@@ -1,0 +1,579 @@
+/*
+ * Fast Cloud ERP configuration workspace.
+ * These rules are intentionally scoped to custom configuration pages so the
+ * bundled laravel-admin / AdminLTE components remain untouched.
+ */
+.erp-config-workspace {
+    --erp-config-accent: #3187bd;
+    --erp-config-accent-soft: #eaf5fb;
+    --erp-config-ink: #1f3545;
+    --erp-config-muted: #718294;
+    --erp-config-line: #e4ebf0;
+    --erp-config-surface: #ffffff;
+    max-width: none;
+    margin: 0 -8px;
+}
+
+.erp-config-workspace > .erp-config-primary,
+.erp-config-workspace > .erp-config-secondary {
+    padding: 0 8px;
+}
+
+.erp-config-card {
+    margin-bottom: 16px;
+    overflow: hidden;
+    border: 1px solid #dfe8ee;
+    border-radius: 10px;
+    background: var(--erp-config-surface);
+    box-shadow: 0 7px 20px rgba(31, 53, 69, .06);
+    animation: erp-config-card-in .26s ease both;
+}
+
+.erp-config-card.box-default {
+    border-color: #dfe8ee;
+}
+
+.erp-config-card.box,
+.erp-config-card.box.box-primary,
+.erp-config-card.box.box-default {
+    border: 1px solid #dfe8ee !important;
+}
+
+.erp-config-card .box-header {
+    min-height: 0;
+    padding: 16px 20px 14px;
+    border-bottom: 1px solid var(--erp-config-line);
+}
+
+.erp-config-card .box-header.with-border {
+    border-bottom: 1px solid var(--erp-config-line);
+}
+
+.erp-config-card .box-title {
+    color: var(--erp-config-ink);
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+.erp-config-card .box-title > .fa {
+    width: 18px;
+    margin-right: 4px;
+    color: var(--erp-config-accent);
+    text-align: center;
+}
+
+.erp-config-card__intro,
+.erp-config-card .setting-help {
+    color: var(--erp-config-muted);
+    font-size: 12px;
+    line-height: 1.65;
+}
+
+.erp-config-card__intro {
+    margin-top: 4px;
+}
+
+.erp-config-card .box-body {
+    padding: 6px 22px 2px;
+}
+
+.erp-config-card .box-footer {
+    display: flex;
+    align-items: center;
+    min-height: 62px;
+    padding: 12px 22px;
+    border-top: 1px solid var(--erp-config-line);
+    background: #fbfdfe;
+}
+
+.erp-config-card .box-footer .btn {
+    min-width: 102px;
+    border-radius: 5px;
+    box-shadow: 0 3px 8px rgba(49, 135, 189, .18);
+    font-weight: 600;
+    transition: box-shadow .18s ease, transform .18s ease;
+}
+
+.erp-config-card .box-footer .btn:hover,
+.erp-config-card .box-footer .btn:focus {
+    box-shadow: 0 5px 13px rgba(49, 135, 189, .25);
+    transform: translateY(-1px);
+}
+
+.erp-config-section,
+.erp-config-workspace .setting-row,
+.erp-config-workspace .setting-section {
+    padding: 20px 0;
+    border-bottom: 1px solid var(--erp-config-line);
+}
+
+.erp-config-section:last-child,
+.erp-config-workspace .setting-row:last-child,
+.erp-config-workspace .setting-section:last-child {
+    padding-bottom: 20px;
+    border-bottom: 0;
+}
+
+.erp-config-section__title,
+.erp-config-workspace .setting-label {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--erp-config-ink);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.45;
+}
+
+.erp-config-section__title,
+.erp-config-workspace .setting-section > .setting-label:first-child {
+    display: flex;
+    align-items: center;
+    min-height: 40px;
+    margin: 0 0 15px;
+    padding: 9px 12px;
+    border: 1px solid #e2e9ee;
+    border-radius: 6px;
+    background: #f5f8fa;
+    color: #244457;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.erp-config-section__title > .fa,
+.erp-config-workspace .setting-section > .setting-label:first-child > .fa {
+    width: 18px;
+    margin-right: 7px;
+    color: #4a7e9d;
+    text-align: center;
+}
+
+.erp-config-workspace.basic-settings .erp-config-section__title {
+    display: block;
+    min-height: 0;
+    margin: 0 0 12px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: #2a4556;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.erp-config-option-row {
+    margin-bottom: 13px;
+    padding: 10px 12px;
+    border: 1px solid #dce6ec;
+    border-radius: 6px;
+    background: #fbfdfe;
+}
+
+.erp-config-workspace .form-group {
+    margin-bottom: 18px;
+}
+
+.erp-config-workspace .form-control {
+    height: 38px;
+    border-color: #cedbe4;
+    border-radius: 5px;
+    color: #314656;
+    box-shadow: none;
+    transition: border-color .16s ease, box-shadow .16s ease;
+}
+
+.erp-config-workspace textarea.form-control {
+    min-height: 88px;
+    height: auto;
+    line-height: 1.6;
+    resize: vertical;
+}
+
+.erp-config-workspace .form-control:focus {
+    border-color: #75afd2;
+    box-shadow: 0 0 0 3px rgba(78, 168, 222, .12);
+}
+
+.erp-config-toggle {
+    display: inline-flex;
+    align-items: center;
+    min-height: 20px;
+    margin: 0;
+    color: #355063;
+    cursor: pointer;
+    font-weight: 400;
+    line-height: 20px;
+}
+
+.erp-config-toggle > input[type="checkbox"] {
+    flex: 0 0 auto;
+    width: 15px;
+    height: 15px;
+    margin: 0 8px 0 0 !important;
+}
+
+.erp-config-choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+.erp-config-choice {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+    margin: 0;
+    padding: 7px 12px;
+    border: 1px solid #d7e2e9;
+    border-radius: 6px;
+    color: #3b5263;
+    cursor: pointer;
+    font-weight: 400;
+    transition: border-color .16s ease, background-color .16s ease, box-shadow .16s ease;
+}
+
+.erp-config-choice:hover {
+    border-color: #8fbed9;
+    background: #f7fbfd;
+}
+
+.erp-config-choice > input[type="radio"] {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    margin: 0 6px 0 0 !important;
+}
+
+.erp-config-choice:first-child {
+    min-width: 196px;
+}
+
+.erp-config-choice:has(input:checked) {
+    border-color: #5a9fc9;
+    background: var(--erp-config-accent-soft);
+    box-shadow: inset 0 0 0 1px rgba(49, 135, 189, .08);
+    color: #1e5e86;
+}
+
+.erp-config-secondary .erp-config-card {
+    box-shadow: 0 7px 20px rgba(31, 53, 69, .045);
+}
+
+.erp-config-audit .box-body {
+    padding: 0;
+}
+
+.erp-config-audit .table {
+    margin-bottom: 0;
+}
+
+.erp-config-audit .table > thead > tr > th {
+    padding: 11px 13px;
+    border-bottom: 1px solid var(--erp-config-line);
+    background: #f8fafc;
+    color: #506578;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.erp-config-audit .table > tbody > tr > td {
+    padding: 10px 13px;
+    border-top-color: #eef3f6;
+    color: #536a7a;
+    font-size: 12px;
+}
+
+.erp-config-audit .table-hover > tbody > tr:hover {
+    background: #f6fbfe;
+}
+
+.erp-config-audit .change-table td {
+    max-width: 180px;
+    overflow-wrap: anywhere;
+    vertical-align: middle !important;
+}
+
+.erp-config-workspace .intro-panel {
+    display: flex;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid #cfe5f3;
+    border-radius: 7px;
+    background: #f7fbfe;
+    color: #50687a;
+    line-height: 1.65;
+}
+
+.erp-config-workspace .intro-panel__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 32px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #dceef8;
+    color: #2875a6;
+}
+
+.erp-config-workspace .intro-panel strong {
+    display: block;
+    margin-bottom: 2px;
+    color: #244a63;
+}
+
+.erp-config-workspace .status-tag {
+    display: inline-block;
+    margin-left: 7px;
+    padding: 3px 8px;
+    border-radius: 12px;
+    background: #e8f7ee;
+    color: #2f855a;
+    font-size: 11px;
+    font-weight: 600;
+    vertical-align: 1px;
+}
+
+.erp-config-workspace .status-tag.is-disabled {
+    background: #eef2f5;
+    color: #6a7d8d;
+}
+
+.erp-config-workspace .provider-options {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 9px;
+    margin-top: 10px;
+}
+
+.erp-config-workspace .provider-option {
+    display: block;
+    min-height: 104px;
+    margin: 0;
+    padding: 13px;
+    border: 1px solid #d7e2e9;
+    border-radius: 7px;
+    color: #334f62;
+    cursor: pointer;
+    font-weight: 400;
+    transition: border-color .16s ease, background-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+
+.erp-config-workspace .provider-option:hover {
+    border-color: #94bfda;
+    background: #f8fcfe;
+    transform: translateY(-1px);
+}
+
+.erp-config-workspace .provider-option.is-selected {
+    border-color: #5a9fc9;
+    background: var(--erp-config-accent-soft);
+    box-shadow: inset 0 0 0 1px rgba(49, 135, 189, .08);
+}
+
+.erp-config-workspace .provider-option input {
+    margin: 0 6px 0 0;
+}
+
+.erp-config-workspace .provider-description {
+    display: block;
+    margin: 7px 0 0 21px;
+    color: var(--erp-config-muted);
+    font-size: 12px;
+    line-height: 1.55;
+}
+
+.erp-config-workspace .provider-panel {
+    margin-top: 14px;
+    padding: 18px;
+    border: 1px solid #dce7ed;
+    border-radius: 7px;
+    background: #fbfdfe;
+}
+
+.erp-config-workspace .provider-panel[hidden] {
+    display: none;
+}
+
+.erp-config-workspace .secret-input-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.erp-config-workspace .secret-input-wrapper {
+    position: relative;
+    flex: 1;
+}
+
+.erp-config-workspace .secret-mask {
+    position: absolute;
+    top: 50%;
+    left: 12px;
+    color: #334155;
+    font-size: 16px;
+    letter-spacing: 2px;
+    line-height: 1;
+    pointer-events: none;
+    transform: translateY(-50%);
+}
+
+.erp-config-workspace .secret-mask.is-hidden {
+    display: none;
+}
+
+.erp-config-workspace .secret-status,
+.erp-config-workspace .change-action {
+    margin-top: 7px;
+    color: var(--erp-config-muted);
+    font-size: 12px;
+    line-height: 1.55;
+}
+
+.erp-config-workspace .mode-option {
+    display: block;
+    margin: 0 0 8px;
+    padding: 11px 13px;
+    border: 1px solid #d7e2e9;
+    border-radius: 7px;
+    color: #415868;
+    cursor: pointer;
+    font-weight: 400;
+    transition: border-color .16s ease, background-color .16s ease;
+}
+
+.erp-config-workspace.watermark-settings .setting-row > .setting-label:first-child {
+    margin-bottom: 10px;
+    color: #29485a;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.erp-config-workspace .mode-option:hover {
+    border-color: #8fbed9;
+    background: #f7fbfd;
+}
+
+.erp-config-workspace .mode-option:has(input:checked) {
+    border-color: #5a9fc9;
+    background: var(--erp-config-accent-soft);
+    color: #1e5e86;
+}
+
+.erp-config-workspace .range-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.erp-config-workspace .range-row input[type="range"] {
+    flex: 1;
+}
+
+.erp-config-workspace .range-row input[type="number"] {
+    width: 92px;
+}
+
+.erp-config-workspace .watermark-preview {
+    height: 286px;
+    overflow: hidden;
+    position: relative;
+    border: 1px solid #dbe6ed;
+    border-radius: 7px;
+    background-color: #f8fbfd;
+}
+
+.erp-config-workspace .watermark-preview::after {
+    position: absolute;
+    right: 12px;
+    bottom: 10px;
+    padding: 3px 7px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, .82);
+    color: #7990a0;
+    content: attr(data-preview-label);
+    font-size: 11px;
+}
+
+@keyframes erp-config-card-in {
+    from {
+        opacity: 0;
+        transform: translateY(5px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@media (max-width: 1199px) {
+    .erp-config-workspace .provider-options {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 991px) {
+    .erp-config-secondary {
+        margin-top: 2px;
+    }
+}
+
+@media (max-width: 767px) {
+    .erp-config-workspace {
+        margin: 0 -4px;
+    }
+
+    .erp-config-workspace > .erp-config-primary,
+    .erp-config-workspace > .erp-config-secondary {
+        padding: 0 4px;
+    }
+
+    .erp-config-card .box-header {
+        padding: 14px 16px 12px;
+    }
+
+    .erp-config-card .box-body {
+        padding: 4px 16px 1px;
+    }
+
+    .erp-config-card .box-footer {
+        padding: 11px 16px;
+    }
+
+    .erp-config-section,
+    .erp-config-workspace .setting-row,
+    .erp-config-workspace .setting-section {
+        padding: 17px 0;
+    }
+
+    .erp-config-workspace .provider-panel {
+        padding: 14px;
+    }
+
+    .erp-config-workspace .secret-input-group {
+        align-items: stretch;
+    }
+
+    .erp-config-workspace .watermark-preview {
+        height: 235px;
+    }
+
+    .erp-config-choice,
+    .erp-config-choice:first-child {
+        width: 100%;
+        min-width: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .erp-config-card,
+    .erp-config-card .box-footer .btn,
+    .erp-config-workspace .provider-option {
+        animation: none;
+        transition: none;
+    }
+}
+
+

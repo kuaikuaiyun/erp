@@ -1,0 +1,17 @@
+@import url("./assistant-domain-stores-20261007-9.css");
+
+.assistant-import-error-list { max-height: 360px; margin: 10px 0 0; padding: 0; overflow: auto; }
+.assistant-import-error-card { margin: 0 0 8px; padding: 9px 11px; border: 1px solid rgba(180, 122, 11, 0.35); border-radius: 4px; background: rgba(255, 255, 255, 0.38); }
+.assistant-import-error-card:last-child { margin-bottom: 0; }
+.assistant-import-error-row { margin-bottom: 6px; color: #8a5800; font-weight: 700; }
+.assistant-import-error-issue { display: grid; grid-template-columns: minmax(96px, auto) minmax(0, 1fr); gap: 3px 10px; padding: 6px 0; border-top: 1px dashed rgba(167, 111, 8, 0.24); color: #76520f; font-size: 13px; line-height: 19px; }
+.assistant-import-error-issue:first-of-type { border-top: 0; }
+.assistant-import-error-issue > strong { grid-row: span 3; color: #684600; }
+.assistant-import-error-value { overflow-wrap: anywhere; }
+.assistant-import-error-reason { color: #9c3d20; }
+.assistant-import-error-hint { color: #76520f; }
+
+@media (max-width: 767px) {
+    .assistant-import-error-issue { grid-template-columns: 1fr; gap: 3px; }
+    .assistant-import-error-issue > strong { grid-row: auto; }
+}

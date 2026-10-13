@@ -1,0 +1,18 @@
+/*
+ * Keep the native PJAX feedback, but make it stable during short page changes.
+ * The old NProgress spinner and blurred tail are both expensive and visually
+ * noisy when the PJAX container is replaced quickly.
+ */
+#nprogress .bar {
+    height: 2px;
+    background: #3c8dbc;
+    box-shadow: none;
+    will-change: transform;
+}
+
+#nprogress .peg,
+#nprogress .spinner {
+    display: none !important;
+}
+
+

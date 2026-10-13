@@ -1,0 +1,21 @@
+.assistant-batch-access-trigger {
+    margin-left: 4px;
+}
+
+.assistant-batch-access-summary {
+    margin-bottom: 14px;
+    color: #5c748a;
+}
+
+.assistant-batch-access-options {
+    display: flex;
+    min-height: 34px;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+
+.assistant-batch-access-choice.is-selected {
+    color: #fff;
+    background-color: #3c8dbc;
+    border-color: #367fa9;
+}

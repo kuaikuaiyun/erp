@@ -1,0 +1,73 @@
+/* Shared request feedback.  Scoped class names keep Ladmin and portal styles isolated. */
+.erp-interaction-loader {
+    position: absolute;
+    /* Keep a regional loader above its table but below Bootstrap modals. */
+    z-index: 30;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 88px;
+    color: #2f668f;
+    background: rgba(248, 251, 253, .76);
+    cursor: progress;
+}
+
+.erp-interaction-loader--page {
+    position: fixed;
+    z-index: 9999;
+    min-height: 100vh;
+    background: rgba(238, 244, 249, .78);
+}
+
+.erp-interaction-loader__content {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    max-width: calc(100% - 32px);
+    padding: 11px 16px;
+    border: 1px solid rgba(160, 185, 205, .68);
+    border-radius: 7px;
+    color: #315d80;
+    background: rgba(255, 255, 255, .96);
+    box-shadow: 0 8px 20px rgba(36, 74, 104, .14);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.erp-interaction-loader__spinner,
+.erp-loading-button__spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    flex: 0 0 14px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: erp-interaction-spin .68s linear infinite;
+}
+
+.erp-loading-region {
+    position: relative;
+}
+
+.erp-loading-button {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 74px;
+    pointer-events: none;
+}
+
+.erp-loading-button[disabled] {
+    opacity: .78;
+}
+
+@keyframes erp-interaction-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (max-width: 767px) {
+    .erp-interaction-loader__content { padding: 9px 12px; }
+}

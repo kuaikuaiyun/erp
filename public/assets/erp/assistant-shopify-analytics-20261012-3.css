@@ -1,0 +1,76 @@
+.assistant-shopify-sync-progress {
+    margin: 0 0 14px;
+    padding: 11px 13px;
+    border: 1px solid #b9ddeb;
+    border-radius: 4px;
+    background: #f2fbff;
+    box-shadow: 0 1px 3px rgba(43, 108, 143, 0.05);
+}
+
+.assistant-shopify-sync-progress-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    color: #2a5877;
+    font-size: 13px;
+}
+
+.assistant-shopify-sync-progress-heading strong {
+    color: #1f4d6b;
+    white-space: nowrap;
+}
+
+.assistant-shopify-sync-progress-bar {
+    height: 7px;
+    margin: 9px 0 6px;
+    border-radius: 5px;
+    background: #dceef5;
+}
+
+.assistant-shopify-sync-progress-bar .progress-bar {
+    min-width: 0;
+    border-radius: 5px;
+    transition: width 0.3s ease;
+}
+
+.assistant-shopify-sync-progress-current {
+    color: #668094;
+    font-size: 12px;
+}
+
+.assistant-shopify-sync-progress-issues {
+    display: grid;
+    gap: 5px;
+    margin-top: 9px;
+}
+
+.assistant-shopify-sync-progress-issue {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 6px 8px;
+    border-left: 3px solid #dd4b39;
+    background: #fff7f5;
+    color: #a94442;
+    font-size: 12px;
+}
+
+.assistant-shopify-sync-progress-issue strong {
+    flex: 0 0 auto;
+    color: #8d3331;
+}
+
+@media (max-width: 767px) {
+    .assistant-shopify-sync-progress-heading {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .assistant-shopify-sync-progress-issue {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 2px;
+    }
+}

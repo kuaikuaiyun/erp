@@ -1,0 +1,172 @@
+/* Business-only additions around the package's native Grid and Form components. */
+.organization-grid-action { margin: 0 4px 4px 0; white-space: nowrap; vertical-align: middle; }
+
+/* Department grid: keep the hierarchy, capacity tags and row actions balanced. */
+.organization-department-grid > thead > tr > th { vertical-align: middle; }
+.organization-department-grid > tbody > tr > td { vertical-align: top; }
+.organization-department-grid > tbody > tr > td { padding-top: 12px; padding-bottom: 12px; }
+.organization-department-grid .column-name { min-width: 275px; }
+.organization-department-grid .column-people_structure { min-width: 240px; }
+.organization-department-grid .column-authorized_pages { min-width: 110px; white-space: nowrap; }
+.organization-department-grid .column-updated_at { min-width: 145px; white-space: nowrap; }
+.organization-department-grid .column-__actions__ { min-width: 340px; vertical-align: top; white-space: normal; }
+.organization-tree-node { display: inline-flex; min-width: 0; width: 100%; align-items: flex-start; }
+.organization-tree-name { display: inline-block; min-width: 0; padding: 1px 0; line-height: 1.5; }
+.organization-tree-name > a { color: #245f9e; }
+.organization-tree-name > a:hover { color: #3c8dbc; }
+.organization-tree-name .label { margin-left: 7px; vertical-align: 1px; font-weight: 400; }
+.organization-tree-code { display: inline-block; margin: 3px 0 0 25px; color: #8b9aad; font-size: 11px; letter-spacing: .01em; }
+.organization-tree-toggle,
+.organization-tree-toggle-placeholder,
+.organization-tree-branch { display: inline-block; width: 20px; min-width: 20px; padding: 0; border: 0; background: transparent; color: #8fa1b4; text-align: center; line-height: 19px; }
+.organization-tree-toggle { cursor: pointer; }
+.organization-tree-toggle:hover { color: #3c8dbc; }
+.organization-tree-branch { position: relative; width: 34px; min-width: 34px; color: #b3c0cc; }
+.organization-tree-branch::before { position: absolute; top: -17px; left: 10px; width: 1px; height: 28px; background: #dbe3ea; content: ''; }
+.organization-tree-branch::after { position: absolute; top: 10px; left: 10px; width: 14px; height: 1px; background: #dbe3ea; content: ''; }
+.organization-tree-branch .fa { position: relative; z-index: 1; font-size: 12px; }
+.organization-tree-root-row > td { background: #fbfcfd; }
+.organization-tree-child-row > td:first-child { background: #fdfefe; }
+.organization-tree-row-collapsed { display: none; }
+
+.organization-capacity-summary { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.organization-capacity-item { display: inline-flex; overflow: hidden; border: 1px solid #dbe4ec; border-radius: 3px; color: #607386; font-size: 12px; line-height: 21px; }
+.organization-capacity-item > span { padding: 0 6px; background: #f7f9fb; }
+.organization-capacity-item > strong { padding: 0 6px; border-left: 1px solid #dbe4ec; color: #40556a; font-weight: 600; }
+.organization-capacity-item.is-full { border-color: #f0c36d; }
+.organization-capacity-item.is-full > span { background: #fff8e8; color: #a66b00; }
+.organization-capacity-item.is-full > strong { border-left-color: #f0c36d; color: #a66b00; }
+
+.organization-form-section { margin: 24px 0 8px; }
+.organization-form-section-divider {
+    min-height: 28px;
+    margin-bottom: 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #f0f0f0;
+    color: #333;
+    font-weight: 600;
+}
+.organization-form-section-divider .btn { margin-top: -3px; }
+.organization-form-section-help { margin-top: 0; margin-bottom: 14px; }
+.organization-form-empty { margin: 0; padding: 8px 0; }
+.organization-form-static-field { margin-bottom: 15px; }
+.organization-form-note { margin-bottom: 20px; }
+
+.organization-membership-panel {
+    padding: 14px 16px;
+    border: 1px solid #dbe5f1;
+    border-radius: 6px;
+    background: #fbfdff;
+}
+.organization-membership-panel-heading { color: #245f9e; font-weight: 600; }
+.organization-membership-panel-heading .fa { margin-right: 6px; }
+.organization-membership-panel-heading .btn { margin-top: -3px; }
+.organization-membership-panel-help { margin: 7px 0 0; color: #74839a; font-size: 12px; line-height: 1.6; }
+.organization-membership-panel-help-secondary { margin-top: 2px; }
+.organization-membership-item {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 12px 0;
+    border-top: 1px solid #edf1f6;
+}
+.organization-membership-item:first-child { margin-top: 11px; }
+.organization-membership-department-field { flex: 1 1 300px; max-width: 380px; }
+.organization-membership-field-label { display: block; margin: 0 0 6px; color: #334155; font-weight: 600; }
+.organization-membership-position-field { flex: 1 1 315px; min-height: 34px; padding: 7px 0; }
+.organization-membership-position-title { margin-right: 8px; color: #334155; font-weight: 600; }
+.organization-membership-position-choice { margin: 0 8px 0 0; color: #506176; cursor: pointer; font-weight: normal; }
+.organization-membership-position-choice input { margin: 0 4px 0 0; vertical-align: -1px; }
+.organization-membership-position-choice.is-disabled { color: #aeb8c4; cursor: not-allowed; }
+.organization-membership-position-notice { display: inline-block; margin-left: 5px; color: #a66b00; font-size: 12px; }
+.organization-membership-action { padding-bottom: 1px; }
+
+.organization-split-panel { padding-top: 2px; }
+.organization-split-panel .table { margin-bottom: 0; }
+
+.organization-dissolution-intro { margin-bottom: 14px; }
+.organization-dissolution-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 30px;
+    padding: 11px 14px 4px;
+    border: 1px solid #e4edf6;
+    border-radius: 4px;
+    background: #fbfdff;
+    color: #506176;
+}
+.organization-dissolution-summary strong { color: #334155; }
+.organization-dissolution-summary .help-block { width: 100%; margin: 1px 0 6px; }
+.organization-dissolution-section { margin-top: 20px; }
+.organization-dissolution-table { margin-bottom: 0; }
+.organization-dissolution-table > tbody > tr > td { vertical-align: middle; }
+.organization-dissolution-membership { display: inline-block; margin: 0 3px 3px 0; }
+.organization-dissolution-position-notice { display: block; min-height: 17px; margin-top: 5px; color: #a66b00; }
+.organization-dissolution-footer {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+}
+
+.organization-permission-tip { margin-bottom: 12px; }
+.organization-permission-tools { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 12px; }
+.organization-permission-tools .form-control { width: 180px; }
+.organization-permission-tree { border: 1px solid #f0f0f0; }
+.organization-native-tree-node { border-bottom: 1px solid #f4f4f4; }
+.organization-native-tree-node:last-child { border-bottom: 0; }
+.organization-native-tree-row { display: flex; min-height: 40px; align-items: center; gap: 8px; padding: 6px 10px; }
+.organization-native-tree-node.has-children > .organization-native-tree-row { background: #f9f9f9; }
+.organization-native-tree-toggle,
+.organization-native-tree-toggle-placeholder { width: 18px; min-width: 18px; padding: 0; text-align: center; }
+.organization-native-tree-toggle[aria-expanded='false'] .fa { transform: rotate(-90deg); }
+.organization-native-tree-toggle .fa { transition: transform .15s ease; }
+.organization-native-tree-children { margin-left: 18px; border-left: 1px solid #eee; }
+.organization-native-tree-children.is-collapsed { display: none; }
+.organization-native-page-choice { min-width: 180px; flex: 1 1 230px; margin: 0; font-weight: 400; cursor: pointer; }
+.organization-native-page-choice input { margin: 0 6px 0 0; vertical-align: middle; }
+.organization-native-inherited-help { flex: 1 1 210px; margin: 0; }
+.organization-native-scope-select { width: 180px; }
+
+/* Keep the package footer intact; only widen and align organization form actions. */
+form.organization-form-footer-right .box-footer > .col-md-2 {
+    display: none;
+}
+form.organization-form-footer-right .box-footer > .col-md-8 {
+    float: none;
+    width: 100%;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+}
+form.organization-form-footer-right .box-footer .btn-group {
+    float: none !important;
+}
+form.organization-form-footer-right .box-footer .btn-group.pull-left {
+    order: 1;
+    margin-right: 8px;
+}
+form.organization-form-footer-right .box-footer .btn-group.pull-right {
+    order: 2;
+}
+
+@media (max-width: 767px) {
+    .organization-department-grid .column-name,
+    .organization-department-grid .column-people_structure,
+    .organization-department-grid .column-__actions__ { min-width: 0; }
+    .organization-capacity-summary { gap: 3px; }
+    .organization-membership-panel { padding: 12px; }
+    .organization-membership-department-field { max-width: none; }
+    .organization-membership-position-field { padding: 0; }
+    .organization-membership-action { width: 100%; }
+    .organization-dissolution-summary { display: block; }
+    .organization-dissolution-summary > div { margin-bottom: 6px; }
+    .organization-dissolution-footer { flex-wrap: wrap; }
+    .organization-permission-tools .form-control,
+    .organization-native-scope-select { width: 100%; }
+    .organization-native-tree-row { flex-wrap: wrap; }
+    .organization-native-inherited-help { margin-left: 26px; }
+}
+
+

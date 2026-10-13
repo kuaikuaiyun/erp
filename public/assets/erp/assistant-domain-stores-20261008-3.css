@@ -1,0 +1,18 @@
+@import url("./assistant-domain-stores-20261008-2.css");
+
+.assistant-domain-stores-table > thead > tr > th.assistant-selection-column { position: sticky; z-index: 10; left: 0; border-right: 1px solid #dfe7ed; background: #f4f7f9; box-shadow: 3px 0 7px rgba(48, 76, 101, 0.12); }
+.assistant-domain-stores-table > tbody > tr.assistant-store-row > td.assistant-selection-column { position: sticky; z-index: 6; left: 0; border-right: 1px solid #e5ebef; background: #fff; box-shadow: 3px 0 7px rgba(48, 76, 101, 0.1); }
+.assistant-domain-stores-table > tbody > tr.assistant-store-row:hover > td.assistant-selection-column { background: #fbfdff; }
+
+.assistant-domain-stores-table .assistant-table-select-all,
+.assistant-domain-stores-table .assistant-selection-column .assistant-row-selector { display: inline-flex; width: 16px; min-width: 16px; height: 16px; align-items: center; justify-content: center; padding: 0; overflow: hidden; border: 1px solid #d8e0e7; border-radius: 2px; background: #fff; color: transparent; font-size: 0; line-height: 1; text-align: center; vertical-align: middle; }
+.assistant-domain-stores-table .assistant-table-select-all::after,
+.assistant-domain-stores-table .assistant-row-selector::after { color: #fff; content: '\f00c'; font-family: FontAwesome; font-size: 10px; line-height: 1; opacity: 0; transform: scale(0.65); transition: opacity 0.12s ease, transform 0.12s ease; }
+.assistant-domain-stores-table .assistant-table-select-all:hover,
+.assistant-domain-stores-table .assistant-table-select-all:focus,
+.assistant-domain-stores-table .assistant-row-selector:hover,
+.assistant-domain-stores-table .assistant-row-selector:focus { border-color: #77a7dd; outline: 0; box-shadow: 0 0 0 2px rgba(52, 133, 215, 0.12); }
+.assistant-domain-stores-table .assistant-table-select-all.is-selected,
+.assistant-domain-stores-table .assistant-row-selector.is-selected { border-color: #2878e8; background: #2878e8; color: transparent; }
+.assistant-domain-stores-table .assistant-table-select-all.is-selected::after,
+.assistant-domain-stores-table .assistant-row-selector.is-selected::after { opacity: 1; transform: scale(1); }

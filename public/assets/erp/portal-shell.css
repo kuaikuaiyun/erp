@@ -1,0 +1,38 @@
+.portal-admin-shell .content-wrapper { min-height: calc(100vh - 101px); }
+.portal-admin-shell .content-header { padding-top: 15px; }
+.portal-admin-shell .content-header > .breadcrumb { display: none; }
+.portal-admin-shell .main-header .navbar-nav > .portal-header-user > span {
+    display: block;
+    min-height: 50px;
+    padding: 0 15px;
+    color: #eaf4fa;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 50px;
+    white-space: nowrap;
+}
+.portal-admin-shell .portal-dashboard-box { max-width: none; }
+.portal-admin-shell .portal-dashboard-box .box-title .fa { margin-right: 6px; }
+.portal-admin-shell .portal-dashboard-info-box { min-height: 104px; margin-bottom: 0; }
+.portal-admin-shell .portal-dashboard-info-box .progress-description { display: block; overflow: hidden; margin-top: 9px; color: #778899; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
+.portal-admin-shell .portal-workbench-welcome { padding: 6px 10px 18px; }
+.portal-admin-shell .portal-workbench-welcome h2 { margin: 0 0 6px; color: #173a59; font-size: 24px; font-weight: 700; line-height: 1.45; }
+.portal-admin-shell .portal-workbench-welcome p { margin: 0; color: #63809a; font-size: 14px; }
+.portal-admin-shell .portal-menu-configuration .box { margin-bottom: 20px; }
+.portal-admin-shell .portal-menu-configuration .box-header { min-height: 56px; }
+.portal-admin-shell .portal-menu-configuration .box-header .btn-group { margin-right: 4px; }
+.portal-admin-shell .portal-menu-configuration .help-block { margin-bottom: 0; }
+.portal-admin-shell .portal-menu-configuration .portal-menu-status-options { padding-top: 7px; }
+.portal-admin-shell .portal-menu-configuration .portal-menu-tree-link { margin-left: 10px; color: #337ab7; font-weight: 400; }
+.portal-admin-shell .portal-menu-placeholder .info-box { min-height: 104px; margin-bottom: 0; }
+.portal-admin-shell .portal-menu-placeholder .progress-description { display: block; margin-top: 9px; color: #778899; line-height: 1.5; }
+.portal-admin-shell .admin-custom-footer { min-height: 50px; }
+.portal-admin-shell .admin-custom-footer strong { display: inline; vertical-align: baseline; }
+.portal-admin-shell .admin-footer-contact { appearance: none; padding: 0; margin-left: 4px; border: 0; background: transparent; color: #337ab7; cursor: pointer; font: inherit; line-height: inherit; vertical-align: baseline; }
+.portal-admin-shell .admin-footer-contact:hover,
+.portal-admin-shell .admin-footer-contact:focus { color: #23527c; text-decoration: underline; }
+
+@media (max-width: 767px) {
+    .portal-admin-shell .portal-dashboard-info-box { min-height: 90px; }
+    .portal-admin-shell .portal-dashboard-info-box .progress-description { white-space: normal; }
+}

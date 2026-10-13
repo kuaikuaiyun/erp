@@ -1,0 +1,15 @@
+@import url("./assistant-domain-stores-20261008-7.css");
+
+/* 自定义快捷选项默认使用浅色，与预设选项区分；被选中时与全部单选项保持一致。 */
+.assistant-domain-store-form .assistant-custom-quick-option.is-selected {
+    border-color: #3c8dbc;
+    background: #3c8dbc;
+    color: #fff;
+}
+
+.assistant-domain-store-form .assistant-custom-quick-option.is-selected:hover,
+.assistant-domain-store-form .assistant-custom-quick-option.is-selected:focus {
+    border-color: #2e6d94;
+    background: #2e6d94;
+    color: #fff;
+}

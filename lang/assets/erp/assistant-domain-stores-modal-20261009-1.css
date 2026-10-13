@@ -1,0 +1,93 @@
+.assistant-domain-store-workbench-modal .assistant-workbench-modal-dialog {
+    width: 94vw;
+    max-width: 1600px;
+    height: calc(100vh - 36px);
+    margin: 18px auto;
+}
+
+.assistant-domain-store-workbench-modal .modal-content {
+    display: flex;
+    height: 100%;
+    flex-direction: column;
+    border-radius: 5px;
+}
+
+.assistant-domain-store-workbench-modal .modal-header {
+    flex: 0 0 auto;
+    border-bottom-color: #e8edf2;
+}
+
+.assistant-domain-store-workbench-modal .modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    padding: 14px;
+    background: #ecf0f5;
+}
+
+.assistant-domain-store-workbench-modal .assistant-modal-form-content {
+    margin: 0;
+}
+
+.assistant-domain-store-workbench-modal .assistant-form-section {
+    margin-bottom: 14px;
+}
+
+.assistant-domain-store-workbench-modal .assistant-form-actions {
+    position: sticky;
+    z-index: 3;
+    right: 0;
+    bottom: -14px;
+    left: 0;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin: 0 -14px -14px;
+    padding: 12px 14px;
+    border-top: 1px solid #dce4ec;
+    background: rgba(255, 255, 255, 0.97);
+    box-shadow: 0 -5px 12px rgba(35, 59, 77, 0.08);
+}
+
+.assistant-domain-store-workbench-modal .assistant-modal-loading {
+    display: flex;
+    min-height: 220px;
+    align-items: center;
+    justify-content: center;
+    color: #5d7387;
+}
+
+.assistant-domain-store-workbench-modal .assistant-modal-form-alert {
+    margin-bottom: 14px;
+}
+
+.assistant-domain-store-workbench-modal.is-saving .modal-header .close,
+.assistant-domain-store-workbench-modal.is-saving .assistant-modal-cancel,
+.assistant-domain-store-workbench-modal.is-saving [data-modal-submit] {
+    pointer-events: none;
+}
+
+@media (max-width: 767px) {
+    .assistant-domain-store-workbench-modal .assistant-workbench-modal-dialog {
+        width: 100vw;
+        height: 100vh;
+        margin: 0;
+    }
+
+    .assistant-domain-store-workbench-modal .modal-content {
+        border: 0;
+        border-radius: 0;
+    }
+
+    .assistant-domain-store-workbench-modal .modal-body {
+        padding: 10px;
+    }
+
+    .assistant-domain-store-workbench-modal .assistant-form-actions {
+        right: -10px;
+        bottom: -10px;
+        left: -10px;
+        margin: 0 -10px -10px;
+        padding: 10px;
+    }
+}

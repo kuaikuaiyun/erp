@@ -1,0 +1,50 @@
+@import url("./assistant-domain-stores-20261008-9.css");
+
+.assistant-status-department-access .assistant-option-group {
+    min-height: 34px;
+}
+
+.assistant-multi-option-choice.is-selected {
+    color: #fff;
+    background-color: #3c8dbc;
+    border-color: #367fa9;
+}
+
+.assistant-shopify-config-guide {
+    margin-top: 4px;
+    padding-top: 14px;
+    border-top: 1px dashed #dbe4ec;
+}
+
+.assistant-shopify-config-guide h4 {
+    margin: 0 0 12px;
+    color: #34526d;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.assistant-shopify-config-guide .form-group {
+    margin-bottom: 10px;
+}
+
+.assistant-shopify-config-guide label {
+    color: #5e788f;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.assistant-shopify-config-guide .form-control[readonly] {
+    color: #567087;
+    background: #f8fafc;
+}
+
+.assistant-shopify-scopes {
+    min-height: 54px;
+    resize: vertical;
+}
+
+.assistant-guide-copy.is-copied {
+    color: #fff;
+    background-color: #00a65a;
+    border-color: #008d4c;
+}

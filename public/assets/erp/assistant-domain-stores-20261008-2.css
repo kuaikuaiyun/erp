@@ -1,0 +1,69 @@
+@import url("./assistant-domain-stores-20261008-1.css");
+
+.assistant-domain-store-form { padding-bottom: 4px; }
+.assistant-domain-store-form .assistant-form-section { margin-bottom: 14px; border-color: #d7e1e8; box-shadow: 0 1px 2px rgba(32, 58, 78, 0.04); }
+.assistant-domain-store-form .assistant-form-section > .box-header { min-height: 42px; padding: 10px 15px; border-bottom-color: #e9eef2; background: #fbfcfd; }
+.assistant-domain-store-form .assistant-form-section > .box-header .box-title { color: #274a66; font-size: 16px; font-weight: 600; line-height: 21px; }
+.assistant-domain-store-form .assistant-form-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); align-items: start; gap: 17px 16px; margin: 0; padding: 16px 15px 18px; }
+.assistant-domain-store-form .assistant-form-grid::before,
+.assistant-domain-store-form .assistant-form-grid::after { display: none; content: none; }
+.assistant-domain-store-form .assistant-form-grid > .form-group { float: none; width: auto; min-width: 0; margin: 0; padding: 0; }
+.assistant-domain-store-form .assistant-form-grid label { display: block; margin: 0 0 6px; color: #3b5870; font-size: 13px; line-height: 18px; }
+.assistant-domain-store-form .assistant-form-grid .form-control { min-height: 34px; border-color: #ced9e2; box-shadow: none; }
+.assistant-domain-store-form .assistant-form-grid .form-control:focus { border-color: #66afe9; box-shadow: 0 0 0 2px rgba(60, 141, 188, 0.1); }
+.assistant-domain-store-form .assistant-form-grid .help-block { margin: 5px 0 0; }
+.assistant-domain-store-form .assistant-form-shop-section .form-group:nth-child(1),
+.assistant-domain-store-form .assistant-form-shop-section .form-group:nth-child(2),
+.assistant-domain-store-form .assistant-form-shop-section .form-group:nth-child(3),
+.assistant-domain-store-form .assistant-form-shop-section .form-group:nth-child(4) { grid-column: span 6; }
+.assistant-domain-store-form .assistant-form-shop-section .form-group:nth-child(n + 5) { grid-column: span 3; }
+.assistant-domain-store-form .assistant-form-team-section .form-group,
+.assistant-domain-store-form .assistant-form-shopify-section .form-group,
+.assistant-domain-store-form .assistant-form-status-section .assistant-status-field { grid-column: span 4; }
+.assistant-domain-store-form .assistant-system-builder,
+.assistant-domain-store-form .assistant-system-erp,
+.assistant-domain-store-form .assistant-payment-field { grid-column: span 6; }
+.assistant-domain-store-form .assistant-form-status-section .assistant-status-remark { grid-column: span 12; }
+.assistant-domain-store-form .assistant-domain-check-form-status { min-height: 34px; padding: 0; }
+.assistant-domain-store-form .assistant-domain-check-form-status .help-block { margin-top: 4px; }
+.assistant-domain-store-form .assistant-option-group { min-height: 34px; gap: 5px; }
+.assistant-domain-store-form .assistant-single-option-input > .form-control { margin-bottom: 6px; }
+.assistant-domain-store-form .assistant-single-option-presets { gap: 5px; }
+.assistant-domain-store-form .assistant-single-option-choice,
+.assistant-domain-store-form .assistant-tag-preset,
+.assistant-domain-store-form .assistant-option-choice { border-color: #d6dee5; }
+.assistant-domain-store-form .assistant-form-actions { position: relative; gap: 9px; margin: 0; padding: 4px 2px 22px; border: 0; }
+
+.assistant-domain-stores-list .table-responsive { position: relative; overflow: auto; }
+.assistant-domain-stores-table th[data-column-key] { position: relative; user-select: none; }
+.assistant-domain-stores-table col.assistant-selection-column { position: static; left: auto; padding: 0; background: transparent; text-align: initial; }
+.assistant-column-resize-handle { position: absolute; z-index: 9; top: 0; right: -4px; width: 8px; height: 100%; cursor: col-resize; touch-action: none; }
+.assistant-column-resize-handle::after { position: absolute; top: 10px; bottom: 10px; left: 3px; width: 1px; background: transparent; content: ''; transition: background 0.15s ease; }
+.assistant-domain-stores-table th[data-column-key]:hover .assistant-column-resize-handle::after,
+.assistant-column-resize-handle:focus::after,
+.assistant-column-resize-handle.is-resizing::after { background: #4a91bd; }
+.assistant-column-resize-handle:focus { outline: 0; }
+.assistant-column-resizing,
+.assistant-column-resizing * { cursor: col-resize !important; user-select: none !important; }
+
+@media (max-width: 991px) {
+    .assistant-domain-store-form .assistant-form-grid { gap: 15px 13px; }
+    .assistant-domain-store-form .assistant-form-shop-section .form-group:nth-child(n + 5),
+    .assistant-domain-store-form .assistant-form-team-section .form-group,
+    .assistant-domain-store-form .assistant-form-shopify-section .form-group,
+    .assistant-domain-store-form .assistant-form-status-section .assistant-status-field { grid-column: span 6; }
+}
+
+@media (max-width: 767px) {
+    .assistant-domain-store-form .assistant-form-section > .box-header { padding-right: 12px; padding-left: 12px; }
+    .assistant-domain-store-form .assistant-form-grid { grid-template-columns: 1fr; gap: 14px; padding: 14px 12px 16px; }
+    .assistant-domain-store-form .assistant-form-grid > .form-group,
+    .assistant-domain-store-form .assistant-form-shop-section .form-group:nth-child(n),
+    .assistant-domain-store-form .assistant-form-team-section .form-group,
+    .assistant-domain-store-form .assistant-form-shopify-section .form-group,
+    .assistant-domain-store-form .assistant-form-status-section .assistant-status-field,
+    .assistant-domain-store-form .assistant-form-status-section .assistant-status-remark,
+    .assistant-domain-store-form .assistant-system-builder,
+    .assistant-domain-store-form .assistant-system-erp,
+    .assistant-domain-store-form .assistant-payment-field { grid-column: span 1; }
+}

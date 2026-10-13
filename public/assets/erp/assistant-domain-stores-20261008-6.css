@@ -1,0 +1,27 @@
+@import url("./assistant-domain-stores-20261008-2.css");
+
+.assistant-domain-store-form .assistant-shopify-configuration {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 14px;
+    padding: 12px 13px;
+    border: 1px solid #d9e5ed;
+    border-radius: 3px;
+    background: #f8fbfd;
+}
+
+.assistant-domain-store-form .assistant-shopify-configuration-item { min-width: 0; }
+.assistant-domain-store-form .assistant-shopify-configuration-item-scopes { grid-column: 1 / -1; }
+.assistant-domain-store-form .assistant-shopify-configuration-label { display: block; margin-bottom: 5px; color: #3b5870; font-size: 13px; font-weight: 600; line-height: 18px; }
+.assistant-domain-store-form .assistant-shopify-configuration-value { display: flex; min-width: 0; align-items: flex-start; gap: 7px; }
+.assistant-domain-store-form .assistant-shopify-configuration-text { display: block; flex: 1 1 auto; min-width: 0; padding: 6px 8px; border: 1px solid #d5e0e8; border-radius: 3px; background: #fff; color: #31536e; font-size: 13px; line-height: 18px; overflow-wrap: anywhere; }
+.assistant-domain-store-form .assistant-shopify-configuration-scopes { color: #536b7c; font-family: Consolas, Monaco, monospace; font-size: 12px; }
+.assistant-domain-store-form .assistant-shopify-copy-button { flex: 0 0 auto; min-width: 29px; height: 32px; padding: 0; border-color: #cbd9e3; color: #3c8dbc; }
+.assistant-domain-store-form .assistant-shopify-copy-button:hover,
+.assistant-domain-store-form .assistant-shopify-copy-button:focus { border-color: #6da9d0; background: #edf7fd; color: #28719f; }
+
+@media (max-width: 767px) {
+    .assistant-domain-store-form .assistant-shopify-configuration { grid-template-columns: 1fr; padding: 11px; }
+    .assistant-domain-store-form .assistant-shopify-configuration-item-scopes { grid-column: auto; }
+}

@@ -1,0 +1,232 @@
+@import url("./assistant-domain-stores-20261009-7.css");
+
+/* Match the logistics-order table: a contained two-axis scroll area with persistent context. */
+.assistant-domain-stores-list .box-body.table-responsive {
+    position: relative;
+    min-height: 320px;
+    max-height: calc(100vh - 255px);
+    overflow: auto !important;
+    overscroll-behavior: contain;
+    scrollbar-color: #71869d #e7edf3;
+    scrollbar-width: auto;
+}
+
+.assistant-domain-stores-list .box-body.table-responsive::-webkit-scrollbar {
+    width: 14px;
+    height: 14px;
+}
+
+.assistant-domain-stores-list .box-body.table-responsive::-webkit-scrollbar-track {
+    background: #e7edf3;
+}
+
+.assistant-domain-stores-list .box-body.table-responsive::-webkit-scrollbar-thumb {
+    border: 3px solid #e7edf3;
+    border-radius: 9px;
+    background: #71869d;
+}
+
+.assistant-domain-stores-list .box-body.table-responsive::-webkit-scrollbar-thumb:hover {
+    background: #536c86;
+}
+
+.assistant-selection-summary {
+    flex-wrap: wrap;
+}
+
+.assistant-domain-stores-table > thead > tr > th {
+    position: sticky;
+    z-index: 8;
+    top: 0;
+    padding: 10px 12px;
+    border-bottom: 1px solid #cdd8e4;
+    background: #eaf0f7;
+    box-shadow: 0 1px 0 #cdd8e4, 0 3px 7px rgba(42, 67, 94, 0.09);
+    color: #314b68;
+}
+
+.assistant-domain-stores-table > tbody > tr.assistant-store-row > td {
+    padding: 10px 12px;
+    color: #384961;
+    transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.assistant-domain-stores-table > tbody > tr.assistant-store-row:nth-child(4n + 3) > td,
+.assistant-domain-stores-table > tbody > tr.assistant-store-row:nth-child(4n + 3) + tr.assistant-store-note-row > td {
+    background: #f8fafc;
+}
+
+.assistant-domain-stores-table > tbody > tr.assistant-store-row:hover > td,
+.assistant-domain-stores-table > tbody > tr.assistant-store-row:hover + tr.assistant-store-note-row > td {
+    background: #edf5fb;
+    color: #213f5d;
+}
+
+.assistant-domain-stores-table > thead > tr > th.assistant-selection-column,
+.assistant-domain-stores-table > tbody > tr.assistant-store-row > td.assistant-record-selection-cell {
+    position: sticky;
+    left: 0;
+    border-right: 1px solid #dfe7ed !important;
+    box-shadow: 3px 0 8px rgba(45, 69, 94, 0.08);
+}
+
+.assistant-domain-stores-table > thead > tr > th.assistant-selection-column {
+    z-index: 13;
+    background: #eaf0f7;
+}
+
+.assistant-domain-stores-table > tbody > tr.assistant-store-row > td.assistant-record-selection-cell {
+    z-index: 6;
+    background: #fff;
+}
+
+.assistant-domain-stores-table > tbody > tr.assistant-store-row:nth-child(4n + 3) > td.assistant-record-selection-cell {
+    background: #f8fafc;
+}
+
+.assistant-domain-stores-table > tbody > tr.assistant-store-row:hover > td.assistant-record-selection-cell {
+    background: #edf5fb;
+}
+
+.assistant-domain-stores-table > thead > tr > th.assistant-action-column,
+.assistant-domain-stores-table > tbody > tr.assistant-store-row > td.assistant-actions {
+    position: sticky;
+    right: 0;
+    border-left: 1px solid #dfe7ed !important;
+    box-shadow: -3px 0 8px rgba(45, 69, 94, 0.08);
+}
+
+.assistant-domain-stores-table > thead > tr > th.assistant-action-column {
+    z-index: 13;
+    background: #eaf0f7;
+}
+
+.assistant-domain-stores-table > tbody > tr.assistant-store-row > td.assistant-actions {
+    z-index: 6;
+    background: #fff;
+}
+
+.assistant-domain-stores-table > tbody > tr.assistant-store-row:nth-child(4n + 3) > td.assistant-actions {
+    background: #f8fafc;
+}
+
+.assistant-domain-stores-table > tbody > tr.assistant-store-row:hover > td.assistant-actions {
+    background: #edf5fb;
+}
+
+.assistant-domain-stores-table > tbody > tr.assistant-store-note-row > td {
+    padding: 8px 14px 11px;
+    border-bottom-color: #edf2f6;
+    background: #fcfdfe;
+}
+
+.assistant-batch-update-modal-dialog {
+    width: min(1120px, calc(100% - 28px));
+}
+
+.assistant-batch-update-notice {
+    margin-bottom: 15px;
+}
+
+.assistant-batch-update-notice p {
+    margin: 0;
+}
+
+.assistant-batch-update-notice p + p {
+    margin-top: 4px;
+}
+
+.assistant-batch-update-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 13px 15px;
+}
+
+.assistant-batch-update-field {
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid #dfe7ee;
+    border-radius: 4px;
+    background: #fafcfd;
+    transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.assistant-batch-update-field.is-enabled {
+    border-color: #91bddb;
+    background: #f4faff;
+    box-shadow: 0 1px 3px rgba(46, 118, 167, 0.08);
+}
+
+.assistant-batch-update-field-wide {
+    grid-column: span 3;
+}
+
+.assistant-batch-update-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 8px;
+    color: #3a5871;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.assistant-batch-update-toggle input {
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    accent-color: #2878e8;
+}
+
+.assistant-batch-update-field .form-control[disabled] {
+    cursor: not-allowed;
+    background: #f0f3f6;
+    color: #94a3b0;
+}
+
+.assistant-batch-update-multi-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 142px;
+    gap: 8px;
+}
+
+.assistant-batch-update-multi-hint {
+    margin: 13px 0 0;
+    color: #6b8192;
+    font-size: 12px;
+    line-height: 18px;
+}
+
+@media (max-width: 1199px) {
+    .assistant-domain-stores-list .box-body.table-responsive {
+        max-height: calc(100vh - 220px);
+    }
+
+    .assistant-batch-update-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .assistant-batch-update-field-wide {
+        grid-column: span 2;
+    }
+}
+
+@media (max-width: 767px) {
+    .assistant-domain-stores-list .box-body.table-responsive {
+        min-height: 260px;
+        max-height: calc(100vh - 170px);
+    }
+
+    .assistant-batch-update-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .assistant-batch-update-field-wide {
+        grid-column: span 1;
+    }
+
+    .assistant-batch-update-multi-controls {
+        grid-template-columns: 1fr;
+    }
+}

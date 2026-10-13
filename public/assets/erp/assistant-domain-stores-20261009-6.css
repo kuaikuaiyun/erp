@@ -1,0 +1,22 @@
+@import url("./assistant-domain-stores-20261009-5.css");
+
+.assistant-domain-store-form .assistant-shopify-config-guide .assistant-shopify-copy-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 88px;
+    gap: 0;
+    align-items: start;
+}
+
+.assistant-domain-store-form .assistant-shopify-config-guide .assistant-shopify-copy-row > .form-control {
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+}
+
+.assistant-domain-store-form .assistant-shopify-config-guide .assistant-shopify-copy-row > .assistant-guide-copy {
+    width: 88px;
+    min-width: 88px;
+    height: 34px;
+    margin: 0;
+    white-space: nowrap;
+}

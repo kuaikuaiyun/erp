@@ -1,0 +1,14 @@
+@import url("./assistant-domain-stores-20261007-10.css");
+
+.assistant-batch-check-form { display: inline-block; margin: 0; }
+.assistant-batch-check-form .btn { min-width: 104px; }
+.assistant-batch-check-form .btn[disabled] { cursor: wait; opacity: 0.72; }
+.assistant-domain-check-cell { min-width: 215px; }
+.assistant-domain-check-cell .assistant-field-value { align-items: flex-start; flex-direction: column; gap: 4px; }
+.assistant-domain-check-meta { display: block; max-width: 100%; overflow: hidden; color: #6b8192; font-size: 11px; font-weight: 400; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.assistant-domain-check-form-status { display: flex; min-height: 34px; align-items: center; flex-wrap: wrap; gap: 8px; padding: 2px 0; }
+.assistant-domain-check-form-status .help-block { width: 100%; margin: 1px 0 0; color: #80919e; font-size: 12px; line-height: 18px; }
+
+@media (max-width: 767px) {
+    .assistant-selection-summary { flex-wrap: wrap; }
+}

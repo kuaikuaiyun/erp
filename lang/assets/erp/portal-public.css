@@ -1,0 +1,115 @@
+:root {
+    color-scheme: light;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+* { box-sizing: border-box; }
+body.portal-public-body {
+    min-height: 100vh;
+    margin: 0;
+    background: #edf2f6;
+    color: #2e4357;
+}
+.portal-public-header {
+    display: flex;
+    min-height: 58px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 0 32px;
+    background: #17394d;
+    color: #fff;
+}
+.portal-public-brand {
+    color: #fff;
+    font-size: 17px;
+    font-weight: 600;
+    text-decoration: none;
+}
+.portal-public-brand:hover,
+.portal-public-brand:focus { color: #fff; text-decoration: none; }
+.portal-public-brand .fa { margin-right: 9px; color: #75bee6; }
+.portal-public-user { color: #c6d8e3; font-size: 13px; }
+.portal-public-main {
+    display: flex;
+    width: min(1120px, calc(100% - 40px));
+    min-height: calc(100vh - 58px);
+    margin: 0 auto;
+    align-items: center;
+    justify-content: center;
+}
+.portal-notice {
+    width: min(560px, 100%);
+    padding: 48px 54px;
+    border: 1px solid #dbe5ed;
+    border-top: 3px solid #3187bb;
+    border-radius: 5px;
+    background: #fff;
+    box-shadow: 0 10px 30px rgba(31, 56, 74, .08);
+    text-align: center;
+}
+.portal-notice-icon {
+    display: inline-flex;
+    width: 60px;
+    height: 60px;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 20px;
+    border: 1px solid #b9d8e9;
+    border-radius: 50%;
+    color: #2785bb;
+    font-size: 25px;
+}
+.portal-notice h1 { margin: 0 0 12px; color: #2b4357; font-size: 23px; font-weight: 600; }
+.portal-notice p { margin: 0 auto; color: #728397; font-size: 14px; line-height: 1.75; }
+.portal-notice-countdown { margin-top: 20px !important; color: #526a7d !important; }
+.portal-notice-button {
+    display: inline-block;
+    margin-top: 16px;
+    padding: 9px 20px;
+    border-radius: 3px;
+    background: #2787bd;
+    color: #fff;
+    font-size: 14px;
+    text-decoration: none;
+}
+.portal-notice-button:hover,
+.portal-notice-button:focus { background: #1d709f; color: #fff; text-decoration: none; }
+.portal-notice-maintenance { border-top-color: #d69a29; }
+.portal-notice-maintenance .portal-notice-icon { border-color: #f0d7a4; color: #bd7d0d; }
+.portal-notice-disabled { border-top-color: #8293a2; }
+.portal-notice-disabled .portal-notice-icon { border-color: #d3dce2; color: #8191a0; }
+.portal-ready { width: 100%; padding: 36px 0; }
+.portal-ready-menu {
+    display: flex;
+    min-height: 46px;
+    align-items: center;
+    gap: 8px;
+    padding: 0 16px;
+    border: 1px solid #dce6ee;
+    border-radius: 4px 4px 0 0;
+    background: #fff;
+}
+.portal-ready-menu a { color: #3284b3; font-size: 14px; font-weight: 600; text-decoration: none; }
+.portal-ready-menu .fa { margin-right: 6px; }
+.portal-ready-panel {
+    min-height: 390px;
+    padding: 110px 30px;
+    border: 1px solid #dce6ee;
+    border-top: 0;
+    border-radius: 0 0 4px 4px;
+    background: #fff;
+    text-align: center;
+}
+.portal-ready-icon { margin-bottom: 22px; color: #3a8dba; font-size: 40px; }
+.portal-ready-panel h1 { margin: 0 0 10px; color: #2d4356; font-size: 24px; font-weight: 600; }
+.portal-ready-panel p { margin: 0; color: #7a8b9c; font-size: 14px; }
+
+@media (max-width: 600px) {
+    .portal-public-header { padding: 0 18px; }
+    .portal-public-user { display: none; }
+    .portal-public-main { width: min(100% - 28px, 1120px); }
+    .portal-notice { padding: 36px 24px; }
+    .portal-ready { padding: 20px 0; }
+}
+
+

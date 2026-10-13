@@ -1,0 +1,600 @@
+<?php
+
+namespace App\Portals\Logistics;
+
+use App\Models\LogisticsOrder;
+use App\Models\LogisticsOrderItem;
+use App\Models\LogisticsPayPalAccount;
+use App\Models\LogisticsPayPalDispute;
+use App\Models\LogisticsPayPalRefund;
+use App\Models\LogisticsRefundDetail;
+use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
+
+class PayPalRiskAnalyticsService
+{
+    /** @param array{date_from:string,date_to:string} $filters
+     *  @return array<string,mixed>
+     */
+    public function summary(LogisticsPayPalAccount $account, array $filters): array
+    {
+        $orders = $this->orderQuery($account, $filters)
+            ->get(['id', 'store_name', 'paid_amount_usd', 'shopify_refund_amount_usd', 'channel_refund_amount_usd']);
+        $orderIds = $orders->pluck('id')->map(static fn ($id): int => (int) $id)->all();
+        $refundIds = $this->refundOrderIds($orderIds, $orders);
+        $disputeIds = $this->disputeOrderIds($orderIds);
+        $orderCount = count($orderIds);
+        $refundCount = count($refundIds);
+        $disputeCount = count($disputeIds);
+        $refundRate = $orderCount > 0 ? round($refundCount / $orderCount * 100, 2) : 0.0;
+        $disputeRate = $orderCount > 0 ? round($disputeCount / $orderCount * 100, 2) : 0.0;
+        $score = max(0.0, min(100.0, round(100 - $refundRate * 2 - $disputeRate * 10, 1)));
+
+        return [
+            'id' => (int) $account->getKey(),
+            'account_name' => (string) $account->account_name,
+            'merchant_id' => (string) ($account->merchant_id ?: '—'),
+            'account_email' => (string) ($account->account_email ?: '—'),
+            'masked_email' => $this->maskEmail($account->account_email),
+            'environment' => (string) $account->environment,
+            'is_enabled' => (bool) $account->is_enabled,
+            'order_count' => $orderCount,
+            'paid_amount' => round((float) $orders->sum('paid_amount_usd'), 2),
+            'refund_order_count' => $refundCount,
+            'dispute_order_count' => $disputeCount,
+            'refund_rate' => $refundRate,
+            'dispute_rate' => $disputeRate,
+            'refund_amount' => $this->canonicalRefundAmount($orderIds, $orders),
+            'dispute_amount' => round((float) LogisticsPayPalDispute::query()
+                ->whereIn('logistics_order_id', $orderIds)
+                ->sum('dispute_amount_usd'), 2),
+            'store_count' => $orders->pluck('store_name')->filter()->unique()->count(),
+            'score' => $score,
+            'risk' => $this->riskLevel($score),
+            'last_imported_at' => $this->dateTime($account->last_imported_at),
+            'last_import_status' => (string) ($account->last_import_status ?: 'never'),
+            'last_import_message' => (string) ($account->last_import_message ?: '尚未接收 Windows VPS 上传的 PayPal 数据。'),
+            'unmatched_count' => LogisticsPayPalRefund::query()
+                ->where('logistics_paypal_account_id', $account->getKey())
+                ->whereNull('logistics_order_id')
+                ->count()
+                + LogisticsPayPalDispute::query()
+                    ->where('logistics_paypal_account_id', $account->getKey())
+                    ->whereNull('logistics_order_id')
+                    ->count(),
+        ];
+    }
+
+    /** @param Collection<int,LogisticsPayPalAccount> $accounts
+     *  @param array{date_from:string,date_to:string} $filters
+     *  @return array<string,float|int>
+     */
+    public function portfolio(Collection $accounts, array $filters): array
+    {
+        $summaries = $accounts->map(fn (LogisticsPayPalAccount $account): array => $this->summary($account, $filters));
+        $orders = (int) $summaries->sum('order_count');
+        $refunds = (int) $summaries->sum('refund_order_count');
+        $disputes = (int) $summaries->sum('dispute_order_count');
+
+        return [
+            'accounts' => $accounts->count(),
+            'orders' => $orders,
+            'paid_amount' => round((float) $summaries->sum('paid_amount'), 2),
+            'refund_rate' => $orders > 0 ? round($refunds / $orders * 100, 2) : 0.0,
+            'dispute_rate' => $orders > 0 ? round($disputes / $orders * 100, 2) : 0.0,
+        ];
+    }
+
+    /** @param array{date_from:string,date_to:string} $filters
+     *  @return array<string,mixed>
+     */
+    public function detail(
+        LogisticsPayPalAccount $account,
+        array $filters,
+        string $tab,
+        int $page = 1,
+    ): array {
+        $summary = $this->summary($account, $filters);
+        $payload = ['summary' => $summary, 'tab' => $tab];
+
+        return match ($tab) {
+            'orders' => $payload + ['rows' => $this->orderRows($account, $filters, $page)],
+            'products' => $payload + ['rows' => $this->productRows($account, $filters, $page)],
+            'refunds' => $payload + ['rows' => $this->paginate($this->refundRows($account, $filters), $page)],
+            'disputes' => $payload + ['rows' => $this->disputeRows($account, $filters, $page)],
+            default => $payload + $this->overview($account, $filters),
+        };
+    }
+
+    /** @param array{date_from:string,date_to:string} $filters
+     *  @return array<string,mixed>
+     */
+    private function overview(LogisticsPayPalAccount $account, array $filters): array
+    {
+        $orders = $this->orderQuery($account, $filters)
+            ->orderBy('order_created_at')
+            ->get(['id', 'shopify_order_number', 'store_name', 'paid_amount_usd', 'order_created_at']);
+        $orderIds = $orders->pluck('id')->map(static fn ($id): int => (int) $id)->all();
+        $refundSet = array_fill_keys($this->refundOrderIds($orderIds), true);
+        $disputeSet = array_fill_keys($this->disputeOrderIds($orderIds), true);
+        $end = $filters['date_to'] !== '' ? Carbon::parse($filters['date_to'])->endOfDay() : now();
+        $start = $filters['date_from'] !== '' ? Carbon::parse($filters['date_from'])->startOfDay() : $end->copy()->subDays(29)->startOfDay();
+        if ($start->diffInDays($end) > 29) {
+            $start = $end->copy()->subDays(29)->startOfDay();
+        }
+        $trend = [];
+        for ($cursor = $start->copy(); $cursor->lessThanOrEqualTo($end); $cursor->addDay()) {
+            $trend[$cursor->format('Y-m-d')] = [
+                'label' => $cursor->format('m-d'),
+                'orders' => 0,
+                'refunds' => 0,
+                'disputes' => 0,
+            ];
+        }
+        foreach ($orders as $order) {
+            $date = $order->order_created_at?->timezone('Asia/Shanghai')->format('Y-m-d');
+            if (!$date || !isset($trend[$date])) {
+                continue;
+            }
+            $trend[$date]['orders']++;
+            $trend[$date]['refunds'] += isset($refundSet[$order->getKey()]) ? 1 : 0;
+            $trend[$date]['disputes'] += isset($disputeSet[$order->getKey()]) ? 1 : 0;
+        }
+
+        $summary = $this->summary($account, $filters);
+        $riskParts = [
+            ['label' => '退款订单风险', 'value' => min(100, round((float) $summary['refund_rate'] * 2, 1)), 'tone' => 'refund'],
+            ['label' => 'PayPal纠纷风险', 'value' => min(100, round((float) $summary['dispute_rate'] * 10, 1)), 'tone' => 'dispute'],
+            ['label' => '未匹配交易风险', 'value' => min(100, (int) $summary['unmatched_count'] * 5), 'tone' => 'unmatched'],
+        ];
+        usort($riskParts, static fn (array $left, array $right): int => $right['value'] <=> $left['value']);
+
+        $exceptions = array_merge(
+            array_map(static fn (array $row): array => [
+                'order_number' => $row['order_number'],
+                'store_name' => $row['store_name'],
+                'type' => '退款',
+                'amount' => $row['amount'],
+                'currency' => $row['currency'],
+                'reason' => $row['reason'],
+                'happened_at' => $row['happened_at'],
+                'status' => $row['status'],
+                'sort_time' => $row['sort_time'],
+            ], $this->refundRows($account, $filters)),
+            LogisticsPayPalDispute::query()
+                ->with('order:id,shopify_order_number,store_name')
+                ->where('logistics_paypal_account_id', $account->getKey())
+                ->where(function (Builder $query) use ($filters): void {
+                    $query->whereHas('order', function (Builder $orders) use ($filters): void {
+                        $this->applyDates($orders, $filters);
+                    })->orWhere(function (Builder $unmatched) use ($filters): void {
+                        $unmatched->whereNull('logistics_order_id');
+                        $this->applyEventDates($unmatched, 'dispute_created_at', $filters);
+                    });
+                })
+                ->get()
+                ->map(fn (LogisticsPayPalDispute $dispute): array => [
+                    'order_number' => $dispute->order?->shopify_order_number ?: '未匹配',
+                    'store_name' => $dispute->order?->store_name ?: '—',
+                    'type' => '纠纷',
+                    'amount' => $dispute->dispute_amount_usd !== null ? (float) $dispute->dispute_amount_usd : (float) $dispute->original_amount,
+                    'currency' => (string) ($dispute->currency_code ?: 'USD'),
+                    'reason' => $this->disputeReason($dispute->reason),
+                    'happened_at' => $this->dateTime($dispute->dispute_created_at),
+                    'status' => $this->disputeStatus($dispute->status),
+                    'sort_time' => $dispute->dispute_created_at?->timestamp ?? 0,
+                ])->all(),
+        );
+        usort($exceptions, static fn (array $left, array $right): int => $right['sort_time'] <=> $left['sort_time']);
+
+        return [
+            'trend' => array_values($trend),
+            'risk_parts' => $riskParts,
+            'exceptions' => array_slice($exceptions, 0, 5),
+        ];
+    }
+
+    /** @param array{date_from:string,date_to:string} $filters */
+    private function orderRows(LogisticsPayPalAccount $account, array $filters, int $page): array
+    {
+        $paginator = $this->orderQuery($account, $filters)
+            ->with(['items:id,logistics_order_id,product_title,variant_title', 'activeRefundDetails:id,logistics_order_id', 'paypalRefunds:id,logistics_order_id', 'paypalDisputes:id,logistics_order_id'])
+            ->orderByDesc('order_created_at')
+            ->orderByDesc('id')
+            ->paginate(10, ['*'], 'page', $page);
+
+        return [
+            'data' => collect($paginator->items())->map(static function (LogisticsOrder $order): array {
+                $products = $order->items->map(static fn (LogisticsOrderItem $item): string => trim($item->product_title.' '.$item->variant_title))->filter()->unique()->take(3)->implode('；');
+                $hasRefund = (float) $order->shopify_refund_amount_usd > 0
+                    || (float) $order->channel_refund_amount_usd > 0
+                    || $order->activeRefundDetails->isNotEmpty()
+                    || $order->paypalRefunds->isNotEmpty();
+
+                return [
+                    'order_number' => (string) ($order->shopify_order_number ?: '—'),
+                    'store_name' => (string) ($order->store_name ?: '—'),
+                    'products' => $products ?: '—',
+                    'paid_amount' => round((float) $order->paid_amount_usd, 2),
+                    'refund_status' => $hasRefund ? '已退款' : '未退款',
+                    'dispute_status' => $order->paypalDisputes->isNotEmpty() ? '有纠纷' : '无纠纷',
+                    'order_created_at' => $order->order_created_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') ?: '—',
+                ];
+            })->all(),
+            'meta' => $this->paginatorMeta($paginator->currentPage(), $paginator->lastPage(), $paginator->total(), $paginator->perPage()),
+        ];
+    }
+
+    /** @param array{date_from:string,date_to:string} $filters */
+    private function productRows(LogisticsPayPalAccount $account, array $filters, int $page): array
+    {
+        $items = LogisticsOrderItem::query()
+            ->selectRaw('logistics_order_items.*, logistics_orders.id as risk_order_id, logistics_orders.paid_amount_usd as risk_order_paid_amount')
+            ->join('logistics_orders', 'logistics_orders.id', '=', 'logistics_order_items.logistics_order_id')
+            ->where('logistics_orders.paypal_account_id', $account->getKey())
+            ->when($filters['date_from'] !== '', fn ($query) => $query->whereDate('logistics_orders.order_created_at', '>=', $filters['date_from']))
+            ->when($filters['date_to'] !== '', fn ($query) => $query->whereDate('logistics_orders.order_created_at', '<=', $filters['date_to']))
+            ->orderBy('logistics_order_items.id')
+            ->get();
+        $orderIds = $items->pluck('risk_order_id')->map(static fn ($id): int => (int) $id)->unique()->values()->all();
+        $refundSet = array_fill_keys($this->refundOrderIds($orderIds), true);
+        $disputeSet = array_fill_keys($this->disputeOrderIds($orderIds), true);
+        $groups = [];
+        foreach ($items as $item) {
+            $key = mb_strtolower(trim((string) $item->product_title)).'|'.mb_strtolower(trim((string) ($item->tongtu_sku ?: $item->shopify_sku)));
+            $groups[$key] ??= [];
+            $groups[$key][] = $item;
+        }
+        $rows = [];
+        foreach ($groups as $group) {
+            /** @var LogisticsOrderItem $first */
+            $first = $group[0];
+            $groupOrderIds = collect($group)->pluck('risk_order_id')->map(static fn ($id): int => (int) $id)->unique()->values();
+            $refundCount = $groupOrderIds->filter(static fn (int $id): bool => isset($refundSet[$id]))->count();
+            $disputeCount = $groupOrderIds->filter(static fn (int $id): bool => isset($disputeSet[$id]))->count();
+            $orderCount = $groupOrderIds->count();
+            $rows[] = [
+                'image_url' => $first->product_image_url,
+                'product_name' => trim((string) $first->product_title) ?: '未命名商品',
+                'sku' => trim((string) ($first->tongtu_sku ?: $first->shopify_sku)) ?: '—',
+                'quantity' => round((float) collect($group)->sum('quantity'), 2),
+                'paid_amount' => round((float) collect($group)->sum('line_revenue_usd'), 2),
+                'refund_orders' => $refundCount,
+                'dispute_orders' => $disputeCount,
+                'refund_rate' => $orderCount > 0 ? round($refundCount / $orderCount * 100, 2) : 0.0,
+                'dispute_rate' => $orderCount > 0 ? round($disputeCount / $orderCount * 100, 2) : 0.0,
+            ];
+        }
+        usort($rows, static fn (array $left, array $right): int => $right['paid_amount'] <=> $left['paid_amount']);
+
+        return $this->paginate($rows, $page);
+    }
+
+    /** @param array{date_from:string,date_to:string} $filters
+     *  @return list<array<string,mixed>>
+     */
+    private function refundRows(LogisticsPayPalAccount $account, array $filters): array
+    {
+        $orders = $this->orderQuery($account, $filters)
+            ->with(['paypalRefunds', 'activeRefundDetails'])
+            ->get(['id', 'shopify_order_number', 'store_name', 'shopify_refund_amount_usd', 'channel_refund_amount_usd', 'refunded_at', 'refund_reason']);
+        $rows = [];
+        foreach ($orders as $order) {
+            if ($order->paypalRefunds->isNotEmpty()) {
+                foreach ($order->paypalRefunds as $refund) {
+                    $rows[] = $this->paypalRefundRow($refund, $order);
+                }
+                continue;
+            }
+            if ($order->activeRefundDetails->isNotEmpty()) {
+                foreach ($order->activeRefundDetails as $refund) {
+                    $rows[] = [
+                        'refund_id' => (string) $refund->refund_number,
+                        'order_number' => (string) ($order->shopify_order_number ?: '—'),
+                        'store_name' => (string) ($order->store_name ?: '—'),
+                        'source' => '表格导入',
+                        'amount' => round((float) $refund->refund_amount_usd, 2),
+                        'currency' => 'USD',
+                        'reason' => (string) ($refund->refund_reason ?: $refund->refund_type ?: '—'),
+                        'status' => '已登记',
+                        'happened_at' => $this->dateTime($refund->created_at),
+                        'sort_time' => $refund->created_at?->timestamp ?? 0,
+                    ];
+                }
+                continue;
+            }
+            $amount = max((float) $order->shopify_refund_amount_usd, (float) $order->channel_refund_amount_usd);
+            if ($amount > 0) {
+                $rows[] = [
+                    'refund_id' => 'SHOPIFY-'.$order->getKey(),
+                    'order_number' => (string) ($order->shopify_order_number ?: '—'),
+                    'store_name' => (string) ($order->store_name ?: '—'),
+                    'source' => 'Shopify',
+                    'amount' => round($amount, 2),
+                    'currency' => 'USD',
+                    'reason' => (string) ($order->refund_reason ?: '—'),
+                    'status' => '已退款',
+                    'happened_at' => $this->dateTime($order->refunded_at),
+                    'sort_time' => $order->refunded_at?->timestamp ?? 0,
+                ];
+            }
+        }
+
+        $unmatched = LogisticsPayPalRefund::query()
+            ->where('logistics_paypal_account_id', $account->getKey())
+            ->whereNull('logistics_order_id');
+        $this->applyEventDates($unmatched, 'refunded_at', $filters);
+        foreach ($unmatched->get() as $refund) {
+            $rows[] = $this->paypalRefundRow($refund, null);
+        }
+        usort($rows, static fn (array $left, array $right): int => $right['sort_time'] <=> $left['sort_time']);
+
+        return $rows;
+    }
+
+    private function paypalRefundRow(LogisticsPayPalRefund $refund, ?LogisticsOrder $order): array
+    {
+        return [
+            'refund_id' => (string) $refund->refund_transaction_id,
+            'order_number' => (string) ($order?->shopify_order_number ?: '未匹配'),
+            'store_name' => (string) ($order?->store_name ?: '—'),
+            'source' => 'PayPal',
+            'amount' => round((float) ($refund->refund_amount_usd ?? $refund->original_amount), 2),
+            'currency' => (string) ($refund->currency_code ?: 'USD'),
+            'reason' => (string) ($refund->refund_reason ?: $refund->event_code ?: '—'),
+            'status' => (string) ($refund->status ?: '已同步'),
+            'happened_at' => $this->dateTime($refund->refunded_at),
+            'sort_time' => $refund->refunded_at?->timestamp ?? 0,
+        ];
+    }
+
+    /** @param array{date_from:string,date_to:string} $filters */
+    private function disputeRows(LogisticsPayPalAccount $account, array $filters, int $page): array
+    {
+        $query = LogisticsPayPalDispute::query()
+            ->with('order:id,shopify_order_number,store_name')
+            ->where('logistics_paypal_account_id', $account->getKey())
+            ->where(function (Builder $query) use ($filters): void {
+                $query->whereHas('order', function (Builder $orders) use ($filters): void {
+                    $this->applyDates($orders, $filters);
+                })->orWhere(function (Builder $unmatched) use ($filters): void {
+                    $unmatched->whereNull('logistics_order_id');
+                    $this->applyEventDates($unmatched, 'dispute_created_at', $filters);
+                });
+            })
+            ->orderByDesc('dispute_created_at')
+            ->orderByDesc('id');
+        $paginator = $query->paginate(10, ['*'], 'page', $page);
+
+        return [
+            'data' => collect($paginator->items())->map(fn (LogisticsPayPalDispute $dispute): array => [
+                'dispute_id' => (string) $dispute->dispute_id,
+                'order_number' => (string) ($dispute->order?->shopify_order_number ?: '未匹配'),
+                'store_name' => (string) ($dispute->order?->store_name ?: '—'),
+                'amount' => round((float) ($dispute->dispute_amount_usd ?? $dispute->original_amount), 2),
+                'currency' => (string) ($dispute->currency_code ?: 'USD'),
+                'reason' => $this->disputeReason($dispute->reason),
+                'stage' => $this->disputeStage($dispute->life_cycle_stage),
+                'status' => $this->disputeStatus($dispute->status),
+                'happened_at' => $this->dateTime($dispute->dispute_created_at),
+                'updated_at' => $this->dateTime($dispute->dispute_updated_at),
+            ])->all(),
+            'meta' => $this->paginatorMeta($paginator->currentPage(), $paginator->lastPage(), $paginator->total(), $paginator->perPage()),
+        ];
+    }
+
+    /** @param list<int> $orderIds
+     *  @param Collection<int,LogisticsOrder>|null $orders
+     *  @return list<int>
+     */
+    private function refundOrderIds(array $orderIds, ?Collection $orders = null): array
+    {
+        if ($orderIds === []) {
+            return [];
+        }
+        $orders ??= LogisticsOrder::query()->whereIn('id', $orderIds)->get(['id', 'shopify_refund_amount_usd', 'channel_refund_amount_usd']);
+        $ids = $orders
+            ->filter(static fn (LogisticsOrder $order): bool => (float) $order->shopify_refund_amount_usd > 0 || (float) $order->channel_refund_amount_usd > 0)
+            ->pluck('id')
+            ->map(static fn ($id): int => (int) $id);
+        $manual = LogisticsRefundDetail::query()
+            ->whereIn('logistics_order_id', $orderIds)
+            ->where('is_void', false)
+            ->distinct()
+            ->pluck('logistics_order_id')
+            ->map(static fn ($id): int => (int) $id);
+        $paypal = LogisticsPayPalRefund::query()
+            ->whereIn('logistics_order_id', $orderIds)
+            ->distinct()
+            ->pluck('logistics_order_id')
+            ->map(static fn ($id): int => (int) $id);
+
+        return $ids->merge($manual)->merge($paypal)->unique()->values()->all();
+    }
+
+    /** @param list<int> $orderIds
+     *  @return list<int>
+     */
+    private function disputeOrderIds(array $orderIds): array
+    {
+        if ($orderIds === []) {
+            return [];
+        }
+
+        return LogisticsPayPalDispute::query()
+            ->whereIn('logistics_order_id', $orderIds)
+            ->distinct()
+            ->pluck('logistics_order_id')
+            ->map(static fn ($id): int => (int) $id)
+            ->values()
+            ->all();
+    }
+
+    /** @param list<int> $orderIds
+     *  @param Collection<int,LogisticsOrder> $orders
+     */
+    private function canonicalRefundAmount(array $orderIds, Collection $orders): float
+    {
+        if ($orderIds === []) {
+            return 0.0;
+        }
+        $paypal = LogisticsPayPalRefund::query()
+            ->whereIn('logistics_order_id', $orderIds)
+            ->whereNotNull('refund_amount_usd')
+            ->selectRaw('logistics_order_id, SUM(refund_amount_usd) as amount')
+            ->groupBy('logistics_order_id')
+            ->pluck('amount', 'logistics_order_id');
+        $manual = LogisticsRefundDetail::query()
+            ->whereIn('logistics_order_id', $orderIds)
+            ->where('is_void', false)
+            ->selectRaw('logistics_order_id, SUM(refund_amount_usd) as amount')
+            ->groupBy('logistics_order_id')
+            ->pluck('amount', 'logistics_order_id');
+        $amount = 0.0;
+        foreach ($orders as $order) {
+            $id = $order->getKey();
+            if ($paypal->has($id)) {
+                $amount += (float) $paypal[$id];
+            } elseif ($manual->has($id)) {
+                $amount += (float) $manual[$id];
+            } else {
+                $amount += max((float) $order->shopify_refund_amount_usd, (float) $order->channel_refund_amount_usd);
+            }
+        }
+
+        return round($amount, 2);
+    }
+
+    /** @param array{date_from:string,date_to:string} $filters */
+    private function orderQuery(LogisticsPayPalAccount $account, array $filters): Builder
+    {
+        $query = LogisticsOrder::query()
+            ->where('paypal_account_id', $account->getKey())
+            ->where(function (Builder $paid): void {
+                $paid->whereNotNull('paid_at')->orWhere('paid_amount_usd', '>', 0);
+            });
+        $this->applyDates($query, $filters);
+
+        return $query;
+    }
+
+    /** @param array{date_from:string,date_to:string} $filters */
+    private function applyDates(Builder $query, array $filters): void
+    {
+        if ($filters['date_from'] !== '') {
+            $query->whereDate('order_created_at', '>=', $filters['date_from']);
+        }
+        if ($filters['date_to'] !== '') {
+            $query->whereDate('order_created_at', '<=', $filters['date_to']);
+        }
+    }
+
+    /** @param array{date_from:string,date_to:string} $filters */
+    private function applyEventDates(Builder $query, string $column, array $filters): void
+    {
+        if ($filters['date_from'] !== '') {
+            $query->whereDate($column, '>=', $filters['date_from']);
+        }
+        if ($filters['date_to'] !== '') {
+            $query->whereDate($column, '<=', $filters['date_to']);
+        }
+    }
+
+    /** @param list<array<string,mixed>> $rows */
+    private function paginate(array $rows, int $page, int $perPage = 10): array
+    {
+        $total = count($rows);
+        $lastPage = max(1, (int) ceil($total / $perPage));
+        $page = max(1, min($lastPage, $page));
+
+        return [
+            'data' => array_slice($rows, ($page - 1) * $perPage, $perPage),
+            'meta' => $this->paginatorMeta($page, $lastPage, $total, $perPage),
+        ];
+    }
+
+    private function paginatorMeta(int $page, int $lastPage, int $total, int $perPage): array
+    {
+        return [
+            'current_page' => $page,
+            'last_page' => $lastPage,
+            'total' => $total,
+            'per_page' => $perPage,
+            'from' => $total === 0 ? 0 : (($page - 1) * $perPage + 1),
+            'to' => min($total, $page * $perPage),
+        ];
+    }
+
+    private function riskLevel(float $score): string
+    {
+        return match (true) {
+            $score >= 85 => 'low',
+            $score >= 70 => 'medium',
+            default => 'high',
+        };
+    }
+
+    private function maskEmail(mixed $email): string
+    {
+        $email = trim((string) ($email ?? ''));
+        if (!str_contains($email, '@')) {
+            return $email ?: '—';
+        }
+        [$local, $domain] = explode('@', $email, 2);
+
+        return mb_substr($local, 0, min(2, mb_strlen($local))).'***@'.$domain;
+    }
+
+    private function dateTime(mixed $value): string
+    {
+        if (!$value) {
+            return '—';
+        }
+        try {
+            return Carbon::parse($value)->timezone('Asia/Shanghai')->format('Y-m-d H:i:s');
+        } catch (\Throwable) {
+            return '—';
+        }
+    }
+
+    private function disputeReason(mixed $reason): string
+    {
+        $reason = trim((string) ($reason ?? ''));
+
+        return [
+            'MERCHANDISE_OR_SERVICE_NOT_RECEIVED' => '未收到商品或服务',
+            'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED' => '商品或服务与描述不符',
+            'UNAUTHORISED' => '未经授权的交易',
+            'UNAUTHORIZED_TRANSACTION' => '未经授权的交易',
+            'CREDIT_NOT_PROCESSED' => '退款未处理',
+            'DUPLICATE_TRANSACTION' => '重复交易',
+            'INCORRECT_AMOUNT' => '金额不正确',
+        ][$reason] ?? ($reason ?: '—');
+    }
+
+    private function disputeStatus(mixed $status): string
+    {
+        $status = trim((string) ($status ?? ''));
+
+        return [
+            'OPEN' => '处理中',
+            'WAITING_FOR_BUYER_RESPONSE' => '等待买家回复',
+            'WAITING_FOR_SELLER_RESPONSE' => '等待卖家回复',
+            'UNDER_REVIEW' => 'PayPal审核中',
+            'RESOLVED' => '已解决',
+        ][$status] ?? ($status ?: '—');
+    }
+
+    private function disputeStage(mixed $stage): string
+    {
+        $stage = trim((string) ($stage ?? ''));
+
+        return [
+            'INQUIRY' => '争议',
+            'CHARGEBACK' => '拒付',
+            'PRE_ARBITRATION' => '预仲裁',
+            'ARBITRATION' => '仲裁',
+        ][$stage] ?? ($stage ?: '—');
+    }
+}

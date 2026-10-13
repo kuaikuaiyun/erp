@@ -1,0 +1,29 @@
+@import url("./assistant-domain-stores-20261008-9.css");
+
+.assistant-form-department-access-section .help-block {
+    margin-bottom: 0;
+}
+
+.assistant-department-access-options {
+    display: flex;
+    min-height: 34px;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    padding: 7px 10px;
+    border: 1px solid #d2dbe4;
+    border-radius: 3px;
+    background: #fff;
+}
+
+.assistant-department-access-option {
+    margin: 0;
+    color: #38536b;
+    font-weight: 400;
+}
+
+.assistant-department-access-option input {
+    position: relative;
+    top: 2px;
+    margin-right: 4px;
+}

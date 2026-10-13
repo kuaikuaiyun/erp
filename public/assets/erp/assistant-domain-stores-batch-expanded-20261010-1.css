@@ -1,0 +1,50 @@
+.assistant-batch-record-panels-expanded {
+    padding: 14px;
+}
+
+.assistant-batch-record-panels-expanded .assistant-batch-record-panel {
+    display: block;
+    scroll-margin-top: 12px;
+}
+
+.assistant-batch-record-panels-expanded .assistant-batch-record-panel + .assistant-batch-record-panel {
+    margin-top: 22px;
+    padding-top: 18px;
+    border-top: 2px solid #cfdbe6;
+}
+
+.assistant-batch-record-panels-expanded .assistant-batch-record-heading {
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border: 1px solid #c7dcea;
+    border-radius: 4px;
+    background: #f1f8fc;
+}
+
+.assistant-batch-record-panels-expanded .assistant-batch-record-heading h5 {
+    font-size: 17px;
+}
+
+.assistant-batch-record-panels-expanded .assistant-batch-option-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.assistant-batch-record-panels-expanded .assistant-batch-option-choice {
+    margin: 0;
+    color: #40576b;
+}
+
+.assistant-batch-record-panels-expanded .assistant-batch-option-choice.is-selected {
+    border-color: #3c8dbc;
+    background: #3c8dbc;
+    color: #fff;
+}
+
+@media (max-width: 767px) {
+    .assistant-batch-record-panels-expanded {
+        padding: 9px;
+    }
+}

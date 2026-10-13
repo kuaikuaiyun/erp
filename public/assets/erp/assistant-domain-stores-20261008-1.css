@@ -1,0 +1,13 @@
+@import url("./assistant-domain-stores-20261007-11.css");
+
+.assistant-single-option-input > .form-control { margin-bottom: 7px; }
+.assistant-single-option-presets { min-height: 0; padding: 0; }
+.assistant-single-option-choice { margin: 0; }
+.assistant-single-option-choice.is-selected { border-color: #3c8dbc; background: #3c8dbc; color: #fff; }
+.assistant-single-option-choice.is-selected:hover,
+.assistant-single-option-choice.is-selected:focus { border-color: #2e6d94; background: #2e6d94; color: #fff; }
+
+.assistant-domain-stores-table .assistant-selection-column { position: sticky; z-index: 4; left: 0; width: 76px; min-width: 76px; padding-right: 8px; padding-left: 8px; background: #f4f7f9; text-align: center; }
+.assistant-domain-stores-table > tbody > tr.assistant-store-row > td.assistant-selection-column { z-index: 3; background: #fff; }
+.assistant-domain-stores-table > tbody > tr.assistant-store-row:hover > td.assistant-selection-column { background: #fbfdff; }
+.assistant-domain-stores-table .assistant-selection-column .assistant-row-selector { min-width: 44px; }

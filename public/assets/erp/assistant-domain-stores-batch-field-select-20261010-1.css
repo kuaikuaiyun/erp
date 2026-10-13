@@ -1,0 +1,98 @@
+.assistant-batch-field-selector {
+    padding: 22px;
+}
+
+.assistant-batch-field-selector-intro {
+    margin-bottom: 16px;
+    padding: 12px 14px;
+    border: 1px solid #c9e0ef;
+    border-radius: 4px;
+    background: #f1f9fd;
+    color: #3d647e;
+}
+
+.assistant-batch-field-selection-summary {
+    margin: 0 0 14px;
+    color: #50677c;
+    font-weight: 600;
+}
+
+.assistant-batch-field-selection-groups {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.assistant-batch-field-selection-group {
+    min-width: 0;
+    padding: 14px;
+    border: 1px solid #d8e1e9;
+    border-radius: 5px;
+    background: #fff;
+}
+
+.assistant-batch-field-selection-group h5 {
+    margin: 0 0 11px;
+    color: #264f70;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.assistant-batch-field-selection-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.assistant-batch-field-selection-option {
+    display: inline-flex;
+    min-width: 132px;
+    align-items: center;
+    gap: 7px;
+    margin: 0;
+    padding: 8px 10px;
+    border: 1px solid #d6e0e8;
+    border-radius: 4px;
+    background: #f9fbfc;
+    color: #3e5870;
+    cursor: pointer;
+    font-weight: 400;
+}
+
+.assistant-batch-field-selection-option:hover {
+    border-color: #91b9d6;
+    background: #f2f8fc;
+}
+
+.assistant-batch-field-selection-option input {
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    accent-color: #3c8dbc;
+}
+
+.assistant-batch-field-selection-option.is-selected,
+.assistant-batch-field-selection-option:has(input:checked) {
+    border-color: #3c8dbc;
+    background: #eaf5fb;
+    color: #235c84;
+}
+
+.assistant-batch-editor-modal .modal-footer [data-batch-editor-continue] {
+    min-width: 128px;
+}
+
+@media (max-width: 767px) {
+    .assistant-batch-field-selector {
+        padding: 12px;
+    }
+
+    .assistant-batch-field-selection-groups {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    .assistant-batch-field-selection-option {
+        flex: 1 1 100%;
+    }
+}
