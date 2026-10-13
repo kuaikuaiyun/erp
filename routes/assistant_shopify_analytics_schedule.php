@@ -3,7 +3,7 @@
 use Illuminate\Support\Facades\Schedule;
 
 Schedule::command('assistant:shopify-analytics:auto-sync --limit=20')
-    ->everyMinute()
+    ->everyThirtyMinutes()
     ->withoutOverlapping(30);
 
 Schedule::command('assistant:shopify-analytics:backfill --limit=10')

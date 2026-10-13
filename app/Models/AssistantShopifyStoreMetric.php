@@ -34,6 +34,7 @@ class AssistantShopifyStoreMetric extends Model
         'sync_status',
         'sync_message',
         'synced_at',
+        'last_successful_synced_at',
     ];
 
     public function __construct(array $attributes = [])
@@ -57,6 +58,7 @@ class AssistantShopifyStoreMetric extends Model
             'net_sales' => 'decimal:2',
             'average_order_value' => 'decimal:2',
             'synced_at' => 'datetime',
+            'last_successful_synced_at' => 'datetime',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
         ];

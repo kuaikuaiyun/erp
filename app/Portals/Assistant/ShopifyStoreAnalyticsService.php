@@ -18,6 +18,10 @@ use RuntimeException;
 
 class ShopifyStoreAnalyticsService
 {
+    private const INITIAL_HISTORY_DAYS = 90;
+
+    private const INCREMENTAL_OVERLAP_HOURS = 1;
+
     public function __construct(private readonly ShopifyOrderSyncService $shopify)
     {
     }
@@ -47,15 +51,11 @@ class ShopifyStoreAnalyticsService
                 return $this->markFailure($metric, $period->sync_status, $period->sync_message ?: 'unknown');
             }
 
-            // Store the current Shopify-local business day on a UTC hour axis.
-            // The UTC axis is only for later screen-side timezone conversion;
-            // it never changes this store's Shopify-local synchronization day.
-            $localDayStartUtc = CarbonImmutable::now($shop['timezone'])
-                ->startOfDay()
-                ->setTimezone('UTC')
-                ->startOfHour();
-            $nowUtc = CarbonImmutable::now('UTC')->startOfHour();
-            $this->refreshUtcHours($store, $localDayStartUtc, $nowUtc, $actor, $shop);
+            // Collect incrementally from the last successful watermark. The
+            // overlap rewrites the previous hour, so a store-local midnight
+            // cannot leave the final part of the prior day uncollected.
+            [$fromUtc, $toUtc] = $this->incrementalHourWindow($metric, $shop['timezone']);
+            $this->refreshUtcHours($store, $fromUtc, $toUtc, $actor, $shop);
 
             $payload = [
                 'shop_timezone' => $period->shop_timezone,
@@ -260,10 +260,6 @@ class ShopifyStoreAnalyticsService
             );
             $period->fill(Arr::except($payload, ['report_date']))->save();
 
-            // Sync tasks always initialise their own Shopify-local history.
-            // The list filter timezone never reaches this Shopify request.
-            $this->startInitialBackfill($store, $shop['timezone']);
-
             return $period;
         } catch (\Throwable $exception) {
             report($exception);
@@ -281,9 +277,9 @@ class ShopifyStoreAnalyticsService
     }
 
     /**
-     * Fetch ShopifyQL hourly values in UTC and store them as the canonical
-     * source for every later reporting timezone. The requested bounds are
-     * inclusive UTC hour starts.
+     * Fetch ShopifyQL hourly values in the store's own timezone, then
+     * normalize the returned hour keys to UTC for later local aggregation.
+     * The requested bounds are inclusive UTC hour starts.
      */
     public function refreshUtcHours(
         AssistantDomainStore $store,
@@ -291,6 +287,7 @@ class ShopifyStoreAnalyticsService
         CarbonImmutable $toUtc,
         ?AdminUser $actor = null,
         ?array $shopInfo = null,
+        ?string $shopTimezone = null,
     ): int {
         $fromUtc = $fromUtc->setTimezone('UTC')->startOfHour();
         $toUtc = $toUtc->setTimezone('UTC')->startOfHour();
@@ -304,22 +301,29 @@ class ShopifyStoreAnalyticsService
         }
 
         $shop = $shopInfo ?? $this->shopInfo($store, $actor);
+        $shopTimezone = $this->validTimezone($shopTimezone ?? $shop['timezone']);
+        $fromShopHour = $fromUtc->setTimezone($shopTimezone)->startOfHour();
+        $toShopHour = $toUtc->setTimezone($shopTimezone)->startOfHour();
+
         $salesByHour = $this->rowsByUtcHour(
-            $this->shopifyQlRows($store, $actor, $this->salesHourlyTimeSeriesQuery($fromUtc, $toUtc)),
+            $this->shopifyQlRows($store, $actor, $this->salesHourlyTimeSeriesQuery($fromShopHour, $toShopHour, $shopTimezone)),
             $fromUtc,
             $toUtc,
+            $shopTimezone,
         );
         $originalSalesByHour = $shop['currency'] === 'USD'
             ? $salesByHour
             : $this->rowsByUtcHour(
-                $this->shopifyQlRows($store, $actor, $this->salesHourlyTimeSeriesQuery($fromUtc, $toUtc, $shop['currency'], true)),
+                $this->shopifyQlRows($store, $actor, $this->salesHourlyTimeSeriesQuery($fromShopHour, $toShopHour, $shopTimezone, $shop['currency'], true)),
                 $fromUtc,
                 $toUtc,
+                $shopTimezone,
             );
         $fulfillmentsByHour = $this->rowsByUtcHour(
-            $this->shopifyQlRows($store, $actor, $this->fulfillmentsHourlyTimeSeriesQuery($fromUtc, $toUtc)),
+            $this->shopifyQlRows($store, $actor, $this->fulfillmentsHourlyTimeSeriesQuery($fromShopHour, $toShopHour, $shopTimezone)),
             $fromUtc,
             $toUtc,
+            $shopTimezone,
         );
 
         $syncedAt = now();
@@ -333,7 +337,7 @@ class ShopifyStoreAnalyticsService
             $rows[] = [
                 'assistant_domain_store_id' => $store->getKey(),
                 'report_hour_utc' => $hourKey,
-                'shop_timezone' => $shop['timezone'],
+                'shop_timezone' => $shopTimezone,
                 'currency_code' => 'USD',
                 'original_currency_code' => $shop['currency'],
                 'total_sales' => $this->decimal($sales, 'total_sales'),
@@ -403,15 +407,16 @@ class ShopifyStoreAnalyticsService
             'sync_status' => AssistantShopifyStoreMetric::STATUS_SUCCESS,
             'sync_message' => null,
             'synced_at' => now(),
+            'last_successful_synced_at' => now(),
         ];
     }
 
-    /** Create the initial 90-day plan using the Shopify store's own local calendar. */
+    /** Create the first 90 local-calendar-day plan, including the current day. */
     private function startInitialBackfill(AssistantDomainStore $store, string $shopTimezone): void
     {
         $shopTimezone = $this->validTimezone($shopTimezone);
         $localToday = CarbonImmutable::now($shopTimezone)->startOfDay();
-        $fromDate = $localToday->subDays(89);
+        $fromDate = $localToday->subDays(self::INITIAL_HISTORY_DAYS - 1);
         $toDate = $localToday;
 
         $task = AssistantShopifyAnalyticsBackfill::query()->firstOrNew(
@@ -475,7 +480,18 @@ class ShopifyStoreAnalyticsService
 
         $errors = Arr::get($response, 'data.shopifyqlQuery.parseErrors', []);
         if (is_array($errors) && $errors !== []) {
-            throw new RuntimeException('ShopifyQL query could not be parsed.');
+            $messages = collect($errors)
+                ->map(static function (mixed $error): string {
+                    if (is_array($error)) {
+                        $error = $error['message'] ?? json_encode($error, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                    }
+
+                    return is_scalar($error) ? trim((string) $error) : '';
+                })
+                ->filter()
+                ->implode('; ');
+
+            throw new RuntimeException('ShopifyQL query could not be parsed: '.Str::limit($messages ?: 'unknown parse error', 1000));
         }
 
         $rows = Arr::get($response, 'data.shopifyqlQuery.tableData.rows', []);
@@ -560,8 +576,9 @@ class ShopifyStoreAnalyticsService
     }
 
     private function salesHourlyTimeSeriesQuery(
-        CarbonImmutable $fromUtc,
-        CarbonImmutable $toUtc,
+        CarbonImmutable $fromShopHour,
+        CarbonImmutable $toShopHour,
+        string $shopTimezone,
         string $currency = 'USD',
         bool $onlyTotalSales = false,
     ): string {
@@ -570,18 +587,22 @@ class ShopifyStoreAnalyticsService
             : 'total_sales, orders, returning_customer_rate, returns, net_sales, average_order_value';
 
         return "FROM sales SHOW {$fields}\n"
-            ."WITH CURRENCY '{$currency}', TIMEZONE 'UTC'\n"
+            ."WITH CURRENCY '{$currency}', TIMEZONE '{$shopTimezone}'\n"
             ."TIMESERIES hour\n"
-            .'SINCE '.$fromUtc->format('Y-m-d\\TH:i').' UNTIL '.$toUtc->addHour()->format('Y-m-d\\TH:i')."\n"
+            .'SINCE '.$fromShopHour->format('Y-m-d\\TH:i:s').' UNTIL '.$toShopHour->addHour()->format('Y-m-d\\TH:i:s')."\n"
             .'ORDER BY hour ASC';
     }
 
-    private function fulfillmentsHourlyTimeSeriesQuery(CarbonImmutable $fromUtc, CarbonImmutable $toUtc): string
+    private function fulfillmentsHourlyTimeSeriesQuery(
+        CarbonImmutable $fromShopHour,
+        CarbonImmutable $toShopHour,
+        string $shopTimezone,
+    ): string
     {
         return "FROM fulfillments SHOW orders_fulfilled\n"
-            ."WITH TIMEZONE 'UTC'\n"
+            ."WITH TIMEZONE '{$shopTimezone}'\n"
             ."TIMESERIES hour\n"
-            .'SINCE '.$fromUtc->format('Y-m-d\\TH:i').' UNTIL '.$toUtc->addHour()->format('Y-m-d\\TH:i')."\n"
+            .'SINCE '.$fromShopHour->format('Y-m-d\\TH:i:s').' UNTIL '.$toShopHour->addHour()->format('Y-m-d\\TH:i:s')."\n"
             .'ORDER BY hour ASC';
     }
 
@@ -665,7 +686,12 @@ class ShopifyStoreAnalyticsService
      * @param array<int, array<string, mixed>> $rows
      * @return array<string, array<string, mixed>>
      */
-    private function rowsByUtcHour(array $rows, CarbonImmutable $fromUtc, CarbonImmutable $toUtc): array
+    private function rowsByUtcHour(
+        array $rows,
+        CarbonImmutable $fromUtc,
+        CarbonImmutable $toUtc,
+        string $shopTimezone,
+    ): array
     {
         $result = [];
 
@@ -676,7 +702,7 @@ class ShopifyStoreAnalyticsService
             }
 
             try {
-                $hour = CarbonImmutable::parse((string) $rawHour, 'UTC')->setTimezone('UTC')->startOfHour();
+                $hour = CarbonImmutable::parse((string) $rawHour, $shopTimezone)->setTimezone('UTC')->startOfHour();
             } catch (\Throwable) {
                 continue;
             }
@@ -689,6 +715,29 @@ class ShopifyStoreAnalyticsService
         }
 
         return $result;
+    }
+
+    /** @return array{0: CarbonImmutable, 1: CarbonImmutable} */
+    private function incrementalHourWindow(AssistantShopifyStoreMetric $metric, string $shopTimezone): array
+    {
+        $toUtc = CarbonImmutable::now('UTC')->startOfHour();
+        $lastSuccessfulSync = $metric->last_successful_synced_at;
+
+        if ($lastSuccessfulSync === null) {
+            $fromUtc = CarbonImmutable::now($shopTimezone)
+                ->startOfDay()
+                ->setTimezone('UTC')
+                ->startOfHour();
+
+            return [$fromUtc, $toUtc];
+        }
+
+        $fromUtc = CarbonImmutable::instance($lastSuccessfulSync)
+            ->setTimezone('UTC')
+            ->startOfHour()
+            ->subHours(self::INCREMENTAL_OVERLAP_HOURS);
+
+        return [$fromUtc->greaterThan($toUtc) ? $toUtc : $fromUtc, $toUtc];
     }
 
     /** @return array<int, string> */
@@ -742,12 +791,19 @@ class ShopifyStoreAnalyticsService
         string $reason,
     ): AssistantShopifyStoreMetric
     {
-        $metric->fill([
-            'currency_code' => 'USD',
+        $payload = [
             'sync_status' => $status,
             'sync_message' => $reason,
-            'synced_at' => now(),
-        ])->save();
+        ];
+
+        // A failed attempt must not advance the successful-sync watermark.
+        // Otherwise automatic synchronization would incorrectly skip this
+        // store for the next 30-minute cycle.
+        if (!$metric->exists) {
+            $payload['currency_code'] = 'USD';
+        }
+
+        $metric->fill($payload)->save();
 
         return $metric;
     }

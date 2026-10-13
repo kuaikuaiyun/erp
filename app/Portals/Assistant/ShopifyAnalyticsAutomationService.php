@@ -11,7 +11,7 @@ use Illuminate\Support\Str;
 
 class ShopifyAnalyticsAutomationService
 {
-    private const AUTO_SYNC_INTERVAL_HOURS = 4;
+    private const AUTO_SYNC_INTERVAL_MINUTES = 30;
 
     public function __construct(private readonly ShopifyStoreAnalyticsService $analytics)
     {
@@ -21,13 +21,14 @@ class ShopifyAnalyticsAutomationService
     public function runAutomatic(int $limit = 20): array
     {
         $result = ['processed' => 0, 'succeeded' => 0, 'failed' => 0];
-        $dueBefore = now()->subHours(self::AUTO_SYNC_INTERVAL_HOURS);
+        $dueBefore = now()->subMinutes(self::AUTO_SYNC_INTERVAL_MINUTES);
 
         $stores = $this->eligibleStores()
             ->where(function (Builder $query) use ($dueBefore): void {
                 $query->whereDoesntHave('shopifyAnalyticsMetric')
                     ->orWhereHas('shopifyAnalyticsMetric', function (Builder $metric) use ($dueBefore): void {
-                        $metric->whereNull('synced_at')->orWhere('synced_at', '<=', $dueBefore);
+                        $metric->whereNull('last_successful_synced_at')
+                            ->orWhere('last_successful_synced_at', '<=', $dueBefore);
                     });
             })
             ->orderBy('id')
@@ -117,6 +118,7 @@ class ShopifyAnalyticsAutomationService
                     $task->store,
                     $fromUtc,
                     $toUtc,
+                    shopTimezone: $shopTimezone,
                 );
 
                 $this->completeTask($task);
