@@ -98,6 +98,9 @@
 <script src="{{ $portalOrigin }}/assets/erp/admin-notifications.js?v=20260929-2"></script>
 <script src="{{ $portalOrigin }}/assets/erp/admin-navigation.js?v=20260929-1"></script>
 <script src="{{ $portalOrigin }}/assets/erp/interaction-loading-20261011-1.js?v=20261012-1"></script>
+@if(in_array($portal->code, ['yunying', 'caigou', 'cangku'], true))
+<script src="{{ $portalOrigin }}/assets/erp/procurement-pending-watcher.js?v=20261013-6"></script>
+@endif
 @stack('scripts')
 @if ($watermarkScript !== null)
     <script>{!! $watermarkScript !!}</script>

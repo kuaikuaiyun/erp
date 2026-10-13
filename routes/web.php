@@ -41,6 +41,10 @@ Route::post('/shopify-analytics/refresh-batch', [ShopifyAnalyticsController::cla
 Route::get('/shopify-analytics/sync-batches/{batch}/progress', [ShopifyAnalyticsController::class, 'syncProgress'])->name('assistant.shopify-analytics.sync-progress');
 Route::post('/shopify-analytics/{domainStore}/refresh', [ShopifyAnalyticsController::class, 'refresh'])->name('assistant.shopify-analytics.refresh');
 Route::get('/product-requests', [ProductRequestController::class, 'operationIndex'])->name('product-requests.operation.index');
+Route::get('/api/product-requests/operation-pending-count', [ProductRequestController::class, 'operationPendingCount'])->name('product-requests.operation.pending-count');
+Route::get('/api/procurement-inspections/pending-count', [ProductRequestController::class, 'procurementPendingCount'])->name('product-requests.procurement.pending-count');
+Route::get('/api/placement-reviews/pending-count', [ProductRequestController::class, 'placementReviewPendingCount'])->name('product-requests.placement.pending-count');
+Route::get('/api/warehouse-acceptances/pending-count', [ProductRequestController::class, 'warehousePendingCount'])->name('product-requests.warehouse.pending-count');
 Route::get('/product-requests/create', [ProductRequestController::class, 'operationCreate'])->name('product-requests.operation.create');
 Route::post('/product-requests', [ProductRequestController::class, 'operationStore'])->name('product-requests.operation.store');
 Route::get('/product-requests/{productRequest}', [ProductRequestController::class, 'show'])->name('product-requests.show');

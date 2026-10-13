@@ -45,6 +45,15 @@
         <a href="{{ $href }}">
             <i class="fa {{ $icon }}"></i>
             <span>{{ $label }}</span>
+            @if($menu->code === 'product_requests')
+            <span id="operation-pending-badge" class="badge bg-yellow" style="margin-left:6px;">0</span>
+            @elseif($menu->code === 'procurement_inspections')
+            <span id="procurement-pending-badge" class="badge bg-yellow" style="margin-left:6px;">0</span>
+            @elseif($menu->code === 'placement_reviews')
+            <span id="placement-review-pending-badge" class="badge bg-yellow" style="margin-left:6px;">0</span>
+            @elseif($menu->code === 'warehouse_acceptances')
+            <span id="warehouse-pending-badge" class="badge bg-yellow" style="margin-left:6px;">0</span>
+            @endif
         </a>
     </li>
     @else
