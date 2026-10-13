@@ -35,26 +35,16 @@
         'placement_reviews' => app(\App\Portals\ProductRequests\ProductRequestAccessService::class)->canReviewPlacement($user),
         default => true,
     };
+    $canAccessAssistantAnalyticsMenu = $menu->code !== 'assistant_shopify_analytics'
+        || app(\App\Portals\Assistant\AssistantPortalAuthorizationService::class)->canViewShopifyAnalytics($user);
 @endphp
 
-@if ((!$isConfigurationMenu || $canManagePortalMenus) && $canAccessProductRequestMenu)
+@if ((!$isConfigurationMenu || $canManagePortalMenus) && $canAccessProductRequestMenu && $canAccessAssistantAnalyticsMenu)
     @if ($children->isEmpty())
     <li class="{{ $isCurrent ? 'active' : '' }}">
         <a href="{{ $href }}">
             <i class="fa {{ $icon }}"></i>
             <span>{{ $label }}</span>
-            @if ($menu->code === 'procurement_inspections')
-            <span class="badge badge-warning" id="procurement-pending-badge" style="margin-left:6px;">0</span>
-            @endif
-            @if ($menu->code === 'product_requests')
-            <span class="badge badge-warning" id="operation-pending-badge" style="margin-left:6px;">0</span>
-            @endif
-            @if ($menu->code === 'placement_reviews')
-            <span class="badge badge-warning" id="placement-review-pending-badge" style="margin-left:6px;">0</span>
-            @endif
-            @if ($menu->code === 'warehouse_acceptances')
-            <span class="badge badge-warning" id="warehouse-pending-badge" style="margin-left:6px;">0</span>
-            @endif
         </a>
     </li>
     @else
@@ -77,4 +67,3 @@
     </li>
     @endif
 @endif
-

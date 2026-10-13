@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Cache;
 class RunAssistantShopifyAnalyticsBackfill extends Command
 {
     protected $signature = 'assistant:shopify-analytics:backfill
-                            {--limit=5 : Maximum stores to process in a normal scheduled run}
+                            {--limit=10 : Maximum stores to process in a normal scheduled run}
                             {--all : Process every currently due store backfill in this one command}';
 
     protected $description = 'Run resumable Assistant Shopify analytics history backfills';
@@ -32,7 +32,7 @@ class RunAssistantShopifyAnalyticsBackfill extends Command
         }
 
         $this->info(sprintf(
-            'Stores processed: %d; succeeded: %d; failed: %d; completed: %d; history days written: %d.',
+            'Stores processed: %d; succeeded: %d; failed: %d; completed: %d; UTC hour records written: %d.',
             $result['processed'],
             $result['succeeded'],
             $result['failed'],

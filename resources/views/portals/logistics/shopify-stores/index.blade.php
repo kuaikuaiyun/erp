@@ -7,7 +7,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics.css?v=20261009-10">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics.css?v=20261012-1">
 @endpush
 
 @section('content')
@@ -18,6 +18,63 @@
     <section class="content logistics-page">
         @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
         @if(session('error'))<div class="alert alert-danger">{{ session('error') }}</div>@endif
+
+        @if($activeSyncBatch)
+            @php
+                $syncProgress = $activeSyncBatch->progressPayload();
+                $syncRunning = !$syncProgress['completed'];
+                $syncTitle = match ($syncProgress['status']) {
+                    'queued' => 'Shopify 同步任务排队中',
+                    'processing' => 'Shopify 店铺后台同步中',
+                    'cancelling' => '正在停止 Shopify 同步任务',
+                    'cancelled' => 'Shopify 同步已停止',
+                    default => 'Shopify 同步完成',
+                };
+            @endphp
+            <div id="shopify-sync-progress"
+                 class="logistics-match-progress logistics-shopify-sync-progress"
+                 data-url="{{ route('logistics.shopify-stores.sync-progress', $activeSyncBatch) }}"
+                 data-completed="{{ $syncProgress['completed'] ? '1' : '0' }}">
+                <div class="logistics-match-progress-heading">
+                    <span>
+                        <i class="fa fa-refresh {{ $syncRunning ? 'fa-spin' : '' }}" data-shopify-sync-icon></i>
+                        <strong data-shopify-sync-title>{{ $syncTitle }}</strong>
+                    </span>
+                    <span data-shopify-sync-percent>{{ $syncProgress['percent'] }}%</span>
+                </div>
+                <div class="progress">
+                    <div class="progress-bar" data-shopify-sync-bar role="progressbar" style="width: {{ $syncProgress['percent'] }}%"></div>
+                </div>
+                <div class="logistics-match-progress-summary" data-shopify-sync-summary>
+                    已处理 {{ $syncProgress['processed'] }} / {{ $syncProgress['total'] }} 家；成功 {{ $syncProgress['success'] }} 家，失败 {{ $syncProgress['failed'] }} 家，已停止 {{ $syncProgress['cancelled'] }} 家；新增订单 {{ $syncProgress['created_orders'] }} 条，更新订单 {{ $syncProgress['updated_orders'] }} 条，Shopify SKU 缺失 {{ $syncProgress['sku_exceptions'] }} 单（{{ $syncProgress['sku_missing_items'] }} / {{ $syncProgress['sku_items'] }} 个商品明细），未付款跳过 {{ $syncProgress['skipped_unpaid'] }} 条，Webhook 警告 {{ $syncProgress['webhook_warnings'] }} 家。
+                </div>
+                <div class="logistics-shopify-sync-current {{ $syncProgress['current_store'] ? '' : 'hide' }}" data-shopify-sync-current>
+                    <i class="fa fa-building-o"></i> 当前店铺：<strong>{{ $syncProgress['current_store'] }}</strong>
+                </div>
+                <div class="logistics-match-progress-note">
+                    <i class="fa fa-clock-o"></i> 每家店铺固定同步近 {{ $syncProgress['sync_days'] }} 天；可关闭本页，后台任务不会中断，返回后仍会显示进度。
+                </div>
+                <div class="logistics-shopify-sync-actions">
+                    <form method="post" action="{{ route('logistics.shopify-stores.sync-cancel', $activeSyncBatch) }}" data-shopify-sync-cancel-form class="{{ $syncProgress['can_cancel'] ? '' : 'hide' }}">
+                        @csrf
+                        <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
+                        <button type="submit" class="btn btn-warning btn-xs" onclick="return confirm('确认停止尚未开始的店铺吗？当前正在同步的店铺会正常完成。');">
+                            <i class="fa fa-stop-circle"></i> 停止剩余任务
+                        </button>
+                    </form>
+                </div>
+                <div class="logistics-shopify-sync-issues {{ $syncIssueDetails === [] ? 'hide' : '' }}" data-shopify-sync-issues>
+                    <details {{ $syncProgress['completed'] && $syncIssueDetails !== [] ? 'open' : '' }}>
+                        <summary>查看异常与警告（<span data-shopify-sync-issue-count>{{ count($syncIssueDetails) }}</span>）</summary>
+                        <div data-shopify-sync-issue-list>
+                            @foreach($syncIssueDetails as $issue)
+                                <div><strong>{{ $issue['store_name'] }}</strong>：{{ $issue['reason'] }}</div>
+                            @endforeach
+                        </div>
+                    </details>
+                </div>
+            </div>
+        @endif
 
         <div class="box box-solid logistics-tip-box">
             <div class="box-body">
@@ -41,7 +98,7 @@
                     <i class="fa fa-rss"></i> 批量登记 Webhook
                 </button>
                 <button class="btn btn-success btn-sm" type="submit" form="shopify-batch-sync-form" id="batch-sync-button" disabled>
-                    <i class="fa fa-refresh"></i> 批量同步近{{ config('logistics.shopify.sync_days', 10) }}天
+                    <i class="fa fa-refresh"></i> 批量同步近{{ $manualSyncDays }}天
                 </button>
                 @include('portals.logistics.partials.pagination', ['paginator' => $stores, 'filters' => $filters, 'routeName' => 'logistics.shopify-stores.index'])
             </div>
@@ -98,7 +155,7 @@
                                     <form method="post" action="{{ route('logistics.shopify-stores.sync', $store) }}" class="logistics-inline-form">
                                         @csrf
                                         <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
-                                        <button class="btn btn-success btn-xs" type="submit"><i class="fa fa-refresh"></i> 同步近{{ config('logistics.shopify.sync_days', 10) }}天</button>
+                                        <button class="btn btn-success btn-xs" type="submit" {{ isset($syncRunning) && $syncRunning ? 'disabled' : '' }}><i class="fa fa-refresh"></i> 同步近{{ $manualSyncDays }}天</button>
                                     </form>
                                 </td>
                             </tr>
@@ -123,6 +180,7 @@
             var webhookButton = document.getElementById('batch-webhook-button');
             var syncForm = document.getElementById('shopify-batch-sync-form');
             var webhookForm = document.getElementById('shopify-batch-webhook-form');
+            var syncLocked = {{ isset($syncRunning) && $syncRunning ? 'true' : 'false' }};
             var items = function () { return Array.prototype.slice.call(document.querySelectorAll('.shopify-store-check')); };
             var selected = function () { return items().filter(function (item) { return item.checked; }); };
             var populate = function (form) {
@@ -136,7 +194,7 @@
             };
             var refresh = function () {
                 var selectedItems = selected();
-                syncButton.disabled = selectedItems.length === 0;
+                syncButton.disabled = syncLocked || selectedItems.length === 0;
                 webhookButton.disabled = selectedItems.length === 0;
                 all.checked = items().length > 0 && selectedItems.length === items().length;
                 all.indeterminate = selectedItems.length > 0 && !all.checked;
@@ -146,6 +204,82 @@
             syncForm.addEventListener('submit', function () { populate(syncForm); });
             webhookForm.addEventListener('submit', function () { populate(webhookForm); });
             refresh();
+        }());
+
+        (function () {
+            var panel = document.getElementById('shopify-sync-progress');
+            if (!panel || panel.getAttribute('data-completed') === '1') {
+                return;
+            }
+
+            var title = panel.querySelector('[data-shopify-sync-title]');
+            var icon = panel.querySelector('[data-shopify-sync-icon]');
+            var percent = panel.querySelector('[data-shopify-sync-percent]');
+            var bar = panel.querySelector('[data-shopify-sync-bar]');
+            var summary = panel.querySelector('[data-shopify-sync-summary]');
+            var current = panel.querySelector('[data-shopify-sync-current]');
+            var cancelForm = panel.querySelector('[data-shopify-sync-cancel-form]');
+            var issues = panel.querySelector('[data-shopify-sync-issues]');
+            var issueCount = panel.querySelector('[data-shopify-sync-issue-count]');
+            var issueList = panel.querySelector('[data-shopify-sync-issue-list]');
+            var reloading = false;
+            var labels = {
+                queued: 'Shopify 同步任务排队中',
+                processing: 'Shopify 店铺后台同步中',
+                cancelling: '正在停止 Shopify 同步任务',
+                cancelled: 'Shopify 同步已停止',
+                completed: 'Shopify 同步完成'
+            };
+            var escapeHtml = function (value) {
+                var node = document.createElement('div');
+                node.textContent = value == null ? '' : String(value);
+                return node.innerHTML;
+            };
+            var renderIssues = function (rows) {
+                rows = Array.isArray(rows) ? rows : [];
+                issueCount.textContent = rows.length;
+                issueList.innerHTML = rows.map(function (row) {
+                    return '<div><strong>' + escapeHtml(row.store_name) + '</strong>：' + escapeHtml(row.reason) + '</div>';
+                }).join('');
+                issues.classList.toggle('hide', rows.length === 0);
+            };
+            var render = function (data) {
+                title.textContent = labels[data.status] || 'Shopify 店铺后台同步中';
+                percent.textContent = data.percent + '%';
+                bar.style.width = data.percent + '%';
+                summary.textContent = '已处理 ' + data.processed + ' / ' + data.total + ' 家；成功 ' + data.success + ' 家，失败 ' + data.failed + ' 家，已停止 ' + data.cancelled + ' 家；新增订单 ' + data.created_orders + ' 条，更新订单 ' + data.updated_orders + ' 条，Shopify SKU 缺失 ' + data.sku_exceptions + ' 单（' + data.sku_missing_items + ' / ' + data.sku_items + ' 个商品明细），未付款跳过 ' + data.skipped_unpaid + ' 条，Webhook 警告 ' + data.webhook_warnings + ' 家。';
+                if (data.current_store) {
+                    current.innerHTML = '<i class="fa fa-building-o"></i> 当前店铺：<strong>' + escapeHtml(data.current_store) + '</strong>';
+                    current.classList.remove('hide');
+                } else {
+                    current.classList.add('hide');
+                }
+                cancelForm.classList.toggle('hide', !data.can_cancel);
+                renderIssues(data.issues);
+                if (data.completed) {
+                    icon.classList.remove('fa-spin');
+                    panel.setAttribute('data-completed', '1');
+                    window.clearInterval(timer);
+                    if (!reloading) {
+                        reloading = true;
+                        window.setTimeout(function () { window.location.reload(); }, 900);
+                    }
+                }
+            };
+            var poll = function () {
+                window.fetch(panel.getAttribute('data-url'), {
+                    headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin'
+                }).then(function (response) {
+                    if (!response.ok) { throw new Error('HTTP ' + response.status); }
+                    return response.json();
+                }).then(render).catch(function () {
+                    title.textContent = '进度读取暂时失败，系统仍在后台同步';
+                });
+            };
+
+            var timer = window.setInterval(poll, 3000);
+            poll();
         }());
     </script>
 @endpush

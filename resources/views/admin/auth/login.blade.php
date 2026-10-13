@@ -134,7 +134,7 @@
     </section>
 </main>
 
-<script src="{{ asset('assets/erp/interaction-loading-20261011-1.js') }}?v=20261011-3"></script>
+<script src="{{ asset('assets/erp/interaction-loading-20261011-1.js') }}?v=20261012-1"></script>
 <script src="{{ asset('assets/erp/login-submit-guard-20261011-1.js') }}"></script>
 
 @if($captcha['enabled'] && $captcha['provider'] === 'turnstile')

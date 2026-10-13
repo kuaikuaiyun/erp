@@ -32,5 +32,5 @@ Ladmin\Admin::headerJs('/assets/erp/admin-notifications.js?v=20260929-2');
 Ladmin\Admin::js('/assets/erp/organization-workspace.js?v=20260929-5');
 Ladmin\Admin::js('/assets/erp/admin-navigation.js?v=20260929-1');
 Ladmin\Admin::js('/assets/erp/portal-workspace.js?v=20260930-2');
-Ladmin\Admin::js('/assets/erp/interaction-loading-20261011-1.js?v=20261011-3');
+Ladmin\Admin::js('/assets/erp/interaction-loading-20261011-1.js?v=20261012-1');
 app(\App\Services\AdminWatermarkService::class)->registerForCurrentAdministrator();

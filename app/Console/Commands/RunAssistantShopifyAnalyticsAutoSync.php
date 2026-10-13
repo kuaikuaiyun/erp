@@ -7,7 +7,7 @@ use Illuminate\Console\Command;
 
 class RunAssistantShopifyAnalyticsAutoSync extends Command
 {
-    protected $signature = 'assistant:shopify-analytics:auto-sync {--limit=10 : Maximum stores to process in this run}';
+    protected $signature = 'assistant:shopify-analytics:auto-sync {--limit=20 : Maximum stores to process in this run}';
 
     protected $description = 'Synchronise due Assistant Shopify analytics snapshots';
 
@@ -16,11 +16,10 @@ class RunAssistantShopifyAnalyticsAutoSync extends Command
         $result = $automation->runAutomatic((int) $this->option('limit'));
 
         $this->info(sprintf(
-            'Processed: %d; succeeded: %d; failed: %d; previous days finalised: %d.',
+            'Processed: %d; succeeded: %d; failed: %d.',
             $result['processed'],
             $result['succeeded'],
             $result['failed'],
-            $result['finalised'],
         ));
 
         return self::SUCCESS;

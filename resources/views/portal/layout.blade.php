@@ -97,10 +97,7 @@
 <script src="{{ $portalOrigin }}/vendor/laravel-admin/AdminLTE/dist/js/app.min.js"></script>
 <script src="{{ $portalOrigin }}/assets/erp/admin-notifications.js?v=20260929-2"></script>
 <script src="{{ $portalOrigin }}/assets/erp/admin-navigation.js?v=20260929-1"></script>
-<script src="{{ $portalOrigin }}/assets/erp/interaction-loading-20261011-1.js?v=20261011-3"></script>
-@if($portal->code === 'caigou' || $portal->code === 'yunying' || $portal->code === 'cangku')
-<script src="{{ $portalOrigin }}/assets/erp/procurement-pending-watcher.js?v=20261013-3"></script>
-@endif
+<script src="{{ $portalOrigin }}/assets/erp/interaction-loading-20261011-1.js?v=20261012-1"></script>
 @stack('scripts')
 @if ($watermarkScript !== null)
     <script>{!! $watermarkScript !!}</script>

@@ -19,6 +19,23 @@
     display: none;
 }
 
+.assistant-domain-store-form .assistant-email-purchase-status {
+    display: flex;
+    min-height: 34px;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 0;
+}
+
+.assistant-domain-store-form .assistant-email-purchase-status .label {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.assistant-domain-store-form .assistant-email-purchase-hint {
+    font-size: 12px;
+}
+
 .assistant-domain-store-form .assistant-add-team-project-quick-option {
     flex: 0 0 auto;
     min-width: 110px;

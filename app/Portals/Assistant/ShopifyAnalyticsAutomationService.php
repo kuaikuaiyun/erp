@@ -17,10 +17,10 @@ class ShopifyAnalyticsAutomationService
     {
     }
 
-    /** @return array{processed: int, succeeded: int, failed: int, finalised: int} */
-    public function runAutomatic(int $limit = 10): array
+    /** @return array{processed: int, succeeded: int, failed: int} */
+    public function runAutomatic(int $limit = 20): array
     {
-        $result = ['processed' => 0, 'succeeded' => 0, 'failed' => 0, 'finalised' => 0];
+        $result = ['processed' => 0, 'succeeded' => 0, 'failed' => 0];
         $dueBefore = now()->subHours(self::AUTO_SYNC_INTERVAL_HOURS);
 
         $stores = $this->eligibleStores()
@@ -31,7 +31,7 @@ class ShopifyAnalyticsAutomationService
                     });
             })
             ->orderBy('id')
-            ->limit($this->limit($limit, 10, 50))
+            ->limit($this->limit($limit, 20, 50))
             ->get();
 
         foreach ($stores as $store) {
@@ -45,17 +45,13 @@ class ShopifyAnalyticsAutomationService
             }
 
             $result['succeeded']++;
-
-            if ($this->finalisePreviousReportingDay($store)) {
-                $result['finalised']++;
-            }
         }
 
         return $result;
     }
 
     /** @return array{processed: int, succeeded: int, failed: int, completed: int, history_rows: int} */
-    public function runInitialBackfill(int $limit = 5): array
+    public function runInitialBackfill(int $limit = 10): array
     {
         $result = ['processed' => 0, 'succeeded' => 0, 'failed' => 0, 'completed' => 0, 'history_rows' => 0];
 
@@ -68,7 +64,7 @@ class ShopifyAnalyticsAutomationService
             })
             ->orderBy('next_attempt_at')
             ->orderBy('id')
-            ->limit($this->limit($limit, 5, 20))
+            ->limit($this->limit($limit, 10, 20))
             ->get();
 
         foreach ($tasks as $task) {
@@ -83,7 +79,7 @@ class ShopifyAnalyticsAutomationService
 
             try {
                 $fromDate = $task->from_date?->toDateString();
-                $toDate = $task->next_date?->toDateString();
+                $toDate = $task->to_date?->toDateString();
                 if ($fromDate === null || $toDate === null) {
                     $this->completeTask($task);
                     $result['completed']++;
@@ -91,11 +87,36 @@ class ShopifyAnalyticsAutomationService
                     continue;
                 }
 
-                $result['history_rows'] += $this->analytics->refreshHistoricalRange(
+                $shopTimezone = (string) $task->shop_timezone;
+                if (!in_array($shopTimezone, timezone_identifiers_list(), true)) {
+                    throw new \RuntimeException('The Shopify store timezone is invalid.');
+                }
+
+                // The backfill range is defined by the store's own local
+                // calendar; it is converted to UTC only for hour storage.
+                $fromUtc = CarbonImmutable::createFromFormat('!Y-m-d', $fromDate, $shopTimezone)
+                    ->startOfDay()
+                    ->setTimezone('UTC')
+                    ->startOfHour();
+                $scheduledEndUtc = CarbonImmutable::createFromFormat('!Y-m-d', $toDate, $shopTimezone)
+                    ->addDay()
+                    ->startOfDay()
+                    ->setTimezone('UTC')
+                    ->subHour();
+                $currentHourUtc = CarbonImmutable::now('UTC')->startOfHour();
+                $toUtc = $scheduledEndUtc->lessThan($currentHourUtc) ? $scheduledEndUtc : $currentHourUtc;
+
+                if ($toUtc->lessThan($fromUtc)) {
+                    $this->completeTask($task);
+                    $result['completed']++;
+
+                    continue;
+                }
+
+                $result['history_rows'] += $this->analytics->refreshUtcHours(
                     $task->store,
-                    $task->shop_timezone,
-                    $fromDate,
-                    $toDate,
+                    $fromUtc,
+                    $toUtc,
                 );
 
                 $this->completeTask($task);
@@ -126,39 +147,6 @@ class ShopifyAnalyticsAutomationService
         return $result;
     }
 
-    private function finalisePreviousReportingDay(AssistantDomainStore $store): bool
-    {
-        $task = AssistantShopifyAnalyticsBackfill::query()
-            ->where('assistant_domain_store_id', $store->getKey())
-            ->first();
-        if (!$task) {
-            return false;
-        }
-
-        $timezone = (string) $task->shop_timezone;
-        if (!in_array($timezone, timezone_identifiers_list(), true) || now($timezone)->hour < 1) {
-            return false;
-        }
-
-        $previousDate = now($timezone)->subDay()->toDateString();
-        $lastFinalisedDate = $task->last_finalized_date?->toDateString();
-        if ($lastFinalisedDate !== null && $lastFinalisedDate >= $previousDate) {
-            return false;
-        }
-
-        try {
-            $this->analytics->refreshHistoricalDate($store, $timezone, $previousDate);
-            $this->markFinalised($task, $previousDate);
-
-            return true;
-        } catch (\Throwable $exception) {
-            report($exception);
-            $this->deferTask($task, Str::limit($exception->getMessage(), 1000), null);
-
-            return false;
-        }
-    }
-
     /** @return Builder<AssistantDomainStore> */
     private function eligibleStores(): Builder
     {
@@ -180,32 +168,6 @@ class ShopifyAnalyticsAutomationService
             && $store->shop_status === AssistantDomainStore::SHOP_STATUS_IN_USE
             && filled($store->shopify_client_id)
             && filled($store->shopify_client_secret);
-    }
-
-    private function markFinalised(AssistantShopifyAnalyticsBackfill $task, string $reportDate): void
-    {
-        $attributes = [
-            'last_finalized_date' => $reportDate,
-            'last_error' => null,
-            'last_processed_at' => now(),
-        ];
-
-        if ($task->next_date?->toDateString() === $reportDate) {
-            $current = CarbonImmutable::createFromFormat('!Y-m-d', $reportDate, $task->shop_timezone);
-            $next = $current->subDay();
-            $from = $task->from_date?->toDateString();
-            $isComplete = $from === null || $next->toDateString() < $from;
-
-            $attributes['next_date'] = $isComplete ? null : $next->toDateString();
-            $attributes['status'] = $isComplete
-                ? AssistantShopifyAnalyticsBackfill::STATUS_COMPLETED
-                : AssistantShopifyAnalyticsBackfill::STATUS_PENDING;
-            $attributes['attempts'] = 0;
-            $attributes['next_attempt_at'] = null;
-            $attributes['completed_at'] = $isComplete ? now() : null;
-        }
-
-        $task->fill($attributes)->save();
     }
 
     private function completeTask(AssistantShopifyAnalyticsBackfill $task): void

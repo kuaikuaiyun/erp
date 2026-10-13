@@ -2,8 +2,11 @@
 
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schedule;
 use App\Models\LogisticsOrder;
 use App\Portals\Logistics\LogisticsOrderItemService;
+
+require __DIR__.'/assistant_shopify_analytics_schedule.php';
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());

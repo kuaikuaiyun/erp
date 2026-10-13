@@ -15,8 +15,10 @@ class PayPalImportService
 {
     private const REFUND_EVENT_CODES = ['T1107', 'T1115', 'T1120'];
 
-    public function __construct(private readonly PayPalOrderAssociationService $associations)
-    {
+    public function __construct(
+        private readonly PayPalOrderAssociationService $associations,
+        private readonly PayPalSourceResponseParser $sourceResponses,
+    ) {
     }
 
     /** @return array<string,int|string> */
@@ -24,50 +26,107 @@ class PayPalImportService
         LogisticsPayPalAccount $account,
         LogisticsPayPalImport $import,
         array $payload,
+        ?callable $progress = null,
     ): array {
-        $transactions = $this->records($payload['transactions'] ?? [], 'transaction_details');
-        $disputes = $this->records($payload['disputes'] ?? [], 'items');
-        $errors = $this->sourceErrors($payload['errors'] ?? []);
+        $transactions = $this->sourceResponses->transactions($payload);
+        $disputes = $this->sourceResponses->disputes($payload);
+        $errors = $this->sourceResponses->errors($payload['errors'] ?? []);
+        $paymentCount = 0;
+        $paymentMatched = 0;
+        $paymentUnmatched = 0;
         $refundCount = 0;
         $disputeCount = 0;
         $matched = 0;
         $unmatched = 0;
         $itemErrors = [];
+        $transactionTotal = count($transactions);
+
+        $this->progress($progress, '正在处理 PayPal 付款与退款交易', 0, $transactionTotal);
 
         foreach ($transactions as $index => $detail) {
-            if (!in_array((string) Arr::get($detail, 'transaction_info.transaction_event_code'), self::REFUND_EVENT_CODES, true)) {
-                continue;
+            $eventCode = strtoupper(trim((string) Arr::get(
+                $detail,
+                'transaction_info.transaction_event_code',
+                '',
+            )));
+
+            if (str_starts_with($eventCode, 'T00')) {
+                $paymentCount++;
+
+                try {
+                    $transactionId = trim((string) Arr::get($detail, 'transaction_info.transaction_id', ''));
+                    if ($transactionId === '') {
+                        throw new \RuntimeException('缺少付款交易号。');
+                    }
+
+                    $order = $this->associations->orderForTransaction($account, $transactionId);
+                    if ($order) {
+                        $paymentMatched++;
+                        $matched++;
+                    } else {
+                        $paymentUnmatched++;
+                        $unmatched++;
+                    }
+                } catch (\Throwable $exception) {
+                    $paymentUnmatched++;
+                    $unmatched++;
+                    $itemErrors[] = '付款记录 '.($index + 1).'：'.Str::limit($exception->getMessage(), 300);
+                }
             }
 
-            try {
-                $wasMatched = $this->persistRefund($account, $detail);
-                $refundCount++;
-                $wasMatched ? $matched++ : $unmatched++;
-            } catch (\Throwable $exception) {
-                $itemErrors[] = '退款记录 '.($index + 1).'：'.Str::limit($exception->getMessage(), 300);
+            if (in_array($eventCode, self::REFUND_EVENT_CODES, true)) {
+                try {
+                    $wasMatched = $this->persistRefund($account, $detail);
+                    $refundCount++;
+                    $wasMatched ? $matched++ : $unmatched++;
+                } catch (\Throwable $exception) {
+                    $itemErrors[] = '退款记录 '.($index + 1).'：'.Str::limit($exception->getMessage(), 300);
+                }
+            }
+
+            if (($index + 1) % 100 === 0 || ($index + 1) === $transactionTotal) {
+                $this->progress(
+                    $progress,
+                    '正在处理 PayPal 付款与退款交易',
+                    $index + 1,
+                    $transactionTotal,
+                );
             }
         }
 
+        $disputeTotal = count($disputes);
+        $this->progress($progress, '正在处理 PayPal 纠纷记录', 0, $disputeTotal);
         foreach ($disputes as $index => $detail) {
-            if (blank($detail['dispute_id'] ?? null)) {
-                continue;
+            if (!blank($detail['dispute_id'] ?? null)) {
+                try {
+                    $wasMatched = $this->persistDispute($account, $detail);
+                    $disputeCount++;
+                    $wasMatched ? $matched++ : $unmatched++;
+                } catch (\Throwable $exception) {
+                    $itemErrors[] = '纠纷记录 '.($index + 1).'：'.Str::limit($exception->getMessage(), 300);
+                }
             }
 
-            try {
-                $wasMatched = $this->persistDispute($account, $detail);
-                $disputeCount++;
-                $wasMatched ? $matched++ : $unmatched++;
-            } catch (\Throwable $exception) {
-                $itemErrors[] = '纠纷记录 '.($index + 1).'：'.Str::limit($exception->getMessage(), 300);
+            if (($index + 1) % 10 === 0 || ($index + 1) === $disputeTotal) {
+                $this->progress(
+                    $progress,
+                    '正在处理 PayPal 纠纷记录',
+                    $index + 1,
+                    $disputeTotal,
+                );
             }
         }
 
         $allErrors = [...$errors, ...$itemErrors];
-        $status = $allErrors === [] ? 'success' : (($refundCount + $disputeCount) > 0 ? 'partial' : 'failed');
+        $processedCount = $paymentCount + $refundCount + $disputeCount;
+        $status = $allErrors === [] ? 'success' : ($processedCount > 0 ? 'partial' : 'failed');
         $message = sprintf(
-            '文件接收%s：交易 %d 条，退款 %d 条，纠纷 %d 条，已匹配 %d 条，未匹配 %d 条，异常 %d 条。',
+            '文件接收%s：交易 %d 条，付款事件 %d 条（已匹配 %d、未匹配 %d），退款 %d 条，纠纷 %d 条，全部业务记录已匹配 %d 条、未匹配 %d 条，异常 %d 条。',
             $status === 'success' ? '成功' : ($status === 'partial' ? '部分完成' : '失败'),
             count($transactions),
+            $paymentCount,
+            $paymentMatched,
+            $paymentUnmatched,
             $refundCount,
             $disputeCount,
             $matched,
@@ -78,6 +137,10 @@ class PayPalImportService
             $message .= ' '.implode('；', array_slice($allErrors, 0, 8));
         }
         $message = Str::limit($message, 1800);
+
+        $this->progress($progress, '正在批量关联已有物流订单');
+        $associatedOrders = $this->associations->associateExistingOrders($account);
+        $this->progress($progress, '已有物流订单关联完成', $associatedOrders, $associatedOrders);
 
         $import->forceFill([
             'status' => $status,
@@ -98,11 +161,13 @@ class PayPalImportService
             'last_import_status' => $status,
             'last_import_message' => $message,
         ])->save();
-        $this->associations->associateExistingOrders($account);
 
         return [
             'status' => $status,
             'transactions' => count($transactions),
+            'payments' => $paymentCount,
+            'payment_matched' => $paymentMatched,
+            'payment_unmatched' => $paymentUnmatched,
             'refunds' => $refundCount,
             'disputes' => $disputeCount,
             'matched' => $matched,
@@ -110,37 +175,6 @@ class PayPalImportService
             'errors' => count($allErrors),
             'message' => $message,
         ];
-    }
-
-    /** @return list<array<string,mixed>> */
-    private function records(mixed $value, string $nestedKey): array
-    {
-        if (!is_array($value)) {
-            return [];
-        }
-        if (isset($value[$nestedKey]) && is_array($value[$nestedKey])) {
-            $value = $value[$nestedKey];
-        }
-
-        return array_values(array_filter($value, static fn (mixed $row): bool => is_array($row)));
-    }
-
-    /** @return list<string> */
-    private function sourceErrors(mixed $value): array
-    {
-        if (!is_array($value)) {
-            return [];
-        }
-
-        $errors = [];
-        foreach ($value as $source => $error) {
-            $error = trim((string) ($error ?? ''));
-            if ($error !== '') {
-                $errors[] = ((string) $source).'：'.Str::limit($error, 500);
-            }
-        }
-
-        return $errors;
     }
 
     private function persistRefund(LogisticsPayPalAccount $account, array $detail): bool
@@ -244,5 +278,16 @@ class PayPalImportService
         }
 
         return null;
+    }
+
+    private function progress(
+        ?callable $callback,
+        string $message,
+        int $current = 0,
+        int $total = 0,
+    ): void {
+        if ($callback) {
+            $callback($message, $current, $total);
+        }
     }
 }

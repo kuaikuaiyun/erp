@@ -101,12 +101,12 @@ class LogisticsOrderController extends Controller
         }
 
         $orders = $query
+            ->select($this->spreadsheets->requiredOrderColumns())
             ->with(['activeRefundDetails' => fn ($refunds) => $refunds->orderBy('id')])
             ->orderByDesc('order_created_at')
-            ->orderByDesc('id')
-            ->get();
+            ->orderByDesc('id');
 
-        if ($orders->isEmpty()) {
+        if (!(clone $orders)->exists()) {
             throw ValidationException::withMessages([
                 'scope' => '当前导出范围内没有可导出的物流订单。',
             ]);
@@ -497,7 +497,7 @@ class LogisticsOrderController extends Controller
             'id', 'shopify_order_id', 'shopify_order_number', 'tongtu_order_number', 'store_name',
             'department_name', 'operator_name', 'group_names', 'staff_status', 'buyer_name', 'buyer_email',
             'buyer_phone', 'is_add_on', 'subscription_type', 'subscription_status', 'payment_method', 'payment_gateway',
-            'collection_account_email', 'transaction_id', 'logistics_status', 'refund_reason', 'data_status',
+            'collection_account_email', 'transaction_id', 'bill_number', 'logistics_status', 'refund_reason', 'data_status',
             'time_zone',
             'source_shop_domain', 'store_assignment_status', 'refund_number', 'refund_type', 'refund_remark',
         ];
@@ -528,7 +528,7 @@ class LogisticsOrderController extends Controller
             'id', 'shopify_order_id', 'shopify_order_number', 'tongtu_order_number', 'store_name',
             'department_name', 'operator_name', 'group_names', 'staff_status', 'buyer_name', 'buyer_email',
             'buyer_phone', 'is_add_on', 'subscription_type', 'subscription_status', 'payment_method', 'payment_gateway',
-            'collection_account_email', 'transaction_id', 'logistics_status', 'data_status',
+            'collection_account_email', 'transaction_id', 'bill_number', 'logistics_status', 'data_status',
             'time_zone', 'source_shop_domain',
         ];
         foreach ($textColumns as $column) {

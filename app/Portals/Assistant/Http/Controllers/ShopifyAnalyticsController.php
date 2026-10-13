@@ -8,6 +8,7 @@ use App\Models\AssistantDomainStore;
 use App\Models\AssistantShopifyAnalyticsSyncBatch;
 use App\Models\AssistantShopifyAnalyticsSyncTask;
 use App\Models\AssistantShopifyStoreMetric;
+use App\Models\AssistantShopifyStoreMetricHour;
 use App\Models\AssistantShopifyStoreMetricPeriod;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
@@ -19,6 +20,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\View\View;
+use Carbon\CarbonImmutable;
 use Symfony\Component\HttpFoundation\Response;
 
 class ShopifyAnalyticsController extends Controller
@@ -113,14 +115,9 @@ class ShopifyAnalyticsController extends Controller
                 ->with('error', __('assistant.shopify_analytics.messages.inactive_store'));
         }
 
-        $filters = $this->filters($request);
-        $metric = $this->analytics->refreshPeriod(
-            $store,
-            $filters['timezone'],
-            $filters['from_date'],
-            $filters['to_date'],
-            $context['user'],
-        );
+        // The list filter only controls local reporting. A manual refresh
+        // always asks Shopify for this store's own local business day.
+        $metric = $this->analytics->refresh($store, $context['user']);
         $messageKey = $metric->sync_status === AssistantShopifyStoreMetric::STATUS_SUCCESS
             ? 'messages.refresh_success'
             : 'messages.refresh_failed';
@@ -383,77 +380,55 @@ class ShopifyAnalyticsController extends Controller
     private function periodQuery(array $filters): QueryBuilder
     {
         $connection = config('admin.database.connection') ?: config('database.default');
-        $periodTable = (new AssistantShopifyStoreMetricPeriod())->getTable();
-        $historyTable = (new \App\Models\AssistantShopifyStoreMetricHistory())->getTable();
-        $expectedDays = (int) \Carbon\CarbonImmutable::parse($filters['from_date'])
-            ->diffInDays(\Carbon\CarbonImmutable::parse($filters['to_date'])) + 1;
+        $hourTable = (new AssistantShopifyStoreMetricHour())->getTable();
+        [$fromUtc, $toUtc] = $this->reportingUtcHours($filters);
 
-        $periods = DB::connection($connection)->table($periodTable)
-            ->select([
-                'assistant_domain_store_id',
-                'shop_timezone',
-                'report_timezone',
-                'from_date',
-                'to_date',
-                'currency_code',
-                'original_currency_code',
-                'total_sales',
-                'original_total_sales',
-                'orders_count',
-                'returning_customer_rate',
-                'fulfilled_orders_count',
-                'refund_amount',
-                'net_sales',
-                'average_order_value',
-                'sync_status',
-                'sync_message',
-                'synced_at',
-            ])
-            ->where('report_timezone', $filters['timezone'])
-            ->whereDate('from_date', $filters['from_date'])
-            ->whereDate('to_date', $filters['to_date']);
-
-        // History is the reliable source after backfill.  A manually fetched
-        // exact period always takes precedence; otherwise aggregate a fully
-        // available daily range in the same reporting timezone.
-        $history = DB::connection($connection)->table($historyTable.' as history')
-            ->selectRaw('history.assistant_domain_store_id')
-            ->selectRaw('MAX(history.shop_timezone) as shop_timezone')
-            ->selectRaw('MAX(history.report_timezone) as report_timezone')
+        // Shopify is synchronized only in the store's own timezone. This
+        // query never calls Shopify: it converts the user-selected reporting
+        // timezone into a UTC range, then aggregates raw hourly records.
+        $hours = DB::connection($connection)->table($hourTable.' as hour')
+            ->selectRaw('hour.assistant_domain_store_id')
+            ->selectRaw('MAX(hour.shop_timezone) as shop_timezone')
+            ->selectRaw('? as report_timezone', [$filters['timezone']])
             ->selectRaw('? as from_date', [$filters['from_date']])
             ->selectRaw('? as to_date', [$filters['to_date']])
             ->selectRaw("'USD' as currency_code")
-            ->selectRaw('MAX(history.original_currency_code) as original_currency_code')
-            ->selectRaw('SUM(history.total_sales) as total_sales')
-            ->selectRaw('SUM(history.original_total_sales) as original_total_sales')
-            ->selectRaw('SUM(history.orders_count) as orders_count')
-            ->selectRaw('AVG(history.returning_customer_rate) as returning_customer_rate')
-            ->selectRaw('SUM(history.fulfilled_orders_count) as fulfilled_orders_count')
-            ->selectRaw('SUM(history.refund_amount) as refund_amount')
-            ->selectRaw('SUM(history.net_sales) as net_sales')
-            ->selectRaw('CASE WHEN SUM(history.orders_count) > 0 THEN SUM(history.total_sales) / SUM(history.orders_count) ELSE 0 END as average_order_value')
+            ->selectRaw('MAX(hour.original_currency_code) as original_currency_code')
+            ->selectRaw('SUM(hour.total_sales) as total_sales')
+            ->selectRaw('SUM(hour.original_total_sales) as original_total_sales')
+            ->selectRaw('SUM(hour.orders_count) as orders_count')
+            ->selectRaw('CASE WHEN SUM(hour.orders_count) > 0 THEN SUM(hour.returning_customer_rate * hour.orders_count) / SUM(hour.orders_count) ELSE 0 END as returning_customer_rate')
+            ->selectRaw('SUM(hour.fulfilled_orders_count) as fulfilled_orders_count')
+            ->selectRaw('SUM(hour.refund_amount) as refund_amount')
+            ->selectRaw('SUM(hour.net_sales) as net_sales')
+            ->selectRaw('CASE WHEN SUM(hour.orders_count) > 0 THEN SUM(hour.total_sales) / SUM(hour.orders_count) ELSE 0 END as average_order_value')
             ->selectRaw('? as sync_status', [AssistantShopifyStoreMetric::STATUS_SUCCESS])
             ->selectRaw('NULL as sync_message')
-            ->selectRaw('MAX(history.synced_at) as synced_at')
-            ->where('history.report_timezone', $filters['timezone'])
-            ->where('history.sync_status', AssistantShopifyStoreMetric::STATUS_SUCCESS)
-            ->whereDate('history.report_date', '>=', $filters['from_date'])
-            ->whereDate('history.report_date', '<=', $filters['to_date'])
-            ->whereNotExists(function (QueryBuilder $exists) use ($periodTable, $filters): void {
-                $exists->selectRaw('1')
-                    ->from($periodTable.' as exact_period')
-                    ->whereColumn('exact_period.assistant_domain_store_id', 'history.assistant_domain_store_id')
-                    ->where('exact_period.report_timezone', $filters['timezone'])
-                    ->whereDate('exact_period.from_date', $filters['from_date'])
-                    ->whereDate('exact_period.to_date', $filters['to_date']);
-            })
-            ->groupBy('history.assistant_domain_store_id')
-            ->havingRaw('COUNT(DISTINCT history.report_date) = ?', [$expectedDays]);
+            ->selectRaw('MAX(hour.synced_at) as synced_at')
+            ->where('hour.report_hour_utc', '>=', $fromUtc->format('Y-m-d H:i:s'))
+            ->where('hour.report_hour_utc', '<=', $toUtc->format('Y-m-d H:i:s'))
+            ->groupBy('hour.assistant_domain_store_id')
+            ->havingRaw('COUNT(*) > 0');
 
         return DB::connection($connection)
             ->query()
-            ->fromSub($periods->unionAll($history), 'analytics_periods')
+            ->fromSub($hours, 'analytics_periods')
             ->select('analytics_periods.*');
+    }
+
+    /** @return array{0: CarbonImmutable, 1: CarbonImmutable} */
+    private function reportingUtcHours(array $filters): array
+    {
+        $fromUtc = CarbonImmutable::createFromFormat('!Y-m-d', $filters['from_date'], $filters['timezone'])
+            ->startOfDay()
+            ->setTimezone('UTC');
+        $toUtc = CarbonImmutable::createFromFormat('!Y-m-d', $filters['to_date'], $filters['timezone'])
+            ->addDay()
+            ->startOfDay()
+            ->setTimezone('UTC')
+            ->subHour();
+
+        return [$fromUtc, $toUtc];
     }
 
     /** @return Builder<AssistantDomainStore> */

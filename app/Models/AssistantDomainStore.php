@@ -155,6 +155,26 @@ class AssistantDomainStore extends Model
         return $this->hasOne(LogisticsShopifyConnection::class, 'assistant_domain_store_id');
     }
 
+    public function shopifyAnalyticsMetric(): HasOne
+    {
+        return $this->hasOne(AssistantShopifyStoreMetric::class, 'assistant_domain_store_id');
+    }
+
+    public function shopifyAnalyticsHistory(): HasMany
+    {
+        return $this->hasMany(AssistantShopifyStoreMetricHistory::class, 'assistant_domain_store_id');
+    }
+
+    public function shopifyAnalyticsHours(): HasMany
+    {
+        return $this->hasMany(AssistantShopifyStoreMetricHour::class, 'assistant_domain_store_id');
+    }
+
+    public function shopifyAnalyticsPeriods(): HasMany
+    {
+        return $this->hasMany(AssistantShopifyStoreMetricPeriod::class, 'assistant_domain_store_id');
+    }
+
     /** @return array<string, string> */
     public static function siteBuilderOptions(): array
     {

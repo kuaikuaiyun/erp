@@ -6,6 +6,7 @@ use App\Models\AdminUser;
 use App\Models\Department;
 use App\Models\Portal;
 use App\Portal\Services\PortalAccessService;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
 class AssistantPortalAuthorizationService
@@ -95,6 +96,43 @@ class AssistantPortalAuthorizationService
     {
         return $this->canManageAllDomainStores($user)
             || ($this->canManage($user) && $this->assistantChildDepartmentFor($user) !== null);
+    }
+
+    /**
+     * Shopify analytics is view-only, but it is still limited to Assistant
+     * members so other portal-authorized departments cannot see its data.
+     */
+    public function canViewShopifyAnalytics(AdminUser $user): bool
+    {
+        return $user->isAdministrator() || $this->isAssistantDepartmentMember($user);
+    }
+
+    public function ensureCanViewShopifyAnalytics(AdminUser $user): void
+    {
+        abort_unless($this->canViewShopifyAnalytics($user), 403);
+    }
+
+    /**
+     * Apply the exact existing Assistant record-isolation rule before any
+     * analytics filtering, aggregation, pagination, or refresh operation.
+     *
+     * @param Builder<\App\Models\AssistantDomainStore> $query
+     * @return Builder<\App\Models\AssistantDomainStore>
+     */
+    public function scopeDomainStores(Builder $query, AdminUser $user): Builder
+    {
+        if ($this->canManageAllDomainStores($user)) {
+            return $query;
+        }
+
+        $childDepartment = $this->assistantChildDepartmentFor($user);
+        if ($childDepartment === null) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->whereHas('authorizedDepartments', function (Builder $access) use ($childDepartment): void {
+            $access->whereKey($childDepartment->getKey());
+        });
     }
 
     public function ensureCanManageDomainStores(AdminUser $user): void

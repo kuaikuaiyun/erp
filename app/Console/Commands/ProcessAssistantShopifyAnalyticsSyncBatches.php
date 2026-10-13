@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Cache;
 
 class ProcessAssistantShopifyAnalyticsSyncBatches extends Command
 {
-    protected $signature = 'assistant:shopify-analytics:process-batches {--limit=10 : Maximum queued stores to process in this run}';
+    protected $signature = 'assistant:shopify-analytics:process-batches {--limit=20 : Maximum queued stores to process in this run}';
 
     protected $description = 'Process queued Assistant Shopify analytics synchronization tasks';
 
@@ -121,15 +121,10 @@ class ProcessAssistantShopifyAnalyticsSyncBatches extends Command
                 return;
             }
 
-            $metric = $batch->report_timezone !== null && $batch->from_date !== null && $batch->to_date !== null
-                ? $analytics->refreshPeriod(
-                    $store,
-                    $batch->report_timezone,
-                    $batch->from_date->toDateString(),
-                    $batch->to_date->toDateString(),
-                    $actor,
-                )
-                : $analytics->refresh($store, $actor);
+            // A batch task always synchronizes the Shopify store's own local
+            // business day. The list filter timezone is only retained for the
+            // browser return URL and must never alter Shopify data collection.
+            $metric = $analytics->refresh($store, $actor);
             if ($metric->sync_status !== AssistantShopifyStoreMetric::STATUS_SUCCESS) {
                 $this->failTask($task, $batch, $metric->sync_message ?: $metric->sync_status);
 

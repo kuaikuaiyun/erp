@@ -3,7 +3,7 @@
 return [
     'shopify' => [
         'api_version' => env('SHOPIFY_API_VERSION', '2026-01'),
-        'sync_days' => (int) env('SHOPIFY_SYNC_DAYS', 10),
+        'sync_days' => (int) env('SHOPIFY_SYNC_DAYS', 60),
         'webhook_url' => env('SHOPIFY_WEBHOOK_URL', 'https://wuliu.digilabreview.com/shopify/webhooks/orders'),
     ],
     'profit' => [

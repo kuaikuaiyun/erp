@@ -92,7 +92,6 @@
                 ['key' => 'domain_expires_at', 'label' => $t('fields.domain_expires_at')],
                 ['key' => 'domain_check_status', 'label' => $t('fields.domain_check_status')],
                 ['key' => 'email_bound', 'label' => $t('fields.email_bound')],
-                ['key' => 'email_purchased', 'label' => $t('fields.email_purchased')],
             ],
         ],
         [
@@ -201,6 +200,9 @@
                     @endif
                     @if ($canManage)
                         <div class="assistant-batch-actions pull-right">
+                            @if ($canSyncEmailPurchases)
+                                <button type="submit" form="assistant-email-purchase-sync-form" class="btn btn-info"><i class="fa fa-envelope"></i> {{ $t('common.sync_email_purchases') }}</button>
+                            @endif
                             <button type="button" class="btn btn-default" data-toggle="modal" data-target="#assistant-export-modal"><i class="fa fa-download"></i> {{ $t('common.export') }}</button>
                             <button type="button" class="btn btn-default" data-toggle="modal" data-target="#assistant-import-modal"><i class="fa fa-upload"></i> {{ $t('common.import') }}</button>
                             <a href="{{ route('assistant.domain-stores.create') }}" class="btn btn-success assistant-editor-trigger" data-loading="off" data-editor-title="{{ $t('create_title') }}"><i class="fa fa-plus"></i> {{ $t('common.add') }}</a>
@@ -214,6 +216,9 @@
                             </div>
                             <div class="assistant-advanced-filter-field"><label for="filter-shop-status">{{ $t('fields.shop_status') }}</label><select id="filter-shop-status" class="form-control" name="shop_status"><option value="">{{ $t('common.all') }}</option>@foreach ($shopStatusLabels as $value => $label)<option value="{{ $value }}" @selected($filters['shop_status'] === $value)>{{ $label }}</option>@endforeach</select></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-domain-check">{{ $t('fields.domain_check') }}</label><select id="filter-domain-check" class="form-control" name="domain_check_status"><option value="">{{ $t('common.all') }}</option>@foreach ($domainCheckLabels as $value => $label)<option value="{{ $value }}" @selected($filters['domain_check_status'] === $value)>{{ $label }}</option>@endforeach</select></div>
+                            @if ($canManageDepartmentAccess)
+                                <div class="assistant-advanced-filter-field"><label for="filter-department">{{ $t('filters.department') }}</label><select id="filter-department" class="form-control" name="department_id"><option value="">{{ $t('filters.all_departments') }}</option>@foreach ($assistantChildDepartments as $department)<option value="{{ $department->getKey() }}" @selected($filters['department_id'] === (string) $department->getKey())>{{ $department->name }}</option>@endforeach</select></div>
+                            @endif
                             <div class="assistant-advanced-filter-field"><label for="filter-site-builder">{{ $t('fields.site_builder') }}</label><input id="filter-site-builder" class="form-control" name="site_builder" value="{{ $filters['site_builder'] }}" list="filter-site-builder-options"><datalist id="filter-site-builder-options">@foreach ($quickOptions['site_builder'] ?? [] as $value)<option value="{{ $value }}">{{ $siteBuilderOptions[$value] ?? $value }}</option>@endforeach</datalist></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-shop-name">{{ $t('fields.shop_name') }}</label><input id="filter-shop-name" class="form-control" name="shop_name" value="{{ $filters['shop_name'] }}"></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-domain">{{ $t('fields.domain') }}</label><input id="filter-domain" class="form-control" name="domain" value="{{ $filters['domain'] }}"></div>
@@ -249,6 +254,13 @@
                 </form>
             </div>
         </div>
+
+        @if ($canSyncEmailPurchases)
+            <form id="assistant-email-purchase-sync-form" method="post" action="{{ route('assistant.domain-stores.email-purchases.sync') }}" data-loading="button">
+                @csrf
+                <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
+            </form>
+        @endif
 
         <div class="assistant-list-utility-bar">
             <div class="assistant-selection-summary">
@@ -358,7 +370,8 @@
                             <td><span class="assistant-field-value"><span class="label {{ \App\Models\AssistantDomainStore::domainCheckStatusClass($store->domain_check_status) }}">{{ $domainCheckLabels[$store->domain_check_status] ?? $store->domain_check_status }}</span></span></td>
                             <td><span class="assistant-field-value">{{ $store->email ?: $t('common.empty') }}</span></td>
                             <td><span class="assistant-field-value"><span class="label {{ $store->email_bound ? 'label-success' : 'label-default' }}">{{ $store->email_bound ? $t('common.yes') : $t('common.no') }}</span></span></td>
-                            <td><span class="assistant-field-value"><span class="label {{ $store->email_purchased ? 'label-info' : 'label-default' }}">{{ $store->email_purchased ? $t('common.yes') : $t('common.no') }}</span></span></td>
+                            @php($emailPurchaseStatus = $store->email_purchase_sync_status ?? ($store->email_purchased ? 'current' : 'never'))
+                            <td><span class="assistant-field-value"><span class="label {{ $emailPurchaseStatus === 'current' ? 'label-info' : ($emailPurchaseStatus === 'missing' ? 'label-warning' : 'label-default') }}">{{ $t('email_purchase_status.'.$emailPurchaseStatus) }}</span></span></td>
                             <td><span class="assistant-field-value">{{ \App\Models\AssistantDomainStore::displayMultiValue($store->team) ?: $t('common.empty') }}</span></td>
                             <td><span class="assistant-field-value">{{ $store->project ?: $t('common.empty') }}</span></td>
                             <td><span class="assistant-field-value">{{ $store->user_name ?: $t('common.empty') }}</span></td>

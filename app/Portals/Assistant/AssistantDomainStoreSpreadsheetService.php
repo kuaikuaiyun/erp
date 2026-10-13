@@ -30,7 +30,7 @@ class AssistantDomainStoreSpreadsheetService
         'other_payment',
     ];
 
-    private const IMPORT_FIELDS = [
+    private const EXPORT_FIELDS = [
         'site_builder',
         'shop_name',
         'domain',
@@ -57,12 +57,37 @@ class AssistantDomainStoreSpreadsheetService
         'shopify_client_secret',
     ];
 
+    private const IMPORT_FIELDS = [
+        'site_builder',
+        'shop_name',
+        'domain',
+        'domain_expires_at',
+        'domain_check_status',
+        'email',
+        'email_bound',
+        'team',
+        'project',
+        'user_name',
+        'erp',
+        'credit_card',
+        'wallet',
+        'paypal',
+        'other_payment',
+        'shop_login_url',
+        'shop_status',
+        'plan_expires_at',
+        'payment_card',
+        'remark',
+        'store_prefix',
+        'shopify_client_id',
+        'shopify_client_secret',
+    ];
+
     private const REQUIRED_IMPORT_FIELDS = [
         'shop_name',
         'domain',
         'domain_check_status',
         'email_bound',
-        'email_purchased',
         'shop_status',
     ];
 
@@ -72,11 +97,17 @@ class AssistantDomainStoreSpreadsheetService
         return array_map(fn (string $field): string => $this->importHeaderLabel($field), self::IMPORT_FIELDS);
     }
 
+    /** @return list<string> */
+    private function exportHeaders(): array
+    {
+        return array_map(fn (string $field): string => $this->importHeaderLabel($field), self::EXPORT_FIELDS);
+    }
+
     public function exportResponse(iterable $stores): StreamedResponse
     {
         $headers = [
             __('assistant.domain_stores.fields.date'),
-            ...$this->importHeaders(),
+            ...$this->exportHeaders(),
             __('assistant.domain_stores.fields.last_operator'),
             __('assistant.domain_stores.fields.operation_time'),
         ];
@@ -310,7 +341,6 @@ class AssistantDomainStoreSpreadsheetService
             $this->importHeaderLabel('site_builder') => $this->activeOptionLabels('site_builder', AssistantDomainStore::siteBuilderOptions(), $quickOptions),
             $this->importHeaderLabel('domain_check_status') => $this->templateDomainCheckOptions(),
             $this->importHeaderLabel('email_bound') => [__('assistant.domain_stores.common.yes'), __('assistant.domain_stores.common.no')],
-            $this->importHeaderLabel('email_purchased') => [__('assistant.domain_stores.common.yes'), __('assistant.domain_stores.common.no')],
             $this->importHeaderLabel('credit_card') => $this->activeOptionLabels('credit_card', AssistantDomainStore::creditCardOptions(), $quickOptions),
             $this->importHeaderLabel('wallet') => $this->activeOptionLabels('wallet', AssistantDomainStore::walletOptions(), $quickOptions),
             $this->importHeaderLabel('paypal') => $this->activeOptionLabels('paypal', AssistantDomainStore::paypalOptions(), $quickOptions),

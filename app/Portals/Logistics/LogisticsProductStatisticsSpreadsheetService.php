@@ -2,16 +2,6 @@
 
 namespace App\Portals\Logistics;
 
-use Illuminate\Support\Collection;
-use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
-use PhpOffice\PhpSpreadsheet\Cell\DataType;
-use PhpOffice\PhpSpreadsheet\Spreadsheet;
-use PhpOffice\PhpSpreadsheet\Style\Alignment;
-use PhpOffice\PhpSpreadsheet\Style\Border;
-use PhpOffice\PhpSpreadsheet\Style\Color;
-use PhpOffice\PhpSpreadsheet\Style\Fill;
-use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
-use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class LogisticsProductStatisticsSpreadsheetService
@@ -19,6 +9,10 @@ class LogisticsProductStatisticsSpreadsheetService
     private const TYPE_TEXT = 'text';
     private const TYPE_MONEY = 'money';
     private const TYPE_RATE = 'rate';
+
+    public function __construct(private readonly StreamedXlsxWriter $streamedWriter)
+    {
+    }
 
     /** @return list<array{0:string,1:string,2:string,3:float|int}> */
     private static function columns(): array
@@ -42,45 +36,56 @@ class LogisticsProductStatisticsSpreadsheetService
         ];
     }
 
-    /** @param Collection<int, array<string, mixed>> $products */
-    public function exportResponse(Collection $products): StreamedResponse
+    /** @param iterable<array<string,mixed>> $products */
+    public function exportResponse(iterable $products): StreamedResponse
     {
-        return response()->streamDownload(function () use ($products): void {
-            $spreadsheet = new Spreadsheet();
-            $sheet = $spreadsheet->getActiveSheet();
-            $sheet->setTitle(__('logistics.product_statistics.title'));
-            $columns = self::columns();
+        $columns = self::columns();
 
-            foreach ($columns as $index => [$label, , , $width]) {
-                $column = Coordinate::stringFromColumnIndex($index + 1);
-                $sheet->setCellValueExplicit($column.'1', $label, DataType::TYPE_STRING);
-                $sheet->getColumnDimension($column)->setWidth($width);
-            }
-
-            $rowNumber = 2;
-            foreach ($products as $product) {
-                $this->writeRow($sheet, $rowNumber, $this->parentRow($product), false);
-                $this->styleParentRow($sheet, $rowNumber, count($columns));
-                $rowNumber++;
-                foreach ($product['variants'] as $variant) {
-                    $this->writeRow($sheet, $rowNumber, $this->variantRow($variant), true);
-                    $this->styleVariantRow($sheet, $rowNumber, count($columns));
-                    $rowNumber++;
+        return $this->streamedWriter->response(
+            __('logistics.product_statistics.title').'_'.now('Asia/Shanghai')->format('Ymd-His').'.xlsx',
+            __('logistics.product_statistics.title'),
+            array_map(static fn (array $column): array => [
+                'label' => $column[0],
+                'width' => $column[3],
+            ], $columns),
+            function () use ($products, $columns): iterable {
+                foreach ($products as $product) {
+                    yield $this->excelRow($this->parentRow($product), $columns, 'parent');
+                    foreach ($product['variants'] as $variant) {
+                        yield $this->excelRow($this->variantRow($variant), $columns, 'variant');
+                    }
                 }
-            }
-
-            $lastColumn = Coordinate::stringFromColumnIndex(count($columns));
-            $lastRow = max(1, $rowNumber - 1);
-            $this->styleSheet($sheet, $lastColumn, $lastRow);
-            (new Xlsx($spreadsheet))->save('php://output');
-            $spreadsheet->disconnectWorksheets();
-        }, __('logistics.product_statistics.title').'_'.now('Asia/Shanghai')->format('Ymd-His').'.xlsx', [
-            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        ]);
+            },
+            false,
+        );
     }
 
-    /** @param array<string, mixed> $product
-     * @return array<string, mixed>
+    /** @param array<string,mixed> $values
+     * @param list<array{0:string,1:string,2:string,3:float|int}> $columns
+     * @return array{kind:string,height:int,outline:int,cells:list<array{value:mixed,type:string,align:string,wrap:bool}>}
+     */
+    private function excelRow(array $values, array $columns, string $kind): array
+    {
+        return [
+            'kind' => $kind,
+            'height' => $kind === 'variant' ? 34 : 42,
+            'outline' => $kind === 'variant' ? 1 : 0,
+            'cells' => array_map(static function (array $column) use ($values): array {
+                [, $field, $type] = $column;
+                $value = $values[$field] ?? null;
+
+                return [
+                    'value' => $value === null || $value === '' ? __('logistics.common.not_available') : $value,
+                    'type' => $type,
+                    'align' => $field === 'name' ? 'left' : 'center',
+                    'wrap' => in_array($field, ['name', 'stores'], true),
+                ];
+            }, $columns),
+        ];
+    }
+
+    /** @param array<string,mixed> $product
+     * @return array<string,mixed>
      */
     private function parentRow(array $product): array
     {
@@ -103,8 +108,8 @@ class LogisticsProductStatisticsSpreadsheetService
         ];
     }
 
-    /** @param array<string, mixed> $variant
-     * @return array<string, mixed>
+    /** @param array<string,mixed> $variant
+     * @return array<string,mixed>
      */
     private function variantRow(array $variant): array
     {
@@ -125,62 +130,6 @@ class LogisticsProductStatisticsSpreadsheetService
             'refund_rate' => $variant['refund_rate'],
             'decision' => __('logistics.common.not_available'),
         ];
-    }
-
-    /** @param array<string, mixed> $row */
-    private function writeRow(Worksheet $sheet, int $rowNumber, array $row, bool $isVariant): void
-    {
-        foreach (self::columns() as $columnIndex => [, $field, $type]) {
-            $column = Coordinate::stringFromColumnIndex($columnIndex + 1);
-            $cell = $column.$rowNumber;
-            $value = $row[$field] ?? null;
-            if (($type === self::TYPE_MONEY || $type === self::TYPE_RATE) && is_numeric($value)) {
-                $sheet->setCellValue($cell, (float) $value);
-                $sheet->getStyle($cell)->getNumberFormat()->setFormatCode($type === self::TYPE_MONEY ? '"$"#,##0.00;[Red]-"$"#,##0.00' : '0.00"%"');
-                continue;
-            }
-            $sheet->setCellValueExplicit($cell, $value === null || $value === '' ? __('logistics.common.not_available') : (string) $value, DataType::TYPE_STRING);
-            if ($field === 'name' || $field === 'stores') {
-                $sheet->getStyle($cell)->getAlignment()->setWrapText(true);
-            }
-        }
-        $sheet->getRowDimension($rowNumber)->setRowHeight($isVariant ? 34 : 42);
-        if ($isVariant) $sheet->getRowDimension($rowNumber)->setOutlineLevel(1);
-    }
-
-    private function styleSheet(Worksheet $sheet, string $lastColumn, int $lastRow): void
-    {
-        $sheet->freezePane('A2');
-        $sheet->setAutoFilter("A1:{$lastColumn}{$lastRow}");
-        $sheet->setShowGridlines(false);
-        $sheet->getRowDimension(1)->setRowHeight(26);
-        $sheet->getStyle("A1:{$lastColumn}1")->getFont()->setBold(true)->setColor(new Color('2A5E8F'));
-        $sheet->getStyle("A1:{$lastColumn}1")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F2F7FC');
-        $sheet->getStyle("A1:{$lastColumn}{$lastRow}")->getAlignment()->setVertical(Alignment::VERTICAL_CENTER)->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $sheet->getStyle("A1:{$lastColumn}{$lastRow}")->getBorders()->getBottom()->setBorderStyle(Border::BORDER_HAIR)->setColor(new Color('DCE7F1'));
-        $sheet->getStyle("A1:{$lastColumn}{$lastRow}")->getBorders()->getRight()->setBorderStyle(Border::BORDER_HAIR)->setColor(new Color('E5EDF5'));
-        $sheet->getStyle("B2:B{$lastRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT);
-        $sheet->getStyle("C2:C{$lastRow}")->getFont()->setName('Consolas')->setSize(10);
-    }
-
-    private function styleParentRow(Worksheet $sheet, int $rowNumber, int $columnCount): void
-    {
-        $lastColumn = Coordinate::stringFromColumnIndex($columnCount);
-        $range = "A{$rowNumber}:{$lastColumn}{$rowNumber}";
-        $sheet->getStyle($range)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F9FCFF');
-        $sheet->getStyle($range)->getFont()->setBold(true)->setColor(new Color('294F76'));
-        $sheet->getStyle("A{$rowNumber}")->getFont()->setColor(new Color('2D80C8'));
-        $sheet->getStyle($range)->getBorders()->getTop()->setBorderStyle(Border::BORDER_THIN)->setColor(new Color('BDD8F1'));
-    }
-
-    private function styleVariantRow(Worksheet $sheet, int $rowNumber, int $columnCount): void
-    {
-        $lastColumn = Coordinate::stringFromColumnIndex($columnCount);
-        $range = "A{$rowNumber}:{$lastColumn}{$rowNumber}";
-        $sheet->getStyle($range)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('FCFDFF');
-        $sheet->getStyle($range)->getFont()->setColor(new Color('647D96'));
-        $sheet->getStyle("B{$rowNumber}")->getAlignment()->setIndent(1);
-        $sheet->getStyle("A{$rowNumber}")->getFont()->setColor(new Color('7A9ABB'));
     }
 
     private function decisionLabel(string $decision): string

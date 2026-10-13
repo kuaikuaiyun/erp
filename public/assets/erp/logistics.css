@@ -122,6 +122,12 @@
 .logistics-match-progress .progress-bar { min-width: 2px; border-radius: 8px; background: linear-gradient(90deg, #3b93d1, #55b7e6); transition: width .35s ease; }
 .logistics-match-progress-summary { color: #426985; font-size: 13px; line-height: 1.7; }
 .logistics-match-progress-note { margin-top: 4px; color: #7892a8; font-size: 12px; }
+.logistics-shopify-sync-current { margin-top: 5px; color: #315f7d; font-size: 13px; }
+.logistics-shopify-sync-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
+.logistics-shopify-sync-actions form { margin: 0; }
+.logistics-shopify-sync-issues { margin-top: 10px; padding-top: 9px; border-top: 1px solid #d2e6f4; color: #5c4650; font-size: 12px; }
+.logistics-shopify-sync-issues summary { cursor: pointer; color: #9b5a21; font-weight: 600; outline: none; }
+.logistics-shopify-sync-issues [data-shopify-sync-issue-list] { max-height: 180px; margin-top: 7px; padding: 8px 10px; overflow: auto; border-radius: 4px; background: rgba(255, 255, 255, .72); line-height: 1.7; }
 .logistics-match-failures { margin-top: 11px; border-top: 1px solid #cfe4f3; padding-top: 9px; }
 .logistics-match-failures summary { cursor: pointer; color: #b64444; font-weight: 700; outline: 0; }
 .logistics-match-failures ul { display: grid; gap: 7px; margin: 9px 0 0; padding: 0; list-style: none; }
