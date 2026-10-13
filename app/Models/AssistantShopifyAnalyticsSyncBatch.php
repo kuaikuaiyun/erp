@@ -16,6 +16,9 @@ class AssistantShopifyAnalyticsSyncBatch extends Model
     protected $fillable = [
         'actor_id',
         'actor_name',
+        'report_timezone',
+        'from_date',
+        'to_date',
         'status',
         'total_count',
         'processed_count',
@@ -39,6 +42,8 @@ class AssistantShopifyAnalyticsSyncBatch extends Model
     protected function casts(): array
     {
         return [
+            'from_date' => 'date',
+            'to_date' => 'date',
             'started_at' => 'datetime',
             'completed_at' => 'datetime',
             'created_at' => 'datetime',

@@ -8,16 +8,16 @@ use App\Models\AssistantDomainStore;
 use App\Models\AssistantShopifyAnalyticsSyncBatch;
 use App\Models\AssistantShopifyAnalyticsSyncTask;
 use App\Models\AssistantShopifyStoreMetric;
-use App\Models\AssistantShopifyStoreMetricHistory;
+use App\Models\AssistantShopifyStoreMetricPeriod;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\ShopifyStoreAnalyticsService;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -39,35 +39,47 @@ class ShopifyAnalyticsController extends Controller
 
         $this->authorization->ensureCanViewShopifyAnalytics($context['user']);
         $filters = $this->filters($request);
-        $baseQuery = $this->visibleShopifyStores($context['user']);
-        $timezoneOptions = $this->timezoneOptions(clone $baseQuery, $filters['report_date']);
-        $query = $this->applyTimezoneFilter(clone $baseQuery, $filters['timezone'], $filters['report_date'])
+        $baseQuery = $this->visibleShopifyStores($context['user'])
             ->when($filters['shop_name'] !== '', function (Builder $stores) use ($filters): void {
                 $stores->where('shop_name', 'like', '%'.$filters['shop_name'].'%');
             })
             ->when($filters['domains'] !== [], function (Builder $stores) use ($filters): void {
                 $stores->whereIn('domain', $filters['domains']);
             });
-        $summary = $this->summary(clone $query, $filters['report_date']);
-
-        $storesQuery = $query
-            ->orderByRaw('CASE WHEN shop_status = ? THEN 0 ELSE 1 END', [AssistantDomainStore::SHOP_STATUS_IN_USE])
-            ->orderBy('shop_name')
-            ->orderBy('id');
-
-        if ($filters['report_date'] === '') {
-            $storesQuery->with('shopifyAnalyticsMetric');
-        } else {
-            $storesQuery->with([
-                'shopifyAnalyticsHistory' => static function (HasMany $history) use ($filters): void {
-                    $history->whereDate('report_date', $filters['report_date']);
-                },
-            ]);
-        }
-
+        $periods = $this->periodQuery($filters);
+        $summary = $this->summary(clone $baseQuery, clone $periods);
+        $storesQuery = $this->withPeriod(clone $baseQuery, clone $periods);
+        $this->applySorting($storesQuery, $filters);
         $stores = $storesQuery
             ->paginate($filters['per_page'])
             ->withQueryString();
+        $stores->getCollection()->each(function (AssistantDomainStore $store): void {
+            $metric = null;
+            if ($store->analytics_period_status !== null) {
+                $metric = new AssistantShopifyStoreMetricPeriod();
+                $metric->setRawAttributes([
+                    'shop_timezone' => $store->analytics_shop_timezone,
+                    'report_timezone' => $store->analytics_report_timezone,
+                    'from_date' => $store->analytics_from_date,
+                    'to_date' => $store->analytics_to_date,
+                    'currency_code' => $store->analytics_currency_code,
+                    'original_currency_code' => $store->analytics_original_currency_code,
+                    'total_sales' => $store->analytics_total_sales,
+                    'original_total_sales' => $store->analytics_original_total_sales,
+                    'orders_count' => $store->analytics_orders_count,
+                    'returning_customer_rate' => $store->analytics_returning_customer_rate,
+                    'fulfilled_orders_count' => $store->analytics_fulfilled_orders_count,
+                    'refund_amount' => $store->analytics_refund_amount,
+                    'net_sales' => $store->analytics_net_sales,
+                    'average_order_value' => $store->analytics_average_order_value,
+                    'sync_status' => $store->analytics_period_status,
+                    'sync_message' => $store->analytics_sync_message,
+                    'synced_at' => $store->analytics_synced_at,
+                ], true);
+            }
+
+            $store->setRelation('shopifyAnalyticsPeriod', $metric);
+        });
         $activeSyncBatch = $this->currentSyncBatch($request, $context['user']);
         $syncIssues = $activeSyncBatch === null ? [] : $this->syncIssueDetails($activeSyncBatch);
 
@@ -75,7 +87,7 @@ class ShopifyAnalyticsController extends Controller
             ...$this->viewContext($context),
             'stores' => $stores,
             'filters' => $filters,
-            'timezoneOptions' => $timezoneOptions,
+            'timezoneOptions' => $this->timezoneOptions(),
             'summary' => $summary,
             'metricStatuses' => AssistantShopifyStoreMetric::statusLabels(),
             'activeSyncBatch' => $activeSyncBatch,
@@ -101,7 +113,14 @@ class ShopifyAnalyticsController extends Controller
                 ->with('error', __('assistant.shopify_analytics.messages.inactive_store'));
         }
 
-        $metric = $this->analytics->refresh($store, $context['user']);
+        $filters = $this->filters($request);
+        $metric = $this->analytics->refreshPeriod(
+            $store,
+            $filters['timezone'],
+            $filters['from_date'],
+            $filters['to_date'],
+            $context['user'],
+        );
         $messageKey = $metric->sync_status === AssistantShopifyStoreMetric::STATUS_SUCCESS
             ? 'messages.refresh_success'
             : 'messages.refresh_failed';
@@ -177,7 +196,7 @@ class ShopifyAnalyticsController extends Controller
                 ->with('error', __('assistant.shopify_analytics.messages.batch_store_busy'));
         }
 
-        $batch = $this->createSyncBatch($stores, $context['user']);
+        $batch = $this->createSyncBatch($stores, $context['user'], $this->filters($request));
         $request->session()->put($this->syncBatchSessionKey(), $batch->getKey());
 
         return $this->indexRedirect($request)->with(
@@ -220,14 +239,17 @@ class ShopifyAnalyticsController extends Controller
     }
 
     /** @param \Illuminate\Support\Collection<int, AssistantDomainStore> $stores */
-    private function createSyncBatch($stores, AdminUser $user): AssistantShopifyAnalyticsSyncBatch
+    private function createSyncBatch($stores, AdminUser $user, array $filters): AssistantShopifyAnalyticsSyncBatch
     {
         $connection = config('admin.database.connection') ?: config('database.default');
 
-        return DB::connection($connection)->transaction(function () use ($stores, $user): AssistantShopifyAnalyticsSyncBatch {
+        return DB::connection($connection)->transaction(function () use ($stores, $user, $filters): AssistantShopifyAnalyticsSyncBatch {
             $batch = AssistantShopifyAnalyticsSyncBatch::query()->create([
                 'actor_id' => $user->getKey(),
                 'actor_name' => $user->name,
+                'report_timezone' => $filters['timezone'],
+                'from_date' => $filters['from_date'],
+                'to_date' => $filters['to_date'],
                 'status' => AssistantShopifyAnalyticsSyncBatch::STATUS_QUEUED,
                 'total_count' => $stores->count(),
             ]);
@@ -305,17 +327,37 @@ class ShopifyAnalyticsController extends Controller
         return 'assistant.shopify_analytics.sync_batch_id';
     }
 
-    /** @return array{shop_name:string, domains:list<string>, timezone:string, report_date:string, per_page:int} */
+    /** @return array{shop_name:string, domains:list<string>, timezone:string, from_date:string, to_date:string, sort:string, direction:string, per_page:int} */
     private function filters(Request $request): array
     {
         $perPage = (int) $request->input('per_page', 20);
-        $date = trim((string) $request->input('report_date'));
+        $defaultTimezone = (string) config('services.assistant.shopify_analytics.default_timezone', 'Asia/Shanghai');
+        $defaultTimezone = in_array($defaultTimezone, timezone_identifiers_list(), true)
+            ? $defaultTimezone
+            : 'Asia/Shanghai';
+        $timezone = trim((string) $request->input('timezone', $defaultTimezone));
+        $timezone = in_array($timezone, timezone_identifiers_list(), true) ? $timezone : $defaultTimezone;
+        $today = now($timezone)->toDateString();
+        $fromDate = $this->date(trim((string) $request->input('from_date')));
+        $toDate = $this->date(trim((string) $request->input('to_date')));
+        $fromDate = $fromDate === '' ? $today : $fromDate;
+        $toDate = $toDate === '' ? $fromDate : $toDate;
+
+        if ($fromDate > $toDate) {
+            [$fromDate, $toDate] = [$toDate, $fromDate];
+        }
+
+        $sort = trim((string) $request->input('sort', 'total_sales'));
+        $direction = strtolower(trim((string) $request->input('direction', 'desc')));
 
         return [
             'shop_name' => trim((string) $request->input('shop_name')),
             'domains' => $this->domains((string) $request->input('domains')),
-            'timezone' => trim((string) $request->input('timezone')),
-            'report_date' => $this->date($date),
+            'timezone' => $timezone,
+            'from_date' => $fromDate,
+            'to_date' => $toDate,
+            'sort' => array_key_exists($sort, $this->sortableColumns()) ? $sort : 'total_sales',
+            'direction' => $direction === 'asc' ? 'asc' : 'desc',
             'per_page' => in_array($perPage, [20, 50, 100], true) ? $perPage : 20,
         ];
     }
@@ -338,83 +380,120 @@ class ShopifyAnalyticsController extends Controller
         return checkdate((int) $matches[2], (int) $matches[3], (int) $matches[1]) ? $date : '';
     }
 
-    /** @param Builder<AssistantDomainStore> $query
-     *  @return Builder<AssistantDomainStore>
-     */
-    private function applyTimezoneFilter(Builder $query, string $timezone, string $reportDate): Builder
+    private function periodQuery(array $filters): QueryBuilder
     {
-        if ($timezone === '') {
-            return $query;
-        }
+        $connection = config('admin.database.connection') ?: config('database.default');
+        $periodTable = (new AssistantShopifyStoreMetricPeriod())->getTable();
+        $historyTable = (new \App\Models\AssistantShopifyStoreMetricHistory())->getTable();
+        $expectedDays = (int) \Carbon\CarbonImmutable::parse($filters['from_date'])
+            ->diffInDays(\Carbon\CarbonImmutable::parse($filters['to_date'])) + 1;
 
-        $relation = $reportDate === '' ? 'shopifyAnalyticsMetric' : 'shopifyAnalyticsHistory';
-        $scopeDate = static function (Builder $metric) use ($reportDate): void {
-            if ($reportDate !== '') {
-                $metric->whereDate('report_date', $reportDate);
-            }
-        };
+        $periods = DB::connection($connection)->table($periodTable)
+            ->select([
+                'assistant_domain_store_id',
+                'shop_timezone',
+                'report_timezone',
+                'from_date',
+                'to_date',
+                'currency_code',
+                'original_currency_code',
+                'total_sales',
+                'original_total_sales',
+                'orders_count',
+                'returning_customer_rate',
+                'fulfilled_orders_count',
+                'refund_amount',
+                'net_sales',
+                'average_order_value',
+                'sync_status',
+                'sync_message',
+                'synced_at',
+            ])
+            ->where('report_timezone', $filters['timezone'])
+            ->whereDate('from_date', $filters['from_date'])
+            ->whereDate('to_date', $filters['to_date']);
 
-        if ($timezone === '__pending__') {
-            return $query->where(function (Builder $pending) use ($relation, $scopeDate): void {
-                $pending->whereDoesntHave($relation, $scopeDate)
-                    ->orWhereHas($relation, function (Builder $metric) use ($scopeDate): void {
-                        $scopeDate($metric);
-                        $metric->whereNull('shop_timezone');
-                    });
-            });
-        }
+        // History is the reliable source after backfill.  A manually fetched
+        // exact period always takes precedence; otherwise aggregate a fully
+        // available daily range in the same reporting timezone.
+        $history = DB::connection($connection)->table($historyTable.' as history')
+            ->selectRaw('history.assistant_domain_store_id')
+            ->selectRaw('MAX(history.shop_timezone) as shop_timezone')
+            ->selectRaw('MAX(history.report_timezone) as report_timezone')
+            ->selectRaw('? as from_date', [$filters['from_date']])
+            ->selectRaw('? as to_date', [$filters['to_date']])
+            ->selectRaw("'USD' as currency_code")
+            ->selectRaw('MAX(history.original_currency_code) as original_currency_code')
+            ->selectRaw('SUM(history.total_sales) as total_sales')
+            ->selectRaw('SUM(history.original_total_sales) as original_total_sales')
+            ->selectRaw('SUM(history.orders_count) as orders_count')
+            ->selectRaw('AVG(history.returning_customer_rate) as returning_customer_rate')
+            ->selectRaw('SUM(history.fulfilled_orders_count) as fulfilled_orders_count')
+            ->selectRaw('SUM(history.refund_amount) as refund_amount')
+            ->selectRaw('SUM(history.net_sales) as net_sales')
+            ->selectRaw('CASE WHEN SUM(history.orders_count) > 0 THEN SUM(history.total_sales) / SUM(history.orders_count) ELSE 0 END as average_order_value')
+            ->selectRaw('? as sync_status', [AssistantShopifyStoreMetric::STATUS_SUCCESS])
+            ->selectRaw('NULL as sync_message')
+            ->selectRaw('MAX(history.synced_at) as synced_at')
+            ->where('history.report_timezone', $filters['timezone'])
+            ->where('history.sync_status', AssistantShopifyStoreMetric::STATUS_SUCCESS)
+            ->whereDate('history.report_date', '>=', $filters['from_date'])
+            ->whereDate('history.report_date', '<=', $filters['to_date'])
+            ->whereNotExists(function (QueryBuilder $exists) use ($periodTable, $filters): void {
+                $exists->selectRaw('1')
+                    ->from($periodTable.' as exact_period')
+                    ->whereColumn('exact_period.assistant_domain_store_id', 'history.assistant_domain_store_id')
+                    ->where('exact_period.report_timezone', $filters['timezone'])
+                    ->whereDate('exact_period.from_date', $filters['from_date'])
+                    ->whereDate('exact_period.to_date', $filters['to_date']);
+            })
+            ->groupBy('history.assistant_domain_store_id')
+            ->havingRaw('COUNT(DISTINCT history.report_date) = ?', [$expectedDays]);
 
-        return $query->whereHas($relation, function (Builder $metric) use ($timezone, $scopeDate): void {
-            $scopeDate($metric);
-            $metric->where('shop_timezone', $timezone);
+        return DB::connection($connection)
+            ->query()
+            ->fromSub($periods->unionAll($history), 'analytics_periods')
+            ->select('analytics_periods.*');
+    }
+
+    /** @return Builder<AssistantDomainStore> */
+    private function withPeriod(Builder $query, QueryBuilder $periods): Builder
+    {
+        return $this->joinPeriod($query, $periods)
+            ->select('assistant_domain_stores.*')
+            ->addSelect([
+                'analytics_metrics.shop_timezone as analytics_shop_timezone',
+                'analytics_metrics.report_timezone as analytics_report_timezone',
+                'analytics_metrics.from_date as analytics_from_date',
+                'analytics_metrics.to_date as analytics_to_date',
+                'analytics_metrics.currency_code as analytics_currency_code',
+                'analytics_metrics.original_currency_code as analytics_original_currency_code',
+                'analytics_metrics.total_sales as analytics_total_sales',
+                'analytics_metrics.original_total_sales as analytics_original_total_sales',
+                'analytics_metrics.orders_count as analytics_orders_count',
+                'analytics_metrics.returning_customer_rate as analytics_returning_customer_rate',
+                'analytics_metrics.fulfilled_orders_count as analytics_fulfilled_orders_count',
+                'analytics_metrics.refund_amount as analytics_refund_amount',
+                'analytics_metrics.net_sales as analytics_net_sales',
+                'analytics_metrics.average_order_value as analytics_average_order_value',
+                'analytics_metrics.sync_status as analytics_period_status',
+                'analytics_metrics.sync_message as analytics_sync_message',
+                'analytics_metrics.synced_at as analytics_synced_at',
+            ]);
+    }
+
+    /** @return Builder<AssistantDomainStore> */
+    private function joinPeriod(Builder $query, QueryBuilder $periods): Builder
+    {
+        return $query->leftJoinSub($periods, 'analytics_metrics', function ($join): void {
+            $join->on('assistant_domain_stores.id', '=', 'analytics_metrics.assistant_domain_store_id');
         });
     }
 
-    /** @param Builder<AssistantDomainStore> $query
-     *  @return array<string, string>
-     */
-    private function timezoneOptions(Builder $query, string $reportDate): array
+    /** @return array<string, float|int> */
+    private function summary(Builder $query, QueryBuilder $periods): array
     {
-        $metricsTable = $this->metricsTable($reportDate);
-        $timezones = $query
-            ->join($metricsTable.' as analytics_metrics', function ($join) use ($reportDate): void {
-                $join->on('assistant_domain_stores.id', '=', 'analytics_metrics.assistant_domain_store_id');
-
-                if ($reportDate !== '') {
-                    $join->where('analytics_metrics.report_date', '=', $reportDate);
-                }
-            })
-            ->whereNotNull('analytics_metrics.shop_timezone')
-            ->where('analytics_metrics.shop_timezone', '!=', '')
-            ->orderBy('analytics_metrics.shop_timezone')
-            ->distinct()
-            ->pluck('analytics_metrics.shop_timezone')
-            ->filter(static fn ($timezone): bool => is_string($timezone) && in_array($timezone, timezone_identifiers_list(), true))
-            ->values();
-
-        $options = ['' => __('assistant.shopify_analytics.filters.all_timezones')];
-        foreach ($timezones as $timezone) {
-            $options[$timezone] = $this->timezoneLabel($timezone);
-        }
-        $options['__pending__'] = __('assistant.shopify_analytics.filters.timezone_pending');
-
-        return $options;
-    }
-
-    /** @param Builder<AssistantDomainStore> $query
-     *  @return array<string, float|int>
-     */
-    private function summary(Builder $query, string $reportDate): array
-    {
-        $metricsTable = $this->metricsTable($reportDate);
-        $row = $query
-            ->leftJoin($metricsTable.' as analytics_metrics', function ($join) use ($reportDate): void {
-                $join->on('assistant_domain_stores.id', '=', 'analytics_metrics.assistant_domain_store_id');
-
-                if ($reportDate !== '') {
-                    $join->where('analytics_metrics.report_date', '=', $reportDate);
-                }
-            })
+        $row = $this->joinPeriod($query, $periods)
             ->selectRaw('COUNT(assistant_domain_stores.id) as stores_count')
             ->selectRaw('SUM(CASE WHEN analytics_metrics.sync_status = ? THEN 1 ELSE 0 END) as synced_stores_count', [AssistantShopifyStoreMetric::STATUS_SUCCESS])
             ->selectRaw('COALESCE(SUM(CASE WHEN analytics_metrics.sync_status = ? THEN analytics_metrics.total_sales ELSE 0 END), 0) as total_sales', [AssistantShopifyStoreMetric::STATUS_SUCCESS])
@@ -435,11 +514,53 @@ class ShopifyAnalyticsController extends Controller
         ];
     }
 
-    private function metricsTable(string $reportDate): string
+    /** @return array<string, string> */
+    private function timezoneOptions(): array
     {
-        return $reportDate === ''
-            ? (new AssistantShopifyStoreMetric())->getTable()
-            : (new AssistantShopifyStoreMetricHistory())->getTable();
+        $timezones = timezone_identifiers_list();
+        sort($timezones);
+
+        $options = ['Asia/Shanghai' => $this->timezoneLabel('Asia/Shanghai')];
+        foreach ($timezones as $timezone) {
+            if ($timezone !== 'Asia/Shanghai') {
+                $options[$timezone] = $this->timezoneLabel($timezone);
+            }
+        }
+
+        return $options;
+    }
+
+    /** @return array<string, string> */
+    private function sortableColumns(): array
+    {
+        return [
+            'shop_name' => 'assistant_domain_stores.shop_name',
+            'domain' => 'assistant_domain_stores.domain',
+            'shop_status' => 'assistant_domain_stores.shop_status',
+            'team' => 'assistant_domain_stores.team',
+            'email_purchased' => 'assistant_domain_stores.email_purchased',
+            'shop_timezone' => 'analytics_metrics.shop_timezone',
+            'total_sales' => 'analytics_metrics.total_sales',
+            'original_total_sales' => 'analytics_metrics.original_total_sales',
+            'orders_count' => 'analytics_metrics.orders_count',
+            'returning_customer_rate' => 'analytics_metrics.returning_customer_rate',
+            'fulfilled_orders_count' => 'analytics_metrics.fulfilled_orders_count',
+            'refund_amount' => 'analytics_metrics.refund_amount',
+            'net_sales' => 'analytics_metrics.net_sales',
+            'average_order_value' => 'analytics_metrics.average_order_value',
+            'sync_status' => 'analytics_metrics.sync_status',
+            'synced_at' => 'analytics_metrics.synced_at',
+            'report_period' => 'analytics_metrics.to_date',
+        ];
+    }
+
+    private function applySorting(Builder $query, array $filters): void
+    {
+        $column = $this->sortableColumns()[$filters['sort']];
+        $query
+            ->orderByRaw("CASE WHEN {$column} IS NULL THEN 1 ELSE 0 END")
+            ->orderBy($column, $filters['direction'])
+            ->orderBy('assistant_domain_stores.id');
     }
 
     private function timezoneLabel(string $timezone): string

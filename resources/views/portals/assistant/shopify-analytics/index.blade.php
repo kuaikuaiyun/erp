@@ -8,6 +8,27 @@
     $money = static fn (mixed $value): string => number_format((float) $value, 2);
     $number = static fn (mixed $value): string => number_format((int) $value);
     $usd = $t('currency.usd_prefix');
+    $currencyPrefix = static function (?string $currency): string {
+        return match (strtoupper((string) $currency)) {
+            'CNY' => 'CNY ',
+            'USD' => '$',
+            'EUR' => 'EUR ',
+            'GBP' => 'GBP ',
+            'JPY' => 'JPY ',
+            default => filled($currency) ? strtoupper((string) $currency).' ' : '',
+        };
+    };
+    $sortUrl = static function (string $field) use ($filters): string {
+        $direction = $filters['sort'] === $field && $filters['direction'] === 'asc' ? 'desc' : 'asc';
+        $query = [
+            ...$filters,
+            'domains' => implode(',', $filters['domains']),
+            'sort' => $field,
+            'direction' => $direction,
+        ];
+
+        return route('assistant.shopify-analytics.index', $query);
+    };
     $syncProgress = $activeSyncBatch?->progressPayload();
     $shopifyAnalyticsJavascript = [
         'selectedCount' => $t('batch.selected_count', ['count' => '__count__']),
@@ -35,6 +56,8 @@
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261012-1.css?v=20261012-6">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261012-3.css?v=20261012-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261013-1.css?v=20261013-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261013-2.css?v=20261013-2">
 @endpush
 
 @section('content')
@@ -117,8 +140,12 @@
                     </select>
                 </div>
                 <div class="form-group assistant-shopify-date-filter">
-                    <label for="assistant-shopify-report-date">{{ $t('filters.report_date') }}</label>
-                    <input id="assistant-shopify-report-date" name="report_date" type="date" class="form-control" value="{{ $filters['report_date'] }}">
+                    <label for="assistant-shopify-from-date">{{ $t('filters.from_date') }}</label>
+                    <input id="assistant-shopify-from-date" name="from_date" type="date" class="form-control" value="{{ $filters['from_date'] }}">
+                </div>
+                <div class="form-group assistant-shopify-date-filter">
+                    <label for="assistant-shopify-to-date">{{ $t('filters.to_date') }}</label>
+                    <input id="assistant-shopify-to-date" name="to_date" type="date" class="form-control" value="{{ $filters['to_date'] }}">
                 </div>
                 <input type="hidden" name="per_page" value="{{ $filters['per_page'] }}">
                 <div class="assistant-shopify-filter-actions">
@@ -134,6 +161,9 @@
         <form id="assistant-shopify-batch-refresh-form" method="post" action="{{ route('assistant.shopify-analytics.refresh-batch') }}" data-loading="button">
             @csrf
             <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
+            <input type="hidden" name="timezone" value="{{ $filters['timezone'] }}">
+            <input type="hidden" name="from_date" value="{{ $filters['from_date'] }}">
+            <input type="hidden" name="to_date" value="{{ $filters['to_date'] }}">
         </form>
 
         @if ($syncProgress !== null)
@@ -192,32 +222,47 @@
                         <th class="assistant-shopify-selection-column">
                             <input type="checkbox" data-shopify-select-all aria-label="{{ $t('batch.select_page') }}">
                         </th>
-                        <th>{{ $t('table.store') }}</th>
-                        <th>{{ $t('table.domain') }}</th>
-                        <th>{{ $t('table.shop_status') }}</th>
-                        <th>{{ $t('table.shop_timezone') }}</th>
-                        <th>{{ $t('table.report_date') }}</th>
-                        <th>{{ $t('metrics.total_sales') }}</th>
-                        <th>{{ $t('metrics.orders') }}</th>
-                        <th>{{ $t('metrics.returning_customer_rate') }}</th>
-                        <th>{{ $t('metrics.fulfilled_orders') }}</th>
-                        <th>{{ $t('metrics.refund_amount') }}</th>
-                        <th>{{ $t('metrics.net_sales') }}</th>
-                        <th>{{ $t('metrics.average_order_value') }}</th>
-                        <th>{{ $t('table.sync_status') }}</th>
-                        <th>{{ $t('table.last_synced_at') }}</th>
+                        @foreach ([
+                            'shop_name' => $t('table.store'),
+                            'domain' => $t('table.domain'),
+                            'shop_status' => $t('table.shop_status'),
+                            'team' => $t('table.team'),
+                            'email_purchased' => $t('table.email_purchased'),
+                            'shop_timezone' => $t('table.shop_timezone'),
+                            'total_sales' => $t('metrics.total_sales'),
+                            'original_total_sales' => $t('metrics.original_total_sales'),
+                            'orders_count' => $t('metrics.orders'),
+                            'returning_customer_rate' => $t('metrics.returning_customer_rate'),
+                            'fulfilled_orders_count' => $t('metrics.fulfilled_orders'),
+                            'refund_amount' => $t('metrics.refund_amount'),
+                            'net_sales' => $t('metrics.net_sales'),
+                            'average_order_value' => $t('metrics.average_order_value'),
+                            'sync_status' => $t('table.sync_status'),
+                            'synced_at' => $t('table.last_synced_at'),
+                        ] as $field => $label)
+                            <th class="assistant-shopify-sortable @if ($filters['sort'] === $field) is-sorted @endif">
+                                <a href="{{ $sortUrl($field) }}" data-loading="region" data-loading-target=".assistant-shopify-analytics-page">
+                                    {{ $label }}
+                                    <i class="fa @if ($filters['sort'] === $field && $filters['direction'] === 'asc') fa-sort-asc @elseif ($filters['sort'] === $field) fa-sort-desc @else fa-sort @endif"></i>
+                                </a>
+                            </th>
+                        @endforeach
+                        <th class="assistant-shopify-sortable @if ($filters['sort'] === 'report_period') is-sorted @endif">
+                            <a href="{{ $sortUrl('report_period') }}" data-loading="region" data-loading-target=".assistant-shopify-analytics-page">
+                                {{ $t('table.report_period') }}
+                                <i class="fa @if ($filters['sort'] === 'report_period' && $filters['direction'] === 'asc') fa-sort-asc @elseif ($filters['sort'] === 'report_period') fa-sort-desc @else fa-sort @endif"></i>
+                            </a>
+                        </th>
                         <th class="assistant-shopify-action-column">{{ $t('table.actions') }}</th>
                     </tr>
                     </thead>
                     <tbody>
                     @forelse ($stores as $store)
                         @php
-                            $metric = $filters['report_date'] === ''
-                                ? $store->shopifyAnalyticsMetric
-                                : $store->shopifyAnalyticsHistory->first();
+                            $metric = $store->shopifyAnalyticsPeriod;
                             $status = $metric?->sync_status ?: \App\Models\AssistantShopifyStoreMetric::STATUS_NOT_SYNCED;
                             $statusLabel = $metricStatuses[$status] ?? $metricStatuses[\App\Models\AssistantShopifyStoreMetric::STATUS_NOT_SYNCED];
-                            $hasSnapshot = $metric?->report_date !== null;
+                            $hasSnapshot = $metric?->sync_status === \App\Models\AssistantShopifyStoreMetric::STATUS_SUCCESS;
                             $isInactive = $store->shop_status !== \App\Models\AssistantDomainStore::SHOP_STATUS_IN_USE;
                             $isConfigured = filled($store->shopify_client_id) && filled($store->shopify_client_secret);
                             $isBatchRefreshable = !$isInactive && $isConfigured;
@@ -225,7 +270,9 @@
                                 ? $t('batch.inactive_unavailable')
                                 : ($isConfigured ? '' : $t('batch.not_configured_unavailable'));
                             $timezone = $metric?->shop_timezone ?: $t('filters.timezone_pending');
-                            $reportDate = $metric?->report_date?->format('Y-m-d') ?: $t('card.not_available');
+                            $reportDate = $metric?->from_date && $metric?->to_date
+                                ? $metric->from_date->format('Y-m-d').' ~ '.$metric->to_date->format('Y-m-d')
+                                : $t('card.not_available');
                             $syncedAt = $metric?->synced_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i') ?: $t('card.not_available');
                             $returningRate = $hasSnapshot ? number_format((float) $metric->returning_customer_rate, 2).'%' : $t('card.not_available');
                             $failureReasonKey = $metric?->sync_message ?: match ($status) {
@@ -236,6 +283,9 @@
                             };
                             $failureReason = $failureReasonKey === null ? null : $t('reasons.'.$failureReasonKey);
                             $singleRefreshFormId = 'assistant-shopify-refresh-'.$store->getKey();
+                            $originalSales = $hasSnapshot
+                                ? $currencyPrefix($metric->original_currency_code).$money($metric->original_total_sales)
+                                : $t('card.not_available');
                         @endphp
                         <tr class="{{ $isInactive ? 'is-inactive' : '' }}">
                             <td class="assistant-shopify-selection-column">
@@ -244,9 +294,11 @@
                             <td class="assistant-shopify-store-cell"><strong>{{ $store->shop_name }}</strong></td>
                             <td class="assistant-shopify-domain-cell" title="{{ $store->domain }}">{{ $store->domain }}</td>
                             <td>{{ \App\Models\AssistantDomainStore::shopStatusLabels()[$store->shop_status] ?? $store->shop_status }}</td>
+                            <td>{{ \App\Models\AssistantDomainStore::displayMultiValue($store->team) ?: $t('card.not_available') }}</td>
+                            <td><span class="label {{ $store->email_purchased ? 'label-info' : 'label-default' }}">{{ $store->email_purchased ? $t('common.yes') : $t('common.no') }}</span></td>
                             <td title="{{ $timezone }}"><span class="assistant-shopify-value-tag assistant-shopify-value-tag-timezone">{{ $timezone }}</span></td>
-                            <td><span class="assistant-shopify-value-tag assistant-shopify-value-tag-date">{{ $reportDate }}</span></td>
                             <td><span class="assistant-shopify-value-tag assistant-shopify-value-tag-money">{{ $hasSnapshot ? $usd.$money($metric->total_sales) : $t('card.not_available') }}</span></td>
+                            <td><span class="assistant-shopify-value-tag assistant-shopify-value-tag-money">{{ $originalSales }}</span></td>
                             <td><span class="assistant-shopify-value-tag assistant-shopify-value-tag-count">{{ $hasSnapshot ? $number($metric->orders_count) : $t('card.not_available') }}</span></td>
                             <td><span class="assistant-shopify-value-tag assistant-shopify-value-tag-rate">{{ $returningRate }}</span></td>
                             <td><span class="assistant-shopify-value-tag assistant-shopify-value-tag-count">{{ $hasSnapshot ? $number($metric->fulfilled_orders_count) : $t('card.not_available') }}</span></td>
@@ -260,6 +312,7 @@
                                 @endif
                             </td>
                             <td>{{ $syncedAt }}</td>
+                            <td><span class="assistant-shopify-value-tag assistant-shopify-value-tag-date">{{ $reportDate }}</span></td>
                             <td class="assistant-shopify-action-column">
                                 @if ($isInactive)
                                     <button type="button" class="btn btn-default btn-xs" disabled><i class="fa fa-ban"></i> {{ $t('actions.inactive') }}</button>
@@ -267,6 +320,9 @@
                                     <form id="{{ $singleRefreshFormId }}" method="post" action="{{ route('assistant.shopify-analytics.refresh', $store) }}" data-loading="button">
                                         @csrf
                                         <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
+                                        <input type="hidden" name="timezone" value="{{ $filters['timezone'] }}">
+                                        <input type="hidden" name="from_date" value="{{ $filters['from_date'] }}">
+                                        <input type="hidden" name="to_date" value="{{ $filters['to_date'] }}">
                                     </form>
                                     <button type="submit" form="{{ $singleRefreshFormId }}" class="btn btn-primary btn-xs"><i class="fa fa-refresh"></i> {{ $t('actions.refresh') }}</button>
                                 @endif
@@ -274,7 +330,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="16" class="assistant-shopify-empty-state">
+                            <td colspan="19" class="assistant-shopify-empty-state">
                                 <i class="fa fa-shopping-bag"></i>
                                 <p>{{ $t('card.no_snapshot') }}</p>
                             </td>

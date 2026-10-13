@@ -1,0 +1,25 @@
+.assistant-shopify-list-table {
+    min-width: 2560px;
+}
+
+.assistant-shopify-list-table > thead > tr > th:nth-child(17),
+.assistant-shopify-list-table > tbody > tr > td:nth-child(17) {
+    width: 150px;
+    min-width: 150px;
+    white-space: nowrap;
+}
+
+.assistant-shopify-list-table > thead > tr > th:nth-child(18),
+.assistant-shopify-list-table > tbody > tr > td:nth-child(18) {
+    width: 180px;
+    min-width: 180px;
+    white-space: nowrap;
+}
+
+.assistant-shopify-list-table > thead > tr > th:nth-child(19),
+.assistant-shopify-list-table > tbody > tr > td:nth-child(19),
+.assistant-shopify-list-table .assistant-shopify-action-column {
+    width: 120px;
+    min-width: 120px;
+    white-space: nowrap;
+}

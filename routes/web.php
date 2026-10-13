@@ -17,6 +17,8 @@ Route::get('/', [PortalEntryController::class, 'root'])->name('portal.root');
 Route::get('/management/menus', [PortalMenuConfigurationController::class, 'index'])->name('portal.menus.index');
 Route::post('/management/menus/order', [PortalMenuConfigurationController::class, 'saveOrder'])->name('portal.menus.order');
 Route::get('/domain-stores', [DomainStoreController::class, 'index'])->name('assistant.domain-stores.index');
+Route::post('/domain-stores/email-purchases/sync', [DomainStoreController::class, 'syncEmailPurchases'])->name('assistant.domain-stores.email-purchases.sync');
+Route::get('/domain-stores/email-purchases/status', [DomainStoreController::class, 'emailPurchaseStatus'])->name('assistant.domain-stores.email-purchases.status');
 Route::get('/domain-stores/batch-edit', [DomainStoreController::class, 'batchEdit'])->name('assistant.domain-stores.batch-edit');
 Route::get('/domain-stores/create', [DomainStoreController::class, 'create'])->name('assistant.domain-stores.create');
 Route::post('/domain-stores', [DomainStoreController::class, 'store'])->name('assistant.domain-stores.store');

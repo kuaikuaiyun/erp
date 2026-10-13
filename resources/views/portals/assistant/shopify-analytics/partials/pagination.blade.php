@@ -31,7 +31,10 @@
         <input type="hidden" name="shop_name" value="{{ $filters['shop_name'] }}">
         <input type="hidden" name="domains" value="{{ implode(',', $filters['domains']) }}">
         <input type="hidden" name="timezone" value="{{ $filters['timezone'] }}">
-        <input type="hidden" name="report_date" value="{{ $filters['report_date'] }}">
+        <input type="hidden" name="from_date" value="{{ $filters['from_date'] }}">
+        <input type="hidden" name="to_date" value="{{ $filters['to_date'] }}">
+        <input type="hidden" name="sort" value="{{ $filters['sort'] }}">
+        <input type="hidden" name="direction" value="{{ $filters['direction'] }}">
         <label>{{ $t('pagination.per_page') }}
             <select name="per_page" class="form-control input-sm" onchange="this.form.submit()">
                 @foreach ([20, 50, 100] as $option)

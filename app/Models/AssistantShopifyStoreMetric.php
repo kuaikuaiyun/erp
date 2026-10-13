@@ -22,7 +22,9 @@ class AssistantShopifyStoreMetric extends Model
         'shop_timezone',
         'report_date',
         'currency_code',
+        'original_currency_code',
         'total_sales',
+        'original_total_sales',
         'orders_count',
         'returning_customer_rate',
         'fulfilled_orders_count',
@@ -47,6 +49,7 @@ class AssistantShopifyStoreMetric extends Model
         return [
             'report_date' => 'date',
             'total_sales' => 'decimal:2',
+            'original_total_sales' => 'decimal:2',
             'orders_count' => 'integer',
             'returning_customer_rate' => 'decimal:4',
             'fulfilled_orders_count' => 'integer',

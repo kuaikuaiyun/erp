@@ -46,7 +46,7 @@ class ShopifyAnalyticsAutomationService
 
             $result['succeeded']++;
 
-            if ($this->finalisePreviousLocalDay($store, (string) $metric->shop_timezone)) {
+            if ($this->finalisePreviousReportingDay($store)) {
                 $result['finalised']++;
             }
         }
@@ -126,16 +126,17 @@ class ShopifyAnalyticsAutomationService
         return $result;
     }
 
-    private function finalisePreviousLocalDay(AssistantDomainStore $store, string $timezone): bool
+    private function finalisePreviousReportingDay(AssistantDomainStore $store): bool
     {
-        if (!in_array($timezone, timezone_identifiers_list(), true) || now($timezone)->hour < 1) {
-            return false;
-        }
-
         $task = AssistantShopifyAnalyticsBackfill::query()
             ->where('assistant_domain_store_id', $store->getKey())
             ->first();
         if (!$task) {
+            return false;
+        }
+
+        $timezone = (string) $task->shop_timezone;
+        if (!in_array($timezone, timezone_identifiers_list(), true) || now($timezone)->hour < 1) {
             return false;
         }
 

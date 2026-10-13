@@ -121,7 +121,15 @@ class ProcessAssistantShopifyAnalyticsSyncBatches extends Command
                 return;
             }
 
-            $metric = $analytics->refresh($store, $actor);
+            $metric = $batch->report_timezone !== null && $batch->from_date !== null && $batch->to_date !== null
+                ? $analytics->refreshPeriod(
+                    $store,
+                    $batch->report_timezone,
+                    $batch->from_date->toDateString(),
+                    $batch->to_date->toDateString(),
+                    $actor,
+                )
+                : $analytics->refresh($store, $actor);
             if ($metric->sync_status !== AssistantShopifyStoreMetric::STATUS_SUCCESS) {
                 $this->failTask($task, $batch, $metric->sync_message ?: $metric->sync_status);
 
