@@ -318,7 +318,10 @@ class ShopifyStoreAnalyticsService
         $originalSalesByHour = $shop['currency'] === 'USD'
             ? $salesByHour
             : $this->rowsByUtcHour(
-                $this->shopifyQlRows($store, $actor, $this->salesHourlyTimeSeriesQuery($fromShopHour, $toShopHour, $shopTimezone, $shop['currency'], true), 'hourly_sales_original_currency'),
+                // Keep Shopify's source values in the store currency. The
+                // analytics page applies its fixed reference-rate display
+                // calculation later and never overwrites these source values.
+                $this->shopifyQlRows($store, $actor, $this->salesHourlyTimeSeriesQuery($fromShopHour, $toShopHour, $shopTimezone, $shop['currency']), 'hourly_sales_original_currency'),
                 $fromUtc,
                 $toUtc,
                 $shopTimezone,
@@ -346,6 +349,8 @@ class ShopifyStoreAnalyticsService
                 'original_currency_code' => $shop['currency'],
                 'total_sales' => $this->decimal($sales, 'total_sales'),
                 'original_total_sales' => $this->decimal($originalSales, 'total_sales'),
+                'original_refund_amount' => $this->decimal($originalSales, 'returns'),
+                'original_net_sales' => $this->decimal($originalSales, 'net_sales'),
                 'orders_count' => $this->integer($sales, 'orders'),
                 'returning_customer_rate' => $this->decimal($sales, 'returning_customer_rate'),
                 'fulfilled_orders_count' => $this->integer($fulfillments, 'orders_fulfilled'),
@@ -371,6 +376,8 @@ class ShopifyStoreAnalyticsService
                 'original_currency_code',
                 'total_sales',
                 'original_total_sales',
+                'original_refund_amount',
+                'original_net_sales',
                 'orders_count',
                 'returning_customer_rate',
                 'fulfilled_orders_count',

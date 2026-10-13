@@ -12,6 +12,7 @@ use App\Models\AssistantShopifyStoreMetricHour;
 use App\Models\AssistantShopifyStoreMetricPeriod;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
+use App\Portals\Assistant\ShopifyAnalyticsReferenceRateService;
 use App\Portals\Assistant\ShopifyStoreAnalyticsService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -29,6 +30,7 @@ class ShopifyAnalyticsController extends Controller
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
         private readonly ShopifyStoreAnalyticsService $analytics,
+        private readonly ShopifyAnalyticsReferenceRateService $referenceRates,
     ) {
     }
 
@@ -68,6 +70,8 @@ class ShopifyAnalyticsController extends Controller
                     'original_currency_code' => $store->analytics_original_currency_code,
                     'total_sales' => $store->analytics_total_sales,
                     'original_total_sales' => $store->analytics_original_total_sales,
+                    'original_refund_amount' => $store->analytics_original_refund_amount,
+                    'original_net_sales' => $store->analytics_original_net_sales,
                     'orders_count' => $store->analytics_orders_count,
                     'returning_customer_rate' => $store->analytics_returning_customer_rate,
                     'fulfilled_orders_count' => $store->analytics_fulfilled_orders_count,
@@ -77,6 +81,8 @@ class ShopifyAnalyticsController extends Controller
                     'sync_status' => $store->analytics_period_status,
                     'sync_message' => $store->analytics_sync_message,
                     'synced_at' => $store->analytics_synced_at,
+                    'reference_rate' => $this->referenceRates->rateFor($store->analytics_original_currency_code),
+                    'reference_rate_configured' => $this->referenceRates->isConfigured($store->analytics_original_currency_code),
                 ], true);
             }
 
@@ -90,6 +96,7 @@ class ShopifyAnalyticsController extends Controller
             'stores' => $stores,
             'filters' => $filters,
             'timezoneOptions' => $this->timezoneOptions(),
+            'referenceRates' => $this->referenceRates->rates(),
             'summary' => $summary,
             'metricStatuses' => AssistantShopifyStoreMetric::statusLabels(),
             'activeSyncBatch' => $activeSyncBatch,
@@ -332,8 +339,12 @@ class ShopifyAnalyticsController extends Controller
         $defaultTimezone = in_array($defaultTimezone, timezone_identifiers_list(), true)
             ? $defaultTimezone
             : 'Asia/Shanghai';
+        $timezoneOptions = $this->timezoneOptions();
+        $defaultTimezone = array_key_exists($defaultTimezone, $timezoneOptions)
+            ? $defaultTimezone
+            : 'Asia/Shanghai';
         $timezone = trim((string) $request->input('timezone', $defaultTimezone));
-        $timezone = in_array($timezone, timezone_identifiers_list(), true) ? $timezone : $defaultTimezone;
+        $timezone = array_key_exists($timezone, $timezoneOptions) ? $timezone : $defaultTimezone;
         $today = now($timezone)->toDateString();
         $fromDate = $this->date(trim((string) $request->input('from_date')));
         $toDate = $this->date(trim((string) $request->input('to_date')));
@@ -394,14 +405,16 @@ class ShopifyAnalyticsController extends Controller
             ->selectRaw('? as to_date', [$filters['to_date']])
             ->selectRaw("'USD' as currency_code")
             ->selectRaw('MAX(hour.original_currency_code) as original_currency_code')
-            ->selectRaw('SUM(hour.total_sales) as total_sales')
             ->selectRaw('SUM(hour.original_total_sales) as original_total_sales')
+            ->selectRaw($this->referenceUsdAggregate('SUM(hour.original_total_sales)', 'MAX(hour.original_currency_code)').' as total_sales')
+            ->selectRaw('SUM(hour.original_refund_amount) as original_refund_amount')
+            ->selectRaw($this->referenceUsdAggregate('SUM(hour.original_refund_amount)', 'MAX(hour.original_currency_code)').' as refund_amount')
+            ->selectRaw('SUM(hour.original_net_sales) as original_net_sales')
+            ->selectRaw($this->referenceUsdAggregate('SUM(hour.original_net_sales)', 'MAX(hour.original_currency_code)').' as net_sales')
             ->selectRaw('SUM(hour.orders_count) as orders_count')
             ->selectRaw('CASE WHEN SUM(hour.orders_count) > 0 THEN SUM(hour.returning_customer_rate * hour.orders_count) / SUM(hour.orders_count) ELSE 0 END as returning_customer_rate')
             ->selectRaw('SUM(hour.fulfilled_orders_count) as fulfilled_orders_count')
-            ->selectRaw('SUM(hour.refund_amount) as refund_amount')
-            ->selectRaw('SUM(hour.net_sales) as net_sales')
-            ->selectRaw('CASE WHEN SUM(hour.orders_count) > 0 THEN SUM(hour.total_sales) / SUM(hour.orders_count) ELSE 0 END as average_order_value')
+            ->selectRaw('CASE WHEN SUM(hour.orders_count) > 0 THEN '.$this->referenceUsdAggregate('SUM(hour.original_total_sales)', 'MAX(hour.original_currency_code)').' / SUM(hour.orders_count) ELSE NULL END as average_order_value')
             ->selectRaw('? as sync_status', [AssistantShopifyStoreMetric::STATUS_SUCCESS])
             ->selectRaw('NULL as sync_message')
             ->selectRaw('MAX(hour.synced_at) as synced_at')
@@ -445,6 +458,8 @@ class ShopifyAnalyticsController extends Controller
                 'analytics_metrics.original_currency_code as analytics_original_currency_code',
                 'analytics_metrics.total_sales as analytics_total_sales',
                 'analytics_metrics.original_total_sales as analytics_original_total_sales',
+                'analytics_metrics.original_refund_amount as analytics_original_refund_amount',
+                'analytics_metrics.original_net_sales as analytics_original_net_sales',
                 'analytics_metrics.orders_count as analytics_orders_count',
                 'analytics_metrics.returning_customer_rate as analytics_returning_customer_rate',
                 'analytics_metrics.fulfilled_orders_count as analytics_fulfilled_orders_count',
@@ -492,14 +507,12 @@ class ShopifyAnalyticsController extends Controller
     /** @return array<string, string> */
     private function timezoneOptions(): array
     {
-        $timezones = timezone_identifiers_list();
-        sort($timezones);
-
-        $options = ['Asia/Shanghai' => $this->timezoneLabel('Asia/Shanghai')];
-        foreach ($timezones as $timezone) {
-            if ($timezone !== 'Asia/Shanghai') {
-                $options[$timezone] = $this->timezoneLabel($timezone);
-            }
+        $options = [];
+        for ($offset = -12; $offset <= 14; $offset++) {
+            $timezone = $offset === 8
+                ? 'Asia/Shanghai'
+                : ($offset === 0 ? 'UTC' : 'Etc/GMT'.($offset > 0 ? '-'.$offset : '+'.abs($offset)));
+            $options[$timezone] = $this->relativeTimezoneLabel($offset);
         }
 
         return $options;
@@ -518,11 +531,9 @@ class ShopifyAnalyticsController extends Controller
             'total_sales' => 'analytics_metrics.total_sales',
             'original_total_sales' => 'analytics_metrics.original_total_sales',
             'orders_count' => 'analytics_metrics.orders_count',
-            'returning_customer_rate' => 'analytics_metrics.returning_customer_rate',
             'fulfilled_orders_count' => 'analytics_metrics.fulfilled_orders_count',
             'refund_amount' => 'analytics_metrics.refund_amount',
             'net_sales' => 'analytics_metrics.net_sales',
-            'average_order_value' => 'analytics_metrics.average_order_value',
             'sync_status' => 'analytics_metrics.sync_status',
             'synced_at' => 'analytics_metrics.synced_at',
             'report_period' => 'analytics_metrics.to_date',
@@ -538,14 +549,29 @@ class ShopifyAnalyticsController extends Controller
             ->orderBy('assistant_domain_stores.id');
     }
 
-    private function timezoneLabel(string $timezone): string
+    private function relativeTimezoneLabel(int $utcOffset): string
     {
-        $offset = now($timezone)->format('P');
+        $relativeToShanghai = $utcOffset - 8;
+        $relativeLabel = match (true) {
+            $relativeToShanghai === 0 => __('assistant.shopify_analytics.filters.timezone_shanghai'),
+            $relativeToShanghai > 0 => __('assistant.shopify_analytics.filters.timezone_after_shanghai', ['hours' => $relativeToShanghai]),
+            default => __('assistant.shopify_analytics.filters.timezone_before_shanghai', ['hours' => abs($relativeToShanghai)]),
+        };
 
-        return __('assistant.shopify_analytics.filters.timezone_option', [
-            'timezone' => $timezone,
-            'offset' => 'UTC'.$offset,
+        return __('assistant.shopify_analytics.filters.timezone_relative_option', [
+            'relative' => $relativeLabel,
+            'offset' => 'UTC'.sprintf('%+03d:00', $utcOffset),
         ]);
+    }
+
+    private function referenceUsdAggregate(string $amountExpression, string $currencyExpression): string
+    {
+        $clauses = [];
+        foreach ($this->referenceRates->rates() as $currency => $rate) {
+            $clauses[] = "WHEN '{$currency}' THEN ({$amountExpression}) * ".number_format($rate, 6, '.', '');
+        }
+
+        return "CASE UPPER(COALESCE({$currencyExpression}, '')) ".implode(' ', $clauses).' ELSE NULL END';
     }
 
     /** @return array{portal: \App\Models\Portal, user: AdminUser}|Response */
