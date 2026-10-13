@@ -13,6 +13,7 @@ use App\Portals\Logistics\ShopifyOrderSyncService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 
@@ -73,6 +74,9 @@ class ShopifyStoreAnalyticsService
                 'sync_status' => $period->sync_status,
                 'sync_message' => $period->sync_message,
                 'synced_at' => $period->synced_at,
+                // This watermark drives future incremental runs. Keep it only
+                // after both the current snapshot and hourly metrics succeed.
+                'last_successful_synced_at' => $period->synced_at ?? now(),
             ];
 
             DB::connection($metric->getConnectionName())->transaction(function () use ($metric, $store, $payload, $reportTimezone, $shop): void {
@@ -168,7 +172,7 @@ class ShopifyStoreAnalyticsService
 
         $shop = $this->shopInfo($store, $actor);
         $salesByDate = $this->rowsByReportDate(
-            $this->shopifyQlRows($store, $actor, $this->salesTimeSeriesQuery($reportTimezone, $fromDate, $toDate)),
+            $this->shopifyQlRows($store, $actor, $this->salesTimeSeriesQuery($reportTimezone, $fromDate, $toDate), 'period_sales_usd'),
             $reportTimezone,
             $fromDate,
             $toDate,
@@ -176,13 +180,13 @@ class ShopifyStoreAnalyticsService
         $originalSalesByDate = $shop['currency'] === 'USD'
             ? $salesByDate
             : $this->rowsByReportDate(
-                $this->shopifyQlRows($store, $actor, $this->salesTimeSeriesQuery($reportTimezone, $fromDate, $toDate, $shop['currency'], true)),
+                $this->shopifyQlRows($store, $actor, $this->salesTimeSeriesQuery($reportTimezone, $fromDate, $toDate, $shop['currency'], true), 'period_sales_original_currency'),
                 $reportTimezone,
                 $fromDate,
                 $toDate,
             );
         $fulfillmentsByDate = $this->rowsByReportDate(
-            $this->shopifyQlRows($store, $actor, $this->fulfillmentsTimeSeriesQuery($reportTimezone, $fromDate, $toDate)),
+            $this->shopifyQlRows($store, $actor, $this->fulfillmentsTimeSeriesQuery($reportTimezone, $fromDate, $toDate), 'period_fulfillments'),
             $reportTimezone,
             $fromDate,
             $toDate,
@@ -306,7 +310,7 @@ class ShopifyStoreAnalyticsService
         $toShopHour = $toUtc->setTimezone($shopTimezone)->startOfHour();
 
         $salesByHour = $this->rowsByUtcHour(
-            $this->shopifyQlRows($store, $actor, $this->salesHourlyTimeSeriesQuery($fromShopHour, $toShopHour, $shopTimezone)),
+            $this->shopifyQlRows($store, $actor, $this->salesHourlyTimeSeriesQuery($fromShopHour, $toShopHour, $shopTimezone), 'hourly_sales_usd'),
             $fromUtc,
             $toUtc,
             $shopTimezone,
@@ -314,13 +318,13 @@ class ShopifyStoreAnalyticsService
         $originalSalesByHour = $shop['currency'] === 'USD'
             ? $salesByHour
             : $this->rowsByUtcHour(
-                $this->shopifyQlRows($store, $actor, $this->salesHourlyTimeSeriesQuery($fromShopHour, $toShopHour, $shopTimezone, $shop['currency'], true)),
+                $this->shopifyQlRows($store, $actor, $this->salesHourlyTimeSeriesQuery($fromShopHour, $toShopHour, $shopTimezone, $shop['currency'], true), 'hourly_sales_original_currency'),
                 $fromUtc,
                 $toUtc,
                 $shopTimezone,
             );
         $fulfillmentsByHour = $this->rowsByUtcHour(
-            $this->shopifyQlRows($store, $actor, $this->fulfillmentsHourlyTimeSeriesQuery($fromShopHour, $toShopHour, $shopTimezone)),
+            $this->shopifyQlRows($store, $actor, $this->fulfillmentsHourlyTimeSeriesQuery($fromShopHour, $toShopHour, $shopTimezone), 'hourly_fulfillments'),
             $fromUtc,
             $toUtc,
             $shopTimezone,
@@ -465,7 +469,12 @@ class ShopifyStoreAnalyticsService
     }
 
     /** @return array<int, array<string, mixed>> */
-    private function shopifyQlRows(AssistantDomainStore $store, ?AdminUser $actor, string $shopifyQl): array
+    private function shopifyQlRows(
+        AssistantDomainStore $store,
+        ?AdminUser $actor,
+        string $shopifyQl,
+        string $queryLabel = 'unspecified',
+    ): array
     {
         $response = $this->shopify->graphqlForStore($store, $actor, <<<'GQL'
             query AssistantShopifyAnalytics($query: String!) {
@@ -478,9 +487,9 @@ class ShopifyStoreAnalyticsService
             }
             GQL, ['query' => $shopifyQl]);
 
-        $errors = Arr::get($response, 'data.shopifyqlQuery.parseErrors', []);
-        if (is_array($errors) && $errors !== []) {
-            $messages = collect($errors)
+        $parseErrors = Arr::get($response, 'data.shopifyqlQuery.parseErrors', []);
+        if (filled($parseErrors)) {
+            $messages = collect(Arr::wrap($parseErrors))
                 ->map(static function (mixed $error): string {
                     if (is_array($error)) {
                         $error = $error['message'] ?? json_encode($error, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -491,7 +500,18 @@ class ShopifyStoreAnalyticsService
                 ->filter()
                 ->implode('; ');
 
-            throw new RuntimeException('ShopifyQL query could not be parsed: '.Str::limit($messages ?: 'unknown parse error', 1000));
+            $message = Str::limit($messages ?: 'unknown parse error', 1000);
+
+            Log::warning('Assistant ShopifyQL query could not be parsed.', [
+                'store_id' => $store->getKey(),
+                'shop_name' => $store->shop_name,
+                'domain' => $store->domain,
+                'query_label' => $queryLabel,
+                'parse_errors' => $parseErrors,
+                'shopifyql' => $shopifyQl,
+            ]);
+
+            throw new RuntimeException('ShopifyQL query could not be parsed ['.$queryLabel.']: '.$message);
         }
 
         $rows = Arr::get($response, 'data.shopifyqlQuery.tableData.rows', []);
