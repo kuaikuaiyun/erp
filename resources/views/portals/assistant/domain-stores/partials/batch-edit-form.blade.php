@@ -50,7 +50,7 @@
                         <span>{{ $store->domain }}</span>
                     </header>
 
-                    @if ($sectionSelected(['shop_name', 'domain', 'shop_login_url', 'email', 'domain_expires_at', 'domain_check_status', 'email_bound']))
+                    @if ($sectionSelected(['shop_name', 'domain', 'shop_login_url', 'email', 'domain_expires_at', 'domain_check_status', 'email_bound', 'email_purchased']))
                     <section class="box box-solid assistant-form-section">
                         <div class="box-header with-border"><h3 class="box-title">{{ $t('sections.shop_domain') }}</h3></div>
                         <div class="box-body row assistant-form-grid">
@@ -94,6 +94,12 @@
                             <div class="form-group col-md-2" data-batch-field="email_bound">
                                 <label for="{{ $idPrefix }}email-bound">{{ $t('fields.email_bound') }} <span class="text-red">*</span></label>
                                 <select id="{{ $idPrefix }}email-bound" name="{{ $prefix }}[email_bound]" class="form-control"><option value="1" @selected($store->email_bound)>{{ $t('common.yes') }}</option><option value="0" @selected(!$store->email_bound)>{{ $t('common.no') }}</option></select>
+                            </div>
+                            @endif
+                            @if ($fieldSelected('email_purchased'))
+                            <div class="form-group col-md-2" data-batch-field="email_purchased">
+                                <label for="{{ $idPrefix }}email-purchased">{{ $t('fields.email_purchased') }} <span class="text-red">*</span></label>
+                                <select id="{{ $idPrefix }}email-purchased" name="{{ $prefix }}[email_purchased]" class="form-control"><option value="1" @selected($store->email_purchased)>{{ $t('common.yes') }}</option><option value="0" @selected(!$store->email_purchased)>{{ $t('common.no') }}</option></select>
                             </div>
                             @endif
                         </div>

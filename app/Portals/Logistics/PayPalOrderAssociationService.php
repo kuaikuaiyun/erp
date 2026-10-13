@@ -35,31 +35,31 @@ class PayPalOrderAssociationService
 
     public function associateExistingOrders(LogisticsPayPalAccount $account): int
     {
-        $accountId = $account->getKey();
+        $query = LogisticsOrder::query()->where('paypal_account_id', $account->getKey());
         $merchantId = $this->normaliseMerchantId($account->merchant_id);
         $email = $this->normaliseEmail($account->account_email);
 
-        if ($merchantId !== '' || $email !== '') {
-            LogisticsOrder::query()
-                ->whereNull('paypal_account_id')
-                ->where(function ($matches) use ($merchantId, $email): void {
-                    if ($merchantId !== '') {
-                        $matches->whereRaw('UPPER(paypal_merchant_id) = ?', [$merchantId]);
-                    }
-                    if ($email !== '') {
-                        $method = $merchantId !== '' ? 'orWhereRaw' : 'whereRaw';
-                        $matches->{$method}('LOWER(collection_account_email) = ?', [$email]);
-                    }
-                })
-                ->update([
-                    'paypal_account_id' => $accountId,
-                    'updated_at' => now(),
-                ]);
-        }
+        $query->orWhere(function ($matches) use ($merchantId, $email): void {
+            if ($merchantId !== '') {
+                $matches->whereRaw('UPPER(paypal_merchant_id) = ?', [$merchantId]);
+            }
+            if ($email !== '') {
+                $method = $merchantId !== '' ? 'orWhereRaw' : 'whereRaw';
+                $matches->{$method}('LOWER(collection_account_email) = ?', [$email]);
+            }
+        });
 
-        return LogisticsOrder::query()
-            ->where('paypal_account_id', $accountId)
-            ->count();
+        $matched = 0;
+        $query->orderBy('id')->chunkById(200, function ($orders) use (&$matched, $account): void {
+            foreach ($orders as $order) {
+                $associated = $this->associateOrder($order);
+                if ($associated?->is($account)) {
+                    $matched++;
+                }
+            }
+        });
+
+        return $matched;
     }
 
     public function orderForTransaction(LogisticsPayPalAccount $account, ?string $transactionId): ?LogisticsOrder

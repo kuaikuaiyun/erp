@@ -10,7 +10,6 @@ use App\Models\AssistantDomainStoreQuickOption;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantDomainCheckService;
 use App\Portals\Assistant\AssistantDomainStoreHistoryService;
-use App\Portals\Assistant\AssistantEmailPurchaseSyncService;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantDomainStoreSpreadsheetService;
 use App\Portals\Logistics\ShopifyOrderSyncService;
@@ -33,7 +32,6 @@ class DomainStoreController extends Controller
         private readonly AssistantDomainStoreHistoryService $history,
         private readonly AssistantDomainStoreSpreadsheetService $spreadsheets,
         private readonly AssistantDomainCheckService $domainChecks,
-        private readonly AssistantEmailPurchaseSyncService $emailPurchases,
         private readonly ShopifyOrderSyncService $shopify,
     ) {
     }
@@ -52,16 +50,6 @@ class DomainStoreController extends Controller
             ->orderByDesc('id')
             ->paginate($filters['per_page'])
             ->withQueryString();
-        $emailPurchaseStatuses = $this->emailPurchases->statusesFor($stores->getCollection()->pluck('email')->all());
-        $stores->getCollection()->each(function (AssistantDomainStore $store) use ($emailPurchaseStatuses): void {
-            $normalized = $this->emailPurchases->normalizedEmail($store->email);
-            $store->setAttribute(
-                'email_purchase_sync_status',
-                $normalized === null
-                    ? AssistantEmailPurchaseSyncService::STATUS_NEVER
-                    : ($emailPurchaseStatuses[$normalized] ?? AssistantEmailPurchaseSyncService::STATUS_NEVER),
-            );
-        });
 
         return view('portals.assistant.domain-stores.index', [
             ...$this->viewContext($context),
@@ -70,63 +58,9 @@ class DomainStoreController extends Controller
             'filters' => $filters,
             'canManage' => $this->authorization->canManageDomainStores($context['user']),
             'canManageDepartmentAccess' => $this->authorization->canManageAllDomainStores($context['user']),
-            'canSyncEmailPurchases' => $this->authorization->canManageQuickOptions($context['user']),
             'assistantChildDepartments' => $this->authorization->assistantChildDepartments(),
             'domainCheckLabels' => AssistantDomainStore::domainCheckLabels(),
             'shopStatusLabels' => AssistantDomainStore::shopStatusLabels(),
-        ]);
-    }
-
-    public function syncEmailPurchases(Request $request): RedirectResponse
-    {
-        $context = $this->portalContext($request);
-
-        if ($context instanceof Response) {
-            abort(403);
-        }
-
-        $this->authorization->ensureCanManageQuickOptions($context['user']);
-
-        try {
-            $result = $this->emailPurchases->synchronize($context['user']);
-        } catch (\LogicException $exception) {
-            $message = match ($exception->getMessage()) {
-                'email_purchase_source_not_configured' => __('assistant.domain_stores.messages.email_purchase_source_not_configured'),
-                'email_purchase_source_token_missing' => __('assistant.domain_stores.messages.email_purchase_source_token_missing'),
-                'email_purchase_storage_not_ready' => __('assistant.domain_stores.messages.email_purchase_storage_not_ready'),
-                default => __('assistant.domain_stores.messages.email_purchase_sync_failed'),
-            };
-
-            return $this->domainStoresIndexRedirect($request)->with('error', $message);
-        } catch (\Throwable) {
-            return $this->domainStoresIndexRedirect($request)
-                ->with('error', __('assistant.domain_stores.messages.email_purchase_sync_failed'));
-        }
-
-        return $this->domainStoresIndexRedirect($request)->with('success', __('assistant.domain_stores.messages.email_purchase_sync_completed', [
-            'source' => $result['source_count'],
-            'matched' => $result['matched_store_count'],
-            'unmatched' => $result['unmatched_store_count'],
-        ]));
-    }
-
-    public function emailPurchaseStatus(Request $request): JsonResponse
-    {
-        $context = $this->portalContext($request);
-
-        if ($context instanceof Response) {
-            abort(403);
-        }
-
-        $this->authorization->ensureCanManageDomainStores($context['user']);
-        $validated = $request->validate(['email' => ['nullable', 'email', 'max:191']]);
-        $status = $this->emailPurchases->statusFor($validated['email'] ?? null);
-        $labels = $this->emailPurchases->statusLabels();
-
-        return response()->json([
-            'status' => $status,
-            'label' => $labels[$status] ?? $labels[AssistantEmailPurchaseSyncService::STATUS_UNSYNCED],
-            'purchased' => $status === AssistantEmailPurchaseSyncService::STATUS_CURRENT,
         ]);
     }
 
@@ -353,7 +287,6 @@ class DomainStoreController extends Controller
                 'email_bound' => false,
                 'email_purchased' => false,
             ]),
-            'emailPurchaseStatus' => $this->emailPurchases->statusFor(null),
             'canManageQuickOptions' => $this->authorization->canManageQuickOptions($context['user']),
             'formMode' => 'create',
             'modalForm' => $this->isModalFormRequest($request),
@@ -419,7 +352,6 @@ class DomainStoreController extends Controller
             ...$this->formOptions(),
             ...$this->departmentAccessFormData($context['user'], $domainStore),
             'store' => $domainStore,
-            'emailPurchaseStatus' => $this->emailPurchases->statusFor($domainStore->email),
             'canManageQuickOptions' => $this->authorization->canManageQuickOptions($context['user']),
             'formMode' => 'edit',
             'modalForm' => $this->isModalFormRequest($request),
@@ -781,7 +713,6 @@ class DomainStoreController extends Controller
             'domain_expires_to' => $this->filterDate($request, 'domain_expires_to'),
             'shop_status' => $shopStatus,
             'domain_check_status' => $domainCheckStatus,
-            'department_id' => $this->filterPositiveInteger($request, 'department_id'),
             'email' => $this->filterText($request, 'email'),
             'email_bound' => $this->filterBoolean($request, 'email_bound'),
             'email_purchased' => $this->filterBoolean($request, 'email_purchased'),
@@ -821,15 +752,6 @@ class DomainStoreController extends Controller
             })
             ->when($filters['shop_status'] !== '', fn (Builder $query) => $query->where('shop_status', $filters['shop_status']))
             ->when($filters['domain_check_status'] !== '', fn (Builder $query) => $query->where('domain_check_status', $filters['domain_check_status']));
-
-        $departmentId = (int) $filters['department_id'];
-        if (
-            $departmentId > 0
-            && $this->authorization->canManageAllDomainStores($user)
-            && $this->authorization->assistantChildDepartments()->contains('id', $departmentId)
-        ) {
-            $query->whereHas('authorizedDepartments', fn (Builder $access) => $access->whereKey($departmentId));
-        }
 
         foreach ([
             'site_builder' => 'site_builder',
@@ -910,11 +832,25 @@ class DomainStoreController extends Controller
      */
     private function scopedStoreQuery(AdminUser $user): Builder
     {
-        if (!$this->authorization->isAssistantDepartmentMember($user)) {
-            return AssistantDomainStore::query();
+        $query = AssistantDomainStore::query();
+
+        if ($this->authorization->canManageAllDomainStores($user)) {
+            return $query;
         }
 
-        return $this->authorization->scopeDomainStores(AssistantDomainStore::query(), $user);
+        if (!$this->authorization->isAssistantDepartmentMember($user)) {
+            return $query;
+        }
+
+        $childDepartment = $this->authorization->assistantChildDepartmentFor($user);
+
+        if ($childDepartment === null) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->whereHas('authorizedDepartments', function (Builder $access) use ($childDepartment): void {
+            $access->whereKey($childDepartment->getKey());
+        });
     }
 
     private function findAccessibleStoreOrFail(AdminUser $user, int|string|null $storeId): AssistantDomainStore
@@ -1139,8 +1075,6 @@ class DomainStoreController extends Controller
             $data[$field] = $values === [] ? null : $values;
         }
 
-        $data['email_purchased'] = $this->emailPurchases->isPurchased($data['email'] ?? null);
-
         return $data;
     }
 
@@ -1350,7 +1284,7 @@ class DomainStoreController extends Controller
     private function batchEditableFields(): array
     {
         return [
-            'shop_name', 'domain', 'shop_login_url', 'email', 'domain_expires_at', 'domain_check_status', 'email_bound',
+            'shop_name', 'domain', 'shop_login_url', 'email', 'domain_expires_at', 'domain_check_status', 'email_bound', 'email_purchased',
             'team', 'project', 'user_name',
             'site_builder', 'erp', 'credit_card', 'wallet', 'paypal', 'other_payment', 'payment_card',
             'store_prefix', 'shopify_client_id', 'shopify_client_secret',
@@ -1485,6 +1419,7 @@ class DomainStoreController extends Controller
             'domain_check_status' => ['required', 'in:'.implode(',', array_keys(AssistantDomainStore::domainCheckLabels()))],
             'email' => ['nullable', 'email', 'max:191'],
             'email_bound' => ['required', 'boolean'],
+            'email_purchased' => ['required', 'boolean'],
             'team' => ['nullable', 'array', 'max:20'],
             'team.*' => ['required', 'string', 'max:100'],
             'project' => ['nullable', 'string', 'max:100'],
@@ -1667,14 +1602,6 @@ class DomainStoreController extends Controller
         $value = is_scalar($rawValue) ? (string) $rawValue : '';
 
         return in_array($value, ['0', '1'], true) ? $value : '';
-    }
-
-    private function filterPositiveInteger(Request $request, string $field): string
-    {
-        $rawValue = $request->input($field, '');
-        $value = is_scalar($rawValue) ? (int) $rawValue : 0;
-
-        return $value > 0 ? (string) $value : '';
     }
 
     private function filterDate(Request $request, string $field): string

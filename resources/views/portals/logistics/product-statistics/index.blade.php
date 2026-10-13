@@ -7,7 +7,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261012-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261009-6">
 @endpush
 
 @section('content')
@@ -27,9 +27,6 @@
         <div class="box box-solid product-statistics-filter-box">
             <div class="box-body">
                 <form id="product-statistics-filter-form" class="product-statistics-filter-form" autocomplete="off" method="get" action="{{ route('logistics.product-statistics.index') }}" data-loading="off">
-                    <input id="product-statistics-sort-field" type="hidden" name="sort" value="{{ $filters['sort'] }}">
-                    <input id="product-statistics-direction-field" type="hidden" name="direction" value="{{ $filters['direction'] }}">
-                    <input id="product-statistics-per-page-field" type="hidden" name="per_page" value="{{ $filters['per_page'] }}">
                     <div class="product-statistics-filters">
                         <div class="product-statistics-filter-field product-statistics-date-field">
                             <label for="product-statistics-date-from">{{ __('logistics.product_statistics.filters.date_range') }}</label>
@@ -116,7 +113,7 @@
                     <span id="product-statistics-page-numbers"></span>
                     <button id="product-statistics-next-page" type="button" class="btn btn-default btn-sm" aria-label="{{ __('logistics.product_statistics.ui.next_page') }}"><i class="fa fa-angle-right"></i></button>
                 </div>
-                <div class="product-statistics-page-size"><label>{{ __('logistics.product_statistics.ui.per_page') }} <select id="product-statistics-page-size" class="form-control input-sm"><option value="5" @selected($filters['per_page'] === 5)>5</option><option value="10" @selected($filters['per_page'] === 10)>10</option><option value="20" @selected($filters['per_page'] === 20)>20</option></select> {{ __('logistics.product_statistics.ui.items') }}</label></div>
+                <div class="product-statistics-page-size"><label>{{ __('logistics.product_statistics.ui.per_page') }} <select id="product-statistics-page-size" class="form-control input-sm"><option value="5">5</option><option value="10" selected>10</option><option value="20">20</option></select> {{ __('logistics.product_statistics.ui.items') }}</label></div>
             </div>
         </div>
 
@@ -166,14 +163,10 @@
     <script>
         window.ErpLogisticsProductStatistics = {
             products: @json($products),
-            summary: @json($productSummary),
-            pagination: @json($productPagination),
-            sort: @json($filters['sort']),
-            direction: @json($filters['direction']),
             decisions: @json($decisionOptions),
             labels: @json($labels),
             exportValidationError: @json($errors->first('scope')),
         };
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/product-statistics.js?v=20261012-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-statistics.js?v=20261009-6"></script>
 @endpush

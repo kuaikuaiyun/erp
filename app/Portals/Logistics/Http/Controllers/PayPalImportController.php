@@ -52,7 +52,7 @@ class PayPalImportController extends Controller
         }
 
         $validator = Validator::make($payload, [
-            'schema_version' => ['required', 'integer', 'in:2'],
+            'schema_version' => ['required', 'integer', 'in:1'],
             'upload_id' => ['required', 'string', 'max:64', 'regex:/^[A-Za-z0-9-]{16,64}$/'],
             'merchant_id' => ['required', 'string', 'max:100'],
             'environment' => ['nullable', 'string', 'in:live,sandbox'],
@@ -60,17 +60,9 @@ class PayPalImportController extends Controller
             'period' => ['nullable', 'array'],
             'period.from' => ['nullable', 'date'],
             'period.to' => ['nullable', 'date'],
-            'source_responses' => ['required', 'array'],
-            'source_responses.transaction_search' => ['required', 'array'],
-            'source_responses.transaction_search.segments' => ['present', 'array'],
-            'source_responses.dispute_search' => ['required', 'array'],
-            'source_responses.dispute_search.list_responses' => ['present', 'array'],
-            'source_responses.dispute_search.detail_responses' => ['present', 'array'],
-            'collection_summary' => ['required', 'array'],
-            'collection_summary.transactions' => ['required', 'integer', 'min:0'],
-            'collection_summary.disputes' => ['required', 'integer', 'min:0'],
-            'collection_summary.errors' => ['required', 'integer', 'min:0'],
-            'errors' => ['present', 'array'],
+            'transactions' => ['present', 'array'],
+            'disputes' => ['present', 'array'],
+            'errors' => ['nullable', 'array'],
         ]);
         if ($validator->fails()) {
             return response()->json([

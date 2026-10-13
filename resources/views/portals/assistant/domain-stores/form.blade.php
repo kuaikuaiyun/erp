@@ -38,20 +38,10 @@
             'deleteFailed' => $t('javascript.quick_option_delete_failed'),
         ],
     ];
-    $emailPurchaseDisplayStatus = filled($value('email'))
-        ? ($emailPurchaseStatus ?? 'unsynced')
-        : 'empty';
-    $emailPurchaseJavascriptConfig = [
-        'statusUrl' => route('assistant.domain-stores.email-purchases.status'),
-        'initialStatus' => $emailPurchaseDisplayStatus,
-        'empty' => $t('email_purchase_status.empty'),
-        'loading' => $t('email_purchase_status.checking'),
-        'failed' => $t('email_purchase_status.lookup_failed'),
-    ];
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-20261009-7.css?v=20261013-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-20261009-7.css">
 @endpush
 
 @section('content')
@@ -118,12 +108,14 @@
                         </div>
                         @error('email_bound')<span class="help-block">{{ $message }}</span>@enderror
                     </div>
-                    <div class="form-group col-md-4">
-                        <label>{{ $t('fields.email_purchased') }}</label>
-                        <div class="assistant-email-purchase-status" data-email-purchase-status>
-                            <span class="label label-default" data-email-purchase-label>{{ $t('email_purchase_status.'.$emailPurchaseDisplayStatus) }}</span>
-                            <span class="text-muted assistant-email-purchase-hint">{{ $t('form.email_purchase_auto_hint') }}</span>
+                    <div class="form-group col-md-4 @error('email_purchased') has-error @enderror">
+                        <label for="email_purchased">{{ $t('fields.email_purchased') }} <span class="text-red">*</span></label>
+                        <div class="assistant-option-group" data-option-group data-required="true">
+                            <input type="hidden" name="email_purchased" value="{{ (bool) $value('email_purchased') ? '1' : '0' }}">
+                            <button type="button" class="btn btn-default btn-sm assistant-option-choice @if ((bool) $value('email_purchased')) is-selected @endif" data-option-value="1">{{ $t('common.yes') }}</button>
+                            <button type="button" class="btn btn-default btn-sm assistant-option-choice @if (!(bool) $value('email_purchased')) is-selected @endif" data-option-value="0">{{ $t('common.no') }}</button>
                         </div>
+                        @error('email_purchased')<span class="help-block">{{ $message }}</span>@enderror
                     </div>
                 </div>
             </div>
@@ -506,7 +498,6 @@
     <script>
         window.ErpAssistantDomainStoreTagTranslations = @json($tagJavascriptTranslations);
         window.ErpAssistantDomainStoreQuickOptionConfig = @json($quickOptionJavascriptConfig);
-        window.ErpAssistantEmailPurchaseConfig = @json($emailPurchaseJavascriptConfig);
     </script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-tags-20261007-3.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-form-20261008-1.js"></script>
@@ -514,5 +505,4 @@
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-quick-options-20261008-2.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-team-project-options-20261009-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-domain-check-20261008-1.js"></script>
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-email-purchase-20261013-1.js?v=20261013-1"></script>
 @endpush

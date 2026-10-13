@@ -3,7 +3,8 @@
 namespace App\Portals\Logistics;
 
 use App\Models\LogisticsOrder;
-use Illuminate\Database\Eloquent\Builder;
+use DateTimeInterface;
+use Illuminate\Support\Collection;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -21,10 +22,6 @@ class LogisticsOrderSpreadsheetService
     private const TYPE_RATE = 'rate';
 
     private const TYPE_MULTILINE = 'multiline';
-
-    public function __construct(private readonly StreamedXlsxWriter $streamedWriter)
-    {
-    }
 
     /**
      * @return list<array{0: string, 1: string, 2: string, 3: float|int}>
@@ -91,54 +88,49 @@ class LogisticsOrderSpreadsheetService
         ];
     }
 
-    /** @return list<string> */
-    public function requiredOrderColumns(): array
+    /**
+     * @param Collection<int, LogisticsOrder> $orders
+     */
+    public function exportResponse(Collection $orders): StreamedResponse
     {
-        return array_values(array_unique(array_merge(
-            ['id'],
-            array_filter(
-                array_column(self::columns(), 1),
-                static fn (string $field): bool => !str_starts_with($field, 'import_refund_'),
-            ),
-        )));
-    }
+        return response()->streamDownload(function () use ($orders): void {
+            $spreadsheet = new Spreadsheet();
+            $sheet = $spreadsheet->getActiveSheet();
+            $sheet->setTitle('物流订单');
+            $columns = self::columns();
 
-    public function exportResponse(Builder $orders): StreamedResponse
-    {
-        $columns = self::columns();
+            foreach ($columns as $columnIndex => [$label, $field, $type, $width]) {
+                $columnName = Coordinate::stringFromColumnIndex($columnIndex + 1);
+                $sheet->setCellValueExplicit($columnName.'1', $label, DataType::TYPE_STRING);
+                $sheet->getColumnDimension($columnName)->setWidth($width);
+            }
 
-        return $this->streamedWriter->response(
-            '物流订单_'.now('Asia/Shanghai')->format('Ymd-His').'.xlsx',
-            '物流订单',
-            array_map(static fn (array $column): array => [
-                'label' => $column[0],
-                'width' => $column[3],
-            ], $columns),
-            function () use ($orders, $columns): iterable {
-                foreach ($orders->lazy(200) as $order) {
-                    $maximumLines = 1;
-                    $cells = array_map(function (array $column) use ($order, &$maximumLines): array {
-                        [, $field, $type] = $column;
-                        $value = $this->exportValue($order, $field);
-                        if ($type === self::TYPE_MULTILINE) {
-                            $maximumLines = max($maximumLines, substr_count((string) $value, "\n") + 1);
-                        }
-
-                        return [
-                            'value' => $value,
-                            'type' => $type === self::TYPE_MULTILINE ? self::TYPE_TEXT : $type,
-                            'wrap' => $type === self::TYPE_MULTILINE,
-                        ];
-                    }, $columns);
-
-                    yield [
-                        'kind' => 'normal',
-                        'height' => min(120, max(18, $maximumLines * 18)),
-                        'cells' => $cells,
-                    ];
+            $rowNumber = 2;
+            foreach ($orders as $order) {
+                foreach ($columns as $columnIndex => [, $field, $type]) {
+                    $columnName = Coordinate::stringFromColumnIndex($columnIndex + 1);
+                    $cell = $columnName.$rowNumber;
+                    $this->writeValue($sheet, $cell, $this->exportValue($order, $field), $type);
                 }
-            },
-        );
+
+                $sheet->getRowDimension($rowNumber)->setRowHeight(-1);
+                $rowNumber++;
+            }
+
+            $lastColumn = Coordinate::stringFromColumnIndex(count($columns));
+            $lastRow = max(1, $rowNumber - 1);
+            $sheet->freezePane('A2');
+            $sheet->setAutoFilter("A1:{$lastColumn}{$lastRow}");
+            $sheet->getRowDimension(1)->setRowHeight(24);
+            $sheet->getStyle("A1:{$lastColumn}1")->getFont()->setBold(true)->getColor()->setRGB('2D4F73');
+            $sheet->getStyle("A1:{$lastColumn}1")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('EAF2F8');
+            $sheet->getStyle("A1:{$lastColumn}{$lastRow}")->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
+
+            (new Xlsx($spreadsheet))->save('php://output');
+            $spreadsheet->disconnectWorksheets();
+        }, '物流订单_'.now('Asia/Shanghai')->format('Ymd-His').'.xlsx', [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
     }
 
     public function refundImportTemplateResponse(): StreamedResponse
@@ -195,6 +187,47 @@ class LogisticsOrderSpreadsheetService
         }, '退款订单导入模板.xlsx', [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);
+    }
+
+    private function writeValue(\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet $sheet, string $cell, mixed $value, string $type): void
+    {
+        if ($type === self::TYPE_MONEY || $type === self::TYPE_RATE) {
+            if ($value === null || $value === '' || !is_numeric($value)) {
+                $sheet->setCellValueExplicit($cell, '', DataType::TYPE_STRING);
+
+                return;
+            }
+
+            $sheet->setCellValue($cell, (float) $value);
+            $sheet->getStyle($cell)->getNumberFormat()->setFormatCode(
+                $type === self::TYPE_MONEY ? '"$"#,##0.00;[Red]-"$"#,##0.00' : '0.00"%"',
+            );
+
+            return;
+        }
+
+        $sheet->setCellValueExplicit($cell, $this->displayValue($value), DataType::TYPE_STRING);
+
+        if ($type === self::TYPE_MULTILINE) {
+            $sheet->getStyle($cell)->getAlignment()->setWrapText(true);
+        }
+    }
+
+    private function displayValue(mixed $value): string
+    {
+        if ($value === null || $value === '') {
+            return '';
+        }
+
+        if ($value instanceof DateTimeInterface) {
+            if (method_exists($value, 'timezone')) {
+                return $value->timezone('Asia/Shanghai')->format('Y-m-d H:i:s');
+            }
+
+            return $value->format('Y-m-d H:i:s');
+        }
+
+        return (string) $value;
     }
 
     private function exportValue(LogisticsOrder $order, string $field): mixed

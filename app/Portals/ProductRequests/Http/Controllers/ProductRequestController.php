@@ -30,6 +30,88 @@ class ProductRequestController extends Controller
     ) {
     }
 
+    public function pendingCount(Request $request): JsonResponse
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::PROCUREMENT_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return response()->json(['count' => 0, 'items' => []]);
+        }
+
+        if (!$this->access->canInspectProcurement($context['user'])) {
+            return response()->json(['count' => 0, 'items' => []]);
+        }
+
+        $records = $this->access->applyProcurementVisibility(
+            ProductRequest::query()->where('status', ProductRequest::STATUS_PENDING),
+            $context['user'],
+        )->get(['id', 'report_no']);
+
+        return response()->json([
+            'count' => $records->count(),
+            'items' => $records->map(fn ($r) => ['id' => $r->id, 'report_no' => $r->report_no]),
+        ]);
+    }
+
+    public function operationPendingCount(Request $request): JsonResponse
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return response()->json(['count' => 0, 'items' => []]);
+        }
+
+        $records = $this->access->applyOperationVisibility(
+            ProductRequest::query()
+                ->where('status', ProductRequest::STATUS_INSPECTION_PASSED)
+                ->where('placement_review_status', ProductRequest::REVIEW_UNFILLED),
+            $context['user'],
+        )->get(['id', 'report_no']);
+
+        return response()->json([
+            'count' => $records->count(),
+            'items' => $records->map(fn ($r) => ['id' => $r->id, 'report_no' => $r->report_no]),
+        ]);
+    }
+
+    public function placementReviewPendingCount(Request $request): JsonResponse
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::PROCUREMENT_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return response()->json(['count' => 0, 'items' => []]);
+        }
+
+        if (!$this->access->canReviewPlacement($context['user'])) {
+            return response()->json(['count' => 0, 'items' => []]);
+        }
+
+        $records = $this->access->applyProcurementVisibility(
+            ProductRequest::query()->where('placement_review_status', ProductRequest::REVIEW_PENDING),
+            $context['user'],
+        )->get(['id', 'report_no']);
+
+        return response()->json([
+            'count' => $records->count(),
+            'items' => $records->map(fn ($r) => ['id' => $r->id, 'report_no' => $r->report_no]),
+        ]);
+    }
+
+    public function warehousePendingCount(Request $request): JsonResponse
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::WAREHOUSE_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return response()->json(['count' => 0, 'items' => []]);
+        }
+
+        $records = ProductRequest::query()
+            ->whereIn('status', [ProductRequest::STATUS_INSPECTION_PASSED, ProductRequest::STATUS_APPROVED])
+            ->where('warehouse_acceptance_result', ProductRequest::WAREHOUSE_PENDING_REVIEW)
+            ->get(['id', 'report_no']);
+
+        return response()->json([
+            'count' => $records->count(),
+            'items' => $records->map(fn ($r) => ['id' => $r->id, 'report_no' => $r->report_no]),
+        ]);
+    }
+
     public function operationIndex(Request $request): Response|View
     {
         $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);

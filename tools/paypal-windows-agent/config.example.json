@@ -1,0 +1,12 @@
+{
+  "paypal_client_id": "",
+  "paypal_client_secret": "",
+  "paypal_merchant_id": "",
+  "paypal_environment": "live",
+  "erp_import_url": "https://wuliu.digilabreview.com/api/paypal/import",
+  "erp_import_secret": "",
+  "initial_sync_days": 30,
+  "overlap_hours": 4,
+  "request_timeout_seconds": 60,
+  "verify_tls": true
+}

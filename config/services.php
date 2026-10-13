@@ -35,20 +35,4 @@ return [
         ],
     ],
 
-    'assistant' => [
-        'shopify_analytics' => [
-            // All dashboard statistics use this reporting timezone by default.
-            'default_timezone' => env('ASSISTANT_SHOPIFY_ANALYTICS_TIMEZONE', 'Asia/Shanghai'),
-        ],
-        'email_purchase' => [
-            // Filled after the external mailbox purchase source is confirmed.
-            'sync_url' => env('ASSISTANT_EMAIL_PURCHASE_SYNC_URL', ''),
-            'sync_method' => env('ASSISTANT_EMAIL_PURCHASE_SYNC_METHOD', 'GET'),
-            'sync_token' => env('ASSISTANT_EMAIL_PURCHASE_SYNC_TOKEN', ''),
-            'sync_origin' => env('ASSISTANT_EMAIL_PURCHASE_ORIGIN', ''),
-            'emails_path' => env('ASSISTANT_EMAIL_PURCHASE_EMAILS_PATH', 'data'),
-            'timeout_seconds' => (int) env('ASSISTANT_EMAIL_PURCHASE_TIMEOUT', 30),
-        ],
-    ],
-
 ];

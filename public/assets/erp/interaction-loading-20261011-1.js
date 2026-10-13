@@ -22,11 +22,7 @@
         }
 
         if (options && typeof options.target === 'string') {
-            var localTarget = options.form && options.form.closest
-                ? options.form.closest(options.target)
-                : null;
-
-            return localTarget || document.querySelector(options.target);
+            return document.querySelector(options.target);
         }
 
         if (options && options.mode === 'modal') {

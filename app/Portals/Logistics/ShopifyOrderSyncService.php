@@ -26,19 +26,14 @@ class ShopifyOrderSyncService
     {
     }
 
-    /** @return array{created:int, updated:int, sku_exception:int, sku_item_count:int, sku_missing_item_count:int, sku_missing_details:list<array{order_number:string,item_count:int,missing_count:int}>, skipped_unpaid:int, webhook_active:bool, webhook_error:?string} */
-    public function syncStore(AssistantDomainStore $store, AdminUser $actor, ?int $syncDays = null): array
+    /** @return array{created:int, updated:int, sku_exception:int, skipped_unpaid:int, webhook_active:bool, webhook_error:?string} */
+    public function syncStore(AssistantDomainStore $store, AdminUser $actor): array
     {
         $connection = LogisticsShopifyConnection::query()->firstOrNew([
             'assistant_domain_store_id' => $store->getKey(),
         ]);
         $connection = $this->ensureAccessToken($connection, $store, $actor);
-        $summary = $this->sync(
-            $connection,
-            $store,
-            $actor,
-            max(1, $syncDays ?? (int) config('logistics.shopify.sync_days', 60)),
-        );
+        $summary = $this->sync($connection, $store, $actor);
         $webhook = $this->registerWebhooks($connection, $actor);
 
         return [...$summary, ...$webhook];
@@ -61,28 +56,6 @@ class ShopifyOrderSyncService
         }
 
         return $this->registerWebhooks($connection, $actor);
-    }
-
-    /**
-     * Execute a server-generated Admin GraphQL query for a configured Shopify
-     * store. This keeps token acquisition and expiry handling in one place for
-     * both logistics synchronization and Assistant analytics.
-     *
-     * @param array<string, mixed> $variables
-     * @return array<string, mixed>
-     */
-    public function graphqlForStore(
-        AssistantDomainStore $store,
-        ?AdminUser $actor,
-        string $query,
-        array $variables = [],
-    ): array {
-        $connection = LogisticsShopifyConnection::query()->firstOrNew([
-            'assistant_domain_store_id' => $store->getKey(),
-        ]);
-        $connection = $this->ensureAccessToken($connection, $store, $actor);
-
-        return $this->graphql($connection, $query, $variables);
     }
 
     public function syncWebhookOrder(LogisticsShopifyConnection $connection, array $webhookPayload, ?string $topic): ?LogisticsOrder
@@ -194,28 +167,20 @@ class ShopifyOrderSyncService
         return $connection;
     }
 
-    /** @return array{created:int, updated:int, sku_exception:int, sku_item_count:int, sku_missing_item_count:int, sku_missing_details:list<array{order_number:string,item_count:int,missing_count:int}>, skipped_unpaid:int} */
+    /** @return array{created:int, updated:int, sku_exception:int} */
     private function sync(
         LogisticsShopifyConnection $connection,
         AssistantDomainStore $store,
         AdminUser $actor,
-        int $syncDays,
     ): array {
         if (!$connection->hasReusableAccessToken()) {
             throw new RuntimeException('Shopify Token 无效或已过期，请重新同步。');
         }
 
-        $summary = [
-            'created' => 0,
-            'updated' => 0,
-            'sku_exception' => 0,
-            'sku_item_count' => 0,
-            'sku_missing_item_count' => 0,
-            'sku_missing_details' => [],
-            'skipped_unpaid' => 0,
-        ];
+        $summary = ['created' => 0, 'updated' => 0, 'sku_exception' => 0, 'skipped_unpaid' => 0];
         $cursor = null;
         $hasNextPage = true;
+        $syncDays = max(1, (int) config('logistics.shopify.sync_days', 10));
         $createdAfter = now()->subDays($syncDays)->utc()->format('Y-m-d\\TH:i:s\\Z');
 
         try {
@@ -236,15 +201,8 @@ class ShopifyOrderSyncService
                         continue;
                     }
                     $summary[$result['state']]++;
-                    if ($result['shopify_sku_missing']) {
+                    if ($result['order']->data_status === LogisticsOrder::STATUS_SKU_EXCEPTION) {
                         $summary['sku_exception']++;
-                        $summary['sku_item_count'] += $result['item_count'];
-                        $summary['sku_missing_item_count'] += $result['missing_sku_count'];
-                        $summary['sku_missing_details'][] = [
-                            'order_number' => (string) ($result['order']->shopify_order_number ?: $result['order']->shopify_order_id),
-                            'item_count' => $result['item_count'],
-                            'missing_count' => $result['missing_sku_count'],
-                        ];
                     }
                 }
 
@@ -264,7 +222,7 @@ class ShopifyOrderSyncService
         $connection->fill([
             'last_synced_at' => now(),
             'last_sync_status' => 'success',
-            'last_sync_message' => '近 '.$syncDays.' 天：新增 '.$summary['created'].' 条，更新 '.$summary['updated'].' 条。',
+            'last_sync_message' => '新增 '.$summary['created'].' 条，更新 '.$summary['updated'].' 条。',
         ])->save();
         $this->log($connection, null, 'shopify', 'sync', 'success', $connection->last_sync_message, $actor, $summary);
 
@@ -355,7 +313,7 @@ GRAPHQL, [
         }
     }
 
-    /** @return array{state:'created'|'updated', order:LogisticsOrder, shopify_sku_missing:bool, item_count:int, missing_sku_count:int}|null */
+    /** @return array{state:'created'|'updated', order:LogisticsOrder}|null */
     private function persistOrder(
         ?AssistantDomainStore $store,
         array $payload,
@@ -379,11 +337,7 @@ GRAPHQL, [
         $attributes = $this->attributes($payload['customAttributes'] ?? []);
         $lineItems = is_array($payload['lineItems']['nodes'] ?? null) ? $payload['lineItems']['nodes'] : [];
         $skuRows = array_map(static fn (array $item): string => trim((string) ($item['sku'] ?? '')), $lineItems);
-        $itemCount = count($lineItems);
-        $missingSkuCount = $lineItems === []
-            ? 0
-            : count(array_filter($skuRows, static fn (string $sku): bool => $sku === ''));
-        $missingSku = $lineItems === [] || $missingSkuCount > 0;
+        $missingSku = $lineItems === [] || collect($skuRows)->contains(static fn (string $sku): bool => $sku === '');
         $transactions = is_array($payload['transactions'] ?? null) ? $payload['transactions'] : [];
         $refunds = is_array($payload['refunds'] ?? null) ? $payload['refunds'] : [];
         $refundData = $this->refundData($refunds);
@@ -468,13 +422,7 @@ GRAPHQL, [
         $this->refunds->attachUnmatchedForOrder($current);
         $this->automation->scheduleForOrder($current);
 
-        return [
-            'state' => $isNew ? 'created' : 'updated',
-            'order' => $current,
-            'shopify_sku_missing' => $missingSku,
-            'item_count' => $itemCount,
-            'missing_sku_count' => $lineItems === [] ? 0 : $missingSkuCount,
-        ];
+        return ['state' => $isNew ? 'created' : 'updated', 'order' => $current];
     }
 
     private function existingOrder(?AssistantDomainStore $store, ?string $sourceShopDomain, string $shopifyOrderId): ?LogisticsOrder
