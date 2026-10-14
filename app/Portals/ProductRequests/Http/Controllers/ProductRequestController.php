@@ -765,7 +765,9 @@ class ProductRequestController extends Controller
                     ->orWhere('operation_display_name', 'like', $keyword)
                     ->orWhere('operation_department_name', 'like', $keyword)
                     ->orWhere('standard_chinese_name', 'like', $keyword)
-                    ->orWhere('company_spu', 'like', $keyword);
+                    ->orWhere('company_spu', 'like', $keyword)
+                    ->orWhere('supplier_url', 'like', $keyword)
+                    ->orWhere('operation_supplier_url', 'like', $keyword);
             });
         }
         if ($filters['status'] !== '') {
