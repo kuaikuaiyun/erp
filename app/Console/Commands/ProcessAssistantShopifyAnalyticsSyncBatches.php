@@ -23,7 +23,10 @@ class ProcessAssistantShopifyAnalyticsSyncBatches extends Command
         AssistantPortalAuthorizationService $authorization,
     ): int {
         $limit = max(1, min(100, (int) $this->option('limit')));
-        $lock = Cache::lock('assistant-shopify-analytics-sync-batches', 900);
+        // A first-time store sync can fetch about ninety local dates. Keep
+        // the worker lock for the full expected window so cron cannot start a
+        // second processor against the same batch mid-import.
+        $lock = Cache::lock('assistant-shopify-analytics-sync-batches', 10800);
 
         if (!$lock->get()) {
             $this->line('Another Assistant Shopify analytics batch processor is already running.');
@@ -61,7 +64,7 @@ class ProcessAssistantShopifyAnalyticsSyncBatches extends Command
 
     private function requeueStalledTasks(): void
     {
-        $cutoff = now()->subMinutes(20);
+        $cutoff = now()->subHours(3);
 
         AssistantShopifyAnalyticsSyncTask::query()
             ->where('status', AssistantShopifyAnalyticsSyncTask::STATUS_PROCESSING)

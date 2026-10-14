@@ -7,6 +7,9 @@
     $t = static fn (string $key, array $replace = []): string => __('assistant.shopify_analytics.'.$key, $replace);
     $money = static fn (mixed $value): string => number_format((float) $value, 2);
     $number = static fn (mixed $value): string => number_format((int) $value);
+    $rateNumber = static function (float $rate): string {
+        return rtrim(rtrim(number_format($rate, 6, '.', ''), '0'), '.');
+    };
     $usd = $t('currency.usd_prefix');
     $currencyPrefix = static function (?string $currency): string {
         return match (strtoupper((string) $currency)) {
@@ -58,6 +61,7 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261012-3.css?v=20261012-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261013-1.css?v=20261013-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261013-2.css?v=20261013-2">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261013-3.css?v=20261013-3">
 @endpush
 
 @section('content')
@@ -93,13 +97,6 @@
                 <div>
                     <span class="assistant-shopify-summary-label">{{ $t('overview.orders') }}</span>
                     <strong>{{ $number($summary['orders_count']) }}</strong>
-                </div>
-            </div>
-            <div class="assistant-shopify-summary-card">
-                <span class="assistant-shopify-summary-icon"><i class="fa fa-truck"></i></span>
-                <div>
-                    <span class="assistant-shopify-summary-label">{{ $t('overview.fulfilled_orders') }}</span>
-                    <strong>{{ $number($summary['fulfilled_orders_count']) }}</strong>
                 </div>
             </div>
             <div class="assistant-shopify-summary-card">
@@ -154,7 +151,7 @@
                 </div>
             </form>
             <div class="box-footer assistant-shopify-overview-notice">
-                <i class="fa fa-info-circle"></i> {{ $t('overview.notice') }}
+                <i class="fa fa-info-circle"></i> {{ $t('overview.notice') }} {{ $t('overview.reference_rate_notice') }}
             </div>
         </div>
 
@@ -213,6 +210,9 @@
                 <button type="submit" form="assistant-shopify-batch-refresh-form" class="btn btn-info btn-sm" disabled data-shopify-batch-refresh>
                     <i class="fa fa-refresh"></i> {{ $t('batch.refresh_selected') }}
                 </button>
+                <button type="button" class="btn btn-default btn-sm" data-toggle="modal" data-target="#assistant-shopify-reference-rates-modal">
+                    <i class="fa fa-exchange"></i> {{ $t('exchange_rates.button') }}
+                </button>
             </div>
 
             <div class="assistant-shopify-table-scroll">
@@ -232,11 +232,9 @@
                             'total_sales' => $t('metrics.total_sales'),
                             'original_total_sales' => $t('metrics.original_total_sales'),
                             'orders_count' => $t('metrics.orders'),
-                            'returning_customer_rate' => $t('metrics.returning_customer_rate'),
                             'fulfilled_orders_count' => $t('metrics.fulfilled_orders'),
                             'refund_amount' => $t('metrics.refund_amount'),
                             'net_sales' => $t('metrics.net_sales'),
-                            'average_order_value' => $t('metrics.average_order_value'),
                             'sync_status' => $t('table.sync_status'),
                             'synced_at' => $t('table.last_synced_at'),
                         ] as $field => $label)
@@ -262,6 +260,10 @@
                             $metric = $store->shopifyAnalyticsPeriod;
                             $status = $metric?->sync_status ?: \App\Models\AssistantShopifyStoreMetric::STATUS_NOT_SYNCED;
                             $statusLabel = $metricStatuses[$status] ?? $metricStatuses[\App\Models\AssistantShopifyStoreMetric::STATUS_NOT_SYNCED];
+                            // A successful source synchronization can quite
+                            // validly have zero orders in the chosen report
+                            // range. It should display zero, not masquerade
+                            // as an unavailable snapshot.
                             $hasSnapshot = $metric?->sync_status === \App\Models\AssistantShopifyStoreMetric::STATUS_SUCCESS;
                             $isInactive = $store->shop_status !== \App\Models\AssistantDomainStore::SHOP_STATUS_IN_USE;
                             $isConfigured = filled($store->shopify_client_id) && filled($store->shopify_client_secret);
@@ -274,10 +276,9 @@
                                 ? $metric->from_date->format('Y-m-d').' ~ '.$metric->to_date->format('Y-m-d')
                                 : $t('card.not_available');
                             $syncedAt = $metric?->synced_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i') ?: $t('card.not_available');
-                            $returningRate = $hasSnapshot ? number_format((float) $metric->returning_customer_rate, 2).'%' : $t('card.not_available');
                             $failureReasonKey = $metric?->sync_message ?: match ($status) {
                                 \App\Models\AssistantShopifyStoreMetric::STATUS_NOT_CONFIGURED => 'credentials_missing',
-                                \App\Models\AssistantShopifyStoreMetric::STATUS_PERMISSION_DENIED => 'reports_permission_denied',
+                                \App\Models\AssistantShopifyStoreMetric::STATUS_PERMISSION_DENIED => 'orders_permission_denied',
                                 \App\Models\AssistantShopifyStoreMetric::STATUS_FAILED => 'unknown',
                                 default => null,
                             };
@@ -286,6 +287,20 @@
                             $originalSales = $hasSnapshot
                                 ? $currencyPrefix($metric->original_currency_code).$money($metric->original_total_sales)
                                 : $t('card.not_available');
+                            $originalCurrency = strtoupper((string) ($metric?->original_currency_code ?: ''));
+                            $hasReferenceRate = $hasSnapshot && (bool) ($metric?->reference_rate_configured);
+                            $referenceRateWarning = $t('exchange_rates.unconfigured', [
+                                'currency' => $originalCurrency !== '' ? $originalCurrency : $t('exchange_rates.unknown_currency'),
+                            ]);
+                            $totalSales = $hasReferenceRate && $metric?->total_sales !== null
+                                ? $usd.$money($metric->total_sales)
+                                : null;
+                            $refundAmount = $hasReferenceRate && $metric?->refund_amount !== null
+                                ? $usd.$money($metric->refund_amount)
+                                : null;
+                            $netSales = $hasReferenceRate && $metric?->net_sales !== null
+                                ? $usd.$money($metric->net_sales)
+                                : null;
                         @endphp
                         <tr class="{{ $isInactive ? 'is-inactive' : '' }}">
                             <td class="assistant-shopify-selection-column">
@@ -297,14 +312,42 @@
                             <td>{{ \App\Models\AssistantDomainStore::displayMultiValue($store->team) ?: $t('card.not_available') }}</td>
                             <td><span class="label {{ $store->email_purchased ? 'label-info' : 'label-default' }}">{{ $store->email_purchased ? $t('common.yes') : $t('common.no') }}</span></td>
                             <td title="{{ $timezone }}"><span class="assistant-shopify-value-tag assistant-shopify-value-tag-timezone">{{ $timezone }}</span></td>
-                            <td><span class="assistant-shopify-value-tag assistant-shopify-value-tag-money">{{ $hasSnapshot ? $usd.$money($metric->total_sales) : $t('card.not_available') }}</span></td>
+                            <td>
+                                @if (!$hasSnapshot)
+                                    <span class="assistant-shopify-value-tag">{{ $t('card.not_available') }}</span>
+                                @elseif (!$hasReferenceRate)
+                                    <span class="assistant-shopify-rate-warning" title="{{ $referenceRateWarning }}"><i class="fa fa-exclamation-circle"></i></span>
+                                @elseif ($totalSales !== null)
+                                    <span class="assistant-shopify-value-tag assistant-shopify-value-tag-money">{{ $totalSales }}</span>
+                                @else
+                                    <span class="assistant-shopify-value-tag">{{ $t('card.not_available') }}</span>
+                                @endif
+                            </td>
                             <td><span class="assistant-shopify-value-tag assistant-shopify-value-tag-money">{{ $originalSales }}</span></td>
                             <td><span class="assistant-shopify-value-tag assistant-shopify-value-tag-count">{{ $hasSnapshot ? $number($metric->orders_count) : $t('card.not_available') }}</span></td>
-                            <td><span class="assistant-shopify-value-tag assistant-shopify-value-tag-rate">{{ $returningRate }}</span></td>
                             <td><span class="assistant-shopify-value-tag assistant-shopify-value-tag-count">{{ $hasSnapshot ? $number($metric->fulfilled_orders_count) : $t('card.not_available') }}</span></td>
-                            <td><span class="assistant-shopify-value-tag assistant-shopify-value-tag-money">{{ $hasSnapshot ? $usd.$money($metric->refund_amount) : $t('card.not_available') }}</span></td>
-                            <td><span class="assistant-shopify-value-tag assistant-shopify-value-tag-money">{{ $hasSnapshot ? $usd.$money($metric->net_sales) : $t('card.not_available') }}</span></td>
-                            <td><span class="assistant-shopify-value-tag assistant-shopify-value-tag-money">{{ $hasSnapshot ? $usd.$money($metric->average_order_value) : $t('card.not_available') }}</span></td>
+                            <td>
+                                @if (!$hasSnapshot)
+                                    <span class="assistant-shopify-value-tag">{{ $t('card.not_available') }}</span>
+                                @elseif (!$hasReferenceRate)
+                                    <span class="assistant-shopify-rate-warning" title="{{ $referenceRateWarning }}"><i class="fa fa-exclamation-circle"></i></span>
+                                @elseif ($refundAmount !== null)
+                                    <span class="assistant-shopify-value-tag assistant-shopify-value-tag-money">{{ $refundAmount }}</span>
+                                @else
+                                    <span class="assistant-shopify-value-tag">{{ $t('card.not_available') }}</span>
+                                @endif
+                            </td>
+                            <td>
+                                @if (!$hasSnapshot)
+                                    <span class="assistant-shopify-value-tag">{{ $t('card.not_available') }}</span>
+                                @elseif (!$hasReferenceRate)
+                                    <span class="assistant-shopify-rate-warning" title="{{ $referenceRateWarning }}"><i class="fa fa-exclamation-circle"></i></span>
+                                @elseif ($netSales !== null)
+                                    <span class="assistant-shopify-value-tag assistant-shopify-value-tag-money">{{ $netSales }}</span>
+                                @else
+                                    <span class="assistant-shopify-value-tag">{{ $t('card.not_available') }}</span>
+                                @endif
+                            </td>
                             <td class="assistant-shopify-sync-status-cell">
                                 <span class="label {{ \App\Models\AssistantShopifyStoreMetric::statusClass($status) }}">{{ $statusLabel }}</span>
                                 @if ($failureReason !== null)
@@ -330,7 +373,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="19" class="assistant-shopify-empty-state">
+                            <td colspan="17" class="assistant-shopify-empty-state">
                                 <i class="fa fa-shopping-bag"></i>
                                 <p>{{ $t('card.no_snapshot') }}</p>
                             </td>
@@ -342,6 +385,41 @@
         </div>
 
         @include('portals.assistant.shopify-analytics.partials.pagination', ['stores' => $stores, 'filters' => $filters])
+
+        <div id="assistant-shopify-reference-rates-modal" class="modal fade" tabindex="-1" role="dialog" aria-labelledby="assistant-shopify-reference-rates-title">
+            <div class="modal-dialog modal-md" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('exchange_rates.close') }}"><span aria-hidden="true">&times;</span></button>
+                        <h4 id="assistant-shopify-reference-rates-title" class="modal-title"><i class="fa fa-exchange"></i> {{ $t('exchange_rates.title') }}</h4>
+                    </div>
+                    <div class="modal-body">
+                        <p class="assistant-shopify-rate-modal-notice">{{ $t('exchange_rates.description') }}</p>
+                        <div class="table-responsive">
+                            <table class="table table-bordered table-striped assistant-shopify-rate-table">
+                                <thead>
+                                <tr>
+                                    <th>{{ $t('exchange_rates.currency') }}</th>
+                                    <th>{{ $t('exchange_rates.rate') }}</th>
+                                </tr>
+                                </thead>
+                                <tbody>
+                                @foreach ($referenceRates as $currency => $rate)
+                                    <tr>
+                                        <td>{{ $t('exchange_rates.currencies.'.strtolower($currency)) }} <code>{{ $currency }}</code></td>
+                                        <td>1 {{ $currency }} = {{ $usd }}{{ $rateNumber($rate) }}</td>
+                                    </tr>
+                                @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">{{ $t('exchange_rates.close') }}</button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </section>
 @endsection
 

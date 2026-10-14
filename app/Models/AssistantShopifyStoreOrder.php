@@ -1,0 +1,66 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+/**
+ * Immutable-source Shopify order fields used by Assistant analytics.
+ *
+ * The amounts in this table are persisted in Shopify's shop currency. Any
+ * reference USD value is calculated only when the analytics page is read.
+ */
+class AssistantShopifyStoreOrder extends Model
+{
+    protected $fillable = [
+        'assistant_domain_store_id',
+        'shopify_order_id',
+        'shopify_legacy_resource_id',
+        'shopify_order_number',
+        'shopify_created_at',
+        'shopify_processed_at',
+        'shopify_updated_at',
+        'shopify_cancelled_at',
+        'is_test',
+        'original_currency_code',
+        'original_total_price',
+        'current_currency_code',
+        'current_total_price',
+        'refunded_currency_code',
+        'refunded_total_amount',
+        'financial_status',
+        'fulfillment_status',
+        'synced_at',
+    ];
+
+    public function __construct(array $attributes = [])
+    {
+        $this->setConnection(config('admin.database.connection') ?: config('database.default'));
+
+        parent::__construct($attributes);
+    }
+
+    /** @return array<string, string> */
+    protected function casts(): array
+    {
+        return [
+            'shopify_created_at' => 'datetime',
+            'shopify_processed_at' => 'datetime',
+            'shopify_updated_at' => 'datetime',
+            'shopify_cancelled_at' => 'datetime',
+            'is_test' => 'boolean',
+            'original_total_price' => 'decimal:4',
+            'current_total_price' => 'decimal:4',
+            'refunded_total_amount' => 'decimal:4',
+            'synced_at' => 'datetime',
+            'created_at' => 'datetime',
+            'updated_at' => 'datetime',
+        ];
+    }
+
+    public function store(): BelongsTo
+    {
+        return $this->belongsTo(AssistantDomainStore::class, 'assistant_domain_store_id');
+    }
+}
