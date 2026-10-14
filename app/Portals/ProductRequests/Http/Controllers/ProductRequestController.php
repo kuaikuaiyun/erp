@@ -370,29 +370,32 @@ class ProductRequestController extends Controller
         abort_unless($this->access->canInspectProcurement($context['user']), 403);
 
         $data = $request->validate([
-            'standard_chinese_name' => ['required', 'string', 'max:191'],
-            'supplier_url' => ['required', 'url', 'max:2048'],
+            'supplier_url' => ['required', 'string', 'max:2048'],
+            'standard_chinese_name' => ['nullable', 'string', 'max:191'],
             'current_id' => ['nullable', 'integer'],
         ]);
         $normalizedUrl = $this->workflow->normalizeSupplierUrl($data['supplier_url']);
-        $base = ProductRequest::query()
+        $query = ProductRequest::query()
             ->whereNotNull('standard_chinese_name')
             ->with('attachments');
         if (!empty($data['current_id'])) {
-            $base->where('id', '!=', $data['current_id']);
+            $query->where('id', '!=', $data['current_id']);
         }
 
-        $records = (clone $base)
+        // 优先按 1688 链接精确匹配；链接查不到数据时回退按标准中文名模糊匹配
+        $matchType = 'supplier_url';
+        $records = (clone $query)
             ->where('supplier_url_hash', $this->workflow->supplierUrlHash($normalizedUrl))
             ->latest('id')
             ->limit(20)
             ->get();
-        $matchType = 'supplier_url';
 
-        if ($records->isEmpty()) {
+        $keyword = trim((string) ($data['standard_chinese_name'] ?? ''));
+        if ($records->isEmpty() && $keyword !== '') {
             $matchType = 'standard_chinese_name';
-            $records = $base
-                ->where('standard_chinese_name', 'like', '%'.str_replace(['%', '_'], ['\\%', '\\_'], $data['standard_chinese_name']).'%')
+            $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $keyword);
+            $records = (clone $query)
+                ->where('standard_chinese_name', 'like', '%'.$escaped.'%')
                 ->latest('id')
                 ->limit(20)
                 ->get();
@@ -846,6 +849,7 @@ class ProductRequestController extends Controller
             'minimum_purchase_price_rmb' => ['required', 'string', 'max:100'],
             'estimated_shipping_weight_g' => ['required', 'string', 'max:100'],
             'outer_package_size' => ['nullable', 'string', 'max:191'],
+            'large_volume_weight_g' => ['nullable', 'string', 'max:100'],
             'erp_binding_status' => ['nullable', Rule::in(['unbound', 'bound'])],
             'selected_skus' => ['nullable', 'array', 'max:100'],
             'selected_skus.*' => ['string', 'max:500'],
@@ -930,7 +934,14 @@ class ProductRequestController extends Controller
             'minimum_order_quantity' => $productRequest->minimum_order_quantity,
             'minimum_purchase_price_rmb' => $productRequest->minimum_purchase_price_rmb,
             'estimated_shipping_weight_g' => $productRequest->estimated_shipping_weight_g,
+            'outer_package_size' => $productRequest->outer_package_size,
+            'large_volume_weight_g' => $productRequest->large_volume_weight_g,
             'erp_binding_status' => $productRequest->erp_binding_status,
+            'seller_images' => $productRequest->attachmentsFor(ProductRequestAttachment::STAGE_PROCUREMENT)
+                ->map(fn (ProductRequestAttachment $attachment): array => [
+                    'url' => route('product-requests.attachments.show', [$productRequest, $attachment]),
+                    'name' => $attachment->original_name,
+                ])->values()->all(),
         ];
     }
 }

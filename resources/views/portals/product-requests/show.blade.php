@@ -24,10 +24,10 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261014-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261014-3">
 @endpush
 @push('scripts')
-    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261013-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261014-3"></script>
 @endpush
 
 @section('content')
@@ -84,6 +84,7 @@
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.outer_package_size') }}</span><span class="product-request-detail-value">{{ $productRequest->outer_package_size ?: $notFilled }}</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.minimum_purchase_price_rmb') }}</span><span class="product-request-detail-value">{{ $productRequest->minimum_purchase_price_rmb ?: $notFilled }}</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.estimated_shipping_weight_g') }}</span><span class="product-request-detail-value">{{ $productRequest->estimated_shipping_weight_g ?: $notFilled }}</span></div>
+                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.large_volume_weight_g') }}</span><span class="product-request-detail-value">{{ $productRequest->large_volume_weight_g ?: $notFilled }}</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.erp_operator') }}</span><span class="product-request-detail-value">{{ $productRequest->erp_operator_display_name ?: $notFilled }}</span></div>
             </div>
             <div class="product-request-detail-media">

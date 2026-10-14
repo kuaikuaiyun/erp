@@ -40,23 +40,25 @@ class ProductRequestAccessService
     {
         $rolesTable = config('admin.database.roles_table');
         $departments = $user->departments()
-            ->get(["{$rolesTable}.id", "{$rolesTable}.name", "{$rolesTable}.slug", "{$rolesTable}.parent_id"]);
+            ->get(["{$rolesTable}.id", "{$rolesTable}.name", "{$rolesTable}.short_name", "{$rolesTable}.slug", "{$rolesTable}.parent_id"]);
 
         return $departments->first(static fn (Department $department): bool => (bool) ($department->pivot->is_primary ?? false))
             ?: $departments->sortBy('id')->first();
     }
 
-    /** @return array{user_id:int,user_name:string,department_id:?int,department_name:?string,display_name:string,root_department_id:?int} */
+    /** @return array{user_id:int,user_name:string,department_id:?int,department_name:?string,department_short_name:?string,display_name:string,root_department_id:?int} */
     public function actorSnapshot(AdminUser $user): array
     {
         $department = $this->primaryDepartment($user);
         $departmentName = $department?->name;
+        $departmentShortName = trim((string) $department?->short_name) ?: $departmentName;
 
         return [
             'user_id' => (int) $user->getKey(),
             'user_name' => (string) $user->name,
             'department_id' => $department ? (int) $department->getKey() : null,
             'department_name' => $departmentName,
+            'department_short_name' => $departmentShortName,
             'display_name' => $departmentName
                 ? $departmentName.' - '.$user->name
                 : (string) $user->name,

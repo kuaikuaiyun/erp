@@ -18,7 +18,7 @@ class Department extends Role
 
     public const POSITION_MEMBER = 'member';
 
-    protected $fillable = ['name', 'slug', 'parent_id', 'sort'];
+    protected $fillable = ['name', 'short_name', 'slug', 'parent_id', 'sort'];
 
     public function parent(): BelongsTo
     {

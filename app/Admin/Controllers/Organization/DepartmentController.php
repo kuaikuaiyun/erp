@@ -195,6 +195,13 @@ class DepartmentController extends Controller
                 .'<span class="label '.($isChild ? 'label-default' : 'label-primary').'">'.e($levelLabel).'</span>'
                 .'<br><small class="text-muted organization-tree-code">'.e($this->slug).'</small></span></span>';
         });
+        $grid->column('short_name', __('organization.departments.short_name'))->display(function ($shortName): string {
+            $shortName = trim((string) $shortName);
+
+            return $shortName === ''
+                ? '<span class="text-muted">'.e(__('organization.common.not_set')).'</span>'
+                : e($shortName);
+        });
         $grid->column('people_structure', __('organization.departments.people_structure'))->display(function (): string {
             $counts = $this->departmentMembers->groupBy(fn (AdminUser $user) => $user->pivot->position)->map->count();
             $managerCount = (int) ($counts[Department::POSITION_MANAGER] ?? 0);
@@ -289,6 +296,10 @@ class DepartmentController extends Controller
         $form->text('name', __('organization.departments.department_name'))
             ->rules('required|max:50')
             ->attribute('maxlength', 50);
+        $form->text('short_name', __('organization.departments.short_name'))
+            ->rules('nullable|max:50')
+            ->attribute('maxlength', 50)
+            ->help(__('organization.departments.short_name_help'));
         $form->text('slug', __('organization.departments.department_code'))
             ->default(__('organization.departments.code_pending'))
             ->readonly()
@@ -338,6 +349,7 @@ class DepartmentController extends Controller
     {
         return [
             'name' => ['required', 'string', 'max:50'],
+            'short_name' => ['nullable', 'string', 'max:50'],
             'parent_id' => ['nullable', 'integer'],
             'sort' => ['nullable', 'integer', 'min:0', 'max:999999'],
         ];
@@ -348,6 +360,7 @@ class DepartmentController extends Controller
         return [
             'name.required' => __('organization.validation.name_required'),
             'name.max' => __('organization.validation.name_max'),
+            'short_name.max' => __('organization.validation.short_name_max'),
             'parent_id.integer' => __('organization.departments.invalid_parent'),
             'sort.integer' => __('organization.validation.sort_integer'),
         ];

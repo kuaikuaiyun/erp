@@ -97,6 +97,9 @@
         var preview = container.querySelector('[data-product-request-preview]');
         if (!preview) { return; }
         preview.querySelectorAll('[data-new-upload-preview]').forEach(function (node) { node.remove(); });
+        if (inputFiles(input).length > 0) {
+            preview.querySelectorAll('[data-reused-preview]').forEach(function (node) { node.remove(); });
+        }
         inputFiles(input).forEach(function (file, index) {
             var item = document.createElement('div');
             item.className = 'product-request-upload-preview-item';
@@ -222,19 +225,43 @@
         var selectedText = reuseForm.querySelector('[data-product-request-reuse-selected]');
         var selectedSource = reuseForm.querySelector('[name="reuse_source_id"]');
 
+        function revealSkuPanel() {
+            if (typeof reuseForm.erpSkuSuggestions === 'function') { reuseForm.erpSkuSuggestions(); }
+        }
+
         function closeReuse() {
             if (overlay) { overlay.hidden = true; }
+            revealSkuPanel();
+        }
+
+        function renderReusedImages(items) {
+            var preview = reuseForm.querySelector('[data-product-request-upload] [data-product-request-preview]');
+            if (!preview) { return; }
+            preview.querySelectorAll('[data-reused-preview]').forEach(function (node) { node.remove(); });
+            (items || []).forEach(function (item) {
+                if (!item || !item.url) { return; }
+                var wrapper = document.createElement('div');
+                wrapper.className = 'product-request-upload-preview-item product-request-upload-existing';
+                wrapper.setAttribute('data-reused-preview', 'true');
+                var link = document.createElement('a');
+                link.href = item.url;
+                link.setAttribute('data-product-request-image-preview', 'true');
+                link.setAttribute('data-product-request-image-alt', item.name || '');
+                var image = document.createElement('img');
+                image.src = item.url;
+                image.alt = item.name || '';
+                link.appendChild(image);
+                wrapper.appendChild(link);
+                preview.appendChild(wrapper);
+            });
         }
 
         function applyRecord(record) {
-            ['standard_chinese_name', 'supplier_url', 'company_spu', 'sku_sequence', 'standard_sku', 'minimum_order_quantity', 'minimum_purchase_price_rmb', 'estimated_shipping_weight_g'].forEach(function (field) {
+            ['standard_chinese_name', 'large_volume_weight_g', 'minimum_purchase_price_rmb', 'estimated_shipping_weight_g', 'outer_package_size'].forEach(function (field) {
                 var input = reuseForm.querySelector('[name="' + field + '"]');
                 if (input) { input.value = record[field] || ''; }
             });
-            ['stock_status', 'erp_binding_status'].forEach(function (field) {
-                var input = reuseForm.querySelector('[name="' + field + '"][value="' + (record[field] || '') + '"]');
-                if (input) { input.checked = true; }
-            });
+            renderReusedImages(record.seller_images);
             if (selectedSource) { selectedSource.value = record.id; }
             if (selectedText) {
                 selectedText.hidden = false;
@@ -243,7 +270,62 @@
             closeReuse();
         }
 
+        function buildDetail(record) {
+            var detail = document.createElement('div');
+            detail.className = 'product-request-reuse-detail';
+            detail.hidden = true;
+            [
+                [config.dedupePrice, record.minimum_purchase_price_rmb],
+                [config.dedupeWeight, record.estimated_shipping_weight_g],
+                [config.dedupeLargeVolume, record.large_volume_weight_g],
+                [config.dedupePackage, record.outer_package_size]
+            ].forEach(function (pair) {
+                var item = document.createElement('div');
+                item.className = 'product-request-reuse-detail-item';
+                var label = document.createElement('span');
+                label.className = 'product-request-reuse-detail-label';
+                label.textContent = pair[0] || '';
+                var value = document.createElement('span');
+                value.className = 'product-request-reuse-detail-value';
+                value.textContent = (pair[1] === null || pair[1] === undefined || pair[1] === '') ? '\u2014' : pair[1];
+                item.appendChild(label);
+                item.appendChild(value);
+                detail.appendChild(item);
+            });
+
+            var images = document.createElement('div');
+            images.className = 'product-request-reuse-detail-images';
+            var imagesLabel = document.createElement('span');
+            imagesLabel.className = 'product-request-reuse-detail-label';
+            imagesLabel.textContent = config.dedupeSellerImages || '';
+            images.appendChild(imagesLabel);
+            var list = record.seller_images || [];
+            if (!list.length) {
+                var empty = document.createElement('span');
+                empty.className = 'text-muted';
+                empty.textContent = config.dedupeNoImages || '';
+                images.appendChild(empty);
+            } else {
+                list.forEach(function (item) {
+                    var link = document.createElement('a');
+                    link.href = item.url;
+                    link.setAttribute('data-product-request-image-preview', 'true');
+                    link.setAttribute('data-product-request-image-alt', item.name || '');
+                    var image = document.createElement('img');
+                    image.src = item.url;
+                    image.alt = item.name || '';
+                    link.appendChild(image);
+                    images.appendChild(link);
+                });
+            }
+            detail.appendChild(images);
+            return detail;
+        }
+
         function appendResult(record) {
+            var wrapper = document.createElement('div');
+            wrapper.className = 'product-request-reuse-item';
+
             var row = document.createElement('div');
             row.className = 'product-request-reuse-row';
             if (record.cover_url) {
@@ -257,29 +339,52 @@
             var name = document.createElement('strong');
             name.textContent = record.standard_chinese_name || '';
             var detail = document.createElement('span');
-            detail.textContent = [record.report_no, record.company_spu, record.supplier_url].filter(Boolean).join(' · ');
+            detail.textContent = [record.report_no, record.supplier_url].filter(Boolean).join(' \u00b7 ');
             content.appendChild(name);
             content.appendChild(detail);
-            var button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'btn btn-success btn-sm';
-            button.textContent = config.reuse || '';
-            button.addEventListener('click', function () { applyRecord(record); });
             row.appendChild(content);
-            row.appendChild(button);
-            results.appendChild(row);
+
+            var detailBlock = buildDetail(record);
+
+            var actions = document.createElement('div');
+            actions.className = 'product-request-reuse-actions';
+            var detailButton = document.createElement('button');
+            detailButton.type = 'button';
+            detailButton.className = 'btn btn-default btn-sm';
+            detailButton.textContent = config.dedupeDetail || '';
+            detailButton.addEventListener('click', function () { detailBlock.hidden = !detailBlock.hidden; });
+            var applyButton = document.createElement('button');
+            applyButton.type = 'button';
+            applyButton.className = 'btn btn-success btn-sm';
+            applyButton.textContent = config.reuse || '';
+            applyButton.addEventListener('click', function () { applyRecord(record); });
+            actions.appendChild(detailButton);
+            actions.appendChild(applyButton);
+            row.appendChild(actions);
+
+            wrapper.appendChild(row);
+            wrapper.appendChild(detailBlock);
+            results.appendChild(wrapper);
         }
 
         if (overlay) {
             overlay.querySelectorAll('[data-product-request-reuse-close]').forEach(function (button) {
                 button.addEventListener('click', closeReuse);
             });
+            overlay.addEventListener('click', function (event) {
+                if (event.target === overlay) { closeReuse(); }
+            });
         }
         if (!reuseButton || !overlay || !results) { return; }
+
         reuseButton.addEventListener('click', function () {
-            var name = reuseForm.querySelector('[name="standard_chinese_name"]');
             var url = reuseForm.querySelector('[name="supplier_url"]');
-            if (!name || !url || !name.value.trim() || !url.value.trim()) {
+            var name = reuseForm.querySelector('[name="standard_chinese_name"]');
+            if (!name || !name.value.trim()) {
+                notify('warning', config.dedupeNameRequired);
+                return;
+            }
+            if (!url || !url.value.trim()) {
                 notify('warning', config.reuseRequired);
                 return;
             }
@@ -290,8 +395,8 @@
             results.appendChild(loading);
             overlay.hidden = false;
             var body = new URLSearchParams();
-            body.append('standard_chinese_name', name.value.trim());
             body.append('supplier_url', url.value.trim());
+            if (name && name.value.trim()) { body.append('standard_chinese_name', name.value.trim()); }
             body.append('current_id', reuseForm.getAttribute('data-current-id') || '');
             fetch(reuseForm.getAttribute('data-reuse-check-url'), {
                 method: 'POST',
@@ -303,7 +408,7 @@
                 });
             }).then(function (result) {
                 if (result.response.status === 422) {
-                    closeReuse();
+                    overlay.hidden = true;
                     showValidationErrors(reuseForm, result.payload.errors || {});
                     return;
                 }
@@ -319,7 +424,7 @@
                 }
                 payload.records.forEach(appendResult);
             }).catch(function () {
-                closeReuse();
+                overlay.hidden = true;
                 notify('warning', config.reuseFailed);
             });
         });
@@ -395,6 +500,7 @@
         }
 
         if (checkButton) { checkButton.addEventListener('click', fetchSuggestions); }
+        form.erpSkuSuggestions = fetchSuggestions;
         updateSummary();
     }
 
@@ -418,11 +524,130 @@
         });
     }
 
+    function initializeSkuBuilder(root) {
+        var builder = root.querySelector('[data-product-request-sku-builder]');
+        if (!builder || builder.dataset.skuBuilderReady === '1') { return; }
+        builder.dataset.skuBuilderReady = '1';
+        var form = builder.closest('form');
+        var template = builder.querySelector('[data-sku-row]');
+        if (!form || !template) { return; }
+        var hidden = form.querySelector('input[name="skus"]');
+        if (!hidden) { return; }
+        var counter = root.querySelector('#sku-count');
+        var warn = root.querySelector('#sku-warn');
+        var prefix = builder.getAttribute('data-sku-prefix') || '';
+        var max = 50;
+
+        function rows() { return Array.prototype.slice.call(builder.querySelectorAll('[data-sku-row]')); }
+
+        function partValue(row, name) {
+            var input = row.querySelector('[data-sku-part="' + name + '"]');
+            return input ? String(input.value || '').replace(/[\n\r,，;；\t]+/g, '').trim() : '';
+        }
+
+        function hasSeparator(row) {
+            return ['pinyin', 'attribute', 'box'].some(function (name) {
+                var input = row.querySelector('[data-sku-part="' + name + '"]');
+                return input ? /[\n\r,，;；\t]/.test(String(input.value || '')) : false;
+            });
+        }
+
+        function rowParts(row) {
+            return {
+                pinyin: partValue(row, 'pinyin').replace(/\s+/g, ''),
+                attribute: partValue(row, 'attribute'),
+                box: partValue(row, 'box')
+            };
+        }
+
+        function rowValue(row) {
+            var parts = rowParts(row);
+            if (parts.pinyin === '' && parts.attribute === '' && parts.box === '') { return ''; }
+            return prefix + parts.pinyin + '-' + parts.attribute + '-' + parts.box;
+        }
+
+        function refreshRowButtons() {
+            var list = rows();
+            list.forEach(function (row, index) {
+                var remove = row.querySelector('[data-sku-remove]');
+                if (remove) { remove.hidden = list.length <= 1; }
+                var add = row.querySelector('[data-sku-add]');
+                if (add) { add.hidden = index !== list.length - 1; }
+            });
+        }
+
+        function sync() {
+            var values = rows().map(rowValue).filter(function (value) { return value !== ''; });
+            hidden.value = values.join(',');
+            if (counter) {
+                counter.textContent = String(values.length);
+                counter.className = values.length > max ? 'text-red' : 'text-muted';
+            }
+            if (warn) {
+                var messages = [];
+                var incomplete = rows().filter(function (row) {
+                    var parts = rowParts(row);
+                    var filled = [parts.pinyin, parts.attribute, parts.box].filter(function (part) { return part !== ''; }).length;
+                    return filled > 0 && filled < 3;
+                }).length;
+                if (incomplete > 0) { messages.push((config.skuIncomplete || '').replace(':count', incomplete)); }
+                if (rows().filter(hasSeparator).length > 0) { messages.push(config.skuSeparator || ''); }
+                var duplicated = values.filter(function (value, index) { return values.indexOf(value) !== index; });
+                if (duplicated.length > 0) { messages.push(config.skuDuplicated || ''); }
+                if (values.length > max) { messages.push((config.skuTooMany || '').replace(':count', max)); }
+                warn.textContent = messages.filter(function (message) { return message !== ''; }).join('；');
+                warn.style.display = warn.textContent === '' ? 'none' : '';
+            }
+            refreshRowButtons();
+        }
+
+        function bindRow(row) {
+            var add = row.querySelector('[data-sku-add]');
+            if (add) { add.addEventListener('click', addRow); }
+            var remove = row.querySelector('[data-sku-remove]');
+            if (remove) {
+                remove.addEventListener('click', function () {
+                    if (rows().length <= 1) { return; }
+                    row.parentNode.removeChild(row);
+                    sync();
+                });
+            }
+            Array.prototype.slice.call(row.querySelectorAll('input[data-sku-part]')).forEach(function (input) {
+                input.addEventListener('input', sync);
+            });
+        }
+
+        function addRow() {
+            if (rows().length >= max) {
+                if (warn) {
+                    warn.textContent = (config.skuTooMany || '').replace(':count', max);
+                    warn.style.display = '';
+                }
+                return;
+            }
+            var row = template.cloneNode(true);
+            Array.prototype.slice.call(row.querySelectorAll('input[data-sku-part]')).forEach(function (input) { input.value = ''; });
+            builder.appendChild(row);
+            bindRow(row);
+            var first = row.querySelector('input[data-sku-part="pinyin"]');
+            if (first) { first.focus(); }
+            sync();
+        }
+
+        bindRow(template);
+        sync();
+    }
+
     function initialize(root) {
         try {
             initializeUploads(root);
         } catch (error) {
             reportInitializationError('upload initializer failed', error);
+        }
+        try {
+            initializeSkuBuilder(root);
+        } catch (error) {
+            reportInitializationError('sku builder initializer failed', error);
         }
         try {
             initializeReuse(root);

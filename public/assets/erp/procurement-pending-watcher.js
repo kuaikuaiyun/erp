@@ -12,11 +12,41 @@
     var PLACEMENT_REVIEW_BADGE_ID = 'placement-review-pending-badge';
     var WAREHOUSE_BADGE_ID = 'warehouse-pending-badge';
 
-    // 采购检验 + 投放审核 + 运营回填 + 仓库验收：记录已通知过的 ID，新记录逐条发通知
-    var notifiedProcurementIds = {};
-    var notifiedPlacementReviewIds = {};
-    var notifiedOperationIds = {};
-    var notifiedWarehouseIds = {};
+    // 已通知过的记录 ID 持久化到浏览器本地，刷新页面后不会重复提醒同一条记录
+    var STORAGE_PREFIX = 'erpPendingNotified:';
+    var MAX_TRACKED_IDS = 1000;
+    var memoryFallback = {};
+
+    function loadNotified(storageKey) {
+        var ids = memoryFallback[storageKey] || [];
+
+        try {
+            var raw = window.localStorage.getItem(STORAGE_PREFIX + storageKey);
+            if (raw) {
+                var parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) {
+                    ids = parsed;
+                }
+            }
+        } catch (e) {
+            // localStorage 不可用时退回内存记录
+        }
+
+        memoryFallback[storageKey] = ids;
+
+        return ids;
+    }
+
+    function saveNotified(storageKey, ids) {
+        var trimmed = ids.length > MAX_TRACKED_IDS ? ids.slice(ids.length - MAX_TRACKED_IDS) : ids;
+        memoryFallback[storageKey] = trimmed;
+
+        try {
+            window.localStorage.setItem(STORAGE_PREFIX + storageKey, JSON.stringify(trimmed));
+        } catch (e) {
+            // 忽略写入失败
+        }
+    }
 
     function updateBadge(badgeId, count) {
         var badge = document.getElementById(badgeId);
@@ -91,26 +121,47 @@
             });
     }
 
+    // 只对本次轮询中首次出现的记录发通知（触发条件与菜单角标统计规则一致）
+    function notifyNewItems(storageKey, items, title, buildBody) {
+        var notified = loadNotified(storageKey);
+        var known = {};
+
+        for (var i = 0; i < notified.length; i++) {
+            known[String(notified[i])] = true;
+        }
+
+        var changed = false;
+        for (var j = 0; j < items.length; j++) {
+            var item = items[j];
+            if (!item || typeof item.id === 'undefined') {
+                continue;
+            }
+
+            var key = String(item.id);
+            if (known[key]) {
+                continue;
+            }
+
+            known[key] = true;
+            notified.push(item.id);
+            changed = true;
+            sendNotification(title, buildBody(item));
+        }
+
+        if (changed) {
+            saveNotified(storageKey, notified);
+        }
+    }
+
     function pollProcurement() {
         fetchCount(PROCUREMENT_API).then(function (data) {
             if (!data || typeof data.count === 'undefined') {
                 return;
             }
-            var count = Number(data.count);
-            updateBadge(PROCUREMENT_BADGE_ID, count);
-
-            // 逐条检查新记录
-            var items = data.items || [];
-            for (var i = 0; i < items.length; i++) {
-                var item = items[i];
-                if (!notifiedProcurementIds[item.id]) {
-                    notifiedProcurementIds[item.id] = true;
-                    sendNotification(
-                        '商品信息检验 - 待处理',
-                        '提报编号 ' + item.report_no + ' 需要检验审核。'
-                    );
-                }
-            }
+            updateBadge(PROCUREMENT_BADGE_ID, Number(data.count));
+            notifyNewItems('procurement', data.items || [], '商品信息检验 - 待处理', function (item) {
+                return '提报编号 ' + item.report_no + ' 需要检验审核。';
+            });
         });
     }
 
@@ -119,21 +170,10 @@
             if (!data || typeof data.count === 'undefined') {
                 return;
             }
-            var count = Number(data.count);
-            updateBadge(OPERATION_BADGE_ID, count);
-
-            // 逐条检查新记录
-            var items = data.items || [];
-            for (var i = 0; i < items.length; i++) {
-                var item = items[i];
-                if (!notifiedOperationIds[item.id]) {
-                    notifiedOperationIds[item.id] = true;
-                    sendNotification(
-                        '需求提报 - 待运营回填',
-                        '提报编号 ' + item.report_no + ' 需要回填投放链接。'
-                    );
-                }
-            }
+            updateBadge(OPERATION_BADGE_ID, Number(data.count));
+            notifyNewItems('operation', data.items || [], '需求提报 - 待运营回填', function (item) {
+                return '提报编号 ' + item.report_no + ' 需要回填投放链接。';
+            });
         });
     }
 
@@ -142,21 +182,10 @@
             if (!data || typeof data.count === 'undefined') {
                 return;
             }
-            var count = Number(data.count);
-            updateBadge(PLACEMENT_REVIEW_BADGE_ID, count);
-
-            // 逐条检查新记录
-            var items = data.items || [];
-            for (var i = 0; i < items.length; i++) {
-                var item = items[i];
-                if (!notifiedPlacementReviewIds[item.id]) {
-                    notifiedPlacementReviewIds[item.id] = true;
-                    sendNotification(
-                        '投放链接审核 - 待审核',
-                        '提报编号 ' + item.report_no + ' 需要审核投放链接。'
-                    );
-                }
-            }
+            updateBadge(PLACEMENT_REVIEW_BADGE_ID, Number(data.count));
+            notifyNewItems('placement-review', data.items || [], '投放链接审核 - 待审核', function (item) {
+                return '提报编号 ' + item.report_no + ' 需要审核投放链接。';
+            });
         });
     }
 
@@ -165,21 +194,10 @@
             if (!data || typeof data.count === 'undefined') {
                 return;
             }
-            var count = Number(data.count);
-            updateBadge(WAREHOUSE_BADGE_ID, count);
-
-            // 逐条检查新记录
-            var items = data.items || [];
-            for (var i = 0; i < items.length; i++) {
-                var item = items[i];
-                if (!notifiedWarehouseIds[item.id]) {
-                    notifiedWarehouseIds[item.id] = true;
-                    sendNotification(
-                        '仓库验收 - 待审核',
-                        '提报编号 ' + item.report_no + ' 需要仓库验收审核。'
-                    );
-                }
-            }
+            updateBadge(WAREHOUSE_BADGE_ID, Number(data.count));
+            notifyNewItems('warehouse', data.items || [], '仓库验收 - 待审核', function (item) {
+                return '提报编号 ' + item.report_no + ' 需要仓库验收审核。';
+            });
         });
     }
 
