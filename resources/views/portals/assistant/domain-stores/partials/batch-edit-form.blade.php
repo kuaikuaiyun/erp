@@ -221,24 +221,30 @@
                     </section>
                     @endif
 
-                    @if ($sectionSelected(['store_prefix', 'shopify_client_id', 'shopify_client_secret']))
+                    @if ($sectionSelected(['store_prefix', 'tongtu_prefix', 'shopify_client_id', 'shopify_client_secret']))
                     <section class="box box-solid assistant-form-section assistant-batch-shopify-section">
                         <div class="box-header with-border"><h3 class="box-title">{{ $t('sections.shopify_app') }}</h3></div>
                         <div class="box-body row assistant-form-grid">
                             @if ($fieldSelected('store_prefix'))
-                            <div class="form-group col-md-4" data-batch-field="store_prefix">
+                            <div class="form-group col-md-3" data-batch-field="store_prefix">
                                 <label for="{{ $idPrefix }}store-prefix">{{ $t('fields.store_prefix') }}</label>
                                 <input id="{{ $idPrefix }}store-prefix" name="{{ $prefix }}[store_prefix]" class="form-control" value="{{ $store->store_prefix }}" maxlength="100">
                             </div>
                             @endif
+                            @if ($fieldSelected('tongtu_prefix'))
+                            <div class="form-group col-md-3" data-batch-field="tongtu_prefix">
+                                <label for="{{ $idPrefix }}tongtu-prefix">{{ $t('fields.tongtu_prefix') }}</label>
+                                <input id="{{ $idPrefix }}tongtu-prefix" name="{{ $prefix }}[tongtu_prefix]" class="form-control" value="{{ $store->tongtu_prefix }}" maxlength="100">
+                            </div>
+                            @endif
                             @if ($fieldSelected('shopify_client_id'))
-                            <div class="form-group col-md-4" data-batch-field="shopify_client_id">
+                            <div class="form-group col-md-3" data-batch-field="shopify_client_id">
                                 <label for="{{ $idPrefix }}shopify-client-id">{{ $t('fields.shopify_client_id') }}</label>
                                 <input id="{{ $idPrefix }}shopify-client-id" name="{{ $prefix }}[shopify_client_id]" class="form-control" value="{{ $store->shopify_client_id }}" maxlength="255" autocomplete="off">
                             </div>
                             @endif
                             @if ($fieldSelected('shopify_client_secret'))
-                            <div class="form-group col-md-4" data-batch-field="shopify_client_secret">
+                            <div class="form-group col-md-3" data-batch-field="shopify_client_secret">
                                 <label for="{{ $idPrefix }}shopify-client-secret">{{ $t('fields.shopify_client_secret') }}</label>
                                 <input id="{{ $idPrefix }}shopify-client-secret" name="{{ $prefix }}[shopify_client_secret]" class="form-control" value="{{ $store->shopify_client_secret }}" maxlength="255" autocomplete="off">
                             </div>

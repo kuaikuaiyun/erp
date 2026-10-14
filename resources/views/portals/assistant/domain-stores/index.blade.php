@@ -118,6 +118,7 @@
             'label' => $t('sections.shopify_app'),
             'fields' => [
                 ['key' => 'store_prefix', 'label' => $t('fields.store_prefix')],
+                ['key' => 'tongtu_prefix', 'label' => $t('fields.tongtu_prefix')],
                 ['key' => 'shopify_client_id', 'label' => $t('fields.shopify_client_id')],
                 ['key' => 'shopify_client_secret', 'label' => $t('fields.shopify_client_secret')],
             ],

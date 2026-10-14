@@ -53,6 +53,7 @@ class AssistantDomainStoreSpreadsheetService
         'payment_card',
         'remark',
         'store_prefix',
+        'tongtu_prefix',
         'shopify_client_id',
         'shopify_client_secret',
     ];
@@ -79,6 +80,7 @@ class AssistantDomainStoreSpreadsheetService
         'payment_card',
         'remark',
         'store_prefix',
+        'tongtu_prefix',
         'shopify_client_id',
         'shopify_client_secret',
     ];
@@ -230,6 +232,7 @@ class AssistantDomainStoreSpreadsheetService
             $store->payment_card,
             $store->remark,
             $store->store_prefix,
+            $store->tongtu_prefix,
             $store->shopify_client_id,
             $store->shopify_client_secret,
             $store->last_operator_name,
@@ -396,6 +399,7 @@ class AssistantDomainStoreSpreadsheetService
             'other_payment' => null,
             'shop_login_url' => null,
             'store_prefix' => null,
+            'tongtu_prefix' => null,
             'shopify_client_id' => null,
             'shopify_client_secret' => null,
             'shop_status' => AssistantDomainStore::SHOP_STATUS_IN_USE,

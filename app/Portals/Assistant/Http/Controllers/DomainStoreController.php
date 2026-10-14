@@ -1111,6 +1111,7 @@ class DomainStoreController extends Controller
         foreach ([
             'site_builder', 'shop_name', 'domain', 'email', 'project', 'user_name',
             'credit_card', 'wallet', 'paypal', 'other_payment', 'shop_login_url', 'store_prefix',
+            'tongtu_prefix',
             'shopify_client_id', 'shopify_client_secret', 'payment_card', 'remark',
         ] as $field) {
             if ($request->has($field)) {
@@ -1353,7 +1354,7 @@ class DomainStoreController extends Controller
             'shop_name', 'domain', 'shop_login_url', 'email', 'domain_expires_at', 'domain_check_status', 'email_bound',
             'team', 'project', 'user_name',
             'site_builder', 'erp', 'credit_card', 'wallet', 'paypal', 'other_payment', 'payment_card',
-            'store_prefix', 'shopify_client_id', 'shopify_client_secret',
+            'store_prefix', 'tongtu_prefix', 'shopify_client_id', 'shopify_client_secret',
             'shop_status', 'plan_expires_at', 'remark',
         ];
     }
@@ -1385,6 +1386,7 @@ class DomainStoreController extends Controller
         return [
             'site_builder', 'shop_name', 'domain', 'email', 'project', 'user_name',
             'credit_card', 'wallet', 'paypal', 'other_payment', 'shop_login_url', 'store_prefix',
+            'tongtu_prefix',
             'shopify_client_id', 'shopify_client_secret', 'payment_card', 'remark',
         ];
     }
@@ -1497,6 +1499,7 @@ class DomainStoreController extends Controller
             'other_payment' => ['nullable', 'string', 'max:100'],
             'shop_login_url' => ['nullable', 'string', 'max:2048'],
             'store_prefix' => ['nullable', 'string', 'max:100'],
+            'tongtu_prefix' => ['nullable', 'string', 'max:100'],
             'shopify_client_id' => ['nullable', 'string', 'max:255'],
             'shopify_client_secret' => ['nullable', 'string', 'max:255'],
             'shop_status' => ['required', 'in:'.implode(',', array_keys(AssistantDomainStore::shopStatusLabels()))],
