@@ -16,6 +16,7 @@ return [
         'edit' => '填写',
         'save' => '保存',
         'submit' => '提交',
+        'submit_progress' => '提交中…',
         'cancel' => '取消',
         'back_to_list' => '返回列表',
         'operation' => '操作',
@@ -259,6 +260,8 @@ return [
         'too_many' => '最多只能上传 :count 张图片。',
         'invalid_file' => '仅支持 JPG、PNG、WEBP 格式，且单张不超过 5 MB。',
         'remove_image' => '移除图片',
+        'paste' => '粘贴图片',
+        'paste_hint' => '已定位到图片框，请按 Ctrl+V（Mac 为 ⌘+V）粘贴剪贴板中的图片。',
     ],
     'events' => [
         'operation_submitted' => '运营提交需求',

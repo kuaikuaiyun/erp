@@ -141,6 +141,34 @@
         renderPreview(container, input);
     }
 
+    function submitProgress(form) {
+        if (!form) { return null; }
+        var existing = form.querySelector('[data-submit-progress]');
+        if (existing) { return existing; }
+        var wrapper = document.createElement('div');
+        wrapper.className = 'product-request-submit-progress';
+        wrapper.setAttribute('data-submit-progress', 'true');
+        wrapper.hidden = true;
+        var track = document.createElement('div');
+        track.className = 'product-request-submit-progress-track';
+        var bar = document.createElement('div');
+        bar.className = 'product-request-submit-progress-bar';
+        bar.setAttribute('data-submit-progress-bar', 'true');
+        track.appendChild(bar);
+        var text = document.createElement('span');
+        text.className = 'product-request-submit-progress-text';
+        text.setAttribute('data-submit-progress-text', 'true');
+        wrapper.appendChild(track);
+        wrapper.appendChild(text);
+        var footer = form.querySelector('.modal-footer');
+        if (footer && footer.parentNode) {
+            footer.parentNode.insertBefore(wrapper, footer);
+        } else {
+            form.appendChild(wrapper);
+        }
+        return wrapper;
+    }
+
     function initializeUploads(root) {
         root.querySelectorAll('[data-product-request-upload]').forEach(function (container) {
             if (container.dataset.productRequestUploadReady === '1') { return; }
@@ -149,6 +177,13 @@
             if (!input) { return; }
             var maxFiles = parseInt(container.getAttribute('data-max-files') || '1', 10);
             input.addEventListener('change', function () { renderPreview(container, input); });
+            var pasteButton = container.querySelector('[data-product-request-paste]');
+            if (pasteButton) {
+                pasteButton.addEventListener('click', function () {
+                    container.focus();
+                    notify('info', config.pasteHint);
+                });
+            }
             ['dragenter', 'dragover'].forEach(function (eventName) {
                 container.addEventListener(eventName, function (event) {
                     event.preventDefault();
@@ -537,6 +572,19 @@
         var warn = root.querySelector('#sku-warn');
         var prefix = builder.getAttribute('data-sku-prefix') || '';
         var max = 50;
+        var boxDefault = builder.getAttribute('data-sku-box-default') || '1pc';
+        var templateBox = template.querySelector('[data-sku-part="box"]');
+        if (templateBox && templateBox.value === '') { templateBox.value = boxDefault; }
+
+        function defaultPinyin() {
+            var found = '';
+            rows().forEach(function (row) {
+                if (found !== '') { return; }
+                var value = partValue(row, 'pinyin');
+                if (value !== '') { found = value; }
+            });
+            return found;
+        }
 
         function rows() { return Array.prototype.slice.call(builder.querySelectorAll('[data-sku-row]')); }
 
@@ -562,7 +610,7 @@
 
         function rowValue(row) {
             var parts = rowParts(row);
-            if (parts.pinyin === '' && parts.attribute === '' && parts.box === '') { return ''; }
+            if (parts.pinyin === '' || parts.attribute === '') { return ''; }
             return prefix + parts.pinyin + '-' + parts.attribute + '-' + parts.box;
         }
 
@@ -587,8 +635,8 @@
                 var messages = [];
                 var incomplete = rows().filter(function (row) {
                     var parts = rowParts(row);
-                    var filled = [parts.pinyin, parts.attribute, parts.box].filter(function (part) { return part !== ''; }).length;
-                    return filled > 0 && filled < 3;
+                    if (parts.pinyin === '' && parts.attribute === '') { return false; }
+                    return parts.pinyin === '' || parts.attribute === '' || parts.box === '';
                 }).length;
                 if (incomplete > 0) { messages.push((config.skuIncomplete || '').replace(':count', incomplete)); }
                 if (rows().filter(hasSeparator).length > 0) { messages.push(config.skuSeparator || ''); }
@@ -615,6 +663,17 @@
             Array.prototype.slice.call(row.querySelectorAll('input[data-sku-part]')).forEach(function (input) {
                 input.addEventListener('input', sync);
             });
+            var pinyin = row.querySelector('input[data-sku-part="pinyin"]');
+            if (pinyin) {
+                pinyin.addEventListener('input', function () {
+                    rows().forEach(function (other) {
+                        if (other === row) { return; }
+                        var target = other.querySelector('input[data-sku-part="pinyin"]');
+                        if (target && String(target.value || '').trim() === '') { target.value = pinyin.value; }
+                    });
+                    sync();
+                });
+            }
         }
 
         function addRow() {
@@ -627,10 +686,14 @@
             }
             var row = template.cloneNode(true);
             Array.prototype.slice.call(row.querySelectorAll('input[data-sku-part]')).forEach(function (input) { input.value = ''; });
+            var pinyin = row.querySelector('input[data-sku-part="pinyin"]');
+            if (pinyin) { pinyin.value = defaultPinyin(); }
+            var box = row.querySelector('input[data-sku-part="box"]');
+            if (box) { box.value = boxDefault; }
             builder.appendChild(row);
             bindRow(row);
-            var first = row.querySelector('input[data-sku-part="pinyin"]');
-            if (first) { first.focus(); }
+            var focusTarget = pinyin && pinyin.value !== '' ? row.querySelector('input[data-sku-part="attribute"]') : pinyin;
+            if (focusTarget) { focusTarget.focus(); }
             sync();
         }
 
@@ -751,29 +814,74 @@
         }
         var buttons = form.querySelectorAll('[type="submit"]');
         buttons.forEach(function (button) { button.disabled = true; });
-        fetch(form.getAttribute('action'), {
-            method: (form.getAttribute('method') || 'post').toUpperCase(),
-            headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-Product-Request-Modal': '1', 'Accept': 'application/json' },
-            body: formData
-        }).then(function (response) {
-            return response.json().then(function (payload) { return { response: response, payload: payload }; });
-        }).then(function (result) {
-            if (result.response.status === 422) {
-                showValidationErrors(form, result.payload.errors || {});
+        var progress = submitProgress(form);
+        var progressBar = progress ? progress.querySelector('[data-submit-progress-bar]') : null;
+        var progressText = progress ? progress.querySelector('[data-submit-progress-text]') : null;
+        var progressTimer = null;
+        var progressValue = 0;
+        function setProgress(value) {
+            if (!progress) { return; }
+            progressValue = Math.max(0, Math.min(100, value));
+            progress.hidden = false;
+            if (progressBar) { progressBar.style.width = progressValue + '%'; }
+            if (progressText) { progressText.textContent = (config.submitProgress || '') + ' ' + Math.round(progressValue) + '%'; }
+        }
+        function bumpProgress(value) {
+            if (value > progressValue) { setProgress(value); }
+        }
+        function startProgress() {
+            setProgress(3);
+            progressTimer = window.setInterval(function () {
+                if (progressValue >= 90) { return; }
+                bumpProgress(progressValue + Math.max(1, Math.round((90 - progressValue) * 0.08)));
+            }, 300);
+        }
+        function stopProgress() {
+            if (progressTimer) { window.clearInterval(progressTimer); progressTimer = null; }
+        }
+        function resetProgress() {
+            stopProgress();
+            if (!progress) { return; }
+            progress.hidden = true;
+            if (progressBar) { progressBar.style.width = '0%'; }
+            if (progressText) { progressText.textContent = ''; }
+        }
+        startProgress();
+        var xhr = new XMLHttpRequest();
+        xhr.open((form.getAttribute('method') || 'post').toUpperCase(), form.getAttribute('action'), true);
+        xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+        xhr.setRequestHeader('X-Product-Request-Modal', '1');
+        xhr.setRequestHeader('Accept', 'application/json');
+        xhr.upload.addEventListener('progress', function (event) {
+            if (event.lengthComputable && event.total > 0) {
+                bumpProgress(5 + Math.round((event.loaded / event.total) * 85));
+            }
+        });
+        xhr.addEventListener('load', function () {
+            var payload = {};
+            try { payload = JSON.parse(xhr.responseText) || {}; } catch (error) { payload = {}; }
+            if (xhr.status === 422) {
+                showValidationErrors(form, payload.errors || {});
                 return;
             }
-            if (!result.response.ok) {
-                notify('warning', result.payload.message || config.submitFailed);
+            if (xhr.status < 200 || xhr.status >= 300) {
+                notify('warning', payload.message || config.submitFailed);
                 return;
             }
-            hideEditor();
-            notify('success', result.payload.message || '');
-            window.location.assign(result.payload.redirect || window.location.href);
-        }).catch(function () {
-            notify('warning', config.submitFailed);
-        }).finally(function () {
+            stopProgress();
+            setProgress(100);
+            window.setTimeout(function () {
+                hideEditor();
+                notify('success', payload.message || '');
+                window.location.assign(payload.redirect || window.location.href);
+            }, 420);
+        });
+        xhr.addEventListener('error', function () { notify('warning', config.submitFailed); });
+        xhr.addEventListener('loadend', function () {
+            if (!(progress && xhr.status >= 200 && xhr.status < 300)) { resetProgress(); }
             buttons.forEach(function (button) { button.disabled = false; });
         });
+        xhr.send(formData);
     });
 
     if (window.jQuery && editorModal) {
