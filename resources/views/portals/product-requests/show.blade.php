@@ -1,4 +1,4 @@
-@extends('portal.layout')
+﻿@extends('portal.layout')
 
 @section('page_title', __('product_requests.show.title'))
 
@@ -24,10 +24,10 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261011-7">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261014-1">
 @endpush
 @push('scripts')
-    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261011-5"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261013-1"></script>
 @endpush
 
 @section('content')
@@ -66,11 +66,10 @@
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.report_no') }}</span><span class="product-request-detail-value">{{ $productRequest->report_no }}</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.reported_at') }}</span><span class="product-request-detail-value">{{ optional($productRequest->reported_at)->format('Y-m-d') }}</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.main_status') }}</span><span class="product-request-detail-value">{{ $statusLabels[$productRequest->status] ?? $notAvailable }}</span></div>
-                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.city') }}</span><span class="product-request-detail-value">{{ $productRequest->city }}</span></div>
+                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.skus') }}</span><span class="product-request-detail-value">@include('portals.product-requests.partials.sku-tags', ['skus' => $productRequest->skus, 'empty' => $notAvailable])</span></div>
+                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.has_stock') }}</span><span class="product-request-detail-value">{{ $productRequest->has_stock ? __('product_requests.common.'.($productRequest->has_stock === 'yes' ? 'yes' : 'no')) : $notAvailable }}</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.request_source') }}</span><span class="product-request-detail-value">{{ $productRequest->operation_display_name }}</span></div>
-                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.minimum_sale_unit') }}</span><span class="product-request-detail-value">{{ $productRequest->minimum_sale_unit }}</span></div>
-                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.has_multiple_attributes') }}</span><span class="product-request-detail-value">{{ $productRequest->has_multiple_attributes }}</span></div>
-                <div class="product-request-detail-item product-request-detail-item-wide"><span class="product-request-detail-label">{{ __('product_requests.fields.reference_page_url') }}</span><span class="product-request-detail-value">@if($isWebLink($referenceLink))<a href="{{ $referenceLink }}" target="_blank" rel="noopener">{{ $referenceLink }}</a>@elseif($referenceLink !== ''){{ $referenceLink }}@else{{ $notFilled }}@endif</span></div>
+                <div class="product-request-detail-item product-request-detail-item-wide"><span class="product-request-detail-label">{{ __('product_requests.fields.operation_supplier_url') }}</span><span class="product-request-detail-value">@if($productRequest->operation_supplier_url)<a href="{{ $productRequest->operation_supplier_url }}" target="_blank" rel="noopener">{{ $productRequest->operation_supplier_url }}</a>@else{{ $notFilled }}@endif</span></div>
             </div>
         </div>
     </article>
@@ -81,16 +80,11 @@
             <div class="product-request-detail-grid">
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.standard_chinese_name') }}</span><span class="product-request-detail-value">{{ $productRequest->standard_chinese_name ?: $notFilled }}</span></div>
                 <div class="product-request-detail-item product-request-detail-item-wide"><span class="product-request-detail-label">{{ __('product_requests.fields.supplier_url') }}</span><span class="product-request-detail-value">@if($productRequest->supplier_url)<a href="{{ $productRequest->supplier_url }}" target="_blank" rel="noopener">{{ $productRequest->supplier_url }}</a>@else{{ $notFilled }}@endif</span></div>
-                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.company_spu') }}</span><span class="product-request-detail-value">{{ $productRequest->company_spu ?: $notFilled }}</span></div>
-                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.sku_sequence') }}</span><span class="product-request-detail-value">{{ $productRequest->sku_sequence ?: $notFilled }}</span></div>
-                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.standard_sku') }}</span><span class="product-request-detail-value">{{ $productRequest->standard_sku ?: $notFilled }}</span></div>
-                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.stock_status') }}</span><span class="product-request-detail-value">{{ $productRequest->stock_status === 'yes' ? __('product_requests.common.yes') : ($productRequest->stock_status === 'no' ? __('product_requests.common.no') : $notFilled) }}</span></div>
-                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.minimum_order_quantity') }}</span><span class="product-request-detail-value">{{ $productRequest->minimum_order_quantity ?: $notFilled }}</span></div>
+                <div class="product-request-detail-item product-request-detail-item-wide"><span class="product-request-detail-label">{{ __('product_requests.fields.skus') }}</span><span class="product-request-detail-value">@include('portals.product-requests.partials.sku-tags', ['skus' => $productRequest->skus, 'empty' => $notFilled])</span></div>
+                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.outer_package_size') }}</span><span class="product-request-detail-value">{{ $productRequest->outer_package_size ?: $notFilled }}</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.minimum_purchase_price_rmb') }}</span><span class="product-request-detail-value">{{ $productRequest->minimum_purchase_price_rmb ?: $notFilled }}</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.estimated_shipping_weight_g') }}</span><span class="product-request-detail-value">{{ $productRequest->estimated_shipping_weight_g ?: $notFilled }}</span></div>
-                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.erp_binding_status') }}</span><span class="product-request-detail-value">{{ $productRequest->erp_binding_status ? __('product_requests.erp_binding.'.$productRequest->erp_binding_status) : $notFilled }}</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.erp_operator') }}</span><span class="product-request-detail-value">{{ $productRequest->erp_operator_display_name ?: $notFilled }}</span></div>
-                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.show.reused_from') }}</span><span class="product-request-detail-value">{{ $productRequest->reused_from_product_request_id ?: $notAvailable }}</span></div>
             </div>
             <div class="product-request-detail-media">
                 <span class="product-request-detail-label">{{ __('product_requests.fields.seller_images') }}</span>
