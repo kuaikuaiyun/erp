@@ -1,0 +1,41 @@
+/* Final filter layout override: five equal controls, then the actions row. */
+.assistant-shopify-analytics-page .assistant-shopify-filter-form {
+    display: grid !important;
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+    align-items: end;
+    gap: 14px;
+}
+
+.assistant-shopify-analytics-page .assistant-shopify-filter-form .form-group,
+.assistant-shopify-analytics-page .assistant-shopify-filter-form .assistant-shopify-date-filter {
+    width: auto !important;
+    min-width: 0;
+    margin: 0 !important;
+}
+
+.assistant-shopify-analytics-page .assistant-shopify-filter-form .form-control {
+    width: 100%;
+    min-width: 0;
+}
+
+.assistant-shopify-analytics-page .assistant-shopify-filter-actions {
+    display: flex;
+    grid-column: 1 / -1;
+    justify-self: start;
+    align-items: center;
+    min-height: 34px;
+    gap: 7px;
+    white-space: nowrap;
+}
+
+@media (max-width: 1199px) {
+    .assistant-shopify-analytics-page .assistant-shopify-filter-form {
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    }
+}
+
+@media (max-width: 767px) {
+    .assistant-shopify-analytics-page .assistant-shopify-filter-form {
+        grid-template-columns: minmax(0, 1fr) !important;
+    }
+}

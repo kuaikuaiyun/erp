@@ -62,6 +62,8 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261013-1.css?v=20261013-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261013-2.css?v=20261013-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261013-3.css?v=20261013-3">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261014-1.css?v=20261014-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261014-2.css?v=20261014-2">
 @endpush
 
 @section('content')
@@ -120,35 +122,39 @@
                 <h3 class="box-title"><i class="fa fa-filter"></i> {{ $t('filters.title') }}</h3>
             </div>
             <form method="get" action="{{ route('assistant.shopify-analytics.index') }}" class="box-body assistant-shopify-filter-form" data-loading="region" data-loading-target=".assistant-shopify-analytics-page">
-                <div class="form-group">
-                    <label for="assistant-shopify-shop-name">{{ $t('filters.shop_name') }}</label>
-                    <input id="assistant-shopify-shop-name" name="shop_name" class="form-control" value="{{ $filters['shop_name'] }}" placeholder="{{ $t('filters.shop_name_placeholder') }}">
+                <div class="assistant-shopify-filter-primary-row">
+                    <div class="form-group">
+                        <label for="assistant-shopify-shop-name">{{ $t('filters.shop_name') }}</label>
+                        <input id="assistant-shopify-shop-name" name="shop_name" class="form-control" value="{{ $filters['shop_name'] }}" placeholder="{{ $t('filters.shop_name_placeholder') }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="assistant-shopify-domains">{{ $t('filters.domains') }}</label>
+                        <input id="assistant-shopify-domains" name="domains" class="form-control" value="{{ implode(', ', $filters['domains']) }}" placeholder="{{ $t('filters.domains_placeholder') }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="assistant-shopify-timezone">{{ $t('filters.timezone') }}</label>
+                        <select id="assistant-shopify-timezone" name="timezone" class="form-control">
+                            @foreach ($timezoneOptions as $value => $label)
+                                <option value="{{ $value }}" @selected($filters['timezone'] === $value)>{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="assistant-shopify-domains">{{ $t('filters.domains') }}</label>
-                    <input id="assistant-shopify-domains" name="domains" class="form-control" value="{{ implode(', ', $filters['domains']) }}" placeholder="{{ $t('filters.domains_placeholder') }}">
-                </div>
-                <div class="form-group">
-                    <label for="assistant-shopify-timezone">{{ $t('filters.timezone') }}</label>
-                    <select id="assistant-shopify-timezone" name="timezone" class="form-control">
-                        @foreach ($timezoneOptions as $value => $label)
-                            <option value="{{ $value }}" @selected($filters['timezone'] === $value)>{{ $label }}</option>
-                        @endforeach
-                    </select>
-                </div>
-                <div class="form-group assistant-shopify-date-filter">
-                    <label for="assistant-shopify-from-date">{{ $t('filters.from_date') }}</label>
-                    <input id="assistant-shopify-from-date" name="from_date" type="date" class="form-control" value="{{ $filters['from_date'] }}">
-                </div>
-                <div class="form-group assistant-shopify-date-filter">
-                    <label for="assistant-shopify-to-date">{{ $t('filters.to_date') }}</label>
-                    <input id="assistant-shopify-to-date" name="to_date" type="date" class="form-control" value="{{ $filters['to_date'] }}">
+                <div class="assistant-shopify-filter-secondary-row">
+                    <div class="form-group assistant-shopify-date-filter">
+                        <label for="assistant-shopify-from-date">{{ $t('filters.from_date') }}</label>
+                        <input id="assistant-shopify-from-date" name="from_date" type="date" class="form-control" value="{{ $filters['from_date'] }}">
+                    </div>
+                    <div class="form-group assistant-shopify-date-filter">
+                        <label for="assistant-shopify-to-date">{{ $t('filters.to_date') }}</label>
+                        <input id="assistant-shopify-to-date" name="to_date" type="date" class="form-control" value="{{ $filters['to_date'] }}">
+                    </div>
+                    <div class="assistant-shopify-filter-actions">
+                        <button type="submit" class="btn btn-primary"><i class="fa fa-search"></i> {{ $t('filters.submit') }}</button>
+                        <a href="{{ route('assistant.shopify-analytics.index') }}" class="btn btn-default">{{ $t('filters.reset') }}</a>
+                    </div>
                 </div>
                 <input type="hidden" name="per_page" value="{{ $filters['per_page'] }}">
-                <div class="assistant-shopify-filter-actions">
-                    <button type="submit" class="btn btn-primary"><i class="fa fa-search"></i> {{ $t('filters.submit') }}</button>
-                    <a href="{{ route('assistant.shopify-analytics.index') }}" class="btn btn-default">{{ $t('filters.reset') }}</a>
-                </div>
             </form>
             <div class="box-footer assistant-shopify-overview-notice">
                 <i class="fa fa-info-circle"></i> {{ $t('overview.notice') }} {{ $t('overview.reference_rate_notice') }}
