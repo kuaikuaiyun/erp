@@ -321,13 +321,13 @@ class ProductRequestController extends Controller
                 ->values();
             unset($data['reuse_source_id'], $data['seller_images'], $data['selected_skus']);
             $actor = $this->access->actorSnapshot($context['user']);
-            // 用户在双选择框中勾选的 SKU 即为最终保存结果（勾选为空则保留原值）
-            $mergedSkus = $selectedSkus->isNotEmpty()
+            // 采购勾选的 SKU 单独存入 procurement_skus，不覆盖运营填写的 skus（勾选为空则保留原值）
+            $procurementSkus = $selectedSkus->isNotEmpty()
                 ? $selectedSkus->implode(',')
-                : $locked->skus;
+                : $locked->procurement_skus;
             $locked->fill([
                 ...$data,
-                'skus' => $mergedSkus,
+                'procurement_skus' => $procurementSkus,
                 'supplier_url_normalized' => $normalizedUrl,
                 'supplier_url_hash' => $this->workflow->supplierUrlHash($normalizedUrl),
                 'status' => ProductRequest::STATUS_INSPECTION_PASSED,
@@ -422,17 +422,19 @@ class ProductRequestController extends Controller
         $records = ProductRequest::query()
             ->where('supplier_url_hash', $this->workflow->supplierUrlHash($normalizedUrl))
             ->when($data['current_id'] ?? null, fn ($query, int $id) => $query->where('id', '!=', $id))
-            ->whereNotNull('skus')
-            ->where('skus', '!=', '')
+            ->where(fn ($query) => $query
+                ->where(fn ($q) => $q->whereNotNull('skus')->where('skus', '!=', ''))
+                ->orWhere(fn ($q) => $q->whereNotNull('procurement_skus')->where('procurement_skus', '!=', '')))
             ->latest('id')
             ->limit(20)
-            ->get(['id', 'report_no', 'skus']);
+            ->get(['id', 'report_no', 'skus', 'procurement_skus']);
 
         return response()->json([
             'items' => $records->map(fn (ProductRequest $record): array => [
                 'id' => $record->getKey(),
                 'report_no' => $record->report_no,
-                'skus' => collect(explode(',', (string) $record->skus))
+                'skus' => collect([(string) $record->skus, (string) $record->procurement_skus])
+                    ->flatMap(fn (string $chunk): array => explode(',', $chunk))
                     ->map(fn (string $sku): string => trim($sku))
                     ->filter(fn (string $sku): bool => $sku !== '')
                     ->unique()
@@ -762,10 +764,13 @@ class ProductRequestController extends Controller
             $query->where(function (Builder $search) use ($keyword): void {
                 $search->where('report_no', 'like', $keyword)
                     ->orWhere('skus', 'like', $keyword)
+                    ->orWhere('procurement_skus', 'like', $keyword)
                     ->orWhere('operation_display_name', 'like', $keyword)
                     ->orWhere('operation_department_name', 'like', $keyword)
                     ->orWhere('standard_chinese_name', 'like', $keyword)
-                    ->orWhere('company_spu', 'like', $keyword);
+                    ->orWhere('company_spu', 'like', $keyword)
+                    ->orWhere('supplier_url', 'like', $keyword)
+                    ->orWhere('operation_supplier_url', 'like', $keyword);
             });
         }
         if ($filters['status'] !== '') {
