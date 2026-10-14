@@ -125,6 +125,13 @@ class PayPalRiskController extends Controller
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
             'tab' => ['nullable', Rule::in(['overview', 'orders', 'products', 'refunds', 'disputes'])],
             'page' => ['nullable', 'integer', 'min:1'],
+            'sort' => ['nullable', Rule::in([
+                '', 'order_number', 'tongtu_order_number', 'store_name', 'products', 'paid_amount',
+                'refund_status', 'dispute_status', 'order_created_at', 'product_name', 'sku', 'quantity',
+                'refund_orders', 'refund_rate', 'dispute_orders', 'dispute_rate', 'refund_id', 'source',
+                'amount', 'reason', 'status', 'happened_at', 'dispute_id', 'stage',
+            ])],
+            'direction' => ['nullable', Rule::in(['', 'asc', 'desc'])],
         ]);
         $filters = [
             'date_from' => trim((string) ($validated['date_from'] ?? '')),
@@ -136,6 +143,8 @@ class PayPalRiskController extends Controller
             $filters,
             (string) ($validated['tab'] ?? 'overview'),
             max(1, (int) ($validated['page'] ?? 1)),
+            (string) ($validated['sort'] ?? ''),
+            (string) ($validated['direction'] ?? ''),
         ));
     }
 

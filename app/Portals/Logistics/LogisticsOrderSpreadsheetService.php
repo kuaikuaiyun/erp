@@ -38,7 +38,6 @@ class LogisticsOrderSpreadsheetService
             ['本订单ID', 'shopify_order_id', self::TYPE_TEXT, 24],
             ['店铺名称', 'store_name', self::TYPE_TEXT, 18],
             ['来源Shopify域名', 'source_shop_domain', self::TYPE_TEXT, 28],
-            ['所属部门', 'department_name', self::TYPE_TEXT, 18],
             ['运营人员', 'operator_name', self::TYPE_TEXT, 18],
             ['所属组', 'group_names', self::TYPE_TEXT, 22],
             ['是否加购', 'is_add_on', self::TYPE_TEXT, 14],

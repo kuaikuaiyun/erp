@@ -7,7 +7,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics.css?v=20261012-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics.css?v=20261014-1">
 @endpush
 
 @section('content')
@@ -110,7 +110,7 @@
                             <th>店铺名称</th>
                             <th>店铺登入网址</th>
                             <th>店铺前缀</th>
-                            <th>所属部门</th>
+                            <th>通途前缀</th>
                             <th>运营人员</th>
                             <th>所属组</th>
                             <th>Token 更新时间</th>
@@ -137,7 +137,7 @@
                                 <td>{{ $store->shop_name }}</td>
                                 <td class="logistics-url-cell">{{ $store->shop_login_url ?: '—' }}</td>
                                 <td>{{ $store->store_prefix ?: '—' }}</td>
-                                <td>厦门快云</td>
+                                <td>{{ $store->tongtu_prefix ?: '—' }}</td>
                                 <td>{{ $store->user_name ?: '—' }}</td>
                                 <td>{{ \App\Models\AssistantDomainStore::displayMultiValue($store->team) ?: '—' }}</td>
                                 <td><span class="label {{ $tokenClass }} logistics-tag" title="{{ $tokenTitle }}">{{ $tokenLabel }}</span></td>
@@ -160,7 +160,7 @@
                                 </td>
                             </tr>
                         @empty
-                            <tr><td colspan="14" class="text-center text-muted">暂无符合条件的 Shopify 店铺。</td></tr>
+                            <tr><td colspan="15" class="text-center text-muted">暂无符合条件的 Shopify 店铺。</td></tr>
                         @endforelse
                     </tbody>
                 </table>

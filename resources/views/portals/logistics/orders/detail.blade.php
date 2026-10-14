@@ -61,7 +61,7 @@
     <header class="logistics-order-detail-hero {{ $statusTone }}">
         <div>
             <span class="logistics-order-detail-eyebrow">{{ $display($order->store_name) }} · Shopify #{{ $display($order->shopify_order_number) }}</span>
-            <h3>{{ $display($order->tongtu_order_number ?: ($order->store_name.'-'.$order->shopify_order_number)) }}</h3>
+            <h3>{{ $display($order->tongtu_order_number) }}</h3>
             <p><i class="fa fa-clock-o"></i> 下单时间 {{ $date($order->order_created_at) }}　·　系统编号 {{ $order->getKey() }}</p>
         </div>
         <div class="logistics-order-detail-tags">
@@ -228,7 +228,6 @@
             <section class="logistics-order-detail-card logistics-order-detail-source">
                 <div class="logistics-order-detail-card-title"><h4>归属信息</h4></div>
                 <dl><dt>来源域名</dt><dd>{{ $display($order->source_shop_domain) }}</dd></dl>
-                <dl><dt>所属部门</dt><dd>{{ $display($order->department_name) }}</dd></dl>
                 <dl><dt>运营人员</dt><dd>{{ $display($order->operator_name) }}</dd></dl>
                 <dl><dt>所属组</dt><dd>{{ $display($order->group_names) }}</dd></dl>
                 <dl><dt>创建时间</dt><dd>{{ $date($order->created_at) }}</dd></dl>

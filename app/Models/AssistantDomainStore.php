@@ -352,6 +352,18 @@ class AssistantDomainStore extends Model
         return $label === $key ? $field : $label;
     }
 
+    public function makeTongtuOrderNumber(?string $shopifyOrderNumber): ?string
+    {
+        $prefix = rtrim(trim((string) $this->tongtu_prefix), '-');
+        $orderNumber = ltrim(trim((string) $shopifyOrderNumber), '#');
+
+        if ($prefix === '' || $orderNumber === '') {
+            return null;
+        }
+
+        return $prefix.'-'.$orderNumber;
+    }
+
     /** @return array<string, mixed> */
     public function historySnapshot(): array
     {

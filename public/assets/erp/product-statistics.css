@@ -124,9 +124,11 @@
 .product-statistics-detail-identity > div { flex: 1; }
 .product-statistics-detail-identity strong { display: block; color: #2b4966; font-size: 17px; }
 .product-statistics-detail-identity > div > span { display: block; margin-top: 4px; color: #8296aa; font-size: 12px; }
-.product-statistics-tabs { border-bottom-color: #dfe8f0; }
-.product-statistics-tabs > li > a { margin-right: 2px; border-radius: 4px 4px 0 0; color: #637c95; font-weight: 600; }
-.product-statistics-tabs > li.active > a, .product-statistics-tabs > li.active > a:hover, .product-statistics-tabs > li.active > a:focus { border-color: #dfe8f0 #dfe8f0 transparent; color: #2272bf; }
+.product-statistics-tabs { display: flex; flex-wrap: wrap; gap: 3px; padding: 4px 5px 0; border: 1px solid #dfe8f0; border-radius: 6px 6px 0 0; background: #f7fafc; }
+.product-statistics-tabs > li { float: none; margin-bottom: -1px; }
+.product-statistics-tabs > li > a { margin-right: 0; padding: 10px 14px; border-radius: 5px 5px 0 0; color: #637c95; font-weight: 600; transition: color .15s ease, background .15s ease; }
+.product-statistics-tabs > li > a:hover { border-color: transparent; color: #2272bf; background: #edf6fd; }
+.product-statistics-tabs > li.active > a, .product-statistics-tabs > li.active > a:hover, .product-statistics-tabs > li.active > a:focus { border-color: #dfe8f0 #dfe8f0 #fff; color: #1677bd; background: #fff; box-shadow: inset 0 2px 0 #2388d1; }
 .product-statistics-tab-content { padding-top: 18px; }
 .product-statistics-detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .product-statistics-detail-metric { padding: 13px 14px; border: 1px solid #e6edf4; border-radius: 4px; background: #fbfdff; }
@@ -144,10 +146,20 @@
 .product-statistics-breakdown .is-total dt, .product-statistics-breakdown .is-total dd { color: #1a8553; font-size: 14px; font-weight: 700; }
 .product-statistics-detail-insight { display: flex; gap: 9px; margin-top: 16px; padding: 13px 15px; border: 1px solid #d8ecff; border-radius: 4px; background: #f1f8ff; color: #557994; font-size: 13px; line-height: 1.6; }
 .product-statistics-detail-insight .fa { padding-top: 3px; color: #3185d4; font-size: 16px; }
-.product-statistics-detail-table { margin-bottom: 0; }
-.product-statistics-detail-table th { border-bottom-color: #e7edf4 !important; background: #f8fafc; color: #5b7188; font-weight: 600; }
+.product-statistics-detail-table-wrap { border: 1px solid #dfe8f0; border-radius: 5px; }
+.product-statistics-detail-table { margin-bottom: 0; border-collapse: separate; border-spacing: 0; }
+.product-statistics-detail-table th { border-top: 0 !important; border-right: 1px solid #dfe8f0; border-bottom: 1px solid #d7e2ec !important; background: #f4f8fb; color: #4f6b84; font-weight: 600; text-align: center; }
+.product-statistics-detail-table th:last-child, .product-statistics-detail-table td:last-child { border-right: 0; }
+.product-statistics-detail-table td { border-top: 1px solid #e7eef4 !important; border-right: 1px solid #e7eef4; color: #3e5d76; text-align: center; }
+.product-statistics-detail-table tbody tr:first-child td { border-top: 0 !important; }
+.product-statistics-detail-table tbody tr:nth-child(even) { background: #fbfdff; }
+.product-statistics-detail-table tbody tr:hover { background: #eef7fd; }
 .product-statistics-detail-table td, .product-statistics-detail-table th { padding: 10px !important; vertical-align: middle !important; }
 .product-statistics-detail-table .is-focused { background: #f0f8ff; }
+.product-statistics-detail-sort { width: 100%; padding: 0; border: 0; outline: 0; color: inherit; background: transparent; font: inherit; font-weight: 600; text-align: center; white-space: nowrap; cursor: pointer; }
+.product-statistics-detail-sort .fa { width: 10px; margin-left: 4px; color: #9eb1c2; font-size: 10px; }
+.product-statistics-detail-sort:hover, .product-statistics-detail-sort:focus, .product-statistics-detail-sort.is-active { color: #1677bd; }
+.product-statistics-detail-sort.is-active .fa { color: #1677bd; }
 .product-statistics-modal-footnote { color: #92a4b4; font-size: 12px; }
 @keyframes product-statistics-row-in { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 1320px) { .product-statistics-filters { grid-template-columns: repeat(3, minmax(230px, 1fr)); } }
