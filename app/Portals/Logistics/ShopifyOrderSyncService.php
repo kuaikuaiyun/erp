@@ -391,8 +391,9 @@ GRAPHQL, [
         $paidTransaction = $this->successfulPayment($transactions);
         $orderNumber = preg_replace('/^#/', '', (string) ($payload['name'] ?? ''));
         $isAssigned = $store instanceof AssistantDomainStore;
+        $tongtuOrderNumber = $isAssigned ? $store->makeTongtuOrderNumber($orderNumber) : null;
 
-        $dataStatus = $this->dataStatus($current, $isAssigned, $missingSku);
+        $dataStatus = $this->dataStatus($current, $isAssigned, filled($tongtuOrderNumber), $missingSku);
         $skuExceptionReason = $missingSku
             ? 'Shopify SKU 缺失'
             : ($current->data_status === LogisticsOrder::STATUS_SKU_EXCEPTION ? $current->sku_exception_reason : null);
@@ -408,11 +409,8 @@ GRAPHQL, [
             'source_shop_domain' => $sourceShopDomain,
             'shopify_order_id' => $shopifyOrderId,
             'shopify_order_number' => $orderNumber,
-            'tongtu_order_number' => $isAssigned && filled($store->shop_name) && filled($orderNumber)
-                ? trim((string) $store->shop_name).'-'.$orderNumber
-                : null,
+            'tongtu_order_number' => $tongtuOrderNumber,
             'store_name' => $isAssigned ? $store->shop_name : '未匹配店铺',
-            'department_name' => $isAssigned ? '厦门快云' : '—',
             'operator_name' => $isAssigned ? $store->user_name : null,
             'group_names' => $isAssigned ? AssistantDomainStore::displayMultiValue($store->team) : null,
             'staff_status' => $isAssigned ? '正常' : '—',
@@ -498,10 +496,13 @@ GRAPHQL, [
             : null;
     }
 
-    private function dataStatus(LogisticsOrder $current, bool $isAssigned, bool $missingSku): string
+    private function dataStatus(LogisticsOrder $current, bool $isAssigned, bool $hasTongtuOrderNumber, bool $missingSku): string
     {
         if (!$isAssigned) {
             return LogisticsOrder::STATUS_STORE_UNMATCHED;
+        }
+        if (!$hasTongtuOrderNumber) {
+            return LogisticsOrder::STATUS_STORE_CONFIG_EXCEPTION;
         }
         if ($missingSku) {
             return LogisticsOrder::STATUS_SKU_EXCEPTION;

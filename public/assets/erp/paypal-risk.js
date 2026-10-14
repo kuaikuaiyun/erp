@@ -3,7 +3,13 @@
 
     var config = window.ErpPayPalRisk || {};
     var routes = config.routes || {};
-    var state = { accountId: null, tab: 'overview', page: 1, lastPayload: null };
+    var state = {
+        accountId: null,
+        tab: 'overview',
+        page: 1,
+        lastPayload: null,
+        sorts: { orders: {}, products: {}, refunds: {}, disputes: {} }
+    };
 
     function one(selector, root) { return (root || document).querySelector(selector); }
     function all(selector, root) { return Array.prototype.slice.call((root || document).querySelectorAll(selector)); }
@@ -53,11 +59,14 @@
     }
 
     function detailUrl(tab, page) {
+        var sorting = state.sorts[tab] || {};
         var params = new URLSearchParams({
             tab: tab,
             page: String(page || 1),
             date_from: (config.filters || {}).date_from || '',
-            date_to: (config.filters || {}).date_to || ''
+            date_to: (config.filters || {}).date_to || '',
+            sort: sorting.key || '',
+            direction: sorting.direction || ''
         });
         return route(routes.detail, state.accountId) + '?' + params.toString();
     }
@@ -168,7 +177,7 @@
         var rows = result.data || [];
         var columns = {
             orders: [
-                ['order_number', '订单号'], ['store_name', '店铺'], ['products', '产品'], ['paid_amount', '实付金额'], ['refund_status', '退款'], ['dispute_status', '纠纷'], ['order_created_at', '下单时间']
+                ['order_number', 'Shopify订单号'], ['tongtu_order_number', '通途订单号'], ['store_name', '店铺'], ['products', '产品'], ['paid_amount', '实付金额'], ['refund_status', '退款'], ['dispute_status', '纠纷'], ['order_created_at', '下单时间']
             ],
             products: [
                 ['product_name', '产品'], ['sku', 'SKU'], ['quantity', '销量'], ['paid_amount', '实收金额'], ['refund_orders', '退款订单'], ['refund_rate', '退款率'], ['dispute_orders', '纠纷订单'], ['dispute_rate', '纠纷率']
@@ -180,7 +189,12 @@
                 ['dispute_id', '纠纷编号'], ['order_number', '订单号'], ['store_name', '店铺'], ['amount', '金额'], ['reason', '原因'], ['stage', '阶段'], ['status', '状态'], ['happened_at', '发生时间']
             ]
         }[tab] || [];
-        var thead = columns.map(function (column) { return '<th>' + escapeHtml(column[1]) + '</th>'; }).join('');
+        var sorting = state.sorts[tab] || {};
+        var thead = columns.map(function (column) {
+            var active = sorting.key === column[0];
+            var icon = active ? (sorting.direction === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort';
+            return '<th><button type="button" class="paypal-risk-table-sort ' + (active ? 'is-active' : '') + '" data-paypal-sort="' + escapeHtml(column[0]) + '">' + escapeHtml(column[1]) + ' <i class="fa ' + icon + '"></i></button></th>';
+        }).join('');
         var tbody = rows.map(function (row) {
             return '<tr>' + columns.map(function (column) {
                 var key = column[0];
@@ -240,6 +254,7 @@
                 state.accountId = button.dataset.paypalDetail;
                 state.tab = 'overview';
                 state.page = 1;
+                state.sorts = { orders: {}, products: {}, refunds: {}, disputes: {} };
                 all('[data-paypal-tab]').forEach(function (link) { link.parentElement.classList.toggle('active', link.dataset.paypalTab === 'overview'); });
                 showModal('#paypal-detail-modal');
                 loadDetail('overview', 1);
@@ -257,6 +272,17 @@
         if (pager) pager.addEventListener('click', function (event) {
             var button = event.target.closest('[data-paypal-detail-page]');
             if (button && !button.disabled) loadDetail(state.tab, Number(button.dataset.paypalDetailPage));
+        });
+        var detailBody = one('#paypal-detail-body');
+        if (detailBody) detailBody.addEventListener('click', function (event) {
+            var button = event.target.closest('[data-paypal-sort]');
+            if (!button || state.tab === 'overview') return;
+            var current = state.sorts[state.tab] || {};
+            var key = button.dataset.paypalSort;
+            if (current.key !== key) state.sorts[state.tab] = { key: key, direction: 'asc' };
+            else if (current.direction === 'asc') state.sorts[state.tab] = { key: key, direction: 'desc' };
+            else state.sorts[state.tab] = {};
+            loadDetail(state.tab, 1);
         });
     }
 

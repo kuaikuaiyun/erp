@@ -11,7 +11,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/paypal-risk.css?v=20261010-3">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/paypal-risk.css?v=20261014-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261014-1">
 @endpush
 
@@ -245,6 +245,6 @@
             filters: @json(['date_from' => $filters['date_from'], 'date_to' => $filters['date_to']])
         };
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/paypal-risk.js?v=20261014-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/paypal-risk.js?v=20261014-2"></script>
     <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261014-1"></script>
 @endpush

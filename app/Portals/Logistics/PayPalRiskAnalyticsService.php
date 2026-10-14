@@ -94,15 +94,19 @@ class PayPalRiskAnalyticsService
         array $filters,
         string $tab,
         int $page = 1,
+        string $sort = '',
+        string $direction = '',
     ): array {
         $summary = $this->summary($account, $filters);
         $payload = ['summary' => $summary, 'tab' => $tab];
 
         return match ($tab) {
-            'orders' => $payload + ['rows' => $this->orderRows($account, $filters, $page)],
-            'products' => $payload + ['rows' => $this->productRows($account, $filters, $page)],
-            'refunds' => $payload + ['rows' => $this->paginate($this->refundRows($account, $filters), $page)],
-            'disputes' => $payload + ['rows' => $this->disputeRows($account, $filters, $page)],
+            'orders' => $payload + ['rows' => $this->orderRows($account, $filters, $page, $sort, $direction)],
+            'products' => $payload + ['rows' => $this->productRows($account, $filters, $page, $sort, $direction)],
+            'refunds' => $payload + ['rows' => $this->paginate($this->sortRows($this->refundRows($account, $filters), $sort, $direction, [
+                'refund_id', 'order_number', 'store_name', 'source', 'amount', 'reason', 'status', 'happened_at',
+            ]), $page)],
+            'disputes' => $payload + ['rows' => $this->disputeRows($account, $filters, $page, $sort, $direction)],
             default => $payload + $this->overview($account, $filters),
         };
     }
@@ -200,16 +204,15 @@ class PayPalRiskAnalyticsService
     }
 
     /** @param array{date_from:string,date_to:string} $filters */
-    private function orderRows(LogisticsPayPalAccount $account, array $filters, int $page): array
+    private function orderRows(LogisticsPayPalAccount $account, array $filters, int $page, string $sort, string $direction): array
     {
-        $paginator = $this->orderQuery($account, $filters)
+        $orders = $this->orderQuery($account, $filters)
             ->with(['items:id,logistics_order_id,product_title,variant_title', 'activeRefundDetails:id,logistics_order_id', 'paypalRefunds:id,logistics_order_id', 'paypalDisputes:id,logistics_order_id'])
             ->orderByDesc('order_created_at')
             ->orderByDesc('id')
-            ->paginate(10, ['*'], 'page', $page);
+            ->get();
 
-        return [
-            'data' => collect($paginator->items())->map(static function (LogisticsOrder $order): array {
+        $rows = $orders->map(static function (LogisticsOrder $order): array {
                 $products = $order->items->map(static fn (LogisticsOrderItem $item): string => trim($item->product_title.' '.$item->variant_title))->filter()->unique()->take(3)->implode('；');
                 $hasRefund = (float) $order->shopify_refund_amount_usd > 0
                     || (float) $order->channel_refund_amount_usd > 0
@@ -220,6 +223,7 @@ class PayPalRiskAnalyticsService
                     'order_id' => (int) $order->getKey(),
                     'order_detail_url' => route('logistics.orders.detail', $order),
                     'order_number' => (string) ($order->shopify_order_number ?: '—'),
+                    'tongtu_order_number' => (string) ($order->tongtu_order_number ?: '—'),
                     'store_name' => (string) ($order->store_name ?: '—'),
                     'products' => $products ?: '—',
                     'paid_amount' => round((float) $order->paid_amount_usd, 2),
@@ -227,13 +231,16 @@ class PayPalRiskAnalyticsService
                     'dispute_status' => $order->paypalDisputes->isNotEmpty() ? '有纠纷' : '无纠纷',
                     'order_created_at' => $order->order_created_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') ?: '—',
                 ];
-            })->all(),
-            'meta' => $this->paginatorMeta($paginator->currentPage(), $paginator->lastPage(), $paginator->total(), $paginator->perPage()),
-        ];
+            })->all();
+
+        return $this->paginate($this->sortRows($rows, $sort, $direction, [
+            'order_number', 'tongtu_order_number', 'store_name', 'products', 'paid_amount', 'refund_status',
+            'dispute_status', 'order_created_at',
+        ]), $page);
     }
 
     /** @param array{date_from:string,date_to:string} $filters */
-    private function productRows(LogisticsPayPalAccount $account, array $filters, int $page): array
+    private function productRows(LogisticsPayPalAccount $account, array $filters, int $page, string $sort, string $direction): array
     {
         $items = LogisticsOrderItem::query()
             ->selectRaw('logistics_order_items.*, logistics_orders.id as risk_order_id, logistics_orders.paid_amount_usd as risk_order_paid_amount')
@@ -274,7 +281,10 @@ class PayPalRiskAnalyticsService
         }
         usort($rows, static fn (array $left, array $right): int => $right['paid_amount'] <=> $left['paid_amount']);
 
-        return $this->paginate($rows, $page);
+        return $this->paginate($this->sortRows($rows, $sort, $direction, [
+            'product_name', 'sku', 'quantity', 'paid_amount', 'refund_orders', 'refund_rate',
+            'dispute_orders', 'dispute_rate',
+        ]), $page);
     }
 
     /** @param array{date_from:string,date_to:string} $filters
@@ -362,7 +372,7 @@ class PayPalRiskAnalyticsService
     }
 
     /** @param array{date_from:string,date_to:string} $filters */
-    private function disputeRows(LogisticsPayPalAccount $account, array $filters, int $page): array
+    private function disputeRows(LogisticsPayPalAccount $account, array $filters, int $page, string $sort, string $direction): array
     {
         $query = LogisticsPayPalDispute::query()
             ->with('order:id,shopify_order_number,store_name')
@@ -377,10 +387,7 @@ class PayPalRiskAnalyticsService
             })
             ->orderByDesc('dispute_created_at')
             ->orderByDesc('id');
-        $paginator = $query->paginate(10, ['*'], 'page', $page);
-
-        return [
-            'data' => collect($paginator->items())->map(fn (LogisticsPayPalDispute $dispute): array => [
+        $rows = $query->get()->map(fn (LogisticsPayPalDispute $dispute): array => [
                 'order_id' => $dispute->order?->getKey(),
                 'order_detail_url' => $dispute->order ? route('logistics.orders.detail', $dispute->order) : null,
                 'dispute_id' => (string) $dispute->dispute_id,
@@ -393,9 +400,11 @@ class PayPalRiskAnalyticsService
                 'status' => $this->disputeStatus($dispute->status),
                 'happened_at' => $this->dateTime($dispute->dispute_created_at),
                 'updated_at' => $this->dateTime($dispute->dispute_updated_at),
-            ])->all(),
-            'meta' => $this->paginatorMeta($paginator->currentPage(), $paginator->lastPage(), $paginator->total(), $paginator->perPage()),
-        ];
+            ])->all();
+
+        return $this->paginate($this->sortRows($rows, $sort, $direction, [
+            'dispute_id', 'order_number', 'store_name', 'amount', 'reason', 'stage', 'status', 'happened_at',
+        ]), $page);
     }
 
     /** @param list<int> $orderIds
@@ -513,6 +522,46 @@ class PayPalRiskAnalyticsService
         if ($filters['date_to'] !== '') {
             $query->whereDate($column, '<=', $filters['date_to']);
         }
+    }
+
+    /** @param list<array<string,mixed>> $rows
+     *  @param list<string> $allowed
+     *  @return list<array<string,mixed>>
+     */
+    private function sortRows(array $rows, string $sort, string $direction, array $allowed): array
+    {
+        if ($sort === '' || !in_array($sort, $allowed, true) || !in_array($direction, ['asc', 'desc'], true)) {
+            return $rows;
+        }
+        foreach ($rows as $index => &$row) {
+            $row['_sort_index'] = $index;
+        }
+        unset($row);
+        usort($rows, static function (array $left, array $right) use ($sort, $direction): int {
+            $leftValue = $left[$sort] ?? null;
+            $rightValue = $right[$sort] ?? null;
+            $leftBlank = $leftValue === null || $leftValue === '' || $leftValue === '—';
+            $rightBlank = $rightValue === null || $rightValue === '' || $rightValue === '—';
+            if ($leftBlank !== $rightBlank) {
+                return $leftBlank ? 1 : -1;
+            }
+            if (is_numeric($leftValue) && is_numeric($rightValue)) {
+                $comparison = (float) $leftValue <=> (float) $rightValue;
+            } else {
+                $comparison = strnatcasecmp((string) $leftValue, (string) $rightValue);
+            }
+            if ($comparison === 0) {
+                return $left['_sort_index'] <=> $right['_sort_index'];
+            }
+
+            return $direction === 'asc' ? $comparison : -$comparison;
+        });
+        foreach ($rows as &$row) {
+            unset($row['_sort_index']);
+        }
+        unset($row);
+
+        return $rows;
     }
 
     /** @param list<array<string,mixed>> $rows */

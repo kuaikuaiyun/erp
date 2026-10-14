@@ -28,18 +28,18 @@
 .logistics-orders-scroll::-webkit-scrollbar-thumb:hover, .logistics-shopify-stores-scroll::-webkit-scrollbar-thumb:hover { background: #536c86; }
 .logistics-table { min-width: 1060px; margin-bottom: 0; font-size: 13px; }
 .logistics-orders-table { min-width: 7600px; }
-.logistics-shopify-stores-table { min-width: 2800px; }
+.logistics-shopify-stores-table { min-width: 2450px; }
 .logistics-shopify-stores-table th, .logistics-shopify-stores-table td { white-space: nowrap; }
 .logistics-shopify-stores-table th:nth-child(1), .logistics-shopify-stores-table td:nth-child(1) { width: 48px; min-width: 48px; }
 .logistics-shopify-stores-table th:nth-child(2), .logistics-shopify-stores-table td:nth-child(2) { width: 160px; min-width: 160px; }
 .logistics-shopify-stores-table th:nth-child(3), .logistics-shopify-stores-table td:nth-child(3) { width: 240px; min-width: 240px; }
 .logistics-shopify-stores-table th:nth-child(4), .logistics-shopify-stores-table td:nth-child(4) { width: 130px; min-width: 130px; }
-.logistics-shopify-stores-table th:nth-child(5), .logistics-shopify-stores-table td:nth-child(5), .logistics-shopify-stores-table th:nth-child(6), .logistics-shopify-stores-table td:nth-child(6) { width: 120px; min-width: 120px; }
+.logistics-shopify-stores-table th:nth-child(5), .logistics-shopify-stores-table td:nth-child(5) { width: 130px; min-width: 130px; }
+.logistics-shopify-stores-table th:nth-child(6), .logistics-shopify-stores-table td:nth-child(6) { width: 140px; min-width: 140px; }
 .logistics-shopify-stores-table th:nth-child(7), .logistics-shopify-stores-table td:nth-child(7) { width: 150px; min-width: 150px; }
 .logistics-shopify-stores-table th:nth-child(8), .logistics-shopify-stores-table td:nth-child(8), .logistics-shopify-stores-table th:nth-child(9), .logistics-shopify-stores-table td:nth-child(9), .logistics-shopify-stores-table th:nth-child(12), .logistics-shopify-stores-table td:nth-child(12) { width: 180px; min-width: 180px; }
 .logistics-shopify-stores-table th:nth-child(10), .logistics-shopify-stores-table td:nth-child(10), .logistics-shopify-stores-table th:nth-child(13), .logistics-shopify-stores-table td:nth-child(13) { width: 300px; min-width: 300px; white-space: normal; overflow-wrap: anywhere; }
 .logistics-shopify-stores-table th:nth-child(11), .logistics-shopify-stores-table td:nth-child(11) { width: 120px; min-width: 120px; }
-.logistics-shopify-stores-table th:nth-child(14), .logistics-shopify-stores-table td:nth-child(14) { width: 285px; min-width: 285px; }
 .logistics-table thead th { background: #f1f5fa; color: #314b68; border-bottom: 1px solid #d9e2ec; white-space: nowrap; font-weight: 700; vertical-align: middle; }
 .logistics-orders-scroll .logistics-orders-table thead th, .logistics-shopify-stores-scroll .logistics-shopify-stores-table thead th { position: sticky; top: 0; z-index: 4; background: #eaf0f7; box-shadow: 0 1px 0 #cdd8e4, 0 3px 7px rgba(42, 67, 94, .09); }
 .logistics-table td { vertical-align: middle !important; color: #384961; max-width: 220px; }

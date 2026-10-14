@@ -396,19 +396,19 @@ class LogisticsOrderController extends Controller
 
             $orderNumber = trim((string) $order->shopify_order_number);
             $missingSku = $this->hasMissingShopifySku($order);
+            $tongtuOrderNumber = $store->makeTongtuOrderNumber($orderNumber);
             $order->fill([
                 'assistant_domain_store_id' => $store->getKey(),
                 'store_name' => $store->shop_name,
-                'department_name' => '厦门快云',
                 'operator_name' => $store->user_name,
                 'group_names' => AssistantDomainStore::displayMultiValue($store->team),
                 'staff_status' => '正常',
-                'tongtu_order_number' => filled($store->shop_name) && $orderNumber !== ''
-                    ? trim((string) $store->shop_name).'-'.$orderNumber
-                    : null,
-                'data_status' => $missingSku
-                    ? LogisticsOrder::STATUS_SKU_EXCEPTION
-                    : LogisticsOrder::STATUS_PENDING_TONGTU,
+                'tongtu_order_number' => $tongtuOrderNumber,
+                'data_status' => blank($tongtuOrderNumber)
+                    ? LogisticsOrder::STATUS_STORE_CONFIG_EXCEPTION
+                    : ($missingSku
+                        ? LogisticsOrder::STATUS_SKU_EXCEPTION
+                        : LogisticsOrder::STATUS_PENDING_TONGTU),
                 'sku_exception_reason' => $missingSku ? 'Shopify SKU 缺失' : null,
             ])->save();
             $this->automation->scheduleForOrder($order);
@@ -520,7 +520,7 @@ class LogisticsOrderController extends Controller
 
         $fields = [
             'id', 'shopify_order_id', 'shopify_order_number', 'tongtu_order_number', 'store_name',
-            'department_name', 'operator_name', 'group_names', 'staff_status', 'buyer_name', 'buyer_email',
+            'operator_name', 'group_names', 'staff_status', 'buyer_name', 'buyer_email',
             'buyer_phone', 'is_add_on', 'subscription_type', 'subscription_status', 'payment_method', 'payment_gateway',
             'collection_account_email', 'transaction_id', 'bill_number', 'logistics_status', 'refund_reason', 'data_status',
             'time_zone',
@@ -551,7 +551,7 @@ class LogisticsOrderController extends Controller
         $query = LogisticsOrder::query();
         $textColumns = [
             'id', 'shopify_order_id', 'shopify_order_number', 'tongtu_order_number', 'store_name',
-            'department_name', 'operator_name', 'group_names', 'staff_status', 'buyer_name', 'buyer_email',
+            'operator_name', 'group_names', 'staff_status', 'buyer_name', 'buyer_email',
             'buyer_phone', 'is_add_on', 'subscription_type', 'subscription_status', 'payment_method', 'payment_gateway',
             'collection_account_email', 'transaction_id', 'bill_number', 'logistics_status', 'data_status',
             'time_zone', 'source_shop_domain',
@@ -614,7 +614,6 @@ class LogisticsOrderController extends Controller
 
         return [
             'stores' => $values('store_name'),
-            'departments' => $values('department_name'),
             'operators' => $values('operator_name'),
             'groups' => $values('group_names'),
             'paymentMethods' => $values('payment_method'),
@@ -629,7 +628,7 @@ class LogisticsOrderController extends Controller
     private function validatedData(Request $request): array
     {
         $textFields = [
-            'shopify_order_id', 'shopify_order_number', 'tongtu_order_number', 'store_name', 'department_name',
+            'shopify_order_id', 'shopify_order_number', 'tongtu_order_number', 'store_name',
             'operator_name', 'group_names', 'staff_status', 'buyer_name', 'buyer_email', 'buyer_phone', 'is_add_on',
             'subscription_type', 'subscription_origin_order_id', 'subscription_status', 'tongtu_sku',
             'tongtu_product_name', 'sale_quantity', 'sale_product_weight', 'payment_status', 'payment_method', 'payment_gateway',

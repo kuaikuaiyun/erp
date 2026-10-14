@@ -7,7 +7,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261012-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261014-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261014-1">
 @endpush
 
@@ -178,6 +178,6 @@
             exportValidationError: @json($errors->first('scope')),
         };
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/product-statistics.js?v=20261014-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-statistics.js?v=20261014-2"></script>
     <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261014-1"></script>
 @endpush

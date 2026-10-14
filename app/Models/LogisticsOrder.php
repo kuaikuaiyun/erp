@@ -16,6 +16,7 @@ class LogisticsOrder extends Model
     public const STATUS_TONGTU_FAILED = '通途匹配失败';
     public const STATUS_SHOPIFY_FAILED = 'Shopify同步失败';
     public const STATUS_STORE_UNMATCHED = '店铺匹配失败';
+    public const STATUS_STORE_CONFIG_EXCEPTION = '店铺配置异常';
 
     public const TRACKING_PENDING = '待匹配';
     public const TRACKING_SYNCED = '已同步';
@@ -138,6 +139,7 @@ class LogisticsOrder extends Model
             self::STATUS_TONGTU_FAILED => self::STATUS_TONGTU_FAILED,
             self::STATUS_SHOPIFY_FAILED => self::STATUS_SHOPIFY_FAILED,
             self::STATUS_STORE_UNMATCHED => self::STATUS_STORE_UNMATCHED,
+            self::STATUS_STORE_CONFIG_EXCEPTION => self::STATUS_STORE_CONFIG_EXCEPTION,
         ];
     }
 
@@ -179,7 +181,7 @@ class LogisticsOrder extends Model
         return match ($this->data_status) {
             self::STATUS_NORMAL => 'label-success',
             self::STATUS_SKU_EXCEPTION, self::STATUS_TONGTU_FAILED, self::STATUS_SHOPIFY_FAILED,
-            self::STATUS_STORE_UNMATCHED => 'label-danger',
+            self::STATUS_STORE_UNMATCHED, self::STATUS_STORE_CONFIG_EXCEPTION => 'label-danger',
             self::STATUS_TONGTU_NOT_FOUND => 'label-warning',
             default => 'label-default',
         };
@@ -207,6 +209,7 @@ class LogisticsOrder extends Model
             self::STATUS_TONGTU_FAILED,
             self::STATUS_SHOPIFY_FAILED,
             self::STATUS_STORE_UNMATCHED,
+            self::STATUS_STORE_CONFIG_EXCEPTION,
         ], true)
             || $logisticsStatus === self::LOGISTICS_EXCEPTION
             || $trackingStatus === self::TRACKING_FAILED;

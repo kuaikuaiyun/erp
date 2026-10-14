@@ -12,7 +12,7 @@ class LogisticsTongtuAutomationService
     {
         $dispatch = DB::connection($order->getConnectionName())->transaction(function () use ($order): ?array {
             $locked = LogisticsOrder::query()->whereKey($order->getKey())->lockForUpdate()->first();
-            if (!$locked || !$locked->assistant_domain_store_id || !$locked->paid_at) {
+            if (!$locked || !$locked->assistant_domain_store_id || !$locked->paid_at || blank($locked->tongtu_order_number)) {
                 return null;
             }
 

@@ -8,6 +8,7 @@
     var decisions = config.decisions || {};
     var labels = config.labels || {};
     var state = { page: Number(pagination.current_page) || 1, pageSize: Number(pagination.per_page) || 10, sort: config.sort || null, direction: config.direction || null, expanded: {}, selected: {}, filtered: [] };
+    var detailState = { product: null, variant: null, sorts: {} };
     var body = document.getElementById('product-statistics-body');
     var empty = document.getElementById('product-statistics-empty');
     var filterForm = document.getElementById('product-statistics-filter-form');
@@ -170,14 +171,37 @@
             + '<dl><dt>' + escapeHtml(t('refunds', '')) + '</dt><dd>' + negativeMoney(subject.refunds) + '</dd></dl>'
             + '<dl class="is-total"><dt>' + escapeHtml(t('profit', '')) + '</dt><dd>' + formatMoney(subject.profit) + '</dd></dl></div>';
     }
+    function detailSortButton(table, key, label) {
+        var current = detailState.sorts[table] || {}, active = current.key === key;
+        var icon = active ? (current.direction === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort';
+        return '<button type="button" class="product-statistics-detail-sort ' + (active ? 'is-active' : '') + '" data-detail-table="' + escapeHtml(table) + '" data-detail-sort="' + escapeHtml(key) + '">' + escapeHtml(label) + ' <i class="fa ' + icon + '"></i></button>';
+    }
+    function detailSortedRows(table, rows) {
+        var sorting = detailState.sorts[table] || {};
+        if (!sorting.key || !sorting.direction) return rows.slice();
+        return rows.map(function (row, index) { return { row: row, index: index }; }).sort(function (leftEntry, rightEntry) {
+            var left = leftEntry.row[sorting.key], right = rightEntry.row[sorting.key];
+            var leftBlank = left === null || left === undefined || left === '' || left === '—';
+            var rightBlank = right === null || right === undefined || right === '' || right === '—';
+            if (leftBlank !== rightBlank) return leftBlank ? 1 : -1;
+            var comparison;
+            if (isNumeric(left) && isNumeric(right)) comparison = number(left) - number(right);
+            else comparison = String(left || '').localeCompare(String(right || ''), 'zh-CN', { numeric: true, sensitivity: 'base' });
+            if (comparison === 0) return leftEntry.index - rightEntry.index;
+            return sorting.direction === 'asc' ? comparison : -comparison;
+        }).map(function (entry) { return entry.row; });
+    }
+    function detailEmptyRow(columns) { return '<tr><td colspan="' + columns + '" class="text-center text-muted">' + escapeHtml(t('pageEmpty', '—')) + '</td></tr>'; }
     function shopRows(product) {
-        return (product.store_metrics || []).map(function (store) {
+        var stores = detailSortedRows('stores', product.store_metrics || []);
+        if (!stores.length) return detailEmptyRow(5);
+        return stores.map(function (store) {
             return '<tr><td>' + escapeHtml(store.name) + '</td><td>' + formatNumber(store.sales) + '</td><td>' + formatMoney(store.revenue) + '</td><td>' + formatMoney(store.profit) + '</td><td><span class="product-statistics-rate ' + rateClass(store.profit_rate) + '">' + formatRate(store.profit_rate) + '</span></td></tr>';
         }).join('');
     }
     function refundRows(subject) {
-        var details = subject.refund_details || [];
-        if (!details.length) return '<tr><td colspan="9" class="text-center text-muted">' + escapeHtml(t('pageEmpty', '—')) + '</td></tr>';
+        var details = detailSortedRows('refunds', subject.refund_details || []);
+        if (!details.length) return detailEmptyRow(9);
         return details.map(function (refund) {
             var orderNumber = refund.order_id && refund.order_detail_url
                 ? '<button type="button" class="btn btn-link btn-xs js-logistics-order-detail" data-order-detail-url="' + escapeHtml(refund.order_detail_url) + '">' + escapeHtml(refund.shopify_order_number || '—') + '</button>'
@@ -186,16 +210,39 @@
         }).join('');
     }
     function relatedOrderRows(subject) {
-        var orders = subject.related_orders || [];
-        if (!orders.length) return '<tr><td colspan="8" class="text-center text-muted">' + escapeHtml(t('pageEmpty', '—')) + '</td></tr>';
+        var orders = detailSortedRows('orders', subject.related_orders || []);
+        if (!orders.length) return detailEmptyRow(8);
         return orders.map(function (order) {
             return '<tr><td><button type="button" class="btn btn-link btn-xs js-logistics-order-detail" data-order-detail-url="' + escapeHtml(order.detail_url || '') + '">' + escapeHtml(order.shopify_order_number || '—') + '</button></td>'
                 + '<td>' + escapeHtml(order.store || '—') + '</td><td>' + escapeHtml(order.bill_number || '—') + '</td><td>' + formatNumber(order.quantity) + '</td><td>' + formatMoney(order.revenue) + '</td><td>' + formatMoney(order.actual_refund) + '</td><td>' + escapeHtml(order.order_created_at || '—') + '</td>'
                 + '<td><button type="button" class="btn btn-info btn-xs js-logistics-order-detail" data-order-detail-url="' + escapeHtml(order.detail_url || '') + '"><i class="fa fa-eye"></i> 查看订单</button></td></tr>';
         }).join('');
     }
+    function renderDetailTables() {
+        var product = detailState.product, variant = detailState.variant, subject = variant || product;
+        if (!product || !subject) return;
+        var variants = detailSortedRows('variants', product.variants || []);
+        var variantBody = variants.length ? variants.map(function (item) {
+            return '<tr class="' + (variant && item.id === variant.id ? 'is-focused' : '') + '"><td>' + escapeHtml(item.name) + '</td><td><code>' + escapeHtml(item.sku) + '</code></td><td>' + formatNumber(item.sales) + '</td><td>' + formatMoney(item.revenue) + '</td><td>' + formatMoney(item.profit) + '</td><td><span class="product-statistics-rate ' + rateClass(item.profit_rate) + '">' + formatRate(item.profit_rate) + '</span></td><td>' + formatRate(item.refund_rate) + '</td></tr>';
+        }).join('') : detailEmptyRow(7);
+        document.getElementById('product-statistics-variants').innerHTML = '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr><th>' + detailSortButton('variants', 'name', t('variant', '')) + '</th><th>' + detailSortButton('variants', 'sku', 'SKU') + '</th><th>' + detailSortButton('variants', 'sales', t('sales', '')) + '</th><th>' + detailSortButton('variants', 'revenue', t('revenue', '')) + '</th><th>' + detailSortButton('variants', 'profit', t('profit', '')) + '</th><th>' + detailSortButton('variants', 'profit_rate', t('profitRate', '')) + '</th><th>' + detailSortButton('variants', 'refund_rate', t('refundRate', '')) + '</th></tr></thead><tbody>' + variantBody + '</tbody></table></div>';
+        document.getElementById('product-statistics-stores').innerHTML = '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr><th>' + detailSortButton('stores', 'name', t('storeName', '')) + '</th><th>' + detailSortButton('stores', 'sales', t('sales', '')) + '</th><th>' + detailSortButton('stores', 'revenue', t('revenue', '')) + '</th><th>' + detailSortButton('stores', 'profit', t('profit', '')) + '</th><th>' + detailSortButton('stores', 'profit_rate', t('profitRate', '')) + '</th></tr></thead><tbody>' + shopRows(product) + '</tbody></table></div>';
+        var trendSource = (product.trend || []).map(function (item, index, rows) {
+            var previous = rows[index - 1], change = previous && number(previous.sales) > 0 ? (number(item.sales) - number(previous.sales)) / number(previous.sales) * 100 : null;
+            return Object.assign({}, item, { sales_change: change });
+        });
+        var trends = detailSortedRows('trend', trendSource);
+        var trendBody = trends.length ? trends.map(function (item) {
+            var change = item.sales_change;
+            return '<tr><td>' + escapeHtml(item.label) + '</td><td>' + formatNumber(item.sales) + '</td><td>' + formatMoney(item.profit) + '</td><td>' + (change === null ? t('notAvailable', '—') : '<span class="' + (change >= 0 ? 'text-green' : 'text-red') + '">' + (change >= 0 ? '+' : '') + formatRate(change) + '</span>') + '</td></tr>';
+        }).join('') : detailEmptyRow(4);
+        document.getElementById('product-statistics-trend').innerHTML = '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table product-statistics-trend-table"><thead><tr><th>' + detailSortButton('trend', 'label', t('period', '')) + '</th><th>' + detailSortButton('trend', 'sales', t('sales', '')) + '</th><th>' + detailSortButton('trend', 'profit', t('profit', '')) + '</th><th>' + detailSortButton('trend', 'sales_change', t('salesChange', '')) + '</th></tr></thead><tbody>' + trendBody + '</tbody></table></div>';
+        document.getElementById('product-statistics-refunds').innerHTML = '<div class="alert alert-info"><i class="fa fa-info-circle"></i> ' + escapeHtml(t('refundAllocationNote', '')) + '</div><div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr><th>' + detailSortButton('refunds', 'store', '店铺') + '</th><th>' + detailSortButton('refunds', 'shopify_order_number', 'Shopify订单号') + '</th><th>' + detailSortButton('refunds', 'bill_number', '账单号') + '</th><th>' + detailSortButton('refunds', 'refund_number', '退款单号') + '</th><th>' + detailSortButton('refunds', 'amount', '分摊退款额（USD）') + '</th><th>' + detailSortButton('refunds', 'refund_type', '退款类型') + '</th><th>' + detailSortButton('refunds', 'refund_reason', '退款原因') + '</th><th>' + detailSortButton('refunds', 'remark', '备注') + '</th><th>' + detailSortButton('refunds', 'imported_at', '导入时间') + '</th></tr></thead><tbody>' + refundRows(subject) + '</tbody></table></div>';
+        document.getElementById('product-statistics-orders').innerHTML = '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr><th>' + detailSortButton('orders', 'shopify_order_number', 'Shopify订单号') + '</th><th>' + detailSortButton('orders', 'store', '店铺') + '</th><th>' + detailSortButton('orders', 'bill_number', '账单号') + '</th><th>' + detailSortButton('orders', 'quantity', '该产品数量') + '</th><th>' + detailSortButton('orders', 'revenue', '该产品实收') + '</th><th>' + detailSortButton('orders', 'actual_refund', '分摊退款') + '</th><th>' + detailSortButton('orders', 'order_created_at', '下单时间') + '</th><th>操作</th></tr></thead><tbody>' + relatedOrderRows(subject) + '</tbody></table></div>';
+    }
     function fillModal(product, variantId) {
         var variant = variantId ? findVariant(product, variantId) : null, subject = variant || product;
+        detailState = { product: product, variant: variant, sorts: {} };
         document.getElementById('product-statistics-detail-title').textContent = variant ? t('variantDetailTitle', '') : t('detailTitle', '');
         document.getElementById('product-statistics-detail-identity').innerHTML = productThumb(subject) + '<div><strong>' + escapeHtml(subject.name) + '</strong><span>' + escapeHtml(subject.sku) + ' · ' + escapeHtml(product.category) + '</span></div>' + decisionBadge(product.decision);
         document.getElementById('product-statistics-overview').innerHTML = '<div class="product-statistics-detail-grid">'
@@ -205,16 +252,7 @@
             + detailMetric(t('refundRate', ''), formatRate(subject.refund_rate)) + detailMetric(t('cost', ''), formatMoney(subject.cost))
             + detailMetric(t('actualRefunds', ''), formatMoney(subject.actual_refunds)) + detailMetric(t('actualRefundCount', ''), formatNumber(subject.actual_refund_count))
             + '</div>' + detailBreakdown(subject);
-        document.getElementById('product-statistics-variants').innerHTML = '<div class="table-responsive"><table class="table product-statistics-detail-table"><thead><tr><th>' + escapeHtml(t('variant', '')) + '</th><th>SKU</th><th>' + escapeHtml(t('sales', '')) + '</th><th>' + escapeHtml(t('revenue', '')) + '</th><th>' + escapeHtml(t('profit', '')) + '</th><th>' + escapeHtml(t('profitRate', '')) + '</th><th>' + escapeHtml(t('refundRate', '')) + '</th></tr></thead><tbody>' + (product.variants || []).map(function (item) {
-            return '<tr class="' + (variant && item.id === variant.id ? 'is-focused' : '') + '"><td>' + escapeHtml(item.name) + '</td><td><code>' + escapeHtml(item.sku) + '</code></td><td>' + formatNumber(item.sales) + '</td><td>' + formatMoney(item.revenue) + '</td><td>' + formatMoney(item.profit) + '</td><td><span class="product-statistics-rate ' + rateClass(item.profit_rate) + '">' + formatRate(item.profit_rate) + '</span></td><td>' + formatRate(item.refund_rate) + '</td></tr>';
-        }).join('') + '</tbody></table></div>';
-        document.getElementById('product-statistics-stores').innerHTML = '<div class="table-responsive"><table class="table product-statistics-detail-table"><thead><tr><th>' + escapeHtml(t('storeName', '')) + '</th><th>' + escapeHtml(t('sales', '')) + '</th><th>' + escapeHtml(t('revenue', '')) + '</th><th>' + escapeHtml(t('profit', '')) + '</th><th>' + escapeHtml(t('profitRate', '')) + '</th></tr></thead><tbody>' + shopRows(product) + '</tbody></table></div>';
-        document.getElementById('product-statistics-trend').innerHTML = '<div class="table-responsive"><table class="table product-statistics-detail-table product-statistics-trend-table"><thead><tr><th>' + escapeHtml(t('period', '')) + '</th><th>' + escapeHtml(t('sales', '')) + '</th><th>' + escapeHtml(t('profit', '')) + '</th><th>' + escapeHtml(t('salesChange', '')) + '</th></tr></thead><tbody>' + (product.trend || []).map(function (item, index, rows) {
-            var previous = rows[index - 1], change = previous && number(previous.sales) > 0 ? (number(item.sales) - number(previous.sales)) / number(previous.sales) * 100 : null;
-            return '<tr><td>' + escapeHtml(item.label) + '</td><td>' + formatNumber(item.sales) + '</td><td>' + formatMoney(item.profit) + '</td><td>' + (change === null ? t('notAvailable', '—') : '<span class="' + (change >= 0 ? 'text-green' : 'text-red') + '">' + (change >= 0 ? '+' : '') + formatRate(change) + '</span>') + '</td></tr>';
-        }).join('') + '</tbody></table></div>';
-        document.getElementById('product-statistics-refunds').innerHTML = '<div class="alert alert-info"><i class="fa fa-info-circle"></i> ' + escapeHtml(t('refundAllocationNote', '')) + '</div><div class="table-responsive"><table class="table product-statistics-detail-table"><thead><tr><th>店铺</th><th>Shopify订单号</th><th>账单号</th><th>退款单号</th><th>分摊退款额（USD）</th><th>退款类型</th><th>退款原因</th><th>备注</th><th>导入时间</th></tr></thead><tbody>' + refundRows(subject) + '</tbody></table></div>';
-        document.getElementById('product-statistics-orders').innerHTML = '<div class="table-responsive"><table class="table product-statistics-detail-table"><thead><tr><th>Shopify订单号</th><th>店铺</th><th>账单号</th><th>该产品数量</th><th>该产品实收</th><th>分摊退款</th><th>下单时间</th><th>操作</th></tr></thead><tbody>' + relatedOrderRows(subject) + '</tbody></table></div>';
+        renderDetailTables();
         if ($) { $('#product-statistics-detail-modal .nav-tabs a[href="#product-statistics-overview"]').tab('show'); $('#product-statistics-detail-modal').modal('show'); }
     }
     function appendHiddenInput(container, name, value) { var input = document.createElement('input'); input.type = 'hidden'; input.name = name; input.value = value; container.appendChild(input); }
@@ -246,6 +284,16 @@
     document.addEventListener('click', function (event) {
         var imagePreview = event.target.closest('.product-statistics-thumb.is-previewable');
         if (imagePreview) { openImagePreview(imagePreview); return; }
+        var detailSort = event.target.closest('.product-statistics-detail-sort');
+        if (detailSort) {
+            var table = detailSort.dataset.detailTable, key = detailSort.dataset.detailSort;
+            var current = detailState.sorts[table] || {};
+            if (current.key !== key) detailState.sorts[table] = { key: key, direction: 'asc' };
+            else if (current.direction === 'asc') detailState.sorts[table] = { key: key, direction: 'desc' };
+            else detailState.sorts[table] = {};
+            renderDetailTables();
+            return;
+        }
         var row = event.target.closest('.product-statistics-product-row');
         if (row && !event.target.closest('button, a, input, select')) { state.expanded[row.dataset.productId] = !state.expanded[row.dataset.productId]; renderTable(); return; }
         var target = event.target.closest('.product-statistics-expand, .product-statistics-view, .product-statistics-variant-view, .product-statistics-page-button, .product-statistics-sort');

@@ -34,6 +34,14 @@ class TongtuOrderMatchService
         $summary = ['matched' => 0, 'not_found' => 0, 'failed' => 0, 'sku_exception' => 0, 'errors' => []];
 
         foreach ($orders as $order) {
+            $configurationError = $this->refreshTongtuOrderNumber($order);
+            if ($configurationError !== null) {
+                $this->log($order, 'failed', $configurationError, $actor);
+                $summary['failed']++;
+                $summary['errors'][(int) $order->getKey()] = $configurationError;
+                continue;
+            }
+
             try {
                 $result = $this->lookupAndApplyWithTokenRefresh($order, $session, $actor !== null);
                 if ($result === null) {
@@ -58,6 +66,35 @@ class TongtuOrderMatchService
         }
 
         return $summary;
+    }
+
+    private function refreshTongtuOrderNumber(LogisticsOrder $order): ?string
+    {
+        $store = $order->store()->first();
+        if (!$store) {
+            $order->forceFill([
+                'tongtu_order_number' => null,
+                'data_status' => LogisticsOrder::STATUS_STORE_UNMATCHED,
+            ])->save();
+
+            return '订单尚未归属 Shopify 店铺，无法生成通途订单号。';
+        }
+
+        $tongtuOrderNumber = $store->makeTongtuOrderNumber($order->shopify_order_number);
+        if (blank($tongtuOrderNumber)) {
+            $order->forceFill([
+                'tongtu_order_number' => null,
+                'data_status' => LogisticsOrder::STATUS_STORE_CONFIG_EXCEPTION,
+            ])->save();
+
+            return '归属店铺尚未填写通途前缀，无法生成通途订单号。';
+        }
+
+        if (!hash_equals((string) $order->tongtu_order_number, $tongtuOrderNumber)) {
+            $order->forceFill(['tongtu_order_number' => $tongtuOrderNumber])->save();
+        }
+
+        return null;
     }
 
     /**

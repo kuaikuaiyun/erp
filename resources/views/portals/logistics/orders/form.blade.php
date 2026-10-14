@@ -6,7 +6,7 @@
     $portalOrigin = rtrim(request()->getSchemeAndHttpHost(), '/');
     $labels = [
         'shopify_order_id' => '本订单ID', 'shopify_order_number' => 'Shopify订单号', 'tongtu_order_number' => '通途订单号',
-        'store_name' => '店铺名称', 'department_name' => '所属部门', 'operator_name' => '运营人员', 'group_names' => '所属组',
+        'store_name' => '店铺名称', 'operator_name' => '运营人员', 'group_names' => '所属组',
         'staff_status' => '人员状态', 'buyer_name' => '买家名称', 'buyer_email' => 'Email', 'buyer_phone' => '电话',
         'is_add_on' => '是否加购', 'subscription_type' => '订阅类型', 'subscription_origin_order_id' => '订阅复购原订单ID',
         'subscription_status' => '订阅状态', 'payment_status' => '支付状态', 'payment_method' => '支付方式', 'payment_gateway' => '支付渠道',
@@ -25,7 +25,7 @@
         'data_status' => '数据状态', 'sku_exception_reason' => 'SKU异常原因', 'time_zone' => '时区',
     ];
     $groups = [
-        '订单基础信息' => ['shopify_order_id', 'shopify_order_number', 'tongtu_order_number', 'store_name', 'department_name', 'operator_name', 'group_names', 'staff_status', 'buyer_name', 'buyer_email', 'buyer_phone', 'is_add_on', 'time_zone', 'destination', 'order_created_at'],
+        '订单基础信息' => ['shopify_order_id', 'shopify_order_number', 'tongtu_order_number', 'store_name', 'operator_name', 'group_names', 'staff_status', 'buyer_name', 'buyer_email', 'buyer_phone', 'is_add_on', 'time_zone', 'destination', 'order_created_at'],
         '订阅与支付' => ['subscription_type', 'subscription_origin_order_id', 'subscription_status', 'payment_status', 'payment_method', 'payment_gateway', 'paid_amount_usd', 'paid_at', 'collection_account', 'collection_account_email', 'transaction_id', 'bill_number'],
         '通途商品与成本' => ['tongtu_sku', 'tongtu_product_name', 'sale_quantity', 'sale_product_weight', 'product_cost_usd', 'handling_fee_usd', 'total_shipping_usd', 'proportional_refund_usd', 'proportional_profit_usd', 'proportional_profit_rate', 'financial_profit_usd', 'financial_profit_rate', 'operation_profit_usd', 'operation_profit_rate'],
         '退款与结算' => ['channel_refund_amount_usd', 'shopify_refund_amount_usd', 'refunded_at', 'refund_reason', 'received_amount_usd', 'platform_fee_usd', 'net_amount_usd'],
