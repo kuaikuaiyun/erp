@@ -120,6 +120,37 @@ class ProductRequestController extends Controller
         );
     }
 
+    public function operationDestroy(Request $request, ProductRequest $productRequest): JsonResponse|RedirectResponse
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $visible = $this->access->applyOperationVisibility(ProductRequest::query(), $context['user'])
+            ->whereKey($productRequest->getKey())
+            ->exists();
+        abort_unless($visible, 404);
+        abort_unless($productRequest->status === ProductRequest::STATUS_PENDING, 403);
+
+        $connection = config('admin.database.connection') ?: config('database.default');
+        DB::connection($connection)->transaction(function () use ($productRequest): void {
+            foreach ($productRequest->attachments as $attachment) {
+                if ($attachment->disk && $attachment->path) {
+                    Storage::disk($attachment->disk)->delete($attachment->path);
+                }
+
+                $attachment->delete();
+            }
+
+            $productRequest->placementReviews()->delete();
+            $productRequest->logs()->delete();
+            $productRequest->delete();
+        });
+
+        return $this->modalSuccess($request, __('product_requests.operation.deleted'), 'product-requests.operation.index');
+    }
+
     public function show(Request $request, ProductRequest $productRequest): Response|View
     {
         $context = $this->anyPortalContext($request);

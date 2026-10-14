@@ -31,6 +31,9 @@ return [
         'image' => '图片',
         'reuse' => '复用',
         'close' => '关闭',
+        'delete' => '删除',
+        'delete_confirm' => '确定要删除这条需求提报记录吗？删除后不可恢复。',
+        'delete_failed' => '删除失败，请稍后重试。',
         'loading' => '加载中…',
         'modal_load_failed' => '加载表单失败，请稍后重试。',
         'modal_submit_failed' => '提交失败，请检查网络后重试。',
@@ -45,6 +48,7 @@ return [
         'my_scope_hint' => '列表已按当前账号和部门管理范围自动过滤。',
         'sku_changed' => 'SKU 有变动，请按最新 SKU 更改店铺里面的 SKU',
         'sku_changed_hint' => '该 SKU 已在商品信息检验时修改。运营填写：:operation ｜ 采购确认：:procurement',
+        'deleted' => '需求提报记录已删除。',
     ],
     'procurement' => [
         'title' => '商品信息检验',

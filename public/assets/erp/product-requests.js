@@ -884,7 +884,49 @@
         document.body.classList.add('product-request-lightbox-open');
     }
 
+    function deleteRecord(button) {
+        var url = button.getAttribute('data-delete-url');
+        if (!url || button.disabled) { return; }
+        if (config.deleteConfirm && !window.confirm(config.deleteConfirm)) { return; }
+        button.disabled = true;
+        var row = button.closest ? button.closest('tr') : null;
+        var xhr = new XMLHttpRequest();
+        xhr.open('DELETE', url, true);
+        xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+        xhr.setRequestHeader('X-Product-Request-Modal', '1');
+        xhr.setRequestHeader('Accept', 'application/json');
+        if (config.csrfToken) { xhr.setRequestHeader('X-CSRF-TOKEN', config.csrfToken); }
+        xhr.addEventListener('load', function () {
+            var payload = {};
+            try { payload = JSON.parse(xhr.responseText) || {}; } catch (error) { payload = {}; }
+            if (xhr.status < 200 || xhr.status >= 300) {
+                button.disabled = false;
+                notify('warning', payload.message || config.deleteFailed);
+                return;
+            }
+            notify('success', payload.message || '');
+            if (!row || !row.parentNode) {
+                window.location.reload();
+                return;
+            }
+            var body = row.parentNode;
+            body.removeChild(row);
+            if (!body.querySelector('tr')) { window.location.reload(); }
+        });
+        xhr.addEventListener('error', function () {
+            button.disabled = false;
+            notify('warning', config.deleteFailed);
+        });
+        xhr.send();
+    }
+
     document.addEventListener('click', function (event) {
+        var deleteButton = event.target.closest ? event.target.closest('[data-product-request-delete]') : null;
+        if (deleteButton) {
+            event.preventDefault();
+            deleteRecord(deleteButton);
+            return;
+        }
         var imagePreview = event.target.closest ? event.target.closest('[data-product-request-image-preview]') : null;
         if (imagePreview) {
             event.preventDefault();
