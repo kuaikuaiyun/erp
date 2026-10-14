@@ -19,8 +19,8 @@ return new class extends Migration
         $schema->table('assistant_shopify_store_metrics', function (Blueprint $table): void {
             $table->dateTime('orders_initial_backfilled_at')
                 ->nullable()
-                ->index()
                 ->after('last_successful_synced_at');
+            $table->index('orders_initial_backfilled_at', 'as_shopify_metric_initial_sync_idx');
         });
     }
 
