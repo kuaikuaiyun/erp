@@ -93,10 +93,9 @@ class ProductRequestController extends Controller
                 'operation_root_department_id' => $actor['root_department_id'],
                 'operation_department_name' => $actor['department_name'],
                 'operation_display_name' => $actor['display_name'],
-                'city' => $data['city'],
-                'reference_page_url' => $data['reference_page_url'],
-                'minimum_sale_unit' => $data['minimum_sale_unit'],
-                'has_multiple_attributes' => $data['has_multiple_attributes'],
+                'skus' => $this->normalizeSkus($data['skus']),
+                'operation_supplier_url' => $data['operation_supplier_url'],
+                'has_stock' => $data['has_stock'],
             ]);
             $productRequest->forceFill([
                 'report_no' => 'REQ-'.now('Asia/Shanghai')->format('Ymd').'-'.str_pad((string) $productRequest->getKey(), 6, '0', STR_PAD_LEFT),
@@ -315,10 +314,20 @@ class ProductRequestController extends Controller
 
             $normalizedUrl = $this->workflow->normalizeSupplierUrl($data['supplier_url']);
             $reuseSourceId = (int) ($data['reuse_source_id'] ?? 0);
-            unset($data['reuse_source_id'], $data['seller_images']);
+            $selectedSkus = collect($data['selected_skus'] ?? [])
+                ->map(fn (string $sku): string => trim($sku))
+                ->filter(fn (string $sku): bool => $sku !== '')
+                ->unique()
+                ->values();
+            unset($data['reuse_source_id'], $data['seller_images'], $data['selected_skus']);
             $actor = $this->access->actorSnapshot($context['user']);
+            // 用户在双选择框中勾选的 SKU 即为最终保存结果（勾选为空则保留原值）
+            $mergedSkus = $selectedSkus->isNotEmpty()
+                ? $selectedSkus->implode(',')
+                : $locked->skus;
             $locked->fill([
                 ...$data,
+                'skus' => $mergedSkus,
                 'supplier_url_normalized' => $normalizedUrl,
                 'supplier_url_hash' => $this->workflow->supplierUrlHash($normalizedUrl),
                 'status' => ProductRequest::STATUS_INSPECTION_PASSED,
@@ -392,6 +401,44 @@ class ProductRequestController extends Controller
         return response()->json([
             'match_type' => $matchType,
             'records' => $records->map(fn (ProductRequest $record): array => $this->reusePayload($record))->values(),
+        ]);
+    }
+
+    /** 输入 1688 链接时返回系统中已录入该链接的 SKU，供采购多选合并 */
+    public function procurementSkuSuggestions(Request $request): JsonResponse|Response
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::PROCUREMENT_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return response()->json(['items' => []]);
+        }
+        abort_unless($this->access->canInspectProcurement($context['user']), 403);
+
+        $data = $request->validate([
+            'supplier_url' => ['required', 'string', 'max:2048'],
+            'current_id' => ['nullable', 'integer'],
+        ]);
+        $normalizedUrl = $this->workflow->normalizeSupplierUrl($data['supplier_url']);
+
+        $records = ProductRequest::query()
+            ->where('supplier_url_hash', $this->workflow->supplierUrlHash($normalizedUrl))
+            ->when($data['current_id'] ?? null, fn ($query, int $id) => $query->where('id', '!=', $id))
+            ->whereNotNull('skus')
+            ->where('skus', '!=', '')
+            ->latest('id')
+            ->limit(20)
+            ->get(['id', 'report_no', 'skus']);
+
+        return response()->json([
+            'items' => $records->map(fn (ProductRequest $record): array => [
+                'id' => $record->getKey(),
+                'report_no' => $record->report_no,
+                'skus' => collect(explode(',', (string) $record->skus))
+                    ->map(fn (string $sku): string => trim($sku))
+                    ->filter(fn (string $sku): bool => $sku !== '')
+                    ->unique()
+                    ->values()
+                    ->all(),
+            ])->values()->all(),
         ]);
     }
 
@@ -714,7 +761,7 @@ class ProductRequestController extends Controller
             $keyword = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $filters['keyword']).'%';
             $query->where(function (Builder $search) use ($keyword): void {
                 $search->where('report_no', 'like', $keyword)
-                    ->orWhere('city', 'like', $keyword)
+                    ->orWhere('skus', 'like', $keyword)
                     ->orWhere('operation_display_name', 'like', $keyword)
                     ->orWhere('operation_department_name', 'like', $keyword)
                     ->orWhere('standard_chinese_name', 'like', $keyword)
@@ -735,12 +782,49 @@ class ProductRequestController extends Controller
     private function validateOperationData(Request $request): array
     {
         return $request->validate([
-            'city' => ['required', 'string', 'max:100'],
-            'reference_page_url' => ['nullable', 'string', 'max:2048'],
-            'minimum_sale_unit' => ['required', 'string', 'max:255'],
-            'has_multiple_attributes' => ['required', 'string', 'max:255'],
+            'skus' => [
+                'required',
+                'string',
+                function (string $attribute, mixed $value, \Closure $fail): void {
+                    $skus = collect(preg_split('/[\n,，;；\t]+/u', (string) $value))
+                        ->map(fn (string $sku): string => trim($sku))
+                        ->filter(fn (string $sku): bool => $sku !== '');
+
+                    if ($skus->isEmpty()) {
+                        $fail('请至少填写一个 SKU。');
+
+                        return;
+                    }
+                    if ($skus->count() > 50) {
+                        $fail('SKU 最多 50 个。');
+
+                        return;
+                    }
+                    if ($skus->unique()->count() !== $skus->count()) {
+                        $fail('SKU 不能重复。');
+                    }
+                },
+            ],
+            'operation_supplier_url' => [
+                'required',
+                'string',
+                'max:2048',
+                'regex:#^https?://#i',
+            ],
+            'has_stock' => ['required', Rule::in(['yes', 'no'])],
             'product_image' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
         ]);
+    }
+
+    /** 将换行/逗号/分号分隔的 SKU 规范化为英文逗号分隔 */
+    private function normalizeSkus(string $value): string
+    {
+        return collect(preg_split('/[\n,，;；\t]+/u', $value))
+            ->map(fn (string $sku): string => trim($sku))
+            ->filter(fn (string $sku): bool => $sku !== '')
+            ->unique()
+            ->values()
+            ->implode(',');
     }
 
     /** @return array<string, mixed> */
@@ -748,15 +832,18 @@ class ProductRequestController extends Controller
     {
         return $request->validate([
             'standard_chinese_name' => ['required', 'string', 'max:191'],
-            'supplier_url' => ['required', 'url', 'max:2048'],
-            'company_spu' => ['required', 'string', 'max:191'],
-            'sku_sequence' => ['required', 'string', 'max:191'],
+            'supplier_url' => ['required', 'string', 'max:2048', 'regex:#^https?://#i'],
+            'company_spu' => ['nullable', 'string', 'max:191'],
+            'sku_sequence' => ['nullable', 'string', 'max:191'],
             'standard_sku' => ['nullable', 'string', 'max:191'],
-            'stock_status' => ['required', Rule::in(['yes', 'no'])],
+            'stock_status' => ['nullable', Rule::in(['yes', 'no'])],
             'minimum_order_quantity' => ['nullable', 'string', 'max:255'],
             'minimum_purchase_price_rmb' => ['required', 'string', 'max:100'],
             'estimated_shipping_weight_g' => ['required', 'string', 'max:100'],
-            'erp_binding_status' => ['required', Rule::in(['unbound', 'bound'])],
+            'outer_package_size' => ['nullable', 'string', 'max:191'],
+            'erp_binding_status' => ['nullable', Rule::in(['unbound', 'bound'])],
+            'selected_skus' => ['nullable', 'array', 'max:100'],
+            'selected_skus.*' => ['string', 'max:500'],
             'seller_images' => ['nullable', 'array', 'max:3'],
             'seller_images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
             'reuse_source_id' => ['nullable', 'integer'],

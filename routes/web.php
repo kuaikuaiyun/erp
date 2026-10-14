@@ -55,6 +55,7 @@ Route::get('/procurement-inspections', [ProductRequestController::class, 'procur
 Route::get('/procurement-inspections/{productRequest}/edit', [ProductRequestController::class, 'procurementEdit'])->name('product-requests.procurement.edit');
 Route::put('/procurement-inspections/{productRequest}', [ProductRequestController::class, 'procurementUpdate'])->name('product-requests.procurement.update');
 Route::post('/procurement-inspections/reuse-check', [ProductRequestController::class, 'procurementReuseCheck'])->name('product-requests.procurement.reuse-check');
+Route::get('/api/procurement-inspections/sku-suggestions', [ProductRequestController::class, 'procurementSkuSuggestions'])->name('product-requests.procurement.sku-suggestions');
 Route::get('/placement-reviews', [ProductRequestController::class, 'placementReviewIndex'])->name('product-requests.placement-reviews.index');
 Route::get('/placement-reviews/{productRequest}/edit', [ProductRequestController::class, 'placementReviewEdit'])->name('product-requests.placement-reviews.edit');
 Route::put('/placement-reviews/{productRequest}', [ProductRequestController::class, 'placementReviewUpdate'])->name('product-requests.placement-reviews.update');

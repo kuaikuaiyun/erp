@@ -325,6 +325,79 @@
         });
     }
 
+    function initializeSkuSuggestions(root) {
+        var input = root.querySelector('#supplier_url[data-sku-suggestions-url]');
+        if (!input || input.dataset.skuSuggestionsReady === '1') { return; }
+        input.dataset.skuSuggestionsReady = '1';
+        var form = input.closest('form');
+        var panel = root.querySelector('#sku-suggestion-panel');
+        var list = root.querySelector('#sku-suggestion-list');
+        var countEl = root.querySelector('#sku-suggestion-count');
+        var summaryRow = root.querySelector('#sku-suggestion-summary-row');
+        var summary = root.querySelector('#sku-selected-summary');
+        var url = input.getAttribute('data-sku-suggestions-url');
+        var currentId = input.getAttribute('data-sku-suggestions-current-id');
+        var checkButton = form ? form.querySelector('[data-sku-check]') : null;
+        if (!panel || !list || !form) { return; }
+
+        function updateSummary() {
+            var checked = form.querySelectorAll('input[name="selected_skus[]"]:checked');
+            var parts = [];
+            for (var i = 0; i < checked.length; i++) { parts.push(checked[i].value); }
+            if (summaryRow) { summaryRow.hidden = parts.length === 0; }
+            if (summary) { summary.textContent = parts.length ? '已勾选 ' + parts.length + ' 个：' + parts.join(', ') : ''; }
+        }
+
+        function render(items) {
+            list.innerHTML = '';
+            if (countEl) { countEl.textContent = ''; }
+            if (!items.length) {
+                var empty = document.createElement('span');
+                empty.className = 'sku-suggestion-empty';
+                empty.textContent = '该链接在系统中暂无已录入 SKU';
+                list.appendChild(empty);
+                panel.hidden = false;
+                updateSummary();
+                return;
+            }
+            var total = 0;
+            items.forEach(function (item) {
+                (item.skus || []).forEach(function (sku) {
+                    total += 1;
+                    var label = document.createElement('label');
+                    var checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.name = 'selected_skus[]';
+                    checkbox.value = sku;
+                    checkbox.addEventListener('change', updateSummary);
+                    label.appendChild(checkbox);
+                    label.appendChild(document.createTextNode(sku));
+                    var source = document.createElement('span');
+                    source.className = 'sku-source';
+                    source.textContent = '（' + (item.report_no || '') + '）';
+                    label.appendChild(source);
+                    list.appendChild(label);
+                });
+            });
+            if (countEl) { countEl.textContent = '共 ' + total + ' 个'; }
+            panel.hidden = false;
+            updateSummary();
+        }
+
+        function fetchSuggestions() {
+            var value = input.value.trim();
+            if (!/^https?:\/\//i.test(value)) { panel.hidden = true; if (summaryRow) { summaryRow.hidden = true; } return; }
+            var query = '?supplier_url=' + encodeURIComponent(value) + (currentId ? '&current_id=' + encodeURIComponent(currentId) : '');
+            fetch(url + query, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function (response) { return response.ok ? response.json() : { items: [] }; })
+                .then(function (payload) { render(payload.items || []); })
+                .catch(function () { panel.hidden = true; });
+        }
+
+        if (checkButton) { checkButton.addEventListener('click', fetchSuggestions); }
+        updateSummary();
+    }
+
     function initializeRadioChoices(root) {
         root.querySelectorAll('.product-request-radio-list').forEach(function (list) {
             if (list.dataset.productRequestRadioReady === '1') { return; }
@@ -355,6 +428,11 @@
             initializeReuse(root);
         } catch (error) {
             reportInitializationError('reuse initializer failed', error);
+        }
+        try {
+            initializeSkuSuggestions(root);
+        } catch (error) {
+            reportInitializationError('sku suggestions initializer failed', error);
         }
         try {
             initializeRadioChoices(root);
