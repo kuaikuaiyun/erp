@@ -394,17 +394,22 @@
             <div id="assistant-shopify-app-section" class="box box-solid assistant-form-section assistant-form-shopify-section" @if ((string) $value('site_builder') !== 'shopify') hidden @endif>
                 <div class="box-header with-border"><h3 class="box-title">{{ $t('sections.shopify_app') }}</h3></div>
                 <div class="box-body row assistant-form-grid">
-                    <div class="form-group col-md-4 @error('store_prefix') has-error @enderror">
+                    <div class="form-group col-md-3 @error('store_prefix') has-error @enderror">
                         <label for="store_prefix">{{ $t('fields.store_prefix') }}</label>
                         <input id="store_prefix" name="store_prefix" class="form-control" value="{{ $value('store_prefix') }}" maxlength="100">
                         @error('store_prefix')<span class="help-block">{{ $message }}</span>@enderror
                     </div>
-                    <div class="form-group col-md-4 @error('shopify_client_id') has-error @enderror">
+                    <div class="form-group col-md-3 @error('tongtu_prefix') has-error @enderror">
+                        <label for="tongtu_prefix">{{ $t('fields.tongtu_prefix') }}</label>
+                        <input id="tongtu_prefix" name="tongtu_prefix" class="form-control" value="{{ $value('tongtu_prefix') }}" maxlength="100">
+                        @error('tongtu_prefix')<span class="help-block">{{ $message }}</span>@enderror
+                    </div>
+                    <div class="form-group col-md-3 @error('shopify_client_id') has-error @enderror">
                         <label for="shopify_client_id">{{ $t('fields.shopify_client_id') }}</label>
                         <input id="shopify_client_id" name="shopify_client_id" class="form-control" value="{{ $value('shopify_client_id') }}" maxlength="255" autocomplete="off">
                         @error('shopify_client_id')<span class="help-block">{{ $message }}</span>@enderror
                     </div>
-                    <div class="form-group col-md-4 @error('shopify_client_secret') has-error @enderror">
+                    <div class="form-group col-md-3 @error('shopify_client_secret') has-error @enderror">
                         <label for="shopify_client_secret">{{ $t('fields.shopify_client_secret') }}</label>
                         <input id="shopify_client_secret" name="shopify_client_secret" class="form-control" value="{{ $value('shopify_client_secret') }}" maxlength="255" autocomplete="off">
                         @error('shopify_client_secret')<span class="help-block">{{ $message }}</span>@enderror

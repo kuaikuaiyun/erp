@@ -179,7 +179,19 @@
         var details = subject.refund_details || [];
         if (!details.length) return '<tr><td colspan="9" class="text-center text-muted">' + escapeHtml(t('pageEmpty', '—')) + '</td></tr>';
         return details.map(function (refund) {
-            return '<tr><td>' + escapeHtml(refund.store || '—') + '</td><td>' + escapeHtml(refund.shopify_order_number || '—') + '</td><td>' + escapeHtml(refund.bill_number || '—') + '</td><td>' + escapeHtml(refund.refund_number || '—') + '</td><td>' + formatMoney(refund.amount) + '</td><td>' + escapeHtml(refund.refund_type || '—') + '</td><td title="' + escapeHtml(refund.refund_reason || '') + '">' + escapeHtml(refund.refund_reason || '—') + '</td><td title="' + escapeHtml(refund.remark || '') + '">' + escapeHtml(refund.remark || '—') + '</td><td>' + escapeHtml(refund.imported_at || '—') + '</td></tr>';
+            var orderNumber = refund.order_id && refund.order_detail_url
+                ? '<button type="button" class="btn btn-link btn-xs js-logistics-order-detail" data-order-detail-url="' + escapeHtml(refund.order_detail_url) + '">' + escapeHtml(refund.shopify_order_number || '—') + '</button>'
+                : escapeHtml(refund.shopify_order_number || '—');
+            return '<tr><td>' + escapeHtml(refund.store || '—') + '</td><td>' + orderNumber + '</td><td>' + escapeHtml(refund.bill_number || '—') + '</td><td>' + escapeHtml(refund.refund_number || '—') + '</td><td>' + formatMoney(refund.amount) + '</td><td>' + escapeHtml(refund.refund_type || '—') + '</td><td title="' + escapeHtml(refund.refund_reason || '') + '">' + escapeHtml(refund.refund_reason || '—') + '</td><td title="' + escapeHtml(refund.remark || '') + '">' + escapeHtml(refund.remark || '—') + '</td><td>' + escapeHtml(refund.imported_at || '—') + '</td></tr>';
+        }).join('');
+    }
+    function relatedOrderRows(subject) {
+        var orders = subject.related_orders || [];
+        if (!orders.length) return '<tr><td colspan="8" class="text-center text-muted">' + escapeHtml(t('pageEmpty', '—')) + '</td></tr>';
+        return orders.map(function (order) {
+            return '<tr><td><button type="button" class="btn btn-link btn-xs js-logistics-order-detail" data-order-detail-url="' + escapeHtml(order.detail_url || '') + '">' + escapeHtml(order.shopify_order_number || '—') + '</button></td>'
+                + '<td>' + escapeHtml(order.store || '—') + '</td><td>' + escapeHtml(order.bill_number || '—') + '</td><td>' + formatNumber(order.quantity) + '</td><td>' + formatMoney(order.revenue) + '</td><td>' + formatMoney(order.actual_refund) + '</td><td>' + escapeHtml(order.order_created_at || '—') + '</td>'
+                + '<td><button type="button" class="btn btn-info btn-xs js-logistics-order-detail" data-order-detail-url="' + escapeHtml(order.detail_url || '') + '"><i class="fa fa-eye"></i> 查看订单</button></td></tr>';
         }).join('');
     }
     function fillModal(product, variantId) {
@@ -202,6 +214,7 @@
             return '<tr><td>' + escapeHtml(item.label) + '</td><td>' + formatNumber(item.sales) + '</td><td>' + formatMoney(item.profit) + '</td><td>' + (change === null ? t('notAvailable', '—') : '<span class="' + (change >= 0 ? 'text-green' : 'text-red') + '">' + (change >= 0 ? '+' : '') + formatRate(change) + '</span>') + '</td></tr>';
         }).join('') + '</tbody></table></div>';
         document.getElementById('product-statistics-refunds').innerHTML = '<div class="alert alert-info"><i class="fa fa-info-circle"></i> ' + escapeHtml(t('refundAllocationNote', '')) + '</div><div class="table-responsive"><table class="table product-statistics-detail-table"><thead><tr><th>店铺</th><th>Shopify订单号</th><th>账单号</th><th>退款单号</th><th>分摊退款额（USD）</th><th>退款类型</th><th>退款原因</th><th>备注</th><th>导入时间</th></tr></thead><tbody>' + refundRows(subject) + '</tbody></table></div>';
+        document.getElementById('product-statistics-orders').innerHTML = '<div class="table-responsive"><table class="table product-statistics-detail-table"><thead><tr><th>Shopify订单号</th><th>店铺</th><th>账单号</th><th>该产品数量</th><th>该产品实收</th><th>分摊退款</th><th>下单时间</th><th>操作</th></tr></thead><tbody>' + relatedOrderRows(subject) + '</tbody></table></div>';
         if ($) { $('#product-statistics-detail-modal .nav-tabs a[href="#product-statistics-overview"]').tab('show'); $('#product-statistics-detail-modal').modal('show'); }
     }
     function appendHiddenInput(container, name, value) { var input = document.createElement('input'); input.type = 'hidden'; input.name = name; input.value = value; container.appendChild(input); }

@@ -440,8 +440,16 @@ GRAPHQL;
     /** @return array{status:string,reason:string} */
     private function failure(\Throwable $exception): array
     {
-        $message = Str::lower($exception->getMessage());
+        $rawMessage = trim($exception->getMessage());
+        $message = Str::lower($rawMessage);
         $permissionMarkers = ['read_orders', 'permission', 'access denied', 'not authorized', 'forbidden'];
+
+        if (preg_match('/shopify api http\s+(\d{3})/i', $rawMessage, $matches) === 1) {
+            return [
+                'status' => AssistantShopifyStoreMetric::STATUS_FAILED,
+                'reason' => 'api_http_'.$matches[1],
+            ];
+        }
 
         if (Str::contains($message, $permissionMarkers)) {
             return [
@@ -450,10 +458,17 @@ GRAPHQL;
             ];
         }
 
-        if (Str::contains($message, ['invalid_client', 'invalid client', 'client secret', 'access token', 'oauth'])) {
+        if (Str::contains($message, ['invalid_client', 'invalid client', 'client secret', 'access token', 'oauth', 'token'])) {
             return [
                 'status' => AssistantShopifyStoreMetric::STATUS_FAILED,
                 'reason' => 'token_failed',
+            ];
+        }
+
+        if (Str::contains($message, ['graphql', 'orders connection'])) {
+            return [
+                'status' => AssistantShopifyStoreMetric::STATUS_FAILED,
+                'reason' => 'graphql_query_failed',
             ];
         }
 
@@ -464,9 +479,58 @@ GRAPHQL;
             ];
         }
 
+        if (Str::contains($message, 'next page without an order cursor')) {
+            return [
+                'status' => AssistantShopifyStoreMetric::STATUS_FAILED,
+                'reason' => 'order_cursor_missing',
+            ];
+        }
+
+        if (Str::contains($message, ['without an order id', 'without an id'])) {
+            return [
+                'status' => AssistantShopifyStoreMetric::STATUS_FAILED,
+                'reason' => 'order_id_missing',
+            ];
+        }
+
+        if (Str::contains($message, ['without a created timestamp', 'invalid order timestamp'])) {
+            return [
+                'status' => AssistantShopifyStoreMetric::STATUS_FAILED,
+                'reason' => 'order_timestamp_invalid',
+            ];
+        }
+
+        if (Str::contains($message, 'non-numeric order amount')) {
+            return [
+                'status' => AssistantShopifyStoreMetric::STATUS_FAILED,
+                'reason' => 'order_amount_invalid',
+            ];
+        }
+
+        if (Str::contains($message, 'invalid iana timezone')) {
+            return [
+                'status' => AssistantShopifyStoreMetric::STATUS_FAILED,
+                'reason' => 'shop_timezone_invalid',
+            ];
+        }
+
+        if (Str::contains($message, 'invalid currency code')) {
+            return [
+                'status' => AssistantShopifyStoreMetric::STATUS_FAILED,
+                'reason' => 'shop_currency_invalid',
+            ];
+        }
+
+        if (Str::contains($message, ['*.myshopify.com', 'shop domain'])) {
+            return [
+                'status' => AssistantShopifyStoreMetric::STATUS_FAILED,
+                'reason' => 'shop_domain_invalid',
+            ];
+        }
+
         return [
             'status' => AssistantShopifyStoreMetric::STATUS_FAILED,
-            'reason' => 'unknown',
+            'reason' => 'unexpected_exception',
         ];
     }
 }
