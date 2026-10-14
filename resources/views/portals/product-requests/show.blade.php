@@ -24,10 +24,10 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261014-20">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261014-22">
 @endpush
 @push('scripts')
-    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261014-20"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261014-22"></script>
 @endpush
 
 @section('content')
@@ -146,8 +146,8 @@
                             <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.review.submitted_at') }}</span><span class="product-request-detail-value">{{ optional($review->submitted_at)->format('Y-m-d H:i') }}</span></div>
                             <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.review.reviewed_by') }}</span><span class="product-request-detail-value">{{ $review->reviewer_name ?: $notFilled }}</span></div>
                             <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.review.reviewed_at') }}</span><span class="product-request-detail-value">{{ optional($review->reviewed_at)->format('Y-m-d H:i') }}</span></div>
-                            <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.review_remark') }}</span><span class="product-request-detail-value">{{ $review->remark ?: $notFilled }}</span></div>
                         </div>
+                        <div class="product-request-review-remark"><span class="product-request-detail-label">{{ __('product_requests.fields.review_remark') }}</span><div class="product-request-remark-html">@if($review->remark){!! $review->remark !!}@else{{ $notFilled }}@endif</div></div>
                     </div>
                 @empty
                     <p class="text-muted">{{ __('product_requests.common.no_records') }}</p>

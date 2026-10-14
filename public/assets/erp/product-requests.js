@@ -807,6 +807,117 @@
         sync();
     }
 
+    function initializeRichEditor(root) {
+        root.querySelectorAll('[data-product-request-editor]').forEach(function (editor) {
+            if (editor.dataset.productRequestEditorReady === '1') { return; }
+            editor.dataset.productRequestEditorReady = '1';
+            var content = editor.querySelector('[data-editor-content]');
+            var fileInput = editor.querySelector('[data-editor-image-input]');
+            var form = editor.closest('form');
+            var input = form ? form.querySelector('[data-editor-input]') : null;
+            if (!content || !input) { return; }
+
+            content.innerHTML = input.value || '';
+            var savedRange = null;
+
+            function sync() { input.value = content.innerHTML; }
+
+            function saveRange() {
+                var selection = window.getSelection();
+                if (selection && selection.rangeCount > 0 && content.contains(selection.anchorNode)) {
+                    savedRange = selection.getRangeAt(0).cloneRange();
+                }
+            }
+
+            function restoreRange() {
+                if (!savedRange) { return; }
+                var selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(savedRange);
+            }
+
+            function insertHtml(html) {
+                content.focus();
+                restoreRange();
+                document.execCommand('insertHTML', false, html);
+                saveRange();
+                sync();
+            }
+
+            function upload(file) {
+                if (!isSupported(file)) { notify('warning', config.invalidFile); return; }
+                var token = 'u' + Date.now() + Math.random().toString(36).slice(2);
+                function placeholderNode() { return content.querySelector('[data-editor-uploading="' + token + '"]'); }
+                function dropPlaceholder() {
+                    var node = placeholderNode();
+                    if (node && node.parentNode) { node.parentNode.removeChild(node); }
+                    sync();
+                }
+                insertHtml('<span class="product-request-rich-uploading" data-editor-uploading="' + token + '">' + (config.imageUploading || '') + '</span>');
+                var data = new FormData();
+                data.append('image', file);
+                fetch(editor.getAttribute('data-upload-url'), {
+                    method: 'POST',
+                    headers: { 'X-CSRF-TOKEN': config.csrfToken || '', 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
+                    body: data
+                }).then(function (response) {
+                    return response.json().catch(function () { return {}; }).then(function (payload) {
+                        return { response: response, payload: payload };
+                    });
+                }).then(function (result) {
+                    if (!result.response.ok || !result.payload.url) {
+                        dropPlaceholder();
+                        notify('warning', result.payload.message || config.imageUploadFailed);
+                        return;
+                    }
+                    var image = document.createElement('img');
+                    image.src = result.payload.url;
+                    image.alt = file.name || '';
+                    var node = placeholderNode();
+                    if (node && node.parentNode) { node.parentNode.replaceChild(image, node); }
+                    else { content.appendChild(image); }
+                    sync();
+                }).catch(function () {
+                    dropPlaceholder();
+                    notify('warning', config.imageUploadFailed);
+                });
+            }
+            editor.erpEditorUpload = upload;
+
+            ['keyup', 'mouseup', 'input', 'blur'].forEach(function (name) {
+                content.addEventListener(name, saveRange);
+            });
+            content.addEventListener('input', sync);
+            content.addEventListener('blur', sync);
+
+            editor.querySelectorAll('[data-editor-command]').forEach(function (button) {
+                var command = button.getAttribute('data-editor-command');
+                button.addEventListener('mousedown', function (event) { event.preventDefault(); });
+                button.addEventListener('click', function () {
+                    if (command === 'insertImage') {
+                        if (fileInput) { fileInput.click(); }
+                        return;
+                    }
+                    content.focus();
+                    restoreRange();
+                    document.execCommand(command, false, null);
+                    saveRange();
+                    sync();
+                });
+            });
+
+            if (fileInput) {
+                fileInput.addEventListener('change', function () {
+                    var files = inputFiles(fileInput);
+                    fileInput.value = '';
+                    files.forEach(function (file) { upload(file); });
+                });
+            }
+
+            sync();
+        });
+    }
+
     function initialize(root) {
         try {
             initializeUploads(root);
@@ -832,6 +943,11 @@
             initializeRadioChoices(root);
         } catch (error) {
             reportInitializationError('radio initializer failed', error);
+        }
+        try {
+            initializeRichEditor(root);
+        } catch (error) {
+            reportInitializationError('rich editor initializer failed', error);
         }
     }
 
@@ -941,12 +1057,27 @@
 
     document.addEventListener('paste', function (event) {
         var active = document.activeElement;
+        var richEditor = active && active.closest ? active.closest('[data-product-request-editor]') : null;
+        if (richEditor && typeof richEditor.erpEditorUpload === 'function') {
+            var richFiles = event.clipboardData ? event.clipboardData.files : null;
+            if (richFiles && richFiles.length) {
+                event.preventDefault();
+                richEditor.erpEditorUpload(richFiles[0]);
+            }
+            return;
+        }
         var container = active && active.closest ? active.closest('[data-product-request-upload]') : null;
+        if (!container) {
+            var host = active && active.closest ? active.closest('[data-product-request-paste-host]') : null;
+            container = host ? host.querySelector('[data-product-request-upload]') : null;
+        }
         if (!container) { return; }
         var input = container.querySelector('input[type="file"]');
         if (!input) { return; }
+        var files = event.clipboardData ? event.clipboardData.files : null;
+        if (!files || !files.length) { return; }
         event.preventDefault();
-        addFiles(container, input, parseInt(container.getAttribute('data-max-files') || '1', 10), event.clipboardData ? event.clipboardData.files : []);
+        addFiles(container, input, parseInt(container.getAttribute('data-max-files') || '1', 10), files);
     });
 
     document.addEventListener('submit', function (event) {

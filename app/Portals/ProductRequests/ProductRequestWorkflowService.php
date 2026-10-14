@@ -30,6 +30,27 @@ class ProductRequestWorkflowService
         }
     }
 
+    /** @param array<int, UploadedFile> $files */
+    public function appendStageAttachments(ProductRequest $productRequest, string $stage, array $files, AdminUser $user): void
+    {
+        if ($files === []) {
+            return;
+        }
+
+        $sort = (int) $productRequest->attachments()->where('stage', $stage)->max('sort');
+
+        foreach (array_values($files) as $file) {
+            $this->storeAttachment($productRequest, $stage, $file, ++$sort, $user);
+        }
+    }
+
+    public function storeStageAttachment(ProductRequest $productRequest, string $stage, UploadedFile $file, AdminUser $user): ProductRequestAttachment
+    {
+        $sort = (int) $productRequest->attachments()->where('stage', $stage)->max('sort');
+
+        return $this->storeAttachment($productRequest, $stage, $file, $sort + 1, $user);
+    }
+
     public function copyStageAttachments(ProductRequest $source, ProductRequest $target, string $stage, AdminUser $user): void
     {
         $this->replaceStageAttachments($target, $stage, [], $user);
@@ -92,13 +113,13 @@ class ProductRequestWorkflowService
         return hash('sha256', $url);
     }
 
-    private function storeAttachment(ProductRequest $productRequest, string $stage, UploadedFile $file, int $sort, AdminUser $user): void
+    private function storeAttachment(ProductRequest $productRequest, string $stage, UploadedFile $file, int $sort, AdminUser $user): ProductRequestAttachment
     {
         $extension = strtolower($file->getClientOriginalExtension()) ?: 'img';
         $path = 'product-requests/'.$productRequest->report_no.'/'.$stage.'/'.Str::uuid().'.'.$extension;
         Storage::disk('local')->putFileAs(dirname($path), $file, basename($path));
 
-        ProductRequestAttachment::query()->create([
+        return ProductRequestAttachment::query()->create([
             'product_request_id' => $productRequest->getKey(),
             'stage' => $stage,
             'sort' => $sort,

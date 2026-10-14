@@ -42,7 +42,7 @@ class ProductRequestController extends Controller
         $requests = $this->applyFilters(
             $this->access->applyOperationVisibility(ProductRequest::query(), $context['user']),
             $filters,
-        )->with('attachments')->latest('id')->paginate($filters['per_page'])->withQueryString();
+        )->with(['attachments', 'placementReviews'])->latest('id')->paginate($filters['per_page'])->withQueryString();
 
         return view('portals.product-requests.operation.index', [
             ...$this->viewContext($context),
@@ -558,13 +558,25 @@ class ProductRequestController extends Controller
         }
         abort_unless($this->access->canReviewPlacement($context['user']), 403);
 
+        $rejected = $request->input('result') === ProductRequestPlacementReview::STATUS_REJECTED;
         $data = $request->validate([
             'result' => ['required', Rule::in([
                 ProductRequestPlacementReview::STATUS_APPROVED,
                 ProductRequestPlacementReview::STATUS_REJECTED,
             ])],
-            'remark' => [Rule::requiredIf($request->input('result') === ProductRequestPlacementReview::STATUS_REJECTED), 'nullable', 'string', 'max:2000'],
+            'remark' => [
+                Rule::requiredIf($rejected),
+                'nullable',
+                'string',
+                'max:20000',
+                function (string $attribute, mixed $value, \Closure $fail) use ($rejected): void {
+                    if ($rejected && $this->remarkIsEmpty($value)) {
+                        $fail(__('product_requests.review.remark_required_hint'));
+                    }
+                },
+            ],
         ]);
+        $data['remark'] = $this->sanitizeReviewRemark($data['remark'] ?? null);
         $connection = config('admin.database.connection') ?: config('database.default');
 
         DB::connection($connection)->transaction(function () use ($productRequest, $data, $context): void {
@@ -600,6 +612,60 @@ class ProductRequestController extends Controller
                 : __('product_requests.messages.placement_rejected'),
             'product-requests.placement-reviews.index',
         );
+    }
+
+    public function placementReviewImageStore(Request $request, ProductRequest $productRequest): JsonResponse|Response
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::PROCUREMENT_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        abort_unless($this->access->canReviewPlacement($context['user']), 403);
+
+        $data = $request->validate([
+            'image' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+        ]);
+        $attachment = $this->workflow->storeStageAttachment(
+            $productRequest,
+            ProductRequestAttachment::STAGE_REVIEW,
+            $data['image'],
+            $context['user'],
+        );
+
+        return response()->json([
+            'url' => route('product-requests.attachments.show', [$productRequest, $attachment]),
+        ]);
+    }
+
+    /** 审核备注允许富文本（含图片），此处仅保留白名单标签并清理事件属性 */
+    private function sanitizeReviewRemark(?string $html): ?string
+    {
+        $html = trim((string) $html);
+        if ($html === '') {
+            return null;
+        }
+
+        $allowed = '<p><br><b><strong><i><em><u><s><ul><ol><li><span><div><img><a><blockquote>';
+        $html = strip_tags($html, $allowed);
+        $html = preg_replace('/\son[a-z]+\s*=\s*"[^"]*"/i', '', $html) ?? $html;
+        $html = preg_replace("/\son[a-z]+\s*=\s*'[^']*'/i", '', $html) ?? $html;
+        $html = preg_replace('/\son[a-z]+\s*=\s*[^\s>]+/i', '', $html) ?? $html;
+        $html = preg_replace('/(<a\b[^>]*?)\shref\s*=\s*(["\']?)\s*javascript:[^"\'>]*\2/i', '$1', $html) ?? $html;
+
+        return trim($html) !== '' ? trim($html) : null;
+    }
+
+    /** 判断富文本备注是否为空内容（忽略空标签、换行与空白，含图片视为非空） */
+    private function remarkIsEmpty(mixed $value): bool
+    {
+        $html = (string) $value;
+        if (stripos($html, '<img') !== false) {
+            return false;
+        }
+        $text = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5);
+        $text = str_replace(["\xC2\xA0", '&nbsp;'], ' ', $text);
+
+        return trim($text) === '';
     }
 
     public function warehouseIndex(Request $request): Response|View

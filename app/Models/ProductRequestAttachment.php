@@ -10,6 +10,7 @@ class ProductRequestAttachment extends Model
     public const STAGE_OPERATION = 'operation';
     public const STAGE_PROCUREMENT = 'procurement';
     public const STAGE_WAREHOUSE = 'warehouse';
+    public const STAGE_REVIEW = 'review';
 
     protected $guarded = [];
 

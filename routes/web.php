@@ -60,6 +60,7 @@ Route::get('/api/procurement-inspections/sku-suggestions', [ProductRequestContro
 Route::get('/placement-reviews', [ProductRequestController::class, 'placementReviewIndex'])->name('product-requests.placement-reviews.index');
 Route::get('/placement-reviews/{productRequest}/edit', [ProductRequestController::class, 'placementReviewEdit'])->name('product-requests.placement-reviews.edit');
 Route::put('/placement-reviews/{productRequest}', [ProductRequestController::class, 'placementReviewUpdate'])->name('product-requests.placement-reviews.update');
+Route::post('/placement-reviews/{productRequest}/images', [ProductRequestController::class, 'placementReviewImageStore'])->name('product-requests.placement-reviews.images.store');
 Route::get('/warehouse-acceptances', [ProductRequestController::class, 'warehouseIndex'])->name('product-requests.warehouse.index');
 Route::get('/warehouse-acceptances/{productRequest}/edit', [ProductRequestController::class, 'warehouseEdit'])->name('product-requests.warehouse.edit');
 Route::put('/warehouse-acceptances/{productRequest}', [ProductRequestController::class, 'warehouseUpdate'])->name('product-requests.warehouse.update');
