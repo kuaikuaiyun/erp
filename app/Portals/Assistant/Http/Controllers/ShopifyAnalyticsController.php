@@ -8,12 +8,11 @@ use App\Models\AssistantDomainStore;
 use App\Models\AssistantShopifyAnalyticsSyncBatch;
 use App\Models\AssistantShopifyAnalyticsSyncTask;
 use App\Models\AssistantShopifyStoreMetric;
-use App\Models\AssistantShopifyStoreMetricHour;
+use App\Models\AssistantShopifyStoreOrder;
 use App\Models\AssistantShopifyStoreMetricPeriod;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\ShopifyAnalyticsReferenceRateService;
-use App\Portals\Assistant\ShopifyStoreAnalyticsService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -29,7 +28,6 @@ class ShopifyAnalyticsController extends Controller
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
-        private readonly ShopifyStoreAnalyticsService $analytics,
         private readonly ShopifyAnalyticsReferenceRateService $referenceRates,
     ) {
     }
@@ -57,16 +55,16 @@ class ShopifyAnalyticsController extends Controller
         $stores = $storesQuery
             ->paginate($filters['per_page'])
             ->withQueryString();
-        $stores->getCollection()->each(function (AssistantDomainStore $store): void {
+        $stores->getCollection()->each(function (AssistantDomainStore $store) use ($filters): void {
             $metric = null;
-            if ($store->analytics_period_status !== null) {
+            if ($store->analytics_sync_status !== null || (bool) $store->analytics_has_report_data) {
                 $metric = new AssistantShopifyStoreMetricPeriod();
                 $metric->setRawAttributes([
                     'shop_timezone' => $store->analytics_shop_timezone,
-                    'report_timezone' => $store->analytics_report_timezone,
-                    'from_date' => $store->analytics_from_date,
-                    'to_date' => $store->analytics_to_date,
-                    'currency_code' => $store->analytics_currency_code,
+                    'report_timezone' => $store->analytics_report_timezone ?? $filters['timezone'],
+                    'from_date' => $store->analytics_from_date ?? $filters['from_date'],
+                    'to_date' => $store->analytics_to_date ?? $filters['to_date'],
+                    'currency_code' => $store->analytics_currency_code ?? 'USD',
                     'original_currency_code' => $store->analytics_original_currency_code,
                     'total_sales' => $store->analytics_total_sales,
                     'original_total_sales' => $store->analytics_original_total_sales,
@@ -78,9 +76,10 @@ class ShopifyAnalyticsController extends Controller
                     'refund_amount' => $store->analytics_refund_amount,
                     'net_sales' => $store->analytics_net_sales,
                     'average_order_value' => $store->analytics_average_order_value,
-                    'sync_status' => $store->analytics_period_status,
+                    'sync_status' => $store->analytics_sync_status,
                     'sync_message' => $store->analytics_sync_message,
                     'synced_at' => $store->analytics_synced_at,
+                    'has_report_data' => (bool) $store->analytics_has_report_data,
                     'reference_rate' => $this->referenceRates->rateFor($store->analytics_original_currency_code),
                     'reference_rate_configured' => $this->referenceRates->isConfigured($store->analytics_original_currency_code),
                 ], true);
@@ -122,16 +121,37 @@ class ShopifyAnalyticsController extends Controller
                 ->with('error', __('assistant.shopify_analytics.messages.inactive_store'));
         }
 
-        // The list filter only controls local reporting. A manual refresh
-        // always asks Shopify for this store's own local business day.
-        $metric = $this->analytics->refresh($store, $context['user']);
-        $messageKey = $metric->sync_status === AssistantShopifyStoreMetric::STATUS_SUCCESS
-            ? 'messages.refresh_success'
-            : 'messages.refresh_failed';
+        // A first store sync may fetch more than ninety local dates. Queue it
+        // through the same worker as multi-select synchronization so a slow
+        // Shopify response never holds the browser request open or allows
+        // repeated clicks to create competing imports.
+        $activeBatchExists = AssistantShopifyAnalyticsSyncBatch::query()
+            ->where('actor_id', $context['user']->getKey())
+            ->whereIn('status', [
+                AssistantShopifyAnalyticsSyncBatch::STATUS_QUEUED,
+                AssistantShopifyAnalyticsSyncBatch::STATUS_PROCESSING,
+            ])
+            ->exists();
+        if ($activeBatchExists) {
+            return $this->indexRedirect($request)
+                ->with('error', __('assistant.shopify_analytics.messages.batch_in_progress'));
+        }
+
+        $busy = AssistantShopifyAnalyticsSyncTask::query()
+            ->where('assistant_domain_store_id', $store->getKey())
+            ->whereIn('status', AssistantShopifyAnalyticsSyncTask::activeStatuses())
+            ->exists();
+        if ($busy) {
+            return $this->indexRedirect($request)
+                ->with('error', __('assistant.shopify_analytics.messages.batch_store_busy'));
+        }
+
+        $batch = $this->createSyncBatch(collect([$store]), $context['user'], $this->filters($request));
+        $request->session()->put($this->syncBatchSessionKey(), $batch->getKey());
 
         return $this->indexRedirect($request)->with(
-            $metric->sync_status === AssistantShopifyStoreMetric::STATUS_SUCCESS ? 'success' : 'error',
-            __('assistant.shopify_analytics.'.$messageKey, ['name' => $store->shop_name]),
+            'success',
+            __('assistant.shopify_analytics.messages.batch_queued', ['count' => 1]),
         );
     }
 
@@ -391,46 +411,47 @@ class ShopifyAnalyticsController extends Controller
     private function periodQuery(array $filters): QueryBuilder
     {
         $connection = config('admin.database.connection') ?: config('database.default');
-        $hourTable = (new AssistantShopifyStoreMetricHour())->getTable();
-        [$fromUtc, $toUtc] = $this->reportingUtcHours($filters);
+        $orderTable = (new AssistantShopifyStoreOrder())->getTable();
+        [$fromUtc, $toUtc] = $this->reportingUtcRange($filters);
 
-        // Shopify is synchronized only in the store's own timezone. This
-        // query never calls Shopify: it converts the user-selected reporting
-        // timezone into a UTC range, then aggregates raw hourly records.
-        $hours = DB::connection($connection)->table($hourTable.' as hour')
-            ->selectRaw('hour.assistant_domain_store_id')
-            ->selectRaw('MAX(hour.shop_timezone) as shop_timezone')
+        // The synchronized source data remains exactly as Shopify returned it:
+        // an order created timestamp in UTC plus source-currency amounts. The
+        // reporting timezone is applied only here, while reading the saved
+        // order rows; changing a page filter must never request Shopify.
+        $orders = DB::connection($connection)->table($orderTable.' as shopify_order')
+            ->selectRaw('shopify_order.assistant_domain_store_id')
             ->selectRaw('? as report_timezone', [$filters['timezone']])
             ->selectRaw('? as from_date', [$filters['from_date']])
             ->selectRaw('? as to_date', [$filters['to_date']])
             ->selectRaw("'USD' as currency_code")
-            ->selectRaw('MAX(hour.original_currency_code) as original_currency_code')
-            ->selectRaw('SUM(hour.original_total_sales) as original_total_sales')
-            ->selectRaw($this->referenceUsdAggregate('SUM(hour.original_total_sales)', 'MAX(hour.original_currency_code)').' as total_sales')
-            ->selectRaw('SUM(hour.original_refund_amount) as original_refund_amount')
-            ->selectRaw($this->referenceUsdAggregate('SUM(hour.original_refund_amount)', 'MAX(hour.original_currency_code)').' as refund_amount')
-            ->selectRaw('SUM(hour.original_net_sales) as original_net_sales')
-            ->selectRaw($this->referenceUsdAggregate('SUM(hour.original_net_sales)', 'MAX(hour.original_currency_code)').' as net_sales')
-            ->selectRaw('SUM(hour.orders_count) as orders_count')
-            ->selectRaw('CASE WHEN SUM(hour.orders_count) > 0 THEN SUM(hour.returning_customer_rate * hour.orders_count) / SUM(hour.orders_count) ELSE 0 END as returning_customer_rate')
-            ->selectRaw('SUM(hour.fulfilled_orders_count) as fulfilled_orders_count')
-            ->selectRaw('CASE WHEN SUM(hour.orders_count) > 0 THEN '.$this->referenceUsdAggregate('SUM(hour.original_total_sales)', 'MAX(hour.original_currency_code)').' / SUM(hour.orders_count) ELSE NULL END as average_order_value')
-            ->selectRaw('? as sync_status', [AssistantShopifyStoreMetric::STATUS_SUCCESS])
-            ->selectRaw('NULL as sync_message')
-            ->selectRaw('MAX(hour.synced_at) as synced_at')
-            ->where('hour.report_hour_utc', '>=', $fromUtc->format('Y-m-d H:i:s'))
-            ->where('hour.report_hour_utc', '<=', $toUtc->format('Y-m-d H:i:s'))
-            ->groupBy('hour.assistant_domain_store_id')
+            ->selectRaw('MAX(shopify_order.original_currency_code) as original_currency_code')
+            ->selectRaw('COALESCE(SUM(shopify_order.original_total_price), 0) as original_total_sales')
+            ->selectRaw('COALESCE(SUM('.$this->referenceUsdRowAggregate('shopify_order.original_total_price', 'shopify_order.original_currency_code').'), 0) as total_sales')
+            ->selectRaw('COALESCE(SUM(shopify_order.refunded_total_amount), 0) as original_refund_amount')
+            ->selectRaw('COALESCE(SUM('.$this->referenceUsdRowAggregate('shopify_order.refunded_total_amount', 'shopify_order.refunded_currency_code').'), 0) as refund_amount')
+            ->selectRaw('COALESCE(SUM(shopify_order.current_total_price), 0) as original_net_sales')
+            ->selectRaw('COALESCE(SUM('.$this->referenceUsdRowAggregate('shopify_order.current_total_price', 'shopify_order.current_currency_code').'), 0) as net_sales')
+            ->selectRaw('COUNT(*) as orders_count')
+            ->selectRaw('0 as returning_customer_rate')
+            ->selectRaw("SUM(CASE WHEN UPPER(COALESCE(shopify_order.fulfillment_status, '')) = 'FULFILLED' THEN 1 ELSE 0 END) as fulfilled_orders_count")
+            ->selectRaw('NULL as average_order_value')
+            ->selectRaw('MAX(shopify_order.synced_at) as synced_at')
+            ->selectRaw('1 as has_report_data')
+            ->where('shopify_order.shopify_created_at', '>=', $fromUtc->format('Y-m-d H:i:s'))
+            ->where('shopify_order.shopify_created_at', '<', $toUtc->format('Y-m-d H:i:s'))
+            ->where('shopify_order.is_test', false)
+            ->whereNull('shopify_order.shopify_cancelled_at')
+            ->groupBy('shopify_order.assistant_domain_store_id')
             ->havingRaw('COUNT(*) > 0');
 
         return DB::connection($connection)
             ->query()
-            ->fromSub($hours, 'analytics_periods')
+            ->fromSub($orders, 'analytics_periods')
             ->select('analytics_periods.*');
     }
 
     /** @return array{0: CarbonImmutable, 1: CarbonImmutable} */
-    private function reportingUtcHours(array $filters): array
+    private function reportingUtcRange(array $filters): array
     {
         $fromUtc = CarbonImmutable::createFromFormat('!Y-m-d', $filters['from_date'], $filters['timezone'])
             ->startOfDay()
@@ -438,8 +459,7 @@ class ShopifyAnalyticsController extends Controller
         $toUtc = CarbonImmutable::createFromFormat('!Y-m-d', $filters['to_date'], $filters['timezone'])
             ->addDay()
             ->startOfDay()
-            ->setTimezone('UTC')
-            ->subHour();
+            ->setTimezone('UTC');
 
         return [$fromUtc, $toUtc];
     }
@@ -450,12 +470,12 @@ class ShopifyAnalyticsController extends Controller
         return $this->joinPeriod($query, $periods)
             ->select('assistant_domain_stores.*')
             ->addSelect([
-                'analytics_metrics.shop_timezone as analytics_shop_timezone',
+                'analytics_sync_state.shop_timezone as analytics_shop_timezone',
                 'analytics_metrics.report_timezone as analytics_report_timezone',
                 'analytics_metrics.from_date as analytics_from_date',
                 'analytics_metrics.to_date as analytics_to_date',
                 'analytics_metrics.currency_code as analytics_currency_code',
-                'analytics_metrics.original_currency_code as analytics_original_currency_code',
+                DB::raw('COALESCE(analytics_metrics.original_currency_code, analytics_sync_state.original_currency_code) as analytics_original_currency_code'),
                 'analytics_metrics.total_sales as analytics_total_sales',
                 'analytics_metrics.original_total_sales as analytics_original_total_sales',
                 'analytics_metrics.original_refund_amount as analytics_original_refund_amount',
@@ -466,18 +486,23 @@ class ShopifyAnalyticsController extends Controller
                 'analytics_metrics.refund_amount as analytics_refund_amount',
                 'analytics_metrics.net_sales as analytics_net_sales',
                 'analytics_metrics.average_order_value as analytics_average_order_value',
-                'analytics_metrics.sync_status as analytics_period_status',
-                'analytics_metrics.sync_message as analytics_sync_message',
-                'analytics_metrics.synced_at as analytics_synced_at',
+                'analytics_sync_state.sync_status as analytics_sync_status',
+                'analytics_sync_state.sync_message as analytics_sync_message',
+                'analytics_sync_state.synced_at as analytics_synced_at',
+                'analytics_metrics.has_report_data as analytics_has_report_data',
             ]);
     }
 
     /** @return Builder<AssistantDomainStore> */
     private function joinPeriod(Builder $query, QueryBuilder $periods): Builder
     {
-        return $query->leftJoinSub($periods, 'analytics_metrics', function ($join): void {
-            $join->on('assistant_domain_stores.id', '=', 'analytics_metrics.assistant_domain_store_id');
-        });
+        $metricTable = (new AssistantShopifyStoreMetric())->getTable();
+
+        return $query
+            ->leftJoinSub($periods, 'analytics_metrics', function ($join): void {
+                $join->on('assistant_domain_stores.id', '=', 'analytics_metrics.assistant_domain_store_id');
+            })
+            ->leftJoin($metricTable.' as analytics_sync_state', 'assistant_domain_stores.id', '=', 'analytics_sync_state.assistant_domain_store_id');
     }
 
     /** @return array<string, float|int> */
@@ -485,12 +510,12 @@ class ShopifyAnalyticsController extends Controller
     {
         $row = $this->joinPeriod($query, $periods)
             ->selectRaw('COUNT(assistant_domain_stores.id) as stores_count')
-            ->selectRaw('SUM(CASE WHEN analytics_metrics.sync_status = ? THEN 1 ELSE 0 END) as synced_stores_count', [AssistantShopifyStoreMetric::STATUS_SUCCESS])
-            ->selectRaw('COALESCE(SUM(CASE WHEN analytics_metrics.sync_status = ? THEN analytics_metrics.total_sales ELSE 0 END), 0) as total_sales', [AssistantShopifyStoreMetric::STATUS_SUCCESS])
-            ->selectRaw('COALESCE(SUM(CASE WHEN analytics_metrics.sync_status = ? THEN analytics_metrics.orders_count ELSE 0 END), 0) as orders_count', [AssistantShopifyStoreMetric::STATUS_SUCCESS])
-            ->selectRaw('COALESCE(SUM(CASE WHEN analytics_metrics.sync_status = ? THEN analytics_metrics.fulfilled_orders_count ELSE 0 END), 0) as fulfilled_orders_count', [AssistantShopifyStoreMetric::STATUS_SUCCESS])
-            ->selectRaw('COALESCE(SUM(CASE WHEN analytics_metrics.sync_status = ? THEN analytics_metrics.refund_amount ELSE 0 END), 0) as refund_amount', [AssistantShopifyStoreMetric::STATUS_SUCCESS])
-            ->selectRaw('COALESCE(SUM(CASE WHEN analytics_metrics.sync_status = ? THEN analytics_metrics.net_sales ELSE 0 END), 0) as net_sales', [AssistantShopifyStoreMetric::STATUS_SUCCESS])
+            ->selectRaw('SUM(CASE WHEN analytics_sync_state.sync_status = ? THEN 1 ELSE 0 END) as synced_stores_count', [AssistantShopifyStoreMetric::STATUS_SUCCESS])
+            ->selectRaw('COALESCE(SUM(analytics_metrics.total_sales), 0) as total_sales')
+            ->selectRaw('COALESCE(SUM(analytics_metrics.orders_count), 0) as orders_count')
+            ->selectRaw('COALESCE(SUM(analytics_metrics.fulfilled_orders_count), 0) as fulfilled_orders_count')
+            ->selectRaw('COALESCE(SUM(analytics_metrics.refund_amount), 0) as refund_amount')
+            ->selectRaw('COALESCE(SUM(analytics_metrics.net_sales), 0) as net_sales')
             ->first();
 
         return [
@@ -527,15 +552,15 @@ class ShopifyAnalyticsController extends Controller
             'shop_status' => 'assistant_domain_stores.shop_status',
             'team' => 'assistant_domain_stores.team',
             'email_purchased' => 'assistant_domain_stores.email_purchased',
-            'shop_timezone' => 'analytics_metrics.shop_timezone',
+            'shop_timezone' => 'analytics_sync_state.shop_timezone',
             'total_sales' => 'analytics_metrics.total_sales',
             'original_total_sales' => 'analytics_metrics.original_total_sales',
             'orders_count' => 'analytics_metrics.orders_count',
             'fulfilled_orders_count' => 'analytics_metrics.fulfilled_orders_count',
             'refund_amount' => 'analytics_metrics.refund_amount',
             'net_sales' => 'analytics_metrics.net_sales',
-            'sync_status' => 'analytics_metrics.sync_status',
-            'synced_at' => 'analytics_metrics.synced_at',
+            'sync_status' => 'analytics_sync_state.sync_status',
+            'synced_at' => 'analytics_sync_state.synced_at',
             'report_period' => 'analytics_metrics.to_date',
         ];
     }
@@ -572,6 +597,11 @@ class ShopifyAnalyticsController extends Controller
         }
 
         return "CASE UPPER(COALESCE({$currencyExpression}, '')) ".implode(' ', $clauses).' ELSE NULL END';
+    }
+
+    private function referenceUsdRowAggregate(string $amountExpression, string $currencyExpression): string
+    {
+        return $this->referenceUsdAggregate($amountExpression, $currencyExpression);
     }
 
     /** @return array{portal: \App\Models\Portal, user: AdminUser}|Response */

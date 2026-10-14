@@ -160,6 +160,11 @@ class AssistantDomainStore extends Model
         return $this->hasOne(AssistantShopifyStoreMetric::class, 'assistant_domain_store_id');
     }
 
+    public function shopifyAnalyticsOrders(): HasMany
+    {
+        return $this->hasMany(AssistantShopifyStoreOrder::class, 'assistant_domain_store_id');
+    }
+
     public function shopifyAnalyticsHistory(): HasMany
     {
         return $this->hasMany(AssistantShopifyStoreMetricHistory::class, 'assistant_domain_store_id');

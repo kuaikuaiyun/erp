@@ -260,6 +260,10 @@
                             $metric = $store->shopifyAnalyticsPeriod;
                             $status = $metric?->sync_status ?: \App\Models\AssistantShopifyStoreMetric::STATUS_NOT_SYNCED;
                             $statusLabel = $metricStatuses[$status] ?? $metricStatuses[\App\Models\AssistantShopifyStoreMetric::STATUS_NOT_SYNCED];
+                            // A successful source synchronization can quite
+                            // validly have zero orders in the chosen report
+                            // range. It should display zero, not masquerade
+                            // as an unavailable snapshot.
                             $hasSnapshot = $metric?->sync_status === \App\Models\AssistantShopifyStoreMetric::STATUS_SUCCESS;
                             $isInactive = $store->shop_status !== \App\Models\AssistantDomainStore::SHOP_STATUS_IN_USE;
                             $isConfigured = filled($store->shopify_client_id) && filled($store->shopify_client_secret);
@@ -274,7 +278,7 @@
                             $syncedAt = $metric?->synced_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i') ?: $t('card.not_available');
                             $failureReasonKey = $metric?->sync_message ?: match ($status) {
                                 \App\Models\AssistantShopifyStoreMetric::STATUS_NOT_CONFIGURED => 'credentials_missing',
-                                \App\Models\AssistantShopifyStoreMetric::STATUS_PERMISSION_DENIED => 'reports_permission_denied',
+                                \App\Models\AssistantShopifyStoreMetric::STATUS_PERMISSION_DENIED => 'orders_permission_denied',
                                 \App\Models\AssistantShopifyStoreMetric::STATUS_FAILED => 'unknown',
                                 default => null,
                             };

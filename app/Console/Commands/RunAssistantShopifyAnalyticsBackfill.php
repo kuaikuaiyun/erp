@@ -12,7 +12,7 @@ class RunAssistantShopifyAnalyticsBackfill extends Command
                             {--limit=10 : Maximum stores to process in a normal scheduled run}
                             {--all : Process every currently due store backfill in this one command}';
 
-    protected $description = 'Run resumable Assistant Shopify analytics history backfills';
+    protected $description = 'Legacy no-op: initial Shopify order history is synchronized by selected store tasks';
 
     public function handle(ShopifyAnalyticsAutomationService $automation): int
     {
@@ -32,7 +32,7 @@ class RunAssistantShopifyAnalyticsBackfill extends Command
         }
 
         $this->info(sprintf(
-            'Stores processed: %d; succeeded: %d; failed: %d; completed: %d; UTC hour records written: %d.',
+            'Legacy tasks processed: %d; succeeded: %d; failed: %d; completed: %d; order rows written: %d.',
             $result['processed'],
             $result['succeeded'],
             $result['failed'],

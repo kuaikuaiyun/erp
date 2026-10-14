@@ -4,30 +4,43 @@ namespace App\Portals\Assistant;
 
 use App\Models\AdminUser;
 use App\Models\AssistantDomainStore;
-use App\Models\AssistantShopifyAnalyticsBackfill;
 use App\Models\AssistantShopifyStoreMetric;
-use App\Models\AssistantShopifyStoreMetricHistory;
-use App\Models\AssistantShopifyStoreMetricHour;
-use App\Models\AssistantShopifyStoreMetricPeriod;
+use App\Models\AssistantShopifyStoreOrder;
 use App\Portals\Logistics\ShopifyOrderSyncService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use RuntimeException;
 
+/**
+ * Assistant Shopify analytics source synchronizer.
+ *
+ * Shopify orders are stored with their source amounts and UTC timestamps. The
+ * analytics page is deliberately a separate read-only reporting layer: it
+ * chooses a reporting timezone, converts the requested dates to UTC, then
+ * aggregates these rows without calling Shopify or changing source values.
+ */
 class ShopifyStoreAnalyticsService
 {
     private const INITIAL_HISTORY_DAYS = 90;
 
-    private const INCREMENTAL_OVERLAP_HOURS = 1;
+    /** Extra prior days protect arbitrary report-timezone boundaries. */
+    private const INITIAL_TIMEZONE_BUFFER_DAYS = 2;
 
-    public function __construct(private readonly ShopifyOrderSyncService $shopify)
-    {
+    /** Store-local current date plus the three preceding dates. */
+    private const INCREMENTAL_SYNC_DAYS = 4;
+
+    public function __construct(
+        private readonly ShopifyOrderSyncService $shopify,
+        private readonly ShopifyAnalyticsReferenceRateService $referenceRates,
+    ) {
     }
 
-    /** Fetch the current business-day metrics in the Shopify store's own timezone. */
+    /**
+     * First successful request for a store loads the latest 90 store-local
+     * calendar days (plus a prior timezone-boundary buffer). Later requests
+     * replace the source rows for the current local date and prior 3 dates.
+     */
     public function refresh(AssistantDomainStore $store, ?AdminUser $actor = null): AssistantShopifyStoreMetric
     {
         $metric = AssistantShopifyStoreMetric::query()->firstOrNew([
@@ -44,63 +57,50 @@ class ShopifyStoreAnalyticsService
 
         try {
             $shop = $this->shopInfo($store, $actor);
-            $reportTimezone = $shop['timezone'];
-            $reportDate = now($reportTimezone)->toDateString();
-            $period = $this->refreshPeriod($store, $reportTimezone, $reportDate, $reportDate, $actor, $shop);
+            $localToday = CarbonImmutable::now($shop['timezone'])->startOfDay();
+            $isInitial = $metric->orders_initial_backfilled_at === null;
+            $fromDate = $isInitial
+                ? $localToday->subDays((self::INITIAL_HISTORY_DAYS - 1) + self::INITIAL_TIMEZONE_BUFFER_DAYS)
+                : $localToday->subDays(self::INCREMENTAL_SYNC_DAYS - 1);
 
-            if ($period->sync_status !== AssistantShopifyStoreMetric::STATUS_SUCCESS) {
-                return $this->markFailure($metric, $period->sync_status, $period->sync_message ?: 'unknown');
-            }
+            $this->synchroniseStoreDates(
+                $store,
+                $actor,
+                $shop,
+                $fromDate,
+                $localToday,
+            );
 
-            // Collect incrementally from the last successful watermark. The
-            // overlap rewrites the previous hour, so a store-local midnight
-            // cannot leave the final part of the prior day uncollected.
-            [$fromUtc, $toUtc] = $this->incrementalHourWindow($metric, $shop['timezone']);
-            $this->refreshUtcHours($store, $fromUtc, $toUtc, $actor, $shop);
-
+            $currentDaySummary = $this->storeDaySummary($store, $localToday);
+            $syncedAt = now();
             $payload = [
-                'shop_timezone' => $period->shop_timezone,
-                'report_date' => $reportDate,
-                'currency_code' => $period->currency_code,
-                'original_currency_code' => $period->original_currency_code,
-                'total_sales' => $period->total_sales,
-                'original_total_sales' => $period->original_total_sales,
-                'orders_count' => $period->orders_count,
-                'returning_customer_rate' => $period->returning_customer_rate,
-                'fulfilled_orders_count' => $period->fulfilled_orders_count,
-                'refund_amount' => $period->refund_amount,
-                'net_sales' => $period->net_sales,
-                'average_order_value' => $period->average_order_value,
-                'sync_status' => $period->sync_status,
-                'sync_message' => $period->sync_message,
-                'synced_at' => $period->synced_at,
-                // This watermark drives future incremental runs. Keep it only
-                // after both the current snapshot and hourly metrics succeed.
-                'last_successful_synced_at' => $period->synced_at ?? now(),
+                'shop_timezone' => $shop['timezone'],
+                'report_date' => $localToday->toDateString(),
+                'currency_code' => 'USD',
+                'original_currency_code' => $shop['currency'],
+                'total_sales' => $currentDaySummary['total_sales'],
+                'original_total_sales' => $currentDaySummary['original_total_sales'],
+                'orders_count' => $currentDaySummary['orders_count'],
+                'returning_customer_rate' => null,
+                'fulfilled_orders_count' => $currentDaySummary['fulfilled_orders_count'],
+                'refund_amount' => $currentDaySummary['refund_amount'],
+                'net_sales' => $currentDaySummary['net_sales'],
+                'average_order_value' => null,
+                'sync_status' => AssistantShopifyStoreMetric::STATUS_SUCCESS,
+                'sync_message' => null,
+                'synced_at' => $syncedAt,
+                'last_successful_synced_at' => $syncedAt,
             ];
 
-            DB::connection($metric->getConnectionName())->transaction(function () use ($metric, $store, $payload, $reportTimezone, $shop): void {
-                $metric->fill($payload)->save();
+            if ($isInitial) {
+                $payload['orders_initial_backfilled_at'] = $syncedAt;
+            }
 
-                // A store can be refreshed repeatedly within its own local
-                // business day. Keep one history row for that day and replace
-                // it with the most recently fetched successful metrics.
-                AssistantShopifyStoreMetricHistory::query()->updateOrCreate(
-                    [
-                        'assistant_domain_store_id' => $store->getKey(),
-                        'report_timezone' => $reportTimezone,
-                        'report_date' => $payload['report_date'],
-                    ],
-                    Arr::except($payload, ['report_date', 'sync_message']),
-                );
-
-                $this->startInitialBackfill($store, $shop['timezone']);
-            });
+            $metric->fill($payload)->save();
 
             return $metric;
         } catch (\Throwable $exception) {
             report($exception);
-
             $failure = $this->failure($exception);
 
             return $this->markFailure($metric, $failure['status'], $failure['reason']);
@@ -108,350 +108,190 @@ class ShopifyStoreAnalyticsService
     }
 
     /**
-     * Fetch and persist one completed store-local business day without
-     * changing the current-day snapshot. The scheduler uses this for later
-     * day finalisation, while initial history uses refreshHistoricalRange().
+     * @param array{timezone:string,currency:string} $shop
      */
-    public function refreshHistoricalDate(
+    private function synchroniseStoreDates(
         AssistantDomainStore $store,
-        string $reportTimezone,
-        string $reportDate,
-        ?AdminUser $actor = null,
-    ): AssistantShopifyStoreMetricHistory {
-        $reportTimezone = $this->validTimezone($reportTimezone);
-        $reportDate = $this->validReportDate($reportDate, $reportTimezone);
+        ?AdminUser $actor,
+        array $shop,
+        CarbonImmutable $fromDate,
+        CarbonImmutable $toDate,
+    ): void {
+        $cursor = $fromDate->setTimezone($shop['timezone'])->startOfDay();
+        $lastDate = $toDate->setTimezone($shop['timezone'])->startOfDay();
 
-        if (blank($store->shopify_client_id) || blank($store->shopify_client_secret)) {
-            throw new RuntimeException('Shopify analytics credentials are not configured.');
-        }
-
-        $shop = $this->shopInfo($store, $actor);
-        $sales = $this->shopifyQl($store, $actor, $this->salesQuery($reportTimezone, $reportDate));
-        $originalSales = $shop['currency'] === 'USD'
-            ? $sales
-            : $this->shopifyQl($store, $actor, $this->salesQuery($reportTimezone, $reportDate, $shop['currency'], true));
-        $fulfillments = $this->shopifyQl($store, $actor, $this->fulfillmentsQuery($reportTimezone, $reportDate));
-        $payload = Arr::except(
-            $this->successfulPayload($shop['timezone'], $reportDate, $sales, $fulfillments, $originalSales, $shop['currency']),
-            ['report_date', 'sync_message'],
-        );
-
-        return AssistantShopifyStoreMetricHistory::query()->updateOrCreate(
-            [
-                'assistant_domain_store_id' => $store->getKey(),
-                'report_timezone' => $reportTimezone,
-                'report_date' => $reportDate,
-            ],
-            $payload,
-        );
-    }
-
-    /**
-     * Fetch a completed store-local date range in two ShopifyQL requests:
-     * one sales series and one fulfillment series. Each returned day is
-     * independently upserted, so rerunning this operation is safe.
-     */
-    public function refreshHistoricalRange(
-        AssistantDomainStore $store,
-        string $reportTimezone,
-        string $fromDate,
-        string $toDate,
-        ?AdminUser $actor = null,
-    ): int {
-        $reportTimezone = $this->validTimezone($reportTimezone);
-        $fromDate = $this->validReportDate($fromDate, $reportTimezone);
-        $toDate = $this->validReportDate($toDate, $reportTimezone);
-
-        if ($fromDate > $toDate) {
-            throw new RuntimeException('The historical date range is invalid.');
-        }
-
-        if (blank($store->shopify_client_id) || blank($store->shopify_client_secret)) {
-            throw new RuntimeException('Shopify analytics credentials are not configured.');
-        }
-
-        $shop = $this->shopInfo($store, $actor);
-        $salesByDate = $this->rowsByReportDate(
-            $this->shopifyQlRows($store, $actor, $this->salesTimeSeriesQuery($reportTimezone, $fromDate, $toDate), 'period_sales_usd'),
-            $reportTimezone,
-            $fromDate,
-            $toDate,
-        );
-        $originalSalesByDate = $shop['currency'] === 'USD'
-            ? $salesByDate
-            : $this->rowsByReportDate(
-                $this->shopifyQlRows($store, $actor, $this->salesTimeSeriesQuery($reportTimezone, $fromDate, $toDate, $shop['currency'], true), 'period_sales_original_currency'),
-                $reportTimezone,
-                $fromDate,
-                $toDate,
-            );
-        $fulfillmentsByDate = $this->rowsByReportDate(
-            $this->shopifyQlRows($store, $actor, $this->fulfillmentsTimeSeriesQuery($reportTimezone, $fromDate, $toDate), 'period_fulfillments'),
-            $reportTimezone,
-            $fromDate,
-            $toDate,
-        );
-
-        $count = 0;
-        foreach ($this->historicalDates($reportTimezone, $fromDate, $toDate) as $reportDate) {
-            $payload = Arr::except(
-                $this->successfulPayload(
-                    $shop['timezone'],
-                    $reportDate,
-                    $salesByDate[$reportDate] ?? [],
-                    $fulfillmentsByDate[$reportDate] ?? [],
-                    $originalSalesByDate[$reportDate] ?? [],
-                    $shop['currency'],
-                ),
-                ['report_date', 'sync_message'],
-            );
-
-            AssistantShopifyStoreMetricHistory::query()->updateOrCreate(
-                [
-                    'assistant_domain_store_id' => $store->getKey(),
-                    'report_timezone' => $reportTimezone,
-                    'report_date' => $reportDate,
-                ],
-                $payload,
-            );
-
-            $count++;
-        }
-
-        return $count;
-    }
-
-    public function refreshPeriod(
-        AssistantDomainStore $store,
-        string $reportTimezone,
-        string $fromDate,
-        string $toDate,
-        ?AdminUser $actor = null,
-        ?array $shopInfo = null,
-    ): AssistantShopifyStoreMetricPeriod {
-        $reportTimezone = $this->validTimezone($reportTimezone);
-        $fromDate = $this->validReportDate($fromDate, $reportTimezone);
-        $toDate = $this->validReportDate($toDate, $reportTimezone);
-        if ($fromDate > $toDate) {
-            throw new RuntimeException('The analytics date range is invalid.');
-        }
-
-        $period = AssistantShopifyStoreMetricPeriod::query()->firstOrNew([
-            'assistant_domain_store_id' => $store->getKey(),
-            'report_timezone' => $reportTimezone,
-            'from_date' => $fromDate,
-            'to_date' => $toDate,
-        ]);
-
-        try {
-            if (blank($store->shopify_client_id) || blank($store->shopify_client_secret)) {
-                throw new RuntimeException('Shopify analytics credentials are not configured.');
-            }
-
-            $shop = $shopInfo ?? $this->shopInfo($store, $actor);
-            $sales = $this->shopifyQl($store, $actor, $this->salesRangeQuery($reportTimezone, $fromDate, $toDate));
-            $originalSales = $shop['currency'] === 'USD'
-                ? $sales
-                : $this->shopifyQl($store, $actor, $this->salesRangeQuery($reportTimezone, $fromDate, $toDate, $shop['currency'], true));
-            $fulfillments = $this->shopifyQl($store, $actor, $this->fulfillmentsRangeQuery($reportTimezone, $fromDate, $toDate));
-            $payload = $this->successfulPayload(
-                $shop['timezone'],
-                $toDate,
-                $sales,
-                $fulfillments,
-                $originalSales,
-                $shop['currency'],
-            );
-            $period->fill(Arr::except($payload, ['report_date']))->save();
-
-            return $period;
-        } catch (\Throwable $exception) {
-            report($exception);
-            $failure = $this->failure($exception);
-            $period->fill([
-                'shop_timezone' => $period->shop_timezone,
-                'currency_code' => 'USD',
-                'sync_status' => $failure['status'],
-                'sync_message' => $failure['reason'],
-                'synced_at' => now(),
-            ])->save();
-
-            return $period;
+        while ($cursor <= $lastDate) {
+            $this->synchroniseStoreDate($store, $actor, $shop, $cursor);
+            $cursor = $cursor->addDay();
         }
     }
 
     /**
-     * Fetch ShopifyQL hourly values in the store's own timezone, then
-     * normalize the returned hour keys to UTC for later local aggregation.
-     * The requested bounds are inclusive UTC hour starts.
+     * @param array{timezone:string,currency:string} $shop
      */
-    public function refreshUtcHours(
+    private function synchroniseStoreDate(
         AssistantDomainStore $store,
-        CarbonImmutable $fromUtc,
-        CarbonImmutable $toUtc,
-        ?AdminUser $actor = null,
-        ?array $shopInfo = null,
-        ?string $shopTimezone = null,
-    ): int {
-        $fromUtc = $fromUtc->setTimezone('UTC')->startOfHour();
-        $toUtc = $toUtc->setTimezone('UTC')->startOfHour();
+        ?AdminUser $actor,
+        array $shop,
+        CarbonImmutable $localDate,
+    ): void {
+        $startUtc = $localDate->startOfDay()->setTimezone('UTC');
+        $endUtc = $localDate->addDay()->startOfDay()->setTimezone('UTC');
+        $orders = $this->fetchOrdersForCreatedWindow($store, $actor, $startUtc, $endUtc);
 
-        if ($fromUtc > $toUtc) {
-            throw new RuntimeException('The UTC hourly history range is invalid.');
+        if ($orders === []) {
+            return;
         }
 
-        if (blank($store->shopify_client_id) || blank($store->shopify_client_secret)) {
-            throw new RuntimeException('Shopify analytics credentials are not configured.');
+        $timestamp = now();
+        $rowsByOrderId = [];
+        foreach ($orders as $order) {
+            $row = $this->orderRow($store, $order, $shop['currency'], $timestamp);
+            $rowsByOrderId[$row['shopify_order_id']] = $row;
         }
 
-        $shop = $shopInfo ?? $this->shopInfo($store, $actor);
-        $shopTimezone = $this->validTimezone($shopTimezone ?? $shop['timezone']);
-        $fromShopHour = $fromUtc->setTimezone($shopTimezone)->startOfHour();
-        $toShopHour = $toUtc->setTimezone($shopTimezone)->startOfHour();
-
-        $salesByHour = $this->rowsByUtcHour(
-            $this->shopifyQlRows($store, $actor, $this->salesHourlyTimeSeriesQuery($fromShopHour, $toShopHour, $shopTimezone), 'hourly_sales_usd'),
-            $fromUtc,
-            $toUtc,
-            $shopTimezone,
-        );
-        $originalSalesByHour = $shop['currency'] === 'USD'
-            ? $salesByHour
-            : $this->rowsByUtcHour(
-                // Keep Shopify's source values in the store currency. The
-                // analytics page applies its fixed reference-rate display
-                // calculation later and never overwrites these source values.
-                $this->shopifyQlRows($store, $actor, $this->salesHourlyTimeSeriesQuery($fromShopHour, $toShopHour, $shopTimezone, $shop['currency']), 'hourly_sales_original_currency'),
-                $fromUtc,
-                $toUtc,
-                $shopTimezone,
-            );
-        $fulfillmentsByHour = $this->rowsByUtcHour(
-            $this->shopifyQlRows($store, $actor, $this->fulfillmentsHourlyTimeSeriesQuery($fromShopHour, $toShopHour, $shopTimezone), 'hourly_fulfillments'),
-            $fromUtc,
-            $toUtc,
-            $shopTimezone,
-        );
-
-        $syncedAt = now();
-        $rows = [];
-        foreach ($this->utcHours($fromUtc, $toUtc) as $hour) {
-            $hourKey = $hour->format('Y-m-d H:00:00');
-            $sales = $salesByHour[$hourKey] ?? [];
-            $originalSales = $originalSalesByHour[$hourKey] ?? [];
-            $fulfillments = $fulfillmentsByHour[$hourKey] ?? [];
-
-            $rows[] = [
-                'assistant_domain_store_id' => $store->getKey(),
-                'report_hour_utc' => $hourKey,
-                'shop_timezone' => $shopTimezone,
-                'currency_code' => 'USD',
-                'original_currency_code' => $shop['currency'],
-                'total_sales' => $this->decimal($sales, 'total_sales'),
-                'original_total_sales' => $this->decimal($originalSales, 'total_sales'),
-                'original_refund_amount' => $this->decimal($originalSales, 'returns'),
-                'original_net_sales' => $this->decimal($originalSales, 'net_sales'),
-                'orders_count' => $this->integer($sales, 'orders'),
-                'returning_customer_rate' => $this->decimal($sales, 'returning_customer_rate'),
-                'fulfilled_orders_count' => $this->integer($fulfillments, 'orders_fulfilled'),
-                'refund_amount' => $this->decimal($sales, 'returns'),
-                'net_sales' => $this->decimal($sales, 'net_sales'),
-                'average_order_value' => $this->decimal($sales, 'average_order_value'),
-                'synced_at' => $syncedAt,
-                'created_at' => $syncedAt,
-                'updated_at' => $syncedAt,
-            ];
-        }
-
-        if ($rows === []) {
-            return 0;
-        }
-
-        AssistantShopifyStoreMetricHour::query()->upsert(
-            $rows,
-            ['assistant_domain_store_id', 'report_hour_utc'],
+        AssistantShopifyStoreOrder::query()->upsert(
+            array_values($rowsByOrderId),
+            ['assistant_domain_store_id', 'shopify_order_id'],
             [
-                'shop_timezone',
-                'currency_code',
+                'shopify_legacy_resource_id',
+                'shopify_order_number',
+                'shopify_created_at',
+                'shopify_processed_at',
+                'shopify_updated_at',
+                'shopify_cancelled_at',
+                'is_test',
                 'original_currency_code',
-                'total_sales',
-                'original_total_sales',
-                'original_refund_amount',
-                'original_net_sales',
-                'orders_count',
-                'returning_customer_rate',
-                'fulfilled_orders_count',
-                'refund_amount',
-                'net_sales',
-                'average_order_value',
+                'original_total_price',
+                'current_currency_code',
+                'current_total_price',
+                'refunded_currency_code',
+                'refunded_total_amount',
+                'financial_status',
+                'fulfillment_status',
                 'synced_at',
                 'updated_at',
             ],
         );
-
-        return count($rows);
     }
 
-    /** @param array<string, mixed> $sales @param array<string, mixed> $fulfillments @return array<string, mixed> */
-    private function successfulPayload(
-        string $shopTimezone,
-        string $reportDate,
-        array $sales,
-        array $fulfillments,
-        array $originalSales,
-        string $originalCurrency,
-    ): array
-    {
+    /** @return list<array<string, mixed>> */
+    private function fetchOrdersForCreatedWindow(
+        AssistantDomainStore $store,
+        ?AdminUser $actor,
+        CarbonImmutable $startUtc,
+        CarbonImmutable $endUtc,
+    ): array {
+        $cursor = null;
+        $orders = [];
+        $query = "created_at:>='".$this->shopifyUtc($startUtc)."' created_at:<'".$this->shopifyUtc($endUtc)."'";
+
+        do {
+            $response = $this->shopify->graphqlForStore(
+                $store,
+                $actor,
+                $this->ordersQuery(),
+                [
+                    'cursor' => $cursor,
+                    'query' => $query,
+                ],
+            );
+            $connection = Arr::get($response, 'data.orders');
+            if (!is_array($connection)) {
+                throw new RuntimeException('Shopify did not return the orders connection.');
+            }
+
+            foreach (Arr::get($connection, 'edges', []) as $edge) {
+                $order = is_array($edge) ? ($edge['node'] ?? null) : null;
+                if (is_array($order)) {
+                    $orders[] = $order;
+                }
+            }
+
+            $pageInfo = Arr::get($connection, 'pageInfo', []);
+            $hasNextPage = (bool) (is_array($pageInfo) ? ($pageInfo['hasNextPage'] ?? false) : false);
+            $nextCursor = is_array($pageInfo) ? ($pageInfo['endCursor'] ?? null) : null;
+
+            if ($hasNextPage && (!is_string($nextCursor) || $nextCursor === '')) {
+                throw new RuntimeException('Shopify returned a next page without an order cursor.');
+            }
+
+            $cursor = $hasNextPage ? $nextCursor : null;
+
+            // Keep long initial synchronizations friendly to the Shopify API
+            // without truncating any result page.
+            if ($hasNextPage) {
+                usleep(120000);
+            }
+        } while ($cursor !== null);
+
+        return $orders;
+    }
+
+    /** @return array<string, mixed> */
+    private function orderRow(
+        AssistantDomainStore $store,
+        array $order,
+        string $fallbackCurrency,
+        \DateTimeInterface $syncedAt,
+    ): array {
+        $orderId = trim((string) ($order['id'] ?? ''));
+        if ($orderId === '') {
+            throw new RuntimeException('Shopify returned an order without an ID.');
+        }
+
+        $original = $this->money($order['originalTotalPriceSet'] ?? null, $fallbackCurrency);
+        $current = $this->money($order['currentTotalPriceSet'] ?? null, $fallbackCurrency);
+        $refunded = $this->money($order['totalRefundedSet'] ?? null, $fallbackCurrency);
+
         return [
-            'shop_timezone' => $shopTimezone,
-            'report_date' => $reportDate,
-            'currency_code' => 'USD',
-            'original_currency_code' => $originalCurrency,
-            'total_sales' => $this->decimal($sales, 'total_sales'),
-            'original_total_sales' => $this->decimal($originalSales, 'total_sales'),
-            'orders_count' => $this->integer($sales, 'orders'),
-            'returning_customer_rate' => $this->decimal($sales, 'returning_customer_rate'),
-            'fulfilled_orders_count' => $this->integer($fulfillments, 'orders_fulfilled'),
-            'refund_amount' => $this->decimal($sales, 'returns'),
-            'net_sales' => $this->decimal($sales, 'net_sales'),
-            'average_order_value' => $this->decimal($sales, 'average_order_value'),
-            'sync_status' => AssistantShopifyStoreMetric::STATUS_SUCCESS,
-            'sync_message' => null,
-            'synced_at' => now(),
-            'last_successful_synced_at' => now(),
+            'assistant_domain_store_id' => $store->getKey(),
+            'shopify_order_id' => $orderId,
+            'shopify_legacy_resource_id' => $this->nullableString($order['legacyResourceId'] ?? null, 40),
+            'shopify_order_number' => $this->nullableString($order['name'] ?? null, 80),
+            'shopify_created_at' => $this->dateTime($order['createdAt'] ?? null),
+            'shopify_processed_at' => $this->dateTime($order['processedAt'] ?? null, false),
+            'shopify_updated_at' => $this->dateTime($order['updatedAt'] ?? null, false),
+            'shopify_cancelled_at' => $this->dateTime($order['cancelledAt'] ?? null, false),
+            'is_test' => (bool) ($order['test'] ?? false),
+            'original_currency_code' => $original['currency'],
+            'original_total_price' => $original['amount'],
+            'current_currency_code' => $current['currency'],
+            'current_total_price' => $current['amount'],
+            'refunded_currency_code' => $refunded['currency'],
+            'refunded_total_amount' => $refunded['amount'],
+            'financial_status' => $this->nullableString($order['displayFinancialStatus'] ?? null, 40),
+            'fulfillment_status' => $this->nullableString($order['displayFulfillmentStatus'] ?? null, 40),
+            'synced_at' => $syncedAt,
+            'created_at' => $syncedAt,
+            'updated_at' => $syncedAt,
         ];
     }
 
-    /** Create the first 90 local-calendar-day plan, including the current day. */
-    private function startInitialBackfill(AssistantDomainStore $store, string $shopTimezone): void
+    /** @return array{currency:string,amount:?float} */
+    private function money(mixed $moneyBag, string $fallbackCurrency): array
     {
-        $shopTimezone = $this->validTimezone($shopTimezone);
-        $localToday = CarbonImmutable::now($shopTimezone)->startOfDay();
-        $fromDate = $localToday->subDays(self::INITIAL_HISTORY_DAYS - 1);
-        $toDate = $localToday;
+        $shopMoney = is_array($moneyBag) ? ($moneyBag['shopMoney'] ?? null) : null;
+        $currency = $fallbackCurrency;
+        $amount = null;
 
-        $task = AssistantShopifyAnalyticsBackfill::query()->firstOrNew(
-            ['assistant_domain_store_id' => $store->getKey()],
-        );
+        if (is_array($shopMoney)) {
+            $candidateCurrency = strtoupper(trim((string) ($shopMoney['currencyCode'] ?? '')));
+            if (preg_match('/^[A-Z]{3}$/', $candidateCurrency) === 1) {
+                $currency = $candidateCurrency;
+            }
 
-        if (!$task->exists || $task->shop_timezone !== $shopTimezone) {
-            $task->fill([
-                'shop_timezone' => $shopTimezone,
-                'from_date' => $fromDate->toDateString(),
-                'to_date' => $toDate->toDateString(),
-                'next_date' => $toDate->toDateString(),
-                'status' => AssistantShopifyAnalyticsBackfill::STATUS_PENDING,
-                'attempts' => 0,
-                'next_attempt_at' => null,
-                'last_error' => null,
-                'last_processed_at' => null,
-                'last_finalized_date' => null,
-                'completed_at' => null,
-            ])->save();
+            $candidateAmount = $shopMoney['amount'] ?? null;
+            if ($candidateAmount !== null && $candidateAmount !== '' && !is_numeric($candidateAmount)) {
+                throw new RuntimeException('Shopify returned a non-numeric order amount.');
+            }
+            $amount = is_numeric($candidateAmount) ? (float) $candidateAmount : null;
         }
+
+        return ['currency' => $currency, 'amount' => $amount];
     }
 
-    /** @return array{timezone: string, currency: string} */
+    /** @return array{timezone:string,currency:string} */
     private function shopInfo(AssistantDomainStore $store, ?AdminUser $actor): array
     {
         $response = $this->shopify->graphqlForStore($store, $actor, <<<'GQL'
@@ -469,177 +309,65 @@ class ShopifyStoreAnalyticsService
         ];
     }
 
-    /** @return array<string, mixed> */
-    private function shopifyQl(AssistantDomainStore $store, ?AdminUser $actor, string $shopifyQl): array
-    {
-        return $this->shopifyQlRows($store, $actor, $shopifyQl)[0] ?? [];
-    }
-
-    /** @return array<int, array<string, mixed>> */
-    private function shopifyQlRows(
+    /** @return array{total_sales:?float,original_total_sales:?float,orders_count:int,fulfilled_orders_count:int,refund_amount:?float,net_sales:?float} */
+    private function storeDaySummary(
         AssistantDomainStore $store,
-        ?AdminUser $actor,
-        string $shopifyQl,
-        string $queryLabel = 'unspecified',
-    ): array
-    {
-        $response = $this->shopify->graphqlForStore($store, $actor, <<<'GQL'
-            query AssistantShopifyAnalytics($query: String!) {
-              shopifyqlQuery(query: $query) {
-                tableData {
-                  rows
-                }
-                parseErrors
-              }
-            }
-            GQL, ['query' => $shopifyQl]);
+        CarbonImmutable $localDate,
+    ): array {
+        $startUtc = $localDate->startOfDay()->setTimezone('UTC');
+        $endUtc = $localDate->addDay()->startOfDay()->setTimezone('UTC');
+        $orders = AssistantShopifyStoreOrder::query()
+            ->where('assistant_domain_store_id', $store->getKey())
+            ->where('shopify_created_at', '>=', $startUtc->format('Y-m-d H:i:s'))
+            ->where('shopify_created_at', '<', $endUtc->format('Y-m-d H:i:s'))
+            ->where('is_test', false)
+            ->whereNull('shopify_cancelled_at')
+            ->get();
 
-        $parseErrors = Arr::get($response, 'data.shopifyqlQuery.parseErrors', []);
-        if (filled($parseErrors)) {
-            $messages = collect(Arr::wrap($parseErrors))
-                ->map(static function (mixed $error): string {
-                    if (is_array($error)) {
-                        $error = $error['message'] ?? json_encode($error, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-                    }
+        $originalCurrency = strtoupper((string) $orders->pluck('original_currency_code')->filter()->first());
+        $referenceRate = $this->referenceRates->rateFor($originalCurrency);
+        $originalTotal = (float) $orders->sum(static fn (AssistantShopifyStoreOrder $order): float => (float) ($order->original_total_price ?? 0));
+        $refund = (float) $orders->sum(static fn (AssistantShopifyStoreOrder $order): float => (float) ($order->refunded_total_amount ?? 0));
+        $net = (float) $orders->sum(static fn (AssistantShopifyStoreOrder $order): float => (float) ($order->current_total_price ?? 0));
 
-                    return is_scalar($error) ? trim((string) $error) : '';
-                })
-                ->filter()
-                ->implode('; ');
-
-            $message = Str::limit($messages ?: 'unknown parse error', 1000);
-
-            Log::warning('Assistant ShopifyQL query could not be parsed.', [
-                'store_id' => $store->getKey(),
-                'shop_name' => $store->shop_name,
-                'domain' => $store->domain,
-                'query_label' => $queryLabel,
-                'parse_errors' => $parseErrors,
-                'shopifyql' => $shopifyQl,
-            ]);
-
-            throw new RuntimeException('ShopifyQL query could not be parsed ['.$queryLabel.']: '.$message);
-        }
-
-        $rows = Arr::get($response, 'data.shopifyqlQuery.tableData.rows', []);
-        if (!is_array($rows) || $rows === []) {
-            return [];
-        }
-
-        $validRows = [];
-        foreach ($rows as $row) {
-            if (!is_array($row)) {
-                throw new RuntimeException('ShopifyQL returned an invalid table row.');
-            }
-
-            $validRows[] = $row;
-        }
-
-        return $validRows;
+        return [
+            'total_sales' => $referenceRate === null ? null : $originalTotal * $referenceRate,
+            'original_total_sales' => $originalTotal,
+            'orders_count' => $orders->count(),
+            'fulfilled_orders_count' => $orders->filter(
+                static fn (AssistantShopifyStoreOrder $order): bool => strtoupper((string) $order->fulfillment_status) === 'FULFILLED',
+            )->count(),
+            'refund_amount' => $referenceRate === null ? null : $refund * $referenceRate,
+            'net_sales' => $referenceRate === null ? null : $net * $referenceRate,
+        ];
     }
 
-    private function salesQuery(string $timezone, ?string $reportDate = null, string $currency = 'USD', bool $onlyTotalSales = false): string
+    private function ordersQuery(): string
     {
-        $fields = $onlyTotalSales
-            ? 'total_sales'
-            : 'total_sales, orders, returning_customer_rate, returns, net_sales, average_order_value';
-
-        return "FROM sales SHOW {$fields}\n"
-            ."WITH CURRENCY '{$currency}', TIMEZONE '{$timezone}'\n"
-            .$this->dateClause($reportDate);
+        return <<<'GRAPHQL'
+query AssistantShopifyAnalyticsOrders($cursor: String, $query: String!) {
+  orders(first: 250, after: $cursor, query: $query, sortKey: CREATED_AT, reverse: false) {
+    pageInfo { hasNextPage endCursor }
+    edges {
+      node {
+        id
+        legacyResourceId
+        name
+        createdAt
+        processedAt
+        updatedAt
+        cancelledAt
+        test
+        displayFinancialStatus
+        displayFulfillmentStatus
+        originalTotalPriceSet { shopMoney { amount currencyCode } }
+        currentTotalPriceSet { shopMoney { amount currencyCode } }
+        totalRefundedSet { shopMoney { amount currencyCode } }
+      }
     }
-
-    private function salesRangeQuery(string $timezone, string $fromDate, string $toDate, string $currency = 'USD', bool $onlyTotalSales = false): string
-    {
-        $fields = $onlyTotalSales
-            ? 'total_sales'
-            : 'total_sales, orders, returning_customer_rate, returns, net_sales, average_order_value';
-
-        return "FROM sales SHOW {$fields}\n"
-            ."WITH CURRENCY '{$currency}', TIMEZONE '{$timezone}'\n"
-            ."SINCE {$fromDate} UNTIL {$toDate}";
-    }
-
-    private function fulfillmentsQuery(string $timezone, ?string $reportDate = null): string
-    {
-        return "FROM fulfillments SHOW orders_fulfilled\n"
-            ."WITH TIMEZONE '{$timezone}'\n"
-            .$this->dateClause($reportDate);
-    }
-
-    private function fulfillmentsRangeQuery(string $timezone, string $fromDate, string $toDate): string
-    {
-        return "FROM fulfillments SHOW orders_fulfilled\n"
-            ."WITH TIMEZONE '{$timezone}'\n"
-            ."SINCE {$fromDate} UNTIL {$toDate}";
-    }
-
-    private function salesTimeSeriesQuery(
-        string $timezone,
-        string $fromDate,
-        string $toDate,
-        string $currency = 'USD',
-        bool $onlyTotalSales = false,
-    ): string
-    {
-        $fields = $onlyTotalSales
-            ? 'total_sales'
-            : 'total_sales, orders, returning_customer_rate, returns, net_sales, average_order_value';
-
-        return "FROM sales SHOW {$fields}\n"
-            ."WITH CURRENCY '{$currency}', TIMEZONE '{$timezone}'\n"
-            ."TIMESERIES day\n"
-            ."SINCE {$fromDate} UNTIL {$toDate}\n"
-            .'ORDER BY day ASC';
-    }
-
-    private function fulfillmentsTimeSeriesQuery(string $timezone, string $fromDate, string $toDate): string
-    {
-        return "FROM fulfillments SHOW orders_fulfilled\n"
-            ."WITH TIMEZONE '{$timezone}'\n"
-            ."TIMESERIES day\n"
-            ."SINCE {$fromDate} UNTIL {$toDate}\n"
-            .'ORDER BY day ASC';
-    }
-
-    private function salesHourlyTimeSeriesQuery(
-        CarbonImmutable $fromShopHour,
-        CarbonImmutable $toShopHour,
-        string $shopTimezone,
-        string $currency = 'USD',
-        bool $onlyTotalSales = false,
-    ): string {
-        $fields = $onlyTotalSales
-            ? 'total_sales'
-            : 'total_sales, orders, returning_customer_rate, returns, net_sales, average_order_value';
-
-        return "FROM sales SHOW {$fields}\n"
-            ."WITH CURRENCY '{$currency}', TIMEZONE '{$shopTimezone}'\n"
-            ."TIMESERIES hour\n"
-            .'SINCE '.$fromShopHour->format('Y-m-d\\TH:i:s').' UNTIL '.$toShopHour->addHour()->format('Y-m-d\\TH:i:s')."\n"
-            .'ORDER BY hour ASC';
-    }
-
-    private function fulfillmentsHourlyTimeSeriesQuery(
-        CarbonImmutable $fromShopHour,
-        CarbonImmutable $toShopHour,
-        string $shopTimezone,
-    ): string
-    {
-        return "FROM fulfillments SHOW orders_fulfilled\n"
-            ."WITH TIMEZONE '{$shopTimezone}'\n"
-            ."TIMESERIES hour\n"
-            .'SINCE '.$fromShopHour->format('Y-m-d\\TH:i:s').' UNTIL '.$toShopHour->addHour()->format('Y-m-d\\TH:i:s')."\n"
-            .'ORDER BY hour ASC';
-    }
-
-    private function dateClause(?string $reportDate): string
-    {
-        if ($reportDate === null) {
-            return 'DURING today';
-        }
-
-        return "SINCE {$reportDate} UNTIL {$reportDate}";
+  }
+}
+GRAPHQL;
     }
 
     private function validTimezone(string $timezone): string
@@ -654,178 +382,52 @@ class ShopifyStoreAnalyticsService
     private function validCurrency(string $currency): string
     {
         $currency = strtoupper(trim($currency));
-
-        if (!preg_match('/^[A-Z]{3}$/', $currency)) {
+        if (preg_match('/^[A-Z]{3}$/', $currency) !== 1) {
             throw new RuntimeException('Shopify returned an invalid currency code.');
         }
 
         return $currency;
     }
 
-    private function validReportDate(string $reportDate, string $timezone): string
+    private function dateTime(mixed $value, bool $required = true): ?CarbonImmutable
     {
-        $date = CarbonImmutable::createFromFormat('!Y-m-d', $reportDate, $timezone);
-        $errors = CarbonImmutable::getLastErrors();
-
-        if (!$date || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))) {
-            throw new RuntimeException('The requested history date is invalid.');
-        }
-
-        return $date->toDateString();
-    }
-
-    /**
-     * ShopifyQL returns day as an ISO date (or timestamp) when TIMESERIES day
-     * is used. Ignore unexpected rows rather than attributing metrics to a
-     * wrong business day.
-     *
-     * @param array<int, array<string, mixed>> $rows
-     * @return array<string, array<string, mixed>>
-     */
-    private function rowsByReportDate(array $rows, string $timezone, string $fromDate, string $toDate): array
-    {
-        $result = [];
-
-        foreach ($rows as $row) {
-            $day = $row['day'] ?? null;
-            if (!is_scalar($day)) {
-                continue;
+        if ($value === null || $value === '') {
+            if ($required) {
+                throw new RuntimeException('Shopify returned an order without a created timestamp.');
             }
 
-            $candidate = substr(trim((string) $day), 0, 10);
-            try {
-                $reportDate = $this->validReportDate($candidate, $timezone);
-            } catch (RuntimeException) {
-                continue;
-            }
-
-            if ($reportDate < $fromDate || $reportDate > $toDate) {
-                continue;
-            }
-
-            $result[$reportDate] = $row;
+            return null;
         }
 
-        return $result;
-    }
-
-    /**
-     * @param array<int, array<string, mixed>> $rows
-     * @return array<string, array<string, mixed>>
-     */
-    private function rowsByUtcHour(
-        array $rows,
-        CarbonImmutable $fromUtc,
-        CarbonImmutable $toUtc,
-        string $shopTimezone,
-    ): array
-    {
-        $result = [];
-
-        foreach ($rows as $row) {
-            $rawHour = $row['hour'] ?? null;
-            if (!is_scalar($rawHour)) {
-                continue;
-            }
-
-            try {
-                $hour = CarbonImmutable::parse((string) $rawHour, $shopTimezone)->setTimezone('UTC')->startOfHour();
-            } catch (\Throwable) {
-                continue;
-            }
-
-            if ($hour < $fromUtc || $hour > $toUtc) {
-                continue;
-            }
-
-            $result[$hour->format('Y-m-d H:00:00')] = $row;
+        try {
+            return CarbonImmutable::parse((string) $value)->setTimezone('UTC');
+        } catch (\Throwable) {
+            throw new RuntimeException('Shopify returned an invalid order timestamp.');
         }
-
-        return $result;
     }
 
-    /** @return array{0: CarbonImmutable, 1: CarbonImmutable} */
-    private function incrementalHourWindow(AssistantShopifyStoreMetric $metric, string $shopTimezone): array
+    private function nullableString(mixed $value, int $length): ?string
     {
-        $toUtc = CarbonImmutable::now('UTC')->startOfHour();
-        $lastSuccessfulSync = $metric->last_successful_synced_at;
+        $value = trim((string) $value);
 
-        if ($lastSuccessfulSync === null) {
-            $fromUtc = CarbonImmutable::now($shopTimezone)
-                ->startOfDay()
-                ->setTimezone('UTC')
-                ->startOfHour();
-
-            return [$fromUtc, $toUtc];
-        }
-
-        $fromUtc = CarbonImmutable::instance($lastSuccessfulSync)
-            ->setTimezone('UTC')
-            ->startOfHour()
-            ->subHours(self::INCREMENTAL_OVERLAP_HOURS);
-
-        return [$fromUtc->greaterThan($toUtc) ? $toUtc : $fromUtc, $toUtc];
+        return $value === '' ? null : Str::limit($value, $length, '');
     }
 
-    /** @return array<int, string> */
-    private function historicalDates(string $timezone, string $fromDate, string $toDate): array
+    private function shopifyUtc(CarbonImmutable $value): string
     {
-        $dates = [];
-        $cursor = CarbonImmutable::createFromFormat('!Y-m-d', $fromDate, $timezone);
-        $until = CarbonImmutable::createFromFormat('!Y-m-d', $toDate, $timezone);
-
-        while ($cursor <= $until) {
-            $dates[] = $cursor->toDateString();
-            $cursor = $cursor->addDay();
-        }
-
-        return $dates;
-    }
-
-    /** @return array<int, CarbonImmutable> */
-    private function utcHours(CarbonImmutable $fromUtc, CarbonImmutable $toUtc): array
-    {
-        $hours = [];
-        $hour = $fromUtc;
-
-        while ($hour <= $toUtc) {
-            $hours[] = $hour;
-            $hour = $hour->addHour();
-        }
-
-        return $hours;
-    }
-
-    /** @param array<string, mixed> $row */
-    private function decimal(array $row, string $field): float
-    {
-        $value = $row[$field] ?? 0;
-
-        return is_numeric($value) ? (float) $value : 0.0;
-    }
-
-    /** @param array<string, mixed> $row */
-    private function integer(array $row, string $field): int
-    {
-        $value = $row[$field] ?? 0;
-
-        return is_numeric($value) ? (int) round((float) $value) : 0;
+        return $value->setTimezone('UTC')->format('Y-m-d\\TH:i:s\\Z');
     }
 
     private function markFailure(
         AssistantShopifyStoreMetric $metric,
         string $status,
         string $reason,
-    ): AssistantShopifyStoreMetric
-    {
+    ): AssistantShopifyStoreMetric {
         $payload = [
             'sync_status' => $status,
             'sync_message' => $reason,
         ];
 
-        // A failed attempt must not advance the successful-sync watermark.
-        // Otherwise automatic synchronization would incorrectly skip this
-        // store for the next 30-minute cycle.
         if (!$metric->exists) {
             $payload['currency_code'] = 'USD';
         }
@@ -835,16 +437,16 @@ class ShopifyStoreAnalyticsService
         return $metric;
     }
 
-    /** @return array{status: string, reason: string} */
+    /** @return array{status:string,reason:string} */
     private function failure(\Throwable $exception): array
     {
         $message = Str::lower($exception->getMessage());
-        $permissionMarkers = ['read_reports', 'permission', 'access denied', 'not authorized', 'forbidden'];
+        $permissionMarkers = ['read_orders', 'permission', 'access denied', 'not authorized', 'forbidden'];
 
         if (Str::contains($message, $permissionMarkers)) {
             return [
                 'status' => AssistantShopifyStoreMetric::STATUS_PERMISSION_DENIED,
-                'reason' => 'reports_permission_denied',
+                'reason' => 'orders_permission_denied',
             ];
         }
 
@@ -855,17 +457,10 @@ class ShopifyStoreAnalyticsService
             ];
         }
 
-        if (Str::contains($message, ['connection', 'timed out', 'timeout', 'cURL', 'could not resolve', 'network'])) {
+        if (Str::contains($message, ['connection', 'timed out', 'timeout', 'curl', 'could not resolve', 'network'])) {
             return [
                 'status' => AssistantShopifyStoreMetric::STATUS_FAILED,
                 'reason' => 'connection_failed',
-            ];
-        }
-
-        if (Str::contains($message, ['shopifyql', 'parse error', 'parseerrors'])) {
-            return [
-                'status' => AssistantShopifyStoreMetric::STATUS_FAILED,
-                'reason' => 'report_query_failed',
             ];
         }
 

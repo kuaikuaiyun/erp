@@ -429,7 +429,7 @@ return [
             'fulfilled_orders' => 'Fulfilled orders',
             'refunds' => 'Refunds (USD)',
             'net_sales' => 'Net sales (USD)',
-            'notice' => 'Totals include every current filter result, not only the active page, and count only successfully fetched stores.',
+            'notice' => 'The selected dates and reporting timezone are converted to UTC and aggregated from saved Shopify orders. Totals include every current filter result, not only the active page.',
             'reference_rate_notice' => 'USD values use fixed reference exchange rates and are for operational reference only.',
         ],
         'metrics' => [
@@ -497,6 +497,7 @@ return [
         ],
         'reasons' => [
             'credentials_missing' => 'Shopify Client ID or Client Secret is missing.',
+            'orders_permission_denied' => 'Shopify order read permission is insufficient. Check read_orders and Shopify approval status.',
             'reports_permission_denied' => 'Shopify reporting permission is insufficient. Check read_reports and Shopify approval status.',
             'token_failed' => 'Shopify Token could not be obtained. Check the Client ID, Client Secret, and store domain.',
             'connection_failed' => 'Shopify could not be reached. Please try again later.',

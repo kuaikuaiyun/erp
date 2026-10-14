@@ -35,6 +35,7 @@ class AssistantShopifyStoreMetric extends Model
         'sync_message',
         'synced_at',
         'last_successful_synced_at',
+        'orders_initial_backfilled_at',
     ];
 
     public function __construct(array $attributes = [])
@@ -59,6 +60,7 @@ class AssistantShopifyStoreMetric extends Model
             'average_order_value' => 'decimal:2',
             'synced_at' => 'datetime',
             'last_successful_synced_at' => 'datetime',
+            'orders_initial_backfilled_at' => 'datetime',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
         ];

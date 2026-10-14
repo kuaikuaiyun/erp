@@ -7,7 +7,7 @@ use Illuminate\Console\Command;
 
 class RunAssistantShopifyAnalyticsAutoSync extends Command
 {
-    protected $signature = 'assistant:shopify-analytics:auto-sync {--limit=20 : Maximum stores to process in this run}';
+    protected $signature = 'assistant:shopify-analytics:auto-sync {--limit=0 : Maximum stores to process in this run; 0 processes every due store}';
 
     protected $description = 'Synchronise due Assistant Shopify analytics snapshots';
 

@@ -482,7 +482,7 @@ return [
             'fulfilled_orders' => '已履约订单数',
             'refunds' => '退款额（USD）',
             'net_sales' => '净销售额（USD）',
-            'notice' => '汇总统计全部当前筛选结果，不受当前分页影响；仅计入已成功拉取的店铺。',
+            'notice' => '筛选日期与统计时区会换算为 UTC 后，从已保存的 Shopify 订单明细汇总；汇总统计全部当前筛选结果，不受当前分页影响。',
             'reference_rate_notice' => 'USD 金额按固定参考汇率换算，仅供运营参考。',
         ],
         'metrics' => [
@@ -550,6 +550,7 @@ return [
         ],
         'reasons' => [
             'credentials_missing' => '缺少 Shopify Client ID 或 Client Secret。',
+            'orders_permission_denied' => 'Shopify 订单读取权限不足，请检查 read_orders 权限及 Shopify 审批状态。',
             'reports_permission_denied' => 'Shopify 报表权限不足，请检查 read_reports 与 Shopify 权限审批状态。',
             'token_failed' => '获取 Shopify Token 失败，请检查 Client ID、Client Secret 与店铺域名。',
             'connection_failed' => '无法连接 Shopify，请稍后重试。',
