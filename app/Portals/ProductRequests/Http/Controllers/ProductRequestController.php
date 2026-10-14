@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
 use App\Models\ProductRequest;
 use App\Models\ProductRequestAttachment;
+use App\Models\ProductRequestLinkSku;
 use App\Models\ProductRequestPlacementReview;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\ProductRequests\ProductRequestAccessService;
@@ -280,7 +281,8 @@ class ProductRequestController extends Controller
         }
         abort_unless($this->access->canInspectProcurement($context['user']), 403);
         abort_unless($this->access->canViewProcurementRequest($productRequest, $context['user']), 403);
-        abort_unless($productRequest->status === ProductRequest::STATUS_PENDING, 403);
+        // 已检验通过的记录允许再次编辑（覆盖保存）
+        abort_unless(in_array($productRequest->status, [ProductRequest::STATUS_PENDING, ProductRequest::STATUS_INSPECTION_PASSED], true), 403);
 
         if (!$this->isModalRequest($request)) {
             return redirect()->route('product-requests.procurement.index');
@@ -304,32 +306,33 @@ class ProductRequestController extends Controller
         abort_unless($this->access->canInspectProcurement($context['user']), 403);
         abort_unless($this->access->canViewProcurementRequest($productRequest, $context['user']), 403);
 
-        $data = $this->validateProcurementData($request);
+        $data = $this->validateProcurementData($request, $productRequest);
         $connection = config('admin.database.connection') ?: config('database.default');
 
         DB::connection($connection)->transaction(function () use ($productRequest, $request, $data, $context): void {
             $locked = ProductRequest::query()->lockForUpdate()->findOrFail($productRequest->getKey());
             abort_unless($this->access->canViewProcurementRequest($locked, $context['user']), 403);
-            abort_unless($locked->status === ProductRequest::STATUS_PENDING, 403);
+            // 允许已检验通过的记录再次编辑，第二次保存覆盖第一次结果
+            abort_unless(in_array($locked->status, [ProductRequest::STATUS_PENDING, ProductRequest::STATUS_INSPECTION_PASSED], true), 403);
 
             $normalizedUrl = $this->workflow->normalizeSupplierUrl($data['supplier_url']);
+            $linkHash = $this->workflow->supplierUrlHash($normalizedUrl);
             $reuseSourceId = (int) ($data['reuse_source_id'] ?? 0);
-            $selectedSkus = collect($data['selected_skus'] ?? [])
-                ->map(fn (string $sku): string => trim($sku))
-                ->filter(fn (string $sku): bool => $sku !== '')
-                ->unique()
-                ->values();
-            unset($data['reuse_source_id'], $data['seller_images'], $data['selected_skus']);
+            $checkedSkus = $this->splitSkus(implode(',', $data['selected_skus'] ?? []));
+            $renderedSkus = $this->splitSkus((string) ($data['link_skus'] ?? ''));
+            unset($data['reuse_source_id'], $data['seller_images'], $data['selected_skus'], $data['link_skus']);
             $actor = $this->access->actorSnapshot($context['user']);
-            // 采购勾选的 SKU 单独存入 procurement_skus，不覆盖运营填写的 skus（勾选为空则保留原值）
-            $procurementSkus = $selectedSkus->isNotEmpty()
-                ? $selectedSkus->implode(',')
-                : $locked->procurement_skus;
+            // SKU 归属于 1688 链接：保存时新增勾选项、删除链接上被取消勾选的项
+            $linkSkus = $this->mergeLinkSkus($this->linkSkuSet($linkHash), $renderedSkus, $checkedSkus);
+            $procurementSkus = implode(',', $linkSkus);
+            if ($linkSkus !== []) {
+                $this->persistLinkSkuSet($linkHash, $normalizedUrl, $linkSkus);
+            }
             $locked->fill([
                 ...$data,
                 'procurement_skus' => $procurementSkus,
                 'supplier_url_normalized' => $normalizedUrl,
-                'supplier_url_hash' => $this->workflow->supplierUrlHash($normalizedUrl),
+                'supplier_url_hash' => $linkHash,
                 'status' => ProductRequest::STATUS_INSPECTION_PASSED,
                 'erp_operator_id' => $actor['user_id'],
                 'erp_operator_name' => $actor['user_name'],
@@ -401,13 +404,19 @@ class ProductRequestController extends Controller
                 ->get();
         }
 
+        // 同一 1688 链接只展示一条记录：按链接聚合，取最新一条作为展示与复用来源
+        $records = $records
+            ->groupBy(fn (ProductRequest $record): string => $record->supplier_url_hash ?: ('record-'.$record->getKey()))
+            ->map(fn ($group): ProductRequest => $group->sortByDesc('id')->first())
+            ->values();
+
         return response()->json([
             'match_type' => $matchType,
             'records' => $records->map(fn (ProductRequest $record): array => $this->reusePayload($record))->values(),
         ]);
     }
 
-    /** 输入 1688 链接时返回系统中已录入该链接的 SKU，供采购多选合并 */
+    /** 输入 1688 链接时返回该链接对应的一套 SKU，供采购勾选 */
     public function procurementSkuSuggestions(Request $request): JsonResponse|Response
     {
         $context = $this->portalContext($request, ProductRequestAccessService::PROCUREMENT_PORTAL_CODE);
@@ -421,29 +430,20 @@ class ProductRequestController extends Controller
             'current_id' => ['nullable', 'integer'],
         ]);
         $normalizedUrl = $this->workflow->normalizeSupplierUrl($data['supplier_url']);
-
-        $records = ProductRequest::query()
-            ->where('supplier_url_hash', $this->workflow->supplierUrlHash($normalizedUrl))
-            ->when($data['current_id'] ?? null, fn ($query, int $id) => $query->where('id', '!=', $id))
-            ->where(fn ($query) => $query
-                ->where(fn ($q) => $q->whereNotNull('skus')->where('skus', '!=', ''))
-                ->orWhere(fn ($q) => $q->whereNotNull('procurement_skus')->where('procurement_skus', '!=', '')))
-            ->latest('id')
-            ->limit(20)
-            ->get(['id', 'report_no', 'skus', 'procurement_skus']);
+        $hash = $this->workflow->supplierUrlHash($normalizedUrl);
+        $skus = $this->splitSkus($this->linkSkuSet($hash, $data['current_id'] ?? null));
+        // 当前记录运营已填写的 SKU 已展示在左侧，右侧只展示链接上其余已录入的 SKU
+        if (!empty($data['current_id'])) {
+            $ownSkus = $this->splitSkus((string) ProductRequest::query()->whereKey($data['current_id'])->value('skus'));
+            $skus = array_values(array_diff($skus, $ownSkus));
+        }
 
         return response()->json([
-            'items' => $records->map(fn (ProductRequest $record): array => [
-                'id' => $record->getKey(),
-                'report_no' => $record->report_no,
-                'skus' => collect([(string) $record->skus, (string) $record->procurement_skus])
-                    ->flatMap(fn (string $chunk): array => explode(',', $chunk))
-                    ->map(fn (string $sku): string => trim($sku))
-                    ->filter(fn (string $sku): bool => $sku !== '')
-                    ->unique()
-                    ->values()
-                    ->all(),
-            ])->values()->all(),
+            'items' => $skus === [] ? [] : [[
+                'id' => null,
+                'report_no' => null,
+                'skus' => $skus,
+            ]],
         ]);
     }
 
@@ -836,8 +836,13 @@ class ProductRequestController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function validateProcurementData(Request $request): array
+    private function validateProcurementData(Request $request, ?ProductRequest $productRequest = null): array
     {
+        $hasExistingImages = $productRequest
+            ? $productRequest->loadMissing('attachments')->attachmentsFor(ProductRequestAttachment::STAGE_PROCUREMENT)->isNotEmpty()
+            : false;
+        $reusedImages = (int) $request->input('reuse_source_id', 0) > 0;
+
         return $request->validate([
             'standard_chinese_name' => ['required', 'string', 'max:191'],
             'supplier_url' => ['required', 'string', 'max:2048', 'regex:#^https?://#i'],
@@ -853,7 +858,9 @@ class ProductRequestController extends Controller
             'erp_binding_status' => ['nullable', Rule::in(['unbound', 'bound'])],
             'selected_skus' => ['nullable', 'array', 'max:100'],
             'selected_skus.*' => ['string', 'max:500'],
-            'seller_images' => ['nullable', 'array', 'max:3'],
+            'link_skus' => ['nullable', 'string', 'max:20000'],
+            // 卖家图 / 实拍图必填：已保存附件或复用来源已带图时无需重复上传
+            'seller_images' => ($reusedImages || $hasExistingImages) ? ['nullable', 'array', 'max:3'] : ['required', 'array', 'max:3'],
             'seller_images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
             'reuse_source_id' => ['nullable', 'integer'],
         ]);
@@ -916,6 +923,64 @@ class ProductRequestController extends Controller
         ];
     }
 
+    /** 读取 1688 链接对应的唯一一套 SKU（以链接表为准，无记录时回退同链接历史数据） */
+    private function linkSkuSet(string $hash, ?int $excludeId = null): string
+    {
+        $stored = ProductRequestLinkSku::query()->where('supplier_url_hash', $hash)->value('skus');
+        if (is_string($stored) && trim($stored) !== '') {
+            return implode(',', $this->splitSkus($stored));
+        }
+
+        return implode(',', $this->legacyLinkSkus($hash, $excludeId));
+    }
+
+    /** @return list<string> */
+    private function legacyLinkSkus(string $hash, ?int $excludeId = null): array
+    {
+        return ProductRequest::query()
+            ->where('supplier_url_hash', $hash)
+            ->when($excludeId, fn (Builder $query, int $id): Builder => $query->where('id', '!=', $id))
+            ->get(['skus', 'procurement_skus'])
+            ->flatMap(fn (ProductRequest $record): array => $this->splitSkus((string) $record->skus.','.(string) $record->procurement_skus))
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /** @param list<string> $skus */
+    private function persistLinkSkuSet(string $hash, ?string $url, array $skus): void
+    {
+        ProductRequestLinkSku::query()->updateOrCreate(
+            ['supplier_url_hash' => $hash],
+            ['supplier_url' => $url, 'skus' => implode(',', $skus)],
+        );
+    }
+
+    /** @return list<string> */
+    private function splitSkus(string $value): array
+    {
+        return collect(explode(',', $value))
+            ->map(fn (string $sku): string => trim($sku))
+            ->filter(fn (string $sku): bool => $sku !== '')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * 计算链接上的 SKU 集合：新增勾选项，删除表单中展示但被取消勾选的项。
+     *
+     * @param  list<string>  $rendered  表单已加载的链接 SKU（未加载面板时为空，表示仅新增）
+     * @param  list<string>  $checked   当前勾选项
+     * @return list<string>
+     */
+    private function mergeLinkSkus(string $current, array $rendered, array $checked): array
+    {
+        $removed = array_diff($rendered, $checked);
+
+        return array_values(array_unique(array_merge(array_diff($this->splitSkus($current), $removed), $checked)));
+    }
+
     /** @return array<string, mixed> */
     private function reusePayload(ProductRequest $productRequest): array
     {
@@ -937,6 +1002,7 @@ class ProductRequestController extends Controller
             'outer_package_size' => $productRequest->outer_package_size,
             'large_volume_weight_g' => $productRequest->large_volume_weight_g,
             'erp_binding_status' => $productRequest->erp_binding_status,
+            'skus' => $this->splitSkus($this->linkSkuSet((string) $productRequest->supplier_url_hash)),
             'seller_images' => $productRequest->attachmentsFor(ProductRequestAttachment::STAGE_PROCUREMENT)
                 ->map(fn (ProductRequestAttachment $attachment): array => [
                     'url' => route('product-requests.attachments.show', [$productRequest, $attachment]),

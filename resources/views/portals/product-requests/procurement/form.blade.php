@@ -7,6 +7,7 @@
     @method('PUT')
     <input type="hidden" name="modal" value="1">
     <input type="hidden" name="reuse_source_id" value="{{ old('reuse_source_id') }}">
+    <input type="hidden" name="link_skus" value="{{ old('link_skus') }}" data-product-request-link-skus>
 
     <div class="modal-header">
         <button type="button" class="close" data-dismiss="modal" aria-label="{{ __('product_requests.common.close') }}"><span aria-hidden="true">&times;</span></button>
@@ -40,8 +41,9 @@
                         <div class="product-request-readonly">{{ $productRequest->operation_display_name }}</div>
                     </div>
                     <div class="form-group">
-                        <label>{{ __('product_requests.fields.operation_skus') }}</label>
-                        <div class="product-request-readonly">@include('portals.product-requests.partials.sku-tags', ['skus' => $productRequest->skus, 'empty' => __('product_requests.common.not_available')])</div>
+                        <label for="operation_skus_input">{{ __('product_requests.fields.operation_skus') }}</label>
+                        <input id="operation_skus_input" class="form-control" value="{{ $productRequest->skus }}" maxlength="2000" data-sku-edit-source>
+                        <span class="help-block">{{ __('product_requests.procurement.operation_skus_editable_hint') }}</span>
                     </div>
                     <div class="form-group">
                         <label>{{ __('product_requests.fields.operation_supplier_url') }}</label>
@@ -84,13 +86,7 @@
                         <div class="sku-suggestion-columns">
                             <div class="sku-suggestion-box">
                                 <div class="sku-suggestion-heading"><strong>{{ __('product_requests.procurement.sku_suggestions_operation') }}</strong></div>
-                                <div class="sku-suggestion-list">
-                                    @forelse(collect(explode(',', (string) $productRequest->skus))->map(fn ($s) => trim($s))->filter()->all() as $sku)
-                                    <label><input type="checkbox" name="selected_skus[]" value="{{ $sku }}" checked> {{ $sku }}</label>
-                                    @empty
-                                    <span class="sku-suggestion-empty">{{ __('product_requests.procurement.sku_suggestions_empty') }}</span>
-                                    @endforelse
-                                </div>
+                                <div class="sku-suggestion-list" id="sku-operation-list" data-operation-skus="{{ $productRequest->skus }}" data-empty-text="{{ __('product_requests.procurement.sku_suggestions_empty') }}"></div>
                             </div>
                             <div class="sku-suggestion-box">
                                 <div class="sku-suggestion-heading"><strong>{{ __('product_requests.procurement.sku_suggestions_system') }}</strong><span class="sku-suggestion-count" id="sku-suggestion-count"></span></div>
@@ -138,8 +134,8 @@
 
             <div class="row product-request-form-bottom-row">
                 <div class="form-group col-md-12 @error('seller_images') has-error @enderror">
-                    <label>{{ __('product_requests.fields.seller_images') }}</label>
-                    @include('portals.product-requests.partials.upload', ['inputName' => 'seller_images', 'inputId' => 'seller_images', 'maxFiles' => 3, 'required' => false, 'existingAttachments' => $sellerImages])
+                    <label>{{ __('product_requests.fields.seller_images') }} <span class="text-red">*</span></label>
+                    @include('portals.product-requests.partials.upload', ['inputName' => 'seller_images', 'inputId' => 'seller_images', 'maxFiles' => 3, 'required' => true, 'existingAttachments' => $sellerImages])
                     <span class="help-block">{{ __('product_requests.help.image_upload') }} {{ __('product_requests.procurement.seller_image_hint') }}</span>
                 </div>
             </div>
@@ -172,5 +168,8 @@
     .sku-suggestion-list label .sku-source { color: #8899a6; margin-left: 4px; font-size: 11px; }
     .sku-suggestion-list label input[type="checkbox"] { margin-right: 4px; }
     .sku-suggestion-empty { font-size: 12px; color: #8899a6; }
+    .sku-suggestion-list .sku-suggestion-item { display: inline-flex; align-items: center; gap: 4px; }
+    .sku-suggestion-list .sku-suggestion-input { width: 150px; max-width: 100%; height: 24px; padding: 2px 6px; border: 1px solid #d2d6de; border-radius: 3px; font-size: 12px; color: #333; }
+    .sku-suggestion-list .sku-suggestion-input:focus { border-color: #3c8dbc; outline: none; }
 </style>
 

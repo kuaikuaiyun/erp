@@ -35,7 +35,7 @@
 .product-request-table thead .product-request-sticky-right { z-index: 6; background: #eaf0f7 !important; }
 .product-request-thumbnail { width: 46px; height: 46px; object-fit: cover; border: 1px solid #dfe7ef; border-radius: 4px; background: #f2f4f7; cursor: zoom-in; transition: transform .16s ease, box-shadow .16s ease; }
 .product-request-thumbnail:hover { transform: scale(1.08); box-shadow: 0 3px 9px rgba(35, 62, 88, .22); }
-.product-request-badge { display: inline-flex; align-items: center; max-width: 220px; min-height: 22px; padding: 4px 9px; color: #496072; border: 1px solid transparent; border-radius: 12px; background: #718397; box-shadow: 0 1px 2px rgba(25, 48, 72, .12); font-size: 12px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; text-align: left; }
+.product-request-badge { display: inline-flex; align-items: center; min-height: 22px; padding: 4px 9px; color: #496072; border: 1px solid transparent; border-radius: 12px; background: #718397; box-shadow: 0 1px 2px rgba(25, 48, 72, .12); font-size: 12px; font-weight: 600; line-height: 1.25; white-space: nowrap; text-align: left; }
 .product-request-badge.status-pending, .product-request-badge.warehouse-pending_review { color: #915f0a; border-color: #d39b39; background: #fff1cc; }
 .product-request-badge.status-inspection_passed, .product-request-badge.review-pending { color: #176a9b; border-color: #4b9dcc; background: #e5f4fc; }
 .product-request-badge.status-approved, .product-request-badge.review-approved, .product-request-badge.warehouse-passed, .product-request-badge.confirmation-confirmed { color: #1e7749; border-color: #4daa76; background: #e4f6eb; }
@@ -97,6 +97,7 @@
 .product-request-reuse-content { flex: 1; min-width: 0; }
 .product-request-reuse-content strong, .product-request-reuse-content span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .product-request-reuse-content span { margin-top: 3px; color: #728091; font-size: 12px; }
+.product-request-reuse-content .product-request-reuse-skus { color: #3c8dbc; overflow: visible; text-overflow: clip; white-space: normal; word-break: break-all; }
 .product-request-reuse-actions { display: flex; flex-shrink: 0; gap: 6px; }
 .product-request-reuse-detail { padding: 0 0 12px 70px; }
 .product-request-reuse-detail-item { display: flex; gap: 8px; margin-bottom: 5px; font-size: 12px; }
@@ -228,7 +229,11 @@ body.product-request-lightbox-open { overflow: hidden; }
 .product-request-sku-stack { display: flex; flex-direction: column; gap: 8px; }
 .product-request-sku-stack-item { display: flex; flex-direction: column; gap: 4px; }
 .product-request-sku-stack-label { color: #8494a7; font-size: 11px; font-weight: 600; line-height: 14px; }
-.product-request-sku-mismatch { display: inline-flex; align-items: center; gap: 4px; margin-bottom: 6px; padding: 2px 8px; border: 1px solid #f2c979; border-radius: 12px; background: #fdf4e3; color: #b9791d; font-size: 11px; font-weight: 600; line-height: 16px; cursor: help; }
+.product-request-sku-mismatch { display: inline-block; max-width: 100%; margin-bottom: 6px; padding: 2px 8px; border: 1px solid #f2c979; border-radius: 12px; background: #fdf4e3; color: #b9791d; font-size: 11px; font-weight: 600; line-height: 16px; white-space: normal; overflow-wrap: break-word; text-align: left; cursor: help; }
+.product-request-table .product-request-sku-cell { min-width: 240px; max-width: 320px; }
+.product-request-table td.product-request-metric-cell, .product-request-table th.product-request-metric-cell { white-space: nowrap; text-align: center; font-variant-numeric: tabular-nums; }
+.product-request-table td.product-request-image-cell, .product-request-table th.product-request-image-cell { width: 62px; text-align: center; white-space: nowrap; }
+.product-request-table td.product-request-nowrap-cell, .product-request-table th.product-request-nowrap-cell { white-space: nowrap; }
 .product-request-link-wrap { overflow-wrap: anywhere; word-break: break-all; }
 .product-request-sku-builder { display: flex; flex-direction: column; gap: 8px; }
 .product-request-sku-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
