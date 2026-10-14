@@ -10,13 +10,20 @@
         'csrfToken' => csrf_token(), 'noticeTitle' => $t('procurement.title'), 'loading' => $t('common.loading'),
         'loadFailed' => $t('common.modal_load_failed'), 'submitFailed' => $t('common.modal_submit_failed'),
         'invalidFile' => $t('uploads.invalid_file'), 'tooMany' => $t('uploads.too_many', ['count' => ':count']),
-        'removeImage' => $t('uploads.remove_image'), 'reuse' => $t('common.reuse'), 'reuseEmpty' => $t('procurement.reuse_empty'),
+        'removeImage' => $t('uploads.remove_image'), 'reuse' => $t('common.reuse'), 'reuseEmpty' => $t('procurement.dedupe_empty'),
         'reuseSelected' => $t('procurement.reuse_selected', ['report_no' => ':report_no']),
-        'reuseRequired' => $t('procurement.reuse_check_hint'), 'reuseFailed' => $t('common.modal_load_failed'),
+        'reuseRequired' => $t('procurement.supplier_url_required_hint'), 'reuseFailed' => $t('common.modal_load_failed'),
+        'dedupeEmpty' => $t('procurement.dedupe_empty'), 'dedupeDetail' => $t('procurement.dedupe_detail'),
+        'dedupePrice' => $t('procurement.dedupe_price'), 'dedupeWeight' => $t('procurement.dedupe_weight'),
+        'dedupePackage' => $t('procurement.dedupe_package'), 'dedupeLargeVolume' => $t('fields.large_volume_weight_g'),
+        'dedupeSellerImages' => $t('procurement.dedupe_seller_images'),
+        'dedupeNoImages' => $t('procurement.dedupe_no_images'),
+        'dedupeNameRequired' => $t('procurement.dedupe_name_required'),
+        'pasteHint' => $t('uploads.paste_hint'), 'submitProgress' => $t('common.submit_progress'),
     ];
 @endphp
-@push('styles')<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261014-2">@endpush
-@push('scripts')<script>window.ErpProductRequestConfig = @json($clientConfig);</script><script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261013-1"></script>@endpush
+@push('styles')<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261014-10">@endpush
+@push('scripts')<script>window.ErpProductRequestConfig = @json($clientConfig);</script><script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261014-10"></script>@endpush
 
 @section('content')
 <section class="content product-request-page">

@@ -1,4 +1,4 @@
-@extends('portal.layout')
+﻿@extends('portal.layout')
 
 @section('page_title', __('product_requests.review.title'))
 
@@ -13,10 +13,11 @@
         'removeImage' => $t('uploads.remove_image'), 'reuse' => $t('common.reuse'), 'reuseEmpty' => $t('procurement.reuse_empty'),
         'reuseSelected' => $t('procurement.reuse_selected', ['report_no' => ':report_no']),
         'reuseRequired' => $t('procurement.reuse_check_hint'), 'reuseFailed' => $t('common.modal_load_failed'),
+        'pasteHint' => $t('uploads.paste_hint'), 'submitProgress' => $t('common.submit_progress'),
     ];
 @endphp
-@push('styles')<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261014-1">@endpush
-@push('scripts')<script>window.ErpProductRequestConfig = @json($clientConfig);</script><script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261013-1"></script>@endpush
+@push('styles')<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261014-10">@endpush
+@push('scripts')<script>window.ErpProductRequestConfig = @json($clientConfig);</script><script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261014-10"></script>@endpush
 
 @section('content')
 <section class="content product-request-page">

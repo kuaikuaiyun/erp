@@ -2,10 +2,11 @@
     $operationImages = $productRequest->attachmentsFor(\App\Models\ProductRequestAttachment::STAGE_OPERATION);
     $sellerImages = $productRequest->attachmentsFor(\App\Models\ProductRequestAttachment::STAGE_PROCUREMENT);
 @endphp
-<form class="product-request-form" method="post" action="{{ route('product-requests.procurement.update', $productRequest) }}" enctype="multipart/form-data" data-product-request-modal-form>
+<form class="product-request-form" method="post" action="{{ route('product-requests.procurement.update', $productRequest) }}" enctype="multipart/form-data" data-product-request-modal-form data-product-request-reuse-form data-current-id="{{ $productRequest->getKey() }}" data-reuse-check-url="{{ route('product-requests.procurement.reuse-check') }}">
     @csrf
     @method('PUT')
     <input type="hidden" name="modal" value="1">
+    <input type="hidden" name="reuse_source_id" value="{{ old('reuse_source_id') }}">
 
     <div class="modal-header">
         <button type="button" class="close" data-dismiss="modal" aria-label="{{ __('product_requests.common.close') }}"><span aria-hidden="true">&times;</span></button>
@@ -51,18 +52,34 @@
         </section>
 
         <section class="form-section product-request-procurement-section">
-            <h2 class="form-section-title">{{ __('product_requests.show.procurement_information') }}</h2>
+            <div class="product-request-section-head">
+                <h2 class="form-section-title">{{ __('product_requests.show.procurement_information') }}</h2>
+                <div class="product-request-dedupe-bar">
+                    <button class="btn btn-default btn-sm" type="button" data-product-request-reuse-check><i class="fa fa-search"></i> {{ __('product_requests.procurement.dedupe_check') }}</button>
+                    <span class="text-muted product-request-dedupe-hint">{{ __('product_requests.procurement.dedupe_check_hint') }}</span>
+                </div>
+            </div>
 
             <div class="row">
                 <div class="form-group col-md-6 @error('standard_chinese_name') has-error @enderror">
                     <label for="standard_chinese_name">{{ __('product_requests.fields.standard_chinese_name') }} <span class="text-red">*</span></label>
                     <input id="standard_chinese_name" class="form-control" name="standard_chinese_name" value="{{ old('standard_chinese_name', $productRequest->standard_chinese_name) }}" maxlength="191" required placeholder="{{ __('product_requests.placeholders.standard_chinese_name') }}">
                     @error('standard_chinese_name')<span class="help-block text-red">{{ $message }}</span>@enderror
+                    <span class="product-request-selected-reuse" data-product-request-reuse-selected hidden></span>
                 </div>
                 <div class="form-group col-md-6 @error('supplier_url') has-error @enderror">
-                    <label for="supplier_url">{{ __('product_requests.fields.supplier_url') }} <span class="text-red">*</span> <button class="btn btn-default btn-xs" type="button" data-sku-check>{{ __('product_requests.procurement.sku_check') }}</button></label>
-                    <input id="supplier_url" class="form-control" type="text" name="supplier_url" value="{{ old('supplier_url', $productRequest->supplier_url) }}" maxlength="2048" required placeholder="{{ __('product_requests.placeholders.supplier_url') }}" data-sku-suggestions-url="{{ route('product-requests.procurement.sku-suggestions') }}" data-sku-suggestions-current-id="{{ $productRequest->getKey() }}">
-                    <span class="help-block">{{ __('product_requests.procurement.sku_check_hint') }}</span>
+                    <label for="supplier_url">{{ __('product_requests.fields.supplier_url') }} <span class="text-red">*</span></label>
+                    @php($supplierUrl = old('supplier_url', $productRequest->supplier_url ?: $productRequest->operation_supplier_url))
+                    <div class="product-request-readonly product-request-readonly-link">
+                        @if($supplierUrl)<a href="{{ $supplierUrl }}" target="_blank" rel="noopener">{{ $supplierUrl }}</a>@else<span class="text-muted">{{ __('product_requests.common.not_available') }}</span>@endif
+                    </div>
+                    <input id="supplier_url" type="hidden" name="supplier_url" value="{{ $supplierUrl }}" data-sku-suggestions-url="{{ route('product-requests.procurement.sku-suggestions') }}" data-sku-suggestions-current-id="{{ $productRequest->getKey() }}">
+                    <span class="help-block">{{ __('product_requests.procurement.supplier_url_readonly_hint') }}</span>
+                    @error('supplier_url')<span class="help-block text-red">{{ $message }}</span>@enderror
+                </div>
+            </div>
+            <div class="row">
+                <div class="form-group col-md-12">
                     <div class="sku-suggestion-panel" id="sku-suggestion-panel" hidden>
                         <div class="sku-suggestion-columns">
                             <div class="sku-suggestion-box">
@@ -80,13 +97,8 @@
                                 <div class="sku-suggestion-list" id="sku-suggestion-list"></div>
                             </div>
                         </div>
+                        <span class="help-block" id="sku-suggestion-summary-row" hidden><i class="fa fa-info-circle"></i> {{ __('product_requests.procurement.sku_suggestions_summary') }} <span class="text-muted" id="sku-selected-summary"></span></span>
                     </div>
-                    @error('supplier_url')<span class="help-block text-red">{{ $message }}</span>@enderror
-                </div>
-            </div>
-            <div class="row" id="sku-suggestion-summary-row" hidden>
-                <div class="form-group col-md-12">
-                    <span class="help-block"><i class="fa fa-info-circle"></i> {{ __('product_requests.procurement.sku_suggestions_summary') }} <span class="text-muted" id="sku-selected-summary"></span></span>
                 </div>
             </div>
 
@@ -109,21 +121,39 @@
                     <input id="outer_package_size" class="form-control" name="outer_package_size" value="{{ old('outer_package_size', $productRequest->outer_package_size) }}" maxlength="191" placeholder="{{ __('product_requests.placeholders.outer_package_size') }}">
                     @error('outer_package_size')<span class="help-block text-red">{{ $message }}</span>@enderror
                 </div>
+                <div class="form-group col-md-6 @error('large_volume_weight_g') has-error @enderror">
+                    <label for="large_volume_weight_g">{{ __('product_requests.fields.large_volume_weight_g') }}</label>
+                    <input id="large_volume_weight_g" class="form-control" name="large_volume_weight_g" value="{{ old('large_volume_weight_g', $productRequest->large_volume_weight_g) }}" maxlength="100" placeholder="{{ __('product_requests.placeholders.large_volume_weight_g') }}">
+                    @error('large_volume_weight_g')<span class="help-block text-red">{{ $message }}</span>@enderror
+                </div>
             </div>
 
-            <div class="row product-request-form-bottom-row">
+            <div class="row">
                 <div class="form-group col-md-6">
                     <label>{{ __('product_requests.fields.erp_operator') }} <span class="text-red">*</span></label>
                     <div class="product-request-readonly">{{ $actor['display_name'] }}</div>
                     <span class="help-block">{{ __('product_requests.help.automatic_current_user') }}</span>
                 </div>
-                <div class="form-group col-md-6 @error('seller_images') has-error @enderror">
+            </div>
+
+            <div class="row product-request-form-bottom-row">
+                <div class="form-group col-md-12 @error('seller_images') has-error @enderror">
                     <label>{{ __('product_requests.fields.seller_images') }}</label>
                     @include('portals.product-requests.partials.upload', ['inputName' => 'seller_images', 'inputId' => 'seller_images', 'maxFiles' => 3, 'required' => false, 'existingAttachments' => $sellerImages])
                     <span class="help-block">{{ __('product_requests.help.image_upload') }} {{ __('product_requests.procurement.seller_image_hint') }}</span>
                 </div>
             </div>
         </section>
+    </div>
+
+    <div class="product-request-reuse-overlay" data-product-request-reuse-modal hidden>
+        <div class="product-request-reuse-dialog" role="dialog" aria-modal="true">
+            <div class="product-request-reuse-dialog-heading">
+                <h5>{{ __('product_requests.procurement.dedupe_title') }}</h5>
+                <button type="button" class="close" data-product-request-reuse-close aria-label="{{ __('product_requests.common.close') }}"><span aria-hidden="true">&times;</span></button>
+            </div>
+            <div data-product-request-reuse-results></div>
+        </div>
     </div>
 
     <div class="modal-footer">

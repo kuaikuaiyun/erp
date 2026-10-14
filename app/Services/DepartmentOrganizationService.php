@@ -196,6 +196,7 @@ class DepartmentOrganizationService
 
             $department = Department::create([
                 'name' => $attributes['name'],
+                'short_name' => $attributes['short_name'] ?? null,
                 'slug' => $this->temporaryDepartmentCode(),
                 'parent_id' => $parent?->getKey(),
                 'sort' => (int) ($attributes['sort'] ?? 0),
@@ -251,11 +252,13 @@ class DepartmentOrganizationService
 
         $department->fill([
             'name' => $attributes['name'],
+            'short_name' => $attributes['short_name'] ?? null,
             'sort' => (int) ($attributes['sort'] ?? 0),
         ])->save();
 
         $this->record($actor, $department, 'department_updated', [
             'name' => $department->name,
+            'short_name' => $department->short_name,
             'slug' => $department->slug,
             'sort' => $department->sort,
         ]);

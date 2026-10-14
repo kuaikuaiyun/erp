@@ -59,6 +59,8 @@ return [
         'edit_department' => '编辑部门',
         'view_permissions' => '页面授权',
         'department_name' => '部门名称',
+        'short_name' => '部门简称',
+        'short_name_help' => '用于列表等位置的精简展示，选填；留空则显示完整部门名称。',
         'department_code' => '部门编码',
         'code_pending' => '保存后自动生成',
         'code_auto_help' => '部门编码由系统依据创建序号自动生成，创建后不可修改。',
@@ -241,6 +243,7 @@ return [
     'validation' => [
         'name_required' => '请填写部门名称。',
         'name_max' => '部门名称不能超过 :max 个字符。',
+        'short_name_max' => '部门简称不能超过 :max 个字符。',
         'sort_integer' => '排序必须为整数。',
         'username_required' => '请填写登录账号。',
         'username_max' => '登录账号不能超过 :max 个字符。',
