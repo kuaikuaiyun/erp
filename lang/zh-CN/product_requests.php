@@ -130,6 +130,8 @@ return [
         'reported_at' => '提报日期',
         'city' => '城市',
         'skus' => 'SKU',
+        'operation_skus' => '运营 SKU',
+        'procurement_skus' => '采购 SKU',
         'operation_supplier_url' => '1688 链接',
         'has_stock' => '是否有现货',
         'operation' => '运营',

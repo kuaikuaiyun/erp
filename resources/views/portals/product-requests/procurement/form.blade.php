@@ -39,7 +39,7 @@
                         <div class="product-request-readonly">{{ $productRequest->operation_display_name }}</div>
                     </div>
                     <div class="form-group">
-                        <label>{{ __('product_requests.fields.skus') }}</label>
+                        <label>{{ __('product_requests.fields.operation_skus') }}</label>
                         <div class="product-request-readonly">@include('portals.product-requests.partials.sku-tags', ['skus' => $productRequest->skus, 'empty' => __('product_requests.common.not_available')])</div>
                     </div>
                     <div class="form-group">
