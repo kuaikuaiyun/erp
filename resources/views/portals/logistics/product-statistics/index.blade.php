@@ -8,6 +8,7 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261012-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261014-1">
 @endpush
 
 @section('content')
@@ -146,8 +147,9 @@
                     <li><a href="#product-statistics-stores" role="tab" data-toggle="tab">{{ __('logistics.product_statistics.ui.store_performance') }}</a></li>
                     <li><a href="#product-statistics-trend" role="tab" data-toggle="tab">{{ __('logistics.product_statistics.ui.sales_trend') }}</a></li>
                     <li><a href="#product-statistics-refunds" role="tab" data-toggle="tab">{{ __('logistics.product_statistics.ui.refund_details') }}</a></li>
+                    <li><a href="#product-statistics-orders" role="tab" data-toggle="tab">相关订单</a></li>
                 </ul>
-                <div class="tab-content product-statistics-tab-content"><div role="tabpanel" class="tab-pane active" id="product-statistics-overview"></div><div role="tabpanel" class="tab-pane" id="product-statistics-variants"></div><div role="tabpanel" class="tab-pane" id="product-statistics-stores"></div><div role="tabpanel" class="tab-pane" id="product-statistics-trend"></div><div role="tabpanel" class="tab-pane" id="product-statistics-refunds"></div></div>
+                <div class="tab-content product-statistics-tab-content"><div role="tabpanel" class="tab-pane active" id="product-statistics-overview"></div><div role="tabpanel" class="tab-pane" id="product-statistics-variants"></div><div role="tabpanel" class="tab-pane" id="product-statistics-stores"></div><div role="tabpanel" class="tab-pane" id="product-statistics-trend"></div><div role="tabpanel" class="tab-pane" id="product-statistics-refunds"></div><div role="tabpanel" class="tab-pane" id="product-statistics-orders"></div></div>
             </div>
             <div class="modal-footer"><span class="pull-left product-statistics-modal-footnote"><i class="fa fa-info-circle"></i> {{ __('logistics.product_statistics.ui.known_profit_only') }}</span><button type="button" class="btn btn-default" data-dismiss="modal">{{ __('logistics.common.close') }}</button></div>
         </div></div>
@@ -160,6 +162,7 @@
             <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">关闭</button></div>
         </div></div>
     </div>
+    @include('portals.logistics.partials.order-detail-modal')
 @endsection
 
 @push('scripts')
@@ -175,5 +178,6 @@
             exportValidationError: @json($errors->first('scope')),
         };
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/product-statistics.js?v=20261012-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-statistics.js?v=20261014-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261014-1"></script>
 @endpush

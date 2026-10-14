@@ -267,6 +267,8 @@ class LogisticsProductStatisticsService
             foreach (($item->order?->activeRefundDetails ?? collect()) as $refund) {
                 $details[] = [
                     'id' => (int) $refund->getKey(),
+                    'order_id' => (int) $item->logistics_order_id,
+                    'order_detail_url' => route('logistics.orders.detail', ['order' => (int) $item->logistics_order_id]),
                     'store' => (string) $item->getAttribute('statistics_store_name'),
                     'shopify_order_number' => (string) $item->getAttribute('statistics_shopify_order_number'),
                     'bill_number' => (string) $item->getAttribute('statistics_bill_number'),
@@ -330,11 +332,59 @@ class LogisticsProductStatisticsService
             'actual_refunds' => $actualRefund['amount'],
             'actual_refund_count' => count($actualRefund['details']),
             'refund_details' => $actualRefund['details'],
+            'related_orders' => $this->relatedOrders($items),
             'profit' => $profit,
             'profit_rate' => $profit !== null && $revenue > 0 ? round($profit / $revenue * 100, 2) : null,
             'refund_rate' => $revenue > 0 ? round($refunds / $revenue * 100, 2) : 0.0,
             'decision' => $this->decision($profit, $revenue, $refunds),
         ];
+    }
+
+    /** @param list<LogisticsOrderItem> $items
+     * @return list<array<string,mixed>>
+     */
+    private function relatedOrders(array $items): array
+    {
+        $orders = [];
+        foreach ($items as $item) {
+            $orderId = (int) $item->logistics_order_id;
+            if ($orderId <= 0) {
+                continue;
+            }
+            $orders[$orderId] ??= [
+                'order_id' => $orderId,
+                'detail_url' => route('logistics.orders.detail', ['order' => $orderId]),
+                'store' => (string) ($item->getAttribute('statistics_store_name') ?: __('logistics.common.unassigned_store')),
+                'shopify_order_number' => (string) ($item->getAttribute('statistics_shopify_order_number') ?: '—'),
+                'bill_number' => (string) ($item->getAttribute('statistics_bill_number') ?: '—'),
+                'quantity' => 0.0,
+                'revenue' => 0.0,
+                'actual_refund' => 0.0,
+                'order_created_at' => $item->getAttribute('statistics_order_created_at')
+                    ? Carbon::parse($item->getAttribute('statistics_order_created_at'))->timezone('Asia/Shanghai')->format('Y-m-d H:i:s')
+                    : '—',
+                '_sort_time' => $item->getAttribute('statistics_order_created_at')
+                    ? Carbon::parse($item->getAttribute('statistics_order_created_at'))->timestamp
+                    : 0,
+            ];
+            $orders[$orderId]['quantity'] += (float) ($item->quantity ?? 0);
+            $orders[$orderId]['revenue'] += (float) ($item->line_revenue_usd ?? 0);
+            $orders[$orderId]['actual_refund'] += (float) ($item->getAttribute('statistics_actual_refund_amount') ?? 0);
+        }
+
+        foreach ($orders as &$order) {
+            $order['quantity'] = round($order['quantity'], 4);
+            $order['revenue'] = round($order['revenue'], 4);
+            $order['actual_refund'] = round($order['actual_refund'], 4);
+        }
+        unset($order);
+        uasort($orders, static fn (array $left, array $right): int => $right['_sort_time'] <=> $left['_sort_time']);
+
+        return array_values(array_map(static function (array $order): array {
+            unset($order['_sort_time']);
+
+            return $order;
+        }, $orders));
     }
 
     /** @param list<LogisticsOrderItem> $items

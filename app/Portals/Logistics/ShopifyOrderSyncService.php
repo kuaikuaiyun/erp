@@ -378,6 +378,7 @@ GRAPHQL, [
 
         $attributes = $this->attributes($payload['customAttributes'] ?? []);
         $lineItems = is_array($payload['lineItems']['nodes'] ?? null) ? $payload['lineItems']['nodes'] : [];
+        $shopifyTags = $this->normalisedTags($payload['tags'] ?? []);
         $skuRows = array_map(static fn (array $item): string => trim((string) ($item['sku'] ?? '')), $lineItems);
         $itemCount = count($lineItems);
         $missingSkuCount = $lineItems === []
@@ -418,7 +419,7 @@ GRAPHQL, [
             'buyer_name' => $this->incoming($this->buyerName($payload), $current->buyer_name),
             'buyer_email' => $this->incoming($payload['email'] ?? Arr::get($payload, 'customer.email'), $current->buyer_email),
             'buyer_phone' => $this->incoming($payload['phone'] ?? Arr::get($payload, 'shippingAddress.phone') ?? Arr::get($payload, 'customer.phone'), $current->buyer_phone),
-            'is_add_on' => '未加购',
+            'is_add_on' => in_array('postupsell', $shopifyTags, true) ? '已加购' : '未加购',
             'subscription_type' => $subscription['type'],
             'subscription_origin_order_id' => $subscription['origin_order_id'],
             'subscription_status' => $subscription['status'],
@@ -976,7 +977,7 @@ GRAPHQL, [
         }
 
         if (!$response->successful()) {
-            throw new RuntimeException('Shopify 请求失败：'.Str::limit($response->body(), 500));
+            throw new RuntimeException('Shopify API HTTP '.$response->status().': '.Str::limit($response->body(), 500));
         }
         $body = $response->json();
         if (!is_array($body)) {

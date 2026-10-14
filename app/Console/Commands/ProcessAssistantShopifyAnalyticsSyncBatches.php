@@ -142,8 +142,27 @@ class ProcessAssistantShopifyAnalyticsSyncBatches extends Command
             $batch->refreshProgress();
         } catch (\Throwable $exception) {
             report($exception);
-            $this->failTask($task, $batch, 'unknown');
+            $this->failTask($task, $batch, $this->taskFailureReason($exception));
         }
+    }
+
+    private function taskFailureReason(\Throwable $exception): string
+    {
+        $message = strtolower($exception->getMessage());
+
+        if (preg_match('/shopify api http\s+(\d{3})/i', $exception->getMessage(), $matches) === 1) {
+            return 'api_http_'.$matches[1];
+        }
+
+        if (str_contains($message, 'client id') || str_contains($message, 'client secret')) {
+            return 'credentials_missing';
+        }
+
+        if (str_contains($message, 'connection') || str_contains($message, 'timeout')) {
+            return 'connection_failed';
+        }
+
+        return 'task_exception';
     }
 
     private function failTask(

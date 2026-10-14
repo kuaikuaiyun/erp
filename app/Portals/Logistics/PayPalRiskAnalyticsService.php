@@ -152,6 +152,8 @@ class PayPalRiskAnalyticsService
 
         $exceptions = array_merge(
             array_map(static fn (array $row): array => [
+                'order_id' => $row['order_id'],
+                'order_detail_url' => $row['order_detail_url'],
                 'order_number' => $row['order_number'],
                 'store_name' => $row['store_name'],
                 'type' => '退款',
@@ -175,6 +177,8 @@ class PayPalRiskAnalyticsService
                 })
                 ->get()
                 ->map(fn (LogisticsPayPalDispute $dispute): array => [
+                    'order_id' => $dispute->order?->getKey(),
+                    'order_detail_url' => $dispute->order ? route('logistics.orders.detail', $dispute->order) : null,
                     'order_number' => $dispute->order?->shopify_order_number ?: '未匹配',
                     'store_name' => $dispute->order?->store_name ?: '—',
                     'type' => '纠纷',
@@ -213,6 +217,8 @@ class PayPalRiskAnalyticsService
                     || $order->paypalRefunds->isNotEmpty();
 
                 return [
+                    'order_id' => (int) $order->getKey(),
+                    'order_detail_url' => route('logistics.orders.detail', $order),
                     'order_number' => (string) ($order->shopify_order_number ?: '—'),
                     'store_name' => (string) ($order->store_name ?: '—'),
                     'products' => $products ?: '—',
@@ -290,6 +296,8 @@ class PayPalRiskAnalyticsService
             if ($order->activeRefundDetails->isNotEmpty()) {
                 foreach ($order->activeRefundDetails as $refund) {
                     $rows[] = [
+                        'order_id' => (int) $order->getKey(),
+                        'order_detail_url' => route('logistics.orders.detail', $order),
                         'refund_id' => (string) $refund->refund_number,
                         'order_number' => (string) ($order->shopify_order_number ?: '—'),
                         'store_name' => (string) ($order->store_name ?: '—'),
@@ -307,6 +315,8 @@ class PayPalRiskAnalyticsService
             $amount = max((float) $order->shopify_refund_amount_usd, (float) $order->channel_refund_amount_usd);
             if ($amount > 0) {
                 $rows[] = [
+                    'order_id' => (int) $order->getKey(),
+                    'order_detail_url' => route('logistics.orders.detail', $order),
                     'refund_id' => 'SHOPIFY-'.$order->getKey(),
                     'order_number' => (string) ($order->shopify_order_number ?: '—'),
                     'store_name' => (string) ($order->store_name ?: '—'),
@@ -336,14 +346,16 @@ class PayPalRiskAnalyticsService
     private function paypalRefundRow(LogisticsPayPalRefund $refund, ?LogisticsOrder $order): array
     {
         return [
+            'order_id' => $order?->getKey(),
+            'order_detail_url' => $order ? route('logistics.orders.detail', $order) : null,
             'refund_id' => (string) $refund->refund_transaction_id,
             'order_number' => (string) ($order?->shopify_order_number ?: '未匹配'),
             'store_name' => (string) ($order?->store_name ?: '—'),
             'source' => 'PayPal',
             'amount' => round((float) ($refund->refund_amount_usd ?? $refund->original_amount), 2),
             'currency' => (string) ($refund->currency_code ?: 'USD'),
-            'reason' => (string) ($refund->refund_reason ?: $refund->event_code ?: '—'),
-            'status' => (string) ($refund->status ?: '已同步'),
+            'reason' => $refund->eventLabel(),
+            'status' => $refund->statusLabel(),
             'happened_at' => $this->dateTime($refund->refunded_at),
             'sort_time' => $refund->refunded_at?->timestamp ?? 0,
         ];
@@ -369,6 +381,8 @@ class PayPalRiskAnalyticsService
 
         return [
             'data' => collect($paginator->items())->map(fn (LogisticsPayPalDispute $dispute): array => [
+                'order_id' => $dispute->order?->getKey(),
+                'order_detail_url' => $dispute->order ? route('logistics.orders.detail', $dispute->order) : null,
                 'dispute_id' => (string) $dispute->dispute_id,
                 'order_number' => (string) ($dispute->order?->shopify_order_number ?: '未匹配'),
                 'store_name' => (string) ($dispute->order?->store_name ?: '—'),

@@ -338,6 +338,16 @@ class ShopifyAnalyticsController extends Controller
     private function syncReasonLabel(?string $reason): string
     {
         $reason = filled($reason) ? $reason : 'unknown';
+
+        if (preg_match('/^api_http_(\d{3})$/', $reason, $matches) === 1) {
+            $specificKey = 'assistant.shopify_analytics.reasons.api_http_'.$matches[1];
+            $specificTranslation = __($specificKey);
+
+            return $specificTranslation === $specificKey
+                ? __('assistant.shopify_analytics.reasons.api_http', ['status' => $matches[1]])
+                : $specificTranslation;
+        }
+
         $key = 'assistant.shopify_analytics.reasons.'.$reason;
         $translation = __($key);
 

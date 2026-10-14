@@ -12,6 +12,7 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/paypal-risk.css?v=20261010-3">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261014-1">
 @endpush
 
 @section('content')
@@ -230,6 +231,7 @@
             <div class="modal-footer"><span class="pull-left paypal-risk-score-note"><i class="fa fa-calculator"></i> 安全指数仅作内部风控参考。</span><button type="button" class="btn btn-default" data-dismiss="modal">关闭</button></div>
         </div></div>
     </div>
+    @include('portals.logistics.partials.order-detail-modal')
 @endsection
 
 @push('scripts')
@@ -243,5 +245,6 @@
             filters: @json(['date_from' => $filters['date_from'], 'date_to' => $filters['date_to']])
         };
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/paypal-risk.js?v=20261010-2"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/paypal-risk.js?v=20261014-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261014-1"></script>
 @endpush

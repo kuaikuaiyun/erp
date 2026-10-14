@@ -82,6 +82,31 @@ class LogisticsOrderController extends Controller
         ]);
     }
 
+    public function detail(Request $request, LogisticsOrder $order): Response|View
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $order->load([
+            'items' => fn ($query) => $query->orderBy('id'),
+            'activeRefundDetails' => fn ($query) => $query->orderByDesc('created_at')->orderByDesc('id'),
+            'paypalAccount',
+            'paypalRefunds' => fn ($query) => $query->orderByDesc('refunded_at')->orderByDesc('id'),
+            'paypalDisputes' => fn ($query) => $query->orderByDesc('dispute_created_at')->orderByDesc('id'),
+            'logs' => fn ($query) => $query->latest('id')->limit(20),
+        ]);
+
+        return view('portals.logistics.orders.detail', [
+            'order' => $order,
+            'shopifyPayload' => $this->decodePayload($order->shopify_payload),
+            'tongtuPayload' => $this->decodePayload($order->tongtu_payload),
+            'fulfillmentPayload' => $this->decodePayload($order->fulfillment_payload),
+            'pageSourcePayload' => $this->decodePayload($order->page_source),
+        ]);
+    }
+
     public function export(Request $request): Response
     {
         $context = $this->portalContext($request);
@@ -642,6 +667,17 @@ class LogisticsOrderController extends Controller
     private function contains(string $value): string
     {
         return '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $value).'%';
+    }
+
+    private function decodePayload(mixed $value): mixed
+    {
+        if (!is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        $decoded = json_decode($value, true);
+
+        return json_last_error() === JSON_ERROR_NONE ? $decoded : $value;
     }
 
     /** @return \Illuminate\Support\Collection<int, AssistantDomainStore> */
