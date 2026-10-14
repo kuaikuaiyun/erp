@@ -111,6 +111,7 @@ return [
         'reported_at' => '提报日期',
         'city' => '城市',
         'skus' => 'SKU',
+        'supplier_url' => '1688 主链接',
         'operation_supplier_url' => '1688 链接',
         'operation' => '运营',
         'request_source' => '需求来源',
