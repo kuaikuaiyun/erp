@@ -1,0 +1,59 @@
+/* Stable two-row filter layout.  This intentionally overrides legacy grid rules. */
+.assistant-shopify-analytics-page .assistant-shopify-filter-form {
+    display: block !important;
+}
+
+.assistant-shopify-analytics-page .assistant-shopify-filter-primary-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: end;
+    gap: 14px;
+}
+
+.assistant-shopify-analytics-page .assistant-shopify-filter-secondary-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 14px;
+    margin-top: 14px;
+}
+
+.assistant-shopify-analytics-page .assistant-shopify-filter-primary-row .form-group,
+.assistant-shopify-analytics-page .assistant-shopify-filter-secondary-row .form-group {
+    width: auto !important;
+    min-width: 0;
+    margin: 0 !important;
+}
+
+.assistant-shopify-analytics-page .assistant-shopify-filter-primary-row .form-control,
+.assistant-shopify-analytics-page .assistant-shopify-filter-secondary-row .form-control {
+    width: 100%;
+    min-width: 0;
+}
+
+.assistant-shopify-analytics-page .assistant-shopify-filter-secondary-row .assistant-shopify-date-filter {
+    flex: 0 1 210px;
+    width: 210px !important;
+}
+
+.assistant-shopify-analytics-page .assistant-shopify-filter-secondary-row .assistant-shopify-filter-actions {
+    display: flex;
+    grid-column: auto;
+    justify-self: auto;
+    align-items: center;
+    gap: 7px;
+    min-height: 34px;
+    margin: 0;
+    white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+    .assistant-shopify-analytics-page .assistant-shopify-filter-primary-row {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .assistant-shopify-analytics-page .assistant-shopify-filter-secondary-row .assistant-shopify-date-filter {
+        flex: 1 1 100%;
+        width: 100% !important;
+    }
+}
