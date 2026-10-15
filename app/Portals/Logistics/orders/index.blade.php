@@ -48,6 +48,20 @@
                 </div>
             </div>
         @endif
+        @if($activeTrackingBatch)
+            @php
+                $trackingProgress = $activeTrackingBatch->progressPayload();
+            @endphp
+            <div id="tracking-sync-progress" class="logistics-match-progress" data-url="{{ route('logistics.orders.tracking-progress', $activeTrackingBatch) }}" data-completed="{{ $trackingProgress['completed'] ? '1' : '0' }}" data-title-queued="{{ __('logistics.tracking.queued') }}" data-title-processing="{{ __('logistics.tracking.processing') }}" data-title-completed="{{ __('logistics.tracking.completed') }}" data-summary-template="{{ __('logistics.tracking.summary', ['processed' => '{processed}', 'total' => '{total}', 'success' => '{success}', 'skipped' => '{skipped}', 'failed' => '{failed}']) }}">
+                <div class="logistics-match-progress-heading"><span><i class="fa fa-refresh fa-spin"></i> <strong data-tracking-title>{{ $trackingProgress['completed'] ? __('logistics.tracking.completed') : ($trackingProgress['status'] === 'queued' ? __('logistics.tracking.queued') : __('logistics.tracking.processing')) }}</strong></span><span data-tracking-percent>{{ $trackingProgress['percent'] }}%</span></div>
+                <div class="progress progress-sm active"><div class="progress-bar progress-bar-aqua progress-bar-striped" role="progressbar" data-tracking-bar aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ $trackingProgress['percent'] }}" style="width: {{ $trackingProgress['percent'] }}%"></div></div>
+                <div class="logistics-match-progress-summary" data-tracking-summary>{{ __('logistics.tracking.summary', $trackingProgress) }}</div>
+                <div class="logistics-match-progress-note"><i class="fa fa-clock-o"></i> {{ __('logistics.tracking.note') }}</div>
+                <div class="logistics-match-failures" data-tracking-failures @if($trackingFailureDetails === []) hidden @endif>
+                    <details open><summary>{{ __('logistics.tracking.failure_details', ['count' => count($trackingFailureDetails)]) }}</summary><ul data-tracking-failure-list>@foreach($trackingFailureDetails as $failure)<li><strong>{{ __('logistics.tracking.order', ['number' => $failure['shopify_order_number']]) }}</strong><span>{{ __('logistics.tracking.tracking_number', ['number' => $failure['tracking_number']]) }}</span><em>{{ $failure['reason'] }}</em></li>@endforeach</ul></details>
+                </div>
+            </div>
+        @endif
 
         <div class="box box-solid logistics-filter-box">
             <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-filter"></i> 筛选条件</h3></div>
@@ -95,6 +109,7 @@
         </div>
 
         <form id="tongtu-match-form" method="post" action="{{ route('logistics.orders.match-tongtu') }}">@csrf<input type="hidden" name="return_to" value="{{ request()->fullUrl() }}"></form>
+        <form id="tracking-sync-form" method="post" action="{{ route('logistics.orders.sync-tracking') }}">@csrf<input type="hidden" name="return_to" value="{{ request()->fullUrl() }}"></form>
         <form id="assign-store-form" method="post" action="{{ route('logistics.orders.assign-store') }}" class="logistics-batch-form">
             @csrf
             <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
@@ -110,6 +125,7 @@
                 <button class="btn btn-default btn-sm" type="button" data-toggle="modal" data-target="#logistics-order-export-modal"><i class="fa fa-download"></i> 导出</button>
                 <button class="btn btn-info btn-sm" type="button" data-toggle="modal" data-target="#logistics-refund-import-modal"><i class="fa fa-upload"></i> 更新退款订单</button>
                 <button class="btn btn-success btn-sm" type="submit" form="tongtu-match-form" id="tongtu-match-button" disabled><i class="fa fa-exchange"></i> 批量匹配通途订单</button>
+                <button class="btn btn-info btn-sm" type="submit" form="tracking-sync-form" id="tracking-sync-button" disabled><i class="fa fa-truck"></i> {{ __('logistics.tracking.batch_sync') }}</button>
                 <button class="btn btn-warning btn-sm" type="submit" form="assign-store-form" id="assign-store-button" disabled><i class="fa fa-link"></i> 批量归属店铺</button>
                 @include('portals.logistics.partials.pagination', ['paginator' => $orders, 'filters' => $filters, 'routeName' => 'logistics.orders.index', 'loadingTarget' => '.logistics-orders-scroll'])
             </div>

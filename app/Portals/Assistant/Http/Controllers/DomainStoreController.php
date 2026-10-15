@@ -873,10 +873,11 @@ class DomainStoreController extends Controller
             }
         }
 
-        foreach (['email_bound', 'email_purchased'] as $filter) {
-            if ($filters[$filter] !== '') {
-                $query->where($filter, (bool) $filters[$filter]);
-            }
+        if ($filters['email_bound'] !== '') {
+            $query->where('email_bound', $filters['email_bound'] === '1');
+        }
+        if ($filters['email_purchased'] !== '') {
+            $this->emailPurchases->applyPurchaseFilter($query, $filters['email_purchased'] === '1');
         }
 
         return $query;

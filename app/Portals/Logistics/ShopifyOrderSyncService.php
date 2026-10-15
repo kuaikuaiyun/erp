@@ -20,6 +20,7 @@ class ShopifyOrderSyncService
         private readonly LogisticsProfitCalculator $profitCalculator,
         private readonly LogisticsOrderItemService $items,
         private readonly LogisticsTongtuAutomationService $automation,
+        private readonly LogisticsTrackingService $tracking,
     )
     {
     }
@@ -438,7 +439,8 @@ GRAPHQL, [
             'destination' => $this->incoming($this->destination($payload['shippingAddress'] ?? []), $current->destination),
             'shipping_company' => array_key_exists('fulfillments', $payload) ? $fulfillment['companies'] : $current->shipping_company,
             'tracking_number' => array_key_exists('fulfillments', $payload) ? $fulfillment['numbers'] : $current->tracking_number,
-            'logistics_status' => $fulfillment['status'],
+            // Shopify 只负责同步物流单号；真实物流状态必须由 51Tracking 回写，不能被订单重拉覆盖。
+            'logistics_status' => $current->logistics_status ?: LogisticsOrder::LOGISTICS_PENDING,
             'fulfillment_payload' => json_encode($fulfillment['payload'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'first_fulfilled_at' => $current->first_fulfilled_at ?: $fulfillment['first_fulfilled_at'],
             'order_created_at' => $this->dateTime($payload['createdAt'] ?? null),
@@ -458,10 +460,14 @@ GRAPHQL, [
             'page_source' => $this->incoming($attributes['yx_page_source'] ?? null, $current->page_source),
             'shopify_payload' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         ]);
+        $trackingNumberChanged = $current->isDirty('tracking_number');
         $this->profitCalculator->recalculate($current);
         $current->save();
         $this->items->syncFromShopifyPayload($current, $payload);
         $this->automation->scheduleForOrder($current);
+        if ($isNew || $trackingNumberChanged) {
+            $this->tracking->scheduleForOrder($current);
+        }
 
         return [
             'state' => $isNew ? 'created' : 'updated',

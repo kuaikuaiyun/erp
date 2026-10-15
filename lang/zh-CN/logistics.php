@@ -23,6 +23,19 @@ return [
     'orders' => [
         'menu' => '物流订单',
     ],
+    'tracking' => [
+        'batch_sync' => '批量查询物流',
+        'queued' => '51Tracking 任务排队中',
+        'processing' => '51Tracking 后台查询中',
+        'completed' => '51Tracking 查询完成',
+        'summary' => '已处理 :processed / :total 条；成功 :success 条，跳过 :skipped 条，失败 :failed 条。',
+        'note' => '首次登记后约 2 分钟查询；运输中每 4 小时复查，异常每 12 小时复查，已签收自动停止。',
+        'failure_details' => '失败详情（:count）',
+        'order' => 'Shopify 订单：:number',
+        'tracking_number' => '物流单号：:number',
+        'configuration_missing' => '尚未配置 51Tracking API 密钥，请联系系统管理员完成配置后再查询。',
+        'queued_message' => '已创建 51Tracking 批量查询任务，共 :count 条订单；系统将先登记单号，再按接口允许的时间查询。',
+    ],
     'product_statistics' => [
         'menu' => '产品统计',
         'title' => '产品统计',
@@ -75,6 +88,8 @@ return [
             'credit_card_refund_amount' => '信用卡退款额（USD）',
             'credit_card_refund_rate' => '信用卡退款率',
             'combined_refund_rate' => '退款综合率',
+            'shipping_rate' => '发货率',
+            'delivery_rate' => '签收率',
             'decision' => '运营建议',
         ],
         'ui' => [
@@ -126,6 +141,8 @@ return [
             'order_number' => 'Shopify 订单号',
             'bill_number' => '账单号',
             'order_created_at' => '下单时间',
+            'tracking_number' => '物流单号',
+            'logistics_status' => '物流状态',
             'quantity' => '该产品数量',
             'actual_profit' => '实际净利润（USD）',
             'amount' => '金额（USD）',
@@ -157,6 +174,12 @@ return [
         'export_empty' => '当前导出范围内没有可导出的产品统计数据。',
     ],
     'paypal_risk' => [
+        'filters' => [
+            'order_date' => '订单创建时间',
+            'event_date' => '真实退款/纠纷时间',
+            'date_ranges_exclusive' => '订单创建时间与真实退款/纠纷时间只能选择其中一组。',
+            'event_date_hint' => '按真实退款或纠纷发生日期筛选；对应比率分母为同一期间的已付款订单。',
+        ],
         'messages' => [
             'account_created' => 'PayPal 账号已新增。订单只会在导入到真实 PayPal 交易号后关联，不会按 Merchant ID 或邮箱预归属。',
             'account_updated' => 'PayPal 账号已更新。历史订单归属不会按 Merchant ID 或邮箱自动变更。',
@@ -172,8 +195,37 @@ return [
             'seller_response_due_at' => '卖家回复截止时间',
             'updated_at' => '更新时间',
             'linked_refunds' => '关联退款',
+            'tracking_number' => '物流单号',
+            'logistics_status' => '物流状态',
+            'shipping_rate' => '发货率',
+            'delivery_rate' => '签收率',
+            'shipping_note' => '发货率和签收率仅展示真实 51Tracking 状态，不参与安全指数评分。',
             'passive_note' => 'ERP 已停用 PayPal 直接访问。交易、退款与纠纷数据仅由各 PayPal 账号对应的 Windows VPS 采集，并按 Merchant ID 上传归属；订单仅在真实交易号精确匹配后关联。',
             'account_note' => 'Merchant ID 是 Windows VPS 上传文件的唯一账号归属依据。收款邮箱仅保存账号资料，不用于订单自动关联；订单只按真实 PayPal 交易号精确关联。',
+        ],
+        'export' => [
+            'button' => '导出当前明细',
+            'orders' => [
+                'order_number' => 'Shopify 订单号', 'tongtu_order_number' => '通途订单号', 'store_name' => '店铺',
+                'products' => '产品', 'paid_amount' => '实付金额（USD）', 'refund_status' => '退款状态',
+                'dispute_status' => '纠纷状态', 'tracking_number' => '物流单号', 'logistics_status' => '物流状态',
+                'order_created_at' => '下单时间',
+            ],
+            'products' => [
+                'product_name' => '产品', 'sku' => 'SKU', 'quantity' => '销量', 'paid_amount' => '实收金额（USD）',
+                'refund_orders' => '退款订单数', 'refund_rate' => '退款率', 'dispute_orders' => '纠纷订单数', 'dispute_rate' => '纠纷率',
+            ],
+            'refunds' => [
+                'refund_id' => '退款交易号', 'order_number' => 'Shopify 订单号', 'store_name' => '店铺', 'source' => '来源',
+                'amount' => '退款金额（USD）', 'source_reason' => '接口原因', 'manual_reason' => '人工原因',
+                'linked_disputes' => '关联纠纷', 'status' => '状态', 'happened_at' => '退款时间',
+            ],
+            'disputes' => [
+                'dispute_id' => '纠纷编号', 'order_number' => 'Shopify 订单号', 'store_name' => '店铺', 'amount' => '金额（USD）',
+                'reason' => '原因', 'stage' => '阶段', 'status' => '状态', 'outcome' => '处理结果',
+                'seller_response_due_at' => '卖家回复截止时间', 'linked_refunds' => '关联退款', 'updated_at' => '更新时间',
+                'happened_at' => '发生时间',
+            ],
         ],
     ],
     'refund_import' => [

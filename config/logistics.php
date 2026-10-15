@@ -30,4 +30,10 @@ return [
         'import_max_bytes' => (int) env('LOGISTICS_PAYPAL_IMPORT_MAX_BYTES', 20 * 1024 * 1024),
         'import_clock_skew_seconds' => (int) env('LOGISTICS_PAYPAL_IMPORT_CLOCK_SKEW_SECONDS', 300),
     ],
+    'tracking' => [
+        'api_key' => env('TRACKING51_API_KEY', ''),
+        'base_url' => env('TRACKING51_BASE_URL', 'https://api.51tracking.com/v4'),
+        'timeout' => (int) env('TRACKING51_TIMEOUT', 30),
+        'initial_query_delay_minutes' => (int) env('TRACKING51_INITIAL_QUERY_DELAY_MINUTES', 2),
+    ],
 ];

@@ -214,14 +214,14 @@
     }
     function orderRows(table, orders) {
         var rows = detailSortedRows(table, orders);
-        if (!rows.length) return detailEmptyRow(10);
+        if (!rows.length) return detailEmptyRow(12);
         return rows.map(function (order) {
-            return '<tr><td>' + orderLink(order) + '</td><td>' + escapeHtml(order.store || blank()) + '</td><td>' + escapeHtml(order.bill_number || blank()) + '</td><td>' + escapeHtml(order.payment_method || blank()) + '</td><td>' + formatNumber(order.quantity) + '</td><td>' + formatMoney(order.revenue) + '</td><td>' + formatMoney(order.paypal_refund) + '</td><td>' + formatMoney(order.credit_card_refund) + '</td><td>' + formatNumber(order.paypal_dispute_count) + '</td><td>' + escapeHtml(order.order_created_at || blank()) + '</td></tr>';
+            return '<tr><td>' + orderLink(order) + '</td><td>' + escapeHtml(order.store || blank()) + '</td><td>' + escapeHtml(order.bill_number || blank()) + '</td><td>' + escapeHtml(order.payment_method || blank()) + '</td><td>' + formatNumber(order.quantity) + '</td><td>' + formatMoney(order.revenue) + '</td><td>' + formatMoney(order.paypal_refund) + '</td><td>' + formatMoney(order.credit_card_refund) + '</td><td>' + formatNumber(order.paypal_dispute_count) + '</td><td>' + escapeHtml(order.tracking_number || blank()) + '</td><td>' + escapeHtml(order.logistics_status || blank()) + '</td><td>' + escapeHtml(order.order_created_at || blank()) + '</td></tr>';
         }).join('');
     }
     function renderOrdersTable(id, table, orders) {
         var headings = [
-            ['shopify_order_number', t('orderNumber')], ['store', t('storeName')], ['bill_number', t('billNumber')], ['payment_method', t('paymentMethod')], ['quantity', t('quantity')], ['revenue', t('revenue')], ['paypal_refund', t('paypalRefund')], ['credit_card_refund', t('creditCardRefund')], ['paypal_dispute_count', t('paypalDisputes')], ['order_created_at', t('orderCreatedAt')]
+            ['shopify_order_number', t('orderNumber')], ['store', t('storeName')], ['bill_number', t('billNumber')], ['payment_method', t('paymentMethod')], ['quantity', t('quantity')], ['revenue', t('revenue')], ['paypal_refund', t('paypalRefund')], ['credit_card_refund', t('creditCardRefund')], ['paypal_dispute_count', t('paypalDisputes')], ['tracking_number', t('trackingNumber')], ['logistics_status', t('logisticsStatus')], ['order_created_at', t('orderCreatedAt')]
         ];
         document.getElementById(id).innerHTML = '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + headings.map(function (heading) { return '<th>' + detailSortButton(table, heading[0], heading[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' + orderRows(table, orders) + '</tbody></table></div>';
     }
@@ -269,6 +269,7 @@
             + detailMetric(t('paypalDisputeCount'), formatNumber(product.paypal_dispute_count)) + detailMetric(t('paypalDisputeRate'), formatRate(product.paypal_dispute_rate))
             + detailMetric(t('creditCardRefundAmount'), formatMoney(product.credit_card_refund_amount)) + detailMetric(t('creditCardRefundRate'), formatRate(product.credit_card_refund_rate))
             + detailMetric(t('combinedRefundRate'), formatRate(product.combined_refund_rate)) + detailMetric(t('actualProfit'), formatMoney(product.actual_profit), isNumeric(product.actual_profit) && number(product.actual_profit) < 0 ? 'is-negative' : '')
+            + detailMetric(t('shippingRate'), formatRate(product.shipping_rate)) + detailMetric(t('deliveryRate'), formatRate(product.delivery_rate))
             + '</div>' + detailBreakdown(product) + '<div class="alert alert-info"><i class="fa fa-info-circle"></i> ' + escapeHtml(t('crossProductNote')) + '<br><i class="fa fa-info-circle"></i> ' + escapeHtml(t('creditCardDisputeNote')) + '</div>';
         renderDetailTables();
         if ($) {
