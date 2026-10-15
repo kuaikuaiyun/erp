@@ -141,6 +141,42 @@
         renderPreview(container, input);
     }
 
+    function clipboardImageFiles(items) {
+        var pending = [];
+        Array.prototype.slice.call(items || []).forEach(function (item) {
+            Array.prototype.slice.call(item.types || []).forEach(function (type) {
+                if (/^image\//.test(type) && typeof item.getType === 'function') {
+                    pending.push(item.getType(type).then(function (blob) {
+                        var ext = (type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+                        return new File([blob], 'clipboard-' + Date.now() + '.' + ext, { type: blob.type || type });
+                    }).catch(function () { return null; }));
+                }
+            });
+        });
+
+        return Promise.all(pending).then(function (files) {
+            return files.filter(function (file) { return !!file; });
+        });
+    }
+
+    function pasteFromClipboard(container, input, maxFiles) {
+        var canRead = window.isSecureContext && navigator.clipboard && typeof navigator.clipboard.read === 'function';
+        if (!canRead) {
+            container.focus();
+            notify('info', config.pasteHint);
+            return;
+        }
+        navigator.clipboard.read().then(function (items) {
+            return clipboardImageFiles(items);
+        }).then(function (files) {
+            if (files.length) { addFiles(container, input, maxFiles, files); }
+            else { notify('info', config.pasteHint); }
+        }).catch(function () {
+            container.focus();
+            notify('info', config.pasteHint);
+        });
+    }
+
     function submitProgress(form) {
         if (!form) { return null; }
         var existing = form.querySelector('[data-submit-progress]');
@@ -180,8 +216,7 @@
             var pasteButton = container.querySelector('[data-product-request-paste]');
             if (pasteButton) {
                 pasteButton.addEventListener('click', function () {
-                    container.focus();
-                    notify('info', config.pasteHint);
+                    pasteFromClipboard(container, input, maxFiles);
                 });
             }
             ['dragenter', 'dragover'].forEach(function (eventName) {
