@@ -241,6 +241,15 @@
                 detail: @json(route('logistics.paypal-risk.accounts.detail', ['account' => '__ID__']))
             },
             filters: @json(['date_from' => $filters['date_from'], 'date_to' => $filters['date_to']])
+            ,labels: @json([
+                'sourceReason' => __('logistics.paypal_risk.ui.source_reason'),
+                'manualReason' => __('logistics.paypal_risk.ui.manual_reason'),
+                'linkedDisputes' => __('logistics.paypal_risk.ui.linked_disputes'),
+                'outcome' => __('logistics.paypal_risk.ui.outcome'),
+                'sellerResponseDueAt' => __('logistics.paypal_risk.ui.seller_response_due_at'),
+                'updatedAt' => __('logistics.paypal_risk.ui.updated_at'),
+                'linkedRefunds' => __('logistics.paypal_risk.ui.linked_refunds'),
+            ])
         };
     </script>
     <script src="{{ $portalOrigin }}/assets/erp/paypal-risk.js?v=20261010-2"></script>

@@ -29,6 +29,9 @@
     <section class="content logistics-page">
         @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
         @if(session('error'))<div class="alert alert-danger">{{ session('error') }}</div>@endif
+        @if(session('logistics_refund_import_error_report'))
+            <div class="alert alert-warning"><i class="fa fa-exclamation-triangle"></i> {{ __('logistics.refund_import.messages.error_report_ready') }} <a class="btn btn-warning btn-xs" href="{{ session('logistics_refund_import_error_report') }}" data-loading="download"><i class="fa fa-download"></i> {{ __('logistics.refund_import.messages.download_error_report') }}</a></div>
+        @endif
         @if($errors->has('scope'))<div class="alert alert-danger">{{ $errors->first('scope') }}</div>@endif
         @if($errors->has('refund_file'))<div class="alert alert-danger">{{ $errors->first('refund_file') }}</div>@endif
         @if($activeMatchBatch)
@@ -192,23 +195,23 @@
                 <form method="post" action="{{ route('logistics.orders.import-refunds') }}" enctype="multipart/form-data" class="modal-content" id="logistics-refund-import-form" data-loading="button">
                     @csrf
                     <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
-                    <div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="关闭"><span aria-hidden="true">&times;</span></button><h4 class="modal-title" id="logistics-refund-import-title"><i class="fa fa-upload"></i> 更新退款订单</h4></div>
+                    <div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ __('logistics.common.close') }}"><span aria-hidden="true">&times;</span></button><h4 class="modal-title" id="logistics-refund-import-title"><i class="fa fa-upload"></i> {{ __('logistics.refund_import.title') }}</h4></div>
                     <div class="modal-body logistics-refund-import-body">
-                        <p class="text-muted">退款单号将与物流订单中的“账单号”匹配；允许同一退款单号多次退款并累计金额。</p>
-                        <div class="logistics-import-header-rule"><i class="fa fa-list-alt"></i><span>表头必须为：<strong>退款单号、退款金额、退款类型、退款原因、备注</strong></span></div>
+                        <p class="text-muted">{{ __('logistics.refund_import.modal.notice') }}</p>
+                        <div class="logistics-import-header-rule"><i class="fa fa-list-alt"></i><span>{{ __('logistics.refund_import.modal.headers') }}</span></div>
                         <label class="logistics-import-dropzone" for="logistics-refund-import-file">
                             <input id="logistics-refund-import-file" type="file" name="refund_file" accept=".csv,.xls,.xlsx" required>
                             <i class="fa fa-cloud-upload"></i>
-                            <strong>拖拽文件到这里，或点击选择文件</strong>
-                            <span>支持 CSV、XLS、XLSX，最大 10MB</span>
+                            <strong>{{ __('logistics.refund_import.modal.dropzone') }}</strong>
+                            <span>{{ __('logistics.refund_import.modal.file_hint') }}</span>
                             <em id="logistics-refund-import-file-name"></em>
                         </label>
                         <div class="logistics-import-footer-note">
-                            <span><i class="fa fa-info-circle"></i> 完全重复的行会自动跳过；导入退款暂不参与利润计算。</span>
-                            <a href="{{ route('logistics.orders.refund-import-template') }}" data-loading="download"><i class="fa fa-file-excel-o"></i> 下载退款导入模板（XLSX）</a>
+                            <span><i class="fa fa-info-circle"></i> {{ __('logistics.refund_import.modal.rule_note') }}</span>
+                            <a href="{{ route('logistics.orders.refund-import-template') }}" data-loading="download"><i class="fa fa-file-excel-o"></i> {{ __('logistics.refund_import.modal.template_download') }}</a>
                         </div>
                     </div>
-                    <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">取消</button><button type="submit" class="btn btn-success"><i class="fa fa-upload"></i> 确认导入</button></div>
+                    <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">{{ __('logistics.common.cancel') }}</button><button type="submit" class="btn btn-success"><i class="fa fa-upload"></i> {{ __('logistics.refund_import.modal.confirm') }}</button></div>
                 </form>
             </div>
         </div>

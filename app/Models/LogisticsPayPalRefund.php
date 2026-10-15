@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class LogisticsPayPalRefund extends Model
 {
@@ -34,6 +35,7 @@ class LogisticsPayPalRefund extends Model
         'logistics_paypal_account_id', 'logistics_order_id', 'refund_transaction_id',
         'original_transaction_id', 'event_code', 'status', 'refund_amount_usd',
         'original_amount', 'currency_code', 'invoice_id', 'refund_reason',
+        'manual_reason', 'manual_reason_updated_by', 'manual_reason_updated_by_name', 'manual_reason_updated_at',
         'refunded_at', 'raw_payload', 'synced_at',
     ];
 
@@ -49,6 +51,7 @@ class LogisticsPayPalRefund extends Model
             'refund_amount_usd' => 'decimal:4',
             'original_amount' => 'decimal:4',
             'refunded_at' => 'datetime',
+            'manual_reason_updated_at' => 'datetime',
             'synced_at' => 'datetime',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
@@ -63,6 +66,11 @@ class LogisticsPayPalRefund extends Model
     public function order(): BelongsTo
     {
         return $this->belongsTo(LogisticsOrder::class, 'logistics_order_id');
+    }
+
+    public function disputeLinks(): HasMany
+    {
+        return $this->hasMany(LogisticsPayPalDisputeRefund::class, 'logistics_paypal_refund_id');
     }
 
     public static function eventLabelFor(mixed $eventCode): string

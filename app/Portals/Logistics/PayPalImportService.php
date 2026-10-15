@@ -4,6 +4,7 @@ namespace App\Portals\Logistics;
 
 use App\Models\LogisticsPayPalAccount;
 use App\Models\LogisticsPayPalDispute;
+use App\Models\LogisticsPayPalDisputeRefund;
 use App\Models\LogisticsPayPalRefund;
 use App\Models\LogisticsPayPalImport;
 use Carbon\Carbon;
@@ -138,10 +139,6 @@ class PayPalImportService
         }
         $message = Str::limit($message, 1800);
 
-        $this->progress($progress, '正在批量关联已有物流订单');
-        $associatedOrders = $this->associations->associateExistingOrders($account);
-        $this->progress($progress, '已有物流订单关联完成', $associatedOrders, $associatedOrders);
-
         $import->forceFill([
             'status' => $status,
             'transaction_count' => count($transactions),
@@ -190,7 +187,7 @@ class PayPalImportService
         $amount = abs((float) Arr::get($info, 'transaction_amount.value', 0));
         $currency = strtoupper(trim((string) Arr::get($info, 'transaction_amount.currency_code')));
 
-        LogisticsPayPalRefund::query()->updateOrCreate([
+        $refund = LogisticsPayPalRefund::query()->updateOrCreate([
             'logistics_paypal_account_id' => $account->getKey(),
             'refund_transaction_id' => $refundId,
         ], [
@@ -207,6 +204,7 @@ class PayPalImportService
             'raw_payload' => json_encode($detail, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'synced_at' => now(),
         ]);
+        $this->linkRefundToDisputes($refund);
 
         return (bool) $order;
     }
@@ -229,7 +227,7 @@ class PayPalImportService
         $amount = abs((float) Arr::get($detail, 'dispute_amount.value', 0));
         $currency = strtoupper(trim((string) Arr::get($detail, 'dispute_amount.currency_code')));
 
-        LogisticsPayPalDispute::query()->updateOrCreate([
+        $dispute = LogisticsPayPalDispute::query()->updateOrCreate([
             'logistics_paypal_account_id' => $account->getKey(),
             'dispute_id' => $disputeId,
         ], [
@@ -250,8 +248,55 @@ class PayPalImportService
             'raw_payload' => json_encode($detail, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'synced_at' => now(),
         ]);
+        $this->linkDisputeToRefunds($dispute);
 
         return (bool) $order;
+    }
+
+    private function linkRefundToDisputes(LogisticsPayPalRefund $refund): void
+    {
+        $originalTransactionId = trim((string) $refund->original_transaction_id);
+        if ($originalTransactionId === '') {
+            return;
+        }
+
+        LogisticsPayPalDispute::query()
+            ->where('logistics_paypal_account_id', $refund->logistics_paypal_account_id)
+            ->where('disputed_transaction_id', $originalTransactionId)
+            ->get(['id'])
+            ->each(function (LogisticsPayPalDispute $dispute) use ($refund, $originalTransactionId): void {
+                LogisticsPayPalDisputeRefund::query()->updateOrCreate([
+                    'logistics_paypal_dispute_id' => $dispute->getKey(),
+                    'logistics_paypal_refund_id' => $refund->getKey(),
+                ], [
+                    'match_source' => 'original_transaction',
+                    'raw_reference' => $originalTransactionId,
+                    'matched_at' => now(),
+                ]);
+            });
+    }
+
+    private function linkDisputeToRefunds(LogisticsPayPalDispute $dispute): void
+    {
+        $transactionId = trim((string) $dispute->disputed_transaction_id);
+        if ($transactionId === '') {
+            return;
+        }
+
+        LogisticsPayPalRefund::query()
+            ->where('logistics_paypal_account_id', $dispute->logistics_paypal_account_id)
+            ->where('original_transaction_id', $transactionId)
+            ->get(['id'])
+            ->each(function (LogisticsPayPalRefund $refund) use ($dispute, $transactionId): void {
+                LogisticsPayPalDisputeRefund::query()->updateOrCreate([
+                    'logistics_paypal_dispute_id' => $dispute->getKey(),
+                    'logistics_paypal_refund_id' => $refund->getKey(),
+                ], [
+                    'match_source' => 'original_transaction',
+                    'raw_reference' => $transactionId,
+                    'matched_at' => now(),
+                ]);
+            });
     }
 
     private function dateTime(mixed $value): ?CarbonInterface

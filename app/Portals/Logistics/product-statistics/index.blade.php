@@ -89,7 +89,7 @@
             <div class="box-header with-border product-statistics-list-toolbar">
                 <h3 class="box-title">{{ __('logistics.product_statistics.headers.list') }} <small id="product-statistics-total-label">—</small></h3>
                 <div class="product-statistics-toolbar-actions">
-                    <span class="product-statistics-toolbar-hint"><i class="fa fa-info-circle"></i> {{ __('logistics.product_statistics.ui.expand_hint') }}</span>
+                    <span class="product-statistics-toolbar-hint"><i class="fa fa-info-circle"></i> {{ __('logistics.product_statistics.ui.cross_product_note') }}</span>
                     <button class="btn btn-default btn-sm" type="button" data-toggle="modal" data-target="#product-statistics-export-modal"><i class="fa fa-download"></i> {{ __('logistics.common.export') }}</button>
                 </div>
             </div>
@@ -97,8 +97,12 @@
                 <table class="table table-hover product-statistics-table" id="product-statistics-table">
                     <thead><tr>
                         <th class="product-statistics-check-column"><input id="product-statistics-check-all" type="checkbox" aria-label="{{ __('logistics.product_statistics.ui.select_current_page') }}"></th>
-                        <th class="product-statistics-expand-column"></th>
-                        @foreach(['name' => 'product', 'sku' => 'sku', 'shop_count' => 'stores', 'sales' => 'sales', 'revenue' => 'revenue', 'cost' => 'cost', 'fees' => 'fees', 'refunds' => 'refunds', 'profit' => 'profit', 'profit_rate' => 'profit_rate', 'refund_rate' => 'refund_rate', 'decision' => 'decision'] as $sort => $label)
+                        @foreach([
+                            'name' => 'product', 'sku' => 'sku', 'shop_count' => 'stores', 'sales' => 'sales', 'revenue' => 'revenue', 'cost' => 'cost', 'fees' => 'fees',
+                            'paypal_refund_amount' => 'paypal_refund_amount', 'paypal_refund_rate' => 'paypal_refund_rate', 'paypal_dispute_count' => 'paypal_dispute_count', 'paypal_dispute_rate' => 'paypal_dispute_rate',
+                            'credit_card_refund_amount' => 'credit_card_refund_amount', 'credit_card_refund_rate' => 'credit_card_refund_rate', 'combined_refund_rate' => 'combined_refund_rate',
+                            'profit' => 'profit', 'profit_rate' => 'profit_rate', 'decision' => 'decision',
+                        ] as $sort => $label)
                             <th><button type="button" class="product-statistics-sort" data-sort="{{ $sort }}">{{ __('logistics.product_statistics.headers.'.$label) }} <i class="fa fa-sort"></i></button></th>
                         @endforeach
                         <th>{{ __('logistics.common.operation') }}</th>
@@ -142,12 +146,12 @@
                 <div id="product-statistics-detail-identity" class="product-statistics-detail-identity"></div>
                 <ul class="nav nav-tabs product-statistics-tabs" role="tablist">
                     <li class="active"><a href="#product-statistics-overview" role="tab" data-toggle="tab">{{ __('logistics.product_statistics.ui.overview') }}</a></li>
-                    <li><a href="#product-statistics-variants" role="tab" data-toggle="tab">{{ __('logistics.product_statistics.ui.variant_details') }}</a></li>
-                    <li><a href="#product-statistics-stores" role="tab" data-toggle="tab">{{ __('logistics.product_statistics.ui.store_performance') }}</a></li>
-                    <li><a href="#product-statistics-trend" role="tab" data-toggle="tab">{{ __('logistics.product_statistics.ui.sales_trend') }}</a></li>
-                    <li><a href="#product-statistics-refunds" role="tab" data-toggle="tab">{{ __('logistics.product_statistics.ui.refund_details') }}</a></li>
+                    <li><a href="#product-statistics-paypal-orders" role="tab" data-toggle="tab">{{ __('logistics.product_statistics.ui.paypal_orders') }}</a></li>
+                    <li><a href="#product-statistics-credit-card-orders" role="tab" data-toggle="tab">{{ __('logistics.product_statistics.ui.credit_card_orders') }}</a></li>
+                    <li><a href="#product-statistics-refunds" role="tab" data-toggle="tab">{{ __('logistics.product_statistics.ui.refunds_and_disputes') }}</a></li>
+                    <li><a href="#product-statistics-orders" role="tab" data-toggle="tab">{{ __('logistics.product_statistics.ui.related_orders') }}</a></li>
                 </ul>
-                <div class="tab-content product-statistics-tab-content"><div role="tabpanel" class="tab-pane active" id="product-statistics-overview"></div><div role="tabpanel" class="tab-pane" id="product-statistics-variants"></div><div role="tabpanel" class="tab-pane" id="product-statistics-stores"></div><div role="tabpanel" class="tab-pane" id="product-statistics-trend"></div><div role="tabpanel" class="tab-pane" id="product-statistics-refunds"></div></div>
+                <div class="tab-content product-statistics-tab-content"><div role="tabpanel" class="tab-pane active" id="product-statistics-overview"></div><div role="tabpanel" class="tab-pane" id="product-statistics-paypal-orders"></div><div role="tabpanel" class="tab-pane" id="product-statistics-credit-card-orders"></div><div role="tabpanel" class="tab-pane" id="product-statistics-refunds"></div><div role="tabpanel" class="tab-pane" id="product-statistics-orders"></div></div>
             </div>
             <div class="modal-footer"><span class="pull-left product-statistics-modal-footnote"><i class="fa fa-info-circle"></i> {{ __('logistics.product_statistics.ui.known_profit_only') }}</span><button type="button" class="btn btn-default" data-dismiss="modal">{{ __('logistics.common.close') }}</button></div>
         </div></div>

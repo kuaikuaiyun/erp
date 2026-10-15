@@ -3,8 +3,9 @@
 namespace App\Portals\Logistics;
 
 use App\Models\AdminUser;
+use App\Models\LogisticsCreditCardRefund;
 use App\Models\LogisticsOrder;
-use App\Models\LogisticsRefundDetail;
+use App\Models\LogisticsPayPalRefund;
 use Illuminate\Http\UploadedFile;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use RuntimeException;
@@ -12,21 +13,21 @@ use RuntimeException;
 class LogisticsRefundImportService
 {
     private const HEADERS = [
-        '退款单号' => 'refund_number',
-        '退款金额' => 'refund_amount_usd',
-        '退款类型' => 'refund_type',
-        '退款原因' => 'refund_reason',
-        '备注' => 'remark',
+        '支付方式' => 'payment_method',
+        '对应编号' => 'reference_number',
+        '退款流水号' => 'refund_reference',
+        '原因' => 'refund_reason',
+        '金额' => 'refund_amount_usd',
     ];
 
     /**
-     * @return array{rows:int,added:int,duplicates:int,matched:int,unmatched:int,invalid:int,errors:list<string>}
+     * @return array{rows:int,paypal_updated:int,credit_card_added:int,credit_card_updated:int,invalid:int,errors:list<array<string,mixed>>}
      */
     public function import(UploadedFile $file, AdminUser $actor): array
     {
         $extension = strtolower((string) $file->getClientOriginalExtension());
         if (!in_array($extension, ['xlsx', 'xls', 'csv'], true)) {
-            throw new RuntimeException('仅支持导入 xlsx、xls、csv 格式。');
+            throw new RuntimeException(__('logistics.refund_import.errors.file_type'));
         }
 
         try {
@@ -34,11 +35,18 @@ class LogisticsRefundImportService
             $rows = $spreadsheet->getActiveSheet()->toArray(null, true, true, true);
             $spreadsheet->disconnectWorksheets();
         } catch (\Throwable $exception) {
-            throw new RuntimeException('退款表格读取失败：'.$exception->getMessage(), previous: $exception);
+            throw new RuntimeException(__('logistics.refund_import.errors.read_failed', ['message' => $exception->getMessage()]), previous: $exception);
         }
 
-        $summary = ['rows' => 0, 'added' => 0, 'duplicates' => 0, 'matched' => 0, 'unmatched' => 0, 'invalid' => 0, 'errors' => []];
         [$headerRow, $columns] = $this->locateHeaders($rows);
+        $summary = [
+            'rows' => 0,
+            'paypal_updated' => 0,
+            'credit_card_added' => 0,
+            'credit_card_updated' => 0,
+            'invalid' => 0,
+            'errors' => [],
+        ];
 
         foreach ($rows as $rowNumber => $row) {
             if ((int) $rowNumber <= $headerRow || $this->isEmptyRow($row)) {
@@ -48,57 +56,114 @@ class LogisticsRefundImportService
 
             try {
                 $data = $this->rowData($row, $columns);
-                $order = LogisticsOrder::query()->where('bill_number', $data['refund_number'])->first();
-                $fingerprint = $this->fingerprintFor($data);
-                $existing = LogisticsRefundDetail::query()->where('fingerprint', $fingerprint)->first();
-
-                if ($existing) {
-                    if (!$existing->logistics_order_id && $order) {
-                        $existing->forceFill(['logistics_order_id' => $order->getKey()])->save();
-                    }
-                    $summary['duplicates']++;
+                if ($data['payment_method'] === 'paypal') {
+                    $this->updatePayPalRefund($data, $actor);
+                    $summary['paypal_updated']++;
                     continue;
                 }
 
-                LogisticsRefundDetail::query()->create([
-                    ...$data,
-                    'logistics_order_id' => $order?->getKey(),
-                    'fingerprint' => $fingerprint,
-                    'is_void' => false,
-                    'imported_by' => $actor->getKey(),
-                    'imported_by_name' => $actor->name,
-                ]);
-                $summary['added']++;
-                $summary[$order ? 'matched' : 'unmatched']++;
+                if ($this->upsertCreditCardRefund($data, $actor)) {
+                    $summary['credit_card_added']++;
+                } else {
+                    $summary['credit_card_updated']++;
+                }
+            } catch (RefundImportRowException $exception) {
+                $summary['invalid']++;
+                $summary['errors'][] = $this->errorRow((int) $rowNumber, $exception, $row, $columns);
             } catch (\Throwable $exception) {
                 $summary['invalid']++;
-                if (count($summary['errors']) < 30) {
-                    $summary['errors'][] = '第 '.$rowNumber.' 行：'.$exception->getMessage();
-                }
+                $summary['errors'][] = [
+                    ...$this->sourceData($row, $columns),
+                    'row' => (int) $rowNumber,
+                    'field' => __('logistics.refund_import.error_fields.system'),
+                    'reason' => __('logistics.refund_import.errors.unexpected'),
+                    'hint' => $exception->getMessage(),
+                ];
             }
         }
 
         if ($summary['rows'] === 0) {
-            throw new RuntimeException('表格没有可导入的退款明细。');
+            throw new RuntimeException(__('logistics.refund_import.errors.no_rows'));
         }
 
         return $summary;
     }
 
-    public function attachUnmatchedForOrder(LogisticsOrder $order): int
+    /** @param array<string,mixed> $data */
+    private function updatePayPalRefund(array $data, AdminUser $actor): void
     {
-        $billNumber = trim((string) $order->bill_number);
-        if ($billNumber === '') {
-            return 0;
+        $matches = LogisticsPayPalRefund::query()
+            ->where('refund_transaction_id', $data['reference_number'])
+            ->limit(2)
+            ->get();
+        if ($matches->count() === 0) {
+            throw new RefundImportRowException('reference_number', 'paypal_refund_not_found');
+        }
+        if ($matches->count() > 1) {
+            throw new RefundImportRowException('reference_number', 'paypal_refund_ambiguous');
         }
 
-        return LogisticsRefundDetail::query()
-            ->whereNull('logistics_order_id')
-            ->where('refund_number', $billNumber)
-            ->update(['logistics_order_id' => $order->getKey(), 'updated_at' => now()]);
+        $matches->first()->forceFill([
+            'manual_reason' => $data['refund_reason'],
+            'manual_reason_updated_by' => $actor->getKey(),
+            'manual_reason_updated_by_name' => $actor->name,
+            'manual_reason_updated_at' => now(),
+        ])->save();
     }
 
-    /** @param array<int|string, array<string, mixed>> $rows
+    /** @param array<string,mixed> $data */
+    private function upsertCreditCardRefund(array $data, AdminUser $actor): bool
+    {
+        $orders = LogisticsOrder::query()
+            ->where('bill_number', $data['reference_number'])
+            ->limit(2)
+            ->get();
+        if ($orders->count() === 0) {
+            throw new RefundImportRowException('reference_number', 'credit_card_bill_not_found');
+        }
+        if ($orders->count() > 1) {
+            throw new RefundImportRowException('reference_number', 'credit_card_bill_ambiguous');
+        }
+
+        /** @var LogisticsOrder $order */
+        $order = $orders->first();
+        if ($order->paypal_account_id !== null && $order->paypal_association_source === 'actual_transaction') {
+            // Independent credit-card imports and PayPal are deliberately two
+            // different financial sources. Do not allow an imported card
+            // refund to be attached to an order already proven to be PayPal.
+            throw new RefundImportRowException('reference_number', 'credit_card_bill_is_paypal_order');
+        }
+
+        $existing = LogisticsCreditCardRefund::query()
+            ->where('logistics_order_id', $order->getKey())
+            ->where('refund_reference', $data['refund_reference'])
+            ->first();
+        $values = [
+            'bill_number' => $data['reference_number'],
+            'refund_amount_usd' => $data['refund_amount_usd'],
+            'refund_reason' => $data['refund_reason'],
+            'last_updated_by' => $actor->getKey(),
+            'last_updated_by_name' => $actor->name,
+            'last_imported_at' => now(),
+        ];
+        if ($existing) {
+            $existing->fill($values)->save();
+
+            return false;
+        }
+
+        LogisticsCreditCardRefund::query()->create([
+            ...$values,
+            'logistics_order_id' => $order->getKey(),
+            'refund_reference' => $data['refund_reference'],
+            'imported_by' => $actor->getKey(),
+            'imported_by_name' => $actor->name,
+        ]);
+
+        return true;
+    }
+
+    /** @param array<int|string,array<string,mixed>> $rows
      * @return array{0:int,1:array<string,string>}
      */
     private function locateHeaders(array $rows): array
@@ -116,51 +181,93 @@ class LogisticsRefundImportService
             }
         }
 
-        throw new RuntimeException('表头必须包含：'.implode('、', array_keys(self::HEADERS)).'。');
-    }
-
-    /** @param array<string, mixed> $row
-     * @param array<string, string> $columns
-     * @return array{refund_number:string,refund_amount_usd:string,refund_type:?string,refund_reason:?string,remark:?string}
-     */
-    private function rowData(array $row, array $columns): array
-    {
-        $refundNumber = $this->text($row[$columns['refund_number']] ?? null);
-        if ($refundNumber === '') {
-            throw new RuntimeException('退款单号不能为空。');
-        }
-
-        $amountText = str_replace([',', '$', '￥', '¥', ' '], '', $this->text($row[$columns['refund_amount_usd']] ?? null));
-        if ($amountText === '' || !is_numeric($amountText)) {
-            throw new RuntimeException('退款金额必须是数字。');
-        }
-        $amount = abs((float) $amountText);
-        if ($amount <= 0) {
-            throw new RuntimeException('退款金额必须大于 0。');
-        }
-
-        return [
-            'refund_number' => $refundNumber,
-            'refund_amount_usd' => number_format($amount, 4, '.', ''),
-            'refund_type' => $this->nullableText($row[$columns['refund_type']] ?? null),
-            'refund_reason' => $this->nullableText($row[$columns['refund_reason']] ?? null),
-            'remark' => $this->nullableText($row[$columns['remark']] ?? null),
-        ];
-    }
-
-    /** @param array<string, mixed> $data */
-    public function fingerprintFor(array $data): string
-    {
-        return hash('sha256', implode('|', [
-            mb_strtolower(trim((string) $data['refund_number'])),
-            number_format((float) $data['refund_amount_usd'], 4, '.', ''),
-            mb_strtolower(trim((string) ($data['refund_type'] ?? ''))),
-            mb_strtolower(trim((string) ($data['refund_reason'] ?? ''))),
-            mb_strtolower(trim((string) ($data['remark'] ?? ''))),
+        throw new RuntimeException(__('logistics.refund_import.errors.headers_required', [
+            'headers' => implode('、', array_keys(self::HEADERS)),
         ]));
     }
 
-    /** @param array<string, mixed> $row */
+    /** @param array<string,mixed> $row
+     * @param array<string,string> $columns
+     * @return array{payment_method:string,reference_number:string,refund_reference:?string,refund_reason:?string,refund_amount_usd:?string}
+     */
+    private function rowData(array $row, array $columns): array
+    {
+        $paymentMethod = $this->paymentMethod($this->text($row[$columns['payment_method']] ?? null));
+        if ($paymentMethod === null) {
+            throw new RefundImportRowException('payment_method', 'payment_method_invalid');
+        }
+
+        $referenceNumber = $this->text($row[$columns['reference_number']] ?? null);
+        if ($referenceNumber === '') {
+            throw new RefundImportRowException('reference_number', 'reference_number_required');
+        }
+
+        $refundReference = $this->nullableText($row[$columns['refund_reference']] ?? null);
+        $amount = $this->nullableAmount($row[$columns['refund_amount_usd']] ?? null);
+        if ($paymentMethod === 'credit_card') {
+            if ($refundReference === null) {
+                throw new RefundImportRowException('refund_reference', 'credit_card_reference_required');
+            }
+            if ($amount === null || (float) $amount <= 0) {
+                throw new RefundImportRowException('refund_amount_usd', 'credit_card_amount_required');
+            }
+        }
+
+        return [
+            'payment_method' => $paymentMethod,
+            'reference_number' => $referenceNumber,
+            'refund_reference' => $refundReference,
+            'refund_reason' => $this->nullableText($row[$columns['refund_reason']] ?? null),
+            'refund_amount_usd' => $amount,
+        ];
+    }
+
+    private function paymentMethod(string $value): ?string
+    {
+        $value = mb_strtolower(trim($value));
+
+        return match ($value) {
+            'paypal' => 'paypal',
+            'credit_card', 'credit card', '信用卡' => 'credit_card',
+            default => null,
+        };
+    }
+
+    /** @param array<string,mixed> $row
+     * @param array<string,string> $columns
+     * @return array<string,mixed>
+     */
+    private function errorRow(int $rowNumber, RefundImportRowException $exception, array $row, array $columns): array
+    {
+        return [
+            ...$this->sourceData($row, $columns),
+            'row' => $rowNumber,
+            'field' => __('logistics.refund_import.error_fields.'.$exception->field),
+            'reason' => __('logistics.refund_import.errors.'.$exception->reason),
+            'hint' => __('logistics.refund_import.hints.'.$exception->reason),
+        ];
+    }
+
+    /** @param array<string,mixed> $row
+     * @param array<string,string> $columns
+     * @return array<string,string>
+     */
+    private function sourceData(array $row, array $columns): array
+    {
+        $data = [];
+        foreach (self::HEADERS as $header => $field) {
+            $data[$field] = $this->text($row[$columns[$field]] ?? null);
+        }
+
+        return $data;
+    }
+
+    public function fingerprintFor(array $data): string
+    {
+        return hash('sha256', implode('|', array_map(static fn (mixed $value): string => mb_strtolower(trim((string) ($value ?? ''))), $data)));
+    }
+
+    /** @param array<string,mixed> $row */
     private function isEmptyRow(array $row): bool
     {
         foreach ($row as $value) {
@@ -179,8 +286,29 @@ class LogisticsRefundImportService
         return $value === '' ? null : $value;
     }
 
+    private function nullableAmount(mixed $value): ?string
+    {
+        $value = str_replace([',', '$', '¥', '￥', ' '], '', $this->text($value));
+        if ($value === '') {
+            return null;
+        }
+        if (!is_numeric($value)) {
+            throw new RefundImportRowException('refund_amount_usd', 'amount_invalid');
+        }
+
+        return number_format((float) $value, 4, '.', '');
+    }
+
     private function text(mixed $value): string
     {
         return trim(preg_replace('/^\xEF\xBB\xBF/', '', (string) ($value ?? '')) ?? '');
+    }
+}
+
+class RefundImportRowException extends RuntimeException
+{
+    public function __construct(public readonly string $field, public readonly string $reason)
+    {
+        parent::__construct($reason);
     }
 }

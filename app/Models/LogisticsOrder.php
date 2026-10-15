@@ -49,7 +49,7 @@ class LogisticsOrder extends Model
         'paid_match_scheduled_at', 'auto_match_paid_completed_at', 'auto_match_fulfillment_scheduled_at',
         'auto_match_fulfillment_completed_at',
         'sku_fingerprint', 'sku_exception_fingerprint',
-        'paypal_account_id',
+        'paypal_account_id', 'paypal_association_source', 'paypal_associated_at',
     ];
 
     public function __construct(array $attributes = [])
@@ -81,6 +81,7 @@ class LogisticsOrder extends Model
                 'auto_match_paid_completed_at' => 'datetime',
                 'auto_match_fulfillment_scheduled_at' => 'datetime',
                 'auto_match_fulfillment_completed_at' => 'datetime',
+                'paypal_associated_at' => 'datetime',
                 'created_at' => 'datetime',
                 'updated_at' => 'datetime',
             ],
@@ -125,6 +126,11 @@ class LogisticsOrder extends Model
     public function paypalDisputes(): HasMany
     {
         return $this->hasMany(LogisticsPayPalDispute::class, 'logistics_order_id');
+    }
+
+    public function creditCardRefunds(): HasMany
+    {
+        return $this->hasMany(LogisticsCreditCardRefund::class, 'logistics_order_id');
     }
 
     /** @return array<string, string> */

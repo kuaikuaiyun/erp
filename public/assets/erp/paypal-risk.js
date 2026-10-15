@@ -3,6 +3,7 @@
 
     var config = window.ErpPayPalRisk || {};
     var routes = config.routes || {};
+    var labels = config.labels || {};
     var state = {
         accountId: null,
         tab: 'overview',
@@ -183,10 +184,10 @@
                 ['product_name', '产品'], ['sku', 'SKU'], ['quantity', '销量'], ['paid_amount', '实收金额'], ['refund_orders', '退款订单'], ['refund_rate', '退款率'], ['dispute_orders', '纠纷订单'], ['dispute_rate', '纠纷率']
             ],
             refunds: [
-                ['refund_id', '退款交易号'], ['order_number', '订单号'], ['store_name', '店铺'], ['source', '来源'], ['amount', '金额'], ['reason', '事件类型'], ['status', '状态'], ['happened_at', '退款时间']
+                ['refund_id', '退款交易号'], ['order_number', '订单号'], ['store_name', '店铺'], ['source', '来源'], ['amount', '金额'], ['source_reason', labels.sourceReason || ''], ['manual_reason', labels.manualReason || ''], ['linked_disputes', labels.linkedDisputes || ''], ['status', '状态'], ['happened_at', '退款时间']
             ],
             disputes: [
-                ['dispute_id', '纠纷编号'], ['order_number', '订单号'], ['store_name', '店铺'], ['amount', '金额'], ['reason', '原因'], ['stage', '阶段'], ['status', '状态'], ['happened_at', '发生时间']
+                ['dispute_id', '纠纷编号'], ['order_number', '订单号'], ['store_name', '店铺'], ['amount', '金额'], ['reason', '原因'], ['stage', '阶段'], ['status', '状态'], ['outcome', labels.outcome || ''], ['seller_response_due_at', labels.sellerResponseDueAt || ''], ['linked_refunds', labels.linkedRefunds || ''], ['updated_at', labels.updatedAt || ''], ['happened_at', '发生时间']
             ]
         }[tab] || [];
         var sorting = state.sorts[tab] || {};
@@ -202,6 +203,8 @@
                 if (key === 'paid_amount' || key === 'amount') value = money(value);
                 if (key === 'refund_rate' || key === 'dispute_rate') value = rate(value);
                 if (key === 'order_number') return '<td>' + orderLink(row) + '</td>';
+                if (key === 'linked_disputes') value = Array.isArray(value) ? value.join('、') : value;
+                if (key === 'linked_refunds') value = Array.isArray(value) ? value.map(function (refund) { return String(refund.refund_id || '') + ' (' + money(refund.amount) + ')'; }).join('、') : value;
                 if (tab === 'products' && key === 'product_name') {
                     var media = row.image_url ? '<img src="' + escapeHtml(row.image_url) + '" alt="">' : '<span class="paypal-risk-product-placeholder"><i class="fa fa-cube"></i></span>';
                     return '<td class="text-left"><div class="paypal-risk-product-cell">' + media + '<span>' + escapeHtml(value) + '</span></div></td>';

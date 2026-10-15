@@ -7,7 +7,6 @@ use App\Models\LogisticsOrderItem;
 use App\Models\LogisticsPayPalAccount;
 use App\Models\LogisticsPayPalDispute;
 use App\Models\LogisticsPayPalRefund;
-use App\Models\LogisticsRefundDetail;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -20,10 +19,10 @@ class PayPalRiskAnalyticsService
     public function summary(LogisticsPayPalAccount $account, array $filters): array
     {
         $orders = $this->orderQuery($account, $filters)
-            ->get(['id', 'store_name', 'paid_amount_usd', 'shopify_refund_amount_usd', 'channel_refund_amount_usd']);
+            ->get(['id', 'store_name', 'paid_amount_usd']);
         $orderIds = $orders->pluck('id')->map(static fn ($id): int => (int) $id)->all();
-        $refundIds = $this->refundOrderIds($orderIds, $orders);
-        $disputeIds = $this->disputeOrderIds($orderIds);
+        $refundIds = $this->refundOrderIds($orderIds, $account);
+        $disputeIds = $this->disputeOrderIds($orderIds, $account);
         $orderCount = count($orderIds);
         $refundCount = count($refundIds);
         $disputeCount = count($disputeIds);
@@ -45,8 +44,9 @@ class PayPalRiskAnalyticsService
             'dispute_order_count' => $disputeCount,
             'refund_rate' => $refundRate,
             'dispute_rate' => $disputeRate,
-            'refund_amount' => $this->canonicalRefundAmount($orderIds, $orders),
+            'refund_amount' => $this->canonicalRefundAmount($orderIds, $account),
             'dispute_amount' => round((float) LogisticsPayPalDispute::query()
+                ->where('logistics_paypal_account_id', $account->getKey())
                 ->whereIn('logistics_order_id', $orderIds)
                 ->sum('dispute_amount_usd'), 2),
             'store_count' => $orders->pluck('store_name')->filter()->unique()->count(),
@@ -104,7 +104,8 @@ class PayPalRiskAnalyticsService
             'orders' => $payload + ['rows' => $this->orderRows($account, $filters, $page, $sort, $direction)],
             'products' => $payload + ['rows' => $this->productRows($account, $filters, $page, $sort, $direction)],
             'refunds' => $payload + ['rows' => $this->paginate($this->sortRows($this->refundRows($account, $filters), $sort, $direction, [
-                'refund_id', 'order_number', 'store_name', 'source', 'amount', 'reason', 'status', 'happened_at',
+                'refund_id', 'order_number', 'store_name', 'source', 'amount', 'reason', 'source_reason', 'manual_reason',
+                'status', 'linked_disputes', 'happened_at',
             ]), $page)],
             'disputes' => $payload + ['rows' => $this->disputeRows($account, $filters, $page, $sort, $direction)],
             default => $payload + $this->overview($account, $filters),
@@ -120,8 +121,8 @@ class PayPalRiskAnalyticsService
             ->orderBy('order_created_at')
             ->get(['id', 'shopify_order_number', 'store_name', 'paid_amount_usd', 'order_created_at']);
         $orderIds = $orders->pluck('id')->map(static fn ($id): int => (int) $id)->all();
-        $refundSet = array_fill_keys($this->refundOrderIds($orderIds), true);
-        $disputeSet = array_fill_keys($this->disputeOrderIds($orderIds), true);
+        $refundSet = array_fill_keys($this->refundOrderIds($orderIds, $account), true);
+        $disputeSet = array_fill_keys($this->disputeOrderIds($orderIds, $account), true);
         $end = $filters['date_to'] !== '' ? Carbon::parse($filters['date_to'])->endOfDay() : now();
         $start = $filters['date_from'] !== '' ? Carbon::parse($filters['date_from'])->startOfDay() : $end->copy()->subDays(29)->startOfDay();
         if ($start->diffInDays($end) > 29) {
@@ -207,17 +208,22 @@ class PayPalRiskAnalyticsService
     private function orderRows(LogisticsPayPalAccount $account, array $filters, int $page, string $sort, string $direction): array
     {
         $orders = $this->orderQuery($account, $filters)
-            ->with(['items:id,logistics_order_id,product_title,variant_title', 'activeRefundDetails:id,logistics_order_id', 'paypalRefunds:id,logistics_order_id', 'paypalDisputes:id,logistics_order_id'])
+            ->with([
+                'items:id,logistics_order_id,product_title,variant_title',
+                'paypalRefunds' => static function ($query) use ($account): void {
+                    $query->where('logistics_paypal_account_id', $account->getKey());
+                },
+                'paypalDisputes' => static function ($query) use ($account): void {
+                    $query->where('logistics_paypal_account_id', $account->getKey());
+                },
+            ])
             ->orderByDesc('order_created_at')
             ->orderByDesc('id')
             ->get();
 
         $rows = $orders->map(static function (LogisticsOrder $order): array {
                 $products = $order->items->map(static fn (LogisticsOrderItem $item): string => trim($item->product_title.' '.$item->variant_title))->filter()->unique()->take(3)->implode('；');
-                $hasRefund = (float) $order->shopify_refund_amount_usd > 0
-                    || (float) $order->channel_refund_amount_usd > 0
-                    || $order->activeRefundDetails->isNotEmpty()
-                    || $order->paypalRefunds->isNotEmpty();
+                $hasRefund = $order->paypalRefunds->isNotEmpty();
 
                 return [
                     'order_id' => (int) $order->getKey(),
@@ -246,13 +252,14 @@ class PayPalRiskAnalyticsService
             ->selectRaw('logistics_order_items.*, logistics_orders.id as risk_order_id, logistics_orders.paid_amount_usd as risk_order_paid_amount')
             ->join('logistics_orders', 'logistics_orders.id', '=', 'logistics_order_items.logistics_order_id')
             ->where('logistics_orders.paypal_account_id', $account->getKey())
+            ->where('logistics_orders.paypal_association_source', 'actual_transaction')
             ->when($filters['date_from'] !== '', fn ($query) => $query->whereDate('logistics_orders.order_created_at', '>=', $filters['date_from']))
             ->when($filters['date_to'] !== '', fn ($query) => $query->whereDate('logistics_orders.order_created_at', '<=', $filters['date_to']))
             ->orderBy('logistics_order_items.id')
             ->get();
         $orderIds = $items->pluck('risk_order_id')->map(static fn ($id): int => (int) $id)->unique()->values()->all();
-        $refundSet = array_fill_keys($this->refundOrderIds($orderIds), true);
-        $disputeSet = array_fill_keys($this->disputeOrderIds($orderIds), true);
+        $refundSet = array_fill_keys($this->refundOrderIds($orderIds, $account), true);
+        $disputeSet = array_fill_keys($this->disputeOrderIds($orderIds, $account), true);
         $groups = [];
         foreach ($items as $item) {
             $key = mb_strtolower(trim((string) $item->product_title)).'|'.mb_strtolower(trim((string) ($item->tongtu_sku ?: $item->shopify_sku)));
@@ -293,51 +300,15 @@ class PayPalRiskAnalyticsService
     private function refundRows(LogisticsPayPalAccount $account, array $filters): array
     {
         $orders = $this->orderQuery($account, $filters)
-            ->with(['paypalRefunds', 'activeRefundDetails'])
-            ->get(['id', 'shopify_order_number', 'store_name', 'shopify_refund_amount_usd', 'channel_refund_amount_usd', 'refunded_at', 'refund_reason']);
+            ->with(['paypalRefunds' => function ($query) use ($account): void {
+                $query->where('logistics_paypal_account_id', $account->getKey())
+                    ->with('disputeLinks.dispute');
+            }])
+            ->get(['id', 'shopify_order_number', 'store_name', 'bill_number']);
         $rows = [];
         foreach ($orders as $order) {
-            if ($order->paypalRefunds->isNotEmpty()) {
-                foreach ($order->paypalRefunds as $refund) {
-                    $rows[] = $this->paypalRefundRow($refund, $order);
-                }
-                continue;
-            }
-            if ($order->activeRefundDetails->isNotEmpty()) {
-                foreach ($order->activeRefundDetails as $refund) {
-                    $rows[] = [
-                        'order_id' => (int) $order->getKey(),
-                        'order_detail_url' => route('logistics.orders.detail', $order),
-                        'refund_id' => (string) $refund->refund_number,
-                        'order_number' => (string) ($order->shopify_order_number ?: '—'),
-                        'store_name' => (string) ($order->store_name ?: '—'),
-                        'source' => '表格导入',
-                        'amount' => round((float) $refund->refund_amount_usd, 2),
-                        'currency' => 'USD',
-                        'reason' => (string) ($refund->refund_reason ?: $refund->refund_type ?: '—'),
-                        'status' => '已登记',
-                        'happened_at' => $this->dateTime($refund->created_at),
-                        'sort_time' => $refund->created_at?->timestamp ?? 0,
-                    ];
-                }
-                continue;
-            }
-            $amount = max((float) $order->shopify_refund_amount_usd, (float) $order->channel_refund_amount_usd);
-            if ($amount > 0) {
-                $rows[] = [
-                    'order_id' => (int) $order->getKey(),
-                    'order_detail_url' => route('logistics.orders.detail', $order),
-                    'refund_id' => 'SHOPIFY-'.$order->getKey(),
-                    'order_number' => (string) ($order->shopify_order_number ?: '—'),
-                    'store_name' => (string) ($order->store_name ?: '—'),
-                    'source' => 'Shopify',
-                    'amount' => round($amount, 2),
-                    'currency' => 'USD',
-                    'reason' => (string) ($order->refund_reason ?: '—'),
-                    'status' => '已退款',
-                    'happened_at' => $this->dateTime($order->refunded_at),
-                    'sort_time' => $order->refunded_at?->timestamp ?? 0,
-                ];
+            foreach ($order->paypalRefunds as $refund) {
+                $rows[] = $this->paypalRefundRow($refund, $order);
             }
         }
 
@@ -364,8 +335,13 @@ class PayPalRiskAnalyticsService
             'source' => 'PayPal',
             'amount' => round((float) ($refund->refund_amount_usd ?? $refund->original_amount), 2),
             'currency' => (string) ($refund->currency_code ?: 'USD'),
-            'reason' => $refund->eventLabel(),
+            'reason' => (string) ($refund->manual_reason ?: $refund->refund_reason ?: $refund->eventLabel()),
+            'source_reason' => (string) ($refund->refund_reason ?: $refund->eventLabel()),
+            'manual_reason' => (string) ($refund->manual_reason ?: ''),
             'status' => $refund->statusLabel(),
+            'linked_disputes' => $refund->disputeLinks
+                ->map(fn ($link): string => (string) ($link->dispute?->dispute_id ?? ''))
+                ->filter()->unique()->values()->all(),
             'happened_at' => $this->dateTime($refund->refunded_at),
             'sort_time' => $refund->refunded_at?->timestamp ?? 0,
         ];
@@ -375,7 +351,7 @@ class PayPalRiskAnalyticsService
     private function disputeRows(LogisticsPayPalAccount $account, array $filters, int $page, string $sort, string $direction): array
     {
         $query = LogisticsPayPalDispute::query()
-            ->with('order:id,shopify_order_number,store_name')
+            ->with(['order:id,shopify_order_number,store_name,bill_number', 'refundLinks.refund'])
             ->where('logistics_paypal_account_id', $account->getKey())
             ->where(function (Builder $query) use ($filters): void {
                 $query->whereHas('order', function (Builder $orders) use ($filters): void {
@@ -400,52 +376,49 @@ class PayPalRiskAnalyticsService
                 'status' => $this->disputeStatus($dispute->status),
                 'happened_at' => $this->dateTime($dispute->dispute_created_at),
                 'updated_at' => $this->dateTime($dispute->dispute_updated_at),
+                'seller_response_due_at' => $this->dateTime($dispute->seller_response_due_at),
+                'outcome' => (string) ($dispute->outcome_code ?: '—'),
+                'linked_refunds' => $dispute->refundLinks->map(fn ($link): array => [
+                    'refund_id' => (string) ($link->refund?->refund_transaction_id ?: '—'),
+                    'amount' => round((float) ($link->refund?->refund_amount_usd ?? $link->refund?->original_amount ?? 0), 2),
+                ])->values()->all(),
             ])->all();
 
         return $this->paginate($this->sortRows($rows, $sort, $direction, [
             'dispute_id', 'order_number', 'store_name', 'amount', 'reason', 'stage', 'status', 'happened_at',
+            'outcome', 'seller_response_due_at', 'updated_at', 'linked_refunds',
         ]), $page);
     }
 
     /** @param list<int> $orderIds
-     *  @param Collection<int,LogisticsOrder>|null $orders
      *  @return list<int>
      */
-    private function refundOrderIds(array $orderIds, ?Collection $orders = null): array
+    private function refundOrderIds(array $orderIds, LogisticsPayPalAccount $account): array
     {
         if ($orderIds === []) {
             return [];
         }
-        $orders ??= LogisticsOrder::query()->whereIn('id', $orderIds)->get(['id', 'shopify_refund_amount_usd', 'channel_refund_amount_usd']);
-        $ids = $orders
-            ->filter(static fn (LogisticsOrder $order): bool => (float) $order->shopify_refund_amount_usd > 0 || (float) $order->channel_refund_amount_usd > 0)
-            ->pluck('id')
-            ->map(static fn ($id): int => (int) $id);
-        $manual = LogisticsRefundDetail::query()
-            ->whereIn('logistics_order_id', $orderIds)
-            ->where('is_void', false)
-            ->distinct()
-            ->pluck('logistics_order_id')
-            ->map(static fn ($id): int => (int) $id);
         $paypal = LogisticsPayPalRefund::query()
+            ->where('logistics_paypal_account_id', $account->getKey())
             ->whereIn('logistics_order_id', $orderIds)
             ->distinct()
             ->pluck('logistics_order_id')
             ->map(static fn ($id): int => (int) $id);
 
-        return $ids->merge($manual)->merge($paypal)->unique()->values()->all();
+        return $paypal->unique()->values()->all();
     }
 
     /** @param list<int> $orderIds
      *  @return list<int>
      */
-    private function disputeOrderIds(array $orderIds): array
+    private function disputeOrderIds(array $orderIds, LogisticsPayPalAccount $account): array
     {
         if ($orderIds === []) {
             return [];
         }
 
         return LogisticsPayPalDispute::query()
+            ->where('logistics_paypal_account_id', $account->getKey())
             ->whereIn('logistics_order_id', $orderIds)
             ->distinct()
             ->pluck('logistics_order_id')
@@ -454,39 +427,20 @@ class PayPalRiskAnalyticsService
             ->all();
     }
 
-    /** @param list<int> $orderIds
-     *  @param Collection<int,LogisticsOrder> $orders
-     */
-    private function canonicalRefundAmount(array $orderIds, Collection $orders): float
+    /** @param list<int> $orderIds */
+    private function canonicalRefundAmount(array $orderIds, LogisticsPayPalAccount $account): float
     {
         if ($orderIds === []) {
             return 0.0;
         }
         $paypal = LogisticsPayPalRefund::query()
+            ->where('logistics_paypal_account_id', $account->getKey())
             ->whereIn('logistics_order_id', $orderIds)
             ->whereNotNull('refund_amount_usd')
             ->selectRaw('logistics_order_id, SUM(refund_amount_usd) as amount')
             ->groupBy('logistics_order_id')
             ->pluck('amount', 'logistics_order_id');
-        $manual = LogisticsRefundDetail::query()
-            ->whereIn('logistics_order_id', $orderIds)
-            ->where('is_void', false)
-            ->selectRaw('logistics_order_id, SUM(refund_amount_usd) as amount')
-            ->groupBy('logistics_order_id')
-            ->pluck('amount', 'logistics_order_id');
-        $amount = 0.0;
-        foreach ($orders as $order) {
-            $id = $order->getKey();
-            if ($paypal->has($id)) {
-                $amount += (float) $paypal[$id];
-            } elseif ($manual->has($id)) {
-                $amount += (float) $manual[$id];
-            } else {
-                $amount += max((float) $order->shopify_refund_amount_usd, (float) $order->channel_refund_amount_usd);
-            }
-        }
-
-        return round($amount, 2);
+        return round((float) $paypal->sum(), 2);
     }
 
     /** @param array{date_from:string,date_to:string} $filters */
@@ -494,6 +448,7 @@ class PayPalRiskAnalyticsService
     {
         $query = LogisticsOrder::query()
             ->where('paypal_account_id', $account->getKey())
+            ->where('paypal_association_source', 'actual_transaction')
             ->where(function (Builder $paid): void {
                 $paid->whereNotNull('paid_at')->orWhere('paid_amount_usd', '>', 0);
             });
@@ -540,6 +495,12 @@ class PayPalRiskAnalyticsService
         usort($rows, static function (array $left, array $right) use ($sort, $direction): int {
             $leftValue = $left[$sort] ?? null;
             $rightValue = $right[$sort] ?? null;
+            if (is_array($leftValue)) {
+                $leftValue = implode('、', array_map(static fn ($value): string => is_array($value) ? implode(' ', $value) : (string) $value, $leftValue));
+            }
+            if (is_array($rightValue)) {
+                $rightValue = implode('、', array_map(static fn ($value): string => is_array($value) ? implode(' ', $value) : (string) $value, $rightValue));
+            }
             $leftBlank = $leftValue === null || $leftValue === '' || $leftValue === '—';
             $rightBlank = $rightValue === null || $rightValue === '' || $rightValue === '—';
             if ($leftBlank !== $rightBlank) {

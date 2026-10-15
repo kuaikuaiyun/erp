@@ -8,6 +8,26 @@
     $riskIcons = ['low' => 'fa-shield', 'medium' => 'fa-exclamation-triangle', 'high' => 'fa-warning'];
     $importLabels = ['never' => '未接收', 'processing' => '处理中', 'success' => '接收成功', 'partial' => '部分完成', 'failed' => '接收失败'];
     $importIcons = ['success' => 'fa-check-circle', 'partial' => 'fa-exclamation-triangle', 'failed' => 'fa-times-circle'];
+    $riskClientConfig = [
+        'routes' => [
+            'store' => route('logistics.paypal-risk.accounts.store'),
+            'update' => route('logistics.paypal-risk.accounts.update', ['account' => '__ID__']),
+            'detail' => route('logistics.paypal-risk.accounts.detail', ['account' => '__ID__']),
+        ],
+        'filters' => [
+            'date_from' => $filters['date_from'],
+            'date_to' => $filters['date_to'],
+        ],
+        'labels' => [
+            'sourceReason' => __('logistics.paypal_risk.ui.source_reason'),
+            'manualReason' => __('logistics.paypal_risk.ui.manual_reason'),
+            'linkedDisputes' => __('logistics.paypal_risk.ui.linked_disputes'),
+            'outcome' => __('logistics.paypal_risk.ui.outcome'),
+            'sellerResponseDueAt' => __('logistics.paypal_risk.ui.seller_response_due_at'),
+            'updatedAt' => __('logistics.paypal_risk.ui.updated_at'),
+            'linkedRefunds' => __('logistics.paypal_risk.ui.linked_refunds'),
+        ],
+    ];
 @endphp
 
 @push('styles')
@@ -38,7 +58,7 @@
         @if($errors->any())
             <div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> {{ $errors->first() }}</div>
         @endif
-        <div class="alert alert-info paypal-risk-passive-note"><i class="fa fa-shield"></i> ERP 已停用 PayPal 直接访问。交易、退款与纠纷数据仅由各 PayPal 账号对应的 Windows VPS 采集，并按 Merchant ID 上传归属。</div>
+        <div class="alert alert-info paypal-risk-passive-note"><i class="fa fa-shield"></i> {{ __('logistics.paypal_risk.ui.passive_note') }}</div>
 
         <div class="paypal-risk-kpis" aria-label="当前筛选概览">
             <article class="paypal-risk-kpi">
@@ -197,7 +217,7 @@
             <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
             <div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title" id="paypal-account-modal-title"><i class="fa fa-paypal"></i> 新增PayPal账号</h4></div>
             <div class="modal-body">
-                <div class="alert alert-info paypal-risk-account-note"><i class="fa fa-info-circle"></i> Merchant ID 为 Windows VPS 上传文件的唯一账号归属依据；收款邮箱仅用于辅助关联已有订单。</div>
+                <div class="alert alert-info paypal-risk-account-note"><i class="fa fa-info-circle"></i> {{ __('logistics.paypal_risk.ui.account_note') }}</div>
                 <div class="row">
                     <div class="form-group col-sm-6"><label for="paypal-account-name">账号名称 <span class="text-red">*</span></label><input id="paypal-account-name" class="form-control" name="account_name" maxlength="191" required placeholder="例如：香港主体PP-01"></div>
                     <div class="form-group col-sm-6"><label for="paypal-account-environment">接口环境 <span class="text-red">*</span></label><select id="paypal-account-environment" class="form-control" name="environment" required><option value="live">Live 正式环境</option><option value="sandbox">Sandbox 测试环境</option></select></div>
@@ -236,15 +256,8 @@
 
 @push('scripts')
     <script>
-        window.ErpPayPalRisk = {
-            routes: {
-                store: @json(route('logistics.paypal-risk.accounts.store')),
-                update: @json(route('logistics.paypal-risk.accounts.update', ['account' => '__ID__'])),
-                detail: @json(route('logistics.paypal-risk.accounts.detail', ['account' => '__ID__']))
-            },
-            filters: @json(['date_from' => $filters['date_from'], 'date_to' => $filters['date_to']])
-        };
+        window.ErpPayPalRisk = @json($riskClientConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/paypal-risk.js?v=20261014-2"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/paypal-risk.js?v=20261014-3"></script>
     <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261014-1"></script>
 @endpush

@@ -14,13 +14,14 @@ use App\Portals\Logistics\LogisticsOrderSpreadsheetService;
 use App\Portals\Logistics\LogisticsPortalService;
 use App\Portals\Logistics\LogisticsRefundImportService;
 use App\Portals\Logistics\LogisticsTongtuAutomationService;
-use App\Portals\Logistics\PayPalOrderAssociationService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
@@ -34,7 +35,6 @@ class LogisticsOrderController extends Controller
         private readonly LogisticsOrderSpreadsheetService $spreadsheets,
         private readonly LogisticsRefundImportService $refundImports,
         private readonly LogisticsTongtuAutomationService $automation,
-        private readonly PayPalOrderAssociationService $paypalAssociations,
     ) {
     }
 
@@ -159,8 +159,6 @@ class LogisticsOrderController extends Controller
         }
 
         $order->fill($data)->save();
-        $this->paypalAssociations->associateOrder($order);
-        $this->refundImports->attachUnmatchedForOrder($order);
         $this->automation->scheduleForOrder($order);
 
         return redirect()
@@ -182,7 +180,7 @@ class LogisticsOrderController extends Controller
                 function (string $attribute, mixed $value, \Closure $fail): void {
                     $extension = strtolower((string) $value->getClientOriginalExtension());
                     if (!in_array($extension, ['xlsx', 'xls', 'csv'], true)) {
-                        $fail('仅支持导入 xlsx、xls、csv 格式。');
+                        $fail(__('logistics.refund_import.errors.file_type'));
                     }
                 },
             ],
@@ -192,17 +190,31 @@ class LogisticsOrderController extends Controller
             $summary = $this->refundImports->import($validated['refund_file'], $context['user']);
         } catch (\Throwable $exception) {
             return $this->indexRedirect($request)
-                ->with('error', '退款订单导入失败：'.$exception->getMessage())
+                ->with('error', __('logistics.refund_import.errors.import_failed', ['message' => $exception->getMessage()]))
                 ->with('logistics_refund_import_failed', true);
         }
 
-        $message = '退款订单导入完成：读取 '.$summary['rows'].' 行，新增 '.$summary['added'].' 条，重复跳过 '
-            .$summary['duplicates'].' 条，匹配 '.$summary['matched'].' 条，未匹配 '.$summary['unmatched'].' 条，无效 '.$summary['invalid'].' 行。';
-        if ($summary['errors'] !== []) {
-            $message .= ' 无效原因：'.implode('；', $summary['errors']);
+        $message = __('logistics.refund_import.messages.completed', [
+            'rows' => $summary['rows'],
+            'paypal_updated' => $summary['paypal_updated'],
+            'credit_card_added' => $summary['credit_card_added'],
+            'credit_card_updated' => $summary['credit_card_updated'],
+            'invalid' => $summary['invalid'],
+        ]);
+        $redirect = $this->indexRedirect($request)->with($summary['invalid'] > 0 ? 'error' : 'success', $message);
+        if ($summary['errors'] === []) {
+            return $redirect;
         }
 
-        return $this->indexRedirect($request)->with($summary['invalid'] > 0 ? 'error' : 'success', $message);
+        $token = (string) Str::uuid();
+        Cache::put($this->refundImportErrorsCacheKey($token), [
+            'actor_id' => (int) $context['user']->getKey(),
+            'errors' => $summary['errors'],
+        ], now()->addHour());
+
+        return $redirect
+            ->with('logistics_refund_import_has_errors', true)
+            ->with('logistics_refund_import_error_report', route('logistics.orders.refund-import-errors', ['token' => $token]));
     }
 
     public function refundImportTemplate(Request $request): Response
@@ -213,6 +225,20 @@ class LogisticsOrderController extends Controller
         }
 
         return $this->spreadsheets->refundImportTemplateResponse();
+    }
+
+    public function refundImportErrors(Request $request, string $token): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        $payload = Cache::get($this->refundImportErrorsCacheKey($token));
+        if (!is_array($payload) || (int) ($payload['actor_id'] ?? 0) !== (int) $context['user']->getKey()) {
+            abort(404);
+        }
+
+        return $this->spreadsheets->refundImportErrorResponse(is_array($payload['errors'] ?? null) ? $payload['errors'] : []);
     }
 
     public function updateRefund(Request $request, LogisticsOrder $order, LogisticsRefundDetail $refund): RedirectResponse
@@ -666,6 +692,11 @@ class LogisticsOrderController extends Controller
     private function contains(string $value): string
     {
         return '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $value).'%';
+    }
+
+    private function refundImportErrorsCacheKey(string $token): string
+    {
+        return 'logistics:refund-import-errors:'.$token;
     }
 
     private function decodePayload(mixed $value): mixed

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class LogisticsPayPalDispute extends Model
 {
@@ -45,5 +46,10 @@ class LogisticsPayPalDispute extends Model
     public function order(): BelongsTo
     {
         return $this->belongsTo(LogisticsOrder::class, 'logistics_order_id');
+    }
+
+    public function refundLinks(): HasMany
+    {
+        return $this->hasMany(LogisticsPayPalDisputeRefund::class, 'logistics_paypal_dispute_id');
     }
 }

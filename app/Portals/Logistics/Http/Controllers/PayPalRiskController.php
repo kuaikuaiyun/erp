@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Models\LogisticsPayPalAccount;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Logistics\LogisticsPortalService;
-use App\Portals\Logistics\PayPalOrderAssociationService;
 use App\Portals\Logistics\PayPalRiskAnalyticsService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -21,7 +20,6 @@ class PayPalRiskController extends Controller
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly LogisticsPortalService $logistics,
-        private readonly PayPalOrderAssociationService $associations,
         private readonly PayPalRiskAnalyticsService $analytics,
     ) {
     }
@@ -90,10 +88,8 @@ class PayPalRiskController extends Controller
             'updated_by' => $context['user']->getKey(),
             'updated_by_name' => $context['user']->name,
         ]);
-        $matched = $this->associations->associateExistingOrders($account);
-
         return $this->indexRedirect($request)
-            ->with('success', 'PayPal账号已新增，并自动关联 '.$matched.' 笔历史订单。');
+            ->with('success', __('logistics.paypal_risk.messages.account_created'));
     }
 
     public function update(Request $request, LogisticsPayPalAccount $account): RedirectResponse
@@ -108,10 +104,8 @@ class PayPalRiskController extends Controller
             'updated_by' => $context['user']->getKey(),
             'updated_by_name' => $context['user']->name,
         ])->save();
-        $matched = $this->associations->associateExistingOrders($account);
-
         return $this->indexRedirect($request)
-            ->with('success', 'PayPal账号已更新，并重新识别 '.$matched.' 笔订单。');
+            ->with('success', __('logistics.paypal_risk.messages.account_updated'));
     }
 
     public function detail(Request $request, LogisticsPayPalAccount $account): Response
@@ -129,7 +123,9 @@ class PayPalRiskController extends Controller
                 '', 'order_number', 'tongtu_order_number', 'store_name', 'products', 'paid_amount',
                 'refund_status', 'dispute_status', 'order_created_at', 'product_name', 'sku', 'quantity',
                 'refund_orders', 'refund_rate', 'dispute_orders', 'dispute_rate', 'refund_id', 'source',
-                'amount', 'reason', 'status', 'happened_at', 'dispute_id', 'stage',
+                'amount', 'reason', 'status', 'happened_at', 'dispute_id', 'stage', 'source_reason',
+                'manual_reason', 'linked_disputes', 'outcome', 'seller_response_due_at', 'linked_refunds',
+                'updated_at',
             ])],
             'direction' => ['nullable', Rule::in(['', 'asc', 'desc'])],
         ]);

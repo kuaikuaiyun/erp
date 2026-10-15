@@ -19,9 +19,7 @@ class ShopifyOrderSyncService
     public function __construct(
         private readonly LogisticsProfitCalculator $profitCalculator,
         private readonly LogisticsOrderItemService $items,
-        private readonly LogisticsRefundImportService $refunds,
         private readonly LogisticsTongtuAutomationService $automation,
-        private readonly PayPalOrderAssociationService $paypalAssociations,
     )
     {
     }
@@ -462,9 +460,7 @@ GRAPHQL, [
         ]);
         $this->profitCalculator->recalculate($current);
         $current->save();
-        $this->paypalAssociations->associateOrder($current);
         $this->items->syncFromShopifyPayload($current, $payload);
-        $this->refunds->attachUnmatchedForOrder($current);
         $this->automation->scheduleForOrder($current);
 
         return [

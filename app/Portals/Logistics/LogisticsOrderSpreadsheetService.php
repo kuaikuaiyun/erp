@@ -145,9 +145,15 @@ class LogisticsOrderSpreadsheetService
         return response()->streamDownload(function (): void {
             $spreadsheet = new Spreadsheet();
             $sheet = $spreadsheet->getActiveSheet();
-            $sheet->setTitle('退款订单导入模板');
-            $headers = ['退款单号', '退款金额', '退款类型', '退款原因', '备注'];
-            $widths = [26, 16, 18, 32, 32];
+            $sheet->setTitle(__('logistics.refund_import.template.sheet_name'));
+            $headers = [
+                __('logistics.refund_import.headers.payment_method'),
+                __('logistics.refund_import.headers.reference_number'),
+                __('logistics.refund_import.headers.refund_reference'),
+                __('logistics.refund_import.headers.refund_reason'),
+                __('logistics.refund_import.headers.refund_amount_usd'),
+            ];
+            $widths = [16, 28, 28, 36, 16];
 
             foreach ($headers as $index => $header) {
                 $column = Coordinate::stringFromColumnIndex($index + 1);
@@ -166,16 +172,15 @@ class LogisticsOrderSpreadsheetService
                 ->setVertical(Alignment::VERTICAL_CENTER);
 
             $instructions = $spreadsheet->createSheet();
-            $instructions->setTitle('填写说明');
+            $instructions->setTitle(__('logistics.refund_import.template.instructions_sheet'));
             $instructionRows = [
-                ['项目', '说明'],
-                ['退款单号', '必填；用于匹配物流订单中的账单号。'],
-                ['退款金额', '必填；请填写已换算为 USD 的数值，可包含小数。'],
-                ['退款类型', '可选；保留原始业务分类。'],
-                ['退款原因', '可选；填写实际退款原因。'],
-                ['备注', '可选；填写需要补充的信息。'],
-                ['重复规则', '完全相同的退款明细会自动跳过；同一退款单号允许多次退款并累计金额。'],
-                ['利润规则', '本次导入的实际退款金额暂不参与利润计算。'],
+                [__('logistics.refund_import.template.item'), __('logistics.refund_import.template.description')],
+                [__('logistics.refund_import.headers.payment_method'), __('logistics.refund_import.template.payment_method')],
+                [__('logistics.refund_import.headers.reference_number'), __('logistics.refund_import.template.reference_number')],
+                [__('logistics.refund_import.headers.refund_reference'), __('logistics.refund_import.template.refund_reference')],
+                [__('logistics.refund_import.headers.refund_reason'), __('logistics.refund_import.template.refund_reason')],
+                [__('logistics.refund_import.headers.refund_amount_usd'), __('logistics.refund_import.template.refund_amount_usd')],
+                [__('logistics.refund_import.template.overwrite_rule'), __('logistics.refund_import.template.overwrite_rule_description')],
             ];
             foreach ($instructionRows as $rowIndex => $row) {
                 $excelRow = $rowIndex + 1;
@@ -191,7 +196,58 @@ class LogisticsOrderSpreadsheetService
 
             (new Xlsx($spreadsheet))->save('php://output');
             $spreadsheet->disconnectWorksheets();
-        }, '退款订单导入模板.xlsx', [
+        }, __('logistics.refund_import.template.filename'), [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
+    }
+
+    /** @param list<array<string,mixed>> $errors */
+    public function refundImportErrorResponse(array $errors): StreamedResponse
+    {
+        return response()->streamDownload(function () use ($errors): void {
+            $spreadsheet = new Spreadsheet();
+            $sheet = $spreadsheet->getActiveSheet();
+            $sheet->setTitle(__('logistics.refund_import.error_report.sheet_name'));
+            $headers = [
+                __('logistics.refund_import.headers.payment_method'),
+                __('logistics.refund_import.headers.reference_number'),
+                __('logistics.refund_import.headers.refund_reference'),
+                __('logistics.refund_import.headers.refund_reason'),
+                __('logistics.refund_import.headers.refund_amount_usd'),
+                __('logistics.refund_import.error_report.row'),
+                __('logistics.refund_import.error_report.field'),
+                __('logistics.refund_import.error_report.reason'),
+                __('logistics.refund_import.error_report.hint'),
+            ];
+            $widths = [16, 28, 28, 34, 16, 12, 18, 36, 54];
+            foreach ($headers as $index => $header) {
+                $column = Coordinate::stringFromColumnIndex($index + 1);
+                $sheet->setCellValueExplicit($column.'1', $header, DataType::TYPE_STRING);
+                $sheet->getColumnDimension($column)->setWidth($widths[$index]);
+            }
+            foreach ($errors as $index => $error) {
+                $values = [
+                    $error['payment_method'] ?? '', $error['reference_number'] ?? '', $error['refund_reference'] ?? '',
+                    $error['refund_reason'] ?? '', $error['refund_amount_usd'] ?? '', $error['row'] ?? '',
+                    $error['field'] ?? '', $error['reason'] ?? '', $error['hint'] ?? '',
+                ];
+                foreach ($values as $columnIndex => $value) {
+                    $sheet->setCellValueExplicit(
+                        Coordinate::stringFromColumnIndex($columnIndex + 1).($index + 2),
+                        (string) $value,
+                        DataType::TYPE_STRING,
+                    );
+                }
+            }
+            $lastColumn = Coordinate::stringFromColumnIndex(count($headers));
+            $sheet->freezePane('A2');
+            $sheet->setAutoFilter("A1:{$lastColumn}1");
+            $sheet->getStyle("A1:{$lastColumn}1")->getFont()->setBold(true)->getColor()->setRGB('FFFFFF');
+            $sheet->getStyle("A1:{$lastColumn}1")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('D9534F');
+            $sheet->getStyle("A1:{$lastColumn}".max(1, count($errors) + 1))->getAlignment()->setVertical(Alignment::VERTICAL_CENTER)->setWrapText(true);
+            (new Xlsx($spreadsheet))->save('php://output');
+            $spreadsheet->disconnectWorksheets();
+        }, __('logistics.refund_import.error_report.filename'), [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);
     }

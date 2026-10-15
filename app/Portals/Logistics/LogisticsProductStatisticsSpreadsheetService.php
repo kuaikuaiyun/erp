@@ -18,20 +18,22 @@ class LogisticsProductStatisticsSpreadsheetService
     private static function columns(): array
     {
         return [
-            ['层级', 'level', self::TYPE_TEXT, 12],
             [__('logistics.product_statistics.headers.product'), 'name', self::TYPE_TEXT, 30],
-            ['SKU', 'sku', self::TYPE_TEXT, 30],
+            ['SKU', 'sku', self::TYPE_TEXT, 28],
             [__('logistics.product_statistics.headers.stores'), 'stores', self::TYPE_TEXT, 24],
             [__('logistics.product_statistics.headers.sales'), 'sales', self::TYPE_TEXT, 15],
             [__('logistics.product_statistics.headers.revenue'), 'revenue', self::TYPE_MONEY, 18],
             [__('logistics.product_statistics.headers.cost'), 'cost', self::TYPE_MONEY, 18],
-            [__('logistics.product_statistics.headers.fees'), 'fees', self::TYPE_MONEY, 20],
-            [__('logistics.product_statistics.headers.refunds'), 'refunds', self::TYPE_MONEY, 17],
-            [__('logistics.product_statistics.ui.actual_refunds'), 'actual_refunds', self::TYPE_MONEY, 18],
-            [__('logistics.product_statistics.ui.actual_refund_count'), 'actual_refund_count', self::TYPE_TEXT, 16],
-            [__('logistics.product_statistics.headers.profit'), 'profit', self::TYPE_MONEY, 17],
-            [__('logistics.product_statistics.headers.profit_rate'), 'profit_rate', self::TYPE_RATE, 14],
-            [__('logistics.product_statistics.headers.refund_rate'), 'refund_rate', self::TYPE_RATE, 14],
+            [__('logistics.product_statistics.headers.fees'), 'fees', self::TYPE_MONEY, 18],
+            [__('logistics.product_statistics.headers.paypal_refund_amount'), 'paypal_refund_amount', self::TYPE_MONEY, 20],
+            [__('logistics.product_statistics.headers.paypal_refund_rate'), 'paypal_refund_rate', self::TYPE_RATE, 18],
+            [__('logistics.product_statistics.headers.paypal_dispute_count'), 'paypal_dispute_count', self::TYPE_TEXT, 19],
+            [__('logistics.product_statistics.headers.paypal_dispute_rate'), 'paypal_dispute_rate', self::TYPE_RATE, 18],
+            [__('logistics.product_statistics.headers.credit_card_refund_amount'), 'credit_card_refund_amount', self::TYPE_MONEY, 21],
+            [__('logistics.product_statistics.headers.credit_card_refund_rate'), 'credit_card_refund_rate', self::TYPE_RATE, 19],
+            [__('logistics.product_statistics.headers.combined_refund_rate'), 'combined_refund_rate', self::TYPE_RATE, 18],
+            [__('logistics.product_statistics.headers.profit'), 'actual_profit', self::TYPE_MONEY, 18],
+            [__('logistics.product_statistics.headers.profit_rate'), 'profit_rate', self::TYPE_RATE, 15],
             [__('logistics.product_statistics.headers.decision'), 'decision', self::TYPE_TEXT, 16],
         ];
     }
@@ -44,32 +46,27 @@ class LogisticsProductStatisticsSpreadsheetService
         return $this->streamedWriter->response(
             __('logistics.product_statistics.title').'_'.now('Asia/Shanghai')->format('Ymd-His').'.xlsx',
             __('logistics.product_statistics.title'),
-            array_map(static fn (array $column): array => [
-                'label' => $column[0],
-                'width' => $column[3],
-            ], $columns),
+            array_map(static fn (array $column): array => ['label' => $column[0], 'width' => $column[3]], $columns),
             function () use ($products, $columns): iterable {
                 foreach ($products as $product) {
-                    yield $this->excelRow($this->parentRow($product), $columns, 'parent');
-                    foreach ($product['variants'] as $variant) {
-                        yield $this->excelRow($this->variantRow($variant), $columns, 'variant');
-                    }
+                    yield $this->excelRow($this->productRow($product), $columns);
                 }
             },
             false,
         );
     }
 
-    /** @param array<string,mixed> $values
+    /**
+     * @param array<string,mixed> $values
      * @param list<array{0:string,1:string,2:string,3:float|int}> $columns
      * @return array{kind:string,height:int,outline:int,cells:list<array{value:mixed,type:string,align:string,wrap:bool}>}
      */
-    private function excelRow(array $values, array $columns, string $kind): array
+    private function excelRow(array $values, array $columns): array
     {
         return [
-            'kind' => $kind,
-            'height' => $kind === 'variant' ? 34 : 42,
-            'outline' => $kind === 'variant' ? 1 : 0,
+            'kind' => 'parent',
+            'height' => 42,
+            'outline' => 0,
             'cells' => array_map(static function (array $column) use ($values): array {
                 [, $field, $type] = $column;
                 $value = $values[$field] ?? null;
@@ -87,48 +84,26 @@ class LogisticsProductStatisticsSpreadsheetService
     /** @param array<string,mixed> $product
      * @return array<string,mixed>
      */
-    private function parentRow(array $product): array
+    private function productRow(array $product): array
     {
         return [
-            'level' => '主产品',
-            'name' => (string) $product['name']."\n".(string) $product['category'],
+            'name' => (string) $product['name'],
             'sku' => (string) $product['sku'],
             'stores' => implode('、', $product['stores']),
             'sales' => $product['sales'],
             'revenue' => $product['revenue'],
             'cost' => $product['cost'],
             'fees' => (float) $product['shipping'] + (float) $product['handling'],
-            'refunds' => $product['refunds'],
-            'actual_refunds' => $product['actual_refunds'],
-            'actual_refund_count' => $product['actual_refund_count'],
-            'profit' => $product['profit'],
+            'paypal_refund_amount' => $product['paypal_refund_amount'],
+            'paypal_refund_rate' => $product['paypal_refund_rate'],
+            'paypal_dispute_count' => $product['paypal_dispute_count'],
+            'paypal_dispute_rate' => $product['paypal_dispute_rate'],
+            'credit_card_refund_amount' => $product['credit_card_refund_amount'],
+            'credit_card_refund_rate' => $product['credit_card_refund_rate'],
+            'combined_refund_rate' => $product['combined_refund_rate'],
+            'actual_profit' => $product['actual_profit'],
             'profit_rate' => $product['profit_rate'],
-            'refund_rate' => $product['refund_rate'],
             'decision' => $this->decisionLabel((string) $product['decision']),
-        ];
-    }
-
-    /** @param array<string,mixed> $variant
-     * @return array<string,mixed>
-     */
-    private function variantRow(array $variant): array
-    {
-        return [
-            'level' => '关联变体',
-            'name' => (string) $variant['name']."\n".__('logistics.product_statistics.ui.ordered_variant'),
-            'sku' => (string) $variant['sku'],
-            'stores' => __('logistics.product_statistics.ui.ordered_variant'),
-            'sales' => $variant['sales'],
-            'revenue' => $variant['revenue'],
-            'cost' => $variant['cost'],
-            'fees' => (float) $variant['shipping'] + (float) $variant['handling'],
-            'refunds' => $variant['refunds'],
-            'actual_refunds' => $variant['actual_refunds'],
-            'actual_refund_count' => $variant['actual_refund_count'],
-            'profit' => $variant['profit'],
-            'profit_rate' => $variant['profit_rate'],
-            'refund_rate' => $variant['refund_rate'],
-            'decision' => __('logistics.common.not_available'),
         ];
     }
 
