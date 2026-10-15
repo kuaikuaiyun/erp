@@ -43,7 +43,7 @@ return [
         'package_width_cm' => '包装宽度',
         'package_height_cm' => '包装高度',
         'warehouse_acceptance_result' => '验收结果',
-        'warehouse_confirmation' => '仓库确认',
+        'warehouse_reject_reason' => '驳回原因',
         'warehouse_remark' => '仓库备注',
         'warehouse_images' => '首件 / 包装图',
         'warehouse_images.*' => '首件 / 包装图',

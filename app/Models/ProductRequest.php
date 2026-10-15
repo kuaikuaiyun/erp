@@ -18,8 +18,11 @@ class ProductRequest extends Model
 
     public const WAREHOUSE_PENDING_REVIEW = 'pending_review';
     public const WAREHOUSE_PASSED = 'passed';
-    public const WAREHOUSE_CONFIRMED = 'confirmed';
-    public const WAREHOUSE_RETURN_FOR_SUPPLEMENT = 'return_for_supplement';
+    public const WAREHOUSE_REJECTED = 'rejected';
+
+    public const WAREHOUSE_REJECT_REASON_QUALITY = 'quality';
+    public const WAREHOUSE_REJECT_REASON_WEIGHT = 'weight';
+    public const WAREHOUSE_REJECT_REASON_BOTH = 'both';
 
     protected $guarded = [];
 

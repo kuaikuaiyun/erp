@@ -39,7 +39,7 @@
 .product-request-badge.status-pending, .product-request-badge.warehouse-pending_review { color: #915f0a; border-color: #d39b39; background: #fff1cc; }
 .product-request-badge.status-inspection_passed, .product-request-badge.review-pending { color: #176a9b; border-color: #4b9dcc; background: #e5f4fc; }
 .product-request-badge.status-approved, .product-request-badge.review-approved, .product-request-badge.warehouse-passed, .product-request-badge.confirmation-confirmed { color: #1e7749; border-color: #4daa76; background: #e4f6eb; }
-.product-request-badge.review-rejected, .product-request-badge.confirmation-return_for_supplement { color: #a52f39; border-color: #d67279; background: #fdebed; }
+.product-request-badge.review-rejected, .product-request-badge.warehouse-rejected, .product-request-badge.confirmation-return_for_supplement { color: #a52f39; border-color: #d67279; background: #fdebed; }
 .product-request-badge.review-unfilled { color: #586c80; border-color: #97a8b8; background: #edf2f6; }
 .product-request-ellipsis { max-width: 300px !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .product-request-empty { padding: 42px 15px !important; color: #84909d !important; text-align: center; }
@@ -255,6 +255,7 @@ body.product-request-lightbox-open { overflow: hidden; }
 .product-request-review-remark { margin-top: 12px; padding-top: 10px; border-top: 1px solid #edf1f5; }
 .product-request-table .product-request-remark-cell { min-width: 200px; max-width: 280px; }
 .product-request-remark-text { display: block; color: #8a4b52; font-size: 12px; line-height: 1.55; word-break: break-word; }
+.product-request-warehouse-reject-reason { display: block; margin-top: 4px; color: #a52f39; font-size: 12px; font-weight: 600; line-height: 1.5; white-space: normal; }
 .product-request-sku-builder { display: flex; flex-direction: column; gap: 8px; }
 .product-request-sku-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .product-request-sku-row .form-control { flex: 1 1 170px; min-width: 140px; }

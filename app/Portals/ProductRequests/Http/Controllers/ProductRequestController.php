@@ -167,7 +167,7 @@ class ProductRequestController extends Controller
             'statusLabels' => $this->statusLabels(),
             'reviewStatusLabels' => $this->reviewStatusLabels(),
             'warehouseResultLabels' => $this->warehouseResultLabels(),
-            'warehouseConfirmationLabels' => $this->warehouseConfirmationLabels(),
+            'warehouseRejectReasonLabels' => $this->warehouseRejectReasonLabels(),
         ];
 
         if ($this->isModalRequest($request)) {
@@ -301,6 +301,8 @@ class ProductRequestController extends Controller
             'filters' => $filters,
             'canInspect' => $this->access->canInspectProcurement($context['user']),
             'statusLabels' => $this->statusLabels(),
+            'warehouseResultLabels' => $this->warehouseResultLabels(),
+            'warehouseRejectReasonLabels' => $this->warehouseRejectReasonLabels(),
         ]);
     }
 
@@ -314,6 +316,8 @@ class ProductRequestController extends Controller
         abort_unless($this->access->canViewProcurementRequest($productRequest, $context['user']), 403);
         // 已检验通过的记录允许再次编辑（覆盖保存）
         abort_unless(in_array($productRequest->status, [ProductRequest::STATUS_PENDING, ProductRequest::STATUS_INSPECTION_PASSED], true), 403);
+        // 检验通过且仓库审核已通过的记录不允许再修改
+        abort_if($productRequest->status === ProductRequest::STATUS_INSPECTION_PASSED && $productRequest->warehouse_acceptance_result === ProductRequest::WAREHOUSE_PASSED, 403);
 
         if (!$this->isModalRequest($request)) {
             return redirect()->route('product-requests.procurement.index');
@@ -345,6 +349,8 @@ class ProductRequestController extends Controller
             abort_unless($this->access->canViewProcurementRequest($locked, $context['user']), 403);
             // 允许已检验通过的记录再次编辑，第二次保存覆盖第一次结果
             abort_unless(in_array($locked->status, [ProductRequest::STATUS_PENDING, ProductRequest::STATUS_INSPECTION_PASSED], true), 403);
+            // 检验通过且仓库审核已通过的记录不允许再修改
+            abort_if($locked->status === ProductRequest::STATUS_INSPECTION_PASSED && $locked->warehouse_acceptance_result === ProductRequest::WAREHOUSE_PASSED, 403);
 
             $normalizedUrl = $this->workflow->normalizeSupplierUrl($data['supplier_url']);
             $linkHash = $this->workflow->supplierUrlHash($normalizedUrl);
@@ -381,6 +387,14 @@ class ProductRequestController extends Controller
                     $this->workflow->copyStageAttachments($source, $locked, ProductRequestAttachment::STAGE_PROCUREMENT, $context['user']);
                     $locked->forceFill(['reused_from_product_request_id' => $source->getKey()])->save();
                 }
+            }
+
+            // 仓库验收不通过后，采购重新检验通过即重新进入仓库验收流程
+            if ($locked->warehouse_acceptance_result === ProductRequest::WAREHOUSE_REJECTED) {
+                $locked->forceFill([
+                    'warehouse_acceptance_result' => ProductRequest::WAREHOUSE_PENDING_REVIEW,
+                    'warehouse_reject_reason' => null,
+                ])->save();
             }
 
             $this->workflow->log($locked, 'procurement_inspection_passed', $context['user'], [
@@ -576,7 +590,7 @@ class ProductRequestController extends Controller
                 },
             ],
         ]);
-        $data['remark'] = $this->sanitizeReviewRemark($data['remark'] ?? null);
+        $data['remark'] = $this->sanitizeRichRemark($data['remark'] ?? null);
         $connection = config('admin.database.connection') ?: config('database.default');
 
         DB::connection($connection)->transaction(function () use ($productRequest, $data, $context): void {
@@ -637,8 +651,8 @@ class ProductRequestController extends Controller
         ]);
     }
 
-    /** 审核备注允许富文本（含图片），此处仅保留白名单标签并清理事件属性 */
-    private function sanitizeReviewRemark(?string $html): ?string
+    /** 富文本备注允许（含图片），此处仅保留白名单标签并清理事件属性 */
+    private function sanitizeRichRemark(?string $html): ?string
     {
         $html = trim((string) $html);
         if ($html === '') {
@@ -686,7 +700,7 @@ class ProductRequestController extends Controller
             'requests' => $requests,
             'filters' => $filters,
             'warehouseResultLabels' => $this->warehouseResultLabels(),
-            'warehouseConfirmationLabels' => $this->warehouseConfirmationLabels(),
+            'warehouseRejectReasonLabels' => $this->warehouseRejectReasonLabels(),
         ]);
     }
 
@@ -716,6 +730,7 @@ class ProductRequestController extends Controller
             return $context;
         }
         abort_unless(in_array($productRequest->status, [ProductRequest::STATUS_INSPECTION_PASSED, ProductRequest::STATUS_APPROVED], true), 403);
+        abort_if($productRequest->warehouse_acceptance_result === ProductRequest::WAREHOUSE_PASSED, 403);
 
         if (!$this->isModalRequest($request)) {
             return redirect()->route('product-requests.warehouse.index');
@@ -727,8 +742,7 @@ class ProductRequestController extends Controller
             ...$this->viewContext($context),
             'productRequest' => $productRequest,
             'actor' => $this->access->actorSnapshot($context['user']),
-            'warehouseResultLabels' => $this->warehouseResultLabels(),
-            'warehouseConfirmationLabels' => $this->warehouseConfirmationLabels(),
+            'warehouseRejectReasonLabels' => $this->warehouseRejectReasonLabels(),
         ]);
     }
 
@@ -740,15 +754,24 @@ class ProductRequestController extends Controller
         }
 
         $data = $this->validateWarehouseData($request, $productRequest);
+        $rejected = $data['result'] === ProductRequest::WAREHOUSE_REJECTED;
         $connection = config('admin.database.connection') ?: config('database.default');
 
-        DB::connection($connection)->transaction(function () use ($productRequest, $data, $request, $context): void {
+        DB::connection($connection)->transaction(function () use ($productRequest, $data, $request, $context, $rejected): void {
             $locked = ProductRequest::query()->lockForUpdate()->findOrFail($productRequest->getKey());
             abort_unless(in_array($locked->status, [ProductRequest::STATUS_INSPECTION_PASSED, ProductRequest::STATUS_APPROVED], true), 403);
+            abort_if($locked->warehouse_acceptance_result === ProductRequest::WAREHOUSE_PASSED, 403);
             $actor = $this->access->actorSnapshot($context['user']);
             unset($data['warehouse_images']);
+            $result = $data['result'];
+            $rejectReason = $rejected ? ($data['warehouse_reject_reason'] ?? null) : null;
+            unset($data['result'], $data['warehouse_reject_reason']);
             $locked->fill([
                 ...$data,
+                'warehouse_acceptance_result' => $result,
+                'warehouse_reject_reason' => $rejectReason,
+                // 审核不通过时回退到检验通过，商品信息检验可修改后重新提交审核
+                'status' => $rejected ? ProductRequest::STATUS_INSPECTION_PASSED : $locked->status,
                 'warehouse_operator_id' => $actor['user_id'],
                 'warehouse_operator_name' => $actor['user_name'],
                 'warehouse_operator_department_name' => $actor['department_name'],
@@ -759,14 +782,40 @@ class ProductRequestController extends Controller
             if ($warehouseImages !== []) {
                 $this->workflow->replaceStageAttachments($locked, ProductRequestAttachment::STAGE_WAREHOUSE, $warehouseImages, $context['user']);
             }
-            $this->workflow->log($locked, 'warehouse_processed', $context['user']);
+            $this->workflow->log($locked, $rejected ? 'warehouse_rejected' : 'warehouse_passed', $context['user'], [
+                'warehouse_reject_reason' => $rejectReason,
+            ]);
         });
 
         return $this->modalSuccess(
             $request,
-            __('product_requests.messages.warehouse_completed'),
+            $rejected
+                ? __('product_requests.messages.warehouse_rejected')
+                : __('product_requests.messages.warehouse_passed'),
             'product-requests.warehouse.index',
         );
+    }
+
+    public function warehouseImageStore(Request $request, ProductRequest $productRequest): JsonResponse|Response
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::WAREHOUSE_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $data = $request->validate([
+            'image' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+        ]);
+        $attachment = $this->workflow->storeStageAttachment(
+            $productRequest,
+            ProductRequestAttachment::STAGE_WAREHOUSE_REMARK,
+            $data['image'],
+            $context['user'],
+        );
+
+        return response()->json([
+            'url' => route('product-requests.attachments.show', [$productRequest, $attachment]),
+        ]);
     }
 
     public function attachment(Request $request, ProductRequest $productRequest, ProductRequestAttachment $attachment): Response
@@ -967,18 +1016,32 @@ class ProductRequestController extends Controller
     private function validateWarehouseData(Request $request, ProductRequest $productRequest): array
     {
         $warehouseImages = $productRequest->loadMissing('attachments')->attachmentsFor(ProductRequestAttachment::STAGE_WAREHOUSE);
+        $rejected = $request->input('result') === ProductRequest::WAREHOUSE_REJECTED;
 
-        return $request->validate([
+        $data = $request->validate([
+            'result' => ['required', Rule::in([ProductRequest::WAREHOUSE_PASSED, ProductRequest::WAREHOUSE_REJECTED])],
             'actual_shipping_weight_g' => ['required', 'string', 'max:100'],
             'package_length_cm' => ['nullable', 'string', 'max:100', 'required_with:package_width_cm,package_height_cm'],
             'package_width_cm' => ['nullable', 'string', 'max:100', 'required_with:package_length_cm,package_height_cm'],
             'package_height_cm' => ['nullable', 'string', 'max:100', 'required_with:package_length_cm,package_width_cm'],
-            'warehouse_acceptance_result' => ['required', Rule::in(array_keys($this->warehouseResultLabels()))],
-            'warehouse_confirmation' => ['required', Rule::in(array_keys($this->warehouseConfirmationLabels()))],
-            'warehouse_remark' => [Rule::requiredIf($request->input('warehouse_confirmation') === ProductRequest::WAREHOUSE_RETURN_FOR_SUPPLEMENT), 'nullable', 'string', 'max:2000'],
+            'warehouse_reject_reason' => [Rule::requiredIf($rejected), 'nullable', Rule::in(array_keys($this->warehouseRejectReasonLabels()))],
+            'warehouse_remark' => [
+                Rule::requiredIf($rejected),
+                'nullable',
+                'string',
+                'max:20000',
+                function (string $attribute, mixed $value, \Closure $fail) use ($rejected): void {
+                    if ($rejected && $this->remarkIsEmpty($value)) {
+                        $fail(__('product_requests.warehouse.remark_required_hint'));
+                    }
+                },
+            ],
             'warehouse_images' => [$warehouseImages->isEmpty() ? 'required' : 'nullable', 'array', 'max:3'],
             'warehouse_images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
         ]);
+        $data['warehouse_remark'] = $this->sanitizeRichRemark($data['warehouse_remark'] ?? null);
+
+        return $data;
     }
 
     /** @return array<string, string> */
@@ -1008,15 +1071,17 @@ class ProductRequestController extends Controller
         return [
             ProductRequest::WAREHOUSE_PENDING_REVIEW => __('product_requests.warehouse_result.pending_review'),
             ProductRequest::WAREHOUSE_PASSED => __('product_requests.warehouse_result.passed'),
+            ProductRequest::WAREHOUSE_REJECTED => __('product_requests.warehouse_result.rejected'),
         ];
     }
 
     /** @return array<string, string> */
-    private function warehouseConfirmationLabels(): array
+    private function warehouseRejectReasonLabels(): array
     {
         return [
-            ProductRequest::WAREHOUSE_CONFIRMED => __('product_requests.warehouse_confirmation.confirmed'),
-            ProductRequest::WAREHOUSE_RETURN_FOR_SUPPLEMENT => __('product_requests.warehouse_confirmation.return_for_supplement'),
+            ProductRequest::WAREHOUSE_REJECT_REASON_QUALITY => __('product_requests.warehouse_reason.quality'),
+            ProductRequest::WAREHOUSE_REJECT_REASON_WEIGHT => __('product_requests.warehouse_reason.weight'),
+            ProductRequest::WAREHOUSE_REJECT_REASON_BOTH => __('product_requests.warehouse_reason.both'),
         ];
     }
 

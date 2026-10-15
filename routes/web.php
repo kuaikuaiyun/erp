@@ -64,6 +64,7 @@ Route::post('/placement-reviews/{productRequest}/images', [ProductRequestControl
 Route::get('/warehouse-acceptances', [ProductRequestController::class, 'warehouseIndex'])->name('product-requests.warehouse.index');
 Route::get('/warehouse-acceptances/{productRequest}/edit', [ProductRequestController::class, 'warehouseEdit'])->name('product-requests.warehouse.edit');
 Route::put('/warehouse-acceptances/{productRequest}', [ProductRequestController::class, 'warehouseUpdate'])->name('product-requests.warehouse.update');
+Route::post('/warehouse-acceptances/{productRequest}/images', [ProductRequestController::class, 'warehouseImageStore'])->name('product-requests.warehouse.images.store');
 Route::get('/shopify-stores', [ShopifyStoreController::class, 'index'])->name('logistics.shopify-stores.index');
 Route::post('/shopify-stores/batch-sync', [ShopifyStoreController::class, 'batchSync'])->name('logistics.shopify-stores.batch-sync');
 Route::post('/shopify-stores/batch-register-webhooks', [ShopifyStoreController::class, 'batchRegisterWebhooks'])->name('logistics.shopify-stores.batch-register-webhooks');

@@ -109,7 +109,12 @@ return [
         'weight_difference' => '实际－预估',
         'weight_difference_hint' => '根据实测发货重量与采购预估发货重量自动显示。',
         'image_hint' => '必填，最多 3 张。',
-        'return_remark_hint' => '选择退回补充时，备注为必填。',
+        'pass' => '审核通过',
+        'reject' => '审核不通过',
+        'reject_reason' => '驳回原因',
+        'reject_reason_hint' => '选择审核不通过时，驳回原因与备注为必填。',
+        'remark_required_hint' => '选择审核不通过时，备注为必填。',
+        'remark_hint' => '支持加粗、列表等格式；可直接粘贴截图（Ctrl+V），或点击工具栏图片按钮插入图片。',
     ],
     'show' => [
         'title' => '需求详情',
@@ -189,7 +194,7 @@ return [
         'warehouse_images' => '首件 / 包装图',
         'warehouse_acceptance_result' => '验收结果',
         'warehouse_operator' => '仓库负责人',
-        'warehouse_confirmation' => '仓库确认',
+        'warehouse_reject_reason' => '驳回原因',
         'warehouse_remark' => '备注',
         'review_remark' => '审核备注',
     ],
@@ -258,11 +263,13 @@ return [
     ],
     'warehouse_result' => [
         'pending_review' => '待审核',
-        'passed' => '通过',
+        'passed' => '审核通过',
+        'rejected' => '审核不通过',
     ],
-    'warehouse_confirmation' => [
-        'confirmed' => '已确认',
-        'return_for_supplement' => '退回补充',
+    'warehouse_reason' => [
+        'quality' => '质量问题',
+        'weight' => '重量问题',
+        'both' => '重量和质量都有问题',
     ],
     'erp_binding' => [
         'unbound' => '未绑定',
@@ -274,7 +281,8 @@ return [
         'procurement_completed' => '商品信息已检验通过。',
         'placement_approved' => '投放链接已审核通过。',
         'placement_rejected' => '投放链接已退回运营修改。',
-        'warehouse_completed' => '仓库验收信息已保存。',
+        'warehouse_passed' => '仓库验收已审核通过。',
+        'warehouse_rejected' => '已审核不通过，商品信息检验可修改后重新提交审核。',
     ],
     'uploads' => [
         'drop_or_click' => '拖拽图片到这里、粘贴图片，或点击选择文件',
@@ -291,6 +299,7 @@ return [
         'placement_submitted' => '运营提交投放链接',
         'placement_approved' => '投放链接审核通过',
         'placement_rejected' => '投放链接审核失败',
-        'warehouse_processed' => '仓库提交验收信息',
+        'warehouse_passed' => '仓库验收审核通过',
+        'warehouse_rejected' => '仓库验收审核不通过',
     ],
 ];
