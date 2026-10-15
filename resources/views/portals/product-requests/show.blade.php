@@ -25,10 +25,10 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261015-17">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261015-19">
 @endpush
 @push('scripts')
-    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261015-18"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261015-19"></script>
 @endpush
 
 @section('content')

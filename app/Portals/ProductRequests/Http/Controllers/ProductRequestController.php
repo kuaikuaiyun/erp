@@ -50,6 +50,7 @@ class ProductRequestController extends Controller
             'filters' => $filters,
             'statusLabels' => $this->statusLabels(),
             'reviewStatusLabels' => $this->reviewStatusLabels(),
+            'rectificationLabels' => $this->rectificationLabels(),
         ]);
     }
 
@@ -279,6 +280,73 @@ class ProductRequestController extends Controller
         );
     }
 
+    /** 运营标记已整改 */
+    public function operationRectify(Request $request, ProductRequest $productRequest): JsonResponse|RedirectResponse
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless(
+            (int) $productRequest->operation_user_id === (int) $context['user']->getKey()
+            && $productRequest->operation_rectification_status === ProductRequest::RECTIFICATION_PENDING,
+            403,
+        );
+
+        $connection = config('admin.database.connection') ?: config('database.default');
+        DB::connection($connection)->transaction(function () use ($productRequest, $context): void {
+            $locked = ProductRequest::query()->lockForUpdate()->findOrFail($productRequest->getKey());
+            $locked->operation_rectification_status = ProductRequest::RECTIFICATION_DONE;
+            // 双方都已整改时，仓库审核状态自动变为通过
+            if ($locked->procurement_rectification_status === ProductRequest::RECTIFICATION_DONE) {
+                $locked->warehouse_acceptance_result = ProductRequest::WAREHOUSE_PASSED;
+                $locked->warehouse_reject_reason = null;
+            }
+            $locked->save();
+            $this->workflow->log($locked, 'operation_rectified', $context['user']);
+        });
+
+        return $this->modalSuccess(
+            $request,
+            __('product_requests.messages.operation_rectified', ['report_no' => $productRequest->report_no]),
+            'product-requests.operation.index',
+        );
+    }
+
+    /** 录入人员（采购）标记已整改 */
+    public function procurementRectify(Request $request, ProductRequest $productRequest): JsonResponse|RedirectResponse
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::PROCUREMENT_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless(
+            $productRequest->procurement_rectification_status === ProductRequest::RECTIFICATION_PENDING,
+            403,
+        );
+
+        $connection = config('admin.database.connection') ?: config('database.default');
+        DB::connection($connection)->transaction(function () use ($productRequest, $context): void {
+            $locked = ProductRequest::query()->lockForUpdate()->findOrFail($productRequest->getKey());
+            $locked->procurement_rectification_status = ProductRequest::RECTIFICATION_DONE;
+            // 双方都已整改时，仓库审核状态自动变为通过
+            if ($locked->operation_rectification_status === ProductRequest::RECTIFICATION_DONE) {
+                $locked->warehouse_acceptance_result = ProductRequest::WAREHOUSE_PASSED;
+                $locked->warehouse_reject_reason = null;
+            }
+            $locked->save();
+            $this->workflow->log($locked, 'procurement_rectified', $context['user']);
+        });
+
+        return $this->modalSuccess(
+            $request,
+            __('product_requests.messages.procurement_rectified', ['report_no' => $productRequest->report_no]),
+            'product-requests.procurement.index',
+        );
+    }
+
     public function operationDestroy(Request $request, ProductRequest $productRequest): JsonResponse|RedirectResponse
     {
         $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
@@ -403,8 +471,11 @@ class ProductRequestController extends Controller
 
         $records = $this->access->applyOperationVisibility(
             ProductRequest::query()
-                ->where('status', ProductRequest::STATUS_INSPECTION_PASSED)
-                ->whereIn('placement_review_status', [ProductRequest::REVIEW_UNFILLED, ProductRequest::REVIEW_REJECTED]),
+                ->where(function ($q): void {
+                    $q->where('status', ProductRequest::STATUS_INSPECTION_PASSED)
+                        ->whereIn('placement_review_status', [ProductRequest::REVIEW_UNFILLED, ProductRequest::REVIEW_REJECTED])
+                        ->orWhere('operation_rectification_status', ProductRequest::RECTIFICATION_PENDING);
+                }),
             $context['user'],
         )->get(['id', 'report_no']);
 
@@ -426,7 +497,11 @@ class ProductRequestController extends Controller
         }
 
         $records = $this->access->applyProcurementVisibility(
-            ProductRequest::query()->where('status', ProductRequest::STATUS_PENDING),
+            ProductRequest::query()
+                ->where(function ($q): void {
+                    $q->where('status', ProductRequest::STATUS_PENDING)
+                        ->orWhere('procurement_rectification_status', ProductRequest::RECTIFICATION_PENDING);
+                }),
             $context['user'],
         )->get(['id', 'report_no']);
 
@@ -462,6 +537,7 @@ class ProductRequestController extends Controller
             'statusLabels' => $this->statusLabels(),
             'warehouseResultLabels' => $this->warehouseResultLabels(),
             'warehouseRejectReasonLabels' => $this->warehouseRejectReasonLabels(),
+            'rectificationLabels' => $this->rectificationLabels(),
         ]);
     }
 
@@ -979,6 +1055,8 @@ class ProductRequestController extends Controller
                 'warehouse_reject_reason' => $rejectReason,
                 // 审核不通过时回退到检验通过，商品信息检验可修改后重新提交审核
                 'status' => $rejected ? ProductRequest::STATUS_INSPECTION_PASSED : $locked->status,
+                'operation_rectification_status' => $rejected ? ProductRequest::RECTIFICATION_PENDING : ProductRequest::RECTIFICATION_NONE,
+                'procurement_rectification_status' => $rejected ? ProductRequest::RECTIFICATION_PENDING : ProductRequest::RECTIFICATION_NONE,
                 'warehouse_operator_id' => $actor['user_id'],
                 'warehouse_operator_name' => $actor['user_name'],
                 'warehouse_operator_department_name' => $actor['department_name'],
@@ -1105,6 +1183,8 @@ class ProductRequestController extends Controller
             'status' => in_array($request->input('status'), array_keys($this->statusLabels()), true) ? (string) $request->input('status') : '',
             'review_status' => in_array($request->input('review_status'), array_keys($this->reviewStatusLabels()), true) ? (string) $request->input('review_status') : '',
             'warehouse_status' => in_array($request->input('warehouse_status'), array_keys($this->warehouseResultLabels()), true) ? (string) $request->input('warehouse_status') : '',
+            'operation_rectification_status' => in_array($request->input('operation_rectification_status'), array_keys($this->rectificationLabels()), true) ? (string) $request->input('operation_rectification_status') : '',
+            'procurement_rectification_status' => in_array($request->input('procurement_rectification_status'), array_keys($this->rectificationLabels()), true) ? (string) $request->input('procurement_rectification_status') : '',
             'per_page' => $perPage,
         ];
     }
@@ -1138,6 +1218,12 @@ class ProductRequestController extends Controller
         }
         if (($filters['warehouse_status'] ?? '') !== '') {
             $query->where('warehouse_acceptance_result', $filters['warehouse_status']);
+        }
+        if (($filters['operation_rectification_status'] ?? '') !== '') {
+            $query->where('operation_rectification_status', $filters['operation_rectification_status']);
+        }
+        if (($filters['procurement_rectification_status'] ?? '') !== '') {
+            $query->where('procurement_rectification_status', $filters['procurement_rectification_status']);
         }
 
         return $query;
@@ -1303,6 +1389,16 @@ class ProductRequestController extends Controller
             ProductRequest::WAREHOUSE_PENDING_REVIEW => __('product_requests.warehouse_result.pending_review'),
             ProductRequest::WAREHOUSE_PASSED => __('product_requests.warehouse_result.passed'),
             ProductRequest::WAREHOUSE_REJECTED => __('product_requests.warehouse_result.rejected'),
+        ];
+    }
+
+    /** @return array<string, string> */
+    private function rectificationLabels(): array
+    {
+        return [
+            ProductRequest::RECTIFICATION_NONE => __('product_requests.rectification.none'),
+            ProductRequest::RECTIFICATION_PENDING => __('product_requests.rectification.pending'),
+            ProductRequest::RECTIFICATION_DONE => __('product_requests.rectification.done'),
         ];
     }
 

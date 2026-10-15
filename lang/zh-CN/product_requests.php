@@ -169,6 +169,8 @@ return [
         'review_status' => '链接审核状态',
         'review_remark' => '审核失败备注',
         'warehouse_status' => '仓库状态',
+        'operation_rectification_status' => '运营整改状态',
+        'procurement_rectification_status' => '录入人员整改状态',
         'placement_link' => '投放链接',
         'reviewer' => '审核人',
         'reviewed_at' => '审核时间',
@@ -299,6 +301,14 @@ return [
         'weight' => '重量问题',
         'both' => '重量和质量都有问题',
     ],
+    'rectification' => [
+        'none' => '无需整改',
+        'pending' => '待整改',
+        'done' => '已整改',
+        'mark_done' => '已整改',
+        'confirm_operation' => '确认运营已完成整改？',
+        'confirm_procurement' => '确认录入人员已完成整改？',
+    ],
     'erp_binding' => [
         'unbound' => '未绑定',
         'bound' => '已绑定',
@@ -306,6 +316,8 @@ return [
     'messages' => [
         'operation_submitted' => '需求 :report_no 已提交，当前状态为待处理。',
         'operation_resubmitted' => '需求 :report_no 已重新提交，当前状态为待处理。',
+        'operation_rectified' => '需求 :report_no 运营已整改。',
+        'procurement_rectified' => '需求 :report_no 录入人员已整改。',
         'placement_submitted' => '投放链接已提交审核。',
         'procurement_completed' => '商品信息已检验通过。',
         'procurement_rejected' => '商品信息检验不通过，已退回运营重新提交。',
@@ -326,6 +338,8 @@ return [
     'events' => [
         'operation_submitted' => '运营提交需求',
         'operation_resubmitted' => '运营重新提交需求',
+        'operation_rectified' => '运营标记已整改',
+        'procurement_rectified' => '录入人员标记已整改',
         'procurement_inspection_passed' => '采购信息检验通过',
         'procurement_inspection_rejected' => '采购信息检验不通过',
         'placement_submitted' => '运营提交投放链接',

@@ -1,4 +1,4 @@
-@php
+﻿@php
     $operationImages = $productRequest->attachmentsFor(\App\Models\ProductRequestAttachment::STAGE_OPERATION);
     $sellerImages = $productRequest->attachmentsFor(\App\Models\ProductRequestAttachment::STAGE_PROCUREMENT);
     $notFilled = __('product_requests.common.not_filled');

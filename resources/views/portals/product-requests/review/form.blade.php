@@ -1,4 +1,4 @@
-<form class="product-request-form" method="post" action="{{ route('product-requests.placement-reviews.update', $productRequest) }}" data-product-request-modal-form>
+﻿<form class="product-request-form" method="post" action="{{ route('product-requests.placement-reviews.update', $productRequest) }}" data-product-request-modal-form>
     @csrf @method('PUT')
     <input type="hidden" name="modal" value="1">
     <div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ __('product_requests.common.close') }}"><span aria-hidden="true">&times;</span></button><h4 class="modal-title">{{ __('product_requests.review.review_form_title') }}</h4><p class="product-request-modal-subtitle">{{ __('product_requests.review.subtitle') }}</p></div>

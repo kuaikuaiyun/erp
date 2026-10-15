@@ -1,4 +1,4 @@
-@php
+﻿@php
     $skuValues = collect(explode(',', (string) ($skus ?? '')))->map(fn ($sku) => trim($sku))->filter()->values();
     $compareValues = isset($compareSkus) && $compareSkus !== null
         ? collect(explode(',', (string) $compareSkus))->map(fn ($sku) => trim($sku))->filter()->values()

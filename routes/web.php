@@ -49,6 +49,7 @@ Route::get('/product-requests/create', [ProductRequestController::class, 'operat
 Route::post('/product-requests', [ProductRequestController::class, 'operationStore'])->name('product-requests.operation.store');
 Route::get('/product-requests/{productRequest}/edit', [ProductRequestController::class, 'operationEdit'])->name('product-requests.operation.edit');
 Route::put('/product-requests/{productRequest}', [ProductRequestController::class, 'operationUpdate'])->name('product-requests.operation.update');
+Route::post('/product-requests/{productRequest}/rectify', [ProductRequestController::class, 'operationRectify'])->name('product-requests.operation.rectify');
 Route::delete('/product-requests/{productRequest}', [ProductRequestController::class, 'operationDestroy'])->name('product-requests.operation.destroy');
 Route::get('/link-review-issues', [ProductRequestController::class, 'linkIssuesIndex'])->name('product-requests.link-issues.index');
 Route::get('/warehouse-issues', [ProductRequestController::class, 'warehouseIssuesIndex'])->name('product-requests.warehouse-issues.index');
@@ -59,6 +60,7 @@ Route::get('/product-requests/{productRequest}/attachments/{attachment}', [Produ
 Route::get('/procurement-inspections', [ProductRequestController::class, 'procurementIndex'])->name('product-requests.procurement.index');
 Route::get('/procurement-inspections/{productRequest}/edit', [ProductRequestController::class, 'procurementEdit'])->name('product-requests.procurement.edit');
 Route::put('/procurement-inspections/{productRequest}', [ProductRequestController::class, 'procurementUpdate'])->name('product-requests.procurement.update');
+Route::post('/procurement-inspections/{productRequest}/rectify', [ProductRequestController::class, 'procurementRectify'])->name('product-requests.procurement.rectify');
 Route::post('/procurement-inspections/reuse-check', [ProductRequestController::class, 'procurementReuseCheck'])->name('product-requests.procurement.reuse-check');
 Route::get('/api/procurement-inspections/sku-suggestions', [ProductRequestController::class, 'procurementSkuSuggestions'])->name('product-requests.procurement.sku-suggestions');
 Route::get('/placement-reviews', [ProductRequestController::class, 'placementReviewIndex'])->name('product-requests.placement-reviews.index');

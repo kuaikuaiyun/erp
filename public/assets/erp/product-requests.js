@@ -1190,6 +1190,13 @@
     }
 
     document.addEventListener('click', function (event) {
+        var confirmBtn = event.target.closest ? event.target.closest('[data-product-request-confirm]') : null;
+        if (confirmBtn) {
+            if (!window.confirm(confirmBtn.getAttribute('data-product-request-confirm'))) {
+                event.preventDefault();
+            }
+            return;
+        }
         var deleteButton = event.target.closest ? event.target.closest('[data-product-request-delete]') : null;
         if (deleteButton) {
             event.preventDefault();

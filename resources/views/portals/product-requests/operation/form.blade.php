@@ -1,4 +1,4 @@
-@php
+﻿@php
     $isEdit = $productRequest->exists;
 @endphp
 <form class="product-request-form" method="post" action="{{ $isEdit ? route('product-requests.operation.update', $productRequest) : route('product-requests.operation.store') }}" enctype="multipart/form-data" data-product-request-modal-form>
