@@ -145,7 +145,9 @@
 .paypal-risk-progress { height: 6px; margin: 5px 0 4px; overflow: hidden; border-radius: 5px; background: #e9eff4; }
 .paypal-risk-progress i { display: block; height: 100%; min-width: 2px; border-radius: inherit; background: #e39a2d; }
 .paypal-risk-rate-block.dispute .paypal-risk-progress i { background: #d95058; }
-.paypal-risk-rate-block small { color: #91a3b4; font-size: 10px; }
+.paypal-risk-rate-note { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #91a3b4; font-size: 10px; line-height: 1.4; }
+.paypal-risk-rate-note span { min-width: 0; }
+.paypal-risk-rate-note span:last-child { flex: 0 0 auto; color: #5f7e96; font-variant-numeric: tabular-nums; }
 .paypal-risk-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 11px 14px; border-top: 1px solid #e8eff5; background: #fbfdff; }
 .paypal-risk-sync-state { min-width: 0; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 0 5px; }
 .paypal-risk-sync-state i { grid-row: span 2; color: #8298ab; }

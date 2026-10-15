@@ -296,6 +296,12 @@ return [
             'date_ranges_exclusive' => '订单创建时间与真实退款/纠纷时间只能选择其中一组。',
             'event_date_hint' => '按真实退款或纠纷发生日期筛选；对应比率分母为同一期间的已付款订单。',
         ],
+        'validation' => [
+            'order_date_invalid' => '订单创建时间的日期格式不正确。',
+            'order_date_range' => '订单创建结束日期不能早于开始日期。',
+            'event_date_invalid' => '真实退款/纠纷时间的日期格式不正确。',
+            'event_date_range' => '真实退款/纠纷结束日期不能早于开始日期。',
+        ],
         'detail_filters' => [
             'keyword' => '搜索',
             'search' => '筛选',
@@ -329,6 +335,10 @@ return [
             'logistics_status' => '物流状态',
             'shipping_rate' => '发货率',
             'delivery_rate' => '签收率',
+            'filtered_refund_rate' => '筛选期退款率',
+            'filtered_dispute_rate' => '筛选期纠纷率',
+            'cumulative_refund_rate' => '已采集累计退款率',
+            'cumulative_dispute_rate' => '已采集累计纠纷率',
             'shipping_note' => '发货率和签收率仅展示真实 51Tracking 状态，不参与安全指数评分。',
             'passive_note' => 'ERP 已停用 PayPal 直接访问。交易、退款与纠纷数据仅由各 PayPal 账号对应的 Windows VPS 采集，并按 Merchant ID 上传归属；订单仅在真实交易号精确匹配后关联。',
             'account_note' => 'Merchant ID 是 Windows VPS 上传文件的唯一账号归属依据。收款邮箱仅保存账号资料，不用于订单自动关联；订单只按真实 PayPal 交易号精确关联。',

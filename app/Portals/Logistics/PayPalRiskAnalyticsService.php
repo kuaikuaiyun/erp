@@ -28,6 +28,7 @@ class PayPalRiskAnalyticsService
         $disputeCount = count($disputeIds);
         $refundRate = $orderCount > 0 ? round($refundCount / $orderCount * 100, 2) : 0.0;
         $disputeRate = $orderCount > 0 ? round($disputeCount / $orderCount * 100, 2) : 0.0;
+        $cumulativeRates = $this->cumulativeRates($account);
         $score = max(0.0, min(100.0, round(100 - $refundRate * 2 - $disputeRate * 10, 1)));
         $shippedOrders = $orders->filter(fn (LogisticsOrder $order): bool => $this->isActuallyShipped($order));
         $deliveredOrders = $shippedOrders->filter(fn (LogisticsOrder $order): bool => $this->isDelivered($order));
@@ -46,6 +47,9 @@ class PayPalRiskAnalyticsService
             'dispute_order_count' => $disputeCount,
             'refund_rate' => $refundRate,
             'dispute_rate' => $disputeRate,
+            // 累计指标只以当前数据库已采集的真实关联记录计算，不受页面日期条件影响。
+            'cumulative_refund_rate' => $cumulativeRates['refund_rate'],
+            'cumulative_dispute_rate' => $cumulativeRates['dispute_rate'],
             'refund_amount' => $this->canonicalRefundAmount($orderIds, $account, $filters),
             'dispute_amount' => $this->canonicalDisputeAmount($orderIds, $account, $filters),
             'store_count' => $orders->pluck('store_name')->filter()->unique()->count(),
@@ -67,6 +71,35 @@ class PayPalRiskAnalyticsService
                     ->where('logistics_paypal_account_id', $account->getKey())
                     ->whereNull('logistics_order_id')
                     ->count(),
+        ];
+    }
+
+    /**
+     * 已采集累计风险比例。
+     *
+     * 这里故意不复用当前页面的筛选条件：它表示系统目前已经采集到的
+     * 全部真实 PayPal 关联订单，而不是 PayPal 账号在站外的历史全量数据。
+     *
+     * @return array{refund_rate:float,dispute_rate:float}
+     */
+    private function cumulativeRates(LogisticsPayPalAccount $account): array
+    {
+        $orderIds = $this->orderQuery($account, [])
+            ->pluck('id')
+            ->map(static fn ($id): int => (int) $id)
+            ->all();
+        $orderCount = count($orderIds);
+        if ($orderCount === 0) {
+            return ['refund_rate' => 0.0, 'dispute_rate' => 0.0];
+        }
+
+        $filters = ['date_mode' => 'order'];
+        $refundCount = count($this->refundOrderIds($orderIds, $account, $filters));
+        $disputeCount = count($this->disputeOrderIds($orderIds, $account, $filters));
+
+        return [
+            'refund_rate' => round($refundCount / $orderCount * 100, 2),
+            'dispute_rate' => round($disputeCount / $orderCount * 100, 2),
         ];
     }
 

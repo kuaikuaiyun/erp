@@ -83,7 +83,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/paypal-risk.css?v=20261015-6">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/paypal-risk.css?v=20261015-7">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261015-2">
 @endpush
 
@@ -204,14 +204,20 @@
                         </div>
 
                         <div class="paypal-risk-rate-block refund">
-                            <div><span>退款率</span><strong>{{ number_format($account['refund_rate'], 2) }}%</strong></div>
+                            <div><span>{{ __('logistics.paypal_risk.ui.filtered_refund_rate') }}</span><strong>{{ number_format($account['refund_rate'], 2) }}%</strong></div>
                             <div class="paypal-risk-progress"><i style="width: {{ min(100, $account['refund_rate'] * 5) }}%"></i></div>
-                            <small>{{ $account['refund_order_count'] }} 笔退款订单 · ${{ number_format($account['refund_amount'], 2) }}</small>
+                            <div class="paypal-risk-rate-note">
+                                <span>{{ $account['refund_order_count'] }} 笔退款订单 · ${{ number_format($account['refund_amount'], 2) }}</span>
+                                <span>{{ __('logistics.paypal_risk.ui.cumulative_refund_rate') }} {{ number_format($account['cumulative_refund_rate'], 2) }}%</span>
+                            </div>
                         </div>
                         <div class="paypal-risk-rate-block dispute">
-                            <div><span>纠纷率</span><strong>{{ number_format($account['dispute_rate'], 2) }}%</strong></div>
+                            <div><span>{{ __('logistics.paypal_risk.ui.filtered_dispute_rate') }}</span><strong>{{ number_format($account['dispute_rate'], 2) }}%</strong></div>
                             <div class="paypal-risk-progress"><i style="width: {{ min(100, $account['dispute_rate'] * 10) }}%"></i></div>
-                            <small>{{ $account['dispute_order_count'] }} 笔纠纷订单 · ${{ number_format($account['dispute_amount'], 2) }}</small>
+                            <div class="paypal-risk-rate-note">
+                                <span>{{ $account['dispute_order_count'] }} 笔纠纷订单 · ${{ number_format($account['dispute_amount'], 2) }}</span>
+                                <span>{{ __('logistics.paypal_risk.ui.cumulative_dispute_rate') }} {{ number_format($account['cumulative_dispute_rate'], 2) }}%</span>
+                            </div>
                         </div>
 
                         <footer class="paypal-risk-card-footer">
