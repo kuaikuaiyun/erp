@@ -53,6 +53,79 @@ class ProductRequestController extends Controller
         ]);
     }
 
+    /** 审核链接问题：投放链接审核失败的需求提报，按提报编号唯一展示 */
+    public function linkIssuesIndex(Request $request): Response|View
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        [$keyword, $perPage] = $this->issueFilters($request);
+        $requests = $this->access->applyOperationVisibility(ProductRequest::query(), $context['user'])
+            ->where('placement_review_status', ProductRequest::REVIEW_REJECTED)
+            ->when($keyword !== '', function ($query) use ($keyword): void {
+                $query->where(function ($sub) use ($keyword): void {
+                    $sub->where('report_no', 'like', '%'.$keyword.'%')
+                        ->orWhere('skus', 'like', '%'.$keyword.'%')
+                        ->orWhere('procurement_skus', 'like', '%'.$keyword.'%')
+                        ->orWhere('supplier_url', 'like', '%'.$keyword.'%')
+                        ->orWhere('operation_supplier_url', 'like', '%'.$keyword.'%');
+                });
+            })
+            ->with(['attachments', 'placementReviews'])
+            ->latest('id')
+            ->paginate($perPage)
+            ->withQueryString();
+
+        return view('portals.product-requests.operation.link-issues', [
+            ...$this->viewContext($context),
+            'requests' => $requests,
+            'filters' => ['keyword' => $keyword, 'per_page' => $perPage],
+        ]);
+    }
+
+    /** 仓库问题：仓库验收审核不通过的需求提报，按提报编号唯一展示 */
+    public function warehouseIssuesIndex(Request $request): Response|View
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        [$keyword, $perPage] = $this->issueFilters($request);
+        $requests = $this->access->applyOperationVisibility(ProductRequest::query(), $context['user'])
+            ->where('warehouse_acceptance_result', ProductRequest::WAREHOUSE_REJECTED)
+            ->when($keyword !== '', function ($query) use ($keyword): void {
+                $query->where(function ($sub) use ($keyword): void {
+                    $sub->where('report_no', 'like', '%'.$keyword.'%')
+                        ->orWhere('skus', 'like', '%'.$keyword.'%')
+                        ->orWhere('procurement_skus', 'like', '%'.$keyword.'%')
+                        ->orWhere('standard_chinese_name', 'like', '%'.$keyword.'%');
+                });
+            })
+            ->with('attachments')
+            ->latest('id')
+            ->paginate($perPage)
+            ->withQueryString();
+
+        return view('portals.product-requests.operation.warehouse-issues', [
+            ...$this->viewContext($context),
+            'requests' => $requests,
+            'filters' => ['keyword' => $keyword, 'per_page' => $perPage],
+            'warehouseRejectReasonLabels' => $this->warehouseRejectReasonLabels(),
+        ]);
+    }
+
+    /** @return array{0: string, 1: int} */
+    private function issueFilters(Request $request): array
+    {
+        $keyword = trim((string) $request->query('keyword', ''));
+        $perPage = (int) $request->query('per_page', 20);
+
+        return [$keyword, in_array($perPage, [20, 50, 100], true) ? $perPage : 20];
+    }
+
     public function operationCreate(Request $request): Response|View
     {
         $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);

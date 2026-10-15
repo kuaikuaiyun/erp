@@ -48,6 +48,8 @@ Route::get('/api/warehouse-acceptances/pending-count', [ProductRequestController
 Route::get('/product-requests/create', [ProductRequestController::class, 'operationCreate'])->name('product-requests.operation.create');
 Route::post('/product-requests', [ProductRequestController::class, 'operationStore'])->name('product-requests.operation.store');
 Route::delete('/product-requests/{productRequest}', [ProductRequestController::class, 'operationDestroy'])->name('product-requests.operation.destroy');
+Route::get('/link-review-issues', [ProductRequestController::class, 'linkIssuesIndex'])->name('product-requests.link-issues.index');
+Route::get('/warehouse-issues', [ProductRequestController::class, 'warehouseIssuesIndex'])->name('product-requests.warehouse-issues.index');
 Route::get('/product-requests/{productRequest}', [ProductRequestController::class, 'show'])->name('product-requests.show');
 Route::get('/product-requests/{productRequest}/placement', [ProductRequestController::class, 'placementEdit'])->name('product-requests.placement.edit');
 Route::put('/product-requests/{productRequest}/placement', [ProductRequestController::class, 'placementUpdate'])->name('product-requests.placement.update');

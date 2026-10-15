@@ -6,6 +6,16 @@ return [
         'procurement_inspections' => '商品信息检验',
         'placement_reviews' => '投放链接审核',
         'warehouse_acceptances' => '仓库验收',
+        'link_review_issues' => '审核链接问题',
+        'warehouse_issues' => '仓库问题',
+    ],
+    'link_issues' => [
+        'title' => '审核链接问题',
+        'subtitle' => '记录投放链接审核失败的需求提报，按提报编号唯一展示。',
+    ],
+    'warehouse_issues' => [
+        'title' => '仓库问题',
+        'subtitle' => '记录仓库验收审核不通过的需求提报，按提报编号唯一展示。',
     ],
     'common' => [
         'search' => '查询',
@@ -153,6 +163,9 @@ return [
         'review_remark' => '审核失败备注',
         'warehouse_status' => '仓库状态',
         'placement_link' => '投放链接',
+        'reviewer' => '审核人',
+        'reviewed_at' => '审核时间',
+        'processed_at' => '处理时间',
         'updated_at' => '最近更新',
     ],
     'fields' => [
