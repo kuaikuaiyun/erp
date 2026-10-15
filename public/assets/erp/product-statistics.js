@@ -130,6 +130,46 @@
         refreshSelection();
     }
     function findProduct(id) { return products.filter(function (product) { return product.id === id; })[0] || null; }
+    function detailRequestUrl(productId) {
+        var url = new URL(config.detailUrl || window.location.href, window.location.origin);
+        Array.prototype.slice.call(filterForm.querySelectorAll('input[name], select[name]')).forEach(function (field) {
+            if (field.name && field.value !== '') url.searchParams.set(field.name, field.value);
+        });
+        url.searchParams.set('product_id', productId);
+        return url.toString();
+    }
+    function showDetailLoading(product) {
+        detailState = { product: null, sorts: {} };
+        document.getElementById('product-statistics-detail-title').textContent = t('detailTitle');
+        document.getElementById('product-statistics-detail-identity').innerHTML = productThumb(product) + '<div><strong>' + escapeHtml(product.name) + '</strong><span>' + escapeHtml(product.sku || blank()) + '</span></div>';
+        document.getElementById('product-statistics-overview').innerHTML = '<div class="alert alert-info"><i class="fa fa-spinner fa-spin"></i> ' + escapeHtml(t('detailLoading')) + '</div>';
+        ['product-statistics-paypal-orders', 'product-statistics-credit-card-orders', 'product-statistics-refunds', 'product-statistics-orders'].forEach(function (id) {
+            document.getElementById(id).innerHTML = '';
+        });
+        if ($) {
+            $('#product-statistics-detail-modal .nav-tabs a[href="#product-statistics-overview"]').tab('show');
+            $('#product-statistics-detail-modal').modal('show');
+        }
+    }
+    function showDetailLoadFailure(message) {
+        document.getElementById('product-statistics-overview').innerHTML = '<div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> ' + escapeHtml(message || t('detailLoadFailed')) + '</div>';
+    }
+    function loadProductDetail(product) {
+        showDetailLoading(product);
+        window.fetch(detailRequestUrl(product.id), {
+            headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin'
+        }).then(function (response) {
+            return response.json().catch(function () { return {}; }).then(function (payload) {
+                if (!response.ok || !payload.product) throw new Error(payload.message || t('detailLoadFailed'));
+                return payload.product;
+            });
+        }).then(function (detail) {
+            fillModal(detail);
+        }).catch(function (error) {
+            showDetailLoadFailure(error && error.message ? error.message : t('detailLoadFailed'));
+        });
+    }
     function openImagePreview(trigger) {
         if (!trigger.dataset.imageUrl) return;
         document.getElementById('product-statistics-image-preview').src = trigger.dataset.imageUrl;
@@ -281,7 +321,7 @@
         }
         var target = event.target.closest('.product-statistics-view, .product-statistics-page-button, .product-statistics-sort');
         if (!target) return;
-        if (target.classList.contains('product-statistics-view')) { var product = findProduct(target.dataset.productId); if (product) fillModal(product); return; }
+        if (target.classList.contains('product-statistics-view')) { var product = findProduct(target.dataset.productId); if (product) loadProductDetail(product); return; }
         if (target.classList.contains('product-statistics-page-button')) { navigate({ page: number(target.dataset.page) || 1 }); return; }
         if (target.classList.contains('product-statistics-sort')) {
             var sort = target.dataset.sort;
