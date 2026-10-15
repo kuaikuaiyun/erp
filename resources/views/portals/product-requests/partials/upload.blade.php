@@ -17,7 +17,7 @@
         <i class="fa fa-cloud-upload"></i>
         <span>{{ __('product_requests.uploads.drop_or_click') }}</span>
     </label>
-    <button type="button" class="btn btn-default btn-xs product-request-upload-paste" data-product-request-paste><i class="fa fa-paste"></i> {{ __('product_requests.uploads.paste') }}</button>
+    <button type="button" class="product-request-upload-paste" data-product-request-paste><i class="fa fa-paste"></i> {{ __('product_requests.uploads.paste') }}<span class="product-request-upload-paste-key">Ctrl + V</span></button>
     <div class="product-request-upload-preview" data-product-request-preview>
         @foreach($existingAttachments as $attachment)
             <div class="product-request-upload-preview-item product-request-upload-existing">
