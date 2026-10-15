@@ -142,6 +142,7 @@ return [
         'keyword_placeholder' => '提报编号、SKU、1688 链接',
         'status' => '主状态',
         'review_status' => '链接审核状态',
+        'warehouse_status' => '仓库状态',
         'per_page' => '每页显示',
     ],
     'table' => [

@@ -974,6 +974,7 @@ class ProductRequestController extends Controller
             'keyword' => trim((string) $request->input('keyword', '')),
             'status' => in_array($request->input('status'), array_keys($this->statusLabels()), true) ? (string) $request->input('status') : '',
             'review_status' => in_array($request->input('review_status'), array_keys($this->reviewStatusLabels()), true) ? (string) $request->input('review_status') : '',
+            'warehouse_status' => in_array($request->input('warehouse_status'), array_keys($this->warehouseResultLabels()), true) ? (string) $request->input('warehouse_status') : '',
             'per_page' => $perPage,
         ];
     }
@@ -1000,6 +1001,9 @@ class ProductRequestController extends Controller
         }
         if ($filters['review_status'] !== '') {
             $query->where('placement_review_status', $filters['review_status']);
+        }
+        if (($filters['warehouse_status'] ?? '') !== '') {
+            $query->where('warehouse_acceptance_result', $filters['warehouse_status']);
         }
 
         return $query;
