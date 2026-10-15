@@ -4,6 +4,16 @@
 
 @php
     $portalOrigin = rtrim(request()->getSchemeAndHttpHost(), '/');
+    $productStatisticsClientConfig = [
+        'products' => $products,
+        'summary' => $productSummary,
+        'pagination' => $productPagination,
+        'sort' => $filters['sort'],
+        'direction' => $filters['direction'],
+        'decisions' => $decisionOptions,
+        'labels' => $labels,
+        'exportValidationError' => $errors->first('scope'),
+    ];
 @endphp
 
 @push('styles')
@@ -170,16 +180,7 @@
 
 @push('scripts')
     <script>
-        window.ErpLogisticsProductStatistics = {
-            products: @json($products),
-            summary: @json($productSummary),
-            pagination: @json($productPagination),
-            sort: @json($filters['sort']),
-            direction: @json($filters['direction']),
-            decisions: @json($decisionOptions),
-            labels: @json($labels),
-            exportValidationError: @json($errors->first('scope')),
-        };
+        window.ErpLogisticsProductStatistics = @json($productStatisticsClientConfig);
     </script>
     <script src="{{ $portalOrigin }}/assets/erp/product-statistics.js?v=20261014-4"></script>
     <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261014-1"></script>
