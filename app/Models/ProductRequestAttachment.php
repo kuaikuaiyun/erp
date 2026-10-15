@@ -12,6 +12,7 @@ class ProductRequestAttachment extends Model
     public const STAGE_WAREHOUSE = 'warehouse';
     public const STAGE_REVIEW = 'review';
     public const STAGE_WAREHOUSE_REMARK = 'warehouse_remark';
+    public const STAGE_PURCHASE_ITEM = 'purchase_item';
 
     protected $guarded = [];
 

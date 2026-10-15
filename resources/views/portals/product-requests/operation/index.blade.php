@@ -30,11 +30,11 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261015-03">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261015-15">
 @endpush
 @push('scripts')
     <script>window.ErpProductRequestConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261015-05"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261015-16"></script>
 @endpush
 
 @section('content')

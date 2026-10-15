@@ -1,5 +1,6 @@
 @php
     $operationImages = $productRequest->attachmentsFor(\App\Models\ProductRequestAttachment::STAGE_OPERATION);
+    $purchaseItemImages = $productRequest->attachmentsFor(\App\Models\ProductRequestAttachment::STAGE_PURCHASE_ITEM);
     $procurementImages = $productRequest->attachmentsFor(\App\Models\ProductRequestAttachment::STAGE_PROCUREMENT);
     $warehouseImages = $productRequest->attachmentsFor(\App\Models\ProductRequestAttachment::STAGE_WAREHOUSE);
     $notFilled = __('product_requests.common.not_filled');
@@ -55,6 +56,19 @@
                     <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.has_stock') }}</span><span class="product-request-detail-value">{{ $productRequest->has_stock ? __('product_requests.common.'.($productRequest->has_stock === 'yes' ? 'yes' : 'no')) : $notAvailable }}</span></div>
                     <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.request_source') }}</span><span class="product-request-detail-value">{{ $productRequest->operation_display_name }}</span></div>
                     <div class="product-request-detail-item product-request-detail-item-span-2"><span class="product-request-detail-label">{{ __('product_requests.fields.operation_supplier_url') }}</span><span class="product-request-detail-value">@if($productRequest->operation_supplier_url)<a href="{{ $productRequest->operation_supplier_url }}" target="_blank" rel="noopener">{{ $productRequest->operation_supplier_url }}</a>@else{{ $notFilled }}@endif</span></div>
+                    <div class="product-request-detail-item product-request-detail-item-span-2"><span class="product-request-detail-label">{{ __('product_requests.fields.operation_remark') }}</span><span class="product-request-detail-value">{{ $productRequest->operation_remark ?: $notFilled }}</span></div>
+                </div>
+                <div class="product-request-detail-modal-image-panel product-request-detail-gallery-wide">
+                    <span class="product-request-detail-label">{{ __('product_requests.fields.purchase_item_images') }}</span>
+                    <div class="product-request-image-grid">
+                        @forelse($purchaseItemImages as $attachment)
+                            <a href="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}" data-product-request-image-preview data-product-request-image-alt="{{ $attachment->original_name }}">
+                                <img src="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}" alt="{{ $attachment->original_name }}">
+                            </a>
+                        @empty
+                            <span class="text-muted">{{ $notAvailable }}</span>
+                        @endforelse
+                    </div>
                 </div>
             </div>
         </section>

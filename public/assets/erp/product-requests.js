@@ -349,7 +349,7 @@
         }
 
         function applyRecord(record) {
-            ['standard_chinese_name', 'large_volume_weight_g', 'minimum_purchase_price_rmb', 'estimated_shipping_weight_g', 'outer_package_size'].forEach(function (field) {
+            ['standard_chinese_name', 'large_volume_weight_g', 'minimum_purchase_price_rmb', 'estimated_shipping_weight_g', 'outer_package_size', 'pcl_product_no'].forEach(function (field) {
                 var input = reuseForm.querySelector('[name="' + field + '"]');
                 if (input) { input.value = record[field] || ''; }
             });
@@ -437,7 +437,18 @@
             if (record.skus && record.skus.length) {
                 var skuLine = document.createElement('span');
                 skuLine.className = 'product-request-reuse-skus';
-                skuLine.textContent = (config.dedupeSkus || 'SKU') + '：' + record.skus.join('，');
+                var skuLabel = document.createElement('span');
+                skuLabel.textContent = (config.dedupeSkus || 'SKU') + '：';
+                skuLine.appendChild(skuLabel);
+                var skuTags = document.createElement('span');
+                skuTags.className = 'product-request-sku-tags';
+                record.skus.forEach(function (sku) {
+                    var tag = document.createElement('span');
+                    tag.className = 'product-request-sku-tag';
+                    tag.textContent = sku;
+                    skuTags.appendChild(tag);
+                });
+                skuLine.appendChild(skuTags);
                 content.appendChild(skuLine);
             }
             row.appendChild(content);
@@ -546,7 +557,29 @@
 
         var operationList = panel.querySelector('#sku-operation-list');
         var skuSource = root.querySelector('[data-sku-edit-source]');
+        var skuPreview = skuSource ? skuSource.parentNode.querySelector('[data-sku-edit-preview]') : null;
         var syncingSkus = false;
+
+        // 运营 SKU 编辑框内容实时渲染为标签，便于逐行查看
+        function renderSkuPreview() {
+            if (!skuSource || !skuPreview) { return; }
+            skuPreview.innerHTML = '';
+            skuSource.value.split(/[\n,]+/).forEach(function (part) {
+                var sku = part.trim();
+                if (sku === '') { return; }
+                var tag = document.createElement('span');
+                tag.className = 'product-request-sku-tag';
+                tag.textContent = sku;
+                skuPreview.appendChild(tag);
+            });
+        }
+
+        // 多行编辑框高度随内容自适应
+        function resizeSkuSource() {
+            if (!skuSource) { return; }
+            skuSource.style.height = 'auto';
+            skuSource.style.height = (skuSource.scrollHeight + 2) + 'px';
+        }
 
         function updateSummary() {
             var checked = form.querySelectorAll('input[name="selected_skus[]"]:checked');
@@ -572,8 +605,10 @@
         function writeOperationSource() {
             if (!skuSource) { return; }
             syncingSkus = true;
-            skuSource.value = operationValues().join(', ');
+            skuSource.value = operationValues().join("\n");
             syncingSkus = false;
+            renderSkuPreview();
+            resizeSkuSource();
         }
 
         // SKU 行：editable=true 时渲染文本框（仅运营 SKU 可改），否则只读展示
@@ -615,7 +650,7 @@
         function renderOperationRows(value) {
             if (!operationList) { return; }
             operationList.innerHTML = '';
-            var values = String(value === null || typeof value === 'undefined' ? '' : value).split(',').map(function (part) { return part.trim(); }).filter(function (part) { return part !== ''; });
+            var values = String(value === null || typeof value === 'undefined' ? '' : value).split(/[\n,]+/).map(function (part) { return part.trim(); }).filter(function (part) { return part !== ''; });
             if (!values.length) {
                 var empty = document.createElement('span');
                 empty.className = 'sku-suggestion-empty';
@@ -630,10 +665,14 @@
             skuSource.addEventListener('input', function () {
                 if (syncingSkus) { return; }
                 renderOperationRows(skuSource.value);
+                renderSkuPreview();
+                resizeSkuSource();
                 updateSummary();
             });
         }
         renderOperationRows(skuSource ? skuSource.value : (operationList ? operationList.getAttribute('data-operation-skus') : ''));
+        renderSkuPreview();
+        resizeSkuSource();
 
         // 链接基线始终与「系统已录入的 SKU」框保持一致，保证增删比对准确
         function syncLinkSkus() {
@@ -733,7 +772,7 @@
         var warn = root.querySelector('#sku-warn');
         var prefix = builder.getAttribute('data-sku-prefix') || '';
         var max = 50;
-        var boxDefault = builder.getAttribute('data-sku-box-default') || '1pc';
+        var boxDefault = builder.getAttribute('data-sku-box-default') || '1pc*';
         var templateBox = template.querySelector('[data-sku-part="box"]');
         if (templateBox && templateBox.value === '') { templateBox.value = boxDefault; }
 
@@ -810,6 +849,26 @@
             refreshRowButtons();
         }
 
+        var hintCanvas = null;
+        function updateBoxHint(input) {
+            if (!input) { return; }
+            var wrap = input.parentNode;
+            if (!wrap || !wrap.classList.contains('product-request-sku-box-wrap')) { return; }
+            var hint = wrap.querySelector('[data-sku-box-hint]');
+            if (!hint) { return; }
+            var value = String(input.value || '');
+            var starIndex = value.lastIndexOf('*');
+            var starEmpty = starIndex !== -1 && value.slice(starIndex + 1).trim() === '';
+            if (!starEmpty) { hint.style.display = 'none'; return; }
+            if (!hintCanvas) { hintCanvas = document.createElement('canvas'); }
+            var context = hintCanvas.getContext('2d');
+            var style = window.getComputedStyle(input);
+            context.font = style.font || (style.fontSize + ' ' + style.fontFamily);
+            var paddingLeft = parseFloat(style.paddingLeft) || 0;
+            hint.style.left = (paddingLeft + context.measureText(value.slice(0, starIndex + 1)).width + 1) + 'px';
+            hint.style.display = 'block';
+        }
+
         function bindRow(row) {
             var add = row.querySelector('[data-sku-add]');
             if (add) { add.addEventListener('click', addRow); }
@@ -823,7 +882,11 @@
             }
             Array.prototype.slice.call(row.querySelectorAll('input[data-sku-part]')).forEach(function (input) {
                 input.addEventListener('input', sync);
+                if (input.getAttribute('data-sku-part') === 'box') {
+                    input.addEventListener('input', function () { updateBoxHint(input); });
+                }
             });
+            updateBoxHint(row.querySelector('input[data-sku-part="box"]'));
             var pinyin = row.querySelector('input[data-sku-part="pinyin"]');
             if (pinyin) {
                 pinyin.addEventListener('input', function () {
@@ -849,8 +912,9 @@
             Array.prototype.slice.call(row.querySelectorAll('input[data-sku-part]')).forEach(function (input) { input.value = ''; });
             var pinyin = row.querySelector('input[data-sku-part="pinyin"]');
             if (pinyin) { pinyin.value = defaultPinyin(); }
+            var templateBox = template.querySelector('input[data-sku-part="box"]');
             var box = row.querySelector('input[data-sku-part="box"]');
-            if (box) { box.value = boxDefault; }
+            if (box) { box.value = templateBox && templateBox.value.trim() !== '' ? templateBox.value : boxDefault; }
             builder.appendChild(row);
             bindRow(row);
             var focusTarget = pinyin && pinyin.value !== '' ? row.querySelector('input[data-sku-part="attribute"]') : pinyin;

@@ -1,5 +1,6 @@
 @php
     $operationImages = $productRequest->attachmentsFor(\App\Models\ProductRequestAttachment::STAGE_OPERATION);
+    $purchaseItemImages = $productRequest->attachmentsFor(\App\Models\ProductRequestAttachment::STAGE_PURCHASE_ITEM);
     $sellerImages = $productRequest->attachmentsFor(\App\Models\ProductRequestAttachment::STAGE_PROCUREMENT);
 @endphp
 <form class="product-request-form" method="post" action="{{ route('product-requests.procurement.update', $productRequest) }}" enctype="multipart/form-data" data-product-request-modal-form data-product-request-reuse-form data-current-id="{{ $productRequest->getKey() }}" data-reuse-check-url="{{ route('product-requests.procurement.reuse-check') }}">
@@ -42,12 +43,29 @@
                     </div>
                     <div class="form-group">
                         <label for="operation_skus_input">{{ __('product_requests.fields.operation_skus') }}</label>
-                        <input id="operation_skus_input" class="form-control" value="{{ $productRequest->skus }}" maxlength="2000" data-sku-edit-source>
+                        <textarea id="operation_skus_input" class="form-control product-request-sku-edit" rows="2" maxlength="2000" data-sku-edit-source>{{ str_replace(',', "\n", (string) $productRequest->skus) }}</textarea>
+                        <div class="product-request-sku-tags product-request-sku-preview" data-sku-edit-preview></div>
                         <span class="help-block">{{ __('product_requests.procurement.operation_skus_editable_hint') }}</span>
                     </div>
                     <div class="form-group">
                         <label>{{ __('product_requests.fields.operation_supplier_url') }}</label>
                         <div class="product-request-readonly">@if($productRequest->operation_supplier_url)<a href="{{ $productRequest->operation_supplier_url }}" target="_blank" rel="noopener">{{ $productRequest->operation_supplier_url }}</a>@else{{ __('product_requests.common.not_available') }}@endif</div>
+                    </div>
+                    <div class="form-group">
+                        <label>{{ __('product_requests.fields.operation_remark') }}</label>
+                        <div class="product-request-readonly">{{ $productRequest->operation_remark ?: __('product_requests.common.not_filled') }}</div>
+                    </div>
+                </div>
+                <div class="form-group product-request-purchase-item-gallery">
+                    <label>{{ __('product_requests.fields.purchase_item_images') }}</label>
+                    <div class="product-request-image-grid">
+                        @forelse($purchaseItemImages as $attachment)
+                            <a href="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}" data-product-request-image-preview data-product-request-image-alt="{{ $attachment->original_name }}">
+                                <img src="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}" alt="{{ $attachment->original_name }}">
+                            </a>
+                        @empty
+                            <span class="text-muted">{{ __('product_requests.common.not_available') }}</span>
+                        @endforelse
                     </div>
                 </div>
             </div>
@@ -125,6 +143,11 @@
             </div>
 
             <div class="row">
+                <div class="form-group col-md-6 @error('pcl_product_no') has-error @enderror">
+                    <label for="pcl_product_no">{{ __('product_requests.fields.pcl_product_no') }} <span class="text-red">*</span></label>
+                    <input id="pcl_product_no" class="form-control" name="pcl_product_no" value="{{ old('pcl_product_no', $productRequest->pcl_product_no) }}" maxlength="100" required placeholder="{{ __('product_requests.placeholders.pcl_product_no') }}">
+                    @error('pcl_product_no')<span class="help-block text-red">{{ $message }}</span>@enderror
+                </div>
                 <div class="form-group col-md-6">
                     <label>{{ __('product_requests.fields.erp_operator') }} <span class="text-red">*</span></label>
                     <div class="product-request-readonly">{{ $actor['display_name'] }}</div>
@@ -171,5 +194,9 @@
     .sku-suggestion-list .sku-suggestion-item { display: inline-flex; align-items: center; gap: 4px; }
     .sku-suggestion-list .sku-suggestion-input { width: 150px; max-width: 100%; height: 24px; padding: 2px 6px; border: 1px solid #d2d6de; border-radius: 3px; font-size: 12px; color: #333; }
     .sku-suggestion-list .sku-suggestion-input:focus { border-color: #3c8dbc; outline: none; }
+    /* 运营填写的 SKU：一行一个竖排，输入框撑满整行保证内容完整可见 */
+    #sku-operation-list { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 6px; }
+    #sku-operation-list .sku-suggestion-item { display: flex; width: 100%; }
+    #sku-operation-list .sku-suggestion-input { flex: 1 1 auto; width: auto; }
 </style>
 

@@ -170,6 +170,7 @@ class ProductRequestController extends Controller
                 'skus' => $this->normalizeSkus($data['skus']),
                 'operation_supplier_url' => $data['operation_supplier_url'],
                 'has_stock' => $data['has_stock'],
+                'operation_remark' => $data['operation_remark'] ?? null,
             ]);
             $productRequest->forceFill([
                 'report_no' => 'REQ-'.now('Asia/Shanghai')->format('Ymd').'-'.str_pad((string) $productRequest->getKey(), 6, '0', STR_PAD_LEFT),
@@ -179,6 +180,12 @@ class ProductRequestController extends Controller
                 $productRequest,
                 ProductRequestAttachment::STAGE_OPERATION,
                 [$request->file('product_image')],
+                $context['user'],
+            );
+            $this->workflow->replaceStageAttachments(
+                $productRequest,
+                ProductRequestAttachment::STAGE_PURCHASE_ITEM,
+                $request->file('purchase_item_images', []),
                 $context['user'],
             );
             $this->workflow->log($productRequest, 'operation_submitted', $context['user']);
@@ -441,12 +448,11 @@ class ProductRequestController extends Controller
                 ->pluck('id')
                 ->all();
             $checkedSkus = $this->splitSkus(implode(',', $data['selected_skus'] ?? []));
-            $renderedSkus = $this->splitSkus((string) ($data['link_skus'] ?? ''));
             unset($data['reuse_source_id'], $data['seller_images'], $data['selected_skus'], $data['link_skus'], $data['removed_seller_images']);
             $actor = $this->access->actorSnapshot($context['user']);
-            // SKU 归属于 1688 链接：保存时新增勾选项、删除链接上被取消勾选的项
-            $linkSkus = $this->mergeLinkSkus($this->linkSkuSet($linkHash), $renderedSkus, $checkedSkus);
-            $procurementSkus = implode(',', $linkSkus);
+            // 链接级 SKU 集合只增不减：系统已录入的 SKU 始终保留在链接记录中，运营 SKU 勾选后并入；表单仅保存本次勾选的 SKU
+            $linkSkus = $this->mergeLinkSkus($this->linkSkuSet($linkHash), $checkedSkus);
+            $procurementSkus = implode(',', $checkedSkus);
             if ($linkSkus !== []) {
                 $this->persistLinkSkuSet($linkHash, $normalizedUrl, $linkSkus);
             }
@@ -464,9 +470,16 @@ class ProductRequestController extends Controller
             ])->save();
 
             $newImages = $request->file('seller_images', []);
-            // 删除后剩余 0 张视为必填校验失败
+            // 删除后剩余 0 张视为必填校验失败；携带复用来源且来源已包含采购阶段图片时放行
             $totalAfter = max(0, $locked->attachmentsFor(ProductRequestAttachment::STAGE_PROCUREMENT)->count() - count($removedImageIds)) + count($newImages);
-            if ($totalAfter === 0) {
+            $reuseSource = null;
+            if ($removedImageIds === [] && $reuseSourceId > 0) {
+                $reuseSource = ProductRequest::query()->with('attachments')->find($reuseSourceId);
+                if (!$reuseSource || $reuseSource->getKey() === $locked->getKey()) {
+                    $reuseSource = null;
+                }
+            }
+            if ($totalAfter === 0 && !($reuseSource && $reuseSource->attachmentsFor(ProductRequestAttachment::STAGE_PROCUREMENT)->isNotEmpty())) {
                 throw \Illuminate\Validation\ValidationException::withMessages([
                     'seller_images' => [__('product_requests.uploads.required')],
                 ]);
@@ -476,12 +489,9 @@ class ProductRequestController extends Controller
             }
             if ($newImages !== []) {
                 $this->workflow->appendStageAttachments($locked, ProductRequestAttachment::STAGE_PROCUREMENT, $newImages, $context['user']);
-            } elseif ($removedImageIds === [] && $reuseSourceId > 0) {
-                $source = ProductRequest::query()->with('attachments')->find($reuseSourceId);
-                if ($source && $source->getKey() !== $locked->getKey()) {
-                    $this->workflow->copyStageAttachments($source, $locked, ProductRequestAttachment::STAGE_PROCUREMENT, $context['user']);
-                    $locked->forceFill(['reused_from_product_request_id' => $source->getKey()])->save();
-                }
+            } elseif ($reuseSource) {
+                $this->workflow->copyStageAttachments($reuseSource, $locked, ProductRequestAttachment::STAGE_PROCUREMENT, $context['user']);
+                $locked->forceFill(['reused_from_product_request_id' => $reuseSource->getKey()])->save();
             }
 
             // 仓库验收不通过后，采购重新检验通过即重新进入仓库验收流程
@@ -1066,6 +1076,9 @@ class ProductRequestController extends Controller
             ],
             'has_stock' => ['required', Rule::in(['yes', 'no'])],
             'product_image' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'purchase_item_images' => ['required', 'array', 'min:1', 'max:6'],
+            'purchase_item_images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'operation_remark' => ['nullable', 'string', 'max:2000'],
         ]);
     }
 
@@ -1097,6 +1110,7 @@ class ProductRequestController extends Controller
             'stock_status' => ['nullable', Rule::in(['yes', 'no'])],
             'minimum_order_quantity' => ['nullable', 'string', 'max:255'],
             'minimum_purchase_price_rmb' => ['required', 'string', 'max:100'],
+            'pcl_product_no' => ['required', 'string', 'max:100'],
             'estimated_shipping_weight_g' => ['required', 'string', 'max:100'],
             'outer_package_size' => ['nullable', 'string', 'max:191'],
             'large_volume_weight_g' => ['nullable', 'string', 'max:100'],
@@ -1230,17 +1244,14 @@ class ProductRequestController extends Controller
     }
 
     /**
-     * 计算链接上的 SKU 集合：新增勾选项，删除表单中展示但被取消勾选的项。
+     * 计算链接上的 SKU 集合：只增不减，历史 SKU 与本次勾选项全部保留。
      *
-     * @param  list<string>  $rendered  表单已加载的链接 SKU（未加载面板时为空，表示仅新增）
      * @param  list<string>  $checked   当前勾选项
      * @return list<string>
      */
-    private function mergeLinkSkus(string $current, array $rendered, array $checked): array
+    private function mergeLinkSkus(string $current, array $checked): array
     {
-        $removed = array_diff($rendered, $checked);
-
-        return array_values(array_unique(array_merge(array_diff($this->splitSkus($current), $removed), $checked)));
+        return array_values(array_unique(array_merge($this->splitSkus($current), $checked)));
     }
 
     /** @return array<string, mixed> */
@@ -1253,6 +1264,7 @@ class ProductRequestController extends Controller
             'report_no' => $productRequest->report_no,
             'cover_url' => $cover ? route('product-requests.attachments.show', [$productRequest, $cover]) : null,
             'standard_chinese_name' => $productRequest->standard_chinese_name,
+            'pcl_product_no' => $productRequest->pcl_product_no,
             'supplier_url' => $productRequest->supplier_url,
             'company_spu' => $productRequest->company_spu,
             'sku_sequence' => $productRequest->sku_sequence,
