@@ -47,6 +47,9 @@ Route::get('/api/placement-reviews/pending-count', [ProductRequestController::cl
 Route::get('/api/warehouse-acceptances/pending-count', [ProductRequestController::class, 'warehousePendingCount'])->name('product-requests.warehouse.pending-count');
 Route::get('/product-requests/create', [ProductRequestController::class, 'operationCreate'])->name('product-requests.operation.create');
 Route::post('/product-requests', [ProductRequestController::class, 'operationStore'])->name('product-requests.operation.store');
+Route::delete('/product-requests/{productRequest}', [ProductRequestController::class, 'operationDestroy'])->name('product-requests.operation.destroy');
+Route::get('/link-review-issues', [ProductRequestController::class, 'linkIssuesIndex'])->name('product-requests.link-issues.index');
+Route::get('/warehouse-issues', [ProductRequestController::class, 'warehouseIssuesIndex'])->name('product-requests.warehouse-issues.index');
 Route::get('/product-requests/{productRequest}', [ProductRequestController::class, 'show'])->name('product-requests.show');
 Route::get('/product-requests/{productRequest}/placement', [ProductRequestController::class, 'placementEdit'])->name('product-requests.placement.edit');
 Route::put('/product-requests/{productRequest}/placement', [ProductRequestController::class, 'placementUpdate'])->name('product-requests.placement.update');
@@ -59,9 +62,11 @@ Route::get('/api/procurement-inspections/sku-suggestions', [ProductRequestContro
 Route::get('/placement-reviews', [ProductRequestController::class, 'placementReviewIndex'])->name('product-requests.placement-reviews.index');
 Route::get('/placement-reviews/{productRequest}/edit', [ProductRequestController::class, 'placementReviewEdit'])->name('product-requests.placement-reviews.edit');
 Route::put('/placement-reviews/{productRequest}', [ProductRequestController::class, 'placementReviewUpdate'])->name('product-requests.placement-reviews.update');
+Route::post('/placement-reviews/{productRequest}/images', [ProductRequestController::class, 'placementReviewImageStore'])->name('product-requests.placement-reviews.images.store');
 Route::get('/warehouse-acceptances', [ProductRequestController::class, 'warehouseIndex'])->name('product-requests.warehouse.index');
 Route::get('/warehouse-acceptances/{productRequest}/edit', [ProductRequestController::class, 'warehouseEdit'])->name('product-requests.warehouse.edit');
 Route::put('/warehouse-acceptances/{productRequest}', [ProductRequestController::class, 'warehouseUpdate'])->name('product-requests.warehouse.update');
+Route::post('/warehouse-acceptances/{productRequest}/images', [ProductRequestController::class, 'warehouseImageStore'])->name('product-requests.warehouse.images.store');
 Route::get('/shopify-stores', [ShopifyStoreController::class, 'index'])->name('logistics.shopify-stores.index');
 Route::post('/shopify-stores/batch-sync', [ShopifyStoreController::class, 'batchSync'])->name('logistics.shopify-stores.batch-sync');
 Route::post('/shopify-stores/batch-register-webhooks', [ShopifyStoreController::class, 'batchRegisterWebhooks'])->name('logistics.shopify-stores.batch-register-webhooks');

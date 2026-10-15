@@ -17,17 +17,17 @@
     $warehouseResult = $productRequest->warehouse_acceptance_result
         ? ($warehouseResultLabels[$productRequest->warehouse_acceptance_result] ?? $notAvailable)
         : $notFilled;
-    $warehouseConfirmation = $productRequest->warehouse_confirmation
-        ? ($warehouseConfirmationLabels[$productRequest->warehouse_confirmation] ?? $notAvailable)
+    $warehouseRejectReason = $productRequest->warehouse_reject_reason
+        ? ($warehouseRejectReasonLabels[$productRequest->warehouse_reject_reason] ?? $notAvailable)
         : $notFilled;
     $isWebLink = static fn (?string $value): bool => str_starts_with(strtolower(trim((string) $value)), 'http://') || str_starts_with(strtolower(trim((string) $value)), 'https://');
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261014-10">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261015-02">
 @endpush
 @push('scripts')
-    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261014-10"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261015-02"></script>
 @endpush
 
 @section('content')
@@ -110,9 +110,9 @@
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.warehouse.weight_difference') }}</span><span class="product-request-detail-value">{{ $weightDifference === null ? $notAvailable : $weightDifference }}</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.package_size_cm') }}</span><span class="product-request-detail-value">{{ collect([$productRequest->package_length_cm, $productRequest->package_width_cm, $productRequest->package_height_cm])->filter()->implode(' × ') ?: $notFilled }}</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_acceptance_result') }}</span><span class="product-request-detail-value">{{ $warehouseResult }}</span></div>
-                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_confirmation') }}</span><span class="product-request-detail-value">{{ $warehouseConfirmation }}</span></div>
+                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_reject_reason') }}</span><span class="product-request-detail-value">{{ $warehouseRejectReason }}</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_operator') }}</span><span class="product-request-detail-value">{{ $productRequest->warehouse_operator_display_name ?: $notFilled }}</span></div>
-                <div class="product-request-detail-item product-request-detail-item-wide"><span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_remark') }}</span><span class="product-request-detail-value">{{ $productRequest->warehouse_remark ?: $notFilled }}</span></div>
+                <div class="product-request-detail-item product-request-detail-item-wide"><span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_remark') }}</span>@if($productRequest->warehouse_remark)<div class="product-request-remark-html">{!! $productRequest->warehouse_remark !!}</div>@else<span class="product-request-detail-value">{{ $notFilled }}</span>@endif</div>
             </div>
             <div class="product-request-detail-media">
                 <span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_images') }}</span>
@@ -146,8 +146,8 @@
                             <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.review.submitted_at') }}</span><span class="product-request-detail-value">{{ optional($review->submitted_at)->format('Y-m-d H:i') }}</span></div>
                             <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.review.reviewed_by') }}</span><span class="product-request-detail-value">{{ $review->reviewer_name ?: $notFilled }}</span></div>
                             <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.review.reviewed_at') }}</span><span class="product-request-detail-value">{{ optional($review->reviewed_at)->format('Y-m-d H:i') }}</span></div>
-                            <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.review_remark') }}</span><span class="product-request-detail-value">{{ $review->remark ?: $notFilled }}</span></div>
                         </div>
+                        <div class="product-request-review-remark"><span class="product-request-detail-label">{{ __('product_requests.fields.review_remark') }}</span><div class="product-request-remark-html">@if($review->remark){!! $review->remark !!}@else{{ $notFilled }}@endif</div></div>
                     </div>
                 @empty
                     <p class="text-muted">{{ __('product_requests.common.no_records') }}</p>

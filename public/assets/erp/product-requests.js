@@ -239,7 +239,9 @@
         var first = null;
         form.querySelectorAll('[data-product-request-upload]').forEach(function (container) {
             var input = container.querySelector('input[type="file"]');
-            if (!input || container.getAttribute('data-required') !== '1' || inputFiles(input).length > 0) { return; }
+            if (!input || container.getAttribute('data-required') !== '1') { return; }
+            // 已保存的附件或复用带过来的图片同样满足必填
+            if (inputFiles(input).length > 0 || container.querySelector('.product-request-upload-preview-item')) { return; }
             var group = container.closest('.form-group') || container;
             appendValidationError(group, container.getAttribute('data-required-message') || '');
             if (!first) { first = container; }
@@ -374,9 +376,15 @@
             var name = document.createElement('strong');
             name.textContent = record.standard_chinese_name || '';
             var detail = document.createElement('span');
-            detail.textContent = [record.report_no, record.supplier_url].filter(Boolean).join(' \u00b7 ');
+            detail.textContent = record.supplier_url || '';
             content.appendChild(name);
             content.appendChild(detail);
+            if (record.skus && record.skus.length) {
+                var skuLine = document.createElement('span');
+                skuLine.className = 'product-request-reuse-skus';
+                skuLine.textContent = (config.dedupeSkus || 'SKU') + '：' + record.skus.join('，');
+                content.appendChild(skuLine);
+            }
             row.appendChild(content);
 
             var detailBlock = buildDetail(record);
@@ -477,15 +485,110 @@
         var summary = root.querySelector('#sku-selected-summary');
         var url = input.getAttribute('data-sku-suggestions-url');
         var currentId = input.getAttribute('data-sku-suggestions-current-id');
+        var linkSkusInput = form ? form.querySelector('[data-product-request-link-skus]') : null;
         var checkButton = form ? form.querySelector('[data-sku-check]') : null;
         if (!panel || !list || !form) { return; }
+
+        var operationList = panel.querySelector('#sku-operation-list');
+        var skuSource = root.querySelector('[data-sku-edit-source]');
+        var syncingSkus = false;
 
         function updateSummary() {
             var checked = form.querySelectorAll('input[name="selected_skus[]"]:checked');
             var parts = [];
-            for (var i = 0; i < checked.length; i++) { parts.push(checked[i].value); }
+            for (var i = 0; i < checked.length; i++) {
+                if (checked[i].value.trim() !== '' && parts.indexOf(checked[i].value) === -1) { parts.push(checked[i].value); }
+            }
             if (summaryRow) { summaryRow.hidden = parts.length === 0; }
             if (summary) { summary.textContent = parts.length ? '已勾选 ' + parts.length + ' 个：' + parts.join(', ') : ''; }
+        }
+
+        // 提报信息下的「运营 SKU」可直接修改，文本与勾选项双向同步
+        function operationValues() {
+            var values = [];
+            if (!operationList) { return values; }
+            operationList.querySelectorAll('[data-sku-select]').forEach(function (box) {
+                var value = (box.value || '').trim();
+                if (value !== '' && values.indexOf(value) === -1) { values.push(value); }
+            });
+            return values;
+        }
+
+        function writeOperationSource() {
+            if (!skuSource) { return; }
+            syncingSkus = true;
+            skuSource.value = operationValues().join(', ');
+            syncingSkus = false;
+        }
+
+        // SKU 行：editable=true 时渲染文本框（仅运营 SKU 可改），否则只读展示
+        function buildSkuRow(value, editable) {
+            var label = document.createElement('label');
+            label.className = 'sku-suggestion-item';
+            var checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.name = 'selected_skus[]';
+            checkbox.value = value;
+            checkbox.checked = true;
+            checkbox.setAttribute('data-sku-select', 'true');
+            checkbox.addEventListener('change', function () {
+                if (label.parentNode === list) { syncLinkSkus(); }
+                updateSummary();
+            });
+            label.appendChild(checkbox);
+            if (editable) {
+                var edit = document.createElement('input');
+                edit.type = 'text';
+                edit.className = 'sku-suggestion-input';
+                edit.value = value;
+                edit.setAttribute('maxlength', '500');
+                edit.setAttribute('data-sku-edit', 'true');
+                edit.addEventListener('input', function () {
+                    var next = edit.value.trim();
+                    checkbox.value = next;
+                    if (next === '') { checkbox.checked = false; }
+                    writeOperationSource();
+                    updateSummary();
+                });
+                label.appendChild(edit);
+            } else {
+                label.appendChild(document.createTextNode(value));
+            }
+            return label;
+        }
+
+        function renderOperationRows(value) {
+            if (!operationList) { return; }
+            operationList.innerHTML = '';
+            var values = String(value === null || typeof value === 'undefined' ? '' : value).split(',').map(function (part) { return part.trim(); }).filter(function (part) { return part !== ''; });
+            if (!values.length) {
+                var empty = document.createElement('span');
+                empty.className = 'sku-suggestion-empty';
+                empty.textContent = operationList.getAttribute('data-empty-text') || '';
+                operationList.appendChild(empty);
+                return;
+            }
+            values.forEach(function (sku) { operationList.appendChild(buildSkuRow(sku, true)); });
+        }
+
+        if (skuSource) {
+            skuSource.addEventListener('input', function () {
+                if (syncingSkus) { return; }
+                renderOperationRows(skuSource.value);
+                updateSummary();
+            });
+        }
+        renderOperationRows(skuSource ? skuSource.value : (operationList ? operationList.getAttribute('data-operation-skus') : ''));
+
+        // 链接基线始终与「系统已录入的 SKU」框保持一致，保证增删比对准确
+        function syncLinkSkus() {
+            if (!linkSkusInput) { return; }
+            var values = [];
+            list.querySelectorAll('[data-sku-select]').forEach(function (box) {
+                var value = (box.value || '').trim();
+                if (value !== '' && values.indexOf(value) === -1) { values.push(value); }
+            });
+            linkSkusInput.value = values.join(',');
         }
 
         function render(items) {
@@ -497,6 +600,7 @@
                 empty.textContent = '该链接在系统中暂无已录入 SKU';
                 list.appendChild(empty);
                 panel.hidden = false;
+                if (linkSkusInput) { linkSkusInput.value = ''; }
                 updateSummary();
                 return;
             }
@@ -504,29 +608,31 @@
             items.forEach(function (item) {
                 (item.skus || []).forEach(function (sku) {
                     total += 1;
-                    var label = document.createElement('label');
-                    var checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox';
-                    checkbox.name = 'selected_skus[]';
-                    checkbox.value = sku;
-                    checkbox.addEventListener('change', updateSummary);
-                    label.appendChild(checkbox);
-                    label.appendChild(document.createTextNode(sku));
-                    var source = document.createElement('span');
-                    source.className = 'sku-source';
-                    source.textContent = '（' + (item.report_no || '') + '）';
-                    label.appendChild(source);
+                    // 链接上已录入的 SKU 只读展示，仅可勾选/取消（不提供修改）
+                    var label = buildSkuRow(sku, false);
+                    if (item.report_no) {
+                        var source = document.createElement('span');
+                        source.className = 'sku-source';
+                        source.textContent = '（' + item.report_no + '）';
+                        label.appendChild(source);
+                    }
                     list.appendChild(label);
                 });
             });
             if (countEl) { countEl.textContent = '共 ' + total + ' 个'; }
             panel.hidden = false;
+            syncLinkSkus();
             updateSummary();
         }
 
         function fetchSuggestions() {
             var value = input.value.trim();
-            if (!/^https?:\/\//i.test(value)) { panel.hidden = true; if (summaryRow) { summaryRow.hidden = true; } return; }
+            if (!/^https?:\/\//i.test(value)) {
+                panel.hidden = true;
+                if (summaryRow) { summaryRow.hidden = true; }
+                if (linkSkusInput) { linkSkusInput.value = ''; }
+                return;
+            }
             var query = '?supplier_url=' + encodeURIComponent(value) + (currentId ? '&current_id=' + encodeURIComponent(currentId) : '');
             fetch(url + query, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
                 .then(function (response) { return response.ok ? response.json() : { items: [] }; })
@@ -701,6 +807,117 @@
         sync();
     }
 
+    function initializeRichEditor(root) {
+        root.querySelectorAll('[data-product-request-editor]').forEach(function (editor) {
+            if (editor.dataset.productRequestEditorReady === '1') { return; }
+            editor.dataset.productRequestEditorReady = '1';
+            var content = editor.querySelector('[data-editor-content]');
+            var fileInput = editor.querySelector('[data-editor-image-input]');
+            var form = editor.closest('form');
+            var input = form ? form.querySelector('[data-editor-input]') : null;
+            if (!content || !input) { return; }
+
+            content.innerHTML = input.value || '';
+            var savedRange = null;
+
+            function sync() { input.value = content.innerHTML; }
+
+            function saveRange() {
+                var selection = window.getSelection();
+                if (selection && selection.rangeCount > 0 && content.contains(selection.anchorNode)) {
+                    savedRange = selection.getRangeAt(0).cloneRange();
+                }
+            }
+
+            function restoreRange() {
+                if (!savedRange) { return; }
+                var selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(savedRange);
+            }
+
+            function insertHtml(html) {
+                content.focus();
+                restoreRange();
+                document.execCommand('insertHTML', false, html);
+                saveRange();
+                sync();
+            }
+
+            function upload(file) {
+                if (!isSupported(file)) { notify('warning', config.invalidFile); return; }
+                var token = 'u' + Date.now() + Math.random().toString(36).slice(2);
+                function placeholderNode() { return content.querySelector('[data-editor-uploading="' + token + '"]'); }
+                function dropPlaceholder() {
+                    var node = placeholderNode();
+                    if (node && node.parentNode) { node.parentNode.removeChild(node); }
+                    sync();
+                }
+                insertHtml('<span class="product-request-rich-uploading" data-editor-uploading="' + token + '">' + (config.imageUploading || '') + '</span>');
+                var data = new FormData();
+                data.append('image', file);
+                fetch(editor.getAttribute('data-upload-url'), {
+                    method: 'POST',
+                    headers: { 'X-CSRF-TOKEN': config.csrfToken || '', 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
+                    body: data
+                }).then(function (response) {
+                    return response.json().catch(function () { return {}; }).then(function (payload) {
+                        return { response: response, payload: payload };
+                    });
+                }).then(function (result) {
+                    if (!result.response.ok || !result.payload.url) {
+                        dropPlaceholder();
+                        notify('warning', result.payload.message || config.imageUploadFailed);
+                        return;
+                    }
+                    var image = document.createElement('img');
+                    image.src = result.payload.url;
+                    image.alt = file.name || '';
+                    var node = placeholderNode();
+                    if (node && node.parentNode) { node.parentNode.replaceChild(image, node); }
+                    else { content.appendChild(image); }
+                    sync();
+                }).catch(function () {
+                    dropPlaceholder();
+                    notify('warning', config.imageUploadFailed);
+                });
+            }
+            editor.erpEditorUpload = upload;
+
+            ['keyup', 'mouseup', 'input', 'blur'].forEach(function (name) {
+                content.addEventListener(name, saveRange);
+            });
+            content.addEventListener('input', sync);
+            content.addEventListener('blur', sync);
+
+            editor.querySelectorAll('[data-editor-command]').forEach(function (button) {
+                var command = button.getAttribute('data-editor-command');
+                button.addEventListener('mousedown', function (event) { event.preventDefault(); });
+                button.addEventListener('click', function () {
+                    if (command === 'insertImage') {
+                        if (fileInput) { fileInput.click(); }
+                        return;
+                    }
+                    content.focus();
+                    restoreRange();
+                    document.execCommand(command, false, null);
+                    saveRange();
+                    sync();
+                });
+            });
+
+            if (fileInput) {
+                fileInput.addEventListener('change', function () {
+                    var files = inputFiles(fileInput);
+                    fileInput.value = '';
+                    files.forEach(function (file) { upload(file); });
+                });
+            }
+
+            sync();
+        });
+    }
+
     function initialize(root) {
         try {
             initializeUploads(root);
@@ -726,6 +943,11 @@
             initializeRadioChoices(root);
         } catch (error) {
             reportInitializationError('radio initializer failed', error);
+        }
+        try {
+            initializeRichEditor(root);
+        } catch (error) {
+            reportInitializationError('rich editor initializer failed', error);
         }
     }
 
@@ -778,7 +1000,49 @@
         document.body.classList.add('product-request-lightbox-open');
     }
 
+    function deleteRecord(button) {
+        var url = button.getAttribute('data-delete-url');
+        if (!url || button.disabled) { return; }
+        if (config.deleteConfirm && !window.confirm(config.deleteConfirm)) { return; }
+        button.disabled = true;
+        var row = button.closest ? button.closest('tr') : null;
+        var xhr = new XMLHttpRequest();
+        xhr.open('DELETE', url, true);
+        xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+        xhr.setRequestHeader('X-Product-Request-Modal', '1');
+        xhr.setRequestHeader('Accept', 'application/json');
+        if (config.csrfToken) { xhr.setRequestHeader('X-CSRF-TOKEN', config.csrfToken); }
+        xhr.addEventListener('load', function () {
+            var payload = {};
+            try { payload = JSON.parse(xhr.responseText) || {}; } catch (error) { payload = {}; }
+            if (xhr.status < 200 || xhr.status >= 300) {
+                button.disabled = false;
+                notify('warning', payload.message || config.deleteFailed);
+                return;
+            }
+            notify('success', payload.message || '');
+            if (!row || !row.parentNode) {
+                window.location.reload();
+                return;
+            }
+            var body = row.parentNode;
+            body.removeChild(row);
+            if (!body.querySelector('tr')) { window.location.reload(); }
+        });
+        xhr.addEventListener('error', function () {
+            button.disabled = false;
+            notify('warning', config.deleteFailed);
+        });
+        xhr.send();
+    }
+
     document.addEventListener('click', function (event) {
+        var deleteButton = event.target.closest ? event.target.closest('[data-product-request-delete]') : null;
+        if (deleteButton) {
+            event.preventDefault();
+            deleteRecord(deleteButton);
+            return;
+        }
         var imagePreview = event.target.closest ? event.target.closest('[data-product-request-image-preview]') : null;
         if (imagePreview) {
             event.preventDefault();
@@ -793,12 +1057,27 @@
 
     document.addEventListener('paste', function (event) {
         var active = document.activeElement;
+        var richEditor = active && active.closest ? active.closest('[data-product-request-editor]') : null;
+        if (richEditor && typeof richEditor.erpEditorUpload === 'function') {
+            var richFiles = event.clipboardData ? event.clipboardData.files : null;
+            if (richFiles && richFiles.length) {
+                event.preventDefault();
+                richEditor.erpEditorUpload(richFiles[0]);
+            }
+            return;
+        }
         var container = active && active.closest ? active.closest('[data-product-request-upload]') : null;
+        if (!container) {
+            var host = active && active.closest ? active.closest('[data-product-request-paste-host]') : null;
+            container = host ? host.querySelector('[data-product-request-upload]') : null;
+        }
         if (!container) { return; }
         var input = container.querySelector('input[type="file"]');
         if (!input) { return; }
+        var files = event.clipboardData ? event.clipboardData.files : null;
+        if (!files || !files.length) { return; }
         event.preventDefault();
-        addFiles(container, input, parseInt(container.getAttribute('data-max-files') || '1', 10), event.clipboardData ? event.clipboardData.files : []);
+        addFiles(container, input, parseInt(container.getAttribute('data-max-files') || '1', 10), files);
     });
 
     document.addEventListener('submit', function (event) {
