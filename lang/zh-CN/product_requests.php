@@ -54,6 +54,7 @@ return [
         'form_title' => '新增需求提报',
         'form_subtitle' => '提交后，采购部门将补充并检验商品信息。',
         'placement_title' => '回填投放链接',
+        'edit' => '重新编辑',
         'placement_subtitle' => '审核失败时，仅允许修改投放链接后重新提交。',
         'my_scope_hint' => '列表已按当前账号和部门管理范围自动过滤。',
         'sku_changed' => 'SKU 有变动，请按最新 SKU 更改店铺里面的 SKU',
@@ -96,6 +97,11 @@ return [
         'supplier_url_readonly_hint' => '该链接为运营填写内容，不可修改。',
         'supplier_url_required_hint' => '请先填写 1688 主链接。',
         'seller_image_hint' => '可选，最多 3 张。',
+        'inspection_pass' => '检验通过',
+        'inspection_reject' => '审核不通过',
+        'inspection_reject_reason' => '审核不通过理由',
+        'inspection_reject_reason_placeholder' => '请填写审核不通过的理由',
+        'inspection_reject_reason_hint' => '选择审核不通过时，理由为必填；通过时可留空。',
     ],
     'review' => [
         'title' => '投放链接审核',
@@ -213,6 +219,7 @@ return [
         'warehouse_operator' => '仓库负责人',
         'warehouse_reject_reason' => '驳回原因',
         'warehouse_remark' => '备注',
+        'inspection_reject_reason' => '检验不通过理由',
         'review_remark' => '审核备注',
     ],
     'editor' => [
@@ -273,6 +280,7 @@ return [
     'status' => [
         'pending' => '待处理',
         'inspection_passed' => '检验通过',
+        'inspection_rejected' => '检验不通过',
         'approved' => '审核通过',
     ],
     'review_status' => [
@@ -297,8 +305,10 @@ return [
     ],
     'messages' => [
         'operation_submitted' => '需求 :report_no 已提交，当前状态为待处理。',
+        'operation_resubmitted' => '需求 :report_no 已重新提交，当前状态为待处理。',
         'placement_submitted' => '投放链接已提交审核。',
         'procurement_completed' => '商品信息已检验通过。',
+        'procurement_rejected' => '商品信息检验不通过，已退回运营重新提交。',
         'placement_approved' => '投放链接已审核通过。',
         'placement_rejected' => '投放链接已退回运营修改。',
         'warehouse_passed' => '仓库验收已审核通过。',
@@ -315,7 +325,9 @@ return [
     ],
     'events' => [
         'operation_submitted' => '运营提交需求',
+        'operation_resubmitted' => '运营重新提交需求',
         'procurement_inspection_passed' => '采购信息检验通过',
+        'procurement_inspection_rejected' => '采购信息检验不通过',
         'placement_submitted' => '运营提交投放链接',
         'placement_approved' => '投放链接审核通过',
         'placement_rejected' => '投放链接审核失败',

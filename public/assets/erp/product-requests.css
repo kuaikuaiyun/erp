@@ -39,7 +39,7 @@
 .product-request-badge.status-pending, .product-request-badge.warehouse-pending_review { color: #915f0a; border-color: #d39b39; background: #fff1cc; }
 .product-request-badge.status-inspection_passed, .product-request-badge.review-pending { color: #176a9b; border-color: #4b9dcc; background: #e5f4fc; }
 .product-request-badge.status-approved, .product-request-badge.review-approved, .product-request-badge.warehouse-passed, .product-request-badge.confirmation-confirmed { color: #1e7749; border-color: #4daa76; background: #e4f6eb; }
-.product-request-badge.review-rejected, .product-request-badge.warehouse-rejected, .product-request-badge.confirmation-return_for_supplement { color: #a52f39; border-color: #d67279; background: #fdebed; }
+.product-request-badge.review-rejected, .product-request-badge.warehouse-rejected, .product-request-badge.confirmation-return_for_supplement, .product-request-badge.status-inspection_rejected { color: #a52f39; border-color: #d67279; background: #fdebed; }
 .product-request-badge.review-unfilled { color: #586c80; border-color: #97a8b8; background: #edf2f6; }
 .product-request-ellipsis { max-width: 300px !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .product-request-empty { padding: 42px 15px !important; color: #84909d !important; text-align: center; }

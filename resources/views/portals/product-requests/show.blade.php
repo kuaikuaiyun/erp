@@ -25,10 +25,10 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261015-16">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261015-17">
 @endpush
 @push('scripts')
-    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261015-16"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261015-18"></script>
 @endpush
 
 @section('content')
@@ -100,6 +100,9 @@
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.estimated_shipping_weight_g') }}</span><span class="product-request-detail-value">{{ $productRequest->estimated_shipping_weight_g ?: $notFilled }}</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.large_volume_weight_g') }}</span><span class="product-request-detail-value">{{ $productRequest->large_volume_weight_g ?: $notFilled }}</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.erp_operator') }}</span><span class="product-request-detail-value">{{ $productRequest->erp_operator_display_name ?: $notFilled }}</span></div>
+                @if(trim((string) $productRequest->inspection_reject_reason) !== '')
+                <div class="product-request-detail-item product-request-detail-item-wide"><span class="product-request-detail-label">{{ __('product_requests.fields.inspection_reject_reason') }}</span><span class="product-request-detail-value product-request-remark-text">{{ $productRequest->inspection_reject_reason }}</span></div>
+                @endif
             </div>
             <div class="product-request-detail-media">
                 <span class="product-request-detail-label">{{ __('product_requests.fields.seller_images') }}</span>

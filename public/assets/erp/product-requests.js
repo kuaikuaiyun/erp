@@ -923,6 +923,40 @@
         }
 
         bindRow(template);
+
+        // 编辑模式：从 hidden input 回显已有 SKU
+        var existing = String(hidden.value || '').trim();
+        if (existing !== '') {
+            var skuList = existing.split(',').map(function (s) { return s.trim(); }).filter(function (s) { return s !== ''; });
+            if (skuList.length > 0) {
+                // 清空模板行的输入
+                Array.prototype.slice.call(template.querySelectorAll('input[data-sku-part]')).forEach(function (input) { input.value = ''; });
+                skuList.forEach(function (sku, index) {
+                    var row = index === 0 ? template : template.cloneNode(true);
+                    if (index > 0) {
+                        Array.prototype.slice.call(row.querySelectorAll('input[data-sku-part]')).forEach(function (input) { input.value = ''; });
+                    }
+                    // 去掉前缀，解析 pinyin-attribute-box
+                    var rest = sku;
+                    if (prefix !== '' && rest.indexOf(prefix) === 0) { rest = rest.slice(prefix.length); }
+                    var parts = rest.split('-');
+                    var box = parts.pop() || '';
+                    var attribute = parts.pop() || '';
+                    var pinyin = parts.join('-');
+                    var pinyinInput = row.querySelector('[data-sku-part="pinyin"]');
+                    var attrInput = row.querySelector('[data-sku-part="attribute"]');
+                    var boxInput = row.querySelector('[data-sku-part="box"]');
+                    if (pinyinInput) { pinyinInput.value = pinyin; }
+                    if (attrInput) { attrInput.value = attribute; }
+                    if (boxInput) { boxInput.value = box; }
+                    if (index > 0) {
+                        builder.appendChild(row);
+                        bindRow(row);
+                    }
+                });
+            }
+        }
+
         sync();
     }
 
@@ -1204,8 +1238,10 @@
         if (!form || !form.matches || !form.matches('[data-product-request-modal-form]')) { return; }
         event.preventDefault();
         clearValidationErrors(form);
-        if (!validateRequiredUploads(form)) { return; }
         var submitter = event.submitter || null;
+        var isRejected = submitter && submitter.name === 'result' && submitter.value === 'rejected';
+        // 审核不通过时只需填写理由，跳过上传必填校验
+        if (!isRejected && !validateRequiredUploads(form)) { return; }
         var formData = new FormData(form);
         if (submitter && submitter.name && !formData.has(submitter.name)) {
             formData.append(submitter.name, submitter.value);

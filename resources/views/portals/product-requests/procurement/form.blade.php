@@ -162,6 +162,15 @@
                     <span class="help-block">{{ __('product_requests.help.image_upload') }} {{ __('product_requests.procurement.seller_image_hint') }}</span>
                 </div>
             </div>
+
+            <div class="row">
+                <div class="form-group col-md-12 @error('inspection_reject_reason') has-error @enderror">
+                    <label for="inspection_reject_reason">{{ __('product_requests.procurement.inspection_reject_reason') }}</label>
+                    <textarea id="inspection_reject_reason" class="form-control" name="inspection_reject_reason" rows="3" maxlength="2000" placeholder="{{ __('product_requests.procurement.inspection_reject_reason_placeholder') }}">{{ old('inspection_reject_reason', $productRequest->inspection_reject_reason) }}</textarea>
+                    <span class="help-block">{{ __('product_requests.procurement.inspection_reject_reason_hint') }}</span>
+                    @error('inspection_reject_reason')<span class="help-block text-red">{{ $message }}</span>@enderror
+                </div>
+            </div>
         </section>
     </div>
 
@@ -177,7 +186,8 @@
 
     <div class="modal-footer">
         <button class="btn btn-default" type="button" data-dismiss="modal">{{ __('product_requests.common.cancel') }}</button>
-        <button class="btn btn-success" type="submit"><i class="fa fa-check"></i> {{ __('product_requests.common.submit') }}</button>
+        <button class="btn btn-danger" type="submit" name="result" value="rejected" formnovalidate><i class="fa fa-times"></i> {{ __('product_requests.procurement.inspection_reject') }}</button>
+        <button class="btn btn-success" type="submit" name="result" value="passed"><i class="fa fa-check"></i> {{ __('product_requests.procurement.inspection_pass') }}</button>
     </div>
 </form>
 <style>

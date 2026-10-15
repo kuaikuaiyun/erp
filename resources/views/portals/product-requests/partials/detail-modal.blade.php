@@ -85,6 +85,9 @@
                     <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.estimated_shipping_weight_g') }}</span><span class="product-request-detail-value">{{ $productRequest->estimated_shipping_weight_g ?: $notFilled }}</span></div>
                     <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.large_volume_weight_g') }}</span><span class="product-request-detail-value">{{ $productRequest->large_volume_weight_g ?: $notFilled }}</span></div>
                     <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.erp_operator') }}</span><span class="product-request-detail-value">{{ $productRequest->erp_operator_display_name ?: $notFilled }}</span></div>
+                    @if(trim((string) $productRequest->inspection_reject_reason) !== '')
+                    <div class="product-request-detail-item product-request-detail-item-span-2"><span class="product-request-detail-label">{{ __('product_requests.fields.inspection_reject_reason') }}</span><span class="product-request-detail-value product-request-remark-text">{{ $productRequest->inspection_reject_reason }}</span></div>
+                    @endif
                 </div>
                 <div class="product-request-detail-modal-media">
                     <span class="product-request-detail-label">{{ __('product_requests.fields.seller_images') }}</span>
