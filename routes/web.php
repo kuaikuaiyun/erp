@@ -89,6 +89,7 @@ Route::put('/orders/{order}', [LogisticsOrderController::class, 'update'])->name
 Route::put('/orders/{order}/refunds/{refund}', [LogisticsOrderController::class, 'updateRefund'])->name('logistics.orders.refunds.update');
 Route::delete('/orders/{order}/refunds/{refund}', [LogisticsOrderController::class, 'voidRefund'])->name('logistics.orders.refunds.void');
 Route::get('/product-statistics', [ProductStatisticsController::class, 'index'])->name('logistics.product-statistics.index');
+Route::get('/product-statistics/detail', [ProductStatisticsController::class, 'detail'])->name('logistics.product-statistics.detail');
 Route::post('/product-statistics/export', [ProductStatisticsController::class, 'export'])->name('logistics.product-statistics.export');
 Route::get('/paypal-risk', [PayPalRiskController::class, 'index'])->name('logistics.paypal-risk.index');
 Route::post('/paypal-risk/accounts', [PayPalRiskController::class, 'store'])->name('logistics.paypal-risk.accounts.store');

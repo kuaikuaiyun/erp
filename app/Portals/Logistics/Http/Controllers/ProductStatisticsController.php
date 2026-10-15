@@ -45,6 +45,31 @@ class ProductStatisticsController extends Controller
         ]);
     }
 
+    public function detail(Request $request): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $validated = $request->validate([
+            'product_id' => ['required', 'string', 'max:512'],
+            ...$this->filterRules(false),
+        ]);
+        $product = $this->statistics->detail(
+            $this->normaliseFilters($validated),
+            (string) $validated['product_id'],
+        );
+
+        if ($product === null) {
+            return response()->json([
+                'message' => __('logistics.product_statistics.ui.detail_not_found'),
+            ], 404);
+        }
+
+        return response()->json(['product' => $product]);
+    }
+
     public function export(Request $request): Response
     {
         $context = $this->portalContext($request);
@@ -59,18 +84,18 @@ class ProductStatisticsController extends Controller
             ...$this->filterRules(false),
         ]);
         $filters = $this->normaliseFilters($validated);
-        $rows = $this->statistics->exportRows(
-            $filters,
-            $validated['scope'] === 'selected' ? $validated['selected_ids'] : null,
-        );
-        if ($rows === []) {
+        $selectedIds = $validated['scope'] === 'selected' ? $validated['selected_ids'] : null;
+        if (!$this->statistics->hasExportRows($filters, $selectedIds)) {
             throw ValidationException::withMessages([
                 'scope' => __('logistics.product_statistics.export_empty'),
             ]);
         }
 
         return $this->spreadsheets->exportResponse(
-            $this->statistics->productsForRows($rows, $filters),
+            $this->statistics->productsForRows(
+                $this->statistics->exportRows($filters, $selectedIds),
+                $filters,
+            ),
         );
     }
 
@@ -176,6 +201,8 @@ class ProductStatisticsController extends Controller
             'filteredCount' => __('logistics.product_statistics.ui.filtered_count'),
             'selectExportWarning' => __('logistics.product_statistics.ui.select_export_warning'),
             'detailTitle' => __('logistics.product_statistics.ui.detail_title'),
+            'detailLoading' => __('logistics.product_statistics.ui.detail_loading'),
+            'detailLoadFailed' => __('logistics.product_statistics.ui.detail_load_failed'),
             'variantDetailTitle' => __('logistics.product_statistics.ui.variant_detail_title'),
             'profitBreakdown' => __('logistics.product_statistics.ui.profit_breakdown'),
             'storeName' => __('logistics.product_statistics.ui.store_name'),

@@ -8,6 +8,7 @@
         'products' => $products,
         'summary' => $productSummary,
         'pagination' => $productPagination,
+        'detailUrl' => route('logistics.product-statistics.detail'),
         'sort' => $filters['sort'],
         'direction' => $filters['direction'],
         'decisions' => $decisionOptions,
@@ -182,6 +183,6 @@
     <script>
         window.ErpLogisticsProductStatistics = @json($productStatisticsClientConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/product-statistics.js?v=20261014-4"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-statistics.js?v=20261015-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261014-1"></script>
 @endpush
