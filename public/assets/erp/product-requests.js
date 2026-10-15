@@ -126,12 +126,14 @@
 
     function addFiles(container, input, maxFiles, incoming) {
         var current = inputFiles(input);
+        // 新上传数量上限需扣除仍保留的已保存附件
+        var limit = Math.max(0, maxFiles - container.querySelectorAll('[data-existing-preview]').length);
         Array.prototype.slice.call(incoming || []).forEach(function (file) {
             if (!isSupported(file)) {
                 notify('warning', config.invalidFile);
                 return;
             }
-            if (current.length >= maxFiles) {
+            if (current.length >= limit) {
                 notify('warning', (config.tooMany || '').replace(':count', maxFiles));
                 return;
             }
@@ -217,6 +219,24 @@
             if (pasteButton) {
                 pasteButton.addEventListener('click', function () {
                     pasteFromClipboard(container, input, maxFiles);
+                });
+            }
+
+            var removedInput = container.querySelector('[data-removed-attachments]');
+            if (removedInput) {
+                container.querySelectorAll('[data-existing-remove]').forEach(function (button) {
+                    button.addEventListener('click', function () {
+                        var item = button.closest('[data-existing-preview]');
+                        if (!item) { return; }
+                        var id = item.getAttribute('data-attachment-id');
+                        var ids = removedInput.value ? removedInput.value.split(',') : [];
+                        if (ids.indexOf(id) === -1) {
+                            ids.push(id);
+                            removedInput.value = ids.join(',');
+                        }
+                        item.remove();
+                        renderPreview(container, input);
+                    });
                 });
             }
             ['dragenter', 'dragover'].forEach(function (eventName) {
@@ -329,7 +349,7 @@
         }
 
         function applyRecord(record) {
-            ['standard_chinese_name', 'large_volume_weight_g', 'minimum_purchase_price_rmb', 'estimated_shipping_weight_g', 'outer_package_size'].forEach(function (field) {
+            ['standard_chinese_name', 'large_volume_weight_g', 'minimum_purchase_price_rmb', 'estimated_shipping_weight_g', 'outer_package_size', 'pcl_product_no'].forEach(function (field) {
                 var input = reuseForm.querySelector('[name="' + field + '"]');
                 if (input) { input.value = record[field] || ''; }
             });
@@ -417,7 +437,18 @@
             if (record.skus && record.skus.length) {
                 var skuLine = document.createElement('span');
                 skuLine.className = 'product-request-reuse-skus';
-                skuLine.textContent = (config.dedupeSkus || 'SKU') + '：' + record.skus.join('，');
+                var skuLabel = document.createElement('span');
+                skuLabel.textContent = (config.dedupeSkus || 'SKU') + '：';
+                skuLine.appendChild(skuLabel);
+                var skuTags = document.createElement('span');
+                skuTags.className = 'product-request-sku-tags';
+                record.skus.forEach(function (sku) {
+                    var tag = document.createElement('span');
+                    tag.className = 'product-request-sku-tag';
+                    tag.textContent = sku;
+                    skuTags.appendChild(tag);
+                });
+                skuLine.appendChild(skuTags);
                 content.appendChild(skuLine);
             }
             row.appendChild(content);
@@ -526,7 +557,29 @@
 
         var operationList = panel.querySelector('#sku-operation-list');
         var skuSource = root.querySelector('[data-sku-edit-source]');
+        var skuPreview = skuSource ? skuSource.parentNode.querySelector('[data-sku-edit-preview]') : null;
         var syncingSkus = false;
+
+        // 运营 SKU 编辑框内容实时渲染为标签，便于逐行查看
+        function renderSkuPreview() {
+            if (!skuSource || !skuPreview) { return; }
+            skuPreview.innerHTML = '';
+            skuSource.value.split(/[\n,]+/).forEach(function (part) {
+                var sku = part.trim();
+                if (sku === '') { return; }
+                var tag = document.createElement('span');
+                tag.className = 'product-request-sku-tag';
+                tag.textContent = sku;
+                skuPreview.appendChild(tag);
+            });
+        }
+
+        // 多行编辑框高度随内容自适应
+        function resizeSkuSource() {
+            if (!skuSource) { return; }
+            skuSource.style.height = 'auto';
+            skuSource.style.height = (skuSource.scrollHeight + 2) + 'px';
+        }
 
         function updateSummary() {
             var checked = form.querySelectorAll('input[name="selected_skus[]"]:checked');
@@ -552,8 +605,10 @@
         function writeOperationSource() {
             if (!skuSource) { return; }
             syncingSkus = true;
-            skuSource.value = operationValues().join(', ');
+            skuSource.value = operationValues().join("\n");
             syncingSkus = false;
+            renderSkuPreview();
+            resizeSkuSource();
         }
 
         // SKU 行：editable=true 时渲染文本框（仅运营 SKU 可改），否则只读展示
@@ -595,7 +650,7 @@
         function renderOperationRows(value) {
             if (!operationList) { return; }
             operationList.innerHTML = '';
-            var values = String(value === null || typeof value === 'undefined' ? '' : value).split(',').map(function (part) { return part.trim(); }).filter(function (part) { return part !== ''; });
+            var values = String(value === null || typeof value === 'undefined' ? '' : value).split(/[\n,]+/).map(function (part) { return part.trim(); }).filter(function (part) { return part !== ''; });
             if (!values.length) {
                 var empty = document.createElement('span');
                 empty.className = 'sku-suggestion-empty';
@@ -610,10 +665,14 @@
             skuSource.addEventListener('input', function () {
                 if (syncingSkus) { return; }
                 renderOperationRows(skuSource.value);
+                renderSkuPreview();
+                resizeSkuSource();
                 updateSummary();
             });
         }
         renderOperationRows(skuSource ? skuSource.value : (operationList ? operationList.getAttribute('data-operation-skus') : ''));
+        renderSkuPreview();
+        resizeSkuSource();
 
         // 链接基线始终与「系统已录入的 SKU」框保持一致，保证增删比对准确
         function syncLinkSkus() {
@@ -713,7 +772,7 @@
         var warn = root.querySelector('#sku-warn');
         var prefix = builder.getAttribute('data-sku-prefix') || '';
         var max = 50;
-        var boxDefault = builder.getAttribute('data-sku-box-default') || '1pc';
+        var boxDefault = builder.getAttribute('data-sku-box-default') || '1pc*';
         var templateBox = template.querySelector('[data-sku-part="box"]');
         if (templateBox && templateBox.value === '') { templateBox.value = boxDefault; }
 
@@ -790,6 +849,26 @@
             refreshRowButtons();
         }
 
+        var hintCanvas = null;
+        function updateBoxHint(input) {
+            if (!input) { return; }
+            var wrap = input.parentNode;
+            if (!wrap || !wrap.classList.contains('product-request-sku-box-wrap')) { return; }
+            var hint = wrap.querySelector('[data-sku-box-hint]');
+            if (!hint) { return; }
+            var value = String(input.value || '');
+            var starIndex = value.lastIndexOf('*');
+            var starEmpty = starIndex !== -1 && value.slice(starIndex + 1).trim() === '';
+            if (!starEmpty) { hint.style.display = 'none'; return; }
+            if (!hintCanvas) { hintCanvas = document.createElement('canvas'); }
+            var context = hintCanvas.getContext('2d');
+            var style = window.getComputedStyle(input);
+            context.font = style.font || (style.fontSize + ' ' + style.fontFamily);
+            var paddingLeft = parseFloat(style.paddingLeft) || 0;
+            hint.style.left = (paddingLeft + context.measureText(value.slice(0, starIndex + 1)).width + 1) + 'px';
+            hint.style.display = 'block';
+        }
+
         function bindRow(row) {
             var add = row.querySelector('[data-sku-add]');
             if (add) { add.addEventListener('click', addRow); }
@@ -803,7 +882,11 @@
             }
             Array.prototype.slice.call(row.querySelectorAll('input[data-sku-part]')).forEach(function (input) {
                 input.addEventListener('input', sync);
+                if (input.getAttribute('data-sku-part') === 'box') {
+                    input.addEventListener('input', function () { updateBoxHint(input); });
+                }
             });
+            updateBoxHint(row.querySelector('input[data-sku-part="box"]'));
             var pinyin = row.querySelector('input[data-sku-part="pinyin"]');
             if (pinyin) {
                 pinyin.addEventListener('input', function () {
@@ -829,8 +912,9 @@
             Array.prototype.slice.call(row.querySelectorAll('input[data-sku-part]')).forEach(function (input) { input.value = ''; });
             var pinyin = row.querySelector('input[data-sku-part="pinyin"]');
             if (pinyin) { pinyin.value = defaultPinyin(); }
+            var templateBox = template.querySelector('input[data-sku-part="box"]');
             var box = row.querySelector('input[data-sku-part="box"]');
-            if (box) { box.value = boxDefault; }
+            if (box) { box.value = templateBox && templateBox.value.trim() !== '' ? templateBox.value : boxDefault; }
             builder.appendChild(row);
             bindRow(row);
             var focusTarget = pinyin && pinyin.value !== '' ? row.querySelector('input[data-sku-part="attribute"]') : pinyin;
@@ -839,6 +923,40 @@
         }
 
         bindRow(template);
+
+        // 编辑模式：从 hidden input 回显已有 SKU
+        var existing = String(hidden.value || '').trim();
+        if (existing !== '') {
+            var skuList = existing.split(',').map(function (s) { return s.trim(); }).filter(function (s) { return s !== ''; });
+            if (skuList.length > 0) {
+                // 清空模板行的输入
+                Array.prototype.slice.call(template.querySelectorAll('input[data-sku-part]')).forEach(function (input) { input.value = ''; });
+                skuList.forEach(function (sku, index) {
+                    var row = index === 0 ? template : template.cloneNode(true);
+                    if (index > 0) {
+                        Array.prototype.slice.call(row.querySelectorAll('input[data-sku-part]')).forEach(function (input) { input.value = ''; });
+                    }
+                    // 去掉前缀，解析 pinyin-attribute-box
+                    var rest = sku;
+                    if (prefix !== '' && rest.indexOf(prefix) === 0) { rest = rest.slice(prefix.length); }
+                    var parts = rest.split('-');
+                    var box = parts.pop() || '';
+                    var attribute = parts.pop() || '';
+                    var pinyin = parts.join('-');
+                    var pinyinInput = row.querySelector('[data-sku-part="pinyin"]');
+                    var attrInput = row.querySelector('[data-sku-part="attribute"]');
+                    var boxInput = row.querySelector('[data-sku-part="box"]');
+                    if (pinyinInput) { pinyinInput.value = pinyin; }
+                    if (attrInput) { attrInput.value = attribute; }
+                    if (boxInput) { boxInput.value = box; }
+                    if (index > 0) {
+                        builder.appendChild(row);
+                        bindRow(row);
+                    }
+                });
+            }
+        }
+
         sync();
     }
 
@@ -1120,8 +1238,10 @@
         if (!form || !form.matches || !form.matches('[data-product-request-modal-form]')) { return; }
         event.preventDefault();
         clearValidationErrors(form);
-        if (!validateRequiredUploads(form)) { return; }
         var submitter = event.submitter || null;
+        var isRejected = submitter && submitter.name === 'result' && submitter.value === 'rejected';
+        // 审核不通过时只需填写理由，跳过上传必填校验
+        if (!isRejected && !validateRequiredUploads(form)) { return; }
         var formData = new FormData(form);
         if (submitter && submitter.name && !formData.has(submitter.name)) {
             formData.append(submitter.name, submitter.value);

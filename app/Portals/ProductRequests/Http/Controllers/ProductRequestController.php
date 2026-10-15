@@ -170,6 +170,7 @@ class ProductRequestController extends Controller
                 'skus' => $this->normalizeSkus($data['skus']),
                 'operation_supplier_url' => $data['operation_supplier_url'],
                 'has_stock' => $data['has_stock'],
+                'operation_remark' => $data['operation_remark'] ?? null,
             ]);
             $productRequest->forceFill([
                 'report_no' => 'REQ-'.now('Asia/Shanghai')->format('Ymd').'-'.str_pad((string) $productRequest->getKey(), 6, '0', STR_PAD_LEFT),
@@ -181,6 +182,12 @@ class ProductRequestController extends Controller
                 [$request->file('product_image')],
                 $context['user'],
             );
+            $this->workflow->replaceStageAttachments(
+                $productRequest,
+                ProductRequestAttachment::STAGE_PURCHASE_ITEM,
+                $request->file('purchase_item_images', []),
+                $context['user'],
+            );
             $this->workflow->log($productRequest, 'operation_submitted', $context['user']);
 
             return $productRequest;
@@ -189,6 +196,85 @@ class ProductRequestController extends Controller
         return $this->modalSuccess(
             $request,
             __('product_requests.messages.operation_submitted', ['report_no' => $productRequest->report_no]),
+            'product-requests.operation.index',
+        );
+    }
+
+    /** 运营重新编辑检验不通过的需求提报 */
+    public function operationEdit(Request $request, ProductRequest $productRequest): Response|View
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        if (!$this->isModalRequest($request)) {
+            return redirect()->route('product-requests.operation.index');
+        }
+
+        // 仅允许检验不通过的记录由原提报人编辑
+        abort_unless(
+            (int) $productRequest->operation_user_id === (int) $context['user']->getKey()
+            && trim((string) $productRequest->inspection_reject_reason) !== '',
+            403,
+        );
+
+        return view('portals.product-requests.operation.form', [
+            ...$this->viewContext($context),
+            'actor' => $this->access->actorSnapshot($context['user']),
+            'productRequest' => $productRequest->loadMissing('attachments'),
+        ]);
+    }
+
+    public function operationUpdate(Request $request, ProductRequest $productRequest): Response|RedirectResponse
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless(
+            (int) $productRequest->operation_user_id === (int) $context['user']->getKey()
+            && trim((string) $productRequest->inspection_reject_reason) !== '',
+            403,
+        );
+
+        $data = $this->validateOperationData($request, $productRequest);
+        $connection = config('admin.database.connection') ?: config('database.default');
+
+        DB::connection($connection)->transaction(function () use ($productRequest, $data, $request, $context): void {
+            $locked = ProductRequest::query()->lockForUpdate()->findOrFail($productRequest->getKey());
+            $locked->fill([
+                'skus' => $this->normalizeSkus($data['skus']),
+                'operation_supplier_url' => $data['operation_supplier_url'],
+                'has_stock' => $data['has_stock'],
+                'operation_remark' => $data['operation_remark'] ?? null,
+                'status' => ProductRequest::STATUS_PENDING,
+                'inspection_reject_reason' => null,
+            ])->save();
+
+            if ($request->hasFile('product_image')) {
+                $this->workflow->replaceStageAttachments(
+                    $locked,
+                    ProductRequestAttachment::STAGE_OPERATION,
+                    [$request->file('product_image')],
+                    $context['user'],
+                );
+            }
+            if ($request->hasFile('purchase_item_images')) {
+                $this->workflow->replaceStageAttachments(
+                    $locked,
+                    ProductRequestAttachment::STAGE_PURCHASE_ITEM,
+                    $request->file('purchase_item_images', []),
+                    $context['user'],
+                );
+            }
+            $this->workflow->log($locked, 'operation_resubmitted', $context['user']);
+        });
+
+        return $this->modalSuccess(
+            $request,
+            __('product_requests.messages.operation_resubmitted', ['report_no' => $productRequest->report_no]),
             'product-requests.operation.index',
         );
     }
@@ -318,7 +404,7 @@ class ProductRequestController extends Controller
         $records = $this->access->applyOperationVisibility(
             ProductRequest::query()
                 ->where('status', ProductRequest::STATUS_INSPECTION_PASSED)
-                ->where('placement_review_status', ProductRequest::REVIEW_UNFILLED),
+                ->whereIn('placement_review_status', [ProductRequest::REVIEW_UNFILLED, ProductRequest::REVIEW_REJECTED]),
             $context['user'],
         )->get(['id', 'report_no']);
 
@@ -415,9 +501,11 @@ class ProductRequestController extends Controller
         abort_unless($this->access->canViewProcurementRequest($productRequest, $context['user']), 403);
 
         $data = $this->validateProcurementData($request, $productRequest);
+        $rejected = ($data['result'] ?? '') === 'rejected';
+        unset($data['result']);
         $connection = config('admin.database.connection') ?: config('database.default');
 
-        DB::connection($connection)->transaction(function () use ($productRequest, $request, $data, $context): void {
+        DB::connection($connection)->transaction(function () use ($productRequest, $request, $data, $context, $rejected): void {
             $locked = ProductRequest::query()->lockForUpdate()->findOrFail($productRequest->getKey());
             abort_unless($this->access->canViewProcurementRequest($locked, $context['user']), 403);
             // 允许已检验通过的记录再次编辑，第二次保存覆盖第一次结果
@@ -425,16 +513,46 @@ class ProductRequestController extends Controller
             // 检验通过且仓库审核已通过的记录不允许再修改
             abort_if($locked->status === ProductRequest::STATUS_INSPECTION_PASSED && $locked->warehouse_acceptance_result === ProductRequest::WAREHOUSE_PASSED, 403);
 
+            $actor = $this->access->actorSnapshot($context['user']);
+
+            // 审核不通过：仅保存备注理由，状态保持待处理，运营可重新提交
+            if ($rejected) {
+                $locked->fill([
+                    'inspection_reject_reason' => $data['inspection_reject_reason'],
+                    'status' => ProductRequest::STATUS_PENDING,
+                    'erp_operator_id' => $actor['user_id'],
+                    'erp_operator_name' => $actor['user_name'],
+                    'erp_operator_department_name' => $actor['department_name'],
+                    'erp_operator_display_name' => $actor['display_name'],
+                    'inspected_at' => now(),
+                ])->save();
+
+                $this->workflow->log($locked, 'procurement_inspection_rejected', $context['user'], [
+                    'inspection_reject_reason' => $data['inspection_reject_reason'],
+                ]);
+                return;
+            }
+
             $normalizedUrl = $this->workflow->normalizeSupplierUrl($data['supplier_url']);
             $linkHash = $this->workflow->supplierUrlHash($normalizedUrl);
             $reuseSourceId = (int) ($data['reuse_source_id'] ?? 0);
+            // 前端删除的已保存附件 ID，仅限当前记录的采购阶段附件
+            $removedImageIds = collect(explode(',', (string) ($data['removed_seller_images'] ?? '')))
+                ->map(fn (string $value): int => (int) trim($value))
+                ->filter(fn (int $value): bool => $value > 0)
+                ->unique()
+                ->values()
+                ->all();
+            $removedImageIds = $locked->attachments()
+                ->where('stage', ProductRequestAttachment::STAGE_PROCUREMENT)
+                ->whereIn('id', $removedImageIds)
+                ->pluck('id')
+                ->all();
             $checkedSkus = $this->splitSkus(implode(',', $data['selected_skus'] ?? []));
-            $renderedSkus = $this->splitSkus((string) ($data['link_skus'] ?? ''));
-            unset($data['reuse_source_id'], $data['seller_images'], $data['selected_skus'], $data['link_skus']);
-            $actor = $this->access->actorSnapshot($context['user']);
-            // SKU 归属于 1688 链接：保存时新增勾选项、删除链接上被取消勾选的项
-            $linkSkus = $this->mergeLinkSkus($this->linkSkuSet($linkHash), $renderedSkus, $checkedSkus);
-            $procurementSkus = implode(',', $linkSkus);
+            unset($data['reuse_source_id'], $data['seller_images'], $data['selected_skus'], $data['link_skus'], $data['removed_seller_images'], $data['inspection_reject_reason']);
+            // 链接级 SKU 集合只增不减：系统已录入的 SKU 始终保留在链接记录中，运营 SKU 勾选后并入；表单仅保存本次勾选的 SKU
+            $linkSkus = $this->mergeLinkSkus($this->linkSkuSet($linkHash), $checkedSkus);
+            $procurementSkus = implode(',', $checkedSkus);
             if ($linkSkus !== []) {
                 $this->persistLinkSkuSet($linkHash, $normalizedUrl, $linkSkus);
             }
@@ -444,6 +562,7 @@ class ProductRequestController extends Controller
                 'supplier_url_normalized' => $normalizedUrl,
                 'supplier_url_hash' => $linkHash,
                 'status' => ProductRequest::STATUS_INSPECTION_PASSED,
+                'inspection_reject_reason' => null,
                 'erp_operator_id' => $actor['user_id'],
                 'erp_operator_name' => $actor['user_name'],
                 'erp_operator_department_name' => $actor['department_name'],
@@ -452,14 +571,28 @@ class ProductRequestController extends Controller
             ])->save();
 
             $newImages = $request->file('seller_images', []);
-            if ($newImages !== []) {
-                $this->workflow->replaceStageAttachments($locked, ProductRequestAttachment::STAGE_PROCUREMENT, $newImages, $context['user']);
-            } elseif ($reuseSourceId > 0) {
-                $source = ProductRequest::query()->with('attachments')->find($reuseSourceId);
-                if ($source && $source->getKey() !== $locked->getKey()) {
-                    $this->workflow->copyStageAttachments($source, $locked, ProductRequestAttachment::STAGE_PROCUREMENT, $context['user']);
-                    $locked->forceFill(['reused_from_product_request_id' => $source->getKey()])->save();
+            // 删除后剩余 0 张视为必填校验失败；携带复用来源且来源已包含采购阶段图片时放行
+            $totalAfter = max(0, $locked->attachmentsFor(ProductRequestAttachment::STAGE_PROCUREMENT)->count() - count($removedImageIds)) + count($newImages);
+            $reuseSource = null;
+            if ($removedImageIds === [] && $reuseSourceId > 0) {
+                $reuseSource = ProductRequest::query()->with('attachments')->find($reuseSourceId);
+                if (!$reuseSource || $reuseSource->getKey() === $locked->getKey()) {
+                    $reuseSource = null;
                 }
+            }
+            if ($totalAfter === 0 && !($reuseSource && $reuseSource->attachmentsFor(ProductRequestAttachment::STAGE_PROCUREMENT)->isNotEmpty())) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'seller_images' => [__('product_requests.uploads.required')],
+                ]);
+            }
+            if ($removedImageIds !== []) {
+                $this->workflow->deleteStageAttachments($locked, ProductRequestAttachment::STAGE_PROCUREMENT, $removedImageIds);
+            }
+            if ($newImages !== []) {
+                $this->workflow->appendStageAttachments($locked, ProductRequestAttachment::STAGE_PROCUREMENT, $newImages, $context['user']);
+            } elseif ($reuseSource) {
+                $this->workflow->copyStageAttachments($reuseSource, $locked, ProductRequestAttachment::STAGE_PROCUREMENT, $context['user']);
+                $locked->forceFill(['reused_from_product_request_id' => $reuseSource->getKey()])->save();
             }
 
             // 仓库验收不通过后，采购重新检验通过即重新进入仓库验收流程
@@ -477,7 +610,9 @@ class ProductRequestController extends Controller
 
         return $this->modalSuccess(
             $request,
-            __('product_requests.messages.procurement_completed'),
+            $rejected
+                ? __('product_requests.messages.procurement_rejected')
+                : __('product_requests.messages.procurement_completed'),
             'product-requests.procurement.index',
         );
     }
@@ -835,7 +970,6 @@ class ProductRequestController extends Controller
             abort_unless(in_array($locked->status, [ProductRequest::STATUS_INSPECTION_PASSED, ProductRequest::STATUS_APPROVED], true), 403);
             abort_if($locked->warehouse_acceptance_result === ProductRequest::WAREHOUSE_PASSED, 403);
             $actor = $this->access->actorSnapshot($context['user']);
-            unset($data['warehouse_images']);
             $result = $data['result'];
             $rejectReason = $rejected ? ($data['warehouse_reject_reason'] ?? null) : null;
             unset($data['result'], $data['warehouse_reject_reason']);
@@ -851,10 +985,6 @@ class ProductRequestController extends Controller
                 'warehouse_operator_display_name' => $actor['display_name'],
                 'warehouse_processed_at' => now(),
             ])->save();
-            $warehouseImages = $request->file('warehouse_images', []);
-            if ($warehouseImages !== []) {
-                $this->workflow->replaceStageAttachments($locked, ProductRequestAttachment::STAGE_WAREHOUSE, $warehouseImages, $context['user']);
-            }
             $this->workflow->log($locked, $rejected ? 'warehouse_rejected' : 'warehouse_passed', $context['user'], [
                 'warehouse_reject_reason' => $rejectReason,
             ]);
@@ -997,7 +1127,11 @@ class ProductRequestController extends Controller
             });
         }
         if ($filters['status'] !== '') {
-            $query->where('status', $filters['status']);
+            if ($filters['status'] === 'inspection_rejected') {
+                $query->whereNotNull('inspection_reject_reason')->where('inspection_reject_reason', '!=', '');
+            } else {
+                $query->where('status', $filters['status']);
+            }
         }
         if ($filters['review_status'] !== '') {
             $query->where('placement_review_status', $filters['review_status']);
@@ -1010,8 +1144,15 @@ class ProductRequestController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function validateOperationData(Request $request): array
+    private function validateOperationData(Request $request, ?ProductRequest $productRequest = null): array
     {
+        $hasProductImage = $productRequest
+            ? $productRequest->loadMissing('attachments')->attachmentsFor(ProductRequestAttachment::STAGE_OPERATION)->isNotEmpty()
+            : false;
+        $hasPurchaseImages = $productRequest
+            ? $productRequest->attachmentsFor(ProductRequestAttachment::STAGE_PURCHASE_ITEM)->isNotEmpty()
+            : false;
+
         return $request->validate([
             'skus' => [
                 'required',
@@ -1043,7 +1184,10 @@ class ProductRequestController extends Controller
                 'regex:#^https?://#i',
             ],
             'has_stock' => ['required', Rule::in(['yes', 'no'])],
-            'product_image' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'product_image' => [$hasProductImage ? 'nullable' : 'required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'purchase_item_images' => [$hasPurchaseImages ? 'nullable' : 'required', 'array', 'min:1', 'max:6'],
+            'purchase_item_images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'operation_remark' => ['nullable', 'string', 'max:2000'],
         ]);
     }
 
@@ -1061,12 +1205,21 @@ class ProductRequestController extends Controller
     /** @return array<string, mixed> */
     private function validateProcurementData(Request $request, ?ProductRequest $productRequest = null): array
     {
+        $rejected = $request->input('result') === 'rejected';
         $hasExistingImages = $productRequest
             ? $productRequest->loadMissing('attachments')->attachmentsFor(ProductRequestAttachment::STAGE_PROCUREMENT)->isNotEmpty()
             : false;
         $reusedImages = (int) $request->input('reuse_source_id', 0) > 0;
 
+        if ($rejected) {
+            return $request->validate([
+                'result' => ['required', Rule::in(['passed', 'rejected'])],
+                'inspection_reject_reason' => ['required', 'string', 'max:2000'],
+            ]);
+        }
+
         return $request->validate([
+            'result' => ['required', Rule::in(['passed', 'rejected'])],
             'standard_chinese_name' => ['required', 'string', 'max:191'],
             'supplier_url' => ['required', 'string', 'max:2048', 'regex:#^https?://#i'],
             'company_spu' => ['nullable', 'string', 'max:191'],
@@ -1075,6 +1228,7 @@ class ProductRequestController extends Controller
             'stock_status' => ['nullable', Rule::in(['yes', 'no'])],
             'minimum_order_quantity' => ['nullable', 'string', 'max:255'],
             'minimum_purchase_price_rmb' => ['required', 'string', 'max:100'],
+            'pcl_product_no' => ['required', 'string', 'max:100'],
             'estimated_shipping_weight_g' => ['required', 'string', 'max:100'],
             'outer_package_size' => ['nullable', 'string', 'max:191'],
             'large_volume_weight_g' => ['nullable', 'string', 'max:100'],
@@ -1086,13 +1240,14 @@ class ProductRequestController extends Controller
             'seller_images' => ($reusedImages || $hasExistingImages) ? ['nullable', 'array', 'max:3'] : ['required', 'array', 'max:3'],
             'seller_images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
             'reuse_source_id' => ['nullable', 'integer'],
+            'removed_seller_images' => ['nullable', 'string', 'max:100'],
+            'inspection_reject_reason' => ['nullable', 'string', 'max:2000'],
         ]);
     }
 
     /** @return array<string, mixed> */
     private function validateWarehouseData(Request $request, ProductRequest $productRequest): array
     {
-        $warehouseImages = $productRequest->loadMissing('attachments')->attachmentsFor(ProductRequestAttachment::STAGE_WAREHOUSE);
         $rejected = $request->input('result') === ProductRequest::WAREHOUSE_REJECTED;
 
         $data = $request->validate([
@@ -1113,8 +1268,6 @@ class ProductRequestController extends Controller
                     }
                 },
             ],
-            'warehouse_images' => [$warehouseImages->isEmpty() ? 'required' : 'nullable', 'array', 'max:3'],
-            'warehouse_images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
         ]);
         $data['warehouse_remark'] = $this->sanitizeRichRemark($data['warehouse_remark'] ?? null);
 
@@ -1126,6 +1279,7 @@ class ProductRequestController extends Controller
     {
         return [
             ProductRequest::STATUS_PENDING => __('product_requests.status.pending'),
+            'inspection_rejected' => __('product_requests.status.inspection_rejected'),
             ProductRequest::STATUS_INSPECTION_PASSED => __('product_requests.status.inspection_passed'),
             ProductRequest::STATUS_APPROVED => __('product_requests.status.approved'),
         ];
@@ -1207,17 +1361,14 @@ class ProductRequestController extends Controller
     }
 
     /**
-     * 计算链接上的 SKU 集合：新增勾选项，删除表单中展示但被取消勾选的项。
+     * 计算链接上的 SKU 集合：只增不减，历史 SKU 与本次勾选项全部保留。
      *
-     * @param  list<string>  $rendered  表单已加载的链接 SKU（未加载面板时为空，表示仅新增）
      * @param  list<string>  $checked   当前勾选项
      * @return list<string>
      */
-    private function mergeLinkSkus(string $current, array $rendered, array $checked): array
+    private function mergeLinkSkus(string $current, array $checked): array
     {
-        $removed = array_diff($rendered, $checked);
-
-        return array_values(array_unique(array_merge(array_diff($this->splitSkus($current), $removed), $checked)));
+        return array_values(array_unique(array_merge($this->splitSkus($current), $checked)));
     }
 
     /** @return array<string, mixed> */
@@ -1230,6 +1381,7 @@ class ProductRequestController extends Controller
             'report_no' => $productRequest->report_no,
             'cover_url' => $cover ? route('product-requests.attachments.show', [$productRequest, $cover]) : null,
             'standard_chinese_name' => $productRequest->standard_chinese_name,
+            'pcl_product_no' => $productRequest->pcl_product_no,
             'supplier_url' => $productRequest->supplier_url,
             'company_spu' => $productRequest->company_spu,
             'sku_sequence' => $productRequest->sku_sequence,

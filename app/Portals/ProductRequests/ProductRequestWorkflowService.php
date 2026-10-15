@@ -44,6 +44,23 @@ class ProductRequestWorkflowService
         }
     }
 
+    /** @param array<int, int> $ids */
+    public function deleteStageAttachments(ProductRequest $productRequest, string $stage, array $ids): void
+    {
+        if ($ids === []) {
+            return;
+        }
+
+        $attachments = $productRequest->attachments()
+            ->where('stage', $stage)
+            ->whereIn('id', $ids)
+            ->get();
+        foreach ($attachments as $attachment) {
+            Storage::disk($attachment->disk)->delete($attachment->path);
+            $attachment->delete();
+        }
+    }
+
     public function storeStageAttachment(ProductRequest $productRequest, string $stage, UploadedFile $file, AdminUser $user): ProductRequestAttachment
     {
         $sort = (int) $productRequest->attachments()->where('stage', $stage)->max('sort');

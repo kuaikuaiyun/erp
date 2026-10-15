@@ -118,7 +118,8 @@ class ProductRequestAccessService
     {
         return (int) $productRequest->operation_user_id === (int) $user->getKey()
             && $productRequest->status === ProductRequest::STATUS_INSPECTION_PASSED
-            && $productRequest->placement_review_status !== ProductRequest::REVIEW_PENDING;
+            && $productRequest->placement_review_status !== ProductRequest::REVIEW_PENDING
+            && $productRequest->placement_review_status !== ProductRequest::REVIEW_APPROVED;
     }
 
     public function canInspectProcurement(AdminUser $user): bool
