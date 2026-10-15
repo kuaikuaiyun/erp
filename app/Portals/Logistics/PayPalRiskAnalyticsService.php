@@ -230,9 +230,9 @@ class PayPalRiskAnalyticsService
                     'type' => '纠纷',
                     'amount' => $dispute->dispute_amount_usd !== null ? (float) $dispute->dispute_amount_usd : (float) $dispute->original_amount,
                     'currency' => (string) ($dispute->currency_code ?: 'USD'),
-                    'reason' => $this->disputeReason($dispute->reason),
+                    'reason' => $dispute->reasonLabel(),
                     'happened_at' => $this->dateTime($dispute->dispute_created_at),
-                    'status' => $this->disputeStatus($dispute->status),
+                    'status' => $dispute->statusLabel(),
                     'sort_time' => $dispute->dispute_created_at?->timestamp ?? 0,
                 ])->all(),
         );
