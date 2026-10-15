@@ -1,4 +1,4 @@
-@php
+﻿@php
     $existingAttachments = $existingAttachments ?? collect();
     $required = $required ?? false;
     $multiple = $maxFiles > 1;

@@ -41,7 +41,12 @@
 .product-request-badge.status-approved, .product-request-badge.review-approved, .product-request-badge.warehouse-passed, .product-request-badge.confirmation-confirmed { color: #1e7749; border-color: #4daa76; background: #e4f6eb; }
 .product-request-badge.review-rejected, .product-request-badge.warehouse-rejected, .product-request-badge.confirmation-return_for_supplement, .product-request-badge.status-inspection_rejected { color: #a52f39; border-color: #d67279; background: #fdebed; }
 .product-request-badge.review-unfilled { color: #586c80; border-color: #97a8b8; background: #edf2f6; }
+.product-request-badge.rectification-none { color: #6b7b8c; border-color: #b4c0cc; background: #f0f3f6; }
+.product-request-badge.rectification-pending { color: #915f0a; border-color: #d39b39; background: #fff1cc; }
+.product-request-badge.rectification-done { color: #1e7749; border-color: #4daa76; background: #e4f6eb; }
+.product-request-inline-form { display: inline-block; margin-left: 6px; }
 .product-request-ellipsis { max-width: 300px !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.product-request-ellipsis > a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .product-request-empty { padding: 42px 15px !important; color: #84909d !important; text-align: center; }
 .product-request-pagination { padding: 12px 15px; }
 .product-request-editor-modal .modal-dialog { width: min(980px, calc(100vw - 30px)); }
@@ -246,7 +251,8 @@ body.product-request-lightbox-open { overflow: hidden; }
 .product-request-table td.product-request-metric-cell, .product-request-table th.product-request-metric-cell { white-space: nowrap; text-align: center; font-variant-numeric: tabular-nums; }
 .product-request-table td.product-request-image-cell, .product-request-table th.product-request-image-cell { width: 62px; text-align: center; white-space: nowrap; }
 .product-request-table td.product-request-nowrap-cell, .product-request-table th.product-request-nowrap-cell { white-space: nowrap; }
-.product-request-link-wrap { overflow-wrap: anywhere; word-break: break-all; }
+.product-request-link-wrap { max-width: 280px; }
+.product-request-link-wrap > a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .product-request-rich-editor { border: 1px solid #cfdbe6; border-radius: 4px; background: #fff; overflow: hidden; }
 .product-request-rich-editor:focus-within { border-color: #73a6ca; box-shadow: 0 0 0 2px rgba(60, 141, 188, .10); }
 .product-request-rich-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 6px 8px; border-bottom: 1px solid #e6edf3; background: #f7fafc; }

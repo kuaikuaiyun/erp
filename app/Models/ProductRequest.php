@@ -24,6 +24,10 @@ class ProductRequest extends Model
     public const WAREHOUSE_REJECT_REASON_WEIGHT = 'weight';
     public const WAREHOUSE_REJECT_REASON_BOTH = 'both';
 
+    public const RECTIFICATION_NONE = 'none';
+    public const RECTIFICATION_PENDING = 'pending';
+    public const RECTIFICATION_DONE = 'done';
+
     protected $guarded = [];
 
     public function __construct(array $attributes = [])

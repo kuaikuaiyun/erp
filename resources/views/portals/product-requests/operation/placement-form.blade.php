@@ -1,4 +1,4 @@
-<form class="product-request-form" method="post" action="{{ route('product-requests.placement.update', $productRequest) }}" data-product-request-modal-form>
+﻿<form class="product-request-form" method="post" action="{{ route('product-requests.placement.update', $productRequest) }}" data-product-request-modal-form>
     @csrf @method('PUT')
     <input type="hidden" name="modal" value="1">
     <div class="modal-header">
