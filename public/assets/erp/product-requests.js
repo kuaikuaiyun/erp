@@ -126,12 +126,14 @@
 
     function addFiles(container, input, maxFiles, incoming) {
         var current = inputFiles(input);
+        // 新上传数量上限需扣除仍保留的已保存附件
+        var limit = Math.max(0, maxFiles - container.querySelectorAll('[data-existing-preview]').length);
         Array.prototype.slice.call(incoming || []).forEach(function (file) {
             if (!isSupported(file)) {
                 notify('warning', config.invalidFile);
                 return;
             }
-            if (current.length >= maxFiles) {
+            if (current.length >= limit) {
                 notify('warning', (config.tooMany || '').replace(':count', maxFiles));
                 return;
             }
@@ -217,6 +219,24 @@
             if (pasteButton) {
                 pasteButton.addEventListener('click', function () {
                     pasteFromClipboard(container, input, maxFiles);
+                });
+            }
+
+            var removedInput = container.querySelector('[data-removed-attachments]');
+            if (removedInput) {
+                container.querySelectorAll('[data-existing-remove]').forEach(function (button) {
+                    button.addEventListener('click', function () {
+                        var item = button.closest('[data-existing-preview]');
+                        if (!item) { return; }
+                        var id = item.getAttribute('data-attachment-id');
+                        var ids = removedInput.value ? removedInput.value.split(',') : [];
+                        if (ids.indexOf(id) === -1) {
+                            ids.push(id);
+                            removedInput.value = ids.join(',');
+                        }
+                        item.remove();
+                        renderPreview(container, input);
+                    });
                 });
             }
             ['dragenter', 'dragover'].forEach(function (eventName) {

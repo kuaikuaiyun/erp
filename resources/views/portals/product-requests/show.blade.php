@@ -27,7 +27,7 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261015-03">
 @endpush
 @push('scripts')
-    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261015-04"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261015-05"></script>
 @endpush
 
 @section('content')
@@ -103,33 +103,6 @@
     </article>
 
     <article class="product-request-box product-request-detail-card">
-        <div class="box-header"><h2 class="box-title">{{ __('product_requests.show.warehouse_information') }}</h2></div>
-        <div class="box-body">
-            <div class="product-request-detail-grid">
-                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.actual_shipping_weight_g') }}</span><span class="product-request-detail-value">{{ $productRequest->actual_shipping_weight_g ?: $notFilled }}</span></div>
-                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.warehouse.weight_difference') }}</span><span class="product-request-detail-value">{{ $weightDifference === null ? $notAvailable : $weightDifference }}</span></div>
-                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.package_size_cm') }}</span><span class="product-request-detail-value">{{ collect([$productRequest->package_length_cm, $productRequest->package_width_cm, $productRequest->package_height_cm])->filter()->implode(' × ') ?: $notFilled }}</span></div>
-                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_acceptance_result') }}</span><span class="product-request-detail-value">{{ $warehouseResult }}</span></div>
-                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_reject_reason') }}</span><span class="product-request-detail-value">{{ $warehouseRejectReason }}</span></div>
-                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_operator') }}</span><span class="product-request-detail-value">{{ $productRequest->warehouse_operator_display_name ?: $notFilled }}</span></div>
-                <div class="product-request-detail-item product-request-detail-item-wide"><span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_remark') }}</span>@if($productRequest->warehouse_remark)<div class="product-request-remark-html">{!! $productRequest->warehouse_remark !!}</div>@else<span class="product-request-detail-value">{{ $notFilled }}</span>@endif</div>
-            </div>
-            <div class="product-request-detail-media">
-                <span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_images') }}</span>
-                <div class="product-request-image-grid">
-                    @forelse($warehouseImages as $attachment)
-                        <a href="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}" data-product-request-image-preview data-product-request-image-alt="{{ $attachment->original_name }}">
-                            <img src="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}" alt="{{ $attachment->original_name }}">
-                        </a>
-                    @empty
-                        <span class="text-muted">{{ $notFilled }}</span>
-                    @endforelse
-                </div>
-            </div>
-        </div>
-    </article>
-
-    <article class="product-request-box product-request-detail-card">
         <div class="box-header"><h2 class="box-title">{{ __('product_requests.show.placement_information') }}</h2></div>
         <div class="box-body">
             <div class="product-request-detail-grid product-request-placement-grid">
@@ -152,6 +125,33 @@
                 @empty
                     <p class="text-muted">{{ __('product_requests.common.no_records') }}</p>
                 @endforelse
+            </div>
+        </div>
+    </article>
+
+    <article class="product-request-box product-request-detail-card">
+        <div class="box-header"><h2 class="box-title">{{ __('product_requests.show.warehouse_information') }}</h2></div>
+        <div class="box-body">
+            <div class="product-request-detail-grid">
+                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.actual_shipping_weight_g') }}</span><span class="product-request-detail-value">{{ $productRequest->actual_shipping_weight_g ?: $notFilled }}</span></div>
+                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.warehouse.weight_difference') }}</span><span class="product-request-detail-value">{{ $weightDifference === null ? $notAvailable : $weightDifference }}</span></div>
+                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.package_size_cm') }}</span><span class="product-request-detail-value">{{ collect([$productRequest->package_length_cm, $productRequest->package_width_cm, $productRequest->package_height_cm])->filter()->implode(' × ') ?: $notFilled }}</span></div>
+                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_acceptance_result') }}</span><span class="product-request-detail-value">{{ $warehouseResult }}</span></div>
+                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_reject_reason') }}</span><span class="product-request-detail-value">{{ $warehouseRejectReason }}</span></div>
+                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_operator') }}</span><span class="product-request-detail-value">{{ $productRequest->warehouse_operator_display_name ?: $notFilled }}</span></div>
+                <div class="product-request-detail-item product-request-detail-item-wide"><span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_remark') }}</span>@if($productRequest->warehouse_remark)<div class="product-request-remark-html">{!! $productRequest->warehouse_remark !!}</div>@else<span class="product-request-detail-value">{{ $notFilled }}</span>@endif</div>
+            </div>
+            <div class="product-request-detail-media">
+                <span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_images') }}</span>
+                <div class="product-request-image-grid">
+                    @forelse($warehouseImages as $attachment)
+                        <a href="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}" data-product-request-image-preview data-product-request-image-alt="{{ $attachment->original_name }}">
+                            <img src="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}" alt="{{ $attachment->original_name }}">
+                        </a>
+                    @empty
+                        <span class="text-muted">{{ $notFilled }}</span>
+                    @endforelse
+                </div>
             </div>
         </div>
     </article>

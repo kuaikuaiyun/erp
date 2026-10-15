@@ -428,9 +428,21 @@ class ProductRequestController extends Controller
             $normalizedUrl = $this->workflow->normalizeSupplierUrl($data['supplier_url']);
             $linkHash = $this->workflow->supplierUrlHash($normalizedUrl);
             $reuseSourceId = (int) ($data['reuse_source_id'] ?? 0);
+            // 前端删除的已保存附件 ID，仅限当前记录的采购阶段附件
+            $removedImageIds = collect(explode(',', (string) ($data['removed_seller_images'] ?? '')))
+                ->map(fn (string $value): int => (int) trim($value))
+                ->filter(fn (int $value): bool => $value > 0)
+                ->unique()
+                ->values()
+                ->all();
+            $removedImageIds = $locked->attachments()
+                ->where('stage', ProductRequestAttachment::STAGE_PROCUREMENT)
+                ->whereIn('id', $removedImageIds)
+                ->pluck('id')
+                ->all();
             $checkedSkus = $this->splitSkus(implode(',', $data['selected_skus'] ?? []));
             $renderedSkus = $this->splitSkus((string) ($data['link_skus'] ?? ''));
-            unset($data['reuse_source_id'], $data['seller_images'], $data['selected_skus'], $data['link_skus']);
+            unset($data['reuse_source_id'], $data['seller_images'], $data['selected_skus'], $data['link_skus'], $data['removed_seller_images']);
             $actor = $this->access->actorSnapshot($context['user']);
             // SKU 归属于 1688 链接：保存时新增勾选项、删除链接上被取消勾选的项
             $linkSkus = $this->mergeLinkSkus($this->linkSkuSet($linkHash), $renderedSkus, $checkedSkus);
@@ -452,9 +464,19 @@ class ProductRequestController extends Controller
             ])->save();
 
             $newImages = $request->file('seller_images', []);
+            // 删除后剩余 0 张视为必填校验失败
+            $totalAfter = max(0, $locked->attachmentsFor(ProductRequestAttachment::STAGE_PROCUREMENT)->count() - count($removedImageIds)) + count($newImages);
+            if ($totalAfter === 0) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'seller_images' => [__('product_requests.uploads.required')],
+                ]);
+            }
+            if ($removedImageIds !== []) {
+                $this->workflow->deleteStageAttachments($locked, ProductRequestAttachment::STAGE_PROCUREMENT, $removedImageIds);
+            }
             if ($newImages !== []) {
-                $this->workflow->replaceStageAttachments($locked, ProductRequestAttachment::STAGE_PROCUREMENT, $newImages, $context['user']);
-            } elseif ($reuseSourceId > 0) {
+                $this->workflow->appendStageAttachments($locked, ProductRequestAttachment::STAGE_PROCUREMENT, $newImages, $context['user']);
+            } elseif ($removedImageIds === [] && $reuseSourceId > 0) {
                 $source = ProductRequest::query()->with('attachments')->find($reuseSourceId);
                 if ($source && $source->getKey() !== $locked->getKey()) {
                     $this->workflow->copyStageAttachments($source, $locked, ProductRequestAttachment::STAGE_PROCUREMENT, $context['user']);
@@ -1086,6 +1108,7 @@ class ProductRequestController extends Controller
             'seller_images' => ($reusedImages || $hasExistingImages) ? ['nullable', 'array', 'max:3'] : ['required', 'array', 'max:3'],
             'seller_images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
             'reuse_source_id' => ['nullable', 'integer'],
+            'removed_seller_images' => ['nullable', 'string', 'max:100'],
         ]);
     }
 

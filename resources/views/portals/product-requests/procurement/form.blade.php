@@ -135,7 +135,7 @@
             <div class="row product-request-form-bottom-row">
                 <div class="form-group col-md-12 @error('seller_images') has-error @enderror">
                     <label>{{ __('product_requests.fields.seller_images') }} <span class="text-red">*</span></label>
-                    @include('portals.product-requests.partials.upload', ['inputName' => 'seller_images', 'inputId' => 'seller_images', 'maxFiles' => 3, 'required' => true, 'existingAttachments' => $sellerImages])
+                    @include('portals.product-requests.partials.upload', ['inputName' => 'seller_images', 'inputId' => 'seller_images', 'maxFiles' => 3, 'required' => true, 'existingAttachments' => $sellerImages, 'removableName' => 'removed_seller_images'])
                     <span class="help-block">{{ __('product_requests.help.image_upload') }} {{ __('product_requests.procurement.seller_image_hint') }}</span>
                 </div>
             </div>
