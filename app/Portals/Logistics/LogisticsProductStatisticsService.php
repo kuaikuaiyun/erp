@@ -585,6 +585,8 @@ class LogisticsProductStatisticsService
         $refunds = round($payment['paypal_refund_amount'] + $payment['credit_card_refund_amount'], 4);
         $profit = $cost === null ? null : round($revenue - $cost - $shipping - $handling - $refunds, 4);
         $paidOrders = $orders->filter(fn (LogisticsOrder $order): bool => $this->isPaidOrder($order));
+        $shippedOrders = $paidOrders->filter(fn (LogisticsOrder $order): bool => $this->isActuallyShipped($order));
+        $deliveredOrders = $shippedOrders->filter(fn (LogisticsOrder $order): bool => $this->isDelivered($order));
         $paypalOrders = $paidOrders->filter(fn (LogisticsOrder $order): bool => $this->isActualPayPalOrder($order));
         $creditCardOrders = $paidOrders->filter(fn (LogisticsOrder $order): bool => $this->isCreditCardOrder($order));
         $paypalRefundOrderIds = array_fill_keys($payment['paypal_refund_order_ids'], true);
@@ -619,6 +621,13 @@ class LogisticsProductStatisticsService
             'credit_card_refund_count' => count($payment['credit_card_refund_details']),
             'credit_card_refund_rate' => $creditCardRefundRate,
             'combined_refund_rate' => $combinedRefundRate,
+            'paid_order_count' => $paidOrders->count(),
+            'shipped_order_count' => $shippedOrders->count(),
+            'delivered_order_count' => $deliveredOrders->count(),
+            'shipping_rate' => $paidOrders->isEmpty() ? 0.0 : round($shippedOrders->count() / $paidOrders->count() * 100, 2),
+            // 发货率、签收率均以当前产品的已付款订单为分母；不能把签收率
+            // 误展示为“已签收 / 已发货”，否则会掩盖尚未发货的订单。
+            'delivery_rate' => $paidOrders->isEmpty() ? 0.0 : round($deliveredOrders->count() / $paidOrders->count() * 100, 2),
             'related_orders' => $this->relatedOrders($items, $payment),
             'profit' => $profit,
             'actual_profit' => $profit,
@@ -802,6 +811,8 @@ class LogisticsProductStatisticsService
                 'credit_card_refund' => 0.0,
                 'actual_refund' => 0.0,
                 'paypal_dispute_count' => 0,
+                'tracking_number' => (string) ($order->tracking_number ?: __('logistics.common.not_available')),
+                'logistics_status' => (string) ($order->logistics_status ?: __('logistics.common.not_available')),
                 'payment_method' => $this->isActualPayPalOrder($order)
                     ? __('logistics.product_statistics.payment_methods.paypal')
                     : ($this->isCreditCardOrder($order)
@@ -1008,6 +1019,20 @@ class LogisticsProductStatisticsService
     private function isPaidOrder(LogisticsOrder $order): bool
     {
         return $order->paid_at !== null || (float) $order->paid_amount_usd > 0;
+    }
+
+    private function isActuallyShipped(LogisticsOrder $order): bool
+    {
+        return in_array((string) $order->logistics_status, [
+            LogisticsOrder::LOGISTICS_IN_TRANSIT,
+            LogisticsOrder::LOGISTICS_EXCEPTION,
+            LogisticsOrder::LOGISTICS_DELIVERED,
+        ], true);
+    }
+
+    private function isDelivered(LogisticsOrder $order): bool
+    {
+        return (string) $order->logistics_status === LogisticsOrder::LOGISTICS_DELIVERED;
     }
 
     private function isActualPayPalOrder(LogisticsOrder $order): bool

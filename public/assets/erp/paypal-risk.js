@@ -14,7 +14,11 @@
 
     function one(selector, root) { return (root || document).querySelector(selector); }
     function all(selector, root) { return Array.prototype.slice.call((root || document).querySelectorAll(selector)); }
-    function route(template, id) { return String(template || '').replace('__ID__', String(id)); }
+    function route(template, id, tab) {
+        return String(template || '')
+            .replace('__ID__', String(id))
+            .replace('__TAB__', encodeURIComponent(String(tab || '')));
+    }
     function escapeHtml(value) {
         return String(value == null ? '' : value)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -66,10 +70,31 @@
             page: String(page || 1),
             date_from: (config.filters || {}).date_from || '',
             date_to: (config.filters || {}).date_to || '',
+            event_date_from: (config.filters || {}).event_date_from || '',
+            event_date_to: (config.filters || {}).event_date_to || '',
             sort: sorting.key || '',
             direction: sorting.direction || ''
         });
         return route(routes.detail, state.accountId) + '?' + params.toString();
+    }
+
+    function exportUrl() {
+        var params = new URLSearchParams({
+            date_from: (config.filters || {}).date_from || '',
+            date_to: (config.filters || {}).date_to || '',
+            event_date_from: (config.filters || {}).event_date_from || '',
+            event_date_to: (config.filters || {}).event_date_to || ''
+        });
+        return route(routes.export, state.accountId, state.tab) + '?' + params.toString();
+    }
+
+    function updateExportButton() {
+        var button = one('#paypal-detail-export');
+        if (!button) return;
+        var exportable = ['orders', 'products', 'refunds', 'disputes'].indexOf(state.tab) !== -1;
+        button.hidden = !exportable;
+        button.disabled = !exportable || !state.accountId;
+        if (exportable) button.innerHTML = '<i class="fa fa-download"></i> ' + escapeHtml(labels.exportCurrentTab || '');
     }
 
     function setDetailLoading(loading, message) {
@@ -96,7 +121,9 @@
             '<div><small>支付订单</small><strong>' + integer(summary.order_count) + '</strong></div>',
             '<div><small>实收金额（USD）</small><strong>' + money(summary.paid_amount) + '</strong></div>',
             '<div><small>退款率</small><strong>' + rate(summary.refund_rate) + '</strong></div>',
-            '<div><small>纠纷率</small><strong>' + rate(summary.dispute_rate) + '</strong></div>'
+            '<div><small>纠纷率</small><strong>' + rate(summary.dispute_rate) + '</strong></div>',
+            '<div><small>' + escapeHtml(labels.shippingRate || '') + '</small><strong>' + rate(summary.shipping_rate) + '</strong></div>',
+            '<div><small>' + escapeHtml(labels.deliveryRate || '') + '</small><strong>' + rate(summary.delivery_rate) + '</strong></div>'
         ].join('');
     }
 
@@ -178,7 +205,7 @@
         var rows = result.data || [];
         var columns = {
             orders: [
-                ['order_number', 'Shopify订单号'], ['tongtu_order_number', '通途订单号'], ['store_name', '店铺'], ['products', '产品'], ['paid_amount', '实付金额'], ['refund_status', '退款'], ['dispute_status', '纠纷'], ['order_created_at', '下单时间']
+                ['order_number', 'Shopify订单号'], ['tongtu_order_number', '通途订单号'], ['store_name', '店铺'], ['products', '产品'], ['paid_amount', '实付金额'], ['refund_status', '退款'], ['dispute_status', '纠纷'], ['tracking_number', labels.trackingNumber || ''], ['logistics_status', labels.logisticsStatus || ''], ['order_created_at', '下单时间']
             ],
             products: [
                 ['product_name', '产品'], ['sku', 'SKU'], ['quantity', '销量'], ['paid_amount', '实收金额'], ['refund_orders', '退款订单'], ['refund_rate', '退款率'], ['dispute_orders', '纠纷订单'], ['dispute_rate', '纠纷率']
@@ -246,6 +273,7 @@
                 state.lastPayload = payload;
                 renderDetailSummary(payload.summary || {});
                 if (state.tab === 'overview') renderOverview(payload); else renderTable(payload, state.tab);
+                updateExportButton();
                 setDetailLoading(false, '');
             })
             .catch(function (error) { setDetailLoading(false, error.message || '风险明细加载失败。'); });
@@ -259,6 +287,7 @@
                 state.page = 1;
                 state.sorts = { orders: {}, products: {}, refunds: {}, disputes: {} };
                 all('[data-paypal-tab]').forEach(function (link) { link.parentElement.classList.toggle('active', link.dataset.paypalTab === 'overview'); });
+                updateExportButton();
                 showModal('#paypal-detail-modal');
                 loadDetail('overview', 1);
             });
@@ -287,8 +316,28 @@
             else state.sorts[state.tab] = {};
             loadDetail(state.tab, 1);
         });
+        var exportButton = one('#paypal-detail-export');
+        if (exportButton) exportButton.addEventListener('click', function () {
+            if (state.accountId && state.tab !== 'overview') window.location.assign(exportUrl());
+        });
+    }
+
+    function initDateModeControls() {
+        var orderInputs = all('input[name="date_from"], input[name="date_to"]');
+        var eventInputs = all('input[name="event_date_from"], input[name="event_date_to"]');
+        if (!orderInputs.length || !eventInputs.length) return;
+        function filled(inputs) { return inputs.some(function (input) { return input.value !== ''; }); }
+        function refresh() {
+            var hasOrder = filled(orderInputs);
+            var hasEvent = filled(eventInputs);
+            orderInputs.forEach(function (input) { input.disabled = hasEvent; });
+            eventInputs.forEach(function (input) { input.disabled = hasOrder; });
+        }
+        orderInputs.concat(eventInputs).forEach(function (input) { input.addEventListener('change', refresh); });
+        refresh();
     }
 
     initAccountModal();
     initDetailModal();
+    initDateModeControls();
 })();

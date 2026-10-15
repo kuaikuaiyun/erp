@@ -28,6 +28,13 @@ class LogisticsOrder extends Model
     public const LOGISTICS_SHIPPED = '已发货';
     public const LOGISTICS_DELIVERED = '已签收';
     public const LOGISTICS_EXCEPTION = '物流异常';
+    public const LOGISTICS_WAITING_QUERY = '待查询';
+    public const LOGISTICS_COURIER_UNMATCHED = '物流商待匹配';
+    public const LOGISTICS_COURIER_UNSUPPORTED = '物流商暂不支持';
+    public const LOGISTICS_INFORMATION_RECEIVED = '信息已预录';
+    public const LOGISTICS_IN_TRANSIT = '运输中';
+    public const LOGISTICS_NO_INFORMATION = '暂无物流信息';
+    public const LOGISTICS_EXPIRED = '查询过期';
 
     protected $fillable = [
         'assistant_domain_store_id', 'source_shop_domain', 'shopify_order_id', 'shopify_order_number', 'tongtu_order_number',
@@ -48,6 +55,10 @@ class LogisticsOrder extends Model
         'logistics_status', 'fulfillment_payload', 'first_fulfilled_at', 'paid_match_due_at',
         'paid_match_scheduled_at', 'auto_match_paid_completed_at', 'auto_match_fulfillment_scheduled_at',
         'auto_match_fulfillment_completed_at',
+        'tracking_courier_code', 'tracking_courier_name', 'tracking_api_status', 'tracking_api_substatus',
+        'tracking_latest_event', 'tracking_latest_checkpoint_at', 'tracking_signed_by', 'tracking_registered_at',
+        'tracking_last_checked_at', 'tracking_next_sync_at', 'tracking_attempts', 'tracking_last_error',
+        'tracking_raw_payload', 'tracking_status_source',
         'sku_fingerprint', 'sku_exception_fingerprint',
         'paypal_account_id', 'paypal_association_source', 'paypal_associated_at',
     ];
@@ -82,6 +93,10 @@ class LogisticsOrder extends Model
                 'auto_match_fulfillment_scheduled_at' => 'datetime',
                 'auto_match_fulfillment_completed_at' => 'datetime',
                 'paypal_associated_at' => 'datetime',
+                'tracking_latest_checkpoint_at' => 'datetime',
+                'tracking_registered_at' => 'datetime',
+                'tracking_last_checked_at' => 'datetime',
+                'tracking_next_sync_at' => 'datetime',
                 'created_at' => 'datetime',
                 'updated_at' => 'datetime',
             ],
@@ -169,15 +184,23 @@ class LogisticsOrder extends Model
             self::LOGISTICS_SHIPPED => self::LOGISTICS_SHIPPED,
             self::LOGISTICS_DELIVERED => self::LOGISTICS_DELIVERED,
             self::LOGISTICS_EXCEPTION => self::LOGISTICS_EXCEPTION,
+            self::LOGISTICS_WAITING_QUERY => self::LOGISTICS_WAITING_QUERY,
+            self::LOGISTICS_COURIER_UNMATCHED => self::LOGISTICS_COURIER_UNMATCHED,
+            self::LOGISTICS_COURIER_UNSUPPORTED => self::LOGISTICS_COURIER_UNSUPPORTED,
+            self::LOGISTICS_INFORMATION_RECEIVED => self::LOGISTICS_INFORMATION_RECEIVED,
+            self::LOGISTICS_IN_TRANSIT => self::LOGISTICS_IN_TRANSIT,
+            self::LOGISTICS_NO_INFORMATION => self::LOGISTICS_NO_INFORMATION,
+            self::LOGISTICS_EXPIRED => self::LOGISTICS_EXPIRED,
         ];
     }
 
     public function logisticsStatusClass(): string
     {
         return match ($this->logistics_status) {
-            self::LOGISTICS_SHIPPED => 'label-primary',
+            self::LOGISTICS_SHIPPED, self::LOGISTICS_IN_TRANSIT => 'label-primary',
             self::LOGISTICS_DELIVERED => 'label-success',
             self::LOGISTICS_EXCEPTION => 'label-danger',
+            self::LOGISTICS_COURIER_UNSUPPORTED, self::LOGISTICS_COURIER_UNMATCHED, self::LOGISTICS_EXPIRED => 'label-warning',
             default => 'label-default',
         };
     }

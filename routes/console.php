@@ -8,6 +8,11 @@ use App\Portals\Logistics\LogisticsOrderItemService;
 
 require __DIR__.'/assistant_shopify_analytics_schedule.php';
 
+Schedule::command('logistics:tracking:process --limit=80')
+    ->everyMinute()
+    ->withoutOverlapping(10)
+    ->runInBackground();
+
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');

@@ -9,11 +9,14 @@ use App\Models\LogisticsOrder;
 use App\Models\LogisticsRefundDetail;
 use App\Models\LogisticsTongtuMatchBatch;
 use App\Models\LogisticsTongtuMatchTask;
+use App\Models\LogisticsTrackingSyncBatch;
+use App\Models\LogisticsTrackingSyncTask;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Logistics\LogisticsOrderSpreadsheetService;
 use App\Portals\Logistics\LogisticsPortalService;
 use App\Portals\Logistics\LogisticsRefundImportService;
 use App\Portals\Logistics\LogisticsTongtuAutomationService;
+use App\Portals\Logistics\LogisticsTrackingService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -35,6 +38,7 @@ class LogisticsOrderController extends Controller
         private readonly LogisticsOrderSpreadsheetService $spreadsheets,
         private readonly LogisticsRefundImportService $refundImports,
         private readonly LogisticsTongtuAutomationService $automation,
+        private readonly LogisticsTrackingService $tracking,
     ) {
     }
 
@@ -53,6 +57,7 @@ class LogisticsOrderController extends Controller
             ->paginate($filters['per_page'])
             ->withQueryString();
         $matchBatch = $this->currentMatchBatch($request, (int) $context['user']->getKey());
+        $trackingBatch = $this->currentTrackingBatch($request, (int) $context['user']->getKey());
 
         return view('portals.logistics.orders.index', [
             ...$this->viewContext($context),
@@ -64,6 +69,8 @@ class LogisticsOrderController extends Controller
             'shopifyStores' => $this->shopifyStores(),
             'activeMatchBatch' => $matchBatch,
             'matchFailureDetails' => $matchBatch ? $this->matchFailureDetails($matchBatch) : [],
+            'activeTrackingBatch' => $trackingBatch,
+            'trackingFailureDetails' => $trackingBatch ? $this->trackingFailureDetails($trackingBatch) : [],
         ]);
     }
 
@@ -158,7 +165,12 @@ class LogisticsOrderController extends Controller
             return back()->withInput()->withErrors(['shopify_order_id' => '该店铺下已存在相同的 Shopify 原生订单 ID。']);
         }
 
-        $order->fill($data)->save();
+        $order->fill($data);
+        $trackingNumberChanged = $order->isDirty('tracking_number');
+        $order->save();
+        if ($trackingNumberChanged) {
+            $this->tracking->scheduleForOrder($order);
+        }
         $this->automation->scheduleForOrder($order);
 
         return redirect()
@@ -380,6 +392,44 @@ class LogisticsOrderController extends Controller
         return response()->json($payload);
     }
 
+    public function syncTracking(Request $request): RedirectResponse
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            abort(403);
+        }
+
+        $data = $request->validate([
+            'selected_ids' => ['required', 'array', 'min:1', 'max:1000'],
+            'selected_ids.*' => ['integer', 'distinct'],
+        ]);
+        if (!$this->tracking->isConfigured()) {
+            return $this->indexRedirect($request)->with('error', __('logistics.tracking.configuration_missing'));
+        }
+        $batch = $this->tracking->queue($data['selected_ids'], $context['user']);
+        $request->session()->put('logistics.tracking_sync_batch_id', $batch->getKey());
+
+        return $this->indexRedirect($request)->with(
+            'success',
+            __('logistics.tracking.queued_message', ['count' => $batch->total_count])
+        );
+    }
+
+    public function trackingProgress(Request $request, LogisticsTrackingSyncBatch $batch): JsonResponse
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response || (int) $batch->actor_id !== (int) $context['user']->getKey()) {
+            abort(403);
+        }
+
+        $batch->refreshProgress();
+        $batch = $batch->fresh();
+        $payload = $batch->progressPayload();
+        $payload['failures'] = $this->trackingFailureDetails($batch);
+
+        return response()->json($payload);
+    }
+
     public function assignStore(Request $request): RedirectResponse
     {
         $context = $this->portalContext($request);
@@ -474,6 +524,27 @@ class LogisticsOrderController extends Controller
             ->first();
     }
 
+    private function currentTrackingBatch(Request $request, int $actorId): ?LogisticsTrackingSyncBatch
+    {
+        $batchId = (int) $request->session()->get('logistics.tracking_sync_batch_id', 0);
+        if ($batchId > 0) {
+            $batch = LogisticsTrackingSyncBatch::query()
+                ->whereKey($batchId)
+                ->where('actor_id', $actorId)
+                ->where('created_at', '>=', now()->subDay())
+                ->first();
+            if ($batch) {
+                return $batch;
+            }
+        }
+
+        return LogisticsTrackingSyncBatch::query()
+            ->where('actor_id', $actorId)
+            ->whereIn('status', [LogisticsTrackingSyncBatch::STATUS_QUEUED, LogisticsTrackingSyncBatch::STATUS_PROCESSING])
+            ->latest('id')
+            ->first();
+    }
+
     /** @return list<array<string, int|string>> */
     private function matchFailureDetails(LogisticsTongtuMatchBatch $batch): array
     {
@@ -490,6 +561,30 @@ class LogisticsOrderController extends Controller
                     'shopify_order_number' => (string) ($task->order?->shopify_order_number ?: '—'),
                     'tongtu_order_number' => (string) ($task->order?->tongtu_order_number ?: '—'),
                     'reason' => (string) ($task->last_error ?: '通途接口请求失败。'),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /** @return list<array<string, int|string>> */
+    private function trackingFailureDetails(LogisticsTrackingSyncBatch $batch): array
+    {
+        return $batch->tasks()
+            ->with('order:id,shopify_order_number,tracking_number')
+            ->whereIn('status', [
+                LogisticsTrackingSyncTask::STATUS_FAILED,
+                LogisticsTrackingSyncTask::STATUS_SKIPPED,
+            ])
+            ->latest('id')
+            ->limit(50)
+            ->get()
+            ->map(static function (LogisticsTrackingSyncTask $task): array {
+                return [
+                    'order_id' => (int) $task->logistics_order_id,
+                    'shopify_order_number' => (string) ($task->order?->shopify_order_number ?: '—'),
+                    'tracking_number' => (string) ($task->tracking_number ?: $task->order?->tracking_number ?: '—'),
+                    'reason' => (string) ($task->last_error ?: '51Tracking 请求失败。'),
                 ];
             })
             ->values()

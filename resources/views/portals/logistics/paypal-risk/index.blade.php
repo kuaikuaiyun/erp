@@ -13,10 +13,14 @@
             'store' => route('logistics.paypal-risk.accounts.store'),
             'update' => route('logistics.paypal-risk.accounts.update', ['account' => '__ID__']),
             'detail' => route('logistics.paypal-risk.accounts.detail', ['account' => '__ID__']),
+            'export' => route('logistics.paypal-risk.accounts.export', ['account' => '__ID__', 'tab' => '__TAB__']),
         ],
         'filters' => [
             'date_from' => $filters['date_from'],
             'date_to' => $filters['date_to'],
+            'event_date_from' => $filters['event_date_from'],
+            'event_date_to' => $filters['event_date_to'],
+            'date_mode' => $filters['date_mode'],
         ],
         'labels' => [
             'sourceReason' => __('logistics.paypal_risk.ui.source_reason'),
@@ -26,6 +30,11 @@
             'sellerResponseDueAt' => __('logistics.paypal_risk.ui.seller_response_due_at'),
             'updatedAt' => __('logistics.paypal_risk.ui.updated_at'),
             'linkedRefunds' => __('logistics.paypal_risk.ui.linked_refunds'),
+            'trackingNumber' => __('logistics.paypal_risk.ui.tracking_number'),
+            'logisticsStatus' => __('logistics.paypal_risk.ui.logistics_status'),
+            'shippingRate' => __('logistics.paypal_risk.ui.shipping_rate'),
+            'deliveryRate' => __('logistics.paypal_risk.ui.delivery_rate'),
+            'exportCurrentTab' => __('logistics.paypal_risk.export.button'),
         ],
     ];
 @endphp
@@ -106,8 +115,13 @@
                         </select>
                     </div>
                     <div class="paypal-risk-filter-field paypal-risk-filter-date">
-                        <label>订单创建时间</label>
+                        <label>{{ __('logistics.paypal_risk.filters.order_date') }}</label>
                         <div><input class="form-control" type="date" name="date_from" value="{{ $filters['date_from'] }}"><span>至</span><input class="form-control" type="date" name="date_to" value="{{ $filters['date_to'] }}"></div>
+                    </div>
+                    <div class="paypal-risk-filter-field paypal-risk-filter-date">
+                        <label>{{ __('logistics.paypal_risk.filters.event_date') }}</label>
+                        <div><input class="form-control" type="date" name="event_date_from" value="{{ $filters['event_date_from'] }}"><span>至</span><input class="form-control" type="date" name="event_date_to" value="{{ $filters['event_date_to'] }}"></div>
+                        <small>{{ __('logistics.paypal_risk.filters.event_date_hint') }}</small>
                     </div>
                     <div class="paypal-risk-filter-actions">
                         <button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> 查询</button>
@@ -149,6 +163,8 @@
                             <div><small>订单总量</small><strong>{{ number_format($account['order_count']) }}</strong></div>
                             <div><small>实收金额</small><strong>${{ number_format($account['paid_amount'], 2) }}</strong></div>
                             <div><small>关联店铺</small><strong>{{ number_format($account['store_count']) }}</strong></div>
+                            <div><small>{{ __('logistics.paypal_risk.ui.shipping_rate') }}</small><strong>{{ number_format($account['shipping_rate'], 2) }}%</strong></div>
+                            <div><small>{{ __('logistics.paypal_risk.ui.delivery_rate') }}</small><strong>{{ number_format($account['delivery_rate'], 2) }}%</strong></div>
                         </div>
 
                         <div class="paypal-risk-rate-block refund">
@@ -248,7 +264,7 @@
                     <div class="tab-content"><div class="tab-pane active" id="paypal-detail-panel"><div id="paypal-detail-body"></div><div id="paypal-detail-pagination" class="paypal-risk-detail-pagination"></div></div></div>
                 </div>
             </div>
-            <div class="modal-footer"><span class="pull-left paypal-risk-score-note"><i class="fa fa-calculator"></i> 安全指数仅作内部风控参考。</span><button type="button" class="btn btn-default" data-dismiss="modal">关闭</button></div>
+            <div class="modal-footer"><span class="pull-left paypal-risk-score-note"><i class="fa fa-calculator"></i> {{ __('logistics.paypal_risk.ui.shipping_note') }}</span><button id="paypal-detail-export" type="button" class="btn btn-success" hidden><i class="fa fa-download"></i> {{ __('logistics.paypal_risk.export.button') }}</button><button type="button" class="btn btn-default" data-dismiss="modal">关闭</button></div>
         </div></div>
     </div>
     @include('portals.logistics.partials.order-detail-modal')
@@ -258,6 +274,6 @@
     <script>
         window.ErpPayPalRisk = @json($riskClientConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/paypal-risk.js?v=20261014-3"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/paypal-risk.js?v=20261015-2"></script>
     <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261014-1"></script>
 @endpush

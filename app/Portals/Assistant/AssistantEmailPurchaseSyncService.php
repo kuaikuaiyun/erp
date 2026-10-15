@@ -6,6 +6,7 @@ use App\Models\AdminUser;
 use App\Models\AssistantDomainStore;
 use App\Models\AssistantEmailPurchaseRecord;
 use App\Models\AssistantEmailPurchaseSync;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
@@ -143,6 +144,29 @@ class AssistantEmailPurchaseSyncService
     public function isPurchased(?string $email): bool
     {
         return $this->statusFor($email) === self::STATUS_CURRENT;
+    }
+
+    public function applyPurchaseFilter(Builder $query, bool $purchased): void
+    {
+        if (!$this->storageReady() || !AssistantEmailPurchaseSync::query()
+            ->where('status', AssistantEmailPurchaseSync::STATUS_SUCCESS)
+            ->exists()) {
+            $query->where('email_purchased', $purchased);
+
+            return;
+        }
+
+        $snapshotConstraint = function ($snapshot): void {
+            $snapshot->selectRaw('1')
+                ->from('assistant_email_purchase_records as email_purchase_snapshot')
+                ->where('email_purchase_snapshot.is_current', true)
+                ->whereRaw('email_purchase_snapshot.normalized_email = LOWER(TRIM(assistant_domain_stores.email))');
+        };
+        if ($purchased) {
+            $query->whereExists($snapshotConstraint);
+        } else {
+            $query->whereNotExists($snapshotConstraint);
+        }
     }
 
     /** @return array<string, string> */

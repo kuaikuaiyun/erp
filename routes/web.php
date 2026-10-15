@@ -86,6 +86,8 @@ Route::post('/orders/import-refunds', [LogisticsOrderController::class, 'importR
 Route::get('/orders/refund-import-errors/{token}', [LogisticsOrderController::class, 'refundImportErrors'])->name('logistics.orders.refund-import-errors');
 Route::post('/orders/match-tongtu', [LogisticsOrderController::class, 'matchTongtu'])->name('logistics.orders.match-tongtu');
 Route::get('/orders/tongtu-match-batches/{batch}/progress', [LogisticsOrderController::class, 'matchProgress'])->name('logistics.orders.match-progress');
+Route::post('/orders/sync-tracking', [LogisticsOrderController::class, 'syncTracking'])->name('logistics.orders.sync-tracking');
+Route::get('/orders/tracking-sync-batches/{batch}/progress', [LogisticsOrderController::class, 'trackingProgress'])->name('logistics.orders.tracking-progress');
 Route::post('/orders/assign-store', [LogisticsOrderController::class, 'assignStore'])->name('logistics.orders.assign-store');
 Route::get('/orders/{order}/detail', [LogisticsOrderController::class, 'detail'])->name('logistics.orders.detail');
 Route::get('/orders/{order}/edit', [LogisticsOrderController::class, 'edit'])->name('logistics.orders.edit');
@@ -99,5 +101,6 @@ Route::get('/paypal-risk', [PayPalRiskController::class, 'index'])->name('logist
 Route::post('/paypal-risk/accounts', [PayPalRiskController::class, 'store'])->name('logistics.paypal-risk.accounts.store');
 Route::put('/paypal-risk/accounts/{account}', [PayPalRiskController::class, 'update'])->name('logistics.paypal-risk.accounts.update');
 Route::get('/paypal-risk/accounts/{account}/detail', [PayPalRiskController::class, 'detail'])->name('logistics.paypal-risk.accounts.detail');
+Route::get('/paypal-risk/accounts/{account}/export/{tab}', [PayPalRiskController::class, 'exportDetail'])->name('logistics.paypal-risk.accounts.export');
 Route::post('/api/paypal/import', PayPalImportController::class)->name('logistics.paypal.import');
 Route::fallback([PortalEntryController::class, 'fallback']);
