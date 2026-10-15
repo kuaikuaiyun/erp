@@ -325,7 +325,7 @@ class ProductRequestController extends Controller
         $records = $this->access->applyOperationVisibility(
             ProductRequest::query()
                 ->where('status', ProductRequest::STATUS_INSPECTION_PASSED)
-                ->where('placement_review_status', ProductRequest::REVIEW_UNFILLED),
+                ->whereIn('placement_review_status', [ProductRequest::REVIEW_UNFILLED, ProductRequest::REVIEW_REJECTED]),
             $context['user'],
         )->get(['id', 'report_no']);
 

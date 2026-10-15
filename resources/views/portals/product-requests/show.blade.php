@@ -25,7 +25,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261015-15">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261015-16">
 @endpush
 @push('scripts')
     <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261015-16"></script>
@@ -67,7 +67,7 @@
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.report_no') }}</span><span class="product-request-detail-value">{{ $productRequest->report_no }}</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.reported_at') }}</span><span class="product-request-detail-value">{{ optional($productRequest->reported_at)->format('Y-m-d') }}</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.main_status') }}</span><span class="product-request-detail-value">{{ $statusLabels[$productRequest->status] ?? $notAvailable }}</span></div>
-                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.skus') }}</span><span class="product-request-detail-value">@include('portals.product-requests.partials.sku-tags', ['skus' => $productRequest->skus, 'empty' => $notAvailable])</span></div>
+                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.skus') }}</span><span class="product-request-detail-value">@include('portals.product-requests.partials.sku-tags', ['skus' => $productRequest->skus, 'compareSkus' => $productRequest->procurement_skus, 'empty' => $notAvailable])</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.has_stock') }}</span><span class="product-request-detail-value">{{ $productRequest->has_stock ? __('product_requests.common.'.($productRequest->has_stock === 'yes' ? 'yes' : 'no')) : $notAvailable }}</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.request_source') }}</span><span class="product-request-detail-value">{{ $productRequest->operation_display_name }}</span></div>
                 <div class="product-request-detail-item product-request-detail-item-wide"><span class="product-request-detail-label">{{ __('product_requests.fields.operation_supplier_url') }}</span><span class="product-request-detail-value">@if($productRequest->operation_supplier_url)<a href="{{ $productRequest->operation_supplier_url }}" target="_blank" rel="noopener">{{ $productRequest->operation_supplier_url }}</a>@else{{ $notFilled }}@endif</span></div>
