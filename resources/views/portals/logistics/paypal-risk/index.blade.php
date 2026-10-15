@@ -26,6 +26,7 @@
             'sourceReason' => __('logistics.paypal_risk.ui.source_reason'),
             'manualReason' => __('logistics.paypal_risk.ui.manual_reason'),
             'linkedDisputes' => __('logistics.paypal_risk.ui.linked_disputes'),
+            'disputeType' => __('logistics.paypal_risk.ui.dispute_type'),
             'outcome' => __('logistics.paypal_risk.ui.outcome'),
             'sellerResponseDueAt' => __('logistics.paypal_risk.ui.seller_response_due_at'),
             'updatedAt' => __('logistics.paypal_risk.ui.updated_at'),
@@ -35,13 +36,55 @@
             'shippingRate' => __('logistics.paypal_risk.ui.shipping_rate'),
             'deliveryRate' => __('logistics.paypal_risk.ui.delivery_rate'),
             'exportCurrentTab' => __('logistics.paypal_risk.export.button'),
+            'detailFilterKeyword' => __('logistics.paypal_risk.detail_filters.keyword'),
+            'detailFilterSearch' => __('logistics.paypal_risk.detail_filters.search'),
+            'detailFilterReset' => __('logistics.paypal_risk.detail_filters.reset'),
+            'detailFilterStatus' => __('logistics.paypal_risk.detail_filters.status'),
+            'detailFilterType' => __('logistics.paypal_risk.detail_filters.type'),
+            'detailFilterOutcome' => __('logistics.paypal_risk.detail_filters.outcome'),
+            'detailFilterAll' => __('logistics.paypal_risk.detail_filters.all'),
+            'detailFilterPlaceholders' => [
+                'orders' => __('logistics.paypal_risk.detail_filters.orders_placeholder'),
+                'products' => __('logistics.paypal_risk.detail_filters.products_placeholder'),
+                'refunds' => __('logistics.paypal_risk.detail_filters.refunds_placeholder'),
+                'disputes' => __('logistics.paypal_risk.detail_filters.disputes_placeholder'),
+            ],
+            'detailFilterOptions' => [
+                'refund_status' => [
+                    \App\Models\LogisticsPayPalRefund::statusLabelFor('D'),
+                    \App\Models\LogisticsPayPalRefund::statusLabelFor('P'),
+                    \App\Models\LogisticsPayPalRefund::statusLabelFor('S'),
+                    \App\Models\LogisticsPayPalRefund::statusLabelFor('V'),
+                ],
+                'dispute_type' => [
+                    \App\Models\LogisticsPayPalDispute::typeLabelFor('INQUIRY'),
+                    \App\Models\LogisticsPayPalDispute::typeLabelFor('CHARGEBACK'),
+                    \App\Models\LogisticsPayPalDispute::typeLabelFor('PRE_ARBITRATION'),
+                    \App\Models\LogisticsPayPalDispute::typeLabelFor('ARBITRATION'),
+                ],
+                'dispute_status' => [
+                    \App\Models\LogisticsPayPalDispute::statusLabelFor('OPEN'),
+                    \App\Models\LogisticsPayPalDispute::statusLabelFor('WAITING_FOR_BUYER_RESPONSE'),
+                    \App\Models\LogisticsPayPalDispute::statusLabelFor('WAITING_FOR_SELLER_RESPONSE'),
+                    \App\Models\LogisticsPayPalDispute::statusLabelFor('UNDER_REVIEW'),
+                    \App\Models\LogisticsPayPalDispute::statusLabelFor('RESOLVED'),
+                ],
+                'dispute_outcome' => [
+                    \App\Models\LogisticsPayPalDispute::outcomeLabelFor('RESOLVED_BUYER_FAVOUR'),
+                    \App\Models\LogisticsPayPalDispute::outcomeLabelFor('RESOLVED_SELLER_FAVOUR'),
+                    \App\Models\LogisticsPayPalDispute::outcomeLabelFor('CANCELED_BY_BUYER'),
+                    \App\Models\LogisticsPayPalDispute::outcomeLabelFor('CANCELED_BY_SELLER'),
+                    \App\Models\LogisticsPayPalDispute::outcomeLabelFor('RESOLVED_WITH_REFUND'),
+                    \App\Models\LogisticsPayPalDispute::outcomeLabelFor('RESOLVED_WITH_PAYOUT'),
+                ],
+            ],
         ],
     ];
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/paypal-risk.css?v=20261014-2">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261014-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/paypal-risk.css?v=20261015-6">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261015-2">
 @endpush
 
 @section('content')
@@ -97,31 +140,24 @@
             <div class="box-body">
                 <form method="get" action="{{ route('logistics.paypal-risk.index') }}" class="paypal-risk-filter-form" autocomplete="off" data-loading="region" data-loading-target=".paypal-risk-page">
                     <div class="paypal-risk-filter-field paypal-risk-filter-keyword">
-                        <label for="paypal-risk-keyword">账号搜索</label>
-                        <div class="paypal-risk-search-input"><i class="fa fa-search"></i><input id="paypal-risk-keyword" class="form-control" name="keyword" value="{{ $filters['keyword'] }}" placeholder="账号名称、邮箱或Merchant ID"></div>
+                        <label for="paypal-risk-keyword">{{ __('logistics.paypal_risk.filters.keyword') }}</label>
+                        <div class="paypal-risk-search-input"><i class="fa fa-search"></i><input id="paypal-risk-keyword" class="form-control" name="keyword" value="{{ $filters['keyword'] }}" placeholder="{{ __('logistics.paypal_risk.filters.keyword_placeholder') }}"></div>
                     </div>
-                    <div class="paypal-risk-filter-field">
-                        <label for="paypal-risk-level">风险等级</label>
-                        <select id="paypal-risk-level" class="form-control" name="risk">
-                            <option value="">全部风险</option>
-                            @foreach($riskLabels as $value => $label)<option value="{{ $value }}" @selected($filters['risk'] === $value)>{{ $label }}</option>@endforeach
-                        </select>
+                    <div class="paypal-risk-filter-field paypal-risk-filter-date-mode">
+                        <label>{{ __('logistics.paypal_risk.filters.date_mode') }}</label>
+                        <input type="hidden" name="date_mode" value="{{ $filters['date_mode'] }}" data-paypal-date-mode-input>
+                        <div class="btn-group" role="group" aria-label="{{ __('logistics.paypal_risk.filters.date_mode') }}">
+                            <button type="button" class="btn btn-default {{ $filters['date_mode'] === 'order' ? 'active' : '' }}" data-paypal-date-mode="order">{{ __('logistics.paypal_risk.filters.order_date') }}</button>
+                            <button type="button" class="btn btn-default {{ $filters['date_mode'] === 'event' ? 'active' : '' }}" data-paypal-date-mode="event">{{ __('logistics.paypal_risk.filters.event_date') }}</button>
+                        </div>
                     </div>
-                    <div class="paypal-risk-filter-field">
-                        <label for="paypal-risk-import-status">接收状态</label>
-                        <select id="paypal-risk-import-status" class="form-control" name="import_status">
-                            <option value="">全部状态</option>
-                            @foreach(['never' => '未接收', 'success' => '接收成功', 'partial' => '部分完成', 'failed' => '接收失败'] as $value => $label)<option value="{{ $value }}" @selected($filters['import_status'] === $value)>{{ $label }}</option>@endforeach
-                        </select>
-                    </div>
-                    <div class="paypal-risk-filter-field paypal-risk-filter-date">
+                    <div class="paypal-risk-filter-field paypal-risk-filter-date" data-paypal-date-panel="order" @if($filters['date_mode'] !== 'order') hidden @endif>
                         <label>{{ __('logistics.paypal_risk.filters.order_date') }}</label>
-                        <div><input class="form-control" type="date" name="date_from" value="{{ $filters['date_from'] }}"><span>至</span><input class="form-control" type="date" name="date_to" value="{{ $filters['date_to'] }}"></div>
+                        <div><input class="form-control" type="date" name="date_from" value="{{ $filters['date_from'] }}" @disabled($filters['date_mode'] !== 'order')><span>{{ __('logistics.paypal_risk.filters.range_to') }}</span><input class="form-control" type="date" name="date_to" value="{{ $filters['date_to'] }}" @disabled($filters['date_mode'] !== 'order')></div>
                     </div>
-                    <div class="paypal-risk-filter-field paypal-risk-filter-date">
+                    <div class="paypal-risk-filter-field paypal-risk-filter-date" data-paypal-date-panel="event" @if($filters['date_mode'] !== 'event') hidden @endif>
                         <label>{{ __('logistics.paypal_risk.filters.event_date') }}</label>
-                        <div><input class="form-control" type="date" name="event_date_from" value="{{ $filters['event_date_from'] }}"><span>至</span><input class="form-control" type="date" name="event_date_to" value="{{ $filters['event_date_to'] }}"></div>
-                        <small>{{ __('logistics.paypal_risk.filters.event_date_hint') }}</small>
+                        <div><input class="form-control" type="date" name="event_date_from" value="{{ $filters['event_date_from'] }}" @disabled($filters['date_mode'] !== 'event')><span>{{ __('logistics.paypal_risk.filters.range_to') }}</span><input class="form-control" type="date" name="event_date_to" value="{{ $filters['event_date_to'] }}" @disabled($filters['date_mode'] !== 'event')></div>
                     </div>
                     <div class="paypal-risk-filter-actions">
                         <button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> 查询</button>
@@ -261,6 +297,7 @@
                         <li><a href="#paypal-detail-panel" data-toggle="tab" data-paypal-tab="refunds">退款记录</a></li>
                         <li><a href="#paypal-detail-panel" data-toggle="tab" data-paypal-tab="disputes">纠纷记录</a></li>
                     </ul>
+                    <div id="paypal-detail-filters" class="paypal-risk-detail-filters" hidden></div>
                     <div class="tab-content"><div class="tab-pane active" id="paypal-detail-panel"><div id="paypal-detail-body"></div><div id="paypal-detail-pagination" class="paypal-risk-detail-pagination"></div></div></div>
                 </div>
             </div>
@@ -274,6 +311,6 @@
     <script>
         window.ErpPayPalRisk = @json($riskClientConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/paypal-risk.js?v=20261015-2"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/paypal-risk.js?v=20261015-5"></script>
     <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261014-1"></script>
 @endpush

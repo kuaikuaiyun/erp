@@ -100,18 +100,21 @@ class PayPalRiskAnalyticsService
         int $page = 1,
         string $sort = '',
         string $direction = '',
+        array $tabFilters = [],
     ): array {
         $summary = $this->summary($account, $filters);
         $payload = ['summary' => $summary, 'tab' => $tab];
 
         return match ($tab) {
-            'orders' => $payload + ['rows' => $this->orderRows($account, $filters, $page, $sort, $direction)],
-            'products' => $payload + ['rows' => $this->productRows($account, $filters, $page, $sort, $direction)],
-            'refunds' => $payload + ['rows' => $this->paginate($this->sortRows($this->refundRows($account, $filters), $sort, $direction, [
+            'orders' => $payload + ['rows' => $this->orderRows($account, $filters, $page, $sort, $direction, 10, $tabFilters)],
+            'products' => $payload + ['rows' => $this->productRows($account, $filters, $page, $sort, $direction, 10, $tabFilters)],
+            'refunds' => $payload + ['rows' => $this->paginate($this->sortRows($this->filterRows($this->refundRows($account, $filters), $tabFilters, [
+                'refund_id', 'order_number', 'store_name', 'source', 'source_reason', 'manual_reason', 'linked_disputes',
+            ]), $sort, $direction, [
                 'refund_id', 'order_number', 'store_name', 'source', 'amount', 'reason', 'source_reason', 'manual_reason',
                 'status', 'linked_disputes', 'happened_at',
             ]), $page)],
-            'disputes' => $payload + ['rows' => $this->disputeRows($account, $filters, $page, $sort, $direction)],
+            'disputes' => $payload + ['rows' => $this->disputeRows($account, $filters, $page, $sort, $direction, 10, $tabFilters)],
             default => $payload + $this->overview($account, $filters),
         };
     }
@@ -123,13 +126,15 @@ class PayPalRiskAnalyticsService
      *
      * @return list<array<string,mixed>>
      */
-    public function exportRows(LogisticsPayPalAccount $account, array $filters, string $tab): array
+    public function exportRows(LogisticsPayPalAccount $account, array $filters, string $tab, array $tabFilters = []): array
     {
         return match ($tab) {
-            'orders' => $this->orderRows($account, $filters, 1, '', '', PHP_INT_MAX)['data'],
-            'products' => $this->productRows($account, $filters, 1, '', '', PHP_INT_MAX)['data'],
-            'refunds' => $this->refundRows($account, $filters),
-            'disputes' => $this->disputeRows($account, $filters, 1, '', '', PHP_INT_MAX)['data'],
+            'orders' => $this->orderRows($account, $filters, 1, '', '', PHP_INT_MAX, $tabFilters)['data'],
+            'products' => $this->productRows($account, $filters, 1, '', '', PHP_INT_MAX, $tabFilters)['data'],
+            'refunds' => $this->filterRows($this->refundRows($account, $filters), $tabFilters, [
+                'refund_id', 'order_number', 'store_name', 'source', 'source_reason', 'manual_reason', 'linked_disputes',
+            ]),
+            'disputes' => $this->disputeRows($account, $filters, 1, '', '', PHP_INT_MAX, $tabFilters)['data'],
             default => [],
         };
     }
@@ -241,7 +246,7 @@ class PayPalRiskAnalyticsService
     }
 
     /** @param array{date_from:string,date_to:string} $filters */
-    private function orderRows(LogisticsPayPalAccount $account, array $filters, int $page, string $sort, string $direction, int $perPage = 10): array
+    private function orderRows(LogisticsPayPalAccount $account, array $filters, int $page, string $sort, string $direction, int $perPage = 10, array $tabFilters = []): array
     {
         $orders = $this->orderQuery($account, $filters)
             ->with([
@@ -277,6 +282,10 @@ class PayPalRiskAnalyticsService
                 ];
             })->all();
 
+        $rows = $this->filterRows($rows, $tabFilters, [
+            'order_number', 'tongtu_order_number', 'store_name', 'products', 'tracking_number', 'logistics_status',
+        ]);
+
         return $this->paginate($this->sortRows($rows, $sort, $direction, [
             'order_number', 'tongtu_order_number', 'store_name', 'products', 'paid_amount', 'refund_status',
             'dispute_status', 'tracking_number', 'logistics_status', 'order_created_at',
@@ -284,7 +293,7 @@ class PayPalRiskAnalyticsService
     }
 
     /** @param array{date_from:string,date_to:string} $filters */
-    private function productRows(LogisticsPayPalAccount $account, array $filters, int $page, string $sort, string $direction, int $perPage = 10): array
+    private function productRows(LogisticsPayPalAccount $account, array $filters, int $page, string $sort, string $direction, int $perPage = 10, array $tabFilters = []): array
     {
         $itemsQuery = LogisticsOrderItem::query()
             ->selectRaw('logistics_order_items.*, logistics_orders.id as risk_order_id, logistics_orders.paid_amount_usd as risk_order_paid_amount')
@@ -332,6 +341,8 @@ class PayPalRiskAnalyticsService
             ];
         }
         usort($rows, static fn (array $left, array $right): int => $right['paid_amount'] <=> $left['paid_amount']);
+
+        $rows = $this->filterRows($rows, $tabFilters, ['product_name', 'sku']);
 
         return $this->paginate($this->sortRows($rows, $sort, $direction, [
             'product_name', 'sku', 'quantity', 'paid_amount', 'refund_orders', 'refund_rate',
@@ -405,7 +416,7 @@ class PayPalRiskAnalyticsService
     }
 
     /** @param array{date_from:string,date_to:string} $filters */
-    private function disputeRows(LogisticsPayPalAccount $account, array $filters, int $page, string $sort, string $direction, int $perPage = 10): array
+    private function disputeRows(LogisticsPayPalAccount $account, array $filters, int $page, string $sort, string $direction, int $perPage = 10, array $tabFilters = []): array
     {
         $query = $this->disputesForFilter($account, $filters)
             ->with(['order:id,shopify_order_number,store_name,bill_number', 'refundLinks.refund'])
@@ -419,18 +430,22 @@ class PayPalRiskAnalyticsService
                 'store_name' => (string) ($dispute->order?->store_name ?: '—'),
                 'amount' => round((float) ($dispute->dispute_amount_usd ?? $dispute->original_amount), 2),
                 'currency' => (string) ($dispute->currency_code ?: 'USD'),
-                'reason' => $this->disputeReason($dispute->reason),
-                'stage' => $this->disputeStage($dispute->life_cycle_stage),
-                'status' => $this->disputeStatus($dispute->status),
+                'reason' => $dispute->reasonLabel(),
+                'stage' => $dispute->typeLabel(),
+                'status' => $dispute->statusLabel(),
                 'happened_at' => $this->dateTime($dispute->dispute_created_at),
                 'updated_at' => $this->dateTime($dispute->dispute_updated_at),
                 'seller_response_due_at' => $this->dateTime($dispute->seller_response_due_at),
-                'outcome' => (string) ($dispute->outcome_code ?: '—'),
+                'outcome' => $dispute->outcomeLabel(),
                 'linked_refunds' => $dispute->refundLinks->map(fn ($link): array => [
                     'refund_id' => (string) ($link->refund?->refund_transaction_id ?: '—'),
                     'amount' => round((float) ($link->refund?->refund_amount_usd ?? $link->refund?->original_amount ?? 0), 2),
                 ])->values()->all(),
             ])->all();
+
+        $rows = $this->filterRows($rows, $tabFilters, [
+            'dispute_id', 'order_number', 'store_name', 'reason', 'stage', 'status', 'outcome', 'linked_refunds',
+        ]);
 
         return $this->paginate($this->sortRows($rows, $sort, $direction, [
             'dispute_id', 'order_number', 'store_name', 'amount', 'reason', 'stage', 'status', 'happened_at',
@@ -624,6 +639,53 @@ class PayPalRiskAnalyticsService
         return (string) $order->logistics_status === LogisticsOrder::LOGISTICS_DELIVERED;
     }
 
+    /**
+     * Detail tabs intentionally filter the already normalised display rows.
+     * This keeps Chinese enum labels, CSV exports and paged modal results on
+     * exactly one data path without ever touching original PayPal payloads.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @param array<string,mixed> $filters
+     * @param list<string> $keywordColumns
+     * @return list<array<string,mixed>>
+     */
+    private function filterRows(array $rows, array $filters, array $keywordColumns): array
+    {
+        $keyword = mb_strtolower(trim((string) ($filters['keyword'] ?? '')));
+        $status = trim((string) ($filters['status'] ?? ''));
+        $type = trim((string) ($filters['type'] ?? ''));
+        $outcome = trim((string) ($filters['outcome'] ?? ''));
+
+        if ($keyword === '' && $status === '' && $type === '' && $outcome === '') {
+            return $rows;
+        }
+
+        return array_values(array_filter($rows, static function (array $row) use ($keyword, $status, $type, $outcome, $keywordColumns): bool {
+            if ($keyword !== '') {
+                $matched = false;
+                foreach ($keywordColumns as $column) {
+                    $value = $row[$column] ?? '';
+                    if (is_array($value)) {
+                        $value = implode(' ', array_map(static fn ($item): string => is_array($item)
+                            ? implode(' ', array_map('strval', $item))
+                            : (string) $item, $value));
+                    }
+                    if (str_contains(mb_strtolower((string) $value), $keyword)) {
+                        $matched = true;
+                        break;
+                    }
+                }
+                if (!$matched) {
+                    return false;
+                }
+            }
+
+            return ($status === '' || (string) ($row['status'] ?? '') === $status)
+                && ($type === '' || (string) ($row['stage'] ?? '') === $type)
+                && ($outcome === '' || (string) ($row['outcome'] ?? '') === $outcome);
+        }));
+    }
+
     /** @param list<array<string,mixed>> $rows
      *  @param list<string> $allowed
      *  @return list<array<string,mixed>>
@@ -727,43 +789,4 @@ class PayPalRiskAnalyticsService
         }
     }
 
-    private function disputeReason(mixed $reason): string
-    {
-        $reason = trim((string) ($reason ?? ''));
-
-        return [
-            'MERCHANDISE_OR_SERVICE_NOT_RECEIVED' => '未收到商品或服务',
-            'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED' => '商品或服务与描述不符',
-            'UNAUTHORISED' => '未经授权的交易',
-            'UNAUTHORIZED_TRANSACTION' => '未经授权的交易',
-            'CREDIT_NOT_PROCESSED' => '退款未处理',
-            'DUPLICATE_TRANSACTION' => '重复交易',
-            'INCORRECT_AMOUNT' => '金额不正确',
-        ][$reason] ?? ($reason ?: '—');
-    }
-
-    private function disputeStatus(mixed $status): string
-    {
-        $status = trim((string) ($status ?? ''));
-
-        return [
-            'OPEN' => '处理中',
-            'WAITING_FOR_BUYER_RESPONSE' => '等待买家回复',
-            'WAITING_FOR_SELLER_RESPONSE' => '等待卖家回复',
-            'UNDER_REVIEW' => 'PayPal审核中',
-            'RESOLVED' => '已解决',
-        ][$status] ?? ($status ?: '—');
-    }
-
-    private function disputeStage(mixed $stage): string
-    {
-        $stage = trim((string) ($stage ?? ''));
-
-        return [
-            'INQUIRY' => '争议',
-            'CHARGEBACK' => '拒付',
-            'PRE_ARBITRATION' => '预仲裁',
-            'ARBITRATION' => '仲裁',
-        ][$stage] ?? ($stage ?: '—');
-    }
 }
