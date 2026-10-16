@@ -474,7 +474,8 @@ class ProductRequestController extends Controller
                 ->where(function ($q): void {
                     $q->where('status', ProductRequest::STATUS_INSPECTION_PASSED)
                         ->whereIn('placement_review_status', [ProductRequest::REVIEW_UNFILLED, ProductRequest::REVIEW_REJECTED])
-                        ->orWhere('operation_rectification_status', ProductRequest::RECTIFICATION_PENDING);
+                        ->orWhere('operation_rectification_status', ProductRequest::RECTIFICATION_PENDING)
+                        ->orWhere('inspection_reject_reason', '!=', '');
                 }),
             $context['user'],
         )->get(['id', 'report_no']);
