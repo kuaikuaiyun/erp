@@ -31,7 +31,7 @@
 .product-statistics-toolbar-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
 .product-statistics-toolbar-hint { color: #8092a5; font-size: 12px; }
 .product-statistics-toolbar-hint .fa { margin-right: 4px; color: #4c98dd; }
-.product-statistics-table-scroll { position: relative; max-height: calc(100vh - 235px); overflow: auto !important; overscroll-behavior: contain; }
+.product-statistics-table-scroll { position: relative; max-height: calc(100vh - 235px); overflow: auto !important; overscroll-behavior: auto; }
 .product-statistics-table { min-width: 2080px; margin-bottom: 0; border-collapse: separate; border-spacing: 0; font-size: 13px; }
 .product-statistics-table th { position: sticky; top: 0; z-index: 5; padding: 0 !important; border-bottom: 1px solid #dfe9f2 !important; border-right: 1px solid #e7eef5 !important; background: #f5f8fc; color: #3f678e; font-weight: 700; text-align: center; vertical-align: middle !important; white-space: nowrap; }
 .product-statistics-table td { padding: 9px 10px !important; border-color: #e8eef4 !important; border-right: 1px solid #eef3f8 !important; color: #506b86; text-align: center; vertical-align: middle !important; white-space: nowrap; }

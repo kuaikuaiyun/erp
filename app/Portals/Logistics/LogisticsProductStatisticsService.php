@@ -35,8 +35,10 @@ class LogisticsProductStatisticsService
         $page = min($page, $lastPage);
         $offset = ($page - 1) * $perPage;
         $this->applyDatabaseSort($query, trim((string) ($filters['sort'] ?? '')), trim((string) ($filters['direction'] ?? '')));
-        $products = $query->forPage($page, $perPage)
-            ->get()
+        $productRows = $query->forPage($page, $perPage)
+            ->get();
+        $this->hydrateMissingProductImages($productRows);
+        $products = $productRows
             ->map(fn (object $row): array => $this->listProduct($row))
             ->all();
 
@@ -165,6 +167,7 @@ class LogisticsProductStatisticsService
         $query = $this->database()->query()
             ->fromSub($itemStatistics, 'item_statistics')
             ->join('logistics_order_items as first_item', 'first_item.id', '=', 'item_statistics.first_item_id')
+            ->leftJoin('logistics_order_items as image_item', 'image_item.id', '=', 'item_statistics.image_item_id')
             ->leftJoinSub($orderStatistics, 'order_statistics', 'order_statistics.product_key', '=', 'item_statistics.product_key')
             ->select([
                 'item_statistics.product_key',
@@ -181,8 +184,8 @@ class LogisticsProductStatisticsService
                 'first_item.tongtu_product_name',
                 'first_item.tongtu_sku',
                 'first_item.shopify_sku',
-                'first_item.product_image_url',
             ])
+            ->selectRaw("COALESCE(NULLIF(TRIM(first_item.product_image_url), ''), NULLIF(TRIM(image_item.product_image_url), '')) as product_image_url")
             ->selectRaw('COALESCE(order_statistics.paypal_refund_amount, 0) as paypal_refund_amount')
             ->selectRaw('COALESCE(order_statistics.paypal_refund_count, 0) as paypal_refund_count')
             ->selectRaw('COALESCE(order_statistics.paypal_refund_order_count, 0) as paypal_refund_order_count')
@@ -237,6 +240,7 @@ class LogisticsProductStatisticsService
         return $this->baseItemQuery($filters)
             ->selectRaw("{$key} as product_key")
             ->selectRaw('MIN(items.id) as first_item_id')
+            ->selectRaw("MIN(CASE WHEN NULLIF(TRIM(items.product_image_url), '') IS NOT NULL THEN items.id END) as image_item_id")
             ->selectRaw("GROUP_CONCAT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__') ORDER BY COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__') SEPARATOR 0x1F) as store_names")
             ->selectRaw("COUNT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__')) as shop_count")
             ->selectRaw('SUM(COALESCE(items.quantity, 0)) as sales')
@@ -246,6 +250,72 @@ class LogisticsProductStatisticsService
             ->selectRaw('SUM(COALESCE(items.total_shipping_usd, 0)) as shipping')
             ->selectRaw('SUM(COALESCE(items.handling_fee_usd, 0)) as handling')
             ->groupByRaw($key);
+    }
+
+    /** @param Collection<int,object> $rows */
+    private function hydrateMissingProductImages(Collection $rows): void
+    {
+        $missingRows = $rows->filter(static fn (object $row): bool => !filled($row->product_image_url ?? null));
+        if ($missingRows->isEmpty()) {
+            return;
+        }
+
+        $skuKeys = $missingRows
+            ->flatMap(fn (object $row): array => $this->imageSkuKeys($row))
+            ->unique()
+            ->values()
+            ->all();
+        if ($skuKeys === []) {
+            return;
+        }
+
+        $imageRows = $this->database()
+            ->table('logistics_order_items')
+            ->select(['tongtu_sku', 'shopify_sku', 'product_image_url'])
+            ->whereRaw("NULLIF(TRIM(product_image_url), '') IS NOT NULL")
+            ->where(function (Builder $query) use ($skuKeys): void {
+                $query->whereIn(DB::raw("LOWER(NULLIF(TRIM(tongtu_sku), ''))"), $skuKeys)
+                    ->orWhereIn(DB::raw("LOWER(NULLIF(TRIM(shopify_sku), ''))"), $skuKeys);
+            })
+            ->orderBy('id')
+            ->get();
+
+        $imagesBySku = [];
+        foreach ($imageRows as $imageRow) {
+            $imageUrl = trim((string) ($imageRow->product_image_url ?? ''));
+            if ($imageUrl === '') {
+                continue;
+            }
+
+            foreach ($this->imageSkuKeys($imageRow) as $skuKey) {
+                $imagesBySku[$skuKey] ??= $imageUrl;
+            }
+        }
+
+        foreach ($missingRows as $row) {
+            foreach ($this->imageSkuKeys($row) as $skuKey) {
+                if (!isset($imagesBySku[$skuKey])) {
+                    continue;
+                }
+
+                $row->product_image_url = $imagesBySku[$skuKey];
+                break;
+            }
+        }
+    }
+
+    /** @return list<string> */
+    private function imageSkuKeys(object $row): array
+    {
+        $keys = [];
+        foreach (['tongtu_sku', 'shopify_sku'] as $property) {
+            $value = mb_strtolower(trim((string) ($row->{$property} ?? '')));
+            if ($value !== '') {
+                $keys[] = $value;
+            }
+        }
+
+        return array_values(array_unique($keys));
     }
 
     /** @param array<string,mixed> $filters */
