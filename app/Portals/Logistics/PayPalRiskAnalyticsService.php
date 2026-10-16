@@ -21,15 +21,28 @@ use Illuminate\Support\Collection;
  */
 class PayPalRiskAnalyticsService
 {
+    /**
+     * 退款率与纠纷率的统计口径不同：纠纷风险仅纳入实际与商品/服务
+     * 履约相关的索偿、撤销付款，避免预仲裁等后续流程重复放大指标。
+     *
+     * @var list<string>
+     */
+    private const QUALIFYING_DISPUTE_REASONS = [
+        'MERCHANDISE_OR_SERVICE_NOT_RECEIVED',
+        'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED',
+    ];
+
+    /** @var list<string> */
+    private const QUALIFYING_DISPUTE_TYPES = [
+        'INQUIRY',
+        'CHARGEBACK',
+    ];
+
     /** @return array<string,mixed> */
     public function summary(LogisticsPayPalAccount $account, array $filters): array
     {
         $current = $this->paymentMetrics($account, $filters);
         $history = $this->paymentMetrics($account, [], false);
-        $score = max(0.0, min(100.0, round(100 - $current['refund_rate'] * 2 - $current['dispute_rate'] * 10, 1)));
-        $historyScore = max(0.0, min(100.0, round(100 - $history['refund_rate'] * 2 - $history['dispute_rate'] * 10, 1)));
-        $history['score'] = $historyScore;
-        $history['risk'] = $this->riskLevel($historyScore);
 
         return [
             'id' => (int) $account->getKey(),
@@ -42,8 +55,6 @@ class PayPalRiskAnalyticsService
             ...$current,
             'cumulative_refund_rate' => $history['refund_rate'],
             'cumulative_dispute_rate' => $history['dispute_rate'],
-            'score' => $score,
-            'risk' => $this->riskLevel($score),
             'last_imported_at' => $this->dateTime($account->last_imported_at),
             'last_import_status' => (string) ($account->last_import_status ?: 'never'),
             'last_import_message' => (string) ($account->last_import_message ?: __('logistics.paypal_risk.messages.no_import_yet')),
@@ -117,7 +128,8 @@ class PayPalRiskAnalyticsService
         $groups = $payments->groupBy(fn (LogisticsPayPalTransaction $payment): string => (string) $payment->payment_transaction_id);
         $paymentIds = $payments->pluck('payment_transaction_id')->filter()->unique()->values()->all();
         $refunds = $this->refundQueryForPayments($account, $filters, $paymentIds, $applyRange)->get();
-        $disputes = $this->disputeQueryForPayments($account, $filters, $paymentIds, $applyRange)->get();
+        $allDisputes = $this->disputeQueryForPayments($account, $filters, $paymentIds, $applyRange)->get();
+        $disputes = $this->qualifyingDisputeQueryForPayments($account, $filters, $paymentIds, $applyRange)->get();
         $matchedGroups = $groups->filter(fn (Collection $group): bool => $group->contains(fn (LogisticsPayPalTransaction $payment): bool => $payment->logistics_order_id !== null));
         $matchedOrders = $matchedGroups
             ->map(fn (Collection $group) => $group->first(fn (LogisticsPayPalTransaction $payment): bool => $payment->order instanceof LogisticsOrder)?->order)
@@ -126,26 +138,31 @@ class PayPalRiskAnalyticsService
             ->values();
         $refundKeys = $refunds->map(fn (LogisticsPayPalRefund $refund): string => trim((string) ($refund->original_transaction_id ?: $refund->refund_transaction_id)))->filter()->unique();
         $disputeKeys = $disputes->map(fn (LogisticsPayPalDispute $dispute): string => trim((string) ($dispute->disputed_transaction_id ?: $dispute->dispute_id)))->filter()->unique();
+        $paidAmount = round((float) $payments->sum(fn (LogisticsPayPalTransaction $payment): float => (float) ($payment->payment_amount_usd ?? 0)), 2);
+        $disputeAmount = round((float) $disputes->sum(fn (LogisticsPayPalDispute $dispute): float => (float) ($dispute->dispute_amount_usd ?? $dispute->original_amount ?? 0)), 2);
         $shipped = $matchedOrders->filter(fn (LogisticsOrder $order): bool => $this->isActuallyShipped($order));
         $delivered = $shipped->filter(fn (LogisticsOrder $order): bool => $this->isDelivered($order));
         $unmatchedPayments = $groups->filter(fn (Collection $group): bool => $group->every(fn (LogisticsPayPalTransaction $payment): bool => $payment->logistics_order_id === null))->count();
 
         return [
             'order_count' => $groups->count(),
-            'paid_amount' => round((float) $payments->sum(fn (LogisticsPayPalTransaction $payment): float => (float) ($payment->payment_amount_usd ?? 0)), 2),
+            'paid_amount' => $paidAmount,
             'refund_order_count' => $refundKeys->count(),
             'dispute_order_count' => $disputeKeys->count(),
             'refund_rate' => $groups->isEmpty() ? 0.0 : round($refundKeys->count() / $groups->count() * 100, 2),
             'dispute_rate' => $groups->isEmpty() ? 0.0 : round($disputeKeys->count() / $groups->count() * 100, 2),
             'refund_amount' => round((float) $refunds->sum(fn (LogisticsPayPalRefund $refund): float => (float) ($refund->refund_amount_usd ?? $refund->original_amount ?? 0)), 2),
-            'dispute_amount' => round((float) $disputes->sum(fn (LogisticsPayPalDispute $dispute): float => (float) ($dispute->dispute_amount_usd ?? $dispute->original_amount ?? 0)), 2),
+            'dispute_amount' => $disputeAmount,
+            'dispute_amount_rate' => $paidAmount <= 0
+                ? 0.0
+                : round($disputeAmount / $paidAmount * 100, 2),
             'store_count' => $matchedOrders->pluck('store_name')->filter()->unique()->count(),
             'shipped_order_count' => $shipped->count(),
             'delivered_order_count' => $delivered->count(),
             // Delivery status exists only after an ERP order is safely matched.
             'shipping_rate' => $matchedGroups->isEmpty() ? 0.0 : round($shipped->count() / $matchedGroups->count() * 100, 2),
             'delivery_rate' => $matchedGroups->isEmpty() ? 0.0 : round($delivered->count() / $matchedGroups->count() * 100, 2),
-            'unmatched_count' => $unmatchedPayments + $refunds->whereNull('logistics_order_id')->count() + $disputes->whereNull('logistics_order_id')->count(),
+            'unmatched_count' => $unmatchedPayments + $refunds->whereNull('logistics_order_id')->count() + $allDisputes->whereNull('logistics_order_id')->count(),
         ];
     }
 
@@ -179,7 +196,7 @@ class PayPalRiskAnalyticsService
                 $trend[$key]['refunds']++;
             }
         }
-        foreach ($this->disputeQueryForPayments($account, $filters, $payments->pluck('payment_transaction_id')->all())->get() as $dispute) {
+        foreach ($this->qualifyingDisputeQueryForPayments($account, $filters, $payments->pluck('payment_transaction_id')->all())->get() as $dispute) {
             $key = $dispute->dispute_created_at?->timezone('Asia/Shanghai')->format('Y-m-d');
             if ($key && isset($trend[$key])) {
                 $trend[$key]['disputes']++;
@@ -203,11 +220,6 @@ class PayPalRiskAnalyticsService
 
         return [
             'trend' => array_values($trend),
-            'risk_parts' => [
-                ['label' => __('logistics.paypal_risk.detail.refund_risk'), 'value' => min(100, round((float) $summary['refund_rate'] * 2, 1)), 'tone' => 'refund'],
-                ['label' => __('logistics.paypal_risk.detail.dispute_risk'), 'value' => min(100, round((float) $summary['dispute_rate'] * 10, 1)), 'tone' => 'dispute'],
-                ['label' => __('logistics.paypal_risk.detail.unmatched_risk'), 'value' => min(100, (int) $summary['unmatched_count'] * 5), 'tone' => 'unmatched'],
-            ],
             'exceptions' => array_slice($exceptions, 0, 5),
         ];
     }
@@ -420,6 +432,14 @@ class PayPalRiskAnalyticsService
         return $query;
     }
 
+    /** @param list<string> $paymentIds */
+    private function qualifyingDisputeQueryForPayments(LogisticsPayPalAccount $account, array $filters, array $paymentIds, bool $applyRange = true): Builder
+    {
+        return $this->disputeQueryForPayments($account, $filters, $paymentIds, $applyRange)
+            ->whereIn('reason', self::QUALIFYING_DISPUTE_REASONS)
+            ->whereIn('life_cycle_stage', self::QUALIFYING_DISPUTE_TYPES);
+    }
+
     /** @return Collection<int,LogisticsOrder> */
     private function matchedOrdersForPayments(LogisticsPayPalAccount $account, array $filters): Collection
     {
@@ -580,15 +600,6 @@ class PayPalRiskAnalyticsService
                 'to' => min($total, $page * $perPage),
             ],
         ];
-    }
-
-    private function riskLevel(float $score): string
-    {
-        return match (true) {
-            $score >= 85 => 'low',
-            $score >= 70 => 'medium',
-            default => 'high',
-        };
     }
 
     private function maskEmail(mixed $email): string

@@ -93,16 +93,17 @@
 }
 .paypal-risk-card:hover { transform: translateY(-2px); border-color: #bdd3e6; box-shadow: 0 8px 22px rgba(20, 57, 88, .11); }
 .paypal-risk-card.is-disabled { opacity: .68; }
-.paypal-risk-card-accent { height: 4px; background: #1a8d67; }
-.paypal-risk-card.risk-medium .paypal-risk-card-accent { background: #e18a13; }
-.paypal-risk-card.risk-high .paypal-risk-card-accent { background: #d44149; }
+.paypal-risk-card-accent { height: 4px; background: #2384c6; }
 .paypal-risk-card-header { min-height: 72px; display: flex; align-items: center; gap: 10px; padding: 14px 15px 11px; border-bottom: 1px solid #eef3f7; }
-.paypal-risk-card-scope-switch { display: flex; justify-content: flex-end; gap: 0; margin: 10px 15px -4px; }
+.paypal-risk-account-meta { display: flex; align-items: center; gap: 8px; margin: 11px 15px 0; min-width: 0; }
+.paypal-risk-account-meta span { flex: 0 0 auto; color: #8197aa; font-size: 10px; text-transform: uppercase; letter-spacing: .3px; }
+.paypal-risk-account-meta strong { min-width: 0; overflow: hidden; color: #34536e; font-family: Consolas, Monaco, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.paypal-risk-account-meta em { flex: 0 0 auto; padding: 3px 7px; border-radius: 9px; color: #39739f; background: #eaf4fb; font-size: 10px; font-style: normal; }
+.paypal-risk-card-scope-switch { display: flex; justify-content: flex-end; gap: 0; margin: 10px 15px 8px; }
 .paypal-risk-card-scope-switch .btn { min-width: 68px; border-color: #cfdce7; color: #52718a; box-shadow: none; }
 .paypal-risk-card-scope-switch .btn + .btn { margin-left: -1px; }
 .paypal-risk-card-scope-switch .btn.is-active { position: relative; z-index: 1; border-color: #2585bf; color: #fff; background: #2c90c9; }
 .paypal-risk-card-scope-panel[hidden] { display: none !important; }
-.paypal-risk-card-scope-panel .paypal-risk-rate-note span + span { display: none; }
 .paypal-risk-matched-only-note { margin: 8px 15px 0; color: #7890a5; font-size: 11px; line-height: 1.45; }
 .paypal-risk-matched-only-note .fa { color: #3c8dbc; }
 .paypal-risk-match-status { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 7px; border-radius: 4px; font-size: 11px; white-space: nowrap; }
@@ -114,36 +115,6 @@
 .paypal-risk-account-identity { min-width: 0; flex: 1; }
 .paypal-risk-account-identity h3 { margin: 0 0 2px; overflow: hidden; color: #153957; font-size: 15px; font-weight: 600; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
 .paypal-risk-account-identity p { margin: 0; overflow: hidden; color: #7c93a8; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.paypal-risk-pill { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; padding: 5px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
-.paypal-risk-pill.risk-low { color: #087f58; background: #ddf4eb; }
-.paypal-risk-pill.risk-medium { color: #9a5a00; background: #ffedcc; }
-.paypal-risk-pill.risk-high { color: #ad252d; background: #fde1e3; }
-
-.paypal-risk-score-row { display: flex; align-items: center; gap: 15px; padding: 14px 16px 11px; }
-.paypal-risk-score-ring {
-    --risk-score: 0;
-    position: relative;
-    width: 76px;
-    height: 76px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    flex: 0 0 76px;
-    border: 7px solid #e7eef4;
-    border-top-color: #138e68;
-    border-right-color: #138e68;
-    border-radius: 50%;
-}
-.risk-medium .paypal-risk-score-ring { border-top-color: #e18a13; border-right-color: #e18a13; }
-.risk-high .paypal-risk-score-ring { border-top-color: #d44149; border-right-color: #d44149; }
-.paypal-risk-score-ring strong { color: #123753; font-size: 21px; line-height: 1; font-variant-numeric: tabular-nums; }
-.paypal-risk-score-ring small { margin-top: 4px; color: #8aa0b4; font-size: 9px; }
-.paypal-risk-score-copy { min-width: 0; display: flex; flex-direction: column; }
-.paypal-risk-score-copy span { color: #8197aa; font-size: 10px; text-transform: uppercase; letter-spacing: .3px; }
-.paypal-risk-score-copy strong { margin: 3px 0 6px; overflow: hidden; color: #34536e; font-family: Consolas, Monaco, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.paypal-risk-score-copy em { align-self: flex-start; padding: 3px 7px; border-radius: 9px; color: #39739f; background: #eaf4fb; font-size: 10px; font-style: normal; }
-
 .paypal-risk-card-metrics { display: grid; grid-template-columns: repeat(3, 1fr); margin: 0 15px 12px; border: 1px solid #e6edf3; border-radius: 6px; background: #f8fbfd; }
 .paypal-risk-card-metrics div { min-width: 0; padding: 9px 7px; text-align: center; border-right: 1px solid #e6edf3; }
 .paypal-risk-card-metrics div:last-child { border-right: 0; }
@@ -194,12 +165,11 @@
 .paypal-risk-detail-loading { min-height: 340px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: #66829b; }
 .paypal-risk-detail-loading[hidden] { display: none !important; }
 .paypal-risk-detail-loading i { color: #187fc2; font-size: 30px; }
-.paypal-risk-detail-summary { display: grid; grid-template-columns: 1.25fr repeat(4, 1fr); border: 1px solid #dce7ef; border-radius: 7px; overflow: hidden; margin-bottom: 14px; }
+.paypal-risk-detail-summary { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid #dce7ef; border-radius: 7px; overflow: hidden; margin-bottom: 14px; }
 .paypal-risk-detail-summary > div { min-height: 70px; display: flex; flex-direction: column; justify-content: center; padding: 10px 15px; border-right: 1px solid #e4ebf1; background: #fbfdff; }
 .paypal-risk-detail-summary > div:last-child { border-right: 0; }
 .paypal-risk-detail-summary small { color: #8297aa; }
 .paypal-risk-detail-summary strong { margin-top: 4px; color: #173b59; font-size: 18px; font-variant-numeric: tabular-nums; }
-.paypal-risk-detail-summary .score strong { color: #0f8b65; font-size: 25px; }
 .paypal-risk-tabs { border-bottom-color: #dbe5ee; }
 .paypal-risk-tabs > li > a { color: #5e7890; font-weight: 600; }
 .paypal-risk-tabs > li.active > a, .paypal-risk-tabs > li.active > a:focus { color: #1478b8; border-top: 2px solid #1478b8; }
@@ -213,19 +183,12 @@
 .paypal-risk-detail-filter-actions { display: flex; gap: 6px; }
 .paypal-risk-detail-filter-actions .btn { height: 32px; white-space: nowrap; }
 #paypal-detail-body { min-height: 360px; padding-top: 15px; }
-.paypal-risk-overview-grid { display: grid; grid-template-columns: 1.65fr 1fr; gap: 14px; }
+.paypal-risk-overview-grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
 .paypal-risk-panel { border: 1px solid #dde7ef; border-radius: 7px; background: #fff; overflow: hidden; }
 .paypal-risk-panel-heading { display: flex; align-items: center; justify-content: space-between; padding: 11px 14px; color: #234763; background: #f7fafc; border-bottom: 1px solid #e2eaf1; font-weight: 600; }
 .paypal-risk-panel-body { padding: 13px 14px; }
 .paypal-risk-chart-wrap { position: relative; height: 245px; }
 .paypal-risk-chart-wrap canvas { width: 100%; height: 100%; }
-.paypal-risk-factor { margin-bottom: 15px; }
-.paypal-risk-factor:last-child { margin-bottom: 0; }
-.paypal-risk-factor > div { display: flex; justify-content: space-between; color: #526f87; font-size: 12px; }
-.paypal-risk-factor .bar { height: 7px; margin-top: 7px; border-radius: 5px; background: #e8eff4; overflow: hidden; }
-.paypal-risk-factor .bar i { display: block; height: 100%; background: #e19a2e; }
-.paypal-risk-factor.tone-dispute .bar i { background: #d44b54; }
-.paypal-risk-factor.tone-unmatched .bar i { background: #7289a0; }
 .paypal-risk-exceptions { grid-column: 1 / -1; }
 .paypal-risk-data-table { width: 100%; margin: 0; border-collapse: collapse; table-layout: fixed; }
 .paypal-risk-data-table th { padding: 10px 9px; color: #4d6b83; background: #f5f8fb; border: 1px solid #dee7ef; font-size: 11px; text-align: center; }
@@ -245,7 +208,7 @@
 .paypal-risk-detail-pagination { min-height: 38px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 10px; }
 .paypal-risk-detail-pagination button { min-width: 31px; }
 .paypal-risk-detail-pagination span { color: #70879b; font-size: 11px; }
-.paypal-risk-score-note { color: #8195a7; font-size: 11px; }
+.paypal-risk-modal-note { color: #8195a7; font-size: 11px; }
 
 @media (max-width: 1360px) {
     .paypal-risk-kpis { grid-template-columns: repeat(3, 1fr); }

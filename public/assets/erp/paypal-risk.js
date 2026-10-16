@@ -167,7 +167,6 @@
         error.textContent = message || '';
     }
 
-    function riskLabel(risk) { return ({ low: '低风险', medium: '中风险', high: '高风险' })[risk] || risk || '—'; }
     function orderLink(row) {
         var label = escapeHtml(row.order_number == null || row.order_number === '' ? '—' : row.order_number);
         if (!row.order_id || !row.order_detail_url) return label;
@@ -177,20 +176,16 @@
     function renderDetailSummary(summary) {
         one('#paypal-detail-subtitle').textContent = summary.account_name + ' · ' + summary.account_email + ' · Merchant ID ' + summary.merchant_id;
         one('#paypal-detail-summary').innerHTML = [
-            '<div class="score"><small>安全指数 · ' + escapeHtml(riskLabel(summary.risk)) + '</small><strong>' + Number(summary.score || 0).toFixed(1) + '</strong></div>',
-            '<div><small>支付订单</small><strong>' + integer(summary.order_count) + '</strong></div>',
-            '<div><small>实收金额（USD）</small><strong>' + money(summary.paid_amount) + '</strong></div>',
-            '<div><small>退款率</small><strong>' + rate(summary.refund_rate) + '</strong></div>',
-            '<div><small>纠纷率</small><strong>' + rate(summary.dispute_rate) + '</strong></div>',
+            '<div><small>' + escapeHtml(labels.paymentCount || '') + '</small><strong>' + integer(summary.order_count) + '</strong></div>',
+            '<div><small>' + escapeHtml(labels.receivedAmount || '') + '</small><strong>' + money(summary.paid_amount) + '</strong></div>',
+            '<div><small>' + escapeHtml(labels.filteredRefundRate || '') + '</small><strong>' + rate(summary.refund_rate) + '</strong></div>',
+            '<div><small>' + escapeHtml(labels.filteredDisputeRate || '') + '</small><strong>' + rate(summary.dispute_rate) + '</strong></div>',
             '<div><small>' + escapeHtml(labels.shippingRate || '') + '</small><strong>' + rate(summary.shipping_rate) + '</strong></div>',
             '<div><small>' + escapeHtml(labels.deliveryRate || '') + '</small><strong>' + rate(summary.delivery_rate) + '</strong></div>'
         ].join('');
     }
 
     function renderOverview(payload) {
-        var factors = (payload.risk_parts || []).map(function (factor) {
-            return '<div class="paypal-risk-factor tone-' + escapeHtml(factor.tone) + '"><div><span>' + escapeHtml(factor.label) + '</span><strong>' + Number(factor.value || 0).toFixed(1) + ' 分</strong></div><div class="bar"><i style="width:' + Math.min(100, Number(factor.value || 0)) + '%"></i></div></div>';
-        }).join('');
         var exceptions = payload.exceptions || [];
         var rows = exceptions.map(function (row) {
             return '<tr><td>' + escapeHtml(row.happened_at) + '</td><td>' + escapeHtml(row.store_name) + '</td><td>' + orderLink(row) + '</td><td><span class="status-tag ' + (row.type === '纠纷' ? 'danger' : '') + '">' + escapeHtml(row.type) + '</span></td><td>' + money(row.amount) + '</td><td class="text-left">' + escapeHtml(row.reason) + '</td><td>' + escapeHtml(row.status) + '</td></tr>';
@@ -198,8 +193,7 @@
         if (!rows) rows = '<tr><td colspan="7">当前时间范围内没有退款或纠纷异常。</td></tr>';
 
         one('#paypal-detail-body').innerHTML = '<div class="paypal-risk-overview-grid">' +
-            '<section class="paypal-risk-panel"><div class="paypal-risk-panel-heading"><span>订单风险趋势</span><small><i style="color:#2384c6">●</i> 订单　<i style="color:#e39a2d">●</i> 退款　<i style="color:#d34b54">●</i> 纠纷</small></div><div class="paypal-risk-panel-body"><div class="paypal-risk-chart-wrap"><canvas id="paypal-risk-trend-chart"></canvas></div></div></section>' +
-            '<section class="paypal-risk-panel"><div class="paypal-risk-panel-heading"><span>风险因子拆解</span><small>扣分贡献</small></div><div class="paypal-risk-panel-body">' + factors + '</div></section>' +
+            '<section class="paypal-risk-panel"><div class="paypal-risk-panel-heading"><span>订单、退款与纠纷趋势</span><small><i style="color:#2384c6">●</i> 订单　<i style="color:#e39a2d">●</i> 退款　<i style="color:#d34b54">●</i> 纠纷</small></div><div class="paypal-risk-panel-body"><div class="paypal-risk-chart-wrap"><canvas id="paypal-risk-trend-chart"></canvas></div></div></section>' +
             '<section class="paypal-risk-panel paypal-risk-exceptions"><div class="paypal-risk-panel-heading"><span>最近异常记录</span><small>最多显示5条</small></div><div class="table-responsive"><table class="paypal-risk-data-table"><thead><tr><th>发生时间</th><th>店铺</th><th>订单号</th><th>类型</th><th>金额</th><th>原因</th><th>状态</th></tr></thead><tbody>' + rows + '</tbody></table></div></section>' +
             '</div>';
         one('#paypal-detail-pagination').innerHTML = '';
@@ -464,14 +458,6 @@
                 panels.forEach(function (panel) {
                     panel.hidden = panel.dataset.paypalCardScopePanel !== activeScope;
                 });
-                var riskPill = one('[data-paypal-card-risk]', card);
-                if (riskPill) {
-                    var risk = riskPill.dataset['risk' + activeScope.charAt(0).toUpperCase() + activeScope.slice(1)] || 'low';
-                    var label = riskPill.dataset['riskLabel' + activeScope.charAt(0).toUpperCase() + activeScope.slice(1)] || '';
-                    var icon = riskPill.dataset['riskIcon' + activeScope.charAt(0).toUpperCase() + activeScope.slice(1)] || 'fa-shield';
-                    riskPill.className = 'paypal-risk-pill risk-' + risk;
-                    riskPill.innerHTML = '<i class="fa ' + escapeHtml(icon) + '"></i> ' + escapeHtml(label);
-                }
             }
 
             buttons.forEach(function (button) {
