@@ -51,6 +51,7 @@ class ProductRequestController extends Controller
             'statusLabels' => $this->statusLabels(),
             'reviewStatusLabels' => $this->reviewStatusLabels(),
             'rectificationLabels' => $this->rectificationLabels(),
+            'warehouseResultLabels' => $this->warehouseResultLabels(),
         ]);
     }
 
