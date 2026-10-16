@@ -215,19 +215,25 @@
         var pad = { left: 38, right: 16, top: 15, bottom: 28 };
         var plotW = width - pad.left - pad.right;
         var plotH = height - pad.top - pad.bottom;
-        var max = Math.max(1, data.reduce(function (carry, point) { return Math.max(carry, Number(point.orders || 0), Number(point.refunds || 0), Number(point.disputes || 0)); }, 0));
+        var hasTrendData = data.some(function (point) {
+            return Number(point.orders || 0) > 0 || Number(point.refunds || 0) > 0 || Number(point.disputes || 0) > 0;
+        });
         context.font = '10px Arial';
         context.textAlign = 'right';
         context.fillStyle = '#849aae';
         context.strokeStyle = '#e4ebf1';
         context.lineWidth = 1;
+        if (!data.length || !hasTrendData) {
+            context.font = '13px Arial';
+            context.textAlign = 'center';
+            context.fillText(labels.trendEmpty || '当前筛选范围暂无趋势数据', width / 2, height / 2);
+            return;
+        }
+        var max = data.reduce(function (carry, point) { return Math.max(carry, Number(point.orders || 0), Number(point.refunds || 0), Number(point.disputes || 0)); }, 0);
         for (var line = 0; line <= 4; line++) {
             var y = pad.top + plotH * line / 4;
             context.beginPath(); context.moveTo(pad.left, y); context.lineTo(width - pad.right, y); context.stroke();
             context.fillText(String(Math.round(max * (4 - line) / 4)), pad.left - 7, y + 3);
-        }
-        if (!data.length) {
-            context.textAlign = 'center'; context.fillText('暂无趋势数据', width / 2, height / 2); return;
         }
         var step = data.length > 1 ? plotW / (data.length - 1) : plotW;
         [
