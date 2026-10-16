@@ -501,6 +501,9 @@ class ProductRequestController extends Controller
             ProductRequest::query()
                 ->where(function ($q): void {
                     $q->where('status', ProductRequest::STATUS_PENDING)
+                        ->where(function ($sub): void {
+                            $sub->whereNull('inspection_reject_reason')->orWhere('inspection_reject_reason', '');
+                        })
                         ->orWhere('procurement_rectification_status', ProductRequest::RECTIFICATION_PENDING);
                 }),
             $context['user'],
