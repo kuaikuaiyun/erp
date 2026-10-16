@@ -250,6 +250,8 @@ body.product-request-lightbox-open { overflow: hidden; }
 .product-request-table .product-request-sku-cell { min-width: 240px; max-width: 320px; }
 .product-request-table td.product-request-metric-cell, .product-request-table th.product-request-metric-cell { white-space: nowrap; text-align: center; font-variant-numeric: tabular-nums; }
 .product-request-table td.product-request-image-cell, .product-request-table th.product-request-image-cell { width: 62px; text-align: center; white-space: nowrap; }
+.product-request-table td.product-request-image-cell-multi, .product-request-table th.product-request-image-cell-multi { width: auto; min-width: 158px; }
+.product-request-image-cell-multi .product-request-thumbnail { margin: 0 2px; }
 .product-request-table td.product-request-nowrap-cell, .product-request-table th.product-request-nowrap-cell { white-space: nowrap; }
 .product-request-link-wrap { max-width: 280px; }
 .product-request-link-wrap > a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

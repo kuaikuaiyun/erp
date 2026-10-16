@@ -1,4 +1,4 @@
-﻿@extends('portal.layout')
+@extends('portal.layout')
 
 @section('page_title', __('product_requests.warehouse.title'))
 
@@ -17,8 +17,8 @@
         'imageUploading' => $t('editor.uploading'), 'imageUploadFailed' => $t('editor.upload_failed'),
     ];
 @endphp
-@push('styles')<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261015-19">@endpush
-@push('scripts')<script>window.ErpProductRequestConfig = @json($clientConfig);</script><script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261015-19"></script>@endpush
+@push('styles')<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261016-2">@endpush
+@push('scripts')<script>window.ErpProductRequestConfig = @json($clientConfig);</script><script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261016-2"></script>@endpush
 
 @section('content')
 <section class="content product-request-page">
