@@ -47,6 +47,15 @@ class LogisticsPayPalAccount extends Model
         return $this->hasMany(LogisticsPayPalRefund::class, 'logistics_paypal_account_id');
     }
 
+    /**
+     * Source-of-truth payment ledger. A payment remains here even when the
+     * related Shopify / ERP order has not arrived or cannot be matched.
+     */
+    public function transactions(): HasMany
+    {
+        return $this->hasMany(LogisticsPayPalTransaction::class, 'logistics_paypal_account_id');
+    }
+
     public function disputes(): HasMany
     {
         return $this->hasMany(LogisticsPayPalDispute::class, 'logistics_paypal_account_id');

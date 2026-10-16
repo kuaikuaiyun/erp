@@ -116,9 +116,10 @@ class PayPalRiskController extends Controller
             'tab_status' => ['nullable', 'string', 'max:100'],
             'tab_type' => ['nullable', 'string', 'max:100'],
             'tab_outcome' => ['nullable', 'string', 'max:100'],
+            'tab_match_status' => ['nullable', Rule::in(['', 'matched', 'unmatched'])],
             'sort' => ['nullable', Rule::in([
-                '', 'order_number', 'tongtu_order_number', 'store_name', 'products', 'paid_amount',
-                'refund_status', 'dispute_status', 'tracking_number', 'logistics_status', 'order_created_at', 'product_name', 'sku', 'quantity',
+                '', 'payment_transaction_id', 'match_status', 'order_number', 'tongtu_order_number', 'store_name', 'products', 'paid_amount',
+                'refund_status', 'dispute_status', 'tracking_number', 'logistics_status', 'paid_at', 'product_name', 'sku', 'quantity',
                 'refund_orders', 'refund_rate', 'dispute_orders', 'dispute_rate', 'refund_id', 'source',
                 'amount', 'reason', 'status', 'happened_at', 'dispute_id', 'stage', 'source_reason',
                 'manual_reason', 'linked_disputes', 'outcome', 'seller_response_due_at', 'linked_refunds',
@@ -158,6 +159,7 @@ class PayPalRiskController extends Controller
             'tab_status' => ['nullable', 'string', 'max:100'],
             'tab_type' => ['nullable', 'string', 'max:100'],
             'tab_outcome' => ['nullable', 'string', 'max:100'],
+            'tab_match_status' => ['nullable', Rule::in(['', 'matched', 'unmatched'])],
         ], $this->dateValidationMessages());
         $filters = $this->detailDateFilters($validated);
         $fields = $this->exportFields($tab);
@@ -293,7 +295,7 @@ class PayPalRiskController extends Controller
     }
 
     /** @param array<string,mixed> $validated
-     *  @return array{keyword:string,status:string,type:string,outcome:string}
+     *  @return array{keyword:string,status:string,type:string,outcome:string,match_status:string}
      */
     private function detailTabFilters(array $validated): array
     {
@@ -302,13 +304,19 @@ class PayPalRiskController extends Controller
             'status' => trim((string) ($validated['tab_status'] ?? '')),
             'type' => trim((string) ($validated['tab_type'] ?? '')),
             'outcome' => trim((string) ($validated['tab_outcome'] ?? '')),
+            'match_status' => trim((string) ($validated['tab_match_status'] ?? '')),
         ];
     }
 
     /** @return array<string,string> */
     private function exportFields(string $tab): array
     {
-        return __('logistics.paypal_risk.export.'.$tab);
+        $fields = __('logistics.paypal_risk.export.'.$tab);
+        if ($tab === 'orders' && is_array($fields)) {
+            unset($fields['order_created_at']);
+        }
+
+        return is_array($fields) ? $fields : [];
     }
 
     /** @param Collection<int,array<string,mixed>> $summaries */

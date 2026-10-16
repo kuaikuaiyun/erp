@@ -33,6 +33,16 @@
             'linkedRefunds' => __('logistics.paypal_risk.ui.linked_refunds'),
             'trackingNumber' => __('logistics.paypal_risk.ui.tracking_number'),
             'logisticsStatus' => __('logistics.paypal_risk.ui.logistics_status'),
+            'paymentTransactionId' => __('logistics.paypal_risk.ui.payment_transaction_id'),
+            'paymentTime' => __('logistics.paypal_risk.ui.payment_time'),
+            'matchStatus' => __('logistics.paypal_risk.ui.match_status'),
+            'shopifyOrderNumber' => __('logistics.paypal_risk.ui.shopify_order_number'),
+            'tongtuOrderNumber' => __('logistics.paypal_risk.ui.tongtu_order_number'),
+            'storeName' => __('logistics.paypal_risk.ui.store_name'),
+            'products' => __('logistics.paypal_risk.ui.products'),
+            'paidAmount' => __('logistics.paypal_risk.ui.paid_amount'),
+            'refundStatus' => __('logistics.paypal_risk.ui.refund_status'),
+            'disputeStatus' => __('logistics.paypal_risk.ui.dispute_status'),
             'shippingRate' => __('logistics.paypal_risk.ui.shipping_rate'),
             'deliveryRate' => __('logistics.paypal_risk.ui.delivery_rate'),
             'exportCurrentTab' => __('logistics.paypal_risk.export.button'),
@@ -42,7 +52,10 @@
             'detailFilterStatus' => __('logistics.paypal_risk.detail_filters.status'),
             'detailFilterType' => __('logistics.paypal_risk.detail_filters.type'),
             'detailFilterOutcome' => __('logistics.paypal_risk.detail_filters.outcome'),
+            'detailFilterMatchStatus' => __('logistics.paypal_risk.detail_filters.match_status'),
             'detailFilterAll' => __('logistics.paypal_risk.detail_filters.all'),
+            'detailFilterMatched' => __('logistics.paypal_risk.detail_filters.matched'),
+            'detailFilterUnmatched' => __('logistics.paypal_risk.detail_filters.unmatched'),
             'detailFilterPlaceholders' => [
                 'orders' => __('logistics.paypal_risk.detail_filters.orders_placeholder'),
                 'products' => __('logistics.paypal_risk.detail_filters.products_placeholder'),
@@ -83,7 +96,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/paypal-risk.css?v=20261015-7">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/paypal-risk.css?v=20261015-10">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261015-2">
 @endpush
 
@@ -147,12 +160,12 @@
                         <label>{{ __('logistics.paypal_risk.filters.date_mode') }}</label>
                         <input type="hidden" name="date_mode" value="{{ $filters['date_mode'] }}" data-paypal-date-mode-input>
                         <div class="btn-group" role="group" aria-label="{{ __('logistics.paypal_risk.filters.date_mode') }}">
-                            <button type="button" class="btn btn-default {{ $filters['date_mode'] === 'order' ? 'active' : '' }}" data-paypal-date-mode="order">{{ __('logistics.paypal_risk.filters.order_date') }}</button>
+                            <button type="button" class="btn btn-default {{ $filters['date_mode'] === 'order' ? 'active' : '' }}" data-paypal-date-mode="order">{{ __('logistics.paypal_risk.filters.payment_date') }}</button>
                             <button type="button" class="btn btn-default {{ $filters['date_mode'] === 'event' ? 'active' : '' }}" data-paypal-date-mode="event">{{ __('logistics.paypal_risk.filters.event_date') }}</button>
                         </div>
                     </div>
                     <div class="paypal-risk-filter-field paypal-risk-filter-date" data-paypal-date-panel="order" @if($filters['date_mode'] !== 'order') hidden @endif>
-                        <label>{{ __('logistics.paypal_risk.filters.order_date') }}</label>
+                        <label>{{ __('logistics.paypal_risk.filters.payment_date') }}</label>
                         <div><input class="form-control" type="date" name="date_from" value="{{ $filters['date_from'] }}" @disabled($filters['date_mode'] !== 'order')><span>{{ __('logistics.paypal_risk.filters.range_to') }}</span><input class="form-control" type="date" name="date_to" value="{{ $filters['date_to'] }}" @disabled($filters['date_mode'] !== 'order')></div>
                     </div>
                     <div class="paypal-risk-filter-field paypal-risk-filter-date" data-paypal-date-panel="event" @if($filters['date_mode'] !== 'event') hidden @endif>
@@ -184,21 +197,32 @@
                                 <h3 title="{{ $account['account_name'] }}">{{ $account['account_name'] }}</h3>
                                 <p title="{{ $account['account_email'] }}">{{ $account['masked_email'] }}</p>
                             </div>
-                            <span class="paypal-risk-pill risk-{{ $account['risk'] }}"><i class="fa {{ $riskIcons[$account['risk']] }}"></i> {{ $riskLabels[$account['risk']] }}</span>
+                            <span class="paypal-risk-pill risk-{{ $account['risk'] }}" data-paypal-card-risk
+                                data-risk-current="{{ $account['risk'] }}"
+                                data-risk-history="{{ $account['history']['risk'] }}"
+                                data-risk-label-current="{{ $riskLabels[$account['risk']] }}"
+                                data-risk-label-history="{{ $riskLabels[$account['history']['risk']] }}"
+                                data-risk-icon-current="{{ $riskIcons[$account['risk']] }}"
+                                data-risk-icon-history="{{ $riskIcons[$account['history']['risk']] }}"><i class="fa {{ $riskIcons[$account['risk']] }}"></i> {{ $riskLabels[$account['risk']] }}</span>
                         </header>
 
+                        <div class="paypal-risk-card-scope-switch" role="group" aria-label="{{ __('logistics.paypal_risk.ui.metric_scope') }}">
+                            <button type="button" class="btn btn-default btn-xs is-active" data-paypal-card-scope="current">{{ __('logistics.paypal_risk.ui.current_scope') }}</button>
+                            <button type="button" class="btn btn-default btn-xs" data-paypal-card-scope="history">{{ __('logistics.paypal_risk.ui.history_scope') }}</button>
+                        </div>
+                        <div class="paypal-risk-card-scope-panel" data-paypal-card-scope-panel="current">
                         <div class="paypal-risk-score-row">
-                            <div class="paypal-risk-score-ring" style="--risk-score: {{ $account['score'] }}"><strong>{{ number_format($account['score'], 1) }}</strong><small>安全指数</small></div>
+                            <div class="paypal-risk-score-ring" style="--risk-score: {{ $account['score'] }}"><strong>{{ number_format($account['score'], 1) }}</strong><small>{{ __('logistics.paypal_risk.ui.safety_score') }}</small></div>
                             <div class="paypal-risk-score-copy">
                                 <span>Merchant ID</span><strong title="{{ $account['merchant_id'] }}">{{ $account['merchant_id'] }}</strong>
-                                <em>{{ $account['environment'] === 'sandbox' ? 'Sandbox 测试环境' : 'Live 正式环境' }}</em>
+                                <em>{{ $account['environment'] === 'sandbox' ? __('logistics.paypal_risk.ui.sandbox_environment') : __('logistics.paypal_risk.ui.live_environment') }}</em>
                             </div>
                         </div>
 
                         <div class="paypal-risk-card-metrics">
-                            <div><small>订单总量</small><strong>{{ number_format($account['order_count']) }}</strong></div>
-                            <div><small>实收金额</small><strong>${{ number_format($account['paid_amount'], 2) }}</strong></div>
-                            <div><small>关联店铺</small><strong>{{ number_format($account['store_count']) }}</strong></div>
+                            <div><small>{{ __('logistics.paypal_risk.ui.payment_count') }}</small><strong>{{ number_format($account['order_count']) }}</strong></div>
+                            <div><small>{{ __('logistics.paypal_risk.ui.received_amount') }}</small><strong>${{ number_format($account['paid_amount'], 2) }}</strong></div>
+                            <div><small>{{ __('logistics.paypal_risk.ui.linked_store_count') }}</small><strong>{{ number_format($account['store_count']) }}</strong></div>
                             <div><small>{{ __('logistics.paypal_risk.ui.shipping_rate') }}</small><strong>{{ number_format($account['shipping_rate'], 2) }}%</strong></div>
                             <div><small>{{ __('logistics.paypal_risk.ui.delivery_rate') }}</small><strong>{{ number_format($account['delivery_rate'], 2) }}%</strong></div>
                         </div>
@@ -207,7 +231,7 @@
                             <div><span>{{ __('logistics.paypal_risk.ui.filtered_refund_rate') }}</span><strong>{{ number_format($account['refund_rate'], 2) }}%</strong></div>
                             <div class="paypal-risk-progress"><i style="width: {{ min(100, $account['refund_rate'] * 5) }}%"></i></div>
                             <div class="paypal-risk-rate-note">
-                                <span>{{ $account['refund_order_count'] }} 笔退款订单 · ${{ number_format($account['refund_amount'], 2) }}</span>
+                                <span>{{ __('logistics.paypal_risk.ui.refund_order_summary', ['count' => $account['refund_order_count'], 'amount' => number_format($account['refund_amount'], 2)]) }}</span>
                                 <span>{{ __('logistics.paypal_risk.ui.cumulative_refund_rate') }} {{ number_format($account['cumulative_refund_rate'], 2) }}%</span>
                             </div>
                         </div>
@@ -215,9 +239,38 @@
                             <div><span>{{ __('logistics.paypal_risk.ui.filtered_dispute_rate') }}</span><strong>{{ number_format($account['dispute_rate'], 2) }}%</strong></div>
                             <div class="paypal-risk-progress"><i style="width: {{ min(100, $account['dispute_rate'] * 10) }}%"></i></div>
                             <div class="paypal-risk-rate-note">
-                                <span>{{ $account['dispute_order_count'] }} 笔纠纷订单 · ${{ number_format($account['dispute_amount'], 2) }}</span>
+                                <span>{{ __('logistics.paypal_risk.ui.dispute_order_summary', ['count' => $account['dispute_order_count'], 'amount' => number_format($account['dispute_amount'], 2)]) }}</span>
                                 <span>{{ __('logistics.paypal_risk.ui.cumulative_dispute_rate') }} {{ number_format($account['cumulative_dispute_rate'], 2) }}%</span>
                             </div>
+                        </div>
+                        <p class="paypal-risk-matched-only-note"><i class="fa fa-info-circle"></i> {{ __('logistics.paypal_risk.ui.matched_only_note') }}</p>
+                        </div>
+                        <div class="paypal-risk-card-scope-panel" data-paypal-card-scope-panel="history" hidden>
+                            <div class="paypal-risk-score-row">
+                                <div class="paypal-risk-score-ring" style="--risk-score: {{ $account['history']['score'] }}"><strong>{{ number_format($account['history']['score'], 1) }}</strong><small>{{ __('logistics.paypal_risk.ui.history_scope') }}</small></div>
+                                <div class="paypal-risk-score-copy">
+                                    <span>Merchant ID</span><strong title="{{ $account['merchant_id'] }}">{{ $account['merchant_id'] }}</strong>
+                                    <em>{{ $account['environment'] === 'sandbox' ? __('logistics.paypal_risk.ui.sandbox_environment') : __('logistics.paypal_risk.ui.live_environment') }}</em>
+                                </div>
+                            </div>
+                            <div class="paypal-risk-card-metrics">
+                                <div><small>{{ __('logistics.paypal_risk.ui.payment_count') }}</small><strong>{{ number_format($account['history']['order_count']) }}</strong></div>
+                                <div><small>{{ __('logistics.paypal_risk.ui.received_amount') }}</small><strong>${{ number_format($account['history']['paid_amount'], 2) }}</strong></div>
+                                <div><small>{{ __('logistics.paypal_risk.ui.linked_store_count') }}</small><strong>{{ number_format($account['history']['store_count']) }}</strong></div>
+                                <div><small>{{ __('logistics.paypal_risk.ui.shipping_rate') }}</small><strong>{{ number_format($account['history']['shipping_rate'], 2) }}%</strong></div>
+                                <div><small>{{ __('logistics.paypal_risk.ui.delivery_rate') }}</small><strong>{{ number_format($account['history']['delivery_rate'], 2) }}%</strong></div>
+                            </div>
+                            <div class="paypal-risk-rate-block refund">
+                                <div><span>{{ __('logistics.paypal_risk.ui.history_refund_rate') }}</span><strong>{{ number_format($account['history']['refund_rate'], 2) }}%</strong></div>
+                                <div class="paypal-risk-progress"><i style="width: {{ min(100, $account['history']['refund_rate'] * 5) }}%"></i></div>
+                                <div class="paypal-risk-rate-note"><span>{{ __('logistics.paypal_risk.ui.refund_order_summary', ['count' => $account['history']['refund_order_count'], 'amount' => number_format($account['history']['refund_amount'], 2)]) }}</span></div>
+                            </div>
+                            <div class="paypal-risk-rate-block dispute">
+                                <div><span>{{ __('logistics.paypal_risk.ui.history_dispute_rate') }}</span><strong>{{ number_format($account['history']['dispute_rate'], 2) }}%</strong></div>
+                                <div class="paypal-risk-progress"><i style="width: {{ min(100, $account['history']['dispute_rate'] * 10) }}%"></i></div>
+                                <div class="paypal-risk-rate-note"><span>{{ __('logistics.paypal_risk.ui.dispute_order_summary', ['count' => $account['history']['dispute_order_count'], 'amount' => number_format($account['history']['dispute_amount'], 2)]) }}</span></div>
+                            </div>
+                            <p class="paypal-risk-matched-only-note"><i class="fa fa-info-circle"></i> {{ __('logistics.paypal_risk.ui.matched_only_note') }}</p>
                         </div>
 
                         <footer class="paypal-risk-card-footer">
@@ -317,6 +370,6 @@
     <script>
         window.ErpPayPalRisk = @json($riskClientConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/paypal-risk.js?v=20261015-5"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/paypal-risk.js?v=20261015-9"></script>
     <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261014-1"></script>
 @endpush

@@ -21,6 +21,7 @@ class ShopifyOrderSyncService
         private readonly LogisticsOrderItemService $items,
         private readonly LogisticsTongtuAutomationService $automation,
         private readonly LogisticsTrackingService $tracking,
+        private readonly PayPalOrderAssociationService $paypalAssociations,
     )
     {
     }
@@ -463,6 +464,7 @@ GRAPHQL, [
         $trackingNumberChanged = $current->isDirty('tracking_number');
         $this->profitCalculator->recalculate($current);
         $current->save();
+        $this->paypalAssociations->reconcileOrder($current);
         $this->items->syncFromShopifyPayload($current, $payload);
         $this->automation->scheduleForOrder($current);
         if ($isNew || $trackingNumberChanged) {
