@@ -70,6 +70,14 @@
 .logistics-order-detail-timeline-head { padding: 9px 14px 9px 38px; color: #56738d; background: #f1f6fa; border-bottom: 1px solid #dce7ef; font-size: 11px; font-weight: 700; }
 .logistics-order-detail-timeline-row { position: relative; min-height: 48px; padding: 10px 14px 10px 38px; border-bottom: 1px solid #e8eff4; }
 .logistics-order-detail-timeline-row:last-child { border-bottom: 0; }
+.logistics-order-detail-timeline-more { border: 0; }
+.logistics-order-detail-timeline-more summary { display: flex; align-items: center; justify-content: center; min-height: 39px; color: #3377a8; background: #f8fbfd; border-top: 1px dashed #dbe7ef; font-size: 12px; font-weight: 600; cursor: pointer; list-style: none; }
+.logistics-order-detail-timeline-more summary::-webkit-details-marker { display: none; }
+.logistics-order-detail-timeline-more summary::before { margin-right: 6px; color: #5b9ccc; content: '\f107'; font: normal normal normal 14px/1 FontAwesome; transition: transform .15s ease; }
+.logistics-order-detail-timeline-more[open] summary::before { transform: rotate(180deg); }
+.logistics-order-detail-timeline-more .is-expanded { display: none; }
+.logistics-order-detail-timeline-more[open] .is-collapsed { display: none; }
+.logistics-order-detail-timeline-more[open] .is-expanded { display: inline; }
 .logistics-order-detail-timeline-row::before { content: ''; position: absolute; left: 19px; top: 0; bottom: 0; width: 1px; background: #d8e7ef; }
 .logistics-order-detail-timeline-row:last-child::before { bottom: 50%; }
 .logistics-order-detail-timeline-row > i { position: absolute; left: 15px; top: 19px; z-index: 1; width: 9px; height: 9px; border-radius: 50%; background: #36a478; box-shadow: 0 0 0 3px #e5f6ef; }

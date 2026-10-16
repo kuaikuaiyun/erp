@@ -9,7 +9,8 @@
         tab: 'overview',
         page: 1,
         lastPayload: null,
-        sorts: { orders: {}, products: {}, refunds: {}, disputes: {} }
+        sorts: { orders: {}, products: {}, refunds: {}, disputes: {} },
+        tabFilters: { orders: {}, products: {}, refunds: {}, disputes: {} }
     };
 
     function one(selector, root) { return (root || document).querySelector(selector); }
@@ -65,13 +66,19 @@
 
     function detailUrl(tab, page) {
         var sorting = state.sorts[tab] || {};
+        var tabFilters = detailTabFilters(tab);
         var params = new URLSearchParams({
             tab: tab,
             page: String(page || 1),
+            date_mode: (config.filters || {}).date_mode || 'order',
             date_from: (config.filters || {}).date_from || '',
             date_to: (config.filters || {}).date_to || '',
             event_date_from: (config.filters || {}).event_date_from || '',
             event_date_to: (config.filters || {}).event_date_to || '',
+            tab_keyword: tabFilters.keyword || '',
+            tab_status: tabFilters.status || '',
+            tab_type: tabFilters.type || '',
+            tab_outcome: tabFilters.outcome || '',
             sort: sorting.key || '',
             direction: sorting.direction || ''
         });
@@ -79,13 +86,61 @@
     }
 
     function exportUrl() {
+        var tabFilters = detailTabFilters(state.tab);
         var params = new URLSearchParams({
+            date_mode: (config.filters || {}).date_mode || 'order',
             date_from: (config.filters || {}).date_from || '',
             date_to: (config.filters || {}).date_to || '',
             event_date_from: (config.filters || {}).event_date_from || '',
-            event_date_to: (config.filters || {}).event_date_to || ''
+            event_date_to: (config.filters || {}).event_date_to || '',
+            tab_keyword: tabFilters.keyword || '',
+            tab_status: tabFilters.status || '',
+            tab_type: tabFilters.type || '',
+            tab_outcome: tabFilters.outcome || ''
         });
         return route(routes.export, state.accountId, state.tab) + '?' + params.toString();
+    }
+
+    function detailTabFilters(tab) {
+        if (!state.tabFilters[tab]) state.tabFilters[tab] = {};
+        return state.tabFilters[tab];
+    }
+
+    function optionHtml(values, selected) {
+        var options = values || [];
+        return options.map(function (value) {
+            var isSelected = String(value) === String(selected || '');
+            return '<option value="' + escapeHtml(value) + '"' + (isSelected ? ' selected' : '') + '>' + escapeHtml(value) + '</option>';
+        }).join('');
+    }
+
+    function renderDetailFilters(tab) {
+        var container = one('#paypal-detail-filters');
+        if (!container) return;
+        if (tab === 'overview') {
+            container.hidden = true;
+            container.innerHTML = '';
+            return;
+        }
+
+        var filters = detailTabFilters(tab);
+        var options = labels.detailFilterOptions || {};
+        var placeholder = (labels.detailFilterPlaceholders || {})[tab] || '';
+        var selects = '';
+        if (tab === 'refunds') {
+            selects = '<label><span>' + escapeHtml(labels.detailFilterStatus || '') + '</span><select class="form-control" name="status"><option value="">' + escapeHtml(labels.detailFilterAll || '') + '</option>' + optionHtml(options.refund_status, filters.status) + '</select></label>';
+        }
+        if (tab === 'disputes') {
+            selects = '<label><span>' + escapeHtml(labels.detailFilterType || '') + '</span><select class="form-control" name="type"><option value="">' + escapeHtml(labels.detailFilterAll || '') + '</option>' + optionHtml(options.dispute_type, filters.type) + '</select></label>' +
+                '<label><span>' + escapeHtml(labels.detailFilterStatus || '') + '</span><select class="form-control" name="status"><option value="">' + escapeHtml(labels.detailFilterAll || '') + '</option>' + optionHtml(options.dispute_status, filters.status) + '</select></label>' +
+                '<label><span>' + escapeHtml(labels.detailFilterOutcome || '') + '</span><select class="form-control" name="outcome"><option value="">' + escapeHtml(labels.detailFilterAll || '') + '</option>' + optionHtml(options.dispute_outcome, filters.outcome) + '</select></label>';
+        }
+        container.hidden = false;
+        container.innerHTML = '<form class="paypal-risk-detail-filter-form" data-paypal-detail-filter-form data-paypal-tab="' + escapeHtml(tab) + '">' +
+            '<label class="paypal-risk-detail-filter-keyword"><span>' + escapeHtml(labels.detailFilterKeyword || '') + '</span><input class="form-control" name="keyword" value="' + escapeHtml(filters.keyword || '') + '" placeholder="' + escapeHtml(placeholder) + '"></label>' +
+            selects +
+            '<div class="paypal-risk-detail-filter-actions"><button class="btn btn-primary btn-sm" type="submit"><i class="fa fa-search"></i> ' + escapeHtml(labels.detailFilterSearch || '') + '</button><button class="btn btn-default btn-sm" type="button" data-paypal-detail-filter-reset>' + escapeHtml(labels.detailFilterReset || '') + '</button></div>' +
+            '</form>';
     }
 
     function updateExportButton() {
@@ -214,7 +269,7 @@
                 ['refund_id', '退款交易号'], ['order_number', '订单号'], ['store_name', '店铺'], ['source', '来源'], ['amount', '金额'], ['source_reason', labels.sourceReason || ''], ['manual_reason', labels.manualReason || ''], ['linked_disputes', labels.linkedDisputes || ''], ['status', '状态'], ['happened_at', '退款时间']
             ],
             disputes: [
-                ['dispute_id', '纠纷编号'], ['order_number', '订单号'], ['store_name', '店铺'], ['amount', '金额'], ['reason', '原因'], ['stage', '阶段'], ['status', '状态'], ['outcome', labels.outcome || ''], ['seller_response_due_at', labels.sellerResponseDueAt || ''], ['linked_refunds', labels.linkedRefunds || ''], ['updated_at', labels.updatedAt || ''], ['happened_at', '发生时间']
+                ['dispute_id', '纠纷编号'], ['order_number', '订单号'], ['store_name', '店铺'], ['amount', '金额'], ['reason', '原因'], ['stage', labels.disputeType || ''], ['status', '状态'], ['outcome', labels.outcome || ''], ['seller_response_due_at', labels.sellerResponseDueAt || ''], ['linked_refunds', labels.linkedRefunds || ''], ['updated_at', labels.updatedAt || ''], ['happened_at', '发生时间']
             ]
         }[tab] || [];
         var sorting = state.sorts[tab] || {};
@@ -272,6 +327,7 @@
             .then(function (payload) {
                 state.lastPayload = payload;
                 renderDetailSummary(payload.summary || {});
+                renderDetailFilters(state.tab);
                 if (state.tab === 'overview') renderOverview(payload); else renderTable(payload, state.tab);
                 updateExportButton();
                 setDetailLoading(false, '');
@@ -286,6 +342,7 @@
                 state.tab = 'overview';
                 state.page = 1;
                 state.sorts = { orders: {}, products: {}, refunds: {}, disputes: {} };
+                state.tabFilters = { orders: {}, products: {}, refunds: {}, disputes: {} };
                 all('[data-paypal-tab]').forEach(function (link) { link.parentElement.classList.toggle('active', link.dataset.paypalTab === 'overview'); });
                 updateExportButton();
                 showModal('#paypal-detail-modal');
@@ -316,6 +373,28 @@
             else state.sorts[state.tab] = {};
             loadDetail(state.tab, 1);
         });
+        var detailFilters = one('#paypal-detail-filters');
+        if (detailFilters) {
+            detailFilters.addEventListener('submit', function (event) {
+                var form = event.target.closest('[data-paypal-detail-filter-form]');
+                if (!form) return;
+                event.preventDefault();
+                var formData = new FormData(form);
+                state.tabFilters[state.tab] = {
+                    keyword: String(formData.get('keyword') || '').trim(),
+                    status: String(formData.get('status') || '').trim(),
+                    type: String(formData.get('type') || '').trim(),
+                    outcome: String(formData.get('outcome') || '').trim()
+                };
+                loadDetail(state.tab, 1);
+            });
+            detailFilters.addEventListener('click', function (event) {
+                var reset = event.target.closest('[data-paypal-detail-filter-reset]');
+                if (!reset) return;
+                state.tabFilters[state.tab] = {};
+                loadDetail(state.tab, 1);
+            });
+        }
         var exportButton = one('#paypal-detail-export');
         if (exportButton) exportButton.addEventListener('click', function () {
             if (state.accountId && state.tab !== 'overview') window.location.assign(exportUrl());
@@ -323,18 +402,26 @@
     }
 
     function initDateModeControls() {
-        var orderInputs = all('input[name="date_from"], input[name="date_to"]');
-        var eventInputs = all('input[name="event_date_from"], input[name="event_date_to"]');
-        if (!orderInputs.length || !eventInputs.length) return;
-        function filled(inputs) { return inputs.some(function (input) { return input.value !== ''; }); }
-        function refresh() {
-            var hasOrder = filled(orderInputs);
-            var hasEvent = filled(eventInputs);
-            orderInputs.forEach(function (input) { input.disabled = hasEvent; });
-            eventInputs.forEach(function (input) { input.disabled = hasOrder; });
+        var input = one('[data-paypal-date-mode-input]');
+        var buttons = all('[data-paypal-date-mode]');
+        var panels = all('[data-paypal-date-panel]');
+        if (!input || !buttons.length || !panels.length) return;
+        function setMode(mode) {
+            mode = mode === 'event' ? 'event' : 'order';
+            input.value = mode;
+            buttons.forEach(function (button) {
+                button.classList.toggle('active', button.dataset.paypalDateMode === mode);
+            });
+            panels.forEach(function (panel) {
+                var active = panel.dataset.paypalDatePanel === mode;
+                panel.hidden = !active;
+                all('input, select, textarea', panel).forEach(function (field) { field.disabled = !active; });
+            });
         }
-        orderInputs.concat(eventInputs).forEach(function (input) { input.addEventListener('change', refresh); });
-        refresh();
+        buttons.forEach(function (button) {
+            button.addEventListener('click', function () { setMode(button.dataset.paypalDateMode); });
+        });
+        setMode(input.value);
     }
 
     initAccountModal();

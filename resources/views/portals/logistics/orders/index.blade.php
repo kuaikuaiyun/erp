@@ -19,7 +19,7 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics.css?v=20261009-10">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261014-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261015-2">
 @endpush
 
 @section('content')

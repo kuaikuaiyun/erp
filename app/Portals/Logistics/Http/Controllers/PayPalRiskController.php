@@ -12,7 +12,6 @@ use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -41,20 +40,9 @@ class PayPalRiskController extends Controller
                     ->orWhere('merchant_id', 'like', $keyword);
             });
         }
-        if ($filters['import_status'] !== '') {
-            if ($filters['import_status'] === 'never') {
-                $query->whereNull('last_import_status');
-            } else {
-                $query->where('last_import_status', $filters['import_status']);
-            }
-        }
-
         $accounts = $query->get();
         $summaries = $accounts
-            ->map(fn (LogisticsPayPalAccount $account): array => $this->analytics->summary($account, $filters))
-            ->when($filters['risk'] !== '', fn (Collection $items): Collection => $items
-                ->where('risk', $filters['risk'])
-                ->values());
+            ->map(fn (LogisticsPayPalAccount $account): array => $this->analytics->summary($account, $filters));
         $page = max(1, (int) $request->input('page', 1));
         $perPage = (int) $filters['per_page'];
         $page = min($page, max(1, (int) ceil($summaries->count() / $perPage)));
@@ -115,13 +103,19 @@ class PayPalRiskController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
+        $this->normalizeDateModeInput($request);
         $validated = $request->validate([
+            'date_mode' => ['nullable', Rule::in(['order', 'event'])],
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
             'event_date_from' => ['nullable', 'date'],
             'event_date_to' => ['nullable', 'date', 'after_or_equal:event_date_from'],
             'tab' => ['nullable', Rule::in(['overview', 'orders', 'products', 'refunds', 'disputes'])],
             'page' => ['nullable', 'integer', 'min:1'],
+            'tab_keyword' => ['nullable', 'string', 'max:191'],
+            'tab_status' => ['nullable', 'string', 'max:100'],
+            'tab_type' => ['nullable', 'string', 'max:100'],
+            'tab_outcome' => ['nullable', 'string', 'max:100'],
             'sort' => ['nullable', Rule::in([
                 '', 'order_number', 'tongtu_order_number', 'store_name', 'products', 'paid_amount',
                 'refund_status', 'dispute_status', 'tracking_number', 'logistics_status', 'order_created_at', 'product_name', 'sku', 'quantity',
@@ -131,7 +125,7 @@ class PayPalRiskController extends Controller
                 'updated_at',
             ])],
             'direction' => ['nullable', Rule::in(['', 'asc', 'desc'])],
-        ]);
+        ], $this->dateValidationMessages());
         $filters = $this->detailDateFilters($validated);
 
         return response()->json($this->analytics->detail(
@@ -141,6 +135,7 @@ class PayPalRiskController extends Controller
             max(1, (int) ($validated['page'] ?? 1)),
             (string) ($validated['sort'] ?? ''),
             (string) ($validated['direction'] ?? ''),
+            $this->detailTabFilters($validated),
         ));
     }
 
@@ -152,15 +147,21 @@ class PayPalRiskController extends Controller
         }
         abort_unless(in_array($tab, ['orders', 'products', 'refunds', 'disputes'], true), 404);
 
+        $this->normalizeDateModeInput($request);
         $validated = $request->validate([
+            'date_mode' => ['nullable', Rule::in(['order', 'event'])],
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
             'event_date_from' => ['nullable', 'date'],
             'event_date_to' => ['nullable', 'date', 'after_or_equal:event_date_from'],
-        ]);
+            'tab_keyword' => ['nullable', 'string', 'max:191'],
+            'tab_status' => ['nullable', 'string', 'max:100'],
+            'tab_type' => ['nullable', 'string', 'max:100'],
+            'tab_outcome' => ['nullable', 'string', 'max:100'],
+        ], $this->dateValidationMessages());
         $filters = $this->detailDateFilters($validated);
         $fields = $this->exportFields($tab);
-        $rows = $this->analytics->exportRows($account, $filters, $tab);
+        $rows = $this->analytics->exportRows($account, $filters, $tab, $this->detailTabFilters($validated));
         $filename = 'paypal-'.$tab.'-'.now('Asia/Shanghai')->format('Ymd-His').'.csv';
 
         return response()->streamDownload(function () use ($fields, $rows): void {
@@ -212,41 +213,33 @@ class PayPalRiskController extends Controller
         return $data;
     }
 
-    /** @return array{keyword:string,risk:string,import_status:string,date_from:string,date_to:string,event_date_from:string,event_date_to:string,date_mode:string,per_page:int} */
+    /** @return array{keyword:string,date_from:string,date_to:string,event_date_from:string,event_date_to:string,date_mode:string,per_page:int} */
     private function filters(Request $request): array
     {
+        $this->normalizeDateModeInput($request);
         $validated = $request->validate([
             'keyword' => ['nullable', 'string', 'max:191'],
-            'risk' => ['nullable', Rule::in(['', 'low', 'medium', 'high'])],
-            'import_status' => ['nullable', Rule::in(['', 'never', 'success', 'partial', 'failed'])],
+            'date_mode' => ['nullable', Rule::in(['order', 'event'])],
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
             'event_date_from' => ['nullable', 'date'],
             'event_date_to' => ['nullable', 'date', 'after_or_equal:event_date_from'],
             'per_page' => ['nullable', Rule::in([6, 12, 24])],
-        ]);
-        // HTML date inputs are always submitted by the browser, including
-        // when empty.  Check the validated values so an empty event range is
-        // not mistaken for an active filter.
-        $hasOrderDateFilter = filled($validated['date_from'] ?? null)
-            || filled($validated['date_to'] ?? null);
-        $hasEventDateFilter = filled($validated['event_date_from'] ?? null)
-            || filled($validated['event_date_to'] ?? null);
-        if ($hasOrderDateFilter && $hasEventDateFilter) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
-                'event_date_from' => __('logistics.paypal_risk.filters.date_ranges_exclusive'),
-            ]);
-        }
+        ], $this->dateValidationMessages());
+        $dateMode = (string) ($validated['date_mode'] ?? 'order');
+        $dateMode = $dateMode === 'event' ? 'event' : 'order';
+        $defaultFrom = now('Asia/Shanghai')->subDays(29)->format('Y-m-d');
+        $defaultTo = now('Asia/Shanghai')->format('Y-m-d');
 
         return [
             'keyword' => trim((string) ($validated['keyword'] ?? '')),
-            'risk' => trim((string) ($validated['risk'] ?? '')),
-            'import_status' => trim((string) ($validated['import_status'] ?? '')),
-            'date_from' => $hasOrderDateFilter ? trim((string) ($validated['date_from'] ?? '')) : ($hasEventDateFilter ? '' : now('Asia/Shanghai')->subDays(29)->format('Y-m-d')),
-            'date_to' => $hasOrderDateFilter ? trim((string) ($validated['date_to'] ?? '')) : ($hasEventDateFilter ? '' : now('Asia/Shanghai')->format('Y-m-d')),
-            'event_date_from' => $hasEventDateFilter ? trim((string) ($validated['event_date_from'] ?? '')) : '',
-            'event_date_to' => $hasEventDateFilter ? trim((string) ($validated['event_date_to'] ?? '')) : '',
-            'date_mode' => $hasEventDateFilter ? 'event' : 'order',
+            // 时间口径以 date_mode 为唯一依据。即使有人手工同时传两组日期，也只读取
+            // 当前口径的一组，避免订单时间和风险发生时间被意外叠加筛选。
+            'date_from' => $dateMode === 'order' ? trim((string) ($validated['date_from'] ?? $defaultFrom)) : '',
+            'date_to' => $dateMode === 'order' ? trim((string) ($validated['date_to'] ?? $defaultTo)) : '',
+            'event_date_from' => $dateMode === 'event' ? trim((string) ($validated['event_date_from'] ?? $defaultFrom)) : '',
+            'event_date_to' => $dateMode === 'event' ? trim((string) ($validated['event_date_to'] ?? $defaultTo)) : '',
+            'date_mode' => $dateMode,
             'per_page' => (int) ($validated['per_page'] ?? 6),
         ];
     }
@@ -256,20 +249,59 @@ class PayPalRiskController extends Controller
      */
     private function detailDateFilters(array $validated): array
     {
-        $hasOrderRange = filled($validated['date_from'] ?? null) || filled($validated['date_to'] ?? null);
-        $hasEventRange = filled($validated['event_date_from'] ?? null) || filled($validated['event_date_to'] ?? null);
-        if ($hasOrderRange && $hasEventRange) {
-            throw ValidationException::withMessages([
-                'event_date_from' => __('logistics.paypal_risk.filters.date_ranges_exclusive'),
-            ]);
-        }
+        $dateMode = (string) ($validated['date_mode'] ?? 'order');
+        $dateMode = $dateMode === 'event' ? 'event' : 'order';
 
         return [
-            'date_from' => $hasOrderRange ? trim((string) ($validated['date_from'] ?? '')) : '',
-            'date_to' => $hasOrderRange ? trim((string) ($validated['date_to'] ?? '')) : '',
-            'event_date_from' => $hasEventRange ? trim((string) ($validated['event_date_from'] ?? '')) : '',
-            'event_date_to' => $hasEventRange ? trim((string) ($validated['event_date_to'] ?? '')) : '',
-            'date_mode' => $hasEventRange ? 'event' : 'order',
+            'date_from' => $dateMode === 'order' ? trim((string) ($validated['date_from'] ?? '')) : '',
+            'date_to' => $dateMode === 'order' ? trim((string) ($validated['date_to'] ?? '')) : '',
+            'event_date_from' => $dateMode === 'event' ? trim((string) ($validated['event_date_from'] ?? '')) : '',
+            'event_date_to' => $dateMode === 'event' ? trim((string) ($validated['event_date_to'] ?? '')) : '',
+            'date_mode' => $dateMode,
+        ];
+    }
+
+    /**
+     * 两套日期控件只允许当前时间口径的一套参与校验与查询。
+     * 前端禁用隐藏字段只是体验层保障；这里再次归一化，避免旧页面、
+     * 浏览器缓存或手工请求同时带入两套日期后发生交叉校验。
+     */
+    private function normalizeDateModeInput(Request $request): void
+    {
+        $submittedMode = (string) $request->input('date_mode', 'order');
+        $activeMode = $submittedMode === 'event' ? 'event' : 'order';
+
+        $request->merge([
+            'date_from' => $activeMode === 'order' ? $request->input('date_from') : null,
+            'date_to' => $activeMode === 'order' ? $request->input('date_to') : null,
+            'event_date_from' => $activeMode === 'event' ? $request->input('event_date_from') : null,
+            'event_date_to' => $activeMode === 'event' ? $request->input('event_date_to') : null,
+        ]);
+    }
+
+    /** @return array<string,string> */
+    private function dateValidationMessages(): array
+    {
+        return [
+            'date_from.date' => __('logistics.paypal_risk.validation.order_date_invalid'),
+            'date_to.date' => __('logistics.paypal_risk.validation.order_date_invalid'),
+            'date_to.after_or_equal' => __('logistics.paypal_risk.validation.order_date_range'),
+            'event_date_from.date' => __('logistics.paypal_risk.validation.event_date_invalid'),
+            'event_date_to.date' => __('logistics.paypal_risk.validation.event_date_invalid'),
+            'event_date_to.after_or_equal' => __('logistics.paypal_risk.validation.event_date_range'),
+        ];
+    }
+
+    /** @param array<string,mixed> $validated
+     *  @return array{keyword:string,status:string,type:string,outcome:string}
+     */
+    private function detailTabFilters(array $validated): array
+    {
+        return [
+            'keyword' => trim((string) ($validated['tab_keyword'] ?? '')),
+            'status' => trim((string) ($validated['tab_status'] ?? '')),
+            'type' => trim((string) ($validated['tab_type'] ?? '')),
+            'outcome' => trim((string) ($validated['tab_outcome'] ?? '')),
         ];
     }
 

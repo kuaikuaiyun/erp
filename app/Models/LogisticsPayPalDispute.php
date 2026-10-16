@@ -52,4 +52,59 @@ class LogisticsPayPalDispute extends Model
     {
         return $this->hasMany(LogisticsPayPalDisputeRefund::class, 'logistics_paypal_dispute_id');
     }
+
+    public static function typeLabelFor(mixed $type): string
+    {
+        return self::enumLabel('types', $type, 'unknown_type');
+    }
+
+    public static function reasonLabelFor(mixed $reason): string
+    {
+        return self::enumLabel('reasons', $reason, 'unknown_reason');
+    }
+
+    public static function statusLabelFor(mixed $status): string
+    {
+        return self::enumLabel('statuses', $status, 'unknown_status');
+    }
+
+    public static function outcomeLabelFor(mixed $outcome): string
+    {
+        return self::enumLabel('outcomes', $outcome, 'unknown_outcome');
+    }
+
+    public function typeLabel(): string
+    {
+        return self::typeLabelFor($this->life_cycle_stage);
+    }
+
+    public function reasonLabel(): string
+    {
+        return self::reasonLabelFor($this->reason);
+    }
+
+    public function statusLabel(): string
+    {
+        return self::statusLabelFor($this->status);
+    }
+
+    public function outcomeLabel(): string
+    {
+        return self::outcomeLabelFor($this->outcome_code);
+    }
+
+    private static function enumLabel(string $group, mixed $value, string $unknownKey): string
+    {
+        $value = strtoupper(trim((string) ($value ?? '')));
+        if ($value === '') {
+            return __('logistics.common.not_available');
+        }
+
+        $translationKey = 'logistics.paypal_dispute.'.$group.'.'.$value;
+        $label = __($translationKey);
+
+        return $label === $translationKey
+            ? __('logistics.paypal_dispute.'.$unknownKey)
+            : $label;
+    }
 }

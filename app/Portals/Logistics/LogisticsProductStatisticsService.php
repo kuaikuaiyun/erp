@@ -443,6 +443,10 @@ class LogisticsProductStatisticsService
         return [
             'id' => $this->productId((string) $row->product_key),
             'name' => trim((string) ($row->product_title ?: $row->tongtu_product_name)) ?: __('logistics.product_statistics.unnamed_product'),
+            'matched_name' => $this->matchedChineseProductName(
+                (string) $row->product_title,
+                (string) $row->tongtu_product_name,
+            ),
             'sku' => trim((string) ($row->tongtu_sku ?: $row->shopify_sku)) ?: __('logistics.common.not_available'),
             'category' => __('logistics.product_statistics.sold_product'),
             'image_url' => filled($row->product_image_url) ? (string) $row->product_image_url : null,
@@ -554,6 +558,10 @@ class LogisticsProductStatisticsService
             '_first_item_id' => (int) $first->getKey(),
             '_search' => $this->searchText($items),
             'name' => $this->productTitle($first),
+            'matched_name' => $this->matchedChineseProductName(
+                (string) $first->product_title,
+                (string) $first->tongtu_product_name,
+            ),
             'sku' => $this->sku($first),
             'category' => __('logistics.product_statistics.sold_product'),
             'image_url' => $this->firstImage($items),
@@ -770,10 +778,10 @@ class LogisticsProductStatisticsService
             'disputed_transaction_id' => (string) ($dispute->disputed_transaction_id ?: __('logistics.common.not_available')),
             'amount' => round((float) ($dispute->dispute_amount_usd ?? $dispute->original_amount ?? 0), 4),
             'currency' => (string) ($dispute->currency_code ?: 'USD'),
-            'reason' => (string) ($dispute->reason ?: __('logistics.common.not_available')),
-            'stage' => (string) ($dispute->life_cycle_stage ?: __('logistics.common.not_available')),
-            'status' => (string) ($dispute->status ?: __('logistics.common.not_available')),
-            'outcome' => (string) ($dispute->outcome_code ?: __('logistics.common.not_available')),
+            'reason' => $dispute->reasonLabel(),
+            'stage' => $dispute->typeLabel(),
+            'status' => $dispute->statusLabel(),
+            'outcome' => $dispute->outcomeLabel(),
             'seller_response_due_at' => $this->dateTime($dispute->seller_response_due_at),
             'updated_at' => $this->dateTime($dispute->dispute_updated_at),
             'happened_at' => $this->dateTime($dispute->dispute_created_at),
@@ -1092,6 +1100,18 @@ class LogisticsProductStatisticsService
     private function productTitle(LogisticsOrderItem $item): string
     {
         return trim((string) $item->product_title) ?: trim((string) $item->tongtu_product_name) ?: __('logistics.product_statistics.unnamed_product');
+    }
+
+    private function matchedChineseProductName(string $productTitle, string $matchedName): ?string
+    {
+        $productTitle = trim($productTitle);
+        $matchedName = trim($matchedName);
+
+        if ($matchedName === '' || $matchedName === $productTitle || !preg_match('/\\p{Han}/u', $matchedName)) {
+            return null;
+        }
+
+        return $matchedName;
     }
 
     private function sku(LogisticsOrderItem $item): string

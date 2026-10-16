@@ -8,26 +8,6 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class LogisticsPayPalRefund extends Model
 {
-    private const EVENT_LABELS = [
-        'T1106' => '付款撤销',
-        'T1107' => '付款退款',
-        'T1108' => '费用撤销',
-        'T1109' => '手续费退款',
-        'T1110' => '纠纷调查余额冻结',
-        'T1111' => '纠纷解决余额冻结取消',
-        'T1115' => '批量付款退款',
-        'T1120' => '关联授权交易退款',
-        'T1201' => '拒付',
-        'T1202' => '拒付撤销',
-        'T1205' => '拒付补偿',
-    ];
-
-    private const STATUS_LABELS = [
-        'D' => '已拒绝',
-        'P' => '待处理',
-        'S' => '成功完成',
-        'V' => '完全撤销/退款',
-    ];
 
     protected $table = 'logistics_paypal_refunds';
 
@@ -77,24 +57,30 @@ class LogisticsPayPalRefund extends Model
     {
         $eventCode = strtoupper(trim((string) ($eventCode ?? '')));
         if ($eventCode === '') {
-            return '—';
+            return __('logistics.common.not_available');
         }
 
-        $label = self::EVENT_LABELS[$eventCode] ?? '其他 PayPal 事件';
+        $translationKey = 'logistics.paypal_refund.events.'.$eventCode;
+        $label = __($translationKey);
 
-        return $label.'（'.$eventCode.'）';
+        return $label === $translationKey
+            ? __('logistics.paypal_refund.unknown_event')
+            : $label;
     }
 
     public static function statusLabelFor(mixed $status): string
     {
         $status = strtoupper(trim((string) ($status ?? '')));
         if ($status === '') {
-            return '—';
+            return __('logistics.common.not_available');
         }
 
-        $label = self::STATUS_LABELS[$status] ?? '未知状态';
+        $translationKey = 'logistics.paypal_refund.statuses.'.$status;
+        $label = __($translationKey);
 
-        return $label.'（'.$status.'）';
+        return $label === $translationKey
+            ? __('logistics.paypal_refund.unknown_status')
+            : $label;
     }
 
     public function eventLabel(): string

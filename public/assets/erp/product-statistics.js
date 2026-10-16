@@ -8,7 +8,7 @@
     var decisions = config.decisions || {};
     var labels = config.labels || {};
     var state = { page: Number(pagination.current_page) || 1, sort: config.sort || '', direction: config.direction || '', selected: {} };
-    var detailState = { product: null, sorts: {} };
+    var detailState = { product: null, sorts: {}, filters: {}, pages: {}, activeTab: 'overview' };
     var body = document.getElementById('product-statistics-body');
     var empty = document.getElementById('product-statistics-empty');
     var filterForm = document.getElementById('product-statistics-filter-form');
@@ -57,10 +57,11 @@
         return '<span class="product-statistics-thumb ' + (image ? 'has-image is-previewable' : '') + '"' + attributes + '>' + image + '<i class="fa fa-cube" aria-hidden="true"></i></span>';
     }
     function parentRow(product) {
+        var subtitle = product.matched_name || product.category || '';
         return '<tr class="product-statistics-product-row" data-product-id="' + escapeHtml(product.id) + '">'
             + '<td class="product-statistics-check-column"><input class="product-statistics-check" type="checkbox" value="' + escapeHtml(product.id) + '"' + (state.selected[product.id] ? ' checked' : '') + '></td>'
-            + '<td><div class="product-statistics-product-cell">' + productThumb(product) + '<span><strong>' + escapeHtml(product.name) + '</strong><small>' + escapeHtml(product.category || '') + '</small></span></div></td>'
-            + '<td><code>' + escapeHtml(product.sku || blank()) + '</code></td>'
+            + '<td><div class="product-statistics-product-cell">' + productThumb(product) + '<span><strong title="' + escapeHtml(product.name || '') + '">' + escapeHtml(product.name) + '</strong><small class="' + (product.matched_name ? 'product-statistics-matched-name' : '') + '" title="' + escapeHtml(subtitle) + '">' + escapeHtml(subtitle) + '</small></span></div></td>'
+            + '<td><code title="' + escapeHtml(product.sku || '') + '">' + escapeHtml(product.sku || blank()) + '</code></td>'
             + '<td><span class="product-statistics-store-count">' + formatNumber(product.shop_count) + '</span><small class="product-statistics-store-names">' + escapeHtml((product.stores || []).join('、')) + '</small></td>'
             + '<td>' + formatNumber(product.sales) + '</td><td>' + formatMoney(product.revenue) + '</td><td>' + formatMoney(product.cost) + '</td><td>' + formatMoney(productFees(product)) + '</td>'
             + '<td>' + formatMoney(product.paypal_refund_amount) + '</td><td>' + formatRate(product.paypal_refund_rate) + '</td><td>' + formatNumber(product.paypal_dispute_count) + '</td><td>' + formatRate(product.paypal_dispute_rate) + '</td>'
@@ -139,13 +140,14 @@
         return url.toString();
     }
     function showDetailLoading(product) {
-        detailState = { product: null, sorts: {} };
+        detailState = { product: null, sorts: {}, filters: {}, pages: {}, activeTab: 'overview' };
         document.getElementById('product-statistics-detail-title').textContent = t('detailTitle');
         document.getElementById('product-statistics-detail-identity').innerHTML = productThumb(product) + '<div><strong>' + escapeHtml(product.name) + '</strong><span>' + escapeHtml(product.sku || blank()) + '</span></div>';
         document.getElementById('product-statistics-overview').innerHTML = '<div class="alert alert-info"><i class="fa fa-spinner fa-spin"></i> ' + escapeHtml(t('detailLoading')) + '</div>';
-        ['product-statistics-paypal-orders', 'product-statistics-credit-card-orders', 'product-statistics-refunds', 'product-statistics-orders'].forEach(function (id) {
+        ['product-statistics-paypal-orders', 'product-statistics-credit-card-orders', 'product-statistics-refunds', 'product-statistics-disputes', 'product-statistics-orders'].forEach(function (id) {
             document.getElementById(id).innerHTML = '';
         });
+        document.getElementById('product-statistics-detail-filters').hidden = true;
         if ($) {
             $('#product-statistics-detail-modal .nav-tabs a[href="#product-statistics-overview"]').tab('show');
             $('#product-statistics-detail-modal').modal('show');
@@ -207,15 +209,90 @@
             return sorting.direction === 'asc' ? comparison : -comparison;
         }).map(function (entry) { return entry.row; });
     }
+    function detailFilter(table) {
+        if (!detailState.filters[table]) detailState.filters[table] = {};
+        return detailState.filters[table];
+    }
+    function detailPage(table) { return Number(detailState.pages[table] || 1); }
+    function detailText(row) {
+        return Object.keys(row || {}).map(function (key) {
+            var value = row[key];
+            if (Array.isArray(value)) return value.map(function (item) { return typeof item === 'object' ? JSON.stringify(item) : item; }).join(' ');
+            return typeof value === 'object' && value !== null ? JSON.stringify(value) : value;
+        }).join(' ').toLocaleLowerCase();
+    }
+    function detailFilteredRows(table, rows) {
+        var filters = detailFilter(table);
+        var keyword = String(filters.keyword || '').trim().toLocaleLowerCase();
+        return detailSortedRows(table, rows.filter(function (row) {
+            if (keyword && detailText(row).indexOf(keyword) === -1) return false;
+            return ['payment_method', 'status', 'type', 'outcome', 'logistics_status'].every(function (key) {
+                var value = key === 'type' ? row.stage : (key === 'payment_method' ? row.payment_method_label : row[key]);
+                return !filters[key] || String(value || '') === String(filters[key]);
+            });
+        }));
+    }
+    function detailPaginatedRows(table, rows) {
+        var filtered = detailFilteredRows(table, rows);
+        var perPage = 10;
+        var lastPage = Math.max(1, Math.ceil(filtered.length / perPage));
+        var page = Math.min(detailPage(table), lastPage);
+        detailState.pages[table] = page;
+        return { rows: filtered.slice((page - 1) * perPage, page * perPage), total: filtered.length, page: page, lastPage: lastPage, from: filtered.length ? ((page - 1) * perPage + 1) : 0, to: Math.min(page * perPage, filtered.length) };
+    }
+    function detailOptionValues(rows, key) {
+        var seen = {};
+        return rows.reduce(function (values, row) {
+            var value = String(row[key] || '').trim();
+            if (value && !seen[value]) { seen[value] = true; values.push(value); }
+            return values;
+        }, []);
+    }
+    function detailSelect(name, label, values, selected) {
+        if (!values.length) return '';
+        return '<label><span>' + escapeHtml(label) + '</span><select class="form-control input-sm" name="' + escapeHtml(name) + '"><option value="">' + escapeHtml(t('detailFilterAll')) + '</option>' + values.map(function (value) { return '<option value="' + escapeHtml(value) + '"' + (String(selected || '') === value ? ' selected' : '') + '>' + escapeHtml(value) + '</option>'; }).join('') + '</select></label>';
+    }
+    function detailPagination(table, pageData) {
+        var pages = [];
+        if (pageData.total > 10) {
+            for (var page = Math.max(1, pageData.page - 2); page <= Math.min(pageData.lastPage, pageData.page + 2); page++) {
+                pages.push('<button type="button" class="btn btn-default btn-xs product-statistics-detail-page' + (page === pageData.page ? ' is-active' : '') + '" data-detail-table="' + escapeHtml(table) + '" data-detail-page="' + page + '">' + page + '</button>');
+            }
+        }
+        var summary = pageData.total ? (t('detailPageSummary') || '').replace(':from', pageData.from).replace(':to', pageData.to).replace(':total', pageData.total) : (t('detailPageEmpty') || '');
+        return '<div class="product-statistics-detail-pagination"><span>' + escapeHtml(summary) + '</span><div>' + pages.join('') + '</div></div>';
+    }
+    function renderDetailFilters() {
+        var container = document.getElementById('product-statistics-detail-filters');
+        var product = detailState.product;
+        var table = detailState.activeTab;
+        if (!container || !product || table === 'overview') { if (container) container.hidden = true; return; }
+        var rows = detailRowsFor(table, product);
+        var filters = detailFilter(table);
+        var placeholder = table === 'refunds' ? t('detailFilterRefundsPlaceholder') : (table === 'disputes' ? t('detailFilterDisputesPlaceholder') : t('detailFilterOrdersPlaceholder'));
+        var selects = '';
+        if (table === 'refunds') {
+            selects += detailSelect('payment_method', t('paymentMethod'), detailOptionValues(rows, 'payment_method_label'), filters.payment_method);
+            selects += detailSelect('status', t('detailFilterStatus'), detailOptionValues(rows, 'status'), filters.status);
+        }
+        if (table === 'disputes') {
+            selects += detailSelect('type', t('detailFilterType'), detailOptionValues(rows, 'stage'), filters.type);
+            selects += detailSelect('status', t('detailFilterStatus'), detailOptionValues(rows, 'status'), filters.status);
+            selects += detailSelect('outcome', t('detailFilterOutcome'), detailOptionValues(rows, 'outcome'), filters.outcome);
+        }
+        if (table === 'paypal_orders' || table === 'credit_card_orders' || table === 'orders') selects += detailSelect('logistics_status', t('detailFilterLogisticsStatus'), detailOptionValues(rows, 'logistics_status'), filters.logistics_status);
+        container.hidden = false;
+        container.innerHTML = '<form class="product-statistics-detail-filter-form" data-detail-table="' + escapeHtml(table) + '"><label class="is-keyword"><span>' + escapeHtml(t('detailFilterKeyword')) + '</span><input type="search" class="form-control input-sm" name="keyword" value="' + escapeHtml(filters.keyword || '') + '" placeholder="' + escapeHtml(placeholder) + '"></label>' + selects + '<div class="product-statistics-detail-filter-actions"><button type="submit" class="btn btn-primary btn-sm"><i class="fa fa-filter"></i> ' + escapeHtml(t('detailFilterSearch')) + '</button><button type="button" class="btn btn-default btn-sm product-statistics-detail-filter-reset" data-detail-table="' + escapeHtml(table) + '">' + escapeHtml(t('detailFilterReset')) + '</button></div></form>';
+    }
     function detailEmptyRow(columns) { return '<tr><td colspan="' + columns + '" class="text-center text-muted">' + escapeHtml(t('emptyRows') || blank()) + '</td></tr>'; }
     function orderLink(row) {
         var label = escapeHtml(row.shopify_order_number || blank());
         return row.order_id && row.detail_url ? '<button type="button" class="btn btn-link btn-xs js-logistics-order-detail" data-order-detail-url="' + escapeHtml(row.detail_url) + '">' + label + '</button>' : label;
     }
     function orderRows(table, orders) {
-        var rows = detailSortedRows(table, orders);
-        if (!rows.length) return detailEmptyRow(12);
-        return rows.map(function (order) {
+        var pageData = detailPaginatedRows(table, orders);
+        if (!pageData.rows.length) return detailEmptyRow(12);
+        return pageData.rows.map(function (order) {
             return '<tr><td>' + orderLink(order) + '</td><td>' + escapeHtml(order.store || blank()) + '</td><td>' + escapeHtml(order.bill_number || blank()) + '</td><td>' + escapeHtml(order.payment_method || blank()) + '</td><td>' + formatNumber(order.quantity) + '</td><td>' + formatMoney(order.revenue) + '</td><td>' + formatMoney(order.paypal_refund) + '</td><td>' + formatMoney(order.credit_card_refund) + '</td><td>' + formatNumber(order.paypal_dispute_count) + '</td><td>' + escapeHtml(order.tracking_number || blank()) + '</td><td>' + escapeHtml(order.logistics_status || blank()) + '</td><td>' + escapeHtml(order.order_created_at || blank()) + '</td></tr>';
         }).join('');
     }
@@ -223,21 +300,22 @@
         var headings = [
             ['shopify_order_number', t('orderNumber')], ['store', t('storeName')], ['bill_number', t('billNumber')], ['payment_method', t('paymentMethod')], ['quantity', t('quantity')], ['revenue', t('revenue')], ['paypal_refund', t('paypalRefund')], ['credit_card_refund', t('creditCardRefund')], ['paypal_dispute_count', t('paypalDisputes')], ['tracking_number', t('trackingNumber')], ['logistics_status', t('logisticsStatus')], ['order_created_at', t('orderCreatedAt')]
         ];
-        document.getElementById(id).innerHTML = '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + headings.map(function (heading) { return '<th>' + detailSortButton(table, heading[0], heading[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' + orderRows(table, orders) + '</tbody></table></div>';
+        var pageData = detailPaginatedRows(table, orders);
+        document.getElementById(id).innerHTML = '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + headings.map(function (heading) { return '<th>' + detailSortButton(table, heading[0], heading[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' + orderRows(table, orders) + '</tbody></table></div>' + detailPagination(table, pageData);
     }
     function refundRows(subject) {
-        var details = detailSortedRows('refunds', subject.refund_details || []);
-        if (!details.length) return detailEmptyRow(10);
-        return details.map(function (refund) {
+        var pageData = detailPaginatedRows('refunds', subject.refund_details || []);
+        if (!pageData.rows.length) return detailEmptyRow(10);
+        return pageData.rows.map(function (refund) {
             var disputeText = (refund.linked_disputes || []).join('、') || blank();
             var order = refund.order_id && refund.order_detail_url ? '<button type="button" class="btn btn-link btn-xs js-logistics-order-detail" data-order-detail-url="' + escapeHtml(refund.order_detail_url) + '">' + escapeHtml(refund.shopify_order_number || blank()) + '</button>' : escapeHtml(refund.shopify_order_number || blank());
             return '<tr><td>' + escapeHtml(refund.payment_method_label || blank()) + '</td><td>' + order + '</td><td>' + escapeHtml(refund.bill_number || blank()) + '</td><td>' + escapeHtml(refund.refund_number || blank()) + '</td><td>' + formatMoney(refund.amount) + '</td><td title="' + escapeHtml(refund.source_reason || '') + '">' + escapeHtml(refund.source_reason || blank()) + '</td><td title="' + escapeHtml(refund.manual_reason || '') + '">' + escapeHtml(refund.manual_reason || blank()) + '</td><td>' + escapeHtml(refund.status || blank()) + '</td><td>' + escapeHtml(disputeText) + '</td><td>' + escapeHtml(refund.imported_at || blank()) + '</td></tr>';
         }).join('');
     }
     function disputeRows(subject) {
-        var details = detailSortedRows('disputes', subject.paypal_dispute_details || []);
-        if (!details.length) return detailEmptyRow(11);
-        return details.map(function (dispute) {
+        var pageData = detailPaginatedRows('disputes', subject.paypal_dispute_details || []);
+        if (!pageData.rows.length) return detailEmptyRow(11);
+        return pageData.rows.map(function (dispute) {
             var refunds = (dispute.linked_refunds || []).map(function (refund) { return String(refund.refund_number || '') + ' (' + formatMoney(refund.amount) + ')'; }).join('、') || blank();
             var order = dispute.order_id && dispute.order_detail_url ? '<button type="button" class="btn btn-link btn-xs js-logistics-order-detail" data-order-detail-url="' + escapeHtml(dispute.order_detail_url) + '">' + escapeHtml(dispute.shopify_order_number || blank()) + '</button>' : escapeHtml(dispute.shopify_order_number || blank());
             return '<tr><td>' + escapeHtml(dispute.dispute_id || blank()) + '</td><td>' + order + '</td><td>' + escapeHtml(dispute.bill_number || blank()) + '</td><td>' + formatMoney(dispute.amount) + '</td><td>' + escapeHtml(dispute.reason || blank()) + '</td><td>' + escapeHtml(dispute.stage || blank()) + '</td><td>' + escapeHtml(dispute.status || blank()) + '</td><td>' + escapeHtml(dispute.outcome || blank()) + '</td><td>' + escapeHtml(dispute.seller_response_due_at || blank()) + '</td><td>' + escapeHtml(refunds) + '</td><td>' + escapeHtml(dispute.updated_at || blank()) + '</td></tr>';
@@ -245,10 +323,21 @@
     }
     function renderRefunds(subject) {
         var refundHeadings = [['payment_method_label', t('paymentMethod')], ['shopify_order_number', t('orderNumber')], ['bill_number', t('billNumber')], ['refund_number', t('refundReference')], ['amount', t('amount')], ['source_reason', t('sourceReason')], ['manual_reason', t('manualReason')], ['status', t('status')], ['linked_disputes', t('paypalDisputes')], ['imported_at', t('updatedAt')]];
-        var disputeHeadings = [['dispute_id', t('paypalDisputes')], ['shopify_order_number', t('orderNumber')], ['bill_number', t('billNumber')], ['amount', t('amount')], ['reason', t('reason')], ['stage', t('stage')], ['status', t('status')], ['outcome', t('disputeOutcome')], ['seller_response_due_at', t('responseDueAt')], ['linked_refunds', t('linkedRefunds')], ['updated_at', t('updatedAt')]];
-        document.getElementById('product-statistics-refunds').innerHTML = '<div class="alert alert-info"><i class="fa fa-info-circle"></i> ' + escapeHtml(t('crossProductNote')) + '<br><i class="fa fa-info-circle"></i> ' + escapeHtml(t('creditCardDisputeNote')) + '</div>'
-            + '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + refundHeadings.map(function (heading) { return '<th>' + detailSortButton('refunds', heading[0], heading[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' + refundRows(subject) + '</tbody></table></div>'
-            + '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + disputeHeadings.map(function (heading) { return '<th>' + detailSortButton('disputes', heading[0], heading[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' + disputeRows(subject) + '</tbody></table></div>';
+        var pageData = detailPaginatedRows('refunds', subject.refund_details || []);
+        document.getElementById('product-statistics-refunds').innerHTML = '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + refundHeadings.map(function (heading) { return '<th>' + detailSortButton('refunds', heading[0], heading[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' + refundRows(subject) + '</tbody></table></div>' + detailPagination('refunds', pageData);
+    }
+    function renderDisputes(subject) {
+        var disputeHeadings = [['dispute_id', t('paypalDisputes')], ['shopify_order_number', t('orderNumber')], ['bill_number', t('billNumber')], ['amount', t('amount')], ['reason', t('reason')], ['stage', t('disputeType')], ['status', t('status')], ['outcome', t('disputeOutcome')], ['seller_response_due_at', t('responseDueAt')], ['linked_refunds', t('linkedRefunds')], ['updated_at', t('updatedAt')]];
+        var pageData = detailPaginatedRows('disputes', subject.paypal_dispute_details || []);
+        document.getElementById('product-statistics-disputes').innerHTML = '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + disputeHeadings.map(function (heading) { return '<th>' + detailSortButton('disputes', heading[0], heading[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' + disputeRows(subject) + '</tbody></table></div>' + detailPagination('disputes', pageData);
+    }
+    function detailRowsFor(table, product) {
+        var related = product.related_orders || [];
+        if (table === 'paypal_orders') return related.filter(function (order) { return order.payment_kind === 'paypal'; });
+        if (table === 'credit_card_orders') return related.filter(function (order) { return order.payment_kind === 'credit_card'; });
+        if (table === 'refunds') return product.refund_details || [];
+        if (table === 'disputes') return product.paypal_dispute_details || [];
+        return related;
     }
     function renderDetailTables() {
         var product = detailState.product;
@@ -257,10 +346,11 @@
         renderOrdersTable('product-statistics-paypal-orders', 'paypal_orders', related.filter(function (order) { return order.payment_kind === 'paypal'; }));
         renderOrdersTable('product-statistics-credit-card-orders', 'credit_card_orders', related.filter(function (order) { return order.payment_kind === 'credit_card'; }));
         renderRefunds(product);
+        renderDisputes(product);
         renderOrdersTable('product-statistics-orders', 'orders', related);
     }
     function fillModal(product) {
-        detailState = { product: product, sorts: {} };
+        detailState = { product: product, sorts: {}, filters: {}, pages: {}, activeTab: 'overview' };
         document.getElementById('product-statistics-detail-title').textContent = t('detailTitle');
         document.getElementById('product-statistics-detail-identity').innerHTML = productThumb(product) + '<div><strong>' + escapeHtml(product.name) + '</strong><span>' + escapeHtml(product.sku || blank()) + '</span></div>' + decisionBadge(product.decision);
         document.getElementById('product-statistics-overview').innerHTML = '<div class="product-statistics-detail-grid">'
@@ -272,6 +362,7 @@
             + detailMetric(t('shippingRate'), formatRate(product.shipping_rate)) + detailMetric(t('deliveryRate'), formatRate(product.delivery_rate))
             + '</div>' + detailBreakdown(product) + '<div class="alert alert-info"><i class="fa fa-info-circle"></i> ' + escapeHtml(t('crossProductNote')) + '<br><i class="fa fa-info-circle"></i> ' + escapeHtml(t('creditCardDisputeNote')) + '</div>';
         renderDetailTables();
+        renderDetailFilters();
         if ($) {
             $('#product-statistics-detail-modal .nav-tabs a[href="#product-statistics-overview"]').tab('show');
             $('#product-statistics-detail-modal').modal('show');
@@ -306,9 +397,41 @@
         });
         if ($) $('#product-statistics-export-modal').on('show.bs.modal', function () { refreshSelection(); populateExportPayload(); });
     }
+    document.addEventListener('submit', function (event) {
+        var form = event.target.closest('.product-statistics-detail-filter-form');
+        if (!form) return;
+        event.preventDefault();
+        var table = form.dataset.detailTable;
+        var filters = detailFilter(table);
+        Array.prototype.slice.call(form.querySelectorAll('[name]')).forEach(function (field) { filters[field.name] = field.value || ''; });
+        detailState.pages[table] = 1;
+        renderDetailFilters();
+        renderDetailTables();
+    });
+    if ($) {
+        $('#product-statistics-detail-modal').on('shown.bs.tab', 'a[data-product-detail-tab]', function (event) {
+            detailState.activeTab = event.target.dataset.productDetailTab || 'overview';
+            renderDetailFilters();
+        });
+    }
     document.addEventListener('click', function (event) {
         var imagePreview = event.target.closest('.product-statistics-thumb.is-previewable');
         if (imagePreview) { openImagePreview(imagePreview); return; }
+        var detailFilterReset = event.target.closest('.product-statistics-detail-filter-reset');
+        if (detailFilterReset) {
+            var filterTable = detailFilterReset.dataset.detailTable;
+            detailState.filters[filterTable] = {};
+            detailState.pages[filterTable] = 1;
+            renderDetailFilters();
+            renderDetailTables();
+            return;
+        }
+        var detailPage = event.target.closest('.product-statistics-detail-page');
+        if (detailPage) {
+            detailState.pages[detailPage.dataset.detailTable] = Number(detailPage.dataset.detailPage) || 1;
+            renderDetailTables();
+            return;
+        }
         var detailSort = event.target.closest('.product-statistics-detail-sort');
         if (detailSort) {
             var table = detailSort.dataset.detailTable;

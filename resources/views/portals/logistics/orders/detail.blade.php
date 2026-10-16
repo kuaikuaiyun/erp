@@ -15,6 +15,62 @@
         }
         return json_encode($value, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '暂无原始数据';
     };
+    $trackingPayload = $order->tracking_raw_payload;
+    if (is_string($trackingPayload)) {
+        $decodedTrackingPayload = json_decode($trackingPayload, true);
+        $trackingPayload = json_last_error() === JSON_ERROR_NONE ? $decodedTrackingPayload : null;
+    }
+    $trackingStatusKey = static function ($value): string {
+        return match (strtolower(trim((string) $value))) {
+            'delivered' => 'delivered',
+            'pickup', 'outfordelivery', 'out_for_delivery' => 'pickup',
+            'transit', 'intransit', 'in_transit' => 'transit',
+            'exception', 'failed_attempt' => 'exception',
+            'undelivered', 'not_delivered' => 'undelivered',
+            'inforeceived', 'info_received' => 'inforeceived',
+            'notfound', 'not_found' => 'notfound',
+            'expired' => 'expired',
+            default => 'pending',
+        };
+    };
+    $trackingStatusClass = static fn (string $status): string => match ($status) {
+        'delivered' => 'is-success',
+        'exception', 'undelivered' => 'is-danger',
+        'pickup', 'transit', 'inforeceived', 'pending' => 'is-pending',
+        default => 'is-neutral',
+    };
+    $trackingEvents = collect([
+        data_get($trackingPayload, 'origin_info.trackinfo', []),
+        data_get($trackingPayload, 'destination_info.trackinfo', []),
+        data_get($trackingPayload, 'trackinfo', []),
+    ])->flatten(1)
+        ->filter(static fn ($event): bool => is_array($event))
+        ->map(function (array $event) use ($trackingStatusKey): array {
+            $at = data_get($event, 'checkpoint_date') ?: data_get($event, 'checkpoint_time') ?: data_get($event, 'time');
+            $status = $trackingStatusKey(data_get($event, 'checkpoint_delivery_status') ?: data_get($event, 'status'));
+            $detail = trim((string) (data_get($event, 'tracking_detail') ?: data_get($event, 'description') ?: data_get($event, 'event') ?: '—'));
+            $location = collect([
+                data_get($event, 'location'),
+                data_get($event, 'country_iso2'),
+            ])->filter()->implode(' · ');
+            try {
+                $sortTime = $at ? \Carbon\Carbon::parse($at)->timestamp : 0;
+            } catch (\Throwable) {
+                $sortTime = 0;
+            }
+            return [
+                'at' => $at,
+                'status' => $status,
+                'detail' => $detail,
+                'location' => $location,
+                'sort_time' => $sortTime,
+                'key' => implode('|', [(string) $at, $detail, $location]),
+            ];
+        })
+        ->filter(static fn (array $event): bool => $event['at'] || $event['detail'] !== '—')
+        ->sortByDesc('sort_time')
+        ->unique('key')
+        ->values();
     $shopifyAttributes = collect(is_array($shopifyPayload) ? data_get($shopifyPayload, 'customAttributes', []) : [])
         ->filter(fn ($item) => is_array($item) && filled($item['key'] ?? null))
         ->mapWithKeys(fn ($item) => [(string) $item['key'] => (string) ($item['value'] ?? '')])
@@ -166,12 +222,60 @@
             </div>
 
             <section class="logistics-order-detail-card">
+                <div class="logistics-order-detail-card-title">
+                    <h4><i class="fa fa-map-signs"></i> {{ __('logistics.tracking.detail_title') }}</h4>
+                    <span>{{ $display($order->tracking_courier_name ?: $order->tracking_courier_code) }}</span>
+                </div>
+                @if($trackingEvents->isNotEmpty())
+                    <div class="logistics-order-detail-timeline">
+                        <div class="logistics-order-detail-timeline-head">
+                            <span>{{ __('logistics.tracking.timeline_time') }}</span>
+                            <span>{{ __('logistics.tracking.timeline_event') }}</span>
+                            <span>{{ __('logistics.tracking.timeline_result') }}</span>
+                        </div>
+                        @foreach($trackingEvents->take(3) as $event)
+                            <div class="logistics-order-detail-timeline-row {{ $trackingStatusClass($event['status']) }}">
+                                <i aria-hidden="true"></i>
+                                <time>{{ $date($event['at']) }}</time>
+                                <strong>{{ $event['detail'] }}</strong>
+                                <div class="logistics-order-detail-timeline-result">
+                                    <span>{{ __('logistics.tracking.statuses.'.$event['status']) }}</span>
+                                    <p>{{ $display($event['location']) }}</p>
+                                </div>
+                            </div>
+                        @endforeach
+                        @if($trackingEvents->count() > 3)
+                            <details class="logistics-order-detail-timeline-more">
+                                <summary>
+                                    <span class="is-collapsed">{{ __('logistics.tracking.show_more', ['count' => $trackingEvents->count()]) }}</span>
+                                    <span class="is-expanded">{{ __('logistics.tracking.collapse') }}</span>
+                                </summary>
+                                @foreach($trackingEvents->slice(3) as $event)
+                                    <div class="logistics-order-detail-timeline-row {{ $trackingStatusClass($event['status']) }}">
+                                        <i aria-hidden="true"></i>
+                                        <time>{{ $date($event['at']) }}</time>
+                                        <strong>{{ $event['detail'] }}</strong>
+                                        <div class="logistics-order-detail-timeline-result">
+                                            <span>{{ __('logistics.tracking.statuses.'.$event['status']) }}</span>
+                                            <p>{{ $display($event['location']) }}</p>
+                                        </div>
+                                    </div>
+                                @endforeach
+                            </details>
+                        @endif
+                    </div>
+                @else
+                    <div class="logistics-order-detail-empty">{{ __('logistics.tracking.timeline_empty') }}</div>
+                @endif
+            </section>
+
+            <section class="logistics-order-detail-card">
                 <div class="logistics-order-detail-card-title"><h4><i class="fa fa-reply"></i> 退款与纠纷</h4><span>导入退款 {{ $money($manualRefundTotal) }} · PayPal 退款 {{ $money($paypalRefundTotal) }}</span></div>
-                <div class="table-responsive"><table class="table logistics-order-detail-table"><thead><tr><th>来源</th><th>编号</th><th>金额</th><th>类型 / 状态</th><th>原因 / 事件类型</th><th>时间</th></tr></thead><tbody>
-                    @foreach($order->activeRefundDetails as $refund)<tr><td><span class="label label-info">导入</span></td><td>{{ $display($refund->refund_number) }}</td><td>{{ $money($refund->refund_amount_usd) }}</td><td>{{ $display($refund->refund_type) }}</td><td>{{ $display($refund->refund_reason ?: $refund->remark) }}</td><td>{{ $date($refund->created_at) }}</td></tr>@endforeach
-                    @foreach($order->paypalRefunds as $refund)<tr><td><span class="label label-primary">PayPal退款</span></td><td>{{ $display($refund->refund_transaction_id) }}</td><td>{{ $money($refund->refund_amount_usd) }}</td><td>{{ $refund->statusLabel() }}</td><td title="{{ $refund->refund_reason }}">{{ $refund->eventLabel() }}</td><td>{{ $date($refund->refunded_at) }}</td></tr>@endforeach
-                    @foreach($order->paypalDisputes as $dispute)<tr><td><span class="label label-danger">PayPal纠纷</span></td><td>{{ $display($dispute->dispute_id) }}</td><td>{{ $money($dispute->dispute_amount_usd ?: $dispute->original_amount) }}</td><td>{{ $display($dispute->life_cycle_stage) }} / {{ $display($dispute->status) }}</td><td>{{ $display($dispute->reason) }}</td><td>{{ $date($dispute->dispute_created_at) }}</td></tr>@endforeach
-                    @if($order->activeRefundDetails->isEmpty() && $order->paypalRefunds->isEmpty() && $order->paypalDisputes->isEmpty())<tr><td colspan="6" class="text-center text-muted">暂无退款或纠纷明细。</td></tr>@endif
+                <div class="table-responsive"><table class="table logistics-order-detail-table"><thead><tr><th>来源</th><th>编号</th><th>金额</th><th>{{ __('logistics.paypal_dispute.type_status') }}</th><th>原因 / 事件类型</th><th>{{ __('logistics.paypal_dispute.outcome') }}</th><th>时间</th></tr></thead><tbody>
+                    @foreach($order->activeRefundDetails as $refund)<tr><td><span class="label label-info">导入</span></td><td>{{ $display($refund->refund_number) }}</td><td>{{ $money($refund->refund_amount_usd) }}</td><td>{{ $display($refund->refund_type) }}</td><td>{{ $display($refund->refund_reason ?: $refund->remark) }}</td><td>{{ __('logistics.common.not_available') }}</td><td>{{ $date($refund->created_at) }}</td></tr>@endforeach
+                    @foreach($order->paypalRefunds as $refund)<tr><td><span class="label label-primary">PayPal退款</span></td><td>{{ $display($refund->refund_transaction_id) }}</td><td>{{ $money($refund->refund_amount_usd) }}</td><td>{{ $refund->statusLabel() }}</td><td title="{{ $refund->refund_reason }}">{{ $refund->eventLabel() }}</td><td>{{ __('logistics.common.not_available') }}</td><td>{{ $date($refund->refunded_at) }}</td></tr>@endforeach
+                    @foreach($order->paypalDisputes as $dispute)<tr><td><span class="label label-danger">PayPal纠纷</span></td><td>{{ $display($dispute->dispute_id) }}</td><td>{{ $money($dispute->dispute_amount_usd ?: $dispute->original_amount) }}</td><td>{{ $dispute->typeLabel() }} / {{ $dispute->statusLabel() }}</td><td>{{ $dispute->reasonLabel() }}</td><td>{{ $dispute->outcomeLabel() }}</td><td>{{ $date($dispute->dispute_created_at) }}</td></tr>@endforeach
+                    @if($order->activeRefundDetails->isEmpty() && $order->paypalRefunds->isEmpty() && $order->paypalDisputes->isEmpty())<tr><td colspan="7" class="text-center text-muted">暂无退款或纠纷明细。</td></tr>@endif
                 </tbody></table></div>
             </section>
 
@@ -206,6 +310,7 @@
                 <details><summary>Shopify 原始订单</summary><pre>{{ $pretty($shopifyPayload) }}</pre></details>
                 <details><summary>通途原始返回</summary><pre>{{ $pretty($tongtuPayload) }}</pre></details>
                 <details><summary>Shopify 发货信息</summary><pre>{{ $pretty($fulfillmentPayload) }}</pre></details>
+                <details><summary>{{ __('logistics.tracking.raw_payload') }}</summary><pre>{{ $pretty($trackingPayload) }}</pre></details>
                 <details><summary>yx_page_source</summary><pre>{{ $pretty($pageSourcePayload) }}</pre></details>
             </section>
         </main>
