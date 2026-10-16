@@ -119,9 +119,9 @@
                             <div class="product-request-detail-modal-grid product-request-detail-review-grid">
                                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.table.review_status') }}</span><span class="product-request-detail-value">{{ __('product_requests.review_status.'.$review->status) }}</span></div>
                                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.review.submitted_by') }}</span><span class="product-request-detail-value">{{ $review->submission_user_name }}</span></div>
-                                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.review.submitted_at') }}</span><span class="product-request-detail-value">{{ optional($review->submitted_at)->format('Y-m-d H:i') }}</span></div>
+                                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.review.submitted_at') }}</span><span class="product-request-detail-value">{{ optional($review->submitted_at)->timezone('Asia/Shanghai')->format('Y-m-d H:i') }}</span></div>
                                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.review.reviewed_by') }}</span><span class="product-request-detail-value">{{ $review->reviewer_name ?: $notFilled }}</span></div>
-                                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.review.reviewed_at') }}</span><span class="product-request-detail-value">{{ optional($review->reviewed_at)->format('Y-m-d H:i') }}</span></div>
+                                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.review.reviewed_at') }}</span><span class="product-request-detail-value">{{ optional($review->reviewed_at)->timezone('Asia/Shanghai')->format('Y-m-d H:i') }}</span></div>
                             </div>
                             <div class="product-request-review-remark"><span class="product-request-detail-label">{{ __('product_requests.fields.review_remark') }}</span><div class="product-request-remark-html">@if($review->remark){!! $review->remark !!}@else{{ $notFilled }}@endif</div></div>
                         </article>
@@ -137,7 +137,6 @@
             <div class="product-request-detail-section-body">
                 <div class="product-request-detail-modal-grid">
                     <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.actual_shipping_weight_g') }}</span><span class="product-request-detail-value">{{ $productRequest->actual_shipping_weight_g ?: $notFilled }}</span></div>
-                    <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.warehouse.weight_difference') }}</span><span class="product-request-detail-value">{{ $weightDifference === null ? $notAvailable : $weightDifference }}</span></div>
                     <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.package_size_cm') }}</span><span class="product-request-detail-value">{{ collect([$productRequest->package_length_cm, $productRequest->package_width_cm, $productRequest->package_height_cm])->filter()->implode(' × ') ?: $notFilled }}</span></div>
                     <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_acceptance_result') }}</span><span class="product-request-detail-value">{{ $warehouseResult }}</span></div>
                     <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_reject_reason') }}</span><span class="product-request-detail-value">{{ $warehouseRejectReason }}</span></div>
@@ -164,7 +163,7 @@
             <div class="product-request-detail-section-body">
                 <ul class="product-request-history">
                     @forelse($productRequest->logs as $log)
-                        <li><strong>{{ __('product_requests.events.'.$log->event) }}</strong><div>{{ $log->actor_department_name ? $log->actor_department_name.' - ' : '' }}{{ $log->actor_name }} · {{ optional($log->created_at)->format('Y-m-d H:i') }}</div></li>
+                        <li><strong>{{ __('product_requests.events.'.$log->event) }}</strong><div>{{ $log->actor_department_name ? $log->actor_department_name.' - ' : '' }}{{ $log->actor_name }} · {{ optional($log->created_at)->timezone('Asia/Shanghai')->format('Y-m-d H:i') }}</div></li>
                     @empty
                         <li>{{ __('product_requests.show.no_history') }}</li>
                     @endforelse
