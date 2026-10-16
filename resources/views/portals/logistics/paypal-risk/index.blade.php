@@ -98,7 +98,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/paypal-risk.css?v=20261016-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/paypal-risk.css?v=20261016-3">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261015-2">
 @endpush
 
@@ -197,18 +197,17 @@
                             <div class="paypal-risk-account-identity">
                                 <h3 title="{{ $account['account_name'] }}">{{ $account['account_name'] }}</h3>
                                 <p title="{{ $account['account_email'] }}">{{ $account['masked_email'] }}</p>
+                                <div class="paypal-risk-account-meta">
+                                    <span>{{ __('logistics.paypal_risk.ui.merchant_id') }}</span><strong title="{{ $account['merchant_id'] }}">{{ $account['merchant_id'] }}</strong>
+                                    <em>{{ $account['environment'] === 'sandbox' ? __('logistics.paypal_risk.ui.sandbox_environment') : __('logistics.paypal_risk.ui.live_environment') }}</em>
+                                </div>
+                            </div>
+                            <div class="paypal-risk-card-scope-switch" role="group" aria-label="{{ __('logistics.paypal_risk.ui.metric_scope') }}">
+                                <button type="button" class="btn btn-default btn-xs is-active" data-paypal-card-scope="current">{{ __('logistics.paypal_risk.ui.current_scope') }}</button>
+                                <button type="button" class="btn btn-default btn-xs" data-paypal-card-scope="history">{{ __('logistics.paypal_risk.ui.history_scope') }}</button>
                             </div>
                         </header>
 
-                        <div class="paypal-risk-account-meta">
-                            <span>Merchant ID</span><strong title="{{ $account['merchant_id'] }}">{{ $account['merchant_id'] }}</strong>
-                            <em>{{ $account['environment'] === 'sandbox' ? __('logistics.paypal_risk.ui.sandbox_environment') : __('logistics.paypal_risk.ui.live_environment') }}</em>
-                        </div>
-
-                        <div class="paypal-risk-card-scope-switch" role="group" aria-label="{{ __('logistics.paypal_risk.ui.metric_scope') }}">
-                            <button type="button" class="btn btn-default btn-xs is-active" data-paypal-card-scope="current">{{ __('logistics.paypal_risk.ui.current_scope') }}</button>
-                            <button type="button" class="btn btn-default btn-xs" data-paypal-card-scope="history">{{ __('logistics.paypal_risk.ui.history_scope') }}</button>
-                        </div>
                         <div class="paypal-risk-card-scope-panel" data-paypal-card-scope-panel="current">
                         <div class="paypal-risk-card-metrics">
                             <div><small>{{ __('logistics.paypal_risk.ui.payment_count') }}</small><strong>{{ number_format($account['order_count']) }}</strong></div>
@@ -319,7 +318,7 @@
                 <div class="row">
                     <div class="form-group col-sm-6"><label for="paypal-account-name">账号名称 <span class="text-red">*</span></label><input id="paypal-account-name" class="form-control" name="account_name" maxlength="191" required placeholder="例如：香港主体PP-01"></div>
                     <div class="form-group col-sm-6"><label for="paypal-account-environment">接口环境 <span class="text-red">*</span></label><select id="paypal-account-environment" class="form-control" name="environment" required><option value="live">Live 正式环境</option><option value="sandbox">Sandbox 测试环境</option></select></div>
-                    <div class="form-group col-sm-6"><label for="paypal-account-merchant">Merchant ID <span class="text-red">*</span></label><input id="paypal-account-merchant" class="form-control" name="merchant_id" maxlength="100" required placeholder="PayPal商户ID"></div>
+                    <div class="form-group col-sm-6"><label for="paypal-account-merchant">{{ __('logistics.paypal_risk.ui.merchant_id') }} <span class="text-red">*</span></label><input id="paypal-account-merchant" class="form-control" name="merchant_id" maxlength="100" required placeholder="PayPal商户ID"></div>
                     <div class="form-group col-sm-6"><label for="paypal-account-email">PayPal账号邮箱</label><input id="paypal-account-email" class="form-control" name="account_email" type="email" maxlength="191" placeholder="merchant@example.com"></div>
                     <div class="form-group col-sm-12 paypal-risk-enabled-control"><input type="hidden" name="is_enabled" value="0"><label><input id="paypal-account-enabled" type="checkbox" name="is_enabled" value="1" checked> 启用账号（停用后保留历史数据，但拒绝接收新文件）</label></div>
                 </div>

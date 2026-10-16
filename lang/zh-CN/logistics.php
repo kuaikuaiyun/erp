@@ -359,6 +359,7 @@ return [
             'current_scope' => '当前筛选',
             'history_scope' => '已采集历史',
             'metric_scope' => '数据范围',
+            'merchant_id' => '商户 ID',
             'payment_count' => '支付订单',
             'received_amount' => '实收金额',
             'linked_store_count' => '关联店铺',
