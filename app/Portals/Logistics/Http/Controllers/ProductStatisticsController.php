@@ -205,6 +205,8 @@ class ProductStatisticsController extends Controller
             'detailLoadFailed' => __('logistics.product_statistics.ui.detail_load_failed'),
             'variantDetailTitle' => __('logistics.product_statistics.ui.variant_detail_title'),
             'profitBreakdown' => __('logistics.product_statistics.ui.profit_breakdown'),
+            'storeOrderDistribution' => __('logistics.product_statistics.ui.store_order_distribution'),
+            'orders' => __('logistics.product_statistics.ui.orders'),
             'storeName' => __('logistics.product_statistics.ui.store_name'),
             'period' => __('logistics.product_statistics.ui.period'),
             'sales' => __('logistics.product_statistics.headers.sales'),
