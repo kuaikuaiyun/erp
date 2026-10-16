@@ -79,6 +79,7 @@
             tab_status: tabFilters.status || '',
             tab_type: tabFilters.type || '',
             tab_outcome: tabFilters.outcome || '',
+            tab_match_status: tabFilters.match_status || '',
             sort: sorting.key || '',
             direction: sorting.direction || ''
         });
@@ -96,7 +97,8 @@
             tab_keyword: tabFilters.keyword || '',
             tab_status: tabFilters.status || '',
             tab_type: tabFilters.type || '',
-            tab_outcome: tabFilters.outcome || ''
+            tab_outcome: tabFilters.outcome || '',
+            tab_match_status: tabFilters.match_status || ''
         });
         return route(routes.export, state.accountId, state.tab) + '?' + params.toString();
     }
@@ -127,6 +129,9 @@
         var options = labels.detailFilterOptions || {};
         var placeholder = (labels.detailFilterPlaceholders || {})[tab] || '';
         var selects = '';
+        if (tab === 'orders') {
+            selects = '<label><span>' + escapeHtml(labels.detailFilterMatchStatus || '') + '</span><select class="form-control" name="match_status"><option value="">' + escapeHtml(labels.detailFilterAll || '') + '</option><option value="matched"' + (filters.match_status === 'matched' ? ' selected' : '') + '>' + escapeHtml(labels.detailFilterMatched || '') + '</option><option value="unmatched"' + (filters.match_status === 'unmatched' ? ' selected' : '') + '>' + escapeHtml(labels.detailFilterUnmatched || '') + '</option></select></label>';
+        }
         if (tab === 'refunds') {
             selects = '<label><span>' + escapeHtml(labels.detailFilterStatus || '') + '</span><select class="form-control" name="status"><option value="">' + escapeHtml(labels.detailFilterAll || '') + '</option>' + optionHtml(options.refund_status, filters.status) + '</select></label>';
         }
@@ -272,6 +277,22 @@
                 ['dispute_id', '纠纷编号'], ['order_number', '订单号'], ['store_name', '店铺'], ['amount', '金额'], ['reason', '原因'], ['stage', labels.disputeType || ''], ['status', '状态'], ['outcome', labels.outcome || ''], ['seller_response_due_at', labels.sellerResponseDueAt || ''], ['linked_refunds', labels.linkedRefunds || ''], ['updated_at', labels.updatedAt || ''], ['happened_at', '发生时间']
             ]
         }[tab] || [];
+        if (tab === 'orders') {
+            columns = [
+                ['payment_transaction_id', labels.paymentTransactionId || ''],
+                ['match_status', labels.matchStatus || ''],
+                ['order_number', labels.shopifyOrderNumber || ''],
+                ['tongtu_order_number', labels.tongtuOrderNumber || ''],
+                ['store_name', labels.storeName || ''],
+                ['products', labels.products || ''],
+                ['paid_amount', labels.paidAmount || ''],
+                ['refund_status', labels.refundStatus || ''],
+                ['dispute_status', labels.disputeStatus || ''],
+                ['tracking_number', labels.trackingNumber || ''],
+                ['logistics_status', labels.logisticsStatus || ''],
+                ['paid_at', labels.paymentTime || '']
+            ];
+        }
         var sorting = state.sorts[tab] || {};
         var thead = columns.map(function (column) {
             var active = sorting.key === column[0];
@@ -285,6 +306,10 @@
                 if (key === 'paid_amount' || key === 'amount') value = money(value);
                 if (key === 'refund_rate' || key === 'dispute_rate') value = rate(value);
                 if (key === 'order_number') return '<td>' + orderLink(row) + '</td>';
+                if (key === 'match_status') {
+                    var matched = String(value || '') === String(labels.detailFilterMatched || '');
+                    return '<td><span class="paypal-risk-match-status ' + (matched ? 'is-matched' : 'is-unmatched') + '">' + escapeHtml(value || '-') + '</span></td>';
+                }
                 if (key === 'linked_disputes') value = Array.isArray(value) ? value.join('、') : value;
                 if (key === 'linked_refunds') value = Array.isArray(value) ? value.map(function (refund) { return String(refund.refund_id || '') + ' (' + money(refund.amount) + ')'; }).join('、') : value;
                 if (tab === 'products' && key === 'product_name') {
@@ -384,7 +409,8 @@
                     keyword: String(formData.get('keyword') || '').trim(),
                     status: String(formData.get('status') || '').trim(),
                     type: String(formData.get('type') || '').trim(),
-                    outcome: String(formData.get('outcome') || '').trim()
+                    outcome: String(formData.get('outcome') || '').trim(),
+                    match_status: String(formData.get('match_status') || '').trim()
                 };
                 loadDetail(state.tab, 1);
             });
@@ -424,7 +450,39 @@
         setMode(input.value);
     }
 
+    function initCardScopeSwitches() {
+        all('.paypal-risk-card').forEach(function (card) {
+            var buttons = all('[data-paypal-card-scope]', card);
+            var panels = all('[data-paypal-card-scope-panel]', card);
+            if (!buttons.length || !panels.length) return;
+
+            function setScope(scope) {
+                var activeScope = scope === 'history' ? 'history' : 'current';
+                buttons.forEach(function (button) {
+                    button.classList.toggle('is-active', button.dataset.paypalCardScope === activeScope);
+                });
+                panels.forEach(function (panel) {
+                    panel.hidden = panel.dataset.paypalCardScopePanel !== activeScope;
+                });
+                var riskPill = one('[data-paypal-card-risk]', card);
+                if (riskPill) {
+                    var risk = riskPill.dataset['risk' + activeScope.charAt(0).toUpperCase() + activeScope.slice(1)] || 'low';
+                    var label = riskPill.dataset['riskLabel' + activeScope.charAt(0).toUpperCase() + activeScope.slice(1)] || '';
+                    var icon = riskPill.dataset['riskIcon' + activeScope.charAt(0).toUpperCase() + activeScope.slice(1)] || 'fa-shield';
+                    riskPill.className = 'paypal-risk-pill risk-' + risk;
+                    riskPill.innerHTML = '<i class="fa ' + escapeHtml(icon) + '"></i> ' + escapeHtml(label);
+                }
+            }
+
+            buttons.forEach(function (button) {
+                button.addEventListener('click', function () { setScope(button.dataset.paypalCardScope); });
+            });
+            setScope('current');
+        });
+    }
+
     initAccountModal();
     initDetailModal();
     initDateModeControls();
+    initCardScopeSwitches();
 })();

@@ -97,6 +97,17 @@
 .paypal-risk-card.risk-medium .paypal-risk-card-accent { background: #e18a13; }
 .paypal-risk-card.risk-high .paypal-risk-card-accent { background: #d44149; }
 .paypal-risk-card-header { min-height: 72px; display: flex; align-items: center; gap: 10px; padding: 14px 15px 11px; border-bottom: 1px solid #eef3f7; }
+.paypal-risk-card-scope-switch { display: flex; justify-content: flex-end; gap: 0; margin: 10px 15px -4px; }
+.paypal-risk-card-scope-switch .btn { min-width: 68px; border-color: #cfdce7; color: #52718a; box-shadow: none; }
+.paypal-risk-card-scope-switch .btn + .btn { margin-left: -1px; }
+.paypal-risk-card-scope-switch .btn.is-active { position: relative; z-index: 1; border-color: #2585bf; color: #fff; background: #2c90c9; }
+.paypal-risk-card-scope-panel[hidden] { display: none !important; }
+.paypal-risk-card-scope-panel .paypal-risk-rate-note span + span { display: none; }
+.paypal-risk-matched-only-note { margin: 8px 15px 0; color: #7890a5; font-size: 11px; line-height: 1.45; }
+.paypal-risk-matched-only-note .fa { color: #3c8dbc; }
+.paypal-risk-match-status { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 7px; border-radius: 4px; font-size: 11px; white-space: nowrap; }
+.paypal-risk-match-status.is-matched { color: #087a4f; background: #e3f6ed; }
+.paypal-risk-match-status.is-unmatched { color: #a55b00; background: #fff1d8; }
 .paypal-risk-card-selector { margin: 0 1px 0 0; line-height: 1; }
 .paypal-risk-card-selector input { margin: 0; }
 .paypal-risk-brand-mark { width: 34px; height: 34px; flex: 0 0 34px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; color: #fff; background: #0866b2; font-size: 18px; box-shadow: inset 0 -2px 0 rgba(0, 0, 0, .12); }

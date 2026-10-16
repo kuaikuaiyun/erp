@@ -6,6 +6,7 @@ use App\Models\LogisticsPayPalAccount;
 use App\Models\LogisticsPayPalDispute;
 use App\Models\LogisticsPayPalDisputeRefund;
 use App\Models\LogisticsPayPalRefund;
+use App\Models\LogisticsPayPalTransaction;
 use Carbon\Carbon;
 use Carbon\CarbonInterface;
 use Illuminate\Http\Client\ConnectionException;
@@ -193,7 +194,19 @@ class PayPalSyncService
                     $details = [];
                 }
                 foreach ($details as $detail) {
-                    if (!is_array($detail) || !in_array((string) Arr::get($detail, 'transaction_info.transaction_event_code'), self::REFUND_EVENT_CODES, true)) {
+                    if (!is_array($detail)) {
+                        continue;
+                    }
+
+                    $eventCode = strtoupper(trim((string) Arr::get($detail, 'transaction_info.transaction_event_code')));
+                    if (str_starts_with($eventCode, 'T00')) {
+                        // Keep the same financial source-of-truth as the
+                        // Windows VPS uploader. A later Shopify sync can
+                        // safely reconcile this raw row by bill number.
+                        $this->persistPayment($account, $detail);
+                    }
+
+                    if (!in_array($eventCode, self::REFUND_EVENT_CODES, true)) {
                         continue;
                     }
                     $matched = $this->persistRefund($account, $detail);
@@ -207,6 +220,35 @@ class PayPalSyncService
         }
 
         return $summary;
+    }
+
+    private function persistPayment(LogisticsPayPalAccount $account, array $detail): void
+    {
+        $info = is_array($detail['transaction_info'] ?? null) ? $detail['transaction_info'] : [];
+        $transactionId = trim((string) ($info['transaction_id'] ?? ''));
+        if ($transactionId === '') {
+            return;
+        }
+
+        $amount = abs((float) Arr::get($info, 'transaction_amount.value', 0));
+        $currency = strtoupper(trim((string) Arr::get($info, 'transaction_amount.currency_code')));
+        $payment = LogisticsPayPalTransaction::query()->updateOrCreate([
+            'logistics_paypal_account_id' => $account->getKey(),
+            'payment_transaction_id' => $transactionId,
+        ], [
+            'invoice_id' => $info['invoice_id'] ?? null,
+            'event_code' => $info['transaction_event_code'] ?? null,
+            'status' => $info['transaction_status'] ?? null,
+            'payment_amount_usd' => $currency === 'USD' ? $amount : null,
+            'original_amount' => $amount,
+            'currency_code' => $currency ?: null,
+            'payment_subject' => $info['transaction_subject'] ?? $info['transaction_note'] ?? null,
+            'paid_at' => $this->dateTime($info['transaction_initiation_date'] ?? null),
+            'raw_payload' => json_encode($detail, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'synced_at' => now(),
+        ]);
+
+        $this->associations->reconcileTransaction($payment);
     }
 
     private function persistRefund(LogisticsPayPalAccount $account, array $detail): bool

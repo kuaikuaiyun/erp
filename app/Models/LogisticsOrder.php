@@ -138,6 +138,11 @@ class LogisticsOrder extends Model
         return $this->hasMany(LogisticsPayPalRefund::class, 'logistics_order_id');
     }
 
+    public function paypalTransactions(): HasMany
+    {
+        return $this->hasMany(LogisticsPayPalTransaction::class, 'logistics_order_id');
+    }
+
     public function paypalDisputes(): HasMany
     {
         return $this->hasMany(LogisticsPayPalDispute::class, 'logistics_order_id');
