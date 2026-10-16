@@ -42,7 +42,7 @@
                 @else
                     {{ $t('common.not_available') }}
                 @endif
-            </td><td>{{ $rejectedReview->reviewer_name ?? $t('common.not_available') }}</td><td class="product-request-nowrap-cell">{{ $rejectedReview && $rejectedReview->reviewed_at ? $rejectedReview->reviewed_at->format('Y-m-d H:i') : $t('common.not_available') }}</td><td class="product-request-sticky-right product-request-actions"><a class="btn btn-default btn-xs product-request-action-button product-request-action-view" href="{{ route('product-requests.show', $productRequest) }}" data-product-request-modal-url="{{ route('product-requests.show', ['productRequest' => $productRequest, 'modal' => 1]) }}"><i class="fa fa-eye"></i> {{ $t('common.view') }}</a></td></tr>
+            </td><td>{{ $rejectedReview->reviewer_name ?? $t('common.not_available') }}</td><td class="product-request-nowrap-cell">{{ $rejectedReview && $rejectedReview->reviewed_at ? $rejectedReview->reviewed_at->timezone('Asia/Shanghai')->format('Y-m-d H:i') : $t('common.not_available') }}</td><td class="product-request-sticky-right product-request-actions"><a class="btn btn-default btn-xs product-request-action-button product-request-action-view" href="{{ route('product-requests.show', $productRequest) }}" data-product-request-modal-url="{{ route('product-requests.show', ['productRequest' => $productRequest, 'modal' => 1]) }}"><i class="fa fa-eye"></i> {{ $t('common.view') }}</a></td></tr>
         @empty
             <tr><td colspan="8" class="product-request-empty">{{ $t('common.no_records') }}</td></tr>
         @endforelse
