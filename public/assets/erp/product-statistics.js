@@ -10,6 +10,7 @@
     var state = { page: Number(pagination.current_page) || 1, sort: config.sort || '', direction: config.direction || '', selected: {} };
     var detailState = { product: null, sorts: {}, filters: {}, pages: {}, activeTab: 'overview' };
     var body = document.getElementById('product-statistics-body');
+    var tableScroll = document.querySelector('.product-statistics-table-scroll');
     var empty = document.getElementById('product-statistics-empty');
     var filterForm = document.getElementById('product-statistics-filter-form');
     var pageSizeInput = document.getElementById('product-statistics-page-size');
@@ -22,6 +23,43 @@
     var exportPayload = document.getElementById('product-statistics-export-payload');
 
     if (!body || !filterForm) return;
+
+    function wheelPixels(event) {
+        if (event.deltaMode === 1) return event.deltaY * 16;
+        if (event.deltaMode === 2) return event.deltaY * window.innerHeight;
+        return event.deltaY;
+    }
+
+    function bindTableBoundaryScroll() {
+        if (!tableScroll) return;
+
+        tableScroll.addEventListener('wheel', function (event) {
+            if (event.ctrlKey || event.shiftKey || event.deltaY === 0 || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+
+            var deltaY = wheelPixels(event);
+            var scrollTop = tableScroll.scrollTop;
+            var maxScrollTop = tableScroll.scrollHeight - tableScroll.clientHeight;
+            var movingUp = deltaY < 0;
+            var movingDown = deltaY > 0;
+            var reachesTop = movingUp && scrollTop + deltaY <= 0;
+            var reachesBottom = movingDown && scrollTop + deltaY >= maxScrollTop;
+
+            if (!(reachesTop || reachesBottom)) return;
+
+            event.preventDefault();
+
+            if (reachesTop) {
+                var distanceToTop = Math.max(0, scrollTop);
+                tableScroll.scrollTop = 0;
+                window.scrollBy({ top: deltaY + distanceToTop, left: 0, behavior: 'auto' });
+                return;
+            }
+
+            var distanceToBottom = Math.max(0, maxScrollTop - scrollTop);
+            tableScroll.scrollTop = Math.max(0, maxScrollTop);
+            window.scrollBy({ top: deltaY - distanceToBottom, left: 0, behavior: 'auto' });
+        }, { passive: false });
+    }
 
     function t(key) { return labels[key] || ''; }
     function blank() { return t('notAvailable') || '—'; }
@@ -188,6 +226,15 @@
             + '<dl><dt>' + escapeHtml(t('fees')) + '</dt><dd>' + negativeMoney(productFees(subject)) + '</dd></dl>'
             + '<dl><dt>' + escapeHtml(t('actualRefunds')) + '</dt><dd>' + negativeMoney(subject.actual_refunds) + '</dd></dl>'
             + '<dl class="is-total"><dt>' + escapeHtml(t('actualProfit')) + '</dt><dd>' + formatMoney(subject.actual_profit) + '</dd></dl></div>';
+    }
+    function detailStoreOrderDistribution(subject) {
+        var stores = Array.isArray(subject.store_order_distribution) ? subject.store_order_distribution : [];
+        if (!stores.length) return '';
+        return '<div class="product-statistics-store-order-distribution"><h5>' + escapeHtml(t('storeOrderDistribution')) + '</h5><div class="product-statistics-store-order-list">'
+            + stores.map(function (store) {
+                return '<div class="product-statistics-store-order"><strong>' + escapeHtml(store.name || blank()) + '</strong><span>' + formatNumber(store.order_count) + ' ' + escapeHtml(t('orders')) + '</span></div>';
+            }).join('')
+            + '</div></div>';
     }
     function detailSortButton(table, key, label) {
         var current = detailState.sorts[table] || {};
@@ -360,7 +407,7 @@
             + detailMetric(t('creditCardRefundAmount'), formatMoney(product.credit_card_refund_amount)) + detailMetric(t('creditCardRefundRate'), formatRate(product.credit_card_refund_rate))
             + detailMetric(t('combinedRefundRate'), formatRate(product.combined_refund_rate)) + detailMetric(t('actualProfit'), formatMoney(product.actual_profit), isNumeric(product.actual_profit) && number(product.actual_profit) < 0 ? 'is-negative' : '')
             + detailMetric(t('shippingRate'), formatRate(product.shipping_rate)) + detailMetric(t('deliveryRate'), formatRate(product.delivery_rate))
-            + '</div>' + detailBreakdown(product) + '<div class="alert alert-info"><i class="fa fa-info-circle"></i> ' + escapeHtml(t('crossProductNote')) + '<br><i class="fa fa-info-circle"></i> ' + escapeHtml(t('creditCardDisputeNote')) + '</div>';
+            + '</div>' + detailStoreOrderDistribution(product) + detailBreakdown(product) + '<div class="alert alert-info"><i class="fa fa-info-circle"></i> ' + escapeHtml(t('crossProductNote')) + '<br><i class="fa fa-info-circle"></i> ' + escapeHtml(t('creditCardDisputeNote')) + '</div>';
         renderDetailTables();
         renderDetailFilters();
         if ($) {
@@ -462,5 +509,6 @@
         }
     });
     renderTable();
+    bindTableBoundaryScroll();
     if (config.exportValidationError && $) $('#product-statistics-export-modal').modal('show');
 }(window, document, window.jQuery));

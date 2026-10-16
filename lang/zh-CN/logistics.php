@@ -201,6 +201,8 @@ return [
             'store_performance' => '店铺表现',
             'sales_trend' => '销售趋势',
             'profit_breakdown' => '利润拆分（USD）',
+            'store_order_distribution' => '店铺订单分布',
+            'orders' => '单',
             'actual_refunds' => '实际导入退款（USD）',
             'actual_refund_count' => '实际退款次数',
             'refund_details' => '退款明细',

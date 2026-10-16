@@ -603,6 +603,8 @@ class LogisticsProductStatisticsService
     private function productKeyExpression(string $alias): string
     {
         return "CASE "
+            . "WHEN NULLIF(TRIM({$alias}.shopify_sku), '') IS NOT NULL THEN CONCAT('shopify-sku:', LOWER(TRIM({$alias}.shopify_sku))) "
+            . "WHEN NULLIF(TRIM({$alias}.tongtu_sku), '') IS NOT NULL THEN CONCAT('tongtu-sku:', LOWER(TRIM({$alias}.tongtu_sku))) "
             . "WHEN NULLIF(TRIM({$alias}.shopify_product_id), '') IS NOT NULL THEN CONCAT('shopify-product:', LOWER(TRIM({$alias}.shopify_product_id))) "
             . "WHEN NULLIF(TRIM(COALESCE({$alias}.tongtu_product_name, {$alias}.product_title)), '') IS NOT NULL THEN CONCAT('product-name:', LOWER(TRIM(COALESCE({$alias}.tongtu_product_name, {$alias}.product_title)))) "
             . "ELSE CONCAT('sku:', COALESCE(NULLIF(LOWER(TRIM({$alias}.tongtu_sku)), ''), NULLIF(LOWER(TRIM({$alias}.shopify_sku)), ''), '__missing__')) END";
@@ -676,6 +678,8 @@ class LogisticsProductStatisticsService
         $combinedRefundOrderIds = $paypalRefundOrderIds + $creditCardRefundOrderIds;
         $combinedRefundRate = $paidOrders->isEmpty() ? 0.0 : round($paidOrders->filter(fn (LogisticsOrder $order): bool => isset($combinedRefundOrderIds[(int) $order->getKey()]))->count() / $paidOrders->count() * 100, 2);
 
+        $relatedOrders = $this->relatedOrders($items, $payment);
+
         return [
             'stores' => $stores,
             'shop_count' => count($stores),
@@ -706,13 +710,42 @@ class LogisticsProductStatisticsService
             // 发货率、签收率均以当前产品的已付款订单为分母；不能把签收率
             // 误展示为“已签收 / 已发货”，否则会掩盖尚未发货的订单。
             'delivery_rate' => $paidOrders->isEmpty() ? 0.0 : round($deliveredOrders->count() / $paidOrders->count() * 100, 2),
-            'related_orders' => $this->relatedOrders($items, $payment),
+            'related_orders' => $relatedOrders,
+            'store_order_distribution' => $this->storeOrderDistribution($relatedOrders),
             'profit' => $profit,
             'actual_profit' => $profit,
             'profit_rate' => $profit !== null && $revenue > 0 ? round($profit / $revenue * 100, 2) : null,
             'refund_rate' => $combinedRefundRate,
             'decision' => $this->decision($profit, $revenue, $combinedRefundRate),
         ];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $orders
+     * @return list<array{name:string,order_count:int}>
+     */
+    private function storeOrderDistribution(array $orders): array
+    {
+        $stores = [];
+        foreach ($orders as $order) {
+            $store = trim((string) ($order['store'] ?? '')) ?: __('logistics.common.unassigned_store');
+            $orderId = (int) ($order['order_id'] ?? 0);
+            if ($orderId <= 0) {
+                continue;
+            }
+
+            $stores[$store][$orderId] = true;
+        }
+        ksort($stores);
+
+        return array_map(
+            static fn (array $orderIds, string $store): array => [
+                'name' => $store,
+                'order_count' => count($orderIds),
+            ],
+            $stores,
+            array_keys($stores),
+        );
     }
 
     /**
