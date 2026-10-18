@@ -8,7 +8,7 @@
     var decisions = config.decisions || {};
     var labels = config.labels || {};
     var state = { page: Number(pagination.current_page) || 1, sort: config.sort || '', direction: config.direction || '', selected: {} };
-    var detailState = { product: null, sorts: {}, filters: {}, pages: {}, activeTab: 'overview' };
+    var detailState = { product: null, detailLoaded: false, loadingDetail: false, sorts: {}, filters: {}, pages: {}, activeTab: 'overview' };
     var body = document.getElementById('product-statistics-body');
     var tableScroll = document.querySelector('.product-statistics-table-scroll');
     var empty = document.getElementById('product-statistics-empty');
@@ -203,26 +203,47 @@
         url.searchParams.set('product_id', productId);
         return url.toString();
     }
-    function showDetailLoading(product) {
-        detailState = { product: null, sorts: {}, filters: {}, pages: {}, activeTab: 'overview' };
+    function detailTabElement(tab) {
+        return document.getElementById('product-statistics-' + String(tab || 'overview').replace(/_/g, '-'));
+    }
+    function showDetailTabLoading(tab) {
+        var container = detailTabElement(tab);
+        if (!container) return;
+        container.innerHTML = '<div class="alert alert-info"><i class="fa fa-spinner fa-spin"></i> ' + escapeHtml(t('detailLoading')) + '</div>';
+    }
+    function clearDeferredDetailTabs() {
+        ['variants', 'paypal_orders', 'credit_card_orders', 'refunds', 'disputes', 'orders'].forEach(function (tab) {
+            var container = detailTabElement(tab);
+            if (container) container.innerHTML = '';
+        });
+    }
+    function openProductDetail(product) {
+        detailState = { product: product, detailLoaded: false, loadingDetail: false, sorts: {}, filters: {}, pages: {}, activeTab: 'overview' };
         document.getElementById('product-statistics-detail-title').textContent = t('detailTitle');
         document.getElementById('product-statistics-detail-identity').innerHTML = productThumb(product) + '<div><strong>' + escapeHtml(product.name) + '</strong><span>' + escapeHtml(productIdentity(product)) + '</span></div>';
-        document.getElementById('product-statistics-overview').innerHTML = '<div class="alert alert-info"><i class="fa fa-spinner fa-spin"></i> ' + escapeHtml(t('detailLoading')) + '</div>';
-        ['product-statistics-variants', 'product-statistics-paypal-orders', 'product-statistics-credit-card-orders', 'product-statistics-refunds', 'product-statistics-disputes', 'product-statistics-orders'].forEach(function (id) {
-            document.getElementById(id).innerHTML = '';
-        });
+        renderOverview(product);
+        clearDeferredDetailTabs();
         document.getElementById('product-statistics-detail-filters').hidden = true;
         if ($) {
             $('#product-statistics-detail-modal .nav-tabs a[href="#product-statistics-overview"]').tab('show');
             $('#product-statistics-detail-modal').modal('show');
         }
     }
-    function showDetailLoadFailure(message) {
-        document.getElementById('product-statistics-overview').innerHTML = '<div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> ' + escapeHtml(message || t('detailLoadFailed')) + '</div>';
+    function showDetailLoadFailure(tab, message) {
+        var container = detailTabElement(tab);
+        if (!container) return;
+        container.innerHTML = '<div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> ' + escapeHtml(message || t('detailLoadFailed')) + '</div>';
     }
-    function loadProductDetail(product) {
-        showDetailLoading(product);
-        window.fetch(detailRequestUrl(product.id), {
+    function ensureDetailLoaded() {
+        if (detailState.activeTab === 'overview' || detailState.detailLoaded || !detailState.product) return;
+        if (detailState.loadingDetail) {
+            showDetailTabLoading(detailState.activeTab);
+            return;
+        }
+        detailState.loadingDetail = true;
+        document.getElementById('product-statistics-detail-filters').hidden = true;
+        showDetailTabLoading(detailState.activeTab);
+        window.fetch(detailRequestUrl(detailState.product.id), {
             headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
             credentials: 'same-origin'
         }).then(function (response) {
@@ -231,9 +252,15 @@
                 return payload.product;
             });
         }).then(function (detail) {
-            fillModal(detail);
+            detailState.product = detail;
+            detailState.detailLoaded = true;
+            detailState.loadingDetail = false;
+            renderOverview(detail);
+            renderDetailFilters();
+            renderDetailTables();
         }).catch(function (error) {
-            showDetailLoadFailure(error && error.message ? error.message : t('detailLoadFailed'));
+            detailState.loadingDetail = false;
+            showDetailLoadFailure(detailState.activeTab, error && error.message ? error.message : t('detailLoadFailed'));
         });
     }
     function openImagePreview(trigger) {
@@ -397,7 +424,7 @@
         var container = document.getElementById('product-statistics-detail-filters');
         var product = detailState.product;
         var table = detailState.activeTab;
-        if (!container || !product || table === 'overview') { if (container) container.hidden = true; return; }
+        if (!container || !product || !detailState.detailLoaded || table === 'overview') { if (container) container.hidden = true; return; }
         var rows = detailRowsFor(table, product);
         var filters = detailFilter(table);
         var placeholder = table === 'refunds' ? t('detailFilterRefundsPlaceholder') : (table === 'disputes' ? t('detailFilterDisputesPlaceholder') : (table === 'variants' ? t('detailFilterVariantsPlaceholder') : t('detailFilterOrdersPlaceholder')));
@@ -484,31 +511,22 @@
     }
     function renderDetailTables() {
         var product = detailState.product;
-        if (!product) return;
+        if (!product || !detailState.detailLoaded) return;
         var related = product.related_orders || [];
-        renderVariants(product);
-        renderOrdersTable('product-statistics-paypal-orders', 'paypal_orders', related.filter(function (order) { return order.payment_kind === 'paypal'; }));
-        renderOrdersTable('product-statistics-credit-card-orders', 'credit_card_orders', related.filter(function (order) { return order.payment_kind === 'credit_card'; }));
-        renderRefunds(product);
-        renderDisputes(product);
-        renderOrdersTable('product-statistics-orders', 'orders', related);
+        if (detailState.activeTab === 'variants') renderVariants(product);
+        if (detailState.activeTab === 'paypal_orders') renderOrdersTable('product-statistics-paypal-orders', 'paypal_orders', related.filter(function (order) { return order.payment_kind === 'paypal'; }));
+        if (detailState.activeTab === 'credit_card_orders') renderOrdersTable('product-statistics-credit-card-orders', 'credit_card_orders', related.filter(function (order) { return order.payment_kind === 'credit_card'; }));
+        if (detailState.activeTab === 'refunds') renderRefunds(product);
+        if (detailState.activeTab === 'disputes') renderDisputes(product);
+        if (detailState.activeTab === 'orders') renderOrdersTable('product-statistics-orders', 'orders', related);
     }
-    function fillModal(product) {
-        detailState = { product: product, sorts: {}, filters: {}, pages: {}, activeTab: 'overview' };
-        document.getElementById('product-statistics-detail-title').textContent = t('detailTitle');
-        document.getElementById('product-statistics-detail-identity').innerHTML = productThumb(product) + '<div><strong>' + escapeHtml(product.name) + '</strong><span>' + escapeHtml(productIdentity(product)) + '</span></div>' + decisionBadge(product.decision);
+    function renderOverview(product) {
         var overviewModules = product.overview_modules || {};
         document.getElementById('product-statistics-overview').innerHTML = '<div class="product-statistics-overview-modules">'
             + overviewModule(t('overviewOverall'), overviewModules.overall, 'is-overall')
             + overviewModule(t('overviewPayPal'), overviewModules.paypal, 'is-paypal')
             + overviewModule(t('overviewCreditCard'), overviewModules.credit_card, 'is-credit-card')
-            + '</div>' + detailStoreOrderDistribution(product);
-        renderDetailTables();
-        renderDetailFilters();
-        if ($) {
-            $('#product-statistics-detail-modal .nav-tabs a[href="#product-statistics-overview"]').tab('show');
-            $('#product-statistics-detail-modal').modal('show');
-        }
+            + '</div>' + (detailState.detailLoaded ? detailStoreOrderDistribution(product) : '');
     }
     function appendHiddenInput(container, name, value) { var input = document.createElement('input'); input.type = 'hidden'; input.name = name; input.value = value; container.appendChild(input); }
     function navigate(params) {
@@ -554,6 +572,7 @@
         $('#product-statistics-detail-modal').on('shown.bs.tab', 'a[data-product-detail-tab]', function (event) {
             detailState.activeTab = event.target.dataset.productDetailTab || 'overview';
             renderDetailFilters();
+            if (detailState.activeTab !== 'overview') ensureDetailLoaded();
         });
     }
     document.addEventListener('click', function (event) {
@@ -587,7 +606,7 @@
         }
         var target = event.target.closest('.product-statistics-view, .product-statistics-page-button, .product-statistics-sort');
         if (!target) return;
-        if (target.classList.contains('product-statistics-view')) { var product = findProduct(target.dataset.productId); if (product) loadProductDetail(product); return; }
+        if (target.classList.contains('product-statistics-view')) { var product = findProduct(target.dataset.productId); if (product) openProductDetail(product); return; }
         if (target.classList.contains('product-statistics-page-button')) { navigate({ page: number(target.dataset.page) || 1 }); return; }
         if (target.classList.contains('product-statistics-sort')) {
             var sort = target.dataset.sort;

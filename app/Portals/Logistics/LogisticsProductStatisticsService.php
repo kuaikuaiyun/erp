@@ -195,6 +195,26 @@ class LogisticsProductStatisticsService
             ->selectRaw('COALESCE(order_statistics.paypal_order_count, 0) as paypal_order_count')
             ->selectRaw('COALESCE(order_statistics.paypal_dispute_count, 0) as paypal_dispute_count')
             ->selectRaw('COALESCE(order_statistics.paypal_dispute_order_count, 0) as paypal_dispute_order_count')
+            ->selectRaw('COALESCE(order_statistics.order_count, 0) as order_count')
+            ->selectRaw('COALESCE(order_statistics.shipped_order_count, 0) as shipped_order_count')
+            ->selectRaw('COALESCE(order_statistics.delivered_order_count, 0) as delivered_order_count')
+            ->selectRaw('COALESCE(order_statistics.paypal_module_unit_count, 0) as paypal_module_unit_count')
+            ->selectRaw('COALESCE(order_statistics.paypal_module_revenue, 0) as paypal_module_revenue')
+            ->selectRaw('COALESCE(order_statistics.paypal_module_order_count, 0) as paypal_module_order_count')
+            ->selectRaw('COALESCE(order_statistics.paypal_module_refund_amount, 0) as paypal_module_refund_amount')
+            ->selectRaw('COALESCE(order_statistics.paypal_module_refund_count, 0) as paypal_module_refund_count')
+            ->selectRaw('COALESCE(order_statistics.paypal_module_dispute_count, 0) as paypal_module_dispute_count')
+            ->selectRaw('COALESCE(order_statistics.paypal_module_dispute_order_count, 0) as paypal_module_dispute_order_count')
+            ->selectRaw('COALESCE(order_statistics.paypal_module_dispute_amount, 0) as paypal_module_dispute_amount')
+            ->selectRaw('COALESCE(order_statistics.paypal_module_shipped_order_count, 0) as paypal_module_shipped_order_count')
+            ->selectRaw('COALESCE(order_statistics.paypal_module_delivered_order_count, 0) as paypal_module_delivered_order_count')
+            ->selectRaw('COALESCE(order_statistics.credit_card_module_unit_count, 0) as credit_card_module_unit_count')
+            ->selectRaw('COALESCE(order_statistics.credit_card_module_revenue, 0) as credit_card_module_revenue')
+            ->selectRaw('COALESCE(order_statistics.credit_card_module_order_count, 0) as credit_card_module_order_count')
+            ->selectRaw('COALESCE(order_statistics.credit_card_module_refund_amount, 0) as credit_card_module_refund_amount')
+            ->selectRaw('COALESCE(order_statistics.credit_card_module_refund_count, 0) as credit_card_module_refund_count')
+            ->selectRaw('COALESCE(order_statistics.credit_card_module_shipped_order_count, 0) as credit_card_module_shipped_order_count')
+            ->selectRaw('COALESCE(order_statistics.credit_card_module_delivered_order_count, 0) as credit_card_module_delivered_order_count')
             ->selectRaw('COALESCE(order_statistics.credit_card_refund_amount, 0) as credit_card_refund_amount')
             ->selectRaw('COALESCE(order_statistics.credit_card_refund_count, 0) as credit_card_refund_count')
             ->selectRaw('COALESCE(order_statistics.credit_card_refund_order_count, 0) as credit_card_refund_order_count')
@@ -339,7 +359,15 @@ class LogisticsProductStatisticsService
         // The Shopify tag is the stable source of truth for the independent
         // credit-card platform. Presentation gateway fields are not reliable.
         $creditCardTag = "(CASE WHEN JSON_VALID(COALESCE(product_orders.shopify_payload, '')) THEN JSON_SEARCH(JSON_EXTRACT(product_orders.shopify_payload, '$.tags'), 'one', '%CreditCardBy%') ELSE NULL END IS NOT NULL)";
-        $creditCard = "(NOT {$actualPaypal} AND {$creditCardTag})";
+        $creditCard = $creditCardTag;
+        $paypalModule = "({$actualPaypal} AND NOT {$creditCardTag})";
+        $quote = fn (string $value): string => $this->database()->getPdo()->quote($value);
+        $shipped = 'product_orders.logistics_status IN ('.implode(', ', array_map($quote, [
+            LogisticsOrder::LOGISTICS_IN_TRANSIT,
+            LogisticsOrder::LOGISTICS_EXCEPTION,
+            LogisticsOrder::LOGISTICS_DELIVERED,
+        ])).')';
+        $delivered = 'product_orders.logistics_status = '.$quote(LogisticsOrder::LOGISTICS_DELIVERED);
 
         return $this->database()->query()
             ->fromSub($orders, 'product_orders')
@@ -353,6 +381,26 @@ class LogisticsProductStatisticsService
             })
             ->leftJoinSub($creditCardRefunds, 'credit_card_refunds', 'credit_card_refunds.logistics_order_id', '=', 'product_orders.order_id')
             ->select('product_orders.product_key')
+            ->selectRaw('COUNT(*) as order_count')
+            ->selectRaw("SUM(CASE WHEN {$shipped} THEN 1 ELSE 0 END) as shipped_order_count")
+            ->selectRaw("SUM(CASE WHEN {$delivered} THEN 1 ELSE 0 END) as delivered_order_count")
+            ->selectRaw("SUM(CASE WHEN {$paypalModule} THEN COALESCE(product_orders.unit_count, 0) ELSE 0 END) as paypal_module_unit_count")
+            ->selectRaw("SUM(CASE WHEN {$paypalModule} THEN COALESCE(product_orders.revenue, 0) ELSE 0 END) as paypal_module_revenue")
+            ->selectRaw("SUM(CASE WHEN {$paypalModule} THEN 1 ELSE 0 END) as paypal_module_order_count")
+            ->selectRaw("SUM(CASE WHEN {$paypalModule} THEN COALESCE(paypal_refunds.refund_amount, 0) ELSE 0 END) as paypal_module_refund_amount")
+            ->selectRaw("SUM(CASE WHEN {$paypalModule} THEN COALESCE(paypal_refunds.refund_count, 0) ELSE 0 END) as paypal_module_refund_count")
+            ->selectRaw("SUM(CASE WHEN {$paypalModule} THEN COALESCE(paypal_disputes.dispute_count, 0) ELSE 0 END) as paypal_module_dispute_count")
+            ->selectRaw("SUM(CASE WHEN {$paypalModule} AND COALESCE(paypal_disputes.dispute_count, 0) > 0 THEN 1 ELSE 0 END) as paypal_module_dispute_order_count")
+            ->selectRaw("SUM(CASE WHEN {$paypalModule} THEN COALESCE(paypal_disputes.dispute_amount, 0) ELSE 0 END) as paypal_module_dispute_amount")
+            ->selectRaw("SUM(CASE WHEN {$paypalModule} AND {$shipped} THEN 1 ELSE 0 END) as paypal_module_shipped_order_count")
+            ->selectRaw("SUM(CASE WHEN {$paypalModule} AND {$delivered} THEN 1 ELSE 0 END) as paypal_module_delivered_order_count")
+            ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(product_orders.unit_count, 0) ELSE 0 END) as credit_card_module_unit_count")
+            ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(product_orders.revenue, 0) ELSE 0 END) as credit_card_module_revenue")
+            ->selectRaw("SUM(CASE WHEN {$creditCard} THEN 1 ELSE 0 END) as credit_card_module_order_count")
+            ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(credit_card_refunds.refund_amount, 0) ELSE 0 END) as credit_card_module_refund_amount")
+            ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(credit_card_refunds.refund_count, 0) ELSE 0 END) as credit_card_module_refund_count")
+            ->selectRaw("SUM(CASE WHEN {$creditCard} AND {$shipped} THEN 1 ELSE 0 END) as credit_card_module_shipped_order_count")
+            ->selectRaw("SUM(CASE WHEN {$creditCard} AND {$delivered} THEN 1 ELSE 0 END) as credit_card_module_delivered_order_count")
             ->selectRaw("SUM(CASE WHEN {$paid} THEN 1 ELSE 0 END) as paid_order_count")
             ->selectRaw("SUM(CASE WHEN {$paid} AND {$actualPaypal} THEN 1 ELSE 0 END) as paypal_order_count")
             ->selectRaw("SUM(CASE WHEN {$actualPaypal} THEN COALESCE(paypal_refunds.refund_amount, 0) ELSE 0 END) as paypal_refund_amount")
@@ -376,12 +424,15 @@ class LogisticsProductStatisticsService
         return $this->baseItemQuery($filters)
             ->selectRaw("{$key} as product_key")
             ->addSelect('orders.id as order_id')
+            ->selectRaw('SUM(COALESCE(items.quantity, 0)) as unit_count')
+            ->selectRaw('SUM(COALESCE(items.line_revenue_usd, 0)) as revenue')
             ->selectRaw('MAX(orders.paid_at) as paid_at')
             ->selectRaw('MAX(COALESCE(orders.paid_amount_usd, 0)) as paid_amount_usd')
             ->selectRaw('MAX(orders.paypal_account_id) as paypal_account_id')
             ->selectRaw('MAX(orders.paypal_association_source) as paypal_association_source')
             ->selectRaw('MAX(orders.payment_method) as payment_method')
             ->selectRaw('MAX(orders.payment_gateway) as payment_gateway')
+            ->selectRaw('MAX(orders.logistics_status) as logistics_status')
             ->selectRaw('MAX(orders.shopify_payload) as shopify_payload')
             ->groupByRaw("{$key}, orders.id");
     }
@@ -402,6 +453,7 @@ class LogisticsProductStatisticsService
             ->whereNotNull('dispute.logistics_order_id')
             ->select(['dispute.logistics_order_id', 'dispute.logistics_paypal_account_id'])
             ->selectRaw('COUNT(*) as dispute_count')
+            ->selectRaw("SUM(COALESCE(dispute.dispute_amount_usd, CASE WHEN UPPER(dispute.currency_code) = 'USD' THEN dispute.original_amount ELSE 0 END)) as dispute_amount")
             ->groupBy('dispute.logistics_order_id', 'dispute.logistics_paypal_account_id');
     }
 
@@ -562,6 +614,98 @@ class LogisticsProductStatisticsService
             'profit_rate' => $row->profit_rate === null ? null : round((float) $row->profit_rate, 2),
             'refund_rate' => round((float) $row->combined_refund_rate, 2),
             'decision' => (string) $row->decision,
+            'overview_modules' => $this->overviewModulesFromRow($row),
+        ];
+    }
+
+    /**
+     * The product list already computes these values from the same source
+     * records.  Keeping a compact overview here lets the modal open without
+     * first loading every order, refund and dispute row for the product.
+     *
+     * @return array{overall:array<string,mixed>,paypal:array<string,mixed>,credit_card:array<string,mixed>}
+     */
+    private function overviewModulesFromRow(object $row): array
+    {
+        $paypal = $this->overviewModuleFromAggregate(
+            (float) $row->paypal_module_unit_count,
+            (int) $row->paypal_module_order_count,
+            (float) $row->paypal_module_revenue,
+            (float) $row->paypal_module_refund_amount,
+            (int) $row->paypal_module_refund_count,
+            (int) $row->paypal_module_shipped_order_count,
+            (int) $row->paypal_module_delivered_order_count,
+            (int) $row->paypal_module_dispute_count,
+            (int) $row->paypal_module_dispute_order_count,
+            (float) $row->paypal_module_dispute_amount,
+            true,
+        );
+        $creditCard = $this->overviewModuleFromAggregate(
+            (float) $row->credit_card_module_unit_count,
+            (int) $row->credit_card_module_order_count,
+            (float) $row->credit_card_module_revenue,
+            (float) $row->credit_card_module_refund_amount,
+            (int) $row->credit_card_module_refund_count,
+            (int) $row->credit_card_module_shipped_order_count,
+            (int) $row->credit_card_module_delivered_order_count,
+            0,
+            0,
+            0.0,
+            false,
+        );
+
+        return [
+            'overall' => $this->overviewModuleFromAggregate(
+                (float) $row->sales,
+                (int) $row->order_count,
+                (float) $row->revenue,
+                $paypal['refund_amount'] + $creditCard['refund_amount'],
+                $paypal['refund_count'] + $creditCard['refund_count'],
+                (int) $row->shipped_order_count,
+                (int) $row->delivered_order_count,
+                (int) $row->paypal_module_dispute_count,
+                (int) $row->paypal_module_dispute_order_count,
+                (float) $row->paypal_module_dispute_amount,
+                true,
+            ),
+            'paypal' => $paypal,
+            'credit_card' => $creditCard,
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function overviewModuleFromAggregate(
+        float $unitCount,
+        int $orderCount,
+        float $receivedAmount,
+        float $refundAmount,
+        int $refundCount,
+        int $shippingCount,
+        int $deliveryCount,
+        int $disputeCount,
+        int $disputeOrderCount,
+        float $disputeAmount,
+        bool $disputesApplicable,
+    ): array {
+        return [
+            'unit_count' => round($unitCount, 4),
+            'order_count' => $orderCount,
+            'received_amount' => round($receivedAmount, 4),
+            'refund_amount' => round($refundAmount, 4),
+            'refund_count' => $refundCount,
+            'refund_rate' => $receivedAmount > 0 ? round($refundAmount / $receivedAmount * 100, 2) : 0.0,
+            'shipping_count' => $shippingCount,
+            'delivery_count' => $deliveryCount,
+            'shipping_rate' => $orderCount > 0 ? round($shippingCount / $orderCount * 100, 2) : 0.0,
+            'delivery_rate' => $shippingCount > 0 ? round($deliveryCount / $shippingCount * 100, 2) : 0.0,
+            'dispute_applicable' => $disputesApplicable,
+            'dispute_count' => $disputeCount,
+            'dispute_order_count' => $disputeOrderCount,
+            'dispute_amount' => round($disputeAmount, 4),
+            'dispute_rate' => $orderCount > 0 ? round($disputeOrderCount / $orderCount * 100, 2) : 0.0,
+            // Reason detail needs the explicit dispute records and is filled
+            // after the user opens a detail tab.
+            'dispute_reason_breakdown' => [],
         ];
     }
 
