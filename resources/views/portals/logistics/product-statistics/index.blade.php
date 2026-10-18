@@ -32,7 +32,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261018-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261018-8">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261015-2">
 @endpush
 
@@ -129,7 +129,7 @@
                             'credit_card_refund_amount' => 'credit_card_refund_amount', 'credit_card_refund_rate' => 'credit_card_refund_rate', 'combined_refund_rate' => 'combined_refund_rate',
                             'profit' => 'profit', 'profit_rate' => 'profit_rate', 'decision' => 'decision',
                         ] as $sort => $label)
-                            <th><button type="button" class="product-statistics-sort" data-sort="{{ $sort }}">{{ __('logistics.product_statistics.headers.'.$label) }} @if(isset($productHeaderTooltips[$sort]))<i class="fa fa-question-circle product-statistics-header-help" title="{{ $productHeaderTooltips[$sort] }}" aria-label="{{ $productHeaderTooltips[$sort] }}"></i>@endif <i class="fa fa-sort"></i></button></th>
+                            <th><button type="button" class="product-statistics-sort" data-sort="{{ $sort }}">{{ __('logistics.product_statistics.headers.'.$label) }} @if(isset($productHeaderTooltips[$sort]))<i class="fa fa-question-circle product-statistics-header-help" title="{{ $productHeaderTooltips[$sort] }}" aria-label="{{ $productHeaderTooltips[$sort] }}"></i>@endif <i class="fa fa-sort product-statistics-sort-indicator"></i></button></th>
                         @endforeach
                         <th>{{ __('logistics.common.operation') }}</th>
                     </tr></thead>
@@ -200,6 +200,6 @@
     <script>
         window.ErpLogisticsProductStatistics = @json($productStatisticsClientConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/product-statistics.js?v=20261018-2"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-statistics.js?v=20261018-10"></script>
     <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261015-2"></script>
 @endpush

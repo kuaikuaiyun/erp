@@ -8,7 +8,7 @@
     var decisions = config.decisions || {};
     var labels = config.labels || {};
     var state = { page: Number(pagination.current_page) || 1, sort: config.sort || '', direction: config.direction || '', selected: {} };
-    var detailState = { product: null, sorts: {}, filters: {}, pages: {}, activeTab: 'overview' };
+    var detailState = { product: null, detailLoaded: false, loadingDetail: false, sorts: {}, filters: {}, pages: {}, perPages: {}, activeTab: 'overview' };
     var body = document.getElementById('product-statistics-body');
     var tableScroll = document.querySelector('.product-statistics-table-scroll');
     var empty = document.getElementById('product-statistics-empty');
@@ -174,7 +174,8 @@
     }
     function renderSortIndicators() {
         Array.prototype.slice.call(document.querySelectorAll('.product-statistics-sort')).forEach(function (button) {
-            var icon = button.querySelector('i');
+            var icon = button.querySelector('.product-statistics-sort-indicator');
+            if (!icon) return;
             if (state.sort && button.dataset.sort === state.sort) {
                 button.classList.add('is-active');
                 icon.className = 'fa fa-sort-' + (state.direction === 'asc' ? 'asc' : 'desc');
@@ -202,26 +203,54 @@
         url.searchParams.set('product_id', productId);
         return url.toString();
     }
-    function showDetailLoading(product) {
-        detailState = { product: null, sorts: {}, filters: {}, pages: {}, activeTab: 'overview' };
+    function detailTabElement(tab) {
+        return document.getElementById('product-statistics-' + String(tab || 'overview').replace(/_/g, '-'));
+    }
+    function showDetailTabLoading(tab) {
+        var container = detailTabElement(tab);
+        if (!container) return;
+        container.innerHTML = '<div class="alert alert-info"><i class="fa fa-spinner fa-spin"></i> ' + escapeHtml(t('detailLoading')) + '</div>';
+    }
+    function clearDeferredDetailTabs() {
+        ['variants', 'paypal_orders', 'credit_card_orders', 'refunds', 'disputes', 'orders'].forEach(function (tab) {
+            var container = detailTabElement(tab);
+            if (container) container.innerHTML = '';
+        });
+    }
+    function openProductDetail(product) {
+        detailState = { product: product, detailLoaded: false, loadingDetail: false, sorts: {}, filters: {}, pages: {}, activeTab: 'overview' };
         document.getElementById('product-statistics-detail-title').textContent = t('detailTitle');
         document.getElementById('product-statistics-detail-identity').innerHTML = productThumb(product) + '<div><strong>' + escapeHtml(product.name) + '</strong><span>' + escapeHtml(productIdentity(product)) + '</span></div>';
-        document.getElementById('product-statistics-overview').innerHTML = '<div class="alert alert-info"><i class="fa fa-spinner fa-spin"></i> ' + escapeHtml(t('detailLoading')) + '</div>';
-        ['product-statistics-variants', 'product-statistics-paypal-orders', 'product-statistics-credit-card-orders', 'product-statistics-refunds', 'product-statistics-disputes', 'product-statistics-orders'].forEach(function (id) {
-            document.getElementById(id).innerHTML = '';
-        });
+        showDetailTabLoading('overview');
+        clearDeferredDetailTabs();
         document.getElementById('product-statistics-detail-filters').hidden = true;
         if ($) {
             $('#product-statistics-detail-modal .nav-tabs a[href="#product-statistics-overview"]').tab('show');
             $('#product-statistics-detail-modal').modal('show');
         }
+        ensureDetailLoaded(true);
     }
-    function showDetailLoadFailure(message) {
-        document.getElementById('product-statistics-overview').innerHTML = '<div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> ' + escapeHtml(message || t('detailLoadFailed')) + '</div>';
+    function showDetailLoadFailure(tab, message) {
+        var container = detailTabElement(tab);
+        if (!container) return;
+        container.innerHTML = '<div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> ' + escapeHtml(message || t('detailLoadFailed')) + '</div>';
     }
-    function loadProductDetail(product) {
-        showDetailLoading(product);
-        window.fetch(detailRequestUrl(product.id), {
+    function ensureDetailLoaded(force) {
+        if (!detailState.product) return;
+        if (detailState.detailLoaded) {
+            renderDetailFilters();
+            renderDetailTables();
+            return;
+        }
+        if (!force && detailState.activeTab === 'overview') return;
+        if (detailState.loadingDetail) {
+            showDetailTabLoading(detailState.activeTab);
+            return;
+        }
+        detailState.loadingDetail = true;
+        document.getElementById('product-statistics-detail-filters').hidden = true;
+        showDetailTabLoading(detailState.activeTab);
+        window.fetch(detailRequestUrl(detailState.product.id), {
             headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
             credentials: 'same-origin'
         }).then(function (response) {
@@ -230,9 +259,15 @@
                 return payload.product;
             });
         }).then(function (detail) {
-            fillModal(detail);
+            detailState.product = detail;
+            detailState.detailLoaded = true;
+            detailState.loadingDetail = false;
+            renderOverview(detail);
+            renderDetailFilters();
+            renderDetailTables();
         }).catch(function (error) {
-            showDetailLoadFailure(error && error.message ? error.message : t('detailLoadFailed'));
+            detailState.loadingDetail = false;
+            showDetailLoadFailure(detailState.activeTab, error && error.message ? error.message : t('detailLoadFailed'));
         });
     }
     function openImagePreview(trigger) {
@@ -243,6 +278,64 @@
         if ($) $('#product-statistics-image-modal').modal('show');
     }
     function detailMetric(label, value, className) { return '<div class="product-statistics-detail-metric ' + (className || '') + '"><span>' + escapeHtml(label) + '</span><strong>' + value + '</strong></div>'; }
+    function replaceTokens(template, values) {
+        return Object.keys(values || {}).reduce(function (result, key) {
+            return result.split(':' + key).join(String(values[key]));
+        }, String(template || ''));
+    }
+    function overviewMetric(label, value, formula, className) {
+        return '<div class="product-statistics-overview-metric ' + (className || '') + '"><span>' + escapeHtml(label) + '</span><strong>' + value + '</strong>' + (formula ? '<small>' + escapeHtml(formula) + '</small>' : '') + '</div>';
+    }
+    function overviewDisputes(subject) {
+        if (!subject.dispute_applicable) {
+            return '<div class="product-statistics-overview-disputes is-not-applicable"><i class="fa fa-info-circle"></i> ' + escapeHtml(t('overviewDisputeNotApplicable')) + '</div>';
+        }
+        var disputes = Array.isArray(subject.dispute_reason_breakdown) ? subject.dispute_reason_breakdown : [];
+        var summary = replaceTokens(t('overviewDisputeCounts'), {
+            orders: formatNumber(subject.dispute_order_count),
+            records: formatNumber(subject.dispute_count),
+            amount: formatMoney(subject.dispute_amount)
+        });
+        var rows = disputes.length ? disputes.map(function (dispute) {
+            return '<li>' + escapeHtml(replaceTokens(t('overviewDisputeReason'), {
+                reason: dispute.reason || blank(),
+                count: formatNumber(dispute.count),
+                ratio: formatRate(dispute.ratio).replace('%', ''),
+                amount: formatMoney(dispute.amount)
+            })) + '</li>';
+        }).join('') : '<li>' + escapeHtml(blank()) + '</li>';
+
+        return '<div class="product-statistics-overview-disputes"><div class="product-statistics-overview-disputes-heading"><span>' + escapeHtml(t('overviewDisputeSummary')) + '</span></div><p class="product-statistics-overview-disputes-summary">' + escapeHtml(summary) + '</p><h5>' + escapeHtml(t('overviewDisputeBreakdown')) + '</h5><ul>' + rows + '</ul><small class="product-statistics-overview-dispute-formula">' + escapeHtml(t('overviewDisputeFormula')) + '</small></div>';
+    }
+    function overviewModule(title, subject, className) {
+        subject = subject || {};
+        var received = formatMoney(subject.received_amount);
+        var refund = formatMoney(subject.refund_amount);
+        var refundFormula = replaceTokens(t('overviewRefundFormula'), { refund: refund, received: received });
+        var shippingFormula = replaceTokens(t('overviewShippingFormula'), {
+            shipped: formatNumber(subject.shipping_count),
+            orders: formatNumber(subject.order_count)
+        });
+        var deliveryFormula = replaceTokens(t('overviewDeliveryFormula'), {
+            delivered: formatNumber(subject.delivery_count),
+            shipped: formatNumber(subject.shipping_count)
+        });
+        var disputeRateFormula = replaceTokens(t('overviewDisputeRateFormula'), {
+            disputed: formatNumber(subject.dispute_order_count),
+            orders: formatNumber(subject.order_count)
+        });
+
+        return '<section class="product-statistics-overview-module ' + className + '"><h4>' + escapeHtml(title) + '</h4><div class="product-statistics-overview-metrics">'
+            + overviewMetric(t('overviewUnitCount'), formatNumber(subject.unit_count))
+            + overviewMetric(t('overviewOrderCount'), formatNumber(subject.order_count))
+            + overviewMetric(t('overviewReceivedAmount'), received)
+            + overviewMetric(t('overviewRefundAmount'), refund)
+            + overviewMetric(t('overviewRefundRate'), formatRate(subject.refund_rate), refundFormula)
+            + (subject.dispute_applicable ? overviewMetric(t('overviewDisputeRate'), formatRate(subject.dispute_rate), disputeRateFormula, 'is-dispute-rate') : '')
+            + overviewMetric(t('overviewShippingRate'), formatRate(subject.shipping_rate), shippingFormula)
+            + overviewMetric(t('overviewDeliveryRate'), formatRate(subject.delivery_rate), deliveryFormula)
+            + '</div>' + overviewDisputes(subject) + '</section>';
+    }
     function negativeMoney(value) { return isNumeric(value) ? '-' + formatMoney(Math.abs(number(value))) : blank(); }
     function detailBreakdown(subject) {
         return '<div class="product-statistics-breakdown"><h5>' + escapeHtml(t('profitBreakdown')) + '</h5>'
@@ -286,6 +379,10 @@
         return detailState.filters[table];
     }
     function detailPage(table) { return Number(detailState.pages[table] || 1); }
+    function detailPerPage(table) {
+        var perPage = Number(detailState.perPages[table] || 10);
+        return [5, 10, 20].indexOf(perPage) === -1 ? 10 : perPage;
+    }
     function detailText(row) {
         return Object.keys(row || {}).map(function (key) {
             var value = row[key];
@@ -306,7 +403,7 @@
     }
     function detailPaginatedRows(table, rows) {
         var filtered = detailFilteredRows(table, rows);
-        var perPage = 10;
+        var perPage = detailPerPage(table);
         var lastPage = Math.max(1, Math.ceil(filtered.length / perPage));
         var page = Math.min(detailPage(table), lastPage);
         detailState.pages[table] = page;
@@ -326,19 +423,29 @@
     }
     function detailPagination(table, pageData) {
         var pages = [];
-        if (pageData.total > 10) {
-            for (var page = Math.max(1, pageData.page - 2); page <= Math.min(pageData.lastPage, pageData.page + 2); page++) {
-                pages.push('<button type="button" class="btn btn-default btn-xs product-statistics-detail-page' + (page === pageData.page ? ' is-active' : '') + '" data-detail-table="' + escapeHtml(table) + '" data-detail-page="' + page + '">' + page + '</button>');
-            }
+        var start = Math.max(1, pageData.page - 2);
+        var end = Math.min(pageData.lastPage, start + 4);
+        start = Math.max(1, end - 4);
+        for (var page = start; page <= end; page++) {
+            pages.push('<button type="button" class="btn btn-default btn-sm product-statistics-detail-page' + (page === pageData.page ? ' is-active' : '') + '" data-detail-table="' + escapeHtml(table) + '" data-detail-page="' + page + '">' + page + '</button>');
         }
         var summary = pageData.total ? (t('detailPageSummary') || '').replace(':from', pageData.from).replace(':to', pageData.to).replace(':total', pageData.total) : (t('detailPageEmpty') || '');
-        return '<div class="product-statistics-detail-pagination"><span>' + escapeHtml(summary) + '</span><div>' + pages.join('') + '</div></div>';
+        var perPage = detailPerPage(table);
+        return '<div class="product-statistics-detail-pagination">'
+            + '<span class="product-statistics-detail-page-summary">' + escapeHtml(summary) + '</span>'
+            + '<div class="product-statistics-detail-page-controls">'
+            + '<button type="button" class="btn btn-default btn-sm product-statistics-detail-page" data-detail-table="' + escapeHtml(table) + '" data-detail-page="' + Math.max(1, pageData.page - 1) + '" aria-label="' + escapeHtml(t('previousPage')) + '"' + (pageData.page <= 1 ? ' disabled' : '') + '><i class="fa fa-angle-left"></i></button>'
+            + pages.join('')
+            + '<button type="button" class="btn btn-default btn-sm product-statistics-detail-page" data-detail-table="' + escapeHtml(table) + '" data-detail-page="' + Math.min(pageData.lastPage, pageData.page + 1) + '" aria-label="' + escapeHtml(t('nextPage')) + '"' + (pageData.page >= pageData.lastPage ? ' disabled' : '') + '><i class="fa fa-angle-right"></i></button>'
+            + '</div>'
+            + '<label class="product-statistics-detail-page-size"><span>' + escapeHtml(t('perPage')) + '</span><select class="form-control input-sm product-statistics-detail-page-size-select" data-detail-table="' + escapeHtml(table) + '"><option value="5"' + (perPage === 5 ? ' selected' : '') + '>5</option><option value="10"' + (perPage === 10 ? ' selected' : '') + '>10</option><option value="20"' + (perPage === 20 ? ' selected' : '') + '>20</option></select><span>' + escapeHtml(t('items')) + '</span></label>'
+            + '</div>';
     }
     function renderDetailFilters() {
         var container = document.getElementById('product-statistics-detail-filters');
         var product = detailState.product;
         var table = detailState.activeTab;
-        if (!container || !product || table === 'overview') { if (container) container.hidden = true; return; }
+        if (!container || !product || !detailState.detailLoaded || table === 'overview') { if (container) container.hidden = true; return; }
         var rows = detailRowsFor(table, product);
         var filters = detailFilter(table);
         var placeholder = table === 'refunds' ? t('detailFilterRefundsPlaceholder') : (table === 'disputes' ? t('detailFilterDisputesPlaceholder') : (table === 'variants' ? t('detailFilterVariantsPlaceholder') : t('detailFilterOrdersPlaceholder')));
@@ -425,33 +532,22 @@
     }
     function renderDetailTables() {
         var product = detailState.product;
-        if (!product) return;
+        if (!product || !detailState.detailLoaded) return;
         var related = product.related_orders || [];
-        renderVariants(product);
-        renderOrdersTable('product-statistics-paypal-orders', 'paypal_orders', related.filter(function (order) { return order.payment_kind === 'paypal'; }));
-        renderOrdersTable('product-statistics-credit-card-orders', 'credit_card_orders', related.filter(function (order) { return order.payment_kind === 'credit_card'; }));
-        renderRefunds(product);
-        renderDisputes(product);
-        renderOrdersTable('product-statistics-orders', 'orders', related);
+        if (detailState.activeTab === 'variants') renderVariants(product);
+        if (detailState.activeTab === 'paypal_orders') renderOrdersTable('product-statistics-paypal-orders', 'paypal_orders', related.filter(function (order) { return order.payment_kind === 'paypal'; }));
+        if (detailState.activeTab === 'credit_card_orders') renderOrdersTable('product-statistics-credit-card-orders', 'credit_card_orders', related.filter(function (order) { return order.payment_kind === 'credit_card'; }));
+        if (detailState.activeTab === 'refunds') renderRefunds(product);
+        if (detailState.activeTab === 'disputes') renderDisputes(product);
+        if (detailState.activeTab === 'orders') renderOrdersTable('product-statistics-orders', 'orders', related);
     }
-    function fillModal(product) {
-        detailState = { product: product, sorts: {}, filters: {}, pages: {}, activeTab: 'overview' };
-        document.getElementById('product-statistics-detail-title').textContent = t('detailTitle');
-        document.getElementById('product-statistics-detail-identity').innerHTML = productThumb(product) + '<div><strong>' + escapeHtml(product.name) + '</strong><span>' + escapeHtml(productIdentity(product)) + '</span></div>' + decisionBadge(product.decision);
-        document.getElementById('product-statistics-overview').innerHTML = '<div class="product-statistics-detail-grid">'
-            + detailMetric(t('sales'), formatNumber(product.sales)) + detailMetric(t('revenue'), formatMoney(product.revenue))
-            + detailMetric(t('paypalRefundAmount'), formatMoney(product.paypal_refund_amount)) + detailMetric(t('paypalRefundRate'), formatRate(product.paypal_refund_rate))
-            + detailMetric(t('paypalDisputeCount'), formatNumber(product.paypal_dispute_count)) + detailMetric(t('paypalDisputeRate'), formatRate(product.paypal_dispute_rate))
-            + detailMetric(t('creditCardRefundAmount'), formatMoney(product.credit_card_refund_amount)) + detailMetric(t('creditCardRefundRate'), formatRate(product.credit_card_refund_rate))
-            + detailMetric(t('combinedRefundRate'), formatRate(product.combined_refund_rate)) + detailMetric(t('actualProfit'), formatMoney(product.actual_profit), isNumeric(product.actual_profit) && number(product.actual_profit) < 0 ? 'is-negative' : '')
-            + detailMetric(t('shippingRate'), formatRate(product.shipping_rate)) + detailMetric(t('deliveryRate'), formatRate(product.delivery_rate))
-            + '</div>' + detailStoreOrderDistribution(product) + detailBreakdown(product) + '<div class="alert alert-info"><i class="fa fa-info-circle"></i> ' + escapeHtml(t('crossProductNote')) + '<br><i class="fa fa-info-circle"></i> ' + escapeHtml(t('creditCardDisputeNote')) + '</div>';
-        renderDetailTables();
-        renderDetailFilters();
-        if ($) {
-            $('#product-statistics-detail-modal .nav-tabs a[href="#product-statistics-overview"]').tab('show');
-            $('#product-statistics-detail-modal').modal('show');
-        }
+    function renderOverview(product) {
+        var overviewModules = product.overview_modules || {};
+        document.getElementById('product-statistics-overview').innerHTML = '<div class="product-statistics-overview-modules">'
+            + overviewModule(t('overviewOverall'), overviewModules.overall, 'is-overall')
+            + overviewModule(t('overviewPayPal'), overviewModules.paypal, 'is-paypal')
+            + overviewModule(t('overviewCreditCard'), overviewModules.credit_card, 'is-credit-card')
+            + '</div>' + (detailState.detailLoaded ? detailStoreOrderDistribution(product) : '');
     }
     function appendHiddenInput(container, name, value) { var input = document.createElement('input'); input.type = 'hidden'; input.name = name; input.value = value; container.appendChild(input); }
     function navigate(params) {
@@ -497,6 +593,7 @@
         $('#product-statistics-detail-modal').on('shown.bs.tab', 'a[data-product-detail-tab]', function (event) {
             detailState.activeTab = event.target.dataset.productDetailTab || 'overview';
             renderDetailFilters();
+            if (detailState.activeTab !== 'overview') ensureDetailLoaded();
         });
     }
     document.addEventListener('click', function (event) {
@@ -513,6 +610,7 @@
         }
         var detailPage = event.target.closest('.product-statistics-detail-page');
         if (detailPage) {
+            if (detailPage.disabled) return;
             detailState.pages[detailPage.dataset.detailTable] = Number(detailPage.dataset.detailPage) || 1;
             renderDetailTables();
             return;
@@ -530,7 +628,7 @@
         }
         var target = event.target.closest('.product-statistics-view, .product-statistics-page-button, .product-statistics-sort');
         if (!target) return;
-        if (target.classList.contains('product-statistics-view')) { var product = findProduct(target.dataset.productId); if (product) loadProductDetail(product); return; }
+        if (target.classList.contains('product-statistics-view')) { var product = findProduct(target.dataset.productId); if (product) openProductDetail(product); return; }
         if (target.classList.contains('product-statistics-page-button')) { navigate({ page: number(target.dataset.page) || 1 }); return; }
         if (target.classList.contains('product-statistics-sort')) {
             var sort = target.dataset.sort;
@@ -539,6 +637,14 @@
             else if (state.sort === sort && state.direction === 'asc') { sort = ''; direction = ''; }
             navigate({ sort: sort, direction: direction, page: 1 });
         }
+    });
+    document.addEventListener('change', function (event) {
+        var pageSize = event.target.closest('.product-statistics-detail-page-size-select');
+        if (!pageSize) return;
+        var table = pageSize.dataset.detailTable;
+        detailState.perPages[table] = Number(pageSize.value) || 10;
+        detailState.pages[table] = 1;
+        renderDetailTables();
     });
     document.addEventListener('keydown', function (event) {
         if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('.product-statistics-thumb.is-previewable')) {
