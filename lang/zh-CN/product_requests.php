@@ -33,6 +33,8 @@ return [
         'product_image_label' => '产品图',
         'product_image_help' => '产品图由导入 Excel 的主图自动保存，如需更换请重新导入。',
         'product_name' => '商品名称',
+        'deleted' => '链接 SKU 记录已删除。',
+        'delete_confirm' => '确定要删除这条链接 SKU 记录吗？删除后链接的 SKU、PCL、图片数据都会被移除，且不可恢复。',
         'updated' => 'SKU 已保存',
     ],
     'import' => [

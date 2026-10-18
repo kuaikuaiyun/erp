@@ -304,6 +304,29 @@ class ProductRequestController extends Controller
         return $user->username === 'kky_boss';
     }
 
+    /** 链接 SKU 记录删除：同时清理产品图、实拍图等磁盘文件，仅移除链接级数据不影响流程记录 */
+    public function linkSkuDestroy(Request $request, ProductRequestLinkSku $linkSku): JsonResponse|RedirectResponse
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::PROCUREMENT_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        abort_unless($this->access->canInspectProcurement($context['user']), 403);
+
+        $disk = Storage::disk('local');
+        foreach (array_values((array) ($linkSku->images ?? [])) as $imagePath) {
+            if (is_string($imagePath) && $imagePath !== '') {
+                $disk->delete($imagePath);
+            }
+        }
+        if (is_string($linkSku->product_image) && $linkSku->product_image !== '') {
+            $disk->delete($linkSku->product_image);
+        }
+        $linkSku->delete();
+
+        return $this->modalSuccess($request, __('product_requests.link_skus.deleted'), 'product-requests.link-skus.index');
+    }
+
     /** 确认复查：仅待复查状态可变更 */
     public function linkSkuReviewDone(Request $request, ProductRequestLinkSku $linkSku): RedirectResponse|Response
     {
@@ -1011,6 +1034,9 @@ class ProductRequestController extends Controller
                 $this->workflow->copyStageAttachments($reuseSource, $locked, ProductRequestAttachment::STAGE_PROCUREMENT, $context['user']);
                 $locked->forceFill(['reused_from_product_request_id' => $reuseSource->getKey()])->save();
             }
+
+            // 系统添加的实拍图同步复制到链接 SKU 记录，PCL SKU 管理中可统一查看与编辑
+            $this->syncLinkSellerImages($locked);
 
             // 仓库验收不通过后，采购重新检验通过即重新进入仓库验收流程
             if ($locked->warehouse_acceptance_result === ProductRequest::WAREHOUSE_REJECTED) {
@@ -2102,6 +2128,59 @@ class ProductRequestController extends Controller
             ['supplier_url_hash' => $hash],
             ['supplier_url' => $url, 'skus' => implode(',', $skus)],
         );
+    }
+
+    /**
+     * 把提报记录采购阶段的实拍图同步复制到链接 SKU 记录（PCL SKU 管理可编辑）：
+     * 复制为独立文件，删除链接图片不影响流程附件；按内容去重，合计最多 3 张
+     */
+    private function syncLinkSellerImages(ProductRequest $productRequest): void
+    {
+        $hash = (string) $productRequest->supplier_url_hash;
+        if ($hash === '') {
+            return;
+        }
+        $linkSku = ProductRequestLinkSku::query()->where('supplier_url_hash', $hash)->first();
+        if (!$linkSku) {
+            return;
+        }
+
+        $disk = Storage::disk('local');
+        $images = array_values((array) ($linkSku->images ?? []));
+        $known = [];
+        foreach ($images as $path) {
+            if (is_string($path) && $path !== '' && $disk->exists($path)) {
+                $known[md5((string) $disk->get($path))] = true;
+            }
+        }
+
+        $attachments = $productRequest->attachments()
+            ->where('stage', ProductRequestAttachment::STAGE_PROCUREMENT)
+            ->orderBy('sort')
+            ->get();
+        foreach ($attachments as $attachment) {
+            if (count($images) >= 3) {
+                break;
+            }
+            $sourceDisk = Storage::disk($attachment->disk ?: 'local');
+            $path = (string) $attachment->path;
+            if ($path === '' || !$sourceDisk->exists($path)) {
+                continue;
+            }
+            $md5 = md5((string) $sourceDisk->get($path));
+            if (isset($known[$md5])) {
+                continue;
+            }
+            $extension = strtolower((string) pathinfo($path, PATHINFO_EXTENSION));
+            $newPath = 'link-skus/'.$linkSku->getKey().'/'.Str::uuid().($extension !== '' ? '.'.$extension : '.jpg');
+            $disk->put($newPath, $sourceDisk->get($path));
+            $images[] = $newPath;
+            $known[$md5] = true;
+        }
+
+        if ($images !== array_values((array) ($linkSku->images ?? []))) {
+            $linkSku->forceFill(['images' => $images === [] ? null : $images])->save();
+        }
     }
 
     /** @return list<string> */

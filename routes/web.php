@@ -68,6 +68,7 @@ Route::get('/api/procurement-inspections/sku-suggestions', [ProductRequestContro
 Route::get('/link-sku-manager', [ProductRequestController::class, 'linkSkuIndex'])->name('product-requests.link-skus.index');
 Route::get('/link-sku-manager/{linkSku}/edit', [ProductRequestController::class, 'linkSkuEdit'])->name('product-requests.link-skus.edit');
 Route::put('/link-sku-manager/{linkSku}', [ProductRequestController::class, 'linkSkuUpdate'])->name('product-requests.link-skus.update');
+Route::delete('/link-sku-manager/{linkSku}', [ProductRequestController::class, 'linkSkuDestroy'])->name('product-requests.link-skus.destroy');
 Route::post('/link-sku-manager/{linkSku}/review', [ProductRequestController::class, 'linkSkuReviewDone'])->name('product-requests.link-skus.review');
 Route::get('/link-sku-manager/{linkSku}/images/{index}', [ProductRequestController::class, 'linkSkuImage'])->name('product-requests.link-skus.image');
 Route::get('/link-sku-manager/{linkSku}/product-image', [ProductRequestController::class, 'linkSkuProductImage'])->name('product-requests.link-skus.product-image');
