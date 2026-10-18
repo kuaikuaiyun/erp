@@ -17,11 +17,9 @@ return [
     'paypal_dispute' => [
         'type_status' => '纠纷类型 / 状态',
         'outcome' => '处理结果',
-        'types' => [
-            'INQUIRY' => '索偿',
-            'CHARGEBACK' => '撤销付款',
-            'PRE_ARBITRATION' => '预仲裁',
-            'ARBITRATION' => '仲裁',
+        'channels' => [
+            'INTERNAL' => '索偿',
+            'EXTERNAL' => '撤销付款',
         ],
         'reasons' => [
             'MERCHANDISE_OR_SERVICE_NOT_RECEIVED' => '未收到商品或服务',
@@ -48,7 +46,7 @@ return [
             'RESOLVED_WITH_REFUND' => '已退款解决',
             'RESOLVED_WITH_PAYOUT' => '已赔付解决',
         ],
-        'unknown_type' => '其他纠纷类型',
+        'unknown_type' => '待确认',
         'unknown_reason' => '其他纠纷原因',
         'unknown_status' => '未知纠纷状态',
         'unknown_outcome' => '未返回处理结果',

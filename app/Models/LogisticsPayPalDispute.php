@@ -53,9 +53,9 @@ class LogisticsPayPalDispute extends Model
         return $this->hasMany(LogisticsPayPalDisputeRefund::class, 'logistics_paypal_dispute_id');
     }
 
-    public static function typeLabelFor(mixed $type): string
+    public static function typeLabelFor(mixed $channel): string
     {
-        return self::enumLabel('types', $type, 'unknown_type');
+        return self::enumLabel('channels', $channel, 'unknown_type');
     }
 
     public static function reasonLabelFor(mixed $reason): string
@@ -75,7 +75,7 @@ class LogisticsPayPalDispute extends Model
 
     public function typeLabel(): string
     {
-        return self::typeLabelFor($this->life_cycle_stage);
+        return self::typeLabelFor($this->channel);
     }
 
     public function reasonLabel(): string
