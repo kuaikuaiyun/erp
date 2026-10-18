@@ -221,21 +221,22 @@
         detailState = { product: product, detailLoaded: false, loadingDetail: false, sorts: {}, filters: {}, pages: {}, activeTab: 'overview' };
         document.getElementById('product-statistics-detail-title').textContent = t('detailTitle');
         document.getElementById('product-statistics-detail-identity').innerHTML = productThumb(product) + '<div><strong>' + escapeHtml(product.name) + '</strong><span>' + escapeHtml(productIdentity(product)) + '</span></div>';
-        renderOverview(product);
+        showDetailTabLoading('overview');
         clearDeferredDetailTabs();
         document.getElementById('product-statistics-detail-filters').hidden = true;
         if ($) {
             $('#product-statistics-detail-modal .nav-tabs a[href="#product-statistics-overview"]').tab('show');
             $('#product-statistics-detail-modal').modal('show');
         }
+        ensureDetailLoaded(true);
     }
     function showDetailLoadFailure(tab, message) {
         var container = detailTabElement(tab);
         if (!container) return;
         container.innerHTML = '<div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> ' + escapeHtml(message || t('detailLoadFailed')) + '</div>';
     }
-    function ensureDetailLoaded() {
-        if (detailState.activeTab === 'overview' || detailState.detailLoaded || !detailState.product) return;
+    function ensureDetailLoaded(force) {
+        if ((!force && detailState.activeTab === 'overview') || detailState.detailLoaded || !detailState.product) return;
         if (detailState.loadingDetail) {
             showDetailTabLoading(detailState.activeTab);
             return;
