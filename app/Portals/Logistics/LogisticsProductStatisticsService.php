@@ -327,12 +327,13 @@ class LogisticsProductStatisticsService
         $creditCardRefunds = $this->creditCardRefundAggregateQuery();
         $paid = '(product_orders.paid_at IS NOT NULL OR COALESCE(product_orders.paid_amount_usd, 0) > 0)';
         $actualPaypal = "(product_orders.paypal_account_id IS NOT NULL AND product_orders.paypal_association_source = 'actual_transaction')";
-        $paymentChannel = "LOWER(CONCAT_WS(' ', COALESCE(product_orders.payment_method, ''), COALESCE(product_orders.payment_gateway, '')))";
         // Use the UTF-8 bytes for “信用卡” to prevent a collation conflict between
         // database fields (for example utf8mb4_0900_ai_ci) and the connection default.
         // The English gateway values remain normal case-insensitive LIKE comparisons.
-        $creditCardChinese = "HEX({$paymentChannel}) LIKE '%E4BFA1E794A8E58DA1%'";
-        $creditCard = "(NOT {$actualPaypal} AND ({$paymentChannel} LIKE '%credit_card%' OR {$paymentChannel} LIKE '%credit card%' OR {$paymentChannel} LIKE '%creditcard%' OR {$creditCardChinese}))";
+        // The Shopify tag is the stable source of truth for the independent
+        // credit-card platform. Presentation gateway fields are not reliable.
+        $creditCardTag = "(CASE WHEN JSON_VALID(COALESCE(product_orders.shopify_payload, '')) THEN JSON_SEARCH(JSON_EXTRACT(product_orders.shopify_payload, '$.tags'), 'one', 'CreditCardByFintrixV2') ELSE NULL END IS NOT NULL)";
+        $creditCard = "(NOT {$actualPaypal} AND {$creditCardTag})";
 
         return $this->database()->query()
             ->fromSub($orders, 'product_orders')
@@ -353,7 +354,7 @@ class LogisticsProductStatisticsService
             ->selectRaw("SUM(CASE WHEN {$paid} AND {$actualPaypal} AND COALESCE(paypal_refunds.refund_count, 0) > 0 THEN 1 ELSE 0 END) as paypal_refund_order_count")
             ->selectRaw("SUM(CASE WHEN {$actualPaypal} THEN COALESCE(paypal_disputes.dispute_count, 0) ELSE 0 END) as paypal_dispute_count")
             ->selectRaw("SUM(CASE WHEN {$paid} AND {$actualPaypal} AND COALESCE(paypal_disputes.dispute_count, 0) > 0 THEN 1 ELSE 0 END) as paypal_dispute_order_count")
-            ->selectRaw("SUM(CASE WHEN {$creditCard} THEN 1 ELSE 0 END) as credit_card_order_count")
+            ->selectRaw("SUM(CASE WHEN {$paid} AND {$creditCard} THEN 1 ELSE 0 END) as credit_card_order_count")
             ->selectRaw('SUM(COALESCE(credit_card_refunds.refund_amount, 0)) as credit_card_refund_amount')
             ->selectRaw('SUM(COALESCE(credit_card_refunds.refund_count, 0)) as credit_card_refund_count')
             ->selectRaw("SUM(CASE WHEN {$paid} AND {$creditCard} AND COALESCE(credit_card_refunds.refund_count, 0) > 0 THEN 1 ELSE 0 END) as credit_card_refund_order_count")
@@ -375,6 +376,7 @@ class LogisticsProductStatisticsService
             ->selectRaw('MAX(orders.paypal_association_source) as paypal_association_source')
             ->selectRaw('MAX(orders.payment_method) as payment_method')
             ->selectRaw('MAX(orders.payment_gateway) as payment_gateway')
+            ->selectRaw('MAX(orders.shopify_payload) as shopify_payload')
             ->groupByRaw("{$key}, orders.id");
     }
 
@@ -1160,15 +1162,26 @@ class LogisticsProductStatisticsService
             return false;
         }
 
-        $value = mb_strtolower(trim(implode(' ', array_filter([
-            (string) $order->payment_method,
-            (string) $order->payment_gateway,
-        ]))));
+        $payload = $order->shopify_payload;
+        if (is_string($payload)) {
+            $payload = json_decode($payload, true);
+        }
+        if (!is_array($payload)) {
+            return false;
+        }
 
-        return str_contains($value, 'credit_card')
-            || str_contains($value, 'credit card')
-            || str_contains($value, 'creditcard')
-            || str_contains($value, '信用卡');
+        $tags = $payload['tags'] ?? [];
+        if (is_string($tags)) {
+            $tags = explode(',', $tags);
+        }
+
+        foreach ((array) $tags as $tag) {
+            if (is_string($tag) && mb_strtolower(trim($tag)) === 'creditcardbyfintrixv2') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function paypalRefundAmount(LogisticsPayPalRefund $refund): float

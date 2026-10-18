@@ -13,10 +13,12 @@ use App\Models\LogisticsTrackingSyncBatch;
 use App\Models\LogisticsTrackingSyncTask;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Logistics\LogisticsOrderSpreadsheetService;
+use App\Portals\Logistics\LogisticsOrderPaymentReferenceService;
 use App\Portals\Logistics\LogisticsPortalService;
 use App\Portals\Logistics\LogisticsRefundImportService;
 use App\Portals\Logistics\LogisticsTongtuAutomationService;
 use App\Portals\Logistics\LogisticsTrackingService;
+use App\Portals\Logistics\PayPalOrderAssociationService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -39,6 +41,8 @@ class LogisticsOrderController extends Controller
         private readonly LogisticsRefundImportService $refundImports,
         private readonly LogisticsTongtuAutomationService $automation,
         private readonly LogisticsTrackingService $tracking,
+        private readonly LogisticsOrderPaymentReferenceService $paymentReferences,
+        private readonly PayPalOrderAssociationService $paypalAssociations,
     ) {
     }
 
@@ -51,7 +55,10 @@ class LogisticsOrderController extends Controller
 
         $filters = $this->filters($request);
         $orders = $this->orderQuery($filters)
-            ->with(['activeRefundDetails' => fn ($query) => $query->orderBy('id')])
+            ->with([
+                'activeRefundDetails' => fn ($query) => $query->orderBy('id'),
+                'paymentReferences' => fn ($query) => $query->orderByRaw("CASE reference_type WHEN 'primary' THEN 0 ELSE 1 END")->orderBy('id'),
+            ])
             ->orderByDesc('order_created_at')
             ->orderByDesc('id')
             ->paginate($filters['per_page'])
@@ -102,6 +109,8 @@ class LogisticsOrderController extends Controller
             'paypalAccount',
             'paypalRefunds' => fn ($query) => $query->orderByDesc('refunded_at')->orderByDesc('id'),
             'paypalDisputes' => fn ($query) => $query->orderByDesc('dispute_created_at')->orderByDesc('id'),
+            'paymentReferences' => fn ($query) => $query->orderByRaw("CASE reference_type WHEN 'primary' THEN 0 ELSE 1 END")->orderBy('id'),
+            'creditCardRefunds' => fn ($query) => $query->orderByDesc('last_imported_at')->orderByDesc('id'),
             'logs' => fn ($query) => $query->latest('id')->limit(20),
         ]);
 
@@ -168,6 +177,8 @@ class LogisticsOrderController extends Controller
         $order->fill($data);
         $trackingNumberChanged = $order->isDirty('tracking_number');
         $order->save();
+        $this->paymentReferences->syncFromAttributes($order, []);
+        $this->paypalAssociations->reconcileOrder($order);
         if ($trackingNumberChanged) {
             $this->tracking->scheduleForOrder($order);
         }
@@ -674,13 +685,21 @@ class LogisticsOrderController extends Controller
             'id', 'shopify_order_id', 'shopify_order_number', 'tongtu_order_number', 'store_name',
             'operator_name', 'group_names', 'staff_status', 'buyer_name', 'buyer_email',
             'buyer_phone', 'is_add_on', 'subscription_type', 'subscription_status', 'payment_method', 'payment_gateway',
-            'collection_account_email', 'transaction_id', 'bill_number', 'logistics_status', 'data_status',
+            'collection_account_email', 'transaction_id', 'logistics_status', 'data_status',
             'time_zone', 'source_shop_domain',
         ];
         foreach ($textColumns as $column) {
             if ($filters[$column] !== '') {
                 $query->where($column, 'like', $this->contains((string) $filters[$column]));
             }
+        }
+
+        if ($filters['bill_number'] !== '') {
+            $value = $this->contains((string) $filters['bill_number']);
+            $query->where(function (Builder $billNumbers) use ($value): void {
+                $billNumbers->where('bill_number', 'like', $value)
+                    ->orWhereHas('paymentReferences', fn (Builder $references) => $references->where('reference_number', 'like', $value));
+            });
         }
 
         foreach (['refund_number' => 'refund_number', 'refund_type' => 'refund_type', 'refund_remark' => 'remark'] as $filter => $column) {

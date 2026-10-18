@@ -60,6 +60,23 @@
 .logistics-order-detail-attributes dl.is-json { grid-column: 1 / -1; }
 .logistics-order-detail-attributes dl.is-json dd { overflow: visible; }
 .logistics-order-detail-attributes dl.is-json pre { max-height: 320px; margin: 0; padding: 12px 14px; overflow: auto; color: #244d6e; background: #eaf2f8; border: 1px solid #d7e5ef; border-radius: 5px; font-size: 11px; font-weight: 500; line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
+.logistics-order-payment-references { margin-top: 13px; padding-top: 12px; border-top: 1px dashed #dbe7f0; }
+.logistics-order-payment-references h5 { margin: 0 0 9px; color: #345a78; font-size: 12px; font-weight: 700; }
+.logistics-order-payment-reference-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.logistics-order-payment-reference-item { min-width: 0; padding: 10px 11px; border: 1px solid #d9e5ee; border-radius: 5px; background: #fbfdff; }
+.logistics-order-payment-reference-item.is-upsell { border-color: #d4e6f2; background: #f5fbff; }
+.logistics-order-payment-reference-item header { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.logistics-order-payment-reference-type { flex: 0 0 auto; padding: 3px 6px; border-radius: 3px; color: #2f6e9d; background: #e5f1fa; font-size: 10px; font-weight: 700; line-height: 1.2; }
+.logistics-order-payment-reference-item.is-primary .logistics-order-payment-reference-type { color: #2d7a59; background: #e4f5ed; }
+.logistics-order-payment-reference-item header code { min-width: 0; overflow: hidden; color: #274b67; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.logistics-order-payment-reference-item > p { margin: 7px 0 0; color: #748ca0; font-size: 10px; line-height: 1.4; word-break: break-all; }
+.logistics-order-payment-reference-refunds { margin-top: 9px; padding-top: 8px; border-top: 1px dashed #d9e6ef; }
+.logistics-order-payment-reference-refunds > strong { display: block; margin-bottom: 5px; color: #a05e31; font-size: 10px; }
+.logistics-order-payment-reference-refunds > div { display: grid; grid-template-columns: minmax(70px, .9fr) auto minmax(80px, 1fr) auto; gap: 6px; align-items: center; min-width: 0; padding: 4px 0; color: #617b90; font-size: 10px; }
+.logistics-order-payment-reference-refunds code,
+.logistics-order-payment-reference-refunds span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.logistics-order-payment-reference-refunds b { color: #a85837; font-size: 10px; white-space: nowrap; }
+.logistics-order-payment-reference-refunds time { color: #8a9cac; font-size: 9px; white-space: nowrap; }
 .logistics-order-detail-two-column { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .logistics-order-detail-table { margin-bottom: 0; }
 .logistics-order-detail-table th { color: #58748e; background: #f1f6fa; border: 1px solid #dfe9f1 !important; font-size: 11px; text-align: center; white-space: nowrap; }
@@ -127,7 +144,10 @@
     .logistics-order-detail-item { grid-template-columns: 48px 1fr; }
     .logistics-order-detail-item-image { width: 48px; height: 48px; }
     .logistics-order-detail-item-metrics { grid-column: 1 / -1; }
-    .logistics-order-detail-definition-grid, .logistics-order-detail-definition-grid.is-single, .logistics-order-detail-attributes { grid-template-columns: 1fr; }
+    .logistics-order-detail-definition-grid, .logistics-order-detail-definition-grid.is-single, .logistics-order-detail-attributes, .logistics-order-payment-reference-list { grid-template-columns: 1fr; }
+    .logistics-order-payment-reference-refunds > div { grid-template-columns: minmax(80px, 1fr) auto; }
+    .logistics-order-payment-reference-refunds span,
+    .logistics-order-payment-reference-refunds time { grid-column: 1 / -1; }
     .logistics-order-detail-timeline-head { display: none; }
     .logistics-order-detail-timeline-row { grid-template-columns: 1fr; gap: 5px; padding: 12px 12px 12px 34px; }
     .logistics-order-detail-timeline-row::before { left: 17px; }

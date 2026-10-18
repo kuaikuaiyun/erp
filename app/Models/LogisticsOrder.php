@@ -153,6 +153,11 @@ class LogisticsOrder extends Model
         return $this->hasMany(LogisticsCreditCardRefund::class, 'logistics_order_id');
     }
 
+    public function paymentReferences(): HasMany
+    {
+        return $this->hasMany(LogisticsOrderPaymentReference::class, 'logistics_order_id');
+    }
+
     /** @return array<string, string> */
     public static function dataStatusOptions(): array
     {

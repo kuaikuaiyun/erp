@@ -275,7 +275,7 @@ return [
             'paypal_dispute_count' => '与该产品相关的 PayPal 纠纷订单数量；信用卡退款不计入。',
             'paypal_dispute_rate' => 'PayPal 纠纷订单数 ÷ 该产品相关已付款订单数。',
             'credit_card_refund_amount' => '从信用卡退款导入记录汇总的退款金额（USD）。',
-            'credit_card_refund_rate' => '信用卡退款金额 ÷ 该产品相关订单实收金额。',
+            'credit_card_refund_rate' => '带 CreditCardByFintrixV2 标签的信用卡退款订单数 ÷ 同标签的信用卡已付款订单数。同一订单多笔退款仅计为 1 笔退款订单。',
             'combined_refund_rate' => 'PayPal 与信用卡真实退款金额合计 ÷ 该产品相关订单实收金额。',
             'shipping_rate' => '已有真实物流单号并已进入物流查询范围的订单占比。',
             'delivery_rate' => '51Tracking 返回“已签收”的订单占已发货订单的比例。',
@@ -524,6 +524,17 @@ return [
             'completed' => '退款导入完成：读取 :rows 行；更新 PayPal 人工原因 :paypal_updated 条；新增信用卡退款 :credit_card_added 条；覆盖信用卡退款 :credit_card_updated 条；失败 :invalid 行。',
             'error_report_ready' => '部分记录未导入，已生成带原始数据、行号、错误字段和处理提示的错误明细。',
             'download_error_report' => '下载错误明细（XLSX）',
+        ],
+    ],
+    'payment_references' => [
+        'upsell_count' => '+:count 个加购账单号',
+        'detail_title' => '账单流水号',
+        'empty' => '暂无账单流水号。',
+        'gateway_order_id' => '支付网关订单号：:value',
+        'credit_card_refunds' => '已导入的信用卡退款',
+        'types' => [
+            'primary' => '主账单号',
+            'upsell' => '加购账单号',
         ],
     ],
 ];

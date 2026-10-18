@@ -16,6 +16,10 @@ use App\Models\LogisticsPayPalTransaction;
  */
 class PayPalOrderAssociationService
 {
+    public function __construct(private readonly LogisticsOrderPaymentReferenceService $paymentReferences)
+    {
+    }
+
     public function orderForTransaction(LogisticsPayPalAccount $account, ?string $transactionId): ?LogisticsOrder
     {
         $transactionId = trim((string) $transactionId);
@@ -23,18 +27,10 @@ class PayPalOrderAssociationService
             return null;
         }
 
-        $matches = LogisticsOrder::query()
-            ->where('bill_number', $transactionId)
-            ->limit(2)
-            ->get();
-
-        // A duplicate bill number is not safe to associate automatically.
-        if ($matches->count() !== 1) {
+        $order = $this->paymentReferences->uniqueOrderForReference($transactionId);
+        if (!$order instanceof LogisticsOrder) {
             return null;
         }
-
-        /** @var LogisticsOrder $order */
-        $order = $matches->first();
         if (!$this->associateOrderToAccount($order, $account)) {
             return null;
         }
@@ -63,7 +59,7 @@ class PayPalOrderAssociationService
 
         $transaction->forceFill([
             'logistics_order_id' => $order->getKey(),
-            'match_source' => 'bill_number',
+            'match_source' => 'payment_reference',
             'matched_at' => now(),
         ])->save();
 
@@ -74,61 +70,56 @@ class PayPalOrderAssociationService
 
     /**
      * Reverse reconciliation for Shopify-later imports. Only an exact and
-     * unique bill number is linked; ambiguous data stays unmatched.
+     * unique primary or upsell payment reference is linked; ambiguous data
+     * stays unmatched.
      */
     public function reconcileOrder(LogisticsOrder $order): int
     {
-        $billNumber = trim((string) $order->bill_number);
-        if ($billNumber === '') {
-            return 0;
-        }
-
-        // Keep the same safety rule as payment-first matching: a duplicated
-        // ERP bill number must never be reverse-associated automatically.
-        $orderMatches = LogisticsOrder::query()
-            ->where('bill_number', $billNumber)
-            ->limit(2)
-            ->get(['id']);
-        if ($orderMatches->count() !== 1 || (int) $orderMatches->first()->getKey() !== (int) $order->getKey()) {
-            return 0;
-        }
-
-        $transactions = LogisticsPayPalTransaction::query()
-            ->with('account')
-            ->where('payment_transaction_id', $billNumber)
-            ->get();
         $matched = 0;
 
-        foreach ($transactions as $transaction) {
-            $account = $transaction->account;
-            if (!$account instanceof LogisticsPayPalAccount || !$this->associateOrderToAccount($order, $account)) {
+        foreach ($this->paymentReferences->referencesForOrder($order) as $reference) {
+            $referenceNumber = trim((string) $reference->reference_number);
+            $matchedOrder = $this->paymentReferences->uniqueOrderForReference($referenceNumber);
+            if (!$matchedOrder instanceof LogisticsOrder || (int) $matchedOrder->getKey() !== (int) $order->getKey()) {
                 continue;
             }
 
-            $transaction->forceFill([
-                'logistics_order_id' => $order->getKey(),
-                'match_source' => 'bill_number',
-                'matched_at' => now(),
-            ])->save();
-            $this->attachRelatedRiskRows($account, $order, $billNumber);
-            $matched++;
-        }
+            $transactions = LogisticsPayPalTransaction::query()
+                ->with('account')
+                ->where('payment_transaction_id', $referenceNumber)
+                ->get();
 
-        // Refunds and disputes can reach ERP before their normal payment event.
-        $candidateAccounts = collect()
-            ->merge($transactions->pluck('logistics_paypal_account_id'))
-            ->merge(LogisticsPayPalRefund::query()->where('original_transaction_id', $billNumber)->pluck('logistics_paypal_account_id'))
-            ->merge(LogisticsPayPalDispute::query()->where('disputed_transaction_id', $billNumber)->pluck('logistics_paypal_account_id'))
-            ->filter()
-            ->unique()
-            ->values();
+            foreach ($transactions as $transaction) {
+                $account = $transaction->account;
+                if (!$account instanceof LogisticsPayPalAccount || !$this->associateOrderToAccount($order, $account)) {
+                    continue;
+                }
 
-        foreach ($candidateAccounts as $accountId) {
-            $account = LogisticsPayPalAccount::query()->find($accountId);
-            if (!$account instanceof LogisticsPayPalAccount || !$this->associateOrderToAccount($order, $account)) {
-                continue;
+                $transaction->forceFill([
+                    'logistics_order_id' => $order->getKey(),
+                    'match_source' => 'payment_reference',
+                    'matched_at' => now(),
+                ])->save();
+                $this->attachRelatedRiskRows($account, $order, $referenceNumber);
+                $matched++;
             }
-            $this->attachRelatedRiskRows($account, $order, $billNumber);
+
+            // Refunds and disputes can reach ERP before their normal payment event.
+            $candidateAccounts = collect()
+                ->merge($transactions->pluck('logistics_paypal_account_id'))
+                ->merge(LogisticsPayPalRefund::query()->where('original_transaction_id', $referenceNumber)->pluck('logistics_paypal_account_id'))
+                ->merge(LogisticsPayPalDispute::query()->where('disputed_transaction_id', $referenceNumber)->pluck('logistics_paypal_account_id'))
+                ->filter()
+                ->unique()
+                ->values();
+
+            foreach ($candidateAccounts as $accountId) {
+                $account = LogisticsPayPalAccount::query()->find($accountId);
+                if (!$account instanceof LogisticsPayPalAccount || !$this->associateOrderToAccount($order, $account)) {
+                    continue;
+                }
+                $this->attachRelatedRiskRows($account, $order, $referenceNumber);
+            }
         }
 
         return $matched;

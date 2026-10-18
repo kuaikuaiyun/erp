@@ -152,6 +152,27 @@
     margin-right: 4px;
 }
 
+.logistics-payment-reference-cell {
+    min-width: 156px;
+    max-width: 220px;
+}
+
+.logistics-payment-reference-cell > span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.logistics-payment-reference-cell small {
+    display: block;
+    margin-top: 3px;
+    color: #5d86a7;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.2;
+}
+
 .logistics-refund-detail-table input {
     min-width: 130px;
 }
