@@ -526,4 +526,15 @@ return [
             'download_error_report' => '下载错误明细（XLSX）',
         ],
     ],
+    'payment_references' => [
+        'upsell_count' => '+:count 个加购账单号',
+        'detail_title' => '账单流水号',
+        'empty' => '暂无账单流水号。',
+        'gateway_order_id' => '支付网关订单号：:value',
+        'credit_card_refunds' => '已导入的信用卡退款',
+        'types' => [
+            'primary' => '主账单号',
+            'upsell' => '加购账单号',
+        ],
+    ],
 ];

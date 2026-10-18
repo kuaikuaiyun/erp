@@ -78,6 +78,25 @@
     $manualRefundTotal = (float) $order->activeRefundDetails->sum('refund_amount_usd');
     $paypalRefundTotal = (float) $order->paypalRefunds->sum('refund_amount_usd');
     $productSubtotal = (float) $order->paid_amount_usd - (float) $order->total_shipping_usd;
+    $paymentReferences = $order->paymentReferences
+        ->filter(fn ($reference) => filled($reference->reference_number))
+        ->map(fn ($reference) => [
+            'reference_number' => (string) $reference->reference_number,
+            'reference_type' => (string) ($reference->reference_type ?: \App\Models\LogisticsOrderPaymentReference::TYPE_PRIMARY),
+            'gateway_order_id' => $reference->gateway_order_id,
+        ]);
+    $legacyBillNumber = trim((string) $order->bill_number);
+    if ($legacyBillNumber !== '' && !$paymentReferences->contains('reference_number', $legacyBillNumber)) {
+        $paymentReferences->prepend([
+            'reference_number' => $legacyBillNumber,
+            'reference_type' => \App\Models\LogisticsOrderPaymentReference::TYPE_PRIMARY,
+            'gateway_order_id' => $order->payment_gateway_order_id,
+        ]);
+    }
+    $paymentReferences = $paymentReferences->unique('reference_number')->values();
+    $creditCardRefundsByReference = $order->creditCardRefunds
+        ->filter(fn ($refund) => filled($refund->bill_number))
+        ->groupBy(fn ($refund) => (string) $refund->bill_number);
     $statusTone = $order->hasFailureRow() ? 'is-danger' : 'is-success';
     $logSourceLabels = [
         'tongtu' => '通途',
@@ -178,11 +197,46 @@
                     <dl><dt>收款账号</dt><dd>{{ $display($order->collection_account) }}</dd></dl>
                     <dl><dt>收款账号邮箱</dt><dd>{{ $display($order->collection_account_email) }}</dd></dl>
                     <dl><dt>交易号 / yx_order_id</dt><dd>{{ $display($order->transaction_id) }}</dd></dl>
-                    <dl><dt>账单号</dt><dd>{{ $display($order->bill_number) }}</dd></dl>
                     <dl><dt>支付网关订单号</dt><dd>{{ $display($order->payment_gateway_order_id) }}</dd></dl>
                     <dl><dt>PayPal Merchant ID</dt><dd>{{ $display($order->paypal_merchant_id) }}</dd></dl>
                     <dl><dt>Checkout ID</dt><dd>{{ $display($order->shopify_checkout_id) }}</dd></dl>
                     <dl><dt>Cart Token</dt><dd class="is-wrap">{{ $display($order->shopify_cart_token) }}</dd></dl>
+                </div>
+                <div class="logistics-order-payment-references">
+                    <h5>{{ __('logistics.payment_references.detail_title') }}</h5>
+                    <div class="logistics-order-payment-reference-list">
+                        @forelse($paymentReferences as $paymentReference)
+                            @php
+                                $referenceNumber = $paymentReference['reference_number'];
+                                $isUpsellReference = $paymentReference['reference_type'] === \App\Models\LogisticsOrderPaymentReference::TYPE_UPSELL;
+                                $referenceRefunds = $creditCardRefundsByReference->get($referenceNumber, collect());
+                            @endphp
+                            <article class="logistics-order-payment-reference-item {{ $isUpsellReference ? 'is-upsell' : 'is-primary' }}">
+                                <header>
+                                    <span class="logistics-order-payment-reference-type">{{ __('logistics.payment_references.types.'.($isUpsellReference ? 'upsell' : 'primary')) }}</span>
+                                    <code title="{{ $referenceNumber }}">{{ $referenceNumber }}</code>
+                                </header>
+                                @if(filled($paymentReference['gateway_order_id']))
+                                    <p>{{ __('logistics.payment_references.gateway_order_id', ['value' => $paymentReference['gateway_order_id']]) }}</p>
+                                @endif
+                                @if($referenceRefunds->isNotEmpty())
+                                    <div class="logistics-order-payment-reference-refunds">
+                                        <strong>{{ __('logistics.payment_references.credit_card_refunds') }}</strong>
+                                        @foreach($referenceRefunds as $refund)
+                                            <div>
+                                                <code title="{{ $display($refund->refund_reference) }}">{{ $display($refund->refund_reference) }}</code>
+                                                <b>{{ $money($refund->refund_amount_usd) }}</b>
+                                                <span title="{{ $display($refund->refund_reason) }}">{{ $display($refund->refund_reason) }}</span>
+                                                <time>{{ $date($refund->last_imported_at) }}</time>
+                                            </div>
+                                        @endforeach
+                                    </div>
+                                @endif
+                            </article>
+                        @empty
+                            <div class="logistics-order-detail-empty">{{ __('logistics.payment_references.empty') }}</div>
+                        @endforelse
+                    </div>
                 </div>
                 @if($shopifyAttributes !== [])
                     <div class="logistics-order-detail-attributes">

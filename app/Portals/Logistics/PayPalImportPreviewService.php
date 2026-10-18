@@ -143,24 +143,48 @@ class PayPalImportPreviewService
             static fn (mixed $value): string => trim((string) $value),
             $billNumbers,
         ))));
-        $orders = collect();
+        /** @var array<string, list<LogisticsOrder>> $candidates */
+        $candidates = [];
 
         foreach (array_chunk($billNumbers, 500) as $chunk) {
             LogisticsOrder::query()
-                ->whereIn('bill_number', $chunk)
+                ->with(['paymentReferences' => static function ($query) use ($chunk): void {
+                    $query->whereIn('reference_number', $chunk);
+                }])
+                ->where(function ($query) use ($chunk): void {
+                    $query->whereIn('bill_number', $chunk)
+                        ->orWhereHas('paymentReferences', static function ($references) use ($chunk): void {
+                            $references->whereIn('reference_number', $chunk);
+                        });
+                })
                 ->get([
                     'id', 'shopify_order_number', 'bill_number', 'store_name',
                     'paypal_account_id', 'paypal_merchant_id',
                 ])
-                ->each(function (LogisticsOrder $order) use ($orders): void {
-                    $key = trim((string) $order->bill_number);
-                    if ($key !== '' && !$orders->has($key)) {
-                        $orders->put($key, $order);
+                ->each(function (LogisticsOrder $order) use (&$candidates, $chunk): void {
+                    $referenceNumbers = [];
+                    $primary = trim((string) $order->bill_number);
+                    if ($primary !== '' && in_array($primary, $chunk, true)) {
+                        $referenceNumbers[] = $primary;
+                    }
+
+                    foreach ($order->paymentReferences as $reference) {
+                        $number = trim((string) $reference->reference_number);
+                        if ($number !== '' && in_array($number, $chunk, true)) {
+                            $referenceNumbers[] = $number;
+                        }
+                    }
+
+                    foreach (array_unique($referenceNumbers) as $referenceNumber) {
+                        $candidates[$referenceNumber] ??= [];
+                        $candidates[$referenceNumber][$order->getKey()] = $order;
                     }
                 });
         }
 
-        return $orders;
+        return collect($candidates)
+            ->filter(static fn (array $orders): bool => count($orders) === 1)
+            ->map(static fn (array $orders): LogisticsOrder => reset($orders));
     }
 
     /** @param list<array<string,mixed>> $details

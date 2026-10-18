@@ -4,14 +4,18 @@ namespace App\Portals\Logistics;
 
 use App\Models\AdminUser;
 use App\Models\LogisticsCreditCardRefund;
-use App\Models\LogisticsOrder;
 use App\Models\LogisticsPayPalRefund;
+use App\Models\LogisticsPayPalTransaction;
 use Illuminate\Http\UploadedFile;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use RuntimeException;
 
 class LogisticsRefundImportService
 {
+    public function __construct(private readonly LogisticsOrderPaymentReferenceService $paymentReferences)
+    {
+    }
+
     private const HEADERS = [
         '支付方式' => 'payment_method',
         '对应编号' => 'reference_number',
@@ -114,23 +118,20 @@ class LogisticsRefundImportService
     /** @param array<string,mixed> $data */
     private function upsertCreditCardRefund(array $data, AdminUser $actor): bool
     {
-        $orders = LogisticsOrder::query()
-            ->where('bill_number', $data['reference_number'])
-            ->limit(2)
-            ->get();
-        if ($orders->count() === 0) {
+        $order = $this->paymentReferences->uniqueOrderForReference($data['reference_number']);
+        if (!$order) {
+            if ($this->paymentReferences->referenceIsAmbiguous($data['reference_number'])) {
+                throw new RefundImportRowException('reference_number', 'credit_card_bill_ambiguous');
+            }
+
             throw new RefundImportRowException('reference_number', 'credit_card_bill_not_found');
         }
-        if ($orders->count() > 1) {
-            throw new RefundImportRowException('reference_number', 'credit_card_bill_ambiguous');
-        }
-
-        /** @var LogisticsOrder $order */
-        $order = $orders->first();
-        if ($order->paypal_account_id !== null && $order->paypal_association_source === 'actual_transaction') {
-            // Independent credit-card imports and PayPal are deliberately two
-            // different financial sources. Do not allow an imported card
-            // refund to be attached to an order already proven to be PayPal.
+        if (LogisticsPayPalTransaction::query()
+            ->where('payment_transaction_id', $data['reference_number'])
+            ->exists()) {
+            // An order can carry multiple payment references. Only block the
+            // exact reference proven to be a real PayPal transaction; other
+            // references may legitimately belong to an independent card flow.
             throw new RefundImportRowException('reference_number', 'credit_card_bill_is_paypal_order');
         }
 
