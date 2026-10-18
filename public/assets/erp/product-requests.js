@@ -351,7 +351,7 @@
         function applyRecord(record) {
             ['standard_chinese_name', 'pcl_product_no'].forEach(function (field) {
                 var input = reuseForm.querySelector('[name="' + field + '"]');
-                if (input) { input.value = record[field] || ''; }
+                if (input && record[field]) { input.value = record[field]; }
             });
             renderReusedImages(record.seller_images);
             // 先带入来源按 SKU 存储的采购价/重量，再把来源系统 SKU 并入右栏（渲染时读取初始值）
@@ -361,7 +361,7 @@
             if (typeof reuseForm.erpSkuSuggestionsAppend === 'function') {
                 reuseForm.erpSkuSuggestionsAppend(record.skus || [], record.report_no || '');
             }
-            if (selectedSource) { selectedSource.value = record.id; }
+            if (selectedSource) { selectedSource.value = record.id || ''; }
             if (selectedText) {
                 selectedText.hidden = false;
                 selectedText.textContent = (config.reuseSelected || '').replace(':report_no', record.report_no || '');

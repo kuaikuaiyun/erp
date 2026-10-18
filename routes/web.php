@@ -47,7 +47,7 @@ Route::get('/api/placement-reviews/pending-count', [ProductRequestController::cl
 Route::get('/api/warehouse-acceptances/pending-count', [ProductRequestController::class, 'warehousePendingCount'])->name('product-requests.warehouse.pending-count');
 Route::get('/product-requests/create', [ProductRequestController::class, 'operationCreate'])->name('product-requests.operation.create');
 Route::post('/product-requests', [ProductRequestController::class, 'operationStore'])->name('product-requests.operation.store');
-Route::post('/product-requests/import', [ProductRequestController::class, 'operationImport'])->name('product-requests.operation.import');
+Route::post('/link-sku-manager/import', [ProductRequestController::class, 'linkSkuImport'])->name('product-requests.link-skus.import');
 Route::get('/product-requests/import-template', [ProductRequestController::class, 'operationImportTemplate'])->name('product-requests.operation.import-template');
 Route::get('/product-requests/{productRequest}/edit', [ProductRequestController::class, 'operationEdit'])->name('product-requests.operation.edit');
 Route::put('/product-requests/{productRequest}', [ProductRequestController::class, 'operationUpdate'])->name('product-requests.operation.update');
@@ -68,6 +68,9 @@ Route::get('/api/procurement-inspections/sku-suggestions', [ProductRequestContro
 Route::get('/link-sku-manager', [ProductRequestController::class, 'linkSkuIndex'])->name('product-requests.link-skus.index');
 Route::get('/link-sku-manager/{linkSku}/edit', [ProductRequestController::class, 'linkSkuEdit'])->name('product-requests.link-skus.edit');
 Route::put('/link-sku-manager/{linkSku}', [ProductRequestController::class, 'linkSkuUpdate'])->name('product-requests.link-skus.update');
+Route::post('/link-sku-manager/{linkSku}/review', [ProductRequestController::class, 'linkSkuReviewDone'])->name('product-requests.link-skus.review');
+Route::get('/link-sku-manager/{linkSku}/images/{index}', [ProductRequestController::class, 'linkSkuImage'])->name('product-requests.link-skus.image');
+Route::get('/link-sku-manager/{linkSku}/product-image', [ProductRequestController::class, 'linkSkuProductImage'])->name('product-requests.link-skus.product-image');
 Route::get('/placement-reviews', [ProductRequestController::class, 'placementReviewIndex'])->name('product-requests.placement-reviews.index');
 Route::get('/placement-reviews/{productRequest}/edit', [ProductRequestController::class, 'placementReviewEdit'])->name('product-requests.placement-reviews.edit');
 Route::put('/placement-reviews/{productRequest}', [ProductRequestController::class, 'placementReviewUpdate'])->name('product-requests.placement-reviews.update');

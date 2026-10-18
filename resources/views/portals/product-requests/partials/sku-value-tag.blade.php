@@ -1,4 +1,4 @@
-@php
+﻿@php
     $skuValuePrice = trim((string) ($values['price'] ?? ''));
     $skuValueWeight = trim((string) ($values['weight'] ?? ''));
 @endphp
