@@ -35,7 +35,9 @@
 .product-statistics-table { min-width: 2080px; margin-bottom: 0; border-collapse: separate; border-spacing: 0; font-size: 13px; }
 .product-statistics-table th { position: sticky; top: 0; z-index: 5; padding: 0 !important; border-bottom: 1px solid #dfe9f2 !important; border-right: 1px solid #e7eef5 !important; background: #f5f8fc; color: #3f678e; font-weight: 700; text-align: center; vertical-align: middle !important; white-space: nowrap; }
 .product-statistics-table td { padding: 9px 10px !important; border-color: #e8eef4 !important; border-right: 1px solid #eef3f8 !important; color: #506b86; text-align: center; vertical-align: middle !important; white-space: nowrap; }
-.product-statistics-table th:last-child, .product-statistics-table td:last-child { border-right: 0 !important; }
+.product-statistics-table th:last-child, .product-statistics-table td:last-child { position: sticky; right: 0; min-width: 86px; width: 86px; border-right: 0 !important; box-shadow: -7px 0 10px rgba(42, 73, 106, .10); }
+.product-statistics-table th:last-child { z-index: 8; background: #f5f8fc; }
+.product-statistics-table td:last-child { z-index: 6; background: #fff; }
 .product-statistics-sort { width: 100%; padding: 13px 10px; border: 0; background: transparent; color: inherit; font: inherit; text-align: center; }
 .product-statistics-sort:hover, .product-statistics-sort.is-active { color: #2477c6; }
 .product-statistics-sort .fa { margin-left: 3px; color: #94a6b7; }
@@ -50,7 +52,6 @@
 .product-statistics-table td:nth-child(3), .product-statistics-table th:nth-child(3) { min-width: 175px; }
 .product-statistics-table td:nth-child(4), .product-statistics-table th:nth-child(4) { min-width: 145px; }
 .product-statistics-table td:nth-child(n+5), .product-statistics-table th:nth-child(n+5) { min-width: 122px; }
-.product-statistics-table td:last-child, .product-statistics-table th:last-child { min-width: 86px; }
 .product-statistics-expand-column { width: 38px; min-width: 38px; text-align: center; }
 .product-statistics-expand { width: 24px; height: 24px; border: 0; border-radius: 4px; background: transparent; color: #5c7894; line-height: 24px; transition: background .16s ease, color .16s ease, transform .16s ease; }
 .product-statistics-expand:hover { background: #e9f3ff; color: #2674bd; }
@@ -180,8 +181,8 @@
 .product-statistics-overview-metric small { display: block; min-height: 27px; margin-top: 5px; color: #8296a9; font-size: 11px; line-height: 1.35; }
 .product-statistics-overview-disputes { margin: 11px 12px 12px; padding: 10px; border: 1px solid #f1dde0; border-radius: 4px; background: #fffafb; }
 .product-statistics-overview-disputes.is-not-applicable { border-color: #e4ddf1; background: #fbf9fe; color: #7c6796; font-size: 12px; line-height: 1.5; }
-.product-statistics-overview-disputes-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #6f5663; font-size: 12px; font-weight: 700; }
-.product-statistics-overview-disputes-heading strong { color: #b24452; font-size: 13px; }
+.product-statistics-overview-disputes-heading { display: flex; align-items: center; gap: 8px; color: #6f5663; font-size: 12px; font-weight: 700; }
+.product-statistics-overview-disputes-summary { margin: 6px 0 0; color: #b24452; font-size: 12px; font-weight: 700; line-height: 1.45; }
 .product-statistics-overview-disputes h5 { margin: 8px 0 5px; color: #8b6a73; font-size: 11px; font-weight: 600; }
 .product-statistics-overview-disputes ul { display: grid; gap: 4px; margin: 0; padding: 0; color: #816b73; font-size: 11px; line-height: 1.45; list-style: none; }
 .product-statistics-overview-disputes li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

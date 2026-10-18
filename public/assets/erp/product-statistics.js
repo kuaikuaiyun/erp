@@ -256,7 +256,11 @@
             return '<div class="product-statistics-overview-disputes is-not-applicable"><i class="fa fa-info-circle"></i> ' + escapeHtml(t('overviewDisputeNotApplicable')) + '</div>';
         }
         var disputes = Array.isArray(subject.dispute_reason_breakdown) ? subject.dispute_reason_breakdown : [];
-        var summary = formatNumber(subject.dispute_count) + ' / ' + formatMoney(subject.dispute_amount);
+        var summary = replaceTokens(t('overviewDisputeCounts'), {
+            orders: formatNumber(subject.dispute_order_count),
+            records: formatNumber(subject.dispute_count),
+            amount: formatMoney(subject.dispute_amount)
+        });
         var rows = disputes.length ? disputes.map(function (dispute) {
             return '<li>' + escapeHtml(replaceTokens(t('overviewDisputeReason'), {
                 reason: dispute.reason || blank(),
@@ -266,7 +270,7 @@
             })) + '</li>';
         }).join('') : '<li>' + escapeHtml(blank()) + '</li>';
 
-        return '<div class="product-statistics-overview-disputes"><div class="product-statistics-overview-disputes-heading"><span>' + escapeHtml(t('overviewDisputeSummary')) + '</span><strong>' + summary + '</strong></div><h5>' + escapeHtml(t('overviewDisputeBreakdown')) + '</h5><ul>' + rows + '</ul><small class="product-statistics-overview-dispute-formula">' + escapeHtml(t('overviewDisputeFormula')) + '</small></div>';
+        return '<div class="product-statistics-overview-disputes"><div class="product-statistics-overview-disputes-heading"><span>' + escapeHtml(t('overviewDisputeSummary')) + '</span></div><p class="product-statistics-overview-disputes-summary">' + escapeHtml(summary) + '</p><h5>' + escapeHtml(t('overviewDisputeBreakdown')) + '</h5><ul>' + rows + '</ul><small class="product-statistics-overview-dispute-formula">' + escapeHtml(t('overviewDisputeFormula')) + '</small></div>';
     }
     function overviewModule(title, subject, className) {
         subject = subject || {};
@@ -281,6 +285,10 @@
             delivered: formatNumber(subject.delivery_count),
             shipped: formatNumber(subject.shipping_count)
         });
+        var disputeRateFormula = replaceTokens(t('overviewDisputeRateFormula'), {
+            disputed: formatNumber(subject.dispute_order_count),
+            orders: formatNumber(subject.order_count)
+        });
 
         return '<section class="product-statistics-overview-module ' + className + '"><h4>' + escapeHtml(title) + '</h4><div class="product-statistics-overview-metrics">'
             + overviewMetric(t('overviewUnitCount'), formatNumber(subject.unit_count))
@@ -288,6 +296,7 @@
             + overviewMetric(t('overviewReceivedAmount'), received)
             + overviewMetric(t('overviewRefundAmount'), refund)
             + overviewMetric(t('overviewRefundRate'), formatRate(subject.refund_rate), refundFormula)
+            + (subject.dispute_applicable ? overviewMetric(t('overviewDisputeRate'), formatRate(subject.dispute_rate), disputeRateFormula, 'is-dispute-rate') : '')
             + overviewMetric(t('overviewShippingRate'), formatRate(subject.shipping_rate), shippingFormula)
             + overviewMetric(t('overviewDeliveryRate'), formatRate(subject.delivery_rate), deliveryFormula)
             + '</div>' + overviewDisputes(subject) + '</section>';

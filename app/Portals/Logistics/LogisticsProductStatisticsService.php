@@ -882,6 +882,10 @@ class LogisticsProductStatisticsService
         $deliveredOrders = $orders->filter(fn (LogisticsOrder $order): bool => $this->isDelivered($order));
         $disputeDetails = $disputesApplicable ? $payment['dispute_details'] : [];
         $disputeCount = count($disputeDetails);
+        $disputeOrderCount = count(array_unique(array_filter(array_map(
+            static fn (array $dispute): int => (int) ($dispute['order_id'] ?? 0),
+            $disputeDetails,
+        ))));
 
         return [
             'unit_count' => $this->sum($items, 'quantity'),
@@ -896,7 +900,9 @@ class LogisticsProductStatisticsService
             'delivery_rate' => $shippedOrders->isEmpty() ? 0.0 : round($deliveredOrders->count() / $shippedOrders->count() * 100, 2),
             'dispute_applicable' => $disputesApplicable,
             'dispute_count' => $disputeCount,
+            'dispute_order_count' => $disputeOrderCount,
             'dispute_amount' => round(array_sum(array_column($disputeDetails, 'amount')), 4),
+            'dispute_rate' => $orders->isEmpty() ? 0.0 : round($disputeOrderCount / $orders->count() * 100, 2),
             'dispute_reason_breakdown' => $this->disputeReasonBreakdown($disputeDetails, $disputeCount),
         ];
     }
