@@ -50,6 +50,8 @@ return [
         'unknown_reason' => '其他纠纷原因',
         'unknown_status' => '未知纠纷状态',
         'unknown_outcome' => '未返回处理结果',
+        'settlement_debit_outcome' => '商家败诉（纠纷结算扣款）',
+        'pending_outcome' => '暂未结案',
     ],
     'paypal_refund' => [
         'events' => [

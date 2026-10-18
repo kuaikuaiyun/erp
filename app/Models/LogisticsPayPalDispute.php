@@ -90,7 +90,56 @@ class LogisticsPayPalDispute extends Model
 
     public function outcomeLabel(): string
     {
-        return self::outcomeLabelFor($this->outcome_code);
+        $outcomeCode = trim((string) ($this->outcome_code ?? ''));
+
+        if ($outcomeCode !== '') {
+            return self::outcomeLabelFor($outcomeCode);
+        }
+
+        if ($this->hasSellerDisputeSettlementDebit()) {
+            return __('logistics.paypal_dispute.settlement_debit_outcome');
+        }
+
+        return __('logistics.paypal_dispute.pending_outcome');
+    }
+
+    /**
+     * PayPal may not return dispute_outcome while it still records the final
+     * settlement in the dispute's money movements. A seller DEBIT caused by
+     * DISPUTE_SETTLEMENT is the authoritative fallback for a seller loss.
+     */
+    private function hasSellerDisputeSettlementDebit(): bool
+    {
+        $rawPayload = $this->raw_payload;
+
+        if (is_string($rawPayload)) {
+            $rawPayload = json_decode($rawPayload, true);
+        }
+
+        if (!is_array($rawPayload)) {
+            return false;
+        }
+
+        $movements = array_merge(
+            is_array($rawPayload['money_movements'] ?? null) ? $rawPayload['money_movements'] : [],
+            is_array($rawPayload['fund_movements'] ?? null) ? $rawPayload['fund_movements'] : [],
+        );
+
+        foreach ($movements as $movement) {
+            if (!is_array($movement)) {
+                continue;
+            }
+
+            $reason = strtoupper(trim((string) ($movement['reason'] ?? '')));
+            $type = strtoupper(trim((string) ($movement['type'] ?? '')));
+            $party = strtoupper(trim((string) ($movement['affected_party'] ?? $movement['party'] ?? '')));
+
+            if ($reason === 'DISPUTE_SETTLEMENT' && $type === 'DEBIT' && in_array($party, ['SELLER', 'RECEIVER'], true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static function enumLabel(string $group, mixed $value, string $unknownKey): string
