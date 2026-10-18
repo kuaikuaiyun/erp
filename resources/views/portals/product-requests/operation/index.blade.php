@@ -41,6 +41,7 @@
 <section class="content product-request-page">
     <header class="content-header"><h1>{{ $t('operation.title') }}</h1><p>{{ $t('operation.subtitle') }}</p></header>
     @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
+    @if(session('error'))<div class="alert alert-danger">{{ session('error') }}</div>@endif
     <div class="box box-solid product-request-filter-box">
         <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-filter"></i> {{ $t('filters.keyword') }}</h3></div>
         <div class="box-body"><form class="product-request-filter-form" method="get" action="{{ route('product-requests.operation.index') }}" data-loading="region" data-loading-target=".product-request-table-box"><div class="product-request-filter-grid">
@@ -53,7 +54,7 @@
         </div><div class="product-request-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ $t('common.search') }}</button><a class="btn btn-default" href="{{ route('product-requests.operation.index') }}">{{ $t('common.reset') }}</a></div></form></div>
     </div>
     <div class="box box-solid product-request-table-box">
-        <div class="box-header with-border product-request-list-toolbar"><h3 class="box-title">{{ $t('operation.title') }}</h3><span class="text-muted">{{ $t('operation.my_scope_hint') }}</span><span class="product-request-toolbar-spacer"></span><button type="button" class="btn btn-success btn-sm" data-product-request-modal-url="{{ route('product-requests.operation.create', ['modal' => 1]) }}"><i class="fa fa-plus"></i> {{ $t('common.new_request') }}</button></div>
+        <div class="box-header with-border product-request-list-toolbar"><h3 class="box-title">{{ $t('operation.title') }}</h3><span class="text-muted">{{ $t('operation.my_scope_hint') }}</span><span class="product-request-toolbar-spacer"></span>@if($canImport ?? false)<button type="button" class="btn btn-info btn-sm" data-toggle="modal" data-target="#product-request-import-modal"><i class="fa fa-upload"></i> {{ $t('import.open_button') }}</button>@endif<button type="button" class="btn btn-success btn-sm" data-product-request-modal-url="{{ route('product-requests.operation.create', ['modal' => 1]) }}"><i class="fa fa-plus"></i> {{ $t('common.new_request') }}</button></div>
         <div class="box-body table-responsive no-padding product-request-table-scroll"><table class="table table-hover product-request-table product-request-operation-table"><thead><tr><th class="product-request-sticky-left">{{ $t('table.report_no') }}</th><th>{{ $t('table.reported_at') }}</th><th class="product-request-sku-cell">{{ $t('table.skus') }}</th><th>{{ $t('table.status') }}</th><th>{{ $t('table.review_status') }}</th><th class="product-request-remark-cell">{{ $t('table.review_remark') }}</th><th>{{ $t('table.warehouse_status') }}</th><th>{{ $t('table.operation_rectification_status') }}</th><th class="product-request-image-cell">{{ $t('table.product') }}</th><th class="product-request-image-cell product-request-image-cell-multi">{{ $t('table.seller_images') }}</th><th>{{ $t('table.operation_supplier_url') }}</th><th>{{ $t('table.reporter') }}</th><th>{{ $t('table.updated_at') }}</th><th class="product-request-sticky-right">{{ $t('common.operation') }}</th></tr></thead><tbody>
             @forelse($requests as $productRequest)
                 @php
@@ -84,6 +85,22 @@
         </tbody></table></div>
         @if($requests->hasPages())<div class="box-footer clearfix product-request-pagination" data-loading="region" data-loading-target=".product-request-table-box">{{ $requests->links() }}</div>@endif
     </div>
+    @if($canImport ?? false)
+    <div class="modal fade" id="product-request-import-modal" tabindex="-1" role="dialog" aria-labelledby="product-request-import-title">
+        <div class="modal-dialog" role="document">
+            <form method="post" action="{{ route('product-requests.operation.import') }}" enctype="multipart/form-data" class="modal-content">
+                @csrf
+                <div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('common.close') }}"><span aria-hidden="true">&times;</span></button><h4 class="modal-title" id="product-request-import-title"><i class="fa fa-upload"></i> {{ $t('import.title') }}</h4></div>
+                <div class="modal-body">
+                    <p class="text-muted">{{ $t('import.notice') }}</p>
+                    <p class="text-muted"><i class="fa fa-list-alt"></i> {{ $t('import.headers') }}</p>
+                    <div class="form-group"><input class="form-control" type="file" name="import_file" accept=".xls,.xlsx" required><span class="help-block">{{ $t('import.file_hint') }}</span></div>
+                </div>
+                <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">{{ $t('common.cancel') }}</button><button type="submit" class="btn btn-info"><i class="fa fa-upload"></i> {{ $t('import.submit') }}</button></div>
+            </form>
+        </div>
+    </div>
+    @endif
     @include('portals.product-requests.partials.modal')
 </section>
 @endsection

@@ -21,6 +21,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use Symfony\Component\HttpFoundation\Response;
 
 class ProductRequestController extends Controller
@@ -53,6 +54,7 @@ class ProductRequestController extends Controller
             'reviewStatusLabels' => $this->reviewStatusLabels(),
             'rectificationLabels' => $this->rectificationLabels(),
             'warehouseResultLabels' => $this->warehouseResultLabels(),
+            'canImport' => $this->canImportProductRequests($context['user']),
         ]);
     }
 
@@ -201,6 +203,265 @@ class ProductRequestController extends Controller
             __('product_requests.messages.operation_submitted', ['report_no' => $productRequest->report_no]),
             'product-requests.operation.index',
         );
+    }
+
+    /** Excel 批量导入需求提报：仅 boss 账号可用，按 1688 链接分组生成已检验通过的记录 */
+    public function operationImport(Request $request): Response|RedirectResponse
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        abort_unless($this->canImportProductRequests($context['user']), 403);
+
+        $data = $request->validate([
+            'import_file' => ['required', 'file', 'mimes:xlsx,xls', 'max:10240'],
+        ]);
+
+        try {
+            [$groups, $rowErrors] = $this->parseProductRequestImport($data['import_file']->getRealPath());
+        } catch (\Throwable) {
+            return back()->with('error', __('product_requests.import.parse_failed'));
+        }
+
+        if ($groups === []) {
+            $message = $rowErrors !== [] ? implode('；', array_slice($rowErrors, 0, 5)) : __('product_requests.import.empty');
+            return back()->with('error', $message);
+        }
+
+        $connection = config('admin.database.connection') ?: config('database.default');
+        $actor = $this->access->actorSnapshot($context['user']);
+        $created = 0;
+        $skuCount = 0;
+
+        DB::connection($connection)->transaction(function () use ($groups, $actor, $context, &$created, &$skuCount): void {
+            foreach ($groups as $group) {
+                $skus = $group['skus'];
+                $productRequest = ProductRequest::query()->create([
+                    'report_no' => 'REQ-'.Str::upper((string) Str::uuid()),
+                    'reported_at' => now('Asia/Shanghai')->toDateString(),
+                    'status' => ProductRequest::STATUS_INSPECTION_PASSED,
+                    'placement_review_status' => ProductRequest::REVIEW_UNFILLED,
+                    'operation_user_id' => $actor['user_id'],
+                    'operation_user_name' => $actor['user_name'],
+                    'operation_department_id' => $actor['department_id'],
+                    'operation_root_department_id' => $actor['root_department_id'],
+                    'operation_department_name' => $actor['department_name'],
+                    'operation_display_name' => $actor['display_name'],
+                    'skus' => implode(',', $skus),
+                    'operation_supplier_url' => $group['url'],
+                    'standard_chinese_name' => $group['name'],
+                    'pcl_product_no' => $group['pcl'],
+                    'supplier_url' => $group['url'],
+                    'supplier_url_normalized' => $group['url'],
+                    'supplier_url_hash' => $group['hash'],
+                    'procurement_skus' => implode(',', $skus),
+                    'procurement_sku_values' => $group['values'] === [] ? null : $group['values'],
+                    'erp_operator_id' => $actor['user_id'],
+                    'erp_operator_name' => $actor['user_name'],
+                    'erp_operator_department_name' => $actor['department_name'],
+                    'erp_operator_display_name' => $actor['display_name'],
+                    'inspected_at' => now(),
+                ]);
+                $productRequest->forceFill([
+                    'report_no' => 'REQ-'.now('Asia/Shanghai')->format('Ymd').'-'.str_pad((string) $productRequest->getKey(), 6, '0', STR_PAD_LEFT),
+                ])->save();
+
+                foreach ($group['images'] as $sort => $image) {
+                    $attachmentPath = 'product-requests/'.$productRequest->report_no.'/'.ProductRequestAttachment::STAGE_OPERATION.'/'.Str::uuid().'.'.$image['ext'];
+                    if (!Storage::disk('local')->put($attachmentPath, $image['bytes'])) {
+                        continue;
+                    }
+                    ProductRequestAttachment::query()->create([
+                        'product_request_id' => $productRequest->getKey(),
+                        'stage' => ProductRequestAttachment::STAGE_OPERATION,
+                        'sort' => $sort + 1,
+                        'disk' => 'local',
+                        'path' => $attachmentPath,
+                        'original_name' => Str::limit($image['name'], 255, ''),
+                        'mime_type' => (new \finfo(FILEINFO_MIME_TYPE))->buffer($image['bytes']) ?: 'application/octet-stream',
+                        'size' => strlen($image['bytes']),
+                        'uploaded_by' => $context['user']->getKey(),
+                        'uploaded_by_name' => $context['user']->name,
+                    ]);
+                }
+
+                $linkSkus = $this->mergeLinkSkus($this->linkSkuSet($group['hash']), $skus);
+                if ($linkSkus !== []) {
+                    $this->persistLinkSkuSet($group['hash'], $group['url'], $linkSkus);
+                }
+                $this->workflow->log($productRequest, 'excel_imported', $context['user'], ['skus' => implode(',', $skus)]);
+                $created++;
+                $skuCount += count($skus);
+            }
+        });
+
+        $message = __('product_requests.import.success', ['count' => $created, 'skus' => $skuCount]);
+        if ($rowErrors !== []) {
+            $message .= '；'.implode('；', array_slice($rowErrors, 0, 5));
+        }
+
+        return redirect()->route('product-requests.operation.index')->with('success', $message);
+    }
+
+    /** 仅 boss 账号可导入需求提报 */
+    private function canImportProductRequests(AdminUser $user): bool
+    {
+        return $user->username === 'kky_boss';
+    }
+
+    /**
+     * 解析导入 Excel：表头固定为 产品主图/PCL（商品编号）/商品名称/当前SKU/采购参考价(CNY)/重量(g)/1688采购链接
+     * 主图列支持 WPS DISPIMG 内嵌图片与标准 Excel 嵌入图片，行按 1688 链接聚合为一条提报
+     *
+     * @return array{0: array<int, array{url: string, hash: string, pcl: ?string, name: string, skus: array<int, string>, values: array<string, array{price: string, weight: string}>, images: array<int, array{bytes: string, ext: string, name: string}>}>, 1: array<int, string>}
+     */
+    private function parseProductRequestImport(string $path): array
+    {
+        $sheet = IOFactory::load($path)->getSheet(0);
+        $highest = $sheet->getHighestDataRow();
+        $cellImages = $this->extractWpsCellImages($path);
+        $drawingImages = $this->extractDrawingImages($sheet);
+        $groups = [];
+        $errors = [];
+
+        for ($row = 2; $row <= $highest; $row++) {
+            $imageRef = trim((string) $sheet->getCell('A'.$row)->getValue());
+            $pcl = trim((string) $sheet->getCell('B'.$row)->getValue());
+            $name = trim((string) $sheet->getCell('C'.$row)->getValue());
+            $sku = trim((string) $sheet->getCell('D'.$row)->getValue());
+            $price = trim((string) $sheet->getCell('E'.$row)->getValue());
+            $weight = trim((string) $sheet->getCell('F'.$row)->getValue());
+            $url = trim((string) $sheet->getCell('G'.$row)->getValue());
+            if ($pcl === '' && $name === '' && $sku === '' && $url === '') {
+                continue;
+            }
+            $missing = [];
+            if ($name === '') { $missing[] = '商品名称'; }
+            if ($sku === '') { $missing[] = 'SKU'; }
+            if ($url === '') { $missing[] = '1688采购链接'; }
+            if ($missing !== []) {
+                $errors[] = __('product_requests.import.row_missing', ['row' => $row, 'fields' => implode('、', $missing)]);
+                continue;
+            }
+            if (!preg_match('#^https?://#i', $url)) {
+                $errors[] = __('product_requests.import.row_invalid_url', ['row' => $row]);
+                continue;
+            }
+
+            $normalized = $this->workflow->normalizeSupplierUrl($url);
+            $hash = $this->workflow->supplierUrlHash($normalized);
+            if (!isset($groups[$hash])) {
+                $groups[$hash] = ['url' => $normalized, 'hash' => $hash, 'pcl' => $pcl !== '' ? $pcl : null, 'name' => $name, 'skus' => [], 'values' => [], 'images' => []];
+            }
+            if (!in_array($sku, $groups[$hash]['skus'], true)) {
+                $groups[$hash]['skus'][] = $sku;
+            }
+            $groups[$hash]['values'][$sku] = ['price' => $price, 'weight' => $weight];
+
+            // 收集产品主图：WPS DISPIMG 按图片 ID 解析，标准嵌入图片按行号匹配，均按图源去重
+            if (preg_match('/DISPIMG\("([^"]+)"/i', $imageRef, $matches) && isset($cellImages[$matches[1]])) {
+                $image = $cellImages[$matches[1]];
+                $groups[$hash]['images'][$image['key']] = $image;
+            }
+            foreach ($drawingImages[$row] ?? [] as $image) {
+                $groups[$hash]['images'][$image['key']] = $image;
+            }
+        }
+
+        foreach ($groups as &$group) {
+            $group['images'] = array_values($group['images']);
+        }
+        unset($group);
+
+        return [array_values($groups), $errors];
+    }
+
+    /**
+     * 读取 WPS cellimages.xml 内嵌图片，返回 DISPIMG 图片 ID => 图片数据 的映射
+     *
+     * @return array<string, array{key: string, bytes: string, ext: string, name: string}>
+     */
+    private function extractWpsCellImages(string $path): array
+    {
+        $zip = new \ZipArchive();
+        if ($zip->open($path) !== true) {
+            return [];
+        }
+        $cellImagesXml = $zip->getFromName('xl/cellimages.xml');
+        $relsXml = $zip->getFromName('xl/_rels/cellimages.xml.rels');
+        if ($cellImagesXml === false || $relsXml === false) {
+            $zip->close();
+
+            return [];
+        }
+
+        $relMap = [];
+        $rels = simplexml_load_string($relsXml);
+        if ($rels !== false) {
+            foreach ($rels->Relationship as $relationship) {
+                $relMap[(string) $relationship['Id']] = (string) $relationship['Target'];
+            }
+        }
+
+        $images = [];
+        $dom = new \DOMDocument();
+        if (@$dom->loadXML($cellImagesXml)) {
+            $xpath = new \DOMXPath($dom);
+            $xpath->registerNamespace('xdr', 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing');
+            $xpath->registerNamespace('a', 'http://schemas.openxmlformats.org/drawingml/2006/main');
+            foreach ($xpath->query('//xdr:pic') ?: [] as $pic) {
+                $idNode = $xpath->query('.//xdr:cNvPr', $pic)?->item(0);
+                $blipNode = $xpath->query('.//a:blip', $pic)?->item(0);
+                if (!$idNode instanceof \DOMElement || !$blipNode instanceof \DOMElement) {
+                    continue;
+                }
+                $imageId = $idNode->getAttribute('name');
+                $rId = $blipNode->getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'embed');
+                $target = $relMap[$rId] ?? '';
+                if ($imageId === '' || $target === '') {
+                    continue;
+                }
+                $zipPath = 'xl/'.ltrim($target, '/');
+                $bytes = $zip->getFromName($zipPath);
+                if ($bytes === false) {
+                    continue;
+                }
+                $extension = strtolower(pathinfo($target, PATHINFO_EXTENSION)) ?: 'png';
+                $images[$imageId] = ['key' => $zipPath, 'bytes' => $bytes, 'ext' => $extension, 'name' => basename($target)];
+            }
+        }
+        $zip->close();
+
+        return $images;
+    }
+
+    /**
+     * 读取标准 Excel 嵌入图片（绘图对象），返回 行号 => 图片数据列表 的映射，仅采集产品主图所在的 A 列
+     *
+     * @return array<int, array<int, array{key: string, bytes: string, ext: string, name: string}>>
+     */
+    private function extractDrawingImages($sheet): array
+    {
+        $images = [];
+        foreach ($sheet->getDrawingCollection() as $index => $drawing) {
+            if (!preg_match('/^([A-Z]+)(\d+)$/', (string) $drawing->getCoordinates(), $matches) || strtoupper($matches[1]) !== 'A') {
+                continue;
+            }
+            $bytes = @file_get_contents($drawing->getPath());
+            if ($bytes === false) {
+                continue;
+            }
+            $extension = strtolower((string) $drawing->getExtension()) ?: 'png';
+            $images[(int) $matches[2]][] = [
+                'key' => 'drawing-'.$index,
+                'bytes' => $bytes,
+                'ext' => $extension,
+                'name' => trim((string) $drawing->getName()) !== '' ? trim((string) $drawing->getName()) : 'image.'.$extension,
+            ];
+        }
+
+        return $images;
     }
 
     /** 运营重新编辑检验不通过的需求提报 */

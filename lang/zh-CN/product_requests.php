@@ -22,6 +22,19 @@ return [
         'sku_values_help' => '价格与重量会同步到同 1688 链接的所有提报记录；两项都清空表示移除该 SKU 的数值。本次新增的 SKU 保存后可再次打开本窗口填写数值。',
         'updated' => 'SKU 已保存',
     ],
+    'import' => [
+        'open_button' => '导入需求提报',
+        'title' => '导入需求提报',
+        'notice' => '请上传按模板整理的 Excel 文件（.xlsx / .xls），系统按 1688 采购链接聚合生成已检验通过的需求提报记录，产品主图列不导入。',
+        'headers' => '表头需依次为：产品主图 / PCL（商品编号）/ 商品名称 / 当前SKU / 采购参考价(CNY) / 重量(g) / 1688采购链接',
+        'file_hint' => '仅支持 .xlsx / .xls 文件，大小不超过 10MB',
+        'submit' => '开始导入',
+        'success' => '成功导入 :count 条需求提报，共 :skus 个 SKU',
+        'empty' => '未解析到有效数据行，请检查文件内容',
+        'parse_failed' => '文件解析失败，请确认文件格式正确后重试',
+        'row_missing' => '第 :row 行缺少必填字段：:fields，已跳过',
+        'row_invalid_url' => '第 :row 行的 1688 采购链接格式不正确，已跳过',
+    ],
     'link_issues' => [
         'title' => '审核链接问题',
         'subtitle' => '记录投放链接审核失败的需求提报，按提报编号唯一展示。',
@@ -377,5 +390,6 @@ return [
         'placement_rejected' => '投放链接审核失败',
         'warehouse_passed' => '仓库验收审核通过',
         'warehouse_rejected' => '仓库验收审核不通过',
+        'excel_imported' => 'Excel 导入需求提报',
     ],
 ];
