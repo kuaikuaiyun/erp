@@ -670,6 +670,7 @@ class LogisticsProductStatisticsService
             'category' => __('logistics.product_statistics.sold_product'),
             'image_url' => $this->firstImage($items),
             ...$summary,
+            'overview_modules' => $this->overviewModules($items),
             // Specs are display-only subdivisions. They never change the PCL
             // parent calculation or allocate a shared order refund/dispute.
             'variants' => $this->variantMetrics($items),
@@ -744,7 +745,7 @@ class LogisticsProductStatisticsService
         $paidOrders = $orders->filter(fn (LogisticsOrder $order): bool => $this->isPaidOrder($order));
         $shippedOrders = $paidOrders->filter(fn (LogisticsOrder $order): bool => $this->isActuallyShipped($order));
         $deliveredOrders = $shippedOrders->filter(fn (LogisticsOrder $order): bool => $this->isDelivered($order));
-        $paypalOrders = $paidOrders->filter(fn (LogisticsOrder $order): bool => $this->isActualPayPalOrder($order));
+        $paypalOrders = $paidOrders->filter(fn (LogisticsOrder $order): bool => $this->isPayPalModuleOrder($order));
         $creditCardOrders = $paidOrders->filter(fn (LogisticsOrder $order): bool => $this->isCreditCardOrder($order));
         $paypalRefundOrderIds = array_fill_keys($payment['paypal_refund_order_ids'], true);
         $creditCardRefundOrderIds = array_fill_keys($payment['credit_card_refund_order_ids'], true);
@@ -826,6 +827,109 @@ class LogisticsProductStatisticsService
     }
 
     /**
+     * Build the three independently readable blocks used by the product-detail
+     * overview.  The raw Shopify, PayPal and tracking records stay untouched;
+     * this only groups the already loaded records for display.
+     *
+     * @param list<LogisticsOrderItem> $items
+     * @return array{overall:array<string,mixed>,paypal:array<string,mixed>,credit_card:array<string,mixed>}
+     */
+    private function overviewModules(array $items): array
+    {
+        $orders = $this->ordersForItems($items);
+        $paypalOrders = $orders
+            ->filter(fn (LogisticsOrder $order): bool => $this->isPayPalModuleOrder($order))
+            ->values();
+        $creditCardOrders = $orders
+            ->filter(fn (LogisticsOrder $order): bool => $this->isCreditCardOrder($order))
+            ->values();
+
+        return [
+            'overall' => $this->overviewModule($items, $orders, true),
+            'paypal' => $this->overviewModule($this->itemsForOrders($items, $paypalOrders), $paypalOrders, true),
+            'credit_card' => $this->overviewModule($this->itemsForOrders($items, $creditCardOrders), $creditCardOrders, false),
+        ];
+    }
+
+    /**
+     * @param list<LogisticsOrderItem> $items
+     * @param Collection<int,LogisticsOrder> $orders
+     * @return list<LogisticsOrderItem>
+     */
+    private function itemsForOrders(array $items, Collection $orders): array
+    {
+        $orderIds = $orders
+            ->map(static fn (LogisticsOrder $order): int => (int) $order->getKey())
+            ->flip();
+
+        return array_values(array_filter($items, static function (LogisticsOrderItem $item) use ($orderIds): bool {
+            return $item->order instanceof LogisticsOrder
+                && $orderIds->has((int) $item->order->getKey());
+        }));
+    }
+
+    /**
+     * @param list<LogisticsOrderItem> $items
+     * @param Collection<int,LogisticsOrder> $orders
+     * @return array<string,mixed>
+     */
+    private function overviewModule(array $items, Collection $orders, bool $disputesApplicable): array
+    {
+        $payment = $this->realPaymentSummary($orders);
+        $refundAmount = round((float) $payment['paypal_refund_amount'] + (float) $payment['credit_card_refund_amount'], 4);
+        $receivedAmount = $this->sum($items, 'line_revenue_usd');
+        $shippedOrders = $orders->filter(fn (LogisticsOrder $order): bool => $this->isActuallyShipped($order));
+        $deliveredOrders = $orders->filter(fn (LogisticsOrder $order): bool => $this->isDelivered($order));
+        $disputeDetails = $disputesApplicable ? $payment['dispute_details'] : [];
+        $disputeCount = count($disputeDetails);
+
+        return [
+            'unit_count' => $this->sum($items, 'quantity'),
+            'order_count' => $orders->count(),
+            'received_amount' => $receivedAmount,
+            'refund_amount' => $refundAmount,
+            'refund_count' => count($payment['refund_details']),
+            'refund_rate' => $receivedAmount > 0 ? round($refundAmount / $receivedAmount * 100, 2) : 0.0,
+            'shipping_count' => $shippedOrders->count(),
+            'delivery_count' => $deliveredOrders->count(),
+            'shipping_rate' => $orders->isEmpty() ? 0.0 : round($shippedOrders->count() / $orders->count() * 100, 2),
+            'delivery_rate' => $shippedOrders->isEmpty() ? 0.0 : round($deliveredOrders->count() / $shippedOrders->count() * 100, 2),
+            'dispute_applicable' => $disputesApplicable,
+            'dispute_count' => $disputeCount,
+            'dispute_amount' => round(array_sum(array_column($disputeDetails, 'amount')), 4),
+            'dispute_reason_breakdown' => $this->disputeReasonBreakdown($disputeDetails, $disputeCount),
+        ];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $disputes
+     * @return list<array{reason:string,count:int,amount:float,ratio:float}>
+     */
+    private function disputeReasonBreakdown(array $disputes, int $total): array
+    {
+        $groups = [];
+        foreach ($disputes as $dispute) {
+            $reason = trim((string) ($dispute['reason'] ?? '')) ?: __('logistics.common.not_available');
+            $groups[$reason] ??= ['reason' => $reason, 'count' => 0, 'amount' => 0.0];
+            $groups[$reason]['count']++;
+            $groups[$reason]['amount'] += (float) ($dispute['amount'] ?? 0);
+        }
+
+        uasort($groups, static function (array $left, array $right): int {
+            return $right['count'] <=> $left['count'] ?: $right['amount'] <=> $left['amount'];
+        });
+
+        return array_values(array_map(static function (array $group) use ($total): array {
+            return [
+                'reason' => $group['reason'],
+                'count' => $group['count'],
+                'amount' => round((float) $group['amount'], 4),
+                'ratio' => $total > 0 ? round((int) $group['count'] / $total * 100, 2) : 0.0,
+            ];
+        }, $groups));
+    }
+
+    /**
      * @param Collection<int,LogisticsOrder> $orders
      * @return array{paypal_refund_amount:float,credit_card_refund_amount:float,paypal_refund_order_ids:list<int>,credit_card_refund_order_ids:list<int>,paypal_dispute_order_ids:list<int>,refund_details:list<array<string,mixed>>,paypal_refund_details:list<array<string,mixed>>,credit_card_refund_details:list<array<string,mixed>>,dispute_details:list<array<string,mixed>>}
      */
@@ -836,7 +940,7 @@ class LogisticsProductStatisticsService
         $disputes = [];
         foreach ($orders as $order) {
             $orderId = (int) $order->getKey();
-            if ($this->isActualPayPalOrder($order)) {
+            if ($this->isPayPalModuleOrder($order)) {
                 foreach ($order->paypalRefunds as $refund) {
                     if (!$refund instanceof LogisticsPayPalRefund) {
                         continue;
@@ -858,9 +962,11 @@ class LogisticsProductStatisticsService
                     $disputes[$key] ??= $this->paypalDisputeDetail($dispute, $order);
                 }
             }
-            foreach ($order->creditCardRefunds as $refund) {
-                $key = 'credit_card:'.(int) $refund->getKey();
-                $creditCardRefunds[$key] ??= $this->creditCardRefundDetail($refund, $order);
+            if ($this->isCreditCardOrder($order)) {
+                foreach ($order->creditCardRefunds as $refund) {
+                    $key = 'credit_card:'.(int) $refund->getKey();
+                    $creditCardRefunds[$key] ??= $this->creditCardRefundDetail($refund, $order);
+                }
             }
         }
 
@@ -1004,12 +1110,12 @@ class LogisticsProductStatisticsService
                 'paypal_dispute_count' => 0,
                 'tracking_number' => (string) ($order->tracking_number ?: __('logistics.common.not_available')),
                 'logistics_status' => (string) ($order->logistics_status ?: __('logistics.common.not_available')),
-                'payment_method' => $this->isActualPayPalOrder($order)
+                'payment_method' => $this->isPayPalModuleOrder($order)
                     ? __('logistics.product_statistics.payment_methods.paypal')
                     : ($this->isCreditCardOrder($order)
                         ? __('logistics.product_statistics.payment_methods.credit_card')
                         : __('logistics.common.not_available')),
-                'payment_kind' => $this->isActualPayPalOrder($order)
+                'payment_kind' => $this->isPayPalModuleOrder($order)
                     ? 'paypal'
                     : ($this->isCreditCardOrder($order) ? 'credit_card' : 'unknown'),
                 'order_created_at' => $this->dateTime($order->order_created_at),
@@ -1241,15 +1347,18 @@ class LogisticsProductStatisticsService
         return $order->paypal_account_id !== null && $order->paypal_association_source === 'actual_transaction';
     }
 
+    private function isPayPalModuleOrder(LogisticsOrder $order): bool
+    {
+        return $this->isActualPayPalOrder($order) && !$this->hasCreditCardTag($order);
+    }
+
     private function isCreditCardOrder(LogisticsOrder $order): bool
     {
-        // An order confirmed by a PayPal transaction is always PayPal, even if
-        // its gateway label happens to include the word "card".  Independent
-        // credit-card refunds must never share the PayPal denominator.
-        if ($this->isActualPayPalOrder($order)) {
-            return false;
-        }
+        return $this->hasCreditCardTag($order);
+    }
 
+    private function hasCreditCardTag(LogisticsOrder $order): bool
+    {
         $payload = $order->shopify_payload;
         if (is_string($payload)) {
             $payload = json_decode($payload, true);

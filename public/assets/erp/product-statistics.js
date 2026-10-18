@@ -243,6 +243,55 @@
         if ($) $('#product-statistics-image-modal').modal('show');
     }
     function detailMetric(label, value, className) { return '<div class="product-statistics-detail-metric ' + (className || '') + '"><span>' + escapeHtml(label) + '</span><strong>' + value + '</strong></div>'; }
+    function replaceTokens(template, values) {
+        return Object.keys(values || {}).reduce(function (result, key) {
+            return result.split(':' + key).join(String(values[key]));
+        }, String(template || ''));
+    }
+    function overviewMetric(label, value, formula, className) {
+        return '<div class="product-statistics-overview-metric ' + (className || '') + '"><span>' + escapeHtml(label) + '</span><strong>' + value + '</strong>' + (formula ? '<small>' + escapeHtml(formula) + '</small>' : '') + '</div>';
+    }
+    function overviewDisputes(subject) {
+        if (!subject.dispute_applicable) {
+            return '<div class="product-statistics-overview-disputes is-not-applicable"><i class="fa fa-info-circle"></i> ' + escapeHtml(t('overviewDisputeNotApplicable')) + '</div>';
+        }
+        var disputes = Array.isArray(subject.dispute_reason_breakdown) ? subject.dispute_reason_breakdown : [];
+        var summary = formatNumber(subject.dispute_count) + ' / ' + formatMoney(subject.dispute_amount);
+        var rows = disputes.length ? disputes.map(function (dispute) {
+            return '<li>' + escapeHtml(replaceTokens(t('overviewDisputeReason'), {
+                reason: dispute.reason || blank(),
+                count: formatNumber(dispute.count),
+                ratio: formatRate(dispute.ratio).replace('%', ''),
+                amount: formatMoney(dispute.amount)
+            })) + '</li>';
+        }).join('') : '<li>' + escapeHtml(blank()) + '</li>';
+
+        return '<div class="product-statistics-overview-disputes"><div class="product-statistics-overview-disputes-heading"><span>' + escapeHtml(t('overviewDisputeSummary')) + '</span><strong>' + summary + '</strong></div><h5>' + escapeHtml(t('overviewDisputeBreakdown')) + '</h5><ul>' + rows + '</ul><small class="product-statistics-overview-dispute-formula">' + escapeHtml(t('overviewDisputeFormula')) + '</small></div>';
+    }
+    function overviewModule(title, subject, className) {
+        subject = subject || {};
+        var received = formatMoney(subject.received_amount);
+        var refund = formatMoney(subject.refund_amount);
+        var refundFormula = replaceTokens(t('overviewRefundFormula'), { refund: refund, received: received });
+        var shippingFormula = replaceTokens(t('overviewShippingFormula'), {
+            shipped: formatNumber(subject.shipping_count),
+            orders: formatNumber(subject.order_count)
+        });
+        var deliveryFormula = replaceTokens(t('overviewDeliveryFormula'), {
+            delivered: formatNumber(subject.delivery_count),
+            shipped: formatNumber(subject.shipping_count)
+        });
+
+        return '<section class="product-statistics-overview-module ' + className + '"><h4>' + escapeHtml(title) + '</h4><div class="product-statistics-overview-metrics">'
+            + overviewMetric(t('overviewUnitCount'), formatNumber(subject.unit_count))
+            + overviewMetric(t('overviewOrderCount'), formatNumber(subject.order_count))
+            + overviewMetric(t('overviewReceivedAmount'), received)
+            + overviewMetric(t('overviewRefundAmount'), refund)
+            + overviewMetric(t('overviewRefundRate'), formatRate(subject.refund_rate), refundFormula)
+            + overviewMetric(t('overviewShippingRate'), formatRate(subject.shipping_rate), shippingFormula)
+            + overviewMetric(t('overviewDeliveryRate'), formatRate(subject.delivery_rate), deliveryFormula)
+            + '</div>' + overviewDisputes(subject) + '</section>';
+    }
     function negativeMoney(value) { return isNumeric(value) ? '-' + formatMoney(Math.abs(number(value))) : blank(); }
     function detailBreakdown(subject) {
         return '<div class="product-statistics-breakdown"><h5>' + escapeHtml(t('profitBreakdown')) + '</h5>'
@@ -438,14 +487,12 @@
         detailState = { product: product, sorts: {}, filters: {}, pages: {}, activeTab: 'overview' };
         document.getElementById('product-statistics-detail-title').textContent = t('detailTitle');
         document.getElementById('product-statistics-detail-identity').innerHTML = productThumb(product) + '<div><strong>' + escapeHtml(product.name) + '</strong><span>' + escapeHtml(productIdentity(product)) + '</span></div>' + decisionBadge(product.decision);
-        document.getElementById('product-statistics-overview').innerHTML = '<div class="product-statistics-detail-grid">'
-            + detailMetric(t('sales'), formatNumber(product.sales)) + detailMetric(t('revenue'), formatMoney(product.revenue))
-            + detailMetric(t('paypalRefundAmount'), formatMoney(product.paypal_refund_amount)) + detailMetric(t('paypalRefundRate'), formatRate(product.paypal_refund_rate))
-            + detailMetric(t('paypalDisputeCount'), formatNumber(product.paypal_dispute_count)) + detailMetric(t('paypalDisputeRate'), formatRate(product.paypal_dispute_rate))
-            + detailMetric(t('creditCardRefundAmount'), formatMoney(product.credit_card_refund_amount)) + detailMetric(t('creditCardRefundRate'), formatRate(product.credit_card_refund_rate))
-            + detailMetric(t('combinedRefundRate'), formatRate(product.combined_refund_rate)) + detailMetric(t('actualProfit'), formatMoney(product.actual_profit), isNumeric(product.actual_profit) && number(product.actual_profit) < 0 ? 'is-negative' : '')
-            + detailMetric(t('shippingRate'), formatRate(product.shipping_rate)) + detailMetric(t('deliveryRate'), formatRate(product.delivery_rate))
-            + '</div>' + detailStoreOrderDistribution(product) + detailBreakdown(product) + '<div class="alert alert-info"><i class="fa fa-info-circle"></i> ' + escapeHtml(t('crossProductNote')) + '<br><i class="fa fa-info-circle"></i> ' + escapeHtml(t('creditCardDisputeNote')) + '</div>';
+        var overviewModules = product.overview_modules || {};
+        document.getElementById('product-statistics-overview').innerHTML = '<div class="product-statistics-overview-modules">'
+            + overviewModule(t('overviewOverall'), overviewModules.overall, 'is-overall')
+            + overviewModule(t('overviewPayPal'), overviewModules.paypal, 'is-paypal')
+            + overviewModule(t('overviewCreditCard'), overviewModules.credit_card, 'is-credit-card')
+            + '</div>' + detailStoreOrderDistribution(product);
         renderDetailTables();
         renderDetailFilters();
         if ($) {
