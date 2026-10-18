@@ -252,6 +252,19 @@ body.product-request-lightbox-open { overflow: hidden; }
 .product-request-sku-tag-detailed .product-request-sku-tag-field-value { color: #1f6691; font-weight: 600; }
 .product-request-remark-notice { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; padding: 7px 12px; border: 1px solid #f0c8c2; border-left: 3px solid #dd4b39; border-radius: 4px; background: #fdf3f2; color: #c0392b; font-size: 12px; line-height: 1.5; }
 .product-request-remark-notice i { flex: 0 0 auto; font-size: 13px; }
+.product-request-import-header-rule { display: flex; align-items: flex-start; gap: 9px; margin: 12px 0 15px; padding: 10px 12px; border-left: 3px solid #2f80c9; border-radius: 3px; background: #eef6fc; color: #43627e; line-height: 1.6; }
+.product-request-import-header-rule > .fa { margin-top: 4px; color: #2f80c9; }
+.product-request-import-dropzone { display: flex; min-height: 176px; align-items: center; justify-content: center; gap: 7px; padding: 22px; border: 1px dashed #91abc0; border-radius: 5px; background: #f8fbfd; color: #4f6f89; cursor: pointer; flex-direction: column; text-align: center; transition: border-color .18s ease, background .18s ease, color .18s ease, transform .18s ease; }
+.product-request-import-dropzone:hover, .product-request-import-dropzone.is-dragover { border-color: #2f80c9; background: #edf7fd; color: #246f9e; transform: translateY(-1px); }
+.product-request-import-dropzone.is-filled { border-style: solid; border-color: #2b9760; background: #f0faf5; color: #23774d; }
+.product-request-import-dropzone input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+.product-request-import-dropzone > .fa { font-size: 31px; }
+.product-request-import-dropzone strong { color: #304f69; }
+.product-request-import-dropzone span { font-size: 12px; }
+.product-request-import-dropzone em { min-height: 18px; color: #23774d; font-style: normal; font-weight: 700; }
+.product-request-import-footer-note { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-top: 13px; color: #73869a; font-size: 12px; line-height: 1.6; }
+.product-request-import-footer-note span { max-width: 68%; }
+.product-request-import-footer-note a { color: #2c79b2; font-weight: 600; white-space: nowrap; }
 .product-request-sku-tag-missing { border-color: #f4c6c6; background: #fdecec; color: #c0392b; }
 .product-request-sku-preview { flex-direction: column; flex-wrap: nowrap; align-items: flex-start; gap: 4px; margin-top: 6px; }
 .product-request-sku-preview:empty { display: none; }

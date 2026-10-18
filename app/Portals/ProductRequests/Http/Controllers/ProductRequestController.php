@@ -215,7 +215,7 @@ class ProductRequestController extends Controller
         abort_unless($this->canImportProductRequests($context['user']), 403);
 
         $data = $request->validate([
-            'import_file' => ['required', 'file', 'mimes:xlsx,xls', 'max:10240'],
+            'import_file' => ['required', 'file', 'extensions:xlsx,xls', 'max:10240'],
         ]);
 
         try {
@@ -234,7 +234,8 @@ class ProductRequestController extends Controller
         $created = 0;
         $skuCount = 0;
 
-        DB::connection($connection)->transaction(function () use ($groups, $actor, $context, &$created, &$skuCount): void {
+        try {
+            DB::connection($connection)->transaction(function () use ($groups, $actor, $context, &$created, &$skuCount): void {
             foreach ($groups as $group) {
                 $skus = $group['skus'];
                 $productRequest = ProductRequest::query()->create([
@@ -294,7 +295,12 @@ class ProductRequestController extends Controller
                 $created++;
                 $skuCount += count($skus);
             }
-        });
+            });
+        } catch (\Throwable $e) {
+            report($e);
+
+            return back()->with('error', __('product_requests.import.failed', ['message' => $e->getMessage()]));
+        }
 
         $message = __('product_requests.import.success', ['count' => $created, 'skus' => $skuCount]);
         if ($rowErrors !== []) {
@@ -302,6 +308,18 @@ class ProductRequestController extends Controller
         }
 
         return redirect()->route('product-requests.operation.index')->with('success', $message);
+    }
+
+    /** 下载需求提报导入模板（仅 boss 账号） */
+    public function operationImportTemplate(Request $request): Response
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        abort_unless($this->canImportProductRequests($context['user']), 403);
+
+        return response()->download(
+            storage_path('app/templates/product-request-import-template.xlsx'),
+            '需求提报导入模板.xlsx'
+        );
     }
 
     /** 仅 boss 账号可导入需求提报 */
