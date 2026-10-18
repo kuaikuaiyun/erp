@@ -169,7 +169,7 @@ return [
         'review_status' => '链接审核状态',
         'review_remark' => '审核失败备注',
         'warehouse_status' => '仓库状态',
-        'operation_rectification_status' => '运营整改状态',
+        'operation_rectification_status' => '仓库问题待运营整改',
         'procurement_rectification_status' => '录入人员整改状态',
         'placement_link' => '投放链接',
         'reviewer' => '审核人',
