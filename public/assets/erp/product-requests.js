@@ -349,12 +349,15 @@
         }
 
         function applyRecord(record) {
-            ['standard_chinese_name', 'large_volume_weight_g', 'minimum_purchase_price_rmb', 'estimated_shipping_weight_g', 'outer_package_size', 'pcl_product_no'].forEach(function (field) {
+            ['standard_chinese_name', 'pcl_product_no'].forEach(function (field) {
                 var input = reuseForm.querySelector('[name="' + field + '"]');
                 if (input) { input.value = record[field] || ''; }
             });
             renderReusedImages(record.seller_images);
-            // 按名称匹配复用时，来源记录链接与当前链接不同，需把来源系统 SKU 并入右栏供勾选
+            // 先带入来源按 SKU 存储的采购价/重量，再把来源系统 SKU 并入右栏（渲染时读取初始值）
+            if (typeof reuseForm.erpSkuSuggestionsApplyValues === 'function') {
+                reuseForm.erpSkuSuggestionsApplyValues(record.sku_values || {});
+            }
             if (typeof reuseForm.erpSkuSuggestionsAppend === 'function') {
                 reuseForm.erpSkuSuggestionsAppend(record.skus || [], record.report_no || '');
             }
@@ -556,13 +559,22 @@
         var url = input.getAttribute('data-sku-suggestions-url');
         var currentId = input.getAttribute('data-sku-suggestions-current-id');
         var linkSkusInput = form ? form.querySelector('[data-product-request-link-skus]') : null;
+        var skuValuesInput = form ? form.querySelector('[data-product-request-sku-values]') : null;
         var checkButton = form ? form.querySelector('[data-sku-check]') : null;
         if (!panel || !list || !form) { return; }
+        var skuValues = {};
+        try { skuValues = JSON.parse(panel.getAttribute('data-initial-sku-values') || '{}') || {}; } catch (e) { skuValues = {}; }
+        var pricePlaceholder = panel.getAttribute('data-price-placeholder') || '';
+        var weightPlaceholder = panel.getAttribute('data-weight-placeholder') || '';
 
         var operationList = panel.querySelector('#sku-operation-list');
         var skuSource = root.querySelector('[data-sku-edit-source]');
         var skuPreview = skuSource ? skuSource.parentNode.querySelector('[data-sku-edit-preview]') : null;
         var syncingSkus = false;
+        // fetchedItems 为当前链接查询结果；extraItems 为按名称复用时带入的来源记录 SKU（需在使用前完成赋值）
+        var fetchedItems = [];
+        var fetchedSkuValues = {};
+        var extraItems = [];
 
         // 运营 SKU 编辑框内容实时渲染为标签，便于逐行查看
         function renderSkuPreview() {
@@ -593,6 +605,27 @@
             }
             if (summaryRow) { summaryRow.hidden = parts.length === 0; }
             if (summary) { summary.textContent = parts.length ? '已勾选 ' + parts.length + ' 个：' + parts.join(', ') : ''; }
+            syncSkuValues();
+        }
+
+        // 把勾选中且填写了价格/重量的 SKU 序列化到隐藏域随表单提交
+        function syncSkuValues() {
+            if (!skuValuesInput) { return; }
+            var out = {};
+            panel.querySelectorAll('.sku-suggestion-item').forEach(function (row) {
+                var cb = row.querySelector('[data-sku-select]');
+                if (!cb || !cb.checked) { return; }
+                var sku = (cb.value || '').trim();
+                if (sku === '') { return; }
+                var price = row.querySelector('[data-sku-price]');
+                var weight = row.querySelector('[data-sku-weight]');
+                var pv = price ? price.value.trim() : '';
+                var wv = weight ? weight.value.trim() : '';
+                if (pv === '' && wv === '') { return; }
+                out[sku] = { price: pv, weight: wv };
+            });
+            skuValuesInput.value = JSON.stringify(out);
+            skuValues = out;
         }
 
         // 提报信息下的「运营 SKU」可直接修改，文本与勾选项双向同步
@@ -615,7 +648,7 @@
             resizeSkuSource();
         }
 
-        // SKU 行：editable=true 时渲染文本框（仅运营 SKU 可改），否则只读展示
+        // SKU 行：editable=true 时渲染文本框（仅运营 SKU 可改），否则只读展示；每行附采购价/重量输入框，勾选才可编辑
         function buildSkuRow(value, editable) {
             var label = document.createElement('label');
             label.className = 'sku-suggestion-item';
@@ -625,11 +658,34 @@
             checkbox.value = value;
             checkbox.checked = true;
             checkbox.setAttribute('data-sku-select', 'true');
+            label.appendChild(checkbox);
+
+            function buildValueField(kind, placeholder) {
+                var field = document.createElement('input');
+                field.type = 'text';
+                field.className = 'sku-suggestion-input sku-value-input';
+                field.placeholder = placeholder;
+                field.maxLength = 100;
+                field.setAttribute('data-sku-' + kind, 'true');
+                var initial = (skuValues[value] && skuValues[value][kind]) || (fetchedSkuValues[value] && fetchedSkuValues[value][kind]) || '';
+                field.value = initial;
+                field.disabled = !checkbox.checked;
+                field.addEventListener('input', syncSkuValues);
+                field.addEventListener('click', function (event) { event.preventDefault(); });
+                return field;
+            }
+            var priceField = buildValueField('price', pricePlaceholder);
+            var weightField = buildValueField('weight', weightPlaceholder);
+            // 系统已录入（同 1688 链接）SKU 的价格/重量仅展示，不可修改；运营 SKU 勾选后价格/重量必填（未勾选禁用自动跳过校验）
+            if (!editable) { priceField.readOnly = true; weightField.readOnly = true; }
+            if (editable) { priceField.required = true; weightField.required = true; }
+
             checkbox.addEventListener('change', function () {
+                priceField.disabled = !checkbox.checked;
+                weightField.disabled = !checkbox.checked;
                 if (label.parentNode === list) { syncLinkSkus(); }
                 updateSummary();
             });
-            label.appendChild(checkbox);
             if (editable) {
                 var edit = document.createElement('input');
                 edit.type = 'text';
@@ -640,7 +696,7 @@
                 edit.addEventListener('input', function () {
                     var next = edit.value.trim();
                     checkbox.value = next;
-                    if (next === '') { checkbox.checked = false; }
+                    if (next === '') { checkbox.checked = false; priceField.disabled = true; weightField.disabled = true; }
                     writeOperationSource();
                     updateSummary();
                 });
@@ -648,6 +704,8 @@
             } else {
                 label.appendChild(document.createTextNode(value));
             }
+            label.appendChild(priceField);
+            label.appendChild(weightField);
             return label;
         }
 
@@ -689,18 +747,15 @@
             linkSkusInput.value = values.join(',');
         }
 
-        // fetchedItems 为当前链接查询结果；extraItems 为按名称复用时带入的来源记录 SKU
-        var fetchedItems = [];
-        var extraItems = [];
-
-        function render() {
+        // fetchedItems/extraItems 已在上方声明并初始化，这里直接合并渲染
+        function render(emptyText) {
             var items = fetchedItems.concat(extraItems);
             list.innerHTML = '';
             if (countEl) { countEl.textContent = ''; }
             if (!items.length) {
                 var empty = document.createElement('span');
                 empty.className = 'sku-suggestion-empty';
-                empty.textContent = '该链接在系统中暂无已录入 SKU';
+                empty.textContent = emptyText || '该链接在系统中暂无已录入 SKU';
                 list.appendChild(empty);
                 panel.hidden = false;
                 if (linkSkusInput) { linkSkusInput.value = ''; }
@@ -733,6 +788,28 @@
             updateSummary();
         }
 
+        // 复用记录时带入来源按 SKU 存储的采购价/重量，并回填到当前面板各行
+        form.erpSkuSuggestionsApplyValues = function (map) {
+            if (!map) { return; }
+            Object.keys(map).forEach(function (sku) {
+                var row = map[sku] || {};
+                if (!skuValues[sku]) { skuValues[sku] = {}; }
+                if (row.price) { skuValues[sku].price = row.price; }
+                if (row.weight) { skuValues[sku].weight = row.weight; }
+            });
+            panel.querySelectorAll('.sku-suggestion-item').forEach(function (rowEl) {
+                var cb = rowEl.querySelector('[data-sku-select]');
+                if (!cb) { return; }
+                var entry = skuValues[(cb.value || '').trim()];
+                if (!entry) { return; }
+                var price = rowEl.querySelector('[data-sku-price]');
+                var weight = rowEl.querySelector('[data-sku-weight]');
+                if (price && entry.price) { price.value = entry.price; }
+                if (weight && entry.weight) { weight.value = entry.weight; }
+            });
+            syncSkuValues();
+        };
+
         // 按名称匹配复用时，把来源记录的系统 SKU 并入右栏供勾选（与已有勾选项去重）
         form.erpSkuSuggestionsAppend = function (skus, reportNo) {
             var existing = [];
@@ -761,12 +838,24 @@
             var query = '?supplier_url=' + encodeURIComponent(value) + (currentId ? '&current_id=' + encodeURIComponent(currentId) : '');
             fetch(url + query, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
                 .then(function (response) { return response.ok ? response.json() : { items: [] }; })
-                .then(function (payload) { fetchedItems = payload.items || []; render(); })
-                .catch(function () { panel.hidden = true; });
+                .then(function (payload) { fetchedItems = payload.items || []; fetchedSkuValues = payload.values || {}; render(); })
+                .catch(function () { fetchedItems = []; fetchedSkuValues = {}; render(); });
         }
 
         if (checkButton) { checkButton.addEventListener('click', fetchSuggestions); }
         form.erpSkuSuggestions = fetchSuggestions;
+        // 提交拦截：未勾选任何系统已录入 SKU 时，运营填写的 SKU 至少要勾选一个（审核不通过除外）
+        form.addEventListener('submit', function (event) {
+            var resultInput = form.querySelector('input[name="result"]');
+            if (resultInput && resultInput.value === 'rejected') { return; }
+            if (!panel.querySelector('input[name="selected_skus[]"]:checked')) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                notify('error', panel.getAttribute('data-sku-check-required') || '请至少勾选一个 SKU');
+            }
+        }, true);
+        // 进入表单只展示左侧运营 SKU；右侧系统已录入 SKU 在点击查重复用后再加载显示
+        render('点击「品名和 1688 查重」复用后，此处显示同 1688 链接已录入的 SKU');
         updateSummary();
     }
 
