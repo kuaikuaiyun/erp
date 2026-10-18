@@ -156,10 +156,18 @@
 .product-statistics-detail-filter-form .form-control { height: 32px; border-color: #d7e3ee; color: #385b79; }
 .product-statistics-detail-filter-actions { display: flex; gap: 6px; }
 .product-statistics-detail-filter-actions .btn { height: 32px; }
-.product-statistics-detail-pagination { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 9px; color: #71899d; font-size: 12px; }
-.product-statistics-detail-pagination > div { display: flex; gap: 3px; }
-.product-statistics-detail-page { min-width: 27px; border-color: #d5e2ed; color: #56728b; }
-.product-statistics-detail-page.is-active { color: #fff; border-color: #2783c8; background: #2783c8; }
+.product-statistics-detail-pagination { display: flex; align-items: center; justify-content: flex-end; min-height: 48px; gap: 12px; margin-top: 9px; padding: 9px 0 0; color: #5d7690; font-size: 12px; }
+.product-statistics-detail-page-summary { margin-right: auto; }
+.product-statistics-detail-page-controls, .product-statistics-detail-page-size { display: flex; align-items: center; gap: 0; margin: 0; white-space: nowrap; }
+.product-statistics-detail-page-controls .btn { width: 29px; height: 29px; padding: 0; border-color: #d9e3ed; border-radius: 0; color: #55708a; line-height: 27px; }
+.product-statistics-detail-page-controls .btn:first-child { border-radius: 3px 0 0 3px; }
+.product-statistics-detail-page-controls .btn:last-child { border-radius: 0 3px 3px 0; }
+.product-statistics-detail-page-controls .btn + .btn { margin-left: -1px; }
+.product-statistics-detail-page { min-width: 29px; }
+.product-statistics-detail-page.is-active { position: relative; z-index: 1; border-color: #2b78c5 !important; background: #2b78c5; color: #fff; }
+.product-statistics-detail-page[disabled] { background: #fafbfd; color: #b8c5d1; cursor: not-allowed; }
+.product-statistics-detail-page-size { gap: 7px; color: #496883; font-weight: 600; }
+.product-statistics-detail-page-size .form-control { width: 59px; height: 29px; border-color: #cedbe8; border-radius: 2px; color: #2c4d6f; font-size: 12px; font-weight: 400; }
 .product-statistics-detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .product-statistics-detail-metric { padding: 13px 14px; border: 1px solid #e6edf4; border-radius: 4px; background: #fbfdff; }
 .product-statistics-detail-metric span { display: block; color: #8194a8; font-size: 12px; }

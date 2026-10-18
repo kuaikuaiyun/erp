@@ -8,7 +8,7 @@
     var decisions = config.decisions || {};
     var labels = config.labels || {};
     var state = { page: Number(pagination.current_page) || 1, sort: config.sort || '', direction: config.direction || '', selected: {} };
-    var detailState = { product: null, detailLoaded: false, loadingDetail: false, sorts: {}, filters: {}, pages: {}, activeTab: 'overview' };
+    var detailState = { product: null, detailLoaded: false, loadingDetail: false, sorts: {}, filters: {}, pages: {}, perPages: {}, activeTab: 'overview' };
     var body = document.getElementById('product-statistics-body');
     var tableScroll = document.querySelector('.product-statistics-table-scroll');
     var empty = document.getElementById('product-statistics-empty');
@@ -379,6 +379,10 @@
         return detailState.filters[table];
     }
     function detailPage(table) { return Number(detailState.pages[table] || 1); }
+    function detailPerPage(table) {
+        var perPage = Number(detailState.perPages[table] || 10);
+        return [5, 10, 20].indexOf(perPage) === -1 ? 10 : perPage;
+    }
     function detailText(row) {
         return Object.keys(row || {}).map(function (key) {
             var value = row[key];
@@ -399,7 +403,7 @@
     }
     function detailPaginatedRows(table, rows) {
         var filtered = detailFilteredRows(table, rows);
-        var perPage = 10;
+        var perPage = detailPerPage(table);
         var lastPage = Math.max(1, Math.ceil(filtered.length / perPage));
         var page = Math.min(detailPage(table), lastPage);
         detailState.pages[table] = page;
@@ -419,13 +423,23 @@
     }
     function detailPagination(table, pageData) {
         var pages = [];
-        if (pageData.total > 10) {
-            for (var page = Math.max(1, pageData.page - 2); page <= Math.min(pageData.lastPage, pageData.page + 2); page++) {
-                pages.push('<button type="button" class="btn btn-default btn-xs product-statistics-detail-page' + (page === pageData.page ? ' is-active' : '') + '" data-detail-table="' + escapeHtml(table) + '" data-detail-page="' + page + '">' + page + '</button>');
-            }
+        var start = Math.max(1, pageData.page - 2);
+        var end = Math.min(pageData.lastPage, start + 4);
+        start = Math.max(1, end - 4);
+        for (var page = start; page <= end; page++) {
+            pages.push('<button type="button" class="btn btn-default btn-sm product-statistics-detail-page' + (page === pageData.page ? ' is-active' : '') + '" data-detail-table="' + escapeHtml(table) + '" data-detail-page="' + page + '">' + page + '</button>');
         }
         var summary = pageData.total ? (t('detailPageSummary') || '').replace(':from', pageData.from).replace(':to', pageData.to).replace(':total', pageData.total) : (t('detailPageEmpty') || '');
-        return '<div class="product-statistics-detail-pagination"><span>' + escapeHtml(summary) + '</span><div>' + pages.join('') + '</div></div>';
+        var perPage = detailPerPage(table);
+        return '<div class="product-statistics-detail-pagination">'
+            + '<span class="product-statistics-detail-page-summary">' + escapeHtml(summary) + '</span>'
+            + '<div class="product-statistics-detail-page-controls">'
+            + '<button type="button" class="btn btn-default btn-sm product-statistics-detail-page" data-detail-table="' + escapeHtml(table) + '" data-detail-page="' + Math.max(1, pageData.page - 1) + '" aria-label="' + escapeHtml(t('previousPage')) + '"' + (pageData.page <= 1 ? ' disabled' : '') + '><i class="fa fa-angle-left"></i></button>'
+            + pages.join('')
+            + '<button type="button" class="btn btn-default btn-sm product-statistics-detail-page" data-detail-table="' + escapeHtml(table) + '" data-detail-page="' + Math.min(pageData.lastPage, pageData.page + 1) + '" aria-label="' + escapeHtml(t('nextPage')) + '"' + (pageData.page >= pageData.lastPage ? ' disabled' : '') + '><i class="fa fa-angle-right"></i></button>'
+            + '</div>'
+            + '<label class="product-statistics-detail-page-size"><span>' + escapeHtml(t('perPage')) + '</span><select class="form-control input-sm product-statistics-detail-page-size-select" data-detail-table="' + escapeHtml(table) + '"><option value="5"' + (perPage === 5 ? ' selected' : '') + '>5</option><option value="10"' + (perPage === 10 ? ' selected' : '') + '>10</option><option value="20"' + (perPage === 20 ? ' selected' : '') + '>20</option></select><span>' + escapeHtml(t('items')) + '</span></label>'
+            + '</div>';
     }
     function renderDetailFilters() {
         var container = document.getElementById('product-statistics-detail-filters');
@@ -596,6 +610,7 @@
         }
         var detailPage = event.target.closest('.product-statistics-detail-page');
         if (detailPage) {
+            if (detailPage.disabled) return;
             detailState.pages[detailPage.dataset.detailTable] = Number(detailPage.dataset.detailPage) || 1;
             renderDetailTables();
             return;
@@ -622,6 +637,14 @@
             else if (state.sort === sort && state.direction === 'asc') { sort = ''; direction = ''; }
             navigate({ sort: sort, direction: direction, page: 1 });
         }
+    });
+    document.addEventListener('change', function (event) {
+        var pageSize = event.target.closest('.product-statistics-detail-page-size-select');
+        if (!pageSize) return;
+        var table = pageSize.dataset.detailTable;
+        detailState.perPages[table] = Number(pageSize.value) || 10;
+        detailState.pages[table] = 1;
+        renderDetailTables();
     });
     document.addEventListener('keydown', function (event) {
         if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('.product-statistics-thumb.is-previewable')) {
