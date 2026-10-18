@@ -299,10 +299,11 @@ class ProductRequestController extends Controller
         DB::connection($connection)->transaction(function () use ($productRequest, $context): void {
             $locked = ProductRequest::query()->lockForUpdate()->findOrFail($productRequest->getKey());
             $locked->operation_rectification_status = ProductRequest::RECTIFICATION_DONE;
-            // 双方都已整改时，仓库审核状态自动变为通过
+            // 双方都已整改时，仓库审核状态自动变为通过，并进入审核链接人员复查流程
             if ($locked->procurement_rectification_status === ProductRequest::RECTIFICATION_DONE) {
                 $locked->warehouse_acceptance_result = ProductRequest::WAREHOUSE_PASSED;
                 $locked->warehouse_reject_reason = null;
+                $locked->placement_recheck_status = ProductRequest::RECTIFICATION_PENDING;
             }
             $locked->save();
             $this->workflow->log($locked, 'operation_rectified', $context['user']);
@@ -332,10 +333,11 @@ class ProductRequestController extends Controller
         DB::connection($connection)->transaction(function () use ($productRequest, $context): void {
             $locked = ProductRequest::query()->lockForUpdate()->findOrFail($productRequest->getKey());
             $locked->procurement_rectification_status = ProductRequest::RECTIFICATION_DONE;
-            // 双方都已整改时，仓库审核状态自动变为通过
+            // 双方都已整改时，仓库审核状态自动变为通过，并进入审核链接人员复查流程
             if ($locked->operation_rectification_status === ProductRequest::RECTIFICATION_DONE) {
                 $locked->warehouse_acceptance_result = ProductRequest::WAREHOUSE_PASSED;
                 $locked->warehouse_reject_reason = null;
+                $locked->placement_recheck_status = ProductRequest::RECTIFICATION_PENDING;
             }
             $locked->save();
             $this->workflow->log($locked, 'procurement_rectified', $context['user']);
@@ -345,6 +347,33 @@ class ProductRequestController extends Controller
             $request,
             __('product_requests.messages.procurement_rectified', ['report_no' => $productRequest->report_no]),
             'product-requests.procurement.index',
+        );
+    }
+
+    /** 审核链接人员确认复查（双方整改完成后） */
+    public function placementReviewRecheck(Request $request, ProductRequest $productRequest): JsonResponse|RedirectResponse
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::PROCUREMENT_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->access->canReviewPlacement($context['user']), 403);
+        abort_unless($productRequest->placement_recheck_status === ProductRequest::RECTIFICATION_PENDING, 403);
+
+        $connection = config('admin.database.connection') ?: config('database.default');
+        DB::connection($connection)->transaction(function () use ($productRequest, $context): void {
+            $locked = ProductRequest::query()->lockForUpdate()->findOrFail($productRequest->getKey());
+            abort_unless($locked->placement_recheck_status === ProductRequest::RECTIFICATION_PENDING, 403);
+            $locked->placement_recheck_status = ProductRequest::RECTIFICATION_DONE;
+            $locked->save();
+            $this->workflow->log($locked, 'placement_rechecked', $context['user']);
+        });
+
+        return $this->modalSuccess(
+            $request,
+            __('product_requests.messages.placement_rechecked', ['report_no' => $productRequest->report_no]),
+            'product-requests.placement-reviews.index',
         );
     }
 
@@ -781,6 +810,115 @@ class ProductRequestController extends Controller
         ]);
     }
 
+    /** PCL 与 SKU 管理列表（按 1688 链接维度） */
+    public function linkSkuIndex(Request $request): Response|View
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::PROCUREMENT_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        abort_unless($this->access->canInspectProcurement($context['user']), 403);
+
+        $keyword = trim((string) $request->query('keyword', ''));
+        $links = ProductRequestLinkSku::query()
+            ->when($keyword !== '', function (Builder $query) use ($keyword): Builder {
+                $pclHashes = ProductRequest::query()
+                    ->where('pcl_product_no', 'like', '%'.$keyword.'%')
+                    ->pluck('supplier_url_hash');
+
+                return $query->where(function (Builder $q) use ($keyword, $pclHashes): void {
+                    $q->where('supplier_url', 'like', '%'.$keyword.'%')
+                        ->orWhere('skus', 'like', '%'.$keyword.'%')
+                        ->when($pclHashes->isNotEmpty(), fn (Builder $inner): Builder => $inner->orWhereIn('supplier_url_hash', $pclHashes));
+                });
+            })
+            ->orderByDesc('updated_at')
+            ->paginate(20)
+            ->withQueryString();
+
+        // 每个链接展示最新一条同链接提报记录的 PCL 商品编号
+        $pclMap = ProductRequest::query()
+            ->whereIn('supplier_url_hash', $links->pluck('supplier_url_hash'))
+            ->whereNotNull('pcl_product_no')
+            ->where('pcl_product_no', '!=', '')
+            ->orderByDesc('updated_at')
+            ->get(['supplier_url_hash', 'pcl_product_no'])
+            ->unique('supplier_url_hash')
+            ->pluck('pcl_product_no', 'supplier_url_hash');
+
+        // 每个链接取最新一条同链接提报记录的运营阶段首图作为产品图
+        $coverMap = [];
+        ProductRequest::query()
+            ->whereIn('supplier_url_hash', $links->pluck('supplier_url_hash'))
+            ->with('attachments')
+            ->orderByDesc('updated_at')
+            ->get(['id', 'supplier_url_hash', 'updated_at'])
+            ->each(function (ProductRequest $record) use (&$coverMap): void {
+                if (isset($coverMap[$record->supplier_url_hash])) {
+                    return;
+                }
+                $cover = $record->attachmentsFor(ProductRequestAttachment::STAGE_OPERATION)->first();
+                if ($cover) {
+                    $coverMap[$record->supplier_url_hash] = [$record, $cover];
+                }
+            });
+
+        return view('portals.product-requests.link-skus.index', [
+            ...$this->viewContext($context),
+            'links' => $links,
+            'pclMap' => $pclMap,
+            'coverMap' => $coverMap,
+            'filters' => ['keyword' => $keyword],
+        ]);
+    }
+
+    /** PCL 与 SKU 编辑弹窗 */
+    public function linkSkuEdit(Request $request, ProductRequestLinkSku $linkSku): Response|View
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::PROCUREMENT_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        abort_unless($this->access->canInspectProcurement($context['user']), 403);
+
+        if (!$this->isModalRequest($request)) {
+            return redirect()->route('product-requests.link-skus.index');
+        }
+
+        $pcl = ProductRequest::query()
+            ->where('supplier_url_hash', $linkSku->supplier_url_hash)
+            ->whereNotNull('pcl_product_no')
+            ->where('pcl_product_no', '!=', '')
+            ->orderByDesc('updated_at')
+            ->value('pcl_product_no');
+
+        return view('portals.product-requests.link-skus.form', [
+            'linkSku' => $linkSku,
+            'pcl' => $pcl,
+            'skus' => $this->splitSkus((string) $linkSku->skus),
+        ]);
+    }
+
+    /** 保存链接 SKU：只增不减，提交值与历史值合并去重；PCL 商品编号仅展示不可编辑 */
+    public function linkSkuUpdate(Request $request, ProductRequestLinkSku $linkSku): JsonResponse|RedirectResponse|Response
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::PROCUREMENT_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        abort_unless($this->access->canInspectProcurement($context['user']), 403);
+
+        $data = $request->validate([
+            'skus' => ['nullable', 'string', 'max:10000'],
+        ]);
+
+        $submitted = $this->splitSkus(str_replace(["\r\n", "\r", "\n"], ',', (string) ($data['skus'] ?? '')));
+        $merged = $this->mergeLinkSkus((string) $linkSku->skus, $submitted);
+        $linkSku->forceFill(['skus' => implode(',', $merged)])->save();
+
+        return $this->modalSuccess($request, __('product_requests.link_skus.updated'), 'product-requests.link-skus.index');
+    }
+
     public function placementReviewPendingCount(Request $request): JsonResponse
     {
         $context = $this->portalContext($request, ProductRequestAccessService::PROCUREMENT_PORTAL_CODE);
@@ -793,8 +931,12 @@ class ProductRequestController extends Controller
         }
 
         // 与投放链接审核列表保持一致：同样不带可见性过滤
+        // 统计待审核记录 + 双方整改完成后待复查的记录
         $records = ProductRequest::query()
-            ->where('placement_review_status', ProductRequest::REVIEW_PENDING)
+            ->where(function (Builder $query): void {
+                $query->where('placement_review_status', ProductRequest::REVIEW_PENDING)
+                    ->orWhere('placement_recheck_status', ProductRequest::RECTIFICATION_PENDING);
+            })
             ->get(['id', 'report_no']);
 
         return response()->json([
@@ -1062,6 +1204,8 @@ class ProductRequestController extends Controller
                 'status' => $rejected ? ProductRequest::STATUS_INSPECTION_PASSED : $locked->status,
                 'operation_rectification_status' => $rejected ? ProductRequest::RECTIFICATION_PENDING : ProductRequest::RECTIFICATION_NONE,
                 'procurement_rectification_status' => $rejected ? ProductRequest::RECTIFICATION_PENDING : ProductRequest::RECTIFICATION_NONE,
+                // 仓库重新审核不通过时重置复查状态，待双方整改完成后重新进入复查流程
+                'placement_recheck_status' => $rejected ? ProductRequest::RECTIFICATION_NONE : $locked->placement_recheck_status,
                 'warehouse_operator_id' => $actor['user_id'],
                 'warehouse_operator_name' => $actor['user_name'],
                 'warehouse_operator_department_name' => $actor['department_name'],
@@ -1190,6 +1334,7 @@ class ProductRequestController extends Controller
             'warehouse_status' => in_array($request->input('warehouse_status'), array_keys($this->warehouseResultLabels()), true) ? (string) $request->input('warehouse_status') : '',
             'operation_rectification_status' => in_array($request->input('operation_rectification_status'), array_keys($this->rectificationLabels()), true) ? (string) $request->input('operation_rectification_status') : '',
             'procurement_rectification_status' => in_array($request->input('procurement_rectification_status'), array_keys($this->rectificationLabels()), true) ? (string) $request->input('procurement_rectification_status') : '',
+            'placement_recheck_status' => in_array($request->input('placement_recheck_status'), array_keys($this->rectificationLabels()), true) ? (string) $request->input('placement_recheck_status') : '',
             'per_page' => $perPage,
         ];
     }
@@ -1229,6 +1374,9 @@ class ProductRequestController extends Controller
         }
         if (($filters['procurement_rectification_status'] ?? '') !== '') {
             $query->where('procurement_rectification_status', $filters['procurement_rectification_status']);
+        }
+        if (($filters['placement_recheck_status'] ?? '') !== '') {
+            $query->where('placement_recheck_status', $filters['placement_recheck_status']);
         }
 
         return $query;
