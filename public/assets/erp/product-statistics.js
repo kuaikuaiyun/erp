@@ -174,7 +174,8 @@
     }
     function renderSortIndicators() {
         Array.prototype.slice.call(document.querySelectorAll('.product-statistics-sort')).forEach(function (button) {
-            var icon = button.querySelector('i');
+            var icon = button.querySelector('.product-statistics-sort-indicator');
+            if (!icon) return;
             if (state.sort && button.dataset.sort === state.sort) {
                 button.classList.add('is-active');
                 icon.className = 'fa fa-sort-' + (state.direction === 'asc' ? 'asc' : 'desc');
