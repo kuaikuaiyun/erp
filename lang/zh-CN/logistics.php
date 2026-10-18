@@ -275,7 +275,7 @@ return [
             'paypal_dispute_count' => '与该产品相关的 PayPal 纠纷订单数量；信用卡退款不计入。',
             'paypal_dispute_rate' => 'PayPal 纠纷订单数 ÷ 该产品相关已付款订单数。',
             'credit_card_refund_amount' => '从信用卡退款导入记录汇总的退款金额（USD）。',
-            'credit_card_refund_rate' => '信用卡退款金额 ÷ 该产品相关订单实收金额。',
+            'credit_card_refund_rate' => '带 CreditCardByFintrixV2 标签的信用卡退款订单数 ÷ 同标签的信用卡已付款订单数。同一订单多笔退款仅计为 1 笔退款订单。',
             'combined_refund_rate' => 'PayPal 与信用卡真实退款金额合计 ÷ 该产品相关订单实收金额。',
             'shipping_rate' => '已有真实物流单号并已进入物流查询范围的订单占比。',
             'delivery_rate' => '51Tracking 返回“已签收”的订单占已发货订单的比例。',
