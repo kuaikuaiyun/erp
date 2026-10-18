@@ -35,6 +35,11 @@
 .product-request-table thead .product-request-sticky-right { z-index: 6; background: #eaf0f7 !important; }
 .product-request-thumbnail { width: 46px; height: 46px; object-fit: cover; border: 1px solid #dfe7ef; border-radius: 4px; background: #f2f4f7; cursor: zoom-in; transition: transform .16s ease, box-shadow .16s ease; }
 .product-request-thumbnail:hover { transform: scale(1.08); box-shadow: 0 3px 9px rgba(35, 62, 88, .22); }
+.product-request-example { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; vertical-align: middle; cursor: zoom-in; }
+.product-request-example img { height: 42px; width: auto; border: 1px solid #dfe7ef; border-radius: 4px; background: #f2f4f7; transition: transform .16s ease, box-shadow .16s ease; }
+.product-request-example:hover img { transform: scale(1.05); box-shadow: 0 3px 9px rgba(35, 62, 88, .22); }
+.product-request-example-text { color: #3c8dbc; font-size: 12px; font-weight: normal; }
+.product-request-example:hover .product-request-example-text { text-decoration: underline; }
 .product-request-badge { display: inline-flex; align-items: center; min-height: 22px; padding: 4px 9px; color: #496072; border: 1px solid transparent; border-radius: 12px; background: #718397; box-shadow: 0 1px 2px rgba(25, 48, 72, .12); font-size: 12px; font-weight: 600; line-height: 1.25; white-space: nowrap; text-align: left; }
 .product-request-badge.status-pending, .product-request-badge.warehouse-pending_review { color: #915f0a; border-color: #d39b39; background: #fff1cc; }
 .product-request-badge.status-inspection_passed, .product-request-badge.review-pending { color: #176a9b; border-color: #4b9dcc; background: #e5f4fc; }

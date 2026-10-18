@@ -354,6 +354,10 @@
                 if (input) { input.value = record[field] || ''; }
             });
             renderReusedImages(record.seller_images);
+            // 按名称匹配复用时，来源记录链接与当前链接不同，需把来源系统 SKU 并入右栏供勾选
+            if (typeof reuseForm.erpSkuSuggestionsAppend === 'function') {
+                reuseForm.erpSkuSuggestionsAppend(record.skus || [], record.report_no || '');
+            }
             if (selectedSource) { selectedSource.value = record.id; }
             if (selectedText) {
                 selectedText.hidden = false;
@@ -685,7 +689,12 @@
             linkSkusInput.value = values.join(',');
         }
 
-        function render(items) {
+        // fetchedItems 为当前链接查询结果；extraItems 为按名称复用时带入的来源记录 SKU
+        var fetchedItems = [];
+        var extraItems = [];
+
+        function render() {
+            var items = fetchedItems.concat(extraItems);
             list.innerHTML = '';
             if (countEl) { countEl.textContent = ''; }
             if (!items.length) {
@@ -699,8 +708,13 @@
                 return;
             }
             var total = 0;
+            var seen = [];
             items.forEach(function (item) {
                 (item.skus || []).forEach(function (sku) {
+                    var value = String(sku === null || typeof sku === 'undefined' ? '' : sku).trim();
+                    // 同一 SKU 只保留一个：当前链接已录入的优先，复用来源重复的不再追加
+                    if (value === '' || seen.indexOf(value) !== -1) { return; }
+                    seen.push(value);
                     total += 1;
                     // 链接上已录入的 SKU 只读展示，仅可勾选/取消（不提供修改）
                     var label = buildSkuRow(sku, false);
@@ -719,6 +733,23 @@
             updateSummary();
         }
 
+        // 按名称匹配复用时，把来源记录的系统 SKU 并入右栏供勾选（与已有勾选项去重）
+        form.erpSkuSuggestionsAppend = function (skus, reportNo) {
+            var existing = [];
+            form.querySelectorAll('input[name="selected_skus[]"]').forEach(function (box) {
+                var value = (box.value || '').trim();
+                if (value !== '' && existing.indexOf(value) === -1) { existing.push(value); }
+            });
+            var added = [];
+            (skus || []).forEach(function (sku) {
+                var value = String(sku === null || typeof sku === 'undefined' ? '' : sku).trim();
+                if (value === '' || existing.indexOf(value) !== -1 || added.indexOf(value) !== -1) { return; }
+                added.push(value);
+            });
+            extraItems = added.length ? [{ id: null, report_no: reportNo || null, skus: added }] : [];
+            render();
+        };
+
         function fetchSuggestions() {
             var value = input.value.trim();
             if (!/^https?:\/\//i.test(value)) {
@@ -730,7 +761,7 @@
             var query = '?supplier_url=' + encodeURIComponent(value) + (currentId ? '&current_id=' + encodeURIComponent(currentId) : '');
             fetch(url + query, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
                 .then(function (response) { return response.ok ? response.json() : { items: [] }; })
-                .then(function (payload) { render(payload.items || []); })
+                .then(function (payload) { fetchedItems = payload.items || []; render(); })
                 .catch(function () { panel.hidden = true; });
         }
 
