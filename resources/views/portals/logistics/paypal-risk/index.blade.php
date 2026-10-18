@@ -47,6 +47,7 @@
             'receivedAmount' => __('logistics.paypal_risk.ui.received_amount'),
             'filteredRefundRate' => __('logistics.paypal_risk.ui.filtered_refund_rate'),
             'filteredDisputeRate' => __('logistics.paypal_risk.ui.filtered_dispute_rate'),
+            'trendEmpty' => __('logistics.paypal_risk.ui.trend_empty'),
             'exportCurrentTab' => __('logistics.paypal_risk.export.button'),
             'detailFilterKeyword' => __('logistics.paypal_risk.detail_filters.keyword'),
             'detailFilterSearch' => __('logistics.paypal_risk.detail_filters.search'),
@@ -98,7 +99,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/paypal-risk.css?v=20261016-3">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/paypal-risk.css?v=20261016-4">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261015-2">
 @endpush
 
@@ -217,22 +218,7 @@
                             <div><small>{{ __('logistics.paypal_risk.ui.delivery_rate') }}</small><strong>{{ number_format($account['delivery_rate'], 2) }}%</strong></div>
                         </div>
 
-                        <div class="paypal-risk-rate-block refund">
-                            <div><span>{{ __('logistics.paypal_risk.ui.filtered_refund_rate') }}</span><strong>{{ number_format($account['refund_rate'], 2) }}%</strong></div>
-                            <div class="paypal-risk-progress"><i style="width: {{ min(100, $account['refund_rate'] * 5) }}%"></i></div>
-                            <div class="paypal-risk-rate-note">
-                                <span>{{ __('logistics.paypal_risk.ui.refund_order_summary', ['count' => $account['refund_order_count'], 'amount' => number_format($account['refund_amount'], 2)]) }}</span>
-                                <span>{{ __('logistics.paypal_risk.ui.cumulative_refund_rate') }} {{ number_format($account['cumulative_refund_rate'], 2) }}%</span>
-                            </div>
-                        </div>
-                        <div class="paypal-risk-rate-block dispute">
-                            <div><span title="{{ __('logistics.paypal_risk.ui.dispute_rate_hint') }}">{{ __('logistics.paypal_risk.ui.filtered_dispute_rate') }}</span><strong>{{ number_format($account['dispute_rate'], 2) }}%</strong></div>
-                            <div class="paypal-risk-progress"><i style="width: {{ min(100, $account['dispute_rate'] * 10) }}%"></i></div>
-                            <div class="paypal-risk-rate-note">
-                                <span>{{ __('logistics.paypal_risk.ui.dispute_order_summary', ['count' => $account['dispute_order_count'], 'amount' => number_format($account['dispute_amount'], 2)]) }}</span>
-                                <span>{{ __('logistics.paypal_risk.ui.dispute_amount_rate', ['rate' => number_format($account['dispute_amount_rate'], 2).'%']) }}</span>
-                            </div>
-                        </div>
+                        @include('portals.logistics.paypal-risk.partials.rate-metrics', ['metrics' => $account, 'scope' => 'current'])
                         <p class="paypal-risk-matched-only-note"><i class="fa fa-info-circle"></i> {{ __('logistics.paypal_risk.ui.matched_only_note') }}</p>
                         </div>
                         <div class="paypal-risk-card-scope-panel" data-paypal-card-scope-panel="history" hidden>
@@ -243,19 +229,7 @@
                                 <div><small>{{ __('logistics.paypal_risk.ui.shipping_rate') }}</small><strong>{{ number_format($account['history']['shipping_rate'], 2) }}%</strong></div>
                                 <div><small>{{ __('logistics.paypal_risk.ui.delivery_rate') }}</small><strong>{{ number_format($account['history']['delivery_rate'], 2) }}%</strong></div>
                             </div>
-                            <div class="paypal-risk-rate-block refund">
-                                <div><span>{{ __('logistics.paypal_risk.ui.history_refund_rate') }}</span><strong>{{ number_format($account['history']['refund_rate'], 2) }}%</strong></div>
-                                <div class="paypal-risk-progress"><i style="width: {{ min(100, $account['history']['refund_rate'] * 5) }}%"></i></div>
-                                <div class="paypal-risk-rate-note"><span>{{ __('logistics.paypal_risk.ui.refund_order_summary', ['count' => $account['history']['refund_order_count'], 'amount' => number_format($account['history']['refund_amount'], 2)]) }}</span></div>
-                            </div>
-                            <div class="paypal-risk-rate-block dispute">
-                                <div><span title="{{ __('logistics.paypal_risk.ui.dispute_rate_hint') }}">{{ __('logistics.paypal_risk.ui.history_dispute_rate') }}</span><strong>{{ number_format($account['history']['dispute_rate'], 2) }}%</strong></div>
-                                <div class="paypal-risk-progress"><i style="width: {{ min(100, $account['history']['dispute_rate'] * 10) }}%"></i></div>
-                                <div class="paypal-risk-rate-note">
-                                    <span>{{ __('logistics.paypal_risk.ui.dispute_order_summary', ['count' => $account['history']['dispute_order_count'], 'amount' => number_format($account['history']['dispute_amount'], 2)]) }}</span>
-                                    <span>{{ __('logistics.paypal_risk.ui.dispute_amount_rate', ['rate' => number_format($account['history']['dispute_amount_rate'], 2).'%']) }}</span>
-                                </div>
-                            </div>
+                            @include('portals.logistics.paypal-risk.partials.rate-metrics', ['metrics' => $account['history'], 'scope' => 'history'])
                             <p class="paypal-risk-matched-only-note"><i class="fa fa-info-circle"></i> {{ __('logistics.paypal_risk.ui.matched_only_note') }}</p>
                         </div>
 
@@ -356,6 +330,6 @@
     <script>
         window.ErpPayPalRisk = @json($riskClientConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/paypal-risk.js?v=20261016-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/paypal-risk.js?v=20261016-2"></script>
     <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261014-1"></script>
 @endpush

@@ -138,7 +138,9 @@ class PayPalRiskAnalyticsService
             ->values();
         $refundKeys = $refunds->map(fn (LogisticsPayPalRefund $refund): string => trim((string) ($refund->original_transaction_id ?: $refund->refund_transaction_id)))->filter()->unique();
         $disputeKeys = $disputes->map(fn (LogisticsPayPalDispute $dispute): string => trim((string) ($dispute->disputed_transaction_id ?: $dispute->dispute_id)))->filter()->unique();
+        $overallDisputeKeys = $allDisputes->map(fn (LogisticsPayPalDispute $dispute): string => trim((string) ($dispute->disputed_transaction_id ?: $dispute->dispute_id)))->filter()->unique();
         $paidAmount = round((float) $payments->sum(fn (LogisticsPayPalTransaction $payment): float => (float) ($payment->payment_amount_usd ?? 0)), 2);
+        $refundAmount = round((float) $refunds->sum(fn (LogisticsPayPalRefund $refund): float => (float) ($refund->refund_amount_usd ?? $refund->original_amount ?? 0)), 2);
         $disputeAmount = round((float) $disputes->sum(fn (LogisticsPayPalDispute $dispute): float => (float) ($dispute->dispute_amount_usd ?? $dispute->original_amount ?? 0)), 2);
         $shipped = $matchedOrders->filter(fn (LogisticsOrder $order): bool => $this->isActuallyShipped($order));
         $delivered = $shipped->filter(fn (LogisticsOrder $order): bool => $this->isDelivered($order));
@@ -149,9 +151,14 @@ class PayPalRiskAnalyticsService
             'paid_amount' => $paidAmount,
             'refund_order_count' => $refundKeys->count(),
             'dispute_order_count' => $disputeKeys->count(),
+            'overall_dispute_order_count' => $overallDisputeKeys->count(),
             'refund_rate' => $groups->isEmpty() ? 0.0 : round($refundKeys->count() / $groups->count() * 100, 2),
             'dispute_rate' => $groups->isEmpty() ? 0.0 : round($disputeKeys->count() / $groups->count() * 100, 2),
-            'refund_amount' => round((float) $refunds->sum(fn (LogisticsPayPalRefund $refund): float => (float) ($refund->refund_amount_usd ?? $refund->original_amount ?? 0)), 2),
+            'overall_dispute_rate' => $groups->isEmpty() ? 0.0 : round($overallDisputeKeys->count() / $groups->count() * 100, 2),
+            'refund_amount' => $refundAmount,
+            'refund_amount_rate' => $paidAmount <= 0
+                ? 0.0
+                : round($refundAmount / $paidAmount * 100, 2),
             'dispute_amount' => $disputeAmount,
             'dispute_amount_rate' => $paidAmount <= 0
                 ? 0.0
