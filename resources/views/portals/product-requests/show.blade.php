@@ -1,4 +1,4 @@
-﻿@extends('portal.layout')
+@extends('portal.layout')
 
 @section('page_title', __('product_requests.show.title'))
 
@@ -23,10 +23,10 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261018-14">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261018-19">
 @endpush
 @push('scripts')
-    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261018-14"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261018-19"></script>
 @endpush
 
 @section('content')

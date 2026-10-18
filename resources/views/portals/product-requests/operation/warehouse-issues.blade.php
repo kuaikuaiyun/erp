@@ -1,4 +1,4 @@
-﻿@extends('portal.layout')
+@extends('portal.layout')
 
 @section('page_title', __('product_requests.warehouse_issues.title'))
 
@@ -18,8 +18,8 @@
         'loadFailed' => $t('common.modal_load_failed'), 'submitFailed' => $t('common.modal_submit_failed'),
     ];
 @endphp
-@push('styles')<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261018-14">@endpush
-@push('scripts')<script>window.ErpProductRequestConfig = @json($clientConfig);</script><script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261018-14"></script>@endpush
+@push('styles')<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261018-19">@endpush
+@push('scripts')<script>window.ErpProductRequestConfig = @json($clientConfig);</script><script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261018-19"></script>@endpush
 
 @section('content')
 <section class="content product-request-page">
