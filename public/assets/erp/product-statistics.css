@@ -79,6 +79,11 @@
 .product-statistics-image-preview-content { display: block; width: auto; max-width: 100%; max-height: min(68vh, 680px); margin: 0 auto; border-radius: 4px; background: #fff; box-shadow: 0 6px 20px rgba(27, 63, 96, .16); object-fit: contain; }
 .product-statistics-image-name { margin: 12px 0 0; overflow: hidden; color: #5c7186; font-size: 13px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 .product-statistics-table code, .product-statistics-detail-table code { border-radius: 3px; background: #f4f7fa; color: #526d87; font-size: 11px; }
+.product-statistics-pcl-pending { display: inline-flex; flex-direction: column; align-items: center; gap: 4px; max-width: 160px; }
+.product-statistics-pcl-pending > span { display: inline-block; padding: 3px 7px; border-radius: 3px; background: #fff2db; color: #b56c11; font-size: 12px; font-weight: 600; line-height: 1.35; white-space: nowrap; }
+.product-statistics-pcl-pending small { max-width: 100%; overflow: hidden; color: #8398ad; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.product-statistics-pcl-pending small code { margin-left: 2px; }
+.product-statistics-pending-dash { color: #9aaaba; cursor: help; }
 .product-statistics-store-count { display: block; color: #2c5f90; font-weight: 700; text-align: center; }
 .product-statistics-store-names { display: block; max-width: 122px; overflow: hidden; color: #91a1b2; font-size: 11px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 .product-statistics-sales-cell { min-width: 112px; text-align: center; }

@@ -770,7 +770,7 @@ class LogisticsOrderController extends Controller
         $textFields = [
             'shopify_order_id', 'shopify_order_number', 'tongtu_order_number', 'store_name',
             'operator_name', 'group_names', 'staff_status', 'buyer_name', 'buyer_email', 'buyer_phone', 'is_add_on',
-            'subscription_type', 'subscription_origin_order_id', 'subscription_status', 'tongtu_sku',
+            'subscription_type', 'subscription_origin_order_id', 'subscription_status', 'tongtu_product_code', 'tongtu_sku',
             'tongtu_product_name', 'sale_quantity', 'sale_product_weight', 'payment_status', 'payment_method', 'payment_gateway',
             'refund_reason', 'collection_account', 'collection_account_email', 'transaction_id', 'bill_number',
             'destination', 'shipping_company', 'tracking_number', 'sku_exception_reason', 'time_zone',

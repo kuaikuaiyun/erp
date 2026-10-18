@@ -96,7 +96,7 @@ class LogisticsOrderItemService
     }
 
     /**
-     * @param list<array{source_key:string,tongtu_sku:?string,tongtu_product_name:?string,tongtu_product_type:?string,product_cost_usd:?float,sale_weight_gram:?float}> $rows
+     * @param list<array{source_key:string,tongtu_sku:?string,tongtu_product_code:?string,tongtu_product_name:?string,tongtu_product_type:?string,product_cost_usd:?float,sale_weight_gram:?float}> $rows
      */
     public function applyTongtuMatch(LogisticsOrder $order, array $rows): void
     {
@@ -111,6 +111,7 @@ class LogisticsOrderItemService
 
             $item->fill([
                 'tongtu_sku' => $row['tongtu_sku'],
+                'tongtu_product_code' => $row['tongtu_product_code'],
                 'tongtu_product_name' => $row['tongtu_product_name'],
                 'tongtu_product_type' => $row['tongtu_product_type'],
                 'product_cost_usd' => $this->decimal($row['product_cost_usd']),
@@ -136,16 +137,18 @@ class LogisticsOrderItemService
         }
 
         $tongtuSkus = $this->lines($order->tongtu_sku);
+        $tongtuProductCodes = $this->lines($order->tongtu_product_code);
         $productNames = $this->lines($order->tongtu_product_name);
         $weights = $this->lines($order->sale_product_weight);
         $costs = $this->allocate($this->number($order->product_cost_usd), $items->map(fn (LogisticsOrderItem $item): float => max(0.0, (float) $item->quantity))->all());
 
         foreach ($items->values() as $index => $item) {
-            if ($item->tongtu_sku !== null || $item->product_cost_usd !== null) {
+            if ($item->tongtu_product_code !== null || $item->tongtu_sku !== null || $item->product_cost_usd !== null) {
                 continue;
             }
             $item->fill([
                 'tongtu_sku' => $this->meaningfulLine($tongtuSkus[$index] ?? null),
+                'tongtu_product_code' => $this->meaningfulLine($tongtuProductCodes[$index] ?? null),
                 'tongtu_product_name' => $this->meaningfulLine($productNames[$index] ?? null),
                 'sale_weight_gram' => $this->number($weights[$index] ?? null),
                 'product_cost_usd' => $this->decimal($costs[$index] ?? null),

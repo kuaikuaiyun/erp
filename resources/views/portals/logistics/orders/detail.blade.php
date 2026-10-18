@@ -161,7 +161,11 @@
                             <div class="logistics-order-detail-item-copy">
                                 <strong>{{ $display($item->product_title) }}</strong>
                                 <span>{{ $display($item->variant_title) }}</span>
-                                <div><code>{{ $display($item->shopify_sku) }}</code><em>通途 SKU：{{ $display($item->tongtu_sku) }}</em></div>
+                                <div>
+                                    <code>{{ $display($item->shopify_sku) }}</code>
+                                    <em>{{ __('logistics.product_statistics.headers.product_code') }}：{{ $display($item->tongtu_product_code) }}</em>
+                                    <em>{{ __('logistics.product_statistics.headers.tongtu_sku') }}：{{ $display($item->tongtu_sku) }}</em>
+                                </div>
                                 <small>配货名称：{{ $display($item->tongtu_product_name) }} @if($item->tongtu_product_type)（类型 {{ $item->tongtu_product_type }}）@endif</small>
                             </div>
                             <dl class="logistics-order-detail-item-metrics">
@@ -337,7 +341,8 @@
                 <div class="logistics-order-detail-card-title"><h4><i class="fa fa-exchange"></i> 通途匹配与同步记录</h4><span>{{ $display($order->sku_exception_reason) }}</span></div>
                 <div class="logistics-order-detail-definition-grid">
                     <dl><dt>通途订单号</dt><dd>{{ $display($order->tongtu_order_number) }}</dd></dl>
-                    <dl><dt>通途 SKU</dt><dd class="is-wrap">{{ $display($order->tongtu_sku) }}</dd></dl>
+                    <dl><dt>{{ __('logistics.product_statistics.headers.product_code') }}</dt><dd class="is-wrap">{{ $display($order->tongtu_product_code) }}</dd></dl>
+                    <dl><dt>{{ __('logistics.product_statistics.headers.tongtu_sku') }}</dt><dd class="is-wrap">{{ $display($order->tongtu_sku) }}</dd></dl>
                     <dl><dt>通途配货名称</dt><dd class="is-wrap">{{ $display($order->tongtu_product_name) }}</dd></dl>
                     <dl><dt>出单产品重量</dt><dd class="is-wrap">{{ $display($order->sale_product_weight) }}</dd></dl>
                 </div>

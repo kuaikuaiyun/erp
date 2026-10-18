@@ -289,7 +289,10 @@ class PayPalRiskAnalyticsService
         $items = LogisticsOrderItem::query()->whereIn('logistics_order_id', $orderIds)->orderBy('id')->get();
         $groups = [];
         foreach ($items as $item) {
-            $key = mb_strtolower(trim((string) $item->product_title)).'|'.mb_strtolower(trim((string) ($item->tongtu_sku ?: $item->shopify_sku)));
+            $productCode = trim((string) $item->tongtu_product_code);
+            $key = $productCode !== ''
+                ? 'pcl:'.mb_strtolower($productCode)
+                : mb_strtolower(trim((string) $item->product_title)).'|'.mb_strtolower(trim((string) ($item->tongtu_sku ?: $item->shopify_sku)));
             $groups[$key][] = $item;
         }
         $rows = [];
@@ -303,7 +306,9 @@ class PayPalRiskAnalyticsService
             $rows[] = [
                 'image_url' => $first->product_image_url,
                 'product_name' => trim((string) $first->product_title) ?: '-',
-                'sku' => trim((string) ($first->tongtu_sku ?: $first->shopify_sku)) ?: '-',
+                'product_code' => trim((string) ($first->tongtu_product_code ?: $first->tongtu_sku ?: $first->shopify_sku)) ?: '-',
+                // Keep the legacy key for the existing table contract; it now represents the product-level PCL.
+                'sku' => trim((string) ($first->tongtu_product_code ?: $first->tongtu_sku ?: $first->shopify_sku)) ?: '-',
                 'quantity' => round((float) collect($group)->sum('quantity'), 2),
                 'paid_amount' => round((float) collect($group)->sum('line_revenue_usd'), 2),
                 'refund_orders' => $refundCount,
