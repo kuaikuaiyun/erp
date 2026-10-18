@@ -73,10 +73,8 @@
                     \App\Models\LogisticsPayPalRefund::statusLabelFor('V'),
                 ],
                 'dispute_type' => [
-                    \App\Models\LogisticsPayPalDispute::typeLabelFor('INQUIRY'),
-                    \App\Models\LogisticsPayPalDispute::typeLabelFor('CHARGEBACK'),
-                    \App\Models\LogisticsPayPalDispute::typeLabelFor('PRE_ARBITRATION'),
-                    \App\Models\LogisticsPayPalDispute::typeLabelFor('ARBITRATION'),
+                    \App\Models\LogisticsPayPalDispute::typeLabelFor('INTERNAL'),
+                    \App\Models\LogisticsPayPalDispute::typeLabelFor('EXTERNAL'),
                 ],
                 'dispute_status' => [
                     \App\Models\LogisticsPayPalDispute::statusLabelFor('OPEN'),
