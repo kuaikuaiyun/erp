@@ -332,7 +332,7 @@ class LogisticsProductStatisticsService
         // The English gateway values remain normal case-insensitive LIKE comparisons.
         // The Shopify tag is the stable source of truth for the independent
         // credit-card platform. Presentation gateway fields are not reliable.
-        $creditCardTag = "(CASE WHEN JSON_VALID(COALESCE(product_orders.shopify_payload, '')) THEN JSON_SEARCH(JSON_EXTRACT(product_orders.shopify_payload, '$.tags'), 'one', 'CreditCardByFintrixV2') ELSE NULL END IS NOT NULL)";
+        $creditCardTag = "(CASE WHEN JSON_VALID(COALESCE(product_orders.shopify_payload, '')) THEN JSON_SEARCH(JSON_EXTRACT(product_orders.shopify_payload, '$.tags'), 'one', '%CreditCardBy%') ELSE NULL END IS NOT NULL)";
         $creditCard = "(NOT {$actualPaypal} AND {$creditCardTag})";
 
         return $this->database()->query()
@@ -1176,7 +1176,7 @@ class LogisticsProductStatisticsService
         }
 
         foreach ((array) $tags as $tag) {
-            if (is_string($tag) && mb_strtolower(trim($tag)) === 'creditcardbyfintrixv2') {
+            if (is_string($tag) && str_contains(mb_strtolower(trim($tag)), 'creditcardby')) {
                 return true;
             }
         }
