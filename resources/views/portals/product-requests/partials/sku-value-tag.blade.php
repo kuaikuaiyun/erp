@@ -1,0 +1,5 @@
+@php
+    $skuValuePrice = trim((string) ($values['price'] ?? ''));
+    $skuValueWeight = trim((string) ($values['weight'] ?? ''));
+@endphp
+<span class="product-request-sku-tag product-request-sku-tag-detailed"><span class="product-request-sku-tag-field"><span class="product-request-sku-tag-field-label">SKU</span><span class="product-request-sku-tag-code">{{ $sku }}</span></span>@if($skuValuePrice !== '' || $skuValueWeight !== '')<span class="product-request-sku-tag-meta">@if($skuValuePrice !== '')<span class="product-request-sku-tag-field"><span class="product-request-sku-tag-field-label">{{ __('product_requests.procurement.sku_value_price_label') }}</span><span class="product-request-sku-tag-field-value">{{ $skuValuePrice }} RMB</span></span>@endif @if($skuValueWeight !== '')<span class="product-request-sku-tag-field"><span class="product-request-sku-tag-field-label">{{ __('product_requests.procurement.sku_value_weight_label') }}</span><span class="product-request-sku-tag-field-value">{{ $skuValueWeight }} g</span></span>@endif</span>@endif</span>

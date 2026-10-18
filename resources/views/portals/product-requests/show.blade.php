@@ -23,10 +23,10 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261018-10">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261018-14">
 @endpush
 @push('scripts')
-    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261018-10"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261018-14"></script>
 @endpush
 
 @section('content')
@@ -93,7 +93,7 @@
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.standard_chinese_name') }}</span><span class="product-request-detail-value">{{ $productRequest->standard_chinese_name ?: $notFilled }}</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.pcl_product_no') }}</span><span class="product-request-detail-value">{{ $productRequest->pcl_product_no ?: $notFilled }}</span></div>
                 <div class="product-request-detail-item product-request-detail-item-wide"><span class="product-request-detail-label">{{ __('product_requests.fields.supplier_url') }}</span><span class="product-request-detail-value">@if($productRequest->supplier_url)<a href="{{ $productRequest->supplier_url }}" target="_blank" rel="noopener">{{ $productRequest->supplier_url }}</a>@else{{ $notFilled }}@endif</span></div>
-                <div class="product-request-detail-item product-request-detail-item-wide"><span class="product-request-detail-label">{{ __('product_requests.fields.procurement_skus') }}</span><span class="product-request-detail-value"><span class="product-request-sku-tags">@forelse(collect(explode(',', (string) $productRequest->procurement_skus))->map(fn ($s) => trim($s))->filter() as $sku)@php($sv = $procurementSkuValues[$sku] ?? [])<span class="product-request-sku-tag">{{ $sku }}@if(trim((string) ($sv['price'] ?? '')) !== '') {{ trim((string) $sv['price']) }} RMB @endif @if(trim((string) ($sv['weight'] ?? '')) !== '') {{ trim((string) $sv['weight']) }} g @endif</span>@empty{{ $notFilled }}@endforelse</span></span></div>
+                <div class="product-request-detail-item product-request-detail-item-wide"><span class="product-request-detail-label">{{ __('product_requests.fields.procurement_skus') }}</span><span class="product-request-detail-value"><span class="product-request-sku-tags">@forelse(collect(explode(',', (string) $productRequest->procurement_skus))->map(fn ($s) => trim($s))->filter() as $sku)@include('portals.product-requests.partials.sku-value-tag', ['sku' => $sku, 'values' => $procurementSkuValues[$sku] ?? []])@empty{{ $notFilled }}@endforelse</span></span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.erp_operator') }}</span><span class="product-request-detail-value">{{ $productRequest->erp_operator_display_name ?: $notFilled }}</span></div>
                 @if(trim((string) $productRequest->inspection_reject_reason) !== '')
                 <div class="product-request-detail-item product-request-detail-item-wide"><span class="product-request-detail-label">{{ __('product_requests.fields.inspection_reject_reason') }}</span><span class="product-request-detail-value product-request-remark-text">{{ $productRequest->inspection_reject_reason }}</span></div>
@@ -145,7 +145,7 @@
         <div class="box-header"><h2 class="box-title">{{ __('product_requests.show.warehouse_information') }}</h2></div>
         <div class="box-body">
             <div class="product-request-detail-grid">
-                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.actual_shipping_weight_g') }}</span><span class="product-request-detail-value">@if(is_array($productRequest->warehouse_sku_weights) && $productRequest->warehouse_sku_weights !== [])<span class="product-request-sku-tags">@foreach($productRequest->warehouse_sku_weights as $sku => $weight)<span class="product-request-sku-tag">{{ $sku }} {{ $weight }} g</span>@endforeach</span>@else{{ $productRequest->actual_shipping_weight_g ?: $notFilled }}@endif</span></div>
+                <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.actual_shipping_weight_g') }}</span><span class="product-request-detail-value">@if(is_array($productRequest->warehouse_sku_weights) && $productRequest->warehouse_sku_weights !== [])<span class="product-request-sku-tags">@foreach($productRequest->warehouse_sku_weights as $sku => $weight)@include('portals.product-requests.partials.sku-weight-tag', ['sku' => $sku, 'weight' => $weight])@endforeach</span>@else{{ $productRequest->actual_shipping_weight_g ?: $notFilled }}@endif</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.package_size_cm') }}</span><span class="product-request-detail-value">{{ collect([$productRequest->package_length_cm, $productRequest->package_width_cm, $productRequest->package_height_cm])->filter()->implode(' × ') ?: $notFilled }}</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_acceptance_result') }}</span><span class="product-request-detail-value">{{ $warehouseResult }}</span></div>
                 <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.fields.warehouse_reject_reason') }}</span><span class="product-request-detail-value">{{ $warehouseRejectReason }}</span></div>

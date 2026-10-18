@@ -30,11 +30,11 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261018-10">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261018-15">
 @endpush
 @push('scripts')
     <script>window.ErpProductRequestConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261018-10"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261018-15"></script>
 @endpush
 
 @section('content')
@@ -42,6 +42,7 @@
     <header class="content-header"><h1>{{ $t('operation.title') }}</h1><p>{{ $t('operation.subtitle') }}</p></header>
     @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
     @if(session('error'))<div class="alert alert-danger">{{ session('error') }}</div>@endif
+    @if($errors->has('import_file'))<div class="alert alert-danger">{{ $errors->first('import_file') }}</div>@endif
     <div class="box box-solid product-request-filter-box">
         <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-filter"></i> {{ $t('filters.keyword') }}</h3></div>
         <div class="box-body"><form class="product-request-filter-form" method="get" action="{{ route('product-requests.operation.index') }}" data-loading="region" data-loading-target=".product-request-table-box"><div class="product-request-filter-grid">
@@ -55,7 +56,7 @@
     </div>
     <div class="box box-solid product-request-table-box">
         <div class="box-header with-border product-request-list-toolbar"><h3 class="box-title">{{ $t('operation.title') }}</h3><span class="text-muted">{{ $t('operation.my_scope_hint') }}</span><span class="product-request-toolbar-spacer"></span>@if($canImport ?? false)<button type="button" class="btn btn-info btn-sm" data-toggle="modal" data-target="#product-request-import-modal"><i class="fa fa-upload"></i> {{ $t('import.open_button') }}</button>@endif<button type="button" class="btn btn-success btn-sm" data-product-request-modal-url="{{ route('product-requests.operation.create', ['modal' => 1]) }}"><i class="fa fa-plus"></i> {{ $t('common.new_request') }}</button></div>
-        <div class="box-body table-responsive no-padding product-request-table-scroll"><table class="table table-hover product-request-table product-request-operation-table"><thead><tr><th class="product-request-sticky-left">{{ $t('table.report_no') }}</th><th>{{ $t('table.reported_at') }}</th><th class="product-request-sku-cell">{{ $t('table.skus') }}</th><th>{{ $t('table.status') }}</th><th>{{ $t('table.review_status') }}</th><th class="product-request-remark-cell">{{ $t('table.review_remark') }}</th><th>{{ $t('table.warehouse_status') }}</th><th>{{ $t('table.operation_rectification_status') }}</th><th class="product-request-image-cell">{{ $t('table.product') }}</th><th class="product-request-image-cell product-request-image-cell-multi">{{ $t('table.seller_images') }}</th><th>{{ $t('table.operation_supplier_url') }}</th><th>{{ $t('table.reporter') }}</th><th>{{ $t('table.updated_at') }}</th><th class="product-request-sticky-right">{{ $t('common.operation') }}</th></tr></thead><tbody>
+        <div class="box-body table-responsive no-padding product-request-table-scroll"><table class="table table-hover product-request-table product-request-operation-table"><thead><tr><th class="product-request-sticky-left">{{ $t('table.report_no') }}</th><th>{{ $t('table.reported_at') }}</th><th class="product-request-sku-cell">{{ $t('table.skus') }}</th><th>{{ $t('table.staff_status') }}</th><th>{{ $t('table.review_status') }}</th><th class="product-request-remark-cell">{{ $t('table.review_remark') }}</th><th>{{ $t('table.warehouse_status') }}</th><th>{{ $t('table.operation_rectification_status') }}</th><th class="product-request-image-cell">{{ $t('table.product') }}</th><th class="product-request-image-cell product-request-image-cell-multi">{{ $t('table.seller_images') }}</th><th>{{ $t('table.operation_supplier_url') }}</th><th>{{ $t('table.reporter') }}</th><th>{{ $t('table.updated_at') }}</th><th class="product-request-sticky-right">{{ $t('common.operation') }}</th></tr></thead><tbody>
             @forelse($requests as $productRequest)
                 @php
                     $cover = $coverFor($productRequest);
@@ -93,13 +94,60 @@
                 <div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('common.close') }}"><span aria-hidden="true">&times;</span></button><h4 class="modal-title" id="product-request-import-title"><i class="fa fa-upload"></i> {{ $t('import.title') }}</h4></div>
                 <div class="modal-body">
                     <p class="text-muted">{{ $t('import.notice') }}</p>
-                    <p class="text-muted"><i class="fa fa-list-alt"></i> {{ $t('import.headers') }}</p>
-                    <div class="form-group"><input class="form-control" type="file" name="import_file" accept=".xls,.xlsx" required><span class="help-block">{{ $t('import.file_hint') }}</span></div>
+                    <div class="product-request-import-header-rule"><i class="fa fa-list-alt"></i><span>{{ $t('import.headers') }}</span></div>
+                    <label class="product-request-import-dropzone" for="product-request-import-file" data-file-selected-template="{{ $t('import.file_selected', ['name' => '__name__']) }}">
+                        <input id="product-request-import-file" type="file" name="import_file" accept=".xls,.xlsx" required>
+                        <i class="fa fa-cloud-upload"></i>
+                        <strong>{{ $t('import.dropzone') }}</strong>
+                        <span>{{ $t('import.file_hint') }}</span>
+                        <em id="product-request-import-file-name"></em>
+                    </label>
+                    <div class="product-request-import-footer-note">
+                        <span><i class="fa fa-info-circle"></i> {{ $t('import.rule_note') }}</span>
+                        <a href="{{ route('product-requests.operation.import-template') }}" data-loading="download"><i class="fa fa-file-excel-o"></i> {{ $t('import.template_download') }}</a>
+                    </div>
                 </div>
-                <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">{{ $t('common.cancel') }}</button><button type="submit" class="btn btn-info"><i class="fa fa-upload"></i> {{ $t('import.submit') }}</button></div>
+                <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">{{ $t('common.cancel') }}</button><button type="submit" class="btn btn-success"><i class="fa fa-upload"></i> {{ $t('import.submit') }}</button></div>
             </form>
         </div>
     </div>
+    <script>
+        (function () {
+            var zone = document.querySelector('.product-request-import-dropzone');
+            var input = document.getElementById('product-request-import-file');
+            var filename = document.getElementById('product-request-import-file-name');
+            if (!zone || !input || !filename) return;
+            var showFilename = function (file) {
+                var template = zone.dataset.fileSelectedTemplate || '__name__';
+                filename.textContent = file ? template.replace('__name__', file.name) : '';
+                zone.classList.toggle('is-filled', Boolean(file));
+            };
+            input.addEventListener('change', function () {
+                showFilename(this.files && this.files[0]);
+            });
+            ['dragenter', 'dragover'].forEach(function (eventName) {
+                zone.addEventListener(eventName, function (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    zone.classList.add('is-dragover');
+                });
+            });
+            ['dragleave', 'drop'].forEach(function (eventName) {
+                zone.addEventListener(eventName, function (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    zone.classList.remove('is-dragover');
+                });
+            });
+            zone.addEventListener('drop', function (event) {
+                var file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+                if (file) {
+                    input.files = event.dataTransfer.files;
+                    showFilename(file);
+                }
+            });
+        })();
+    </script>
     @endif
     @include('portals.product-requests.partials.modal')
 </section>
