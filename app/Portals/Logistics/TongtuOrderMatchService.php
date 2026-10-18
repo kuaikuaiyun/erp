@@ -198,6 +198,7 @@ class TongtuOrderMatchService
         );
 
         $tongtuSkus = [];
+        $tongtuProductCodes = [];
         $productNames = [];
         $quantities = [];
         $weights = [];
@@ -213,13 +214,15 @@ class TongtuOrderMatchService
             if (!$matchedProduct) {
                 $missingInErp[] = $sku;
                 $canCalculateCost = false;
-                $tongtuSkus[] = $sku;
+                $tongtuSkus[] = '—';
+                $tongtuProductCodes[] = '—';
                 $productNames[] = '—';
                 $quantities[] = $this->numberLine($quantity);
                 $weights[] = '—';
                 $itemResults[] = [
                     'source_key' => $item['source_key'],
-                    'tongtu_sku' => $sku !== '' ? $sku : null,
+                    'tongtu_sku' => null,
+                    'tongtu_product_code' => null,
                     'tongtu_product_name' => null,
                     'tongtu_product_type' => null,
                     'product_cost_usd' => null,
@@ -231,9 +234,11 @@ class TongtuOrderMatchService
             $product = $matchedProduct['product'];
             $productType = $matchedProduct['product_type'];
 
-            $tongtuSku = trim((string) ($product['productCode'] ?? $sku));
+            $tongtuProductCode = trim((string) ($product['productCode'] ?? ''));
+            $tongtuSku = trim((string) ($product['sku'] ?? $product['productSku'] ?? ''));
             $productName = trim((string) ($product['productPackingName'] ?? $product['productName'] ?? '—'));
             $tongtuSkus[] = $tongtuSku;
+            $tongtuProductCodes[] = $tongtuProductCode;
             $productNames[] = $productName;
             $quantities[] = $this->numberLine($quantity);
             $details = $this->goodsDetails($product);
@@ -266,6 +271,7 @@ class TongtuOrderMatchService
             $itemResults[] = [
                 'source_key' => $item['source_key'],
                 'tongtu_sku' => $tongtuSku !== '' ? $tongtuSku : null,
+                'tongtu_product_code' => $tongtuProductCode !== '' ? $tongtuProductCode : null,
                 'tongtu_product_name' => $productName === '—' ? null : $productName,
                 'tongtu_product_type' => $productType,
                 'product_cost_usd' => $hasCompleteCost ? ($unitCost * $quantity / max(0.0001, (float) config('logistics.profit.cny_per_usd', 6.7049))) : null,
@@ -281,6 +287,7 @@ class TongtuOrderMatchService
 
         $order->fill([
             'tongtu_sku' => $this->lines($tongtuSkus),
+            'tongtu_product_code' => $this->lines($tongtuProductCodes),
             'tongtu_product_name' => $this->lines($productNames),
             'sale_quantity' => $this->lines($quantities),
             'sale_product_weight' => $this->lines($weights),

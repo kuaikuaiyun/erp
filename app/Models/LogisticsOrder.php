@@ -40,7 +40,7 @@ class LogisticsOrder extends Model
         'assistant_domain_store_id', 'source_shop_domain', 'shopify_order_id', 'shopify_order_number', 'tongtu_order_number',
         'store_name', 'department_name', 'operator_name', 'group_names', 'staff_status',
         'buyer_name', 'buyer_email', 'buyer_phone', 'is_add_on', 'subscription_type',
-        'subscription_origin_order_id', 'subscription_status', 'tongtu_sku', 'tongtu_product_name',
+        'subscription_origin_order_id', 'subscription_status', 'tongtu_sku', 'tongtu_product_code', 'tongtu_product_name',
         'sale_quantity', 'sale_product_weight', 'payment_status', 'payment_method', 'payment_gateway', 'paid_amount_usd',
         'paid_at', 'product_cost_usd', 'handling_fee_usd', 'total_shipping_usd',
         'proportional_refund_usd', 'proportional_profit_usd', 'proportional_profit_rate',

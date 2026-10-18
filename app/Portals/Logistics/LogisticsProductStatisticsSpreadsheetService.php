@@ -19,7 +19,8 @@ class LogisticsProductStatisticsSpreadsheetService
     {
         return [
             [__('logistics.product_statistics.headers.product'), 'name', self::TYPE_TEXT, 30],
-            ['SKU', 'sku', self::TYPE_TEXT, 28],
+            [__('logistics.product_statistics.headers.product_code'), 'product_code', self::TYPE_TEXT, 28],
+            [__('logistics.product_statistics.headers.variant_count'), 'variant_count', self::TYPE_TEXT, 12],
             [__('logistics.product_statistics.headers.stores'), 'stores', self::TYPE_TEXT, 24],
             [__('logistics.product_statistics.headers.sales'), 'sales', self::TYPE_TEXT, 15],
             [__('logistics.product_statistics.headers.revenue'), 'revenue', self::TYPE_MONEY, 18],
@@ -88,7 +89,8 @@ class LogisticsProductStatisticsSpreadsheetService
     {
         return [
             'name' => (string) $product['name'],
-            'sku' => (string) $product['sku'],
+            'product_code' => (string) ($product['product_code'] ?? $product['sku']),
+            'variant_count' => (int) ($product['variant_count'] ?? 0),
             'stores' => implode('、', $product['stores']),
             'sales' => $product['sales'],
             'revenue' => $product['revenue'],

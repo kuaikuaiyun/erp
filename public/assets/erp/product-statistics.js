@@ -94,12 +94,37 @@
         var attributes = imageUrl ? ' role="button" tabindex="0" data-image-url="' + escapeHtml(imageUrl) + '" data-image-name="' + escapeHtml(product.name || '') + '"' : '';
         return '<span class="product-statistics-thumb ' + (image ? 'has-image is-previewable' : '') + '"' + attributes + '>' + image + '<i class="fa fa-cube" aria-hidden="true"></i></span>';
     }
+    function hasTongtuMatch(product) {
+        return Boolean(product && product.has_tongtu_match && product.product_code);
+    }
+    function productIdentity(product) {
+        if (hasTongtuMatch(product)) return product.product_code;
+        var fallbackSku = product && (product.fallback_shopify_sku || product.shopify_sku || product.sku);
+        return fallbackSku ? t('shopifySkuPrefix') + fallbackSku : t('pendingTongtuMatch');
+    }
+    function productCodeCell(product) {
+        if (hasTongtuMatch(product)) {
+            return '<code title="' + escapeHtml(product.product_code) + '">' + escapeHtml(product.product_code) + '</code>';
+        }
+
+        var fallbackSku = product && (product.fallback_shopify_sku || product.shopify_sku || product.sku);
+        var fallback = fallbackSku
+            ? '<small>' + escapeHtml(t('shopifySkuPrefix')) + '<code title="' + escapeHtml(fallbackSku) + '">' + escapeHtml(fallbackSku) + '</code></small>'
+            : '';
+
+        return '<div class="product-statistics-pcl-pending"><span>' + escapeHtml(t('pendingTongtuMatch')) + '</span>' + fallback + '</div>';
+    }
+    function variantCountCell(product) {
+        if (hasTongtuMatch(product)) return formatNumber(product.variant_count);
+        return '<span class="product-statistics-pending-dash" title="' + escapeHtml(t('variantCountPending')) + '">—</span>';
+    }
     function parentRow(product) {
         var subtitle = product.matched_name || product.category || '';
         return '<tr class="product-statistics-product-row" data-product-id="' + escapeHtml(product.id) + '">'
             + '<td class="product-statistics-check-column"><input class="product-statistics-check" type="checkbox" value="' + escapeHtml(product.id) + '"' + (state.selected[product.id] ? ' checked' : '') + '></td>'
             + '<td><div class="product-statistics-product-cell">' + productThumb(product) + '<span><strong title="' + escapeHtml(product.name || '') + '">' + escapeHtml(product.name) + '</strong><small class="' + (product.matched_name ? 'product-statistics-matched-name' : '') + '" title="' + escapeHtml(subtitle) + '">' + escapeHtml(subtitle) + '</small></span></div></td>'
-            + '<td><code title="' + escapeHtml(product.sku || '') + '">' + escapeHtml(product.sku || blank()) + '</code></td>'
+            + '<td>' + productCodeCell(product) + '</td>'
+            + '<td>' + variantCountCell(product) + '</td>'
             + '<td><span class="product-statistics-store-count">' + formatNumber(product.shop_count) + '</span><small class="product-statistics-store-names">' + escapeHtml((product.stores || []).join('、')) + '</small></td>'
             + '<td>' + formatNumber(product.sales) + '</td><td>' + formatMoney(product.revenue) + '</td><td>' + formatMoney(product.cost) + '</td><td>' + formatMoney(productFees(product)) + '</td>'
             + '<td>' + formatMoney(product.paypal_refund_amount) + '</td><td>' + formatRate(product.paypal_refund_rate) + '</td><td>' + formatNumber(product.paypal_dispute_count) + '</td><td>' + formatRate(product.paypal_dispute_rate) + '</td>'
@@ -180,9 +205,9 @@
     function showDetailLoading(product) {
         detailState = { product: null, sorts: {}, filters: {}, pages: {}, activeTab: 'overview' };
         document.getElementById('product-statistics-detail-title').textContent = t('detailTitle');
-        document.getElementById('product-statistics-detail-identity').innerHTML = productThumb(product) + '<div><strong>' + escapeHtml(product.name) + '</strong><span>' + escapeHtml(product.sku || blank()) + '</span></div>';
+        document.getElementById('product-statistics-detail-identity').innerHTML = productThumb(product) + '<div><strong>' + escapeHtml(product.name) + '</strong><span>' + escapeHtml(productIdentity(product)) + '</span></div>';
         document.getElementById('product-statistics-overview').innerHTML = '<div class="alert alert-info"><i class="fa fa-spinner fa-spin"></i> ' + escapeHtml(t('detailLoading')) + '</div>';
-        ['product-statistics-paypal-orders', 'product-statistics-credit-card-orders', 'product-statistics-refunds', 'product-statistics-disputes', 'product-statistics-orders'].forEach(function (id) {
+        ['product-statistics-variants', 'product-statistics-paypal-orders', 'product-statistics-credit-card-orders', 'product-statistics-refunds', 'product-statistics-disputes', 'product-statistics-orders'].forEach(function (id) {
             document.getElementById(id).innerHTML = '';
         });
         document.getElementById('product-statistics-detail-filters').hidden = true;
@@ -316,7 +341,7 @@
         if (!container || !product || table === 'overview') { if (container) container.hidden = true; return; }
         var rows = detailRowsFor(table, product);
         var filters = detailFilter(table);
-        var placeholder = table === 'refunds' ? t('detailFilterRefundsPlaceholder') : (table === 'disputes' ? t('detailFilterDisputesPlaceholder') : t('detailFilterOrdersPlaceholder'));
+        var placeholder = table === 'refunds' ? t('detailFilterRefundsPlaceholder') : (table === 'disputes' ? t('detailFilterDisputesPlaceholder') : (table === 'variants' ? t('detailFilterVariantsPlaceholder') : t('detailFilterOrdersPlaceholder')));
         var selects = '';
         if (table === 'refunds') {
             selects += detailSelect('payment_method', t('paymentMethod'), detailOptionValues(rows, 'payment_method_label'), filters.payment_method);
@@ -338,14 +363,14 @@
     }
     function orderRows(table, orders) {
         var pageData = detailPaginatedRows(table, orders);
-        if (!pageData.rows.length) return detailEmptyRow(12);
+        if (!pageData.rows.length) return detailEmptyRow(15);
         return pageData.rows.map(function (order) {
-            return '<tr><td>' + orderLink(order) + '</td><td>' + escapeHtml(order.store || blank()) + '</td><td>' + escapeHtml(order.bill_number || blank()) + '</td><td>' + escapeHtml(order.payment_method || blank()) + '</td><td>' + formatNumber(order.quantity) + '</td><td>' + formatMoney(order.revenue) + '</td><td>' + formatMoney(order.paypal_refund) + '</td><td>' + formatMoney(order.credit_card_refund) + '</td><td>' + formatNumber(order.paypal_dispute_count) + '</td><td>' + escapeHtml(order.tracking_number || blank()) + '</td><td>' + escapeHtml(order.logistics_status || blank()) + '</td><td>' + escapeHtml(order.order_created_at || blank()) + '</td></tr>';
+            return '<tr><td>' + orderLink(order) + '</td><td>' + escapeHtml(order.store || blank()) + '</td><td>' + escapeHtml((order.tongtu_product_codes || []).join(' / ') || blank()) + '</td><td>' + escapeHtml((order.tongtu_skus || []).join(' / ') || blank()) + '</td><td>' + escapeHtml((order.shopify_skus || []).join(' / ') || blank()) + '</td><td>' + escapeHtml(order.bill_number || blank()) + '</td><td>' + escapeHtml(order.payment_method || blank()) + '</td><td>' + formatNumber(order.quantity) + '</td><td>' + formatMoney(order.revenue) + '</td><td>' + formatMoney(order.paypal_refund) + '</td><td>' + formatMoney(order.credit_card_refund) + '</td><td>' + formatNumber(order.paypal_dispute_count) + '</td><td>' + escapeHtml(order.tracking_number || blank()) + '</td><td>' + escapeHtml(order.logistics_status || blank()) + '</td><td>' + escapeHtml(order.order_created_at || blank()) + '</td></tr>';
         }).join('');
     }
     function renderOrdersTable(id, table, orders) {
         var headings = [
-            ['shopify_order_number', t('orderNumber')], ['store', t('storeName')], ['bill_number', t('billNumber')], ['payment_method', t('paymentMethod')], ['quantity', t('quantity')], ['revenue', t('revenue')], ['paypal_refund', t('paypalRefund')], ['credit_card_refund', t('creditCardRefund')], ['paypal_dispute_count', t('paypalDisputes')], ['tracking_number', t('trackingNumber')], ['logistics_status', t('logisticsStatus')], ['order_created_at', t('orderCreatedAt')]
+            ['shopify_order_number', t('orderNumber')], ['store', t('storeName')], ['tongtu_product_codes', t('productCode')], ['tongtu_skus', t('tongtuSku')], ['shopify_skus', t('shopifySku')], ['bill_number', t('billNumber')], ['payment_method', t('paymentMethod')], ['quantity', t('quantity')], ['revenue', t('revenue')], ['paypal_refund', t('paypalRefund')], ['credit_card_refund', t('creditCardRefund')], ['paypal_dispute_count', t('paypalDisputes')], ['tracking_number', t('trackingNumber')], ['logistics_status', t('logisticsStatus')], ['order_created_at', t('orderCreatedAt')]
         ];
         var pageData = detailPaginatedRows(table, orders);
         document.getElementById(id).innerHTML = '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + headings.map(function (heading) { return '<th>' + detailSortButton(table, heading[0], heading[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' + orderRows(table, orders) + '</tbody></table></div>' + detailPagination(table, pageData);
@@ -378,8 +403,20 @@
         var pageData = detailPaginatedRows('disputes', subject.paypal_dispute_details || []);
         document.getElementById('product-statistics-disputes').innerHTML = '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + disputeHeadings.map(function (heading) { return '<th>' + detailSortButton('disputes', heading[0], heading[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' + disputeRows(subject) + '</tbody></table></div>' + detailPagination('disputes', pageData);
     }
+    function renderVariants(subject) {
+        var variants = subject.variants || [];
+        var headings = [
+            ['tongtu_sku', t('tongtuSku')], ['tongtu_product_name', t('tongtuProductName')], ['shopify_skus', t('shopifySku')], ['stores', t('storeName')], ['order_count', t('orderCount')], ['sales', t('sales')], ['revenue', t('revenue')], ['paypal_refund_amount', t('paypalRefundAmount')], ['paypal_dispute_count', t('paypalDisputeCount')], ['credit_card_refund_amount', t('creditCardRefundAmount')], ['shipping_rate', t('shippingRate')], ['delivery_rate', t('deliveryRate')]
+        ];
+        var pageData = detailPaginatedRows('variants', variants);
+        var rows = pageData.rows.length ? pageData.rows.map(function (variant) {
+            return '<tr><td><code>' + escapeHtml(variant.tongtu_sku || blank()) + '</code></td><td>' + escapeHtml(variant.tongtu_product_name || blank()) + '</td><td>' + escapeHtml((variant.shopify_skus || []).join(' / ') || blank()) + '</td><td>' + escapeHtml((variant.stores || []).join(' / ') || blank()) + '</td><td>' + formatNumber(variant.order_count) + '</td><td>' + formatNumber(variant.sales) + '</td><td>' + formatMoney(variant.revenue) + '</td><td>' + formatMoney(variant.paypal_refund_amount) + '</td><td>' + formatNumber(variant.paypal_dispute_count) + '</td><td>' + formatMoney(variant.credit_card_refund_amount) + '</td><td>' + formatRate(variant.shipping_rate) + '</td><td>' + formatRate(variant.delivery_rate) + '</td></tr>';
+        }).join('') : detailEmptyRow(headings.length);
+        document.getElementById('product-statistics-variants').innerHTML = '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + headings.map(function (heading) { return '<th>' + detailSortButton('variants', heading[0], heading[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' + rows + '</tbody></table></div>' + detailPagination('variants', pageData);
+    }
     function detailRowsFor(table, product) {
         var related = product.related_orders || [];
+        if (table === 'variants') return product.variants || [];
         if (table === 'paypal_orders') return related.filter(function (order) { return order.payment_kind === 'paypal'; });
         if (table === 'credit_card_orders') return related.filter(function (order) { return order.payment_kind === 'credit_card'; });
         if (table === 'refunds') return product.refund_details || [];
@@ -390,6 +427,7 @@
         var product = detailState.product;
         if (!product) return;
         var related = product.related_orders || [];
+        renderVariants(product);
         renderOrdersTable('product-statistics-paypal-orders', 'paypal_orders', related.filter(function (order) { return order.payment_kind === 'paypal'; }));
         renderOrdersTable('product-statistics-credit-card-orders', 'credit_card_orders', related.filter(function (order) { return order.payment_kind === 'credit_card'; }));
         renderRefunds(product);
@@ -399,7 +437,7 @@
     function fillModal(product) {
         detailState = { product: product, sorts: {}, filters: {}, pages: {}, activeTab: 'overview' };
         document.getElementById('product-statistics-detail-title').textContent = t('detailTitle');
-        document.getElementById('product-statistics-detail-identity').innerHTML = productThumb(product) + '<div><strong>' + escapeHtml(product.name) + '</strong><span>' + escapeHtml(product.sku || blank()) + '</span></div>' + decisionBadge(product.decision);
+        document.getElementById('product-statistics-detail-identity').innerHTML = productThumb(product) + '<div><strong>' + escapeHtml(product.name) + '</strong><span>' + escapeHtml(productIdentity(product)) + '</span></div>' + decisionBadge(product.decision);
         document.getElementById('product-statistics-overview').innerHTML = '<div class="product-statistics-detail-grid">'
             + detailMetric(t('sales'), formatNumber(product.sales)) + detailMetric(t('revenue'), formatMoney(product.revenue))
             + detailMetric(t('paypalRefundAmount'), formatMoney(product.paypal_refund_amount)) + detailMetric(t('paypalRefundRate'), formatRate(product.paypal_refund_rate))

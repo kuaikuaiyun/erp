@@ -174,6 +174,8 @@ class LogisticsProductStatisticsService
                 'item_statistics.first_item_id',
                 'item_statistics.store_names',
                 'item_statistics.shop_count',
+                'item_statistics.tongtu_skus',
+                'item_statistics.tongtu_variant_count',
                 'item_statistics.sales',
                 'item_statistics.revenue',
                 'item_statistics.cost',
@@ -182,6 +184,7 @@ class LogisticsProductStatisticsService
                 'item_statistics.handling',
                 'first_item.product_title',
                 'first_item.tongtu_product_name',
+                'first_item.tongtu_product_code',
                 'first_item.tongtu_sku',
                 'first_item.shopify_sku',
             ])
@@ -243,6 +246,8 @@ class LogisticsProductStatisticsService
             ->selectRaw("MIN(CASE WHEN NULLIF(TRIM(items.product_image_url), '') IS NOT NULL THEN items.id END) as image_item_id")
             ->selectRaw("GROUP_CONCAT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__') ORDER BY COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__') SEPARATOR 0x1F) as store_names")
             ->selectRaw("COUNT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__')) as shop_count")
+            ->selectRaw("GROUP_CONCAT(DISTINCT NULLIF(TRIM(items.tongtu_sku), '') ORDER BY NULLIF(TRIM(items.tongtu_sku), '') SEPARATOR 0x1F) as tongtu_skus")
+            ->selectRaw("COUNT(DISTINCT NULLIF(TRIM(items.tongtu_sku), '')) as tongtu_variant_count")
             ->selectRaw('SUM(COALESCE(items.quantity, 0)) as sales')
             ->selectRaw('SUM(COALESCE(items.line_revenue_usd, 0)) as revenue')
             ->selectRaw('SUM(COALESCE(items.product_cost_usd, 0)) as cost')
@@ -271,10 +276,11 @@ class LogisticsProductStatisticsService
 
         $imageRows = $this->database()
             ->table('logistics_order_items')
-            ->select(['tongtu_sku', 'shopify_sku', 'product_image_url'])
+            ->select(['tongtu_product_code', 'tongtu_sku', 'shopify_sku', 'product_image_url'])
             ->whereRaw("NULLIF(TRIM(product_image_url), '') IS NOT NULL")
             ->where(function (Builder $query) use ($skuKeys): void {
-                $query->whereIn(DB::raw("LOWER(NULLIF(TRIM(tongtu_sku), ''))"), $skuKeys)
+                $query->whereIn(DB::raw("LOWER(NULLIF(TRIM(tongtu_product_code), ''))"), $skuKeys)
+                    ->orWhereIn(DB::raw("LOWER(NULLIF(TRIM(tongtu_sku), ''))"), $skuKeys)
                     ->orWhereIn(DB::raw("LOWER(NULLIF(TRIM(shopify_sku), ''))"), $skuKeys);
             })
             ->orderBy('id')
@@ -308,7 +314,7 @@ class LogisticsProductStatisticsService
     private function imageSkuKeys(object $row): array
     {
         $keys = [];
-        foreach (['tongtu_sku', 'shopify_sku'] as $property) {
+        foreach (['tongtu_product_code', 'tongtu_sku', 'shopify_sku'] as $property) {
             $value = mb_strtolower(trim((string) ($row->{$property} ?? '')));
             if ($value !== '') {
                 $keys[] = $value;
@@ -332,7 +338,7 @@ class LogisticsProductStatisticsService
         // The English gateway values remain normal case-insensitive LIKE comparisons.
         // The Shopify tag is the stable source of truth for the independent
         // credit-card platform. Presentation gateway fields are not reliable.
-        $creditCardTag = "(CASE WHEN JSON_VALID(COALESCE(product_orders.shopify_payload, '')) THEN JSON_SEARCH(JSON_EXTRACT(product_orders.shopify_payload, '$.tags'), 'one', 'CreditCardByFintrixV2') ELSE NULL END IS NOT NULL)";
+        $creditCardTag = "(CASE WHEN JSON_VALID(COALESCE(product_orders.shopify_payload, '')) THEN JSON_SEARCH(JSON_EXTRACT(product_orders.shopify_payload, '$.tags'), 'one', '%CreditCardBy%') ELSE NULL END IS NOT NULL)";
         $creditCard = "(NOT {$actualPaypal} AND {$creditCardTag})";
 
         return $this->database()->query()
@@ -508,6 +514,10 @@ class LogisticsProductStatisticsService
     {
         $stores = array_values(array_filter(explode("\x1F", (string) ($row->store_names ?? ''))));
         $stores = array_map(static fn (string $store): string => $store === '__unassigned__' ? __('logistics.common.unassigned_store') : $store, $stores);
+        $tongtuProductCode = trim((string) ($row->tongtu_product_code ?? ''));
+        $shopifySku = trim((string) ($row->shopify_sku ?? ''));
+        $tongtuSku = trim((string) ($row->tongtu_sku ?? ''));
+        $fallbackSku = $shopifySku !== '' ? $shopifySku : $tongtuSku;
         $cost = $row->cost_complete === null ? null : round((float) $row->cost_complete, 4);
         $refunds = round((float) $row->paypal_refund_amount + (float) $row->credit_card_refund_amount, 4);
         $profit = $row->profit === null ? null : round((float) $row->profit, 4);
@@ -519,7 +529,14 @@ class LogisticsProductStatisticsService
                 (string) $row->product_title,
                 (string) $row->tongtu_product_name,
             ),
-            'sku' => trim((string) ($row->tongtu_sku ?: $row->shopify_sku)) ?: __('logistics.common.not_available'),
+            'has_tongtu_match' => $tongtuProductCode !== '',
+            'product_code' => $tongtuProductCode !== '' ? $tongtuProductCode : null,
+            'fallback_shopify_sku' => $fallbackSku !== '' ? $fallbackSku : null,
+            // Keep this compatibility key for consumers which have not yet
+            // switched from SKU to the product-level PCL identifier.
+            'sku' => $tongtuProductCode !== '' ? $tongtuProductCode : ($fallbackSku ?: __('logistics.common.not_available')),
+            'variant_count' => (int) ($row->tongtu_variant_count ?? 0),
+            'variant_skus' => array_values(array_filter(explode("\x1F", (string) ($row->tongtu_skus ?? '')))),
             'category' => __('logistics.product_statistics.sold_product'),
             'image_url' => filled($row->product_image_url) ? (string) $row->product_image_url : null,
             'stores' => $stores,
@@ -571,11 +588,16 @@ class LogisticsProductStatisticsService
         } elseif ($sort === 'decision') {
             $query->orderByRaw("FIELD(product_statistics.decision, 'continue', 'optimize', 'watch', 'stop') {$direction}");
         } elseif (in_array($sort, [
-            'name', 'sku', 'shop_count', 'sales', 'revenue', 'cost', 'paypal_refund_amount', 'paypal_refund_rate',
+            'name', 'sku', 'product_code', 'variant_count', 'shop_count', 'sales', 'revenue', 'cost', 'paypal_refund_amount', 'paypal_refund_rate',
             'paypal_dispute_count', 'paypal_dispute_rate', 'credit_card_refund_amount', 'credit_card_refund_rate',
             'combined_refund_rate', 'profit', 'profit_rate',
         ], true)) {
-            $column = $sort === 'name' ? 'product_title' : ($sort === 'sku' ? 'tongtu_sku' : $sort);
+            $column = match ($sort) {
+                'name' => 'product_title',
+                'sku', 'product_code' => 'tongtu_product_code',
+                'variant_count' => 'tongtu_variant_count',
+                default => $sort,
+            };
             $query->orderBy('product_statistics.'.$column, $direction);
         }
         $query->orderBy('product_statistics.first_item_id');
@@ -605,11 +627,12 @@ class LogisticsProductStatisticsService
     private function productKeyExpression(string $alias): string
     {
         return "CASE "
+            . "WHEN NULLIF(TRIM({$alias}.tongtu_product_code), '') IS NOT NULL THEN CONCAT('tongtu-product-code:', LOWER(TRIM({$alias}.tongtu_product_code))) "
             . "WHEN NULLIF(TRIM({$alias}.shopify_sku), '') IS NOT NULL THEN CONCAT('shopify-sku:', LOWER(TRIM({$alias}.shopify_sku))) "
             . "WHEN NULLIF(TRIM({$alias}.tongtu_sku), '') IS NOT NULL THEN CONCAT('tongtu-sku:', LOWER(TRIM({$alias}.tongtu_sku))) "
             . "WHEN NULLIF(TRIM({$alias}.shopify_product_id), '') IS NOT NULL THEN CONCAT('shopify-product:', LOWER(TRIM({$alias}.shopify_product_id))) "
             . "WHEN NULLIF(TRIM(COALESCE({$alias}.tongtu_product_name, {$alias}.product_title)), '') IS NOT NULL THEN CONCAT('product-name:', LOWER(TRIM(COALESCE({$alias}.tongtu_product_name, {$alias}.product_title)))) "
-            . "ELSE CONCAT('sku:', COALESCE(NULLIF(LOWER(TRIM({$alias}.tongtu_sku)), ''), NULLIF(LOWER(TRIM({$alias}.shopify_sku)), ''), '__missing__')) END";
+            . "ELSE CONCAT('sku:', COALESCE(NULLIF(LOWER(TRIM({$alias}.tongtu_product_code)), ''), NULLIF(LOWER(TRIM({$alias}.tongtu_sku)), ''), NULLIF(LOWER(TRIM({$alias}.shopify_sku)), ''), '__missing__')) END";
     }
 
     private function database(): \Illuminate\Database\Connection
@@ -625,6 +648,10 @@ class LogisticsProductStatisticsService
     {
         $first = $items[0];
         $summary = $this->summary($items);
+        $tongtuProductCode = trim((string) $first->tongtu_product_code);
+        $shopifySku = trim((string) $first->shopify_sku);
+        $tongtuSku = trim((string) $first->tongtu_sku);
+        $fallbackSku = $shopifySku !== '' ? $shopifySku : $tongtuSku;
 
         return [
             'id' => $this->productId($key),
@@ -636,16 +663,64 @@ class LogisticsProductStatisticsService
                 (string) $first->product_title,
                 (string) $first->tongtu_product_name,
             ),
-            'sku' => $this->sku($first),
+            'has_tongtu_match' => $tongtuProductCode !== '',
+            'product_code' => $tongtuProductCode !== '' ? $tongtuProductCode : null,
+            'fallback_shopify_sku' => $fallbackSku !== '' ? $fallbackSku : null,
+            'sku' => $tongtuProductCode !== '' ? $tongtuProductCode : ($fallbackSku ?: __('logistics.common.not_available')),
             'category' => __('logistics.product_statistics.sold_product'),
             'image_url' => $this->firstImage($items),
             ...$summary,
-            // Variants are intentionally not independently allocated or added
-            // to the parent calculation. The product is the reporting unit.
-            'variants' => [],
+            // Specs are display-only subdivisions. They never change the PCL
+            // parent calculation or allocate a shared order refund/dispute.
+            'variants' => $this->variantMetrics($items),
             'store_metrics' => $this->storeMetrics($items),
             'trend' => $this->trend($items),
         ];
+    }
+
+    /**
+     * Display true Tongtu specifications below one PCL product. The parent
+     * product remains the reporting unit; a same order is therefore only
+     * counted once at parent level even when it has several specifications.
+     *
+     * @param list<LogisticsOrderItem> $items
+     * @return list<array<string,mixed>>
+     */
+    private function variantMetrics(array $items): array
+    {
+        $groups = [];
+        foreach ($items as $item) {
+            $tongtuSku = trim((string) $item->tongtu_sku);
+            $shopifySku = trim((string) $item->shopify_sku);
+            $key = $tongtuSku !== ''
+                ? 'tongtu:'.mb_strtolower($tongtuSku)
+                : ($shopifySku !== '' ? 'shopify:'.mb_strtolower($shopifySku) : 'item:'.$item->getKey());
+            $groups[$key][] = $item;
+        }
+        ksort($groups);
+
+        return array_values(array_map(function (array $group): array {
+            $first = $group[0];
+            $summary = $this->summary($group);
+            $shopifySkus = collect($group)->map(static fn (LogisticsOrderItem $item): string => trim((string) $item->shopify_sku))
+                ->filter()->unique()->sort()->values()->all();
+
+            return [
+                'tongtu_sku' => trim((string) $first->tongtu_sku) ?: __('logistics.common.not_available'),
+                'shopify_skus' => $shopifySkus,
+                'tongtu_product_name' => trim((string) $first->tongtu_product_name) ?: __('logistics.common.not_available'),
+                'stores' => $summary['stores'],
+                'shop_count' => $summary['shop_count'],
+                'order_count' => $this->ordersForItems($group)->count(),
+                'sales' => $summary['sales'],
+                'revenue' => $summary['revenue'],
+                'paypal_refund_amount' => $summary['paypal_refund_amount'],
+                'paypal_dispute_count' => $summary['paypal_dispute_count'],
+                'credit_card_refund_amount' => $summary['credit_card_refund_amount'],
+                'shipping_rate' => $summary['shipping_rate'],
+                'delivery_rate' => $summary['delivery_rate'],
+            ];
+        }, $groups));
     }
 
     /**
@@ -918,6 +993,9 @@ class LogisticsProductStatisticsService
                 'store' => (string) ($order->store_name ?: __('logistics.common.unassigned_store')),
                 'shopify_order_number' => (string) ($order->shopify_order_number ?: __('logistics.common.not_available')),
                 'bill_number' => (string) ($order->bill_number ?: __('logistics.common.not_available')),
+                'tongtu_product_codes' => [],
+                'tongtu_skus' => [],
+                'shopify_skus' => [],
                 'quantity' => 0.0,
                 'revenue' => 0.0,
                 'paypal_refund' => 0.0,
@@ -939,6 +1017,12 @@ class LogisticsProductStatisticsService
             ];
             $orders[$id]['quantity'] += (float) $item->quantity;
             $orders[$id]['revenue'] += (float) $item->line_revenue_usd;
+            foreach (['tongtu_product_code' => 'tongtu_product_codes', 'tongtu_sku' => 'tongtu_skus', 'shopify_sku' => 'shopify_skus'] as $field => $target) {
+                $value = trim((string) $item->{$field});
+                if ($value !== '') {
+                    $orders[$id][$target][mb_strtolower($value)] = $value;
+                }
+            }
         }
 
         foreach ($payment['paypal_refund_details'] as $refund) {
@@ -962,6 +1046,9 @@ class LogisticsProductStatisticsService
             $order['paypal_refund'] = round((float) $order['paypal_refund'], 4);
             $order['credit_card_refund'] = round((float) $order['credit_card_refund'], 4);
             $order['actual_refund'] = round($order['paypal_refund'] + $order['credit_card_refund'], 4);
+            $order['tongtu_product_codes'] = array_values($order['tongtu_product_codes']);
+            $order['tongtu_skus'] = array_values($order['tongtu_skus']);
+            $order['shopify_skus'] = array_values($order['shopify_skus']);
         }
         unset($order);
         uasort($orders, static fn (array $left, array $right): int => $right['_sort_time'] <=> $left['_sort_time']);
@@ -1099,6 +1186,7 @@ class LogisticsProductStatisticsService
         if ($keyword !== '') {
             $query->where(function ($nested) use ($itemTable, $keyword): void {
                 $nested->where($itemTable.'.shopify_sku', 'like', '%'.$keyword.'%')
+                    ->orWhere($itemTable.'.tongtu_product_code', 'like', '%'.$keyword.'%')
                     ->orWhere($itemTable.'.tongtu_sku', 'like', '%'.$keyword.'%')
                     ->orWhere($itemTable.'.variant_title', 'like', '%'.$keyword.'%')
                     ->orWhere($itemTable.'.product_title', 'like', '%'.$keyword.'%')
@@ -1176,7 +1264,7 @@ class LogisticsProductStatisticsService
         }
 
         foreach ((array) $tags as $tag) {
-            if (is_string($tag) && mb_strtolower(trim($tag)) === 'creditcardbyfintrixv2') {
+            if (is_string($tag) && str_contains(mb_strtolower(trim($tag)), 'creditcardby')) {
                 return true;
             }
         }
@@ -1197,6 +1285,21 @@ class LogisticsProductStatisticsService
 
     private function productKey(LogisticsOrderItem $item): string
     {
+        $productCode = trim((string) $item->tongtu_product_code);
+        if ($productCode !== '') {
+            return 'tongtu-product-code:'.mb_strtolower($productCode);
+        }
+
+        $shopifySku = trim((string) $item->shopify_sku);
+        if ($shopifySku !== '') {
+            return 'shopify-sku:'.mb_strtolower($shopifySku);
+        }
+
+        $tongtuSku = trim((string) $item->tongtu_sku);
+        if ($tongtuSku !== '') {
+            return 'tongtu-sku:'.mb_strtolower($tongtuSku);
+        }
+
         $shopifyProductId = trim((string) $item->shopify_product_id);
         if ($shopifyProductId !== '') {
             return 'shopify-product:'.mb_strtolower($shopifyProductId);
@@ -1210,7 +1313,7 @@ class LogisticsProductStatisticsService
             return 'product-name:'.$productName;
         }
 
-        return 'sku:'.(mb_strtolower(trim((string) ($item->tongtu_sku ?: $item->shopify_sku))) ?: '__missing__');
+        return 'sku:'.(mb_strtolower(trim((string) ($item->tongtu_product_code ?: $item->tongtu_sku ?: $item->shopify_sku))) ?: '__missing__');
     }
 
     private function productTitle(LogisticsOrderItem $item): string
@@ -1230,9 +1333,9 @@ class LogisticsProductStatisticsService
         return $matchedName;
     }
 
-    private function sku(LogisticsOrderItem $item): string
+    private function productCode(LogisticsOrderItem $item): string
     {
-        return trim((string) ($item->tongtu_sku ?: $item->shopify_sku)) ?: __('logistics.common.not_available');
+        return trim((string) ($item->tongtu_product_code ?: $item->tongtu_sku ?: $item->shopify_sku)) ?: __('logistics.common.not_available');
     }
 
     /** @param list<LogisticsOrderItem> $items */
@@ -1242,6 +1345,7 @@ class LogisticsProductStatisticsService
             (string) $item->product_title,
             (string) $item->variant_title,
             (string) $item->shopify_sku,
+            (string) $item->tongtu_product_code,
             (string) $item->tongtu_sku,
             (string) $item->tongtu_product_name,
         ]), $items));
