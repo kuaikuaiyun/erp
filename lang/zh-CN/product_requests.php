@@ -276,6 +276,7 @@ return [
         'image_upload' => '支持拖拽、粘贴图片或点击选择；仅支持 JPG、PNG、WEBP，单张最大 5 MB。',
         'one_image_only' => '必须上传 1 张产品图。',
         'purchase_item_images' => '支持拖拽、粘贴图片或点击选择；最多 6 张，至少上传 1 张。',
+        'purchase_item_example' => '查看示例图',
         'max_three_images' => '最多上传 3 张图片。',
         'locked_after_submit' => '原始提报信息提交后不可修改。',
     ],
