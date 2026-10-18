@@ -236,7 +236,13 @@
         container.innerHTML = '<div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> ' + escapeHtml(message || t('detailLoadFailed')) + '</div>';
     }
     function ensureDetailLoaded(force) {
-        if ((!force && detailState.activeTab === 'overview') || detailState.detailLoaded || !detailState.product) return;
+        if (!detailState.product) return;
+        if (detailState.detailLoaded) {
+            renderDetailFilters();
+            renderDetailTables();
+            return;
+        }
+        if (!force && detailState.activeTab === 'overview') return;
         if (detailState.loadingDetail) {
             showDetailTabLoading(detailState.activeTab);
             return;
