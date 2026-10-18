@@ -17,9 +17,11 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use Symfony\Component\HttpFoundation\Response;
 
 class ProductRequestController extends Controller
@@ -52,6 +54,7 @@ class ProductRequestController extends Controller
             'reviewStatusLabels' => $this->reviewStatusLabels(),
             'rectificationLabels' => $this->rectificationLabels(),
             'warehouseResultLabels' => $this->warehouseResultLabels(),
+            'canImport' => $this->canImportProductRequests($context['user']),
         ]);
     }
 
@@ -200,6 +203,265 @@ class ProductRequestController extends Controller
             __('product_requests.messages.operation_submitted', ['report_no' => $productRequest->report_no]),
             'product-requests.operation.index',
         );
+    }
+
+    /** Excel 批量导入需求提报：仅 boss 账号可用，按 1688 链接分组生成已检验通过的记录 */
+    public function operationImport(Request $request): Response|RedirectResponse
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        abort_unless($this->canImportProductRequests($context['user']), 403);
+
+        $data = $request->validate([
+            'import_file' => ['required', 'file', 'mimes:xlsx,xls', 'max:10240'],
+        ]);
+
+        try {
+            [$groups, $rowErrors] = $this->parseProductRequestImport($data['import_file']->getRealPath());
+        } catch (\Throwable) {
+            return back()->with('error', __('product_requests.import.parse_failed'));
+        }
+
+        if ($groups === []) {
+            $message = $rowErrors !== [] ? implode('；', array_slice($rowErrors, 0, 5)) : __('product_requests.import.empty');
+            return back()->with('error', $message);
+        }
+
+        $connection = config('admin.database.connection') ?: config('database.default');
+        $actor = $this->access->actorSnapshot($context['user']);
+        $created = 0;
+        $skuCount = 0;
+
+        DB::connection($connection)->transaction(function () use ($groups, $actor, $context, &$created, &$skuCount): void {
+            foreach ($groups as $group) {
+                $skus = $group['skus'];
+                $productRequest = ProductRequest::query()->create([
+                    'report_no' => 'REQ-'.Str::upper((string) Str::uuid()),
+                    'reported_at' => now('Asia/Shanghai')->toDateString(),
+                    'status' => ProductRequest::STATUS_INSPECTION_PASSED,
+                    'placement_review_status' => ProductRequest::REVIEW_UNFILLED,
+                    'operation_user_id' => $actor['user_id'],
+                    'operation_user_name' => $actor['user_name'],
+                    'operation_department_id' => $actor['department_id'],
+                    'operation_root_department_id' => $actor['root_department_id'],
+                    'operation_department_name' => $actor['department_name'],
+                    'operation_display_name' => $actor['display_name'],
+                    'skus' => implode(',', $skus),
+                    'operation_supplier_url' => $group['url'],
+                    'standard_chinese_name' => $group['name'],
+                    'pcl_product_no' => $group['pcl'],
+                    'supplier_url' => $group['url'],
+                    'supplier_url_normalized' => $group['url'],
+                    'supplier_url_hash' => $group['hash'],
+                    'procurement_skus' => implode(',', $skus),
+                    'procurement_sku_values' => $group['values'] === [] ? null : $group['values'],
+                    'erp_operator_id' => $actor['user_id'],
+                    'erp_operator_name' => $actor['user_name'],
+                    'erp_operator_department_name' => $actor['department_name'],
+                    'erp_operator_display_name' => $actor['display_name'],
+                    'inspected_at' => now(),
+                ]);
+                $productRequest->forceFill([
+                    'report_no' => 'REQ-'.now('Asia/Shanghai')->format('Ymd').'-'.str_pad((string) $productRequest->getKey(), 6, '0', STR_PAD_LEFT),
+                ])->save();
+
+                foreach ($group['images'] as $sort => $image) {
+                    $attachmentPath = 'product-requests/'.$productRequest->report_no.'/'.ProductRequestAttachment::STAGE_OPERATION.'/'.Str::uuid().'.'.$image['ext'];
+                    if (!Storage::disk('local')->put($attachmentPath, $image['bytes'])) {
+                        continue;
+                    }
+                    ProductRequestAttachment::query()->create([
+                        'product_request_id' => $productRequest->getKey(),
+                        'stage' => ProductRequestAttachment::STAGE_OPERATION,
+                        'sort' => $sort + 1,
+                        'disk' => 'local',
+                        'path' => $attachmentPath,
+                        'original_name' => Str::limit($image['name'], 255, ''),
+                        'mime_type' => (new \finfo(FILEINFO_MIME_TYPE))->buffer($image['bytes']) ?: 'application/octet-stream',
+                        'size' => strlen($image['bytes']),
+                        'uploaded_by' => $context['user']->getKey(),
+                        'uploaded_by_name' => $context['user']->name,
+                    ]);
+                }
+
+                $linkSkus = $this->mergeLinkSkus($this->linkSkuSet($group['hash']), $skus);
+                if ($linkSkus !== []) {
+                    $this->persistLinkSkuSet($group['hash'], $group['url'], $linkSkus);
+                }
+                $this->workflow->log($productRequest, 'excel_imported', $context['user'], ['skus' => implode(',', $skus)]);
+                $created++;
+                $skuCount += count($skus);
+            }
+        });
+
+        $message = __('product_requests.import.success', ['count' => $created, 'skus' => $skuCount]);
+        if ($rowErrors !== []) {
+            $message .= '；'.implode('；', array_slice($rowErrors, 0, 5));
+        }
+
+        return redirect()->route('product-requests.operation.index')->with('success', $message);
+    }
+
+    /** 仅 boss 账号可导入需求提报 */
+    private function canImportProductRequests(AdminUser $user): bool
+    {
+        return $user->username === 'kky_boss';
+    }
+
+    /**
+     * 解析导入 Excel：表头固定为 产品主图/PCL（商品编号）/商品名称/当前SKU/采购参考价(CNY)/重量(g)/1688采购链接
+     * 主图列支持 WPS DISPIMG 内嵌图片与标准 Excel 嵌入图片，行按 1688 链接聚合为一条提报
+     *
+     * @return array{0: array<int, array{url: string, hash: string, pcl: ?string, name: string, skus: array<int, string>, values: array<string, array{price: string, weight: string}>, images: array<int, array{bytes: string, ext: string, name: string}>}>, 1: array<int, string>}
+     */
+    private function parseProductRequestImport(string $path): array
+    {
+        $sheet = IOFactory::load($path)->getSheet(0);
+        $highest = $sheet->getHighestDataRow();
+        $cellImages = $this->extractWpsCellImages($path);
+        $drawingImages = $this->extractDrawingImages($sheet);
+        $groups = [];
+        $errors = [];
+
+        for ($row = 2; $row <= $highest; $row++) {
+            $imageRef = trim((string) $sheet->getCell('A'.$row)->getValue());
+            $pcl = trim((string) $sheet->getCell('B'.$row)->getValue());
+            $name = trim((string) $sheet->getCell('C'.$row)->getValue());
+            $sku = trim((string) $sheet->getCell('D'.$row)->getValue());
+            $price = trim((string) $sheet->getCell('E'.$row)->getValue());
+            $weight = trim((string) $sheet->getCell('F'.$row)->getValue());
+            $url = trim((string) $sheet->getCell('G'.$row)->getValue());
+            if ($pcl === '' && $name === '' && $sku === '' && $url === '') {
+                continue;
+            }
+            $missing = [];
+            if ($name === '') { $missing[] = '商品名称'; }
+            if ($sku === '') { $missing[] = 'SKU'; }
+            if ($url === '') { $missing[] = '1688采购链接'; }
+            if ($missing !== []) {
+                $errors[] = __('product_requests.import.row_missing', ['row' => $row, 'fields' => implode('、', $missing)]);
+                continue;
+            }
+            if (!preg_match('#^https?://#i', $url)) {
+                $errors[] = __('product_requests.import.row_invalid_url', ['row' => $row]);
+                continue;
+            }
+
+            $normalized = $this->workflow->normalizeSupplierUrl($url);
+            $hash = $this->workflow->supplierUrlHash($normalized);
+            if (!isset($groups[$hash])) {
+                $groups[$hash] = ['url' => $normalized, 'hash' => $hash, 'pcl' => $pcl !== '' ? $pcl : null, 'name' => $name, 'skus' => [], 'values' => [], 'images' => []];
+            }
+            if (!in_array($sku, $groups[$hash]['skus'], true)) {
+                $groups[$hash]['skus'][] = $sku;
+            }
+            $groups[$hash]['values'][$sku] = ['price' => $price, 'weight' => $weight];
+
+            // 收集产品主图：WPS DISPIMG 按图片 ID 解析，标准嵌入图片按行号匹配，均按图源去重
+            if (preg_match('/DISPIMG\("([^"]+)"/i', $imageRef, $matches) && isset($cellImages[$matches[1]])) {
+                $image = $cellImages[$matches[1]];
+                $groups[$hash]['images'][$image['key']] = $image;
+            }
+            foreach ($drawingImages[$row] ?? [] as $image) {
+                $groups[$hash]['images'][$image['key']] = $image;
+            }
+        }
+
+        foreach ($groups as &$group) {
+            $group['images'] = array_values($group['images']);
+        }
+        unset($group);
+
+        return [array_values($groups), $errors];
+    }
+
+    /**
+     * 读取 WPS cellimages.xml 内嵌图片，返回 DISPIMG 图片 ID => 图片数据 的映射
+     *
+     * @return array<string, array{key: string, bytes: string, ext: string, name: string}>
+     */
+    private function extractWpsCellImages(string $path): array
+    {
+        $zip = new \ZipArchive();
+        if ($zip->open($path) !== true) {
+            return [];
+        }
+        $cellImagesXml = $zip->getFromName('xl/cellimages.xml');
+        $relsXml = $zip->getFromName('xl/_rels/cellimages.xml.rels');
+        if ($cellImagesXml === false || $relsXml === false) {
+            $zip->close();
+
+            return [];
+        }
+
+        $relMap = [];
+        $rels = simplexml_load_string($relsXml);
+        if ($rels !== false) {
+            foreach ($rels->Relationship as $relationship) {
+                $relMap[(string) $relationship['Id']] = (string) $relationship['Target'];
+            }
+        }
+
+        $images = [];
+        $dom = new \DOMDocument();
+        if (@$dom->loadXML($cellImagesXml)) {
+            $xpath = new \DOMXPath($dom);
+            $xpath->registerNamespace('xdr', 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing');
+            $xpath->registerNamespace('a', 'http://schemas.openxmlformats.org/drawingml/2006/main');
+            foreach ($xpath->query('//xdr:pic') ?: [] as $pic) {
+                $idNode = $xpath->query('.//xdr:cNvPr', $pic)?->item(0);
+                $blipNode = $xpath->query('.//a:blip', $pic)?->item(0);
+                if (!$idNode instanceof \DOMElement || !$blipNode instanceof \DOMElement) {
+                    continue;
+                }
+                $imageId = $idNode->getAttribute('name');
+                $rId = $blipNode->getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'embed');
+                $target = $relMap[$rId] ?? '';
+                if ($imageId === '' || $target === '') {
+                    continue;
+                }
+                $zipPath = 'xl/'.ltrim($target, '/');
+                $bytes = $zip->getFromName($zipPath);
+                if ($bytes === false) {
+                    continue;
+                }
+                $extension = strtolower(pathinfo($target, PATHINFO_EXTENSION)) ?: 'png';
+                $images[$imageId] = ['key' => $zipPath, 'bytes' => $bytes, 'ext' => $extension, 'name' => basename($target)];
+            }
+        }
+        $zip->close();
+
+        return $images;
+    }
+
+    /**
+     * 读取标准 Excel 嵌入图片（绘图对象），返回 行号 => 图片数据列表 的映射，仅采集产品主图所在的 A 列
+     *
+     * @return array<int, array<int, array{key: string, bytes: string, ext: string, name: string}>>
+     */
+    private function extractDrawingImages($sheet): array
+    {
+        $images = [];
+        foreach ($sheet->getDrawingCollection() as $index => $drawing) {
+            if (!preg_match('/^([A-Z]+)(\d+)$/', (string) $drawing->getCoordinates(), $matches) || strtoupper($matches[1]) !== 'A') {
+                continue;
+            }
+            $bytes = @file_get_contents($drawing->getPath());
+            if ($bytes === false) {
+                continue;
+            }
+            $extension = strtolower((string) $drawing->getExtension()) ?: 'png';
+            $images[(int) $matches[2]][] = [
+                'key' => 'drawing-'.$index,
+                'bytes' => $bytes,
+                'ext' => $extension,
+                'name' => trim((string) $drawing->getName()) !== '' ? trim((string) $drawing->getName()) : 'image.'.$extension,
+            ];
+        }
+
+        return $images;
     }
 
     /** 运营重新编辑检验不通过的需求提报 */
@@ -598,6 +860,7 @@ class ProductRequestController extends Controller
             ...$this->viewContext($context),
             'productRequest' => $productRequest,
             'actor' => $this->access->actorSnapshot($context['user']),
+            'skuValues' => is_array($productRequest->procurement_sku_values) ? $productRequest->procurement_sku_values : [],
         ]);
     }
 
@@ -659,7 +922,10 @@ class ProductRequestController extends Controller
                 ->pluck('id')
                 ->all();
             $checkedSkus = $this->splitSkus(implode(',', $data['selected_skus'] ?? []));
-            unset($data['reuse_source_id'], $data['seller_images'], $data['selected_skus'], $data['link_skus'], $data['removed_seller_images'], $data['inspection_reject_reason']);
+            // 面板左列编辑后的运营 SKU（换行/逗号分隔）统一规范为逗号分隔存储
+            $data['skus'] = $this->normalizeSkus((string) ($data['skus'] ?? ''));
+            $skuValueMap = $this->parseProcurementSkuValues((string) ($data['sku_value_rows'] ?? ''), $checkedSkus);
+            unset($data['reuse_source_id'], $data['seller_images'], $data['selected_skus'], $data['link_skus'], $data['sku_value_rows'], $data['removed_seller_images'], $data['inspection_reject_reason']);
             // 链接级 SKU 集合只增不减：系统已录入的 SKU 始终保留在链接记录中，运营 SKU 勾选后并入；表单仅保存本次勾选的 SKU
             $linkSkus = $this->mergeLinkSkus($this->linkSkuSet($linkHash), $checkedSkus);
             $procurementSkus = implode(',', $checkedSkus);
@@ -669,6 +935,7 @@ class ProductRequestController extends Controller
             $locked->fill([
                 ...$data,
                 'procurement_skus' => $procurementSkus,
+                'procurement_sku_values' => $skuValueMap === [] ? null : $skuValueMap,
                 'supplier_url_normalized' => $normalizedUrl,
                 'supplier_url_hash' => $linkHash,
                 'status' => ProductRequest::STATUS_INSPECTION_PASSED,
@@ -801,12 +1068,16 @@ class ProductRequestController extends Controller
             $skus = array_values(array_diff($skus, $ownSkus));
         }
 
+        // 同链接历史记录按 SKU 保存的采购价/重量（新记录覆盖旧记录），供右栏只读展示
+        $skuValues = $skus === [] ? [] : array_intersect_key($this->linkSkuValues($hash), array_flip($skus));
+
         return response()->json([
             'items' => $skus === [] ? [] : [[
                 'id' => null,
                 'report_no' => null,
                 'skus' => $skus,
             ]],
+            'values' => $skuValues === [] ? new \stdClass() : $skuValues,
         ]);
     }
 
@@ -896,6 +1167,7 @@ class ProductRequestController extends Controller
             'linkSku' => $linkSku,
             'pcl' => $pcl,
             'skus' => $this->splitSkus((string) $linkSku->skus),
+            'skuValues' => $this->linkSkuValues($linkSku->supplier_url_hash),
         ]);
     }
 
@@ -910,11 +1182,41 @@ class ProductRequestController extends Controller
 
         $data = $request->validate([
             'skus' => ['nullable', 'string', 'max:10000'],
+            'sku_values' => ['nullable', 'array', 'max:100'],
+            'sku_values.*.price' => ['nullable', 'string', 'max:100'],
+            'sku_values.*.weight' => ['nullable', 'string', 'max:100'],
         ]);
 
+        // PCL SKU 管理为全量维护：提交内容即最终集合，删除的 SKU 会被移除
         $submitted = $this->splitSkus(str_replace(["\r\n", "\r", "\n"], ',', (string) ($data['skus'] ?? '')));
-        $merged = $this->mergeLinkSkus((string) $linkSku->skus, $submitted);
-        $linkSku->forceFill(['skus' => implode(',', $merged)])->save();
+        $linkSku->forceFill(['skus' => implode(',', $submitted)])->save();
+
+        // 按 SKU 的采购价/重量同步到同链接所有提报记录；两项都清空表示移除该 SKU 的数值
+        $valueRows = collect($data['sku_values'] ?? [])->map(fn (mixed $row): array => [
+            'price' => trim((string) (is_array($row) ? ($row['price'] ?? '') : '')),
+            'weight' => trim((string) (is_array($row) ? ($row['weight'] ?? '') : '')),
+        ]);
+        if ($valueRows->isNotEmpty()) {
+            ProductRequest::query()
+                ->where('supplier_url_hash', $linkSku->supplier_url_hash)
+                ->whereNotNull('procurement_skus')
+                ->get(['id', 'procurement_skus', 'procurement_sku_values'])
+                ->each(function (ProductRequest $record) use ($valueRows): void {
+                    $values = (array) $record->procurement_sku_values;
+                    foreach ($this->splitSkus((string) $record->procurement_skus) as $sku) {
+                        if (!$valueRows->has($sku)) {
+                            continue;
+                        }
+                        $row = $valueRows->get($sku);
+                        if ($row['price'] === '' && $row['weight'] === '') {
+                            unset($values[$sku]);
+                        } else {
+                            $values[$sku] = $row;
+                        }
+                    }
+                    $record->forceFill(['procurement_sku_values' => $values === [] ? null : $values])->save();
+                });
+        }
 
         return $this->modalSuccess($request, __('product_requests.link_skus.updated'), 'product-requests.link-skus.index');
     }
@@ -1169,11 +1471,25 @@ class ProductRequestController extends Controller
 
         $productRequest->load('attachments');
 
+        // 每条采购 SKU 一行：参考值为采购填写的重量，输入框默认回填已保存的实测值（无则取参考值）
+        $procurementSkuValues = is_array($productRequest->procurement_sku_values) ? $productRequest->procurement_sku_values : [];
+        $warehouseSkuWeights = is_array($productRequest->warehouse_sku_weights) ? $productRequest->warehouse_sku_weights : [];
+        $skuWeightRows = collect($this->splitSkus((string) $productRequest->procurement_skus))
+            ->map(function (string $sku) use ($procurementSkuValues, $warehouseSkuWeights): array {
+                $ref = trim((string) ($procurementSkuValues[$sku]['weight'] ?? ''));
+                return [
+                    'sku' => $sku,
+                    'ref' => $ref,
+                    'value' => (string) ($warehouseSkuWeights[$sku] ?? $ref),
+                ];
+            })->values()->all();
+
         return view('portals.product-requests.warehouse.form', [
             ...$this->viewContext($context),
             'productRequest' => $productRequest,
             'actor' => $this->access->actorSnapshot($context['user']),
             'warehouseRejectReasonLabels' => $this->warehouseRejectReasonLabels(),
+            'skuWeightRows' => $skuWeightRows,
         ]);
     }
 
@@ -1195,9 +1511,21 @@ class ProductRequestController extends Controller
             $actor = $this->access->actorSnapshot($context['user']);
             $result = $data['result'];
             $rejectReason = $rejected ? ($data['warehouse_reject_reason'] ?? null) : null;
-            unset($data['result'], $data['warehouse_reject_reason']);
+            // 按 SKU 组装实测重量，仅保留本次采购 SKU
+            $skuWeights = [];
+            foreach ((array) ($data['sku_weight_rows'] ?? []) as $row) {
+                $sku = trim((string) ($row['sku'] ?? ''));
+                $weight = mb_substr(trim((string) ($row['weight'] ?? '')), 0, 100);
+                if ($sku === '' || $weight === '') {
+                    continue;
+                }
+                $skuWeights[$sku] = $weight;
+            }
+            $skuWeights = array_intersect_key($skuWeights, array_flip($this->splitSkus((string) $locked->procurement_skus)));
+            unset($data['result'], $data['warehouse_reject_reason'], $data['sku_weight_rows']);
             $locked->fill([
                 ...$data,
+                'warehouse_sku_weights' => $skuWeights === [] ? null : $skuWeights,
                 'warehouse_acceptance_result' => $result,
                 'warehouse_reject_reason' => $rejectReason,
                 // 审核不通过时回退到检验通过，商品信息检验可修改后重新提交审核
@@ -1457,7 +1785,7 @@ class ProductRequestController extends Controller
             ]);
         }
 
-        return $request->validate([
+        $data = $request->validate([
             'result' => ['required', Rule::in(['passed', 'rejected'])],
             'standard_chinese_name' => ['required', 'string', 'max:191'],
             'supplier_url' => ['required', 'string', 'max:2048', 'regex:#^https?://#i'],
@@ -1466,15 +1794,13 @@ class ProductRequestController extends Controller
             'standard_sku' => ['nullable', 'string', 'max:191'],
             'stock_status' => ['nullable', Rule::in(['yes', 'no'])],
             'minimum_order_quantity' => ['nullable', 'string', 'max:255'],
-            'minimum_purchase_price_rmb' => ['required', 'string', 'max:100'],
             'pcl_product_no' => ['required', 'string', 'max:100'],
-            'estimated_shipping_weight_g' => ['required', 'string', 'max:100'],
-            'outer_package_size' => ['nullable', 'string', 'max:191'],
-            'large_volume_weight_g' => ['nullable', 'string', 'max:100'],
             'erp_binding_status' => ['nullable', Rule::in(['unbound', 'bound'])],
             'selected_skus' => ['nullable', 'array', 'max:100'],
             'selected_skus.*' => ['string', 'max:500'],
+            'skus' => ['nullable', 'string', 'max:10000'],
             'link_skus' => ['nullable', 'string', 'max:20000'],
+            'sku_value_rows' => ['nullable', 'string', 'max:20000'],
             // 卖家图 / 实拍图必填：已保存附件或复用来源已带图时无需重复上传
             'seller_images' => ($reusedImages || $hasExistingImages) ? ['nullable', 'array', 'max:3'] : ['required', 'array', 'max:3'],
             'seller_images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
@@ -1482,6 +1808,35 @@ class ProductRequestController extends Controller
             'removed_seller_images' => ['nullable', 'string', 'max:100'],
             'inspection_reject_reason' => ['nullable', 'string', 'max:2000'],
         ]);
+
+        // 运营填写且勾选的 SKU 必须填写采购价与重量（未勾选的 SKU 不要求）
+        $validator = Validator::make($request->all(), []);
+        $validator->after(function (\Illuminate\Validation\Validator $validator) use ($request): void {
+            $checkedSkus = collect((array) $request->input('selected_skus', []))
+                ->map(fn (mixed $value): string => trim((string) $value))
+                ->filter(fn (string $value): bool => $value !== '')
+                ->unique();
+            // 未勾选任何系统已录入 SKU 时，运营填写的 SKU 至少要勾选一个
+            if ($checkedSkus->isEmpty()) {
+                $validator->errors()->add('selected_skus', __('product_requests.procurement.sku_check_required'));
+                return;
+            }
+            $operationSkus = $this->splitSkus(str_replace(["\r\n", "\r", "\n"], ',', (string) $request->input('skus', '')));
+            $rows = json_decode((string) $request->input('sku_value_rows', ''), true);
+            $rows = is_array($rows) ? $rows : [];
+            $checkedSkus->intersect($operationSkus)
+                ->each(function (string $sku) use ($rows, $validator): void {
+                    $row = $rows[$sku] ?? [];
+                    $price = trim((string) (is_array($row) ? ($row['price'] ?? '') : ''));
+                    $weight = trim((string) (is_array($row) ? ($row['weight'] ?? '') : ''));
+                    if ($price === '' || $weight === '') {
+                        $validator->errors()->add('sku_value_rows', __('product_requests.procurement.sku_value_required', ['sku' => $sku]));
+                    }
+                });
+        });
+        $validator->validate();
+
+        return $data;
     }
 
     /** @return array<string, mixed> */
@@ -1491,7 +1846,9 @@ class ProductRequestController extends Controller
 
         $data = $request->validate([
             'result' => ['required', Rule::in([ProductRequest::WAREHOUSE_PASSED, ProductRequest::WAREHOUSE_REJECTED])],
-            'actual_shipping_weight_g' => ['required', 'string', 'max:100'],
+            'sku_weight_rows' => ['nullable', 'array', 'max:100'],
+            'sku_weight_rows.*.sku' => ['nullable', 'string', 'max:500'],
+            'sku_weight_rows.*.weight' => [Rule::requiredIf(! $rejected), 'nullable', 'string', 'max:100'],
             'package_length_cm' => ['nullable', 'string', 'max:100', 'required_with:package_width_cm,package_height_cm'],
             'package_width_cm' => ['nullable', 'string', 'max:100', 'required_with:package_length_cm,package_height_cm'],
             'package_height_cm' => ['nullable', 'string', 'max:100', 'required_with:package_length_cm,package_width_cm'],
@@ -1576,6 +1933,30 @@ class ProductRequestController extends Controller
         return implode(',', $this->legacyLinkSkus($hash, $excludeId));
     }
 
+    /** @return array<string, array{price: string, weight: string}> 同链接历史记录按 SKU 保存的采购价/重量（新记录覆盖旧记录） */
+    private function linkSkuValues(string $hash): array
+    {
+        $skuValues = [];
+        ProductRequest::query()
+            ->where('supplier_url_hash', $hash)
+            ->whereNotNull('procurement_sku_values')
+            ->orderBy('id')
+            ->get(['procurement_sku_values'])
+            ->each(function (ProductRequest $record) use (&$skuValues): void {
+                foreach ((array) $record->procurement_sku_values as $sku => $row) {
+                    if (!is_array($row)) {
+                        continue;
+                    }
+                    $skuValues[$sku] = [
+                        'price' => (string) ($row['price'] ?? ''),
+                        'weight' => (string) ($row['weight'] ?? ''),
+                    ];
+                }
+            });
+
+        return $skuValues;
+    }
+
     /** @return list<string> */
     private function legacyLinkSkus(string $hash, ?int $excludeId = null): array
     {
@@ -1620,6 +2001,34 @@ class ProductRequestController extends Controller
         return array_values(array_unique(array_merge($this->splitSkus($current), $checked)));
     }
 
+    /**
+     * 解析 SKU 价格/重量 JSON，仅保留本次勾选的 SKU
+     *
+     * @param  list<string>  $checkedSkus
+     * @return array<string, array{price: string, weight: string}>
+     */
+    private function parseProcurementSkuValues(string $raw, array $checkedSkus): array
+    {
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return [];
+        }
+        $result = [];
+        foreach ($checkedSkus as $sku) {
+            $row = $decoded[$sku] ?? null;
+            if (!is_array($row)) {
+                continue;
+            }
+            $price = mb_substr(trim((string) ($row['price'] ?? '')), 0, 100);
+            $weight = mb_substr(trim((string) ($row['weight'] ?? '')), 0, 100);
+            if ($price === '' && $weight === '') {
+                continue;
+            }
+            $result[$sku] = ['price' => $price, 'weight' => $weight];
+        }
+        return $result;
+    }
+
     /** @return array<string, mixed> */
     private function reusePayload(ProductRequest $productRequest): array
     {
@@ -1643,6 +2052,7 @@ class ProductRequestController extends Controller
             'large_volume_weight_g' => $productRequest->large_volume_weight_g,
             'erp_binding_status' => $productRequest->erp_binding_status,
             'skus' => $this->splitSkus($this->linkSkuSet((string) $productRequest->supplier_url_hash)),
+            'sku_values' => $productRequest->procurement_sku_values ?: new \stdClass(),
             'seller_images' => $productRequest->attachmentsFor(ProductRequestAttachment::STAGE_PROCUREMENT)
                 ->map(fn (ProductRequestAttachment $attachment): array => [
                     'url' => route('product-requests.attachments.show', [$productRequest, $attachment]),

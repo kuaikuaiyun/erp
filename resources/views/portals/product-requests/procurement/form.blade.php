@@ -9,6 +9,9 @@
     <input type="hidden" name="modal" value="1">
     <input type="hidden" name="reuse_source_id" value="{{ old('reuse_source_id') }}">
     <input type="hidden" name="link_skus" value="{{ old('link_skus') }}" data-product-request-link-skus>
+    <input type="hidden" name="sku_value_rows" value="{{ old('sku_value_rows') }}" data-product-request-sku-values>
+    {{-- 运营 SKU 隐藏域：面板左列编辑后由 JS 同步写入，随表单提交保存 --}}
+    <input type="hidden" name="skus" value="{{ old('skus', $productRequest->skus) }}" data-sku-edit-source>
 
     <div class="modal-header">
         <button type="button" class="close" data-dismiss="modal" aria-label="{{ __('product_requests.common.close') }}"><span aria-hidden="true">&times;</span></button>
@@ -40,12 +43,6 @@
                     <div class="form-group">
                         <label>{{ __('product_requests.fields.operation') }}</label>
                         <div class="product-request-readonly">{{ $productRequest->operation_display_name }}</div>
-                    </div>
-                    <div class="form-group">
-                        <label for="operation_skus_input">{{ __('product_requests.fields.operation_skus') }}</label>
-                        <textarea id="operation_skus_input" class="form-control product-request-sku-edit" rows="2" maxlength="2000" data-sku-edit-source>{{ str_replace(',', "\n", (string) $productRequest->skus) }}</textarea>
-                        <div class="product-request-sku-tags product-request-sku-preview" data-sku-edit-preview></div>
-                        <span class="help-block">{{ __('product_requests.procurement.operation_skus_editable_hint') }}</span>
                     </div>
                     <div class="form-group">
                         <label>{{ __('product_requests.fields.operation_supplier_url') }}</label>
@@ -81,12 +78,19 @@
             </div>
 
             <div class="row">
+                <div class="form-group col-md-6 @error('pcl_product_no') has-error @enderror">
+                    <label for="pcl_product_no">{{ __('product_requests.fields.pcl_product_no') }} <span class="text-red">*</span></label>
+                    <input id="pcl_product_no" class="form-control" name="pcl_product_no" value="{{ old('pcl_product_no', $productRequest->pcl_product_no) }}" maxlength="100" required placeholder="{{ __('product_requests.placeholders.pcl_product_no') }}">
+                    @error('pcl_product_no')<span class="help-block text-red">{{ $message }}</span>@enderror
+                </div>
                 <div class="form-group col-md-6 @error('standard_chinese_name') has-error @enderror">
                     <label for="standard_chinese_name">{{ __('product_requests.fields.standard_chinese_name') }} <span class="text-red">*</span></label>
                     <input id="standard_chinese_name" class="form-control" name="standard_chinese_name" value="{{ old('standard_chinese_name', $productRequest->standard_chinese_name) }}" maxlength="191" required placeholder="{{ __('product_requests.placeholders.standard_chinese_name') }}">
                     @error('standard_chinese_name')<span class="help-block text-red">{{ $message }}</span>@enderror
                     <span class="product-request-selected-reuse" data-product-request-reuse-selected hidden></span>
                 </div>
+            </div>
+            <div class="row">
                 <div class="form-group col-md-6 @error('supplier_url') has-error @enderror">
                     <label for="supplier_url">{{ __('product_requests.fields.supplier_url') }} <span class="text-red">*</span></label>
                     @php($supplierUrl = old('supplier_url', $productRequest->supplier_url ?: $productRequest->operation_supplier_url))
@@ -97,10 +101,15 @@
                     <span class="help-block">{{ __('product_requests.procurement.supplier_url_readonly_hint') }}</span>
                     @error('supplier_url')<span class="help-block text-red">{{ $message }}</span>@enderror
                 </div>
+                <div class="form-group col-md-6">
+                    <label>{{ __('product_requests.fields.erp_operator') }} <span class="text-red">*</span></label>
+                    <div class="product-request-readonly">{{ $actor['display_name'] }}</div>
+                    <span class="help-block">{{ __('product_requests.help.automatic_current_user') }}</span>
+                </div>
             </div>
             <div class="row">
                 <div class="form-group col-md-12">
-                    <div class="sku-suggestion-panel" id="sku-suggestion-panel" hidden>
+                    <div class="sku-suggestion-panel" id="sku-suggestion-panel" data-initial-sku-values='@json((object) ($skuValues ?? []))' data-price-placeholder="{{ __('product_requests.procurement.sku_value_price_placeholder') }}" data-weight-placeholder="{{ __('product_requests.procurement.sku_value_weight_placeholder') }}" data-sku-check-required="{{ __('product_requests.procurement.sku_check_required') }}" hidden>
                         <div class="sku-suggestion-columns">
                             <div class="sku-suggestion-box">
                                 <div class="sku-suggestion-heading"><strong>{{ __('product_requests.procurement.sku_suggestions_operation') }}</strong></div>
@@ -113,45 +122,6 @@
                         </div>
                         <span class="help-block" id="sku-suggestion-summary-row" hidden><i class="fa fa-info-circle"></i> {{ __('product_requests.procurement.sku_suggestions_summary') }} <span class="text-muted" id="sku-selected-summary"></span></span>
                     </div>
-                </div>
-            </div>
-
-            <div class="row product-request-form-row-divider">
-                <div class="form-group col-md-6 @error('minimum_purchase_price_rmb') has-error @enderror">
-                    <label for="minimum_purchase_price_rmb">{{ __('product_requests.fields.minimum_purchase_price_rmb') }} <span class="text-red">*</span></label>
-                    <input id="minimum_purchase_price_rmb" class="form-control" name="minimum_purchase_price_rmb" value="{{ old('minimum_purchase_price_rmb', $productRequest->minimum_purchase_price_rmb) }}" maxlength="100" required placeholder="{{ __('product_requests.placeholders.minimum_purchase_price_rmb') }}">
-                    @error('minimum_purchase_price_rmb')<span class="help-block text-red">{{ $message }}</span>@enderror
-                </div>
-                <div class="form-group col-md-6 @error('estimated_shipping_weight_g') has-error @enderror">
-                    <label for="estimated_shipping_weight_g">{{ __('product_requests.fields.estimated_shipping_weight_g') }} <span class="text-red">*</span></label>
-                    <input id="estimated_shipping_weight_g" class="form-control" name="estimated_shipping_weight_g" value="{{ old('estimated_shipping_weight_g', $productRequest->estimated_shipping_weight_g) }}" maxlength="100" required placeholder="{{ __('product_requests.placeholders.estimated_shipping_weight_g') }}">
-                    @error('estimated_shipping_weight_g')<span class="help-block text-red">{{ $message }}</span>@enderror
-                </div>
-            </div>
-
-            <div class="row">
-                <div class="form-group col-md-6 @error('outer_package_size') has-error @enderror">
-                    <label for="outer_package_size">{{ __('product_requests.fields.outer_package_size') }}</label>
-                    <input id="outer_package_size" class="form-control" name="outer_package_size" value="{{ old('outer_package_size', $productRequest->outer_package_size) }}" maxlength="191" placeholder="{{ __('product_requests.placeholders.outer_package_size') }}">
-                    @error('outer_package_size')<span class="help-block text-red">{{ $message }}</span>@enderror
-                </div>
-                <div class="form-group col-md-6 @error('large_volume_weight_g') has-error @enderror">
-                    <label for="large_volume_weight_g">{{ __('product_requests.fields.large_volume_weight_g') }}</label>
-                    <input id="large_volume_weight_g" class="form-control" name="large_volume_weight_g" value="{{ old('large_volume_weight_g', $productRequest->large_volume_weight_g) }}" maxlength="100" placeholder="{{ __('product_requests.placeholders.large_volume_weight_g') }}">
-                    @error('large_volume_weight_g')<span class="help-block text-red">{{ $message }}</span>@enderror
-                </div>
-            </div>
-
-            <div class="row">
-                <div class="form-group col-md-6 @error('pcl_product_no') has-error @enderror">
-                    <label for="pcl_product_no">{{ __('product_requests.fields.pcl_product_no') }} <span class="text-red">*</span></label>
-                    <input id="pcl_product_no" class="form-control" name="pcl_product_no" value="{{ old('pcl_product_no', $productRequest->pcl_product_no) }}" maxlength="100" required placeholder="{{ __('product_requests.placeholders.pcl_product_no') }}">
-                    @error('pcl_product_no')<span class="help-block text-red">{{ $message }}</span>@enderror
-                </div>
-                <div class="form-group col-md-6">
-                    <label>{{ __('product_requests.fields.erp_operator') }} <span class="text-red">*</span></label>
-                    <div class="product-request-readonly">{{ $actor['display_name'] }}</div>
-                    <span class="help-block">{{ __('product_requests.help.automatic_current_user') }}</span>
                 </div>
             </div>
 
@@ -208,5 +178,10 @@
     #sku-operation-list { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 6px; }
     #sku-operation-list .sku-suggestion-item { display: flex; width: 100%; }
     #sku-operation-list .sku-suggestion-input { flex: 1 1 auto; width: auto; }
+    /* 每条 SKU 后的采购价/重量输入框，未勾选时禁用 */
+    .sku-suggestion-list .sku-value-input { width: 96px; flex: 0 0 auto; }
+    #sku-operation-list .sku-value-input { flex: 0 0 110px; width: 110px; }
+    .sku-suggestion-list .sku-value-input:disabled { background: #f4f4f4; color: #aaa; cursor: not-allowed; }
+    .sku-suggestion-list .sku-value-input[readonly] { background: #f9fafb; color: #777; cursor: default; }
 </style>
 
