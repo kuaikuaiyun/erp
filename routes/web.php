@@ -63,10 +63,14 @@ Route::put('/procurement-inspections/{productRequest}', [ProductRequestControlle
 Route::post('/procurement-inspections/{productRequest}/rectify', [ProductRequestController::class, 'procurementRectify'])->name('product-requests.procurement.rectify');
 Route::post('/procurement-inspections/reuse-check', [ProductRequestController::class, 'procurementReuseCheck'])->name('product-requests.procurement.reuse-check');
 Route::get('/api/procurement-inspections/sku-suggestions', [ProductRequestController::class, 'procurementSkuSuggestions'])->name('product-requests.procurement.sku-suggestions');
+Route::get('/link-sku-manager', [ProductRequestController::class, 'linkSkuIndex'])->name('product-requests.link-skus.index');
+Route::get('/link-sku-manager/{linkSku}/edit', [ProductRequestController::class, 'linkSkuEdit'])->name('product-requests.link-skus.edit');
+Route::put('/link-sku-manager/{linkSku}', [ProductRequestController::class, 'linkSkuUpdate'])->name('product-requests.link-skus.update');
 Route::get('/placement-reviews', [ProductRequestController::class, 'placementReviewIndex'])->name('product-requests.placement-reviews.index');
 Route::get('/placement-reviews/{productRequest}/edit', [ProductRequestController::class, 'placementReviewEdit'])->name('product-requests.placement-reviews.edit');
 Route::put('/placement-reviews/{productRequest}', [ProductRequestController::class, 'placementReviewUpdate'])->name('product-requests.placement-reviews.update');
 Route::post('/placement-reviews/{productRequest}/images', [ProductRequestController::class, 'placementReviewImageStore'])->name('product-requests.placement-reviews.images.store');
+Route::post('/placement-reviews/{productRequest}/recheck', [ProductRequestController::class, 'placementReviewRecheck'])->name('product-requests.placement-reviews.recheck');
 Route::get('/warehouse-acceptances', [ProductRequestController::class, 'warehouseIndex'])->name('product-requests.warehouse.index');
 Route::get('/warehouse-acceptances/{productRequest}/edit', [ProductRequestController::class, 'warehouseEdit'])->name('product-requests.warehouse.edit');
 Route::put('/warehouse-acceptances/{productRequest}', [ProductRequestController::class, 'warehouseUpdate'])->name('product-requests.warehouse.update');
