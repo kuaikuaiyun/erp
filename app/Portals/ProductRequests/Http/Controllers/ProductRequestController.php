@@ -926,9 +926,9 @@ class ProductRequestController extends Controller
             'sku_values.*.weight' => ['nullable', 'string', 'max:100'],
         ]);
 
+        // PCL SKU 管理为全量维护：提交内容即最终集合，删除的 SKU 会被移除
         $submitted = $this->splitSkus(str_replace(["\r\n", "\r", "\n"], ',', (string) ($data['skus'] ?? '')));
-        $merged = $this->mergeLinkSkus((string) $linkSku->skus, $submitted);
-        $linkSku->forceFill(['skus' => implode(',', $merged)])->save();
+        $linkSku->forceFill(['skus' => implode(',', $submitted)])->save();
 
         // 按 SKU 的采购价/重量同步到同链接所有提报记录；两项都清空表示移除该 SKU 的数值
         $valueRows = collect($data['sku_values'] ?? [])->map(fn (mixed $row): array => [
