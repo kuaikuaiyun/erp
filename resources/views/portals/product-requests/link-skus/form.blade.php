@@ -13,6 +13,11 @@
         @if($skus !== [])
         <div class="form-group"><label>{{ __('product_requests.link_skus.sku_values_label') }}</label>
             <div class="link-sku-value-list">
+                <div class="link-sku-value-item link-sku-value-head">
+                    <span class="link-sku-value-head-spacer"></span>
+                    <span class="link-sku-value-head-label">{{ __('product_requests.procurement.sku_value_price_placeholder') }}</span>
+                    <span class="link-sku-value-head-label">{{ __('product_requests.procurement.sku_value_weight_placeholder') }}</span>
+                </div>
                 @foreach($skus as $sku)
                     @php($sv = old('sku_values')[$sku] ?? ($skuValues[$sku] ?? []))
                     <div class="link-sku-value-item">
@@ -33,4 +38,7 @@
     .link-sku-value-item { display: flex; align-items: center; gap: 8px; }
     .link-sku-value-item .product-request-sku-tag { flex: 1 1 auto; word-break: break-all; }
     .link-sku-value-input { width: 120px; flex: 0 0 120px; height: 28px; }
+    .link-sku-value-head { margin-bottom: -2px; }
+    .link-sku-value-head-spacer { flex: 1 1 auto; }
+    .link-sku-value-head-label { width: 120px; flex: 0 0 120px; font-size: 12px; color: #7c96ab; text-align: center; line-height: 18px; }
 </style>

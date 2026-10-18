@@ -97,6 +97,8 @@ return [
         'reuse_title' => '可复用的商品信息',
         'sku_check' => '检查',
         'sku_check_hint' => '填写 1688 链接后点击「检查」，勾选需要保存的 SKU（左：运营填写；右：系统同链接已录入）。',
+        'sku_value_price_label' => '采购价',
+        'sku_value_weight_label' => '重量',
         'sku_suggestions_title' => 'SKU 选择（勾选需要保存的 SKU）',
         'sku_suggestions_operation' => '运营填写的 SKU',
         'sku_suggestions_system' => '系统中已录入的 SKU（同 1688 链接）',
@@ -163,6 +165,7 @@ return [
         'sku_weight_ref' => '采购参考：:value',
         'sku_weight_placeholder' => '实测重量 g',
         'remark_required_hint' => '选择审核不通过时，备注为必填。',
+        'remark_sku_hint' => '备注需具体写清楚哪个 SKU 存在问题。',
         'remark_hint' => '支持加粗、列表等格式；可直接粘贴截图（Ctrl+V），或点击工具栏图片按钮插入图片。',
     ],
     'show' => [

@@ -17,8 +17,8 @@
         'imageUploading' => $t('editor.uploading'), 'imageUploadFailed' => $t('editor.upload_failed'),
     ];
 @endphp
-@push('styles')<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261018-11">@endpush
-@push('scripts')<script>window.ErpProductRequestConfig = @json($clientConfig);</script><script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261018-11"></script>@endpush
+@push('styles')<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261018-14">@endpush
+@push('scripts')<script>window.ErpProductRequestConfig = @json($clientConfig);</script><script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261018-14"></script>@endpush
 
 @section('content')
 <section class="content product-request-page">
