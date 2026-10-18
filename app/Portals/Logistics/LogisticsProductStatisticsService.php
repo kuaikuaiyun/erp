@@ -4,6 +4,7 @@ namespace App\Portals\Logistics;
 
 use App\Models\LogisticsOrder;
 use App\Models\LogisticsOrderItem;
+use App\Models\LogisticsCreditCardRefund;
 use App\Models\LogisticsPayPalDispute;
 use App\Models\LogisticsPayPalRefund;
 use Carbon\Carbon;
@@ -282,6 +283,583 @@ class LogisticsProductStatisticsService
         $decision = trim((string) ($filters['decision'] ?? ''));
 
         return $decision === '' || $decision === $product['decision'] ? $product : null;
+    }
+
+    /**
+     * Returns the product modal in small, independently paginated pieces.
+     *
+     * The old detail() method remains for compatibility with any external
+     * caller, but the portal endpoint must use this method.  In particular it
+     * must never load every order/refund/dispute into the browser just to show
+     * one page of a tab.
+     *
+     * @param array<string,mixed> $filters
+     * @param array<string,mixed> $options
+     * @return array<string,mixed>|null
+     */
+    public function detailPage(array $filters, string $productId, array $options = []): ?array
+    {
+        $key = $this->decodeProductId($productId);
+        if ($key === null) {
+            return null;
+        }
+
+        $tab = (string) ($options['tab'] ?? 'overview');
+        $withOverview = $tab === 'overview';
+        $row = $this->productStatisticsQuery($filters, $withOverview, [$key])->first();
+        if ($row === null) {
+            return null;
+        }
+
+        $product = $this->listProduct($row);
+        $decision = trim((string) ($filters['decision'] ?? ''));
+        if ($decision !== '' && $decision !== $product['decision']) {
+            return null;
+        }
+
+        if ($withOverview) {
+            $product['store_order_distribution'] = $this->detailStoreOrderDistribution($filters, $key);
+
+            return [
+                'tab' => 'overview',
+                'product' => $product,
+            ];
+        }
+
+        return [
+            'tab' => $tab,
+            'detail' => match ($tab) {
+                'variants' => $this->variantDetailPage($filters, $key, $options),
+                'refunds' => $this->refundDetailPage($filters, $key, $options),
+                'disputes' => $this->disputeDetailPage($filters, $key, $options),
+                'paypal_orders' => $this->orderDetailPage($filters, $key, $options, 'paypal'),
+                'credit_card_orders' => $this->orderDetailPage($filters, $key, $options, 'credit_card'),
+                default => $this->orderDetailPage($filters, $key, $options),
+            },
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $filters
+     * @return list<array{name:string,order_count:int}>
+     */
+    private function detailStoreOrderDistribution(array $filters, string $key): array
+    {
+        return $this->baseItemQuery($filters)
+            ->whereRaw($this->productKeyExpression('items').' = ?', [$key])
+            ->selectRaw("COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__') as store_name")
+            ->selectRaw('COUNT(DISTINCT orders.id) as order_count')
+            ->groupBy('store_name')
+            ->orderBy('store_name')
+            ->get()
+            ->map(static fn (object $row): array => [
+                'name' => $row->store_name === '__unassigned__' ? __('logistics.common.unassigned_store') : (string) $row->store_name,
+                'order_count' => (int) $row->order_count,
+            ])
+            ->all();
+    }
+
+    /**
+     * @param array<string,mixed> $filters
+     * @param array<string,mixed> $options
+     * @return array<string,mixed>
+     */
+    private function orderDetailPage(array $filters, string $key, array $options, ?string $paymentKind = null): array
+    {
+        $orderMetrics = $this->detailOrderMetricsQuery($filters, $key, $options, $paymentKind);
+        $rowsQuery = $this->database()->query()
+            ->fromSub($orderMetrics, 'detail_order_metrics')
+            ->join('logistics_orders as orders', 'orders.id', '=', 'detail_order_metrics.order_id')
+            ->select('orders.id')
+            ->addSelect('detail_order_metrics.quantity as detail_quantity')
+            ->addSelect('detail_order_metrics.revenue as detail_revenue');
+
+        $sort = (string) ($options['sort'] ?? '');
+        $sortColumns = [
+            'shopify_order_number' => 'orders.shopify_order_number',
+            'store' => 'orders.store_name',
+            'bill_number' => 'orders.bill_number',
+            'payment_method' => 'orders.payment_method',
+            'tracking_number' => 'orders.tracking_number',
+            'logistics_status' => 'orders.logistics_status',
+            'order_created_at' => 'orders.order_created_at',
+            'quantity' => 'detail_order_metrics.quantity',
+            'revenue' => 'detail_order_metrics.revenue',
+        ];
+        $this->applyDetailSort($rowsQuery, $sortColumns[$sort] ?? 'orders.order_created_at', $options, 'orders.id');
+        $page = $this->paginateDetailQuery($rowsQuery, $options);
+        $orderIdsOnPage = $page['rows']
+            ->map(static fn (object $row): int => (int) $row->id)
+            ->all();
+
+        return [
+            'rows' => $this->hydratedOrderRows($filters, $key, $orderIdsOnPage),
+            'pagination' => $page['pagination'],
+            'options' => [
+                'logistics_status' => $this->detailLogisticsStatuses($filters, $key, $paymentKind),
+            ],
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $filters
+     * @param list<int> $orderIds
+     * @return list<array<string,mixed>>
+     */
+    private function hydratedOrderRows(array $filters, string $key, array $orderIds): array
+    {
+        if ($orderIds === []) {
+            return [];
+        }
+
+        $orders = LogisticsOrder::query()
+            ->with([
+                'paypalRefunds.disputeLinks.dispute',
+                'paypalDisputes.refundLinks.refund',
+                'creditCardRefunds',
+            ])
+            ->whereIn('id', $orderIds)
+            ->get()
+            ->keyBy(static fn (LogisticsOrder $order): int => (int) $order->getKey());
+
+        $items = LogisticsOrderItem::query()
+            ->whereIn('logistics_order_id', $orderIds)
+            ->whereRaw($this->productKeyExpression('logistics_order_items').' = ?', [$key])
+            ->get()
+            ->filter(function (LogisticsOrderItem $item) use ($orders): bool {
+                $order = $orders->get((int) $item->logistics_order_id);
+                if (!$order instanceof LogisticsOrder) {
+                    return false;
+                }
+                $item->setRelation('order', $order);
+
+                return true;
+            })
+            ->values();
+
+        $payment = $this->realPaymentSummary($orders->values());
+        $rows = collect($this->relatedOrders($items->all(), $payment))
+            ->keyBy(static fn (array $row): int => (int) $row['order_id']);
+
+        return array_values(array_filter(array_map(
+            static fn (int $orderId): ?array => $rows->get($orderId),
+            $orderIds,
+        )));
+    }
+
+    /**
+     * @param array<string,mixed> $filters
+     * @param array<string,mixed> $options
+     */
+    private function detailOrderIdsQuery(array $filters, string $key, array $options = [], ?string $paymentKind = null): Builder
+    {
+        $query = $this->baseItemQuery($filters)
+            ->whereRaw($this->productKeyExpression('items').' = ?', [$key]);
+        $this->applyDetailPaymentKind($query, $paymentKind, 'orders');
+        $this->applyDetailOrderFilters($query, $options, 'orders');
+
+        return $query->select('orders.id as order_id')->distinct();
+    }
+
+    /**
+     * @param array<string,mixed> $filters
+     * @param array<string,mixed> $options
+     */
+    private function detailOrderMetricsQuery(array $filters, string $key, array $options = [], ?string $paymentKind = null): Builder
+    {
+        $query = $this->baseItemQuery($filters)
+            ->whereRaw($this->productKeyExpression('items').' = ?', [$key]);
+        $this->applyDetailPaymentKind($query, $paymentKind, 'orders');
+        $this->applyDetailOrderFilters($query, $options, 'orders');
+
+        return $query
+            ->select('orders.id as order_id')
+            ->selectRaw('SUM(COALESCE(items.quantity, 0)) as quantity')
+            ->selectRaw('SUM(COALESCE(items.line_revenue_usd, 0)) as revenue')
+            ->groupBy('orders.id');
+    }
+
+    /** @param array<string,mixed> $options */
+    private function applyDetailOrderFilters(object $query, array $options, string $orderTable): void
+    {
+        $keyword = trim((string) ($options['keyword'] ?? ''));
+        if ($keyword !== '') {
+            $like = '%'.$this->escapeLike($keyword).'%';
+            $query->where(function ($nested) use ($like, $orderTable): void {
+                $nested->where("{$orderTable}.shopify_order_number", 'like', $like)
+                    ->orWhere("{$orderTable}.store_name", 'like', $like)
+                    ->orWhere("{$orderTable}.bill_number", 'like', $like)
+                    ->orWhere("{$orderTable}.tracking_number", 'like', $like)
+                    ->orWhere("{$orderTable}.payment_method", 'like', $like);
+            });
+        }
+
+        $status = trim((string) ($options['logistics_status'] ?? ''));
+        if ($status !== '') {
+            $query->where("{$orderTable}.logistics_status", $status);
+        }
+    }
+
+    private function applyDetailPaymentKind(object $query, ?string $paymentKind, string $orderTable): void
+    {
+        if ($paymentKind === null) {
+            return;
+        }
+
+        $creditCardTag = "(CASE WHEN JSON_VALID(COALESCE({$orderTable}.shopify_payload, '')) THEN JSON_SEARCH(JSON_EXTRACT({$orderTable}.shopify_payload, '$.tags'), 'one', '%CreditCardBy%') ELSE NULL END IS NOT NULL)";
+        if ($paymentKind === 'credit_card') {
+            $query->whereRaw($creditCardTag);
+
+            return;
+        }
+
+        $query->whereNotNull("{$orderTable}.paypal_account_id")
+            ->where("{$orderTable}.paypal_association_source", 'actual_transaction')
+            ->whereRaw("NOT {$creditCardTag}");
+    }
+
+    /**
+     * @param array<string,mixed> $filters
+     * @return list<string>
+     */
+    private function detailLogisticsStatuses(array $filters, string $key, ?string $paymentKind): array
+    {
+        $query = $this->baseItemQuery($filters)
+            ->whereRaw($this->productKeyExpression('items').' = ?', [$key]);
+        $this->applyDetailPaymentKind($query, $paymentKind, 'orders');
+
+        return $query
+            ->whereNotNull('orders.logistics_status')
+            ->distinct()
+            ->orderBy('orders.logistics_status')
+            ->pluck('orders.logistics_status')
+            ->map(static fn ($value): string => (string) $value)
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param array<string,mixed> $filters
+     * @param array<string,mixed> $options
+     * @return array<string,mixed>
+     */
+    private function refundDetailPage(array $filters, string $key, array $options): array
+    {
+        $orderOptions = $options;
+        $orderOptions['keyword'] = '';
+        $orderOptions['logistics_status'] = '';
+        $paypalOrderIds = $this->detailOrderIdsQuery($filters, $key, $orderOptions, 'paypal');
+        $creditCardOrderIds = $this->detailOrderIdsQuery($filters, $key, $orderOptions, 'credit_card');
+
+        $paypal = $this->database()->table('logistics_paypal_refunds as refund')
+            ->join('logistics_orders as orders', 'orders.id', '=', 'refund.logistics_order_id')
+            ->whereIn('refund.logistics_order_id', $paypalOrderIds)
+            ->selectRaw("'paypal' as payment_method")
+            ->selectRaw('refund.id as record_id')
+            ->selectRaw('refund.status as raw_status')
+            ->selectRaw('refund.refund_transaction_id as reference')
+            ->selectRaw('refund.refund_reason as source_reason')
+            ->selectRaw('refund.manual_reason as manual_reason')
+            ->selectRaw('COALESCE(refund.refund_amount_usd, CASE WHEN UPPER(refund.currency_code) = \'USD\' THEN refund.original_amount ELSE 0 END) as amount')
+            ->selectRaw('COALESCE(refund.refunded_at, refund.created_at) as happened_at');
+        $creditCard = $this->database()->table('logistics_credit_card_refunds as refund')
+            ->join('logistics_orders as orders', 'orders.id', '=', 'refund.logistics_order_id')
+            ->whereIn('refund.logistics_order_id', $creditCardOrderIds)
+            ->selectRaw("'credit_card' as payment_method")
+            ->selectRaw('refund.id as record_id')
+            ->selectRaw("'credit_card' as raw_status")
+            ->selectRaw('refund.refund_reference as reference')
+            ->selectRaw("'' as source_reason")
+            ->selectRaw('refund.refund_reason as manual_reason')
+            ->selectRaw('refund.refund_amount_usd as amount')
+            ->selectRaw('COALESCE(refund.last_imported_at, refund.updated_at, refund.created_at) as happened_at');
+
+        $query = $this->database()->query()->fromSub($paypal->unionAll($creditCard), 'refund_rows');
+        $this->applyDetailTextFilter($query, $options, ['reference', 'source_reason', 'manual_reason']);
+        if (filled($options['payment_method'] ?? null)) {
+            $query->where('payment_method', (string) $options['payment_method']);
+        }
+        if (filled($options['status'] ?? null)) {
+            $query->where('raw_status', (string) $options['status']);
+        }
+        $this->applyDetailSort($query, [
+            'payment_method_label' => 'payment_method', 'refund_number' => 'reference', 'amount' => 'amount',
+            'source_reason' => 'source_reason', 'manual_reason' => 'manual_reason', 'status' => 'raw_status', 'imported_at' => 'happened_at',
+        ][(string) ($options['sort'] ?? '')] ?? 'happened_at', $options, 'record_id');
+        $page = $this->paginateDetailQuery($query, $options);
+
+        $paypalIds = [];
+        $creditCardIds = [];
+        foreach ($page['rows'] as $row) {
+            if ($row->payment_method === 'paypal') $paypalIds[] = (int) $row->record_id;
+            if ($row->payment_method === 'credit_card') $creditCardIds[] = (int) $row->record_id;
+        }
+        $paypalRows = LogisticsPayPalRefund::query()->with('disputeLinks.dispute')->whereIn('id', $paypalIds)->get()->keyBy('id');
+        $creditCardRows = LogisticsCreditCardRefund::query()->whereIn('id', $creditCardIds)->get()->keyBy('id');
+        $orderIds = array_values(array_unique(array_merge(
+            $paypalRows->pluck('logistics_order_id')->map(static fn ($id): int => (int) $id)->all(),
+            $creditCardRows->pluck('logistics_order_id')->map(static fn ($id): int => (int) $id)->all(),
+        )));
+        $orders = LogisticsOrder::query()->whereIn('id', $orderIds)->get()->keyBy('id');
+        $rows = [];
+        foreach ($page['rows'] as $row) {
+            $refund = $row->payment_method === 'paypal' ? $paypalRows->get((int) $row->record_id) : $creditCardRows->get((int) $row->record_id);
+            $order = $refund ? $orders->get((int) $refund->logistics_order_id) : null;
+            if ($refund && $order instanceof LogisticsOrder) {
+                $rows[] = $row->payment_method === 'paypal'
+                    ? $this->paypalRefundDetail($refund, $order)
+                    : $this->creditCardRefundDetail($refund, $order);
+            }
+        }
+
+        return [
+            'rows' => $rows,
+            'pagination' => $page['pagination'],
+            'options' => [
+                'payment_method' => [
+                    ['value' => 'paypal', 'label' => __('logistics.product_statistics.payment_methods.paypal')],
+                    ['value' => 'credit_card', 'label' => __('logistics.product_statistics.payment_methods.credit_card')],
+                ],
+                'status' => $this->refundStatusOptions($filters, $key),
+            ],
+        ];
+    }
+
+    /** @param array<string,mixed> $filters @return list<array{value:string,label:string}> */
+    private function refundStatusOptions(array $filters, string $key): array
+    {
+        $options = ['keyword' => '', 'logistics_status' => ''];
+        $paypalIds = $this->detailOrderIdsQuery($filters, $key, $options, 'paypal');
+        $creditIds = $this->detailOrderIdsQuery($filters, $key, $options, 'credit_card');
+
+        $values = $this->database()->query()
+            ->fromSub(
+                $this->database()->table('logistics_paypal_refunds as refund')->whereIn('refund.logistics_order_id', $paypalIds)->select('refund.status as value')
+                    ->unionAll($this->database()->table('logistics_credit_card_refunds as refund')->whereIn('refund.logistics_order_id', $creditIds)->selectRaw("'credit_card' as value")),
+                'refund_status_options',
+            )
+            ->whereNotNull('value')->where('value', '<>', '')
+            ->distinct()->orderBy('value')->pluck('value')->map(static fn ($value): string => (string) $value)->all();
+
+        return array_map(static fn (string $value): array => [
+            'value' => $value,
+            'label' => $value === 'credit_card'
+                ? __('logistics.product_statistics.credit_card_refund_status')
+                : LogisticsPayPalRefund::statusLabelFor($value),
+        ], $values);
+    }
+
+    /**
+     * @param array<string,mixed> $filters
+     * @param array<string,mixed> $options
+     * @return array<string,mixed>
+     */
+    private function disputeDetailPage(array $filters, string $key, array $options): array
+    {
+        $orderOptions = $options;
+        $orderOptions['keyword'] = '';
+        $orderOptions['logistics_status'] = '';
+        $orderIds = $this->detailOrderIdsQuery($filters, $key, $orderOptions, 'paypal');
+        $query = LogisticsPayPalDispute::query()
+            ->join('logistics_orders as orders', 'orders.id', '=', 'logistics_paypal_disputes.logistics_order_id')
+            ->whereIn('logistics_paypal_disputes.logistics_order_id', $orderIds)
+            ->select('logistics_paypal_disputes.*');
+        $this->applyDetailTextFilter($query, $options, [
+            'logistics_paypal_disputes.dispute_id', 'logistics_paypal_disputes.reason', 'orders.shopify_order_number', 'orders.store_name', 'orders.bill_number',
+        ]);
+        foreach (['status' => 'status', 'type' => 'channel', 'outcome' => 'outcome_code'] as $option => $column) {
+            if (filled($options[$option] ?? null)) {
+                $query->where('logistics_paypal_disputes.'.$column, (string) $options[$option]);
+            }
+        }
+        $this->applyDetailSort($query, [
+            'dispute_id' => 'logistics_paypal_disputes.dispute_id', 'amount' => 'logistics_paypal_disputes.dispute_amount_usd',
+            'status' => 'logistics_paypal_disputes.status', 'stage' => 'logistics_paypal_disputes.channel',
+            'outcome' => 'logistics_paypal_disputes.outcome_code', 'updated_at' => 'logistics_paypal_disputes.dispute_updated_at',
+        ][(string) ($options['sort'] ?? '')] ?? 'logistics_paypal_disputes.dispute_updated_at', $options, 'logistics_paypal_disputes.id');
+        $page = $this->paginateDetailQuery($query, $options);
+        $ids = $page['rows']
+            ->map(static fn (object $row): int => (int) $row->id)
+            ->all();
+        $details = LogisticsPayPalDispute::query()->with(['order', 'refundLinks.refund'])->whereIn('id', $ids)->get()->keyBy('id');
+        $rows = array_values(array_filter(array_map(function (int $id) use ($details): ?array {
+            $dispute = $details->get($id);
+            return $dispute instanceof LogisticsPayPalDispute && $dispute->order instanceof LogisticsOrder
+                ? $this->paypalDisputeDetail($dispute, $dispute->order)
+                : null;
+        }, $ids)));
+
+        return [
+            'rows' => $rows,
+            'pagination' => $page['pagination'],
+            'options' => $this->disputeOptions($filters, $key),
+        ];
+    }
+
+    /** @param array<string,mixed> $filters @return array<string,list<array{value:string,label:string}>> */
+    private function disputeOptions(array $filters, string $key): array
+    {
+        $options = ['keyword' => '', 'logistics_status' => ''];
+        $orderIds = $this->detailOrderIdsQuery($filters, $key, $options, 'paypal');
+        $base = $this->database()->table('logistics_paypal_disputes as dispute')->whereIn('dispute.logistics_order_id', $orderIds);
+        $values = static function (Builder $query, string $column): array {
+            return $query->whereNotNull($column)->where($column, '<>', '')->distinct()->orderBy($column)->pluck($column)
+                ->map(static fn ($value): string => (string) $value)->all();
+        };
+
+        $types = $values(clone $base, 'dispute.channel');
+        $statuses = $values(clone $base, 'dispute.status');
+        $outcomes = $values(clone $base, 'dispute.outcome_code');
+
+        return [
+            'type' => array_map(static fn (string $value): array => [
+                'value' => $value,
+                'label' => LogisticsPayPalDispute::typeLabelFor($value),
+            ], $types),
+            'status' => array_map(static fn (string $value): array => [
+                'value' => $value,
+                'label' => LogisticsPayPalDispute::statusLabelFor($value),
+            ], $statuses),
+            'outcome' => array_map(static fn (string $value): array => [
+                'value' => $value,
+                'label' => LogisticsPayPalDispute::outcomeLabelFor($value),
+            ], $outcomes),
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $filters
+     * @param array<string,mixed> $options
+     * @return array<string,mixed>
+     */
+    private function variantDetailPage(array $filters, string $key, array $options): array
+    {
+        $variantExpression = $this->detailVariantKeyExpression('items');
+        $query = $this->baseItemQuery($filters)
+            ->whereRaw($this->productKeyExpression('items').' = ?', [$key])
+            ->selectRaw("{$variantExpression} as variant_key")
+            ->groupByRaw($variantExpression);
+        $this->applyDetailTextFilter($query, $options, ['items.tongtu_sku', 'items.shopify_sku', 'items.tongtu_product_name', 'items.product_title', 'orders.store_name']);
+        $this->applyDetailSort($query, 'variant_key', $options, 'variant_key');
+        $page = $this->paginateDetailQuery($query, $options);
+        $keys = $page['rows']
+            ->map(static fn (object $row): string => (string) $row->variant_key)
+            ->all();
+        if ($keys === []) {
+            return ['rows' => [], 'pagination' => $page['pagination'], 'options' => []];
+        }
+
+        $items = LogisticsOrderItem::query()
+            ->with([
+                'order',
+                'order.paypalRefunds.disputeLinks.dispute',
+                'order.paypalDisputes.refundLinks.refund',
+                'order.creditCardRefunds',
+            ])
+            ->select('logistics_order_items.*')
+            ->selectRaw('logistics_orders.store_name as statistics_store_name')
+            ->selectRaw('logistics_orders.order_created_at as statistics_order_created_at')
+            ->join('logistics_orders', 'logistics_orders.id', '=', 'logistics_order_items.logistics_order_id')
+            ->whereNotNull('logistics_order_items.line_revenue_usd')
+            ->whereRaw($this->productKeyExpression('logistics_order_items').' = ?', [$key])
+            ->whereIn(DB::raw($this->detailVariantKeyExpression('logistics_order_items')), $keys);
+        $this->applyBaseFilters($items, $filters);
+        $groups = [];
+        foreach ($items->get()->all() as $item) {
+            $groups[$this->detailVariantKeyFromItem($item)][] = $item;
+        }
+        foreach ($groups as $variantKey => $groupItems) {
+            $metrics = $this->variantMetrics($groupItems);
+            $groups[$variantKey] = $metrics[0] ?? null;
+        }
+
+        return [
+            'rows' => array_values(array_filter(array_map(static fn (string $variantKey): ?array => $groups[$variantKey] ?? null, $keys))),
+            'pagination' => $page['pagination'],
+            'options' => [],
+        ];
+    }
+
+    /** @param array<string,mixed> $options */
+    private function applyDetailTextFilter(object $query, array $options, array $columns): void
+    {
+        $keyword = trim((string) ($options['keyword'] ?? ''));
+        if ($keyword === '') {
+            return;
+        }
+        $like = '%'.$this->escapeLike($keyword).'%';
+        $query->where(function ($nested) use ($columns, $like): void {
+            foreach ($columns as $index => $column) {
+                if ($index === 0) $nested->where($column, 'like', $like);
+                else $nested->orWhere($column, 'like', $like);
+            }
+        });
+    }
+
+    /** @param array<string,mixed> $options */
+    private function applyDetailSort(object $query, string $column, array $options, string $tieBreaker): void
+    {
+        $direction = ($options['direction'] ?? '') === 'asc' ? 'asc' : 'desc';
+        $query->orderBy($column, $direction)->orderBy($tieBreaker, $direction);
+    }
+
+    /**
+     * @param array<string,mixed> $options
+     * @return array{rows:Collection<int,object>,pagination:array<string,int>}
+     */
+    private function paginateDetailQuery(object $query, array $options): array
+    {
+        $perPage = in_array((int) ($options['per_page'] ?? 10), [5, 10, 20], true) ? (int) $options['per_page'] : 10;
+        $countQuery = clone $query;
+        if (method_exists($countQuery, 'reorder')) {
+            $countQuery->reorder();
+        }
+        if ($countQuery instanceof \Illuminate\Database\Eloquent\Builder) {
+            $countQuery = $countQuery->toBase();
+        }
+        $total = $this->database()->query()->fromSub($countQuery, 'detail_page_count')->count();
+        $lastPage = max(1, (int) ceil($total / $perPage));
+        $page = min(max(1, (int) ($options['page'] ?? 1)), $lastPage);
+        $rows = $query->forPage($page, $perPage)->get();
+
+        return [
+            'rows' => $rows,
+            'pagination' => [
+                'current_page' => $page,
+                'per_page' => $perPage,
+                'total' => $total,
+                'last_page' => $lastPage,
+                'from' => $total === 0 ? 0 : (($page - 1) * $perPage) + 1,
+                'to' => min($page * $perPage, $total),
+            ],
+        ];
+    }
+
+    private function detailVariantKeyExpression(string $alias): string
+    {
+        return "CASE WHEN NULLIF(TRIM({$alias}.tongtu_sku), '') IS NOT NULL THEN CONCAT('tongtu:', LOWER(TRIM({$alias}.tongtu_sku))) "
+            . "WHEN NULLIF(TRIM({$alias}.shopify_sku), '') IS NOT NULL THEN CONCAT('shopify:', LOWER(TRIM({$alias}.shopify_sku))) "
+            . "ELSE CONCAT('item:', {$alias}.id) END";
+    }
+
+    private function detailVariantKeyFromItem(LogisticsOrderItem $item): string
+    {
+        $tongtuSku = trim((string) $item->tongtu_sku);
+        if ($tongtuSku !== '') {
+            return 'tongtu:'.mb_strtolower($tongtuSku);
+        }
+
+        $shopifySku = trim((string) $item->shopify_sku);
+        if ($shopifySku !== '') {
+            return 'shopify:'.mb_strtolower($shopifySku);
+        }
+
+        return 'item:'.(int) $item->getKey();
+    }
+
+    private function escapeLike(string $value): string
+    {
+        return str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $value);
     }
 
     /**

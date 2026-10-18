@@ -200,6 +200,6 @@
     <script>
         window.ErpLogisticsProductStatistics = @json($productStatisticsClientConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/product-statistics.js?v=20261018-10"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-statistics.js?v=20261018-12"></script>
     <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261015-2"></script>
 @endpush

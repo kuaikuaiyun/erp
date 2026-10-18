@@ -55,19 +55,21 @@ class ProductStatisticsController extends Controller
         $validated = $request->validate([
             'product_id' => ['required', 'string', 'max:512'],
             ...$this->filterRules(false),
+            ...$this->detailRules(),
         ]);
-        $product = $this->statistics->detail(
+        $detail = $this->statistics->detailPage(
             $this->normaliseFilters($validated),
             (string) $validated['product_id'],
+            $this->normaliseDetailOptions($validated),
         );
 
-        if ($product === null) {
+        if ($detail === null) {
             return response()->json([
                 'message' => __('logistics.product_statistics.ui.detail_not_found'),
             ], 404);
         }
 
-        return response()->json(['product' => $product]);
+        return response()->json($detail);
     }
 
     public function export(Request $request): Response
@@ -153,6 +155,26 @@ class ProductStatisticsController extends Controller
         return $rules;
     }
 
+    /** @return array<string,mixed> */
+    private function detailRules(): array
+    {
+        return [
+            'detail_tab' => ['nullable', Rule::in([
+                'overview', 'variants', 'paypal_orders', 'credit_card_orders', 'refunds', 'disputes', 'orders',
+            ])],
+            'detail_page' => ['nullable', 'integer', 'min:1'],
+            'detail_per_page' => ['nullable', 'integer', Rule::in([5, 10, 20])],
+            'detail_sort' => ['nullable', 'string', 'max:64'],
+            'detail_direction' => ['nullable', Rule::in(['', 'asc', 'desc'])],
+            'detail_keyword' => ['nullable', 'string', 'max:191'],
+            'detail_status' => ['nullable', 'string', 'max:191'],
+            'detail_type' => ['nullable', 'string', 'max:191'],
+            'detail_outcome' => ['nullable', 'string', 'max:191'],
+            'detail_payment_method' => ['nullable', Rule::in(['paypal', 'credit_card'])],
+            'detail_logistics_status' => ['nullable', 'string', 'max:191'],
+        ];
+    }
+
     /** @param array<string,mixed> $input
      * @return array<string,mixed>
      */
@@ -171,6 +193,28 @@ class ProductStatisticsController extends Controller
             'per_page' => in_array((int) ($input['per_page'] ?? 10), [5, 10, 20], true)
                 ? (int) ($input['per_page'] ?? 10)
                 : 10,
+        ];
+    }
+
+    /** @param array<string,mixed> $input
+     * @return array<string,mixed>
+     */
+    private function normaliseDetailOptions(array $input): array
+    {
+        return [
+            'tab' => trim((string) ($input['detail_tab'] ?? 'overview')) ?: 'overview',
+            'page' => max(1, (int) ($input['detail_page'] ?? 1)),
+            'per_page' => in_array((int) ($input['detail_per_page'] ?? 10), [5, 10, 20], true)
+                ? (int) ($input['detail_per_page'] ?? 10)
+                : 10,
+            'sort' => trim((string) ($input['detail_sort'] ?? '')),
+            'direction' => trim((string) ($input['detail_direction'] ?? '')),
+            'keyword' => trim((string) ($input['detail_keyword'] ?? '')),
+            'status' => trim((string) ($input['detail_status'] ?? '')),
+            'type' => trim((string) ($input['detail_type'] ?? '')),
+            'outcome' => trim((string) ($input['detail_outcome'] ?? '')),
+            'payment_method' => trim((string) ($input['detail_payment_method'] ?? '')),
+            'logistics_status' => trim((string) ($input['detail_logistics_status'] ?? '')),
         ];
     }
 
