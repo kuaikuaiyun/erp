@@ -563,7 +563,7 @@ class ProductRequestController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
-        abort_unless($this->access->canInspectProcurement($context['user']), 403);
+        abort_unless($this->access->canManageLinkSkus($context['user']), 403);
 
         $disk = Storage::disk('local');
         foreach (array_values((array) ($linkSku->images ?? [])) as $imagePath) {
@@ -586,7 +586,7 @@ class ProductRequestController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
-        abort_unless($this->access->canInspectProcurement($context['user']), 403);
+        abort_unless($this->access->canManageLinkSkus($context['user']), 403);
         abort_unless($linkSku->review_status === 'pending', 403);
 
         $linkSku->forceFill(['review_status' => 'done'])->save();
@@ -601,7 +601,7 @@ class ProductRequestController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
-        abort_unless($this->access->canInspectProcurement($context['user']), 403);
+        abort_unless($this->access->canManageLinkSkus($context['user']), 403);
 
         $images = array_values((array) ($linkSku->images ?? []));
         $path = $images[$index] ?? null;
@@ -617,7 +617,7 @@ class ProductRequestController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
-        abort_unless($this->access->canInspectProcurement($context['user']), 403);
+        abort_unless($this->access->canManageLinkSkus($context['user']), 403);
 
         $path = (string) ($linkSku->product_image ?? '');
         abort_if($path === '' || !Storage::disk('local')->exists($path), 404);
@@ -1104,7 +1104,7 @@ class ProductRequestController extends Controller
             return response()->json(['count' => 0, 'items' => []]);
         }
 
-        $records = $this->access->applyProcurementVisibility(
+        $records = $this->access->applyInspectionVisibility(
             ProductRequest::query()
                 ->where(function ($q): void {
                     $q->where('status', ProductRequest::STATUS_PENDING)
@@ -1132,7 +1132,7 @@ class ProductRequestController extends Controller
 
         $filters = $this->filters($request);
         $requests = $this->applyFilters(
-            $this->access->applyProcurementVisibility(ProductRequest::query(), $context['user']),
+            $this->access->applyInspectionVisibility(ProductRequest::query(), $context['user']),
             $filters,
         )
             ->with('attachments')
@@ -1145,6 +1145,7 @@ class ProductRequestController extends Controller
             'requests' => $requests,
             'filters' => $filters,
             'canInspect' => $this->access->canInspectProcurement($context['user']),
+            'canAssign' => $this->access->canAssignProcurement($context['user']),
             'statusLabels' => $this->statusLabels(),
             'warehouseResultLabels' => $this->warehouseResultLabels(),
             'warehouseRejectReasonLabels' => $this->warehouseRejectReasonLabels(),
@@ -1159,7 +1160,7 @@ class ProductRequestController extends Controller
             return $context;
         }
         abort_unless($this->access->canInspectProcurement($context['user']), 403);
-        abort_unless($this->access->canViewProcurementRequest($productRequest, $context['user']), 403);
+        abort_unless($this->access->canViewInspectionRequest($productRequest, $context['user']), 403);
         // 已检验通过的记录允许再次编辑（覆盖保存）
         abort_unless(in_array($productRequest->status, [ProductRequest::STATUS_PENDING, ProductRequest::STATUS_INSPECTION_PASSED], true), 403);
         // 检验通过且仓库审核已通过的记录不允许再修改
@@ -1200,7 +1201,7 @@ class ProductRequestController extends Controller
             return $context;
         }
         abort_unless($this->access->canInspectProcurement($context['user']), 403);
-        abort_unless($this->access->canViewProcurementRequest($productRequest, $context['user']), 403);
+        abort_unless($this->access->canViewInspectionRequest($productRequest, $context['user']), 403);
 
         $draft = $this->resolveProcurementDraft($productRequest, $context['user']);
         $data = $this->validateProcurementData($request, $productRequest, $draft);
@@ -1210,7 +1211,7 @@ class ProductRequestController extends Controller
 
         DB::connection($connection)->transaction(function () use ($productRequest, $request, $data, $context, $rejected, $draft): void {
             $locked = ProductRequest::query()->lockForUpdate()->findOrFail($productRequest->getKey());
-            abort_unless($this->access->canViewProcurementRequest($locked, $context['user']), 403);
+            abort_unless($this->access->canViewInspectionRequest($locked, $context['user']), 403);
             // 允许已检验通过的记录再次编辑，第二次保存覆盖第一次结果
             abort_unless(in_array($locked->status, [ProductRequest::STATUS_PENDING, ProductRequest::STATUS_INSPECTION_PASSED], true), 403);
             // 检验通过且仓库审核已通过的记录不允许再修改
@@ -1367,7 +1368,7 @@ class ProductRequestController extends Controller
         ]);
 
         $productRequest = ProductRequest::query()->findOrFail((int) $data['product_request_id']);
-        abort_unless($this->access->canViewProcurementRequest($productRequest, $user), 403);
+        abort_unless($this->access->canViewInspectionRequest($productRequest, $user), 403);
 
         $draft = $this->resolveProcurementDraft($productRequest, $user);
         $isExisting = $draft !== null;
@@ -1515,6 +1516,105 @@ class ProductRequestController extends Controller
         ]);
     }
 
+    /** 分配录入人员弹窗：展示本次分配的记录与候选人今日已分配条数 */
+    public function procurementAssignForm(Request $request): Response|View
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::PROCUREMENT_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        abort_unless($this->access->canInspectProcurement($context['user']), 403);
+        abort_unless($this->access->canAssignProcurement($context['user']), 403);
+
+        $ids = collect((array) $request->input('ids', []))
+            ->map(fn ($value): int => (int) $value)
+            ->filter(fn (int $value): bool => $value > 0)
+            ->unique()
+            ->values();
+        // 仅允许分配主状态为待检验的记录，且必须在当前用户可见范围内
+        $records = $this->access->applyInspectionVisibility(
+            ProductRequest::query()
+                ->whereIn('id', $ids->all() ?: [0])
+                ->where('status', ProductRequest::STATUS_PENDING),
+            $context['user'],
+        )
+            ->orderByDesc('id')
+            ->get(['id', 'report_no', 'standard_chinese_name', 'procurement_assignee_name']);
+        abort_if($records->isEmpty(), 404);
+
+        return view('portals.product-requests.procurement.assign', [
+            ...$this->viewContext($context),
+            'records' => $records,
+            'assignees' => $this->assigneeOptions(),
+        ]);
+    }
+
+    /** 保存分配：写入录入人员与分配时间，并记录操作日志 */
+    public function procurementAssign(Request $request): JsonResponse|RedirectResponse
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::PROCUREMENT_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        abort_unless($this->access->canInspectProcurement($context['user']), 403);
+        abort_unless($this->access->canAssignProcurement($context['user']), 403);
+
+        $data = $request->validate([
+            'ids' => ['required', 'array', 'min:1', 'max:200'],
+            'ids.*' => ['integer'],
+            'assignee_id' => ['required', 'integer'],
+        ]);
+
+        $assignee = AdminUser::query()->findOrFail((int) $data['assignee_id']);
+        abort_unless($this->access->isAssignableUser($assignee), 403);
+        $assigneeSnapshot = $this->access->actorSnapshot($assignee);
+
+        $records = $this->access->applyInspectionVisibility(
+            ProductRequest::query()
+                ->whereIn('id', collect($data['ids'])->map(fn ($value): int => (int) $value)->all())
+                ->where('status', ProductRequest::STATUS_PENDING),
+            $context['user'],
+        )->get();
+
+        foreach ($records as $record) {
+            $record->fill([
+                'procurement_assignee_id' => $assigneeSnapshot['user_id'],
+                'procurement_assignee_name' => $assigneeSnapshot['display_name'],
+                'procurement_assigned_at' => now(),
+            ])->save();
+            $this->workflow->log($record, 'procurement_assigned', $context['user'], [
+                'assignee' => $assigneeSnapshot['display_name'],
+            ]);
+        }
+
+        return $this->modalSuccess(
+            $request,
+            __('product_requests.procurement.assign_success', ['count' => $records->count()]),
+            'product-requests.procurement.index',
+        );
+    }
+
+    /** 候选录入人员：树内成员 + 今日已被分配条数（按东八区当天统计） */
+    private function assigneeOptions(): array
+    {
+        $dayStart = \Carbon\Carbon::today('Asia/Shanghai');
+        $counts = ProductRequest::query()
+            ->whereBetween('procurement_assigned_at', [$dayStart->copy()->startOfDay(), $dayStart->copy()->endOfDay()])
+            ->groupBy('procurement_assignee_id')
+            ->selectRaw('procurement_assignee_id, count(*) as total')
+            ->pluck('total', 'procurement_assignee_id');
+
+        return collect($this->access->assignableUsers())
+            ->map(fn (array $user): array => [
+                'id' => $user['id'],
+                'name' => $user['name'],
+                'display_name' => $user['display_name'],
+                'today_count' => (int) ($counts[(int) $user['id']] ?? 0),
+            ])
+            ->values()
+            ->all();
+    }
+
     /** PCL 与 SKU 管理列表（按 1688 链接维度） */
     public function linkSkuIndex(Request $request): Response|View
     {
@@ -1522,7 +1622,7 @@ class ProductRequestController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
-        abort_unless($this->access->canInspectProcurement($context['user']), 403);
+        abort_unless($this->access->canManageLinkSkus($context['user']), 403);
 
         $keyword = trim((string) $request->query('keyword', ''));
         $sourceFilter = (string) $request->query('source', '');
@@ -1610,7 +1710,7 @@ class ProductRequestController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
-        abort_unless($this->access->canInspectProcurement($context['user']), 403);
+        abort_unless($this->access->canManageLinkSkus($context['user']), 403);
 
         if (!$this->isModalRequest($request)) {
             return redirect()->route('product-requests.link-skus.index');
@@ -1649,7 +1749,7 @@ class ProductRequestController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
-        abort_unless($this->access->canInspectProcurement($context['user']), 403);
+        abort_unless($this->access->canManageLinkSkus($context['user']), 403);
 
         $data = $request->validate([
             'skus' => ['nullable', 'string', 'max:10000'],
@@ -2172,6 +2272,7 @@ class ProductRequestController extends Controller
             'operation_rectification_status' => in_array($request->input('operation_rectification_status'), array_keys($this->rectificationLabels()), true) ? (string) $request->input('operation_rectification_status') : '',
             'procurement_rectification_status' => in_array($request->input('procurement_rectification_status'), array_keys($this->rectificationLabels()), true) ? (string) $request->input('procurement_rectification_status') : '',
             'placement_recheck_status' => in_array($request->input('placement_recheck_status'), array_keys($this->rectificationLabels()), true) ? (string) $request->input('placement_recheck_status') : '',
+            'assign_status' => in_array($request->input('assign_status'), ['unassigned', 'assigned'], true) ? (string) $request->input('assign_status') : '',
             'per_page' => $perPage,
         ];
     }
@@ -2214,6 +2315,13 @@ class ProductRequestController extends Controller
         }
         if (($filters['placement_recheck_status'] ?? '') !== '') {
             $query->where('placement_recheck_status', $filters['placement_recheck_status']);
+        }
+        if (($filters['assign_status'] ?? '') !== '') {
+            if ($filters['assign_status'] === 'unassigned') {
+                $query->whereNull('procurement_assignee_id');
+            } else {
+                $query->whereNotNull('procurement_assignee_id');
+            }
         }
 
         return $query;

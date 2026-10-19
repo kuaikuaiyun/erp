@@ -42,6 +42,8 @@ return [
         'inspection_reject_reason' => '审核不通过理由',
         'result' => '审核结果',
         'remark' => '审核备注',
+        'assignee_id' => '录入人员',
+        'ids' => '分配记录',
         'actual_shipping_weight_g' => '实测发货重量 g',
         'package_length_cm' => '包装长度',
         'package_width_cm' => '包装宽度',

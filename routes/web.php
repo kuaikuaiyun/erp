@@ -65,6 +65,8 @@ Route::get('/product-requests/{productRequest}/placement', [ProductRequestContro
 Route::put('/product-requests/{productRequest}/placement', [ProductRequestController::class, 'placementUpdate'])->name('product-requests.placement.update');
 Route::get('/product-requests/{productRequest}/attachments/{attachment}', [ProductRequestController::class, 'attachment'])->name('product-requests.attachments.show');
 Route::get('/procurement-inspections', [ProductRequestController::class, 'procurementIndex'])->name('product-requests.procurement.index');
+Route::get('/procurement-inspections/assign', [ProductRequestController::class, 'procurementAssignForm'])->name('product-requests.procurement.assign.form');
+Route::post('/procurement-inspections/assign', [ProductRequestController::class, 'procurementAssign'])->name('product-requests.procurement.assign');
 Route::post('/procurement-inspections/drafts', [ProductRequestController::class, 'procurementDraftStore'])->name('product-requests.procurement.drafts.store');
 Route::get('/procurement-inspections/{productRequest}/edit', [ProductRequestController::class, 'procurementEdit'])->name('product-requests.procurement.edit');
 Route::put('/procurement-inspections/{productRequest}', [ProductRequestController::class, 'procurementUpdate'])->name('product-requests.procurement.update');
