@@ -43,6 +43,7 @@ class ProductRequest extends Model
             'reported_at' => 'date',
             'inspected_at' => 'datetime',
             'warehouse_processed_at' => 'datetime',
+            'procurement_assigned_at' => 'datetime',
             'procurement_sku_values' => 'array',
             'warehouse_sku_weights' => 'array',
             'created_at' => 'datetime',

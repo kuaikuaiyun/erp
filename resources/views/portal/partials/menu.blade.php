@@ -33,6 +33,7 @@
     $canAccessProductRequestMenu = match ($menu->code) {
         'procurement_inspections' => app(\App\Portals\ProductRequests\ProductRequestAccessService::class)->canInspectProcurement($user),
         'placement_reviews' => app(\App\Portals\ProductRequests\ProductRequestAccessService::class)->canReviewPlacement($user),
+        'link_sku_manager' => app(\App\Portals\ProductRequests\ProductRequestAccessService::class)->canManageLinkSkus($user),
         default => true,
     };
     $canAccessAssistantAnalyticsMenu = $menu->code !== 'assistant_shopify_analytics'

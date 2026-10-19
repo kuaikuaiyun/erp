@@ -1228,6 +1228,53 @@
         });
     }
 
+    function initializeAssignment(root) {
+        var select = root.querySelector ? root.querySelector('[data-product-request-assignee-select]') : null;
+        if (!select) { return; }
+        var hint = root.querySelector('[data-product-request-assignee-hint]');
+        function refreshHint() {
+            if (!hint) { return; }
+            var option = select.options[select.selectedIndex];
+            if (!option || !option.value) {
+                hint.hidden = true;
+                hint.textContent = '';
+                return;
+            }
+            var name = option.getAttribute('data-display-name') || option.textContent || '';
+            var count = option.getAttribute('data-today-count') || '0';
+            hint.textContent = (config.assigneeTodayHint || '')
+                .replace(':name', name.trim())
+                .replace(':count', count);
+            hint.hidden = false;
+        }
+        select.addEventListener('change', refreshHint);
+        refreshHint();
+    }
+
+    function bindAssignCheckAll() {
+        document.querySelectorAll('[data-product-request-assign-check-all]').forEach(function (master) {
+            if (master.dataset.assignCheckAllBound === 'true') { return; }
+            master.dataset.assignCheckAllBound = 'true';
+            master.addEventListener('change', function () {
+                document.querySelectorAll('[data-product-request-assign-checkbox]').forEach(function (box) {
+                    box.checked = master.checked;
+                });
+            });
+        });
+    }
+
+    function openAssignModal(button) {
+        var checked = Array.prototype.slice.call(document.querySelectorAll('[data-product-request-assign-checkbox]:checked'));
+        if (!checked.length) {
+            notify('warning', config.assignNoneSelected);
+            return;
+        }
+        var base = button.getAttribute('data-product-request-assign-url') || '';
+        if (!base) { return; }
+        var query = checked.map(function (box) { return 'ids[]=' + encodeURIComponent(box.value); }).join('&');
+        openEditor(base + (base.indexOf('?') === -1 ? '?' : '&') + query);
+    }
+
     function initialize(root) {
         try {
             initializeUploads(root);
@@ -1258,6 +1305,11 @@
             initializeRichEditor(root);
         } catch (error) {
             reportInitializationError('rich editor initializer failed', error);
+        }
+        try {
+            initializeAssignment(root);
+        } catch (error) {
+            reportInitializationError('assignment initializer failed', error);
         }
     }
 
@@ -1364,6 +1416,12 @@
         if (imagePreview) {
             event.preventDefault();
             openImageLightbox(imagePreview);
+            return;
+        }
+        var assignButton = event.target.closest ? event.target.closest('[data-product-request-assign-url]') : null;
+        if (assignButton) {
+            event.preventDefault();
+            openAssignModal(assignButton);
             return;
         }
         var opener = event.target.closest ? event.target.closest('[data-product-request-modal-url]') : null;
@@ -1495,4 +1553,6 @@
             setEditorMessage(config.loading, false);
         });
     }
+
+    bindAssignCheckAll();
 }());

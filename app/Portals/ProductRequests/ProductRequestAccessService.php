@@ -14,20 +14,9 @@ class ProductRequestAccessService
     public const PROCUREMENT_PORTAL_CODE = 'caigou';
     public const WAREHOUSE_PORTAL_CODE = 'cangku';
 
-    public const PROCUREMENT_ENTRY_DEPARTMENT_SLUG = 'dept-000016';
+    public const PROCUREMENT_TREE_ROOT_SLUG = 'dept-000015';
     public const PROCUREMENT_REVIEW_DEPARTMENT_SLUG = 'dept-000017';
-
-    /**
-     * 采购录入部门与运营需求来源部门的固定对应关系。
-     *
-     * 后续新增城市时，在这里增加“录入部门编码 => 运营部门名称”的一项即可，
-     * 不需要新增后台配置模块。
-     *
-     * @var array<string, list<string>>
-     */
-    private const PROCUREMENT_ENTRY_OPERATION_DEPARTMENT_NAMES = [
-        self::PROCUREMENT_ENTRY_DEPARTMENT_SLUG => ['厦门运营部门'],
-    ];
+    public const PROCUREMENT_ENTRY_DEPARTMENT_SLUG = 'dept-000016';
 
     public function assertPortal(Portal $portal, string $expectedCode): void
     {
@@ -125,7 +114,7 @@ class ProductRequestAccessService
     public function canInspectProcurement(AdminUser $user): bool
     {
         return $this->isProcurementRootManager($user)
-            || $this->hasAnyDirectDepartmentSlug($user, $this->procurementEntryDepartmentSlugs());
+            || $this->belongsToProcurementTree($user);
     }
 
     public function canReviewPlacement(AdminUser $user): bool
@@ -134,19 +123,32 @@ class ProductRequestAccessService
             || $this->hasDirectDepartmentSlug($user, self::PROCUREMENT_REVIEW_DEPARTMENT_SLUG);
     }
 
+    /** PCL SKU 管理仅入录审核部门树内任意部门的主管与管理员可见可用 */
+    public function canManageLinkSkus(AdminUser $user): bool
+    {
+        if ($user->isAdministrator()) {
+            return true;
+        }
+
+        $root = Department::business()->where('slug', self::PROCUREMENT_TREE_ROOT_SLUG)->first(['id']);
+        if (!$root) {
+            return false;
+        }
+
+        return $user->departments()
+            ->whereIn('id', $this->descendantDepartmentIds((int) $root->getKey()))
+            ->wherePivot('position', Department::POSITION_MANAGER)
+            ->exists();
+    }
+
+    /** 入录审核部门树内的所有部门都可查看运营部门提报的数据，不再按“录入部门 => 运营部门”一对一映射 */
     public function applyProcurementVisibility(Builder $query, AdminUser $user): Builder
     {
-        if ($this->canViewAllProcurementRequests($user)) {
+        if ($this->belongsToProcurementTree($user)) {
             return $query;
         }
 
-        $operationDepartmentIds = $this->mappedOperationDepartmentIds($user);
-
-        if ($operationDepartmentIds === []) {
-            return $query->whereRaw('1 = 0');
-        }
-
-        return $query->whereIn('operation_department_id', $operationDepartmentIds);
+        return $query->whereRaw('1 = 0');
     }
 
     public function canViewProcurementRequest(ProductRequest $productRequest, AdminUser $user): bool
@@ -155,6 +157,107 @@ class ProductRequestAccessService
             ProductRequest::query()->whereKey($productRequest->getKey()),
             $user,
         )->exists();
+    }
+
+    /** 商品信息检验是否可分配录入人员：管理员与入录审核部门树内任意部门的主管 */
+    public function canAssignProcurement(AdminUser $user): bool
+    {
+        if ($user->isAdministrator()) {
+            return true;
+        }
+
+        $root = Department::business()->where('slug', self::PROCUREMENT_TREE_ROOT_SLUG)->first(['id']);
+        if (!$root) {
+            return false;
+        }
+
+        return $user->departments()
+            ->whereIn('id', $this->descendantDepartmentIds((int) $root->getKey()))
+            ->wherePivot('position', Department::POSITION_MANAGER)
+            ->exists();
+    }
+
+    /**
+     * 商品信息检验（分配）可见性：管理员与树内主管可查看全部记录；
+     * 树内普通成员仅可查看已分配给自己的记录（待分配记录对其不可见）；树外用户无数据。
+     */
+    public function applyInspectionVisibility(Builder $query, AdminUser $user): Builder
+    {
+        if ($this->canAssignProcurement($user)) {
+            return $query;
+        }
+
+        if ($this->belongsToProcurementTree($user)) {
+            return $query->where('procurement_assignee_id', $user->getKey());
+        }
+
+        return $query->whereRaw('1 = 0');
+    }
+
+    public function canViewInspectionRequest(ProductRequest $productRequest, AdminUser $user): bool
+    {
+        return $this->applyInspectionVisibility(
+            ProductRequest::query()->whereKey($productRequest->getKey()),
+            $user,
+        )->exists();
+    }
+
+    /** 是否可被分配为录入人员：仅「录入部门」（含其后代部门）内的普通成员，主管/副主管与管理员不参与分配 */
+    public function isAssignableUser(AdminUser $user): bool
+    {
+        if ($user->isAdministrator()) {
+            return false;
+        }
+
+        $departmentIds = $this->assignableDepartmentIds();
+        if ($departmentIds === []) {
+            return false;
+        }
+
+        return $user->departments()
+            ->whereIn('id', $departmentIds)
+            ->wherePivot('position', Department::POSITION_MEMBER)
+            ->exists();
+    }
+
+    /** @return list<array{id:int,name:string,display_name:string,department_name:?string}> 「录入部门」内可被分配的录入人员（仅普通成员） */
+    public function assignableUsers(): array
+    {
+        $departmentIds = $this->assignableDepartmentIds();
+        if ($departmentIds === []) {
+            return [];
+        }
+
+        $users = AdminUser::query()
+            ->where('status', AdminUser::STATUS_ACTIVE)
+            ->whereHas('departments', function ($query) use ($departmentIds): void {
+                $query->whereIn(config('admin.database.roles_table').'.id', $departmentIds);
+            })
+            ->orderBy('id')
+            ->get();
+
+        return $users
+            ->filter(fn (AdminUser $user): bool => $this->isAssignableUser($user))
+            ->map(function (AdminUser $user): array {
+                $snapshot = $this->actorSnapshot($user);
+
+                return [
+                    'id' => $snapshot['user_id'],
+                    'name' => $snapshot['user_name'],
+                    'display_name' => $snapshot['display_name'],
+                    'department_name' => $snapshot['department_name'],
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    /** @return list<int> 可作为分配对象的部门：录入部门及其所有后代部门 */
+    private function assignableDepartmentIds(): array
+    {
+        $entry = Department::business()->where('slug', self::PROCUREMENT_ENTRY_DEPARTMENT_SLUG)->first(['id']);
+
+        return $entry ? $this->descendantDepartmentIds((int) $entry->getKey()) : [];
     }
 
     public function canViewRequestFromPortal(ProductRequest $productRequest, AdminUser $user, Portal $portal): bool
@@ -213,59 +316,24 @@ class ProductRequestAccessService
         return $user->departments()->where('slug', $slug)->exists();
     }
 
-    /** @param list<string> $slugs */
-    private function hasAnyDirectDepartmentSlug(AdminUser $user, array $slugs): bool
+    /**
+     * 用户是否属于入录审核部门（dept-000015）树：本部门或其任意后代部门的成员均视为树内成员。
+     * 树内成员可查看运营部门提报的全部数据，无需再按城市维护部门映射。
+     */
+    private function belongsToProcurementTree(AdminUser $user): bool
     {
-        return $slugs !== [] && $user->departments()->whereIn('slug', $slugs)->exists();
-    }
-
-    /** @return list<string> */
-    private function procurementEntryDepartmentSlugs(): array
-    {
-        return array_keys(self::PROCUREMENT_ENTRY_OPERATION_DEPARTMENT_NAMES);
-    }
-
-    private function canViewAllProcurementRequests(AdminUser $user): bool
-    {
-        return $this->isProcurementRootManager($user)
-            || $this->hasDirectDepartmentSlug($user, self::PROCUREMENT_REVIEW_DEPARTMENT_SLUG);
-    }
-
-    /** @return list<int> */
-    private function mappedOperationDepartmentIds(AdminUser $user): array
-    {
-        $entrySlugs = $user->departments()
-            ->whereIn('slug', $this->procurementEntryDepartmentSlugs())
-            ->pluck('slug')
-            ->all();
-        $operationDepartmentNames = [];
-
-        foreach ($entrySlugs as $entrySlug) {
-            $operationDepartmentNames = array_merge(
-                $operationDepartmentNames,
-                self::PROCUREMENT_ENTRY_OPERATION_DEPARTMENT_NAMES[$entrySlug] ?? [],
-            );
+        if ($user->isAdministrator()) {
+            return true;
         }
 
-        if ($operationDepartmentNames === []) {
-            return [];
+        $root = Department::business()->where('slug', self::PROCUREMENT_TREE_ROOT_SLUG)->first(['id']);
+        if (!$root) {
+            return false;
         }
 
-        $operationDepartmentIds = Department::business()
-            ->whereIn('name', array_values(array_unique($operationDepartmentNames)))
-            ->pluck('id')
-            ->map(fn ($id): int => (int) $id)
-            ->all();
-        $scopedDepartmentIds = [];
-
-        foreach ($operationDepartmentIds as $operationDepartmentId) {
-            $scopedDepartmentIds = array_merge(
-                $scopedDepartmentIds,
-                $this->descendantDepartmentIds($operationDepartmentId),
-            );
-        }
-
-        return array_values(array_unique($scopedDepartmentIds));
+        return $user->departments()
+            ->whereIn('id', $this->descendantDepartmentIds((int) $root->getKey()))
+            ->exists();
     }
 
     private function isProcurementRootManager(AdminUser $user): bool
@@ -274,17 +342,13 @@ class ProductRequestAccessService
             return true;
         }
 
-        $childDepartment = Department::query()
-            ->whereIn('slug', [...$this->procurementEntryDepartmentSlugs(), self::PROCUREMENT_REVIEW_DEPARTMENT_SLUG])
-            ->orderBy('id')
-            ->first(['id', 'parent_id']);
-
-        if (!$childDepartment || !$childDepartment->parent_id) {
+        $root = Department::business()->where('slug', self::PROCUREMENT_TREE_ROOT_SLUG)->first(['id']);
+        if (!$root) {
             return false;
         }
 
         return $user->departments()
-            ->whereKey($childDepartment->parent_id)
+            ->whereKey($root->getKey())
             ->wherePivot('position', Department::POSITION_MANAGER)
             ->exists();
     }
