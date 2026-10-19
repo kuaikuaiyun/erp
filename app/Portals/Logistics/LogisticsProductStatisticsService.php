@@ -318,6 +318,13 @@ class LogisticsProductStatisticsService
         }
 
         if ($withOverview) {
+            // The overview query deliberately keeps the main product list
+            // lightweight.  Reason distribution is only needed inside this
+            // one product modal, so fetch it here instead of loading every
+            // dispute record for every product on the list page.
+            $disputeReasonBreakdown = $this->overviewDisputeReasonBreakdown($filters, $key);
+            $product['overview_modules']['overall']['dispute_reason_breakdown'] = $disputeReasonBreakdown;
+            $product['overview_modules']['paypal']['dispute_reason_breakdown'] = $disputeReasonBreakdown;
             $product['store_order_distribution'] = $this->detailStoreOrderDistribution($filters, $key);
 
             return [
@@ -356,6 +363,60 @@ class LogisticsProductStatisticsService
                 'name' => $row->store_name === '__unassigned__' ? __('logistics.common.unassigned_store') : (string) $row->store_name,
                 'order_count' => (int) $row->order_count,
             ])
+            ->all();
+    }
+
+    /**
+     * Return the PayPal dispute-reason distribution for just one product
+     * overview.  The selected orders and account association intentionally
+     * follow the same rules as the PayPal overview module: actual PayPal
+     * transactions only, excluding independent CreditCardBy orders.
+     *
+     * @param array<string,mixed> $filters
+     * @return list<array{reason:string,count:int,amount:float,ratio:float}>
+     */
+    private function overviewDisputeReasonBreakdown(array $filters, string $key): array
+    {
+        $creditCardTag = "(CASE WHEN JSON_VALID(COALESCE(orders.shopify_payload, '')) THEN JSON_SEARCH(JSON_EXTRACT(orders.shopify_payload, '$.tags'), 'one', '%CreditCardBy%') ELSE NULL END IS NOT NULL)";
+        $productOrders = $this->baseItemQuery($filters)
+            ->whereRaw($this->productKeyExpression('items').' = ?', [$key])
+            ->whereNotNull('orders.paypal_account_id')
+            ->where('orders.paypal_association_source', 'actual_transaction')
+            ->whereRaw("NOT {$creditCardTag}")
+            ->select([
+                'orders.id as order_id',
+                'orders.paypal_account_id as paypal_account_id',
+            ])
+            ->groupBy('orders.id', 'orders.paypal_account_id');
+
+        $rows = $this->database()->table('logistics_paypal_disputes as dispute')
+            ->joinSub($productOrders, 'product_orders', function ($join): void {
+                $join->on('product_orders.order_id', '=', 'dispute.logistics_order_id')
+                    ->on('product_orders.paypal_account_id', '=', 'dispute.logistics_paypal_account_id');
+            })
+            ->selectRaw("COALESCE(NULLIF(TRIM(dispute.reason), ''), '__unknown__') as reason_code")
+            ->selectRaw('COUNT(DISTINCT dispute.id) as dispute_count')
+            ->selectRaw("SUM(COALESCE(dispute.dispute_amount_usd, CASE WHEN UPPER(dispute.currency_code) = 'USD' THEN dispute.original_amount ELSE 0 END)) as dispute_amount")
+            ->groupBy('reason_code')
+            ->orderByDesc('dispute_count')
+            ->orderByDesc('dispute_amount')
+            ->get();
+
+        $total = (int) $rows->sum(static fn (object $row): int => (int) $row->dispute_count);
+
+        return $rows
+            ->map(static function (object $row) use ($total): array {
+                $reasonCode = (string) $row->reason_code;
+
+                return [
+                    'reason' => $reasonCode === '__unknown__'
+                        ? __('logistics.common.not_available')
+                        : LogisticsPayPalDispute::reasonLabelFor($reasonCode),
+                    'count' => (int) $row->dispute_count,
+                    'amount' => round((float) $row->dispute_amount, 4),
+                    'ratio' => $total > 0 ? round((int) $row->dispute_count / $total * 100, 2) : 0.0,
+                ];
+            })
             ->all();
     }
 
