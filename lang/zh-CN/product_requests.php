@@ -332,7 +332,7 @@ return [
         'skus' => 'SKU',
         'sku_pinyin' => '产品拼音（如 qingjieji）',
         'sku_attribute' => '参数 (如颜色 / 100ml容量 等相关属性)',
-        'sku_box' => '一盒里面具体个数',
+        'sku_box' => '* 后填写一盒里面具体个数',
         'operation_supplier_url' => 'https://detail.1688.com/ 开头的商品链接',
         'operation_remark' => '选填，补充该需求的其他说明',
         'reference_page_url' => '请输入参考页面链接',
