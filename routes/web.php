@@ -53,6 +53,7 @@ Route::post('/product-requests/drafts', [ProductRequestController::class, 'opera
 Route::get('/product-requests/drafts/{draft}/edit', [ProductRequestController::class, 'operationDraftEdit'])->name('product-requests.operation.drafts.edit');
 Route::delete('/product-requests/drafts/{draft}', [ProductRequestController::class, 'operationDraftDestroy'])->name('product-requests.operation.drafts.destroy');
 Route::get('/product-requests/drafts/{draft}/images/{type}/{index}', [ProductRequestController::class, 'operationDraftImage'])->name('product-requests.operation.drafts.image');
+Route::get('/product-request-drafts/{draft}/images/{type}/{index}', [ProductRequestController::class, 'draftImage'])->name('product-requests.drafts.image');
 Route::get('/product-requests/{productRequest}/edit', [ProductRequestController::class, 'operationEdit'])->name('product-requests.operation.edit');
 Route::put('/product-requests/{productRequest}', [ProductRequestController::class, 'operationUpdate'])->name('product-requests.operation.update');
 Route::post('/product-requests/{productRequest}/rectify', [ProductRequestController::class, 'operationRectify'])->name('product-requests.operation.rectify');
@@ -64,6 +65,7 @@ Route::get('/product-requests/{productRequest}/placement', [ProductRequestContro
 Route::put('/product-requests/{productRequest}/placement', [ProductRequestController::class, 'placementUpdate'])->name('product-requests.placement.update');
 Route::get('/product-requests/{productRequest}/attachments/{attachment}', [ProductRequestController::class, 'attachment'])->name('product-requests.attachments.show');
 Route::get('/procurement-inspections', [ProductRequestController::class, 'procurementIndex'])->name('product-requests.procurement.index');
+Route::post('/procurement-inspections/drafts', [ProductRequestController::class, 'procurementDraftStore'])->name('product-requests.procurement.drafts.store');
 Route::get('/procurement-inspections/{productRequest}/edit', [ProductRequestController::class, 'procurementEdit'])->name('product-requests.procurement.edit');
 Route::put('/procurement-inspections/{productRequest}', [ProductRequestController::class, 'procurementUpdate'])->name('product-requests.procurement.update');
 Route::post('/procurement-inspections/{productRequest}/rectify', [ProductRequestController::class, 'procurementRectify'])->name('product-requests.procurement.rectify');

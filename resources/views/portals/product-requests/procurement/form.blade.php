@@ -2,16 +2,23 @@
     $operationImages = $productRequest->attachmentsFor(\App\Models\ProductRequestAttachment::STAGE_OPERATION);
     $purchaseItemImages = $productRequest->attachmentsFor(\App\Models\ProductRequestAttachment::STAGE_PURCHASE_ITEM);
     $sellerImages = $productRequest->attachmentsFor(\App\Models\ProductRequestAttachment::STAGE_PROCUREMENT);
+    $draft = $draft ?? null;
+    $draftPayload = $draft ? (array) ($draft->payload ?? []) : [];
+    $draftSellerItems = $draft
+        ? collect($draft->images ?? [])->values()->map(fn ($item, $index) => ['id' => $index, 'url' => route('product-requests.drafts.image', ['draft' => $draft, 'type' => 'seller', 'index' => $index]), 'name' => (string) ($item['original_name'] ?? '')])->all()
+        : null;
+    $draftField = static fn (string $key): string => (string) ($draftPayload[$key] ?? '');
 @endphp
-<form class="product-request-form" method="post" action="{{ route('product-requests.procurement.update', $productRequest) }}" enctype="multipart/form-data" data-product-request-modal-form data-product-request-reuse-form data-current-id="{{ $productRequest->getKey() }}" data-reuse-check-url="{{ route('product-requests.procurement.reuse-check') }}">
+<form class="product-request-form" method="post" action="{{ route('product-requests.procurement.update', $productRequest) }}" enctype="multipart/form-data" data-product-request-modal-form data-product-request-reuse-form data-current-id="{{ $productRequest->getKey() }}" data-reuse-check-url="{{ route('product-requests.procurement.reuse-check') }}" @if($draft) data-procurement-draft="{{ json_encode(['system_skus' => $draftPayload['system_skus'] ?? [], 'selected_skus' => $draftPayload['selected_skus'] ?? [], 'report_no' => $productRequest->report_no]) }}" @endif>
     @csrf
     @method('PUT')
     <input type="hidden" name="modal" value="1">
-    <input type="hidden" name="reuse_source_id" value="{{ old('reuse_source_id') }}">
-    <input type="hidden" name="link_skus" value="{{ old('link_skus') }}" data-product-request-link-skus>
-    <input type="hidden" name="sku_value_rows" value="{{ old('sku_value_rows') }}" data-product-request-sku-values>
+    <input type="hidden" name="product_request_id" value="{{ $productRequest->getKey() }}">
+    <input type="hidden" name="reuse_source_id" value="{{ $draft ? (int) ($draftPayload['reuse_source_id'] ?? 0) : old('reuse_source_id') }}">
+    <input type="hidden" name="link_skus" value="{{ old('link_skus', $draft ? implode(',', (array) ($draftPayload['system_skus'] ?? [])) : '') }}" data-product-request-link-skus>
+    <input type="hidden" name="sku_value_rows" value="{{ old('sku_value_rows', $draft ? json_encode($draftPayload['sku_values'] ?? []) : '') }}" data-product-request-sku-values>
     {{-- 运营 SKU 隐藏域：面板左列编辑后由 JS 同步写入，随表单提交保存 --}}
-    <input type="hidden" name="skus" value="{{ old('skus', $productRequest->skus) }}" data-sku-edit-source>
+    <input type="hidden" name="skus" value="{{ old('skus', $draft ? $draftField('skus') : $productRequest->skus) }}" data-sku-edit-source>
 
     <div class="modal-header">
         <button type="button" class="close" data-dismiss="modal" aria-label="{{ __('product_requests.common.close') }}"><span aria-hidden="true">&times;</span></button>
@@ -20,6 +27,9 @@
     </div>
 
     <div class="modal-body product-request-modal-body">
+        @if($draft)
+            <div class="alert alert-info product-request-draft-notice"><i class="fa fa-history"></i> {{ __('product_requests.procurement.draft_restored') }}（{{ $draft->updated_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i') }}）</div>
+        @endif
         <section class="form-section product-request-source-summary">
             <div class="product-request-source-summary-image">
                 <span class="product-request-detail-label">{{ __('product_requests.fields.product_image') }}</span>
@@ -80,12 +90,12 @@
             <div class="row">
                 <div class="form-group col-md-6 @error('pcl_product_no') has-error @enderror">
                     <label for="pcl_product_no">{{ __('product_requests.fields.pcl_product_no') }} <span class="text-red">*</span></label>
-                    <input id="pcl_product_no" class="form-control" name="pcl_product_no" value="{{ old('pcl_product_no', $productRequest->pcl_product_no) }}" maxlength="100" required placeholder="{{ __('product_requests.placeholders.pcl_product_no') }}">
+                    <input id="pcl_product_no" class="form-control" name="pcl_product_no" value="{{ old('pcl_product_no', $draft ? $draftField('pcl_product_no') : $productRequest->pcl_product_no) }}" maxlength="100" required placeholder="{{ __('product_requests.placeholders.pcl_product_no') }}">
                     @error('pcl_product_no')<span class="help-block text-red">{{ $message }}</span>@enderror
                 </div>
                 <div class="form-group col-md-6 @error('standard_chinese_name') has-error @enderror">
                     <label for="standard_chinese_name">{{ __('product_requests.fields.standard_chinese_name') }} <span class="text-red">*</span></label>
-                    <input id="standard_chinese_name" class="form-control" name="standard_chinese_name" value="{{ old('standard_chinese_name', $productRequest->standard_chinese_name) }}" maxlength="191" required placeholder="{{ __('product_requests.placeholders.standard_chinese_name') }}">
+                    <input id="standard_chinese_name" class="form-control" name="standard_chinese_name" value="{{ old('standard_chinese_name', $draft ? $draftField('standard_chinese_name') : $productRequest->standard_chinese_name) }}" maxlength="191" required placeholder="{{ __('product_requests.placeholders.standard_chinese_name') }}">
                     @error('standard_chinese_name')<span class="help-block text-red">{{ $message }}</span>@enderror
                     <span class="product-request-selected-reuse" data-product-request-reuse-selected hidden></span>
                 </div>
@@ -128,7 +138,7 @@
             <div class="row product-request-form-bottom-row">
                 <div class="form-group col-md-12 @error('seller_images') has-error @enderror">
                     <label>{{ __('product_requests.fields.seller_images') }} <span class="text-red">*</span></label>
-                    @include('portals.product-requests.partials.upload', ['inputName' => 'seller_images', 'inputId' => 'seller_images', 'maxFiles' => 3, 'required' => true, 'existingAttachments' => $sellerImages, 'removableName' => 'removed_seller_images'])
+                    @include('portals.product-requests.partials.upload', ['inputName' => 'seller_images', 'inputId' => 'seller_images', 'maxFiles' => 3, 'required' => $draft ? ($draftSellerItems === [] && $sellerImages->isEmpty()) : true, 'existingAttachments' => $sellerImages, 'existingItems' => $draftSellerItems, 'removableName' => 'removed_seller_images'])
                     <span class="help-block">{{ __('product_requests.help.image_upload') }} {{ __('product_requests.procurement.seller_image_hint') }}</span>
                 </div>
             </div>
@@ -136,7 +146,7 @@
             <div class="row">
                 <div class="form-group col-md-12 @error('inspection_reject_reason') has-error @enderror">
                     <label for="inspection_reject_reason">{{ __('product_requests.procurement.inspection_reject_reason') }}</label>
-                    <textarea id="inspection_reject_reason" class="form-control" name="inspection_reject_reason" rows="3" maxlength="2000" placeholder="{{ __('product_requests.procurement.inspection_reject_reason_placeholder') }}">{{ old('inspection_reject_reason', $productRequest->inspection_reject_reason) }}</textarea>
+                    <textarea id="inspection_reject_reason" class="form-control" name="inspection_reject_reason" rows="3" maxlength="2000" placeholder="{{ __('product_requests.procurement.inspection_reject_reason_placeholder') }}">{{ old('inspection_reject_reason', $draft ? $draftField('inspection_reject_reason') : $productRequest->inspection_reject_reason) }}</textarea>
                     <span class="help-block">{{ __('product_requests.procurement.inspection_reject_reason_hint') }}</span>
                     @error('inspection_reject_reason')<span class="help-block text-red">{{ $message }}</span>@enderror
                 </div>
@@ -155,6 +165,7 @@
     </div>
 
     <div class="modal-footer">
+        <button class="btn btn-default pull-left" type="submit" name="action" value="draft" formnovalidate formaction="{{ route('product-requests.procurement.drafts.store') }}"><i class="fa fa-save"></i> {{ __('product_requests.procurement.draft_save') }}</button>
         <button class="btn btn-default" type="button" data-dismiss="modal">{{ __('product_requests.common.cancel') }}</button>
         <button class="btn btn-danger" type="submit" name="result" value="rejected" formnovalidate><i class="fa fa-times"></i> {{ __('product_requests.procurement.inspection_reject') }}</button>
         <button class="btn btn-success" type="submit" name="result" value="passed"><i class="fa fa-check"></i> {{ __('product_requests.procurement.inspection_pass') }}</button>
