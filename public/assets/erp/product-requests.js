@@ -578,6 +578,8 @@
         try { skuValues = JSON.parse(panel.getAttribute('data-initial-sku-values') || '{}') || {}; } catch (e) { skuValues = {}; }
         var pricePlaceholder = panel.getAttribute('data-price-placeholder') || '';
         var weightPlaceholder = panel.getAttribute('data-weight-placeholder') || '';
+        var priceLabel = panel.getAttribute('data-price-label') || '';
+        var weightLabel = panel.getAttribute('data-weight-label') || '';
         // 商品信息检验草稿：恢复上次勾选的系统 SKU 与右侧列表，无需重新查重
         var draftData = null;
         try { draftData = JSON.parse(form.getAttribute('data-procurement-draft') || 'null'); } catch (e) { draftData = null; }
@@ -676,7 +678,10 @@
             checkbox.setAttribute('data-sku-select', 'true');
             label.appendChild(checkbox);
 
-            function buildValueField(kind, placeholder) {
+            // 数值输入框外再包一层小字标签，明确区分「采购价」与「重量」，只读行也能看清数值含义
+            function buildValueField(kind, placeholder, caption) {
+                var wrap = document.createElement('span');
+                wrap.className = 'sku-value-field';
                 var field = document.createElement('input');
                 field.type = 'text';
                 field.className = 'sku-suggestion-input sku-value-input';
@@ -688,10 +693,19 @@
                 field.disabled = !checkbox.checked;
                 field.addEventListener('input', syncSkuValues);
                 field.addEventListener('click', function (event) { event.preventDefault(); });
-                return field;
+                if (caption !== '') {
+                    var captionEl = document.createElement('span');
+                    captionEl.className = 'sku-value-caption';
+                    captionEl.textContent = caption;
+                    wrap.appendChild(captionEl);
+                }
+                wrap.appendChild(field);
+                return { field: field, wrap: wrap };
             }
-            var priceField = buildValueField('price', pricePlaceholder);
-            var weightField = buildValueField('weight', weightPlaceholder);
+            var priceBuild = buildValueField('price', pricePlaceholder, priceLabel);
+            var priceField = priceBuild.field;
+            var weightBuild = buildValueField('weight', weightPlaceholder, weightLabel);
+            var weightField = weightBuild.field;
             // 系统已录入（同 1688 链接）SKU 的价格/重量仅展示，不可修改；运营 SKU 勾选后价格/重量必填（未勾选禁用自动跳过校验）
             if (!editable) { priceField.readOnly = true; weightField.readOnly = true; }
             if (editable) { priceField.required = true; weightField.required = true; }
@@ -720,8 +734,8 @@
             } else {
                 label.appendChild(document.createTextNode(value));
             }
-            label.appendChild(priceField);
-            label.appendChild(weightField);
+            label.appendChild(priceBuild.wrap);
+            label.appendChild(weightBuild.wrap);
             return label;
         }
 

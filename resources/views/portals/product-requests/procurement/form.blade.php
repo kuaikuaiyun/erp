@@ -119,7 +119,7 @@
             </div>
             <div class="row">
                 <div class="form-group col-md-12">
-                    <div class="sku-suggestion-panel" id="sku-suggestion-panel" data-initial-sku-values='@json((object) ($skuValues ?? []))' data-price-placeholder="{{ __('product_requests.procurement.sku_value_price_placeholder') }}" data-weight-placeholder="{{ __('product_requests.procurement.sku_value_weight_placeholder') }}" data-sku-check-required="{{ __('product_requests.procurement.sku_check_required') }}" hidden>
+                    <div class="sku-suggestion-panel" id="sku-suggestion-panel" data-initial-sku-values='@json((object) ($skuValues ?? []))' data-price-placeholder="{{ __('product_requests.procurement.sku_value_price_placeholder') }}" data-weight-placeholder="{{ __('product_requests.procurement.sku_value_weight_placeholder') }}" data-price-label="{{ __('product_requests.procurement.sku_value_price_label') }}" data-weight-label="{{ __('product_requests.procurement.sku_value_weight_label') }}" data-sku-check-required="{{ __('product_requests.procurement.sku_check_required') }}" hidden>
                         <div class="sku-suggestion-columns">
                             <div class="sku-suggestion-box">
                                 <div class="sku-suggestion-heading"><strong>{{ __('product_requests.procurement.sku_suggestions_operation') }}</strong></div>
@@ -192,6 +192,9 @@
     /* 每条 SKU 后的采购价/重量输入框，未勾选时禁用 */
     .sku-suggestion-list .sku-value-input { width: 96px; flex: 0 0 auto; }
     #sku-operation-list .sku-value-input { flex: 0 0 110px; width: 110px; }
+    /* 数值输入框前的小字标签，明确区分「采购价」与「重量」，避免只读行看不出数值含义 */
+    .sku-suggestion-list .sku-value-field { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+    .sku-suggestion-list .sku-value-caption { font-size: 11px; color: #8899a6; white-space: nowrap; }
     .sku-suggestion-list .sku-value-input:disabled { background: #f4f4f4; color: #aaa; cursor: not-allowed; }
     .sku-suggestion-list .sku-value-input[readonly] { background: #f9fafb; color: #777; cursor: default; }
 </style>
