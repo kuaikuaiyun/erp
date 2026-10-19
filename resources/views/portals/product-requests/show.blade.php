@@ -128,9 +128,9 @@
                         <div class="product-request-detail-grid product-request-review-grid">
                             <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.table.review_status') }}</span><span class="product-request-detail-value">{{ __('product_requests.review_status.'.$review->status) }}</span></div>
                             <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.review.submitted_by') }}</span><span class="product-request-detail-value">{{ $review->submission_user_name }}</span></div>
-                            <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.review.submitted_at') }}</span><span class="product-request-detail-value">{{ optional($review->submitted_at)->timezone('Asia/Shanghai')->format('Y-m-d H:i') }}</span></div>
+                            <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.review.submitted_at') }}</span><span class="product-request-detail-value">{{ $review->submitted_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i') ?: $notFilled }}</span></div>
                             <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.review.reviewed_by') }}</span><span class="product-request-detail-value">{{ $review->reviewer_name ?: $notFilled }}</span></div>
-                            <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.review.reviewed_at') }}</span><span class="product-request-detail-value">{{ optional($review->reviewed_at)->timezone('Asia/Shanghai')->format('Y-m-d H:i') }}</span></div>
+                            <div class="product-request-detail-item"><span class="product-request-detail-label">{{ __('product_requests.review.reviewed_at') }}</span><span class="product-request-detail-value">{{ $review->reviewed_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i') ?: $notFilled }}</span></div>
                         </div>
                         <div class="product-request-review-remark"><span class="product-request-detail-label">{{ __('product_requests.fields.review_remark') }}</span><div class="product-request-remark-html">@if($review->remark){!! $review->remark !!}@else{{ $notFilled }}@endif</div></div>
                     </div>
@@ -172,7 +172,7 @@
         <div class="box-body">
             <ul class="product-request-history">
                 @forelse($productRequest->logs as $log)
-                    <li><strong>{{ __('product_requests.events.'.$log->event) }}</strong><div>{{ $log->actor_department_name ? $log->actor_department_name.' - ' : '' }}{{ $log->actor_name }} · {{ optional($log->created_at)->timezone('Asia/Shanghai')->format('Y-m-d H:i') }}</div></li>
+                    <li><strong>{{ __('product_requests.events.'.$log->event) }}</strong><div>{{ $log->actor_department_name ? $log->actor_department_name.' - ' : '' }}{{ $log->actor_name }} · {{ $log->created_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i') }}</div></li>
                 @empty
                     <li>{{ __('product_requests.show.no_history') }}</li>
                 @endforelse
