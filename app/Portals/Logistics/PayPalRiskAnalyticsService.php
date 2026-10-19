@@ -4,6 +4,7 @@ namespace App\Portals\Logistics;
 
 use App\Models\LogisticsOrder;
 use App\Models\LogisticsOrderItem;
+use App\Models\LogisticsOrderPaymentReference;
 use App\Models\LogisticsPayPalAccount;
 use App\Models\LogisticsPayPalDispute;
 use App\Models\LogisticsPayPalRefund;
@@ -97,7 +98,7 @@ class PayPalRiskAnalyticsService
             'orders' => $payload + ['rows' => $this->orderRows($account, $filters, $page, $sort, $direction, 10, $tabFilters)],
             'products' => $payload + ['rows' => $this->productRows($account, $filters, $page, $sort, $direction, 10, $tabFilters)],
             'refunds' => $payload + ['rows' => $this->paginate($this->sortRows(
-                $this->filterRows($this->refundRows($account, $filters), $tabFilters, ['refund_id', 'order_number', 'store_name', 'source_reason', 'manual_reason', 'linked_disputes']),
+                $this->filterRows($this->refundRows($account, $filters), $tabFilters, ['refund_id', 'order_number', 'bill_numbers', 'store_name', 'source_reason', 'manual_reason', 'linked_disputes']),
                 $sort,
                 $direction,
                 ['refund_id', 'order_number', 'store_name', 'source', 'amount', 'source_reason', 'manual_reason', 'status', 'linked_disputes', 'happened_at', 'match_status'],
@@ -113,7 +114,7 @@ class PayPalRiskAnalyticsService
         return match ($tab) {
             'orders' => $this->orderRows($account, $filters, 1, '', '', PHP_INT_MAX, $tabFilters)['data'],
             'products' => $this->productRows($account, $filters, 1, '', '', PHP_INT_MAX, $tabFilters)['data'],
-            'refunds' => $this->filterRows($this->refundRows($account, $filters), $tabFilters, ['refund_id', 'order_number', 'store_name', 'source_reason', 'manual_reason', 'linked_disputes']),
+            'refunds' => $this->filterRows($this->refundRows($account, $filters), $tabFilters, ['refund_id', 'order_number', 'bill_numbers', 'store_name', 'source_reason', 'manual_reason', 'linked_disputes']),
             'disputes' => $this->disputeRows($account, $filters, 1, '', '', PHP_INT_MAX, $tabFilters)['data'],
             default => [],
         };
@@ -236,8 +237,9 @@ class PayPalRiskAnalyticsService
     {
         $payments = $this->paymentQuery($account, $filters)
             ->with([
-                'order:id,shopify_order_number,tongtu_order_number,store_name,tracking_number,logistics_status',
+                'order:id,shopify_order_number,tongtu_order_number,store_name,bill_number,tracking_number,logistics_status',
                 'order.items:id,logistics_order_id,product_title,variant_title',
+                'order.paymentReferences:id,logistics_order_id,reference_number,reference_type,gateway_order_id',
             ])
             ->orderByDesc('paid_at')->orderByDesc('id')->get();
         $transactionIds = $payments->pluck('payment_transaction_id')->filter()->all();
@@ -258,6 +260,7 @@ class PayPalRiskAnalyticsService
                 'order_detail_url' => $order ? route('logistics.orders.detail', $order) : null,
                 'order_number' => (string) ($order?->shopify_order_number ?: '-'),
                 'tongtu_order_number' => (string) ($order?->tongtu_order_number ?: '-'),
+                'bill_numbers' => $this->orderBillNumbers($order),
                 'store_name' => (string) ($order?->store_name ?: '-'),
                 'products' => $products ?: '-',
                 'paid_amount' => round((float) ($payment->payment_amount_usd ?? $payment->original_amount), 2),
@@ -269,10 +272,10 @@ class PayPalRiskAnalyticsService
             ];
         })->all();
 
-        $rows = $this->filterRows($rows, $tabFilters, ['payment_transaction_id', 'order_number', 'tongtu_order_number', 'store_name', 'products', 'tracking_number', 'logistics_status', 'match_status']);
+        $rows = $this->filterRows($rows, $tabFilters, ['payment_transaction_id', 'order_number', 'tongtu_order_number', 'bill_numbers', 'store_name', 'products', 'tracking_number', 'logistics_status', 'match_status']);
 
         return $this->paginate($this->sortRows($rows, $sort, $direction, [
-            'payment_transaction_id', 'match_status', 'order_number', 'tongtu_order_number', 'store_name', 'products', 'paid_amount', 'refund_status', 'dispute_status', 'tracking_number', 'logistics_status', 'paid_at',
+            'payment_transaction_id', 'match_status', 'order_number', 'tongtu_order_number', 'bill_numbers', 'store_name', 'products', 'paid_amount', 'refund_status', 'dispute_status', 'tracking_number', 'logistics_status', 'paid_at',
         ]), $page, $perPage);
     }
 
@@ -329,7 +332,11 @@ class PayPalRiskAnalyticsService
         $paymentIds = $this->paymentQuery($account, $filters)->pluck('payment_transaction_id')->filter()->all();
 
         return $this->refundQueryForPayments($account, $filters, $paymentIds)
-            ->with(['order:id,shopify_order_number,store_name', 'disputeLinks.dispute'])
+            ->with([
+                'order:id,shopify_order_number,store_name,bill_number',
+                'order.paymentReferences:id,logistics_order_id,reference_number,reference_type,gateway_order_id',
+                'disputeLinks.dispute',
+            ])
             ->orderByDesc('refunded_at')->orderByDesc('id')->get()
             ->map(fn (LogisticsPayPalRefund $refund): array => $this->paypalRefundRow($refund))
             ->all();
@@ -347,6 +354,7 @@ class PayPalRiskAnalyticsService
             'refund_id' => (string) $refund->refund_transaction_id,
             'match_status' => $matched ? __('logistics.paypal_risk.detail.matched') : __('logistics.paypal_risk.detail.unmatched'),
             'order_number' => (string) ($order?->shopify_order_number ?: '-'),
+            'bill_numbers' => $this->orderBillNumbers($order),
             'store_name' => (string) ($order?->store_name ?: '-'),
             'source' => 'PayPal',
             'amount' => round((float) ($refund->refund_amount_usd ?? $refund->original_amount), 2),
@@ -366,7 +374,11 @@ class PayPalRiskAnalyticsService
     {
         $paymentIds = $this->paymentQuery($account, $filters)->pluck('payment_transaction_id')->filter()->all();
         $rows = $this->disputeQueryForPayments($account, $filters, $paymentIds)
-            ->with(['order:id,shopify_order_number,store_name', 'refundLinks.refund'])
+            ->with([
+                'order:id,shopify_order_number,store_name,bill_number',
+                'order.paymentReferences:id,logistics_order_id,reference_number,reference_type,gateway_order_id',
+                'refundLinks.refund',
+            ])
             ->orderByDesc('dispute_created_at')->orderByDesc('id')->get()
             ->map(function (LogisticsPayPalDispute $dispute): array {
                 $order = $dispute->order;
@@ -376,6 +388,7 @@ class PayPalRiskAnalyticsService
                     'dispute_id' => (string) $dispute->dispute_id,
                     'match_status' => $order instanceof LogisticsOrder ? __('logistics.paypal_risk.detail.matched') : __('logistics.paypal_risk.detail.unmatched'),
                     'order_number' => (string) ($order?->shopify_order_number ?: '-'),
+                    'bill_numbers' => $this->orderBillNumbers($order),
                     'store_name' => (string) ($order?->store_name ?: '-'),
                     'amount' => round((float) ($dispute->dispute_amount_usd ?? $dispute->original_amount), 2),
                     'currency' => (string) ($dispute->currency_code ?: 'USD'),
@@ -393,9 +406,37 @@ class PayPalRiskAnalyticsService
                     'sort_time' => $dispute->dispute_created_at?->timestamp ?? 0,
                 ];
             })->all();
-        $rows = $this->filterRows($rows, $tabFilters, ['dispute_id', 'order_number', 'store_name', 'reason', 'stage', 'status', 'outcome', 'linked_refunds', 'match_status']);
+        $rows = $this->filterRows($rows, $tabFilters, ['dispute_id', 'order_number', 'bill_numbers', 'store_name', 'reason', 'stage', 'status', 'outcome', 'linked_refunds', 'match_status']);
 
-        return $this->paginate($this->sortRows($rows, $sort, $direction, ['dispute_id', 'match_status', 'order_number', 'store_name', 'amount', 'reason', 'stage', 'status', 'happened_at', 'outcome', 'seller_response_due_at', 'updated_at', 'linked_refunds']), $page, $perPage);
+        return $this->paginate($this->sortRows($rows, $sort, $direction, ['dispute_id', 'match_status', 'order_number', 'bill_numbers', 'store_name', 'amount', 'reason', 'stage', 'status', 'happened_at', 'outcome', 'seller_response_due_at', 'updated_at', 'linked_refunds']), $page, $perPage);
+    }
+
+    private function orderBillNumbers(?LogisticsOrder $order): string
+    {
+        if (!$order instanceof LogisticsOrder) {
+            return '-';
+        }
+
+        $references = $order->relationLoaded('paymentReferences')
+            ? $order->paymentReferences
+            : collect();
+        $primary = $references
+            ->where('reference_type', LogisticsOrderPaymentReference::TYPE_PRIMARY)
+            ->pluck('reference_number');
+        $upsells = $references
+            ->where('reference_type', LogisticsOrderPaymentReference::TYPE_UPSELL)
+            ->pluck('reference_number');
+        $legacy = trim((string) $order->bill_number);
+
+        $numbers = collect($legacy !== '' ? [$legacy] : [])
+            ->concat($primary)
+            ->concat($upsells)
+            ->map(static fn ($number): string => trim((string) $number))
+            ->filter()
+            ->unique()
+            ->values();
+
+        return $numbers->isEmpty() ? '-' : $numbers->implode("\n");
     }
 
     private function paymentQuery(LogisticsPayPalAccount $account, array $filters, bool $applyRange = true): Builder

@@ -256,6 +256,8 @@ class ProductStatisticsController extends Controller
             'overviewReceivedAmount' => __('logistics.product_statistics.ui.overview_received_amount'),
             'overviewRefundAmount' => __('logistics.product_statistics.ui.overview_refund_amount'),
             'overviewRefundRate' => __('logistics.product_statistics.ui.overview_refund_rate'),
+            'overviewChargebackRate' => __('logistics.product_statistics.ui.overview_chargeback_rate'),
+            'overviewChargebackRateFormula' => __('logistics.product_statistics.ui.overview_chargeback_rate_formula'),
             'overviewDisputeSummary' => __('logistics.product_statistics.ui.overview_dispute_summary'),
             'overviewDisputeCounts' => __('logistics.product_statistics.ui.overview_dispute_counts'),
             'overviewDisputeOrderCount' => __('logistics.product_statistics.ui.overview_dispute_order_count'),

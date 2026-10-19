@@ -1,6 +1,0 @@
-@import url("./assistant-domain-stores-20261008-4.css");
-
-/* The selection cell spans the record's data row and remark row. */
-.assistant-domain-stores-table > tbody > tr.assistant-store-row > td.assistant-record-selection-cell {
-    vertical-align: middle !important;
-}

@@ -1,0 +1,282 @@
+.aikaipin-product-library-page {
+    padding-bottom: 26px;
+}
+
+.aikaipin-page-header {
+    display: flex;
+    align-items: flex-end;
+    margin-bottom: 8px;
+}
+
+.aikaipin-page-header h1 {
+    margin: 0 0 5px;
+    font-size: 26px;
+    line-height: 1.25;
+}
+
+.aikaipin-page-header p {
+    margin: 0;
+    color: #7a8797;
+}
+
+.aikaipin-filter-actions,
+.aikaipin-row-actions {
+    display: inline-flex;
+    gap: 6px;
+}
+
+.aikaipin-filter-box,
+.aikaipin-table-box {
+    border-top: 3px solid #3c8dbc;
+}
+
+.aikaipin-filter-grid {
+    display: grid;
+    grid-template-columns: minmax(240px, 2fr) repeat(3, minmax(145px, 1fr)) auto;
+    align-items: end;
+    gap: 14px;
+}
+
+.aikaipin-filter-field {
+    min-width: 0;
+}
+
+.aikaipin-filter-field label {
+    display: block;
+    margin: 0 0 6px;
+    color: #526170;
+    font-weight: 600;
+}
+
+.aikaipin-filter-actions {
+    padding-bottom: 1px;
+}
+
+.aikaipin-list-toolbar {
+    align-items: center;
+    display: flex;
+    justify-content: flex-end;
+    min-height: 47px;
+}
+
+.aikaipin-list-toolbar-actions {
+    align-items: center;
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-end;
+}
+
+.aikaipin-selected-count {
+    color: #7c8999;
+    font-size: 12px;
+    margin-right: 4px;
+    white-space: nowrap;
+}
+
+.aikaipin-product-table {
+    min-width: 1210px;
+    margin-bottom: 0;
+}
+
+.aikaipin-product-table > thead > tr > th {
+    border-bottom-width: 1px;
+    color: #647287;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.aikaipin-product-table > tbody > tr > td {
+    vertical-align: middle;
+}
+
+.aikaipin-image-column {
+    width: 76px;
+}
+
+.aikaipin-select-column,
+.aikaipin-select-cell {
+    text-align: center;
+    width: 38px;
+}
+
+.aikaipin-check-label {
+    cursor: pointer;
+    display: inline-flex;
+    margin: 0;
+}
+
+.aikaipin-check-label input {
+    cursor: pointer;
+    margin: 0;
+}
+
+.aikaipin-image-cell {
+    padding-bottom: 9px !important;
+    padding-top: 9px !important;
+}
+
+.aikaipin-product-image {
+    align-items: center;
+    background: #f4f7fa;
+    border: 1px solid #e1e8ef;
+    border-radius: 4px;
+    color: #aab7c5;
+    display: inline-flex;
+    height: 58px;
+    justify-content: center;
+    overflow: hidden;
+    width: 58px;
+}
+
+.aikaipin-product-image .fa {
+    font-size: 22px;
+}
+
+.aikaipin-product-code {
+    color: #506278;
+    font-family: Consolas, Monaco, monospace;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.aikaipin-name-column {
+    min-width: 190px;
+}
+
+.aikaipin-name-cell strong {
+    color: #34495e;
+    display: block;
+    font-weight: 600;
+    line-height: 1.45;
+}
+
+.aikaipin-sku-line {
+    color: #8491a2;
+    cursor: help;
+    display: inline-flex;
+    font-family: Consolas, Monaco, monospace;
+    font-size: 11px;
+    gap: 5px;
+    margin-top: 4px;
+    max-width: 210px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: top;
+    white-space: nowrap;
+}
+
+.aikaipin-sku-more {
+    background: #ecf3fa;
+    border-radius: 10px;
+    color: #3c8dbc;
+    font-family: inherit;
+    padding: 0 5px;
+}
+
+.aikaipin-source {
+    color: #43556c;
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.aikaipin-type {
+    color: #8b98a8;
+    display: block;
+    font-size: 11px;
+    margin-top: 3px;
+    white-space: nowrap;
+}
+
+.aikaipin-operation-column {
+    min-width: 300px;
+}
+
+.aikaipin-row-actions {
+    white-space: nowrap;
+}
+
+.aikaipin-empty-state {
+    color: #8996a6;
+    padding: 50px 20px;
+    text-align: center;
+}
+
+.aikaipin-empty-state .fa {
+    color: #c4cfda;
+    font-size: 25px;
+}
+
+.aikaipin-empty-state p {
+    margin: 10px 0 14px;
+}
+
+.aikaipin-visibility-source {
+    background: #f6f9fc;
+    border: 1px solid #e0e8f0;
+    border-radius: 4px;
+    color: #53657b;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 15px;
+    padding: 10px;
+}
+
+.aikaipin-visibility-source-label,
+.aikaipin-visibility-source small {
+    flex-basis: 100%;
+}
+
+.aikaipin-visibility-source-label {
+    color: #8693a4;
+    font-size: 12px;
+}
+
+.aikaipin-visibility-source code {
+    color: #75879a;
+    font-size: 11px;
+    padding: 2px 4px;
+}
+
+.aikaipin-visibility-source small {
+    color: #8996a6;
+    line-height: 1.5;
+}
+
+@media (max-width: 1199px) {
+    .aikaipin-filter-grid {
+        grid-template-columns: repeat(2, minmax(180px, 1fr));
+    }
+
+    .aikaipin-filter-keyword {
+        grid-column: span 2;
+    }
+}
+
+@media (max-width: 767px) {
+    .aikaipin-page-header {
+        display: block;
+    }
+
+    .aikaipin-list-toolbar {
+        align-items: stretch;
+    }
+
+    .aikaipin-list-toolbar-actions {
+        justify-content: flex-start;
+    }
+
+    .aikaipin-filter-grid,
+    .aikaipin-filter-keyword {
+        display: block;
+    }
+
+    .aikaipin-filter-field,
+    .aikaipin-filter-actions {
+        margin-bottom: 12px;
+    }
+}

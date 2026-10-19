@@ -11,6 +11,7 @@ use App\Portals\Logistics\Http\Controllers\ProductStatisticsController;
 use App\Portals\Logistics\Http\Controllers\ShopifyStoreController;
 use App\Portals\Logistics\Http\Controllers\ShopifyWebhookController;
 use App\Portals\ProductRequests\Http\Controllers\ProductRequestController;
+use App\Portals\Aikaipin\Http\Controllers\ProductLibraryController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [PortalEntryController::class, 'root'])->name('portal.root');
@@ -115,6 +116,7 @@ Route::delete('/orders/{order}/refunds/{refund}', [LogisticsOrderController::cla
 Route::get('/product-statistics', [ProductStatisticsController::class, 'index'])->name('logistics.product-statistics.index');
 Route::get('/product-statistics/detail', [ProductStatisticsController::class, 'detail'])->name('logistics.product-statistics.detail');
 Route::post('/product-statistics/export', [ProductStatisticsController::class, 'export'])->name('logistics.product-statistics.export');
+Route::get('/product-library', [ProductLibraryController::class, 'index'])->name('aikaipin.product-library.index');
 Route::get('/paypal-risk', [PayPalRiskController::class, 'index'])->name('logistics.paypal-risk.index');
 Route::post('/paypal-risk/accounts', [PayPalRiskController::class, 'store'])->name('logistics.paypal-risk.accounts.store');
 Route::put('/paypal-risk/accounts/{account}', [PayPalRiskController::class, 'update'])->name('logistics.paypal-risk.accounts.update');
