@@ -929,7 +929,7 @@
         var warn = root.querySelector('#sku-warn');
         var prefix = builder.getAttribute('data-sku-prefix') || '';
         var max = 50;
-        var boxDefault = builder.getAttribute('data-sku-box-default') || '1pc*';
+        var boxDefault = builder.getAttribute('data-sku-box-default') || '1pc';
         var templateBox = template.querySelector('[data-sku-part="box"]');
         if (templateBox && templateBox.value === '') { templateBox.value = boxDefault; }
 
@@ -1015,14 +1015,16 @@
             if (!hint) { return; }
             var value = String(input.value || '');
             var starIndex = value.lastIndexOf('*');
-            var starEmpty = starIndex !== -1 && value.slice(starIndex + 1).trim() === '';
-            if (!starEmpty) { hint.style.display = 'none'; return; }
+            var countFilled = starIndex !== -1 && value.slice(starIndex + 1).trim() !== '';
+            // 未填写个数时把占位提示跟在已填内容后面，提示词本身以 * 开头，输入框内不再默认带 *
+            if (value.trim() === '' || countFilled) { hint.style.display = 'none'; return; }
             if (!hintCanvas) { hintCanvas = document.createElement('canvas'); }
             var context = hintCanvas.getContext('2d');
             var style = window.getComputedStyle(input);
             context.font = style.font || (style.fontSize + ' ' + style.fontFamily);
             var paddingLeft = parseFloat(style.paddingLeft) || 0;
-            hint.style.left = (paddingLeft + context.measureText(value.slice(0, starIndex + 1)).width + 1) + 'px';
+            var anchor = starIndex === -1 ? value : value.slice(0, starIndex + 1);
+            hint.style.left = (paddingLeft + context.measureText(anchor).width + 1) + 'px';
             hint.style.display = 'block';
         }
 
