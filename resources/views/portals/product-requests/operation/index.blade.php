@@ -26,15 +26,16 @@
         'pasteHint' => $t('uploads.paste_hint'),
         'submitProgress' => $t('common.submit_progress'),
         'deleteConfirm' => $t('common.delete_confirm'), 'deleteFailed' => $t('common.delete_failed'),
+        'supplierUrlPrefix' => 'https://detail.1688.com/', 'supplierUrlInvalid' => $t('operation.link_prefix_error'),
     ];
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261018-20">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261018-22">
 @endpush
 @push('scripts')
     <script>window.ErpProductRequestConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261018-20"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261018-22"></script>
 @endpush
 
 @section('content')
@@ -52,6 +53,26 @@
             <div class="product-request-filter-field"><label>{{ $t('filters.per_page') }}</label><select class="form-control" name="per_page">@foreach([20, 50, 100] as $perPage)<option value="{{ $perPage }}" @selected($filters['per_page'] === $perPage)>{{ $perPage }}</option>@endforeach</select></div>
         </div><div class="product-request-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ $t('common.search') }}</button><a class="btn btn-default" href="{{ route('product-requests.operation.index') }}">{{ $t('common.reset') }}</a></div></form></div>
     </div>
+    @if(isset($drafts) && $drafts->isNotEmpty())
+        <div class="box box-solid product-request-draft-box">
+            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-file-text-o"></i> {{ $t('operation.drafts_title') }} <span class="badge bg-aqua">{{ $drafts->count() }}</span></h3></div>
+            <div class="box-body no-padding"><ul class="product-request-draft-list">
+                @foreach($drafts as $draft)
+                    <li class="product-request-draft-item">
+                        <div class="product-request-draft-meta">
+                            <strong>{{ $t('operation.draft_label') }} #{{ $draft->getKey() }}</strong>
+                            <span class="text-muted">{{ $t('operation.draft_updated_at') }} {{ optional($draft->updated_at)->timezone('Asia/Shanghai')->format('Y-m-d H:i') }}</span>
+                            <span class="text-muted">{{ $t('table.skus') }}：{{ trim((string) $draft->skus) !== '' ? \Illuminate\Support\Str::limit((string) $draft->skus, 60) : $t('common.not_filled') }}</span>
+                        </div>
+                        <div class="product-request-draft-actions">
+                            <button type="button" class="btn btn-primary btn-xs" data-product-request-modal-url="{{ route('product-requests.operation.drafts.edit', ['draft' => $draft, 'modal' => 1]) }}"><i class="fa fa-pencil"></i> {{ $t('operation.draft_continue') }}</button>
+                            <button type="button" class="btn btn-danger btn-xs" data-product-request-delete data-delete-url="{{ route('product-requests.operation.drafts.destroy', $draft) }}" data-delete-confirm="{{ $t('operation.draft_delete_confirm') }}" title="{{ $t('operation.draft_delete_confirm') }}"><i class="fa fa-trash-o"></i> {{ $t('common.delete') }}</button>
+                        </div>
+                    </li>
+                @endforeach
+            </ul></div>
+        </div>
+    @endif
     <div class="box box-solid product-request-table-box">
         <div class="box-header with-border product-request-list-toolbar"><h3 class="box-title">{{ $t('operation.title') }}</h3><span class="text-muted">{{ $t('operation.my_scope_hint') }}</span><span class="product-request-toolbar-spacer"></span><button type="button" class="btn btn-success btn-sm" data-product-request-modal-url="{{ route('product-requests.operation.create', ['modal' => 1]) }}"><i class="fa fa-plus"></i> {{ $t('common.new_request') }}</button></div>
         <div class="box-body table-responsive no-padding product-request-table-scroll"><table class="table table-hover product-request-table product-request-operation-table"><thead><tr><th class="product-request-sticky-left">{{ $t('table.report_no') }}</th><th>{{ $t('table.reported_at') }}</th><th class="product-request-sku-cell">{{ $t('table.skus') }}</th><th>{{ $t('table.staff_status') }}</th><th>{{ $t('table.review_status') }}</th><th class="product-request-remark-cell">{{ $t('table.review_remark') }}</th><th>{{ $t('table.warehouse_status') }}</th><th>{{ $t('table.operation_rectification_status') }}</th><th class="product-request-image-cell">{{ $t('table.product') }}</th><th class="product-request-image-cell product-request-image-cell-multi">{{ $t('table.seller_images') }}</th><th>{{ $t('table.operation_supplier_url') }}</th><th>{{ $t('table.reporter') }}</th><th>{{ $t('table.updated_at') }}</th><th class="product-request-sticky-right">{{ $t('common.operation') }}</th></tr></thead><tbody>

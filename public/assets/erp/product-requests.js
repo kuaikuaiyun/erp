@@ -307,6 +307,18 @@
         return !first;
     }
 
+    function validateSupplierUrl(form) {
+        var input = form.querySelector('input[name="operation_supplier_url"]');
+        if (!input) { return true; }
+        var prefix = (config.supplierUrlPrefix || 'https://detail.1688.com/').toLowerCase();
+        var value = (input.value || '').trim().toLowerCase();
+        if (value !== '' && value.indexOf(prefix) === 0) { return true; }
+        var group = input.closest('.form-group') || input.parentNode;
+        appendValidationError(group, config.supplierUrlInvalid || '');
+        if (typeof input.focus === 'function') { input.focus(); }
+        return false;
+    }
+
     function initializeReuse(root) {
         var reuseForm = root.querySelector('[data-product-request-reuse-form]');
         if (!reuseForm || reuseForm.dataset.productRequestReuseReady === '1') { return; }
@@ -1276,7 +1288,7 @@
     function deleteRecord(button) {
         var url = button.getAttribute('data-delete-url');
         if (!url || button.disabled) { return; }
-        if (config.deleteConfirm && !window.confirm(config.deleteConfirm)) { return; }
+        if (config.deleteConfirm && !window.confirm(button.getAttribute('data-delete-confirm') || config.deleteConfirm)) { return; }
         button.disabled = true;
         var row = button.closest ? button.closest('tr') : null;
         var xhr = new XMLHttpRequest();
@@ -1367,8 +1379,13 @@
         clearValidationErrors(form);
         var submitter = event.submitter || null;
         var isRejected = submitter && submitter.name === 'result' && submitter.value === 'rejected';
-        // 审核不通过时只需填写理由，跳过上传必填校验
-        if (!isRejected && !validateRequiredUploads(form)) { return; }
+        // 保存草稿：跳过必填与链接前缀校验，允许保存不完整内容
+        var isDraft = !!(submitter && submitter.name === 'action' && submitter.value === 'draft');
+        if (!isDraft) {
+            // 审核不通过时只需填写理由，跳过上传必填校验
+            if (!isRejected && !validateRequiredUploads(form)) { return; }
+            if (!validateSupplierUrl(form)) { return; }
+        }
         var formData = new FormData(form);
         if (submitter && submitter.name && !formData.has(submitter.name)) {
             formData.append(submitter.name, submitter.value);
@@ -1409,7 +1426,8 @@
         }
         startProgress();
         var xhr = new XMLHttpRequest();
-        xhr.open((form.getAttribute('method') || 'post').toUpperCase(), form.getAttribute('action'), true);
+        var submitUrl = submitter && submitter.getAttribute ? submitter.getAttribute('formaction') : null;
+        xhr.open((form.getAttribute('method') || 'post').toUpperCase(), submitUrl || form.getAttribute('action'), true);
         xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
         xhr.setRequestHeader('X-Product-Request-Modal', '1');
         xhr.setRequestHeader('Accept', 'application/json');

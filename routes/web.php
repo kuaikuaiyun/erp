@@ -49,6 +49,10 @@ Route::get('/product-requests/create', [ProductRequestController::class, 'operat
 Route::post('/product-requests', [ProductRequestController::class, 'operationStore'])->name('product-requests.operation.store');
 Route::post('/link-sku-manager/import', [ProductRequestController::class, 'linkSkuImport'])->name('product-requests.link-skus.import');
 Route::get('/product-requests/import-template', [ProductRequestController::class, 'operationImportTemplate'])->name('product-requests.operation.import-template');
+Route::post('/product-requests/drafts', [ProductRequestController::class, 'operationDraftStore'])->name('product-requests.operation.drafts.store');
+Route::get('/product-requests/drafts/{draft}/edit', [ProductRequestController::class, 'operationDraftEdit'])->name('product-requests.operation.drafts.edit');
+Route::delete('/product-requests/drafts/{draft}', [ProductRequestController::class, 'operationDraftDestroy'])->name('product-requests.operation.drafts.destroy');
+Route::get('/product-requests/drafts/{draft}/images/{type}/{index}', [ProductRequestController::class, 'operationDraftImage'])->name('product-requests.operation.drafts.image');
 Route::get('/product-requests/{productRequest}/edit', [ProductRequestController::class, 'operationEdit'])->name('product-requests.operation.edit');
 Route::put('/product-requests/{productRequest}', [ProductRequestController::class, 'operationUpdate'])->name('product-requests.operation.update');
 Route::post('/product-requests/{productRequest}/rectify', [ProductRequestController::class, 'operationRectify'])->name('product-requests.operation.rectify');

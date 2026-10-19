@@ -95,6 +95,38 @@ class ProductRequestWorkflowService
         }
     }
 
+    /** 将草稿里已保存的图片转成正式附件：复制文件到提报记录的附件目录 @param array<int, array<string, mixed>> $items */
+    public function adoptStageAttachments(ProductRequest $productRequest, string $stage, array $items, AdminUser $user): void
+    {
+        $sort = (int) $productRequest->attachments()->where('stage', $stage)->max('sort');
+
+        foreach (array_values($items) as $item) {
+            $source = (string) ($item['path'] ?? '');
+            if ($source === '' || !Storage::disk('local')->exists($source)) {
+                continue;
+            }
+
+            $extension = pathinfo($source, PATHINFO_EXTENSION);
+            $path = 'product-requests/'.$productRequest->report_no.'/'.$stage.'/'.Str::uuid().($extension ? '.'.$extension : '');
+            if (!Storage::disk('local')->copy($source, $path)) {
+                continue;
+            }
+
+            ProductRequestAttachment::query()->create([
+                'product_request_id' => $productRequest->getKey(),
+                'stage' => $stage,
+                'sort' => ++$sort,
+                'disk' => 'local',
+                'path' => $path,
+                'original_name' => $item['original_name'] ?? basename($source),
+                'mime_type' => $item['mime_type'] ?? null,
+                'size' => $item['size'] ?? null,
+                'uploaded_by' => $user->getKey(),
+                'uploaded_by_name' => $user->name,
+            ]);
+        }
+    }
+
     /** @param array<string, mixed> $payload */
     public function log(ProductRequest $productRequest, string $event, AdminUser $actor, array $payload = []): void
     {
