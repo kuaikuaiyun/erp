@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
 use App\Models\ProductRequest;
 use App\Models\ProductRequestAttachment;
+use App\Models\ProductRequestDraft;
 use App\Models\ProductRequestLinkSku;
 use App\Models\ProductRequestPlacementReview;
 use App\Portal\Http\Controllers\PortalEntryController;
@@ -15,6 +16,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
@@ -46,9 +48,16 @@ class ProductRequestController extends Controller
             $filters,
         )->with(['attachments', 'placementReviews'])->latest('id')->paginate($filters['per_page'])->withQueryString();
 
+        $drafts = ProductRequestDraft::query()
+            ->where('stage', ProductRequestDraft::STAGE_OPERATION)
+            ->where('user_id', $context['user']->getKey())
+            ->latest('id')
+            ->get();
+
         return view('portals.product-requests.operation.index', [
             ...$this->viewContext($context),
             'requests' => $requests,
+            'drafts' => $drafts,
             'filters' => $filters,
             'statusLabels' => $this->statusLabels(),
             'reviewStatusLabels' => $this->reviewStatusLabels(),
@@ -155,10 +164,11 @@ class ProductRequestController extends Controller
             return $context;
         }
 
-        $data = $this->validateOperationData($request);
+        $draft = $this->resolveDraft($request, $context['user']);
+        $data = $this->validateOperationData($request, null, $draft);
         $connection = config('admin.database.connection') ?: config('database.default');
 
-        $productRequest = DB::connection($connection)->transaction(function () use ($context, $data, $request): ProductRequest {
+        $productRequest = DB::connection($connection)->transaction(function () use ($context, $data, $request, $draft): ProductRequest {
             $actor = $this->access->actorSnapshot($context['user']);
             $productRequest = ProductRequest::query()->create([
                 'report_no' => 'REQ-'.Str::upper((string) Str::uuid()),
@@ -183,16 +193,49 @@ class ProductRequestController extends Controller
             $this->workflow->replaceStageAttachments(
                 $productRequest,
                 ProductRequestAttachment::STAGE_OPERATION,
-                [$request->file('product_image')],
+                $request->hasFile('product_image') ? [$request->file('product_image')] : [],
                 $context['user'],
             );
-            $this->workflow->replaceStageAttachments(
-                $productRequest,
-                ProductRequestAttachment::STAGE_PURCHASE_ITEM,
-                $request->file('purchase_item_images', []),
-                $context['user'],
+            if (!$request->hasFile('product_image') && $draft) {
+                $draftProductImages = $this->draftItems($draft, 'images');
+                if ($draftProductImages !== []) {
+                    $this->workflow->adoptStageAttachments(
+                        $productRequest,
+                        ProductRequestAttachment::STAGE_OPERATION,
+                        [$draftProductImages[0]],
+                        $context['user'],
+                    );
+                }
+            }
+
+            // 草稿中保留的图片先接管，再追加本次新上传的图片，总数不超过 6 张
+            $keptPurchaseImages = $draft ? $this->draftSplitItems($draft, $request, 'purchase_images', 'purchase_images_removed')[0] : [];
+            if ($keptPurchaseImages !== []) {
+                $this->workflow->adoptStageAttachments(
+                    $productRequest,
+                    ProductRequestAttachment::STAGE_PURCHASE_ITEM,
+                    $keptPurchaseImages,
+                    $context['user'],
+                );
+            }
+            $newPurchaseImages = array_slice(
+                (array) $request->file('purchase_item_images', []),
+                0,
+                max(0, 6 - count($keptPurchaseImages)),
             );
+            foreach ($newPurchaseImages as $file) {
+                $this->workflow->storeStageAttachment(
+                    $productRequest,
+                    ProductRequestAttachment::STAGE_PURCHASE_ITEM,
+                    $file,
+                    $context['user'],
+                );
+            }
             $this->workflow->log($productRequest, 'operation_submitted', $context['user']);
+
+            if ($draft) {
+                $this->deleteDraft($draft);
+            }
 
             return $productRequest;
         });
@@ -202,6 +245,215 @@ class ProductRequestController extends Controller
             __('product_requests.messages.operation_submitted', ['report_no' => $productRequest->report_no]),
             'product-requests.operation.index',
         );
+    }
+
+    /** 保存需求提报草稿：不进入流程，仅本人可见，可随时回来继续编辑 */
+    public function operationDraftStore(Request $request): Response|RedirectResponse
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $user = $context['user'];
+        $data = $request->validate([
+            'skus' => ['nullable', 'string', 'max:2048'],
+            'operation_supplier_url' => ['nullable', 'string', 'max:2048'],
+            'has_stock' => ['nullable', Rule::in(['yes', 'no'])],
+            'operation_remark' => ['nullable', 'string', 'max:2000'],
+            'product_image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'purchase_item_images' => ['nullable', 'array', 'max:6'],
+            'purchase_item_images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+        ]);
+
+        $existing = $this->resolveDraft($request, $user);
+        $draft = $existing ?? new ProductRequestDraft();
+        $draft->user_id = $user->getKey();
+        $draft->stage = ProductRequestDraft::STAGE_OPERATION;
+        $draft->product_request_id = null;
+        $draft->skus = $this->normalizeSkus((string) ($data['skus'] ?? ''));
+        $draft->operation_supplier_url = trim((string) ($data['operation_supplier_url'] ?? ''));
+        $draft->has_stock = $data['has_stock'] ?? null;
+        $draft->operation_remark = $data['operation_remark'] ?? null;
+
+        $images = $existing ? $this->draftItems($existing, 'images') : [];
+        if ($request->hasFile('product_image')) {
+            $this->deleteDraftImageFiles($images);
+            $images = [$this->storeDraftImage($request->file('product_image'))];
+        }
+        $draft->images = $images === [] ? null : $images;
+
+        [$keptPurchaseImages, $droppedPurchaseImages] = $existing
+            ? $this->draftSplitItems($existing, $request, 'purchase_images', 'purchase_images_removed')
+            : [[], []];
+        $this->deleteDraftImageFiles($droppedPurchaseImages);
+        foreach (array_slice((array) $request->file('purchase_item_images', []), 0, max(0, 6 - count($keptPurchaseImages))) as $file) {
+            $keptPurchaseImages[] = $this->storeDraftImage($file);
+        }
+        $draft->purchase_images = $keptPurchaseImages === [] ? null : $keptPurchaseImages;
+
+        $draft->save();
+
+        return $this->modalSuccess($request, __('product_requests.operation.draft_saved'), 'product-requests.operation.index');
+    }
+
+    /** 打开草稿继续编辑 */
+    public function operationDraftEdit(Request $request, ProductRequestDraft $draft): Response|View
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $this->assertDraftOwner($draft, $context['user'], ProductRequestDraft::STAGE_OPERATION);
+
+        if (!$this->isModalRequest($request)) {
+            return redirect()->route('product-requests.operation.index');
+        }
+
+        return view('portals.product-requests.operation.form', [
+            ...$this->viewContext($context),
+            'actor' => $this->access->actorSnapshot($context['user']),
+            'productRequest' => new ProductRequest(),
+            'draft' => $draft,
+        ]);
+    }
+
+    public function operationDraftDestroy(Request $request, ProductRequestDraft $draft): JsonResponse|RedirectResponse
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $this->assertDraftOwner($draft, $context['user'], ProductRequestDraft::STAGE_OPERATION);
+
+        $this->deleteDraft($draft);
+
+        return $this->modalSuccess($request, __('product_requests.operation.draft_deleted'), 'product-requests.operation.index');
+    }
+
+    /** 读取草稿图片（仅草稿归属人可见） */
+    public function operationDraftImage(Request $request, ProductRequestDraft $draft, string $type, int $index): Response
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $this->assertDraftOwner($draft, $context['user'], ProductRequestDraft::STAGE_OPERATION);
+        abort_unless(in_array($type, ['product', 'purchase'], true), 404);
+
+        $items = $this->draftItems($draft, $type === 'product' ? 'images' : 'purchase_images');
+        $item = $items[$index] ?? null;
+        $path = is_array($item) ? (string) ($item['path'] ?? '') : '';
+        abort_unless($path !== '' && Storage::disk('local')->exists($path), 404);
+
+        return response()->file(Storage::disk('local')->path($path), [
+            'Content-Type' => ($item['mime_type'] ?? '') ?: 'application/octet-stream',
+        ]);
+    }
+
+    /** 校验草稿归属与类型，避免跨用户、跨模块操作草稿 */
+    private function assertDraftOwner(ProductRequestDraft $draft, AdminUser $user, string $stage): void
+    {
+        abort_unless($draft->stage === $stage && (int) $draft->user_id === (int) $user->getKey(), 403);
+    }
+
+    /** 读取草稿图片：按草稿类型匹配对应门户，且仅草稿归属人可见 */
+    public function draftImage(Request $request, ProductRequestDraft $draft, string $type, int $index): Response
+    {
+        $context = $this->portalContext($request, $draft->stage === ProductRequestDraft::STAGE_PROCUREMENT
+            ? ProductRequestAccessService::PROCUREMENT_PORTAL_CODE
+            : ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $this->assertDraftOwner($draft, $context['user'], $draft->stage);
+
+        $items = $this->draftItems($draft, $type === 'purchase' ? 'purchase_images' : 'images');
+        $item = $items[$index] ?? null;
+        $path = is_array($item) ? (string) ($item['path'] ?? '') : '';
+        abort_unless($path !== '' && Storage::disk('local')->exists($path), 404);
+
+        return response()->file(Storage::disk('local')->path($path), [
+            'Content-Type' => ($item['mime_type'] ?? '') ?: 'application/octet-stream',
+        ]);
+    }
+
+    private function resolveDraft(Request $request, AdminUser $user): ?ProductRequestDraft
+    {
+        $id = (int) $request->input('draft_id', 0);
+        if ($id <= 0) {
+            return null;
+        }
+
+        return ProductRequestDraft::query()
+            ->where('stage', ProductRequestDraft::STAGE_OPERATION)
+            ->where('user_id', $user->getKey())
+            ->find($id);
+    }
+
+    /** @return array<int, array<string, mixed>> */
+    private function draftItems(ProductRequestDraft $draft, string $field): array
+    {
+        return array_values(array_filter((array) ($draft->{$field} ?? []), 'is_array'));
+    }
+
+    /** 拆出草稿中保留与移除的图片 @return array{0: array<int, array<string, mixed>>, 1: array<int, array<string, mixed>>} */
+    private function draftSplitItems(ProductRequestDraft $draft, Request $request, string $field, string $removedField): array
+    {
+        $removed = collect(preg_split('/[,，;；\s]+/u', (string) $request->input($removedField, '')))
+            ->map(fn ($value): string => trim((string) $value))
+            ->filter(fn (string $value): bool => $value !== '' && ctype_digit($value))
+            ->map(fn (string $value): int => (int) $value)
+            ->all();
+
+        $kept = [];
+        $dropped = [];
+        foreach ($this->draftItems($draft, $field) as $index => $item) {
+            if (in_array($index, $removed, true)) {
+                $dropped[] = $item;
+            } else {
+                $kept[] = $item;
+            }
+        }
+
+        return [$kept, $dropped];
+    }
+
+    /** @return array{path: string, original_name: string, mime_type: string|null, size: int} */
+    private function storeDraftImage(UploadedFile $file): array
+    {
+        $extension = strtolower($file->getClientOriginalExtension()) ?: 'img';
+        $path = 'product-request-drafts/'.Str::uuid().'.'.$extension;
+        Storage::disk('local')->putFileAs(dirname($path), $file, basename($path));
+
+        return [
+            'path' => $path,
+            'original_name' => Str::limit((string) $file->getClientOriginalName(), 255, ''),
+            'mime_type' => $file->getMimeType(),
+            'size' => (int) $file->getSize(),
+        ];
+    }
+
+    /** @param array<int, array<string, mixed>> $items */
+    private function deleteDraftImageFiles(array $items): void
+    {
+        foreach ($items as $item) {
+            $path = is_array($item) ? (string) ($item['path'] ?? '') : '';
+            if ($path !== '') {
+                Storage::disk('local')->delete($path);
+            }
+        }
+    }
+
+    private function deleteDraft(ProductRequestDraft $draft): void
+    {
+        $this->deleteDraftImageFiles($this->draftItems($draft, 'images'));
+        $this->deleteDraftImageFiles($this->draftItems($draft, 'purchase_images'));
+        $draft->delete();
     }
 
     /** Excel 批量导入链接级 SKU 与 PCL 数据：仅 boss 账号可用，只写链接维度数据供流程使用，不生成需求提报记录 */
@@ -919,11 +1171,25 @@ class ProductRequestController extends Controller
 
         $productRequest->load('attachments');
 
+        // 存在本人草稿时优先回填草稿内容，方便继续上次未完成的填写
+        $draft = $this->resolveProcurementDraft($productRequest, $context['user']);
+        $skuValues = is_array($productRequest->procurement_sku_values) ? $productRequest->procurement_sku_values : [];
+        if ($draft) {
+            foreach ((array) (($draft->payload ?? [])['sku_values'] ?? []) as $sku => $value) {
+                if (is_array($value) && is_array($skuValues[$sku] ?? null)) {
+                    $skuValues[$sku] = array_merge($skuValues[$sku], $value);
+                } elseif (is_array($value)) {
+                    $skuValues[$sku] = $value;
+                }
+            }
+        }
+
         return view('portals.product-requests.procurement.form', [
             ...$this->viewContext($context),
             'productRequest' => $productRequest,
             'actor' => $this->access->actorSnapshot($context['user']),
-            'skuValues' => is_array($productRequest->procurement_sku_values) ? $productRequest->procurement_sku_values : [],
+            'skuValues' => $skuValues,
+            'draft' => $draft,
         ]);
     }
 
@@ -936,12 +1202,13 @@ class ProductRequestController extends Controller
         abort_unless($this->access->canInspectProcurement($context['user']), 403);
         abort_unless($this->access->canViewProcurementRequest($productRequest, $context['user']), 403);
 
-        $data = $this->validateProcurementData($request, $productRequest);
+        $draft = $this->resolveProcurementDraft($productRequest, $context['user']);
+        $data = $this->validateProcurementData($request, $productRequest, $draft);
         $rejected = ($data['result'] ?? '') === 'rejected';
         unset($data['result']);
         $connection = config('admin.database.connection') ?: config('database.default');
 
-        DB::connection($connection)->transaction(function () use ($productRequest, $request, $data, $context, $rejected): void {
+        DB::connection($connection)->transaction(function () use ($productRequest, $request, $data, $context, $rejected, $draft): void {
             $locked = ProductRequest::query()->lockForUpdate()->findOrFail($productRequest->getKey());
             abort_unless($this->access->canViewProcurementRequest($locked, $context['user']), 403);
             // 允许已检验通过的记录再次编辑，第二次保存覆盖第一次结果
@@ -1011,8 +1278,9 @@ class ProductRequestController extends Controller
             ])->save();
 
             $newImages = $request->file('seller_images', []);
-            // 删除后剩余 0 张视为必填校验失败；携带复用来源且来源已包含采购阶段图片时放行
-            $totalAfter = max(0, $locked->attachmentsFor(ProductRequestAttachment::STAGE_PROCUREMENT)->count() - count($removedImageIds)) + count($newImages);
+            // 草稿中保留的图片（本次未删除的），在未新上传且未复用来源时接管为正式附件
+            $draftImages = $draft ? $this->draftSplitItems($draft, $request, 'images', 'removed_seller_images')[0] : [];
+            // 复用来源：本次未删除任何已存图片且携带复用来源时使用
             $reuseSource = null;
             if ($removedImageIds === [] && $reuseSourceId > 0) {
                 $reuseSource = ProductRequest::query()->with('attachments')->find($reuseSourceId);
@@ -1020,6 +1288,9 @@ class ProductRequestController extends Controller
                     $reuseSource = null;
                 }
             }
+            $adoptDraftImages = ($newImages === [] && $reuseSource === null) ? $draftImages : [];
+            // 删除后剩余 0 张视为必填校验失败；携带复用来源且来源已包含采购阶段图片时放行
+            $totalAfter = max(0, $locked->attachmentsFor(ProductRequestAttachment::STAGE_PROCUREMENT)->count() - count($removedImageIds)) + count($newImages) + count($adoptDraftImages);
             if ($totalAfter === 0 && !($reuseSource && $reuseSource->attachmentsFor(ProductRequestAttachment::STAGE_PROCUREMENT)->isNotEmpty())) {
                 throw \Illuminate\Validation\ValidationException::withMessages([
                     'seller_images' => [__('product_requests.uploads.required')],
@@ -1033,6 +1304,8 @@ class ProductRequestController extends Controller
             } elseif ($reuseSource) {
                 $this->workflow->copyStageAttachments($reuseSource, $locked, ProductRequestAttachment::STAGE_PROCUREMENT, $context['user']);
                 $locked->forceFill(['reused_from_product_request_id' => $reuseSource->getKey()])->save();
+            } elseif ($adoptDraftImages !== []) {
+                $this->workflow->adoptStageAttachments($locked, ProductRequestAttachment::STAGE_PROCUREMENT, $adoptDraftImages, $context['user']);
             }
 
             // 系统添加的实拍图同步复制到链接 SKU 记录，PCL SKU 管理中可统一查看与编辑
@@ -1051,6 +1324,12 @@ class ProductRequestController extends Controller
             ]);
         });
 
+        // 正式提交完成后草稿已无意义，一并清理
+        $draft = $this->resolveProcurementDraft($productRequest, $context['user']);
+        if ($draft) {
+            $this->deleteDraft($draft);
+        }
+
         return $this->modalSuccess(
             $request,
             $rejected
@@ -1058,6 +1337,85 @@ class ProductRequestController extends Controller
                 : __('product_requests.messages.procurement_completed'),
             'product-requests.procurement.index',
         );
+    }
+
+    /** 保存商品信息检验草稿：不改变记录状态，仅本人可见，下次打开该表单自动回填 */
+    public function procurementDraftStore(Request $request): Response|RedirectResponse
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::PROCUREMENT_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $user = $context['user'];
+        abort_unless($this->access->canInspectProcurement($user), 403);
+
+        $data = $request->validate([
+            'product_request_id' => ['required', 'integer'],
+            'pcl_product_no' => ['nullable', 'string', 'max:100'],
+            'standard_chinese_name' => ['nullable', 'string', 'max:191'],
+            'inspection_reject_reason' => ['nullable', 'string', 'max:2000'],
+            'skus' => ['nullable', 'string', 'max:10000'],
+            'selected_skus' => ['nullable', 'array', 'max:100'],
+            'selected_skus.*' => ['string', 'max:500'],
+            'link_skus' => ['nullable', 'string', 'max:20000'],
+            'sku_value_rows' => ['nullable', 'string', 'max:20000'],
+            'reuse_source_id' => ['nullable', 'integer'],
+            'removed_seller_images' => ['nullable', 'string', 'max:100'],
+            'seller_images' => ['nullable', 'array', 'max:3'],
+            'seller_images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+        ]);
+
+        $productRequest = ProductRequest::query()->findOrFail((int) $data['product_request_id']);
+        abort_unless($this->access->canViewProcurementRequest($productRequest, $user), 403);
+
+        $draft = $this->resolveProcurementDraft($productRequest, $user);
+        $isExisting = $draft !== null;
+        $draft ??= new ProductRequestDraft();
+        $draft->user_id = $user->getKey();
+        $draft->stage = ProductRequestDraft::STAGE_PROCUREMENT;
+        $draft->product_request_id = $productRequest->getKey();
+
+        // 草稿图片：按勾选移除旧图，再追加本次新上传的图片，总数不超过 3 张
+        [$images] = $isExisting
+            ? $this->draftSplitItems($draft, $request, 'images', 'removed_seller_images')
+            : [[], []];
+        $dropped = $isExisting
+            ? $this->draftSplitItems($draft, $request, 'images', 'removed_seller_images')[1]
+            : [];
+        $this->deleteDraftImageFiles($dropped);
+        foreach (array_slice((array) $request->file('seller_images', []), 0, max(0, 3 - count($images))) as $file) {
+            $images[] = $this->storeDraftImage($file);
+        }
+        $draft->images = $images === [] ? null : $images;
+
+        $skuValueRows = json_decode((string) ($data['sku_value_rows'] ?? ''), true);
+        $draft->payload = [
+            'pcl_product_no' => (string) ($data['pcl_product_no'] ?? ''),
+            'standard_chinese_name' => (string) ($data['standard_chinese_name'] ?? ''),
+            'inspection_reject_reason' => (string) ($data['inspection_reject_reason'] ?? ''),
+            'skus' => $this->normalizeSkus((string) ($data['skus'] ?? '')),
+            'selected_skus' => array_values(array_unique(array_filter(array_map(
+                fn ($value): string => trim((string) $value),
+                (array) ($data['selected_skus'] ?? []),
+            ), fn (string $value): bool => $value !== ''))),
+            'system_skus' => $this->splitSkus((string) ($data['link_skus'] ?? '')),
+            'sku_values' => is_array($skuValueRows) ? $skuValueRows : [],
+            'reuse_source_id' => (int) ($data['reuse_source_id'] ?? 0),
+        ];
+        $draft->save();
+
+        return $this->modalSuccess($request, __('product_requests.procurement.draft_saved'), 'product-requests.procurement.index');
+    }
+
+    private function resolveProcurementDraft(ProductRequest $productRequest, AdminUser $user): ?ProductRequestDraft
+    {
+        return ProductRequestDraft::query()
+            ->where('stage', ProductRequestDraft::STAGE_PROCUREMENT)
+            ->where('user_id', $user->getKey())
+            ->where('product_request_id', $productRequest->getKey())
+            ->latest('id')
+            ->first();
     }
 
     public function procurementReuseCheck(Request $request): JsonResponse|Response
@@ -1169,23 +1527,33 @@ class ProductRequestController extends Controller
         $keyword = trim((string) $request->query('keyword', ''));
         $sourceFilter = (string) $request->query('source', '');
         $reviewStatusFilter = (string) $request->query('review_status', '');
+        // 每页条数仅支持 20 / 50，非法值回落到默认 20
+        $perPage = (int) $request->query('per_page', 20);
+        if (!in_array($perPage, [20, 50], true)) {
+            $perPage = 20;
+        }
         $links = ProductRequestLinkSku::query()
             ->when($keyword !== '', function (Builder $query) use ($keyword): Builder {
-                $pclHashes = ProductRequest::query()
-                    ->where('pcl_product_no', 'like', '%'.$keyword.'%')
+                // PCL 与商品名称都可能只存在同链接的提报记录中，按链接哈希一并匹配
+                $matchedHashes = ProductRequest::query()
+                    ->where(function (Builder $inner) use ($keyword): void {
+                        $inner->where('pcl_product_no', 'like', '%'.$keyword.'%')
+                            ->orWhere('standard_chinese_name', 'like', '%'.$keyword.'%');
+                    })
                     ->pluck('supplier_url_hash');
 
-                return $query->where(function (Builder $q) use ($keyword, $pclHashes): void {
+                return $query->where(function (Builder $q) use ($keyword, $matchedHashes): void {
                     $q->where('supplier_url', 'like', '%'.$keyword.'%')
                         ->orWhere('skus', 'like', '%'.$keyword.'%')
                         ->orWhere('pcl_product_no', 'like', '%'.$keyword.'%')
-                        ->when($pclHashes->isNotEmpty(), fn (Builder $inner): Builder => $inner->orWhereIn('supplier_url_hash', $pclHashes));
+                        ->orWhere('product_name', 'like', '%'.$keyword.'%')
+                        ->when($matchedHashes->isNotEmpty(), fn (Builder $inner): Builder => $inner->orWhereIn('supplier_url_hash', $matchedHashes));
                 });
             })
             ->when(in_array($sourceFilter, ['system', 'import'], true), fn (Builder $query): Builder => $query->where('source', $sourceFilter))
             ->when(in_array($reviewStatusFilter, ['pending', 'done'], true), fn (Builder $query): Builder => $query->where('review_status', $reviewStatusFilter))
             ->orderByDesc('updated_at')
-            ->paginate(20)
+            ->paginate($perPage)
             ->withQueryString();
 
         // 每个链接展示最新一条同链接提报记录的 PCL 商品编号（链接表自身已存 PCL 时优先）
@@ -1230,7 +1598,7 @@ class ProductRequestController extends Controller
             'pclMap' => $pclMap,
             'nameMap' => $nameMap,
             'coverMap' => $coverMap,
-            'filters' => ['keyword' => $keyword, 'source' => $sourceFilter, 'review_status' => $reviewStatusFilter],
+            'filters' => ['keyword' => $keyword, 'source' => $sourceFilter, 'review_status' => $reviewStatusFilter, 'per_page' => $perPage],
             'canImport' => $this->canImportProductRequests($context['user']),
         ]);
     }
@@ -1852,14 +2220,19 @@ class ProductRequestController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function validateOperationData(Request $request, ?ProductRequest $productRequest = null): array
+    private function validateOperationData(Request $request, ?ProductRequest $productRequest = null, ?ProductRequestDraft $draft = null): array
     {
-        $hasProductImage = $productRequest
-            ? $productRequest->loadMissing('attachments')->attachmentsFor(ProductRequestAttachment::STAGE_OPERATION)->isNotEmpty()
-            : false;
-        $hasPurchaseImages = $productRequest
-            ? $productRequest->attachmentsFor(ProductRequestAttachment::STAGE_PURCHASE_ITEM)->isNotEmpty()
-            : false;
+        $hasProductImage = false;
+        $hasPurchaseImages = false;
+        if ($productRequest) {
+            $productRequest->loadMissing('attachments');
+            $hasProductImage = $productRequest->attachmentsFor(ProductRequestAttachment::STAGE_OPERATION)->isNotEmpty();
+            $hasPurchaseImages = $productRequest->attachmentsFor(ProductRequestAttachment::STAGE_PURCHASE_ITEM)->isNotEmpty();
+        } elseif ($draft) {
+            // 草稿已保存的图片同样视为已上传，提交时无需重复选择
+            $hasProductImage = $this->draftItems($draft, 'images') !== [];
+            $hasPurchaseImages = $this->draftSplitItems($draft, $request, 'purchase_images', 'purchase_images_removed')[0] !== [];
+        }
 
         return $request->validate([
             'skus' => [
@@ -1889,13 +2262,15 @@ class ProductRequestController extends Controller
                 'required',
                 'string',
                 'max:2048',
-                'regex:#^https?://#i',
+                'regex:#^https://detail\.1688\.com/#i',
             ],
             'has_stock' => ['required', Rule::in(['yes', 'no'])],
             'product_image' => [$hasProductImage ? 'nullable' : 'required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
             'purchase_item_images' => [$hasPurchaseImages ? 'nullable' : 'required', 'array', 'min:1', 'max:6'],
             'purchase_item_images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
             'operation_remark' => ['nullable', 'string', 'max:2000'],
+        ], [
+            'operation_supplier_url.regex' => __('product_requests.operation.link_prefix_error'),
         ]);
     }
 
@@ -1911,13 +2286,17 @@ class ProductRequestController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function validateProcurementData(Request $request, ?ProductRequest $productRequest = null): array
+    private function validateProcurementData(Request $request, ?ProductRequest $productRequest = null, ?ProductRequestDraft $draft = null): array
     {
         $rejected = $request->input('result') === 'rejected';
         $hasExistingImages = $productRequest
             ? $productRequest->loadMissing('attachments')->attachmentsFor(ProductRequestAttachment::STAGE_PROCUREMENT)->isNotEmpty()
             : false;
         $reusedImages = (int) $request->input('reuse_source_id', 0) > 0;
+        // 草稿中保留的图片同样视为已上传，正式保存时会被接管为附件
+        $hasDraftImages = $draft
+            ? $this->draftSplitItems($draft, $request, 'images', 'removed_seller_images')[0] !== []
+            : false;
 
         if ($rejected) {
             return $request->validate([
@@ -1943,7 +2322,7 @@ class ProductRequestController extends Controller
             'link_skus' => ['nullable', 'string', 'max:20000'],
             'sku_value_rows' => ['nullable', 'string', 'max:20000'],
             // 卖家图 / 实拍图必填：已保存附件或复用来源已带图时无需重复上传
-            'seller_images' => ($reusedImages || $hasExistingImages) ? ['nullable', 'array', 'max:3'] : ['required', 'array', 'max:3'],
+            'seller_images' => ($reusedImages || $hasExistingImages || $hasDraftImages) ? ['nullable', 'array', 'max:3'] : ['required', 'array', 'max:3'],
             'seller_images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
             'reuse_source_id' => ['nullable', 'integer'],
             'removed_seller_images' => ['nullable', 'string', 'max:100'],

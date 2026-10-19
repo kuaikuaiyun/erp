@@ -307,6 +307,18 @@
         return !first;
     }
 
+    function validateSupplierUrl(form) {
+        var input = form.querySelector('input[name="operation_supplier_url"]');
+        if (!input) { return true; }
+        var prefix = (config.supplierUrlPrefix || 'https://detail.1688.com/').toLowerCase();
+        var value = (input.value || '').trim().toLowerCase();
+        if (value !== '' && value.indexOf(prefix) === 0) { return true; }
+        var group = input.closest('.form-group') || input.parentNode;
+        appendValidationError(group, config.supplierUrlInvalid || '');
+        if (typeof input.focus === 'function') { input.focus(); }
+        return false;
+    }
+
     function initializeReuse(root) {
         var reuseForm = root.querySelector('[data-product-request-reuse-form]');
         if (!reuseForm || reuseForm.dataset.productRequestReuseReady === '1') { return; }
@@ -566,6 +578,12 @@
         try { skuValues = JSON.parse(panel.getAttribute('data-initial-sku-values') || '{}') || {}; } catch (e) { skuValues = {}; }
         var pricePlaceholder = panel.getAttribute('data-price-placeholder') || '';
         var weightPlaceholder = panel.getAttribute('data-weight-placeholder') || '';
+        var priceLabel = panel.getAttribute('data-price-label') || '';
+        var weightLabel = panel.getAttribute('data-weight-label') || '';
+        // 商品信息检验草稿：恢复上次勾选的系统 SKU 与右侧列表，无需重新查重
+        var draftData = null;
+        try { draftData = JSON.parse(form.getAttribute('data-procurement-draft') || 'null'); } catch (e) { draftData = null; }
+        var draftChecked = draftData && Array.isArray(draftData.selected_skus) ? draftData.selected_skus : null;
 
         var operationList = panel.querySelector('#sku-operation-list');
         var skuSource = root.querySelector('[data-sku-edit-source]');
@@ -649,18 +667,21 @@
         }
 
         // SKU 行：editable=true 时渲染文本框（仅运营 SKU 可改），否则只读展示；每行附采购价/重量输入框，勾选才可编辑
-        function buildSkuRow(value, editable) {
+        function buildSkuRow(value, editable, checked) {
             var label = document.createElement('label');
             label.className = 'sku-suggestion-item';
             var checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
             checkbox.name = 'selected_skus[]';
             checkbox.value = value;
-            checkbox.checked = true;
+            checkbox.checked = checked === undefined || checked === null ? true : !!checked;
             checkbox.setAttribute('data-sku-select', 'true');
             label.appendChild(checkbox);
 
-            function buildValueField(kind, placeholder) {
+            // 数值输入框外再包一层小字标签，明确区分「采购价」与「重量」，只读行也能看清数值含义
+            function buildValueField(kind, placeholder, caption) {
+                var wrap = document.createElement('span');
+                wrap.className = 'sku-value-field';
                 var field = document.createElement('input');
                 field.type = 'text';
                 field.className = 'sku-suggestion-input sku-value-input';
@@ -672,10 +693,19 @@
                 field.disabled = !checkbox.checked;
                 field.addEventListener('input', syncSkuValues);
                 field.addEventListener('click', function (event) { event.preventDefault(); });
-                return field;
+                if (caption !== '') {
+                    var captionEl = document.createElement('span');
+                    captionEl.className = 'sku-value-caption';
+                    captionEl.textContent = caption;
+                    wrap.appendChild(captionEl);
+                }
+                wrap.appendChild(field);
+                return { field: field, wrap: wrap };
             }
-            var priceField = buildValueField('price', pricePlaceholder);
-            var weightField = buildValueField('weight', weightPlaceholder);
+            var priceBuild = buildValueField('price', pricePlaceholder, priceLabel);
+            var priceField = priceBuild.field;
+            var weightBuild = buildValueField('weight', weightPlaceholder, weightLabel);
+            var weightField = weightBuild.field;
             // 系统已录入（同 1688 链接）SKU 的价格/重量仅展示，不可修改；运营 SKU 勾选后价格/重量必填（未勾选禁用自动跳过校验）
             if (!editable) { priceField.readOnly = true; weightField.readOnly = true; }
             if (editable) { priceField.required = true; weightField.required = true; }
@@ -704,8 +734,8 @@
             } else {
                 label.appendChild(document.createTextNode(value));
             }
-            label.appendChild(priceField);
-            label.appendChild(weightField);
+            label.appendChild(priceBuild.wrap);
+            label.appendChild(weightBuild.wrap);
             return label;
         }
 
@@ -772,7 +802,7 @@
                     seen.push(value);
                     total += 1;
                     // 链接上已录入的 SKU 只读展示，仅可勾选/取消（不提供修改）
-                    var label = buildSkuRow(sku, false);
+                    var label = buildSkuRow(sku, false, draftChecked === null ? true : draftChecked.indexOf(value) !== -1);
                     if (item.report_no) {
                         var source = document.createElement('span');
                         source.className = 'sku-source';
@@ -846,6 +876,9 @@
         form.erpSkuSuggestions = fetchSuggestions;
         // 提交拦截：未勾选任何系统已录入 SKU 时，运营填写的 SKU 至少要勾选一个（审核不通过除外）
         form.addEventListener('submit', function (event) {
+            var submitter = event.submitter || null;
+            // 保存草稿：允许不勾选任何 SKU 直接保存
+            if (submitter && submitter.name === 'action' && submitter.value === 'draft') { return; }
             var resultInput = form.querySelector('input[name="result"]');
             if (resultInput && resultInput.value === 'rejected') { return; }
             if (!panel.querySelector('input[name="selected_skus[]"]:checked')) {
@@ -856,6 +889,10 @@
         }, true);
         // 进入表单只展示左侧运营 SKU；右侧系统已录入 SKU 在点击查重复用后再加载显示
         render('点击「品名和 1688 查重」复用后，此处显示同 1688 链接已录入的 SKU');
+        if (draftData && draftData.system_skus && draftData.system_skus.length) {
+            extraItems = [{ id: null, report_no: draftData.report_no || null, skus: draftData.system_skus }];
+            render();
+        }
         updateSummary();
     }
 
@@ -1276,7 +1313,7 @@
     function deleteRecord(button) {
         var url = button.getAttribute('data-delete-url');
         if (!url || button.disabled) { return; }
-        if (config.deleteConfirm && !window.confirm(config.deleteConfirm)) { return; }
+        if (config.deleteConfirm && !window.confirm(button.getAttribute('data-delete-confirm') || config.deleteConfirm)) { return; }
         button.disabled = true;
         var row = button.closest ? button.closest('tr') : null;
         var xhr = new XMLHttpRequest();
@@ -1367,9 +1404,16 @@
         clearValidationErrors(form);
         var submitter = event.submitter || null;
         var isRejected = submitter && submitter.name === 'result' && submitter.value === 'rejected';
-        // 审核不通过时只需填写理由，跳过上传必填校验
-        if (!isRejected && !validateRequiredUploads(form)) { return; }
+        // 保存草稿：跳过必填与链接前缀校验，允许保存不完整内容
+        var isDraft = !!(submitter && submitter.name === 'action' && submitter.value === 'draft');
+        if (!isDraft) {
+            // 审核不通过时只需填写理由，跳过上传必填校验
+            if (!isRejected && !validateRequiredUploads(form)) { return; }
+            if (!validateSupplierUrl(form)) { return; }
+        }
         var formData = new FormData(form);
+        // 保存草稿提交到独立接口，需去掉表单的方法伪装（如 PUT），否则会被改写为 PUT 而找不到路由
+        if (isDraft) { formData.delete('_method'); }
         if (submitter && submitter.name && !formData.has(submitter.name)) {
             formData.append(submitter.name, submitter.value);
         }
@@ -1409,7 +1453,8 @@
         }
         startProgress();
         var xhr = new XMLHttpRequest();
-        xhr.open((form.getAttribute('method') || 'post').toUpperCase(), form.getAttribute('action'), true);
+        var submitUrl = submitter && submitter.getAttribute ? submitter.getAttribute('formaction') : null;
+        xhr.open((form.getAttribute('method') || 'post').toUpperCase(), submitUrl || form.getAttribute('action'), true);
         xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
         xhr.setRequestHeader('X-Product-Request-Modal', '1');
         xhr.setRequestHeader('Accept', 'application/json');

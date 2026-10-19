@@ -58,7 +58,15 @@
 .product-request-ellipsis { max-width: 300px !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .product-request-ellipsis > a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .product-request-empty { padding: 42px 15px !important; color: #84909d !important; text-align: center; }
-.product-request-pagination { padding: 12px 15px; }
+.product-request-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 15px; }
+.product-request-pagination .pagination { margin: 0; }
+.product-request-pagination-total { color: #7b8794; font-size: 13px; }
+.product-request-draft-list { list-style: none; margin: 0; padding: 0; }
+.product-request-draft-item { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 15px; border-bottom: 1px solid #eef2f6; }
+.product-request-draft-item:last-child { border-bottom: 0; }
+.product-request-draft-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-width: 0; }
+.product-request-draft-meta strong { color: #304b68; }
+.product-request-draft-actions { display: flex; align-items: center; gap: 6px; }
 .product-request-editor-modal .modal-dialog { width: min(980px, calc(100vw - 30px)); }
 .product-request-editor-modal .modal-content { overflow: hidden; border: 0; border-radius: 5px; box-shadow: 0 9px 32px rgba(27, 49, 72, .24); }
 .product-request-editor-modal .modal-header { padding: 16px 20px 12px; border-bottom-color: #e4ebf2; background: #fbfdff; }
@@ -69,6 +77,7 @@
 .product-request-modal-loading { min-height: 108px; display: flex; align-items: center; justify-content: center; color: #6d7f91; }
 .product-request-form .form-group > label { color: #455565; font-weight: 600; }
 .product-request-form .form-group > label .text-red { margin-left: 3px; }
+.product-request-field-hint { margin-left: 6px; color: #8793a0; font-size: 12px; font-weight: 400; }
 .product-request-form .help-block { margin-bottom: 0; color: #8793a0; }
 .product-request-form .form-section + .form-section { margin-top: 16px; }
 .product-request-form .form-section-title { margin: 0 0 15px; padding-bottom: 10px; border-bottom: 1px solid #eef2f5; font-size: 15px; font-weight: 600; }
