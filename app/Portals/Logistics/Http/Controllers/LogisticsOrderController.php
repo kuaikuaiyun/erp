@@ -56,7 +56,8 @@ class LogisticsOrderController extends Controller
         $filters = $this->filters($request);
         $orders = $this->orderQuery($filters)
             ->with([
-                'activeRefundDetails' => fn ($query) => $query->orderBy('id'),
+                'paypalRefunds' => fn ($query) => $query->orderByDesc('refunded_at')->orderByDesc('id'),
+                'creditCardRefunds' => fn ($query) => $query->orderByDesc('last_imported_at')->orderByDesc('id'),
                 'paymentReferences' => fn ($query) => $query->orderByRaw("CASE reference_type WHEN 'primary' THEN 0 ELSE 1 END")->orderBy('id'),
             ])
             ->orderByDesc('order_created_at')
@@ -105,7 +106,6 @@ class LogisticsOrderController extends Controller
 
         $order->load([
             'items' => fn ($query) => $query->orderBy('id'),
-            'activeRefundDetails' => fn ($query) => $query->orderByDesc('created_at')->orderByDesc('id'),
             'paypalAccount',
             'paypalRefunds' => fn ($query) => $query->orderByDesc('refunded_at')->orderByDesc('id'),
             'paypalDisputes' => fn ($query) => $query->orderByDesc('dispute_created_at')->orderByDesc('id'),
@@ -143,7 +143,10 @@ class LogisticsOrderController extends Controller
 
         $orders = $query
             ->select($this->spreadsheets->requiredOrderColumns())
-            ->with(['activeRefundDetails' => fn ($refunds) => $refunds->orderBy('id')])
+            ->with([
+                'paypalRefunds' => fn ($refunds) => $refunds->orderByDesc('refunded_at')->orderByDesc('id'),
+                'creditCardRefunds' => fn ($refunds) => $refunds->orderByDesc('last_imported_at')->orderByDesc('id'),
+            ])
             ->orderByDesc('order_created_at')
             ->orderByDesc('id');
 
@@ -656,7 +659,7 @@ class LogisticsOrderController extends Controller
             'buyer_phone', 'is_add_on', 'subscription_type', 'subscription_status', 'payment_method', 'payment_gateway',
             'collection_account_email', 'transaction_id', 'bill_number', 'logistics_status', 'refund_reason', 'data_status',
             'time_zone',
-            'source_shop_domain', 'store_assignment_status', 'refund_number', 'refund_type', 'refund_remark',
+            'source_shop_domain', 'store_assignment_status', 'refund_number',
         ];
         $filters = ['per_page' => $perPage];
         foreach ($fields as $field) {
@@ -702,16 +705,21 @@ class LogisticsOrderController extends Controller
             });
         }
 
-        foreach (['refund_number' => 'refund_number', 'refund_type' => 'refund_type', 'refund_remark' => 'remark'] as $filter => $column) {
-            if ($filters[$filter] !== '') {
-                $query->whereHas('activeRefundDetails', fn (Builder $refunds) => $refunds->where($column, 'like', $this->contains((string) $filters[$filter])));
-            }
+        if ($filters['refund_number'] !== '') {
+            $value = $this->contains((string) $filters['refund_number']);
+            $query->where(function (Builder $refundNumbers) use ($value): void {
+                $refundNumbers
+                    ->whereHas('paypalRefunds', fn (Builder $refunds) => $refunds->where('refund_transaction_id', 'like', $value))
+                    ->orWhereHas('creditCardRefunds', fn (Builder $refunds) => $refunds->where('refund_reference', 'like', $value));
+            });
         }
         if ($filters['refund_reason'] !== '') {
             $value = $this->contains((string) $filters['refund_reason']);
             $query->where(function (Builder $reasons) use ($value): void {
-                $reasons->where('refund_reason', 'like', $value)
-                    ->orWhereHas('activeRefundDetails', fn (Builder $refunds) => $refunds->where('refund_reason', 'like', $value));
+                $reasons->whereHas('paypalRefunds', fn (Builder $refunds) => $refunds
+                        ->where('refund_reason', 'like', $value)
+                        ->orWhere('manual_reason', 'like', $value))
+                    ->orWhereHas('creditCardRefunds', fn (Builder $refunds) => $refunds->where('refund_reason', 'like', $value));
             });
         }
 
@@ -722,7 +730,6 @@ class LogisticsOrderController extends Controller
         }
 
         foreach ([
-            'refunded' => 'refunded_at',
             'ordered' => 'order_created_at',
             'created' => 'created_at',
         ] as $prefix => $column) {
@@ -732,6 +739,23 @@ class LogisticsOrderController extends Controller
             if ($filters[$prefix.'_to'] !== '') {
                 $query->whereDate($column, '<=', $filters[$prefix.'_to']);
             }
+        }
+
+        if ($filters['refunded_from'] !== '' || $filters['refunded_to'] !== '') {
+            $applyDateRange = static function (Builder $refunds, string $column) use ($filters): void {
+                if ($filters['refunded_from'] !== '') {
+                    $refunds->whereDate($column, '>=', $filters['refunded_from']);
+                }
+                if ($filters['refunded_to'] !== '') {
+                    $refunds->whereDate($column, '<=', $filters['refunded_to']);
+                }
+            };
+
+            $query->where(function (Builder $refundDate) use ($applyDateRange): void {
+                $refundDate
+                    ->whereHas('paypalRefunds', fn (Builder $refunds) => $applyDateRange($refunds, 'refunded_at'))
+                    ->orWhereHas('creditCardRefunds', fn (Builder $refunds) => $applyDateRange($refunds, 'last_imported_at'));
+            });
         }
 
         return $query;

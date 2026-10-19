@@ -64,15 +64,8 @@ class LogisticsOrderSpreadsheetService
             ['财务利润率', 'financial_profit_rate', self::TYPE_RATE, 14],
             ['运营利润（USD）', 'operation_profit_usd', self::TYPE_MONEY, 18],
             ['运营利润率', 'operation_profit_rate', self::TYPE_RATE, 14],
-            ['渠道退款额（USD）', 'channel_refund_amount_usd', self::TYPE_MONEY, 20],
-            ['Shopify店铺退款额（USD）', 'shopify_refund_amount_usd', self::TYPE_MONEY, 24],
-            ['退款时间', 'refunded_at', self::TYPE_TEXT, 20],
-            ['退款原因', 'refund_reason', self::TYPE_TEXT, 28],
-            ['退款单号', 'import_refund_number', self::TYPE_MULTILINE, 24],
-            ['退款金额（USD）', 'import_refund_amount_usd', self::TYPE_MONEY, 18],
-            ['退款类型', 'import_refund_type', self::TYPE_MULTILINE, 20],
-            ['导入退款原因', 'import_refund_reason', self::TYPE_MULTILINE, 28],
-            ['退款备注', 'import_refund_remark', self::TYPE_MULTILINE, 28],
+            ['PayPal实际退款（逐笔）', 'paypal_actual_refunds', self::TYPE_MULTILINE, 48],
+            ['信用卡实际退款（逐笔）', 'credit_card_actual_refunds', self::TYPE_MULTILINE, 52],
             ['收款账号', 'collection_account', self::TYPE_TEXT, 30],
             ['收款账号邮箱', 'collection_account_email', self::TYPE_TEXT, 28],
             ['收款账号实收金额（USD）', 'received_amount_usd', self::TYPE_MONEY, 24],
@@ -98,7 +91,10 @@ class LogisticsOrderSpreadsheetService
             ['id'],
             array_filter(
                 array_column(self::columns(), 1),
-                static fn (string $field): bool => !str_starts_with($field, 'import_refund_'),
+                static fn (string $field): bool => !in_array($field, [
+                    'paypal_actual_refunds',
+                    'credit_card_actual_refunds',
+                ], true),
             ),
         )));
     }
@@ -255,14 +251,27 @@ class LogisticsOrderSpreadsheetService
 
     private function exportValue(LogisticsOrder $order, string $field): mixed
     {
-        $refunds = $order->relationLoaded('activeRefundDetails') ? $order->activeRefundDetails : collect();
+        $paypalRefunds = $order->relationLoaded('paypalRefunds') ? $order->paypalRefunds : collect();
+        $creditCardRefunds = $order->relationLoaded('creditCardRefunds') ? $order->creditCardRefunds : collect();
 
         return match ($field) {
-            'import_refund_number' => $refunds->pluck('refund_number')->filter()->implode("\n"),
-            'import_refund_amount_usd' => $refunds->isEmpty() ? null : $refunds->sum(fn ($refund): float => (float) $refund->refund_amount_usd),
-            'import_refund_type' => $refunds->pluck('refund_type')->filter()->implode("\n"),
-            'import_refund_reason' => $refunds->pluck('refund_reason')->filter()->implode("\n"),
-            'import_refund_remark' => $refunds->pluck('remark')->filter()->implode("\n"),
+            'paypal_actual_refunds' => $paypalRefunds->map(static function ($refund): string {
+                return implode(' | ', array_filter([
+                    $refund->refund_transaction_id,
+                    'US$'.number_format((float) $refund->refund_amount_usd, 2),
+                    $refund->manual_reason ?: $refund->refund_reason ?: $refund->eventLabel(),
+                    $refund->refunded_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s'),
+                ], static fn ($value): bool => filled($value)));
+            })->implode("\n"),
+            'credit_card_actual_refunds' => $creditCardRefunds->map(static function ($refund): string {
+                return implode(' | ', array_filter([
+                    $refund->bill_number,
+                    $refund->refund_reference,
+                    'US$'.number_format((float) $refund->refund_amount_usd, 2),
+                    $refund->refund_reason,
+                    $refund->last_imported_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s'),
+                ], static fn ($value): bool => filled($value)));
+            })->implode("\n"),
             default => $order->getAttribute($field),
         };
     }
