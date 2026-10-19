@@ -75,8 +75,10 @@
         ->filter(fn ($item) => is_array($item) && filled($item['key'] ?? null))
         ->mapWithKeys(fn ($item) => [(string) $item['key'] => (string) ($item['value'] ?? '')])
         ->all();
-    $manualRefundTotal = (float) $order->activeRefundDetails->sum('refund_amount_usd');
-    $paypalRefundTotal = (float) $order->paypalRefunds->sum('refund_amount_usd');
+    $paypalRefunds = $order->paypalRefunds;
+    $creditCardRefunds = $order->creditCardRefunds;
+    $paypalRefundTotal = (float) $paypalRefunds->sum('refund_amount_usd');
+    $creditCardRefundTotal = (float) $creditCardRefunds->sum('refund_amount_usd');
     $productSubtotal = (float) $order->paid_amount_usd - (float) $order->total_shipping_usd;
     $paymentReferences = $order->paymentReferences
         ->filter(fn ($reference) => filled($reference->reference_number))
@@ -94,7 +96,7 @@
         ]);
     }
     $paymentReferences = $paymentReferences->unique('reference_number')->values();
-    $creditCardRefundsByReference = $order->creditCardRefunds
+    $creditCardRefundsByReference = $creditCardRefunds
         ->filter(fn ($refund) => filled($refund->bill_number))
         ->groupBy(fn ($refund) => (string) $refund->bill_number);
     $statusTone = $order->hasFailureRow() ? 'is-danger' : 'is-success';
@@ -328,12 +330,12 @@
             </section>
 
             <section class="logistics-order-detail-card">
-                <div class="logistics-order-detail-card-title"><h4><i class="fa fa-reply"></i> 退款与纠纷</h4><span>导入退款 {{ $money($manualRefundTotal) }} · PayPal 退款 {{ $money($paypalRefundTotal) }}</span></div>
-                <div class="table-responsive"><table class="table logistics-order-detail-table"><thead><tr><th>来源</th><th>编号</th><th>金额</th><th>{{ __('logistics.paypal_dispute.type_status') }}</th><th>原因 / 事件类型</th><th>{{ __('logistics.paypal_dispute.outcome') }}</th><th>时间</th></tr></thead><tbody>
-                    @foreach($order->activeRefundDetails as $refund)<tr><td><span class="label label-info">导入</span></td><td>{{ $display($refund->refund_number) }}</td><td>{{ $money($refund->refund_amount_usd) }}</td><td>{{ $display($refund->refund_type) }}</td><td>{{ $display($refund->refund_reason ?: $refund->remark) }}</td><td>{{ __('logistics.common.not_available') }}</td><td>{{ $date($refund->created_at) }}</td></tr>@endforeach
-                    @foreach($order->paypalRefunds as $refund)<tr><td><span class="label label-primary">PayPal退款</span></td><td>{{ $display($refund->refund_transaction_id) }}</td><td>{{ $money($refund->refund_amount_usd) }}</td><td>{{ $refund->statusLabel() }}</td><td title="{{ $refund->refund_reason }}">{{ $refund->eventLabel() }}</td><td>{{ __('logistics.common.not_available') }}</td><td>{{ $date($refund->refunded_at) }}</td></tr>@endforeach
+                <div class="logistics-order-detail-card-title"><h4><i class="fa fa-reply"></i> {{ __('logistics.orders.refunds.detail_title') }}</h4><span>{{ __('logistics.orders.refunds.detail_summary', ['paypal_count' => $paypalRefunds->count(), 'paypal_amount' => $money($paypalRefundTotal), 'credit_count' => $creditCardRefunds->count(), 'credit_amount' => $money($creditCardRefundTotal)]) }}</span></div>
+                <div class="table-responsive"><table class="table logistics-order-detail-table"><thead><tr><th>来源</th><th>编号</th><th>金额</th><th>{{ __('logistics.orders.refunds.refund_status') }}</th><th>{{ __('logistics.orders.refunds.reason_or_event') }}</th><th>{{ __('logistics.paypal_dispute.outcome') }}</th><th>时间</th></tr></thead><tbody>
+                    @foreach($paypalRefunds as $refund)<tr><td><span class="label label-primary">{{ __('logistics.orders.refunds.source_paypal') }}</span></td><td>{{ $display($refund->refund_transaction_id) }}</td><td>{{ $money($refund->refund_amount_usd) }}</td><td>{{ $refund->statusLabel() }}</td><td title="{{ $refund->manual_reason ?: $refund->refund_reason }}">{{ $display($refund->manual_reason ?: $refund->refund_reason ?: $refund->eventLabel()) }}</td><td>{{ __('logistics.common.not_available') }}</td><td>{{ $date($refund->refunded_at ?: $refund->created_at) }}</td></tr>@endforeach
+                    @foreach($creditCardRefunds as $refund)<tr><td><span class="label label-info">{{ __('logistics.orders.refunds.source_credit_card') }}</span></td><td title="账单号：{{ $refund->bill_number }}">{{ $display($refund->refund_reference) }}</td><td>{{ $money($refund->refund_amount_usd) }}</td><td>{{ __('logistics.orders.refunds.refund_status') }}</td><td>{{ $display($refund->refund_reason) }}</td><td>{{ __('logistics.common.not_available') }}</td><td>{{ $date($refund->last_imported_at ?: $refund->created_at) }}</td></tr>@endforeach
                     @foreach($order->paypalDisputes as $dispute)<tr><td><span class="label label-danger">PayPal纠纷</span></td><td>{{ $display($dispute->dispute_id) }}</td><td>{{ $money($dispute->dispute_amount_usd ?: $dispute->original_amount) }}</td><td>{{ $dispute->typeLabel() }} / {{ $dispute->statusLabel() }}</td><td>{{ $dispute->reasonLabel() }}</td><td>{{ $dispute->outcomeLabel() }}</td><td>{{ $date($dispute->dispute_created_at) }}</td></tr>@endforeach
-                    @if($order->activeRefundDetails->isEmpty() && $order->paypalRefunds->isEmpty() && $order->paypalDisputes->isEmpty())<tr><td colspan="7" class="text-center text-muted">暂无退款或纠纷明细。</td></tr>@endif
+                    @if($paypalRefunds->isEmpty() && $creditCardRefunds->isEmpty() && $order->paypalDisputes->isEmpty())<tr><td colspan="7" class="text-center text-muted">{{ __('logistics.orders.refunds.empty') }}</td></tr>@endif
                 </tbody></table></div>
             </section>
 

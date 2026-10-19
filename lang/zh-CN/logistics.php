@@ -84,6 +84,21 @@ return [
     ],
     'orders' => [
         'menu' => '物流订单',
+        'refunds' => [
+            'paypal_actual' => 'PayPal 实际退款',
+            'credit_card_actual' => '信用卡实际退款',
+            'summary' => ':count 笔 / US$:amount',
+            'hover_hint' => '悬浮查看逐笔明细',
+            'paypal_item' => '退款交易号：:number；金额：US$:amount；原因：:reason；退款时间：:time',
+            'credit_card_item' => '账单号：:bill；退款流水号：:reference；金额：US$:amount；原因：:reason；导入时间：:time',
+            'detail_title' => '实际退款与纠纷',
+            'detail_summary' => 'PayPal 实际退款 :paypal_count 笔 / :paypal_amount · 信用卡实际退款 :credit_count 笔 / :credit_amount',
+            'source_paypal' => 'PayPal 退款',
+            'source_credit_card' => '信用卡退款',
+            'refund_status' => '退款状态',
+            'reason_or_event' => '原因 / 事件类型',
+            'empty' => '暂无实际退款或纠纷明细。',
+        ],
     ],
     'tracking' => [
         'batch_sync' => '批量查询物流',
