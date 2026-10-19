@@ -91,6 +91,7 @@ return [
         'delete_confirm' => '确定要删除这条需求提报记录吗？删除后不可恢复。',
         'delete_failed' => '删除失败，请稍后重试。',
         'loading' => '加载中…',
+        'pagination_summary' => '共 :total 条记录 ｜ 第 :current / :last 页',
         'modal_load_failed' => '加载表单失败，请稍后重试。',
         'modal_submit_failed' => '提交失败，请检查网络后重试。',
     ],

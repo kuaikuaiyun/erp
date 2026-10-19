@@ -1169,6 +1169,11 @@ class ProductRequestController extends Controller
         $keyword = trim((string) $request->query('keyword', ''));
         $sourceFilter = (string) $request->query('source', '');
         $reviewStatusFilter = (string) $request->query('review_status', '');
+        // 每页条数仅支持 20 / 50，非法值回落到默认 20
+        $perPage = (int) $request->query('per_page', 20);
+        if (!in_array($perPage, [20, 50], true)) {
+            $perPage = 20;
+        }
         $links = ProductRequestLinkSku::query()
             ->when($keyword !== '', function (Builder $query) use ($keyword): Builder {
                 $pclHashes = ProductRequest::query()
@@ -1185,7 +1190,7 @@ class ProductRequestController extends Controller
             ->when(in_array($sourceFilter, ['system', 'import'], true), fn (Builder $query): Builder => $query->where('source', $sourceFilter))
             ->when(in_array($reviewStatusFilter, ['pending', 'done'], true), fn (Builder $query): Builder => $query->where('review_status', $reviewStatusFilter))
             ->orderByDesc('updated_at')
-            ->paginate(20)
+            ->paginate($perPage)
             ->withQueryString();
 
         // 每个链接展示最新一条同链接提报记录的 PCL 商品编号（链接表自身已存 PCL 时优先）
@@ -1230,7 +1235,7 @@ class ProductRequestController extends Controller
             'pclMap' => $pclMap,
             'nameMap' => $nameMap,
             'coverMap' => $coverMap,
-            'filters' => ['keyword' => $keyword, 'source' => $sourceFilter, 'review_status' => $reviewStatusFilter],
+            'filters' => ['keyword' => $keyword, 'source' => $sourceFilter, 'review_status' => $reviewStatusFilter, 'per_page' => $perPage],
             'canImport' => $this->canImportProductRequests($context['user']),
         ]);
     }

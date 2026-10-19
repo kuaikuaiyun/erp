@@ -30,11 +30,11 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261018-19">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261018-20">
 @endpush
 @push('scripts')
     <script>window.ErpProductRequestConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261018-19"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261018-20"></script>
 @endpush
 
 @section('content')
@@ -82,7 +82,7 @@
                 <tr><td colspan="14" class="product-request-empty">{{ $t('common.no_records') }}</td></tr>
             @endforelse
         </tbody></table></div>
-        @if($requests->hasPages())<div class="box-footer clearfix product-request-pagination" data-loading="region" data-loading-target=".product-request-table-box">{{ $requests->links() }}</div>@endif
+        {{ $requests->links('portals.product-requests.partials.pagination') }}
     </div>
     @include('portals.product-requests.partials.modal')
 </section>
