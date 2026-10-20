@@ -461,6 +461,8 @@ return [
             'timezone_shanghai' => 'Shanghai time',
             'timezone_after_shanghai' => 'Shanghai time + :hours hour(s)',
             'timezone_before_shanghai' => 'Shanghai time - :hours hour(s)',
+            'timezone_utc_option' => ':offset',
+            'timezone_utc_option_shanghai' => ':offset (Shanghai)',
             'submit' => 'Search',
             'reset' => 'Reset',
         ],

@@ -61,6 +61,17 @@ class ShopifyStoreAnalyticsService
 
         try {
             $shop = $this->shopInfo($store, $actor);
+
+            // Store metadata is authoritative Shopify data and must not depend on
+            // the much longer order synchronization succeeding. Otherwise a
+            // changed Shopify timezone remains stale whenever history backfill or
+            // an incremental order request fails after this metadata query.
+            $metric->fill([
+                'shop_timezone' => $shop['timezone'],
+                'currency_code' => 'USD',
+                'original_currency_code' => $shop['currency'],
+            ])->save();
+
             $localToday = CarbonImmutable::now($shop['timezone'])->startOfDay();
             $isInitial = $metric->orders_initial_backfilled_at === null;
             $historyFromDate = $localToday->subDays(
