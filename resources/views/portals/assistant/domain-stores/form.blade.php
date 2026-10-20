@@ -477,6 +477,17 @@
                         @error('remark')<span class="help-block">{{ $message }}</span>@enderror
                     </div>
                     @if ($canManageDepartmentAccess)
+                        <div class="form-group col-md-4 assistant-status-field @error('owner_department_id') has-error @enderror">
+                            <label for="owner_department_id">{{ $t('fields.owner_department') }}</label>
+                            <select id="owner_department_id" name="owner_department_id" class="form-control">
+                                <option value="">{{ $t('form.owner_department_unassigned') }}</option>
+                                @foreach ($assistantChildDepartments as $department)
+                                    <option value="{{ $department->getKey() }}" @selected((int) $ownerDepartmentId === (int) $department->getKey())>{{ $department->name }}</option>
+                                @endforeach
+                            </select>
+                            <span class="help-block">{{ $t('form.owner_department_hint') }}</span>
+                            @error('owner_department_id')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
                         <div class="form-group col-md-12 assistant-status-department-access @error('authorized_department_ids') has-error @enderror">
                             <label>{{ $t('fields.authorized_departments') }}</label>
                             <div class="assistant-option-group assistant-multi-option-group" data-multi-option-group>

@@ -40,12 +40,23 @@
         'uploadDemoMessage' => $t('messages.upload_demo_message'),
         'fileSelected' => $t('upload.file_selected', ['name' => ':name', 'size' => ':size']),
         'fileUnselected' => $t('upload.file_unselected'),
-        'presetCategories' => trans('aikaipin.options.categories'),
-        'categoryStorageKey' => 'erp.aikaipin.product-library.categories.v1',
+        'serverFilters' => true,
+        'filterResetUrl' => route('aikaipin.product-library.index'),
+        'initialCategories' => $categories->map(static fn ($category): array => [
+            'value' => (string) $category->getKey(),
+            'label' => (string) $category->name,
+        ])->values()->all(),
+        'categoryStoreUrl' => route('aikaipin.product-library.categories.store'),
+        'categoryDeleteUrlTemplate' => route('aikaipin.product-library.categories.destroy', ['category' => '__category__']),
+        'csrfToken' => csrf_token(),
         'categoryEmptyTitle' => $t('messages.category_empty_title'),
         'categoryEmptyMessage' => $t('messages.category_empty_message'),
         'categoryDuplicateTitle' => $t('messages.category_duplicate_title'),
         'categoryDuplicateMessage' => $t('messages.category_duplicate_message'),
+        'categoryCreatedTitle' => $t('messages.category_created_title'),
+        'categoryCreatedMessage' => $t('messages.category_created_message'),
+        'categoryDeletedTitle' => $t('messages.category_deleted_title'),
+        'categoryDeletedMessage' => $t('messages.category_deleted_message'),
         'removeCategoryAria' => $t('upload.remove_category', ['name' => ':name']),
         'imagePreviewTitle' => $t('image_preview.title', ['name' => ':name']),
         'imagePreviewPosition' => $t('image_preview.position', ['current' => ':current', 'total' => ':total']),
@@ -56,49 +67,49 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261019-9">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261020-1">
 @endpush
 
 @push('scripts')
     <script>window.ErpAikaipinProductLibraryConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261019-6"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261020-1"></script>
 @endpush
 
 @section('content')
 <section class="content aikaipin-product-library-page">
     <div class="box box-solid aikaipin-filter-box">
         <div class="box-body">
-            <form class="aikaipin-filter-form" data-aikaipin-filter-form>
+            <form class="aikaipin-filter-form" method="get" action="{{ route('aikaipin.product-library.index') }}" data-aikaipin-filter-form>
                 <div class="aikaipin-filter-grid">
                     <div class="aikaipin-filter-field aikaipin-filter-keyword">
                         <label for="aikaipin-keyword">{{ $t('filters.keyword') }}</label>
-                        <input id="aikaipin-keyword" class="form-control" type="search" autocomplete="off"
+                        <input id="aikaipin-keyword" class="form-control" type="search" name="keyword" value="{{ $filters['keyword'] }}" autocomplete="off"
                             placeholder="{{ $t('filters.keyword_placeholder') }}" data-aikaipin-filter="keyword">
                     </div>
                     <div class="aikaipin-filter-field">
                         <label for="aikaipin-category">{{ $t('filters.category') }}</label>
-                        <select id="aikaipin-category" class="form-control" data-aikaipin-filter="category">
+                        <select id="aikaipin-category" class="form-control" name="category" data-aikaipin-filter="category">
                             <option value="">{{ $t('filters.all') }}</option>
-                            @foreach (trans('aikaipin.options.categories') as $value => $label)
-                                <option value="{{ $value }}">{{ $label }}</option>
+                            @foreach ($categories as $category)
+                                <option value="{{ $category->getKey() }}" @selected($filters['category'] === (int) $category->getKey())>{{ $category->name }}</option>
                             @endforeach
                         </select>
                     </div>
                     <div class="aikaipin-filter-field">
                         <label for="aikaipin-source">{{ $t('filters.source') }}</label>
-                        <select id="aikaipin-source" class="form-control" data-aikaipin-filter="source">
+                        <select id="aikaipin-source" class="form-control" name="source" data-aikaipin-filter="source">
                             <option value="">{{ $t('filters.all') }}</option>
-                            @foreach (trans('aikaipin.options.sources') as $value => $label)
-                                <option value="{{ $value }}">{{ $label }}</option>
+                            @foreach (trans('aikaipin.upload.source_options') as $value => $label)
+                                <option value="{{ $value }}" @selected($filters['source'] === $value)>{{ $label }}</option>
                             @endforeach
                         </select>
                     </div>
                     <div class="aikaipin-filter-field">
                         <label for="aikaipin-type">{{ $t('filters.type') }}</label>
-                        <select id="aikaipin-type" class="form-control" data-aikaipin-filter="type">
+                        <select id="aikaipin-type" class="form-control" name="type" data-aikaipin-filter="type">
                             <option value="">{{ $t('filters.all') }}</option>
-                            @foreach (trans('aikaipin.options.types') as $value => $label)
-                                <option value="{{ $value }}">{{ $label }}</option>
+                            @foreach (trans('aikaipin.upload.type_options') as $value => $label)
+                                <option value="{{ $value }}" @selected($filters['type'] === $value)>{{ $label }}</option>
                             @endforeach
                         </select>
                     </div>
@@ -106,9 +117,9 @@
                         <button class="btn btn-primary" type="submit">
                             <i class="fa fa-search" aria-hidden="true"></i> {{ $t('filters.search') }}
                         </button>
-                        <button class="btn btn-default" type="reset">
+                        <a class="btn btn-default" href="{{ route('aikaipin.product-library.index') }}">
                             <i class="fa fa-undo" aria-hidden="true"></i> {{ $t('filters.reset') }}
-                        </button>
+                        </a>
                     </div>
                 </div>
             </form>
@@ -157,21 +168,26 @@
                     <tbody data-aikaipin-product-list>
                     @foreach ($products as $product)
                         @php
-                            $skuCount = count($product['skus']);
-                            $allSkus = implode(', ', $product['skus']);
-                            $productName = trans('aikaipin.'.$product['name_key']);
-                            $imageCount = count($product['images']);
+                            $skus = $product->skus->pluck('sku')->values()->all();
+                            $skuCount = count($skus);
+                            $allSkus = implode(', ', $skus);
+                            $productName = (string) $product->name;
+                            $imageCount = $product->images->count();
+                            $previewImages = $product->images
+                                ->map(static fn ($image): array => ['url' => null])
+                                ->values()
+                                ->all();
+                            $updatedAt = $product->updated_at?->timezone(config('app.timezone'))->format('Y-m-d H:i');
                         @endphp
                         <tr data-aikaipin-product
-                            data-keyword="{{ strtolower($product['code'].' '.trans('aikaipin.'.$product['name_key']).' '.$allSkus) }}"
-                            data-category="{{ $product['category'] }}"
-                            data-source="{{ $product['source'] }}"
-                            data-type="{{ $product['type'] }}">
+                            data-keyword="{{ strtolower($product->product_code.' '.$productName.' '.$allSkus) }}"
+                            data-source="{{ $product->source_platform }}"
+                            data-type="{{ $product->product_type }}">
                             @if ($canManageProductLibrary)
                                 <td class="aikaipin-select-cell">
                                     <label class="aikaipin-check-label">
-                                        <input type="checkbox" value="{{ $product['code'] }}" aria-label="{{ $t('actions.select_product', ['code' => $product['code']]) }}" data-aikaipin-product-select>
-                                        <span class="sr-only">{{ $t('actions.select_product', ['code' => $product['code']]) }}</span>
+                                        <input type="checkbox" value="{{ $product->getKey() }}" aria-label="{{ $t('actions.select_product', ['code' => $product->product_code]) }}" data-aikaipin-product-select>
+                                        <span class="sr-only">{{ $t('actions.select_product', ['code' => $product->product_code]) }}</span>
                                     </label>
                                 </td>
                             @endif
@@ -181,7 +197,7 @@
                                     aria-label="{{ $t('image_preview.open', ['name' => $productName]) }}"
                                     data-aikaipin-preview-image
                                     data-aikaipin-preview-title="{{ $productName }}"
-                                    data-aikaipin-preview-images='@json($product['images'])'>
+                                    data-aikaipin-preview-images='@json($previewImages)'>
                                     <i class="fa fa-picture-o" aria-hidden="true"></i>
                                     @if ($imageCount > 1)
                                         <span class="aikaipin-product-image-count">{{ $imageCount }}</span>
@@ -189,33 +205,40 @@
                                     <span class="sr-only">{{ $t('image_preview.open', ['name' => $productName]) }}</span>
                                 </button>
                             </td>
-                            <td class="aikaipin-product-code-cell"><span class="aikaipin-product-code">{{ $product['code'] }}</span></td>
+                            <td class="aikaipin-product-code-cell"><span class="aikaipin-product-code">{{ $product->product_code }}</span></td>
                             <td class="aikaipin-name-cell">
-                                <strong>{{ trans('aikaipin.'.$product['name_key']) }}</strong>
-                                <span class="aikaipin-sku-line" title="{{ $allSkus }}">
-                                    <span>{{ $product['skus'][0] }}</span>
-                                    @if ($skuCount > 1)
-                                        <span class="aikaipin-sku-more">+{{ $skuCount - 1 }}</span>
-                                    @endif
-                                </span>
+                                <strong>{{ $productName }}</strong>
+                                @if ($skuCount > 0)
+                                    <span class="aikaipin-sku-line" title="{{ $allSkus }}">
+                                        <span>{{ $skus[0] }}</span>
+                                        @if ($skuCount > 1)
+                                            <span class="aikaipin-sku-more">+{{ $skuCount - 1 }}</span>
+                                        @endif
+                                    </span>
+                                @endif
                             </td>
-                            <td class="aikaipin-category-cell"><span class="label label-default">{{ trans('aikaipin.options.categories.'.$product['category']) }}</span></td>
+                            <td class="aikaipin-category-cell">
+                                @foreach ($product->categories as $category)
+                                    <span class="label label-default">{{ $category->name }}</span>
+                                @endforeach
+                            </td>
                             <td class="aikaipin-source-cell">
-                                <span class="aikaipin-source">{{ trans('aikaipin.options.sources.'.$product['source']) }}</span>
-                                <span class="aikaipin-type">{{ trans('aikaipin.options.types.'.$product['type']) }}</span>
+                                <span class="aikaipin-source">{{ trans('aikaipin.upload.source_options.'.$product->source_platform) }}</span>
+                                <span class="aikaipin-type">{{ trans('aikaipin.upload.type_options.'.$product->product_type) }}</span>
                             </td>
-                            <td class="aikaipin-updated-cell"><time datetime="{{ str_replace(' ', 'T', $product['updated_at']) }}">{{ $product['updated_at'] }}</time></td>
+                            <td class="aikaipin-updated-cell"><time datetime="{{ $product->updated_at?->toAtomString() }}">{{ $updatedAt }}</time></td>
                             <td class="aikaipin-operation-cell">
                                 <div class="btn-group btn-group-sm aikaipin-row-actions" role="group" aria-label="{{ $t('table.operation') }}">
-                                    <a class="btn btn-default" href="{{ $product['landing_url'] }}" target="_blank" rel="noopener noreferrer"
-                                        title="{{ $t('actions.open_landing_page') }}" aria-label="{{ $t('actions.open_landing_page') }}">
-                                        <i class="fa fa-external-link" aria-hidden="true"></i> {{ $t('actions.landing_page') }}
-                                    </a>
-                                    <a class="btn btn-default" href="{{ $product['reference_url'] }}" target="_blank" rel="noopener noreferrer"
-                                        title="{{ $t('actions.open_reference_page') }}" aria-label="{{ $t('actions.open_reference_page') }}">
-                                        <i class="fa fa-external-link" aria-hidden="true"></i> {{ $t('actions.reference_page') }}
-                                    </a>
-                                    <button class="btn btn-default" type="button" data-aikaipin-action="download">
+                                    @if ($product->landing_page_url)
+                                        <a class="btn btn-default" href="{{ $product->landing_page_url }}" target="_blank" rel="noopener noreferrer"
+                                            title="{{ $t('actions.open_landing_page') }}" aria-label="{{ $t('actions.open_landing_page') }}">
+                                            <i class="fa fa-external-link" aria-hidden="true"></i> {{ $t('actions.landing_page') }}
+                                        </a>
+                                    @else
+                                        <button class="btn btn-default" type="button" disabled>{{ $t('actions.landing_page') }}</button>
+                                    @endif
+                                    <button class="btn btn-default" type="button" disabled>{{ $t('actions.reference_page') }}</button>
+                                    <button class="btn btn-default" type="button" disabled>
                                         <i class="fa fa-download" aria-hidden="true"></i> {{ $t('actions.download') }}
                                     </button>
                                     @if ($canManageProductLibrary)
@@ -227,19 +250,26 @@
                             </td>
                         </tr>
                     @endforeach
-                    <tr class="aikaipin-empty-row" data-aikaipin-empty-row hidden>
+                    @if ($products->isEmpty())
+                    <tr class="aikaipin-empty-row" data-aikaipin-empty-row>
                         <td colspan="{{ $canManageProductLibrary ? 8 : 7 }}">
                             <div class="aikaipin-empty-state">
                                 <i class="fa fa-search" aria-hidden="true"></i>
                                 <p data-aikaipin-empty-message>{{ $t('messages.no_records') }}</p>
-                                <button class="btn btn-default btn-sm" type="button" data-aikaipin-clear-filters>{{ $t('filters.reset') }}</button>
+                                <a class="btn btn-default btn-sm" href="{{ route('aikaipin.product-library.index') }}">{{ $t('filters.reset') }}</a>
                             </div>
                         </td>
                     </tr>
+                    @endif
                     </tbody>
                 </table>
             </div>
         </div>
+        @if ($products->total() > 0)
+            <div class="box-footer clearfix">
+                @include('portals.aikaipin.product-library.partials.pagination', ['products' => $products])
+            </div>
+        @endif
     </div>
 </section>
 

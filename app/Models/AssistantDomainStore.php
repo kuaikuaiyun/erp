@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
@@ -79,6 +80,8 @@ class AssistantDomainStore extends Model
     ];
 
     protected $fillable = [
+        'owner_department_id',
+        'owner_user_id',
         'site_builder',
         'shop_name',
         'domain',
@@ -149,6 +152,16 @@ class AssistantDomainStore extends Model
             'domain_store_id',
             'department_id',
         )->withTimestamps();
+    }
+
+    public function ownerDepartment(): BelongsTo
+    {
+        return $this->belongsTo(Department::class, 'owner_department_id');
+    }
+
+    public function ownerUser(): BelongsTo
+    {
+        return $this->belongsTo(AdminUser::class, 'owner_user_id');
     }
 
     public function shopifyConnection(): HasOne
@@ -341,6 +354,8 @@ class AssistantDomainStore extends Model
             'payment_type' => self::fieldLabel('payment_type'),
             'payment_note' => self::fieldLabel('payment_note'),
             'authorized_departments' => self::fieldLabel('authorized_departments'),
+            'owner_department' => self::fieldLabel('owner_department'),
+            'owner_user' => self::fieldLabel('owner_user'),
         ];
     }
 
@@ -402,6 +417,8 @@ class AssistantDomainStore extends Model
                 ->pluck('name')
                 ->values()
                 ->all(),
+            'owner_department' => $this->ownerDepartment?->name,
+            'owner_user' => $this->ownerUser?->name ?: $this->ownerUser?->username,
         ];
     }
 

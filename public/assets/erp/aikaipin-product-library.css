@@ -900,6 +900,23 @@
     min-width: 2px;
 }
 
+.aikaipin-pagination-control {
+    align-items: center;
+    display: flex;
+    gap: 14px;
+    justify-content: space-between;
+    min-height: 32px;
+}
+
+.aikaipin-pagination-summary {
+    color: #6d7f92;
+    font-size: 12px;
+}
+
+.aikaipin-pagination-control .pagination {
+    margin: 0;
+}
+
 @media (max-width: 1199px) {
     .aikaipin-filter-grid {
         grid-template-columns: repeat(2, minmax(180px, 1fr));
@@ -975,5 +992,10 @@
 
     .aikaipin-attachment-grid {
         grid-template-columns: 1fr;
+    }
+
+    .aikaipin-pagination-control {
+        align-items: flex-start;
+        flex-direction: column;
     }
 }

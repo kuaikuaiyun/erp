@@ -95,6 +95,11 @@
     }
 
     function clearFilters() {
+        if (config.serverFilters) {
+            window.location.assign(config.filterResetUrl || (form ? form.action : window.location.pathname));
+            return;
+        }
+
         Object.keys(filters).forEach(function (name) {
             if (filters[name]) {
                 filters[name].value = '';
@@ -336,14 +341,7 @@
     }
 
     function defaultCategories() {
-        var presetCategories = config.presetCategories || {};
-
-        return Object.keys(presetCategories).map(function (value) {
-            return {
-                value: value,
-                label: String(presetCategories[value])
-            };
-        });
+        return normalizeCategories(config.initialCategories || []);
     }
 
     function normalizeCategories(categories) {
@@ -368,35 +366,7 @@
     }
 
     function loadCategories() {
-        var storageKey = config.categoryStorageKey;
-
-        if (!storageKey || !window.localStorage) {
-            return defaultCategories();
-        }
-
-        try {
-            var stored = window.localStorage.getItem(storageKey);
-
-            if (stored === null) {
-                return defaultCategories();
-            }
-
-            return normalizeCategories(JSON.parse(stored));
-        } catch (error) {
-            return defaultCategories();
-        }
-    }
-
-    function persistCategories() {
-        if (!config.categoryStorageKey || !window.localStorage) {
-            return;
-        }
-
-        try {
-            window.localStorage.setItem(config.categoryStorageKey, JSON.stringify(uploadCategories));
-        } catch (error) {
-            // Browser storage can be unavailable in private browsing mode.
-        }
+        return defaultCategories();
     }
 
     function selectedCategories() {
@@ -451,8 +421,27 @@
         });
     }
 
-    function categoryValue() {
-        return 'custom_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+    function categoryRequest(url, method, body) {
+        return window.fetch(url, {
+            method: method,
+            credentials: 'same-origin',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': config.csrfToken || ''
+            },
+            body: body ? JSON.stringify(body) : null
+        }).then(function (response) {
+            return response.json().catch(function () {
+                return {};
+            }).then(function (payload) {
+                if (!response.ok) {
+                    throw new Error(payload.message || config.categoryDuplicateMessage);
+                }
+
+                return payload;
+            });
+        });
     }
 
     function addCategory() {
@@ -463,40 +452,47 @@
             return;
         }
 
-        var duplicate = uploadCategories.some(function (category) {
-            return category.label.toLowerCase() === label.toLowerCase();
-        });
-
-        if (duplicate) {
-            notify('warning', config.categoryDuplicateTitle, config.categoryDuplicateMessage);
-            categoryInput.focus();
-            return;
-        }
-
-        var newCategory = {
-            value: categoryValue(),
-            label: label
-        };
         var selectedValues = selectedCategories();
 
-        selectedValues.push(newCategory.value);
-        uploadCategories.push(newCategory);
-        persistCategories();
-        renderCategories(selectedValues);
-        categoryInput.value = '';
-        categoryInput.focus();
+        categoryInput.disabled = true;
+        categoryRequest(config.categoryStoreUrl, 'POST', {name: label}).then(function (payload) {
+            var newCategory = payload.category;
+
+            if (!newCategory || !newCategory.value || !newCategory.label) {
+                throw new Error(config.categoryDuplicateMessage);
+            }
+
+            selectedValues.push(String(newCategory.value));
+            uploadCategories.push({
+                value: String(newCategory.value),
+                label: String(newCategory.label)
+            });
+            renderCategories(selectedValues);
+            categoryInput.value = '';
+            notify('success', config.categoryCreatedTitle, payload.message || config.categoryCreatedMessage);
+        }).catch(function (error) {
+            notify('warning', config.categoryDuplicateTitle, error.message || config.categoryDuplicateMessage);
+        }).then(function () {
+            categoryInput.disabled = false;
+            categoryInput.focus();
+        });
     }
 
     function removeCategory(value) {
         var selectedValues = selectedCategories().filter(function (selectedValue) {
             return selectedValue !== value;
         });
+        var deleteUrl = String(config.categoryDeleteUrlTemplate || '').replace('__category__', encodeURIComponent(value));
 
-        uploadCategories = uploadCategories.filter(function (category) {
-            return category.value !== value;
+        categoryRequest(deleteUrl, 'DELETE').then(function (payload) {
+            uploadCategories = uploadCategories.filter(function (category) {
+                return category.value !== value;
+            });
+            renderCategories(selectedValues);
+            notify('success', config.categoryDeletedTitle, payload.message || config.categoryDeletedMessage);
+        }).catch(function (error) {
+            notify('warning', config.categoryDuplicateTitle, error.message || config.categoryDuplicateMessage);
         });
-        persistCategories();
-        renderCategories(selectedValues);
     }
 
     function releaseImageUrls() {
@@ -674,21 +670,21 @@
 
     if (form) {
         form.addEventListener('submit', function (event) {
-            event.preventDefault();
-            applyFilters();
-        });
-
-        form.addEventListener('reset', function () {
-            window.setTimeout(clearFilters, 0);
+            if (!config.serverFilters) {
+                event.preventDefault();
+                applyFilters();
+            }
         });
     }
 
-    Object.keys(filters).forEach(function (name) {
-        if (filters[name]) {
-            filters[name].addEventListener('change', applyFilters);
-            filters[name].addEventListener('input', applyFilters);
-        }
-    });
+    if (!config.serverFilters) {
+        Object.keys(filters).forEach(function (name) {
+            if (filters[name]) {
+                filters[name].addEventListener('change', applyFilters);
+                filters[name].addEventListener('input', applyFilters);
+            }
+        });
+    }
 
     if (selectAll) {
         selectAll.addEventListener('change', function () {

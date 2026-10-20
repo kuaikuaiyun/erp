@@ -3,9 +3,15 @@
 namespace App\Portals\Aikaipin\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\AikaipinProduct;
+use App\Models\AikaipinProductCategory;
+use App\Models\AdminUser;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Aikaipin\AikaipinPortalAuthorizationService;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -24,12 +30,78 @@ class ProductLibraryController extends Controller
             return $context;
         }
 
+        $canManageProductLibrary = $this->authorization->canManageProductLibrary($context['user']);
+        $filters = $this->productFilters($request);
+
         return view('portals.aikaipin.product-library.index', [
             ...$context,
-            'products' => $this->sampleProducts(),
-            'canManageProductLibrary' => $this->authorization->canManageProductLibrary($context['user']),
+            'products' => $this->productQuery($context['user'], $canManageProductLibrary, $filters)
+                ->paginate(15)
+                ->withQueryString(),
+            'filters' => $filters,
+            'categories' => AikaipinProductCategory::query()->orderBy('sort')->orderBy('name')->get(['id', 'name']),
+            'canManageProductLibrary' => $canManageProductLibrary,
             'operationVisibilitySource' => $this->authorization->operationVisibilitySource(),
             'quickAuthorizationDepartments' => $this->authorization->quickAuthorizationDepartments(),
+        ]);
+    }
+
+    public function storeCategory(Request $request): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:80'],
+        ]);
+        $name = trim(preg_replace('/\s+/u', ' ', (string) $validated['name']) ?: '');
+
+        if ($name === '') {
+            throw ValidationException::withMessages([
+                'name' => __('aikaipin.messages.category_empty_message'),
+            ]);
+        }
+
+        $category = AikaipinProductCategory::firstOrCreate(
+            ['name' => $name],
+            ['created_by' => (int) $context['user']->getKey()],
+        );
+
+        if (!$category->wasRecentlyCreated) {
+            return response()->json([
+                'message' => __('aikaipin.messages.category_duplicate_message'),
+            ], 422);
+        }
+
+        return response()->json([
+            'category' => $this->categoryPayload($category),
+            'message' => __('aikaipin.messages.category_created_message'),
+        ], 201);
+    }
+
+    public function destroyCategory(Request $request, AikaipinProductCategory $category): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
+
+        if ($category->products()->exists()) {
+            return response()->json([
+                'message' => __('aikaipin.messages.category_in_use_message'),
+            ], 422);
+        }
+
+        $category->delete();
+
+        return response()->json([
+            'message' => __('aikaipin.messages.category_deleted_message'),
         ]);
     }
 
@@ -74,6 +146,79 @@ class ProductLibraryController extends Controller
         $context['portal']->load('menus');
 
         return $context;
+    }
+
+    /** @return array{keyword:string,category:?int,source:string,type:string} */
+    private function productFilters(Request $request): array
+    {
+        $category = $request->query('category');
+
+        return [
+            'keyword' => trim((string) $request->query('keyword', '')),
+            'category' => is_numeric($category) && (int) $category > 0 ? (int) $category : null,
+            'source' => trim((string) $request->query('source', '')),
+            'type' => trim((string) $request->query('type', '')),
+        ];
+    }
+
+    /**
+     * @param array{keyword:string,category:?int,source:string,type:string} $filters
+     */
+    private function productQuery(AdminUser $user, bool $canManageProductLibrary, array $filters): Builder
+    {
+        $query = AikaipinProduct::query()
+            ->with([
+                'skus',
+                'categories',
+                'images',
+                'referenceFile',
+                'packageFile',
+            ])
+            ->latest('updated_at')
+            ->latest('id');
+
+        if (!$canManageProductLibrary) {
+            $departmentIds = $this->authorization->operationDepartmentIdsForUser($user);
+
+            if ($departmentIds === []) {
+                $query->whereRaw('1 = 0');
+            } else {
+                $query->whereHas('authorizedDepartments', static fn (Builder $departments) => $departments->whereKey($departmentIds));
+            }
+        }
+
+        if ($filters['keyword'] !== '') {
+            $like = '%'.$filters['keyword'].'%';
+
+            $query->where(function (Builder $products) use ($like): void {
+                $products->where('product_code', 'like', $like)
+                    ->orWhere('name', 'like', $like)
+                    ->orWhereHas('skus', static fn (Builder $skus) => $skus->where('sku', 'like', $like));
+            });
+        }
+
+        if ($filters['category'] !== null) {
+            $query->whereHas('categories', static fn (Builder $categories) => $categories->whereKey($filters['category']));
+        }
+
+        if ($filters['source'] !== '') {
+            $query->where('source_platform', $filters['source']);
+        }
+
+        if ($filters['type'] !== '') {
+            $query->where('product_type', $filters['type']);
+        }
+
+        return $query;
+    }
+
+    /** @return array{value:string,label:string} */
+    private function categoryPayload(AikaipinProductCategory $category): array
+    {
+        return [
+            'value' => (string) $category->getKey(),
+            'label' => (string) $category->name,
+        ];
     }
 
     /**

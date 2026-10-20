@@ -12,6 +12,7 @@ use App\Portals\Assistant\AssistantDomainCheckService;
 use App\Portals\Assistant\AssistantDomainStoreHistoryService;
 use App\Portals\Assistant\AssistantEmailPurchaseSyncService;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
+use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Assistant\AssistantDomainStoreSpreadsheetService;
 use App\Portals\Logistics\ShopifyOrderSyncService;
 use Illuminate\Database\Eloquent\Builder;
@@ -34,6 +35,7 @@ class DomainStoreController extends Controller
         private readonly AssistantDomainStoreSpreadsheetService $spreadsheets,
         private readonly AssistantDomainCheckService $domainChecks,
         private readonly AssistantEmailPurchaseSyncService $emailPurchases,
+        private readonly AssistantStoreOwnerService $storeOwners,
         private readonly ShopifyOrderSyncService $shopify,
     ) {
     }
@@ -48,6 +50,7 @@ class DomainStoreController extends Controller
 
         $filters = $this->filters($request);
         $stores = $this->storeQuery($context['user'], $filters)
+            ->with(['ownerUser:id,name,username', 'ownerDepartment:id,name'])
             ->orderByDesc('created_at')
             ->orderByDesc('id')
             ->paginate($filters['per_page'])
@@ -62,6 +65,10 @@ class DomainStoreController extends Controller
                     : ($emailPurchaseStatuses[$normalized] ?? AssistantEmailPurchaseSyncService::STATUS_NEVER),
             );
         });
+        $canManageStoreOwnership = $this->authorization->canManageAllDomainStores($context['user']);
+        $ownerScopeWarningIds = $canManageStoreOwnership
+            ? $this->storeOwners->outOfScopeStoreIds($stores->getCollection())
+            : [];
 
         return view('portals.assistant.domain-stores.index', [
             ...$this->viewContext($context),
@@ -70,8 +77,16 @@ class DomainStoreController extends Controller
             'filters' => $filters,
             'canManage' => $this->authorization->canManageDomainStores($context['user']),
             'canManageDepartmentAccess' => $this->authorization->canManageAllDomainStores($context['user']),
+            'canManageStoreOwnership' => $canManageStoreOwnership,
+            'ownerScopeWarningIds' => $ownerScopeWarningIds,
             'canSyncEmailPurchases' => $this->authorization->canManageQuickOptions($context['user']),
             'assistantChildDepartments' => $this->authorization->assistantChildDepartments(),
+            'operationDepartments' => $canManageStoreOwnership
+                ? $this->storeOwners->operationDepartments()
+                : collect(),
+            'operationScopeMap' => $canManageStoreOwnership
+                ? $this->storeOwners->scopeMap()
+                : [],
             'domainCheckLabels' => AssistantDomainStore::domainCheckLabels(),
             'shopStatusLabels' => AssistantDomainStore::shopStatusLabels(),
         ]);
@@ -235,6 +250,7 @@ class DomainStoreController extends Controller
                     }
 
                     $store = new AssistantDomainStore($data);
+                    $store->owner_department_id = $departmentAccess['owner_department_id'];
                     $this->setLastOperator($store, $context['user']);
                     $store->save();
                     $this->syncDepartmentAccess($store, $departmentAccess['department_ids']);
@@ -375,6 +391,7 @@ class DomainStoreController extends Controller
         $store = DB::connection(config('admin.database.connection') ?: config('database.default'))
             ->transaction(function () use ($data, $context, $departmentAccess): AssistantDomainStore {
                 $store = new AssistantDomainStore($data);
+                $store->owner_department_id = $departmentAccess['owner_department_id'];
                 $this->setLastOperator($store, $context['user']);
                 $store->save();
                 $this->syncDepartmentAccess($store, $departmentAccess['department_ids']);
@@ -442,6 +459,7 @@ class DomainStoreController extends Controller
         DB::connection($domainStore->getConnectionName())->transaction(function () use ($domainStore, $data, $context, $departmentAccess): void {
             $before = $domainStore->historySnapshot();
             $domainStore->fill($data);
+            $domainStore->owner_department_id = $departmentAccess['owner_department_id'];
             $this->setLastOperator($domainStore, $context['user']);
             $domainStore->save();
             $this->syncDepartmentAccess($domainStore, $departmentAccess['department_ids']);
@@ -640,6 +658,126 @@ class DomainStoreController extends Controller
         return $this->updateDepartmentAccessBatch($request, false);
     }
 
+    public function ownerOptions(Request $request): JsonResponse
+    {
+        $context = $this->portalContext($request);
+
+        if ($context instanceof Response) {
+            abort(403);
+        }
+
+        abort_unless($this->authorization->canManageAllDomainStores($context['user']), 403);
+        $validated = $request->validate([
+            'selected_ids' => ['required', 'array', 'min:1', 'max:100'],
+            'selected_ids.*' => ['required', 'integer', 'distinct'],
+        ]);
+        $selectedIds = collect($validated['selected_ids'])
+            ->map(static fn (mixed $id): int => (int) $id)
+            ->unique()
+            ->values();
+        $stores = $this->scopedStoreQuery($context['user'])
+            ->with('ownerUser:id,name,username')
+            ->whereKey($selectedIds->all())
+            ->get();
+
+        if ($stores->count() !== $selectedIds->count()) {
+            throw ValidationException::withMessages([
+                'selected_ids' => __('assistant.domain_stores.validation.owner_selection_changed'),
+            ]);
+        }
+
+        if ($stores->contains(static fn (AssistantDomainStore $store): bool => !$store->owner_department_id)) {
+            throw ValidationException::withMessages([
+                'selected_ids' => __('assistant.domain_stores.validation.owner_department_required'),
+            ]);
+        }
+
+        $candidates = $this->storeOwners->eligibleUsersForDepartments(
+            $stores->pluck('owner_department_id')->map(static fn (mixed $id): int => (int) $id)->unique()->values()->all(),
+        );
+        $candidateIds = $candidates->pluck('id')->map(static fn (mixed $id): int => (int) $id);
+
+        return response()->json([
+            'users' => $candidates->map(static function (AdminUser $user): array {
+                $departmentNames = $user->departments
+                    ->pluck('name')
+                    ->filter()
+                    ->unique()
+                    ->values()
+                    ->implode(' / ');
+
+                return [
+                    'id' => (int) $user->getKey(),
+                    'name' => (string) ($user->name ?: $user->username),
+                    'username' => (string) $user->username,
+                    'departments' => $departmentNames,
+                ];
+            })->values(),
+            'selected_count' => $stores->count(),
+            'outside_scope_count' => $stores
+                ->filter(static fn (AssistantDomainStore $store): bool => $store->owner_user_id !== null)
+                ->reject(static fn (AssistantDomainStore $store): bool => $candidateIds->contains((int) $store->owner_user_id))
+                ->count(),
+        ]);
+    }
+
+    public function assignOwnerBatch(Request $request): Response|RedirectResponse
+    {
+        return $this->updateOwnerBatch($request, false);
+    }
+
+    public function clearOwnerBatch(Request $request): Response|RedirectResponse
+    {
+        return $this->updateOwnerBatch($request, true);
+    }
+
+    public function updateOwnerDepartmentScopes(Request $request): RedirectResponse
+    {
+        $context = $this->portalContext($request);
+
+        if ($context instanceof Response) {
+            abort(403);
+        }
+
+        abort_unless($this->authorization->canManageAllDomainStores($context['user']), 403);
+        $validated = $request->validate([
+            'scopes' => ['nullable', 'array'],
+            'scopes.*' => ['nullable', 'array'],
+            'scopes.*.*' => ['integer', 'distinct'],
+        ]);
+        $assistantDepartmentIds = $this->authorization->assistantChildDepartments()
+            ->pluck('id')
+            ->map(static fn (mixed $id): int => (int) $id);
+        $operationDepartmentIds = $this->storeOwners->operationDepartments()
+            ->pluck('id')
+            ->map(static fn (mixed $id): int => (int) $id);
+        $scopeMap = [];
+
+        foreach (($validated['scopes'] ?? []) as $assistantDepartmentId => $configuredOperationIds) {
+            $assistantDepartmentId = (int) $assistantDepartmentId;
+            $configuredOperationIds = collect($configuredOperationIds ?? [])
+                ->map(static fn (mixed $id): int => (int) $id)
+                ->unique()
+                ->values();
+
+            if (
+                !$assistantDepartmentIds->contains($assistantDepartmentId)
+                || $configuredOperationIds->diff($operationDepartmentIds)->isNotEmpty()
+            ) {
+                throw ValidationException::withMessages([
+                    'scopes' => __('assistant.domain_stores.validation.invalid_owner_scope'),
+                ]);
+            }
+
+            $scopeMap[$assistantDepartmentId] = $configuredOperationIds->all();
+        }
+
+        $this->storeOwners->replaceScopes($scopeMap, $context['user']);
+
+        return $this->domainStoresIndexRedirect($request)
+            ->with('success', __('assistant.domain_stores.messages.owner_scopes_updated'));
+    }
+
     public function checkBatch(Request $request): Response|RedirectResponse
     {
         $context = $this->portalContext($request);
@@ -788,6 +926,7 @@ class DomainStoreController extends Controller
             'team' => $this->filterText($request, 'team'),
             'project' => $this->filterText($request, 'project'),
             'user_name' => $this->filterText($request, 'user_name'),
+            'owner_user' => $this->filterText($request, 'owner_user'),
             'erp' => $this->filterText($request, 'erp'),
             'credit_card' => $this->filterText($request, 'credit_card'),
             'wallet' => $this->filterText($request, 'wallet'),
@@ -858,6 +997,13 @@ class DomainStoreController extends Controller
             }
         }
 
+        if ($filters['owner_user'] !== '') {
+            $ownerKeyword = $this->containsValue((string) $filters['owner_user']);
+            $query->whereHas('ownerUser', static fn (Builder $owner) => $owner
+                ->where('name', 'like', $ownerKeyword)
+                ->orWhere('username', 'like', $ownerKeyword));
+        }
+
         foreach ([
             'created_from' => ['created_at', '>='],
             'created_to' => ['created_at', '<='],
@@ -893,6 +1039,9 @@ class DomainStoreController extends Controller
             ->orWhere('team', 'like', $keyword)
             ->orWhere('project', 'like', $keyword)
             ->orWhere('user_name', 'like', $keyword)
+            ->orWhereHas('ownerUser', static fn (Builder $owner) => $owner
+                ->where('name', 'like', $keyword)
+                ->orWhere('username', 'like', $keyword))
             ->orWhere('erp', 'like', $keyword)
             ->orWhere('credit_card', 'like', $keyword)
             ->orWhere('wallet', 'like', $keyword)
@@ -953,6 +1102,10 @@ class DomainStoreController extends Controller
                 ? $store->authorizedDepartments()->pluck('admin_roles.id')->map(static fn ($id): int => (int) $id)->all()
                 : ($canManageDepartmentAccess || $childDepartmentId === null ? [] : [(int) $childDepartmentId]),
         );
+        $ownerDepartmentId = old(
+            'owner_department_id',
+            $store?->owner_department_id ?? ($canManageDepartmentAccess ? null : $childDepartmentId),
+        );
 
         return [
             'canManageDepartmentAccess' => $canManageDepartmentAccess,
@@ -962,6 +1115,9 @@ class DomainStoreController extends Controller
                 ->unique()
                 ->values()
                 ->all(),
+            'ownerDepartmentId' => $ownerDepartmentId === null || $ownerDepartmentId === ''
+                ? null
+                : (int) $ownerDepartmentId,
         ];
     }
 
@@ -970,7 +1126,7 @@ class DomainStoreController extends Controller
      * A child-department member cannot alter access and new records are shared with
      * that member's own child department automatically.
      *
-     * @return array{department_ids: list<int>}
+     * @return array{department_ids: list<int>, owner_department_id: ?int}
      */
     private function departmentAccessForRequest(
         Request $request,
@@ -990,17 +1146,22 @@ class DomainStoreController extends Controller
                         ->map(static fn ($id): int => (int) $id)
                         ->values()
                         ->all(),
+                    'owner_department_id' => $existingStore->owner_department_id === null
+                        ? null
+                        : (int) $existingStore->owner_department_id,
                 ];
             }
 
             return [
                 'department_ids' => [(int) $department->getKey()],
+                'owner_department_id' => (int) $department->getKey(),
             ];
         }
 
         $validated = $request->validate([
             'authorized_department_ids' => ['nullable', 'array'],
             'authorized_department_ids.*' => ['integer', 'distinct'],
+            'owner_department_id' => ['nullable', 'integer'],
         ]);
         $departments = $this->authorization->assistantChildDepartments()->keyBy('id');
         $departmentIds = collect($validated['authorized_department_ids'] ?? [])
@@ -1014,8 +1175,23 @@ class DomainStoreController extends Controller
             ]);
         }
 
+        $ownerDepartmentId = isset($validated['owner_department_id'])
+            ? (int) $validated['owner_department_id']
+            : ($existingStore?->owner_department_id ? (int) $existingStore->owner_department_id : null);
+
+        if ($ownerDepartmentId !== null && !$departments->has($ownerDepartmentId)) {
+            throw ValidationException::withMessages([
+                'owner_department_id' => __('assistant.domain_stores.validation.invalid_owner_department'),
+            ]);
+        }
+
+        if ($ownerDepartmentId === null && $departmentIds->count() === 1) {
+            $ownerDepartmentId = (int) $departmentIds->first();
+        }
+
         return [
             'department_ids' => $departmentIds->all(),
+            'owner_department_id' => $ownerDepartmentId,
         ];
     }
 
@@ -1097,6 +1273,100 @@ class DomainStoreController extends Controller
                 : __($grant
                     ? 'assistant.domain_stores.messages.batch_access_granted'
                     : 'assistant.domain_stores.messages.batch_access_revoked', ['count' => $affected]));
+    }
+
+    private function updateOwnerBatch(Request $request, bool $clear): Response|RedirectResponse
+    {
+        $context = $this->portalContext($request);
+
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->authorization->canManageAllDomainStores($context['user']), 403);
+        $rules = [
+            'selected_ids' => ['required', 'array', 'min:1', 'max:100'],
+            'selected_ids.*' => ['required', 'integer', 'distinct'],
+        ];
+
+        if (!$clear) {
+            $rules['owner_user_id'] = ['required', 'integer'];
+        }
+
+        $validated = $request->validate($rules);
+        $selectedIds = collect($validated['selected_ids'])
+            ->map(static fn (mixed $id): int => (int) $id)
+            ->unique()
+            ->values();
+        $stores = $this->scopedStoreQuery($context['user'])
+            ->with('ownerUser:id,name,username')
+            ->whereKey($selectedIds->all())
+            ->get();
+
+        if ($stores->count() !== $selectedIds->count()) {
+            throw ValidationException::withMessages([
+                'selected_ids' => __('assistant.domain_stores.validation.owner_selection_changed'),
+            ]);
+        }
+
+        $ownerUserId = null;
+
+        if (!$clear) {
+            if ($stores->contains(static fn (AssistantDomainStore $store): bool => !$store->owner_department_id)) {
+                throw ValidationException::withMessages([
+                    'selected_ids' => __('assistant.domain_stores.validation.owner_department_required'),
+                ]);
+            }
+
+            $ownerUserId = (int) $validated['owner_user_id'];
+            $candidates = $this->storeOwners->eligibleUsersForDepartments(
+                $stores->pluck('owner_department_id')->map(static fn (mixed $id): int => (int) $id)->unique()->values()->all(),
+            );
+
+            if (!$candidates->contains('id', $ownerUserId)) {
+                throw ValidationException::withMessages([
+                    'owner_user_id' => __('assistant.domain_stores.validation.invalid_owner_user'),
+                ]);
+            }
+        }
+
+        $updated = DB::connection(config('admin.database.connection') ?: config('database.default'))
+            ->transaction(function () use ($stores, $ownerUserId, $context): int {
+                $count = 0;
+
+                foreach ($stores as $store) {
+                    if (($store->owner_user_id === null ? null : (int) $store->owner_user_id) === $ownerUserId) {
+                        continue;
+                    }
+
+                    $before = $store->historySnapshot();
+                    $store->owner_user_id = $ownerUserId;
+                    $store->unsetRelation('ownerUser');
+                    $this->setLastOperator($store, $context['user']);
+                    $store->save();
+                    $this->history->recordUpdated($store, $before, $store->historySnapshot(), $context['user']);
+                    $count++;
+                }
+
+                return $count;
+            });
+
+        $message = $updated === 0
+            ? __('assistant.domain_stores.messages.owner_unchanged')
+            : __($clear
+                ? 'assistant.domain_stores.messages.owner_cleared'
+                : 'assistant.domain_stores.messages.owner_assigned', ['count' => $updated]);
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'message' => $message,
+                'updated_count' => $updated,
+                'type' => $updated === 0 ? 'warning' : 'success',
+            ]);
+        }
+
+        return $this->domainStoresIndexRedirect($request)
+            ->with($updated === 0 ? 'error' : 'success', $message);
     }
 
     /** @param list<int> $departmentIds */

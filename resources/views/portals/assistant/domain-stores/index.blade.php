@@ -81,6 +81,18 @@
         'successTitle' => $t('messages.success_title'),
         'errorTitle' => $t('messages.error_title'),
     ];
+    $ownershipJavascriptConfig = [
+        'optionsUrl' => route('assistant.domain-stores.owners.options'),
+        'translations' => [
+            'selectionCount' => $t('javascript.owner_selection_count', ['count' => '__count__']),
+            'loading' => $t('javascript.owner_candidates_loading'),
+            'loadFailed' => $t('javascript.owner_candidates_failed'),
+            'empty' => $t('javascript.owner_candidates_empty'),
+            'chooseOwner' => $t('javascript.owner_choose_required'),
+            'outsideScope' => $t('javascript.owner_outside_scope_warning', ['count' => '__count__']),
+            'clearConfirm' => $t('javascript.owner_clear_confirm', ['count' => '__count__']),
+        ],
+    ];
     $batchUpdateFieldGroups = [
         [
             'label' => $t('sections.shop_domain'),
@@ -142,6 +154,7 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-field-select-20261010-1.css">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-expanded-20261010-1.css?v=20261010-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-modal-20261009-1.css">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-1.css">
 @endpush
 
 @section('content')
@@ -150,9 +163,9 @@
     </section>
 
     <section class="content assistant-domain-stores-page">
-        @if ($errors->has('import_file') || $errors->has('scope') || $errors->has('department_ids') || $errors->batchUpdate->any())
+        @if ($errors->has('import_file') || $errors->has('scope') || $errors->has('department_ids') || $errors->has('selected_ids') || $errors->has('owner_user_id') || $errors->has('scopes') || $errors->batchUpdate->any())
             <div class="alert alert-danger {{ $errors->has('import_file') ? 'assistant-import-errors' : ($errors->has('department_ids') ? 'assistant-batch-access-errors' : ($errors->batchUpdate->any() ? 'assistant-batch-update-errors' : 'assistant-export-errors')) }}" role="alert">
-                {{ $errors->first('import_file') ?: $errors->first('department_ids') ?: $errors->batchUpdate->first() ?: $errors->first('scope') }}
+                {{ $errors->first('import_file') ?: $errors->first('department_ids') ?: $errors->first('selected_ids') ?: $errors->first('owner_user_id') ?: $errors->first('scopes') ?: $errors->batchUpdate->first() ?: $errors->first('scope') }}
             </div>
         @endif
 
@@ -233,6 +246,7 @@
                             <div class="assistant-advanced-filter-field"><label for="filter-team">{{ $t('fields.team') }}</label><input id="filter-team" class="form-control" name="team" value="{{ $filters['team'] }}"></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-project">{{ $t('fields.project') }}</label><input id="filter-project" class="form-control" name="project" value="{{ $filters['project'] }}"></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-user-name">{{ $t('fields.user_short') }}</label><input id="filter-user-name" class="form-control" name="user_name" value="{{ $filters['user_name'] }}"></div>
+                            <div class="assistant-advanced-filter-field"><label for="filter-owner-user">{{ $t('fields.owner_user') }}</label><input id="filter-owner-user" class="form-control" name="owner_user" value="{{ $filters['owner_user'] }}"></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-erp">{{ $t('fields.erp') }}</label><input id="filter-erp" class="form-control" name="erp" value="{{ $filters['erp'] }}"></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-credit-card">{{ $t('fields.credit_card') }}</label><input id="filter-credit-card" class="form-control" name="credit_card" value="{{ $filters['credit_card'] }}" list="filter-credit-card-options"><datalist id="filter-credit-card-options">@foreach ($quickOptions['credit_card'] ?? [] as $value)<option value="{{ $value }}">{{ $creditCardOptions[$value] ?? $value }}</option>@endforeach</datalist></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-wallet">{{ $t('fields.wallet') }}</label><input id="filter-wallet" class="form-control" name="wallet" value="{{ $filters['wallet'] }}" list="filter-wallet-options"><datalist id="filter-wallet-options">@foreach ($quickOptions['wallet'] ?? [] as $value)<option value="{{ $value }}">{{ $walletOptions[$value] ?? $value }}</option>@endforeach</datalist></div>
@@ -283,6 +297,11 @@
                         <button type="button" class="btn btn-primary btn-sm assistant-batch-access-trigger" id="assistant-batch-grant-trigger" data-toggle="modal" data-target="#assistant-batch-grant-modal" hidden><i class="fa fa-share"></i> {{ $t('selection.batch_grant_access') }}</button>
                         <button type="button" class="btn btn-warning btn-sm assistant-batch-access-trigger" id="assistant-batch-revoke-trigger" data-toggle="modal" data-target="#assistant-batch-revoke-modal" hidden><i class="fa fa-ban"></i> {{ $t('selection.batch_revoke_access') }}</button>
                     @endif
+                    @if ($canManageStoreOwnership)
+                        <button type="button" class="btn btn-success btn-sm" id="assistant-batch-owner-trigger" data-toggle="modal" data-target="#assistant-batch-owner-modal" hidden><i class="fa fa-user-plus"></i> {{ $t('selection.batch_assign_owner') }}</button>
+                        <button type="button" class="btn btn-default btn-sm" id="assistant-batch-owner-clear-trigger" data-toggle="modal" data-target="#assistant-batch-owner-clear-modal" hidden><i class="fa fa-user-times"></i> {{ $t('selection.batch_clear_owner') }}</button>
+                        <button type="button" class="btn btn-default btn-sm" data-toggle="modal" data-target="#assistant-owner-scope-modal"><i class="fa fa-sitemap"></i> {{ $t('selection.configure_owner_scopes') }}</button>
+                    @endif
                 @else
                     <span class="text-muted"><i class="fa fa-eye"></i> {{ $t('selection.readonly') }}</span>
                 @endif
@@ -309,6 +328,7 @@
                         <col class="assistant-team-column" data-column-key="team">
                         <col class="assistant-project-column" data-column-key="project">
                         <col class="assistant-user-column" data-column-key="user_name">
+                        <col class="assistant-owner-user-column" data-column-key="owner_user">
                         <col class="assistant-erp-column" data-column-key="erp">
                         <col class="assistant-payment-column" data-column-key="credit_card">
                         <col class="assistant-payment-column" data-column-key="wallet">
@@ -341,6 +361,7 @@
                         <th class="assistant-team-column" data-column-key="team">{{ $t('fields.team') }}</th>
                         <th class="assistant-project-column" data-column-key="project">{{ $t('fields.project') }}</th>
                         <th class="assistant-user-column" data-column-key="user_name">{{ $t('fields.user_short') }}</th>
+                        <th class="assistant-owner-user-column" data-column-key="owner_user">{{ $t('fields.owner_user') }}</th>
                         <th class="assistant-erp-column" data-column-key="erp">{{ $t('fields.erp') }}</th>
                         <th class="assistant-payment-column" data-column-key="credit_card">{{ $t('fields.credit_card') }}</th>
                         <th class="assistant-payment-column" data-column-key="wallet">{{ $t('fields.wallet') }}</th>
@@ -376,6 +397,17 @@
                             <td><span class="assistant-field-value">{{ \App\Models\AssistantDomainStore::displayMultiValue($store->team) ?: $t('common.empty') }}</span></td>
                             <td><span class="assistant-field-value">{{ $store->project ?: $t('common.empty') }}</span></td>
                             <td><span class="assistant-field-value">{{ $store->user_name ?: $t('common.empty') }}</span></td>
+                            <td>
+                                <span class="assistant-field-value">
+                                    {{ $store->ownerUser?->name ?: $store->ownerUser?->username ?: $t('common.empty') }}
+                                    @if ($store->ownerUser && $store->ownerDepartment)
+                                        <small class="assistant-owner-department">{{ $store->ownerDepartment->name }}</small>
+                                    @endif
+                                    @if (in_array((int) $store->getKey(), $ownerScopeWarningIds, true))
+                                        <small class="assistant-owner-scope-warning" title="{{ $t('form.owner_outside_scope') }}"><i class="fa fa-exclamation-triangle"></i> {{ $t('form.owner_outside_scope') }}</small>
+                                    @endif
+                                </span>
+                            </td>
                             <td><span class="assistant-field-value">{{ \App\Models\AssistantDomainStore::displayMultiValue($store->erp) ?: $t('common.empty') }}</span></td>
                             <td><span class="assistant-field-value">{{ $store->credit_card ? ($creditCardOptions[$store->credit_card] ?? $store->credit_card) : $t('common.empty') }}</span></td>
                             <td><span class="assistant-field-value">{{ $store->wallet ? ($walletOptions[$store->wallet] ?? $store->wallet) : $t('common.empty') }}</span></td>
@@ -412,11 +444,11 @@
                             </td>
                         </tr>
                         <tr class="assistant-store-note-row">
-                            <td colspan="24"><span class="assistant-note-label">{{ $t('fields.remark') }}</span><span class="assistant-note-value">{{ $store->remark ?: $t('common.empty') }}</span></td>
+                            <td colspan="25"><span class="assistant-note-label">{{ $t('fields.remark') }}</span><span class="assistant-note-value">{{ $store->remark ?: $t('common.empty') }}</span></td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="25" class="assistant-empty-state">{{ $canManage ? $t('common.no_records') : $t('empty.readonly') }}</td>
+                            <td colspan="26" class="assistant-empty-state">{{ $canManage ? $t('common.no_records') : $t('empty.readonly') }}</td>
                         </tr>
                     @endforelse
                     </tbody>
@@ -555,6 +587,101 @@
                 </div>
             @endforeach
         @endif
+
+        @if ($canManageStoreOwnership)
+            <div class="modal fade" id="assistant-batch-owner-modal" tabindex="-1" role="dialog" aria-labelledby="assistant-batch-owner-title">
+                <div class="modal-dialog" role="document">
+                    <form method="post" action="{{ route('assistant.domain-stores.owners.assign') }}" class="modal-content" id="assistant-batch-owner-form">
+                        @csrf
+                        <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
+                        <div class="modal-header">
+                            <button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('common.close') }}"><span aria-hidden="true">&times;</span></button>
+                            <h4 class="modal-title" id="assistant-batch-owner-title"><i class="fa fa-user-plus"></i> {{ $t('selection.batch_assign_owner') }}</h4>
+                        </div>
+                        <div class="modal-body">
+                            <p class="text-muted" data-owner-selection-summary></p>
+                            <div class="alert alert-warning assistant-owner-warning" data-owner-warning hidden></div>
+                            <div class="form-group">
+                                <label for="assistant-owner-user-select">{{ $t('selection.choose_owner') }}</label>
+                                <select class="form-control" id="assistant-owner-user-select" name="owner_user_id" required disabled>
+                                    <option value="">{{ $t('javascript.owner_candidates_loading') }}</option>
+                                </select>
+                            </div>
+                            <p class="text-muted assistant-owner-help">{{ $t('selection.owner_assignment_only_notice') }}</p>
+                            <span data-owner-selected-inputs></span>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-default" data-dismiss="modal">{{ $t('common.cancel') }}</button>
+                            <button type="submit" class="btn btn-success" data-owner-submit disabled><i class="fa fa-check"></i> {{ $t('selection.confirm_assign_owner') }}</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <div class="modal fade" id="assistant-batch-owner-clear-modal" tabindex="-1" role="dialog" aria-labelledby="assistant-batch-owner-clear-title">
+                <div class="modal-dialog" role="document">
+                    <form method="post" action="{{ route('assistant.domain-stores.owners.clear') }}" class="modal-content" id="assistant-batch-owner-clear-form">
+                        @csrf
+                        @method('DELETE')
+                        <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
+                        <div class="modal-header">
+                            <button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('common.close') }}"><span aria-hidden="true">&times;</span></button>
+                            <h4 class="modal-title" id="assistant-batch-owner-clear-title"><i class="fa fa-user-times"></i> {{ $t('selection.batch_clear_owner') }}</h4>
+                        </div>
+                        <div class="modal-body">
+                            <p data-owner-clear-summary></p>
+                            <p class="text-muted">{{ $t('selection.owner_assignment_only_notice') }}</p>
+                            <span data-owner-clear-inputs></span>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-default" data-dismiss="modal">{{ $t('common.cancel') }}</button>
+                            <button type="submit" class="btn btn-danger"><i class="fa fa-user-times"></i> {{ $t('selection.confirm_clear_owner') }}</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <div class="modal fade" id="assistant-owner-scope-modal" tabindex="-1" role="dialog" aria-labelledby="assistant-owner-scope-title">
+                <div class="modal-dialog modal-lg" role="document">
+                    <form method="post" action="{{ route('assistant.domain-stores.owner-scopes.update') }}" class="modal-content">
+                        @csrf
+                        @method('PUT')
+                        <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
+                        <div class="modal-header">
+                            <button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('common.close') }}"><span aria-hidden="true">&times;</span></button>
+                            <h4 class="modal-title" id="assistant-owner-scope-title"><i class="fa fa-sitemap"></i> {{ $t('selection.owner_scope_title') }}</h4>
+                        </div>
+                        <div class="modal-body">
+                            <div class="alert alert-info"><i class="fa fa-info-circle"></i> {{ $t('selection.owner_scope_help') }}</div>
+                            <div class="assistant-owner-scope-grid">
+                                @forelse ($assistantChildDepartments as $assistantDepartment)
+                                    <section class="assistant-owner-scope-card">
+                                        <h5>{{ $assistantDepartment->name }}</h5>
+                                        <p class="text-muted">{{ $t('selection.choose_operation_departments') }}</p>
+                                        <div class="assistant-owner-scope-options">
+                                            @forelse ($operationDepartments as $operationDepartment)
+                                                <label style="--owner-scope-depth: {{ (int) $operationDepartment->tree_depth }}">
+                                                    <input type="checkbox" name="scopes[{{ $assistantDepartment->getKey() }}][]" value="{{ $operationDepartment->getKey() }}" @checked(in_array((int) $operationDepartment->getKey(), $operationScopeMap[$assistantDepartment->getKey()] ?? [], true))>
+                                                    <span>{{ $operationDepartment->name }}</span>
+                                                </label>
+                                            @empty
+                                                <span class="text-muted">{{ $t('selection.no_operation_departments') }}</span>
+                                            @endforelse
+                                        </div>
+                                    </section>
+                                @empty
+                                    <p class="text-muted">{{ $t('form.no_child_departments') }}</p>
+                                @endforelse
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-default" data-dismiss="modal">{{ $t('common.cancel') }}</button>
+                            <button type="submit" class="btn btn-primary"><i class="fa fa-save"></i> {{ $t('common.save') }}</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        @endif
     @endif
 @endsection
 
@@ -566,6 +693,7 @@
         window.ErpAssistantDomainStoreModalTranslations = @json($modalJavascriptTranslations);
         window.ErpAssistantDomainStoreBatchUpdateTranslations = @json($batchUpdateJavascriptTranslations);
         window.ErpAssistantDomainStoreBatchUpdateFieldGroups = @json($batchUpdateFieldGroups);
+        window.ErpAssistantDomainStoreOwnership = @json($ownershipJavascriptConfig);
     </script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-20261007-2.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-access-20261009-1.js"></script>
@@ -576,6 +704,7 @@
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-quick-options-20261008-2.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-team-project-options-20261009-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-modal-20261009-1.js?v=20261011-2"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-1.js"></script>
     @if (session('success'))
         <script>
             window.ErpAdminNotifier.notify({
