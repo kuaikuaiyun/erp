@@ -140,6 +140,11 @@ Route::put('/selection-proposals/{proposal}', [ProductLibraryController::class, 
 Route::post('/selection-proposals/{proposal}/withdraw', [ProductLibraryController::class, 'withdrawSelectionProposal'])->name('aikaipin.selection-proposals.withdraw');
 Route::get('/selection-proposals/{proposal}/images/{image}', [ProductLibraryController::class, 'showSelectionProposalImage'])->name('aikaipin.selection-proposals.images.show');
 Route::get('/placement-evaluations', [ProductLibraryController::class, 'placementEvaluation'])->name('aikaipin.placement-evaluations.index');
+Route::get('/placement-evaluations/product-options', [ProductLibraryController::class, 'placementEvaluationProductOptions'])->name('aikaipin.placement-evaluations.product-options');
+Route::post('/placement-evaluations', [ProductLibraryController::class, 'storePlacementEvaluation'])->name('aikaipin.placement-evaluations.store');
+Route::get('/placement-evaluations/{evaluation}', [ProductLibraryController::class, 'showPlacementEvaluation'])->name('aikaipin.placement-evaluations.show');
+Route::put('/placement-evaluations/{evaluation}', [ProductLibraryController::class, 'updatePlacementEvaluation'])->name('aikaipin.placement-evaluations.update');
+Route::delete('/placement-evaluations/{evaluation}', [ProductLibraryController::class, 'destroyPlacementEvaluation'])->name('aikaipin.placement-evaluations.destroy');
 Route::get('/paypal-risk', [PayPalRiskController::class, 'index'])->name('logistics.paypal-risk.index');
 Route::post('/paypal-risk/accounts', [PayPalRiskController::class, 'store'])->name('logistics.paypal-risk.accounts.store');
 Route::put('/paypal-risk/accounts/{account}', [PayPalRiskController::class, 'update'])->name('logistics.paypal-risk.accounts.update');

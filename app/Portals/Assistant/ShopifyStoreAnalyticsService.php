@@ -67,29 +67,27 @@ class ShopifyStoreAnalyticsService
                 (self::INITIAL_HISTORY_DAYS - 1) + self::INITIAL_TIMEZONE_BUFFER_DAYS,
             );
             $historyStartUtc = $historyFromDate->startOfDay()->setTimezone('UTC');
+            $historyEndUtc = $localToday->addDay()->startOfDay()->setTimezone('UTC');
+
+            // Some rows may already contain the original Shopify tags while
+            // their derived category is still empty (for example after a
+            // partially completed deployment). Repair those rows locally
+            // before deciding whether Shopify history needs to be requested.
+            $this->repairStoredSubscriptionCategories(
+                (int) $store->getKey(),
+                $historyStartUtc,
+                $historyEndUtc,
+            );
             // Tags were introduced after order-history storage already existed.
             // Only an explicit user-selected synchronization may perform this
             // one-time 90-day tag backfill; the automatic 30-minute process
             // remains incremental and cannot unexpectedly fan out API work.
             $needsSubscriptionTagBackfill = $allowSubscriptionHistoryBackfill
-                && AssistantShopifyStoreOrder::query()
-                    ->where('assistant_domain_store_id', $store->getKey())
-                    ->where('shopify_created_at', '>=', $historyStartUtc->format('Y-m-d H:i:s'))
-                    ->where(function ($orders): void {
-                        $orders
-                            // Rows written before tag persistence was introduced
-                            // have no source tags at all. A legitimate order with
-                            // no tags is stored as JSON [] and must not retrigger
-                            // another 90-day backfill.
-                            ->whereNull('shopify_tags')
-                            ->orWhereNull('subscription_category')
-                            ->orWhere('subscription_category', '')
-                            ->orWhereNotIn(
-                                'subscription_category',
-                                AssistantShopifyStoreOrder::subscriptionCategories(),
-                            );
-                    })
-                    ->exists();
+                && $this->hasUnclassifiedSubscriptionOrders(
+                    (int) $store->getKey(),
+                    $historyStartUtc,
+                    $historyEndUtc,
+                );
             $requiresFullHistory = $isInitial || $needsSubscriptionTagBackfill;
             $fromDate = $requiresFullHistory
                 ? $historyFromDate
@@ -102,6 +100,22 @@ class ShopifyStoreAnalyticsService
                 $fromDate,
                 $localToday,
             );
+
+            if ($requiresFullHistory) {
+                $this->repairStoredSubscriptionCategories(
+                    (int) $store->getKey(),
+                    $historyStartUtc,
+                    $historyEndUtc,
+                );
+
+                if ($this->hasUnclassifiedSubscriptionOrders(
+                    (int) $store->getKey(),
+                    $historyStartUtc,
+                    $historyEndUtc,
+                )) {
+                    throw new RuntimeException('Shopify subscription classification backfill is incomplete.');
+                }
+            }
 
             $currentDaySummary = $this->storeDaySummary($store, $localToday);
             $syncedAt = now();
@@ -137,6 +151,69 @@ class ShopifyStoreAnalyticsService
 
             return $this->markFailure($metric, $failure['status'], $failure['reason']);
         }
+    }
+
+    private function repairStoredSubscriptionCategories(
+        int $storeId,
+        CarbonImmutable $startUtc,
+        CarbonImmutable $endUtc,
+    ): void {
+        AssistantShopifyStoreOrder::query()
+            ->where('assistant_domain_store_id', $storeId)
+            ->where('shopify_created_at', '>=', $startUtc->format('Y-m-d H:i:s'))
+            ->where('shopify_created_at', '<', $endUtc->format('Y-m-d H:i:s'))
+            ->whereNotNull('shopify_tags')
+            ->where(function ($orders): void {
+                $orders
+                    ->whereNull('subscription_category')
+                    ->orWhere('subscription_category', '')
+                    ->orWhereNotIn(
+                        'subscription_category',
+                        AssistantShopifyStoreOrder::subscriptionCategories(),
+                    );
+            })
+            ->select(['id', 'shopify_tags'])
+            ->chunkById(500, function ($orders): void {
+                $idsByCategory = [];
+                foreach ($orders as $order) {
+                    $category = AssistantShopifyStoreOrder::subscriptionCategoryForTags($order->shopify_tags);
+                    $idsByCategory[$category][] = (int) $order->getKey();
+                }
+
+                foreach ($idsByCategory as $category => $ids) {
+                    AssistantShopifyStoreOrder::query()
+                        ->whereKey($ids)
+                        ->update([
+                            'subscription_category' => $category,
+                            'updated_at' => now(),
+                        ]);
+                }
+            });
+    }
+
+    private function hasUnclassifiedSubscriptionOrders(
+        int $storeId,
+        CarbonImmutable $startUtc,
+        CarbonImmutable $endUtc,
+    ): bool {
+        return AssistantShopifyStoreOrder::query()
+            ->where('assistant_domain_store_id', $storeId)
+            ->where('shopify_created_at', '>=', $startUtc->format('Y-m-d H:i:s'))
+            ->where('shopify_created_at', '<', $endUtc->format('Y-m-d H:i:s'))
+            ->where(function ($orders): void {
+                $orders
+                    // Rows written before tag persistence was introduced have
+                    // no source tags. A legitimate tag-free order is stored as
+                    // JSON [] and is classified as a regular order.
+                    ->whereNull('shopify_tags')
+                    ->orWhereNull('subscription_category')
+                    ->orWhere('subscription_category', '')
+                    ->orWhereNotIn(
+                        'subscription_category',
+                        AssistantShopifyStoreOrder::subscriptionCategories(),
+                    );
+            })
+            ->exists();
     }
 
     /**
@@ -521,6 +598,13 @@ GRAPHQL;
             return [
                 'status' => AssistantShopifyStoreMetric::STATUS_FAILED,
                 'reason' => 'order_cursor_missing',
+            ];
+        }
+
+        if (Str::contains($message, 'subscription classification backfill is incomplete')) {
+            return [
+                'status' => AssistantShopifyStoreMetric::STATUS_FAILED,
+                'reason' => 'subscription_classification_incomplete',
             ];
         }
 

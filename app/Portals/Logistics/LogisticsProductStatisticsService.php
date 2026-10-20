@@ -23,6 +23,28 @@ use Illuminate\Support\Facades\DB;
 class LogisticsProductStatisticsService
 {
     /**
+     * Imported credit-card refund reasons counted as operational alerts.
+     *
+     * English markers are matched case-insensitively. Chinese business
+     * reasons use the same contains rule so additional notes around the
+     * standard wording do not prevent a match.
+     *
+     * @var list<string>
+     */
+    private const CREDIT_CARD_ALERT_REASON_KEYWORDS = [
+        'ethoca',
+        'cdrn',
+        'rdr',
+        '取消复购订单',
+        '取消加购',
+        '取消订单',
+        '质量问题',
+        '地址无法发货',
+        '描述不符',
+        '商品无法发货',
+    ];
+
+    /**
      * @param array<string, mixed> $filters
      * @return array{products:list<array<string,mixed>>,summary:array<string,mixed>,pagination:array<string,int>}
      */
@@ -1338,19 +1360,22 @@ class LogisticsProductStatisticsService
     }
 
     /**
-     * A credit-card refund is considered a chargeback when its imported reason
-     * contains one of the industry markers Ethoca, CDRN, or RDR.  The import
-     * reason is user-supplied text, therefore matching is deliberately
-     * case-insensitive and allows surrounding text.
+     * A credit-card refund is considered an operational alert when its
+     * imported reason contains a configured marker. The imported reason is
+     * user-supplied text, therefore matching is deliberately case-insensitive
+     * and allows surrounding text.
      */
     private function creditCardChargebackAggregateQuery(): Builder
     {
         return $this->database()->table('logistics_credit_card_refunds as refund')
             ->where(function (Builder $query): void {
-                $query
-                    ->whereRaw("LOWER(COALESCE(refund.refund_reason, '')) LIKE ?", ['%ethoca%'])
-                    ->orWhereRaw("LOWER(COALESCE(refund.refund_reason, '')) LIKE ?", ['%cdrn%'])
-                    ->orWhereRaw("LOWER(COALESCE(refund.refund_reason, '')) LIKE ?", ['%rdr%']);
+                foreach (self::CREDIT_CARD_ALERT_REASON_KEYWORDS as $index => $keyword) {
+                    $method = $index === 0 ? 'whereRaw' : 'orWhereRaw';
+                    $query->{$method}(
+                        "LOWER(COALESCE(refund.refund_reason, '')) LIKE ?",
+                        ['%'.mb_strtolower($keyword).'%'],
+                    );
+                }
             })
             ->select('refund.logistics_order_id')
             ->selectRaw('COUNT(*) as chargeback_count')
@@ -2011,8 +2036,17 @@ class LogisticsProductStatisticsService
     {
         $value = mb_strtolower(trim((string) $reason));
 
-        return $value !== ''
-            && (str_contains($value, 'ethoca') || str_contains($value, 'cdrn') || str_contains($value, 'rdr'));
+        if ($value === '') {
+            return false;
+        }
+
+        foreach (self::CREDIT_CARD_ALERT_REASON_KEYWORDS as $keyword) {
+            if (str_contains($value, mb_strtolower($keyword))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

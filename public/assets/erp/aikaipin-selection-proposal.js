@@ -5,6 +5,7 @@
     var selectionConfig = config.selection || {};
     var selectionModal = document.getElementById('aikaipin-selection-proposal-modal');
     var detailModal = document.getElementById('aikaipin-selection-proposal-detail-modal');
+    var imagePreviewModal = document.getElementById('aikaipin-selection-proposal-image-preview-modal');
     var selectionForm = document.querySelector('[data-aikaipin-selection-form]');
     var formTitle = document.querySelector('[data-aikaipin-selection-form-title]');
     var submitButton = document.querySelector('[data-aikaipin-selection-submit]');
@@ -15,12 +16,21 @@
     var imageInput = document.querySelector('[data-aikaipin-selection-images]');
     var imagePreviews = document.querySelector('[data-aikaipin-selection-image-previews]');
     var detailBody = document.querySelector('[data-aikaipin-selection-detail-body]');
+    var imagePreviewTitle = document.querySelector('[data-aikaipin-selection-image-preview-title]');
+    var imagePreviewCanvas = document.querySelector('[data-aikaipin-selection-image-preview-canvas]');
+    var imagePreviewPosition = document.querySelector('[data-aikaipin-selection-image-preview-position]');
+    var imagePreviewThumbnails = document.querySelector('[data-aikaipin-selection-image-preview-thumbnails]');
+    var imagePreviewPrevious = document.querySelector('[data-aikaipin-selection-image-preview-previous]');
+    var imagePreviewNext = document.querySelector('[data-aikaipin-selection-image-preview-next]');
     var tags = {specification: [], attribute: []};
     var newImages = [];
     var existingImages = [];
     var removedImageIds = [];
     var editingProposalId = null;
     var submitting = false;
+    var previewImages = [];
+    var previewImageIndex = 0;
+    var previewImageTitle = '';
 
     function notify(type, title, message) {
         if (window.ErpAdminNotifier && typeof window.ErpAdminNotifier.notify === 'function') {
@@ -80,6 +90,152 @@
 
     function proposalUrl(template, proposalId) {
         return String(template || '').replace('__proposal__', encodeURIComponent(proposalId));
+    }
+
+    function normalizePreviewImages(images) {
+        return Array.isArray(images) ? images.filter(function (image) {
+            return image && image.url;
+        }) : [];
+    }
+
+    function renderImagePreview() {
+        var image;
+
+        if (!imagePreviewCanvas || previewImages.length === 0) {
+            return;
+        }
+
+        previewImageIndex = Math.max(0, Math.min(previewImageIndex, previewImages.length - 1));
+        image = previewImages[previewImageIndex];
+        imagePreviewCanvas.innerHTML = '';
+
+        var element = document.createElement('img');
+        element.src = image.url;
+        element.alt = image.name || replaceTokens(selectionConfig.imagePreviewImageAlt, {number: previewImageIndex + 1});
+        element.addEventListener('error', function () {
+            var unavailable;
+
+            imagePreviewCanvas.innerHTML = '';
+            unavailable = document.createElement('p');
+            unavailable.className = 'aikaipin-submission-image-preview-unavailable';
+            unavailable.textContent = selectionConfig.imagePreviewUnavailable;
+            imagePreviewCanvas.appendChild(unavailable);
+        });
+        imagePreviewCanvas.appendChild(element);
+
+        if (imagePreviewTitle) {
+            imagePreviewTitle.textContent = replaceTokens(selectionConfig.imagePreviewTitle, {name: previewImageTitle});
+        }
+        if (imagePreviewPosition) {
+            imagePreviewPosition.textContent = replaceTokens(selectionConfig.imagePreviewPosition, {
+                current: previewImageIndex + 1,
+                total: previewImages.length
+            });
+        }
+        if (imagePreviewPrevious) {
+            imagePreviewPrevious.disabled = previewImages.length < 2;
+        }
+        if (imagePreviewNext) {
+            imagePreviewNext.disabled = previewImages.length < 2;
+        }
+        if (imagePreviewThumbnails) {
+            imagePreviewThumbnails.innerHTML = '';
+            previewImages.forEach(function (previewImage, index) {
+                var thumbnail = document.createElement('button');
+                var thumbnailImage = document.createElement('img');
+
+                thumbnail.type = 'button';
+                thumbnail.className = 'aikaipin-submission-image-preview-thumbnail' + (index === previewImageIndex ? ' is-active' : '');
+                thumbnail.setAttribute('data-aikaipin-selection-image-preview-index', String(index));
+                thumbnail.setAttribute('aria-label', replaceTokens(selectionConfig.imagePreviewThumbnail, {number: index + 1}));
+                thumbnail.setAttribute('aria-current', index === previewImageIndex ? 'true' : 'false');
+                thumbnailImage.src = previewImage.url;
+                thumbnailImage.alt = previewImage.name || replaceTokens(selectionConfig.imagePreviewImageAlt, {number: index + 1});
+                thumbnail.appendChild(thumbnailImage);
+                imagePreviewThumbnails.appendChild(thumbnail);
+            });
+        }
+    }
+
+    function openImagePreview(images, title) {
+        previewImages = normalizePreviewImages(images);
+        if (previewImages.length === 0) {
+            notify('warning', selectionConfig.saveFailedTitle, selectionConfig.imagePreviewUnavailable);
+            return;
+        }
+
+        previewImageIndex = 0;
+        previewImageTitle = title || '';
+        renderImagePreview();
+        if (imagePreviewModal && window.jQuery) {
+            window.jQuery(imagePreviewModal).modal('show');
+        }
+    }
+
+    function openProposalImagePreview(proposalId) {
+        loadProposal(proposalId).then(function (proposal) {
+            openImagePreview(proposal.images, proposal.product_name || '');
+        }).catch(function (error) {
+            notify('error', selectionConfig.saveFailedTitle, error.message || selectionConfig.saveFailedMessage);
+        });
+    }
+
+    function showThumbnailUnavailable(image) {
+        var trigger = image.closest('[data-aikaipin-selection-preview-proposal-id]');
+        var icon;
+
+        if (!trigger || trigger.classList.contains('is-unavailable')) {
+            return;
+        }
+
+        trigger.classList.add('is-unavailable');
+        trigger.title = selectionConfig.imagePreviewUnavailable;
+        trigger.setAttribute('aria-label', selectionConfig.imagePreviewUnavailable);
+        image.remove();
+        icon = document.createElement('i');
+        icon.className = 'fa fa-picture-o';
+        icon.setAttribute('aria-hidden', 'true');
+        trigger.appendChild(icon);
+    }
+
+    function bindThumbnailFallbacks(root) {
+        Array.prototype.slice.call(root.querySelectorAll('[data-aikaipin-selection-thumbnail-image]')).forEach(function (image) {
+            if (image.getAttribute('data-aikaipin-thumbnail-bound') === 'true') {
+                return;
+            }
+
+            image.setAttribute('data-aikaipin-thumbnail-bound', 'true');
+            image.addEventListener('error', function () {
+                showThumbnailUnavailable(image);
+            });
+            if (image.complete && image.naturalWidth === 0) {
+                showThumbnailUnavailable(image);
+            }
+        });
+    }
+
+    function bindPreviewTriggers(root) {
+        Array.prototype.slice.call(root.querySelectorAll('[data-aikaipin-selection-preview-proposal-id]')).forEach(function (trigger) {
+            if (trigger.getAttribute('data-aikaipin-preview-bound') === 'true') {
+                return;
+            }
+
+            trigger.setAttribute('data-aikaipin-preview-bound', 'true');
+            trigger.addEventListener('click', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                openProposalImagePreview(Number(trigger.getAttribute('data-aikaipin-selection-preview-proposal-id')));
+            });
+        });
+    }
+
+    function movePreviewImage(offset) {
+        if (previewImages.length < 2) {
+            return;
+        }
+
+        previewImageIndex = (previewImageIndex + offset + previewImages.length) % previewImages.length;
+        renderImagePreview();
     }
 
     function tagInput(type) {
@@ -374,17 +530,20 @@
                 var imageGrid = document.createElement('div');
                 imageGrid.className = 'aikaipin-submission-detail-image-grid';
                 proposal.images.forEach(function (image) {
-                    var imageLink = document.createElement('a');
+                    var imageButton = document.createElement('button');
                     var element = document.createElement('img');
-                    imageLink.href = image.url;
-                    imageLink.target = '_blank';
-                    imageLink.rel = 'noopener noreferrer';
+
+                    imageButton.type = 'button';
+                    imageButton.className = 'aikaipin-submission-detail-image-trigger';
+                    imageButton.setAttribute('data-aikaipin-selection-preview-proposal-id', String(proposal.id));
+                    imageButton.setAttribute('aria-label', replaceTokens(selectionConfig.imagePreviewOpen, {name: proposal.product_name || ''}));
                     element.src = image.url;
                     element.alt = image.name;
-                    imageLink.appendChild(element);
-                    imageGrid.appendChild(imageLink);
+                    imageButton.appendChild(element);
+                    imageGrid.appendChild(imageButton);
                 });
                 imageSection.appendChild(imageGrid);
+                bindPreviewTriggers(imageGrid);
             } else {
                 var noImage = document.createElement('p');
                 noImage.textContent = labels.noValue;
@@ -510,7 +669,40 @@
         window.jQuery(selectionModal).on('hidden.bs.modal', resetSelectionForm);
     }
 
+    if (imagePreviewModal && window.jQuery) {
+        window.jQuery(imagePreviewModal).on('hidden.bs.modal', function () {
+            previewImages = [];
+            previewImageIndex = 0;
+            previewImageTitle = '';
+            if (imagePreviewCanvas) {
+                imagePreviewCanvas.innerHTML = '';
+            }
+            if (imagePreviewThumbnails) {
+                imagePreviewThumbnails.innerHTML = '';
+            }
+        });
+    }
+
     document.addEventListener('click', function (event) {
+        var previousImageButton = event.target.closest('[data-aikaipin-selection-image-preview-previous]');
+        if (previousImageButton) {
+            movePreviewImage(-1);
+            return;
+        }
+
+        var nextImageButton = event.target.closest('[data-aikaipin-selection-image-preview-next]');
+        if (nextImageButton) {
+            movePreviewImage(1);
+            return;
+        }
+
+        var previewThumbnail = event.target.closest('[data-aikaipin-selection-image-preview-index]');
+        if (previewThumbnail) {
+            previewImageIndex = Number(previewThumbnail.getAttribute('data-aikaipin-selection-image-preview-index')) || 0;
+            renderImagePreview();
+            return;
+        }
+
         var openButton = event.target.closest('[data-aikaipin-open-modal="selection"]');
         if (openButton) {
             openNewProposal();
@@ -580,7 +772,23 @@
         }
     });
 
+    document.addEventListener('keydown', function (event) {
+        if (!imagePreviewModal || !imagePreviewModal.classList.contains('in')) {
+            return;
+        }
+        if (event.key === 'ArrowLeft') {
+            event.preventDefault();
+            movePreviewImage(-1);
+        }
+        if (event.key === 'ArrowRight') {
+            event.preventDefault();
+            movePreviewImage(1);
+        }
+    });
+
     renderTags('specification');
     renderTags('attribute');
     renderImages();
+    bindThumbnailFallbacks(document);
+    bindPreviewTriggers(document);
 }(window, document));

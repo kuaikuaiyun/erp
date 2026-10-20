@@ -615,6 +615,7 @@ return [
             'graphql_query_failed' => 'Shopify GraphQL 订单查询失败，请检查应用权限、接口版本与请求配置。',
             'order_id_missing' => 'Shopify 返回的订单缺少订单 ID，当前批次已停止该店铺同步。',
             'order_cursor_missing' => 'Shopify 返回的订单分页游标缺失，当前批次已停止该店铺同步。',
+            'subscription_classification_incomplete' => '订单标签历史回补未完整写入，请稍后重新勾选该店铺同步；若重复出现，请检查服务端日志。',
             'order_timestamp_invalid' => 'Shopify 返回的订单创建时间缺失或格式异常，当前批次已停止该店铺同步。',
             'order_amount_invalid' => 'Shopify 返回的订单金额格式异常，当前批次已停止该店铺同步。',
             'shop_timezone_invalid' => 'Shopify 返回的店铺时区无效，无法确定同步日期范围。',
