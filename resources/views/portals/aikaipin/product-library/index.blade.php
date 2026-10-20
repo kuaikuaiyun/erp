@@ -49,6 +49,19 @@
         'categoryStoreUrl' => route('aikaipin.product-library.categories.store'),
         'categoryDeleteUrlTemplate' => route('aikaipin.product-library.categories.destroy', ['category' => '__category__']),
         'csrfToken' => csrf_token(),
+        'productStoreUrl' => route('aikaipin.product-library.store'),
+        'packageUploadInitializeUrl' => route('aikaipin.product-library.package-uploads.initialize'),
+        'packageUploadPartUrlTemplate' => route('aikaipin.product-library.package-uploads.parts.store', ['uploadToken' => '__token__', 'chunkIndex' => '__chunk__']),
+        'packageUploadCompleteUrlTemplate' => route('aikaipin.product-library.package-uploads.complete', ['uploadToken' => '__token__']),
+        'visibilityUpdateUrl' => route('aikaipin.product-library.visibility.update'),
+        'productCreatedTitle' => $t('messages.product_created_title'),
+        'productCreatedMessage' => $t('messages.product_created_message'),
+        'productSaveFailedTitle' => $t('messages.product_save_failed_title'),
+        'productSaveFailedMessage' => $t('messages.product_save_failed_message'),
+        'packageUploadTitle' => $t('messages.package_upload_title'),
+        'uploadingProductPackage' => $t('upload.uploading_package'),
+        'savingProduct' => $t('upload.saving_product'),
+        'visibilityUpdatedTitle' => $t('messages.visibility_updated_title'),
         'categoryEmptyTitle' => $t('messages.category_empty_title'),
         'categoryEmptyMessage' => $t('messages.category_empty_message'),
         'categoryDuplicateTitle' => $t('messages.category_duplicate_title'),
@@ -67,12 +80,12 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261020-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261020-2">
 @endpush
 
 @push('scripts')
     <script>window.ErpAikaipinProductLibraryConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261020-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261020-2"></script>
 @endpush
 
 @section('content')
@@ -174,7 +187,9 @@
                             $productName = (string) $product->name;
                             $imageCount = $product->images->count();
                             $previewImages = $product->images
-                                ->map(static fn ($image): array => ['url' => null])
+                                ->map(static fn ($image): array => [
+                                    'url' => route('aikaipin.product-library.files.show', ['product' => $product, 'file' => $image]),
+                                ])
                                 ->values()
                                 ->all();
                             $updatedAt = $product->updated_at?->timezone(config('app.timezone'))->format('Y-m-d H:i');
@@ -198,7 +213,11 @@
                                     data-aikaipin-preview-image
                                     data-aikaipin-preview-title="{{ $productName }}"
                                     data-aikaipin-preview-images='@json($previewImages)'>
-                                    <i class="fa fa-picture-o" aria-hidden="true"></i>
+                                    @if ($imageCount > 0)
+                                        <img src="{{ $previewImages[0]['url'] }}" alt="{{ $productName }}">
+                                    @else
+                                        <i class="fa fa-picture-o" aria-hidden="true"></i>
+                                    @endif
                                     @if ($imageCount > 1)
                                         <span class="aikaipin-product-image-count">{{ $imageCount }}</span>
                                     @endif
@@ -237,10 +256,20 @@
                                     @else
                                         <button class="btn btn-default" type="button" disabled>{{ $t('actions.landing_page') }}</button>
                                     @endif
-                                    <button class="btn btn-default" type="button" disabled>{{ $t('actions.reference_page') }}</button>
-                                    <button class="btn btn-default" type="button" disabled>
-                                        <i class="fa fa-download" aria-hidden="true"></i> {{ $t('actions.download') }}
-                                    </button>
+                                    @if ($product->referenceFile)
+                                        <a class="btn btn-default" href="{{ route('aikaipin.product-library.files.show', ['product' => $product, 'file' => $product->referenceFile]) }}" target="_blank" rel="noopener noreferrer">
+                                            <i class="fa fa-external-link" aria-hidden="true"></i> {{ $t('actions.reference_page') }}
+                                        </a>
+                                    @else
+                                        <button class="btn btn-default" type="button" disabled>{{ $t('actions.reference_page') }}</button>
+                                    @endif
+                                    @if ($product->packageFile)
+                                        <a class="btn btn-default" href="{{ route('aikaipin.product-library.files.show', ['product' => $product, 'file' => $product->packageFile]) }}">
+                                            <i class="fa fa-download" aria-hidden="true"></i> {{ $t('actions.download') }}
+                                        </a>
+                                    @else
+                                        <button class="btn btn-default" type="button" disabled><i class="fa fa-download" aria-hidden="true"></i> {{ $t('actions.download') }}</button>
+                                    @endif
                                     @if ($canManageProductLibrary)
                                         <button class="btn btn-primary" type="button" data-aikaipin-action="edit">
                                             <i class="fa fa-pencil" aria-hidden="true"></i> {{ $t('actions.edit') }}
@@ -337,7 +366,7 @@
 
     <div id="aikaipin-upload-modal" class="modal fade" tabindex="-1" role="dialog" aria-hidden="true">
         <div class="modal-dialog modal-lg" role="document">
-            <form class="modal-content aikaipin-upload-form" data-aikaipin-upload-form>
+            <form class="modal-content aikaipin-upload-form" novalidate data-aikaipin-upload-form>
                 <div class="modal-header">
                     <button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('upload.close') }}"><span aria-hidden="true">&times;</span></button>
                     <h4 class="modal-title">{{ $t('upload.title') }}</h4>
@@ -375,11 +404,11 @@
                             <div class="row">
                                 <div class="col-sm-6 form-group">
                                     <label for="aikaipin-upload-name">{{ $t('upload.product_name') }}</label>
-                                    <input id="aikaipin-upload-name" class="form-control" type="text" maxlength="191" autocomplete="off" data-aikaipin-upload-name>
+                                    <input id="aikaipin-upload-name" class="form-control" name="name" type="text" maxlength="191" autocomplete="off" data-aikaipin-upload-name>
                                 </div>
                                 <div class="col-sm-6 form-group">
                                     <label for="aikaipin-upload-landing-url">{{ $t('upload.landing_page_url') }}</label>
-                                    <input id="aikaipin-upload-landing-url" class="form-control" type="url" autocomplete="off" data-aikaipin-upload-landing-url>
+                                    <input id="aikaipin-upload-landing-url" class="form-control" name="landing_page_url" type="url" autocomplete="off" data-aikaipin-upload-landing-url>
                                 </div>
                             </div>
                         </div>
@@ -484,7 +513,7 @@
                                 <div class="aikaipin-department-choices" data-toggle="buttons">
                                     @foreach ($quickAuthorizationDepartments as $department)
                                         <label class="btn btn-default btn-sm active" title="{{ $department['code'] }}">
-                                            <input type="checkbox" name="quick_authorization[]" value="{{ $department['id'] }}" checked> {{ $department['name'] }}
+                                            <input type="checkbox" name="authorized_department_ids[]" value="{{ $department['id'] }}" checked> {{ $department['name'] }}
                                         </label>
                                     @endforeach
                                 </div>

@@ -123,8 +123,14 @@ Route::get('/product-statistics', [ProductStatisticsController::class, 'index'])
 Route::get('/product-statistics/detail', [ProductStatisticsController::class, 'detail'])->name('logistics.product-statistics.detail');
 Route::post('/product-statistics/export', [ProductStatisticsController::class, 'export'])->name('logistics.product-statistics.export');
 Route::get('/product-library', [ProductLibraryController::class, 'index'])->name('aikaipin.product-library.index');
+Route::post('/product-library', [ProductLibraryController::class, 'storeProduct'])->name('aikaipin.product-library.store');
 Route::post('/product-library/categories', [ProductLibraryController::class, 'storeCategory'])->name('aikaipin.product-library.categories.store');
 Route::delete('/product-library/categories/{category}', [ProductLibraryController::class, 'destroyCategory'])->name('aikaipin.product-library.categories.destroy');
+Route::post('/product-library/package-uploads', [ProductLibraryController::class, 'initializePackageUpload'])->name('aikaipin.product-library.package-uploads.initialize');
+Route::post('/product-library/package-uploads/{uploadToken}/parts/{chunkIndex}', [ProductLibraryController::class, 'storePackageUploadPart'])->whereNumber('chunkIndex')->name('aikaipin.product-library.package-uploads.parts.store');
+Route::post('/product-library/package-uploads/{uploadToken}/complete', [ProductLibraryController::class, 'completePackageUpload'])->name('aikaipin.product-library.package-uploads.complete');
+Route::post('/product-library/visibility', [ProductLibraryController::class, 'updateVisibility'])->name('aikaipin.product-library.visibility.update');
+Route::get('/product-library/{product}/files/{file}', [ProductLibraryController::class, 'showProductFile'])->name('aikaipin.product-library.files.show');
 Route::get('/selection-proposals', [ProductLibraryController::class, 'selectionProposal'])->name('aikaipin.selection-proposals.index');
 Route::get('/placement-evaluations', [ProductLibraryController::class, 'placementEvaluation'])->name('aikaipin.placement-evaluations.index');
 Route::get('/paypal-risk', [PayPalRiskController::class, 'index'])->name('logistics.paypal-risk.index');

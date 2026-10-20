@@ -168,6 +168,12 @@
     font-size: 22px;
 }
 
+.aikaipin-product-image img {
+    height: 100%;
+    object-fit: cover;
+    width: 100%;
+}
+
 .aikaipin-product-image-count {
     align-items: center;
     background: #3c8dbc;

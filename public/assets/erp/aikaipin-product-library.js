@@ -39,6 +39,8 @@
     var uploadSkus = [];
     var uploadImageFiles = [];
     var uploadTimer = null;
+    var packageUploadToken = '';
+    var uploadSubmitHtml = uploadSubmit ? uploadSubmit.innerHTML : '';
     var uploadCategories = loadCategories();
     var previewImages = [];
     var previewImageIndex = 0;
@@ -176,6 +178,7 @@
             visibilityConfirm.textContent = mode === 'enable'
                 ? config.enableVisibilityConfirm
                 : config.cancelVisibilityConfirm;
+            visibilityConfirm.setAttribute('data-aikaipin-visibility-action', mode);
             visibilityConfirm.className = mode === 'enable'
                 ? 'btn btn-primary'
                 : 'btn btn-warning';
@@ -402,7 +405,7 @@
             choice.className = 'btn btn-default btn-sm' + (isSelected ? ' active' : '');
             input.className = 'aikaipin-category-choice-input';
             input.type = 'checkbox';
-            input.name = 'categories[]';
+            input.name = 'category_ids[]';
             input.value = category.value;
             input.checked = isSelected;
             input.setAttribute('data-aikaipin-category-choice', '');
@@ -442,6 +445,46 @@
                 return payload;
             });
         });
+    }
+
+    function responsePayload(response) {
+        return response.json().catch(function () {
+            return {};
+        }).then(function (payload) {
+            if (!response.ok) {
+                var fieldErrors = payload.errors || {};
+                var firstField = Object.keys(fieldErrors)[0];
+                var firstMessage = firstField && fieldErrors[firstField] && fieldErrors[firstField][0];
+                throw new Error(firstMessage || payload.message || config.productSaveFailedMessage);
+            }
+
+            return payload;
+        });
+    }
+
+    function jsonRequest(url, method, body) {
+        return window.fetch(url, {
+            method: method,
+            credentials: 'same-origin',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': config.csrfToken || ''
+            },
+            body: body ? JSON.stringify(body) : null
+        }).then(responsePayload);
+    }
+
+    function formDataRequest(url, formData) {
+        return window.fetch(url, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Accept': 'application/json',
+                'X-CSRF-TOKEN': config.csrfToken || ''
+            },
+            body: formData
+        }).then(responsePayload);
     }
 
     function addCategory() {
@@ -614,6 +657,7 @@
         releaseImageUrls();
         uploadSkus = [];
         uploadImageFiles = [];
+        packageUploadToken = '';
         renderSkus();
         renderCategories([]);
         renderImagePreviews();
@@ -629,37 +673,157 @@
         }
         if (uploadSubmit) {
             uploadSubmit.disabled = false;
+            uploadSubmit.innerHTML = uploadSubmitHtml;
         }
 
         syncChoiceButtons();
     }
 
-    function simulateUpload() {
-        var progress = 0;
+    function setUploadSubmitState(isBusy, label) {
+        if (!uploadSubmit) {
+            return;
+        }
+
+        uploadSubmit.disabled = isBusy;
+        uploadSubmit.innerHTML = isBusy
+            ? '<i class="fa fa-spinner fa-spin" aria-hidden="true"></i> ' + String(label || config.savingProduct)
+            : uploadSubmitHtml;
+    }
+
+    function updateUploadProgress(received, total) {
+        var percentage = total > 0 ? Math.min(100, Math.floor((received / total) * 100)) : 0;
 
         if (uploadProgress) {
             uploadProgress.hidden = false;
         }
-        if (uploadSubmit) {
-            uploadSubmit.disabled = true;
+        if (uploadProgressBar) {
+            uploadProgressBar.style.width = percentage + '%';
+            uploadProgressBar.setAttribute('aria-valuenow', String(percentage));
+        }
+    }
+
+    function packageFingerprint(file) {
+        var value = [file.name, file.size, file.lastModified, 5 * 1024 * 1024].join('|');
+        var hash = 2166136261;
+        var index;
+
+        for (index = 0; index < value.length; index += 1) {
+            hash ^= value.charCodeAt(index);
+            hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
         }
 
-        uploadTimer = window.setInterval(function () {
-            progress = Math.min(100, progress + 20);
-            if (uploadProgressBar) {
-                uploadProgressBar.style.width = progress + '%';
-                uploadProgressBar.setAttribute('aria-valuenow', String(progress));
+        return ('00000000' + (hash >>> 0).toString(16)).slice(-8).repeat(8);
+    }
+
+    function packagePartUrl(token, chunkIndex) {
+        return String(config.packageUploadPartUrlTemplate || '')
+            .replace('__token__', encodeURIComponent(token))
+            .replace('__chunk__', String(chunkIndex));
+    }
+
+    function packageCompleteUrl(token) {
+        return String(config.packageUploadCompleteUrlTemplate || '').replace('__token__', encodeURIComponent(token));
+    }
+
+    function uploadPackage(file) {
+        var totalChunks = Math.ceil(file.size / (5 * 1024 * 1024));
+
+        return jsonRequest(config.packageUploadInitializeUrl, 'POST', {
+            client_fingerprint: packageFingerprint(file),
+            original_name: file.name,
+            mime_type: file.type || null,
+            total_size: file.size,
+            total_chunks: totalChunks
+        }).then(function (session) {
+            var uploaded = {};
+            var chunkIndex = 0;
+
+            packageUploadToken = session.upload_token;
+            (session.uploaded_chunks || []).forEach(function (index) {
+                uploaded[Number(index)] = true;
+            });
+            updateUploadProgress(Number(session.received_size || 0), file.size);
+
+            function uploadNextPart() {
+                while (chunkIndex < totalChunks && uploaded[chunkIndex]) {
+                    chunkIndex += 1;
+                }
+
+                if (chunkIndex >= totalChunks) {
+                    return jsonRequest(packageCompleteUrl(packageUploadToken), 'POST').then(function (completed) {
+                        packageUploadToken = completed.upload_token;
+                        updateUploadProgress(file.size, file.size);
+                        return completed;
+                    });
+                }
+
+                var start = chunkIndex * 5 * 1024 * 1024;
+                var end = Math.min(file.size, start + 5 * 1024 * 1024);
+                var partData = new FormData();
+                var currentIndex = chunkIndex;
+
+                partData.append('chunk', file.slice(start, end), file.name + '.part');
+                return formDataRequest(packagePartUrl(packageUploadToken, currentIndex), partData).then(function (updatedSession) {
+                    uploaded[currentIndex] = true;
+                    chunkIndex = currentIndex + 1;
+                    updateUploadProgress(Number(updatedSession.received_size || 0), file.size);
+                    return uploadNextPart();
+                });
             }
 
-            if (progress === 100) {
-                window.clearInterval(uploadTimer);
-                uploadTimer = null;
-                if (uploadSubmit) {
-                    uploadSubmit.disabled = false;
-                }
-                notify('success', config.uploadDemoTitle, config.uploadDemoMessage);
+            if (session.status === 'completed') {
+                updateUploadProgress(file.size, file.size);
+                return session;
             }
-        }, 180);
+
+            return uploadNextPart();
+        });
+    }
+
+    function submitProduct() {
+        var packageFileToUpload = packageFile && packageFile.files && packageFile.files[0];
+
+        if (!uploadName || String(uploadName.value || '').trim() === '') {
+            notify('warning', config.productNameRequiredTitle, config.productNameRequiredMessage);
+            uploadName.focus();
+            return;
+        }
+
+        if (!packageFileToUpload) {
+            notify('warning', config.archiveRequiredTitle, config.archiveRequiredMessage);
+            packageFile.focus();
+            return;
+        }
+
+        setUploadSubmitState(true, config.uploadingProductPackage);
+        uploadPackage(packageFileToUpload).then(function (session) {
+            var formData = new FormData(uploadForm);
+
+            uploadSkus.forEach(function (sku) {
+                formData.append('skus[]', sku);
+            });
+            uploadImageFiles.forEach(function (item) {
+                formData.append('images[]', item.file, item.file.name);
+            });
+            if (referenceFile && referenceFile.files && referenceFile.files[0]) {
+                formData.append('reference_file', referenceFile.files[0], referenceFile.files[0].name);
+            }
+            formData.append('package_upload_token', session.upload_token);
+            setUploadSubmitState(true, config.savingProduct);
+
+            return formDataRequest(config.productStoreUrl, formData);
+        }).then(function (payload) {
+            notify('success', config.productCreatedTitle, payload.message || config.productCreatedMessage);
+            if (uploadModal && window.jQuery) {
+                window.jQuery(uploadModal).modal('hide');
+            }
+            window.setTimeout(function () {
+                window.location.assign(payload.redirect_url || window.location.href);
+            }, 400);
+        }).catch(function (error) {
+            notify('error', config.productSaveFailedTitle, error.message || config.productSaveFailedMessage);
+            setUploadSubmitState(false);
+        });
     }
 
     function openUploadModal() {
@@ -740,24 +904,7 @@
     if (uploadForm) {
         uploadForm.addEventListener('submit', function (event) {
             event.preventDefault();
-
-            if (!uploadName || String(uploadName.value || '').trim() === '') {
-                notify('warning', config.productNameRequiredTitle, config.productNameRequiredMessage);
-                if (uploadName) {
-                    uploadName.focus();
-                }
-                return;
-            }
-
-            if (!packageFile || !packageFile.files || !packageFile.files[0]) {
-                notify('warning', config.archiveRequiredTitle, config.archiveRequiredMessage);
-                if (packageFile) {
-                    packageFile.focus();
-                }
-                return;
-            }
-
-            simulateUpload();
+            submitProduct();
         });
     }
 
@@ -860,10 +1007,32 @@
 
         var confirmButton = event.target.closest('[data-aikaipin-visibility-confirm]');
         if (confirmButton) {
-            if (visibilityModal && window.jQuery) {
-                window.jQuery(visibilityModal).modal('hide');
+            var selectedProducts = selectedSelectionBoxes().map(function (box) {
+                return Number(box.value);
+            });
+            var action = confirmButton.getAttribute('data-aikaipin-visibility-action');
+            var originalLabel = confirmButton.innerHTML;
+
+            if (selectedProducts.length === 0) {
+                notify('warning', config.selectionRequiredTitle, config.selectionRequiredMessage);
+                return;
             }
-            notify('info', config.demoTitle, replaceCount(config.demoMessage, selectedSelectionBoxes().length));
+
+            confirmButton.disabled = true;
+            jsonRequest(config.visibilityUpdateUrl, 'POST', {
+                action: action,
+                product_ids: selectedProducts
+            }).then(function (payload) {
+                if (visibilityModal && window.jQuery) {
+                    window.jQuery(visibilityModal).modal('hide');
+                }
+                notify('success', config.visibilityUpdatedTitle, payload.message || '');
+            }).catch(function (error) {
+                notify('error', config.productSaveFailedTitle, error.message || config.productSaveFailedMessage);
+            }).then(function () {
+                confirmButton.disabled = false;
+                confirmButton.innerHTML = originalLabel;
+            });
             return;
         }
 

@@ -91,6 +91,7 @@
             'chooseOwner' => $t('javascript.owner_choose_required'),
             'outsideScope' => $t('javascript.owner_outside_scope_warning', ['count' => '__count__']),
             'clearConfirm' => $t('javascript.owner_clear_confirm', ['count' => '__count__']),
+            'scopeSaving' => $t('javascript.owner_scope_saving'),
         ],
     ];
     $batchUpdateFieldGroups = [
@@ -154,7 +155,7 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-field-select-20261010-1.css">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-expanded-20261010-1.css?v=20261010-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-modal-20261009-1.css">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-1.css">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-1.css?v=20261020-2">
 @endpush
 
 @section('content')
@@ -294,12 +295,10 @@
                         <button type="submit" class="btn btn-danger btn-sm" id="assistant-batch-delete-button"><i class="fa fa-trash"></i> {{ $t('selection.batch_delete') }}</button>
                     </form>
                     @if ($canManageDepartmentAccess)
-                        <button type="button" class="btn btn-primary btn-sm assistant-batch-access-trigger" id="assistant-batch-grant-trigger" data-toggle="modal" data-target="#assistant-batch-grant-modal" hidden><i class="fa fa-share"></i> {{ $t('selection.batch_grant_access') }}</button>
-                        <button type="button" class="btn btn-warning btn-sm assistant-batch-access-trigger" id="assistant-batch-revoke-trigger" data-toggle="modal" data-target="#assistant-batch-revoke-modal" hidden><i class="fa fa-ban"></i> {{ $t('selection.batch_revoke_access') }}</button>
+                        <button type="button" class="btn btn-primary btn-sm assistant-batch-access-trigger" id="assistant-batch-access-trigger" data-toggle="modal" data-target="#assistant-batch-access-modal" hidden><i class="fa fa-share-alt"></i> {{ $t('selection.batch_manage_access') }}</button>
                     @endif
                     @if ($canManageStoreOwnership)
-                        <button type="button" class="btn btn-success btn-sm" id="assistant-batch-owner-trigger" data-toggle="modal" data-target="#assistant-batch-owner-modal" hidden><i class="fa fa-user-plus"></i> {{ $t('selection.batch_assign_owner') }}</button>
-                        <button type="button" class="btn btn-default btn-sm" id="assistant-batch-owner-clear-trigger" data-toggle="modal" data-target="#assistant-batch-owner-clear-modal" hidden><i class="fa fa-user-times"></i> {{ $t('selection.batch_clear_owner') }}</button>
+                        <button type="button" class="btn btn-success btn-sm" id="assistant-batch-owner-trigger" data-toggle="modal" data-target="#assistant-batch-owner-modal" hidden><i class="fa fa-user"></i> {{ $t('selection.batch_manage_owner') }}</button>
                         <button type="button" class="btn btn-default btn-sm" data-toggle="modal" data-target="#assistant-owner-scope-modal"><i class="fa fa-sitemap"></i> {{ $t('selection.configure_owner_scopes') }}</button>
                     @endif
                 @else
@@ -553,55 +552,60 @@
         @include('portals.assistant.domain-stores.partials.batch-update-modal')
 
         @if ($canManageDepartmentAccess)
-            @foreach (['grant' => 'primary', 'revoke' => 'warning'] as $mode => $color)
-                <div class="modal fade" id="assistant-batch-{{ $mode }}-modal" tabindex="-1" role="dialog" aria-labelledby="assistant-batch-{{ $mode }}-title">
-                    <div class="modal-dialog" role="document">
-                        <form method="post" action="{{ $mode === 'grant' ? route('assistant.domain-stores.access.grant-batch') : route('assistant.domain-stores.access.revoke-batch') }}" class="modal-content assistant-batch-access-form" data-access-mode="{{ $mode }}">
-                            @csrf
-                            @if ($mode === 'revoke')
-                                @method('DELETE')
-                            @endif
-                            <div class="modal-header">
-                                <button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('common.close') }}"><span aria-hidden="true">&times;</span></button>
-                                <h4 class="modal-title" id="assistant-batch-{{ $mode }}-title"><i class="fa {{ $mode === 'grant' ? 'fa-share' : 'fa-ban' }}"></i> {{ $mode === 'grant' ? $t('selection.batch_grant_access') : $t('selection.batch_revoke_access') }}</h4>
+            <div class="modal fade" id="assistant-batch-access-modal" tabindex="-1" role="dialog" aria-labelledby="assistant-batch-access-title">
+                <div class="modal-dialog" role="document">
+                    <form method="post" action="{{ route('assistant.domain-stores.access.grant-batch') }}" class="modal-content assistant-batch-access-form" data-grant-url="{{ route('assistant.domain-stores.access.grant-batch') }}" data-revoke-url="{{ route('assistant.domain-stores.access.revoke-batch') }}" data-grant-label="{{ $t('selection.confirm_grant_access') }}" data-revoke-label="{{ $t('selection.confirm_revoke_access') }}">
+                        @csrf
+                        <input type="hidden" name="_method" value="DELETE" data-access-method disabled>
+                        <div class="modal-header">
+                            <button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('common.close') }}"><span aria-hidden="true">&times;</span></button>
+                            <h4 class="modal-title" id="assistant-batch-access-title"><i class="fa fa-share-alt"></i> {{ $t('selection.batch_manage_access') }}</h4>
+                        </div>
+                        <div class="modal-body">
+                            <div class="btn-group assistant-batch-action-switch" role="group" aria-label="{{ $t('selection.batch_manage_access') }}">
+                                <button type="button" class="btn btn-primary is-selected" data-access-mode-choice="grant" aria-pressed="true"><i class="fa fa-share"></i> {{ $t('selection.grant_access_action') }}</button>
+                                <button type="button" class="btn btn-default" data-access-mode-choice="revoke" aria-pressed="false"><i class="fa fa-ban"></i> {{ $t('selection.revoke_access_action') }}</button>
                             </div>
-                            <div class="modal-body">
-                                <p class="text-muted assistant-batch-access-summary" data-selection-summary></p>
-                                <p class="assistant-modal-section-title">{{ $t('selection.choose_departments') }}</p>
-                                <div class="assistant-batch-access-options" data-batch-access-options>
-                                    @forelse ($assistantChildDepartments as $department)
-                                        <button type="button" class="btn btn-default btn-sm assistant-batch-access-choice" data-department-id="{{ $department->getKey() }}" aria-pressed="false">{{ $department->name }}</button>
-                                    @empty
-                                        <span class="text-muted">{{ $t('form.no_child_departments') }}</span>
-                                    @endforelse
-                                </div>
-                                <span data-selected-record-inputs></span>
-                                <span data-selected-department-inputs></span>
+                            <p class="text-muted assistant-batch-access-summary" data-selection-summary></p>
+                            <p class="assistant-modal-section-title">{{ $t('selection.choose_departments') }}</p>
+                            <div class="assistant-batch-access-options" data-batch-access-options>
+                                @forelse ($assistantChildDepartments as $department)
+                                    <button type="button" class="btn btn-default btn-sm assistant-batch-access-choice" data-department-id="{{ $department->getKey() }}" aria-pressed="false">{{ $department->name }}</button>
+                                @empty
+                                    <span class="text-muted">{{ $t('form.no_child_departments') }}</span>
+                                @endforelse
                             </div>
-                            <div class="modal-footer">
-                                <button type="button" class="btn btn-default" data-dismiss="modal">{{ $t('common.cancel') }}</button>
-                                <button type="submit" class="btn btn-{{ $color }}" data-submit-button><i class="fa {{ $mode === 'grant' ? 'fa-share' : 'fa-ban' }}"></i> {{ $mode === 'grant' ? $t('selection.confirm_grant_access') : $t('selection.confirm_revoke_access') }}</button>
-                            </div>
-                        </form>
-                    </div>
+                            <span data-selected-record-inputs></span>
+                            <span data-selected-department-inputs></span>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-default" data-dismiss="modal">{{ $t('common.cancel') }}</button>
+                            <button type="submit" class="btn btn-primary" data-submit-button><i class="fa fa-share" data-submit-icon></i> <span data-submit-text>{{ $t('selection.confirm_grant_access') }}</span></button>
+                        </div>
+                    </form>
                 </div>
-            @endforeach
+            </div>
         @endif
 
         @if ($canManageStoreOwnership)
             <div class="modal fade" id="assistant-batch-owner-modal" tabindex="-1" role="dialog" aria-labelledby="assistant-batch-owner-title">
                 <div class="modal-dialog" role="document">
-                    <form method="post" action="{{ route('assistant.domain-stores.owners.assign') }}" class="modal-content" id="assistant-batch-owner-form">
+                    <form method="post" action="{{ route('assistant.domain-stores.owners.assign') }}" class="modal-content" id="assistant-batch-owner-form" data-assign-url="{{ route('assistant.domain-stores.owners.assign') }}" data-clear-url="{{ route('assistant.domain-stores.owners.clear') }}" data-assign-label="{{ $t('selection.confirm_assign_owner') }}" data-clear-label="{{ $t('selection.confirm_clear_owner') }}">
                         @csrf
+                        <input type="hidden" name="_method" value="DELETE" data-owner-method disabled>
                         <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
                         <div class="modal-header">
                             <button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('common.close') }}"><span aria-hidden="true">&times;</span></button>
-                            <h4 class="modal-title" id="assistant-batch-owner-title"><i class="fa fa-user-plus"></i> {{ $t('selection.batch_assign_owner') }}</h4>
+                            <h4 class="modal-title" id="assistant-batch-owner-title"><i class="fa fa-user"></i> {{ $t('selection.batch_manage_owner') }}</h4>
                         </div>
                         <div class="modal-body">
+                            <div class="btn-group assistant-batch-action-switch" role="group" aria-label="{{ $t('selection.batch_manage_owner') }}">
+                                <button type="button" class="btn btn-success is-selected" data-owner-mode-choice="assign" aria-pressed="true"><i class="fa fa-user-plus"></i> {{ $t('selection.assign_owner_action') }}</button>
+                                <button type="button" class="btn btn-default" data-owner-mode-choice="clear" aria-pressed="false"><i class="fa fa-user-times"></i> {{ $t('selection.clear_owner_action') }}</button>
+                            </div>
                             <p class="text-muted" data-owner-selection-summary></p>
                             <div class="alert alert-warning assistant-owner-warning" data-owner-warning hidden></div>
-                            <div class="form-group">
+                            <div class="form-group" data-owner-assign-fields>
                                 <label for="assistant-owner-user-select">{{ $t('selection.choose_owner') }}</label>
                                 <select class="form-control" id="assistant-owner-user-select" name="owner_user_id" required disabled>
                                     <option value="">{{ $t('javascript.owner_candidates_loading') }}</option>
@@ -612,30 +616,7 @@
                         </div>
                         <div class="modal-footer">
                             <button type="button" class="btn btn-default" data-dismiss="modal">{{ $t('common.cancel') }}</button>
-                            <button type="submit" class="btn btn-success" data-owner-submit disabled><i class="fa fa-check"></i> {{ $t('selection.confirm_assign_owner') }}</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-
-            <div class="modal fade" id="assistant-batch-owner-clear-modal" tabindex="-1" role="dialog" aria-labelledby="assistant-batch-owner-clear-title">
-                <div class="modal-dialog" role="document">
-                    <form method="post" action="{{ route('assistant.domain-stores.owners.clear') }}" class="modal-content" id="assistant-batch-owner-clear-form">
-                        @csrf
-                        @method('DELETE')
-                        <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
-                        <div class="modal-header">
-                            <button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('common.close') }}"><span aria-hidden="true">&times;</span></button>
-                            <h4 class="modal-title" id="assistant-batch-owner-clear-title"><i class="fa fa-user-times"></i> {{ $t('selection.batch_clear_owner') }}</h4>
-                        </div>
-                        <div class="modal-body">
-                            <p data-owner-clear-summary></p>
-                            <p class="text-muted">{{ $t('selection.owner_assignment_only_notice') }}</p>
-                            <span data-owner-clear-inputs></span>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-default" data-dismiss="modal">{{ $t('common.cancel') }}</button>
-                            <button type="submit" class="btn btn-danger"><i class="fa fa-user-times"></i> {{ $t('selection.confirm_clear_owner') }}</button>
+                            <button type="submit" class="btn btn-success" data-owner-submit disabled><i class="fa fa-check" data-owner-submit-icon></i> <span data-owner-submit-text>{{ $t('selection.confirm_assign_owner') }}</span></button>
                         </div>
                     </form>
                 </div>
@@ -643,7 +624,7 @@
 
             <div class="modal fade" id="assistant-owner-scope-modal" tabindex="-1" role="dialog" aria-labelledby="assistant-owner-scope-title">
                 <div class="modal-dialog modal-lg" role="document">
-                    <form method="post" action="{{ route('assistant.domain-stores.owner-scopes.update') }}" class="modal-content">
+                    <form method="post" action="{{ route('assistant.domain-stores.owner-scopes.update') }}" class="modal-content" data-owner-scope-form>
                         @csrf
                         @method('PUT')
                         <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
@@ -661,7 +642,7 @@
                                         <div class="assistant-owner-scope-options">
                                             @forelse ($operationDepartments as $operationDepartment)
                                                 <label style="--owner-scope-depth: {{ (int) $operationDepartment->tree_depth }}">
-                                                    <input type="checkbox" name="scopes[{{ $assistantDepartment->getKey() }}][]" value="{{ $operationDepartment->getKey() }}" @checked(in_array((int) $operationDepartment->getKey(), $operationScopeMap[$assistantDepartment->getKey()] ?? [], true))>
+                                                    <input type="checkbox" name="scopes[{{ $assistantDepartment->getKey() }}][]" value="{{ $operationDepartment->getKey() }}" data-owner-scope-checkbox data-department-id="{{ $operationDepartment->getKey() }}" data-parent-id="{{ $operationDepartment->parent_id ?: '' }}" @checked(in_array((int) $operationDepartment->getKey(), $operationScopeMap[$assistantDepartment->getKey()] ?? [], true))>
                                                     <span>{{ $operationDepartment->name }}</span>
                                                 </label>
                                             @empty
@@ -676,7 +657,7 @@
                         </div>
                         <div class="modal-footer">
                             <button type="button" class="btn btn-default" data-dismiss="modal">{{ $t('common.cancel') }}</button>
-                            <button type="submit" class="btn btn-primary"><i class="fa fa-save"></i> {{ $t('common.save') }}</button>
+                            <button type="submit" class="btn btn-primary" data-owner-scope-submit><i class="fa fa-save"></i> <span data-owner-scope-submit-text>{{ $t('common.save') }}</span></button>
                         </div>
                     </form>
                 </div>
@@ -696,7 +677,7 @@
         window.ErpAssistantDomainStoreOwnership = @json($ownershipJavascriptConfig);
     </script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-20261007-2.js"></script>
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-access-20261009-1.js"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-access-20261020-2.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-editor-20261010-2.js?v=20261011-2"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-check-20261007-3.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-resize-20261008-1.js"></script>
@@ -704,7 +685,7 @@
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-quick-options-20261008-2.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-team-project-options-20261009-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-modal-20261009-1.js?v=20261011-2"></script>
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-1.js"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-3.js"></script>
     @if (session('success'))
         <script>
             window.ErpAdminNotifier.notify({
