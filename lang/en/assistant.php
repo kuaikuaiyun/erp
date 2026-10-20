@@ -433,6 +433,15 @@ return [
             'notice' => 'The selected dates and reporting timezone are converted to UTC and aggregated from saved Shopify orders. Totals include every current filter result, not only the active page.',
             'reference_rate_notice' => 'USD values use fixed reference exchange rates and are for operational reference only.',
         ],
+        'subscriptions' => [
+            'title' => 'Subscription order summary',
+            'regular' => 'No subscription (regular orders)',
+            'subscribed' => 'Subscribed',
+            'recurring' => 'Recurring orders',
+            'orders' => 'Total orders',
+            'sales' => 'Total sales (USD)',
+            'original_sales' => 'Original store sales',
+        ],
         'metrics' => [
             'total_sales' => 'Sales (USD)',
             'original_total_sales' => 'Store original sales',

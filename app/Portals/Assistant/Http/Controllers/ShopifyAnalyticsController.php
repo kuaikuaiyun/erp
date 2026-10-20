@@ -71,6 +71,15 @@ class ShopifyAnalyticsController extends Controller
                     'original_refund_amount' => $store->analytics_original_refund_amount,
                     'original_net_sales' => $store->analytics_original_net_sales,
                     'orders_count' => $store->analytics_orders_count,
+                    'regular_orders_count' => $store->analytics_regular_orders_count,
+                    'regular_total_sales' => $store->analytics_regular_total_sales,
+                    'regular_original_total_sales' => $store->analytics_regular_original_total_sales,
+                    'subscribed_orders_count' => $store->analytics_subscribed_orders_count,
+                    'subscribed_total_sales' => $store->analytics_subscribed_total_sales,
+                    'subscribed_original_total_sales' => $store->analytics_subscribed_original_total_sales,
+                    'recurring_orders_count' => $store->analytics_recurring_orders_count,
+                    'recurring_total_sales' => $store->analytics_recurring_total_sales,
+                    'recurring_original_total_sales' => $store->analytics_recurring_original_total_sales,
                     'returning_customer_rate' => $store->analytics_returning_customer_rate,
                     'fulfilled_orders_count' => $store->analytics_fulfilled_orders_count,
                     'refund_amount' => $store->analytics_refund_amount,
@@ -423,6 +432,10 @@ class ShopifyAnalyticsController extends Controller
         $connection = config('admin.database.connection') ?: config('database.default');
         $orderTable = (new AssistantShopifyStoreOrder())->getTable();
         [$fromUtc, $toUtc] = $this->reportingUtcRange($filters);
+        $referenceSales = $this->referenceUsdRowAggregate(
+            'shopify_order.original_total_price',
+            'shopify_order.original_currency_code',
+        );
 
         // The synchronized source data remains exactly as Shopify returned it:
         // an order created timestamp in UTC plus source-currency amounts. The
@@ -442,6 +455,15 @@ class ShopifyAnalyticsController extends Controller
             ->selectRaw('COALESCE(SUM(shopify_order.current_total_price), 0) as original_net_sales')
             ->selectRaw('COALESCE(SUM('.$this->referenceUsdRowAggregate('shopify_order.current_total_price', 'shopify_order.current_currency_code').'), 0) as net_sales')
             ->selectRaw('COUNT(*) as orders_count')
+            ->selectRaw("COALESCE(SUM(CASE WHEN shopify_order.subscription_category = ? THEN 1 ELSE 0 END), 0) as regular_orders_count", [AssistantShopifyStoreOrder::SUBSCRIPTION_CATEGORY_REGULAR])
+            ->selectRaw("COALESCE(SUM(CASE WHEN shopify_order.subscription_category = ? THEN {$referenceSales} ELSE 0 END), 0) as regular_total_sales", [AssistantShopifyStoreOrder::SUBSCRIPTION_CATEGORY_REGULAR])
+            ->selectRaw('COALESCE(SUM(CASE WHEN shopify_order.subscription_category = ? THEN shopify_order.original_total_price ELSE 0 END), 0) as regular_original_total_sales', [AssistantShopifyStoreOrder::SUBSCRIPTION_CATEGORY_REGULAR])
+            ->selectRaw("COALESCE(SUM(CASE WHEN shopify_order.subscription_category = ? THEN 1 ELSE 0 END), 0) as subscribed_orders_count", [AssistantShopifyStoreOrder::SUBSCRIPTION_CATEGORY_SUBSCRIBED])
+            ->selectRaw("COALESCE(SUM(CASE WHEN shopify_order.subscription_category = ? THEN {$referenceSales} ELSE 0 END), 0) as subscribed_total_sales", [AssistantShopifyStoreOrder::SUBSCRIPTION_CATEGORY_SUBSCRIBED])
+            ->selectRaw('COALESCE(SUM(CASE WHEN shopify_order.subscription_category = ? THEN shopify_order.original_total_price ELSE 0 END), 0) as subscribed_original_total_sales', [AssistantShopifyStoreOrder::SUBSCRIPTION_CATEGORY_SUBSCRIBED])
+            ->selectRaw("COALESCE(SUM(CASE WHEN shopify_order.subscription_category = ? THEN 1 ELSE 0 END), 0) as recurring_orders_count", [AssistantShopifyStoreOrder::SUBSCRIPTION_CATEGORY_RECURRING])
+            ->selectRaw("COALESCE(SUM(CASE WHEN shopify_order.subscription_category = ? THEN {$referenceSales} ELSE 0 END), 0) as recurring_total_sales", [AssistantShopifyStoreOrder::SUBSCRIPTION_CATEGORY_RECURRING])
+            ->selectRaw('COALESCE(SUM(CASE WHEN shopify_order.subscription_category = ? THEN shopify_order.original_total_price ELSE 0 END), 0) as recurring_original_total_sales', [AssistantShopifyStoreOrder::SUBSCRIPTION_CATEGORY_RECURRING])
             ->selectRaw('0 as returning_customer_rate')
             ->selectRaw("SUM(CASE WHEN UPPER(COALESCE(shopify_order.fulfillment_status, '')) = 'FULFILLED' THEN 1 ELSE 0 END) as fulfilled_orders_count")
             ->selectRaw('NULL as average_order_value')
@@ -491,6 +513,15 @@ class ShopifyAnalyticsController extends Controller
                 'analytics_metrics.original_refund_amount as analytics_original_refund_amount',
                 'analytics_metrics.original_net_sales as analytics_original_net_sales',
                 'analytics_metrics.orders_count as analytics_orders_count',
+                'analytics_metrics.regular_orders_count as analytics_regular_orders_count',
+                'analytics_metrics.regular_total_sales as analytics_regular_total_sales',
+                'analytics_metrics.regular_original_total_sales as analytics_regular_original_total_sales',
+                'analytics_metrics.subscribed_orders_count as analytics_subscribed_orders_count',
+                'analytics_metrics.subscribed_total_sales as analytics_subscribed_total_sales',
+                'analytics_metrics.subscribed_original_total_sales as analytics_subscribed_original_total_sales',
+                'analytics_metrics.recurring_orders_count as analytics_recurring_orders_count',
+                'analytics_metrics.recurring_total_sales as analytics_recurring_total_sales',
+                'analytics_metrics.recurring_original_total_sales as analytics_recurring_original_total_sales',
                 'analytics_metrics.returning_customer_rate as analytics_returning_customer_rate',
                 'analytics_metrics.fulfilled_orders_count as analytics_fulfilled_orders_count',
                 'analytics_metrics.refund_amount as analytics_refund_amount',
@@ -526,6 +557,12 @@ class ShopifyAnalyticsController extends Controller
             ->selectRaw('COALESCE(SUM(analytics_metrics.fulfilled_orders_count), 0) as fulfilled_orders_count')
             ->selectRaw('COALESCE(SUM(analytics_metrics.refund_amount), 0) as refund_amount')
             ->selectRaw('COALESCE(SUM(analytics_metrics.net_sales), 0) as net_sales')
+            ->selectRaw('COALESCE(SUM(analytics_metrics.regular_orders_count), 0) as regular_orders_count')
+            ->selectRaw('COALESCE(SUM(analytics_metrics.regular_total_sales), 0) as regular_total_sales')
+            ->selectRaw('COALESCE(SUM(analytics_metrics.subscribed_orders_count), 0) as subscribed_orders_count')
+            ->selectRaw('COALESCE(SUM(analytics_metrics.subscribed_total_sales), 0) as subscribed_total_sales')
+            ->selectRaw('COALESCE(SUM(analytics_metrics.recurring_orders_count), 0) as recurring_orders_count')
+            ->selectRaw('COALESCE(SUM(analytics_metrics.recurring_total_sales), 0) as recurring_total_sales')
             ->first();
 
         return [
@@ -536,6 +573,12 @@ class ShopifyAnalyticsController extends Controller
             'fulfilled_orders_count' => (int) ($row?->fulfilled_orders_count ?? 0),
             'refund_amount' => (float) ($row?->refund_amount ?? 0),
             'net_sales' => (float) ($row?->net_sales ?? 0),
+            'regular_orders_count' => (int) ($row?->regular_orders_count ?? 0),
+            'regular_total_sales' => (float) ($row?->regular_total_sales ?? 0),
+            'subscribed_orders_count' => (int) ($row?->subscribed_orders_count ?? 0),
+            'subscribed_total_sales' => (float) ($row?->subscribed_total_sales ?? 0),
+            'recurring_orders_count' => (int) ($row?->recurring_orders_count ?? 0),
+            'recurring_total_sales' => (float) ($row?->recurring_total_sales ?? 0),
         ];
     }
 
@@ -566,6 +609,9 @@ class ShopifyAnalyticsController extends Controller
             'total_sales' => 'analytics_metrics.total_sales',
             'original_total_sales' => 'analytics_metrics.original_total_sales',
             'orders_count' => 'analytics_metrics.orders_count',
+            'regular_orders_count' => 'analytics_metrics.regular_orders_count',
+            'subscribed_orders_count' => 'analytics_metrics.subscribed_orders_count',
+            'recurring_orders_count' => 'analytics_metrics.recurring_orders_count',
             'fulfilled_orders_count' => 'analytics_metrics.fulfilled_orders_count',
             'refund_amount' => 'analytics_metrics.refund_amount',
             'net_sales' => 'analytics_metrics.net_sales',

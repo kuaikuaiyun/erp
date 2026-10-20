@@ -1,0 +1,128 @@
+.assistant-shopify-subscription-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin: 0 0 14px;
+}
+
+.assistant-shopify-subscription-card {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid #dce6ef;
+    border-top: 3px solid #7b8b9b;
+    border-radius: 7px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(31, 55, 75, .05);
+}
+
+.assistant-shopify-subscription-card-subscribed {
+    border-top-color: #3c8dbc;
+}
+
+.assistant-shopify-subscription-card-recurring {
+    border-top-color: #00a65a;
+}
+
+.assistant-shopify-subscription-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 14px 8px;
+    color: #284964;
+}
+
+.assistant-shopify-subscription-icon {
+    display: inline-flex;
+    width: 28px;
+    height: 28px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 7px;
+    background: #edf4f8;
+    color: #3c8dbc;
+}
+
+.assistant-shopify-subscription-card-recurring .assistant-shopify-subscription-icon {
+    background: #e9f8f1;
+    color: #009551;
+}
+
+.assistant-shopify-subscription-metrics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border-top: 1px solid #edf2f6;
+}
+
+.assistant-shopify-subscription-metrics > span {
+    min-width: 0;
+    padding: 10px 14px 12px;
+}
+
+.assistant-shopify-subscription-metrics > span + span {
+    border-left: 1px solid #edf2f6;
+}
+
+.assistant-shopify-subscription-metrics small,
+.assistant-shopify-subscription-metrics strong {
+    display: block;
+}
+
+.assistant-shopify-subscription-metrics small {
+    margin-bottom: 3px;
+    color: #73879c;
+}
+
+.assistant-shopify-subscription-metrics strong {
+    overflow: hidden;
+    color: #163a59;
+    font-size: 17px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.assistant-shopify-list-table {
+    min-width: 3010px;
+}
+
+.assistant-shopify-list-table > thead > tr > th.assistant-shopify-subscription-list-column,
+.assistant-shopify-list-table > tbody > tr > td.assistant-shopify-subscription-list-cell {
+    width: 220px !important;
+    min-width: 220px !important;
+}
+
+.assistant-shopify-subscription-list-cell {
+    padding-top: 7px !important;
+    padding-bottom: 7px !important;
+}
+
+.assistant-shopify-list-category-stat {
+    display: grid;
+    gap: 4px;
+}
+
+.assistant-shopify-list-category-stat > span {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.assistant-shopify-list-category-stat small {
+    color: #73879c;
+    font-weight: 400;
+    white-space: nowrap;
+}
+
+.assistant-shopify-list-category-stat strong {
+    flex: 0 0 auto;
+    color: #1d4666;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+    .assistant-shopify-subscription-summary {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

@@ -56,6 +56,32 @@ class AikaipinPortalAuthorizationService
         ];
     }
 
+    /** @return list<array{id:int,name:string,code:string}> */
+    public function quickAuthorizationDepartments(): array
+    {
+        $operationDepartment = Department::business()
+            ->where('slug', self::OPERATION_DEPARTMENT_SLUG)
+            ->first(['id']);
+
+        if (!$operationDepartment) {
+            return [];
+        }
+
+        return Department::business()
+            ->where('parent_id', $operationDepartment->getKey())
+            ->orderBy('sort')
+            ->orderBy('name')
+            ->get(['id', 'name', 'slug'])
+            ->map(static function (Department $department): array {
+                return [
+                    'id' => (int) $department->getKey(),
+                    'name' => (string) $department->name,
+                    'code' => (string) $department->slug,
+                ];
+            })
+            ->all();
+    }
+
     /** @return list<int> */
     private function departmentTreeIds(int $departmentId): array
     {

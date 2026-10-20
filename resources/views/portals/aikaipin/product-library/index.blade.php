@@ -22,27 +22,50 @@
         'cancelVisibilityDescription' => $t('visibility.cancel_description', ['count' => ':count']),
         'enableVisibilityConfirm' => $t('visibility.enable_confirm'),
         'cancelVisibilityConfirm' => $t('visibility.cancel_confirm'),
+        'skuEmptyTitle' => $t('messages.sku_empty_title'),
+        'skuEmptyMessage' => $t('messages.sku_empty_message'),
+        'imageLimitTitle' => $t('messages.image_limit_title'),
+        'imageLimitMessage' => $t('messages.image_limit_message'),
+        'imageTooLargeTitle' => $t('messages.image_too_large_title'),
+        'imageTooLargeMessage' => $t('messages.image_too_large_message', ['name' => ':name']),
+        'archiveInvalidTitle' => $t('messages.archive_invalid_title'),
+        'archiveInvalidMessage' => $t('messages.archive_invalid_message'),
+        'archiveTooLargeTitle' => $t('messages.archive_too_large_title'),
+        'archiveTooLargeMessage' => $t('messages.archive_too_large_message'),
+        'productNameRequiredTitle' => $t('messages.product_name_required_title'),
+        'productNameRequiredMessage' => $t('messages.product_name_required_message'),
+        'archiveRequiredTitle' => $t('messages.archive_required_title'),
+        'archiveRequiredMessage' => $t('messages.archive_required_message'),
+        'uploadDemoTitle' => $t('messages.upload_demo_title'),
+        'uploadDemoMessage' => $t('messages.upload_demo_message'),
+        'fileSelected' => $t('upload.file_selected', ['name' => ':name', 'size' => ':size']),
+        'fileUnselected' => $t('upload.file_unselected'),
+        'presetCategories' => trans('aikaipin.options.categories'),
+        'categoryStorageKey' => 'erp.aikaipin.product-library.categories.v1',
+        'categoryEmptyTitle' => $t('messages.category_empty_title'),
+        'categoryEmptyMessage' => $t('messages.category_empty_message'),
+        'categoryDuplicateTitle' => $t('messages.category_duplicate_title'),
+        'categoryDuplicateMessage' => $t('messages.category_duplicate_message'),
+        'removeCategoryAria' => $t('upload.remove_category', ['name' => ':name']),
+        'imagePreviewTitle' => $t('image_preview.title', ['name' => ':name']),
+        'imagePreviewPosition' => $t('image_preview.position', ['current' => ':current', 'total' => ':total']),
+        'imagePreviewPlaceholder' => $t('image_preview.placeholder'),
+        'imagePreviewThumbnail' => $t('image_preview.thumbnail', ['number' => ':number']),
+        'imagePreviewImageAlt' => $t('image_preview.image_alt', ['number' => ':number']),
     ];
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261019-4">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261019-9">
 @endpush
 
 @push('scripts')
     <script>window.ErpAikaipinProductLibraryConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261019-3"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261019-6"></script>
 @endpush
 
 @section('content')
 <section class="content aikaipin-product-library-page">
-    <header class="content-header aikaipin-page-header">
-        <div>
-            <h1>{{ $t('product_library.title') }}</h1>
-            <p>{{ $t('product_library.subtitle') }}</p>
-        </div>
-    </header>
-
     <div class="box box-solid aikaipin-filter-box">
         <div class="box-body">
             <form class="aikaipin-filter-form" data-aikaipin-filter-form>
@@ -103,9 +126,6 @@
                     <button class="btn btn-default btn-sm" type="button" disabled data-aikaipin-batch-action="cancel">
                         <i class="fa fa-eye-slash" aria-hidden="true"></i> {{ $t('actions.cancel_visibility') }}
                     </button>
-                    <button class="btn btn-default btn-sm" type="button" data-aikaipin-action="category">
-                        <i class="fa fa-sitemap" aria-hidden="true"></i> {{ $t('actions.category_management') }}
-                    </button>
                     <button class="btn btn-primary btn-sm" type="button" data-aikaipin-action="upload">
                         <i class="fa fa-upload" aria-hidden="true"></i> {{ $t('actions.upload_product') }}
                     </button>
@@ -126,11 +146,11 @@
                             </th>
                         @endif
                         <th class="aikaipin-image-column">{{ $t('table.image') }}</th>
-                        <th>{{ $t('table.product_code') }}</th>
+                        <th class="aikaipin-product-code-column">{{ $t('table.product_code') }}</th>
                         <th class="aikaipin-name-column">{{ $t('table.product_name_sku') }}</th>
-                        <th>{{ $t('table.category') }}</th>
-                        <th>{{ $t('table.source_type') }}</th>
-                        <th>{{ $t('table.updated_at') }}</th>
+                        <th class="aikaipin-category-column">{{ $t('table.category') }}</th>
+                        <th class="aikaipin-source-column">{{ $t('table.source_type') }}</th>
+                        <th class="aikaipin-updated-column">{{ $t('table.updated_at') }}</th>
                         <th class="aikaipin-operation-column">{{ $t('table.operation') }}</th>
                     </tr>
                     </thead>
@@ -139,6 +159,8 @@
                         @php
                             $skuCount = count($product['skus']);
                             $allSkus = implode(', ', $product['skus']);
+                            $productName = trans('aikaipin.'.$product['name_key']);
+                            $imageCount = count($product['images']);
                         @endphp
                         <tr data-aikaipin-product
                             data-keyword="{{ strtolower($product['code'].' '.trans('aikaipin.'.$product['name_key']).' '.$allSkus) }}"
@@ -154,12 +176,20 @@
                                 </td>
                             @endif
                             <td class="aikaipin-image-cell">
-                                <span class="aikaipin-product-image" title="{{ $t('table.placeholder_image') }}">
+                                <button class="aikaipin-product-image" type="button"
+                                    title="{{ $t('image_preview.open', ['name' => $productName]) }}"
+                                    aria-label="{{ $t('image_preview.open', ['name' => $productName]) }}"
+                                    data-aikaipin-preview-image
+                                    data-aikaipin-preview-title="{{ $productName }}"
+                                    data-aikaipin-preview-images='@json($product['images'])'>
                                     <i class="fa fa-picture-o" aria-hidden="true"></i>
-                                    <span class="sr-only">{{ $t('table.placeholder_image') }}</span>
-                                </span>
+                                    @if ($imageCount > 1)
+                                        <span class="aikaipin-product-image-count">{{ $imageCount }}</span>
+                                    @endif
+                                    <span class="sr-only">{{ $t('image_preview.open', ['name' => $productName]) }}</span>
+                                </button>
                             </td>
-                            <td><span class="aikaipin-product-code">{{ $product['code'] }}</span></td>
+                            <td class="aikaipin-product-code-cell"><span class="aikaipin-product-code">{{ $product['code'] }}</span></td>
                             <td class="aikaipin-name-cell">
                                 <strong>{{ trans('aikaipin.'.$product['name_key']) }}</strong>
                                 <span class="aikaipin-sku-line" title="{{ $allSkus }}">
@@ -169,13 +199,13 @@
                                     @endif
                                 </span>
                             </td>
-                            <td><span class="label label-default">{{ trans('aikaipin.options.categories.'.$product['category']) }}</span></td>
-                            <td>
+                            <td class="aikaipin-category-cell"><span class="label label-default">{{ trans('aikaipin.options.categories.'.$product['category']) }}</span></td>
+                            <td class="aikaipin-source-cell">
                                 <span class="aikaipin-source">{{ trans('aikaipin.options.sources.'.$product['source']) }}</span>
                                 <span class="aikaipin-type">{{ trans('aikaipin.options.types.'.$product['type']) }}</span>
                             </td>
-                            <td><time datetime="{{ str_replace(' ', 'T', $product['updated_at']) }}">{{ $product['updated_at'] }}</time></td>
-                            <td>
+                            <td class="aikaipin-updated-cell"><time datetime="{{ str_replace(' ', 'T', $product['updated_at']) }}">{{ $product['updated_at'] }}</time></td>
+                            <td class="aikaipin-operation-cell">
                                 <div class="btn-group btn-group-sm aikaipin-row-actions" role="group" aria-label="{{ $t('table.operation') }}">
                                     <a class="btn btn-default" href="{{ $product['landing_url'] }}" target="_blank" rel="noopener noreferrer"
                                         title="{{ $t('actions.open_landing_page') }}" aria-label="{{ $t('actions.open_landing_page') }}">
@@ -213,6 +243,38 @@
     </div>
 </section>
 
+<div id="aikaipin-image-preview-modal" class="modal fade" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('image_preview.close') }}"><span aria-hidden="true">&times;</span></button>
+                <h4 class="modal-title" data-aikaipin-image-preview-title></h4>
+            </div>
+            <div class="modal-body">
+                <div class="aikaipin-image-preview-frame">
+                    <button class="aikaipin-image-preview-nav aikaipin-image-preview-prev" type="button"
+                        title="{{ $t('image_preview.previous') }}" aria-label="{{ $t('image_preview.previous') }}"
+                        data-aikaipin-image-preview-prev>
+                        <i class="fa fa-angle-left" aria-hidden="true"></i>
+                    </button>
+                    <div class="aikaipin-image-preview-stage" data-aikaipin-image-preview-stage></div>
+                    <button class="aikaipin-image-preview-nav aikaipin-image-preview-next" type="button"
+                        title="{{ $t('image_preview.next') }}" aria-label="{{ $t('image_preview.next') }}"
+                        data-aikaipin-image-preview-next>
+                        <i class="fa fa-angle-right" aria-hidden="true"></i>
+                    </button>
+                </div>
+                <div class="aikaipin-image-preview-position" data-aikaipin-image-preview-position></div>
+                <div class="aikaipin-image-preview-thumbnails" role="tablist" aria-label="{{ $t('image_preview.thumbnails') }}"
+                    data-aikaipin-image-preview-thumbnails></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-default" data-dismiss="modal">{{ $t('image_preview.close') }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 @if ($canManageProductLibrary)
     <div id="aikaipin-visibility-modal" class="modal fade" tabindex="-1" role="dialog" aria-hidden="true">
         <div class="modal-dialog modal-sm" role="document">
@@ -240,6 +302,176 @@
                     <button type="button" class="btn btn-primary" data-aikaipin-visibility-confirm></button>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <div id="aikaipin-upload-modal" class="modal fade" tabindex="-1" role="dialog" aria-hidden="true">
+        <div class="modal-dialog modal-lg" role="document">
+            <form class="modal-content aikaipin-upload-form" data-aikaipin-upload-form>
+                <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('upload.close') }}"><span aria-hidden="true">&times;</span></button>
+                    <h4 class="modal-title">{{ $t('upload.title') }}</h4>
+                </div>
+                <div class="modal-body">
+                    <p class="aikaipin-upload-demo-note"><i class="fa fa-info-circle" aria-hidden="true"></i> {{ $t('upload.demo_notice') }}</p>
+                    <section class="aikaipin-upload-section">
+                        <header class="aikaipin-upload-section-heading">
+                            <span class="aikaipin-upload-section-number">1</span>
+                            <h5>{{ $t('upload.sections.basic_information') }}</h5>
+                        </header>
+                        <div class="aikaipin-upload-section-body">
+                            <div class="row">
+                                <div class="col-sm-6 form-group">
+                                    <label>{{ $t('upload.source_platform') }}</label>
+                                    <div class="btn-group aikaipin-choice-group" data-toggle="buttons">
+                                        @foreach (trans('aikaipin.upload.source_options') as $value => $label)
+                                            <label class="btn btn-default @if($value === 'shopify') active @endif">
+                                                <input type="radio" name="source_platform" value="{{ $value }}" @checked($value === 'shopify')> {{ $label }}
+                                            </label>
+                                        @endforeach
+                                    </div>
+                                </div>
+                                <div class="col-sm-6 form-group">
+                                    <label>{{ $t('upload.product_type') }}</label>
+                                    <div class="btn-group aikaipin-choice-group" data-toggle="buttons">
+                                        @foreach (trans('aikaipin.upload.type_options') as $value => $label)
+                                            <label class="btn btn-default @if($value === 'general') active @endif">
+                                                <input type="radio" name="product_type" value="{{ $value }}" @checked($value === 'general')> {{ $label }}
+                                            </label>
+                                        @endforeach
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-sm-6 form-group">
+                                    <label for="aikaipin-upload-name">{{ $t('upload.product_name') }}</label>
+                                    <input id="aikaipin-upload-name" class="form-control" type="text" maxlength="191" autocomplete="off" data-aikaipin-upload-name>
+                                </div>
+                                <div class="col-sm-6 form-group">
+                                    <label for="aikaipin-upload-landing-url">{{ $t('upload.landing_page_url') }}</label>
+                                    <input id="aikaipin-upload-landing-url" class="form-control" type="url" autocomplete="off" data-aikaipin-upload-landing-url>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                    <section class="aikaipin-upload-section">
+                        <header class="aikaipin-upload-section-heading">
+                            <span class="aikaipin-upload-section-number">2</span>
+                            <h5>{{ $t('upload.sections.product_details') }}</h5>
+                        </header>
+                        <div class="aikaipin-upload-section-body">
+                            <div class="form-group">
+                                <label for="aikaipin-upload-sku">{{ $t('upload.skus') }}</label>
+                                <div class="input-group">
+                                    <input id="aikaipin-upload-sku" class="form-control" type="text" autocomplete="off" placeholder="{{ $t('upload.sku_placeholder') }}" data-aikaipin-sku-input>
+                                    <span class="input-group-btn">
+                                        <button class="btn btn-default" type="button" data-aikaipin-add-sku><i class="fa fa-plus" aria-hidden="true"></i> {{ $t('upload.add_sku') }}</button>
+                                    </span>
+                                </div>
+                                <div class="aikaipin-sku-tags" data-aikaipin-sku-tags aria-live="polite"></div>
+                                <p class="help-block">{{ $t('upload.sku_hint') }}</p>
+                            </div>
+                            <div class="form-group aikaipin-upload-section-last-field">
+                                <label>{{ $t('upload.categories') }}</label>
+                                <div class="input-group aikaipin-category-add-group">
+                                    <input id="aikaipin-upload-category" class="form-control" type="text" maxlength="80" autocomplete="off"
+                                        placeholder="{{ $t('upload.category_placeholder') }}" data-aikaipin-category-input>
+                                    <span class="input-group-btn">
+                                        <button class="btn btn-default" type="button" data-aikaipin-add-category>
+                                            <i class="fa fa-plus" aria-hidden="true"></i> {{ $t('upload.add_category') }}
+                                        </button>
+                                    </span>
+                                </div>
+                                <div class="aikaipin-category-choices" data-aikaipin-category-choices aria-live="polite"></div>
+                                <p class="help-block">{{ $t('upload.category_hint') }}</p>
+                            </div>
+                        </div>
+                    </section>
+                    <section class="aikaipin-upload-section">
+                        <header class="aikaipin-upload-section-heading">
+                            <span class="aikaipin-upload-section-number">3</span>
+                            <h5>{{ $t('upload.sections.attachments') }}</h5>
+                        </header>
+                        <div class="aikaipin-upload-section-body">
+                            <div class="aikaipin-attachment-grid">
+                                <div class="aikaipin-attachment-card">
+                                    <label for="aikaipin-upload-images">{{ $t('upload.product_images') }}</label>
+                                    <input id="aikaipin-upload-images" class="aikaipin-visually-hidden" type="file" accept="image/*" multiple data-aikaipin-upload-images>
+                                    <label class="aikaipin-upload-file-card" for="aikaipin-upload-images">
+                                        <span class="aikaipin-upload-file-icon"><i class="fa fa-picture-o" aria-hidden="true"></i></span>
+                                        <span class="aikaipin-upload-file-content">
+                                            <strong>{{ $t('upload.select_images') }}</strong>
+                                            <small>{{ $t('upload.images_hint') }}</small>
+                                        </span>
+                                        <i class="fa fa-angle-right" aria-hidden="true"></i>
+                                    </label>
+                                    <div class="aikaipin-image-previews" data-aikaipin-image-previews></div>
+                                </div>
+                                <div class="aikaipin-attachment-card">
+                                    <label for="aikaipin-upload-reference-file">{{ $t('upload.reference_file') }}</label>
+                                    <input id="aikaipin-upload-reference-file" class="aikaipin-visually-hidden" type="file" data-aikaipin-reference-file>
+                                    <label class="aikaipin-upload-file-card" for="aikaipin-upload-reference-file">
+                                        <span class="aikaipin-upload-file-icon"><i class="fa fa-file-o" aria-hidden="true"></i></span>
+                                        <span class="aikaipin-upload-file-content">
+                                            <strong>{{ $t('upload.select_reference_file') }}</strong>
+                                            <small data-aikaipin-reference-file-name>{{ $t('upload.file_unselected') }}</small>
+                                        </span>
+                                        <i class="fa fa-angle-right" aria-hidden="true"></i>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                    <section class="aikaipin-upload-section aikaipin-upload-package-section">
+                        <header class="aikaipin-upload-section-heading">
+                            <span class="aikaipin-upload-section-number">4</span>
+                            <h5>{{ $t('upload.sections.package') }}</h5>
+                        </header>
+                        <div class="aikaipin-upload-section-body">
+                            <input id="aikaipin-upload-archive" class="aikaipin-visually-hidden" type="file" accept=".zip,.rar,.7z,.tar,.gz,.tgz,.bz2,.xz" data-aikaipin-package-file>
+                            <label class="aikaipin-package-file-card" for="aikaipin-upload-archive">
+                                <span class="aikaipin-package-file-icon"><i class="fa fa-file-archive-o" aria-hidden="true"></i></span>
+                                <span class="aikaipin-upload-file-content">
+                                    <strong>{{ $t('upload.select_package_archive') }}</strong>
+                                    <small>{{ $t('upload.package_hint') }}</small>
+                                    <small class="aikaipin-selected-file-name" data-aikaipin-package-file-name>{{ $t('upload.file_unselected') }}</small>
+                                </span>
+                                <span class="aikaipin-package-file-action">{{ $t('upload.select_file') }}</span>
+                            </label>
+                            <div class="progress progress-sm active aikaipin-upload-progress" hidden data-aikaipin-upload-progress>
+                                <div class="progress-bar progress-bar-primary progress-bar-striped" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" style="width: 0%" data-aikaipin-upload-progress-bar></div>
+                            </div>
+                        </div>
+                    </section>
+                    <section class="aikaipin-upload-section aikaipin-upload-section-last">
+                        <header class="aikaipin-upload-section-heading">
+                            <span class="aikaipin-upload-section-number">5</span>
+                            <h5>{{ $t('upload.sections.authorization') }}</h5>
+                        </header>
+                        <div class="aikaipin-upload-section-body">
+                            <label>{{ $t('upload.quick_authorization') }}</label>
+                            @if ($quickAuthorizationDepartments !== [])
+                                <div class="aikaipin-department-choices" data-toggle="buttons">
+                                    @foreach ($quickAuthorizationDepartments as $department)
+                                        <label class="btn btn-default btn-sm active" title="{{ $department['code'] }}">
+                                            <input type="checkbox" name="quick_authorization[]" value="{{ $department['id'] }}" checked> {{ $department['name'] }}
+                                        </label>
+                                    @endforeach
+                                </div>
+                                <p class="help-block">{{ $t('upload.authorization_hint') }}</p>
+                            @else
+                                <p class="help-block">{{ $t('upload.authorization_empty') }}</p>
+                            @endif
+                        </div>
+                    </section>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-default" type="button" data-dismiss="modal">{{ $t('upload.cancel') }}</button>
+                    <button class="btn btn-primary" type="submit" data-aikaipin-upload-submit>
+                        <i class="fa fa-upload" aria-hidden="true"></i> {{ $t('upload.simulate_submit') }}
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 @endif

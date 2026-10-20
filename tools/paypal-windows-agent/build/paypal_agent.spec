@@ -6,7 +6,7 @@ datas += collect_data_files('certifi')
 
 
 a = Analysis(
-    ['D:/日志/项目开发/快云erp系统/app/new/tools/paypal-windows-agent/paypal_agent.py'],
+    ['../paypal_agent.py'],
     pathex=[],
     binaries=[],
     datas=datas,

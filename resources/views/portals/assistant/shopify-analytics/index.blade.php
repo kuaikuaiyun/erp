@@ -64,6 +64,7 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261013-3.css?v=20261013-3">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261014-1.css?v=20261014-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261014-2.css?v=20261014-2">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261020-1.css?v=20261020-4">
 @endpush
 
 @section('content')
@@ -115,6 +116,34 @@
                     <strong>{{ $usd }}{{ $money($summary['net_sales']) }}</strong>
                 </div>
             </div>
+        </div>
+
+        <div class="assistant-shopify-subscription-summary" role="status" aria-label="{{ $t('subscriptions.title') }}">
+            @foreach ([
+                ['key' => 'regular', 'icon' => 'fa-shopping-cart'],
+                ['key' => 'subscribed', 'icon' => 'fa-check-circle'],
+                ['key' => 'recurring', 'icon' => 'fa-repeat'],
+            ] as $subscriptionCard)
+                @php
+                    $subscriptionKey = $subscriptionCard['key'];
+                @endphp
+                <div class="assistant-shopify-subscription-card assistant-shopify-subscription-card-{{ $subscriptionKey }}">
+                    <div class="assistant-shopify-subscription-heading">
+                        <span class="assistant-shopify-subscription-icon"><i class="fa {{ $subscriptionCard['icon'] }}"></i></span>
+                        <strong>{{ $t('subscriptions.'.$subscriptionKey) }}</strong>
+                    </div>
+                    <div class="assistant-shopify-subscription-metrics">
+                        <span>
+                            <small>{{ $t('subscriptions.orders') }}</small>
+                            <strong>{{ $number($summary[$subscriptionKey.'_orders_count']) }}</strong>
+                        </span>
+                        <span>
+                            <small>{{ $t('subscriptions.sales') }}</small>
+                            <strong>{{ $usd }}{{ $money($summary[$subscriptionKey.'_total_sales']) }}</strong>
+                        </span>
+                    </div>
+                </div>
+            @endforeach
         </div>
 
         <div class="box box-default assistant-shopify-filter-box">
@@ -238,13 +267,16 @@
                             'total_sales' => $t('metrics.total_sales'),
                             'original_total_sales' => $t('metrics.original_total_sales'),
                             'orders_count' => $t('metrics.orders'),
+                            'regular_orders_count' => $t('subscriptions.regular'),
+                            'subscribed_orders_count' => $t('subscriptions.subscribed'),
+                            'recurring_orders_count' => $t('subscriptions.recurring'),
                             'fulfilled_orders_count' => $t('metrics.fulfilled_orders'),
                             'refund_amount' => $t('metrics.refund_amount'),
                             'net_sales' => $t('metrics.net_sales'),
                             'sync_status' => $t('table.sync_status'),
                             'synced_at' => $t('table.last_synced_at'),
                         ] as $field => $label)
-                            <th class="assistant-shopify-sortable @if ($filters['sort'] === $field) is-sorted @endif">
+                            <th class="assistant-shopify-sortable @if (in_array($field, ['regular_orders_count', 'subscribed_orders_count', 'recurring_orders_count'], true)) assistant-shopify-subscription-list-column @endif @if ($filters['sort'] === $field) is-sorted @endif">
                                 <a href="{{ $sortUrl($field) }}" data-loading="region" data-loading-target=".assistant-shopify-analytics-page">
                                     {{ $label }}
                                     <i class="fa @if ($filters['sort'] === $field && $filters['direction'] === 'asc') fa-sort-asc @elseif ($filters['sort'] === $field) fa-sort-desc @else fa-sort @endif"></i>
@@ -331,6 +363,37 @@
                             </td>
                             <td><span class="assistant-shopify-value-tag assistant-shopify-value-tag-money">{{ $originalSales }}</span></td>
                             <td><span class="assistant-shopify-value-tag assistant-shopify-value-tag-count">{{ $hasSnapshot ? $number($metric->orders_count) : $t('card.not_available') }}</span></td>
+                            @foreach (['regular', 'subscribed', 'recurring'] as $subscriptionKey)
+                                @php
+                                    $categoryOrders = data_get($metric, $subscriptionKey.'_orders_count');
+                                    $categorySales = data_get($metric, $subscriptionKey.'_total_sales');
+                                    $categoryOriginalSales = data_get($metric, $subscriptionKey.'_original_total_sales');
+                                @endphp
+                                <td class="assistant-shopify-subscription-list-cell">
+                                    @if (!$hasSnapshot)
+                                        <span class="assistant-shopify-value-tag">{{ $t('card.not_available') }}</span>
+                                    @else
+                                        <div class="assistant-shopify-list-category-stat">
+                                            <span>
+                                                <small>{{ $t('subscriptions.orders') }}</small>
+                                                <strong>{{ $number($categoryOrders) }}</strong>
+                                            </span>
+                                            <span>
+                                                <small>{{ $t('subscriptions.sales') }}</small>
+                                                @if (!$hasReferenceRate)
+                                                    <strong class="assistant-shopify-rate-warning" title="{{ $referenceRateWarning }}"><i class="fa fa-exclamation-circle"></i></strong>
+                                                @else
+                                                    <strong>{{ $usd }}{{ $money($categorySales) }}</strong>
+                                                @endif
+                                            </span>
+                                            <span>
+                                                <small>{{ $t('subscriptions.original_sales') }}</small>
+                                                <strong>{{ $currencyPrefix($metric?->original_currency_code) }}{{ $money($categoryOriginalSales) }}</strong>
+                                            </span>
+                                        </div>
+                                    @endif
+                                </td>
+                            @endforeach
                             <td><span class="assistant-shopify-value-tag assistant-shopify-value-tag-count">{{ $hasSnapshot ? $number($metric->fulfilled_orders_count) : $t('card.not_available') }}</span></td>
                             <td>
                                 @if (!$hasSnapshot)
@@ -379,7 +442,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="17" class="assistant-shopify-empty-state">
+                            <td colspan="20" class="assistant-shopify-empty-state">
                                 <i class="fa fa-shopping-bag"></i>
                                 <p>{{ $t('card.no_snapshot') }}</p>
                             </td>
