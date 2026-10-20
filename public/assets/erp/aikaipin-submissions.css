@@ -147,7 +147,7 @@
 }
 
 .aikaipin-selection-proposal-table {
-    min-width: 1180px;
+    min-width: 1400px;
     table-layout: fixed;
     width: 100%;
 }
@@ -173,7 +173,9 @@
 .aikaipin-selection-specification-column,
 .aikaipin-selection-specification-cell,
 .aikaipin-selection-attribute-column,
-.aikaipin-selection-attribute-cell {
+.aikaipin-selection-attribute-cell,
+.aikaipin-selection-remark-column,
+.aikaipin-selection-remark-cell {
     min-width: 140px;
 }
 
@@ -218,7 +220,8 @@
 }
 
 .aikaipin-selection-proposal-table th.aikaipin-selection-specification-column,
-.aikaipin-selection-proposal-table th.aikaipin-selection-attribute-column {
+.aikaipin-selection-proposal-table th.aikaipin-selection-attribute-column,
+.aikaipin-selection-proposal-table th.aikaipin-selection-remark-column {
     min-width: 140px;
 }
 
@@ -354,6 +357,40 @@ button.aikaipin-selection-list-image:focus {
     min-height: 50px;
 }
 
+.aikaipin-placement-evaluation-table {
+    min-width: 1200px;
+    table-layout: auto;
+}
+
+.aikaipin-placement-evaluation-table .aikaipin-submission-operation-column,
+.aikaipin-placement-evaluation-table .aikaipin-submission-operation-cell {
+    min-width: 202px;
+    width: 202px;
+}
+
+.aikaipin-placement-evaluation-table .aikaipin-submission-operation-cell .btn-group {
+    white-space: nowrap;
+}
+
+.aikaipin-placement-evaluation-table .aikaipin-submission-operation-cell .btn {
+    margin-left: 2px;
+}
+
+.aikaipin-placement-evaluation-table .aikaipin-submission-operation-cell .btn:first-child {
+    margin-left: 0;
+}
+
+.aikaipin-submission-list-remark {
+    color: #61758a;
+    display: -webkit-box;
+    line-height: 1.45;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    text-overflow: ellipsis;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
 .aikaipin-submission-empty-state {
     color: #8a99a7;
     padding: 34px 20px;
@@ -372,6 +409,7 @@ button.aikaipin-selection-list-image:focus {
 #aikaipin-selection-proposal-modal .modal-dialog,
 #aikaipin-placement-evaluation-modal .modal-dialog,
 #aikaipin-selection-proposal-detail-modal .modal-dialog,
+#aikaipin-placement-evaluation-detail-modal .modal-dialog,
 #aikaipin-selection-proposal-image-preview-modal .modal-dialog {
     margin: 22px auto;
     max-width: 940px;
@@ -494,6 +532,43 @@ button.aikaipin-selection-list-image:focus {
     color: #8a97a6;
     font-size: 12px;
     margin: 0;
+}
+
+.aikaipin-submission-detail-records {
+    background: #fff;
+    border: 1px solid #e1e9f0;
+    border-radius: 5px;
+    margin-top: 12px;
+    padding: 12px;
+}
+
+.aikaipin-submission-detail-records h5 {
+    color: #526170;
+    font-size: 12px;
+    font-weight: 600;
+    margin: 0 0 10px;
+}
+
+.aikaipin-submission-detail-records p {
+    color: #8a97a6;
+    font-size: 12px;
+    margin: 0;
+}
+
+.aikaipin-submission-detail-record-list {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.aikaipin-submission-detail-record-list div {
+    background: #f7f9fb;
+    border: 1px solid #e2ebf2;
+    border-radius: 4px;
+    color: #4e6479;
+    font-size: 12px;
+    line-height: 1.5;
+    padding: 8px 10px;
 }
 
 .aikaipin-submission-detail-image-grid {
@@ -1011,6 +1086,7 @@ button.aikaipin-selection-list-image:focus {
     #aikaipin-selection-proposal-modal .modal-dialog,
     #aikaipin-placement-evaluation-modal .modal-dialog,
     #aikaipin-selection-proposal-detail-modal .modal-dialog,
+    #aikaipin-placement-evaluation-detail-modal .modal-dialog,
     #aikaipin-selection-proposal-image-preview-modal .modal-dialog {
         margin: 12px auto;
         width: calc(100% - 20px);

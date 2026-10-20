@@ -7,6 +7,8 @@ use App\Models\AikaipinProduct;
 use App\Models\AikaipinProductCategory;
 use App\Models\AikaipinProductFile;
 use App\Models\AikaipinProductUploadSession;
+use App\Models\AikaipinPlacementEvaluation;
+use App\Models\AikaipinPlacementEvaluationRecord;
 use App\Models\AikaipinSelectionProposal;
 use App\Models\AikaipinSelectionProposalImage;
 use App\Models\AikaipinSelectionProposalTag;
@@ -908,10 +910,168 @@ class ProductLibraryController extends Controller
             return $context;
         }
 
+        $canReviewAllPlacementEvaluations = $this->authorization->canManageProductLibrary($context['user']);
+        $filters = $this->placementEvaluationFilters($request);
+
         return view('portals.aikaipin.placement-evaluation.index', [
             ...$context,
-            'products' => $this->sampleProducts(),
-            'evaluations' => $this->samplePlacementEvaluations(),
+            'evaluations' => $this->placementEvaluationQuery($context['user'], $canReviewAllPlacementEvaluations, $filters)
+                ->paginate(15)
+                ->withQueryString(),
+            'filters' => $filters,
+            'canReviewAllPlacementEvaluations' => $canReviewAllPlacementEvaluations,
+        ]);
+    }
+
+    public function placementEvaluationProductOptions(Request $request): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $keyword = trim((string) $request->query('keyword', ''));
+        $canManageProductLibrary = $this->authorization->canManageProductLibrary($context['user']);
+        $products = $this->productQuery($context['user'], $canManageProductLibrary, [
+            'keyword' => $keyword,
+            'category' => null,
+            'source' => '',
+            'type' => '',
+        ])->limit(12)->get(['id', 'product_code', 'name']);
+
+        return response()->json([
+            'products' => $products->map(static fn (AikaipinProduct $product): array => [
+                'id' => (int) $product->getKey(),
+                'code' => (string) $product->product_code,
+                'name' => (string) $product->name,
+            ])->values()->all(),
+        ]);
+    }
+
+    public function storePlacementEvaluation(Request $request): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $data = $this->validatedPlacementEvaluationData($request);
+        $product = $this->placementEvaluationProduct($context['user'], (int) $data['product_id']);
+        $records = $this->placementEvaluationRecords($data['records']);
+        $connection = config('admin.database.connection') ?: config('database.default');
+
+        try {
+            $evaluation = DB::connection($connection)->transaction(function () use ($context, $data, $product, $records): AikaipinPlacementEvaluation {
+                $evaluation = AikaipinPlacementEvaluation::create([
+                    'evaluation_code' => $this->nextPlacementEvaluationCode(),
+                    'product_id' => (int) $product->getKey(),
+                    'product_code' => (string) $product->product_code,
+                    'product_name' => (string) $product->name,
+                    'test_started_on' => $data['test_started_on'],
+                    'data_ended_on' => $data['data_ended_on'],
+                    'remark' => ($data['remark'] ?? null) ?: null,
+                    'created_by' => (int) $context['user']->getKey(),
+                    'created_by_name' => (string) ($context['user']->name ?: $context['user']->username),
+                    'updated_by' => (int) $context['user']->getKey(),
+                    'updated_by_name' => (string) ($context['user']->name ?: $context['user']->username),
+                ]);
+                foreach ($records as $sort => $record) {
+                    $evaluation->records()->create([...$record, 'sort' => $sort]);
+                }
+
+                return $evaluation;
+            });
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return response()->json([
+                'message' => __('aikaipin.placement_evaluation.messages.save_failed_message'),
+            ], 500);
+        }
+
+        return response()->json([
+            'message' => __('aikaipin.placement_evaluation.messages.created_message'),
+            'redirect_url' => route('aikaipin.placement-evaluations.index'),
+            'evaluation_id' => $evaluation->getKey(),
+        ], 201);
+    }
+
+    public function showPlacementEvaluation(Request $request, AikaipinPlacementEvaluation $evaluation): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->canViewPlacementEvaluation($context['user'], $evaluation), 403);
+        $evaluation->load('records');
+
+        return response()->json($this->placementEvaluationPayload($context['user'], $evaluation));
+    }
+
+    public function updatePlacementEvaluation(Request $request, AikaipinPlacementEvaluation $evaluation): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->canEditPlacementEvaluation($context['user'], $evaluation), 403);
+        $data = $this->validatedPlacementEvaluationData($request);
+        $product = $this->placementEvaluationProduct($context['user'], (int) $data['product_id']);
+        $records = $this->placementEvaluationRecords($data['records']);
+        $connection = config('admin.database.connection') ?: config('database.default');
+
+        try {
+            DB::connection($connection)->transaction(function () use ($context, $evaluation, $data, $product, $records): void {
+                $evaluation->forceFill([
+                    'product_id' => (int) $product->getKey(),
+                    'product_code' => (string) $product->product_code,
+                    'product_name' => (string) $product->name,
+                    'test_started_on' => $data['test_started_on'],
+                    'data_ended_on' => $data['data_ended_on'],
+                    'remark' => ($data['remark'] ?? null) ?: null,
+                    'updated_by' => (int) $context['user']->getKey(),
+                    'updated_by_name' => (string) ($context['user']->name ?: $context['user']->username),
+                ])->save();
+                $evaluation->records()->delete();
+                foreach ($records as $sort => $record) {
+                    $evaluation->records()->create([...$record, 'sort' => $sort]);
+                }
+            });
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return response()->json([
+                'message' => __('aikaipin.placement_evaluation.messages.save_failed_message'),
+            ], 500);
+        }
+
+        return response()->json([
+            'message' => __('aikaipin.placement_evaluation.messages.updated_message'),
+            'redirect_url' => route('aikaipin.placement-evaluations.index'),
+            'evaluation_id' => $evaluation->getKey(),
+        ]);
+    }
+
+    public function destroyPlacementEvaluation(Request $request, AikaipinPlacementEvaluation $evaluation): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->canEditPlacementEvaluation($context['user'], $evaluation), 403);
+        $connection = config('admin.database.connection') ?: config('database.default');
+
+        DB::connection($connection)->transaction(function () use ($evaluation): void {
+            $evaluation->records()->delete();
+            $evaluation->delete();
+        });
+
+        return response()->json([
+            'message' => __('aikaipin.placement_evaluation.messages.deleted_message'),
+            'redirect_url' => route('aikaipin.placement-evaluations.index'),
         ]);
     }
 
@@ -1018,6 +1178,140 @@ class ProductLibraryController extends Controller
 
         return $departmentIds !== []
             && $product->authorizedDepartments()->whereKey($departmentIds)->exists();
+    }
+
+    /** @return array{keyword:string} */
+    private function placementEvaluationFilters(Request $request): array
+    {
+        return [
+            'keyword' => trim((string) $request->query('keyword', '')),
+        ];
+    }
+
+    /** @return array{product_id:int,test_started_on:string,data_ended_on:string,remark:?string,records:list<array{platform:string,currency:string,actual_spend:string|int|float,orders:string|int}>} */
+    private function validatedPlacementEvaluationData(Request $request): array
+    {
+        return $request->validate([
+            'product_id' => ['required', 'integer', 'min:1'],
+            'test_started_on' => ['required', 'date'],
+            'data_ended_on' => ['required', 'date', 'after_or_equal:test_started_on'],
+            'remark' => ['nullable', 'string', 'max:2000'],
+            'records' => ['required', 'array', 'min:1', 'max:60'],
+            'records.*.platform' => ['required', 'in:facebook,google,tiktok,mediago,newsbreak'],
+            'records.*.currency' => ['required', 'in:usd,eur,cny'],
+            'records.*.actual_spend' => ['required', 'numeric', 'min:0', 'max:99999999999999.99'],
+            'records.*.orders' => ['required', 'integer', 'min:0', 'max:4294967295'],
+        ]);
+    }
+
+    /** @param list<array{platform:string,currency:string,actual_spend:string|int|float,orders:string|int}> $records
+     *  @return list<array{platform:string,currency:string,actual_spend:string,orders:int}>
+     */
+    private function placementEvaluationRecords(array $records): array
+    {
+        return collect($records)
+            ->map(static fn (array $record): array => [
+                'platform' => (string) $record['platform'],
+                'currency' => (string) $record['currency'],
+                'actual_spend' => (string) $record['actual_spend'],
+                'orders' => (int) $record['orders'],
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function placementEvaluationProduct(AdminUser $user, int $productId): AikaipinProduct
+    {
+        $product = AikaipinProduct::query()->find($productId);
+        if ($product === null || !$this->canViewProduct($user, $product)) {
+            throw ValidationException::withMessages([
+                'product_id' => __('aikaipin.placement_evaluation.messages.related_product_invalid_message'),
+            ]);
+        }
+
+        return $product;
+    }
+
+    /** @param array{keyword:string} $filters */
+    private function placementEvaluationQuery(AdminUser $user, bool $canReviewAll, array $filters): Builder
+    {
+        $query = AikaipinPlacementEvaluation::query()
+            ->with('records')
+            ->latest('updated_at')
+            ->latest('id');
+
+        if (!$canReviewAll) {
+            $query->where('created_by', $user->getKey());
+        }
+        if ($filters['keyword'] !== '') {
+            $like = '%'.$filters['keyword'].'%';
+            $query->where(function (Builder $evaluations) use ($like): void {
+                $evaluations->where('evaluation_code', 'like', $like)
+                    ->orWhere('product_code', 'like', $like)
+                    ->orWhere('product_name', 'like', $like);
+            });
+        }
+
+        return $query;
+    }
+
+    private function canViewPlacementEvaluation(AdminUser $user, AikaipinPlacementEvaluation $evaluation): bool
+    {
+        return $this->authorization->canManageProductLibrary($user)
+            || (int) $evaluation->created_by === (int) $user->getKey();
+    }
+
+    private function canEditPlacementEvaluation(AdminUser $user, AikaipinPlacementEvaluation $evaluation): bool
+    {
+        return (int) $evaluation->created_by === (int) $user->getKey();
+    }
+
+    /** @return array<string, mixed> */
+    private function placementEvaluationPayload(AdminUser $user, AikaipinPlacementEvaluation $evaluation): array
+    {
+        return [
+            'id' => (int) $evaluation->getKey(),
+            'evaluation_code' => (string) $evaluation->evaluation_code,
+            'product' => [
+                'id' => (int) $evaluation->product_id,
+                'code' => (string) $evaluation->product_code,
+                'name' => (string) $evaluation->product_name,
+            ],
+            'test_started_on' => $evaluation->test_started_on?->toDateString(),
+            'data_ended_on' => $evaluation->data_ended_on?->toDateString(),
+            'remark' => $evaluation->remark,
+            'created_by_name' => $evaluation->created_by_name,
+            'created_at' => $evaluation->created_at?->toAtomString(),
+            'updated_at' => $evaluation->updated_at?->toAtomString(),
+            'can_edit' => $this->canEditPlacementEvaluation($user, $evaluation),
+            'records' => $evaluation->records->map(static fn (AikaipinPlacementEvaluationRecord $record): array => [
+                'id' => (int) $record->getKey(),
+                'platform' => (string) $record->platform,
+                'currency' => (string) $record->currency,
+                'actual_spend' => (string) $record->actual_spend,
+                'orders' => (int) $record->orders,
+            ])->values()->all(),
+        ];
+    }
+
+    private function nextPlacementEvaluationCode(): string
+    {
+        $connection = config('admin.database.connection') ?: config('database.default');
+        $period = now()->format('Ym');
+        $sequences = DB::connection($connection)->table('aikaipin_placement_evaluation_code_sequences');
+        $sequences->insertOrIgnore([
+            'period' => $period,
+            'last_number' => 0,
+            'updated_at' => now(),
+        ]);
+        $sequence = $sequences->where('period', $period)->lockForUpdate()->first();
+        $nextNumber = (int) ($sequence->last_number ?? 0) + 1;
+        $sequences->where('period', $period)->update([
+            'last_number' => $nextNumber,
+            'updated_at' => now(),
+        ]);
+
+        return sprintf('ATE-%s-%06d', $period, $nextNumber);
     }
 
     private function nextProductCode(): string

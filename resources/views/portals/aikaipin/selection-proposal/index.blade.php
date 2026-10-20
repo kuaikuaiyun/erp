@@ -67,7 +67,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-submissions.css?v=20261020-6">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-submissions.css?v=20261020-7">
 @endpush
 
 @push('scripts')
@@ -112,6 +112,7 @@
                         <col class="aikaipin-selection-product-name-column">
                         <col class="aikaipin-selection-specification-column">
                         <col class="aikaipin-selection-attribute-column">
+                        <col class="aikaipin-selection-remark-column">
                         @if ($canReviewAllSelectionProposals)
                             <col class="aikaipin-selection-submitter-column">
                         @endif
@@ -126,6 +127,7 @@
                         <th class="aikaipin-selection-product-name-column">{{ $t('selection_proposal.table.product_name') }}</th>
                         <th class="aikaipin-selection-specification-column">{{ $t('selection_proposal.table.specifications') }}</th>
                         <th class="aikaipin-selection-attribute-column">{{ $t('selection_proposal.table.attributes') }}</th>
+                        <th class="aikaipin-selection-remark-column">{{ $t('selection_proposal.fields.remark') }}</th>
                         @if ($canReviewAllSelectionProposals)
                             <th class="aikaipin-selection-submitter-column">{{ $t('selection_proposal.table.submitter') }}</th>
                         @endif
@@ -182,6 +184,9 @@
                                     @endforeach
                                 </div>
                             </td>
+                            <td class="aikaipin-selection-remark-cell">
+                                <span class="aikaipin-submission-list-remark" @if ($proposal->remark) title="{{ $proposal->remark }}" @endif>{{ $proposal->remark ?: $t('selection_proposal.fields.no_value') }}</span>
+                            </td>
                             @if ($canReviewAllSelectionProposals)
                                 <td class="aikaipin-selection-submitter-cell">{{ $proposal->created_by_name }}</td>
                             @endif
@@ -211,7 +216,7 @@
                         </tr>
                     @endforeach
                     <tr data-aikaipin-list-empty-row @if ($proposals->isNotEmpty()) hidden @endif>
-                        <td colspan="{{ $canReviewAllSelectionProposals ? 9 : 8 }}">
+                        <td colspan="{{ $canReviewAllSelectionProposals ? 10 : 9 }}">
                             <div class="aikaipin-submission-empty-state">
                                 <i class="fa fa-search" aria-hidden="true"></i>
                                 <p data-aikaipin-list-empty-message>{{ $t('selection_proposal.messages.no_records') }}</p>
