@@ -35,7 +35,6 @@ class AiProductController extends Controller
             ->when($filters['keyword'] !== '', function (Builder $query) use ($filters): Builder {
                 return $query->where(function (Builder $inner) use ($filters): void {
                     $inner->where('report_no', 'like', '%'.$filters['keyword'].'%')
-                        ->orWhere('ai_product_name', 'like', '%'.$filters['keyword'].'%')
                         ->orWhere('placement_link', 'like', '%'.$filters['keyword'].'%');
                 });
             })
@@ -44,16 +43,10 @@ class AiProductController extends Controller
             ->paginate($filters['per_page'])
             ->withQueryString();
 
-        $products = AiProduct::query()
-            ->where('is_enabled', true)
-            ->orderBy('id')
-            ->get(['id', 'name', 'category']);
-
         return view('portals.ai-products.operation.index', [
             'portal' => $context['portal']->load('menus'),
             'user' => $context['user'],
             'submissions' => $submissions,
-            'products' => $products,
             'filters' => $filters,
             'statusLabels' => AiProductSubmission::statusLabels(),
         ]);
@@ -68,28 +61,17 @@ class AiProductController extends Controller
         }
 
         $data = Validator::make($request->all(), $this->storeRules(), [], [
-            'ai_product_id' => __('ai_products.fields.ai_product'),
             'placement_link' => __('ai_products.fields.placement_link'),
         ])->validate();
 
-        $product = null;
-        if (!empty($data['ai_product_id'])) {
-            $product = AiProduct::query()->whereKey((int) $data['ai_product_id'])->first();
-            if (!$product || !$product->is_enabled) {
-                return redirect()
-                    ->route('ai-products.operation.index')
-                    ->withInput()
-                    ->with('error', __('ai_products.validation.product_invalid'));
-            }
-        }
-
         $actor = $this->access->actorSnapshot($context['user']);
+        $connection = config('admin.database.connection') ?: config('database.default');
 
-        $submission = DB::connection($product?->getConnectionName() ?? config('admin.database.connection') ?: config('database.default'))->transaction(function () use ($data, $actor, $product): AiProductSubmission {
+        $submission = DB::connection($connection)->transaction(function () use ($data, $actor): AiProductSubmission {
             $submission = new AiProductSubmission([
                 'report_no' => 'AI-TMP-'.uniqid(),
-                'ai_product_id' => $product ? (int) $product->getKey() : null,
-                'ai_product_name' => $product?->name,
+                'ai_product_id' => null,
+                'ai_product_name' => null,
                 'placement_link' => trim((string) $data['placement_link']),
                 'operation_user_id' => $actor['user_id'],
                 'operation_user_name' => $actor['user_name'],
@@ -124,7 +106,6 @@ class AiProductController extends Controller
             ->when($filters['keyword'] !== '', function (Builder $query) use ($filters): Builder {
                 return $query->where(function (Builder $inner) use ($filters): void {
                     $inner->where('report_no', 'like', '%'.$filters['keyword'].'%')
-                        ->orWhere('ai_product_name', 'like', '%'.$filters['keyword'].'%')
                         ->orWhere('placement_link', 'like', '%'.$filters['keyword'].'%')
                         ->orWhere('operation_display_name', 'like', '%'.$filters['keyword'].'%');
                 });
@@ -214,14 +195,6 @@ class AiProductController extends Controller
     private function storeRules(): array
     {
         return [
-            'ai_product_id' => ['nullable', 'integer', function (string $attribute, mixed $value, \Closure $fail): void {
-                if ($value === null || $value === '') {
-                    return;
-                }
-                if (!AiProduct::query()->whereKey((int) $value)->where('is_enabled', true)->exists()) {
-                    $fail(__('ai_products.validation.product_invalid'));
-                }
-            }],
             'placement_link' => ['required', 'string', 'max:2048', 'url'],
         ];
     }

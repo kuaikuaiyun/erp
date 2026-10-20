@@ -2,14 +2,14 @@
 
 return [
     'menus' => [
-        'request' => 'AI 团队产品库产品提报',
-        'request_hint' => '如果你是 AI 产品库选的品，这边提交你选的品跟你的落地页',
-        'review' => 'AI 产品投放链接审核',
+        'request' => '已有产品投放连接提报',
+        'request_hint' => 'AI开品库里面有的或者查重有的',
+        'review' => '已有产品投放连接审核',
     ],
 
     'filters' => [
         'keyword' => '关键词',
-        'keyword_placeholder' => '提报编号 / AI 产品 / 投放链接',
+        'keyword_placeholder' => '提报编号 / 投放链接',
         'per_page' => '每页条数',
     ],
 
@@ -24,21 +24,21 @@ return [
     ],
 
     'operation' => [
-        'title' => 'AI 团队产品库产品提报',
-        'subtitle' => '如果你是 AI 产品库选的品，这边提交你选的品跟你的落地页',
+        'title' => '已有产品投放连接提报',
+        'subtitle' => '',
         'create_button' => '发起提报',
-        'create_title' => '发起 AI 产品需求提报',
+        'create_title' => '发起已有产品投放连接提报',
         'submit_success' => '提报成功，提报编号：:report_no',
         'list_title' => '提报记录',
     ],
 
     'review' => [
-        'title' => 'AI 产品投放链接审核',
-        'subtitle' => '审核运营提交的 AI 产品投放链接需求',
+        'title' => '已有产品投放连接审核',
+        'subtitle' => '审核运营提交的已有产品投放连接',
         'list_title' => '审核列表',
         'approve_button' => '审核通过',
         'reject_button' => '审核不通过',
-        'approve_confirm' => '确认审核通过该条 AI 产品需求提报吗？',
+        'approve_confirm' => '确认审核通过该条提报吗？',
         'reject_modal_title' => '审核不通过',
         'reject_submit' => '确认不通过',
         'approve_success' => '已通过：:report_no',

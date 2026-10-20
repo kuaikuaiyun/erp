@@ -10,6 +10,7 @@ return [
         'link_review_issues' => '审核链接问题',
         'warehouse_issues' => '仓库问题',
         'link_sku_manager' => 'PCL SKU 管理',
+        'submission_group' => '提报',
     ],
     'link_skus' => [
         'title' => 'PCL SKU 管理',
@@ -133,6 +134,7 @@ return [
         'my_scope_hint' => '列表已按当前账号和部门管理范围自动过滤。',
         'sku_changed' => 'SKU 有变动，请按最新 SKU 更改店铺里面的 SKU',
         'sku_changed_hint' => '该 SKU 已在商品信息检验时修改。运营填写：:operation ｜ 采购确认：:procurement',
+        'sku_normal' => 'SKU 无变动',
         'link_changed' => '1688 链接已被修改',
         'deleted' => '需求提报记录已删除。',
         'link_prefix_error' => '1688 链接必须以 https://detail.1688.com/ 开头',
