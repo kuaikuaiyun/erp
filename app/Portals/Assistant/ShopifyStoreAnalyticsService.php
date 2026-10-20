@@ -41,7 +41,11 @@ class ShopifyStoreAnalyticsService
      * calendar days (plus a prior timezone-boundary buffer). Later requests
      * replace the source rows for the current local date and prior 3 dates.
      */
-    public function refresh(AssistantDomainStore $store, ?AdminUser $actor = null): AssistantShopifyStoreMetric
+    public function refresh(
+        AssistantDomainStore $store,
+        ?AdminUser $actor = null,
+        bool $allowSubscriptionHistoryBackfill = false,
+    ): AssistantShopifyStoreMetric
     {
         $metric = AssistantShopifyStoreMetric::query()->firstOrNew([
             'assistant_domain_store_id' => $store->getKey(),
@@ -59,18 +63,36 @@ class ShopifyStoreAnalyticsService
             $shop = $this->shopInfo($store, $actor);
             $localToday = CarbonImmutable::now($shop['timezone'])->startOfDay();
             $isInitial = $metric->orders_initial_backfilled_at === null;
+            $historyFromDate = $localToday->subDays(
+                (self::INITIAL_HISTORY_DAYS - 1) + self::INITIAL_TIMEZONE_BUFFER_DAYS,
+            );
+            $historyStartUtc = $historyFromDate->startOfDay()->setTimezone('UTC');
             // Tags were introduced after order-history storage already existed.
             // Only an explicit user-selected synchronization may perform this
             // one-time 90-day tag backfill; the automatic 30-minute process
             // remains incremental and cannot unexpectedly fan out API work.
-            $needsSubscriptionTagBackfill = $actor !== null
+            $needsSubscriptionTagBackfill = $allowSubscriptionHistoryBackfill
                 && AssistantShopifyStoreOrder::query()
                     ->where('assistant_domain_store_id', $store->getKey())
-                    ->whereNull('subscription_category')
+                    ->where('shopify_created_at', '>=', $historyStartUtc->format('Y-m-d H:i:s'))
+                    ->where(function ($orders): void {
+                        $orders
+                            // Rows written before tag persistence was introduced
+                            // have no source tags at all. A legitimate order with
+                            // no tags is stored as JSON [] and must not retrigger
+                            // another 90-day backfill.
+                            ->whereNull('shopify_tags')
+                            ->orWhereNull('subscription_category')
+                            ->orWhere('subscription_category', '')
+                            ->orWhereNotIn(
+                                'subscription_category',
+                                AssistantShopifyStoreOrder::subscriptionCategories(),
+                            );
+                    })
                     ->exists();
             $requiresFullHistory = $isInitial || $needsSubscriptionTagBackfill;
             $fromDate = $requiresFullHistory
-                ? $localToday->subDays((self::INITIAL_HISTORY_DAYS - 1) + self::INITIAL_TIMEZONE_BUFFER_DAYS)
+                ? $historyFromDate
                 : $localToday->subDays(self::INCREMENTAL_SYNC_DAYS - 1);
 
             $this->synchroniseStoreDates(

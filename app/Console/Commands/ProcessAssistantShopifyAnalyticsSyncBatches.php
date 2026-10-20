@@ -127,7 +127,10 @@ class ProcessAssistantShopifyAnalyticsSyncBatches extends Command
             // A batch task always synchronizes the Shopify store's own local
             // business day. The list filter timezone is only retained for the
             // browser return URL and must never alter Shopify data collection.
-            $metric = $analytics->refresh($store, $actor);
+            // A user-created batch is allowed to perform the one-time 90-day
+            // source-tag backfill for stores whose older order rows predate tag
+            // persistence. Automatic scheduled synchronization stays incremental.
+            $metric = $analytics->refresh($store, $actor, true);
             if ($metric->sync_status !== AssistantShopifyStoreMetric::STATUS_SUCCESS) {
                 $this->failTask($task, $batch, $metric->sync_message ?: $metric->sync_status);
 
