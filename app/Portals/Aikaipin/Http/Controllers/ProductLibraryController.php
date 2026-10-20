@@ -7,10 +7,14 @@ use App\Models\AikaipinProduct;
 use App\Models\AikaipinProductCategory;
 use App\Models\AikaipinProductFile;
 use App\Models\AikaipinProductUploadSession;
+use App\Models\AikaipinSelectionProposal;
+use App\Models\AikaipinSelectionProposalImage;
+use App\Models\AikaipinSelectionProposalTag;
 use App\Models\AdminUser;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Aikaipin\AikaipinPortalAuthorizationService;
 use App\Portals\Aikaipin\AikaipinProductLibraryStorageService;
+use App\Portals\Aikaipin\AikaipinSelectionProposalStorageService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -28,6 +32,7 @@ class ProductLibraryController extends Controller
         private readonly PortalEntryController $portalEntries,
         private readonly AikaipinPortalAuthorizationService $authorization,
         private readonly AikaipinProductLibraryStorageService $storage,
+        private readonly AikaipinSelectionProposalStorageService $selectionProposalStorage,
     ) {
     }
 
@@ -661,9 +666,238 @@ class ProductLibraryController extends Controller
             return $context;
         }
 
+        $canReviewAllSelectionProposals = $this->authorization->canManageProductLibrary($context['user']);
+        $filters = $this->selectionProposalFilters($request);
+
         return view('portals.aikaipin.selection-proposal.index', [
             ...$context,
-            'proposals' => $this->sampleSelectionProposals(),
+            'proposals' => $this->selectionProposalQuery($context['user'], $canReviewAllSelectionProposals, $filters)
+                ->paginate(15)
+                ->withQueryString(),
+            'filters' => $filters,
+            'canReviewAllSelectionProposals' => $canReviewAllSelectionProposals,
+        ]);
+    }
+
+    public function storeSelectionProposal(Request $request): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $data = $request->validate([
+            'product_name' => ['required', 'string', 'max:191'],
+            'specifications' => ['nullable', 'array'],
+            'specifications.*' => ['nullable', 'string', 'max:80', 'distinct'],
+            'attributes' => ['nullable', 'array'],
+            'attributes.*' => ['nullable', 'string', 'max:80', 'distinct'],
+            'link_1688' => ['nullable', 'url', 'max:2048'],
+            'competitor_url' => ['nullable', 'url', 'max:2048'],
+            'remark' => ['nullable', 'string', 'max:2000'],
+            'images' => ['required', 'array', 'min:1', 'max:3'],
+            'images.*' => ['file', 'image', 'max:20480'],
+        ]);
+        $specifications = $this->selectionProposalTagValues($data['specifications'] ?? []);
+        $attributes = $this->selectionProposalTagValues($data['attributes'] ?? []);
+        $createdPaths = [];
+        $proposal = null;
+
+        try {
+            $connection = config('admin.database.connection') ?: config('database.default');
+            $proposal = DB::connection($connection)->transaction(function () use ($context, $data, $specifications, $attributes, &$createdPaths): AikaipinSelectionProposal {
+                $proposal = AikaipinSelectionProposal::create([
+                    'proposal_code' => $this->nextSelectionProposalCode(),
+                    'product_name' => trim((string) $data['product_name']),
+                    'link_1688' => ($data['link_1688'] ?? null) ?: null,
+                    'competitor_url' => ($data['competitor_url'] ?? null) ?: null,
+                    'remark' => ($data['remark'] ?? null) ?: null,
+                    'created_by' => (int) $context['user']->getKey(),
+                    'created_by_name' => (string) ($context['user']->name ?: $context['user']->username),
+                    'updated_by' => (int) $context['user']->getKey(),
+                    'updated_by_name' => (string) ($context['user']->name ?: $context['user']->username),
+                ]);
+
+                $this->syncSelectionProposalTags($proposal, $specifications, $attributes);
+                foreach (array_values($data['images']) as $sort => $image) {
+                    /** @var UploadedFile $image */
+                    $imagePayload = $this->selectionProposalStorage->storeImage($image);
+                    $createdPaths[] = $imagePayload['path'];
+                    $proposal->images()->create([...$imagePayload, 'disk' => AikaipinSelectionProposalStorageService::DISK, 'sort' => $sort]);
+                }
+
+                return $proposal;
+            });
+        } catch (ValidationException $exception) {
+            throw $exception;
+        } catch (\Throwable $exception) {
+            foreach ($createdPaths as $path) {
+                $this->selectionProposalStorage->deleteImage($path);
+            }
+            report($exception);
+
+            return response()->json([
+                'message' => __('aikaipin.selection_proposal.messages.save_failed_message'),
+            ], 500);
+        }
+
+        return response()->json([
+            'message' => __('aikaipin.selection_proposal.messages.created_message'),
+            'redirect_url' => route('aikaipin.selection-proposals.index'),
+            'proposal_id' => $proposal?->getKey(),
+        ], 201);
+    }
+
+    public function showSelectionProposal(Request $request, AikaipinSelectionProposal $proposal): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->canViewSelectionProposal($context['user'], $proposal), 403);
+        $proposal->load(['tags', 'images']);
+
+        return response()->json($this->selectionProposalPayload($context['user'], $proposal));
+    }
+
+    public function updateSelectionProposal(Request $request, AikaipinSelectionProposal $proposal): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->canEditSelectionProposal($context['user'], $proposal), 403);
+        $data = $request->validate([
+            'product_name' => ['required', 'string', 'max:191'],
+            'specifications' => ['nullable', 'array'],
+            'specifications.*' => ['nullable', 'string', 'max:80', 'distinct'],
+            'attributes' => ['nullable', 'array'],
+            'attributes.*' => ['nullable', 'string', 'max:80', 'distinct'],
+            'link_1688' => ['nullable', 'url', 'max:2048'],
+            'competitor_url' => ['nullable', 'url', 'max:2048'],
+            'remark' => ['nullable', 'string', 'max:2000'],
+            'images' => ['nullable', 'array'],
+            'images.*' => ['file', 'image', 'max:20480'],
+            'remove_image_ids' => ['nullable', 'array'],
+            'remove_image_ids.*' => ['integer', 'distinct'],
+        ]);
+        $specifications = $this->selectionProposalTagValues($data['specifications'] ?? []);
+        $attributes = $this->selectionProposalTagValues($data['attributes'] ?? []);
+        $removedImageIds = collect($data['remove_image_ids'] ?? [])->map(static fn ($id): int => (int) $id)->unique()->values()->all();
+        $existingImages = $proposal->images()->get();
+        $existingImageIds = $existingImages->pluck('id')->map(static fn ($id): int => (int) $id)->all();
+        if (collect($removedImageIds)->diff($existingImageIds)->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                'remove_image_ids' => __('aikaipin.selection_proposal.messages.image_invalid_message'),
+            ]);
+        }
+
+        $newImages = array_values($data['images'] ?? []);
+        $finalImageCount = $existingImages->count() - count($removedImageIds) + count($newImages);
+        if ($finalImageCount < 1 || $finalImageCount > 3) {
+            throw ValidationException::withMessages([
+                'images' => $finalImageCount < 1
+                    ? __('aikaipin.selection_proposal.messages.image_required_message')
+                    : __('aikaipin.selection_proposal.messages.image_limit_message'),
+            ]);
+        }
+
+        $createdPaths = [];
+        $obsoleteImages = collect();
+
+        try {
+            $connection = config('admin.database.connection') ?: config('database.default');
+            DB::connection($connection)->transaction(function () use ($context, $proposal, $data, $specifications, $attributes, $removedImageIds, $newImages, &$createdPaths, &$obsoleteImages): void {
+                $proposal->forceFill([
+                    'product_name' => trim((string) $data['product_name']),
+                    'link_1688' => ($data['link_1688'] ?? null) ?: null,
+                    'competitor_url' => ($data['competitor_url'] ?? null) ?: null,
+                    'remark' => ($data['remark'] ?? null) ?: null,
+                    'updated_by' => (int) $context['user']->getKey(),
+                    'updated_by_name' => (string) ($context['user']->name ?: $context['user']->username),
+                ])->save();
+                $this->syncSelectionProposalTags($proposal, $specifications, $attributes);
+
+                $removedImages = $proposal->images()->whereKey($removedImageIds)->get();
+                if ($removedImages->isNotEmpty()) {
+                    $obsoleteImages = $obsoleteImages->merge($removedImages);
+                    $proposal->images()->whereKey($removedImageIds)->delete();
+                }
+
+                $sort = (int) ($proposal->images()->max('sort') ?? -1) + 1;
+                foreach ($newImages as $image) {
+                    /** @var UploadedFile $image */
+                    $imagePayload = $this->selectionProposalStorage->storeImage($image);
+                    $createdPaths[] = $imagePayload['path'];
+                    $proposal->images()->create([...$imagePayload, 'disk' => AikaipinSelectionProposalStorageService::DISK, 'sort' => $sort]);
+                    $sort += 1;
+                }
+            });
+        } catch (ValidationException $exception) {
+            throw $exception;
+        } catch (\Throwable $exception) {
+            foreach ($createdPaths as $path) {
+                $this->selectionProposalStorage->deleteImage($path);
+            }
+            report($exception);
+
+            return response()->json([
+                'message' => __('aikaipin.selection_proposal.messages.save_failed_message'),
+            ], 500);
+        }
+
+        foreach ($obsoleteImages->unique('id') as $image) {
+            try {
+                $this->selectionProposalStorage->deleteImage((string) $image->path);
+            } catch (\Throwable $exception) {
+                report($exception);
+            }
+        }
+
+        return response()->json([
+            'message' => __('aikaipin.selection_proposal.messages.updated_message'),
+            'redirect_url' => route('aikaipin.selection-proposals.index'),
+            'proposal_id' => $proposal->getKey(),
+        ]);
+    }
+
+    public function withdrawSelectionProposal(Request $request, AikaipinSelectionProposal $proposal): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->canEditSelectionProposal($context['user'], $proposal), 403);
+        $proposal->forceFill([
+            'withdrawn_at' => now(),
+            'withdrawn_by' => (int) $context['user']->getKey(),
+            'withdrawn_by_name' => (string) ($context['user']->name ?: $context['user']->username),
+            'updated_by' => (int) $context['user']->getKey(),
+            'updated_by_name' => (string) ($context['user']->name ?: $context['user']->username),
+        ])->save();
+
+        return response()->json([
+            'message' => __('aikaipin.selection_proposal.messages.withdrawn_message'),
+            'redirect_url' => route('aikaipin.selection-proposals.index'),
+        ]);
+    }
+
+    public function showSelectionProposalImage(Request $request, AikaipinSelectionProposal $proposal, AikaipinSelectionProposalImage $image): Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless((int) $image->proposal_id === (int) $proposal->getKey(), 404);
+        abort_unless($this->canViewSelectionProposal($context['user'], $proposal), 403);
+        abort_unless($image->disk === AikaipinSelectionProposalStorageService::DISK && Storage::disk($image->disk)->exists($image->path), 404);
+
+        return response()->file(Storage::disk($image->disk)->path($image->path), [
+            'Content-Type' => $image->mime_type ?: 'application/octet-stream',
         ]);
     }
 
@@ -804,6 +1038,139 @@ class ProductLibraryController extends Controller
         ]);
 
         return sprintf('AKP-%s-%06d', $period, $nextNumber);
+    }
+
+    /** @return array{keyword:string} */
+    private function selectionProposalFilters(Request $request): array
+    {
+        return [
+            'keyword' => trim((string) $request->query('keyword', '')),
+        ];
+    }
+
+    /** @param list<mixed> $values
+     *  @return list<string>
+     */
+    private function selectionProposalTagValues(array $values): array
+    {
+        return collect($values)
+            ->map(static fn ($value): string => trim(preg_replace('/\s+/u', ' ', (string) $value) ?: ''))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /** @param list<string> $specifications
+     *  @param list<string> $attributes
+     */
+    private function syncSelectionProposalTags(AikaipinSelectionProposal $proposal, array $specifications, array $attributes): void
+    {
+        $proposal->tags()->delete();
+        foreach ($specifications as $sort => $value) {
+            $proposal->tags()->create([
+                'type' => AikaipinSelectionProposalTag::TYPE_SPECIFICATION,
+                'value' => $value,
+                'sort' => $sort,
+            ]);
+        }
+        foreach ($attributes as $sort => $value) {
+            $proposal->tags()->create([
+                'type' => AikaipinSelectionProposalTag::TYPE_ATTRIBUTE,
+                'value' => $value,
+                'sort' => $sort,
+            ]);
+        }
+    }
+
+    /** @param array{keyword:string} $filters */
+    private function selectionProposalQuery(AdminUser $user, bool $canReviewAll, array $filters): Builder
+    {
+        $query = AikaipinSelectionProposal::query()
+            ->with(['tags'])
+            ->latest('updated_at')
+            ->latest('id');
+
+        if (!$canReviewAll) {
+            $query->where('created_by', $user->getKey());
+        }
+        if ($filters['keyword'] !== '') {
+            $like = '%'.$filters['keyword'].'%';
+            $query->where(function (Builder $proposals) use ($like): void {
+                $proposals->where('proposal_code', 'like', $like)
+                    ->orWhere('product_name', 'like', $like)
+                    ->orWhereHas('tags', static fn (Builder $tags) => $tags->where('value', 'like', $like));
+            });
+        }
+
+        return $query;
+    }
+
+    private function canViewSelectionProposal(AdminUser $user, AikaipinSelectionProposal $proposal): bool
+    {
+        return $this->authorization->canManageProductLibrary($user)
+            || (int) $proposal->created_by === (int) $user->getKey();
+    }
+
+    private function canEditSelectionProposal(AdminUser $user, AikaipinSelectionProposal $proposal): bool
+    {
+        return $proposal->withdrawn_at === null
+            && (int) $proposal->created_by === (int) $user->getKey();
+    }
+
+    /** @return array<string, mixed> */
+    private function selectionProposalPayload(AdminUser $user, AikaipinSelectionProposal $proposal): array
+    {
+        return [
+            'id' => (int) $proposal->getKey(),
+            'proposal_code' => (string) $proposal->proposal_code,
+            'product_name' => (string) $proposal->product_name,
+            'specifications' => $proposal->tags
+                ->where('type', AikaipinSelectionProposalTag::TYPE_SPECIFICATION)
+                ->pluck('value')
+                ->values()
+                ->all(),
+            'attributes' => $proposal->tags
+                ->where('type', AikaipinSelectionProposalTag::TYPE_ATTRIBUTE)
+                ->pluck('value')
+                ->values()
+                ->all(),
+            'link_1688' => $proposal->link_1688,
+            'competitor_url' => $proposal->competitor_url,
+            'remark' => $proposal->remark,
+            'created_by_name' => $proposal->created_by_name,
+            'created_at' => $proposal->created_at?->toAtomString(),
+            'updated_at' => $proposal->updated_at?->toAtomString(),
+            'withdrawn_at' => $proposal->withdrawn_at?->toAtomString(),
+            'can_edit' => $this->canEditSelectionProposal($user, $proposal),
+            'images' => $proposal->images->map(function (AikaipinSelectionProposalImage $image) use ($proposal): array {
+                return [
+                    'id' => (int) $image->getKey(),
+                    'name' => (string) $image->original_name,
+                    'url' => route('aikaipin.selection-proposals.images.show', ['proposal' => $proposal, 'image' => $image]),
+                ];
+            })->values()->all(),
+        ];
+    }
+
+    private function nextSelectionProposalCode(): string
+    {
+        $connection = config('admin.database.connection') ?: config('database.default');
+        $period = now()->format('Ym');
+        $sequences = DB::connection($connection)->table('aikaipin_selection_proposal_code_sequences');
+        $sequences->insertOrIgnore([
+            'period' => $period,
+            'last_number' => 0,
+            'updated_at' => now(),
+        ]);
+        $sequence = $sequences->where('period', $period)->lockForUpdate()->first();
+        $nextNumber = (int) ($sequence->last_number ?? 0) + 1;
+        $sequences->where('period', $period)->update([
+            'last_number' => $nextNumber,
+            'updated_at' => now(),
+        ]);
+
+        return sprintf('SPR-%s-%06d', $period, $nextNumber);
     }
 
     /** @return array{keyword:string,category:?int,source:string,type:string} */

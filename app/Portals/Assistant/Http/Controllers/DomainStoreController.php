@@ -66,6 +66,12 @@ class DomainStoreController extends Controller
             );
         });
         $canManageStoreOwnership = $this->authorization->canManageAllDomainStores($context['user']);
+        $assistantChildDepartments = $this->authorization->assistantChildDepartments();
+        $operationScopeMap = $canManageStoreOwnership
+            ? $this->storeOwners->scopeMap()
+            : [];
+        $ownerAssignableDepartmentIds = collect(array_keys($operationScopeMap))
+            ->map(static fn (mixed $id): int => (int) $id);
         $ownerScopeWarningIds = $canManageStoreOwnership
             ? $this->storeOwners->outOfScopeStoreIds($stores->getCollection())
             : [];
@@ -80,13 +86,14 @@ class DomainStoreController extends Controller
             'canManageStoreOwnership' => $canManageStoreOwnership,
             'ownerScopeWarningIds' => $ownerScopeWarningIds,
             'canSyncEmailPurchases' => $this->authorization->canManageQuickOptions($context['user']),
-            'assistantChildDepartments' => $this->authorization->assistantChildDepartments(),
+            'assistantChildDepartments' => $assistantChildDepartments,
+            'ownerAssignableDepartments' => $assistantChildDepartments
+                ->whereIn('id', $ownerAssignableDepartmentIds->all())
+                ->values(),
             'operationDepartments' => $canManageStoreOwnership
                 ? $this->storeOwners->operationDepartments()
                 : collect(),
-            'operationScopeMap' => $canManageStoreOwnership
-                ? $this->storeOwners->scopeMap()
-                : [],
+            'operationScopeMap' => $operationScopeMap,
             'domainCheckLabels' => AssistantDomainStore::domainCheckLabels(),
             'shopStatusLabels' => AssistantDomainStore::shopStatusLabels(),
         ]);
@@ -687,7 +694,10 @@ class DomainStoreController extends Controller
             ]);
         }
 
-        $availableDepartments = $this->authorization->assistantChildDepartments()->keyBy('id');
+        $configuredDepartmentIds = $this->storeOwners->configuredAssistantDepartmentIds();
+        $availableDepartments = $this->authorization->assistantChildDepartments()
+            ->whereIn('id', $configuredDepartmentIds->all())
+            ->keyBy('id');
         $selectedDepartmentId = isset($validated['owner_department_id'])
             ? (int) $validated['owner_department_id']
             : null;
@@ -704,7 +714,10 @@ class DomainStoreController extends Controller
             ->unique()
             ->values();
         $requiresDepartment = $selectedDepartmentId === null
-            && $stores->contains(static fn (AssistantDomainStore $store): bool => !$store->owner_department_id);
+            && (
+                $stores->contains(static fn (AssistantDomainStore $store): bool => !$store->owner_department_id)
+                || $existingDepartmentIds->diff($availableDepartments->keys())->isNotEmpty()
+            );
         $candidateDepartmentIds = $selectedDepartmentId !== null
             ? [$selectedDepartmentId]
             : ($requiresDepartment ? [] : $existingDepartmentIds->all());
@@ -1341,7 +1354,10 @@ class DomainStoreController extends Controller
             $selectedDepartmentId = isset($validated['owner_department_id'])
                 ? (int) $validated['owner_department_id']
                 : null;
-            $availableDepartments = $this->authorization->assistantChildDepartments()->keyBy('id');
+            $configuredDepartmentIds = $this->storeOwners->configuredAssistantDepartmentIds();
+            $availableDepartments = $this->authorization->assistantChildDepartments()
+                ->whereIn('id', $configuredDepartmentIds->all())
+                ->keyBy('id');
 
             if ($selectedDepartmentId !== null && !$availableDepartments->has($selectedDepartmentId)) {
                 throw ValidationException::withMessages([
@@ -1349,10 +1365,16 @@ class DomainStoreController extends Controller
                 ]);
             }
 
-            if (
-                $selectedDepartmentId === null
-                && $stores->contains(static fn (AssistantDomainStore $store): bool => !$store->owner_department_id)
-            ) {
+            $storeDepartmentIds = $stores->pluck('owner_department_id')
+                ->filter(static fn (mixed $id): bool => $id !== null)
+                ->map(static fn (mixed $id): int => (int) $id)
+                ->unique()
+                ->values();
+
+            if ($selectedDepartmentId === null && (
+                $stores->contains(static fn (AssistantDomainStore $store): bool => !$store->owner_department_id)
+                || $storeDepartmentIds->diff($availableDepartments->keys())->isNotEmpty()
+            )) {
                 throw ValidationException::withMessages([
                     'owner_department_id' => __('assistant.domain_stores.validation.owner_department_required'),
                 ]);
