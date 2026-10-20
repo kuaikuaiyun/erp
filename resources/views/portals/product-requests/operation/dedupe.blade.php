@@ -69,7 +69,13 @@
     @if($keyword === '' && $supplierUrl === '')
         <div class="dedupe-empty"><i class="fa fa-search-plus"></i>{{ $t('dedupe.empty_hint') }}</div>
     @elseif($results === [])
-        <div class="dedupe-empty"><i class="fa fa-inbox"></i>{{ $t('dedupe.no_results') }}</div>
+        <div style="margin:20px 0;padding:16px 20px;background:#fff8e1;border:1px solid #ffe58f;border-radius:8px;color:#8a6d3b">
+            <i class="fa fa-exclamation-triangle" style="margin-right:6px"></i>
+            <strong>没有找到搜索信息</strong>
+            <span style="color:#a98a4b;margin-left:8px">{{ $t('dedupe.no_results') }}</span>
+            @if($supplierUrl !== '')<br><span style="color:#a98a4b;font-size:12px;margin-left:22px">链接：{{ \Illuminate\Support\Str::limit($supplierUrl, 80) }}</span>@endif
+            @if($keyword !== '')<br><span style="color:#a98a4b;font-size:12px;margin-left:22px">关键词：{{ $keyword }}</span>@endif
+        </div>
     @else
         @if($matchType)
             <p style="margin:14px 0 10px;color:#666;font-size:13px">
