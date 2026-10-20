@@ -68,6 +68,10 @@
 
     @if($keyword === '' && $supplierUrl === '')
         <div class="dedupe-empty"><i class="fa fa-search-plus"></i>{{ $t('dedupe.empty_hint') }}</div>
+    @elseif(!empty($validationHint))
+        <div style="margin:20px 0;padding:16px 20px;background:#e8f4fd;border:1px solid #91d5ff;border-radius:8px;color:#0958d9">
+            <i class="fa fa-info-circle" style="margin-right:6px"></i>{{ $validationHint }}
+        </div>
     @elseif($results === [])
         <div style="margin:20px 0;padding:16px 20px;background:#fff8e1;border:1px solid #ffe58f;border-radius:8px;color:#8a6d3b">
             <i class="fa fa-exclamation-triangle" style="margin-right:6px"></i>
