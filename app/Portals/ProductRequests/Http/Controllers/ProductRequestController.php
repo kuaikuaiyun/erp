@@ -712,14 +712,10 @@ class ProductRequestController extends Controller
         return redirect()->route('product-requests.link-skus.index')->with('success', __('product_requests.link_skus.review_done_success'));
     }
 
-    /** 链接实拍图鉴权读取 */
+    /** 链接实拍图鉴权读取（已登录即可访问，跨门户共享） */
     public function linkSkuImage(Request $request, ProductRequestLinkSku $linkSku, int $index): Response
     {
-        $context = $this->portalContext($request, ProductRequestAccessService::PROCUREMENT_PORTAL_CODE);
-        if ($context instanceof Response) {
-            return $context;
-        }
-        abort_unless($this->access->canManageLinkSkus($context['user']), 403);
+        abort_if($request->user() === null, 401);
 
         $images = array_values((array) ($linkSku->images ?? []));
         $path = $images[$index] ?? null;
@@ -728,14 +724,10 @@ class ProductRequestController extends Controller
         return response()->file(Storage::disk('local')->path($path));
     }
 
-    /** 链接产品图（导入 Excel 主图）鉴权读取 */
+    /** 链接产品图（导入 Excel 主图）鉴权读取（已登录即可访问，跨门户共享） */
     public function linkSkuProductImage(Request $request, ProductRequestLinkSku $linkSku): Response
     {
-        $context = $this->portalContext($request, ProductRequestAccessService::PROCUREMENT_PORTAL_CODE);
-        if ($context instanceof Response) {
-            return $context;
-        }
-        abort_unless($this->access->canManageLinkSkus($context['user']), 403);
+        abort_if($request->user() === null, 401);
 
         $path = (string) ($linkSku->product_image ?? '');
         abort_if($path === '' || !Storage::disk('local')->exists($path), 404);
