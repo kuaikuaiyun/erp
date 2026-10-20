@@ -440,6 +440,7 @@ return [
             'recurring' => 'Recurring orders',
             'orders' => 'Total orders',
             'sales' => 'Total sales (USD)',
+            'original_sales' => 'Original store sales',
         ],
         'metrics' => [
             'total_sales' => 'Sales (USD)',

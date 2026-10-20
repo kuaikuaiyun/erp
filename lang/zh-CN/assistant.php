@@ -493,6 +493,7 @@ return [
             'recurring' => '复购单',
             'orders' => '总单量',
             'sales' => '总营业额（USD）',
+            'original_sales' => '店铺原始营业额',
         ],
         'metrics' => [
             'total_sales' => '销售额（USD）',
