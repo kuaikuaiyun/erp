@@ -287,6 +287,8 @@ body.product-request-lightbox-open { overflow: hidden; }
 .product-request-sku-stack-item { display: flex; flex-direction: column; gap: 4px; }
 .product-request-sku-stack-label { color: #8494a7; font-size: 11px; font-weight: 600; line-height: 14px; }
 .product-request-sku-mismatch { display: inline-block; max-width: 100%; margin-bottom: 6px; padding: 2px 8px; border: 1px solid #f2c979; border-radius: 12px; background: #fdf4e3; color: #b9791d; font-size: 11px; font-weight: 600; line-height: 16px; white-space: normal; overflow-wrap: break-word; text-align: left; cursor: help; }
+.product-request-sku-normal { display: inline-flex; align-items: center; gap: 5px; padding: 4px 12px; border: 1px solid #28a745; border-radius: 12px; background: #28a745; font-size: 12px; font-weight: 700; line-height: 18px; color: #ffffff; box-shadow: 0 1px 2px rgba(40,167,69,.25); }
+.product-request-sku-normal .fa { color: #ffffff; font-size: 13px; }
 .product-request-table .product-request-sku-cell { min-width: 240px; max-width: 320px; }
 .product-request-table td.product-request-metric-cell, .product-request-table th.product-request-metric-cell { white-space: nowrap; text-align: center; font-variant-numeric: tabular-nums; }
 .product-request-table td.product-request-image-cell, .product-request-table th.product-request-image-cell { width: 62px; text-align: center; white-space: nowrap; }
