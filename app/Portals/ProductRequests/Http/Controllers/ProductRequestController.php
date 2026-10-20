@@ -1742,7 +1742,7 @@ class ProductRequestController extends Controller
         ]);
     }
 
-    /** 保存链接 SKU：只增不减，提交值与历史值合并去重；PCL 商品编号仅展示不可编辑 */
+    /** 保存链接 SKU：只增不减，提交值与历史值合并去重；PCL 商品编号可编辑 */
     public function linkSkuUpdate(Request $request, ProductRequestLinkSku $linkSku): JsonResponse|RedirectResponse|Response
     {
         $context = $this->portalContext($request, ProductRequestAccessService::PROCUREMENT_PORTAL_CODE);
@@ -1752,6 +1752,7 @@ class ProductRequestController extends Controller
         abort_unless($this->access->canManageLinkSkus($context['user']), 403);
 
         $data = $request->validate([
+            'pcl_product_no' => ['nullable', 'string', 'max:100'],
             'skus' => ['nullable', 'string', 'max:10000'],
             'sku_values' => ['nullable', 'array', 'max:100'],
             'sku_values.*.price' => ['nullable', 'string', 'max:100'],
@@ -1764,7 +1765,10 @@ class ProductRequestController extends Controller
 
         // PCL SKU 管理为全量维护：提交内容即最终集合，删除的 SKU 会被移除
         $submitted = $this->splitSkus(str_replace(["\r\n", "\r", "\n"], ',', (string) ($data['skus'] ?? '')));
-        $linkSku->forceFill(['skus' => implode(',', $submitted)])->save();
+        $linkSku->forceFill([
+            'skus' => implode(',', $submitted),
+            'pcl_product_no' => trim((string) ($data['pcl_product_no'] ?? '')) !== '' ? trim((string) $data['pcl_product_no']) : null,
+        ])->save();
 
         // 按 SKU 的采购价/重量同步到链接表（仅保留本次提交 SKU 的数值，两项都清空表示移除）
         $valueRows = collect($data['sku_values'] ?? [])->map(fn (mixed $row): array => [
