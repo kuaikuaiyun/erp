@@ -2,7 +2,8 @@
 
 return [
     'menus' => [
-        'request' => 'AI 产品需求提报',
+        'request' => 'AI 团队产品库产品提报',
+        'request_hint' => '如果你是 AI 产品库选的品，这边提交你选的品跟你的落地页',
         'review' => 'AI 产品投放链接审核',
     ],
 
@@ -23,8 +24,8 @@ return [
     ],
 
     'operation' => [
-        'title' => 'AI 产品需求提报',
-        'subtitle' => '选择 AI 产品并填写投放链接，提交后进入入录审核系统审核',
+        'title' => 'AI 团队产品库产品提报',
+        'subtitle' => '如果你是 AI 产品库选的品，这边提交你选的品跟你的落地页',
         'create_button' => '发起提报',
         'create_title' => '发起 AI 产品需求提报',
         'submit_success' => '提报成功，提报编号：:report_no',

@@ -104,11 +104,11 @@
                 <div class="form-group col-md-6 @error('supplier_url') has-error @enderror">
                     <label for="supplier_url">{{ __('product_requests.fields.supplier_url') }} <span class="text-red">*</span></label>
                     @php($supplierUrl = old('supplier_url', $productRequest->supplier_url ?: $productRequest->operation_supplier_url))
-                    <div class="product-request-readonly product-request-readonly-link">
-                        @if($supplierUrl)<a href="{{ $supplierUrl }}" target="_blank" rel="noopener">{{ $supplierUrl }}</a>@else<span class="text-muted">{{ __('product_requests.common.not_available') }}</span>@endif
-                    </div>
-                    <input id="supplier_url" type="hidden" name="supplier_url" value="{{ $supplierUrl }}" data-sku-suggestions-url="{{ route('product-requests.procurement.sku-suggestions') }}" data-sku-suggestions-current-id="{{ $productRequest->getKey() }}">
-                    <span class="help-block">{{ __('product_requests.procurement.supplier_url_readonly_hint') }}</span>
+                    @if($productRequest->operation_supplier_url && $supplierUrl !== $productRequest->operation_supplier_url)
+                        <div class="product-request-link-changed-hint" title="{{ $productRequest->operation_supplier_url }}"><i class="fa fa-info-circle"></i> 运营填写的原链接已被修改</div>
+                    @endif
+                    <input id="supplier_url" type="text" name="supplier_url" class="form-control" value="{{ $supplierUrl }}" placeholder="请输入 1688 链接" data-sku-suggestions-url="{{ route('product-requests.procurement.sku-suggestions') }}" data-sku-suggestions-current-id="{{ $productRequest->getKey() }}">
+                    <span class="help-block">{{ __('product_requests.procurement.supplier_url_editable_hint') }}</span>
                     @error('supplier_url')<span class="help-block text-red">{{ $message }}</span>@enderror
                 </div>
                 <div class="form-group col-md-6">
@@ -197,5 +197,7 @@
     .sku-suggestion-list .sku-value-caption { font-size: 11px; color: #8899a6; white-space: nowrap; }
     .sku-suggestion-list .sku-value-input:disabled { background: #f4f4f4; color: #aaa; cursor: not-allowed; }
     .sku-suggestion-list .sku-value-input[readonly] { background: #f9fafb; color: #777; cursor: default; }
+    .product-request-link-changed-hint { margin-bottom: 6px; padding: 6px 10px; background: #fff3cd; border: 1px solid #ffe58f; border-radius: 4px; color: #8a6d3b; font-size: 12px; }
+    .product-request-link-changed-hint .fa { margin-right: 4px; }
 </style>
 
