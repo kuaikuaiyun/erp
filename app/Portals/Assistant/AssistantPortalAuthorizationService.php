@@ -68,6 +68,15 @@ class AssistantPortalAuthorizationService
     }
 
     /**
+     * Every active Assistant department member may assign the real store owner.
+     * This permission never expands the records visible to that member.
+     */
+    public function canAssignStoreOwners(AdminUser $user): bool
+    {
+        return $this->isAssistantDepartmentMember($user);
+    }
+
+    /**
      * A non-manager Assistant account may operate records only through exactly
      * one direct child department under the Assistant primary department.
      */
@@ -90,6 +99,26 @@ class AssistantPortalAuthorizationService
             ->get();
 
         return $departments->count() === 1 ? $departments->first() : null;
+    }
+
+    /** @return Collection<int, Department> */
+    public function assistantChildDepartmentsFor(AdminUser $user): Collection
+    {
+        if ($user->isAdministrator()) {
+            return collect();
+        }
+
+        $departmentId = $this->editorDepartmentId();
+
+        if ($departmentId === null) {
+            return collect();
+        }
+
+        return $user->departments()
+            ->where('parent_id', $departmentId)
+            ->orderBy('sort')
+            ->orderBy('name')
+            ->get();
     }
 
     public function canManageDomainStores(AdminUser $user): bool

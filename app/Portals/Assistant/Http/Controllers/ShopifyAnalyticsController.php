@@ -5,6 +5,7 @@ namespace App\Portals\Assistant\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
 use App\Models\AssistantDomainStore;
+use App\Models\AssistantDomainStoreQuickOption;
 use App\Models\AssistantShopifyAnalyticsSyncBatch;
 use App\Models\AssistantShopifyAnalyticsSyncTask;
 use App\Models\AssistantShopifyStoreMetric;
@@ -12,6 +13,7 @@ use App\Models\AssistantShopifyStoreOrder;
 use App\Models\AssistantShopifyStoreMetricPeriod;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
+use App\Portals\Assistant\AssistantEmailPurchaseSyncService;
 use App\Portals\Assistant\ShopifyAnalyticsReferenceRateService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -28,6 +30,7 @@ class ShopifyAnalyticsController extends Controller
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
+        private readonly AssistantEmailPurchaseSyncService $emailPurchases,
         private readonly ShopifyAnalyticsReferenceRateService $referenceRates,
     ) {
     }
@@ -47,6 +50,12 @@ class ShopifyAnalyticsController extends Controller
             })
             ->when($filters['domains'] !== [], function (Builder $stores) use ($filters): void {
                 $stores->whereIn('domain', $filters['domains']);
+            })
+            ->when($filters['team'] !== '', function (Builder $stores) use ($filters): void {
+                $stores->whereJsonContains('team', $filters['team']);
+            })
+            ->when($filters['email_purchased'] !== '', function (Builder $stores) use ($filters): void {
+                $this->emailPurchases->applyPurchaseFilter($stores, $filters['email_purchased'] === '1');
             });
         $periods = $this->periodQuery($filters);
         $summary = $this->summary(clone $baseQuery, clone $periods);
@@ -104,6 +113,7 @@ class ShopifyAnalyticsController extends Controller
             'stores' => $stores,
             'filters' => $filters,
             'timezoneOptions' => $this->timezoneOptions(),
+            'teamOptions' => AssistantDomainStoreQuickOption::valuesByField()['team'] ?? [],
             'referenceRates' => $this->referenceRates->rates(),
             'summary' => $summary,
             'metricStatuses' => AssistantShopifyStoreMetric::statusLabels(),
@@ -370,7 +380,7 @@ class ShopifyAnalyticsController extends Controller
         return 'assistant.shopify_analytics.sync_batch_id';
     }
 
-    /** @return array{shop_name:string, domains:list<string>, timezone:string, from_date:string, to_date:string, sort:string, direction:string, per_page:int} */
+    /** @return array{shop_name:string, domains:list<string>, team:string, email_purchased:string, timezone:string, from_date:string, to_date:string, sort:string, direction:string, per_page:int} */
     private function filters(Request $request): array
     {
         $perPage = (int) $request->input('per_page', 20);
@@ -400,6 +410,10 @@ class ShopifyAnalyticsController extends Controller
         return [
             'shop_name' => trim((string) $request->input('shop_name')),
             'domains' => $this->domains((string) $request->input('domains')),
+            'team' => trim((string) $request->input('team')),
+            'email_purchased' => in_array((string) $request->input('email_purchased'), ['0', '1'], true)
+                ? (string) $request->input('email_purchased')
+                : '',
             'timezone' => $timezone,
             'from_date' => $fromDate,
             'to_date' => $toDate,

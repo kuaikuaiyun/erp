@@ -64,7 +64,7 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261013-3.css?v=20261013-3">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261014-1.css?v=20261014-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261014-2.css?v=20261014-2">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261020-1.css?v=20261020-6">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261020-1.css?v=20261020-7">
 @endpush
 
 @section('content')
@@ -166,6 +166,26 @@
                             @foreach ($timezoneOptions as $value => $label)
                                 <option value="{{ $value }}" @selected($filters['timezone'] === $value)>{{ $label }}</option>
                             @endforeach
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="assistant-shopify-team">{{ $t('table.team') }}</label>
+                        <select id="assistant-shopify-team" name="team" class="form-control">
+                            <option value="">{{ __('assistant.domain_stores.common.all') }}</option>
+                            @if ($filters['team'] !== '' && !in_array($filters['team'], $teamOptions, true))
+                                <option value="{{ $filters['team'] }}" selected>{{ $filters['team'] }}</option>
+                            @endif
+                            @foreach ($teamOptions as $teamOption)
+                                <option value="{{ $teamOption }}" @selected($filters['team'] === $teamOption)>{{ $teamOption }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="assistant-shopify-email-purchased">{{ $t('table.email_purchased') }}</label>
+                        <select id="assistant-shopify-email-purchased" name="email_purchased" class="form-control">
+                            <option value="">{{ __('assistant.domain_stores.common.all') }}</option>
+                            <option value="1" @selected($filters['email_purchased'] === '1')>{{ __('assistant.domain_stores.common.yes') }}</option>
+                            <option value="0" @selected($filters['email_purchased'] === '0')>{{ __('assistant.domain_stores.common.no') }}</option>
                         </select>
                     </div>
                 </div>

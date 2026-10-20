@@ -11,14 +11,12 @@
     }
 
     var ownerSelect = document.getElementById('assistant-owner-user-select');
-    var ownerDepartmentSelect = document.getElementById('assistant-owner-department-select');
+    var ownerOperationDepartmentSelect = document.getElementById('assistant-owner-operation-department-select');
     var ownerSubmit = ownerForm.querySelector('[data-owner-submit]');
     var ownerMethod = ownerForm.querySelector('[data-owner-method]');
     var assignFields = ownerForm.querySelector('[data-owner-assign-fields]');
-    var warning = ownerForm.querySelector('[data-owner-warning]');
     var summary = ownerForm.querySelector('[data-owner-selection-summary]');
     var currentMode = 'assign';
-    var outsideScopeCount = 0;
     var candidateRequestId = 0;
 
     function selectedIds() {
@@ -76,7 +74,7 @@
             : ownerForm.getAttribute('data-assign-url');
         ownerMethod.disabled = !clear;
         assignFields.hidden = clear;
-        ownerDepartmentSelect.disabled = clear;
+        ownerOperationDepartmentSelect.disabled = clear;
         ownerSelect.required = !clear;
         ownerSelect.disabled = clear || ownerSelect.getAttribute('data-candidates-ready') !== '1';
 
@@ -101,30 +99,36 @@
         summary.textContent = clear
             ? interpolate(translations.clearConfirm, selectedIds().length)
             : interpolate(translations.selectionCount, selectedIds().length);
-        warning.hidden = clear || outsideScopeCount === 0;
         syncOwnerSubmit();
     }
 
-    function loadCandidates(ids, ownerDepartmentId) {
+    function resetOwnerCandidates(message) {
+        candidateRequestId++;
+        ownerSelect.removeAttribute('data-candidates-ready');
+        ownerSelect.innerHTML = '';
+        ownerSelect.disabled = true;
+
+        var option = document.createElement('option');
+        option.value = '';
+        option.textContent = message || translations.chooseDepartmentFirst || '';
+        ownerSelect.appendChild(option);
+        syncOwnerSubmit();
+    }
+
+    function loadCandidates(ids, operationDepartmentId) {
         var params = new URLSearchParams();
         var requestId = ++candidateRequestId;
 
         ownerSelect.removeAttribute('data-candidates-ready');
         ownerSelect.innerHTML = '';
         ownerSelect.disabled = true;
-        outsideScopeCount = 0;
-        warning.hidden = true;
-        warning.textContent = '';
-
         var loadingOption = document.createElement('option');
         loadingOption.value = '';
         loadingOption.textContent = translations.loading || 'Loading...';
         ownerSelect.appendChild(loadingOption);
 
         ids.forEach(function (id) { params.append('selected_ids[]', id); });
-        if (ownerDepartmentId) {
-            params.append('owner_department_id', ownerDepartmentId);
-        }
+        params.append('operation_department_id', operationDepartmentId);
         syncOwnerSubmit();
 
         window.fetch(config.optionsUrl + '?' + params.toString(), {
@@ -145,17 +149,11 @@
             var users = payload.users || [];
             ownerSelect.innerHTML = '';
 
-            if (!ownerDepartmentSelect.value && payload.owner_department_id) {
-                ownerDepartmentSelect.value = String(payload.owner_department_id);
-            }
-
             var placeholder = document.createElement('option');
             placeholder.value = '';
-            placeholder.textContent = payload.requires_department
-                ? (translations.chooseDepartmentFirst || '')
-                : (users.length
+            placeholder.textContent = users.length
                 ? (translations.chooseOwner || '')
-                : (translations.empty || ''));
+                : (translations.empty || '');
             ownerSelect.appendChild(placeholder);
 
             users.forEach(function (user) {
@@ -169,11 +167,6 @@
 
             if (users.length) {
                 ownerSelect.setAttribute('data-candidates-ready', '1');
-            }
-
-            outsideScopeCount = Number(payload.outside_scope_count || 0);
-            if (outsideScopeCount > 0) {
-                warning.textContent = interpolate(translations.outsideScope, outsideScopeCount);
             }
 
             setOwnerMode(currentMode);
@@ -291,8 +284,14 @@
     });
 
     ownerSelect.addEventListener('change', syncOwnerSubmit);
-    ownerDepartmentSelect.addEventListener('change', function () {
-        loadCandidates(selectedIds(), ownerDepartmentSelect.value);
+    ownerOperationDepartmentSelect.addEventListener('change', function () {
+        if (!ownerOperationDepartmentSelect.value) {
+            resetOwnerCandidates(translations.chooseDepartmentFirst || '');
+            setOwnerMode(currentMode);
+            return;
+        }
+
+        loadCandidates(selectedIds(), ownerOperationDepartmentSelect.value);
     });
 
     ownerForm.addEventListener('submit', function (event) {
@@ -307,10 +306,9 @@
         window.jQuery('#assistant-batch-owner-modal').on('show.bs.modal', function () {
             var ids = selectedIds();
             fillSelectedInputs(ownerForm.querySelector('[data-owner-selected-inputs]'), ids);
-            ownerDepartmentSelect.value = '';
-            ownerSelect.value = '';
+            ownerOperationDepartmentSelect.value = '';
+            resetOwnerCandidates(translations.chooseDepartmentFirst || '');
             setOwnerMode('assign');
-            loadCandidates(ids, '');
         });
     }
 
