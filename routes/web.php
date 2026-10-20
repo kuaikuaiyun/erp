@@ -2,6 +2,7 @@
 
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portal\Http\Controllers\PortalMenuConfigurationController;
+use App\Portals\AiProducts\Http\Controllers\AiProductController;
 use App\Portals\Assistant\Http\Controllers\DomainStoreController;
 use App\Portals\Assistant\Http\Controllers\ShopifyAnalyticsController;
 use App\Portals\Logistics\Http\Controllers\LogisticsOrderController;
@@ -121,4 +122,9 @@ Route::put('/paypal-risk/accounts/{account}', [PayPalRiskController::class, 'upd
 Route::get('/paypal-risk/accounts/{account}/detail', [PayPalRiskController::class, 'detail'])->name('logistics.paypal-risk.accounts.detail');
 Route::get('/paypal-risk/accounts/{account}/export/{tab}', [PayPalRiskController::class, 'exportDetail'])->name('logistics.paypal-risk.accounts.export');
 Route::post('/api/paypal/import', PayPalImportController::class)->name('logistics.paypal.import');
+Route::get('/ai-product-requests', [AiProductController::class, 'operationIndex'])->name('ai-products.operation.index');
+Route::post('/ai-product-requests', [AiProductController::class, 'operationStore'])->name('ai-products.operation.store');
+Route::get('/ai-product-reviews', [AiProductController::class, 'reviewIndex'])->name('ai-products.review.index');
+Route::post('/ai-product-reviews/{submission}/approve', [AiProductController::class, 'reviewApprove'])->name('ai-products.review.approve');
+Route::post('/ai-product-reviews/{submission}/reject', [AiProductController::class, 'reviewReject'])->name('ai-products.review.reject');
 Route::fallback([PortalEntryController::class, 'fallback']);

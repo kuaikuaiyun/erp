@@ -53,5 +53,7 @@ return [
         'warehouse_remark' => '仓库备注',
         'warehouse_images' => '首件 / 包装图',
         'warehouse_images.*' => '首件 / 包装图',
+        'ai_product_id' => 'AI 产品',
+        'review_remark' => '审核备注',
     ],
 ];
