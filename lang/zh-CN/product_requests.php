@@ -2,7 +2,8 @@
 
 return [
     'menus' => [
-        'operation_requests' => '需求提报',
+        'product_dedupe_checker' => '查重工具',
+        'operation_requests' => '自己开品提报',
         'procurement_inspections' => '商品信息检验',
         'placement_reviews' => '投放链接审核',
         'warehouse_acceptances' => '仓库验收',
@@ -62,6 +63,30 @@ return [
     'warehouse_issues' => [
         'title' => '仓库问题',
         'subtitle' => '记录仓库验收审核不通过的需求提报，按提报编号唯一展示。',
+    ],
+    'dedupe' => [
+        'title' => '查重工具',
+        'subtitle' => '根据产品名称或 1688 链接，查看系统中已录入的商品数据（PCL、SKU、重量、图片等）',
+        'keyword_label' => '产品名称',
+        'keyword_placeholder' => '输入产品名称模糊搜索',
+        'supplier_url_label' => '1688 链接',
+        'supplier_url_placeholder' => '粘贴完整的 1688 链接（优先精确匹配）',
+        'search_button' => '查重',
+        'reset_button' => '重置',
+        'empty_hint' => '请输入产品名称或 1688 链接开始查重',
+        'no_results' => '未找到匹配的商品数据',
+        'match_url' => '按 1688 链接精确匹配',
+        'match_keyword' => '按关键词模糊匹配',
+        'result_source_link_sku' => '来自链接 SKU 库',
+        'result_source_record' => '来自需求提报记录',
+        'pcl_label' => 'PCL 商品编号',
+        'sku_label' => 'SKU 列表',
+        'weight_label' => '重量 (g)',
+        'images_label' => '实拍图',
+        'product_image_label' => '产品图',
+        'supplier_url_label' => '1688 链接',
+        'name_label' => '商品名称',
+        'sku_empty' => '暂无 SKU',
     ],
     'common' => [
         'search' => '查询',

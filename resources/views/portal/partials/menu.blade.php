@@ -46,6 +46,9 @@
         <a href="{{ $href }}">
             <i class="fa {{ $icon }}"></i>
             <span>{{ $label }}</span>
+            @if($menu->code === 'ai_product_requests')
+            <i class="fa fa-question-circle" style="margin-left:4px;color:#f39c12;font-size:14px;cursor:pointer;" data-toggle="tooltip" data-placement="right" title="{{ __('ai_products.menus.request_hint') }}"></i>
+            @endif
             @if($menu->code === 'product_requests')
             <span id="operation-pending-badge" class="badge bg-yellow" style="margin-left:6px;">0</span>
             @elseif($menu->code === 'procurement_inspections')

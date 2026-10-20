@@ -43,6 +43,7 @@ Route::post('/shopify-analytics/refresh-batch', [ShopifyAnalyticsController::cla
 Route::get('/shopify-analytics/sync-batches/{batch}/progress', [ShopifyAnalyticsController::class, 'syncProgress'])->name('assistant.shopify-analytics.sync-progress');
 Route::post('/shopify-analytics/{domainStore}/refresh', [ShopifyAnalyticsController::class, 'refresh'])->name('assistant.shopify-analytics.refresh');
 Route::get('/product-requests', [ProductRequestController::class, 'operationIndex'])->name('product-requests.operation.index');
+Route::get('/product-request-dedupe', [ProductRequestController::class, 'operationDedupeIndex'])->name('product-requests.operation.dedupe');
 Route::get('/api/product-requests/operation-pending-count', [ProductRequestController::class, 'operationPendingCount'])->name('product-requests.operation.pending-count');
 Route::get('/api/procurement-inspections/pending-count', [ProductRequestController::class, 'procurementPendingCount'])->name('product-requests.procurement.pending-count');
 Route::get('/api/placement-reviews/pending-count', [ProductRequestController::class, 'placementReviewPendingCount'])->name('product-requests.placement.pending-count');

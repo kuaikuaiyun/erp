@@ -66,6 +66,93 @@ class ProductRequestController extends Controller
         ]);
     }
 
+    /** 查重工具：按产品名或 1688 链接查询系统中已录入的商品数据（PCL/SKU/重量/图片） */
+    public function operationDedupeIndex(Request $request): Response|View
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $keyword = trim((string) $request->input('keyword', ''));
+        $supplierUrl = trim((string) $request->input('supplier_url', ''));
+        $results = [];
+        $matchType = null;
+
+        if ($keyword !== '' || $supplierUrl !== '') {
+            if ($supplierUrl !== '') {
+                $normalizedUrl = $this->workflow->normalizeSupplierUrl($supplierUrl);
+                $hash = $this->workflow->supplierUrlHash($normalizedUrl);
+
+                // 优先查链接 SKU 表
+                $linkSku = ProductRequestLinkSku::query()->where('supplier_url_hash', $hash)->first();
+                if ($linkSku && $this->splitSkus((string) $linkSku->skus) !== []) {
+                    $results[] = $this->linkSkuReusePayload($linkSku);
+                    $matchType = 'supplier_url';
+                }
+
+                // 再查录入记录
+                $query = ProductRequest::query()
+                    ->whereNotNull('standard_chinese_name')
+                    ->where('supplier_url_hash', $hash)
+                    ->with('attachments')
+                    ->latest('id')
+                    ->limit(20)
+                    ->get();
+
+                foreach ($query as $record) {
+                    $results[] = $this->reusePayload($record);
+                }
+
+                // 按链接去重：同链接只保留一条（链接 SKU 表优先）
+                $deduped = [];
+                $seenHashes = [];
+                foreach ($results as $item) {
+                    $h = md5((string) ($item['supplier_url'] ?? ''));
+                    if (!in_array($h, $seenHashes, true)) {
+                        $deduped[] = $item;
+                        $seenHashes[] = $h;
+                    }
+                }
+                $results = $deduped;
+                if ($matchType === null && $results !== []) {
+                    $matchType = 'supplier_url';
+                }
+            }
+
+            if ($keyword !== '' && $results === []) {
+                $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $keyword);
+                $records = ProductRequest::query()
+                    ->whereNotNull('standard_chinese_name')
+                    ->where('standard_chinese_name', 'like', '%'.$escaped.'%')
+                    ->with('attachments')
+                    ->latest('id')
+                    ->limit(30)
+                    ->get();
+
+                foreach ($records as $record) {
+                    $results[] = $this->reusePayload($record);
+                }
+
+                // 按链接聚合去重
+                $results = collect($results)
+                    ->groupBy(fn (array $item): string => md5((string) ($item['supplier_url'] ?? $item['report_no'] ?? '')))
+                    ->map(fn ($group) => $group->sortByDesc('id')->first())
+                    ->values()
+                    ->all();
+                $matchType = 'keyword';
+            }
+        }
+
+        return view('portals.product-requests.operation.dedupe', [
+            ...$this->viewContext($context),
+            'keyword' => $keyword,
+            'supplierUrl' => $supplierUrl,
+            'results' => $results,
+            'matchType' => $matchType,
+        ]);
+    }
+
     /** 审核链接问题：投放链接审核失败的需求提报，按提报编号唯一展示 */
     public function linkIssuesIndex(Request $request): Response|View
     {
