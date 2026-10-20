@@ -23,14 +23,19 @@
 .dedupe-images{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
 .dedupe-images img{width:80px;height:80px;object-fit:cover;border-radius:4px;border:1px solid #eee;cursor:pointer}
 .dedupe-images a{display:inline-block}
-.dedupe-sku-list{display:flex;flex-direction:column;gap:6px;margin-top:4px}
-.dedupe-sku-item{display:flex;align-items:center;gap:10px;font-size:13px;color:#333;background:#f9f9f9;border-radius:4px;padding:6px 10px}
-.dedupe-sku-code{font-family:monospace;color:#3c8dbc}
-.dedupe-sku-values{display:flex;gap:12px;color:#666;font-size:12px;margin-left:auto}
-.dedupe-sku-values span{white-space:nowrap}
-.dedupe-match-badge{display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;line-height:16px}
-.dedupe-match-url{background:#dff0d8;color:#3c763d;border:1px solid #d6e9c6}
-.dedupe-match-keyword{background:#fcf8e3;color:#8a6d3b;border:1px solid #faebcc}
+.dedupe-sku-list{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+.dedupe-sku-item{display:flex;align-items:center;gap:10px;font-size:13px;color:#2c3e50;background:#fff;border:1px solid #e1e7ef;border-radius:6px;padding:8px 12px;transition:border-color .14s ease,box-shadow .14s ease}
+.dedupe-sku-item:hover{border-color:#3c8dbc;box-shadow:0 2px 6px rgba(60,141,188,.15)}
+.dedupe-sku-code{display:inline-block;font-family:'SF Mono',Menlo,Consolas,monospace;color:#1f5168;background:#eaf4fb;font-size:13px;font-weight:600;padding:3px 8px;border-radius:4px;letter-spacing:.2px;word-break:break-all}
+.dedupe-sku-values{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto;align-items:center}
+.dedupe-sku-pill{display:inline-flex;align-items:center;gap:4px;font-size:12px;line-height:1;padding:5px 9px;border-radius:5px;font-weight:600;white-space:nowrap}
+.dedupe-sku-pill i{font-style:normal;font-size:11px;opacity:.85;font-weight:500}
+.dedupe-sku-price{background:#e8f7ee;color:#1f7a3e;border:1px solid #b8e0c6}
+.dedupe-sku-weight{background:#fff3e0;color:#b1570b;border:1px solid #ffd9a8}
+.dedupe-sku-pill-empty{color:#aaa;font-size:12px;font-weight:400;font-style:italic;background:transparent;border:1px dashed #d9d9d9;padding:5px 9px;border-radius:5px}
+.dedupe-match-badge{display:inline-block;padding:3px 12px;border-radius:12px;font-size:12px;line-height:18px;font-weight:600}
+.dedupe-match-url{background:#dff0d8;color:#2d6a30;border:1px solid #b8dca0}
+.dedupe-match-keyword{background:#fcf8e3;color:#8a6d3b;border:1px solid #f0d97a}
 .dedupe-source-badge{display:inline-block;padding:2px 8px;border-radius:3px;font-size:11px;margin-left:6px;background:#5bc0de;color:#fff}
 .dedupe-empty{text-align:center;padding:60px 20px;color:#999}
 .dedupe-empty .fa{font-size:48px;margin-bottom:12px;display:block}
@@ -139,9 +144,11 @@
                                         @endphp
                                         @if($price || $weight)
                                             <span class="dedupe-sku-values">
-                                                @if($price)<span><b>¥</b>{{ $price }}</span>@endif
-                                                @if($weight)<span><b>重量</b>{{ $weight }}g</span>@endif
+                                                @if($price)<span class="dedupe-sku-pill dedupe-sku-price" title="采购价（人民币）"><i>RMB</i>¥{{ $price }}</span>@endif
+                                                @if($weight)<span class="dedupe-sku-pill dedupe-sku-weight" title="发货重量（克）"><i>重量</i>{{ $weight }}g</span>@endif
                                             </span>
+                                        @else
+                                            <span class="dedupe-sku-pill dedupe-sku-pill-empty">未录入价格/重量</span>
                                         @endif
                                     </div>
                                 @endforeach
