@@ -59,7 +59,17 @@ class ShopifyStoreAnalyticsService
             $shop = $this->shopInfo($store, $actor);
             $localToday = CarbonImmutable::now($shop['timezone'])->startOfDay();
             $isInitial = $metric->orders_initial_backfilled_at === null;
-            $fromDate = $isInitial
+            // Tags were introduced after order-history storage already existed.
+            // Only an explicit user-selected synchronization may perform this
+            // one-time 90-day tag backfill; the automatic 30-minute process
+            // remains incremental and cannot unexpectedly fan out API work.
+            $needsSubscriptionTagBackfill = $actor !== null
+                && AssistantShopifyStoreOrder::query()
+                    ->where('assistant_domain_store_id', $store->getKey())
+                    ->whereNull('subscription_category')
+                    ->exists();
+            $requiresFullHistory = $isInitial || $needsSubscriptionTagBackfill;
+            $fromDate = $requiresFullHistory
                 ? $localToday->subDays((self::INITIAL_HISTORY_DAYS - 1) + self::INITIAL_TIMEZONE_BUFFER_DAYS)
                 : $localToday->subDays(self::INCREMENTAL_SYNC_DAYS - 1);
 
@@ -161,6 +171,8 @@ class ShopifyStoreAnalyticsService
                 'shopify_updated_at',
                 'shopify_cancelled_at',
                 'is_test',
+                'shopify_tags',
+                'subscription_category',
                 'original_currency_code',
                 'original_total_price',
                 'current_currency_code',
@@ -243,6 +255,7 @@ class ShopifyStoreAnalyticsService
         $original = $this->money($order['originalTotalPriceSet'] ?? null, $fallbackCurrency);
         $current = $this->money($order['currentTotalPriceSet'] ?? null, $fallbackCurrency);
         $refunded = $this->money($order['totalRefundedSet'] ?? null, $fallbackCurrency);
+        $tags = is_array($order['tags'] ?? null) ? array_values($order['tags']) : [];
 
         return [
             'assistant_domain_store_id' => $store->getKey(),
@@ -254,6 +267,8 @@ class ShopifyStoreAnalyticsService
             'shopify_updated_at' => $this->dateTime($order['updatedAt'] ?? null, false),
             'shopify_cancelled_at' => $this->dateTime($order['cancelledAt'] ?? null, false),
             'is_test' => (bool) ($order['test'] ?? false),
+            'shopify_tags' => json_encode($tags, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'subscription_category' => AssistantShopifyStoreOrder::subscriptionCategoryForTags($tags),
             'original_currency_code' => $original['currency'],
             'original_total_price' => $original['amount'],
             'current_currency_code' => $current['currency'],
@@ -358,6 +373,7 @@ query AssistantShopifyAnalyticsOrders($cursor: String, $query: String!) {
         updatedAt
         cancelledAt
         test
+        tags
         displayFinancialStatus
         displayFulfillmentStatus
         originalTotalPriceSet { shopMoney { amount currencyCode } }

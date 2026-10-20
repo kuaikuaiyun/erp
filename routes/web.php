@@ -117,6 +117,8 @@ Route::get('/product-statistics', [ProductStatisticsController::class, 'index'])
 Route::get('/product-statistics/detail', [ProductStatisticsController::class, 'detail'])->name('logistics.product-statistics.detail');
 Route::post('/product-statistics/export', [ProductStatisticsController::class, 'export'])->name('logistics.product-statistics.export');
 Route::get('/product-library', [ProductLibraryController::class, 'index'])->name('aikaipin.product-library.index');
+Route::get('/selection-proposals', [ProductLibraryController::class, 'selectionProposal'])->name('aikaipin.selection-proposals.index');
+Route::get('/placement-evaluations', [ProductLibraryController::class, 'placementEvaluation'])->name('aikaipin.placement-evaluations.index');
 Route::get('/paypal-risk', [PayPalRiskController::class, 'index'])->name('logistics.paypal-risk.index');
 Route::post('/paypal-risk/accounts', [PayPalRiskController::class, 'store'])->name('logistics.paypal-risk.accounts.store');
 Route::put('/paypal-risk/accounts/{account}', [PayPalRiskController::class, 'update'])->name('logistics.paypal-risk.accounts.update');

@@ -5,7 +5,8 @@
   "paypal_environment": "live",
   "erp_import_url": "https://wuliu.digilabreview.com/api/paypal/import",
   "erp_import_secret": "",
-  "initial_sync_days": 30,
+  "initial_sync_days": 90,
+  "reporting_delay_hours": 4,
   "overlap_hours": 4,
   "request_timeout_seconds": 60,
   "verify_tls": true

@@ -486,6 +486,14 @@ return [
             'notice' => '筛选日期与统计时区会换算为 UTC 后，从已保存的 Shopify 订单明细汇总；汇总统计全部当前筛选结果，不受当前分页影响。',
             'reference_rate_notice' => 'USD 金额按固定参考汇率换算，仅供运营参考。',
         ],
+        'subscriptions' => [
+            'title' => '订阅订单汇总',
+            'regular' => '无订阅（普通订单）',
+            'subscribed' => '已订阅',
+            'recurring' => '复购单',
+            'orders' => '总单量',
+            'sales' => '总营业额（USD）',
+        ],
         'metrics' => [
             'total_sales' => '销售额（USD）',
             'original_total_sales' => '店铺原始营业额',

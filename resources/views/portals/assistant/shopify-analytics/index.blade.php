@@ -64,6 +64,7 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261013-3.css?v=20261013-3">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261014-1.css?v=20261014-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261014-2.css?v=20261014-2">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261020-1.css?v=20261020-1">
 @endpush
 
 @section('content')
@@ -115,6 +116,34 @@
                     <strong>{{ $usd }}{{ $money($summary['net_sales']) }}</strong>
                 </div>
             </div>
+        </div>
+
+        <div class="assistant-shopify-subscription-summary" role="status" aria-label="{{ $t('subscriptions.title') }}">
+            @foreach ([
+                ['key' => 'regular', 'icon' => 'fa-shopping-cart'],
+                ['key' => 'subscribed', 'icon' => 'fa-check-circle'],
+                ['key' => 'recurring', 'icon' => 'fa-repeat'],
+            ] as $subscriptionCard)
+                @php
+                    $subscriptionKey = $subscriptionCard['key'];
+                @endphp
+                <div class="assistant-shopify-subscription-card assistant-shopify-subscription-card-{{ $subscriptionKey }}">
+                    <div class="assistant-shopify-subscription-heading">
+                        <span class="assistant-shopify-subscription-icon"><i class="fa {{ $subscriptionCard['icon'] }}"></i></span>
+                        <strong>{{ $t('subscriptions.'.$subscriptionKey) }}</strong>
+                    </div>
+                    <div class="assistant-shopify-subscription-metrics">
+                        <span>
+                            <small>{{ $t('subscriptions.orders') }}</small>
+                            <strong>{{ $number($summary[$subscriptionKey.'_orders_count']) }}</strong>
+                        </span>
+                        <span>
+                            <small>{{ $t('subscriptions.sales') }}</small>
+                            <strong>{{ $usd }}{{ $money($summary[$subscriptionKey.'_total_sales']) }}</strong>
+                        </span>
+                    </div>
+                </div>
+            @endforeach
         </div>
 
         <div class="box box-default assistant-shopify-filter-box">

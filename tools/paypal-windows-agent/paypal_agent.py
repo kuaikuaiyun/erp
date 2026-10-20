@@ -29,7 +29,8 @@ PAYPAL_ENVIRONMENT = "live"
 ERP_IMPORT_URL = "https://wuliu.digilabreview.com/api/paypal/import"
 ERP_IMPORT_SECRET = ""
 
-INITIAL_SYNC_DAYS = 30
+INITIAL_SYNC_DAYS = 90
+REPORTING_DELAY_HOURS = 4
 OVERLAP_HOURS = 4
 REQUEST_TIMEOUT_SECONDS = 60
 VERIFY_TLS = True
@@ -70,6 +71,7 @@ def load_config(config_file: Path) -> None:
     global ERP_IMPORT_URL
     global ERP_IMPORT_SECRET
     global INITIAL_SYNC_DAYS
+    global REPORTING_DELAY_HOURS
     global OVERLAP_HOURS
     global REQUEST_TIMEOUT_SECONDS
     global VERIFY_TLS
@@ -99,11 +101,14 @@ def load_config(config_file: Path) -> None:
     ERP_IMPORT_SECRET = str(config.get("erp_import_secret") or "").strip()
 
     try:
-        INITIAL_SYNC_DAYS = int(config.get("initial_sync_days", 30))
+        INITIAL_SYNC_DAYS = int(config.get("initial_sync_days", 90))
+        REPORTING_DELAY_HOURS = int(config.get("reporting_delay_hours", 4))
         OVERLAP_HOURS = int(config.get("overlap_hours", 4))
         REQUEST_TIMEOUT_SECONDS = int(config.get("request_timeout_seconds", 60))
     except (TypeError, ValueError) as exception:
-        raise RuntimeError("initial_sync_days、overlap_hours、request_timeout_seconds 必须填写整数。") from exception
+        raise RuntimeError(
+            "initial_sync_days、reporting_delay_hours、overlap_hours、request_timeout_seconds 必须填写整数。"
+        ) from exception
 
     verify_tls = config.get("verify_tls", True)
     if not isinstance(verify_tls, bool):
@@ -197,6 +202,8 @@ def validate_config(require_paypal_credentials: bool = True) -> None:
         raise RuntimeError("paypal_environment 只能填写 live 或 sandbox。")
     if not 1 <= INITIAL_SYNC_DAYS <= 730:
         raise RuntimeError("initial_sync_days 必须在 1 至 730 之间。")
+    if not 1 <= REPORTING_DELAY_HOURS <= 72:
+        raise RuntimeError("reporting_delay_hours 必须在 1 至 72 之间。")
     if not 0 <= OVERLAP_HOURS <= 168:
         raise RuntimeError("overlap_hours 必须在 0 至 168 之间。")
     if not 10 <= REQUEST_TIMEOUT_SECONDS <= 600:
@@ -234,7 +241,7 @@ def paypal_base_url() -> str:
 class PayPalClient:
     def __init__(self) -> None:
         self.session = requests.Session()
-        self.session.headers.update({"Accept": "application/json", "User-Agent": "KKY-PayPal-Windows-Agent/1.0"})
+        self.session.headers.update({"Accept": "application/json", "User-Agent": "KKY-PayPal-Windows-Agent/2.0"})
         self.token = ""
 
     def authenticate(self) -> None:
@@ -304,7 +311,7 @@ class PayPalClient:
 
 
 def sync_range() -> tuple[datetime, datetime]:
-    end = utc_now() - timedelta(minutes=1)
+    end = utc_now() - timedelta(hours=REPORTING_DELAY_HOURS)
     previous = parse_datetime(str(load_state().get("last_success_to") or ""))
     start = previous - timedelta(hours=OVERLAP_HOURS) if previous else end - timedelta(days=max(1, INITIAL_SYNC_DAYS))
     if start >= end:
@@ -314,74 +321,161 @@ def sync_range() -> tuple[datetime, datetime]:
 
 def date_segments(start: datetime, end: datetime) -> Iterator[tuple[datetime, datetime]]:
     cursor = start
-    while cursor <= end:
-        segment_end = min(end, cursor + timedelta(days=30) - timedelta(seconds=1))
+    maximum_span = timedelta(days=30)
+    while cursor < end:
+        remaining = end - cursor
+        if remaining <= maximum_span:
+            yield cursor, end
+            break
+
+        segment_end = cursor + maximum_span - timedelta(seconds=1)
         yield cursor, segment_end
         cursor = segment_end + timedelta(seconds=1)
 
 
-def collect_transactions(client: PayPalClient, start: datetime, end: datetime) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    for segment_start, segment_end in date_segments(start, end):
+def collect_transaction_responses(
+    client: PayPalClient,
+    start: datetime,
+    end: datetime,
+) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]]]:
+    segments: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    record_count = 0
+
+    for segment_number, (segment_start, segment_end) in enumerate(date_segments(start, end), start=1):
+        base_request: dict[str, Any] = {
+            "start_date": iso_utc(segment_start),
+            "end_date": iso_utc(segment_end),
+            "fields": "all",
+            "balance_affecting_records_only": "N",
+            "page_size": 500,
+        }
+        segment: dict[str, Any] = {
+            "segment": segment_number,
+            "request": base_request.copy(),
+            "responses": [],
+        }
+        segments.append(segment)
+        logging.info(
+            "交易查询分段 %d：%s 至 %s。",
+            segment_number,
+            base_request["start_date"],
+            base_request["end_date"],
+        )
         page = 1
         while True:
-            body = client.get(
-                "/v1/reporting/transactions",
-                {
-                    "start_date": iso_utc(segment_start),
-                    "end_date": iso_utc(segment_end),
-                    "fields": "all",
-                    "page_size": 500,
+            request_params = {**base_request, "page": page}
+            try:
+                body = client.get(
+                    "/v1/reporting/transactions",
+                    request_params,
+                    "PayPal 交易记录查询失败",
+                )
+            except RuntimeError as exception:
+                error = {
+                    "source": "transaction_search",
+                    "segment": segment_number,
                     "page": page,
-                },
-                "PayPal 交易记录查询失败",
-            )
+                    "request": request_params,
+                    "message": str(exception),
+                }
+                segment["error"] = error
+                errors.append(error)
+                logging.error(
+                    "交易查询分段 %d 第 %d 页失败：%s",
+                    segment_number,
+                    page,
+                    exception,
+                )
+                break
+
+            segment["responses"].append(body)
             details = body.get("transaction_details")
-            if isinstance(details, list):
-                records.extend(row for row in details if isinstance(row, dict))
+            page_count = len(details) if isinstance(details, list) else 0
+            record_count += page_count
             total_pages = max(1, int(body.get("total_pages") or 1))
+            logging.info(
+                "交易查询分段 %d 第 %d/%d 页成功：%d 条。",
+                segment_number,
+                page,
+                total_pages,
+                page_count,
+            )
             if page >= total_pages:
                 break
             page += 1
             if page > 500:
-                raise RuntimeError("PayPal 交易记录分页超过 500 页，已停止以避免异常循环。")
-    return records
+                error = {
+                    "source": "transaction_search",
+                    "segment": segment_number,
+                    "page": page,
+                    "request": {**base_request, "page": page},
+                    "message": "PayPal 交易记录分页超过 500 页，已停止以避免异常循环。",
+                }
+                segment["error"] = error
+                errors.append(error)
+                logging.error("交易查询分段 %d 分页超过 500 页。", segment_number)
+                break
+
+    return segments, record_count, errors
 
 
-def collect_disputes(client: PayPalClient, start: datetime, end: datetime) -> tuple[list[dict[str, Any]], list[str]]:
+def collect_dispute_responses(
+    client: PayPalClient,
+    start: datetime,
+    end: datetime,
+) -> tuple[dict[str, Any], int, list[dict[str, Any]]]:
     earliest = utc_now() - timedelta(days=179)
     start = max(start, earliest)
-    records: list[dict[str, Any]] = []
-    detail_errors: list[str] = []
+    request_base: dict[str, Any] = {
+        "update_time_after": iso_utc(start),
+        "update_time_before": iso_utc(end),
+        "page_size": 50,
+    }
+    result: dict[str, Any] = {
+        "request": request_base.copy(),
+        "list_responses": [],
+        "detail_responses": [],
+    }
+    errors: list[dict[str, Any]] = []
+    list_items: dict[str, dict[str, Any]] = {}
     page = 1
+    logging.info(
+        "纠纷列表查询：%s 至 %s。",
+        request_base["update_time_after"],
+        request_base["update_time_before"],
+    )
     while start <= end:
-        body = client.get(
-            "/v1/customer/disputes",
-            {
-                "update_time_after": iso_utc(start),
-                "update_time_before": iso_utc(end),
-                "page_size": 50,
+        request_params = {**request_base, "page": page}
+        try:
+            body = client.get(
+                "/v1/customer/disputes",
+                request_params,
+                "PayPal 纠纷列表查询失败",
+            )
+        except RuntimeError as exception:
+            error = {
+                "source": "dispute_search",
                 "page": page,
-            },
-            "PayPal 纠纷列表查询失败",
-        )
+                "request": request_params,
+                "message": str(exception),
+            }
+            result["error"] = error
+            errors.append(error)
+            logging.error("纠纷列表第 %d 页失败：%s", page, exception)
+            break
+
+        result["list_responses"].append(body)
         items = body.get("items")
         if not isinstance(items, list):
             items = []
+        logging.info("纠纷列表第 %d 页成功：%d 条。", page, len(items))
         for item in items:
-            if not isinstance(item, dict) or not item.get("dispute_id"):
+            if not isinstance(item, dict):
                 continue
-            dispute_id = str(item["dispute_id"])
-            try:
-                detail = client.get(
-                    "/v1/customer/disputes/" + quote(dispute_id, safe=""),
-                    {},
-                    "PayPal 纠纷详情查询失败",
-                )
-                records.append({**item, **detail})
-            except RuntimeError as exception:
-                records.append(item)
-                detail_errors.append(f"{dispute_id}：{exception}")
+            dispute_id = str(item.get("dispute_id") or "").strip()
+            if dispute_id:
+                list_items[dispute_id] = item
         links = body.get("links")
         has_next = isinstance(links, list) and any(
             isinstance(link, dict) and link.get("rel") == "next" for link in links
@@ -390,42 +484,79 @@ def collect_disputes(client: PayPalClient, start: datetime, end: datetime) -> tu
             break
         page += 1
         if page > 100:
-            raise RuntimeError("PayPal 纠纷分页超过 100 页，已停止以避免异常循环。")
-    return records, detail_errors
+            error = {
+                "source": "dispute_search",
+                "page": page,
+                "request": {**request_base, "page": page},
+                "message": "PayPal 纠纷分页超过 100 页，已停止以避免异常循环。",
+            }
+            result["error"] = error
+            errors.append(error)
+            logging.error("纠纷列表分页超过 100 页。")
+            break
+
+    for index, dispute_id in enumerate(list_items, start=1):
+        try:
+            detail = client.get(
+                "/v1/customer/disputes/" + quote(dispute_id, safe=""),
+                {},
+                "PayPal 纠纷详情查询失败",
+            )
+            result["detail_responses"].append({
+                "dispute_id": dispute_id,
+                "response": detail,
+            })
+            logging.info("纠纷详情 %d/%d 成功：%s。", index, len(list_items), dispute_id)
+        except RuntimeError as exception:
+            error = {
+                "source": "dispute_detail",
+                "dispute_id": dispute_id,
+                "message": str(exception),
+            }
+            result["detail_responses"].append({
+                "dispute_id": dispute_id,
+                "error": error,
+            })
+            errors.append(error)
+            logging.error("纠纷详情 %d/%d 失败：%s；%s", index, len(list_items), dispute_id, exception)
+
+    return result, len(list_items), errors
 
 
 def collect_payload() -> dict[str, Any]:
     start, end = sync_range()
     client = PayPalClient()
     client.authenticate()
-    errors: dict[str, str | None] = {"transactions": None, "disputes": None}
-    transactions: list[dict[str, Any]] = []
-    disputes: list[dict[str, Any]] = []
-
-    try:
-        transactions = collect_transactions(client, start, end)
-    except RuntimeError as exception:
-        errors["transactions"] = str(exception)
-
-    try:
-        disputes, detail_errors = collect_disputes(client, start, end)
-        if detail_errors:
-            errors["disputes"] = "部分纠纷详情失败：" + "；".join(detail_errors[:20])
-    except RuntimeError as exception:
-        errors["disputes"] = str(exception)
+    logging.info("本轮查询区间（UTC）：%s 至 %s。", iso_utc(start), iso_utc(end))
+    transaction_responses, transaction_count, transaction_errors = collect_transaction_responses(
+        client,
+        start,
+        end,
+    )
+    dispute_responses, dispute_count, dispute_errors = collect_dispute_responses(client, start, end)
+    errors = [*transaction_errors, *dispute_errors]
 
     upload_id = str(uuid.uuid4())
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "upload_id": upload_id,
         "merchant_id": PAYPAL_MERCHANT_ID.strip().upper(),
         "environment": PAYPAL_ENVIRONMENT,
         "generated_at": iso_utc(utc_now()),
         "period": {"from": iso_utc(start), "to": iso_utc(end)},
-        "transactions": transactions,
-        "disputes": disputes,
+        "source_responses": {
+            "transaction_search": {
+                "segments": transaction_responses,
+            },
+            "dispute_search": dispute_responses,
+        },
+        "collection_summary": {
+            "transactions": transaction_count,
+            "disputes": dispute_count,
+            "errors": len(errors),
+        },
         "errors": errors,
-        "collector": {"name": "KKY PayPal Windows Agent", "version": "1.0"},
+        "collector": {"name": "KKY PayPal Windows Agent", "version": "2.0"},
     }
 
 
@@ -457,9 +588,9 @@ def upload_json_bytes(json_bytes: bytes, filename: str) -> dict[str, Any]:
             "X-PayPal-Nonce": nonce,
             "X-PayPal-Signature": signature,
             "X-PayPal-Filename": filename,
-            "User-Agent": "KKY-PayPal-Windows-Agent/1.0",
+            "User-Agent": "KKY-PayPal-Windows-Agent/2.0",
         },
-        timeout=max(REQUEST_TIMEOUT_SECONDS, 120),
+        timeout=max(REQUEST_TIMEOUT_SECONDS, 600),
         verify=VERIFY_TLS,
     )
     try:
@@ -478,16 +609,23 @@ def upload(path: Path) -> dict[str, Any]:
 def test_import_connection() -> int:
     now = iso_utc(utc_now())
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "upload_id": str(uuid.uuid4()),
         "merchant_id": PAYPAL_MERCHANT_ID.strip().upper(),
         "environment": PAYPAL_ENVIRONMENT,
         "generated_at": now,
         "period": {"from": now, "to": now},
-        "transactions": [],
-        "disputes": [],
-        "errors": {},
-        "collector": {"name": "KKY PayPal Windows Agent connection test", "version": "1.1"},
+        "source_responses": {
+            "transaction_search": {"segments": []},
+            "dispute_search": {
+                "request": {},
+                "list_responses": [],
+                "detail_responses": [],
+            },
+        },
+        "collection_summary": {"transactions": 0, "disputes": 0, "errors": 0},
+        "errors": [],
+        "collector": {"name": "KKY PayPal Windows Agent connection test", "version": "2.0"},
     }
     raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     response = upload_json_bytes(raw, "paypal_import_connection_test.json")
@@ -531,17 +669,23 @@ def main(config_file: Path, test_import: bool = False) -> int:
         logging.info("开始采集 Merchant ID %s 的 PayPal 数据。", PAYPAL_MERCHANT_ID.strip().upper())
         payload = collect_payload()
         path = save_pending(payload)
+        summary = payload.get("collection_summary") if isinstance(payload.get("collection_summary"), dict) else {}
+        transaction_count = int(summary.get("transactions") or 0)
+        dispute_count = int(summary.get("disputes") or 0)
+        error_count = int(summary.get("errors") or 0)
         logging.info(
-            "采集完成：交易 %d 条，纠纷 %d 条，文件 %s。",
-            len(payload["transactions"]),
-            len(payload["disputes"]),
+            "%s：交易 %d 条，纠纷 %d 条，异常 %d 条，文件 %s。",
+            "采集完整" if error_count == 0 else "采集未完整",
+            transaction_count,
+            dispute_count,
+            error_count,
             path.name,
         )
         try:
             response = upload(path)
             archive(path, payload, response)
             logging.info("ERP 已接收：%s", response.get("message", "完成"))
-            return 0 if response.get("status") in {"success", "partial"} else 3
+            return 0 if response.get("status") == "success" else 3
         except Exception as exception:
             logging.exception("文件上传失败，已保留在 pending 目录：%s", exception)
             return 2
