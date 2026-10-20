@@ -485,6 +485,7 @@ return [
             'original_sales' => 'Original store sales',
         ],
         'metrics' => [
+            'business_summary' => 'Sales summary',
             'total_sales' => 'Sales (USD)',
             'original_total_sales' => 'Store original sales',
             'orders' => 'Orders',

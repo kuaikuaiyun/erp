@@ -611,7 +611,7 @@
                                     <label for="assistant-owner-department-select">{{ $t('selection.choose_owner_department') }}</label>
                                     <select class="form-control" id="assistant-owner-department-select" name="owner_department_id">
                                         <option value="">{{ $t('selection.keep_owner_department') }}</option>
-                                        @foreach ($assistantChildDepartments as $department)
+                                        @foreach ($ownerAssignableDepartments as $department)
                                             <option value="{{ $department->getKey() }}">{{ $department->name }}</option>
                                         @endforeach
                                     </select>

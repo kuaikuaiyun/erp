@@ -134,6 +134,11 @@ Route::post('/product-library/package-uploads/{uploadToken}/complete', [ProductL
 Route::post('/product-library/visibility', [ProductLibraryController::class, 'updateVisibility'])->name('aikaipin.product-library.visibility.update');
 Route::get('/product-library/{product}/files/{file}', [ProductLibraryController::class, 'showProductFile'])->name('aikaipin.product-library.files.show');
 Route::get('/selection-proposals', [ProductLibraryController::class, 'selectionProposal'])->name('aikaipin.selection-proposals.index');
+Route::post('/selection-proposals', [ProductLibraryController::class, 'storeSelectionProposal'])->name('aikaipin.selection-proposals.store');
+Route::get('/selection-proposals/{proposal}', [ProductLibraryController::class, 'showSelectionProposal'])->name('aikaipin.selection-proposals.show');
+Route::put('/selection-proposals/{proposal}', [ProductLibraryController::class, 'updateSelectionProposal'])->name('aikaipin.selection-proposals.update');
+Route::post('/selection-proposals/{proposal}/withdraw', [ProductLibraryController::class, 'withdrawSelectionProposal'])->name('aikaipin.selection-proposals.withdraw');
+Route::get('/selection-proposals/{proposal}/images/{image}', [ProductLibraryController::class, 'showSelectionProposalImage'])->name('aikaipin.selection-proposals.images.show');
 Route::get('/placement-evaluations', [ProductLibraryController::class, 'placementEvaluation'])->name('aikaipin.placement-evaluations.index');
 Route::get('/paypal-risk', [PayPalRiskController::class, 'index'])->name('logistics.paypal-risk.index');
 Route::post('/paypal-risk/accounts', [PayPalRiskController::class, 'store'])->name('logistics.paypal-risk.accounts.store');

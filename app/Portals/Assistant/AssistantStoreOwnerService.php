@@ -46,6 +46,17 @@ class AssistantStoreOwnerService
             ->all();
     }
 
+    /** @return Collection<int, int> */
+    public function configuredAssistantDepartmentIds(): Collection
+    {
+        return AssistantDepartmentOperationScope::query()
+            ->select('assistant_department_id')
+            ->distinct()
+            ->pluck('assistant_department_id')
+            ->map(static fn (mixed $id): int => (int) $id)
+            ->values();
+    }
+
     /**
      * @param array<int, list<int>> $scopeMap
      */

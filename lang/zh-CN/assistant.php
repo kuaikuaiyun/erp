@@ -538,6 +538,7 @@ return [
             'original_sales' => '店铺原始营业额',
         ],
         'metrics' => [
+            'business_summary' => '营业汇总',
             'total_sales' => '销售额（USD）',
             'original_total_sales' => '店铺原始营业额',
             'orders' => '订单数',
