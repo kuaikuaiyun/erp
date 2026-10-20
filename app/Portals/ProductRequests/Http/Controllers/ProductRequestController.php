@@ -79,89 +79,54 @@ class ProductRequestController extends Controller
         $results = [];
         $matchType = null;
 
-        if ($keyword !== '' || $supplierUrl !== '') {
-            if ($supplierUrl !== '') {
-                $normalizedUrl = $this->workflow->normalizeSupplierUrl($supplierUrl);
-                $hash = $this->workflow->supplierUrlHash($normalizedUrl);
+        if ($keyword === '' && $supplierUrl === '') {
+            return view('portals.product-requests.operation.dedupe', [
+                ...$this->viewContext($context),
+                'keyword' => $keyword,
+                'supplierUrl' => $supplierUrl,
+                'results' => [],
+                'matchType' => null,
+            ]);
+        }
 
-                // 优先查链接 SKU 表
-                $linkSku = ProductRequestLinkSku::query()->where('supplier_url_hash', $hash)->first();
-                if ($linkSku && $this->splitSkus((string) $linkSku->skus) !== []) {
-                    $results[] = $this->linkSkuReusePayload($linkSku);
-                    $matchType = 'supplier_url';
-                }
+        // --- 路径 1：有 1688 链接时精确匹配（对齐采购检验里的链接查重） ---
+        if ($supplierUrl !== '') {
+            $normalizedUrl = $this->workflow->normalizeSupplierUrl($supplierUrl);
+            $hash = $this->workflow->supplierUrlHash($normalizedUrl);
+            $matchType = 'supplier_url';
 
-                // 再查录入记录
-                $query = ProductRequest::query()
-                    ->whereNotNull('standard_chinese_name')
-                    ->where('supplier_url_hash', $hash)
-                    ->with('attachments')
-                    ->latest('id')
-                    ->limit(20)
-                    ->get();
-
-                foreach ($query as $record) {
-                    $results[] = $this->reusePayload($record);
-                }
-
-                // 按链接去重：同链接只保留一条（链接 SKU 表优先）
-                $deduped = [];
-                $seenHashes = [];
-                foreach ($results as $item) {
-                    $h = md5((string) ($item['supplier_url'] ?? ''));
-                    if (!in_array($h, $seenHashes, true)) {
-                        $deduped[] = $item;
-                        $seenHashes[] = $h;
-                    }
-                }
-                $results = $deduped;
-                if ($matchType === null && $results !== []) {
-                    $matchType = 'supplier_url';
-                }
+            // 1.1 查链接 SKU 表（PCL SKU 管理维护的主库）
+            $linkSku = ProductRequestLinkSku::query()->where('supplier_url_hash', $hash)->first();
+            if ($linkSku) {
+                $results[] = $this->linkSkuReusePayload($linkSku);
             }
 
-            if ($keyword !== '' && $results === []) {
-                $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $keyword);
+            // 1.2 查需求提报历史记录（同 hash 的所有已提报记录）
+            $records = ProductRequest::query()
+                ->where('supplier_url_hash', $hash)
+                ->with('attachments')
+                ->latest('id')
+                ->limit(20)
+                ->get();
 
-                // 1. 查需求提报记录的产品名
-                $records = ProductRequest::query()
-                    ->whereNotNull('standard_chinese_name')
-                    ->where('standard_chinese_name', 'like', '%'.$escaped.'%')
-                    ->with('attachments')
-                    ->latest('id')
-                    ->limit(30)
-                    ->get();
-
-                // 2. 查链接 SKU 库的 product_name（251 条记录的主来源）
-                $linkSkuRows = ProductRequestLinkSku::query()
-                    ->where('product_name', 'like', '%'.$escaped.'%')
-                    ->limit(30)
-                    ->get();
-
-                // 3. 链接 SKU 库优先
-                $seenHashes = [];
-                foreach ($linkSkuRows as $linkSku) {
-                    if ($this->splitSkus((string) $linkSku->skus) === []) {
-                        continue;
-                    }
-                    $hash = (string) $linkSku->supplier_url_hash;
-                    if ($hash !== '') {
-                        $seenHashes[$hash] = true;
-                    }
-                    $results[] = $this->linkSkuReusePayload($linkSku);
+            $seenHashes = [$hash => true];
+            foreach ($records as $record) {
+                $h = (string) $record->supplier_url_hash;
+                if ($h !== '' && isset($seenHashes[$h])) {
+                    continue; // 已被 link_sku 覆盖
                 }
-
-                // 4. 补需求提报（去掉已被链接 SKU 覆盖的链接）
-                foreach ($records as $record) {
-                    $hash = (string) $record->supplier_url_hash;
-                    if ($hash !== '' && isset($seenHashes[$hash])) {
-                        continue;
-                    }
-                    $results[] = $this->reusePayload($record);
-                }
-
-                $matchType = 'keyword';
+                $results[] = $this->reusePayload($record);
             }
+
+            // 1.3 链接精确匹配没命中时，回退到关键词模糊（两个都填的场景）
+            if ($results === [] && $keyword !== '') {
+                $results = $this->dedupeKeywordResults($keyword);
+                $matchType = $results !== [] ? 'keyword' : null;
+            }
+        } else {
+            // --- 路径 2：仅产品名称模糊搜索 ---
+            $results = $this->dedupeKeywordResults($keyword);
+            $matchType = $results !== [] ? 'keyword' : null;
         }
 
         return view('portals.product-requests.operation.dedupe', [
@@ -171,6 +136,52 @@ class ProductRequestController extends Controller
             'results' => $results,
             'matchType' => $matchType,
         ]);
+    }
+
+    /** 关键词模糊查询：同时查 product_request_link_skus.product_name + product_requests.standard_chinese_name，link_sku 优先 */
+    private function dedupeKeywordResults(string $keyword): array
+    {
+        $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $keyword);
+
+        // 先查链接 SKU 库（251 条 PCL SKU 管理记录，主数据来源）
+        $linkSkuRows = ProductRequestLinkSku::query()
+            ->where('product_name', 'like', '%'.$escaped.'%')
+            ->limit(30)
+            ->get();
+
+        // 再查需求提报记录
+        $records = ProductRequest::query()
+            ->whereNotNull('standard_chinese_name')
+            ->where('standard_chinese_name', 'like', '%'.$escaped.'%')
+            ->with('attachments')
+            ->latest('id')
+            ->limit(30)
+            ->get();
+
+        // link_sku 优先入队
+        $results = [];
+        $seenHashes = [];
+        foreach ($linkSkuRows as $linkSku) {
+            if ($this->splitSkus((string) $linkSku->skus) === []) {
+                continue;
+            }
+            $hash = (string) $linkSku->supplier_url_hash;
+            if ($hash !== '') {
+                $seenHashes[$hash] = true;
+            }
+            $results[] = $this->linkSkuReusePayload($linkSku);
+        }
+
+        // 补需求提报（排除已被 link_sku 覆盖的 hash）
+        foreach ($records as $record) {
+            $hash = (string) $record->supplier_url_hash;
+            if ($hash !== '' && isset($seenHashes[$hash])) {
+                continue;
+            }
+            $results[] = $this->reusePayload($record);
+        }
+
+        return $results;
     }
 
     /** 审核链接问题：投放链接审核失败的需求提报，按提报编号唯一展示 */
