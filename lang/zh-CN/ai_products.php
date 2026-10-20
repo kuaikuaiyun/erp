@@ -25,7 +25,7 @@ return [
 
     'operation' => [
         'title' => '已有产品投放连接提报',
-        'subtitle' => 'AI开品库里面有的或者查重有的，请填写投放链接',
+        'subtitle' => '',
         'create_button' => '发起提报',
         'create_title' => '发起已有产品投放连接提报',
         'submit_success' => '提报成功，提报编号：:report_no',

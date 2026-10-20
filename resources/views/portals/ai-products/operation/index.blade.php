@@ -20,7 +20,7 @@
 
 @section('content')
 <section class="content product-request-page">
-    <header class="content-header"><h1>{{ $t('operation.title') }}</h1><p>{{ $t('operation.subtitle') }}</p></header>
+    <header class="content-header"><h1>{{ $t('operation.title') }}</h1></header>
     @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
     @if(session('error'))<div class="alert alert-danger">{{ session('error') }}</div>@endif
     @if(isset($errors) && $errors->any())<div class="alert alert-danger"><ul class="list-unstyled" style="margin:0">@foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>@endif
