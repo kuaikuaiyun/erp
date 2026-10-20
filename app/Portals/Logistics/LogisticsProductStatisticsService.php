@@ -1012,6 +1012,9 @@ class LogisticsProductStatisticsService
                 ->selectRaw('COALESCE(order_statistics.credit_card_module_order_count, 0) as credit_card_module_order_count')
                 ->selectRaw('COALESCE(order_statistics.credit_card_module_refund_amount, 0) as credit_card_module_refund_amount')
                 ->selectRaw('COALESCE(order_statistics.credit_card_module_refund_count, 0) as credit_card_module_refund_count')
+                ->selectRaw('COALESCE(order_statistics.credit_card_module_chargeback_count, 0) as credit_card_module_chargeback_count')
+                ->selectRaw('COALESCE(order_statistics.credit_card_module_chargeback_order_count, 0) as credit_card_module_chargeback_order_count')
+                ->selectRaw('COALESCE(order_statistics.credit_card_module_chargeback_amount, 0) as credit_card_module_chargeback_amount')
                 ->selectRaw('COALESCE(order_statistics.credit_card_module_shipped_order_count, 0) as credit_card_module_shipped_order_count')
                 ->selectRaw('COALESCE(order_statistics.credit_card_module_delivered_order_count, 0) as credit_card_module_delivered_order_count');
         }
@@ -1212,6 +1215,14 @@ class LogisticsProductStatisticsService
             ->select('product_orders.product_key');
 
         if ($withOverviewModules) {
+            $query->leftJoinSub(
+                $this->creditCardChargebackAggregateQuery(),
+                'credit_card_chargebacks',
+                'credit_card_chargebacks.logistics_order_id',
+                '=',
+                'product_orders.order_id',
+            );
+
             $paypalModule = "({$actualPaypal} AND NOT {$creditCardTag})";
             $quote = fn (string $value): string => $this->database()->getPdo()->quote($value);
             $shipped = 'product_orders.logistics_status IN ('.implode(', ', array_map($quote, [
@@ -1240,6 +1251,9 @@ class LogisticsProductStatisticsService
                 ->selectRaw("SUM(CASE WHEN {$creditCard} THEN 1 ELSE 0 END) as credit_card_module_order_count")
                 ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(credit_card_refunds.refund_amount, 0) ELSE 0 END) as credit_card_module_refund_amount")
                 ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(credit_card_refunds.refund_count, 0) ELSE 0 END) as credit_card_module_refund_count")
+                ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(credit_card_chargebacks.chargeback_count, 0) ELSE 0 END) as credit_card_module_chargeback_count")
+                ->selectRaw("SUM(CASE WHEN {$creditCard} AND COALESCE(credit_card_chargebacks.chargeback_count, 0) > 0 THEN 1 ELSE 0 END) as credit_card_module_chargeback_order_count")
+                ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(credit_card_chargebacks.chargeback_amount, 0) ELSE 0 END) as credit_card_module_chargeback_amount")
                 ->selectRaw("SUM(CASE WHEN {$creditCard} AND {$shipped} THEN 1 ELSE 0 END) as credit_card_module_shipped_order_count")
                 ->selectRaw("SUM(CASE WHEN {$creditCard} AND {$delivered} THEN 1 ELSE 0 END) as credit_card_module_delivered_order_count");
         }
@@ -1320,6 +1334,27 @@ class LogisticsProductStatisticsService
             ->select('refund.logistics_order_id')
             ->selectRaw('SUM(refund.refund_amount_usd) as refund_amount')
             ->selectRaw('COUNT(*) as refund_count')
+            ->groupBy('refund.logistics_order_id');
+    }
+
+    /**
+     * A credit-card refund is considered a chargeback when its imported reason
+     * contains one of the industry markers Ethoca, CDRN, or RDR.  The import
+     * reason is user-supplied text, therefore matching is deliberately
+     * case-insensitive and allows surrounding text.
+     */
+    private function creditCardChargebackAggregateQuery(): Builder
+    {
+        return $this->database()->table('logistics_credit_card_refunds as refund')
+            ->where(function (Builder $query): void {
+                $query
+                    ->whereRaw("LOWER(COALESCE(refund.refund_reason, '')) LIKE ?", ['%ethoca%'])
+                    ->orWhereRaw("LOWER(COALESCE(refund.refund_reason, '')) LIKE ?", ['%cdrn%'])
+                    ->orWhereRaw("LOWER(COALESCE(refund.refund_reason, '')) LIKE ?", ['%rdr%']);
+            })
+            ->select('refund.logistics_order_id')
+            ->selectRaw('COUNT(*) as chargeback_count')
+            ->selectRaw('SUM(refund.refund_amount_usd) as chargeback_amount')
             ->groupBy('refund.logistics_order_id');
     }
 
@@ -1546,6 +1581,10 @@ class LogisticsProductStatisticsService
             0,
             0.0,
             false,
+            true,
+            (int) $row->credit_card_module_chargeback_count,
+            (int) $row->credit_card_module_chargeback_order_count,
+            (float) $row->credit_card_module_chargeback_amount,
         );
 
         return [
@@ -1561,6 +1600,7 @@ class LogisticsProductStatisticsService
                 (int) $row->paypal_module_dispute_order_count,
                 (float) $row->paypal_module_dispute_amount,
                 true,
+                false,
             ),
             'paypal' => $paypal,
             'credit_card' => $creditCard,
@@ -1580,6 +1620,10 @@ class LogisticsProductStatisticsService
         int $disputeOrderCount,
         float $disputeAmount,
         bool $disputesApplicable,
+        bool $creditCardChargebacksApplicable = false,
+        int $chargebackCount = 0,
+        int $chargebackOrderCount = 0,
+        float $chargebackAmount = 0.0,
     ): array {
         return [
             'unit_count' => round($unitCount, 4),
@@ -1598,6 +1642,11 @@ class LogisticsProductStatisticsService
             'dispute_amount' => round($disputeAmount, 4),
             'dispute_rate' => $orderCount > 0 ? round($disputeOrderCount / $orderCount * 100, 2) : 0.0,
             'dispute_reason_breakdown' => [],
+            'chargeback_applicable' => $creditCardChargebacksApplicable,
+            'chargeback_count' => $chargebackCount,
+            'chargeback_order_count' => $chargebackOrderCount,
+            'chargeback_amount' => round($chargebackAmount, 4),
+            'chargeback_rate' => $orderCount > 0 ? round($chargebackOrderCount / $orderCount * 100, 2) : 0.0,
         ];
     }
 
@@ -1883,7 +1932,7 @@ class LogisticsProductStatisticsService
         return [
             'overall' => $this->overviewModule($items, $orders, true),
             'paypal' => $this->overviewModule($this->itemsForOrders($items, $paypalOrders), $paypalOrders, true),
-            'credit_card' => $this->overviewModule($this->itemsForOrders($items, $creditCardOrders), $creditCardOrders, false),
+            'credit_card' => $this->overviewModule($this->itemsForOrders($items, $creditCardOrders), $creditCardOrders, false, true),
         ];
     }
 
@@ -1909,7 +1958,7 @@ class LogisticsProductStatisticsService
      * @param Collection<int,LogisticsOrder> $orders
      * @return array<string,mixed>
      */
-    private function overviewModule(array $items, Collection $orders, bool $disputesApplicable): array
+    private function overviewModule(array $items, Collection $orders, bool $disputesApplicable, bool $creditCardChargebacksApplicable = false): array
     {
         $payment = $this->realPaymentSummary($orders);
         $refundAmount = round((float) $payment['paypal_refund_amount'] + (float) $payment['credit_card_refund_amount'], 4);
@@ -1921,6 +1970,16 @@ class LogisticsProductStatisticsService
         $disputeOrderCount = count(array_unique(array_filter(array_map(
             static fn (array $dispute): int => (int) ($dispute['order_id'] ?? 0),
             $disputeDetails,
+        ))));
+        $chargebackDetails = $creditCardChargebacksApplicable
+            ? array_values(array_filter(
+                $payment['credit_card_refund_details'],
+                fn (array $refund): bool => $this->isCreditCardChargebackReason($refund['refund_reason'] ?? ''),
+            ))
+            : [];
+        $chargebackOrderCount = count(array_unique(array_filter(array_map(
+            static fn (array $refund): int => (int) ($refund['order_id'] ?? 0),
+            $chargebackDetails,
         ))));
 
         return [
@@ -1940,7 +1999,20 @@ class LogisticsProductStatisticsService
             'dispute_amount' => round(array_sum(array_column($disputeDetails, 'amount')), 4),
             'dispute_rate' => $orders->isEmpty() ? 0.0 : round($disputeOrderCount / $orders->count() * 100, 2),
             'dispute_reason_breakdown' => $this->disputeReasonBreakdown($disputeDetails, $disputeCount),
+            'chargeback_applicable' => $creditCardChargebacksApplicable,
+            'chargeback_count' => count($chargebackDetails),
+            'chargeback_order_count' => $chargebackOrderCount,
+            'chargeback_amount' => round(array_sum(array_column($chargebackDetails, 'amount')), 4),
+            'chargeback_rate' => $orders->isEmpty() ? 0.0 : round($chargebackOrderCount / $orders->count() * 100, 2),
         ];
+    }
+
+    private function isCreditCardChargebackReason(mixed $reason): bool
+    {
+        $value = mb_strtolower(trim((string) $reason));
+
+        return $value !== ''
+            && (str_contains($value, 'ethoca') || str_contains($value, 'cdrn') || str_contains($value, 'rdr'));
     }
 
     /**

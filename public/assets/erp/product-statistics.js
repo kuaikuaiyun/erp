@@ -343,6 +343,11 @@
             disputed: formatNumber(subject.dispute_order_count),
             orders: formatNumber(subject.order_count)
         });
+        var chargebackRateFormula = replaceTokens(t('overviewChargebackRateFormula'), {
+            chargebackOrders: formatNumber(subject.chargeback_order_count),
+            chargebacks: formatNumber(subject.chargeback_count),
+            orders: formatNumber(subject.order_count)
+        });
 
         return '<section class="product-statistics-overview-module ' + className + '"><h4>' + escapeHtml(title) + '</h4><div class="product-statistics-overview-metrics">'
             + overviewMetric(t('overviewUnitCount'), formatNumber(subject.unit_count))
@@ -351,6 +356,7 @@
             + overviewMetric(t('overviewRefundAmount'), refund)
             + overviewMetric(t('overviewRefundRate'), formatRate(subject.refund_rate), refundFormula)
             + (subject.dispute_applicable ? overviewMetric(t('overviewDisputeRate'), formatRate(subject.dispute_rate), disputeRateFormula, 'is-dispute-rate') : '')
+            + (subject.chargeback_applicable ? overviewMetric(t('overviewChargebackRate'), formatRate(subject.chargeback_rate), chargebackRateFormula, 'is-chargeback-rate') : '')
             + overviewMetric(t('overviewShippingRate'), formatRate(subject.shipping_rate), shippingFormula)
             + overviewMetric(t('overviewDeliveryRate'), formatRate(subject.delivery_rate), deliveryFormula)
             + '</div>' + overviewDisputes(subject) + '</section>';

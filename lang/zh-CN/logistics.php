@@ -225,6 +225,8 @@ return [
             'overview_received_amount' => '实收金额（USD）',
             'overview_refund_amount' => '真实退款额（USD）',
             'overview_refund_rate' => '退款率（按金额）',
+            'overview_chargeback_rate' => '预警率（按笔数）',
+            'overview_chargeback_rate_formula' => '发生拒付的信用卡订单 :chargebackOrders 笔（导入拒付记录 :chargebacks 条）÷ 信用卡订单 :orders 笔 × 100%',
             'overview_dispute_summary' => 'PayPal 纠纷明细',
             'overview_dispute_counts' => '纠纷订单 :orders 笔；纠纷记录 :records 条；涉及金额 :amount',
             'overview_dispute_order_count' => '纠纷订单数',
@@ -468,7 +470,7 @@ return [
             'button' => '导出当前明细',
             'orders' => [
                 'payment_transaction_id' => 'PayPal 付款交易号', 'match_status' => '匹配状态', 'paid_at' => 'PayPal 付款时间',
-                'order_number' => 'Shopify 订单号', 'tongtu_order_number' => '通途订单号', 'store_name' => '店铺',
+                'order_number' => 'Shopify 订单号', 'tongtu_order_number' => '通途订单号', 'bill_numbers' => '账单号', 'store_name' => '店铺',
                 'products' => '产品', 'paid_amount' => '实付金额（USD）', 'refund_status' => '退款状态',
                 'dispute_status' => '纠纷状态', 'tracking_number' => '物流单号', 'logistics_status' => '物流状态',
                 'order_created_at' => '下单时间',
@@ -478,12 +480,12 @@ return [
                 'refund_orders' => '退款订单数', 'refund_rate' => '退款率', 'dispute_orders' => '纠纷订单数', 'dispute_rate' => '纠纷率',
             ],
             'refunds' => [
-                'refund_id' => '退款交易号', 'order_number' => 'Shopify 订单号', 'store_name' => '店铺', 'source' => '来源',
+                'refund_id' => '退款交易号', 'order_number' => 'Shopify 订单号', 'bill_numbers' => '账单号', 'store_name' => '店铺', 'source' => '来源',
                 'amount' => '退款金额（USD）', 'source_reason' => '接口原因', 'manual_reason' => '人工原因',
                 'linked_disputes' => '关联纠纷', 'status' => '状态', 'happened_at' => '退款时间',
             ],
             'disputes' => [
-                'dispute_id' => '纠纷编号', 'order_number' => 'Shopify 订单号', 'store_name' => '店铺', 'amount' => '金额（USD）',
+                'dispute_id' => '纠纷编号', 'order_number' => 'Shopify 订单号', 'bill_numbers' => '账单号', 'store_name' => '店铺', 'amount' => '金额（USD）',
                 'reason' => '原因', 'stage' => '纠纷类型', 'status' => '状态', 'outcome' => '处理结果',
                 'seller_response_due_at' => '卖家回复截止时间', 'linked_refunds' => '关联退款', 'updated_at' => '更新时间',
                 'happened_at' => '发生时间',
