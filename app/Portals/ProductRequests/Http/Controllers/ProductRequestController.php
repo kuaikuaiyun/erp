@@ -1317,7 +1317,22 @@ class ProductRequestController extends Controller
             $linkSkus = $this->mergeLinkSkus($this->linkSkuSet($linkHash), $checkedSkus);
             $procurementSkus = implode(',', $checkedSkus);
             if ($linkSkus !== []) {
-                $this->persistLinkSkuSet($linkHash, $normalizedUrl, $linkSkus);
+                $linkSkuPayload = [
+                    'supplier_url' => $normalizedUrl,
+                    'skus' => implode(',', $linkSkus),
+                    'sku_values' => $skuValueMap === [] ? null : $skuValueMap,
+                    'pcl_product_no' => trim((string) ($data['pcl_product_no'] ?? $locked->pcl_product_no)) ?: null,
+                    'product_name' => trim((string) ($data['standard_chinese_name'] ?? $locked->standard_chinese_name)) ?: null,
+                    'source' => 'system',
+                ];
+                $linkCover = $locked->attachmentsFor(ProductRequestAttachment::STAGE_OPERATION)->first();
+                if ($linkCover) {
+                    $linkSkuPayload['product_image'] = $linkCover->path;
+                }
+                ProductRequestLinkSku::query()->updateOrCreate(
+                    ['supplier_url_hash' => $linkHash],
+                    $linkSkuPayload,
+                );
             }
             $locked->fill([
                 ...$data,
@@ -1712,41 +1727,13 @@ class ProductRequestController extends Controller
             ->paginate($perPage)
             ->withQueryString();
 
-        // 每个链接展示最新一条同链接提报记录的 PCL 商品编号（链接表自身已存 PCL 时优先）
+        // 每个链接展示 PCL/商品名称/产品图，全部直接读 product_request_link_skus 表自身字段，不回退到提报记录
         $pclMap = $links->pluck('pcl_product_no', 'supplier_url_hash')
             ->filter(fn (?string $pcl): bool => trim((string) $pcl) !== '');
-        // 商品名称同样以链接表已存名称优先，同链接最新提报记录的标准中文名兜底
         $nameMap = $links->pluck('product_name', 'supplier_url_hash')
             ->filter(fn (?string $name): bool => trim((string) $name) !== '');
-        ProductRequest::query()
-            ->whereIn('supplier_url_hash', $links->pluck('supplier_url_hash'))
-            ->orderByDesc('updated_at')
-            ->get(['supplier_url_hash', 'pcl_product_no', 'standard_chinese_name'])
-            ->each(function (ProductRequest $record) use ($pclMap, $nameMap): void {
-                if (!$pclMap->has($record->supplier_url_hash) && trim((string) $record->pcl_product_no) !== '') {
-                    $pclMap->put($record->supplier_url_hash, $record->pcl_product_no);
-                }
-                if (!$nameMap->has($record->supplier_url_hash) && trim((string) $record->standard_chinese_name) !== '') {
-                    $nameMap->put($record->supplier_url_hash, $record->standard_chinese_name);
-                }
-            });
-
-        // 每个链接取最新一条同链接提报记录的运营阶段首图作为产品图
-        $coverMap = [];
-        ProductRequest::query()
-            ->whereIn('supplier_url_hash', $links->pluck('supplier_url_hash'))
-            ->with('attachments')
-            ->orderByDesc('updated_at')
-            ->get(['id', 'supplier_url_hash', 'updated_at'])
-            ->each(function (ProductRequest $record) use (&$coverMap): void {
-                if (isset($coverMap[$record->supplier_url_hash])) {
-                    return;
-                }
-                $cover = $record->attachmentsFor(ProductRequestAttachment::STAGE_OPERATION)->first();
-                if ($cover) {
-                    $coverMap[$record->supplier_url_hash] = [$record, $cover];
-                }
-            });
+        $coverMap = $links->pluck('product_image', 'supplier_url_hash')
+            ->filter(fn (?string $path): bool => trim((string) $path) !== '');
 
         return view('portals.product-requests.link-skus.index', [
             ...$this->viewContext($context),
