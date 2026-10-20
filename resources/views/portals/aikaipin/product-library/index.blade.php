@@ -36,10 +36,9 @@
         'productNameRequiredMessage' => $t('messages.product_name_required_message'),
         'archiveRequiredTitle' => $t('messages.archive_required_title'),
         'archiveRequiredMessage' => $t('messages.archive_required_message'),
-        'uploadDemoTitle' => $t('messages.upload_demo_title'),
-        'uploadDemoMessage' => $t('messages.upload_demo_message'),
         'fileSelected' => $t('upload.file_selected', ['name' => ':name', 'size' => ':size']),
         'fileUnselected' => $t('upload.file_unselected'),
+        'fileExisting' => $t('upload.file_existing', ['name' => ':name']),
         'serverFilters' => true,
         'filterResetUrl' => route('aikaipin.product-library.index'),
         'initialCategories' => $categories->map(static fn ($category): array => [
@@ -50,17 +49,25 @@
         'categoryDeleteUrlTemplate' => route('aikaipin.product-library.categories.destroy', ['category' => '__category__']),
         'csrfToken' => csrf_token(),
         'productStoreUrl' => route('aikaipin.product-library.store'),
+        'productEditUrlTemplate' => route('aikaipin.product-library.edit', ['product' => '__product__']),
+        'productUpdateUrlTemplate' => route('aikaipin.product-library.update', ['product' => '__product__']),
         'packageUploadInitializeUrl' => route('aikaipin.product-library.package-uploads.initialize'),
         'packageUploadPartUrlTemplate' => route('aikaipin.product-library.package-uploads.parts.store', ['uploadToken' => '__token__', 'chunkIndex' => '__chunk__']),
         'packageUploadCompleteUrlTemplate' => route('aikaipin.product-library.package-uploads.complete', ['uploadToken' => '__token__']),
         'visibilityUpdateUrl' => route('aikaipin.product-library.visibility.update'),
         'productCreatedTitle' => $t('messages.product_created_title'),
         'productCreatedMessage' => $t('messages.product_created_message'),
+        'productUpdatedTitle' => $t('messages.product_updated_title'),
+        'productUpdatedMessage' => $t('messages.product_updated_message'),
         'productSaveFailedTitle' => $t('messages.product_save_failed_title'),
         'productSaveFailedMessage' => $t('messages.product_save_failed_message'),
         'packageUploadTitle' => $t('messages.package_upload_title'),
         'uploadingProductPackage' => $t('upload.uploading_package'),
         'savingProduct' => $t('upload.saving_product'),
+        'uploadTitle' => $t('upload.title'),
+        'editTitle' => $t('upload.edit_title'),
+        'saveProductLabel' => $t('upload.save_product'),
+        'saveChangesLabel' => $t('upload.save_changes'),
         'visibilityUpdatedTitle' => $t('messages.visibility_updated_title'),
         'categoryEmptyTitle' => $t('messages.category_empty_title'),
         'categoryEmptyMessage' => $t('messages.category_empty_message'),
@@ -80,12 +87,12 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261020-2">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261020-3">
 @endpush
 
 @push('scripts')
     <script>window.ErpAikaipinProductLibraryConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261020-2"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261020-3"></script>
 @endpush
 
 @section('content')
@@ -271,7 +278,7 @@
                                         <button class="btn btn-default" type="button" disabled><i class="fa fa-download" aria-hidden="true"></i> {{ $t('actions.download') }}</button>
                                     @endif
                                     @if ($canManageProductLibrary)
-                                        <button class="btn btn-primary" type="button" data-aikaipin-action="edit">
+                                        <button class="btn btn-primary" type="button" data-aikaipin-action="edit" data-aikaipin-product-id="{{ $product->getKey() }}">
                                             <i class="fa fa-pencil" aria-hidden="true"></i> {{ $t('actions.edit') }}
                                         </button>
                                     @endif
@@ -369,7 +376,7 @@
             <form class="modal-content aikaipin-upload-form" novalidate data-aikaipin-upload-form>
                 <div class="modal-header">
                     <button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('upload.close') }}"><span aria-hidden="true">&times;</span></button>
-                    <h4 class="modal-title">{{ $t('upload.title') }}</h4>
+                    <h4 class="modal-title" data-aikaipin-upload-title>{{ $t('upload.title') }}</h4>
                 </div>
                 <div class="modal-body">
                     <p class="aikaipin-upload-demo-note"><i class="fa fa-info-circle" aria-hidden="true"></i> {{ $t('upload.demo_notice') }}</p>
@@ -526,8 +533,8 @@
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-default" type="button" data-dismiss="modal">{{ $t('upload.cancel') }}</button>
-                    <button class="btn btn-primary" type="submit" data-aikaipin-upload-submit>
-                        <i class="fa fa-upload" aria-hidden="true"></i> {{ $t('upload.simulate_submit') }}
+                    <button class="btn btn-primary" type="button" data-aikaipin-upload-submit>
+                        <i class="fa fa-upload" aria-hidden="true"></i> {{ $t('upload.save_product') }}
                     </button>
                 </div>
             </form>

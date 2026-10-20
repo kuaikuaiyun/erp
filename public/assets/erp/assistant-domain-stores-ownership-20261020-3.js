@@ -11,6 +11,7 @@
     }
 
     var ownerSelect = document.getElementById('assistant-owner-user-select');
+    var ownerDepartmentSelect = document.getElementById('assistant-owner-department-select');
     var ownerSubmit = ownerForm.querySelector('[data-owner-submit]');
     var ownerMethod = ownerForm.querySelector('[data-owner-method]');
     var assignFields = ownerForm.querySelector('[data-owner-assign-fields]');
@@ -18,6 +19,7 @@
     var summary = ownerForm.querySelector('[data-owner-selection-summary]');
     var currentMode = 'assign';
     var outsideScopeCount = 0;
+    var candidateRequestId = 0;
 
     function selectedIds() {
         return Array.prototype.slice.call(document.querySelectorAll('.assistant-row-selector[aria-pressed="true"]'))
@@ -74,6 +76,7 @@
             : ownerForm.getAttribute('data-assign-url');
         ownerMethod.disabled = !clear;
         assignFields.hidden = clear;
+        ownerDepartmentSelect.disabled = clear;
         ownerSelect.required = !clear;
         ownerSelect.disabled = clear || ownerSelect.getAttribute('data-candidates-ready') !== '1';
 
@@ -102,8 +105,9 @@
         syncOwnerSubmit();
     }
 
-    function loadCandidates(ids) {
+    function loadCandidates(ids, ownerDepartmentId) {
         var params = new URLSearchParams();
+        var requestId = ++candidateRequestId;
 
         ownerSelect.removeAttribute('data-candidates-ready');
         ownerSelect.innerHTML = '';
@@ -118,6 +122,9 @@
         ownerSelect.appendChild(loadingOption);
 
         ids.forEach(function (id) { params.append('selected_ids[]', id); });
+        if (ownerDepartmentId) {
+            params.append('owner_department_id', ownerDepartmentId);
+        }
         syncOwnerSubmit();
 
         window.fetch(config.optionsUrl + '?' + params.toString(), {
@@ -131,14 +138,24 @@
                 return payload;
             });
         }).then(function (payload) {
+            if (requestId !== candidateRequestId) {
+                return;
+            }
+
             var users = payload.users || [];
             ownerSelect.innerHTML = '';
 
+            if (!ownerDepartmentSelect.value && payload.owner_department_id) {
+                ownerDepartmentSelect.value = String(payload.owner_department_id);
+            }
+
             var placeholder = document.createElement('option');
             placeholder.value = '';
-            placeholder.textContent = users.length
+            placeholder.textContent = payload.requires_department
+                ? (translations.chooseDepartmentFirst || '')
+                : (users.length
                 ? (translations.chooseOwner || '')
-                : (translations.empty || '');
+                : (translations.empty || ''));
             ownerSelect.appendChild(placeholder);
 
             users.forEach(function (user) {
@@ -161,6 +178,10 @@
 
             setOwnerMode(currentMode);
         }).catch(function (error) {
+            if (requestId !== candidateRequestId) {
+                return;
+            }
+
             ownerSelect.innerHTML = '';
             var option = document.createElement('option');
             option.value = '';
@@ -270,6 +291,9 @@
     });
 
     ownerSelect.addEventListener('change', syncOwnerSubmit);
+    ownerDepartmentSelect.addEventListener('change', function () {
+        loadCandidates(selectedIds(), ownerDepartmentSelect.value);
+    });
 
     ownerForm.addEventListener('submit', function (event) {
         fillSelectedInputs(ownerForm.querySelector('[data-owner-selected-inputs]'), selectedIds());
@@ -283,9 +307,10 @@
         window.jQuery('#assistant-batch-owner-modal').on('show.bs.modal', function () {
             var ids = selectedIds();
             fillSelectedInputs(ownerForm.querySelector('[data-owner-selected-inputs]'), ids);
+            ownerDepartmentSelect.value = '';
             ownerSelect.value = '';
             setOwnerMode('assign');
-            loadCandidates(ids);
+            loadCandidates(ids, '');
         });
     }
 

@@ -82,6 +82,8 @@ return [
         'category_in_use_message' => '该分类已被产品使用，暂时不能删除。',
         'product_created_title' => '产品已保存',
         'product_created_message' => '产品资料、附件和授权范围已保存。',
+        'product_updated_title' => '产品已更新',
+        'product_updated_message' => '产品资料、附件和授权范围已更新。',
         'product_save_failed_title' => '保存失败',
         'product_save_failed_message' => '保存产品时发生错误，请稍后重试。',
         'package_upload_title' => '正在上传产品包',
@@ -91,6 +93,7 @@ return [
         'product_category_invalid_message' => '选择的产品分类无效，请刷新页面后重试。',
         'product_authorization_invalid_message' => '选择的授权部门无效，请刷新页面后重试。',
         'product_selection_invalid_message' => '选择的产品无效，请刷新页面后重试。',
+        'product_image_invalid_message' => '选择的产品图片无效，请刷新页面后重试。',
         'visibility_updated_title' => '可见性已更新',
         'visibility_enabled_message' => '已为 :count 条产品开启运营部门二级部门可见性。',
         'visibility_cancelled_message' => '已取消 :count 条产品的运营部门二级部门可见性。',
@@ -103,11 +106,9 @@ return [
         'archive_too_large_title' => '压缩文件过大',
         'archive_too_large_message' => '产品包压缩文件不能超过 150MB。',
         'product_name_required_title' => '请填写产品名称',
-        'product_name_required_message' => '模拟上传前请填写产品名称。',
+        'product_name_required_message' => '保存产品前请填写产品名称。',
         'archive_required_title' => '请选择产品包压缩文件',
-        'archive_required_message' => '模拟上传前请先选择产品包压缩文件。',
-        'upload_demo_title' => '模拟上传完成',
-        'upload_demo_message' => '本次仅完成前端演示，未上传文件、未创建产品、未保存授权。',
+        'archive_required_message' => '保存产品前请先选择产品包压缩文件。',
     ],
     'visibility' => [
         'selected_none' => '未选择产品',
@@ -271,6 +272,7 @@ return [
     ],
     'upload' => [
         'title' => '上传产品包',
+        'edit_title' => '编辑产品',
         'sections' => [
             'basic_information' => '基础信息',
             'product_details' => 'SKU 与分类',
@@ -280,7 +282,8 @@ return [
         ],
         'close' => '关闭',
         'cancel' => '取消',
-        'simulate_submit' => '保存产品',
+        'save_product' => '保存产品',
+        'save_changes' => '保存修改',
         'saving_product' => '正在保存…',
         'uploading_package' => '正在上传产品包…',
         'demo_notice' => '提交后会保存产品资料、附件与授权范围；产品包支持断点续传。',
@@ -319,6 +322,7 @@ return [
         'authorization_empty' => '运营部门下暂无可授权的二级部门。',
         'file_selected' => '已选择：:name（:size）',
         'file_unselected' => '未选择文件',
+        'file_existing' => '保留当前文件：:name',
     ],
     'options' => [
         'categories' => [

@@ -124,6 +124,8 @@ Route::get('/product-statistics/detail', [ProductStatisticsController::class, 'd
 Route::post('/product-statistics/export', [ProductStatisticsController::class, 'export'])->name('logistics.product-statistics.export');
 Route::get('/product-library', [ProductLibraryController::class, 'index'])->name('aikaipin.product-library.index');
 Route::post('/product-library', [ProductLibraryController::class, 'storeProduct'])->name('aikaipin.product-library.store');
+Route::get('/product-library/{product}/edit-data', [ProductLibraryController::class, 'editProduct'])->name('aikaipin.product-library.edit');
+Route::put('/product-library/{product}', [ProductLibraryController::class, 'updateProduct'])->name('aikaipin.product-library.update');
 Route::post('/product-library/categories', [ProductLibraryController::class, 'storeCategory'])->name('aikaipin.product-library.categories.store');
 Route::delete('/product-library/categories/{category}', [ProductLibraryController::class, 'destroyCategory'])->name('aikaipin.product-library.categories.destroy');
 Route::post('/product-library/package-uploads', [ProductLibraryController::class, 'initializePackageUpload'])->name('aikaipin.product-library.package-uploads.initialize');

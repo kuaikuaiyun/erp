@@ -89,6 +89,7 @@
             'loadFailed' => $t('javascript.owner_candidates_failed'),
             'empty' => $t('javascript.owner_candidates_empty'),
             'chooseOwner' => $t('javascript.owner_choose_required'),
+            'chooseDepartmentFirst' => $t('javascript.owner_department_required'),
             'outsideScope' => $t('javascript.owner_outside_scope_warning', ['count' => '__count__']),
             'clearConfirm' => $t('javascript.owner_clear_confirm', ['count' => '__count__']),
             'scopeSaving' => $t('javascript.owner_scope_saving'),
@@ -164,9 +165,9 @@
     </section>
 
     <section class="content assistant-domain-stores-page">
-        @if ($errors->has('import_file') || $errors->has('scope') || $errors->has('department_ids') || $errors->has('selected_ids') || $errors->has('owner_user_id') || $errors->has('scopes') || $errors->batchUpdate->any())
+        @if ($errors->has('import_file') || $errors->has('scope') || $errors->has('department_ids') || $errors->has('selected_ids') || $errors->has('owner_department_id') || $errors->has('owner_user_id') || $errors->has('scopes') || $errors->batchUpdate->any())
             <div class="alert alert-danger {{ $errors->has('import_file') ? 'assistant-import-errors' : ($errors->has('department_ids') ? 'assistant-batch-access-errors' : ($errors->batchUpdate->any() ? 'assistant-batch-update-errors' : 'assistant-export-errors')) }}" role="alert">
-                {{ $errors->first('import_file') ?: $errors->first('department_ids') ?: $errors->first('selected_ids') ?: $errors->first('owner_user_id') ?: $errors->first('scopes') ?: $errors->batchUpdate->first() ?: $errors->first('scope') }}
+                {{ $errors->first('import_file') ?: $errors->first('department_ids') ?: $errors->first('selected_ids') ?: $errors->first('owner_department_id') ?: $errors->first('owner_user_id') ?: $errors->first('scopes') ?: $errors->batchUpdate->first() ?: $errors->first('scope') }}
             </div>
         @endif
 
@@ -605,11 +606,23 @@
                             </div>
                             <p class="text-muted" data-owner-selection-summary></p>
                             <div class="alert alert-warning assistant-owner-warning" data-owner-warning hidden></div>
-                            <div class="form-group" data-owner-assign-fields>
-                                <label for="assistant-owner-user-select">{{ $t('selection.choose_owner') }}</label>
-                                <select class="form-control" id="assistant-owner-user-select" name="owner_user_id" required disabled>
-                                    <option value="">{{ $t('javascript.owner_candidates_loading') }}</option>
-                                </select>
+                            <div data-owner-assign-fields>
+                                <div class="form-group">
+                                    <label for="assistant-owner-department-select">{{ $t('selection.choose_owner_department') }}</label>
+                                    <select class="form-control" id="assistant-owner-department-select" name="owner_department_id">
+                                        <option value="">{{ $t('selection.keep_owner_department') }}</option>
+                                        @foreach ($assistantChildDepartments as $department)
+                                            <option value="{{ $department->getKey() }}">{{ $department->name }}</option>
+                                        @endforeach
+                                    </select>
+                                    <span class="help-block">{{ $t('selection.owner_department_assignment_notice') }}</span>
+                                </div>
+                                <div class="form-group">
+                                    <label for="assistant-owner-user-select">{{ $t('selection.choose_owner') }}</label>
+                                    <select class="form-control" id="assistant-owner-user-select" name="owner_user_id" required disabled>
+                                        <option value="">{{ $t('javascript.owner_candidates_loading') }}</option>
+                                    </select>
+                                </div>
                             </div>
                             <p class="text-muted assistant-owner-help">{{ $t('selection.owner_assignment_only_notice') }}</p>
                             <span data-owner-selected-inputs></span>
@@ -685,7 +698,7 @@
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-quick-options-20261008-2.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-team-project-options-20261009-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-modal-20261009-1.js?v=20261011-2"></script>
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-3.js"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-3.js?v=20261020-4"></script>
     @if (session('success'))
         <script>
             window.ErpAdminNotifier.notify({

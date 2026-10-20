@@ -670,6 +670,7 @@ class DomainStoreController extends Controller
         $validated = $request->validate([
             'selected_ids' => ['required', 'array', 'min:1', 'max:100'],
             'selected_ids.*' => ['required', 'integer', 'distinct'],
+            'owner_department_id' => ['nullable', 'integer'],
         ]);
         $selectedIds = collect($validated['selected_ids'])
             ->map(static fn (mixed $id): int => (int) $id)
@@ -686,15 +687,30 @@ class DomainStoreController extends Controller
             ]);
         }
 
-        if ($stores->contains(static fn (AssistantDomainStore $store): bool => !$store->owner_department_id)) {
+        $availableDepartments = $this->authorization->assistantChildDepartments()->keyBy('id');
+        $selectedDepartmentId = isset($validated['owner_department_id'])
+            ? (int) $validated['owner_department_id']
+            : null;
+
+        if ($selectedDepartmentId !== null && !$availableDepartments->has($selectedDepartmentId)) {
             throw ValidationException::withMessages([
-                'selected_ids' => __('assistant.domain_stores.validation.owner_department_required'),
+                'owner_department_id' => __('assistant.domain_stores.validation.invalid_owner_department'),
             ]);
         }
 
-        $candidates = $this->storeOwners->eligibleUsersForDepartments(
-            $stores->pluck('owner_department_id')->map(static fn (mixed $id): int => (int) $id)->unique()->values()->all(),
-        );
+        $existingDepartmentIds = $stores->pluck('owner_department_id')
+            ->filter(static fn (mixed $id): bool => $id !== null)
+            ->map(static fn (mixed $id): int => (int) $id)
+            ->unique()
+            ->values();
+        $requiresDepartment = $selectedDepartmentId === null
+            && $stores->contains(static fn (AssistantDomainStore $store): bool => !$store->owner_department_id);
+        $candidateDepartmentIds = $selectedDepartmentId !== null
+            ? [$selectedDepartmentId]
+            : ($requiresDepartment ? [] : $existingDepartmentIds->all());
+        $candidates = $candidateDepartmentIds === []
+            ? collect()
+            : $this->storeOwners->eligibleUsersForDepartments($candidateDepartmentIds);
         $candidateIds = $candidates->pluck('id')->map(static fn (mixed $id): int => (int) $id);
 
         return response()->json([
@@ -714,6 +730,11 @@ class DomainStoreController extends Controller
                 ];
             })->values(),
             'selected_count' => $stores->count(),
+            'owner_department_id' => $selectedDepartmentId
+                ?? (!$requiresDepartment && $existingDepartmentIds->count() === 1
+                    ? (int) $existingDepartmentIds->first()
+                    : null),
+            'requires_department' => $requiresDepartment,
             'outside_scope_count' => $stores
                 ->filter(static fn (AssistantDomainStore $store): bool => $store->owner_user_id !== null)
                 ->reject(static fn (AssistantDomainStore $store): bool => $candidateIds->contains((int) $store->owner_user_id))
@@ -743,7 +764,10 @@ class DomainStoreController extends Controller
         $validated = $request->validate([
             'scopes' => ['nullable', 'array'],
             'scopes.*' => ['nullable', 'array'],
-            'scopes.*.*' => ['integer', 'distinct'],
+            // The same Operations department may intentionally be selectable
+            // from more than one Assistant department. De-duplicate each
+            // department below instead of applying a global wildcard distinct rule.
+            'scopes.*.*' => ['integer'],
         ]);
         $assistantDepartmentIds = $this->authorization->assistantChildDepartments()
             ->pluck('id')
@@ -1291,6 +1315,7 @@ class DomainStoreController extends Controller
 
         if (!$clear) {
             $rules['owner_user_id'] = ['required', 'integer'];
+            $rules['owner_department_id'] = ['nullable', 'integer'];
         }
 
         $validated = $request->validate($rules);
@@ -1310,17 +1335,39 @@ class DomainStoreController extends Controller
         }
 
         $ownerUserId = null;
+        $selectedDepartmentId = null;
 
         if (!$clear) {
-            if ($stores->contains(static fn (AssistantDomainStore $store): bool => !$store->owner_department_id)) {
+            $selectedDepartmentId = isset($validated['owner_department_id'])
+                ? (int) $validated['owner_department_id']
+                : null;
+            $availableDepartments = $this->authorization->assistantChildDepartments()->keyBy('id');
+
+            if ($selectedDepartmentId !== null && !$availableDepartments->has($selectedDepartmentId)) {
                 throw ValidationException::withMessages([
-                    'selected_ids' => __('assistant.domain_stores.validation.owner_department_required'),
+                    'owner_department_id' => __('assistant.domain_stores.validation.invalid_owner_department'),
+                ]);
+            }
+
+            if (
+                $selectedDepartmentId === null
+                && $stores->contains(static fn (AssistantDomainStore $store): bool => !$store->owner_department_id)
+            ) {
+                throw ValidationException::withMessages([
+                    'owner_department_id' => __('assistant.domain_stores.validation.owner_department_required'),
                 ]);
             }
 
             $ownerUserId = (int) $validated['owner_user_id'];
+            $candidateDepartmentIds = $selectedDepartmentId !== null
+                ? [$selectedDepartmentId]
+                : $stores->pluck('owner_department_id')
+                    ->map(static fn (mixed $id): int => (int) $id)
+                    ->unique()
+                    ->values()
+                    ->all();
             $candidates = $this->storeOwners->eligibleUsersForDepartments(
-                $stores->pluck('owner_department_id')->map(static fn (mixed $id): int => (int) $id)->unique()->values()->all(),
+                $candidateDepartmentIds,
             );
 
             if (!$candidates->contains('id', $ownerUserId)) {
@@ -1331,16 +1378,25 @@ class DomainStoreController extends Controller
         }
 
         $updated = DB::connection(config('admin.database.connection') ?: config('database.default'))
-            ->transaction(function () use ($stores, $ownerUserId, $context): int {
+            ->transaction(function () use ($stores, $ownerUserId, $selectedDepartmentId, $context): int {
                 $count = 0;
 
                 foreach ($stores as $store) {
-                    if (($store->owner_user_id === null ? null : (int) $store->owner_user_id) === $ownerUserId) {
+                    $ownerUnchanged = ($store->owner_user_id === null ? null : (int) $store->owner_user_id) === $ownerUserId;
+                    $departmentUnchanged = $selectedDepartmentId === null
+                        || (int) $store->owner_department_id === $selectedDepartmentId;
+
+                    if ($ownerUnchanged && $departmentUnchanged) {
                         continue;
                     }
 
                     $before = $store->historySnapshot();
                     $store->owner_user_id = $ownerUserId;
+                    if ($selectedDepartmentId !== null) {
+                        // owner_department_id is assignment metadata only;
+                        // record visibility still comes from authorizedDepartments.
+                        $store->owner_department_id = $selectedDepartmentId;
+                    }
                     $store->unsetRelation('ownerUser');
                     $this->setLastOperator($store, $context['user']);
                     $store->save();

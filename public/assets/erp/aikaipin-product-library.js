@@ -23,6 +23,7 @@
     var uploadModal = document.getElementById('aikaipin-upload-modal');
     var uploadForm = document.querySelector('[data-aikaipin-upload-form]');
     var uploadName = document.querySelector('[data-aikaipin-upload-name]');
+    var uploadLandingUrl = document.querySelector('[data-aikaipin-upload-landing-url]');
     var skuInput = document.querySelector('[data-aikaipin-sku-input]');
     var skuTags = document.querySelector('[data-aikaipin-sku-tags]');
     var categoryInput = document.querySelector('[data-aikaipin-category-input]');
@@ -36,8 +37,15 @@
     var uploadProgress = document.querySelector('[data-aikaipin-upload-progress]');
     var uploadProgressBar = document.querySelector('[data-aikaipin-upload-progress-bar]');
     var uploadSubmit = document.querySelector('[data-aikaipin-upload-submit]');
+    var uploadTitle = document.querySelector('[data-aikaipin-upload-title]');
     var uploadSkus = [];
     var uploadImageFiles = [];
+    var existingImageFiles = [];
+    var removedImageIds = [];
+    var existingReferenceFile = null;
+    var existingPackageFile = null;
+    var editingProductId = null;
+    var isProductSubmitting = false;
     var uploadTimer = null;
     var packageUploadToken = '';
     var uploadSubmitHtml = uploadSubmit ? uploadSubmit.innerHTML : '';
@@ -546,33 +554,40 @@
         });
     }
 
+    function addImagePreview(item, removeAttribute, removeValue) {
+        var preview = document.createElement('div');
+        var image = document.createElement('img');
+        var removeButton = document.createElement('button');
+
+        preview.className = 'aikaipin-image-preview';
+        image.src = item.url;
+        image.alt = item.name || (item.file && item.file.name) || '';
+        removeButton.type = 'button';
+        removeButton.className = 'aikaipin-image-preview-remove';
+        removeButton.setAttribute('aria-label', image.alt);
+        removeButton.setAttribute(removeAttribute, String(removeValue));
+        removeButton.innerHTML = '&times;';
+        preview.appendChild(image);
+        preview.appendChild(removeButton);
+        imagePreviews.appendChild(preview);
+    }
+
     function renderImagePreviews() {
         if (!imagePreviews) {
             return;
         }
 
         imagePreviews.innerHTML = '';
+        existingImageFiles.forEach(function (item) {
+            addImagePreview(item, 'data-aikaipin-remove-existing-image', item.id);
+        });
         uploadImageFiles.forEach(function (item, index) {
-            var preview = document.createElement('div');
-            var image = document.createElement('img');
-            var removeButton = document.createElement('button');
-
-            preview.className = 'aikaipin-image-preview';
-            image.src = item.url;
-            image.alt = item.file.name;
-            removeButton.type = 'button';
-            removeButton.className = 'aikaipin-image-preview-remove';
-            removeButton.setAttribute('aria-label', item.file.name);
-            removeButton.setAttribute('data-aikaipin-remove-image', String(index));
-            removeButton.innerHTML = '&times;';
-            preview.appendChild(image);
-            preview.appendChild(removeButton);
-            imagePreviews.appendChild(preview);
+            addImagePreview(item, 'data-aikaipin-remove-image', index);
         });
     }
 
     function addImages(files) {
-        var available = Math.max(0, 3 - uploadImageFiles.length);
+        var available = Math.max(0, 3 - existingImageFiles.length - uploadImageFiles.length);
         var accepted = 0;
         var reachedLimit = files.length > available;
 
@@ -588,7 +603,8 @@
 
             uploadImageFiles.push({
                 file: file,
-                url: window.URL.createObjectURL(file)
+                url: window.URL.createObjectURL(file),
+                name: file.name
             });
             accepted += 1;
         });
@@ -614,6 +630,16 @@
 
         element.textContent = file
             ? replaceTokens(config.fileSelected, {name: file.name, size: fileSize(file.size)})
+            : config.fileUnselected;
+    }
+
+    function updateExistingFileName(element, file) {
+        if (!element) {
+            return;
+        }
+
+        element.textContent = file
+            ? replaceTokens(config.fileExisting, {name: file.name})
             : config.fileUnselected;
     }
 
@@ -643,6 +669,17 @@
         });
     }
 
+    function setUploadMode(productId) {
+        editingProductId = productId || null;
+        uploadSubmitHtml = '<i class="fa fa-' + (editingProductId ? 'save' : 'upload') + '" aria-hidden="true"></i> '
+            + String(editingProductId ? config.saveChangesLabel : config.saveProductLabel);
+
+        if (uploadTitle) {
+            uploadTitle.textContent = editingProductId ? config.editTitle : config.uploadTitle;
+        }
+        setUploadSubmitState(false);
+    }
+
     function resetUploadModal() {
         if (!uploadForm) {
             return;
@@ -657,7 +694,12 @@
         releaseImageUrls();
         uploadSkus = [];
         uploadImageFiles = [];
+        existingImageFiles = [];
+        removedImageIds = [];
+        existingReferenceFile = null;
+        existingPackageFile = null;
         packageUploadToken = '';
+        isProductSubmitting = false;
         renderSkus();
         renderCategories([]);
         renderImagePreviews();
@@ -671,12 +713,8 @@
             uploadProgressBar.style.width = '0%';
             uploadProgressBar.setAttribute('aria-valuenow', '0');
         }
-        if (uploadSubmit) {
-            uploadSubmit.disabled = false;
-            uploadSubmit.innerHTML = uploadSubmitHtml;
-        }
-
         syncChoiceButtons();
+        setUploadMode(null);
     }
 
     function setUploadSubmitState(isBusy, label) {
@@ -782,22 +820,41 @@
 
     function submitProduct() {
         var packageFileToUpload = packageFile && packageFile.files && packageFile.files[0];
+        var isEditing = editingProductId !== null;
+        var packageRequest;
+
+        if (isProductSubmitting) {
+            return;
+        }
 
         if (!uploadName || String(uploadName.value || '').trim() === '') {
             notify('warning', config.productNameRequiredTitle, config.productNameRequiredMessage);
             uploadName.focus();
+            setUploadSubmitState(false);
             return;
         }
 
-        if (!packageFileToUpload) {
+        if (!packageFileToUpload && !existingPackageFile) {
             notify('warning', config.archiveRequiredTitle, config.archiveRequiredMessage);
             packageFile.focus();
+            setUploadSubmitState(false);
             return;
         }
 
-        setUploadSubmitState(true, config.uploadingProductPackage);
-        uploadPackage(packageFileToUpload).then(function (session) {
+        isProductSubmitting = true;
+        if (packageFileToUpload) {
+            setUploadSubmitState(true, config.uploadingProductPackage);
+            packageRequest = uploadPackage(packageFileToUpload);
+        } else {
+            setUploadSubmitState(true, config.savingProduct);
+            packageRequest = Promise.resolve(null);
+        }
+
+        packageRequest.then(function (session) {
             var formData = new FormData(uploadForm);
+            var requestUrl = isEditing
+                ? String(config.productUpdateUrlTemplate || '').replace('__product__', encodeURIComponent(editingProductId))
+                : config.productStoreUrl;
 
             uploadSkus.forEach(function (sku) {
                 formData.append('skus[]', sku);
@@ -808,12 +865,25 @@
             if (referenceFile && referenceFile.files && referenceFile.files[0]) {
                 formData.append('reference_file', referenceFile.files[0], referenceFile.files[0].name);
             }
-            formData.append('package_upload_token', session.upload_token);
+            removedImageIds.forEach(function (id) {
+                formData.append('remove_image_ids[]', String(id));
+            });
+            if (session && session.upload_token) {
+                formData.append('package_upload_token', session.upload_token);
+            }
+            if (isEditing) {
+                formData.append('_method', 'PUT');
+            }
             setUploadSubmitState(true, config.savingProduct);
 
-            return formDataRequest(config.productStoreUrl, formData);
+            return formDataRequest(requestUrl, formData);
         }).then(function (payload) {
-            notify('success', config.productCreatedTitle, payload.message || config.productCreatedMessage);
+            notify(
+                'success',
+                isEditing ? config.productUpdatedTitle : config.productCreatedTitle,
+                payload.message || (isEditing ? config.productUpdatedMessage : config.productCreatedMessage)
+            );
+            isProductSubmitting = false;
             if (uploadModal && window.jQuery) {
                 window.jQuery(uploadModal).modal('hide');
             }
@@ -822,14 +892,76 @@
             }, 400);
         }).catch(function (error) {
             notify('error', config.productSaveFailedTitle, error.message || config.productSaveFailedMessage);
+            isProductSubmitting = false;
             setUploadSubmitState(false);
         });
     }
 
     function openUploadModal() {
+        resetUploadModal();
         if (uploadModal && window.jQuery) {
             window.jQuery(uploadModal).modal('show');
         }
+    }
+
+    function productEditUrl(productId) {
+        return String(config.productEditUrlTemplate || '').replace('__product__', encodeURIComponent(productId));
+    }
+
+    function setRadioValue(name, value) {
+        if (!uploadForm) {
+            return;
+        }
+
+        Array.prototype.slice.call(uploadForm.querySelectorAll('input[name="' + name + '"]')).forEach(function (input) {
+            input.checked = input.value === String(value || '');
+        });
+    }
+
+    function setAuthorizedDepartments(values) {
+        var selected = (values || []).map(String);
+
+        if (!uploadForm) {
+            return;
+        }
+
+        Array.prototype.slice.call(uploadForm.querySelectorAll('input[name="authorized_department_ids[]"]')).forEach(function (input) {
+            input.checked = selected.indexOf(input.value) !== -1;
+        });
+    }
+
+    function openEditModal(productId) {
+        if (!productId) {
+            return;
+        }
+
+        jsonRequest(productEditUrl(productId), 'GET').then(function (product) {
+            resetUploadModal();
+            setUploadMode(Number(product.id));
+            uploadName.value = product.name || '';
+            if (uploadLandingUrl) {
+                uploadLandingUrl.value = product.landing_page_url || '';
+            }
+            setRadioValue('source_platform', product.source_platform);
+            setRadioValue('product_type', product.product_type);
+            uploadSkus = Array.isArray(product.skus) ? product.skus.slice() : [];
+            existingImageFiles = Array.isArray(product.images) ? product.images.slice() : [];
+            existingReferenceFile = product.reference_file || null;
+            existingPackageFile = product.package_file || null;
+            renderSkus();
+            renderCategories(Array.isArray(product.category_ids) ? product.category_ids.map(String) : []);
+            renderImagePreviews();
+            updateExistingFileName(referenceFileName, existingReferenceFile);
+            updateExistingFileName(packageFileName, existingPackageFile);
+            setAuthorizedDepartments(product.authorized_department_ids);
+            syncChoiceButtons();
+
+            if (uploadModal && window.jQuery) {
+                window.jQuery(uploadModal).modal('show');
+            }
+        }).catch(function (error) {
+            notify('error', config.productSaveFailedTitle, error.message || config.productSaveFailedMessage);
+        });
     }
 
     if (form) {
@@ -886,7 +1018,12 @@
 
     if (referenceFile) {
         referenceFile.addEventListener('change', function () {
-            updateFileName(referenceFileName, referenceFile.files && referenceFile.files[0]);
+            var file = referenceFile.files && referenceFile.files[0];
+            if (file) {
+                updateFileName(referenceFileName, file);
+                return;
+            }
+            updateExistingFileName(referenceFileName, existingReferenceFile);
         });
     }
 
@@ -897,15 +1034,21 @@
                 packageFile.value = '';
                 file = null;
             }
-            updateFileName(packageFileName, file);
+            if (file) {
+                updateFileName(packageFileName, file);
+                return;
+            }
+            updateExistingFileName(packageFileName, existingPackageFile);
         });
     }
 
     if (uploadForm) {
         uploadForm.addEventListener('submit', function (event) {
             event.preventDefault();
+            event.stopImmediatePropagation();
+            event.stopPropagation();
             submitProduct();
-        });
+        }, true);
     }
 
     if (uploadModal && window.jQuery) {
@@ -993,6 +1136,26 @@
             return;
         }
 
+        var removeExistingImageButton = event.target.closest('[data-aikaipin-remove-existing-image]');
+        if (removeExistingImageButton) {
+            var existingImageId = Number(removeExistingImageButton.getAttribute('data-aikaipin-remove-existing-image'));
+            existingImageFiles = existingImageFiles.filter(function (image) {
+                return Number(image.id) !== existingImageId;
+            });
+            if (removedImageIds.indexOf(existingImageId) === -1) {
+                removedImageIds.push(existingImageId);
+            }
+            renderImagePreviews();
+            return;
+        }
+
+        var uploadSubmitButton = event.target.closest('[data-aikaipin-upload-submit]');
+        if (uploadSubmitButton) {
+            event.preventDefault();
+            submitProduct();
+            return;
+        }
+
         var clearButton = event.target.closest('[data-aikaipin-clear-filters]');
         if (clearButton) {
             clearFilters();
@@ -1040,6 +1203,10 @@
         if (actionButton) {
             if (actionButton.getAttribute('data-aikaipin-action') === 'upload') {
                 openUploadModal();
+                return;
+            }
+            if (actionButton.getAttribute('data-aikaipin-action') === 'edit') {
+                openEditModal(Number(actionButton.getAttribute('data-aikaipin-product-id')));
                 return;
             }
             notify('info', config.comingSoonTitle, config.comingSoonMessage);

@@ -82,6 +82,8 @@ return [
         'category_in_use_message' => 'This category is already used by products and cannot be deleted.',
         'product_created_title' => 'Product saved',
         'product_created_message' => 'The product details, attachments, and authorization scope were saved.',
+        'product_updated_title' => 'Product updated',
+        'product_updated_message' => 'The product details, attachments, and authorization scope were updated.',
         'product_save_failed_title' => 'Save failed',
         'product_save_failed_message' => 'An error occurred while saving the product. Please try again later.',
         'package_upload_title' => 'Uploading product package',
@@ -91,6 +93,7 @@ return [
         'product_category_invalid_message' => 'The selected product category is invalid. Refresh the page and try again.',
         'product_authorization_invalid_message' => 'The selected authorization department is invalid. Refresh the page and try again.',
         'product_selection_invalid_message' => 'The selected products are invalid. Refresh the page and try again.',
+        'product_image_invalid_message' => 'The selected product image is invalid. Refresh the page and try again.',
         'visibility_updated_title' => 'Visibility updated',
         'visibility_enabled_message' => 'Visibility was enabled for :count products in the operation child departments.',
         'visibility_cancelled_message' => 'Visibility was cancelled for :count products in the operation child departments.',
@@ -103,11 +106,9 @@ return [
         'archive_too_large_title' => 'Archive file is too large',
         'archive_too_large_message' => 'The product package archive cannot exceed 150MB.',
         'product_name_required_title' => 'Enter a product name',
-        'product_name_required_message' => 'Enter a product name before simulating the upload.',
+        'product_name_required_message' => 'Enter a product name before saving.',
         'archive_required_title' => 'Select a product package archive',
-        'archive_required_message' => 'Select a product package archive before simulating the upload.',
-        'upload_demo_title' => 'Simulated upload complete',
-        'upload_demo_message' => 'This only completed the frontend demo. No file, product, or authorization has been saved.',
+        'archive_required_message' => 'Select a product package archive before saving.',
     ],
     'visibility' => [
         'selected_none' => 'No products selected',
@@ -271,6 +272,7 @@ return [
     ],
     'upload' => [
         'title' => 'Upload Product Package',
+        'edit_title' => 'Edit Product',
         'sections' => [
             'basic_information' => 'Basic Information',
             'product_details' => 'SKUs & Categories',
@@ -280,7 +282,8 @@ return [
         ],
         'close' => 'Close',
         'cancel' => 'Cancel',
-        'simulate_submit' => 'Save Product',
+        'save_product' => 'Save Product',
+        'save_changes' => 'Save Changes',
         'saving_product' => 'Saving…',
         'uploading_package' => 'Uploading product package…',
         'demo_notice' => 'Submitting saves the product details, attachments, and authorization scope. Product-package uploads support resuming.',
@@ -319,6 +322,7 @@ return [
         'authorization_empty' => 'No second-level departments under Operations are available for authorization.',
         'file_selected' => 'Selected: :name (:size)',
         'file_unselected' => 'No file selected',
+        'file_existing' => 'Keeping current file: :name',
     ],
     'options' => [
         'categories' => [
