@@ -514,6 +514,8 @@ return [
             'timezone_shanghai' => '上海时间',
             'timezone_after_shanghai' => '上海时间 + :hours 小时',
             'timezone_before_shanghai' => '上海时间 - :hours 小时',
+            'timezone_utc_option' => ':offset',
+            'timezone_utc_option_shanghai' => ':offset（上海时间）',
             'submit' => '查询',
             'reset' => '重置',
         ],

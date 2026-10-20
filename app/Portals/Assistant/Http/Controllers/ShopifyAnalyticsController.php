@@ -590,7 +590,10 @@ class ShopifyAnalyticsController extends Controller
             $timezone = $offset === 8
                 ? 'Asia/Shanghai'
                 : ($offset === 0 ? 'UTC' : 'Etc/GMT'.($offset > 0 ? '-'.$offset : '+'.abs($offset)));
-            $options[$timezone] = $this->relativeTimezoneLabel($offset);
+            $offsetLabel = 'UTC'.sprintf('%+03d:00', $offset);
+            $options[$timezone] = $offset === 8
+                ? __('assistant.shopify_analytics.filters.timezone_utc_option_shanghai', ['offset' => $offsetLabel])
+                : __('assistant.shopify_analytics.filters.timezone_utc_option', ['offset' => $offsetLabel]);
         }
 
         return $options;
@@ -628,21 +631,6 @@ class ShopifyAnalyticsController extends Controller
             ->orderByRaw("CASE WHEN {$column} IS NULL THEN 1 ELSE 0 END")
             ->orderBy($column, $filters['direction'])
             ->orderBy('assistant_domain_stores.id');
-    }
-
-    private function relativeTimezoneLabel(int $utcOffset): string
-    {
-        $relativeToShanghai = $utcOffset - 8;
-        $relativeLabel = match (true) {
-            $relativeToShanghai === 0 => __('assistant.shopify_analytics.filters.timezone_shanghai'),
-            $relativeToShanghai > 0 => __('assistant.shopify_analytics.filters.timezone_after_shanghai', ['hours' => $relativeToShanghai]),
-            default => __('assistant.shopify_analytics.filters.timezone_before_shanghai', ['hours' => abs($relativeToShanghai)]),
-        };
-
-        return __('assistant.shopify_analytics.filters.timezone_relative_option', [
-            'relative' => $relativeLabel,
-            'offset' => 'UTC'.sprintf('%+03d:00', $utcOffset),
-        ]);
     }
 
     private function referenceUsdAggregate(string $amountExpression, string $currencyExpression): string
