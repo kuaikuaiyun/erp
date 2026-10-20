@@ -138,6 +138,18 @@ return [
         'image_alt' => 'Product image :number',
     ],
     'selection_proposal' => [
+        'image_preview' => [
+            'title' => 'Product Images - :name',
+            'open' => 'View product images for :name',
+            'close' => 'Close',
+            'previous' => 'Previous image',
+            'next' => 'Next image',
+            'position' => 'Image :current of :total',
+            'thumbnail' => 'Image :number',
+            'thumbnails' => 'Product image thumbnails',
+            'image_alt' => 'Product image :number',
+            'unavailable' => 'The image is temporarily unavailable. Refresh the page and try again.',
+        ],
         'filters' => [
             'keyword' => 'Keyword',
             'keyword_placeholder' => 'Proposal code, product name, specification, or attribute',
@@ -148,6 +160,7 @@ return [
             'submitter' => 'Submitter',
             'status' => 'Status',
             'proposal_code' => 'Proposal Code',
+            'product_images' => 'Product Images',
             'product_name' => 'Product Name',
             'specifications' => 'Specifications',
             'attributes' => 'Optional Attributes',

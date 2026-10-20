@@ -562,6 +562,7 @@ return [
             'graphql_query_failed' => 'The Shopify GraphQL order query failed. Check app permissions, API version, and request configuration.',
             'order_id_missing' => 'Shopify returned an order without an ID. Synchronization for this store was stopped.',
             'order_cursor_missing' => 'Shopify returned a next page without an order cursor. Synchronization for this store was stopped.',
+            'subscription_classification_incomplete' => 'The historical order-tag backfill was not written completely. Select this store and synchronize it again; check the server log if it repeats.',
             'order_timestamp_invalid' => 'Shopify returned an order with a missing or invalid creation timestamp. Synchronization for this store was stopped.',
             'order_amount_invalid' => 'Shopify returned an order with an invalid amount. Synchronization for this store was stopped.',
             'shop_timezone_invalid' => 'Shopify returned an invalid store timezone, so the synchronization date range cannot be determined.',

@@ -147,14 +147,207 @@
 }
 
 .aikaipin-selection-proposal-table {
-    min-width: 1020px;
-    table-layout: auto;
+    min-width: 1180px;
+    table-layout: fixed;
+    width: 100%;
 }
 
-.aikaipin-selection-proposal-table .aikaipin-submission-operation-column,
-.aikaipin-selection-proposal-table .aikaipin-submission-operation-cell {
+.aikaipin-selection-image-column,
+.aikaipin-selection-image-cell {
+    min-width: 78px;
+    width: 78px;
+}
+
+.aikaipin-selection-code-column,
+.aikaipin-selection-code-cell {
+    min-width: 165px;
+    width: 165px;
+}
+
+.aikaipin-selection-product-name-column,
+.aikaipin-selection-product-name-cell {
+    min-width: 200px;
+    width: 200px;
+}
+
+.aikaipin-selection-specification-column,
+.aikaipin-selection-specification-cell,
+.aikaipin-selection-attribute-column,
+.aikaipin-selection-attribute-cell {
+    min-width: 140px;
+}
+
+.aikaipin-selection-submitter-column,
+.aikaipin-selection-submitter-cell {
+    min-width: 110px;
+    width: 110px;
+}
+
+.aikaipin-selection-status-column,
+.aikaipin-selection-status-cell {
+    min-width: 80px;
+    width: 80px;
+}
+
+.aikaipin-selection-updated-at-column,
+.aikaipin-selection-updated-at-cell {
+    min-width: 145px;
+    white-space: nowrap;
+    width: 145px;
+}
+
+.aikaipin-selection-operation-column,
+.aikaipin-selection-operation-cell {
     min-width: 202px;
     width: 202px;
+}
+
+.aikaipin-selection-proposal-table th.aikaipin-selection-code-column {
+    min-width: 165px;
+    width: 165px;
+}
+
+.aikaipin-selection-proposal-table th.aikaipin-selection-image-column {
+    min-width: 78px;
+    width: 78px;
+}
+
+.aikaipin-selection-proposal-table th.aikaipin-selection-product-name-column {
+    min-width: 200px;
+    width: 200px;
+}
+
+.aikaipin-selection-proposal-table th.aikaipin-selection-specification-column,
+.aikaipin-selection-proposal-table th.aikaipin-selection-attribute-column {
+    min-width: 140px;
+}
+
+.aikaipin-selection-proposal-table th.aikaipin-selection-submitter-column {
+    min-width: 110px;
+    width: 110px;
+}
+
+.aikaipin-selection-proposal-table th.aikaipin-selection-status-column {
+    min-width: 80px;
+    width: 80px;
+}
+
+.aikaipin-selection-proposal-table th.aikaipin-selection-updated-at-column {
+    min-width: 145px;
+    width: 145px;
+}
+
+.aikaipin-selection-proposal-table th.aikaipin-selection-operation-column {
+    min-width: 202px;
+    width: 202px;
+}
+
+.aikaipin-selection-product-name-cell {
+    min-width: 0;
+}
+
+.aikaipin-selection-product-name-cell .aikaipin-submission-product-name {
+    display: -webkit-box;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+.aikaipin-selection-specification-cell .aikaipin-submission-labels,
+.aikaipin-selection-attribute-cell .aikaipin-submission-labels {
+    align-content: center;
+    min-height: 24px;
+}
+
+.aikaipin-selection-proposal-table .aikaipin-submission-code {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.aikaipin-selection-proposal-table .aikaipin-submission-operation-cell .btn-group {
+    white-space: nowrap;
+}
+
+.aikaipin-selection-proposal-table .aikaipin-submission-operation-cell .btn {
+    margin-left: 2px;
+}
+
+.aikaipin-selection-proposal-table .aikaipin-submission-operation-cell .btn:first-child {
+    margin-left: 0;
+}
+
+.aikaipin-selection-image-cell {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+}
+
+.aikaipin-selection-list-image {
+    align-items: center;
+    background: #f7f9fb;
+    border: 1px solid #dbe5ee;
+    border-radius: 5px;
+    color: #9aacbc;
+    display: inline-flex;
+    height: 52px;
+    justify-content: center;
+    overflow: visible;
+    padding: 0;
+    position: relative;
+    vertical-align: middle;
+    width: 52px;
+}
+
+button.aikaipin-selection-list-image {
+    cursor: pointer;
+}
+
+button.aikaipin-selection-list-image:hover,
+button.aikaipin-selection-list-image:focus {
+    border-color: #4b9fc9;
+    box-shadow: 0 0 0 2px rgba(62, 145, 191, .14);
+    outline: 0;
+}
+
+.aikaipin-selection-list-image img {
+    border-radius: 4px;
+    display: block;
+    height: 100%;
+    object-fit: cover;
+    width: 100%;
+}
+
+.aikaipin-selection-list-image-empty .fa {
+    font-size: 21px;
+}
+
+.aikaipin-selection-list-image.is-unavailable {
+    border-style: dashed;
+    color: #aab8c4;
+}
+
+.aikaipin-selection-list-image.is-unavailable .fa {
+    font-size: 21px;
+}
+
+.aikaipin-selection-list-image-count {
+    align-items: center;
+    background: #3c8dbc;
+    border: 2px solid #fff;
+    border-radius: 10px;
+    bottom: -5px;
+    color: #fff;
+    display: flex;
+    font-size: 10px;
+    font-weight: 600;
+    height: 19px;
+    justify-content: center;
+    line-height: 1;
+    min-width: 19px;
+    padding: 0 4px;
+    position: absolute;
+    right: -6px;
 }
 
 .aikaipin-submission-pagination {
@@ -178,7 +371,8 @@
 
 #aikaipin-selection-proposal-modal .modal-dialog,
 #aikaipin-placement-evaluation-modal .modal-dialog,
-#aikaipin-selection-proposal-detail-modal .modal-dialog {
+#aikaipin-selection-proposal-detail-modal .modal-dialog,
+#aikaipin-selection-proposal-image-preview-modal .modal-dialog {
     margin: 22px auto;
     max-width: 940px;
     width: calc(100% - 30px);
@@ -308,18 +502,182 @@
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
 }
 
-.aikaipin-submission-detail-image-grid a {
+.aikaipin-submission-detail-image-grid a,
+.aikaipin-submission-detail-image-trigger {
     background: #f7f9fb;
     border: 1px solid #dbe4ec;
     border-radius: 4px;
     display: block;
     overflow: hidden;
+    padding: 0;
+}
+
+.aikaipin-submission-detail-image-trigger {
+    cursor: pointer;
+    width: 100%;
+}
+
+.aikaipin-submission-detail-image-trigger:hover,
+.aikaipin-submission-detail-image-trigger:focus {
+    border-color: #4b9fc9;
+    box-shadow: 0 0 0 2px rgba(62, 145, 191, .14);
+    outline: 0;
 }
 
 .aikaipin-submission-detail-image-grid img {
     display: block;
     height: 120px;
     object-fit: contain;
+    width: 100%;
+}
+
+#aikaipin-selection-proposal-image-preview-modal {
+    z-index: 1070;
+}
+
+.aikaipin-submission-image-preview-modal {
+    border: 0;
+    border-radius: 7px;
+    box-shadow: 0 18px 45px rgba(35, 55, 78, .3);
+    overflow: hidden;
+}
+
+.aikaipin-submission-image-preview-modal .modal-header,
+.aikaipin-submission-image-preview-modal .modal-footer {
+    background: #fff;
+    border-color: #e7edf3;
+    padding: 15px 20px;
+}
+
+.aikaipin-submission-image-preview-modal .modal-title {
+    color: #34495e;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.aikaipin-submission-image-preview-modal .modal-body {
+    background: #f6f8fb;
+    padding: 16px 20px 18px;
+}
+
+.aikaipin-submission-image-preview-stage {
+    align-items: center;
+    background: #edf2f6;
+    border: 1px solid #dce5ec;
+    border-radius: 5px;
+    display: flex;
+    justify-content: center;
+    min-height: 390px;
+    overflow: hidden;
+    position: relative;
+}
+
+.aikaipin-submission-image-preview-canvas {
+    align-items: center;
+    display: flex;
+    height: min(58vh, 520px);
+    justify-content: center;
+    padding: 20px 72px;
+    width: 100%;
+}
+
+.aikaipin-submission-image-preview-canvas img {
+    display: block;
+    height: 100%;
+    max-height: 520px;
+    max-width: 100%;
+    object-fit: contain;
+    width: 100%;
+}
+
+.aikaipin-submission-image-preview-unavailable {
+    color: #7b8c9d;
+    font-size: 13px;
+    line-height: 1.6;
+    margin: 0;
+    max-width: 360px;
+    text-align: center;
+}
+
+.aikaipin-submission-image-preview-navigation {
+    align-items: center;
+    background: rgba(40, 57, 73, .66);
+    border: 0;
+    border-radius: 50%;
+    color: #fff;
+    display: flex;
+    font-size: 31px;
+    height: 42px;
+    justify-content: center;
+    line-height: 1;
+    padding: 0 0 3px;
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 42px;
+    z-index: 1;
+}
+
+.aikaipin-submission-image-preview-navigation:hover,
+.aikaipin-submission-image-preview-navigation:focus {
+    background: #3c8dbc;
+    outline: 0;
+}
+
+.aikaipin-submission-image-preview-navigation:disabled {
+    cursor: default;
+    opacity: .35;
+}
+
+.aikaipin-submission-image-preview-navigation:disabled:hover {
+    background: rgba(40, 57, 73, .66);
+}
+
+.aikaipin-submission-image-preview-previous {
+    left: 16px;
+}
+
+.aikaipin-submission-image-preview-next {
+    right: 16px;
+}
+
+.aikaipin-submission-image-preview-position {
+    color: #718398;
+    font-size: 12px;
+    margin: 11px 0 9px;
+    text-align: center;
+}
+
+.aikaipin-submission-image-preview-thumbnails {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    overflow-x: auto;
+    padding: 2px 0;
+}
+
+.aikaipin-submission-image-preview-thumbnail {
+    background: #fff;
+    border: 2px solid transparent;
+    border-radius: 4px;
+    flex: 0 0 auto;
+    height: 54px;
+    overflow: hidden;
+    padding: 0;
+    width: 54px;
+}
+
+.aikaipin-submission-image-preview-thumbnail:hover,
+.aikaipin-submission-image-preview-thumbnail:focus,
+.aikaipin-submission-image-preview-thumbnail.is-active {
+    border-color: #3c8dbc;
+    outline: 0;
+}
+
+.aikaipin-submission-image-preview-thumbnail img {
+    display: block;
+    height: 100%;
+    object-fit: cover;
     width: 100%;
 }
 
@@ -652,7 +1010,8 @@
 
     #aikaipin-selection-proposal-modal .modal-dialog,
     #aikaipin-placement-evaluation-modal .modal-dialog,
-    #aikaipin-selection-proposal-detail-modal .modal-dialog {
+    #aikaipin-selection-proposal-detail-modal .modal-dialog,
+    #aikaipin-selection-proposal-image-preview-modal .modal-dialog {
         margin: 12px auto;
         width: calc(100% - 20px);
     }
@@ -695,5 +1054,35 @@
 
     .aikaipin-submission-detail-image-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .aikaipin-submission-image-preview-modal .modal-header,
+    .aikaipin-submission-image-preview-modal .modal-footer,
+    .aikaipin-submission-image-preview-modal .modal-body {
+        padding-left: 14px;
+        padding-right: 14px;
+    }
+
+    .aikaipin-submission-image-preview-stage {
+        min-height: 250px;
+    }
+
+    .aikaipin-submission-image-preview-canvas {
+        height: min(48vh, 380px);
+        padding-left: 52px;
+        padding-right: 52px;
+    }
+
+    .aikaipin-submission-image-preview-navigation {
+        height: 36px;
+        width: 36px;
+    }
+
+    .aikaipin-submission-image-preview-previous {
+        left: 8px;
+    }
+
+    .aikaipin-submission-image-preview-next {
+        right: 8px;
     }
 }

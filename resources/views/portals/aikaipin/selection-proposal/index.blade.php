@@ -38,6 +38,12 @@
             'saveLabel' => $t('selection_proposal.actions.save'),
             'saveChangesLabel' => $t('selection_proposal.actions.save_changes'),
             'savingLabel' => $t('upload.saving_product'),
+            'imagePreviewTitle' => $t('selection_proposal.image_preview.title', ['name' => ':name']),
+            'imagePreviewOpen' => $t('selection_proposal.image_preview.open', ['name' => ':name']),
+            'imagePreviewPosition' => $t('selection_proposal.image_preview.position', ['current' => ':current', 'total' => ':total']),
+            'imagePreviewThumbnail' => $t('selection_proposal.image_preview.thumbnail', ['number' => ':number']),
+            'imagePreviewImageAlt' => $t('selection_proposal.image_preview.image_alt', ['number' => ':number']),
+            'imagePreviewUnavailable' => $t('selection_proposal.image_preview.unavailable'),
             'storeUrl' => route('aikaipin.selection-proposals.store'),
             'showUrlTemplate' => route('aikaipin.selection-proposals.show', ['proposal' => '__proposal__']),
             'updateUrlTemplate' => route('aikaipin.selection-proposals.update', ['proposal' => '__proposal__']),
@@ -61,12 +67,12 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-submissions.css?v=20261020-2">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-submissions.css?v=20261020-6">
 @endpush
 
 @push('scripts')
     <script>window.ErpAikaipinSubmissionConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-selection-proposal.js?v=20261020-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-selection-proposal.js?v=20261020-3"></script>
 @endpush
 
 @section('content')
@@ -100,18 +106,32 @@
         <div class="box-body no-padding">
             <div class="table-responsive">
                 <table class="table table-hover aikaipin-submission-table aikaipin-selection-proposal-table">
+                    <colgroup>
+                        <col class="aikaipin-selection-code-column">
+                        <col class="aikaipin-selection-image-column">
+                        <col class="aikaipin-selection-product-name-column">
+                        <col class="aikaipin-selection-specification-column">
+                        <col class="aikaipin-selection-attribute-column">
+                        @if ($canReviewAllSelectionProposals)
+                            <col class="aikaipin-selection-submitter-column">
+                        @endif
+                        <col class="aikaipin-selection-status-column">
+                        <col class="aikaipin-selection-updated-at-column">
+                        <col class="aikaipin-selection-operation-column">
+                    </colgroup>
                     <thead>
                     <tr>
-                        <th>{{ $t('selection_proposal.table.proposal_code') }}</th>
-                        <th>{{ $t('selection_proposal.table.product_name') }}</th>
-                        <th>{{ $t('selection_proposal.table.specifications') }}</th>
-                        <th>{{ $t('selection_proposal.table.attributes') }}</th>
+                        <th class="aikaipin-selection-code-column">{{ $t('selection_proposal.table.proposal_code') }}</th>
+                        <th class="aikaipin-selection-image-column">{{ $t('selection_proposal.table.product_images') }}</th>
+                        <th class="aikaipin-selection-product-name-column">{{ $t('selection_proposal.table.product_name') }}</th>
+                        <th class="aikaipin-selection-specification-column">{{ $t('selection_proposal.table.specifications') }}</th>
+                        <th class="aikaipin-selection-attribute-column">{{ $t('selection_proposal.table.attributes') }}</th>
                         @if ($canReviewAllSelectionProposals)
-                            <th>{{ $t('selection_proposal.table.submitter') }}</th>
+                            <th class="aikaipin-selection-submitter-column">{{ $t('selection_proposal.table.submitter') }}</th>
                         @endif
-                        <th>{{ $t('selection_proposal.table.status') }}</th>
-                        <th>{{ $t('selection_proposal.table.updated_at') }}</th>
-                        <th class="aikaipin-submission-operation-column">{{ $t('selection_proposal.table.operation') }}</th>
+                        <th class="aikaipin-selection-status-column">{{ $t('selection_proposal.table.status') }}</th>
+                        <th class="aikaipin-selection-updated-at-column">{{ $t('selection_proposal.table.updated_at') }}</th>
+                        <th class="aikaipin-submission-operation-column aikaipin-selection-operation-column">{{ $t('selection_proposal.table.operation') }}</th>
                     </tr>
                     </thead>
                     <tbody>
@@ -122,18 +142,40 @@
                             $keywords = strtolower(implode(' ', array_merge([$proposal->proposal_code, $proposal->product_name], $specifications, $attributes)));
                             $updatedAt = $proposal->updated_at?->timezone(config('app.timezone'))->format('Y-m-d H:i');
                             $canEditProposal = (int) $proposal->created_by === (int) $user->getKey() && $proposal->withdrawn_at === null;
+                            $previewImages = $proposal->images->map(static fn ($image): array => [
+                                'url' => route('aikaipin.selection-proposals.images.show', ['proposal' => $proposal, 'image' => $image]),
+                                'name' => (string) $image->original_name,
+                            ])->values()->all();
+                            $imageCount = count($previewImages);
                         @endphp
                         <tr data-aikaipin-list-row data-keyword="{{ $keywords }}">
-                            <td><span class="aikaipin-submission-code">{{ $proposal->proposal_code }}</span></td>
-                            <td><strong class="aikaipin-submission-product-name">{{ $proposal->product_name }}</strong></td>
-                            <td>
+                            <td class="aikaipin-selection-code-cell"><span class="aikaipin-submission-code">{{ $proposal->proposal_code }}</span></td>
+                            <td class="aikaipin-selection-image-cell">
+                                @if ($imageCount > 0)
+                                    <button class="aikaipin-selection-list-image" type="button"
+                                        title="{{ $t('selection_proposal.image_preview.open', ['name' => $proposal->product_name]) }}"
+                                        aria-label="{{ $t('selection_proposal.image_preview.open', ['name' => $proposal->product_name]) }}"
+                                        data-aikaipin-selection-preview-proposal-id="{{ $proposal->getKey() }}">
+                                        <img src="{{ $previewImages[0]['url'] }}" alt="{{ $t('selection_proposal.image_preview.image_alt', ['number' => 1]) }}" data-aikaipin-selection-thumbnail-image>
+                                        @if ($imageCount > 1)
+                                            <span class="aikaipin-selection-list-image-count">{{ $imageCount }}</span>
+                                        @endif
+                                    </button>
+                                @else
+                                    <span class="aikaipin-selection-list-image aikaipin-selection-list-image-empty" aria-label="{{ $t('selection_proposal.fields.no_value') }}">
+                                        <i class="fa fa-picture-o" aria-hidden="true"></i>
+                                    </span>
+                                @endif
+                            </td>
+                            <td class="aikaipin-selection-product-name-cell"><strong class="aikaipin-submission-product-name">{{ $proposal->product_name }}</strong></td>
+                            <td class="aikaipin-selection-specification-cell">
                                 <div class="aikaipin-submission-labels">
                                     @foreach ($specifications as $specification)
                                         <span class="label label-default">{{ $specification }}</span>
                                     @endforeach
                                 </div>
                             </td>
-                            <td>
+                            <td class="aikaipin-selection-attribute-cell">
                                 <div class="aikaipin-submission-labels">
                                     @foreach ($attributes as $attribute)
                                         <span class="label label-info">{{ $attribute }}</span>
@@ -141,17 +183,17 @@
                                 </div>
                             </td>
                             @if ($canReviewAllSelectionProposals)
-                                <td>{{ $proposal->created_by_name }}</td>
+                                <td class="aikaipin-selection-submitter-cell">{{ $proposal->created_by_name }}</td>
                             @endif
-                            <td>
+                            <td class="aikaipin-selection-status-cell">
                                 @if ($proposal->withdrawn_at)
                                     <span class="label label-default">{{ $t('selection_proposal.messages.status_withdrawn') }}</span>
                                 @else
                                     <span class="label label-success">{{ $t('selection_proposal.messages.status_active') }}</span>
                                 @endif
                             </td>
-                            <td><time datetime="{{ $proposal->updated_at?->toAtomString() }}">{{ $updatedAt }}</time></td>
-                            <td class="aikaipin-submission-operation-cell">
+                            <td class="aikaipin-selection-updated-at-cell"><time datetime="{{ $proposal->updated_at?->toAtomString() }}">{{ $updatedAt }}</time></td>
+                            <td class="aikaipin-submission-operation-cell aikaipin-selection-operation-cell">
                                 <div class="btn-group btn-group-sm" role="group" aria-label="{{ $t('selection_proposal.table.operation') }}">
                                     <button class="btn btn-default" type="button" data-aikaipin-selection-view data-aikaipin-proposal-id="{{ $proposal->getKey() }}">
                                         <i class="fa fa-eye" aria-hidden="true"></i> {{ $t('selection_proposal.actions.view') }}
@@ -169,7 +211,7 @@
                         </tr>
                     @endforeach
                     <tr data-aikaipin-list-empty-row @if ($proposals->isNotEmpty()) hidden @endif>
-                        <td colspan="{{ $canReviewAllSelectionProposals ? 8 : 7 }}">
+                        <td colspan="{{ $canReviewAllSelectionProposals ? 9 : 8 }}">
                             <div class="aikaipin-submission-empty-state">
                                 <i class="fa fa-search" aria-hidden="true"></i>
                                 <p data-aikaipin-list-empty-message>{{ $t('selection_proposal.messages.no_records') }}</p>
@@ -180,7 +222,7 @@
                 </table>
             </div>
         </div>
-        @if ($proposals->total() > 0)
+        @if ($proposals->hasPages())
             <div class="box-footer clearfix aikaipin-submission-pagination">
                 <div class="pull-right">{{ $proposals->links() }}</div>
             </div>
@@ -259,6 +301,31 @@
                 <button type="button" class="btn btn-primary" data-aikaipin-selection-submit><i class="fa fa-check" aria-hidden="true"></i> {{ $t('selection_proposal.actions.save') }}</button>
             </div>
         </form>
+    </div>
+</div>
+
+<div id="aikaipin-selection-proposal-image-preview-modal" class="modal fade" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content aikaipin-submission-image-preview-modal">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('selection_proposal.image_preview.close') }}"><span aria-hidden="true">&times;</span></button>
+                <h4 class="modal-title" data-aikaipin-selection-image-preview-title></h4>
+            </div>
+            <div class="modal-body">
+                <div class="aikaipin-submission-image-preview-stage">
+                    <button class="aikaipin-submission-image-preview-navigation aikaipin-submission-image-preview-previous" type="button" data-aikaipin-selection-image-preview-previous aria-label="{{ $t('selection_proposal.image_preview.previous') }}">
+                        <i class="fa fa-angle-left" aria-hidden="true"></i>
+                    </button>
+                    <div class="aikaipin-submission-image-preview-canvas" data-aikaipin-selection-image-preview-canvas></div>
+                    <button class="aikaipin-submission-image-preview-navigation aikaipin-submission-image-preview-next" type="button" data-aikaipin-selection-image-preview-next aria-label="{{ $t('selection_proposal.image_preview.next') }}">
+                        <i class="fa fa-angle-right" aria-hidden="true"></i>
+                    </button>
+                </div>
+                <p class="aikaipin-submission-image-preview-position" data-aikaipin-selection-image-preview-position></p>
+                <div class="aikaipin-submission-image-preview-thumbnails" aria-label="{{ $t('selection_proposal.image_preview.thumbnails') }}" data-aikaipin-selection-image-preview-thumbnails></div>
+            </div>
+            <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">{{ $t('selection_proposal.image_preview.close') }}</button></div>
+        </div>
     </div>
 </div>
 

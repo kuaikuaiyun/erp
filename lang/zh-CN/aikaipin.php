@@ -138,6 +138,18 @@ return [
         'image_alt' => '产品图片 :number',
     ],
     'selection_proposal' => [
+        'image_preview' => [
+            'title' => '产品图片 - :name',
+            'open' => '查看 :name 的产品图片',
+            'close' => '关闭',
+            'previous' => '上一张图片',
+            'next' => '下一张图片',
+            'position' => '第 :current / :total 张',
+            'thumbnail' => '第 :number 张图片',
+            'thumbnails' => '产品图片缩略图',
+            'image_alt' => '产品图片 :number',
+            'unavailable' => '图片暂时无法加载，请稍后刷新后重试。',
+        ],
         'filters' => [
             'keyword' => '关键词',
             'keyword_placeholder' => '提报编号、产品名称、规格或属性',
@@ -148,6 +160,7 @@ return [
             'submitter' => '提报人',
             'status' => '状态',
             'proposal_code' => '提报编号',
+            'product_images' => '产品图片',
             'product_name' => '产品名称',
             'specifications' => '规格',
             'attributes' => '可选属性',

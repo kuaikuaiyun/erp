@@ -1087,7 +1087,7 @@ class ProductLibraryController extends Controller
     private function selectionProposalQuery(AdminUser $user, bool $canReviewAll, array $filters): Builder
     {
         $query = AikaipinSelectionProposal::query()
-            ->with(['tags'])
+            ->with(['tags', 'images'])
             ->latest('updated_at')
             ->latest('id');
 
