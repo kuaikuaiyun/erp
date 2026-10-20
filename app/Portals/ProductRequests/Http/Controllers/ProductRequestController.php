@@ -66,7 +66,7 @@ class ProductRequestController extends Controller
         ]);
     }
 
-    /** 查重工具：按产品名或 1688 链接查询系统中已录入的商品数据（PCL/SKU/重量/图片） */
+    /** 查重工具：必须同时填写产品名和 1688 链接，按链接精确匹配优先 */
     public function operationDedupeIndex(Request $request): Response|View
     {
         $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
@@ -78,19 +78,16 @@ class ProductRequestController extends Controller
         $supplierUrl = trim((string) $request->input('supplier_url', ''));
         $results = [];
         $matchType = null;
+        $validationHint = null;
 
         if ($keyword === '' && $supplierUrl === '') {
-            return view('portals.product-requests.operation.dedupe', [
-                ...$this->viewContext($context),
-                'keyword' => $keyword,
-                'supplierUrl' => $supplierUrl,
-                'results' => [],
-                'matchType' => null,
-            ]);
-        }
-
-        // --- 路径 1：有 1688 链接时精确匹配（对齐采购检验里的链接查重） ---
-        if ($supplierUrl !== '') {
+            // 都没填：正常页面，不提示
+        } elseif ($keyword === '') {
+            $validationHint = __('product_requests.dedupe.keyword_required_hint');
+        } elseif ($supplierUrl === '') {
+            $validationHint = __('product_requests.dedupe.supplier_url_required_hint');
+        } else {
+            // 两个都填：先链接精确匹配，没命中回退关键词
             $normalizedUrl = $this->workflow->normalizeSupplierUrl($supplierUrl);
             $hash = $this->workflow->supplierUrlHash($normalizedUrl);
             $matchType = 'supplier_url';
@@ -113,20 +110,16 @@ class ProductRequestController extends Controller
             foreach ($records as $record) {
                 $h = (string) $record->supplier_url_hash;
                 if ($h !== '' && isset($seenHashes[$h])) {
-                    continue; // 已被 link_sku 覆盖
+                    continue;
                 }
                 $results[] = $this->reusePayload($record);
             }
 
-            // 1.3 链接精确匹配没命中时，回退到关键词模糊（两个都填的场景）
-            if ($results === [] && $keyword !== '') {
+            // 1.3 链接精确匹配没命中时，回退到关键词模糊
+            if ($results === []) {
                 $results = $this->dedupeKeywordResults($keyword);
                 $matchType = $results !== [] ? 'keyword' : null;
             }
-        } else {
-            // --- 路径 2：仅产品名称模糊搜索 ---
-            $results = $this->dedupeKeywordResults($keyword);
-            $matchType = $results !== [] ? 'keyword' : null;
         }
 
         return view('portals.product-requests.operation.dedupe', [
@@ -135,6 +128,7 @@ class ProductRequestController extends Controller
             'supplierUrl' => $supplierUrl,
             'results' => $results,
             'matchType' => $matchType,
+            'validationHint' => $validationHint,
         ]);
     }
 
@@ -712,10 +706,13 @@ class ProductRequestController extends Controller
         return redirect()->route('product-requests.link-skus.index')->with('success', __('product_requests.link_skus.review_done_success'));
     }
 
-    /** 链接实拍图鉴权读取（已登录即可访问，跨门户共享） */
+    /** 链接实拍图鉴权读取（跨门户共享，已登录即可访问） */
     public function linkSkuImage(Request $request, ProductRequestLinkSku $linkSku, int $index): Response
     {
-        abort_if($request->user() === null, 401);
+        $context = $this->anyPortalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
 
         $images = array_values((array) ($linkSku->images ?? []));
         $path = $images[$index] ?? null;
@@ -724,10 +721,13 @@ class ProductRequestController extends Controller
         return response()->file(Storage::disk('local')->path($path));
     }
 
-    /** 链接产品图（导入 Excel 主图）鉴权读取（已登录即可访问，跨门户共享） */
+    /** 链接产品图（导入 Excel 主图）鉴权读取（跨门户共享，已登录即可访问） */
     public function linkSkuProductImage(Request $request, ProductRequestLinkSku $linkSku): Response
     {
-        abort_if($request->user() === null, 401);
+        $context = $this->anyPortalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
 
         $path = (string) ($linkSku->product_image ?? '');
         abort_if($path === '' || !Storage::disk('local')->exists($path), 404);
