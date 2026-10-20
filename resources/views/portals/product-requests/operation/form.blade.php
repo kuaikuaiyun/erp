@@ -1,4 +1,4 @@
-﻿@php
+@php
     $isEdit = $productRequest->exists;
     $draft = $draft ?? null;
     $draftData = [
@@ -18,7 +18,19 @@
             ?: trim((string) ($actor['department_name'] ?? ''))
             ?: trim((string) ($actor['user_name'] ?? ''))
             ?: 'SKU';
-        $skuPrefix = $teamShortName.'-'.now('Asia/Shanghai')->format('Ymd').'-';
+        // 编辑/草稿场景优先从已有 SKU 反推前缀，避免 now() 日期变化导致前缀匹配失败
+        $baseSkus = $isEdit ? (string) $productRequest->skus : ($draft ? (string) $draft->skus : '');
+        $skuPrefix = null;
+        if ($baseSkus !== '') {
+            $firstSku = trim((string) preg_split('/[,，;；\n]+/u', $baseSkus)[0] ?? '');
+            if ($firstSku !== '') {
+                $skuParts = explode('-', $firstSku);
+                if (count($skuParts) >= 2 && preg_match('/^\d{8}$/', $skuParts[1])) {
+                    $skuPrefix = $skuParts[0].'-'.$skuParts[1].'-';
+                }
+            }
+        }
+        $skuPrefix = $skuPrefix ?? $teamShortName.'-'.now('Asia/Shanghai')->format('Ymd').'-';
         $existingSkus = ($isEdit || $draft)
             ? collect(preg_split('/[,，;；\n]+/u', $isEdit ? (string) $productRequest->skus : $draftData['skus']))->map(fn ($s) => trim($s))->filter()->values()
             : collect();
