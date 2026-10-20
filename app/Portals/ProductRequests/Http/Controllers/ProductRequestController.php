@@ -122,6 +122,8 @@ class ProductRequestController extends Controller
 
             if ($keyword !== '' && $results === []) {
                 $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $keyword);
+
+                // 1. 查需求提报记录的产品名
                 $records = ProductRequest::query()
                     ->whereNotNull('standard_chinese_name')
                     ->where('standard_chinese_name', 'like', '%'.$escaped.'%')
@@ -130,16 +132,34 @@ class ProductRequestController extends Controller
                     ->limit(30)
                     ->get();
 
+                // 2. 查链接 SKU 库的 product_name（251 条记录的主来源）
+                $linkSkuRows = ProductRequestLinkSku::query()
+                    ->where('product_name', 'like', '%'.$escaped.'%')
+                    ->limit(30)
+                    ->get();
+
+                // 3. 链接 SKU 库优先
+                $seenHashes = [];
+                foreach ($linkSkuRows as $linkSku) {
+                    if ($this->splitSkus((string) $linkSku->skus) === []) {
+                        continue;
+                    }
+                    $hash = (string) $linkSku->supplier_url_hash;
+                    if ($hash !== '') {
+                        $seenHashes[$hash] = true;
+                    }
+                    $results[] = $this->linkSkuReusePayload($linkSku);
+                }
+
+                // 4. 补需求提报（去掉已被链接 SKU 覆盖的链接）
                 foreach ($records as $record) {
+                    $hash = (string) $record->supplier_url_hash;
+                    if ($hash !== '' && isset($seenHashes[$hash])) {
+                        continue;
+                    }
                     $results[] = $this->reusePayload($record);
                 }
 
-                // 按链接聚合去重
-                $results = collect($results)
-                    ->groupBy(fn (array $item): string => md5((string) ($item['supplier_url'] ?? $item['report_no'] ?? '')))
-                    ->map(fn ($group) => $group->sortByDesc('id')->first())
-                    ->values()
-                    ->all();
                 $matchType = 'keyword';
             }
         }
@@ -2864,6 +2884,13 @@ class ProductRequestController extends Controller
                 'url' => route('product-requests.link-skus.image', [$linkSku, $index]),
                 'name' => basename($path),
             ])->values()->all();
+        // images 数组基本未存储（全表 NULL），兜底用 product_image 封面显示
+        if ($sellerImages === [] && $linkSku->product_image) {
+            $sellerImages = [[
+                'url' => route('product-requests.link-skus.product-image', $linkSku),
+                'name' => basename($linkSku->product_image),
+            ]];
+        }
         if ($sellerImages === [] && $latest) {
             $sellerImages = $latest->attachmentsFor(ProductRequestAttachment::STAGE_PROCUREMENT)
                 ->map(fn (ProductRequestAttachment $attachment): array => [
