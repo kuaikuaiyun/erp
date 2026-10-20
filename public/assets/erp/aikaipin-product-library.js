@@ -23,6 +23,7 @@
     var uploadModal = document.getElementById('aikaipin-upload-modal');
     var uploadForm = document.querySelector('[data-aikaipin-upload-form]');
     var uploadName = document.querySelector('[data-aikaipin-upload-name]');
+    var uploadLandingUrl = document.querySelector('[data-aikaipin-upload-landing-url]');
     var skuInput = document.querySelector('[data-aikaipin-sku-input]');
     var skuTags = document.querySelector('[data-aikaipin-sku-tags]');
     var categoryInput = document.querySelector('[data-aikaipin-category-input]');
@@ -36,9 +37,18 @@
     var uploadProgress = document.querySelector('[data-aikaipin-upload-progress]');
     var uploadProgressBar = document.querySelector('[data-aikaipin-upload-progress-bar]');
     var uploadSubmit = document.querySelector('[data-aikaipin-upload-submit]');
+    var uploadTitle = document.querySelector('[data-aikaipin-upload-title]');
     var uploadSkus = [];
     var uploadImageFiles = [];
+    var existingImageFiles = [];
+    var removedImageIds = [];
+    var existingReferenceFile = null;
+    var existingPackageFile = null;
+    var editingProductId = null;
+    var isProductSubmitting = false;
     var uploadTimer = null;
+    var packageUploadToken = '';
+    var uploadSubmitHtml = uploadSubmit ? uploadSubmit.innerHTML : '';
     var uploadCategories = loadCategories();
     var previewImages = [];
     var previewImageIndex = 0;
@@ -95,6 +105,11 @@
     }
 
     function clearFilters() {
+        if (config.serverFilters) {
+            window.location.assign(config.filterResetUrl || (form ? form.action : window.location.pathname));
+            return;
+        }
+
         Object.keys(filters).forEach(function (name) {
             if (filters[name]) {
                 filters[name].value = '';
@@ -171,6 +186,7 @@
             visibilityConfirm.textContent = mode === 'enable'
                 ? config.enableVisibilityConfirm
                 : config.cancelVisibilityConfirm;
+            visibilityConfirm.setAttribute('data-aikaipin-visibility-action', mode);
             visibilityConfirm.className = mode === 'enable'
                 ? 'btn btn-primary'
                 : 'btn btn-warning';
@@ -336,14 +352,7 @@
     }
 
     function defaultCategories() {
-        var presetCategories = config.presetCategories || {};
-
-        return Object.keys(presetCategories).map(function (value) {
-            return {
-                value: value,
-                label: String(presetCategories[value])
-            };
-        });
+        return normalizeCategories(config.initialCategories || []);
     }
 
     function normalizeCategories(categories) {
@@ -368,35 +377,7 @@
     }
 
     function loadCategories() {
-        var storageKey = config.categoryStorageKey;
-
-        if (!storageKey || !window.localStorage) {
-            return defaultCategories();
-        }
-
-        try {
-            var stored = window.localStorage.getItem(storageKey);
-
-            if (stored === null) {
-                return defaultCategories();
-            }
-
-            return normalizeCategories(JSON.parse(stored));
-        } catch (error) {
-            return defaultCategories();
-        }
-    }
-
-    function persistCategories() {
-        if (!config.categoryStorageKey || !window.localStorage) {
-            return;
-        }
-
-        try {
-            window.localStorage.setItem(config.categoryStorageKey, JSON.stringify(uploadCategories));
-        } catch (error) {
-            // Browser storage can be unavailable in private browsing mode.
-        }
+        return defaultCategories();
     }
 
     function selectedCategories() {
@@ -432,7 +413,7 @@
             choice.className = 'btn btn-default btn-sm' + (isSelected ? ' active' : '');
             input.className = 'aikaipin-category-choice-input';
             input.type = 'checkbox';
-            input.name = 'categories[]';
+            input.name = 'category_ids[]';
             input.value = category.value;
             input.checked = isSelected;
             input.setAttribute('data-aikaipin-category-choice', '');
@@ -451,8 +432,67 @@
         });
     }
 
-    function categoryValue() {
-        return 'custom_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+    function categoryRequest(url, method, body) {
+        return window.fetch(url, {
+            method: method,
+            credentials: 'same-origin',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': config.csrfToken || ''
+            },
+            body: body ? JSON.stringify(body) : null
+        }).then(function (response) {
+            return response.json().catch(function () {
+                return {};
+            }).then(function (payload) {
+                if (!response.ok) {
+                    throw new Error(payload.message || config.categoryDuplicateMessage);
+                }
+
+                return payload;
+            });
+        });
+    }
+
+    function responsePayload(response) {
+        return response.json().catch(function () {
+            return {};
+        }).then(function (payload) {
+            if (!response.ok) {
+                var fieldErrors = payload.errors || {};
+                var firstField = Object.keys(fieldErrors)[0];
+                var firstMessage = firstField && fieldErrors[firstField] && fieldErrors[firstField][0];
+                throw new Error(firstMessage || payload.message || config.productSaveFailedMessage);
+            }
+
+            return payload;
+        });
+    }
+
+    function jsonRequest(url, method, body) {
+        return window.fetch(url, {
+            method: method,
+            credentials: 'same-origin',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': config.csrfToken || ''
+            },
+            body: body ? JSON.stringify(body) : null
+        }).then(responsePayload);
+    }
+
+    function formDataRequest(url, formData) {
+        return window.fetch(url, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Accept': 'application/json',
+                'X-CSRF-TOKEN': config.csrfToken || ''
+            },
+            body: formData
+        }).then(responsePayload);
     }
 
     function addCategory() {
@@ -463,40 +503,47 @@
             return;
         }
 
-        var duplicate = uploadCategories.some(function (category) {
-            return category.label.toLowerCase() === label.toLowerCase();
-        });
-
-        if (duplicate) {
-            notify('warning', config.categoryDuplicateTitle, config.categoryDuplicateMessage);
-            categoryInput.focus();
-            return;
-        }
-
-        var newCategory = {
-            value: categoryValue(),
-            label: label
-        };
         var selectedValues = selectedCategories();
 
-        selectedValues.push(newCategory.value);
-        uploadCategories.push(newCategory);
-        persistCategories();
-        renderCategories(selectedValues);
-        categoryInput.value = '';
-        categoryInput.focus();
+        categoryInput.disabled = true;
+        categoryRequest(config.categoryStoreUrl, 'POST', {name: label}).then(function (payload) {
+            var newCategory = payload.category;
+
+            if (!newCategory || !newCategory.value || !newCategory.label) {
+                throw new Error(config.categoryDuplicateMessage);
+            }
+
+            selectedValues.push(String(newCategory.value));
+            uploadCategories.push({
+                value: String(newCategory.value),
+                label: String(newCategory.label)
+            });
+            renderCategories(selectedValues);
+            categoryInput.value = '';
+            notify('success', config.categoryCreatedTitle, payload.message || config.categoryCreatedMessage);
+        }).catch(function (error) {
+            notify('warning', config.categoryDuplicateTitle, error.message || config.categoryDuplicateMessage);
+        }).then(function () {
+            categoryInput.disabled = false;
+            categoryInput.focus();
+        });
     }
 
     function removeCategory(value) {
         var selectedValues = selectedCategories().filter(function (selectedValue) {
             return selectedValue !== value;
         });
+        var deleteUrl = String(config.categoryDeleteUrlTemplate || '').replace('__category__', encodeURIComponent(value));
 
-        uploadCategories = uploadCategories.filter(function (category) {
-            return category.value !== value;
+        categoryRequest(deleteUrl, 'DELETE').then(function (payload) {
+            uploadCategories = uploadCategories.filter(function (category) {
+                return category.value !== value;
+            });
+            renderCategories(selectedValues);
+            notify('success', config.categoryDeletedTitle, payload.message || config.categoryDeletedMessage);
+        }).catch(function (error) {
+            notify('warning', config.categoryDuplicateTitle, error.message || config.categoryDuplicateMessage);
         });
-        persistCategories();
-        renderCategories(selectedValues);
     }
 
     function releaseImageUrls() {
@@ -507,33 +554,40 @@
         });
     }
 
+    function addImagePreview(item, removeAttribute, removeValue) {
+        var preview = document.createElement('div');
+        var image = document.createElement('img');
+        var removeButton = document.createElement('button');
+
+        preview.className = 'aikaipin-image-preview';
+        image.src = item.url;
+        image.alt = item.name || (item.file && item.file.name) || '';
+        removeButton.type = 'button';
+        removeButton.className = 'aikaipin-image-preview-remove';
+        removeButton.setAttribute('aria-label', image.alt);
+        removeButton.setAttribute(removeAttribute, String(removeValue));
+        removeButton.innerHTML = '&times;';
+        preview.appendChild(image);
+        preview.appendChild(removeButton);
+        imagePreviews.appendChild(preview);
+    }
+
     function renderImagePreviews() {
         if (!imagePreviews) {
             return;
         }
 
         imagePreviews.innerHTML = '';
+        existingImageFiles.forEach(function (item) {
+            addImagePreview(item, 'data-aikaipin-remove-existing-image', item.id);
+        });
         uploadImageFiles.forEach(function (item, index) {
-            var preview = document.createElement('div');
-            var image = document.createElement('img');
-            var removeButton = document.createElement('button');
-
-            preview.className = 'aikaipin-image-preview';
-            image.src = item.url;
-            image.alt = item.file.name;
-            removeButton.type = 'button';
-            removeButton.className = 'aikaipin-image-preview-remove';
-            removeButton.setAttribute('aria-label', item.file.name);
-            removeButton.setAttribute('data-aikaipin-remove-image', String(index));
-            removeButton.innerHTML = '&times;';
-            preview.appendChild(image);
-            preview.appendChild(removeButton);
-            imagePreviews.appendChild(preview);
+            addImagePreview(item, 'data-aikaipin-remove-image', index);
         });
     }
 
     function addImages(files) {
-        var available = Math.max(0, 3 - uploadImageFiles.length);
+        var available = Math.max(0, 3 - existingImageFiles.length - uploadImageFiles.length);
         var accepted = 0;
         var reachedLimit = files.length > available;
 
@@ -549,7 +603,8 @@
 
             uploadImageFiles.push({
                 file: file,
-                url: window.URL.createObjectURL(file)
+                url: window.URL.createObjectURL(file),
+                name: file.name
             });
             accepted += 1;
         });
@@ -575,6 +630,16 @@
 
         element.textContent = file
             ? replaceTokens(config.fileSelected, {name: file.name, size: fileSize(file.size)})
+            : config.fileUnselected;
+    }
+
+    function updateExistingFileName(element, file) {
+        if (!element) {
+            return;
+        }
+
+        element.textContent = file
+            ? replaceTokens(config.fileExisting, {name: file.name})
             : config.fileUnselected;
     }
 
@@ -604,6 +669,17 @@
         });
     }
 
+    function setUploadMode(productId) {
+        editingProductId = productId || null;
+        uploadSubmitHtml = '<i class="fa fa-' + (editingProductId ? 'save' : 'upload') + '" aria-hidden="true"></i> '
+            + String(editingProductId ? config.saveChangesLabel : config.saveProductLabel);
+
+        if (uploadTitle) {
+            uploadTitle.textContent = editingProductId ? config.editTitle : config.uploadTitle;
+        }
+        setUploadSubmitState(false);
+    }
+
     function resetUploadModal() {
         if (!uploadForm) {
             return;
@@ -618,6 +694,12 @@
         releaseImageUrls();
         uploadSkus = [];
         uploadImageFiles = [];
+        existingImageFiles = [];
+        removedImageIds = [];
+        existingReferenceFile = null;
+        existingPackageFile = null;
+        packageUploadToken = '';
+        isProductSubmitting = false;
         renderSkus();
         renderCategories([]);
         renderImagePreviews();
@@ -631,64 +713,274 @@
             uploadProgressBar.style.width = '0%';
             uploadProgressBar.setAttribute('aria-valuenow', '0');
         }
-        if (uploadSubmit) {
-            uploadSubmit.disabled = false;
-        }
-
         syncChoiceButtons();
+        setUploadMode(null);
     }
 
-    function simulateUpload() {
-        var progress = 0;
+    function setUploadSubmitState(isBusy, label) {
+        if (!uploadSubmit) {
+            return;
+        }
+
+        uploadSubmit.disabled = isBusy;
+        uploadSubmit.innerHTML = isBusy
+            ? '<i class="fa fa-spinner fa-spin" aria-hidden="true"></i> ' + String(label || config.savingProduct)
+            : uploadSubmitHtml;
+    }
+
+    function updateUploadProgress(received, total) {
+        var percentage = total > 0 ? Math.min(100, Math.floor((received / total) * 100)) : 0;
 
         if (uploadProgress) {
             uploadProgress.hidden = false;
         }
-        if (uploadSubmit) {
-            uploadSubmit.disabled = true;
+        if (uploadProgressBar) {
+            uploadProgressBar.style.width = percentage + '%';
+            uploadProgressBar.setAttribute('aria-valuenow', String(percentage));
+        }
+    }
+
+    function packageFingerprint(file) {
+        var value = [file.name, file.size, file.lastModified, 5 * 1024 * 1024].join('|');
+        var hash = 2166136261;
+        var index;
+
+        for (index = 0; index < value.length; index += 1) {
+            hash ^= value.charCodeAt(index);
+            hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
         }
 
-        uploadTimer = window.setInterval(function () {
-            progress = Math.min(100, progress + 20);
-            if (uploadProgressBar) {
-                uploadProgressBar.style.width = progress + '%';
-                uploadProgressBar.setAttribute('aria-valuenow', String(progress));
+        return ('00000000' + (hash >>> 0).toString(16)).slice(-8).repeat(8);
+    }
+
+    function packagePartUrl(token, chunkIndex) {
+        return String(config.packageUploadPartUrlTemplate || '')
+            .replace('__token__', encodeURIComponent(token))
+            .replace('__chunk__', String(chunkIndex));
+    }
+
+    function packageCompleteUrl(token) {
+        return String(config.packageUploadCompleteUrlTemplate || '').replace('__token__', encodeURIComponent(token));
+    }
+
+    function uploadPackage(file) {
+        var totalChunks = Math.ceil(file.size / (5 * 1024 * 1024));
+
+        return jsonRequest(config.packageUploadInitializeUrl, 'POST', {
+            client_fingerprint: packageFingerprint(file),
+            original_name: file.name,
+            mime_type: file.type || null,
+            total_size: file.size,
+            total_chunks: totalChunks
+        }).then(function (session) {
+            var uploaded = {};
+            var chunkIndex = 0;
+
+            packageUploadToken = session.upload_token;
+            (session.uploaded_chunks || []).forEach(function (index) {
+                uploaded[Number(index)] = true;
+            });
+            updateUploadProgress(Number(session.received_size || 0), file.size);
+
+            function uploadNextPart() {
+                while (chunkIndex < totalChunks && uploaded[chunkIndex]) {
+                    chunkIndex += 1;
+                }
+
+                if (chunkIndex >= totalChunks) {
+                    return jsonRequest(packageCompleteUrl(packageUploadToken), 'POST').then(function (completed) {
+                        packageUploadToken = completed.upload_token;
+                        updateUploadProgress(file.size, file.size);
+                        return completed;
+                    });
+                }
+
+                var start = chunkIndex * 5 * 1024 * 1024;
+                var end = Math.min(file.size, start + 5 * 1024 * 1024);
+                var partData = new FormData();
+                var currentIndex = chunkIndex;
+
+                partData.append('chunk', file.slice(start, end), file.name + '.part');
+                return formDataRequest(packagePartUrl(packageUploadToken, currentIndex), partData).then(function (updatedSession) {
+                    uploaded[currentIndex] = true;
+                    chunkIndex = currentIndex + 1;
+                    updateUploadProgress(Number(updatedSession.received_size || 0), file.size);
+                    return uploadNextPart();
+                });
             }
 
-            if (progress === 100) {
-                window.clearInterval(uploadTimer);
-                uploadTimer = null;
-                if (uploadSubmit) {
-                    uploadSubmit.disabled = false;
-                }
-                notify('success', config.uploadDemoTitle, config.uploadDemoMessage);
+            if (session.status === 'completed') {
+                updateUploadProgress(file.size, file.size);
+                return session;
             }
-        }, 180);
+
+            return uploadNextPart();
+        });
+    }
+
+    function submitProduct() {
+        var packageFileToUpload = packageFile && packageFile.files && packageFile.files[0];
+        var isEditing = editingProductId !== null;
+        var packageRequest;
+
+        if (isProductSubmitting) {
+            return;
+        }
+
+        if (!uploadName || String(uploadName.value || '').trim() === '') {
+            notify('warning', config.productNameRequiredTitle, config.productNameRequiredMessage);
+            uploadName.focus();
+            setUploadSubmitState(false);
+            return;
+        }
+
+        if (!packageFileToUpload && !existingPackageFile) {
+            notify('warning', config.archiveRequiredTitle, config.archiveRequiredMessage);
+            packageFile.focus();
+            setUploadSubmitState(false);
+            return;
+        }
+
+        isProductSubmitting = true;
+        if (packageFileToUpload) {
+            setUploadSubmitState(true, config.uploadingProductPackage);
+            packageRequest = uploadPackage(packageFileToUpload);
+        } else {
+            setUploadSubmitState(true, config.savingProduct);
+            packageRequest = Promise.resolve(null);
+        }
+
+        packageRequest.then(function (session) {
+            var formData = new FormData(uploadForm);
+            var requestUrl = isEditing
+                ? String(config.productUpdateUrlTemplate || '').replace('__product__', encodeURIComponent(editingProductId))
+                : config.productStoreUrl;
+
+            uploadSkus.forEach(function (sku) {
+                formData.append('skus[]', sku);
+            });
+            uploadImageFiles.forEach(function (item) {
+                formData.append('images[]', item.file, item.file.name);
+            });
+            if (referenceFile && referenceFile.files && referenceFile.files[0]) {
+                formData.append('reference_file', referenceFile.files[0], referenceFile.files[0].name);
+            }
+            removedImageIds.forEach(function (id) {
+                formData.append('remove_image_ids[]', String(id));
+            });
+            if (session && session.upload_token) {
+                formData.append('package_upload_token', session.upload_token);
+            }
+            if (isEditing) {
+                formData.append('_method', 'PUT');
+            }
+            setUploadSubmitState(true, config.savingProduct);
+
+            return formDataRequest(requestUrl, formData);
+        }).then(function (payload) {
+            notify(
+                'success',
+                isEditing ? config.productUpdatedTitle : config.productCreatedTitle,
+                payload.message || (isEditing ? config.productUpdatedMessage : config.productCreatedMessage)
+            );
+            isProductSubmitting = false;
+            if (uploadModal && window.jQuery) {
+                window.jQuery(uploadModal).modal('hide');
+            }
+            window.setTimeout(function () {
+                window.location.assign(payload.redirect_url || window.location.href);
+            }, 400);
+        }).catch(function (error) {
+            notify('error', config.productSaveFailedTitle, error.message || config.productSaveFailedMessage);
+            isProductSubmitting = false;
+            setUploadSubmitState(false);
+        });
     }
 
     function openUploadModal() {
+        resetUploadModal();
         if (uploadModal && window.jQuery) {
             window.jQuery(uploadModal).modal('show');
         }
     }
 
-    if (form) {
-        form.addEventListener('submit', function (event) {
-            event.preventDefault();
-            applyFilters();
-        });
+    function productEditUrl(productId) {
+        return String(config.productEditUrlTemplate || '').replace('__product__', encodeURIComponent(productId));
+    }
 
-        form.addEventListener('reset', function () {
-            window.setTimeout(clearFilters, 0);
+    function setRadioValue(name, value) {
+        if (!uploadForm) {
+            return;
+        }
+
+        Array.prototype.slice.call(uploadForm.querySelectorAll('input[name="' + name + '"]')).forEach(function (input) {
+            input.checked = input.value === String(value || '');
         });
     }
 
-    Object.keys(filters).forEach(function (name) {
-        if (filters[name]) {
-            filters[name].addEventListener('change', applyFilters);
-            filters[name].addEventListener('input', applyFilters);
+    function setAuthorizedDepartments(values) {
+        var selected = (values || []).map(String);
+
+        if (!uploadForm) {
+            return;
         }
-    });
+
+        Array.prototype.slice.call(uploadForm.querySelectorAll('input[name="authorized_department_ids[]"]')).forEach(function (input) {
+            input.checked = selected.indexOf(input.value) !== -1;
+        });
+    }
+
+    function openEditModal(productId) {
+        if (!productId) {
+            return;
+        }
+
+        jsonRequest(productEditUrl(productId), 'GET').then(function (product) {
+            resetUploadModal();
+            setUploadMode(Number(product.id));
+            uploadName.value = product.name || '';
+            if (uploadLandingUrl) {
+                uploadLandingUrl.value = product.landing_page_url || '';
+            }
+            setRadioValue('source_platform', product.source_platform);
+            setRadioValue('product_type', product.product_type);
+            uploadSkus = Array.isArray(product.skus) ? product.skus.slice() : [];
+            existingImageFiles = Array.isArray(product.images) ? product.images.slice() : [];
+            existingReferenceFile = product.reference_file || null;
+            existingPackageFile = product.package_file || null;
+            renderSkus();
+            renderCategories(Array.isArray(product.category_ids) ? product.category_ids.map(String) : []);
+            renderImagePreviews();
+            updateExistingFileName(referenceFileName, existingReferenceFile);
+            updateExistingFileName(packageFileName, existingPackageFile);
+            setAuthorizedDepartments(product.authorized_department_ids);
+            syncChoiceButtons();
+
+            if (uploadModal && window.jQuery) {
+                window.jQuery(uploadModal).modal('show');
+            }
+        }).catch(function (error) {
+            notify('error', config.productSaveFailedTitle, error.message || config.productSaveFailedMessage);
+        });
+    }
+
+    if (form) {
+        form.addEventListener('submit', function (event) {
+            if (!config.serverFilters) {
+                event.preventDefault();
+                applyFilters();
+            }
+        });
+    }
+
+    if (!config.serverFilters) {
+        Object.keys(filters).forEach(function (name) {
+            if (filters[name]) {
+                filters[name].addEventListener('change', applyFilters);
+                filters[name].addEventListener('input', applyFilters);
+            }
+        });
+    }
 
     if (selectAll) {
         selectAll.addEventListener('change', function () {
@@ -726,7 +1018,12 @@
 
     if (referenceFile) {
         referenceFile.addEventListener('change', function () {
-            updateFileName(referenceFileName, referenceFile.files && referenceFile.files[0]);
+            var file = referenceFile.files && referenceFile.files[0];
+            if (file) {
+                updateFileName(referenceFileName, file);
+                return;
+            }
+            updateExistingFileName(referenceFileName, existingReferenceFile);
         });
     }
 
@@ -737,32 +1034,21 @@
                 packageFile.value = '';
                 file = null;
             }
-            updateFileName(packageFileName, file);
+            if (file) {
+                updateFileName(packageFileName, file);
+                return;
+            }
+            updateExistingFileName(packageFileName, existingPackageFile);
         });
     }
 
     if (uploadForm) {
         uploadForm.addEventListener('submit', function (event) {
             event.preventDefault();
-
-            if (!uploadName || String(uploadName.value || '').trim() === '') {
-                notify('warning', config.productNameRequiredTitle, config.productNameRequiredMessage);
-                if (uploadName) {
-                    uploadName.focus();
-                }
-                return;
-            }
-
-            if (!packageFile || !packageFile.files || !packageFile.files[0]) {
-                notify('warning', config.archiveRequiredTitle, config.archiveRequiredMessage);
-                if (packageFile) {
-                    packageFile.focus();
-                }
-                return;
-            }
-
-            simulateUpload();
-        });
+            event.stopImmediatePropagation();
+            event.stopPropagation();
+            submitProduct();
+        }, true);
     }
 
     if (uploadModal && window.jQuery) {
@@ -850,6 +1136,26 @@
             return;
         }
 
+        var removeExistingImageButton = event.target.closest('[data-aikaipin-remove-existing-image]');
+        if (removeExistingImageButton) {
+            var existingImageId = Number(removeExistingImageButton.getAttribute('data-aikaipin-remove-existing-image'));
+            existingImageFiles = existingImageFiles.filter(function (image) {
+                return Number(image.id) !== existingImageId;
+            });
+            if (removedImageIds.indexOf(existingImageId) === -1) {
+                removedImageIds.push(existingImageId);
+            }
+            renderImagePreviews();
+            return;
+        }
+
+        var uploadSubmitButton = event.target.closest('[data-aikaipin-upload-submit]');
+        if (uploadSubmitButton) {
+            event.preventDefault();
+            submitProduct();
+            return;
+        }
+
         var clearButton = event.target.closest('[data-aikaipin-clear-filters]');
         if (clearButton) {
             clearFilters();
@@ -864,10 +1170,32 @@
 
         var confirmButton = event.target.closest('[data-aikaipin-visibility-confirm]');
         if (confirmButton) {
-            if (visibilityModal && window.jQuery) {
-                window.jQuery(visibilityModal).modal('hide');
+            var selectedProducts = selectedSelectionBoxes().map(function (box) {
+                return Number(box.value);
+            });
+            var action = confirmButton.getAttribute('data-aikaipin-visibility-action');
+            var originalLabel = confirmButton.innerHTML;
+
+            if (selectedProducts.length === 0) {
+                notify('warning', config.selectionRequiredTitle, config.selectionRequiredMessage);
+                return;
             }
-            notify('info', config.demoTitle, replaceCount(config.demoMessage, selectedSelectionBoxes().length));
+
+            confirmButton.disabled = true;
+            jsonRequest(config.visibilityUpdateUrl, 'POST', {
+                action: action,
+                product_ids: selectedProducts
+            }).then(function (payload) {
+                if (visibilityModal && window.jQuery) {
+                    window.jQuery(visibilityModal).modal('hide');
+                }
+                notify('success', config.visibilityUpdatedTitle, payload.message || '');
+            }).catch(function (error) {
+                notify('error', config.productSaveFailedTitle, error.message || config.productSaveFailedMessage);
+            }).then(function () {
+                confirmButton.disabled = false;
+                confirmButton.innerHTML = originalLabel;
+            });
             return;
         }
 
@@ -875,6 +1203,10 @@
         if (actionButton) {
             if (actionButton.getAttribute('data-aikaipin-action') === 'upload') {
                 openUploadModal();
+                return;
+            }
+            if (actionButton.getAttribute('data-aikaipin-action') === 'edit') {
+                openEditModal(Number(actionButton.getAttribute('data-aikaipin-product-id')));
                 return;
             }
             notify('info', config.comingSoonTitle, config.comingSoonMessage);

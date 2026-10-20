@@ -83,6 +83,27 @@ class AikaipinPortalAuthorizationService
     }
 
     /** @return list<int> */
+    public function operationDepartmentIdsForUser(AdminUser $user): array
+    {
+        $operationDepartmentIds = collect($this->quickAuthorizationDepartments())
+            ->pluck('id')
+            ->map(static fn (mixed $id): int => (int) $id)
+            ->all();
+
+        if ($operationDepartmentIds === []) {
+            return [];
+        }
+
+        return $user->departments()
+            ->whereIn('id', $operationDepartmentIds)
+            ->pluck('id')
+            ->map(static fn (mixed $id): int => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /** @return list<int> */
     private function departmentTreeIds(int $departmentId): array
     {
         $departments = Department::business()

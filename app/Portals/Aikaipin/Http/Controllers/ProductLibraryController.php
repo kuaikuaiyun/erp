@@ -3,9 +3,22 @@
 namespace App\Portals\Aikaipin\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\AikaipinProduct;
+use App\Models\AikaipinProductCategory;
+use App\Models\AikaipinProductFile;
+use App\Models\AikaipinProductUploadSession;
+use App\Models\AdminUser;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Aikaipin\AikaipinPortalAuthorizationService;
+use App\Portals\Aikaipin\AikaipinProductLibraryStorageService;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -14,6 +27,7 @@ class ProductLibraryController extends Controller
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly AikaipinPortalAuthorizationService $authorization,
+        private readonly AikaipinProductLibraryStorageService $storage,
     ) {
     }
 
@@ -24,12 +38,619 @@ class ProductLibraryController extends Controller
             return $context;
         }
 
+        $canManageProductLibrary = $this->authorization->canManageProductLibrary($context['user']);
+        $filters = $this->productFilters($request);
+
         return view('portals.aikaipin.product-library.index', [
             ...$context,
-            'products' => $this->sampleProducts(),
-            'canManageProductLibrary' => $this->authorization->canManageProductLibrary($context['user']),
+            'products' => $this->productQuery($context['user'], $canManageProductLibrary, $filters)
+                ->paginate(15)
+                ->withQueryString(),
+            'filters' => $filters,
+            'categories' => AikaipinProductCategory::query()->orderBy('sort')->orderBy('name')->get(['id', 'name']),
+            'canManageProductLibrary' => $canManageProductLibrary,
             'operationVisibilitySource' => $this->authorization->operationVisibilitySource(),
             'quickAuthorizationDepartments' => $this->authorization->quickAuthorizationDepartments(),
+        ]);
+    }
+
+    public function storeCategory(Request $request): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:80'],
+        ]);
+        $name = trim(preg_replace('/\s+/u', ' ', (string) $validated['name']) ?: '');
+
+        if ($name === '') {
+            throw ValidationException::withMessages([
+                'name' => __('aikaipin.messages.category_empty_message'),
+            ]);
+        }
+
+        $category = AikaipinProductCategory::firstOrCreate(
+            ['name' => $name],
+            ['created_by' => (int) $context['user']->getKey()],
+        );
+
+        if (!$category->wasRecentlyCreated) {
+            return response()->json([
+                'message' => __('aikaipin.messages.category_duplicate_message'),
+            ], 422);
+        }
+
+        return response()->json([
+            'category' => $this->categoryPayload($category),
+            'message' => __('aikaipin.messages.category_created_message'),
+        ], 201);
+    }
+
+    public function destroyCategory(Request $request, AikaipinProductCategory $category): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
+
+        if ($category->products()->exists()) {
+            return response()->json([
+                'message' => __('aikaipin.messages.category_in_use_message'),
+            ], 422);
+        }
+
+        $category->delete();
+
+        return response()->json([
+            'message' => __('aikaipin.messages.category_deleted_message'),
+        ]);
+    }
+
+    public function initializePackageUpload(Request $request): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
+
+        $data = $request->validate([
+            'client_fingerprint' => ['required', 'string', 'size:64'],
+            'original_name' => ['required', 'string', 'max:255'],
+            'mime_type' => ['nullable', 'string', 'max:191'],
+            'total_size' => ['required', 'integer', 'min:1', 'max:157286400'],
+            'total_chunks' => ['required', 'integer', 'min:1'],
+        ]);
+        $expectedChunks = (int) ceil((int) $data['total_size'] / AikaipinProductLibraryStorageService::PACKAGE_CHUNK_SIZE);
+
+        if ((int) $data['total_chunks'] !== $expectedChunks) {
+            throw ValidationException::withMessages([
+                'total_chunks' => __('aikaipin.messages.package_upload_invalid_message'),
+            ]);
+        }
+
+        $session = AikaipinProductUploadSession::query()
+            ->where('user_id', $context['user']->getKey())
+            ->where('client_fingerprint', $data['client_fingerprint'])
+            ->first();
+
+        if ($session !== null && ($session->status === AikaipinProductUploadSession::STATUS_CONSUMED
+            || $session->expires_at?->isPast()
+            || (int) $session->total_size !== (int) $data['total_size']
+            || (int) $session->total_chunks !== (int) $data['total_chunks']
+            || $session->original_name !== $data['original_name'])) {
+            $this->deleteUploadSession($session);
+            $session = null;
+        }
+
+        if ($session === null) {
+            $uploadToken = (string) Str::uuid();
+            $session = AikaipinProductUploadSession::create([
+                'upload_token' => $uploadToken,
+                'user_id' => (int) $context['user']->getKey(),
+                'client_fingerprint' => $data['client_fingerprint'],
+                'original_name' => $data['original_name'],
+                'mime_type' => $data['mime_type'] ?: null,
+                'total_size' => (int) $data['total_size'],
+                'total_chunks' => (int) $data['total_chunks'],
+                'disk' => AikaipinProductLibraryStorageService::DISK,
+                'temporary_directory' => $this->storage->newTemporaryDirectory($uploadToken),
+                'status' => AikaipinProductUploadSession::STATUS_UPLOADING,
+                'expires_at' => now()->addDay(),
+            ]);
+        }
+
+        return response()->json($this->packageSessionPayload($session));
+    }
+
+    public function storePackageUploadPart(Request $request, string $uploadToken, int $chunkIndex): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
+        $session = $this->uploadSessionForUser($context['user'], $uploadToken);
+        $data = $request->validate([
+            'chunk' => ['required', 'file'],
+        ]);
+
+        if ($session->status !== AikaipinProductUploadSession::STATUS_UPLOADING
+            || $session->expires_at?->isPast()
+            || $chunkIndex < 0
+            || $chunkIndex >= (int) $session->total_chunks) {
+            throw ValidationException::withMessages([
+                'chunk' => __('aikaipin.messages.package_upload_invalid_message'),
+            ]);
+        }
+
+        /** @var UploadedFile $chunk */
+        $chunk = $data['chunk'];
+        $remaining = (int) $session->total_size - ($chunkIndex * AikaipinProductLibraryStorageService::PACKAGE_CHUNK_SIZE);
+        $expectedSize = min(AikaipinProductLibraryStorageService::PACKAGE_CHUNK_SIZE, $remaining);
+
+        if ($chunk->getSize() !== $expectedSize) {
+            throw ValidationException::withMessages([
+                'chunk' => __('aikaipin.messages.package_upload_invalid_message'),
+            ]);
+        }
+
+        $this->storage->storeUploadPart($session, $chunkIndex, $chunk);
+        $session->forceFill([
+            'received_size' => (int) $session->parts()->sum('size'),
+            'expires_at' => now()->addDay(),
+        ])->save();
+
+        return response()->json($this->packageSessionPayload($session->refresh()));
+    }
+
+    public function completePackageUpload(Request $request, string $uploadToken): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
+        $session = $this->uploadSessionForUser($context['user'], $uploadToken);
+
+        if ($session->status === AikaipinProductUploadSession::STATUS_COMPLETED && $session->assembled_path) {
+            return response()->json($this->packageSessionPayload($session));
+        }
+
+        $parts = $session->parts()->orderBy('chunk_index')->get();
+        $expectedIndexes = range(0, (int) $session->total_chunks - 1);
+        if ($session->status !== AikaipinProductUploadSession::STATUS_UPLOADING
+            || $session->expires_at?->isPast()
+            || $parts->count() !== (int) $session->total_chunks
+            || $parts->pluck('chunk_index')->map(static fn ($index): int => (int) $index)->all() !== $expectedIndexes) {
+            throw ValidationException::withMessages([
+                'package_upload_token' => __('aikaipin.messages.package_upload_incomplete_message'),
+            ]);
+        }
+
+        try {
+            $assembled = $this->storage->assembleUpload($session, $parts);
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return response()->json([
+                'message' => __('aikaipin.messages.package_upload_assembly_failed_message'),
+            ], 422);
+        }
+
+        $session->forceFill([
+            'assembled_path' => $assembled['path'],
+            'received_size' => $assembled['size'],
+            'status' => AikaipinProductUploadSession::STATUS_COMPLETED,
+            'expires_at' => now()->addDay(),
+        ])->save();
+
+        return response()->json($this->packageSessionPayload($session));
+    }
+
+    public function storeProduct(Request $request): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
+
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:191'],
+            'source_platform' => ['required', 'in:shopify,shopline'],
+            'product_type' => ['required', 'in:general,xiaohei'],
+            'landing_page_url' => ['nullable', 'url', 'max:2048'],
+            'skus' => ['nullable', 'array'],
+            'skus.*' => ['nullable', 'string', 'max:191', 'distinct'],
+            'category_ids' => ['nullable', 'array'],
+            'category_ids.*' => ['integer', 'distinct'],
+            'images' => ['nullable', 'array', 'max:3'],
+            'images.*' => ['file', 'image', 'max:20480'],
+            'reference_file' => ['nullable', 'file'],
+            'package_upload_token' => ['required', 'uuid'],
+            'authorized_department_ids' => ['nullable', 'array'],
+            'authorized_department_ids.*' => ['integer', 'distinct'],
+        ]);
+        $categoryIds = collect($data['category_ids'] ?? [])->map(static fn ($id): int => (int) $id)->unique()->values()->all();
+        $departmentIds = collect($data['authorized_department_ids'] ?? [])->map(static fn ($id): int => (int) $id)->unique()->values()->all();
+        $skuValues = collect($data['skus'] ?? [])
+            ->map(static fn ($sku): string => trim((string) $sku))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($categoryIds !== [] && AikaipinProductCategory::query()->whereKey($categoryIds)->count() !== count($categoryIds)) {
+            throw ValidationException::withMessages([
+                'category_ids' => __('aikaipin.messages.product_category_invalid_message'),
+            ]);
+        }
+
+        $availableDepartments = collect($this->authorization->quickAuthorizationDepartments())->keyBy('id');
+        if (collect($departmentIds)->diff($availableDepartments->keys())->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                'authorized_department_ids' => __('aikaipin.messages.product_authorization_invalid_message'),
+            ]);
+        }
+
+        $createdPaths = [];
+        $product = null;
+
+        try {
+            $connection = config('admin.database.connection') ?: config('database.default');
+            $product = DB::connection($connection)->transaction(function () use ($context, $data, $categoryIds, $departmentIds, $skuValues, &$createdPaths): AikaipinProduct {
+                $session = $this->uploadSessionForUser($context['user'], (string) $data['package_upload_token'], true);
+                if ($session->status !== AikaipinProductUploadSession::STATUS_COMPLETED
+                    || !$session->assembled_path
+                    || !Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($session->assembled_path)) {
+                    throw ValidationException::withMessages([
+                        'package_upload_token' => __('aikaipin.messages.package_upload_incomplete_message'),
+                    ]);
+                }
+
+                $product = AikaipinProduct::create([
+                    'product_code' => $this->nextProductCode(),
+                    'name' => trim((string) $data['name']),
+                    'source_platform' => $data['source_platform'],
+                    'product_type' => $data['product_type'],
+                    'landing_page_url' => $data['landing_page_url'] ?: null,
+                    'created_by' => (int) $context['user']->getKey(),
+                    'created_by_name' => (string) ($context['user']->name ?: $context['user']->username),
+                    'updated_by' => (int) $context['user']->getKey(),
+                    'updated_by_name' => (string) ($context['user']->name ?: $context['user']->username),
+                ]);
+
+                foreach ($skuValues as $sort => $sku) {
+                    $product->skus()->create(['sku' => $sku, 'sort' => $sort]);
+                }
+
+                $product->categories()->sync($categoryIds);
+                $product->authorizedDepartments()->sync($departmentIds);
+
+                foreach (array_values($data['images'] ?? []) as $sort => $image) {
+                    /** @var UploadedFile $image */
+                    $imagePayload = $this->storage->storeUploadedFile($image, 'images');
+                    $createdPaths[] = $imagePayload['path'];
+                    $product->files()->create([...$imagePayload, 'kind' => AikaipinProductFile::KIND_IMAGE, 'sort' => $sort, 'disk' => AikaipinProductLibraryStorageService::DISK]);
+                }
+
+                if (($data['reference_file'] ?? null) instanceof UploadedFile) {
+                    /** @var UploadedFile $referenceFile */
+                    $referenceFile = $data['reference_file'];
+                    $referencePayload = $this->storage->storeUploadedFile($referenceFile, 'references');
+                    $createdPaths[] = $referencePayload['path'];
+                    $product->files()->create([...$referencePayload, 'kind' => AikaipinProductFile::KIND_REFERENCE, 'sort' => 0, 'disk' => AikaipinProductLibraryStorageService::DISK]);
+                }
+
+                $packagePayload = $this->storage->copyStoredFile($session->assembled_path, 'packages', $session->original_name, $session->mime_type);
+                $createdPaths[] = $packagePayload['path'];
+                $product->files()->create([...$packagePayload, 'kind' => AikaipinProductFile::KIND_PACKAGE, 'sort' => 0, 'disk' => AikaipinProductLibraryStorageService::DISK]);
+
+                $session->forceFill([
+                    'status' => AikaipinProductUploadSession::STATUS_CONSUMED,
+                    'expires_at' => now()->addHour(),
+                ])->save();
+
+                return $product;
+            });
+        } catch (ValidationException $exception) {
+            throw $exception;
+        } catch (\Throwable $exception) {
+            foreach ($createdPaths as $path) {
+                $this->storage->deleteFile($path);
+            }
+            report($exception);
+
+            return response()->json([
+                'message' => __('aikaipin.messages.product_save_failed_message'),
+            ], 500);
+        }
+
+        $completedSession = AikaipinProductUploadSession::query()
+            ->where('upload_token', $data['package_upload_token'])
+            ->first();
+        if ($completedSession !== null) {
+            try {
+                $this->deleteUploadSession($completedSession);
+            } catch (\Throwable $exception) {
+                report($exception);
+            }
+        }
+
+        return response()->json([
+            'message' => __('aikaipin.messages.product_created_message'),
+            'redirect_url' => route('aikaipin.product-library.index'),
+            'product_id' => $product?->getKey(),
+        ], 201);
+    }
+
+    public function editProduct(Request $request, AikaipinProduct $product): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
+
+        $product->load([
+            'skus',
+            'categories',
+            'authorizedDepartments',
+            'images',
+            'referenceFile',
+            'packageFile',
+        ]);
+
+        return response()->json($this->productEditPayload($product));
+    }
+
+    public function updateProduct(Request $request, AikaipinProduct $product): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
+
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:191'],
+            'source_platform' => ['required', 'in:shopify,shopline'],
+            'product_type' => ['required', 'in:general,xiaohei'],
+            'landing_page_url' => ['nullable', 'url', 'max:2048'],
+            'skus' => ['nullable', 'array'],
+            'skus.*' => ['nullable', 'string', 'max:191', 'distinct'],
+            'category_ids' => ['nullable', 'array'],
+            'category_ids.*' => ['integer', 'distinct'],
+            'images' => ['nullable', 'array'],
+            'images.*' => ['file', 'image', 'max:20480'],
+            'remove_image_ids' => ['nullable', 'array'],
+            'remove_image_ids.*' => ['integer', 'distinct'],
+            'reference_file' => ['nullable', 'file'],
+            'package_upload_token' => ['nullable', 'uuid'],
+            'authorized_department_ids' => ['nullable', 'array'],
+            'authorized_department_ids.*' => ['integer', 'distinct'],
+        ]);
+        $categoryIds = collect($data['category_ids'] ?? [])->map(static fn ($id): int => (int) $id)->unique()->values()->all();
+        $departmentIds = collect($data['authorized_department_ids'] ?? [])->map(static fn ($id): int => (int) $id)->unique()->values()->all();
+        $skuValues = collect($data['skus'] ?? [])
+            ->map(static fn ($sku): string => trim((string) $sku))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+        $removedImageIds = collect($data['remove_image_ids'] ?? [])->map(static fn ($id): int => (int) $id)->unique()->values()->all();
+
+        if ($categoryIds !== [] && AikaipinProductCategory::query()->whereKey($categoryIds)->count() !== count($categoryIds)) {
+            throw ValidationException::withMessages([
+                'category_ids' => __('aikaipin.messages.product_category_invalid_message'),
+            ]);
+        }
+
+        $availableDepartments = collect($this->authorization->quickAuthorizationDepartments())->keyBy('id');
+        if (collect($departmentIds)->diff($availableDepartments->keys())->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                'authorized_department_ids' => __('aikaipin.messages.product_authorization_invalid_message'),
+            ]);
+        }
+
+        $existingImages = $product->images()->get();
+        $existingImageIds = $existingImages->pluck('id')->map(static fn ($id): int => (int) $id)->all();
+        if (collect($removedImageIds)->diff($existingImageIds)->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                'remove_image_ids' => __('aikaipin.messages.product_image_invalid_message'),
+            ]);
+        }
+
+        $remainingImageCount = $existingImages->count() - count($removedImageIds);
+        $newImages = array_values($data['images'] ?? []);
+        if ($remainingImageCount + count($newImages) > 3) {
+            throw ValidationException::withMessages([
+                'images' => __('aikaipin.messages.image_limit_message'),
+            ]);
+        }
+
+        if (!($data['package_upload_token'] ?? null) && !$product->packageFile()->exists()) {
+            throw ValidationException::withMessages([
+                'package_upload_token' => __('aikaipin.messages.archive_required_message'),
+            ]);
+        }
+
+        $createdPaths = [];
+        $obsoleteFiles = collect();
+        $completedSession = null;
+
+        try {
+            $connection = config('admin.database.connection') ?: config('database.default');
+            DB::connection($connection)->transaction(function () use ($context, $product, $data, $categoryIds, $departmentIds, $skuValues, $removedImageIds, $newImages, &$createdPaths, &$obsoleteFiles, &$completedSession): void {
+                $product->forceFill([
+                    'name' => trim((string) $data['name']),
+                    'source_platform' => $data['source_platform'],
+                    'product_type' => $data['product_type'],
+                    'landing_page_url' => $data['landing_page_url'] ?: null,
+                    'updated_by' => (int) $context['user']->getKey(),
+                    'updated_by_name' => (string) ($context['user']->name ?: $context['user']->username),
+                ])->save();
+
+                $product->skus()->delete();
+                foreach ($skuValues as $sort => $sku) {
+                    $product->skus()->create(['sku' => $sku, 'sort' => $sort]);
+                }
+
+                $product->categories()->sync($categoryIds);
+                $product->authorizedDepartments()->sync($departmentIds);
+
+                $removedImages = $product->images()->whereKey($removedImageIds)->get();
+                if ($removedImages->isNotEmpty()) {
+                    $obsoleteFiles = $obsoleteFiles->merge($removedImages);
+                    $product->images()->whereKey($removedImageIds)->delete();
+                }
+
+                $imageSort = (int) ($product->images()->max('sort') ?? -1) + 1;
+                foreach ($newImages as $image) {
+                    /** @var UploadedFile $image */
+                    $imagePayload = $this->storage->storeUploadedFile($image, 'images');
+                    $createdPaths[] = $imagePayload['path'];
+                    $product->files()->create([...$imagePayload, 'kind' => AikaipinProductFile::KIND_IMAGE, 'sort' => $imageSort, 'disk' => AikaipinProductLibraryStorageService::DISK]);
+                    $imageSort += 1;
+                }
+
+                if (($data['reference_file'] ?? null) instanceof UploadedFile) {
+                    /** @var UploadedFile $referenceFile */
+                    $referenceFile = $data['reference_file'];
+                    $referencePayload = $this->storage->storeUploadedFile($referenceFile, 'references');
+                    $createdPaths[] = $referencePayload['path'];
+                    $obsoleteFiles = $obsoleteFiles->merge($product->files()->where('kind', AikaipinProductFile::KIND_REFERENCE)->get());
+                    $product->files()->where('kind', AikaipinProductFile::KIND_REFERENCE)->delete();
+                    $product->files()->create([...$referencePayload, 'kind' => AikaipinProductFile::KIND_REFERENCE, 'sort' => 0, 'disk' => AikaipinProductLibraryStorageService::DISK]);
+                }
+
+                if ($data['package_upload_token'] ?? null) {
+                    $session = $this->uploadSessionForUser($context['user'], (string) $data['package_upload_token'], true);
+                    if ($session->status !== AikaipinProductUploadSession::STATUS_COMPLETED
+                        || !$session->assembled_path
+                        || !Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($session->assembled_path)) {
+                        throw ValidationException::withMessages([
+                            'package_upload_token' => __('aikaipin.messages.package_upload_incomplete_message'),
+                        ]);
+                    }
+
+                    $packagePayload = $this->storage->copyStoredFile($session->assembled_path, 'packages', $session->original_name, $session->mime_type);
+                    $createdPaths[] = $packagePayload['path'];
+                    $obsoleteFiles = $obsoleteFiles->merge($product->files()->where('kind', AikaipinProductFile::KIND_PACKAGE)->get());
+                    $product->files()->where('kind', AikaipinProductFile::KIND_PACKAGE)->delete();
+                    $product->files()->create([...$packagePayload, 'kind' => AikaipinProductFile::KIND_PACKAGE, 'sort' => 0, 'disk' => AikaipinProductLibraryStorageService::DISK]);
+                    $session->forceFill([
+                        'status' => AikaipinProductUploadSession::STATUS_CONSUMED,
+                        'expires_at' => now()->addHour(),
+                    ])->save();
+                    $completedSession = $session;
+                }
+            });
+        } catch (ValidationException $exception) {
+            throw $exception;
+        } catch (\Throwable $exception) {
+            foreach ($createdPaths as $path) {
+                $this->storage->deleteFile($path);
+            }
+            report($exception);
+
+            return response()->json([
+                'message' => __('aikaipin.messages.product_save_failed_message'),
+            ], 500);
+        }
+
+        foreach ($obsoleteFiles->unique('id') as $file) {
+            try {
+                $this->storage->deleteFile((string) $file->path);
+            } catch (\Throwable $exception) {
+                report($exception);
+            }
+        }
+        if ($completedSession !== null) {
+            try {
+                $this->deleteUploadSession($completedSession);
+            } catch (\Throwable $exception) {
+                report($exception);
+            }
+        }
+
+        return response()->json([
+            'message' => __('aikaipin.messages.product_updated_message'),
+            'redirect_url' => route('aikaipin.product-library.index'),
+            'product_id' => $product->getKey(),
+        ]);
+    }
+
+    public function updateVisibility(Request $request): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
+        $data = $request->validate([
+            'action' => ['required', 'in:enable,cancel'],
+            'product_ids' => ['required', 'array', 'min:1'],
+            'product_ids.*' => ['integer', 'distinct'],
+        ]);
+        $productIds = collect($data['product_ids'])->map(static fn ($id): int => (int) $id)->unique()->values()->all();
+        $products = AikaipinProduct::query()->whereKey($productIds)->get();
+        if ($products->count() !== count($productIds)) {
+            throw ValidationException::withMessages([
+                'product_ids' => __('aikaipin.messages.product_selection_invalid_message'),
+            ]);
+        }
+
+        $departmentIds = collect($this->authorization->quickAuthorizationDepartments())->pluck('id')->map(static fn ($id): int => (int) $id)->all();
+        foreach ($products as $product) {
+            if ($data['action'] === 'enable') {
+                $product->authorizedDepartments()->syncWithoutDetaching($departmentIds);
+            } else {
+                $product->authorizedDepartments()->detach($departmentIds);
+            }
+        }
+
+        return response()->json([
+            'message' => $data['action'] === 'enable'
+                ? __('aikaipin.messages.visibility_enabled_message', ['count' => count($productIds)])
+                : __('aikaipin.messages.visibility_cancelled_message', ['count' => count($productIds)]),
+        ]);
+    }
+
+    public function showProductFile(Request $request, AikaipinProduct $product, AikaipinProductFile $file): Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless((int) $file->product_id === (int) $product->getKey(), 404);
+        abort_unless($this->canViewProduct($context['user'], $product), 403);
+        abort_unless($file->disk === AikaipinProductLibraryStorageService::DISK && Storage::disk($file->disk)->exists($file->path), 404);
+
+        if ($file->kind === AikaipinProductFile::KIND_PACKAGE) {
+            return response()->download(Storage::disk($file->disk)->path($file->path), $file->original_name, [
+                'Content-Type' => $file->mime_type ?: 'application/octet-stream',
+            ]);
+        }
+
+        return response()->file(Storage::disk($file->disk)->path($file->path), [
+            'Content-Type' => $file->mime_type ?: 'application/octet-stream',
         ]);
     }
 
@@ -74,6 +695,188 @@ class ProductLibraryController extends Controller
         $context['portal']->load('menus');
 
         return $context;
+    }
+
+    private function uploadSessionForUser(AdminUser $user, string $uploadToken, bool $lockForUpdate = false): AikaipinProductUploadSession
+    {
+        $query = AikaipinProductUploadSession::query()
+            ->where('upload_token', $uploadToken)
+            ->where('user_id', $user->getKey());
+
+        if ($lockForUpdate) {
+            $query->lockForUpdate();
+        }
+
+        $session = $query->first();
+        if ($session === null) {
+            throw ValidationException::withMessages([
+                'package_upload_token' => __('aikaipin.messages.package_upload_invalid_message'),
+            ]);
+        }
+
+        return $session;
+    }
+
+    /** @return array{upload_token:string,status:string,uploaded_chunks:list<int>,received_size:int,total_size:int,chunk_size:int} */
+    private function packageSessionPayload(AikaipinProductUploadSession $session): array
+    {
+        return [
+            'upload_token' => (string) $session->upload_token,
+            'status' => (string) $session->status,
+            'uploaded_chunks' => $session->parts()
+                ->orderBy('chunk_index')
+                ->pluck('chunk_index')
+                ->map(static fn ($index): int => (int) $index)
+                ->values()
+                ->all(),
+            'received_size' => (int) $session->received_size,
+            'total_size' => (int) $session->total_size,
+            'chunk_size' => AikaipinProductLibraryStorageService::PACKAGE_CHUNK_SIZE,
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function productEditPayload(AikaipinProduct $product): array
+    {
+        $filePayload = function (?AikaipinProductFile $file) use ($product): ?array {
+            if ($file === null) {
+                return null;
+            }
+
+            return [
+                'id' => (int) $file->getKey(),
+                'name' => (string) $file->original_name,
+                'url' => route('aikaipin.product-library.files.show', ['product' => $product, 'file' => $file]),
+            ];
+        };
+
+        return [
+            'id' => (int) $product->getKey(),
+            'name' => (string) $product->name,
+            'source_platform' => (string) $product->source_platform,
+            'product_type' => (string) $product->product_type,
+            'landing_page_url' => $product->landing_page_url,
+            'skus' => $product->skus->pluck('sku')->values()->all(),
+            'category_ids' => $product->categories->pluck('id')->map(static fn ($id): string => (string) $id)->values()->all(),
+            'authorized_department_ids' => $product->authorizedDepartments->pluck('id')->map(static fn ($id): string => (string) $id)->values()->all(),
+            'images' => $product->images->map(function (AikaipinProductFile $file) use ($filePayload): array {
+                return $filePayload($file);
+            })->values()->all(),
+            'reference_file' => $filePayload($product->referenceFile),
+            'package_file' => $filePayload($product->packageFile),
+        ];
+    }
+
+    private function deleteUploadSession(AikaipinProductUploadSession $session): void
+    {
+        $this->storage->deleteUploadTemporaryFiles($session);
+        $session->parts()->delete();
+        $session->delete();
+    }
+
+    private function canViewProduct(AdminUser $user, AikaipinProduct $product): bool
+    {
+        if ($this->authorization->canManageProductLibrary($user)) {
+            return true;
+        }
+
+        $departmentIds = $this->authorization->operationDepartmentIdsForUser($user);
+
+        return $departmentIds !== []
+            && $product->authorizedDepartments()->whereKey($departmentIds)->exists();
+    }
+
+    private function nextProductCode(): string
+    {
+        $connection = config('admin.database.connection') ?: config('database.default');
+        $period = now()->format('Ym');
+        $sequences = DB::connection($connection)->table('aikaipin_product_code_sequences');
+        $sequences->insertOrIgnore([
+            'period' => $period,
+            'last_number' => 0,
+            'updated_at' => now(),
+        ]);
+        $sequence = $sequences->where('period', $period)->lockForUpdate()->first();
+        $nextNumber = (int) ($sequence->last_number ?? 0) + 1;
+        $sequences->where('period', $period)->update([
+            'last_number' => $nextNumber,
+            'updated_at' => now(),
+        ]);
+
+        return sprintf('AKP-%s-%06d', $period, $nextNumber);
+    }
+
+    /** @return array{keyword:string,category:?int,source:string,type:string} */
+    private function productFilters(Request $request): array
+    {
+        $category = $request->query('category');
+
+        return [
+            'keyword' => trim((string) $request->query('keyword', '')),
+            'category' => is_numeric($category) && (int) $category > 0 ? (int) $category : null,
+            'source' => trim((string) $request->query('source', '')),
+            'type' => trim((string) $request->query('type', '')),
+        ];
+    }
+
+    /**
+     * @param array{keyword:string,category:?int,source:string,type:string} $filters
+     */
+    private function productQuery(AdminUser $user, bool $canManageProductLibrary, array $filters): Builder
+    {
+        $query = AikaipinProduct::query()
+            ->with([
+                'skus',
+                'categories',
+                'images',
+                'referenceFile',
+                'packageFile',
+            ])
+            ->latest('updated_at')
+            ->latest('id');
+
+        if (!$canManageProductLibrary) {
+            $departmentIds = $this->authorization->operationDepartmentIdsForUser($user);
+
+            if ($departmentIds === []) {
+                $query->whereRaw('1 = 0');
+            } else {
+                $query->whereHas('authorizedDepartments', static fn (Builder $departments) => $departments->whereKey($departmentIds));
+            }
+        }
+
+        if ($filters['keyword'] !== '') {
+            $like = '%'.$filters['keyword'].'%';
+
+            $query->where(function (Builder $products) use ($like): void {
+                $products->where('product_code', 'like', $like)
+                    ->orWhere('name', 'like', $like)
+                    ->orWhereHas('skus', static fn (Builder $skus) => $skus->where('sku', 'like', $like));
+            });
+        }
+
+        if ($filters['category'] !== null) {
+            $query->whereHas('categories', static fn (Builder $categories) => $categories->whereKey($filters['category']));
+        }
+
+        if ($filters['source'] !== '') {
+            $query->where('source_platform', $filters['source']);
+        }
+
+        if ($filters['type'] !== '') {
+            $query->where('product_type', $filters['type']);
+        }
+
+        return $query;
+    }
+
+    /** @return array{value:string,label:string} */
+    private function categoryPayload(AikaipinProductCategory $category): array
+    {
+        return [
+            'value' => (string) $category->getKey(),
+            'label' => (string) $category->name,
+        ];
     }
 
     /**

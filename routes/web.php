@@ -34,6 +34,10 @@ Route::post('/domain-stores/batch-update', [DomainStoreController::class, 'updat
 Route::post('/domain-stores/check', [DomainStoreController::class, 'checkBatch'])->name('assistant.domain-stores.check-batch');
 Route::post('/domain-stores/access/grant', [DomainStoreController::class, 'grantDepartmentAccessBatch'])->name('assistant.domain-stores.access.grant-batch');
 Route::delete('/domain-stores/access/revoke', [DomainStoreController::class, 'revokeDepartmentAccessBatch'])->name('assistant.domain-stores.access.revoke-batch');
+Route::get('/domain-stores/owners/options', [DomainStoreController::class, 'ownerOptions'])->name('assistant.domain-stores.owners.options');
+Route::post('/domain-stores/owners/assign', [DomainStoreController::class, 'assignOwnerBatch'])->name('assistant.domain-stores.owners.assign');
+Route::delete('/domain-stores/owners/clear', [DomainStoreController::class, 'clearOwnerBatch'])->name('assistant.domain-stores.owners.clear');
+Route::put('/domain-stores/owner-scopes', [DomainStoreController::class, 'updateOwnerDepartmentScopes'])->name('assistant.domain-stores.owner-scopes.update');
 Route::get('/domain-stores/{domainStore}/edit', [DomainStoreController::class, 'edit'])->name('assistant.domain-stores.edit');
 Route::put('/domain-stores/{domainStore}', [DomainStoreController::class, 'update'])->name('assistant.domain-stores.update');
 Route::delete('/domain-stores/{domainStore}', [DomainStoreController::class, 'destroy'])->name('assistant.domain-stores.destroy');
@@ -119,6 +123,16 @@ Route::get('/product-statistics', [ProductStatisticsController::class, 'index'])
 Route::get('/product-statistics/detail', [ProductStatisticsController::class, 'detail'])->name('logistics.product-statistics.detail');
 Route::post('/product-statistics/export', [ProductStatisticsController::class, 'export'])->name('logistics.product-statistics.export');
 Route::get('/product-library', [ProductLibraryController::class, 'index'])->name('aikaipin.product-library.index');
+Route::post('/product-library', [ProductLibraryController::class, 'storeProduct'])->name('aikaipin.product-library.store');
+Route::get('/product-library/{product}/edit-data', [ProductLibraryController::class, 'editProduct'])->name('aikaipin.product-library.edit');
+Route::put('/product-library/{product}', [ProductLibraryController::class, 'updateProduct'])->name('aikaipin.product-library.update');
+Route::post('/product-library/categories', [ProductLibraryController::class, 'storeCategory'])->name('aikaipin.product-library.categories.store');
+Route::delete('/product-library/categories/{category}', [ProductLibraryController::class, 'destroyCategory'])->name('aikaipin.product-library.categories.destroy');
+Route::post('/product-library/package-uploads', [ProductLibraryController::class, 'initializePackageUpload'])->name('aikaipin.product-library.package-uploads.initialize');
+Route::post('/product-library/package-uploads/{uploadToken}/parts/{chunkIndex}', [ProductLibraryController::class, 'storePackageUploadPart'])->whereNumber('chunkIndex')->name('aikaipin.product-library.package-uploads.parts.store');
+Route::post('/product-library/package-uploads/{uploadToken}/complete', [ProductLibraryController::class, 'completePackageUpload'])->name('aikaipin.product-library.package-uploads.complete');
+Route::post('/product-library/visibility', [ProductLibraryController::class, 'updateVisibility'])->name('aikaipin.product-library.visibility.update');
+Route::get('/product-library/{product}/files/{file}', [ProductLibraryController::class, 'showProductFile'])->name('aikaipin.product-library.files.show');
 Route::get('/selection-proposals', [ProductLibraryController::class, 'selectionProposal'])->name('aikaipin.selection-proposals.index');
 Route::get('/placement-evaluations', [ProductLibraryController::class, 'placementEvaluation'])->name('aikaipin.placement-evaluations.index');
 Route::get('/paypal-risk', [PayPalRiskController::class, 'index'])->name('logistics.paypal-risk.index');
