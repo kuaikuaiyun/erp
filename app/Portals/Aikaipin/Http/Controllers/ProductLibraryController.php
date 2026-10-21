@@ -224,7 +224,7 @@ class ProductLibraryController extends Controller
             'categories.*' => ['nullable', 'string', 'max:80', 'distinct'],
             'images' => ['nullable', 'array', 'max:3'],
             'images.*' => ['file', 'image', 'max:20480'],
-            'reference_file' => ['nullable', 'file'],
+            'reference_file' => ['nullable', 'file', 'extensions:html,htm', 'max:20480'],
             'package_upload_token' => ['required', 'uuid'],
             'authorized_department_ids' => ['nullable', 'array'],
             'authorized_department_ids.*' => ['integer', 'distinct'],
@@ -371,7 +371,7 @@ class ProductLibraryController extends Controller
             'images.*' => ['file', 'image', 'max:20480'],
             'remove_image_indexes' => ['nullable', 'array'],
             'remove_image_indexes.*' => ['integer', 'min:0', 'distinct'],
-            'reference_file' => ['nullable', 'file'],
+            'reference_file' => ['nullable', 'file', 'extensions:html,htm', 'max:20480'],
             'package_upload_token' => ['nullable', 'uuid'],
             'authorized_department_ids' => ['nullable', 'array'],
             'authorized_department_ids.*' => ['integer', 'distinct'],
@@ -585,6 +585,47 @@ class ProductLibraryController extends Controller
         return $this->serveProductFile($file, false);
     }
 
+    public function showProductReferencePreview(Request $request, AikaipinProduct $product): Response|View
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->canViewProduct($context['user'], $product), 403);
+        $this->referencePreviewFile($product);
+
+        return view('portals.aikaipin.product-library.reference-preview', [
+            'product' => $product,
+            'contentUrl' => route('aikaipin.product-library.reference-preview.content', ['product' => $product]),
+            'libraryUrl' => route('aikaipin.product-library.index'),
+        ]);
+    }
+
+    public function showProductReferencePreviewContent(Request $request, AikaipinProduct $product): Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->canViewProduct($context['user'], $product), 403);
+        $file = $this->referencePreviewFile($product);
+        $content = Storage::disk($file['disk'])->get($file['path']);
+
+        return response($content, 200, [
+            'Content-Type' => 'text/html; charset=UTF-8',
+            'Content-Disposition' => 'inline; filename="preview.html"',
+            'Cache-Control' => 'private, no-store, max-age=0',
+            'Pragma' => 'no-cache',
+            'X-Content-Type-Options' => 'nosniff',
+            'Referrer-Policy' => 'no-referrer',
+            'Permissions-Policy' => 'camera=(), geolocation=(), microphone=(), payment=(), usb=()',
+            'X-Robots-Tag' => 'noindex, nofollow, noarchive',
+            'Content-Security-Policy' => "sandbox allow-scripts allow-modals; default-src 'none'; base-uri 'none'; object-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https:; style-src 'unsafe-inline' https:; img-src data: blob: https:; font-src data: https:; media-src data: blob: https:; connect-src https:; frame-src https:; worker-src blob:; form-action 'none'; frame-ancestors 'self'",
+        ]);
+    }
+
     public function showProductFile(Request $request, AikaipinProduct $product, string $kind): Response
     {
         $context = $this->pageContext($request);
@@ -595,12 +636,38 @@ class ProductLibraryController extends Controller
         abort_unless($this->canViewProduct($context['user'], $product), 403);
         abort_unless(in_array($kind, ['reference', 'package'], true), 404);
 
-        $file = $kind === 'reference'
-            ? $product->referenceFilePayload()
-            : $product->packageFilePayload();
+        if ($kind === 'reference') {
+            return redirect()->route('aikaipin.product-library.reference-preview', ['product' => $product]);
+        }
+
+        $file = $product->packageFilePayload();
         abort_unless($file !== null, 404);
 
-        return $this->serveProductFile($file, $kind === 'package');
+        return $this->serveProductFile($file, true);
+    }
+
+    /** @return array{disk:string,path:string,original_name:string,mime_type:?string,size:int,sha256:?string} */
+    private function referencePreviewFile(AikaipinProduct $product): array
+    {
+        $file = $product->referenceFilePayload();
+        abort_unless($file !== null, 404);
+
+        $disk = (string) $file['disk'];
+        $path = ltrim(str_replace('\\', '/', trim((string) $file['path'])), '/');
+        $extension = strtolower((string) pathinfo($path, PATHINFO_EXTENSION));
+
+        abort_unless(
+            $disk === AikaipinProductLibraryStorageService::DISK
+                && $path !== ''
+                && !in_array('..', explode('/', $path), true)
+                && in_array($extension, ['html', 'htm'], true),
+            404,
+        );
+        abort_unless(Storage::disk($disk)->exists($path), 404);
+
+        $file['path'] = $path;
+
+        return $file;
     }
 
     /** @param array{disk:string,path:string,original_name:string,mime_type:?string,size:int,sha256:?string} $file */
@@ -644,7 +711,7 @@ class ProductLibraryController extends Controller
         }
 
         $data = $request->validate([
-            'product_name' => ['required', 'string', 'max:191'],
+            'product_name' => ['required', 'string', 'max:255'],
             'specifications' => ['nullable', 'array'],
             'specifications.*' => ['nullable', 'string', 'max:80', 'distinct'],
             'attributes' => ['nullable', 'array'],
@@ -727,7 +794,7 @@ class ProductLibraryController extends Controller
 
         abort_unless($this->canEditSelectionProposal($context['user'], $proposal), 403);
         $data = $request->validate([
-            'product_name' => ['required', 'string', 'max:191'],
+            'product_name' => ['required', 'string', 'max:255'],
             'specifications' => ['nullable', 'array'],
             'specifications.*' => ['nullable', 'string', 'max:80', 'distinct'],
             'attributes' => ['nullable', 'array'],
@@ -1094,7 +1161,9 @@ class ProductLibraryController extends Controller
 
             return [
                 'name' => (string) $file['original_name'],
-                'url' => route('aikaipin.product-library.files.show', ['product' => $product, 'kind' => $kind]),
+                'url' => $kind === 'reference'
+                    ? route('aikaipin.product-library.reference-preview', ['product' => $product])
+                    : route('aikaipin.product-library.files.show', ['product' => $product, 'kind' => $kind]),
             ];
         };
 
@@ -1434,7 +1503,7 @@ class ProductLibraryController extends Controller
     private function productQuery(AdminUser $user, bool $canManageProductLibrary, array $filters): Builder
     {
         $query = AikaipinProduct::query()
-            ->latest('updated_at')
+            ->latest('created_at')
             ->latest('id');
 
         if (!$canManageProductLibrary) {

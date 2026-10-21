@@ -134,6 +134,8 @@ Route::post('/product-library/package-uploads/{uploadToken}/parts/{chunkIndex}',
 Route::post('/product-library/package-uploads/{uploadToken}/complete', [ProductLibraryController::class, 'completePackageUpload'])->name('aikaipin.product-library.package-uploads.complete');
 Route::post('/product-library/visibility', [ProductLibraryController::class, 'updateVisibility'])->name('aikaipin.product-library.visibility.update');
 Route::get('/product-library/{product}/images/{imageIndex}', [ProductLibraryController::class, 'showProductImage'])->whereNumber('imageIndex')->name('aikaipin.product-library.images.show');
+Route::get('/product-library/{product}/reference-preview', [ProductLibraryController::class, 'showProductReferencePreview'])->name('aikaipin.product-library.reference-preview');
+Route::get('/product-library/{product}/reference-preview/content', [ProductLibraryController::class, 'showProductReferencePreviewContent'])->name('aikaipin.product-library.reference-preview.content');
 Route::get('/product-library/{product}/files/{kind}', [ProductLibraryController::class, 'showProductFile'])->whereIn('kind', ['reference', 'package'])->name('aikaipin.product-library.files.show');
 Route::get('/selection-proposals', [ProductLibraryController::class, 'selectionProposal'])->name('aikaipin.selection-proposals.index');
 Route::post('/selection-proposals', [ProductLibraryController::class, 'storeSelectionProposal'])->name('aikaipin.selection-proposals.store');
