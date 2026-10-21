@@ -837,7 +837,9 @@
                 if (price && entry.price) { price.value = entry.price; }
                 if (weight && entry.weight) { weight.value = entry.weight; }
             });
-            syncSkuValues();
+            // 此处不能立即 syncSkuValues()：来源 SKU 行可能还没渲染进面板，
+            // 立刻回写会用「当前 DOM 行」重建 skuValues，把刚带入的价格/重量清空。
+            // 复用流程随后会 append + render，渲染时读取 skuValues，再由 updateSummary 统一回写。
         };
 
         // 按名称匹配复用时，把来源记录的系统 SKU 并入右栏供勾选（与已有勾选项去重）
