@@ -1,9 +1,9 @@
 <?php
 
 return [
-    'page_title' => 'Shopify 店铺分析',
+    'page_title' => '店铺列表',
 
-    'title' => 'Shopify 店铺分析',
+    'title' => '店铺列表',
     'subtitle' => '运营系统',
 
     'menus' => [
