@@ -1331,8 +1331,35 @@ class ProductRequestController extends Controller
                 if ($linkCover) {
                     $linkSkuPayload['product_image'] = $linkCover->path;
                 }
+
+                // 同一 PCL 商品编号只维护一条链接记录：先按链接找，找不到再按 PCL 找历史记录并更新，
+                // 避免同一产品因换了 1688 链接而重复新增记录
+                $pclNo = trim((string) ($linkSkuPayload['pcl_product_no'] ?? ''));
+                $linkSku = ProductRequestLinkSku::query()->where('supplier_url_hash', $linkHash)->first();
+                if (!$linkSku && $pclNo !== '') {
+                    $linkSku = ProductRequestLinkSku::query()
+                        ->where('pcl_product_no', $pclNo)
+                        ->orderByDesc('id')
+                        ->first();
+                }
+
+                if ($linkSku && (string) $linkSku->supplier_url_hash !== $linkHash) {
+                    // 命中同 PCL 的历史记录（不同链接）：保留其原有 SKU 与价格重量，合并后更新
+                    $linkSkuPayload['skus'] = implode(',', $this->mergeLinkSkus(
+                        (string) $linkSku->skus,
+                        $linkSkus,
+                    ));
+                    if ($skuValueMap !== []) {
+                        $linkSkuPayload['sku_values'] = array_merge(
+                            (array) ($linkSku->sku_values ?? []),
+                            $skuValueMap,
+                        );
+                    }
+                    $linkSkuPayload['supplier_url_hash'] = $linkHash;
+                }
+
                 ProductRequestLinkSku::query()->updateOrCreate(
-                    ['supplier_url_hash' => $linkHash],
+                    $linkSku ? ['id' => $linkSku->getKey()] : ['supplier_url_hash' => $linkHash],
                     $linkSkuPayload,
                 );
             }
@@ -2233,10 +2260,57 @@ class ProductRequestController extends Controller
         abort_unless($this->access->canViewRequestFromPortal($productRequest, $context['user'], $context['portal']), 403);
         abort_unless(Storage::disk($attachment->disk)->exists($attachment->path), 404);
 
-        return $this->cachedImageResponse(
-            Storage::disk($attachment->disk)->path($attachment->path),
-            $attachment->mime_type ?: null,
-        );
+        $path = Storage::disk($attachment->disk)->path($attachment->path);
+        $mimeType = (string) ($attachment->mime_type ?: '');
+        // 列表缩略图按 ?w= 生成缓存小图，避免每张原图（截图常见近 1MB）都完整下载
+        $width = (int) $request->query('w', 0);
+        if ($width > 0 && str_starts_with($mimeType, 'image/') && ($thumb = $this->thumbnailPath($path, $width)) !== null) {
+            return $this->cachedImageResponse($thumb, 'image/jpeg');
+        }
+
+        return $this->cachedImageResponse($path, $mimeType ?: null);
+    }
+
+    /**
+     * 按宽度生成缩略图并缓存到本地磁盘，原图更新后自动重建；GD 不可用时返回 null 走原图。
+     */
+    private function thumbnailPath(string $sourcePath, int $width): ?string
+    {
+        if (!function_exists('imagecreatefromstring') || !function_exists('imagescale')) {
+            return null;
+        }
+
+        $width = max(80, min(1600, $width));
+        $modifiedAt = (int) (@filemtime($sourcePath) ?: 0);
+        $target = storage_path('app/private/thumbnails/'.$width.'/'.md5($sourcePath.'|'.$modifiedAt).'.jpg');
+
+        if (!is_file($target)) {
+            $info = @getimagesize($sourcePath);
+            if (!$info || (int) $info[0] <= $width || (int) $info[1] <= 0) {
+                return null;
+            }
+
+            $contents = @file_get_contents($sourcePath);
+            $image = $contents === false ? null : @imagecreatefromstring($contents);
+            if (!$image) {
+                return null;
+            }
+
+            $height = (int) max(1, round($info[1] * $width / $info[0]));
+            $resized = @imagescale($image, $width, $height, IMG_BILINEAR_FIXED);
+            imagedestroy($image);
+            if (!$resized) {
+                return null;
+            }
+
+            if (!is_dir(dirname($target))) {
+                @mkdir(dirname($target), 0775, true);
+            }
+            @imagejpeg($resized, $target, 82);
+            imagedestroy($resized);
+        }
+
+        return is_file($target) ? $target : null;
     }
 
     /**
