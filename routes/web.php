@@ -11,6 +11,7 @@ use App\Portals\Logistics\Http\Controllers\PayPalImportController;
 use App\Portals\Logistics\Http\Controllers\ProductStatisticsController;
 use App\Portals\Logistics\Http\Controllers\ShopifyStoreController;
 use App\Portals\Logistics\Http\Controllers\ShopifyWebhookController;
+use App\Portals\Operation\Http\Controllers\OperationDomainStoreController;
 use App\Portals\ProductRequests\Http\Controllers\ProductRequestController;
 use App\Portals\Aikaipin\Http\Controllers\ProductLibraryController;
 use Illuminate\Support\Facades\Route;
@@ -48,6 +49,8 @@ Route::get('/shopify-analytics/sync-batches/{batch}/progress', [ShopifyAnalytics
 Route::post('/shopify-analytics/{domainStore}/refresh', [ShopifyAnalyticsController::class, 'refresh'])->name('assistant.shopify-analytics.refresh');
 Route::get('/product-requests', [ProductRequestController::class, 'operationIndex'])->name('product-requests.operation.index');
 Route::get('/product-request-dedupe', [ProductRequestController::class, 'operationDedupeIndex'])->name('product-requests.operation.dedupe');
+Route::get('/operation/domain-stores', [OperationDomainStoreController::class, 'index'])->name('operation.domain-stores.index');
+Route::post('/operation/domain-stores/{domainStore}/refresh', [OperationDomainStoreController::class, 'refresh'])->name('operation.domain-stores.refresh');
 Route::get('/api/product-requests/operation-pending-count', [ProductRequestController::class, 'operationPendingCount'])->name('product-requests.operation.pending-count');
 Route::get('/api/procurement-inspections/pending-count', [ProductRequestController::class, 'procurementPendingCount'])->name('product-requests.procurement.pending-count');
 Route::get('/api/placement-reviews/pending-count', [ProductRequestController::class, 'placementReviewPendingCount'])->name('product-requests.placement.pending-count');

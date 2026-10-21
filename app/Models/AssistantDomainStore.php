@@ -174,6 +174,12 @@ class AssistantDomainStore extends Model
         return $this->hasOne(AssistantShopifyStoreMetric::class, 'assistant_domain_store_id');
     }
 
+    public function latestShopifyMetric(): HasOne
+    {
+        return $this->hasOne(AssistantShopifyStoreMetric::class, 'assistant_domain_store_id')
+            ->latestOfMany('report_date');
+    }
+
     public function shopifyAnalyticsOrders(): HasMany
     {
         return $this->hasMany(AssistantShopifyStoreOrder::class, 'assistant_domain_store_id');
