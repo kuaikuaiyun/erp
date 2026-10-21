@@ -7,7 +7,7 @@
     $t = static fn (string $key, array $replace = []): string => __('product_requests.'.$key, $replace);
 @endphp
 @push('styles')
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261018-20">
+<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261022-01">
 <style>
 .dedupe-card{border:1px solid #e4e4e4;border-radius:8px;background:#fff;margin-bottom:20px;overflow:hidden}
 .dedupe-card-header{padding:14px 18px;background:#fafafa;border-bottom:1px solid #eee;display:flex;align-items:center;justify-content:space-between;gap:12px}
