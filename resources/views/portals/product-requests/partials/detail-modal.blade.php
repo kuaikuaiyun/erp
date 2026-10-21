@@ -39,7 +39,7 @@
                     <div class="product-request-image-grid">
                         @forelse($operationImages as $attachment)
                             <a href="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}" data-product-request-image-preview data-product-request-image-alt="{{ $attachment->original_name }}">
-                                <img loading="lazy" decoding="async" src="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}?w=1200" alt="{{ $attachment->original_name }}">
+                                <img loading="lazy" decoding="async" src="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}?w=400" alt="{{ $attachment->original_name }}">
                             </a>
                         @empty
                             <span class="text-muted">{{ $notAvailable }}</span>
@@ -61,7 +61,7 @@
                     <div class="product-request-image-grid">
                         @forelse($purchaseItemImages as $attachment)
                             <a href="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}" data-product-request-image-preview data-product-request-image-alt="{{ $attachment->original_name }}">
-                                <img loading="lazy" decoding="async" src="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}?w=1200" alt="{{ $attachment->original_name }}">
+                                <img loading="lazy" decoding="async" src="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}?w=400" alt="{{ $attachment->original_name }}">
                             </a>
                         @empty
                             <span class="text-muted">{{ $notAvailable }}</span>
@@ -89,7 +89,7 @@
                     <div class="product-request-image-grid">
                         @forelse($procurementImages as $attachment)
                             <a href="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}" data-product-request-image-preview data-product-request-image-alt="{{ $attachment->original_name }}">
-                                <img loading="lazy" decoding="async" src="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}?w=1200" alt="{{ $attachment->original_name }}">
+                                <img loading="lazy" decoding="async" src="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}?w=400" alt="{{ $attachment->original_name }}">
                             </a>
                         @empty
                             <span class="text-muted">{{ $notFilled }}</span>
@@ -142,7 +142,7 @@
                     <div class="product-request-image-grid">
                         @forelse($warehouseImages as $attachment)
                             <a href="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}" data-product-request-image-preview data-product-request-image-alt="{{ $attachment->original_name }}">
-                                <img loading="lazy" decoding="async" src="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}?w=1200" alt="{{ $attachment->original_name }}">
+                                <img loading="lazy" decoding="async" src="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}?w=400" alt="{{ $attachment->original_name }}">
                             </a>
                         @empty
                             <span class="text-muted">{{ $notFilled }}</span>

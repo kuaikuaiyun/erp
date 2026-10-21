@@ -2276,7 +2276,7 @@ class ProductRequestController extends Controller
      */
     private function thumbnailPath(string $sourcePath, int $width): ?string
     {
-        if (!function_exists('imagecreatefromstring') || !function_exists('imagescale')) {
+        if (!function_exists('imagecreatefromstring') || !function_exists('imagescale') || !function_exists('imagejpeg')) {
             return null;
         }
 
@@ -2284,14 +2284,28 @@ class ProductRequestController extends Controller
         $modifiedAt = (int) (@filemtime($sourcePath) ?: 0);
         $target = storage_path('app/private/thumbnails/'.$width.'/'.md5($sourcePath.'|'.$modifiedAt).'.jpg');
 
-        if (!is_file($target)) {
+        if (is_file($target)) {
+            return $target;
+        }
+
+        // 缩略图生成失败（GD 缺失、超大图内存不足、目录不可写等）时统一回退原图，
+        // 不能让 ?w= 请求直接报错，否则列表图片会整片无法访问
+        try {
             $info = @getimagesize($sourcePath);
             if (!$info || (int) $info[0] <= $width || (int) $info[1] <= 0) {
                 return null;
             }
+            // 超大图解码会占用大量内存，直接跳过缩略图，避免触发内存耗尽导致 500
+            if ((int) $info[0] * (int) $info[1] > 20000000) {
+                return null;
+            }
 
             $contents = @file_get_contents($sourcePath);
-            $image = $contents === false ? null : @imagecreatefromstring($contents);
+            if ($contents === false) {
+                return null;
+            }
+
+            $image = @imagecreatefromstring($contents);
             if (!$image) {
                 return null;
             }
@@ -2308,6 +2322,8 @@ class ProductRequestController extends Controller
             }
             @imagejpeg($resized, $target, 82);
             imagedestroy($resized);
+        } catch (\Throwable $e) {
+            return null;
         }
 
         return is_file($target) ? $target : null;
