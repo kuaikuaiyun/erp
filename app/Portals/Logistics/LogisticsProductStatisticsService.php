@@ -846,18 +846,22 @@ class LogisticsProductStatisticsService
         $query = LogisticsPayPalDispute::query()
             ->join('logistics_orders as orders', 'orders.id', '=', 'logistics_paypal_disputes.logistics_order_id')
             ->whereIn('logistics_paypal_disputes.logistics_order_id', $orderIds)
-            ->select('logistics_paypal_disputes.*');
+            ->select('logistics_paypal_disputes.*')
+            ->selectRaw($this->disputeTypeKeyExpression().' as display_type_key');
         $this->applyDetailTextFilter($query, $options, [
             'logistics_paypal_disputes.dispute_id', 'logistics_paypal_disputes.reason', 'orders.shopify_order_number', 'orders.store_name', 'orders.bill_number',
         ]);
-        foreach (['status' => 'status', 'type' => 'channel', 'outcome' => 'outcome_code'] as $option => $column) {
+        foreach (['status' => 'status', 'outcome' => 'outcome_code'] as $option => $column) {
             if (filled($options[$option] ?? null)) {
                 $query->where('logistics_paypal_disputes.'.$column, (string) $options[$option]);
             }
         }
+        if (filled($options['type'] ?? null)) {
+            $this->applyDisputeTypeFilter($query, (string) $options['type']);
+        }
         $this->applyDetailSort($query, [
             'dispute_id' => 'logistics_paypal_disputes.dispute_id', 'amount' => 'logistics_paypal_disputes.dispute_amount_usd',
-            'status' => 'logistics_paypal_disputes.status', 'stage' => 'logistics_paypal_disputes.channel',
+            'status' => 'logistics_paypal_disputes.status', 'stage' => 'display_type_key',
             'outcome' => 'logistics_paypal_disputes.outcome_code', 'updated_at' => 'logistics_paypal_disputes.dispute_updated_at',
         ][(string) ($options['sort'] ?? '')] ?? 'logistics_paypal_disputes.dispute_updated_at', $options, 'logistics_paypal_disputes.id');
         $page = $this->paginateDetailQuery($query, $options);
@@ -890,15 +894,28 @@ class LogisticsProductStatisticsService
                 ->map(static fn ($value): string => (string) $value)->all();
         };
 
-        $types = $values(clone $base, 'dispute.channel');
+        $types = (clone $base)
+            ->select(['dispute.channel', 'dispute.life_cycle_stage'])
+            ->where(function (Builder $query): void {
+                $query->whereNotNull('dispute.channel')
+                    ->orWhereNotNull('dispute.life_cycle_stage');
+            })
+            ->distinct()
+            ->get()
+            ->map(static fn (object $row): array => [
+                'value' => LogisticsPayPalDispute::typeKeyFor($row->channel ?? null, $row->life_cycle_stage ?? null),
+                'label' => LogisticsPayPalDispute::typeLabelFor($row->channel ?? null, $row->life_cycle_stage ?? null),
+            ])
+            ->filter(static fn (array $option): bool => $option['value'] !== '')
+            ->unique('value')
+            ->sortBy('label', SORT_NATURAL)
+            ->values()
+            ->all();
         $statuses = $values(clone $base, 'dispute.status');
         $outcomes = $values(clone $base, 'dispute.outcome_code');
 
         return [
-            'type' => array_map(static fn (string $value): array => [
-                'value' => $value,
-                'label' => LogisticsPayPalDispute::typeLabelFor($value),
-            ], $types),
+            'type' => $types,
             'status' => array_map(static fn (string $value): array => [
                 'value' => $value,
                 'label' => LogisticsPayPalDispute::statusLabelFor($value),
@@ -908,6 +925,39 @@ class LogisticsProductStatisticsService
                 'label' => LogisticsPayPalDispute::outcomeLabelFor($value),
             ], $outcomes),
         ];
+    }
+
+    private function disputeTypeKeyExpression(): string
+    {
+        return "CASE WHEN logistics_paypal_disputes.channel = 'ALERT' THEN 'ALERT' WHEN logistics_paypal_disputes.life_cycle_stage = 'INQUIRY' THEN 'INQUIRY' ELSE COALESCE(logistics_paypal_disputes.channel, '') END";
+    }
+
+    /** @param \Illuminate\Database\Eloquent\Builder<LogisticsPayPalDispute> $query */
+    private function applyDisputeTypeFilter($query, string $type): void
+    {
+        $type = strtoupper(trim($type));
+
+        if ($type === 'ALERT') {
+            $query->where('logistics_paypal_disputes.channel', 'ALERT');
+
+            return;
+        }
+
+        if ($type === 'INQUIRY') {
+            $query->where('logistics_paypal_disputes.life_cycle_stage', 'INQUIRY')
+                ->where(function ($nested): void {
+                    $nested->whereNull('logistics_paypal_disputes.channel')
+                        ->orWhere('logistics_paypal_disputes.channel', '<>', 'ALERT');
+                });
+
+            return;
+        }
+
+        $query->where('logistics_paypal_disputes.channel', $type)
+            ->where(function ($nested): void {
+                $nested->whereNull('logistics_paypal_disputes.life_cycle_stage')
+                    ->orWhere('logistics_paypal_disputes.life_cycle_stage', '<>', 'INQUIRY');
+            });
     }
 
     /**

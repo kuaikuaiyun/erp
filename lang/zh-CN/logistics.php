@@ -22,6 +22,9 @@ return [
             'EXTERNAL' => '撤销付款',
             'ALERT' => '撤销付款提前通知',
         ],
+        'stages' => [
+            'INQUIRY' => '查询',
+        ],
         'reasons' => [
             'MERCHANDISE_OR_SERVICE_NOT_RECEIVED' => '未收到商品或服务',
             'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED' => '商品或服务与描述不符',

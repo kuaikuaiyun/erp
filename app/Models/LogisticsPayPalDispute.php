@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class LogisticsPayPalDispute extends Model
 {
+    private const QUERY_LIFE_CYCLE_STAGE = 'INQUIRY';
+
     protected $table = 'logistics_paypal_disputes';
 
     protected $fillable = [
@@ -53,9 +55,29 @@ class LogisticsPayPalDispute extends Model
         return $this->hasMany(LogisticsPayPalDisputeRefund::class, 'logistics_paypal_dispute_id');
     }
 
-    public static function typeLabelFor(mixed $channel): string
+    public static function typeKeyFor(mixed $channel, mixed $lifeCycleStage = null): string
     {
-        return self::enumLabel('channels', $channel, 'unknown_type');
+        $channel = strtoupper(trim((string) ($channel ?? '')));
+        $lifeCycleStage = strtoupper(trim((string) ($lifeCycleStage ?? '')));
+
+        if ($channel === 'ALERT') {
+            return 'ALERT';
+        }
+
+        if ($lifeCycleStage === self::QUERY_LIFE_CYCLE_STAGE) {
+            return self::QUERY_LIFE_CYCLE_STAGE;
+        }
+
+        return $channel;
+    }
+
+    public static function typeLabelFor(mixed $channel, mixed $lifeCycleStage = null): string
+    {
+        $type = self::typeKeyFor($channel, $lifeCycleStage);
+
+        return $type === self::QUERY_LIFE_CYCLE_STAGE
+            ? self::enumLabel('stages', $type, 'unknown_type')
+            : self::enumLabel('channels', $type, 'unknown_type');
     }
 
     public static function reasonLabelFor(mixed $reason): string
@@ -75,7 +97,7 @@ class LogisticsPayPalDispute extends Model
 
     public function typeLabel(): string
     {
-        return self::typeLabelFor($this->channel);
+        return self::typeLabelFor($this->channel, $this->life_cycle_stage);
     }
 
     public function reasonLabel(): string
