@@ -158,6 +158,7 @@ Route::post('/api/paypal/import', PayPalImportController::class)->name('logistic
 Route::get('/ai-product-requests', [AiProductController::class, 'operationIndex'])->name('ai-products.operation.index');
 Route::post('/ai-product-requests', [AiProductController::class, 'operationStore'])->name('ai-products.operation.store');
 Route::put('/ai-product-requests/{submission}', [AiProductController::class, 'operationUpdate'])->name('ai-products.operation.update');
+Route::delete('/ai-product-requests/{submission}', [AiProductController::class, 'operationDestroy'])->name('ai-products.operation.destroy');
 Route::get('/ai-product-reviews', [AiProductController::class, 'reviewIndex'])->name('ai-products.review.index');
 Route::post('/ai-product-reviews/{submission}/approve', [AiProductController::class, 'reviewApprove'])->name('ai-products.review.approve');
 Route::post('/ai-product-reviews/{submission}/reject', [AiProductController::class, 'reviewReject'])->name('ai-products.review.reject');
