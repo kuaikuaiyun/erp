@@ -471,6 +471,7 @@ return [
         'summary' => '源产品 :source 条；可迁移 :eligible 条；本次选中 :selected 条；因现有数据冲突跳过 :conflicts 条；已删除跳过 :deleted 条；来源平台不支持跳过 :unsupported 条。',
         'no_records' => '没有可安全写入的产品记录；请先检查现有 ID 或产品编号冲突。',
         'dry_run_complete' => '预览完成：未写入任何数据。',
+        'auto_increment_warning' => '产品已写入，但自动递增值未能更新；请检查系统日志后再继续导入。',
         'complete' => '迁移完成：已写入 :count 条产品记录。',
         'errors' => [
             'user_not_found' => '未找到新 ERP 用户 ID :id，无法指定上传人。',
@@ -488,5 +489,8 @@ return [
             'column_count_invalid' => '源 SQL 的字段数量不匹配（数据表：:table）。',
             'save_failed' => '迁移写入失败，事务已回滚；请查看系统日志。',
         ],
+    ],
+    'migrations' => [
+        'product_name_sku_rollback_unsafe' => '无法安全回滚产品名称与 SKU 字段长度：现有数据超过 191 个字符。',
     ],
 ];

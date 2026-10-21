@@ -25,24 +25,17 @@ class LogisticsProductStatisticsService
     /**
      * Imported credit-card refund reasons counted as operational alerts.
      *
-     * English markers are matched case-insensitively. Chinese business
-     * reasons use the same contains rule so additional notes around the
-     * standard wording do not prevent a match.
+     * Only the three external early-warning networks belong to this metric.
      *
      * @var list<string>
      */
-    private const CREDIT_CARD_ALERT_REASON_KEYWORDS = [
-        'ethoca',
-        'cdrn',
-        'rdr',
-        '取消复购订单',
-        '取消加购',
-        '取消订单',
-        '质量问题',
-        '地址无法发货',
-        '描述不符',
-        '商品无法发货',
-    ];
+    private const CREDIT_CARD_ALERT_REASON_KEYWORDS = LogisticsCreditCardRefundReason::ALERT;
+
+    /** @var list<string> */
+    private const CREDIT_CARD_CUSTOMER_SERVICE_REASON_KEYWORDS = LogisticsCreditCardRefundReason::CUSTOMER_SERVICE;
+
+    /** @var list<string> */
+    private const CREDIT_CARD_DISPUTE_REASON_KEYWORDS = LogisticsCreditCardRefundReason::DISPUTE;
 
     /**
      * @param array<string, mixed> $filters
@@ -347,6 +340,9 @@ class LogisticsProductStatisticsService
             $disputeReasonBreakdown = $this->overviewDisputeReasonBreakdown($filters, $key);
             $product['overview_modules']['overall']['dispute_reason_breakdown'] = $disputeReasonBreakdown;
             $product['overview_modules']['paypal']['dispute_reason_breakdown'] = $disputeReasonBreakdown;
+            $creditCardReasonSummaries = $this->overviewCreditCardReasonSummaries($filters, $key);
+            $product['overview_modules']['credit_card']['alert_record_summary'] = $creditCardReasonSummaries['alert'];
+            $product['overview_modules']['credit_card']['dispute_record_summary'] = $creditCardReasonSummaries['dispute'];
             $product['store_order_distribution'] = $this->detailStoreOrderDistribution($filters, $key);
 
             return [
@@ -443,6 +439,94 @@ class LogisticsProductStatisticsService
     }
 
     /**
+     * Build record-level summaries for the credit-card module only.  These
+     * figures intentionally do not flow into the overall module.
+     *
+     * @param array<string,mixed> $filters
+     * @return array{alert:array<string,mixed>,dispute:array<string,mixed>}
+     */
+    private function overviewCreditCardReasonSummaries(array $filters, string $key): array
+    {
+        $productOrders = $this->productOrderQuery($filters, false, [$key]);
+        $creditCardTag = "(CASE WHEN JSON_VALID(COALESCE(product_orders.shopify_payload, '')) THEN JSON_SEARCH(JSON_EXTRACT(product_orders.shopify_payload, '$.tags'), 'one', '%CreditCardBy%') ELSE NULL END IS NOT NULL)";
+
+        $records = $this->database()->table('logistics_credit_card_refunds as refund')
+            ->joinSub($productOrders, 'product_orders', 'product_orders.order_id', '=', 'refund.logistics_order_id')
+            ->whereRaw($creditCardTag)
+            ->select([
+                'refund.id',
+                'refund.logistics_order_id as order_id',
+                'refund.refund_reason as reason',
+                'refund.refund_amount_usd as amount',
+            ])
+            ->get()
+            ->map(static fn (object $row): array => [
+                'id' => (int) $row->id,
+                'order_id' => (int) $row->order_id,
+                'reason' => trim((string) $row->reason),
+                'amount' => (float) $row->amount,
+            ])
+            ->all();
+
+        return [
+            'alert' => $this->creditCardReasonSummary($records, self::CREDIT_CARD_ALERT_REASON_KEYWORDS),
+            'dispute' => $this->creditCardReasonSummary($records, self::CREDIT_CARD_DISPUTE_REASON_KEYWORDS),
+        ];
+    }
+
+    /**
+     * @param list<array{id:int,order_id:int,reason:string,amount:float}> $records
+     * @param list<string> $keywords
+     * @return array{record_count:int,order_count:int,amount:float,reason_breakdown:list<array{reason:string,count:int,amount:float,ratio:float}>}
+     */
+    private function creditCardReasonSummary(array $records, array $keywords): array
+    {
+        $matched = array_values(array_filter(
+            $records,
+            fn (array $record): bool => $this->creditCardReasonMatches($record['reason'], $keywords),
+        ));
+        $recordCount = count($matched);
+        $breakdown = [];
+
+        foreach ($matched as $record) {
+            $label = $this->matchedCreditCardReasonLabel($record['reason'], $keywords) ?? $record['reason'];
+            $breakdown[$label] ??= ['reason' => $label, 'count' => 0, 'amount' => 0.0];
+            $breakdown[$label]['count']++;
+            $breakdown[$label]['amount'] += $record['amount'];
+        }
+
+        $breakdown = array_values(array_map(static function (array $row) use ($recordCount): array {
+            $row['amount'] = round((float) $row['amount'], 4);
+            $row['ratio'] = $recordCount > 0 ? round((int) $row['count'] / $recordCount * 100, 2) : 0.0;
+
+            return $row;
+        }, $breakdown));
+
+        usort($breakdown, static fn (array $left, array $right): int => [$right['count'], $right['amount']] <=> [$left['count'], $left['amount']]);
+
+        return [
+            'record_count' => $recordCount,
+            'order_count' => count(array_unique(array_column($matched, 'order_id'))),
+            'amount' => round(array_sum(array_column($matched, 'amount')), 4),
+            'reason_breakdown' => $breakdown,
+        ];
+    }
+
+    /** @param list<string> $keywords */
+    private function matchedCreditCardReasonLabel(string $reason, array $keywords): ?string
+    {
+        $value = LogisticsCreditCardRefundReason::normalize($reason);
+
+        foreach ($keywords as $keyword) {
+            if (str_contains($value, LogisticsCreditCardRefundReason::normalize($keyword))) {
+                return $keyword;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * @param array<string,mixed> $filters
      * @param array<string,mixed> $options
      * @return array<string,mixed>
@@ -476,7 +560,7 @@ class LogisticsProductStatisticsService
             ->all();
 
         return [
-            'rows' => $this->hydratedOrderRows($filters, $key, $orderIdsOnPage),
+            'rows' => $this->hydratedOrderRows($filters, $key, $orderIdsOnPage, $paymentKind),
             'pagination' => $page['pagination'],
             'options' => [
                 'logistics_status' => $this->detailLogisticsStatuses($filters, $key, $paymentKind),
@@ -489,7 +573,7 @@ class LogisticsProductStatisticsService
      * @param list<int> $orderIds
      * @return list<array<string,mixed>>
      */
-    private function hydratedOrderRows(array $filters, string $key, array $orderIds): array
+    private function hydratedOrderRows(array $filters, string $key, array $orderIds, ?string $paymentKind = null): array
     {
         if ($orderIds === []) {
             return [];
@@ -525,7 +609,23 @@ class LogisticsProductStatisticsService
             ->keyBy(static fn (array $row): int => (int) $row['order_id']);
 
         return array_values(array_filter(array_map(
-            static fn (int $orderId): ?array => $rows->get($orderId),
+            static function (int $orderId) use ($rows, $paymentKind): ?array {
+                $row = $rows->get($orderId);
+                if (!is_array($row)) {
+                    return null;
+                }
+
+                // Keep the API contract as strict as the visible tab. A PayPal
+                // order row never carries independent card-refund data, while
+                // a card order row never carries PayPal refunds or disputes.
+                if ($paymentKind === 'paypal') {
+                    unset($row['credit_card_refund']);
+                } elseif ($paymentKind === 'credit_card') {
+                    unset($row['paypal_refund'], $row['paypal_dispute_count']);
+                }
+
+                return $row;
+            },
             $orderIds,
         )));
     }
@@ -746,18 +846,22 @@ class LogisticsProductStatisticsService
         $query = LogisticsPayPalDispute::query()
             ->join('logistics_orders as orders', 'orders.id', '=', 'logistics_paypal_disputes.logistics_order_id')
             ->whereIn('logistics_paypal_disputes.logistics_order_id', $orderIds)
-            ->select('logistics_paypal_disputes.*');
+            ->select('logistics_paypal_disputes.*')
+            ->selectRaw($this->disputeTypeKeyExpression().' as display_type_key');
         $this->applyDetailTextFilter($query, $options, [
             'logistics_paypal_disputes.dispute_id', 'logistics_paypal_disputes.reason', 'orders.shopify_order_number', 'orders.store_name', 'orders.bill_number',
         ]);
-        foreach (['status' => 'status', 'type' => 'channel', 'outcome' => 'outcome_code'] as $option => $column) {
+        foreach (['status' => 'status', 'outcome' => 'outcome_code'] as $option => $column) {
             if (filled($options[$option] ?? null)) {
                 $query->where('logistics_paypal_disputes.'.$column, (string) $options[$option]);
             }
         }
+        if (filled($options['type'] ?? null)) {
+            $this->applyDisputeTypeFilter($query, (string) $options['type']);
+        }
         $this->applyDetailSort($query, [
             'dispute_id' => 'logistics_paypal_disputes.dispute_id', 'amount' => 'logistics_paypal_disputes.dispute_amount_usd',
-            'status' => 'logistics_paypal_disputes.status', 'stage' => 'logistics_paypal_disputes.channel',
+            'status' => 'logistics_paypal_disputes.status', 'stage' => 'display_type_key',
             'outcome' => 'logistics_paypal_disputes.outcome_code', 'updated_at' => 'logistics_paypal_disputes.dispute_updated_at',
         ][(string) ($options['sort'] ?? '')] ?? 'logistics_paypal_disputes.dispute_updated_at', $options, 'logistics_paypal_disputes.id');
         $page = $this->paginateDetailQuery($query, $options);
@@ -790,15 +894,28 @@ class LogisticsProductStatisticsService
                 ->map(static fn ($value): string => (string) $value)->all();
         };
 
-        $types = $values(clone $base, 'dispute.channel');
+        $types = (clone $base)
+            ->select(['dispute.channel', 'dispute.life_cycle_stage'])
+            ->where(function (Builder $query): void {
+                $query->whereNotNull('dispute.channel')
+                    ->orWhereNotNull('dispute.life_cycle_stage');
+            })
+            ->distinct()
+            ->get()
+            ->map(static fn (object $row): array => [
+                'value' => LogisticsPayPalDispute::typeKeyFor($row->channel ?? null, $row->life_cycle_stage ?? null),
+                'label' => LogisticsPayPalDispute::typeLabelFor($row->channel ?? null, $row->life_cycle_stage ?? null),
+            ])
+            ->filter(static fn (array $option): bool => $option['value'] !== '')
+            ->unique('value')
+            ->sortBy('label', SORT_NATURAL)
+            ->values()
+            ->all();
         $statuses = $values(clone $base, 'dispute.status');
         $outcomes = $values(clone $base, 'dispute.outcome_code');
 
         return [
-            'type' => array_map(static fn (string $value): array => [
-                'value' => $value,
-                'label' => LogisticsPayPalDispute::typeLabelFor($value),
-            ], $types),
+            'type' => $types,
             'status' => array_map(static fn (string $value): array => [
                 'value' => $value,
                 'label' => LogisticsPayPalDispute::statusLabelFor($value),
@@ -808,6 +925,39 @@ class LogisticsProductStatisticsService
                 'label' => LogisticsPayPalDispute::outcomeLabelFor($value),
             ], $outcomes),
         ];
+    }
+
+    private function disputeTypeKeyExpression(): string
+    {
+        return "CASE WHEN logistics_paypal_disputes.channel = 'ALERT' THEN 'ALERT' WHEN logistics_paypal_disputes.life_cycle_stage = 'INQUIRY' THEN 'INQUIRY' ELSE COALESCE(logistics_paypal_disputes.channel, '') END";
+    }
+
+    /** @param \Illuminate\Database\Eloquent\Builder<LogisticsPayPalDispute> $query */
+    private function applyDisputeTypeFilter($query, string $type): void
+    {
+        $type = strtoupper(trim($type));
+
+        if ($type === 'ALERT') {
+            $query->where('logistics_paypal_disputes.channel', 'ALERT');
+
+            return;
+        }
+
+        if ($type === 'INQUIRY') {
+            $query->where('logistics_paypal_disputes.life_cycle_stage', 'INQUIRY')
+                ->where(function ($nested): void {
+                    $nested->whereNull('logistics_paypal_disputes.channel')
+                        ->orWhere('logistics_paypal_disputes.channel', '<>', 'ALERT');
+                });
+
+            return;
+        }
+
+        $query->where('logistics_paypal_disputes.channel', $type)
+            ->where(function ($nested): void {
+                $nested->whereNull('logistics_paypal_disputes.life_cycle_stage')
+                    ->orWhere('logistics_paypal_disputes.life_cycle_stage', '<>', 'INQUIRY');
+            });
     }
 
     /**
@@ -1037,6 +1187,10 @@ class LogisticsProductStatisticsService
                 ->selectRaw('COALESCE(order_statistics.credit_card_module_chargeback_count, 0) as credit_card_module_chargeback_count')
                 ->selectRaw('COALESCE(order_statistics.credit_card_module_chargeback_order_count, 0) as credit_card_module_chargeback_order_count')
                 ->selectRaw('COALESCE(order_statistics.credit_card_module_chargeback_amount, 0) as credit_card_module_chargeback_amount')
+                ->selectRaw('COALESCE(order_statistics.credit_card_module_customer_service_refund_count, 0) as credit_card_module_customer_service_refund_count')
+                ->selectRaw('COALESCE(order_statistics.credit_card_module_customer_service_refund_amount, 0) as credit_card_module_customer_service_refund_amount')
+                ->selectRaw('COALESCE(order_statistics.credit_card_module_dispute_refund_count, 0) as credit_card_module_dispute_refund_count')
+                ->selectRaw('COALESCE(order_statistics.credit_card_module_dispute_refund_amount, 0) as credit_card_module_dispute_refund_amount')
                 ->selectRaw('COALESCE(order_statistics.credit_card_module_shipped_order_count, 0) as credit_card_module_shipped_order_count')
                 ->selectRaw('COALESCE(order_statistics.credit_card_module_delivered_order_count, 0) as credit_card_module_delivered_order_count');
         }
@@ -1238,9 +1392,23 @@ class LogisticsProductStatisticsService
 
         if ($withOverviewModules) {
             $query->leftJoinSub(
-                $this->creditCardChargebackAggregateQuery(),
+                $this->creditCardReasonAggregateQuery(self::CREDIT_CARD_ALERT_REASON_KEYWORDS),
                 'credit_card_chargebacks',
                 'credit_card_chargebacks.logistics_order_id',
+                '=',
+                'product_orders.order_id',
+            );
+            $query->leftJoinSub(
+                $this->creditCardReasonAggregateQuery(self::CREDIT_CARD_CUSTOMER_SERVICE_REASON_KEYWORDS),
+                'credit_card_customer_service_refunds',
+                'credit_card_customer_service_refunds.logistics_order_id',
+                '=',
+                'product_orders.order_id',
+            );
+            $query->leftJoinSub(
+                $this->creditCardReasonAggregateQuery(self::CREDIT_CARD_DISPUTE_REASON_KEYWORDS),
+                'credit_card_dispute_refunds',
+                'credit_card_dispute_refunds.logistics_order_id',
                 '=',
                 'product_orders.order_id',
             );
@@ -1276,6 +1444,10 @@ class LogisticsProductStatisticsService
                 ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(credit_card_chargebacks.chargeback_count, 0) ELSE 0 END) as credit_card_module_chargeback_count")
                 ->selectRaw("SUM(CASE WHEN {$creditCard} AND COALESCE(credit_card_chargebacks.chargeback_count, 0) > 0 THEN 1 ELSE 0 END) as credit_card_module_chargeback_order_count")
                 ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(credit_card_chargebacks.chargeback_amount, 0) ELSE 0 END) as credit_card_module_chargeback_amount")
+                ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(credit_card_customer_service_refunds.chargeback_count, 0) ELSE 0 END) as credit_card_module_customer_service_refund_count")
+                ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(credit_card_customer_service_refunds.chargeback_amount, 0) ELSE 0 END) as credit_card_module_customer_service_refund_amount")
+                ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(credit_card_dispute_refunds.chargeback_count, 0) ELSE 0 END) as credit_card_module_dispute_refund_count")
+                ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(credit_card_dispute_refunds.chargeback_amount, 0) ELSE 0 END) as credit_card_module_dispute_refund_amount")
                 ->selectRaw("SUM(CASE WHEN {$creditCard} AND {$shipped} THEN 1 ELSE 0 END) as credit_card_module_shipped_order_count")
                 ->selectRaw("SUM(CASE WHEN {$creditCard} AND {$delivered} THEN 1 ELSE 0 END) as credit_card_module_delivered_order_count");
         }
@@ -1353,6 +1525,9 @@ class LogisticsProductStatisticsService
     private function creditCardRefundAggregateQuery(): Builder
     {
         return $this->database()->table('logistics_credit_card_refunds as refund')
+            ->whereNot(function (Builder $query): void {
+                $this->applyCreditCardReasonFilter($query, self::CREDIT_CARD_DISPUTE_REASON_KEYWORDS);
+            })
             ->select('refund.logistics_order_id')
             ->selectRaw('SUM(refund.refund_amount_usd) as refund_amount')
             ->selectRaw('COUNT(*) as refund_count')
@@ -1365,22 +1540,30 @@ class LogisticsProductStatisticsService
      * user-supplied text, therefore matching is deliberately case-insensitive
      * and allows surrounding text.
      */
-    private function creditCardChargebackAggregateQuery(): Builder
+    /** @param list<string> $keywords */
+    private function creditCardReasonAggregateQuery(array $keywords): Builder
     {
         return $this->database()->table('logistics_credit_card_refunds as refund')
-            ->where(function (Builder $query): void {
-                foreach (self::CREDIT_CARD_ALERT_REASON_KEYWORDS as $index => $keyword) {
-                    $method = $index === 0 ? 'whereRaw' : 'orWhereRaw';
-                    $query->{$method}(
-                        "LOWER(COALESCE(refund.refund_reason, '')) LIKE ?",
-                        ['%'.mb_strtolower($keyword).'%'],
-                    );
-                }
+            ->where(function (Builder $query) use ($keywords): void {
+                $this->applyCreditCardReasonFilter($query, $keywords);
             })
             ->select('refund.logistics_order_id')
             ->selectRaw('COUNT(*) as chargeback_count')
             ->selectRaw('SUM(refund.refund_amount_usd) as chargeback_amount')
             ->groupBy('refund.logistics_order_id');
+    }
+
+    /** @param list<string> $keywords */
+    private function applyCreditCardReasonFilter(Builder $query, array $keywords): void
+    {
+        $expression = "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(refund.refund_reason, ''), '（', ''), '）', ''), '(', ''), ')', ''), ' ', ''))";
+
+        foreach ($keywords as $index => $keyword) {
+            $method = $index === 0 ? 'whereRaw' : 'orWhereRaw';
+            $query->{$method}($expression.' LIKE ?', [
+                '%'.LogisticsCreditCardRefundReason::normalize($keyword).'%',
+            ]);
+        }
     }
 
     /** @param array<string,mixed> $filters */
@@ -1610,6 +1793,10 @@ class LogisticsProductStatisticsService
             (int) $row->credit_card_module_chargeback_count,
             (int) $row->credit_card_module_chargeback_order_count,
             (float) $row->credit_card_module_chargeback_amount,
+            (int) $row->credit_card_module_customer_service_refund_count,
+            (float) $row->credit_card_module_customer_service_refund_amount,
+            (int) $row->credit_card_module_dispute_refund_count,
+            (float) $row->credit_card_module_dispute_refund_amount,
         );
 
         return [
@@ -1649,6 +1836,10 @@ class LogisticsProductStatisticsService
         int $chargebackCount = 0,
         int $chargebackOrderCount = 0,
         float $chargebackAmount = 0.0,
+        int $customerServiceRefundCount = 0,
+        float $customerServiceRefundAmount = 0.0,
+        int $creditCardDisputeCount = 0,
+        float $creditCardDisputeAmount = 0.0,
     ): array {
         return [
             'unit_count' => round($unitCount, 4),
@@ -1671,7 +1862,25 @@ class LogisticsProductStatisticsService
             'chargeback_count' => $chargebackCount,
             'chargeback_order_count' => $chargebackOrderCount,
             'chargeback_amount' => round($chargebackAmount, 4),
-            'chargeback_rate' => $orderCount > 0 ? round($chargebackOrderCount / $orderCount * 100, 2) : 0.0,
+            'chargeback_rate' => $receivedAmount > 0 ? round($chargebackAmount / $receivedAmount * 100, 2) : 0.0,
+            'customer_service_refund_count' => $customerServiceRefundCount,
+            'customer_service_refund_amount' => round($customerServiceRefundAmount, 4),
+            'customer_service_refund_rate' => $receivedAmount > 0 ? round($customerServiceRefundAmount / $receivedAmount * 100, 2) : 0.0,
+            'credit_card_dispute_count' => $creditCardDisputeCount,
+            'credit_card_dispute_amount' => round($creditCardDisputeAmount, 4),
+            'credit_card_dispute_rate' => $orderCount > 0 ? round($creditCardDisputeCount / $orderCount * 100, 2) : 0.0,
+            'alert_record_summary' => [
+                'record_count' => 0,
+                'order_count' => 0,
+                'amount' => 0.0,
+                'reason_breakdown' => [],
+            ],
+            'dispute_record_summary' => [
+                'record_count' => 0,
+                'order_count' => 0,
+                'amount' => 0.0,
+                'reason_breakdown' => [],
+            ],
         ];
     }
 
@@ -1888,7 +2097,7 @@ class LogisticsProductStatisticsService
             'paypal_dispute_rate' => $paypalDisputeRate,
             'paypal_dispute_details' => $payment['dispute_details'],
             'credit_card_refund_amount' => $payment['credit_card_refund_amount'],
-            'credit_card_refund_count' => count($payment['credit_card_refund_details']),
+            'credit_card_refund_count' => count($payment['credit_card_actual_refund_details']),
             'credit_card_refund_rate' => $creditCardRefundRate,
             'combined_refund_rate' => $combinedRefundRate,
             'paid_order_count' => $paidOrders->count(),
@@ -1955,9 +2164,9 @@ class LogisticsProductStatisticsService
             ->values();
 
         return [
-            'overall' => $this->overviewModule($items, $orders, true),
-            'paypal' => $this->overviewModule($this->itemsForOrders($items, $paypalOrders), $paypalOrders, true),
-            'credit_card' => $this->overviewModule($this->itemsForOrders($items, $creditCardOrders), $creditCardOrders, false, true),
+            'overall' => $this->overviewModule($items, $orders, true, false, 'overall'),
+            'paypal' => $this->overviewModule($this->itemsForOrders($items, $paypalOrders), $paypalOrders, true, false, 'paypal'),
+            'credit_card' => $this->overviewModule($this->itemsForOrders($items, $creditCardOrders), $creditCardOrders, false, true, 'credit_card'),
         ];
     }
 
@@ -1983,10 +2192,19 @@ class LogisticsProductStatisticsService
      * @param Collection<int,LogisticsOrder> $orders
      * @return array<string,mixed>
      */
-    private function overviewModule(array $items, Collection $orders, bool $disputesApplicable, bool $creditCardChargebacksApplicable = false): array
+    private function overviewModule(array $items, Collection $orders, bool $disputesApplicable, bool $creditCardChargebacksApplicable = false, string $paymentKind = 'overall'): array
     {
         $payment = $this->realPaymentSummary($orders);
-        $refundAmount = round((float) $payment['paypal_refund_amount'] + (float) $payment['credit_card_refund_amount'], 4);
+        $refundAmount = round(match ($paymentKind) {
+            'paypal' => (float) $payment['paypal_refund_amount'],
+            'credit_card' => (float) $payment['credit_card_refund_amount'],
+            default => (float) $payment['paypal_refund_amount'] + (float) $payment['credit_card_refund_amount'],
+        }, 4);
+        $refundCount = match ($paymentKind) {
+            'paypal' => count($payment['paypal_refund_details']),
+            'credit_card' => count($payment['credit_card_actual_refund_details']),
+            default => count($payment['refund_details']),
+        };
         $receivedAmount = $this->sum($items, 'line_revenue_usd');
         $shippedOrders = $orders->filter(fn (LogisticsOrder $order): bool => $this->isActuallyShipped($order));
         $deliveredOrders = $orders->filter(fn (LogisticsOrder $order): bool => $this->isDelivered($order));
@@ -1999,20 +2217,32 @@ class LogisticsProductStatisticsService
         $chargebackDetails = $creditCardChargebacksApplicable
             ? array_values(array_filter(
                 $payment['credit_card_refund_details'],
-                fn (array $refund): bool => $this->isCreditCardChargebackReason($refund['refund_reason'] ?? ''),
+                fn (array $refund): bool => $this->creditCardReasonMatches($refund['refund_reason'] ?? '', self::CREDIT_CARD_ALERT_REASON_KEYWORDS),
             ))
             : [];
         $chargebackOrderCount = count(array_unique(array_filter(array_map(
             static fn (array $refund): int => (int) ($refund['order_id'] ?? 0),
             $chargebackDetails,
         ))));
+        $customerServiceRefundDetails = $creditCardChargebacksApplicable
+            ? array_values(array_filter(
+                $payment['credit_card_refund_details'],
+                fn (array $refund): bool => $this->creditCardReasonMatches($refund['refund_reason'] ?? '', self::CREDIT_CARD_CUSTOMER_SERVICE_REASON_KEYWORDS),
+            ))
+            : [];
+        $creditCardDisputeDetails = $creditCardChargebacksApplicable
+            ? array_values(array_filter(
+                $payment['credit_card_refund_details'],
+                fn (array $refund): bool => $this->creditCardReasonMatches($refund['refund_reason'] ?? '', self::CREDIT_CARD_DISPUTE_REASON_KEYWORDS),
+            ))
+            : [];
 
         return [
             'unit_count' => $this->sum($items, 'quantity'),
             'order_count' => $orders->count(),
             'received_amount' => $receivedAmount,
             'refund_amount' => $refundAmount,
-            'refund_count' => count($payment['refund_details']),
+            'refund_count' => $refundCount,
             'refund_rate' => $receivedAmount > 0 ? round($refundAmount / $receivedAmount * 100, 2) : 0.0,
             'shipping_count' => $shippedOrders->count(),
             'delivery_count' => $deliveredOrders->count(),
@@ -2028,20 +2258,27 @@ class LogisticsProductStatisticsService
             'chargeback_count' => count($chargebackDetails),
             'chargeback_order_count' => $chargebackOrderCount,
             'chargeback_amount' => round(array_sum(array_column($chargebackDetails, 'amount')), 4),
-            'chargeback_rate' => $orders->isEmpty() ? 0.0 : round($chargebackOrderCount / $orders->count() * 100, 2),
+            'chargeback_rate' => $receivedAmount > 0 ? round(array_sum(array_column($chargebackDetails, 'amount')) / $receivedAmount * 100, 2) : 0.0,
+            'customer_service_refund_count' => count($customerServiceRefundDetails),
+            'customer_service_refund_amount' => round(array_sum(array_column($customerServiceRefundDetails, 'amount')), 4),
+            'customer_service_refund_rate' => $receivedAmount > 0 ? round(array_sum(array_column($customerServiceRefundDetails, 'amount')) / $receivedAmount * 100, 2) : 0.0,
+            'credit_card_dispute_count' => count($creditCardDisputeDetails),
+            'credit_card_dispute_amount' => round(array_sum(array_column($creditCardDisputeDetails, 'amount')), 4),
+            'credit_card_dispute_rate' => $orders->isEmpty() ? 0.0 : round(count($creditCardDisputeDetails) / $orders->count() * 100, 2),
         ];
     }
 
-    private function isCreditCardChargebackReason(mixed $reason): bool
+    /** @param list<string> $keywords */
+    private function creditCardReasonMatches(mixed $reason, array $keywords): bool
     {
-        $value = mb_strtolower(trim((string) $reason));
+        $value = LogisticsCreditCardRefundReason::normalize($reason);
 
         if ($value === '') {
             return false;
         }
 
-        foreach (self::CREDIT_CARD_ALERT_REASON_KEYWORDS as $keyword) {
-            if (str_contains($value, mb_strtolower($keyword))) {
+        foreach ($keywords as $keyword) {
+            if (str_contains($value, LogisticsCreditCardRefundReason::normalize($keyword))) {
                 return true;
             }
         }
@@ -2079,7 +2316,7 @@ class LogisticsProductStatisticsService
 
     /**
      * @param Collection<int,LogisticsOrder> $orders
-     * @return array{paypal_refund_amount:float,credit_card_refund_amount:float,paypal_refund_order_ids:list<int>,credit_card_refund_order_ids:list<int>,paypal_dispute_order_ids:list<int>,refund_details:list<array<string,mixed>>,paypal_refund_details:list<array<string,mixed>>,credit_card_refund_details:list<array<string,mixed>>,dispute_details:list<array<string,mixed>>}
+     * @return array{paypal_refund_amount:float,credit_card_refund_amount:float,paypal_refund_order_ids:list<int>,credit_card_refund_order_ids:list<int>,paypal_dispute_order_ids:list<int>,refund_details:list<array<string,mixed>>,paypal_refund_details:list<array<string,mixed>>,credit_card_refund_details:list<array<string,mixed>>,credit_card_actual_refund_details:list<array<string,mixed>>,dispute_details:list<array<string,mixed>>}
      */
     private function realPaymentSummary(Collection $orders): array
     {
@@ -2120,16 +2357,24 @@ class LogisticsProductStatisticsService
 
         $paypalDetails = array_values($paypalRefunds);
         $creditCardDetails = array_values($creditCardRefunds);
+        $creditCardActualRefundDetails = array_values(array_filter(
+            $creditCardDetails,
+            fn (array $detail): bool => !$this->creditCardReasonMatches(
+                $detail['refund_reason'] ?? '',
+                self::CREDIT_CARD_DISPUTE_REASON_KEYWORDS,
+            ),
+        ));
 
         return [
             'paypal_refund_amount' => round(array_sum(array_column($paypalDetails, 'amount')), 4),
-            'credit_card_refund_amount' => round(array_sum(array_column($creditCardDetails, 'amount')), 4),
+            'credit_card_refund_amount' => round(array_sum(array_column($creditCardActualRefundDetails, 'amount')), 4),
             'paypal_refund_order_ids' => array_values(array_unique(array_map(static fn (array $detail): int => (int) $detail['order_id'], $paypalDetails))),
-            'credit_card_refund_order_ids' => array_values(array_unique(array_map(static fn (array $detail): int => (int) $detail['order_id'], $creditCardDetails))),
+            'credit_card_refund_order_ids' => array_values(array_unique(array_map(static fn (array $detail): int => (int) $detail['order_id'], $creditCardActualRefundDetails))),
             'paypal_dispute_order_ids' => array_values(array_unique(array_map(static fn (array $detail): int => (int) $detail['order_id'], array_values($disputes)))),
-            'refund_details' => array_values(array_merge($paypalDetails, $creditCardDetails)),
+            'refund_details' => array_values(array_merge($paypalDetails, $creditCardActualRefundDetails)),
             'paypal_refund_details' => $paypalDetails,
             'credit_card_refund_details' => $creditCardDetails,
+            'credit_card_actual_refund_details' => $creditCardActualRefundDetails,
             'dispute_details' => array_values($disputes),
         ];
     }
@@ -2284,7 +2529,7 @@ class LogisticsProductStatisticsService
                 $orders[$refund['order_id']]['paypal_refund'] += (float) $refund['amount'];
             }
         }
-        foreach ($payment['credit_card_refund_details'] as $refund) {
+        foreach ($payment['credit_card_actual_refund_details'] as $refund) {
             if (isset($orders[$refund['order_id']])) {
                 $orders[$refund['order_id']]['credit_card_refund'] += (float) $refund['amount'];
             }

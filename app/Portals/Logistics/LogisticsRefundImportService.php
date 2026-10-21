@@ -209,8 +209,16 @@ class LogisticsRefundImportService
             if ($refundReference === null) {
                 throw new RefundImportRowException('refund_reference', 'credit_card_reference_required');
             }
-            if ($amount === null || (float) $amount <= 0) {
+            if ($amount === null || (float) $amount < 0) {
                 throw new RefundImportRowException('refund_amount_usd', 'credit_card_amount_required');
+            }
+        }
+
+        $refundReason = $this->nullableText($row[$columns['refund_reason']] ?? null);
+        if ($paymentMethod === 'credit_card') {
+            $refundReason = LogisticsCreditCardRefundReason::canonical($refundReason);
+            if ($refundReason === null) {
+                throw new RefundImportRowException('refund_reason', 'credit_card_reason_invalid');
             }
         }
 
@@ -218,7 +226,7 @@ class LogisticsRefundImportService
             'payment_method' => $paymentMethod,
             'reference_number' => $referenceNumber,
             'refund_reference' => $refundReference,
-            'refund_reason' => $this->nullableText($row[$columns['refund_reason']] ?? null),
+            'refund_reason' => $refundReason,
             'refund_amount_usd' => $amount,
         ];
     }

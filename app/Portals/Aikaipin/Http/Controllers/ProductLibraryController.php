@@ -214,7 +214,7 @@ class ProductLibraryController extends Controller
         abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
 
         $data = $request->validate([
-            'name' => ['required', 'string', 'max:191'],
+            'name' => ['required', 'string', 'max:255'],
             'source_platform' => ['required', 'in:shopify,shopline'],
             'product_type' => ['required', 'in:general,xiaohei'],
             'landing_page_url' => ['nullable', 'url', 'max:2048'],
@@ -359,7 +359,7 @@ class ProductLibraryController extends Controller
         abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
 
         $data = $request->validate([
-            'name' => ['required', 'string', 'max:191'],
+            'name' => ['required', 'string', 'max:255'],
             'source_platform' => ['required', 'in:shopify,shopline'],
             'product_type' => ['required', 'in:general,xiaohei'],
             'landing_page_url' => ['nullable', 'url', 'max:2048'],

@@ -6,6 +6,7 @@ use App\Models\LogisticsOrder;
 use Illuminate\Database\Eloquent\Builder;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\Cell\DataValidation;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
@@ -167,6 +168,19 @@ class LogisticsOrderSpreadsheetService
             $sheet->getStyle("A1:{$lastColumn}1")->getAlignment()
                 ->setHorizontal(Alignment::HORIZONTAL_CENTER)
                 ->setVertical(Alignment::VERTICAL_CENTER);
+
+            $reasonValidation = $sheet->getCell('D2')->getDataValidation();
+            $reasonValidation->setType(DataValidation::TYPE_LIST)
+                ->setErrorStyle(DataValidation::STYLE_STOP)
+                ->setAllowBlank(true)
+                ->setShowDropDown(true)
+                ->setShowErrorMessage(true)
+                ->setErrorTitle(__('logistics.refund_import.template.reason_invalid_title'))
+                ->setError(__('logistics.refund_import.template.reason_invalid_message'))
+                ->setFormula1('"'.implode(',', LogisticsCreditCardRefundReason::allowed()).'"');
+            for ($row = 3; $row <= 1000; $row++) {
+                $sheet->getCell('D'.$row)->setDataValidation(clone $reasonValidation);
+            }
 
             $instructions = $spreadsheet->createSheet();
             $instructions->setTitle(__('logistics.refund_import.template.instructions_sheet'));
