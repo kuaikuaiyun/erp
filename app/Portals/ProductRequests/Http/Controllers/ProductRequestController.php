@@ -407,9 +407,10 @@ class ProductRequestController extends Controller
         $path = is_array($item) ? (string) ($item['path'] ?? '') : '';
         abort_unless($path !== '' && Storage::disk('local')->exists($path), 404);
 
-        return response()->file(Storage::disk('local')->path($path), [
-            'Content-Type' => ($item['mime_type'] ?? '') ?: 'application/octet-stream',
-        ]);
+        return $this->cachedImageResponse(
+            Storage::disk('local')->path($path),
+            ($item['mime_type'] ?? '') ?: null,
+        );
     }
 
     /** 校验草稿归属与类型，避免跨用户、跨模块操作草稿 */
@@ -435,9 +436,10 @@ class ProductRequestController extends Controller
         $path = is_array($item) ? (string) ($item['path'] ?? '') : '';
         abort_unless($path !== '' && Storage::disk('local')->exists($path), 404);
 
-        return response()->file(Storage::disk('local')->path($path), [
-            'Content-Type' => ($item['mime_type'] ?? '') ?: 'application/octet-stream',
-        ]);
+        return $this->cachedImageResponse(
+            Storage::disk('local')->path($path),
+            ($item['mime_type'] ?? '') ?: null,
+        );
     }
 
     private function resolveDraft(Request $request, AdminUser $user): ?ProductRequestDraft
@@ -664,7 +666,7 @@ class ProductRequestController extends Controller
         $path = $images[$index] ?? null;
         abort_if(!is_string($path) || $path === '' || !Storage::disk('local')->exists($path), 404);
 
-        return response()->file(Storage::disk('local')->path($path));
+        return $this->cachedImageResponse(Storage::disk('local')->path($path));
     }
 
     /** 链接产品图（导入 Excel 主图）鉴权读取（跨门户共享，已登录即可访问） */
@@ -678,7 +680,7 @@ class ProductRequestController extends Controller
         $path = (string) ($linkSku->product_image ?? '');
         abort_if($path === '' || !Storage::disk('local')->exists($path), 404);
 
-        return response()->file(Storage::disk('local')->path($path));
+        return $this->cachedImageResponse(Storage::disk('local')->path($path));
     }
 
     /**
@@ -1329,8 +1331,35 @@ class ProductRequestController extends Controller
                 if ($linkCover) {
                     $linkSkuPayload['product_image'] = $linkCover->path;
                 }
+
+                // 同一 PCL 商品编号只维护一条链接记录：先按链接找，找不到再按 PCL 找历史记录并更新，
+                // 避免同一产品因换了 1688 链接而重复新增记录
+                $pclNo = trim((string) ($linkSkuPayload['pcl_product_no'] ?? ''));
+                $linkSku = ProductRequestLinkSku::query()->where('supplier_url_hash', $linkHash)->first();
+                if (!$linkSku && $pclNo !== '') {
+                    $linkSku = ProductRequestLinkSku::query()
+                        ->where('pcl_product_no', $pclNo)
+                        ->orderByDesc('id')
+                        ->first();
+                }
+
+                if ($linkSku && (string) $linkSku->supplier_url_hash !== $linkHash) {
+                    // 命中同 PCL 的历史记录（不同链接）：保留其原有 SKU 与价格重量，合并后更新
+                    $linkSkuPayload['skus'] = implode(',', $this->mergeLinkSkus(
+                        (string) $linkSku->skus,
+                        $linkSkus,
+                    ));
+                    if ($skuValueMap !== []) {
+                        $linkSkuPayload['sku_values'] = array_merge(
+                            (array) ($linkSku->sku_values ?? []),
+                            $skuValueMap,
+                        );
+                    }
+                    $linkSkuPayload['supplier_url_hash'] = $linkHash;
+                }
+
                 ProductRequestLinkSku::query()->updateOrCreate(
-                    ['supplier_url_hash' => $linkHash],
+                    $linkSku ? ['id' => $linkSku->getKey()] : ['supplier_url_hash' => $linkHash],
                     $linkSkuPayload,
                 );
             }
@@ -1505,50 +1534,39 @@ class ProductRequestController extends Controller
         ]);
         $normalizedUrl = $this->workflow->normalizeSupplierUrl($data['supplier_url']);
         $hash = $this->workflow->supplierUrlHash($normalizedUrl);
-        $query = ProductRequest::query()
-            ->whereNotNull('standard_chinese_name')
-            ->with('attachments');
-        if (!empty($data['current_id'])) {
-            $query->where('id', '!=', $data['current_id']);
-        }
-
-        // 优先按 1688 链接查链接 SKU 表：SKU 表中有该链接数据时直接复用链接级 SKU/PCL/实拍图
+        // 链接与产品名统一只查 product_request_link_skus 表
         $matchType = 'supplier_url';
+        $linkSkus = collect();
         $linkSku = ProductRequestLinkSku::query()->where('supplier_url_hash', $hash)->first();
+
         if ($linkSku && $this->splitSkus((string) $linkSku->skus) !== []) {
-            return response()->json([
-                'match_type' => $matchType,
-                'records' => [$this->linkSkuReusePayload($linkSku)],
-            ]);
+            $linkSkus = collect([$linkSku]);
+        } else {
+            $keyword = trim((string) ($data['standard_chinese_name'] ?? ''));
+
+            // 链接未命中（或该链接没有 SKU）时，回退按产品名模糊匹配同一张表
+            // 名称模糊查询可能命中多个链接，按链接聚合后全部返回，供采购选择
+            if ($keyword !== '') {
+                $matchType = 'standard_chinese_name';
+                $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $keyword);
+                $linkSkus = ProductRequestLinkSku::query()
+                    ->where('product_name', 'like', '%'.$escaped.'%')
+                    ->latest('id')
+                    ->limit(200)
+                    ->get()
+                    ->filter(fn (ProductRequestLinkSku $row): bool => $this->splitSkus((string) $row->skus) !== [])
+                    ->unique('supplier_url_hash')
+                    ->take(20)
+                    ->values();
+            }
         }
-
-        // 链接 SKU 表无数据时回退查录入记录：先按 1688 链接精确匹配，再按标准中文名模糊匹配
-        $records = (clone $query)
-            ->where('supplier_url_hash', $hash)
-            ->latest('id')
-            ->limit(20)
-            ->get();
-
-        $keyword = trim((string) ($data['standard_chinese_name'] ?? ''));
-        if ($records->isEmpty() && $keyword !== '') {
-            $matchType = 'standard_chinese_name';
-            $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $keyword);
-            $records = (clone $query)
-                ->where('standard_chinese_name', 'like', '%'.$escaped.'%')
-                ->latest('id')
-                ->limit(20)
-                ->get();
-        }
-
-        // 同一 1688 链接只展示一条记录：按链接聚合，取最新一条作为展示与复用来源
-        $records = $records
-            ->groupBy(fn (ProductRequest $record): string => $record->supplier_url_hash ?: ('record-'.$record->getKey()))
-            ->map(fn ($group): ProductRequest => $group->sortByDesc('id')->first())
-            ->values();
 
         return response()->json([
             'match_type' => $matchType,
-            'records' => $records->map(fn (ProductRequest $record): array => $this->reusePayload($record))->values(),
+            'records' => $linkSkus
+                ->map(fn (ProductRequestLinkSku $row): array => $this->linkSkuReusePayload($row))
+                ->values()
+                ->all(),
         ]);
     }
 
@@ -2242,9 +2260,98 @@ class ProductRequestController extends Controller
         abort_unless($this->access->canViewRequestFromPortal($productRequest, $context['user'], $context['portal']), 403);
         abort_unless(Storage::disk($attachment->disk)->exists($attachment->path), 404);
 
-        return response()->file(Storage::disk($attachment->disk)->path($attachment->path), [
-            'Content-Type' => $attachment->mime_type ?: 'application/octet-stream',
-        ]);
+        $path = Storage::disk($attachment->disk)->path($attachment->path);
+        $mimeType = (string) ($attachment->mime_type ?: '');
+        // 列表缩略图按 ?w= 生成缓存小图，避免每张原图（截图常见近 1MB）都完整下载
+        $width = (int) $request->query('w', 0);
+        if ($width > 0 && str_starts_with($mimeType, 'image/') && ($thumb = $this->thumbnailPath($path, $width)) !== null) {
+            return $this->cachedImageResponse($thumb, 'image/jpeg');
+        }
+
+        return $this->cachedImageResponse($path, $mimeType ?: null);
+    }
+
+    /**
+     * 按宽度生成缩略图并缓存到本地磁盘，原图更新后自动重建；GD 不可用时返回 null 走原图。
+     */
+    private function thumbnailPath(string $sourcePath, int $width): ?string
+    {
+        if (!function_exists('imagecreatefromstring') || !function_exists('imagescale') || !function_exists('imagejpeg')) {
+            return null;
+        }
+
+        $width = max(80, min(1600, $width));
+        $modifiedAt = (int) (@filemtime($sourcePath) ?: 0);
+        $target = storage_path('app/private/thumbnails/'.$width.'/'.md5($sourcePath.'|'.$modifiedAt).'.jpg');
+
+        if (is_file($target)) {
+            return $target;
+        }
+
+        // 缩略图生成失败（GD 缺失、超大图内存不足、目录不可写等）时统一回退原图，
+        // 不能让 ?w= 请求直接报错，否则列表图片会整片无法访问
+        try {
+            $info = @getimagesize($sourcePath);
+            if (!$info || (int) $info[0] <= $width || (int) $info[1] <= 0) {
+                return null;
+            }
+            // 超大图解码会占用大量内存，直接跳过缩略图，避免触发内存耗尽导致 500
+            if ((int) $info[0] * (int) $info[1] > 20000000) {
+                return null;
+            }
+
+            $contents = @file_get_contents($sourcePath);
+            if ($contents === false) {
+                return null;
+            }
+
+            $image = @imagecreatefromstring($contents);
+            if (!$image) {
+                return null;
+            }
+
+            $height = (int) max(1, round($info[1] * $width / $info[0]));
+            $resized = @imagescale($image, $width, $height, IMG_BILINEAR_FIXED);
+            imagedestroy($image);
+            if (!$resized) {
+                return null;
+            }
+
+            if (!is_dir(dirname($target))) {
+                @mkdir(dirname($target), 0775, true);
+            }
+            @imagejpeg($resized, $target, 82);
+            imagedestroy($resized);
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        return is_file($target) ? $target : null;
+    }
+
+    /**
+     * 图片响应统一加浏览器缓存头：附件/图片按 uuid 命名且不覆盖，
+     * 首次加载后浏览器直接命中本地缓存，避免列表里几十张缩略图每次都回源触发框架启动与鉴权查询。
+     */
+    private function cachedImageResponse(string $path, ?string $mimeType = null): Response
+    {
+        $lastModified = @filemtime($path) ?: time();
+        $lastModifiedHttp = gmdate('D, d M Y H:i:s', $lastModified).' GMT';
+        $etag = '"'.md5($path.'|'.$lastModified.'|'.(@filesize($path) ?: 0)).'"';
+        $mimeType = $mimeType ?: (string) (@mime_content_type($path) ?: 'application/octet-stream');
+        $cacheHeaders = [
+            'Cache-Control' => 'private, max-age=604800, immutable',
+            'ETag' => $etag,
+            'Last-Modified' => $lastModifiedHttp,
+        ];
+
+        $request = request();
+        if ($request->headers->get('If-None-Match') === $etag
+            || $request->headers->get('If-Modified-Since') === $lastModifiedHttp) {
+            return response('', 304, $cacheHeaders);
+        }
+
+        return response()->file($path, $cacheHeaders + ['Content-Type' => $mimeType]);
     }
 
     /** @return array{portal:\App\Models\Portal,user:AdminUser}|Response */

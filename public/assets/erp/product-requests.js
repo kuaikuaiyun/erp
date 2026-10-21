@@ -375,8 +375,12 @@
             }
             if (selectedSource) { selectedSource.value = record.id || ''; }
             if (selectedText) {
+                // 链接 SKU 库来源没有提报编号，名称模糊查询会返回多条，用「名称 · 链接」区分
+                var sourceLabel = record.id
+                    ? (record.report_no || '')
+                    : [record.standard_chinese_name, record.supplier_url].filter(Boolean).join(' · ');
                 selectedText.hidden = false;
-                selectedText.textContent = (config.reuseSelected || '').replace(':report_no', record.report_no || '');
+                selectedText.textContent = (config.reuseSelected || '').replace(':report_no', sourceLabel || record.report_no || '');
             }
             closeReuse();
         }
@@ -837,7 +841,9 @@
                 if (price && entry.price) { price.value = entry.price; }
                 if (weight && entry.weight) { weight.value = entry.weight; }
             });
-            syncSkuValues();
+            // 此处不能立即 syncSkuValues()：来源 SKU 行可能还没渲染进面板，
+            // 立刻回写会用「当前 DOM 行」重建 skuValues，把刚带入的价格/重量清空。
+            // 复用流程随后会 append + render，渲染时读取 skuValues，再由 updateSummary 统一回写。
         };
 
         // 按名称匹配复用时，把来源记录的系统 SKU 并入右栏供勾选（与已有勾选项去重）

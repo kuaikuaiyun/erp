@@ -37,7 +37,7 @@
             @foreach($existingAttachments as $attachment)
                 <div class="product-request-upload-preview-item product-request-upload-existing" data-existing-preview="true" data-attachment-id="{{ $attachment->id }}">
                     <a href="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}" data-product-request-image-preview data-product-request-image-alt="{{ $attachment->original_name }}">
-                        <img src="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}" alt="{{ $attachment->original_name }}">
+                        <img loading="lazy" decoding="async" src="{{ route('product-requests.attachments.show', [$productRequest, $attachment]) }}?w=240" alt="{{ $attachment->original_name }}">
                     </a>
                     @if($removableName !== '')
                         <button type="button" class="product-request-upload-remove" data-existing-remove title="{{ __('product_requests.uploads.remove_image') }}">&times;</button>
