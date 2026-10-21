@@ -263,7 +263,7 @@
                                         <button class="btn btn-default" type="button" disabled>{{ $t('actions.landing_page') }}</button>
                                     @endif
                                     @if ($referenceFile)
-                                        <a class="btn btn-default" href="{{ route('aikaipin.product-library.files.show', ['product' => $product, 'kind' => 'reference']) }}" target="_blank" rel="noopener noreferrer">
+                                        <a class="btn btn-default" href="{{ route('aikaipin.product-library.reference-preview', ['product' => $product]) }}" target="_blank" rel="noopener noreferrer">
                                             <i class="fa fa-external-link" aria-hidden="true"></i> {{ $t('actions.reference_page') }}
                                         </a>
                                     @else
@@ -474,7 +474,7 @@
                                 </div>
                                 <div class="aikaipin-attachment-card">
                                     <label for="aikaipin-upload-reference-file">{{ $t('upload.reference_file') }}</label>
-                                    <input id="aikaipin-upload-reference-file" class="aikaipin-visually-hidden" type="file" data-aikaipin-reference-file>
+                                    <input id="aikaipin-upload-reference-file" class="aikaipin-visually-hidden" type="file" accept=".html,.htm,text/html,application/xhtml+xml" data-aikaipin-reference-file>
                                     <label class="aikaipin-upload-file-card" for="aikaipin-upload-reference-file">
                                         <span class="aikaipin-upload-file-icon"><i class="fa fa-file-o" aria-hidden="true"></i></span>
                                         <span class="aikaipin-upload-file-content">

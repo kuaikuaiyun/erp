@@ -249,7 +249,7 @@
                     <div class="aikaipin-submission-form-section-body">
                         <div class="form-group no-margin">
                             <label for="aikaipin-selection-product-name">{{ $t('selection_proposal.fields.product_name') }}</label>
-                            <input id="aikaipin-selection-product-name" class="form-control" type="text" maxlength="191" autocomplete="off" data-aikaipin-selection-product-name>
+                            <input id="aikaipin-selection-product-name" class="form-control" type="text" maxlength="255" autocomplete="off" data-aikaipin-selection-product-name>
                         </div>
                     </div>
                 </section>
