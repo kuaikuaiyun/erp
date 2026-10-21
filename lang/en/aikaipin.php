@@ -471,6 +471,7 @@ return [
         'summary' => 'Source: :source; eligible: :eligible; selected: :selected; skipped for existing-data conflicts: :conflicts; deleted skipped: :deleted; unsupported platforms skipped: :unsupported.',
         'no_records' => 'No product records can be safely inserted. Check existing IDs and product-code conflicts first.',
         'dry_run_complete' => 'Preview completed; no data was written.',
+        'auto_increment_warning' => 'Products were written, but the auto-increment value could not be updated. Check the system log before importing more.',
         'complete' => 'Import completed: :count product records were written.',
         'errors' => [
             'user_not_found' => 'New ERP user ID :id was not found, so the uploader cannot be assigned.',
@@ -488,5 +489,8 @@ return [
             'column_count_invalid' => 'The source SQL has a column-count mismatch (table: :table).',
             'save_failed' => 'The import could not be written and the transaction was rolled back. Check the system log.',
         ],
+    ],
+    'migrations' => [
+        'product_name_sku_rollback_unsafe' => 'The product-name and SKU column lengths cannot be safely rolled back because existing data exceeds 191 characters.',
     ],
 ];

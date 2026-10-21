@@ -410,7 +410,7 @@
                             <div class="row">
                                 <div class="col-sm-6 form-group">
                                     <label for="aikaipin-upload-name">{{ $t('upload.product_name') }}</label>
-                                    <input id="aikaipin-upload-name" class="form-control" name="name" type="text" maxlength="191" autocomplete="off" data-aikaipin-upload-name>
+                                    <input id="aikaipin-upload-name" class="form-control" name="name" type="text" maxlength="255" autocomplete="off" data-aikaipin-upload-name>
                                 </div>
                                 <div class="col-sm-6 form-group">
                                     <label for="aikaipin-upload-landing-url">{{ $t('upload.landing_page_url') }}</label>

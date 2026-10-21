@@ -158,15 +158,20 @@ class ImportAikaipinLegacyProducts extends Command
                 foreach ($selected as $record) {
                     DB::connection($connection)->table('aikaipin_products')->insert($record);
                 }
-
-                $nextId = max(array_column($selected, 'id')) + 1;
-                DB::connection($connection)->unprepared('ALTER TABLE `aikaipin_products` AUTO_INCREMENT = '.(int) $nextId);
             });
         } catch (\Throwable $exception) {
             report($exception);
             $this->error(__('aikaipin.import.errors.save_failed'));
 
             return self::FAILURE;
+        }
+
+        try {
+            $nextId = max(array_column($selected, 'id')) + 1;
+            DB::connection($connection)->unprepared('ALTER TABLE `aikaipin_products` AUTO_INCREMENT = '.(int) $nextId);
+        } catch (\Throwable $exception) {
+            report($exception);
+            $this->warn(__('aikaipin.import.auto_increment_warning'));
         }
 
         $this->info(__('aikaipin.import.complete', ['count' => count($selected)]));
