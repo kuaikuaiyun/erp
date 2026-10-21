@@ -1,20 +1,20 @@
 .assistant-batch-editor-modal .assistant-batch-editor-modal-dialog {
-    width: 96vw;
-    max-width: 1760px;
-    height: calc(100vh - 32px);
-    margin: 16px auto;
+    width: calc(100% - 30px);
+    max-width: 760px;
+    height: auto;
+    margin: 30px auto;
 }
 
 .assistant-batch-editor-modal .modal-content {
     display: flex;
-    height: 100%;
+    max-height: calc(100vh - 60px);
     flex-direction: column;
 }
 
 .assistant-batch-editor-modal .modal-body {
     flex: 1 1 auto;
     min-height: 0;
-    overflow: hidden;
+    overflow: auto;
     padding: 0;
     background: #edf1f5;
 }
@@ -30,7 +30,7 @@
 
 .assistant-batch-edit-form {
     display: flex;
-    height: 100%;
+    height: auto;
     min-height: 0;
     flex-direction: column;
     padding: 14px;
@@ -56,7 +56,7 @@
 .assistant-batch-editor-layout {
     display: flex;
     flex: 1 1 auto;
-    height: 100%;
+    height: auto;
     min-height: 0;
 }
 
@@ -116,7 +116,7 @@
 .assistant-batch-record-panels {
     flex: 1 1 auto;
     min-width: 0;
-    overflow: auto;
+    overflow: visible;
     padding: 14px;
 }
 
@@ -163,6 +163,10 @@
 
 .assistant-batch-record-panels .help-block.assistant-batch-validation-error {
     margin-bottom: 0;
+}
+
+.assistant-batch-unified-value {
+    margin: 0;
 }
 
 .assistant-batch-editor-alert {

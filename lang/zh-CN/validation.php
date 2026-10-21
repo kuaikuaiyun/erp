@@ -17,6 +17,12 @@ return [
     ],
     'array' => ':attribute必须为数组。',
     'in' => '请选择有效的:attribute。',
+    'custom' => [
+        'selected_ids' => [
+            'required' => '请先选择至少一条店铺记录。',
+            'required_if' => '请先选择至少一条店铺记录。',
+        ],
+    ],
     'attributes' => [
         'city' => '城市',
         'reference_page_url' => '参考页面链接',
@@ -44,6 +50,12 @@ return [
         'remark' => '审核备注',
         'assignee_id' => '录入人员',
         'ids' => '分配记录',
+        'selected_ids' => '已选择的店铺记录',
+        'selected_ids.*' => '已选择的店铺记录',
+        'operation_department_id' => '运营部门',
+        'owner_user_id' => '运营归属人',
+        'department_ids' => '授权二级部门',
+        'scopes' => '可选运营部门',
         'actual_shipping_weight_g' => '实测发货重量 g',
         'package_length_cm' => '包装长度',
         'package_width_cm' => '包装宽度',

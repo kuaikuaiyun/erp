@@ -413,7 +413,7 @@
             choice.className = 'btn btn-default btn-sm' + (isSelected ? ' active' : '');
             input.className = 'aikaipin-category-choice-input';
             input.type = 'checkbox';
-            input.name = 'category_ids[]';
+            input.name = 'categories[]';
             input.value = category.value;
             input.checked = isSelected;
             input.setAttribute('data-aikaipin-category-choice', '');
@@ -429,29 +429,6 @@
             tag.appendChild(choice);
             tag.appendChild(removeButton);
             categoryChoices.appendChild(tag);
-        });
-    }
-
-    function categoryRequest(url, method, body) {
-        return window.fetch(url, {
-            method: method,
-            credentials: 'same-origin',
-            headers: {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': config.csrfToken || ''
-            },
-            body: body ? JSON.stringify(body) : null
-        }).then(function (response) {
-            return response.json().catch(function () {
-                return {};
-            }).then(function (payload) {
-                if (!response.ok) {
-                    throw new Error(payload.message || config.categoryDuplicateMessage);
-                }
-
-                return payload;
-            });
         });
     }
 
@@ -503,47 +480,32 @@
             return;
         }
 
-        var selectedValues = selectedCategories();
-
-        categoryInput.disabled = true;
-        categoryRequest(config.categoryStoreUrl, 'POST', {name: label}).then(function (payload) {
-            var newCategory = payload.category;
-
-            if (!newCategory || !newCategory.value || !newCategory.label) {
-                throw new Error(config.categoryDuplicateMessage);
-            }
-
-            selectedValues.push(String(newCategory.value));
-            uploadCategories.push({
-                value: String(newCategory.value),
-                label: String(newCategory.label)
-            });
-            renderCategories(selectedValues);
-            categoryInput.value = '';
-            notify('success', config.categoryCreatedTitle, payload.message || config.categoryCreatedMessage);
-        }).catch(function (error) {
-            notify('warning', config.categoryDuplicateTitle, error.message || config.categoryDuplicateMessage);
-        }).then(function () {
-            categoryInput.disabled = false;
-            categoryInput.focus();
+        var existing = uploadCategories.some(function (category) {
+            return String(category.value || '').toLocaleLowerCase() === label.toLocaleLowerCase();
         });
+
+        if (existing) {
+            notify('warning', config.categoryDuplicateTitle, config.categoryDuplicateMessage);
+            categoryInput.focus();
+            return;
+        }
+
+        uploadCategories.push({value: label, label: label});
+        renderCategories(selectedCategories().concat([label]));
+        categoryInput.value = '';
+        notify('success', config.categoryCreatedTitle, config.categoryCreatedMessage);
+        categoryInput.focus();
     }
 
     function removeCategory(value) {
         var selectedValues = selectedCategories().filter(function (selectedValue) {
             return selectedValue !== value;
         });
-        var deleteUrl = String(config.categoryDeleteUrlTemplate || '').replace('__category__', encodeURIComponent(value));
-
-        categoryRequest(deleteUrl, 'DELETE').then(function (payload) {
-            uploadCategories = uploadCategories.filter(function (category) {
-                return category.value !== value;
-            });
-            renderCategories(selectedValues);
-            notify('success', config.categoryDeletedTitle, payload.message || config.categoryDeletedMessage);
-        }).catch(function (error) {
-            notify('warning', config.categoryDuplicateTitle, error.message || config.categoryDuplicateMessage);
+        uploadCategories = uploadCategories.filter(function (category) {
+            return category.value !== value;
         });
+        renderCategories(selectedValues);
+        notify('success', config.categoryDeletedTitle, config.categoryDeletedMessage);
     }
 
     function releaseImageUrls() {
@@ -579,7 +541,7 @@
 
         imagePreviews.innerHTML = '';
         existingImageFiles.forEach(function (item) {
-            addImagePreview(item, 'data-aikaipin-remove-existing-image', item.id);
+            addImagePreview(item, 'data-aikaipin-remove-existing-image', item.index);
         });
         uploadImageFiles.forEach(function (item, index) {
             addImagePreview(item, 'data-aikaipin-remove-image', index);
@@ -865,8 +827,8 @@
             if (referenceFile && referenceFile.files && referenceFile.files[0]) {
                 formData.append('reference_file', referenceFile.files[0], referenceFile.files[0].name);
             }
-            removedImageIds.forEach(function (id) {
-                formData.append('remove_image_ids[]', String(id));
+            removedImageIds.forEach(function (index) {
+                formData.append('remove_image_indexes[]', String(index));
             });
             if (session && session.upload_token) {
                 formData.append('package_upload_token', session.upload_token);
@@ -949,7 +911,7 @@
             existingReferenceFile = product.reference_file || null;
             existingPackageFile = product.package_file || null;
             renderSkus();
-            renderCategories(Array.isArray(product.category_ids) ? product.category_ids.map(String) : []);
+            renderCategories(Array.isArray(product.categories) ? product.categories.map(String) : []);
             renderImagePreviews();
             updateExistingFileName(referenceFileName, existingReferenceFile);
             updateExistingFileName(packageFileName, existingPackageFile);
@@ -1140,7 +1102,7 @@
         if (removeExistingImageButton) {
             var existingImageId = Number(removeExistingImageButton.getAttribute('data-aikaipin-remove-existing-image'));
             existingImageFiles = existingImageFiles.filter(function (image) {
-                return Number(image.id) !== existingImageId;
+                return Number(image.index) !== existingImageId;
             });
             if (removedImageIds.indexOf(existingImageId) === -1) {
                 removedImageIds.push(existingImageId);

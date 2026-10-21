@@ -366,6 +366,7 @@ class DomainStoreController extends Controller
             ...$this->viewContext($context),
             ...$this->formOptions(),
             ...$this->departmentAccessFormData($context['user']),
+            ...$this->ownerAssignmentFormData($context['user']),
             'store' => new AssistantDomainStore([
                 'domain_check_status' => AssistantDomainStore::DOMAIN_CHECK_NOT_CHECKED,
                 'shop_status' => AssistantDomainStore::SHOP_STATUS_IN_USE,
@@ -390,11 +391,13 @@ class DomainStoreController extends Controller
         $this->authorization->ensureCanManageDomainStores($context['user']);
         $data = $this->validatedData($request);
         $departmentAccess = $this->departmentAccessForRequest($request, $context['user']);
+        $ownerUserId = $this->ownerAssignmentForRequest($request, $context['user']);
 
         $store = DB::connection(config('admin.database.connection') ?: config('database.default'))
-            ->transaction(function () use ($data, $context, $departmentAccess): AssistantDomainStore {
+            ->transaction(function () use ($data, $context, $departmentAccess, $ownerUserId): AssistantDomainStore {
                 $store = new AssistantDomainStore($data);
                 $store->owner_department_id = $departmentAccess['owner_department_id'];
+                $store->owner_user_id = $ownerUserId;
                 $this->setLastOperator($store, $context['user']);
                 $store->save();
                 $this->syncDepartmentAccess($store, $departmentAccess['department_ids']);
@@ -438,6 +441,7 @@ class DomainStoreController extends Controller
             ...$this->viewContext($context),
             ...$this->formOptions(),
             ...$this->departmentAccessFormData($context['user'], $domainStore),
+            ...$this->ownerAssignmentFormData($context['user'], $domainStore),
             'store' => $domainStore,
             'emailPurchaseStatus' => $this->emailPurchases->statusFor($domainStore->email),
             'canManageQuickOptions' => $this->authorization->canManageQuickOptions($context['user']),
@@ -458,11 +462,14 @@ class DomainStoreController extends Controller
         $domainStore = $this->findAccessibleStoreOrFail($context['user'], $domainStore->getKey());
         $data = $this->validatedData($request, $domainStore);
         $departmentAccess = $this->departmentAccessForRequest($request, $context['user'], $domainStore);
+        $ownerUserId = $this->ownerAssignmentForRequest($request, $context['user'], $domainStore);
 
-        DB::connection($domainStore->getConnectionName())->transaction(function () use ($domainStore, $data, $context, $departmentAccess): void {
+        DB::connection($domainStore->getConnectionName())->transaction(function () use ($domainStore, $data, $context, $departmentAccess, $ownerUserId): void {
             $before = $domainStore->historySnapshot();
             $domainStore->fill($data);
             $domainStore->owner_department_id = $departmentAccess['owner_department_id'];
+            $domainStore->owner_user_id = $ownerUserId;
+            $domainStore->unsetRelation('ownerUser');
             $this->setLastOperator($domainStore, $context['user']);
             $domainStore->save();
             $this->syncDepartmentAccess($domainStore, $departmentAccess['department_ids']);
@@ -577,7 +584,8 @@ class DomainStoreController extends Controller
 
         return view('portals.assistant.domain-stores.partials.batch-edit-form', [
             ...$this->formOptions(),
-            'stores' => $stores,
+            'selectedIds' => $selectedIds,
+            'selectedCount' => $stores->count(),
             'selectedFields' => $selectedFields,
             'domainCheckLabels' => AssistantDomainStore::domainCheckLabels(),
             'shopStatusLabels' => AssistantDomainStore::shopStatusLabels(),
@@ -604,20 +612,20 @@ class DomainStoreController extends Controller
                         $finalPairs = [];
 
                         foreach ($stores as $store) {
-                            $record = $payload['records'][(int) $store->getKey()];
                             $finalPairs[(int) $store->getKey()] = [
-                                'shop_name' => $record['shop_name'] ?? $store->shop_name,
-                                'domain' => $record['domain'] ?? $store->domain,
+                                'shop_name' => $payload['values']['shop_name'] ?? $store->shop_name,
+                                'domain' => $payload['values']['domain'] ?? $store->domain,
                             ];
                         }
 
-                        $this->ensureBatchStoreDomainPairsAreUnique($finalPairs, $payload['selected_ids']);
+                        $pairField = in_array('shop_name', $payload['fields'], true) ? 'shop_name' : 'domain';
+                        $this->ensureBatchStoreDomainPairsAreUnique($finalPairs, $payload['selected_ids'], $pairField);
                     }
                     $updated = 0;
 
                     foreach ($stores as $store) {
                         $before = $store->historySnapshot();
-                        $store->fill($payload['records'][(int) $store->getKey()]);
+                        $store->fill($payload['values']);
 
                         if (!$store->isDirty()) {
                             continue;
@@ -1124,6 +1132,139 @@ class DomainStoreController extends Controller
         ];
     }
 
+    /** @return array<string, mixed> */
+    private function ownerAssignmentFormData(AdminUser $user, ?AssistantDomainStore $store = null): array
+    {
+        $canAssignStoreOwner = $this->authorization->canAssignStoreOwners($user);
+        $departments = $canAssignStoreOwner
+            ? $this->assignableOperationDepartments($user)
+            : collect();
+        $candidatesByDepartment = [];
+
+        foreach ($departments as $department) {
+            $candidatesByDepartment[(int) $department->getKey()] = $this->storeOwners
+                ->eligibleUsersForOperationDepartment((int) $department->getKey())
+                ->map(static function (AdminUser $candidate): array {
+                    $departmentNames = $candidate->departments
+                        ->pluck('name')
+                        ->filter()
+                        ->unique()
+                        ->values()
+                        ->implode(' / ');
+
+                    return [
+                        'id' => (int) $candidate->getKey(),
+                        'name' => (string) ($candidate->name ?: $candidate->username),
+                        'username' => (string) $candidate->username,
+                        'departments' => $departmentNames,
+                    ];
+                })
+                ->values()
+                ->all();
+        }
+
+        $ownerUserId = old('owner_user_id', $store?->owner_user_id);
+        $ownerUserId = $ownerUserId === null || $ownerUserId === '' ? null : (int) $ownerUserId;
+        $operationDepartmentId = old('operation_department_id');
+        $operationDepartmentId = $operationDepartmentId === null || $operationDepartmentId === ''
+            ? null
+            : (int) $operationDepartmentId;
+
+        if ($operationDepartmentId === null && $ownerUserId !== null) {
+            foreach ($candidatesByDepartment as $departmentId => $candidates) {
+                if (collect($candidates)->contains('id', $ownerUserId)) {
+                    $operationDepartmentId = (int) $departmentId;
+                    break;
+                }
+            }
+        }
+
+        $currentOwner = null;
+        if ($ownerUserId !== null && $operationDepartmentId === null && $store?->exists) {
+            $owner = $store->ownerUser()->first(['id', 'name', 'username']);
+            if ($owner !== null) {
+                $currentOwner = [
+                    'id' => (int) $owner->getKey(),
+                    'name' => (string) ($owner->name ?: $owner->username),
+                    'username' => (string) $owner->username,
+                ];
+            }
+        }
+
+        return [
+            'canAssignStoreOwner' => $canAssignStoreOwner,
+            'ownerOperationDepartments' => $departments,
+            'ownerCandidatesByDepartment' => $candidatesByDepartment,
+            'ownerOperationDepartmentId' => $operationDepartmentId,
+            'ownerUserId' => $ownerUserId,
+            'currentOwnerOutsideScope' => $currentOwner,
+        ];
+    }
+
+    private function ownerAssignmentForRequest(
+        Request $request,
+        AdminUser $user,
+        ?AssistantDomainStore $existingStore = null,
+    ): ?int {
+        if (!$this->authorization->canAssignStoreOwners($user)) {
+            return $existingStore?->owner_user_id === null
+                ? null
+                : (int) $existingStore->owner_user_id;
+        }
+
+        $validated = $request->validate([
+            'operation_department_id' => ['nullable', 'integer'],
+            'owner_user_id' => ['nullable', 'integer'],
+        ]);
+        $operationDepartmentId = isset($validated['operation_department_id'])
+            ? (int) $validated['operation_department_id']
+            : null;
+        $ownerUserId = isset($validated['owner_user_id'])
+            ? (int) $validated['owner_user_id']
+            : null;
+
+        if ($operationDepartmentId === null && $ownerUserId === null) {
+            return null;
+        }
+
+        if (
+            $operationDepartmentId === null
+            && $ownerUserId !== null
+            && $existingStore?->owner_user_id !== null
+            && $ownerUserId === (int) $existingStore->owner_user_id
+        ) {
+            return $ownerUserId;
+        }
+
+        if ($operationDepartmentId === null) {
+            throw ValidationException::withMessages([
+                'operation_department_id' => __('assistant.domain_stores.javascript.owner_department_required'),
+            ]);
+        }
+
+        if ($ownerUserId === null) {
+            throw ValidationException::withMessages([
+                'owner_user_id' => __('assistant.domain_stores.javascript.owner_choose_required'),
+            ]);
+        }
+
+        $availableDepartments = $this->assignableOperationDepartments($user)->keyBy('id');
+        if (!$availableDepartments->has($operationDepartmentId)) {
+            throw ValidationException::withMessages([
+                'operation_department_id' => __('assistant.domain_stores.validation.invalid_owner_operation_department'),
+            ]);
+        }
+
+        $candidates = $this->storeOwners->eligibleUsersForOperationDepartment($operationDepartmentId);
+        if (!$candidates->contains('id', $ownerUserId)) {
+            throw ValidationException::withMessages([
+                'owner_user_id' => __('assistant.domain_stores.validation.invalid_owner_user'),
+            ]);
+        }
+
+        return $ownerUserId;
+    }
+
     /**
      * A primary manager or administrator chooses the child departments explicitly.
      * A child-department member cannot alter access and new records are shared with
@@ -1458,80 +1599,59 @@ class DomainStoreController extends Controller
     }
 
     /**
-     * @return array{selected_ids: list<int>, fields: list<string>, records: array<int, array<string, mixed>>}
+     * @return array{selected_ids: list<int>, fields: list<string>, values: array<string, mixed>}
      */
     private function batchUpdatePayload(Request $request): array
     {
         $selectedIds = $this->selectedBatchStoreIds($request);
         $selectedFields = $this->selectedBatchEditableFields($request);
-        $submittedRecords = $request->input('records');
+        $submittedValues = $request->input('values');
 
-        if (!is_array($submittedRecords)) {
+        if (!is_array($submittedValues)) {
             throw ValidationException::withMessages([
-                'records' => __('assistant.domain_stores.batch_update.records_required'),
+                'values' => __('assistant.domain_stores.batch_update.records_required'),
             ]);
         }
 
-        $submittedIds = collect(array_keys($submittedRecords))
-            ->filter(static fn (mixed $id): bool => is_numeric($id))
-            ->map(static fn (mixed $id): int => (int) $id)
-            ->unique()
-            ->sort()
-            ->values()
-            ->all();
-        $expectedIds = collect($selectedIds)->sort()->values()->all();
+        $values = array_intersect_key($submittedValues, array_flip($selectedFields));
 
-        if ($submittedIds !== $expectedIds) {
-            throw ValidationException::withMessages([
-                'records' => __('assistant.domain_stores.batch_update.selection_changed'),
-            ]);
+        foreach (array_intersect($this->batchEditableStringFields(), $selectedFields) as $field) {
+            if (array_key_exists($field, $values) && is_scalar($values[$field])) {
+                $values[$field] = trim((string) $values[$field]);
+            }
         }
 
-        $records = [];
-        $errors = [];
-
-        foreach ($selectedIds as $storeId) {
-            $data = $submittedRecords[$storeId] ?? $submittedRecords[(string) $storeId] ?? null;
-
-            if (!is_array($data)) {
-                $errors['records.'.$storeId] = [__('assistant.domain_stores.batch_update.record_data_required')];
-
-                continue;
-            }
-
-            $data = array_intersect_key($data, array_flip($selectedFields));
-
-            foreach (array_intersect($this->batchEditableStringFields(), $selectedFields) as $field) {
-                if (array_key_exists($field, $data) && is_scalar($data[$field])) {
-                    $data[$field] = trim((string) $data[$field]);
-                }
-            }
-
-            foreach (array_intersect(['team', 'erp'], $selectedFields) as $field) {
-                $data[$field] = AssistantDomainStore::normalizeMultiValue($data[$field] ?? null);
-            }
-
-            $validator = Validator::make($data, $this->batchRulesForFields($selectedFields));
-
-            if ($validator->fails()) {
-                foreach ($validator->errors()->toArray() as $field => $messages) {
-                    $errors['records.'.$storeId.'.'.$field] = $messages;
-                }
-
-                continue;
-            }
-
-            $records[$storeId] = $this->normalizeValidatedData($validator->validated());
+        foreach (array_intersect(['team', 'erp'], $selectedFields) as $field) {
+            $values[$field] = AssistantDomainStore::normalizeMultiValue($values[$field] ?? null);
         }
 
-        if ($errors !== []) {
+        $validator = Validator::make($values, $this->batchRulesForFields($selectedFields));
+
+        if ($validator->fails()) {
+            $errors = [];
+
+            foreach ($validator->errors()->toArray() as $field => $messages) {
+                $errors['values.'.$field] = $messages;
+            }
+
             throw ValidationException::withMessages($errors);
+        }
+
+        $values = $validator->validated();
+
+        foreach (array_intersect(['team', 'erp'], $selectedFields) as $field) {
+            $normalized = AssistantDomainStore::normalizeMultiValue($values[$field] ?? null);
+            $values[$field] = $normalized === [] ? null : $normalized;
+        }
+
+        if (in_array('email', $selectedFields, true)) {
+            $values['email_purchased'] = $this->emailPurchases->isPurchased($values['email'] ?? null);
         }
 
         return [
             'selected_ids' => $selectedIds,
             'fields' => $selectedFields,
-            'records' => $records,
+            'values' => $values,
         ];
     }
 
@@ -1542,7 +1662,7 @@ class DomainStoreController extends Controller
      * @param array<int, array<string, mixed>> $records
      * @param list<int> $selectedIds
      */
-    private function ensureBatchStoreDomainPairsAreUnique(array $records, array $selectedIds): void
+    private function ensureBatchStoreDomainPairsAreUnique(array $records, array $selectedIds, string $errorField): void
     {
         $pairs = [];
 
@@ -1553,7 +1673,7 @@ class DomainStoreController extends Controller
 
             if (isset($pairs[$key])) {
                 throw ValidationException::withMessages([
-                    'records.'.$storeId.'.shop_name' => __('assistant.domain_stores.batch_update.duplicate_pair'),
+                    'values.'.$errorField => __('assistant.domain_stores.batch_update.duplicate_pair'),
                 ]);
             }
 
@@ -1585,14 +1705,14 @@ class DomainStoreController extends Controller
                 $storeId = $pairs[$key]['store_id'] ?? null;
 
                 if ($storeId !== null) {
-                    $errors['records.'.$storeId.'.shop_name'] = [
+                    $errors['values.'.$errorField] = [
                         __('assistant.domain_stores.validation.store_domain_exists'),
                     ];
                 }
             }
 
             if ($errors === []) {
-                $errors['records'] = [__('assistant.domain_stores.validation.store_domain_exists')];
+                $errors['values'] = [__('assistant.domain_stores.validation.store_domain_exists')];
             }
 
             throw ValidationException::withMessages($errors);
@@ -1624,7 +1744,7 @@ class DomainStoreController extends Controller
     private function selectedBatchEditableFields(Request $request): array
     {
         $validated = Validator::make($request->all(), [
-            'fields' => ['required', 'array', 'min:1', 'max:'.count($this->batchEditableFields())],
+            'fields' => ['required', 'array', 'size:1'],
             'fields.*' => ['required', 'string', 'distinct'],
         ])->validate();
         $requestedFields = collect($validated['fields'])

@@ -48,6 +48,14 @@
         'loading' => $t('email_purchase_status.checking'),
         'failed' => $t('email_purchase_status.lookup_failed'),
     ];
+    $ownerAssignmentJavascriptConfig = [
+        'candidates' => $ownerCandidatesByDepartment ?? [],
+        'selectedOwnerId' => $ownerUserId ?? null,
+        'translations' => [
+            'chooseOwner' => $t('form.owner_user_placeholder'),
+            'empty' => $t('form.owner_candidates_empty'),
+        ],
+    ];
 @endphp
 
 @push('styles')
@@ -476,6 +484,40 @@
                         <input id="remark" name="remark" class="form-control" value="{{ $value('remark') }}" maxlength="2000">
                         @error('remark')<span class="help-block">{{ $message }}</span>@enderror
                     </div>
+                    @if ($canAssignStoreOwner)
+                        <div class="form-group col-md-4 assistant-status-field @error('operation_department_id') has-error @enderror">
+                            <label for="operation_department_id">{{ $t('fields.owner_operation_department') }}</label>
+                            <select id="operation_department_id" name="operation_department_id" class="form-control" data-owner-operation-department>
+                                <option value="">{{ $t('form.owner_operation_department_placeholder') }}</option>
+                                @foreach ($ownerOperationDepartments as $department)
+                                    <option value="{{ $department->getKey() }}" @selected((int) $ownerOperationDepartmentId === (int) $department->getKey())>{{ $department->name }}</option>
+                                @endforeach
+                            </select>
+                            @error('operation_department_id')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+                        <div class="form-group col-md-4 assistant-status-field @error('owner_user_id') has-error @enderror">
+                            <label for="owner_user_id">{{ $t('fields.owner_user') }}</label>
+                            <select id="owner_user_id" name="owner_user_id" class="form-control" data-owner-user @disabled($ownerOperationDepartmentId === null && empty($currentOwnerOutsideScope))>
+                                <option value="">{{ $t('form.owner_user_placeholder') }}</option>
+                                @if ($ownerOperationDepartmentId !== null)
+                                    @foreach (($ownerCandidatesByDepartment[$ownerOperationDepartmentId] ?? []) as $candidate)
+                                        <option value="{{ $candidate['id'] }}" @selected((int) $ownerUserId === (int) $candidate['id'])>
+                                            {{ $candidate['name'] }}@if ($candidate['username']) ({{ $candidate['username'] }})@endif @if ($candidate['departments']) - {{ $candidate['departments'] }}@endif
+                                        </option>
+                                    @endforeach
+                                @elseif (!empty($currentOwnerOutsideScope))
+                                    <option value="{{ $currentOwnerOutsideScope['id'] }}" selected>
+                                        {{ $currentOwnerOutsideScope['name'] }}@if ($currentOwnerOutsideScope['username']) ({{ $currentOwnerOutsideScope['username'] }})@endif - {{ $t('form.owner_outside_scope') }}
+                                    </option>
+                                @endif
+                            </select>
+                            @error('owner_user_id')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+                        <div class="col-md-4 assistant-status-field">
+                            <label>&nbsp;</label>
+                            <span class="help-block">{{ $t('form.owner_assignment_hint') }}</span>
+                        </div>
+                    @endif
                     @if ($canManageDepartmentAccess)
                         <div class="form-group col-md-4 assistant-status-field @error('owner_department_id') has-error @enderror">
                             <label for="owner_department_id">{{ $t('fields.owner_department') }}</label>
@@ -523,6 +565,7 @@
         window.ErpAssistantDomainStoreTagTranslations = @json($tagJavascriptTranslations);
         window.ErpAssistantDomainStoreQuickOptionConfig = @json($quickOptionJavascriptConfig);
         window.ErpAssistantEmailPurchaseConfig = @json($emailPurchaseJavascriptConfig);
+        window.ErpAssistantDomainStoreOwnerForm = @json($ownerAssignmentJavascriptConfig);
     </script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-tags-20261007-3.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-form-20261008-1.js"></script>
@@ -531,4 +574,5 @@
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-team-project-options-20261009-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-domain-check-20261008-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-email-purchase-20261013-1.js?v=20261013-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-owner-form-20261020-1.js?v=20261020-1"></script>
 @endpush
