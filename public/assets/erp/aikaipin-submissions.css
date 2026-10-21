@@ -1162,3 +1162,299 @@ button.aikaipin-selection-list-image:focus {
         right: 8px;
     }
 }
+
+/* Selection proposal and placement evaluation list presentation refresh. */
+.aikaipin-submission-list-box {
+    border: 1px solid #dfe8f0;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(48, 77, 104, .07);
+    overflow: hidden;
+}
+
+.aikaipin-submission-list-toolbar {
+    background: linear-gradient(90deg, #f7fafc, #fff);
+    border-bottom: 1px solid #e4ebf1;
+    justify-content: space-between;
+    min-height: 58px;
+    padding: 10px 14px;
+}
+
+.aikaipin-submission-list-toolbar-summary {
+    align-items: center;
+    color: #66798d;
+    display: inline-flex;
+    font-size: 12px;
+    font-weight: 600;
+    gap: 7px;
+    letter-spacing: .01em;
+}
+
+.aikaipin-submission-list-toolbar-summary .fa {
+    align-items: center;
+    background: #e8f3fb;
+    border-radius: 50%;
+    color: #3489bb;
+    display: inline-flex;
+    height: 25px;
+    justify-content: center;
+    width: 25px;
+}
+
+.aikaipin-submission-list-toolbar-actions .btn {
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+.aikaipin-submission-table {
+    background: #fff;
+}
+
+.aikaipin-submission-table thead tr {
+    background: #f8fafc;
+}
+
+.aikaipin-submission-table thead th {
+    border-bottom-color: #e4ebf1;
+    color: #60748a;
+    letter-spacing: .01em;
+    padding: 12px 14px;
+}
+
+.aikaipin-submission-table tbody tr {
+    background: #fff;
+    transition: background .16s ease, box-shadow .16s ease;
+}
+
+.aikaipin-submission-table tbody tr:nth-child(even) {
+    background: #fcfdfe;
+}
+
+.aikaipin-submission-table tbody tr:hover {
+    background: #f4faff;
+}
+
+.aikaipin-submission-table tbody td {
+    border-top-color: #edf1f4;
+    padding: 13px 14px;
+}
+
+.aikaipin-submission-code,
+.aikaipin-submission-product-code {
+    color: #5d748a;
+    font-size: 11px;
+}
+
+.aikaipin-submission-product-name {
+    color: #263f59;
+    font-size: 14px;
+    letter-spacing: .01em;
+}
+
+.aikaipin-submission-product-code {
+    color: #7f92a5;
+    margin-top: 5px;
+}
+
+.aikaipin-submission-list-remark {
+    color: #64798e;
+    line-height: 1.55;
+}
+
+.aikaipin-selection-proposal-table {
+    min-width: 1360px;
+}
+
+.aikaipin-selection-proposal-table .aikaipin-selection-code-cell {
+    vertical-align: middle;
+    padding-top: 13px;
+}
+
+.aikaipin-selection-proposal-table tbody td {
+    vertical-align: middle;
+}
+
+.aikaipin-selection-cell-content {
+    align-items: center;
+    display: flex;
+    min-height: 56px;
+    width: 100%;
+}
+
+.aikaipin-selection-cell-content .aikaipin-submission-labels {
+    width: 100%;
+}
+
+.aikaipin-selection-cell-content--operation {
+    justify-content: flex-end;
+}
+
+.aikaipin-selection-image-cell {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+}
+
+.aikaipin-selection-list-image {
+    border-radius: 7px;
+    height: 56px;
+    width: 56px;
+}
+
+.aikaipin-selection-list-image img {
+    border-radius: 6px;
+}
+
+.aikaipin-selection-list-image-count {
+    background: #2985bb;
+    box-shadow: 0 2px 5px rgba(27, 100, 144, .24);
+}
+
+.aikaipin-selection-product-name-cell .aikaipin-submission-product-name {
+    -webkit-line-clamp: 2;
+}
+
+.aikaipin-selection-specification-cell .aikaipin-submission-labels,
+.aikaipin-selection-attribute-cell .aikaipin-submission-labels {
+    gap: 5px;
+}
+
+.aikaipin-selection-specification-cell .aikaipin-submission-labels .label,
+.aikaipin-selection-attribute-cell .aikaipin-submission-labels .label {
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 7px;
+}
+
+.aikaipin-selection-specification-cell .aikaipin-submission-labels .label {
+    background: #eef2f6;
+    border: 1px solid #dce5ec;
+    color: #53677a;
+}
+
+.aikaipin-selection-attribute-cell .aikaipin-submission-labels .label {
+    background: #e7f7fd;
+    border: 1px solid #b9e6f8;
+    color: #2080ad;
+}
+
+.aikaipin-selection-status-cell .label {
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 8px;
+}
+
+.aikaipin-selection-submitter-cell,
+.aikaipin-selection-updated-at-cell,
+.aikaipin-placement-submitter-cell,
+.aikaipin-placement-updated-at-cell {
+    color: #657b90;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.aikaipin-submission-operation-cell .btn {
+    border-radius: 4px !important;
+    box-shadow: none;
+    font-size: 12px;
+    padding: 5px 9px;
+}
+
+.aikaipin-submission-operation-cell .btn-default {
+    background: #f8fafc;
+    border-color: #dce5ec;
+    color: #4c657b;
+}
+
+.aikaipin-submission-operation-cell .btn-default:hover,
+.aikaipin-submission-operation-cell .btn-default:focus {
+    background: #eef7fc;
+    border-color: #8ec3e2;
+    color: #247bab;
+}
+
+.aikaipin-placement-evaluation-table {
+    min-width: 1320px;
+    table-layout: fixed;
+    width: 100%;
+}
+
+.aikaipin-placement-evaluation-table th.aikaipin-placement-code-column,
+.aikaipin-placement-evaluation-table .aikaipin-placement-code-cell {
+    width: 170px;
+}
+
+.aikaipin-placement-evaluation-table th.aikaipin-placement-product-column,
+.aikaipin-placement-evaluation-table .aikaipin-placement-product-cell {
+    width: 260px;
+}
+
+.aikaipin-placement-evaluation-table th.aikaipin-placement-period-column,
+.aikaipin-placement-evaluation-table .aikaipin-placement-period-cell {
+    width: 190px;
+}
+
+.aikaipin-placement-evaluation-table th.aikaipin-placement-data-column,
+.aikaipin-placement-evaluation-table .aikaipin-placement-data-cell {
+    width: 270px;
+}
+
+.aikaipin-placement-evaluation-table th.aikaipin-placement-submitter-column,
+.aikaipin-placement-evaluation-table .aikaipin-placement-submitter-cell {
+    width: 110px;
+}
+
+.aikaipin-placement-evaluation-table th.aikaipin-placement-updated-at-column,
+.aikaipin-placement-evaluation-table .aikaipin-placement-updated-at-cell {
+    width: 155px;
+}
+
+.aikaipin-placement-evaluation-table .aikaipin-submission-operation-column,
+.aikaipin-placement-evaluation-table .aikaipin-submission-operation-cell {
+    width: 202px;
+}
+
+.aikaipin-placement-product-cell .aikaipin-submission-product-name {
+    display: -webkit-box;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+}
+
+.aikaipin-placement-period-cell .aikaipin-submission-date-range {
+    background: #f3f7fa;
+    border: 1px solid #e0e8ef;
+    border-radius: 11px;
+    color: #536b80;
+    display: inline-block;
+    font-family: Consolas, Monaco, monospace;
+    font-size: 11px;
+    padding: 4px 8px;
+}
+
+.aikaipin-placement-summary {
+    gap: 5px;
+}
+
+.aikaipin-placement-summary span {
+    background: #f4f9fc;
+    border-left: 3px solid #67add2;
+    border-radius: 3px;
+    color: #45647b;
+    font-size: 11px;
+    padding: 4px 7px;
+    white-space: normal;
+}
+
+.aikaipin-placement-remark-cell .aikaipin-submission-list-remark {
+    max-width: 260px;
+}
+
+@media (max-width: 767px) {
+    .aikaipin-submission-list-toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 10px;
+    }
+}

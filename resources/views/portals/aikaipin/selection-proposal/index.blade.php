@@ -67,7 +67,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-submissions.css?v=20261020-7">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-submissions.css?v=20261021-3">
 @endpush
 
 @push('scripts')
@@ -97,6 +97,10 @@
 
     <div class="box box-solid aikaipin-submission-list-box">
         <div class="box-header with-border aikaipin-submission-list-toolbar">
+            <div class="aikaipin-submission-list-toolbar-summary">
+                <i class="fa fa-list-alt" aria-hidden="true"></i>
+                <span>{{ trans_choice('aikaipin.selection_proposal.list.record_count', $proposals->total(), ['count' => $proposals->total()]) }}</span>
+            </div>
             <div class="aikaipin-submission-list-toolbar-actions">
                 <button class="btn btn-primary btn-sm" type="button" data-aikaipin-open-modal="selection">
                     <i class="fa fa-plus" aria-hidden="true"></i> {{ $t('selection_proposal.actions.new') }}
@@ -151,7 +155,9 @@
                             $imageCount = count($previewImages);
                         @endphp
                         <tr data-aikaipin-list-row data-keyword="{{ $keywords }}">
-                            <td class="aikaipin-selection-code-cell"><span class="aikaipin-submission-code">{{ $proposal->proposal_code }}</span></td>
+                            <td class="aikaipin-selection-code-cell">
+                                <div class="aikaipin-selection-cell-content"><span class="aikaipin-submission-code">{{ $proposal->proposal_code }}</span></div>
+                            </td>
                             <td class="aikaipin-selection-image-cell">
                                 @if ($imageCount > 0)
                                     <button class="aikaipin-selection-list-image" type="button"
@@ -169,48 +175,64 @@
                                     </span>
                                 @endif
                             </td>
-                            <td class="aikaipin-selection-product-name-cell"><strong class="aikaipin-submission-product-name">{{ $proposal->product_name }}</strong></td>
+                            <td class="aikaipin-selection-product-name-cell">
+                                <div class="aikaipin-selection-cell-content"><strong class="aikaipin-submission-product-name">{{ $proposal->product_name }}</strong></div>
+                            </td>
                             <td class="aikaipin-selection-specification-cell">
-                                <div class="aikaipin-submission-labels">
-                                    @foreach ($specifications as $specification)
-                                        <span class="label label-default">{{ $specification }}</span>
-                                    @endforeach
+                                <div class="aikaipin-selection-cell-content">
+                                    <div class="aikaipin-submission-labels">
+                                        @foreach ($specifications as $specification)
+                                            <span class="label label-default">{{ $specification }}</span>
+                                        @endforeach
+                                    </div>
                                 </div>
                             </td>
                             <td class="aikaipin-selection-attribute-cell">
-                                <div class="aikaipin-submission-labels">
-                                    @foreach ($attributes as $attribute)
-                                        <span class="label label-info">{{ $attribute }}</span>
-                                    @endforeach
+                                <div class="aikaipin-selection-cell-content">
+                                    <div class="aikaipin-submission-labels">
+                                        @foreach ($attributes as $attribute)
+                                            <span class="label label-info">{{ $attribute }}</span>
+                                        @endforeach
+                                    </div>
                                 </div>
                             </td>
                             <td class="aikaipin-selection-remark-cell">
-                                <span class="aikaipin-submission-list-remark" @if ($proposal->remark) title="{{ $proposal->remark }}" @endif>{{ $proposal->remark ?: $t('selection_proposal.fields.no_value') }}</span>
+                                <div class="aikaipin-selection-cell-content">
+                                    <span class="aikaipin-submission-list-remark" @if ($proposal->remark) title="{{ $proposal->remark }}" @endif>{{ $proposal->remark ?: $t('selection_proposal.fields.no_value') }}</span>
+                                </div>
                             </td>
                             @if ($canReviewAllSelectionProposals)
-                                <td class="aikaipin-selection-submitter-cell">{{ $proposal->created_by_name }}</td>
+                                <td class="aikaipin-selection-submitter-cell">
+                                    <div class="aikaipin-selection-cell-content">{{ $proposal->created_by_name }}</div>
+                                </td>
                             @endif
                             <td class="aikaipin-selection-status-cell">
-                                @if ($proposal->withdrawn_at)
-                                    <span class="label label-default">{{ $t('selection_proposal.messages.status_withdrawn') }}</span>
-                                @else
-                                    <span class="label label-success">{{ $t('selection_proposal.messages.status_active') }}</span>
-                                @endif
-                            </td>
-                            <td class="aikaipin-selection-updated-at-cell"><time datetime="{{ $proposal->updated_at?->toAtomString() }}">{{ $updatedAt }}</time></td>
-                            <td class="aikaipin-submission-operation-cell aikaipin-selection-operation-cell">
-                                <div class="btn-group btn-group-sm" role="group" aria-label="{{ $t('selection_proposal.table.operation') }}">
-                                    <button class="btn btn-default" type="button" data-aikaipin-selection-view data-aikaipin-proposal-id="{{ $proposal->getKey() }}">
-                                        <i class="fa fa-eye" aria-hidden="true"></i> {{ $t('selection_proposal.actions.view') }}
-                                    </button>
-                                    @if ($canEditProposal)
-                                        <button class="btn btn-primary" type="button" data-aikaipin-selection-edit data-aikaipin-proposal-id="{{ $proposal->getKey() }}">
-                                            <i class="fa fa-pencil" aria-hidden="true"></i> {{ $t('selection_proposal.actions.edit') }}
-                                        </button>
-                                        <button class="btn btn-default" type="button" data-aikaipin-selection-withdraw data-aikaipin-proposal-id="{{ $proposal->getKey() }}">
-                                            <i class="fa fa-reply" aria-hidden="true"></i> {{ $t('selection_proposal.actions.withdraw') }}
-                                        </button>
+                                <div class="aikaipin-selection-cell-content">
+                                    @if ($proposal->withdrawn_at)
+                                        <span class="label label-default">{{ $t('selection_proposal.messages.status_withdrawn') }}</span>
+                                    @else
+                                        <span class="label label-success">{{ $t('selection_proposal.messages.status_active') }}</span>
                                     @endif
+                                </div>
+                            </td>
+                            <td class="aikaipin-selection-updated-at-cell">
+                                <div class="aikaipin-selection-cell-content"><time datetime="{{ $proposal->updated_at?->toAtomString() }}">{{ $updatedAt }}</time></div>
+                            </td>
+                            <td class="aikaipin-submission-operation-cell aikaipin-selection-operation-cell">
+                                <div class="aikaipin-selection-cell-content aikaipin-selection-cell-content--operation">
+                                    <div class="btn-group btn-group-sm" role="group" aria-label="{{ $t('selection_proposal.table.operation') }}">
+                                        <button class="btn btn-default" type="button" data-aikaipin-selection-view data-aikaipin-proposal-id="{{ $proposal->getKey() }}">
+                                            <i class="fa fa-eye" aria-hidden="true"></i> {{ $t('selection_proposal.actions.view') }}
+                                        </button>
+                                        @if ($canEditProposal)
+                                            <button class="btn btn-primary" type="button" data-aikaipin-selection-edit data-aikaipin-proposal-id="{{ $proposal->getKey() }}">
+                                                <i class="fa fa-pencil" aria-hidden="true"></i> {{ $t('selection_proposal.actions.edit') }}
+                                            </button>
+                                            <button class="btn btn-default" type="button" data-aikaipin-selection-withdraw data-aikaipin-proposal-id="{{ $proposal->getKey() }}">
+                                                <i class="fa fa-reply" aria-hidden="true"></i> {{ $t('selection_proposal.actions.withdraw') }}
+                                            </button>
+                                        @endif
+                                    </div>
                                 </div>
                             </td>
                         </tr>
