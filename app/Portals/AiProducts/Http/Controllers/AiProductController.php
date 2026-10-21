@@ -81,7 +81,7 @@ class AiProductController extends Controller
             ]);
             $submission->save();
 
-            $submission->report_no = 'AI-'.now('Asia/Shanghai')->format('Ymd').'-'.str_pad((string) $submission->getKey(), 6, '0', STR_PAD_LEFT);
+            $submission->report_no = now('Asia/Shanghai')->format('Ymd').'-'.str_pad((string) $submission->getKey(), 6, '0', STR_PAD_LEFT);
             $submission->save();
 
             return $submission;
@@ -90,6 +90,45 @@ class AiProductController extends Controller
         return redirect()
             ->route('ai-products.operation.index')
             ->with('success', __('ai_products.operation.submit_success', ['report_no' => $submission->report_no]));
+    }
+
+    /** 运营门户：审核不通过的记录重新编辑后再次提交审核 */
+    public function operationUpdate(Request $request, AiProductSubmission $submission): Response
+    {
+        $context = $this->portalContext($request, AiProductAccessService::OPERATION_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $user = $context['user'];
+        abort_unless(
+            $user->isAdministrator() || (int) $submission->operation_user_id === (int) $user->getKey(),
+            403
+        );
+
+        if ((string) $submission->review_status !== AiProductSubmission::REVIEW_REJECTED) {
+            return redirect()
+                ->route('ai-products.operation.index')
+                ->with('error', __('ai_products.operation.edit_not_allowed'));
+        }
+
+        $data = Validator::make($request->all(), $this->storeRules(), [], [
+            'placement_link' => __('ai_products.fields.placement_link'),
+        ])->validate();
+
+        // 重新编辑后回到待审核，并清空上一轮审核信息，等待审核人员重新处理
+        $submission->forceFill([
+            'placement_link' => trim((string) $data['placement_link']),
+            'review_status' => AiProductSubmission::REVIEW_PENDING,
+            'review_remark' => null,
+            'reviewer_id' => null,
+            'reviewer_name' => null,
+            'reviewed_at' => null,
+        ])->save();
+
+        return redirect()
+            ->route('ai-products.operation.index')
+            ->with('success', __('ai_products.operation.update_success', ['report_no' => $submission->report_no]));
     }
 
     /** 入录审核门户：AI 产品投放链接审核列表 */
