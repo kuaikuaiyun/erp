@@ -19,6 +19,7 @@ return [
         'reset' => '重置',
         'close' => '关闭',
         'cancel' => '取消',
+        'delete' => '删除',
         'no_records' => '暂无数据',
         'pagination_summary' => '共 :total 条，当前第 :current/:last 页',
     ],
@@ -33,6 +34,9 @@ return [
         'edit_button' => '重新编辑',
         'edit_title' => '重新编辑投放链接',
         'edit_not_allowed' => '只有审核不通过的记录才能重新编辑',
+        'delete_confirm' => '确认删除该条提报记录吗？删除后不可恢复。',
+        'delete_success' => '已删除提报记录：:report_no',
+        'delete_not_allowed' => '只有待审核的记录才能删除',
         'list_title' => '提报记录',
     ],
 

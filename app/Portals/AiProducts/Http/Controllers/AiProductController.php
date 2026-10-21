@@ -131,6 +131,34 @@ class AiProductController extends Controller
             ->with('success', __('ai_products.operation.update_success', ['report_no' => $submission->report_no]));
     }
 
+    /** 运营门户：删除待审核的提报记录 */
+    public function operationDestroy(Request $request, AiProductSubmission $submission): Response
+    {
+        $context = $this->portalContext($request, AiProductAccessService::OPERATION_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $user = $context['user'];
+        abort_unless(
+            $user->isAdministrator() || (int) $submission->operation_user_id === (int) $user->getKey(),
+            403
+        );
+
+        if ((string) $submission->review_status !== AiProductSubmission::REVIEW_PENDING) {
+            return redirect()
+                ->route('ai-products.operation.index')
+                ->with('error', __('ai_products.operation.delete_not_allowed'));
+        }
+
+        $reportNo = (string) $submission->report_no;
+        $submission->delete();
+
+        return redirect()
+            ->route('ai-products.operation.index')
+            ->with('success', __('ai_products.operation.delete_success', ['report_no' => $reportNo]));
+    }
+
     /** 入录审核门户：AI 产品投放链接审核列表 */
     public function reviewIndex(Request $request): Response|View
     {
