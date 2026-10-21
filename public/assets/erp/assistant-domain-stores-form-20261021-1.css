@@ -23,12 +23,8 @@
     color: #3c8dbc;
 }
 
-.assistant-domain-store-form .assistant-form-access-section .assistant-access-owner-department {
-    grid-column: span 5;
-}
-
 .assistant-domain-store-form .assistant-form-access-section .assistant-status-department-access {
-    grid-column: span 7;
+    grid-column: span 12;
 }
 
 .assistant-domain-store-form .assistant-form-access-section .assistant-option-group {
@@ -36,16 +32,14 @@
 }
 
 @media (max-width: 991px) {
-    .assistant-domain-store-form .assistant-form-access-section .assistant-access-owner-department,
     .assistant-domain-store-form .assistant-form-access-section .assistant-status-department-access {
-        grid-column: span 6;
+        grid-column: span 12;
     }
 }
 
 @media (max-width: 767px) {
     .assistant-domain-store-form .assistant-form-owner-section .assistant-owner-form-field,
     .assistant-domain-store-form .assistant-owner-form-note,
-    .assistant-domain-store-form .assistant-form-access-section .assistant-access-owner-department,
     .assistant-domain-store-form .assistant-form-access-section .assistant-status-department-access {
         grid-column: span 1;
     }

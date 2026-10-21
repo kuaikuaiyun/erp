@@ -156,6 +156,7 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-expanded-20261010-1.css?v=20261010-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-modal-20261009-1.css">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-1.css?v=20261020-2">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-form-20261021-1.css?v=20261021-3">
 @endpush
 
 @section('content')
@@ -414,9 +415,6 @@
                             <td>
                                 <span class="assistant-field-value">
                                     {{ $store->ownerUser?->name ?: $store->ownerUser?->username ?: $t('common.empty') }}
-                                    @if ($store->ownerUser && $store->ownerDepartment)
-                                        <small class="assistant-owner-department">{{ $store->ownerDepartment->name }}</small>
-                                    @endif
                                 </span>
                             </td>
                             <td><span class="assistant-field-value">{{ \App\Models\AssistantDomainStore::displayMultiValue($store->erp) ?: $t('common.empty') }}</span></td>
@@ -709,6 +707,7 @@
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-access-guide-20261009-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-quick-options-20261008-2.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-team-project-options-20261009-1.js"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-owner-form-20261020-1.js?v=20261021-2"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-modal-20261009-1.js?v=20261011-2"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-3.js?v=20261020-6"></script>
     @if (session('success'))

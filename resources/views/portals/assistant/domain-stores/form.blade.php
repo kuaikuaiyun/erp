@@ -50,6 +50,7 @@
     ];
     $ownerAssignmentJavascriptConfig = [
         'candidates' => $ownerCandidatesByDepartment ?? [],
+        'selectedDepartmentId' => $ownerOperationDepartmentId ?? null,
         'selectedOwnerId' => $ownerUserId ?? null,
         'translations' => [
             'chooseOwner' => $t('form.owner_user_placeholder'),
@@ -60,7 +61,7 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-20261009-7.css?v=20261013-1">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-form-20261021-1.css?v=20261021-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-form-20261021-1.css?v=20261021-3">
 @endpush
 
 @section('content')
@@ -73,6 +74,9 @@
     <section class="{{ $isModalForm ? 'assistant-modal-form-content' : 'content' }} assistant-domain-stores-page">
         <form method="post" action="{{ $formAction }}" class="assistant-domain-store-form" @if ($isModalForm) data-modal-form novalidate @endif>
             @csrf
+            @if ($canAssignStoreOwner)
+                <script type="application/json" data-owner-form-config>@json($ownerAssignmentJavascriptConfig)</script>
+            @endif
             @unless ($isCreate)
                 @method('PUT')
             @endunless
@@ -532,17 +536,6 @@
                 <div class="box box-solid assistant-form-section assistant-form-access-section">
                     <div class="box-header with-border"><h3 class="box-title">{{ $t('sections.department_access') }}</h3></div>
                     <div class="box-body row assistant-form-grid">
-                        <div class="form-group assistant-access-owner-department @error('owner_department_id') has-error @enderror">
-                            <label for="owner_department_id">{{ $t('fields.owner_department') }}</label>
-                            <select id="owner_department_id" name="owner_department_id" class="form-control">
-                                <option value="">{{ $t('form.owner_department_unassigned') }}</option>
-                                @foreach ($assistantChildDepartments as $department)
-                                    <option value="{{ $department->getKey() }}" @selected((int) $ownerDepartmentId === (int) $department->getKey())>{{ $department->name }}</option>
-                                @endforeach
-                            </select>
-                            <span class="help-block">{{ $t('form.owner_department_hint') }}</span>
-                            @error('owner_department_id')<span class="help-block">{{ $message }}</span>@enderror
-                        </div>
                         <div class="form-group assistant-status-department-access @error('authorized_department_ids') has-error @enderror">
                             <label>{{ $t('fields.authorized_departments') }}</label>
                             <div class="assistant-option-group assistant-multi-option-group" data-multi-option-group>
@@ -588,5 +581,5 @@
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-team-project-options-20261009-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-domain-check-20261008-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-email-purchase-20261013-1.js?v=20261013-1"></script>
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-owner-form-20261020-1.js?v=20261020-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-owner-form-20261020-1.js?v=20261021-2"></script>
 @endpush

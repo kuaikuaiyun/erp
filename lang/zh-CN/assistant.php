@@ -46,7 +46,7 @@ return [
             'shopify_app' => 'Shopify App 应用',
             'status_expiry' => '状态与期限',
             'operation_owner' => '店铺运营归属',
-            'department_access' => '助理记录归属与授权',
+            'department_access' => '助理部门访问权限',
         ],
 
         'form' => [
@@ -60,14 +60,14 @@ return [
             'domain_check_hint' => '保存后可在列表中勾选记录并执行检测；检测结果会覆盖当前状态。检测仅使用主域名，不会修改此处填写内容。',
             'email_purchase_auto_hint' => '按最近一次邮箱购买状态同步结果自动匹配。',
             'select_department' => '请选择二级部门',
-            'owner_department_hint' => '用于记录店铺所属的助理二级部门；店铺的额外查看、编辑和删除权限请在右侧单独授权。',
+            'owner_department_hint' => '用于标记该店铺由哪个助理二级部门负责。',
             'owner_department_unassigned' => '未分配助理二级部门',
             'owner_outside_scope' => '当前归属已超出可选运营部门范围',
             'owner_operation_department_placeholder' => '暂不设置归属人',
             'owner_user_placeholder' => '请选择运营归属人',
             'owner_candidates_empty' => '该运营部门暂无可选的在职成员',
             'owner_assignment_hint' => '运营部门和店铺实际使用人仅用于记录运营归属，不会改变店铺记录的查看、编辑或删除权限。',
-            'authorized_departments_hint' => '勾选的二级部门可查看、编辑和删除该记录；全部取消勾选后，仅一级主管和系统管理员可见。',
+            'authorized_departments_hint' => '勾选后，该助理二级部门的成员可以查看、编辑和删除该店铺；未勾选的部门不能访问。二级部门成员新增记录时，系统会自动授权给其所在部门；一级主管和系统管理员可在此增加或回收访问权限。全部取消后，仅一级主管和系统管理员可见。',
             'no_child_departments' => '当前没有可用的助理二级部门。',
             'shopify_config_guide' => 'Shopify App 配置教程',
             'shopify_access_scopes_value' => 'read_orders,write_orders,write_draft_orders,read_products,write_products,read_customers,read_shipping,read_inventory,write_discounts,read_discounts,write_marketing_events,read_marketing_events,write_themes,read_themes,write_content,read_content,write_online_store_pages,read_online_store_pages,read_analytics,read_reports,read_price_rules,read_legal_policies,read_publications',
@@ -121,10 +121,10 @@ return [
             'transfer_note' => '旧版转店提示',
             'payment_type' => '旧版支付方式',
             'payment_note' => '旧版支付备注',
-            'owner_department' => '记录所属助理二级部门',
+            'owner_department' => '店铺所属助理部门',
             'owner_operation_department' => '运营归属部门',
             'owner_user' => '店铺实际使用人',
-            'authorized_departments' => '额外授权助理二级部门',
+            'authorized_departments' => '可访问该店铺的助理部门',
         ],
 
         'options' => [

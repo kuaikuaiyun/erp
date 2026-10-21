@@ -46,7 +46,7 @@ return [
             'shopify_app' => 'Shopify App',
             'status_expiry' => 'Status & Expiry',
             'operation_owner' => 'Store Operations Ownership',
-            'department_access' => 'Assistant Record Ownership & Access',
+            'department_access' => 'Assistant Department Access',
         ],
 
         'form' => [
@@ -60,14 +60,14 @@ return [
             'domain_check_hint' => 'After saving, select the record from the list and run a check; its result replaces the current status. The check uses only the registrable domain and does not change what is entered here.',
             'email_purchase_auto_hint' => 'Automatically matched against the most recent email-purchase synchronization.',
             'select_department' => 'Select a department',
-            'owner_department_hint' => 'Records the Assistant secondary department that owns this store. Grant additional view, edit, and delete access separately on the right.',
+            'owner_department_hint' => 'Identifies the Assistant secondary department responsible for this store.',
             'owner_department_unassigned' => 'No Assistant secondary department assigned',
             'owner_outside_scope' => 'Current owner is outside the selectable Operations scope',
             'owner_operation_department_placeholder' => 'Leave owner unassigned',
             'owner_user_placeholder' => 'Choose an Operations owner',
             'owner_candidates_empty' => 'No eligible active users in this Operations department',
             'owner_assignment_hint' => 'The Operations department and actual store user are operational metadata only and do not change record access permissions.',
-            'authorized_departments_hint' => 'Selected secondary departments can view, edit, and delete this record. Leave all unchecked for primary-manager-only access.',
+            'authorized_departments_hint' => 'Members of selected Assistant secondary departments can view, edit, and delete this store. A secondary-department member automatically grants access to their own department when creating a record. Primary managers and system administrators can add or revoke access here. Leave all unchecked for primary-manager-only access.',
             'no_child_departments' => 'No Assistant secondary departments are available.',
             'shopify_config_guide' => 'Shopify App configuration',
             'shopify_access_scopes_value' => 'read_orders,write_orders,write_draft_orders,read_products,write_products,read_customers,read_shipping,read_inventory,write_discounts,read_discounts,write_marketing_events,read_marketing_events,write_themes,read_themes,write_content,read_content,write_online_store_pages,read_online_store_pages,read_analytics,read_reports,read_price_rules,read_legal_policies,read_publications',
@@ -121,10 +121,10 @@ return [
             'transfer_note' => 'Legacy transfer note',
             'payment_type' => 'Legacy payment method',
             'payment_note' => 'Legacy payment note',
-            'owner_department' => 'Owning Assistant secondary department',
+            'owner_department' => 'Responsible Assistant department',
             'owner_operation_department' => 'Owning Operations department',
             'owner_user' => 'Actual store user',
-            'authorized_departments' => 'Additional authorized Assistant departments',
+            'authorized_departments' => 'Assistant departments with store access',
         ],
 
         'options' => [

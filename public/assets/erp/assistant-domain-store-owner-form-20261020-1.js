@@ -1,22 +1,7 @@
 (function (window, document) {
     'use strict';
 
-    var departmentSelect = document.querySelector('[data-owner-operation-department]');
-    var ownerSelect = document.querySelector('[data-owner-user]');
-
-    if (!departmentSelect || !ownerSelect) {
-        return;
-    }
-
-    var config = window.ErpAssistantDomainStoreOwnerForm || {};
-    var candidates = config.candidates || {};
-    var translations = config.translations || {};
-    var initialDepartmentId = String(departmentSelect.value || '');
-    var initialOwnerId = config.selectedOwnerId === null || config.selectedOwnerId === undefined
-        ? ''
-        : String(config.selectedOwnerId);
-
-    function appendOption(value, text, selected) {
+    function appendOption(ownerSelect, value, text, selected) {
         var option = document.createElement('option');
         option.value = String(value || '');
         option.textContent = text || '';
@@ -38,30 +23,58 @@
         return label;
     }
 
-    function populateOwners(departmentId, selectedOwnerId) {
+    function formConfig(form) {
+        var configNode = form ? form.querySelector('[data-owner-form-config]') : null;
+
+        if (configNode) {
+            try {
+                return JSON.parse(configNode.textContent || '{}');
+            } catch (error) {
+                return {};
+            }
+        }
+
+        return window.ErpAssistantDomainStoreOwnerForm || {};
+    }
+
+    function populateOwners(form, departmentSelect, ownerSelect) {
+        var config = formConfig(form);
+        var candidates = config.candidates || {};
+        var translations = config.translations || {};
+        var departmentId = String(departmentSelect.value || '');
+        var initialDepartmentId = config.selectedDepartmentId === null || config.selectedDepartmentId === undefined
+            ? ''
+            : String(config.selectedDepartmentId);
+        var initialOwnerId = config.selectedOwnerId === null || config.selectedOwnerId === undefined
+            ? ''
+            : String(config.selectedOwnerId);
+        var selectedOwnerId = departmentId === initialDepartmentId ? initialOwnerId : '';
         var rows = candidates[String(departmentId)] || [];
 
         ownerSelect.innerHTML = '';
-        appendOption('', rows.length ? translations.chooseOwner : translations.empty, !selectedOwnerId);
+        appendOption(ownerSelect, '', departmentId && !rows.length ? translations.empty : translations.chooseOwner, !selectedOwnerId);
 
         rows.forEach(function (candidate) {
-            appendOption(candidate.id, candidateLabel(candidate), String(candidate.id) === String(selectedOwnerId || ''));
+            appendOption(ownerSelect, candidate.id, candidateLabel(candidate), String(candidate.id) === String(selectedOwnerId || ''));
         });
 
         ownerSelect.disabled = !departmentId || rows.length === 0;
     }
 
-    departmentSelect.addEventListener('change', function () {
-        var departmentId = String(departmentSelect.value || '');
-        var selectedOwnerId = departmentId === initialDepartmentId ? initialOwnerId : '';
+    document.addEventListener('change', function (event) {
+        var departmentSelect = event.target.closest('[data-owner-operation-department]');
 
-        if (!departmentId) {
-            ownerSelect.innerHTML = '';
-            appendOption('', translations.chooseOwner, true);
-            ownerSelect.disabled = true;
+        if (!departmentSelect) {
             return;
         }
 
-        populateOwners(departmentId, selectedOwnerId);
+        var form = departmentSelect.closest('.assistant-domain-store-form');
+        var ownerSelect = form ? form.querySelector('[data-owner-user]') : null;
+
+        if (!form || !ownerSelect) {
+            return;
+        }
+
+        populateOwners(form, departmentSelect, ownerSelect);
     });
 })(window, document);
