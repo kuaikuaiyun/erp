@@ -1098,6 +1098,8 @@ class ProductLibraryController extends Controller
             ];
         };
 
+        $imageFiles = $product->imageFiles();
+
         return [
             'id' => (int) $product->getKey(),
             'name' => (string) $product->name,
@@ -1113,7 +1115,7 @@ class ProductLibraryController extends Controller
                     'name' => (string) $file['original_name'],
                     'url' => route('aikaipin.product-library.images.show', ['product' => $product, 'imageIndex' => $index]),
                 ];
-            }, $product->imageFiles(), array_keys($product->imageFiles())),
+            }, $imageFiles, array_keys($imageFiles)),
             'reference_file' => $filePayload($product->referenceFilePayload(), 'reference'),
             'package_file' => $filePayload($product->packageFilePayload(), 'package'),
         ];

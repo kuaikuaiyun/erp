@@ -70,8 +70,8 @@
         'categoryDuplicateMessage' => $t('messages.category_duplicate_message'),
         'categoryCreatedTitle' => $t('messages.category_created_title'),
         'categoryCreatedMessage' => $t('messages.category_created_message'),
-        'categoryDeletedTitle' => $t('messages.category_deleted_title'),
-        'categoryDeletedMessage' => $t('messages.category_deleted_message'),
+        'categoryDeselectedTitle' => $t('messages.category_deselected_title'),
+        'categoryDeselectedMessage' => $t('messages.category_deselected_message'),
         'removeCategoryAria' => $t('upload.remove_category', ['name' => ':name']),
         'imagePreviewTitle' => $t('image_preview.title', ['name' => ':name']),
         'imagePreviewPosition' => $t('image_preview.position', ['current' => ':current', 'total' => ':total']),
@@ -82,12 +82,12 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261021-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261021-2">
 @endpush
 
 @push('scripts')
     <script>window.ErpAikaipinProductLibraryConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261021-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261021-2"></script>
 @endpush
 
 @section('content')

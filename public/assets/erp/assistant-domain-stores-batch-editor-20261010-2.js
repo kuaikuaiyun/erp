@@ -96,7 +96,7 @@
                 var key = String(field.key || '');
                 var label = String(field.label || key);
                 return '<label class="assistant-batch-field-selection-option">' +
-                    '<input type="radio" name="assistant_batch_field_choice" value="' + escapeHtml(key) + '" data-batch-field-choice>' +
+                    '<input type="checkbox" name="assistant_batch_field_choices[]" value="' + escapeHtml(key) + '" data-batch-field-choice>' +
                     '<span>' + escapeHtml(label) + '</span>' +
                     '</label>';
             }).join('');

@@ -60,6 +60,7 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-20261009-7.css?v=20261013-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-form-20261021-1.css?v=20261021-1">
 @endpush
 
 @section('content')
@@ -484,8 +485,14 @@
                         <input id="remark" name="remark" class="form-control" value="{{ $value('remark') }}" maxlength="2000">
                         @error('remark')<span class="help-block">{{ $message }}</span>@enderror
                     </div>
-                    @if ($canAssignStoreOwner)
-                        <div class="form-group col-md-4 assistant-status-field @error('operation_department_id') has-error @enderror">
+                </div>
+            </div>
+
+            @if ($canAssignStoreOwner)
+                <div class="box box-solid assistant-form-section assistant-form-owner-section">
+                    <div class="box-header with-border"><h3 class="box-title">{{ $t('sections.operation_owner') }}</h3></div>
+                    <div class="box-body row assistant-form-grid">
+                        <div class="form-group assistant-owner-form-field @error('operation_department_id') has-error @enderror">
                             <label for="operation_department_id">{{ $t('fields.owner_operation_department') }}</label>
                             <select id="operation_department_id" name="operation_department_id" class="form-control" data-owner-operation-department>
                                 <option value="">{{ $t('form.owner_operation_department_placeholder') }}</option>
@@ -495,7 +502,7 @@
                             </select>
                             @error('operation_department_id')<span class="help-block">{{ $message }}</span>@enderror
                         </div>
-                        <div class="form-group col-md-4 assistant-status-field @error('owner_user_id') has-error @enderror">
+                        <div class="form-group assistant-owner-form-field @error('owner_user_id') has-error @enderror">
                             <label for="owner_user_id">{{ $t('fields.owner_user') }}</label>
                             <select id="owner_user_id" name="owner_user_id" class="form-control" data-owner-user @disabled($ownerOperationDepartmentId === null && empty($currentOwnerOutsideScope))>
                                 <option value="">{{ $t('form.owner_user_placeholder') }}</option>
@@ -513,13 +520,19 @@
                             </select>
                             @error('owner_user_id')<span class="help-block">{{ $message }}</span>@enderror
                         </div>
-                        <div class="col-md-4 assistant-status-field">
-                            <label>&nbsp;</label>
-                            <span class="help-block">{{ $t('form.owner_assignment_hint') }}</span>
+                        <div class="assistant-owner-form-note">
+                            <i class="fa fa-info-circle" aria-hidden="true"></i>
+                            <span>{{ $t('form.owner_assignment_hint') }}</span>
                         </div>
-                    @endif
-                    @if ($canManageDepartmentAccess)
-                        <div class="form-group col-md-4 assistant-status-field @error('owner_department_id') has-error @enderror">
+                    </div>
+                </div>
+            @endif
+
+            @if ($canManageDepartmentAccess)
+                <div class="box box-solid assistant-form-section assistant-form-access-section">
+                    <div class="box-header with-border"><h3 class="box-title">{{ $t('sections.department_access') }}</h3></div>
+                    <div class="box-body row assistant-form-grid">
+                        <div class="form-group assistant-access-owner-department @error('owner_department_id') has-error @enderror">
                             <label for="owner_department_id">{{ $t('fields.owner_department') }}</label>
                             <select id="owner_department_id" name="owner_department_id" class="form-control">
                                 <option value="">{{ $t('form.owner_department_unassigned') }}</option>
@@ -530,7 +543,7 @@
                             <span class="help-block">{{ $t('form.owner_department_hint') }}</span>
                             @error('owner_department_id')<span class="help-block">{{ $message }}</span>@enderror
                         </div>
-                        <div class="form-group col-md-12 assistant-status-department-access @error('authorized_department_ids') has-error @enderror">
+                        <div class="form-group assistant-status-department-access @error('authorized_department_ids') has-error @enderror">
                             <label>{{ $t('fields.authorized_departments') }}</label>
                             <div class="assistant-option-group assistant-multi-option-group" data-multi-option-group>
                                 @forelse ($assistantChildDepartments as $department)
@@ -541,12 +554,13 @@
                                     <span class="text-muted">{{ $t('form.no_child_departments') }}</span>
                                 @endforelse
                             </div>
+                            <span class="help-block">{{ $t('form.authorized_departments_hint') }}</span>
                             @error('authorized_department_ids')<span class="help-block">{{ $message }}</span>@enderror
                             @error('authorized_department_ids.*')<span class="help-block">{{ $message }}</span>@enderror
                         </div>
-                    @endif
+                    </div>
                 </div>
-            </div>
+            @endif
 
             <div class="assistant-form-actions">
                 @if ($isModalForm)

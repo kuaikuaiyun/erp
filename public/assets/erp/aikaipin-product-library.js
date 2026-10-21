@@ -505,7 +505,7 @@
             return category.value !== value;
         });
         renderCategories(selectedValues);
-        notify('success', config.categoryDeletedTitle, config.categoryDeletedMessage);
+        notify('success', config.categoryDeselectedTitle, config.categoryDeselectedMessage);
     }
 
     function releaseImageUrls() {

@@ -1,6 +1,6 @@
 .assistant-batch-editor-modal .assistant-batch-editor-modal-dialog {
     width: calc(100% - 30px);
-    max-width: 760px;
+    max-width: 1120px;
     height: auto;
     margin: 30px auto;
 }
@@ -42,6 +42,83 @@
     align-items: center;
     justify-content: center;
     color: #5c7185;
+}
+
+.assistant-batch-field-selector {
+    min-height: 230px;
+    padding: 16px;
+    background: #edf1f5;
+}
+
+.assistant-batch-field-selector-intro {
+    margin-bottom: 10px;
+    padding: 10px 12px;
+    border: 1px solid #c9e0ef;
+    border-radius: 4px;
+    background: #f1f9fd;
+    color: #3d647e;
+}
+
+.assistant-batch-field-selection-summary {
+    margin-bottom: 12px;
+    color: #264f70;
+    font-weight: 600;
+}
+
+.assistant-batch-field-selection-groups {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.assistant-batch-field-selection-group {
+    min-width: 0;
+    margin: 0;
+    padding: 12px;
+    border: 1px solid #d8e0e8;
+    border-radius: 4px;
+    background: #fff;
+}
+
+.assistant-batch-field-selection-group h5 {
+    margin: 0 0 9px;
+    color: #264f70;
+    font-weight: 600;
+}
+
+.assistant-batch-field-selection-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+
+.assistant-batch-field-selection-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    padding: 7px 10px;
+    border: 1px solid #d4dde6;
+    border-radius: 3px;
+    background: #f8fafc;
+    color: #415c73;
+    cursor: pointer;
+    font-weight: 400;
+}
+
+.assistant-batch-field-selection-option:hover {
+    border-color: #8db8d5;
+    background: #f1f8fc;
+}
+
+.assistant-batch-field-selection-option.is-selected {
+    border-color: #3c8dbc;
+    background: #3c8dbc;
+    color: #fff;
+}
+
+.assistant-batch-field-selection-option input {
+    margin: 0;
 }
 
 .assistant-batch-editor-intro {
@@ -169,6 +246,15 @@
     margin: 0;
 }
 
+.assistant-batch-unified-value .assistant-form-grid {
+    display: flex;
+    flex-wrap: wrap;
+}
+
+.assistant-batch-unified-value .form-group {
+    min-width: 0;
+}
+
 .assistant-batch-editor-alert {
     margin: 0 0 12px;
 }
@@ -210,5 +296,9 @@
     .assistant-batch-record-heading span {
         display: block;
         margin-top: 3px;
+    }
+
+    .assistant-batch-field-selection-groups {
+        grid-template-columns: 1fr;
     }
 }

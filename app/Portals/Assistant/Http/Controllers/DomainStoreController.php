@@ -1744,7 +1744,7 @@ class DomainStoreController extends Controller
     private function selectedBatchEditableFields(Request $request): array
     {
         $validated = Validator::make($request->all(), [
-            'fields' => ['required', 'array', 'size:1'],
+            'fields' => ['required', 'array', 'min:1', 'max:25'],
             'fields.*' => ['required', 'string', 'distinct'],
         ])->validate();
         $requestedFields = collect($validated['fields'])
