@@ -1509,26 +1509,37 @@ class ProductRequestController extends Controller
         $hash = $this->workflow->supplierUrlHash($normalizedUrl);
         // 链接与产品名统一只查 product_request_link_skus 表
         $matchType = 'supplier_url';
+        $linkSkus = collect();
         $linkSku = ProductRequestLinkSku::query()->where('supplier_url_hash', $hash)->first();
 
-        if (!$linkSku || $this->splitSkus((string) $linkSku->skus) === []) {
-            $linkSku = null;
+        if ($linkSku && $this->splitSkus((string) $linkSku->skus) !== []) {
+            $linkSkus = collect([$linkSku]);
+        } else {
             $keyword = trim((string) ($data['standard_chinese_name'] ?? ''));
 
             // 链接未命中（或该链接没有 SKU）时，回退按产品名模糊匹配同一张表
+            // 名称模糊查询可能命中多个链接，按链接聚合后全部返回，供采购选择
             if ($keyword !== '') {
                 $matchType = 'standard_chinese_name';
                 $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $keyword);
-                $linkSku = ProductRequestLinkSku::query()
+                $linkSkus = ProductRequestLinkSku::query()
                     ->where('product_name', 'like', '%'.$escaped.'%')
                     ->latest('id')
-                    ->first();
+                    ->limit(200)
+                    ->get()
+                    ->filter(fn (ProductRequestLinkSku $row): bool => $this->splitSkus((string) $row->skus) !== [])
+                    ->unique('supplier_url_hash')
+                    ->take(20)
+                    ->values();
             }
         }
 
         return response()->json([
             'match_type' => $matchType,
-            'records' => $linkSku ? [$this->linkSkuReusePayload($linkSku)] : [],
+            'records' => $linkSkus
+                ->map(fn (ProductRequestLinkSku $row): array => $this->linkSkuReusePayload($row))
+                ->values()
+                ->all(),
         ]);
     }
 

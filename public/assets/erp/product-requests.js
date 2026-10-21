@@ -375,8 +375,12 @@
             }
             if (selectedSource) { selectedSource.value = record.id || ''; }
             if (selectedText) {
+                // 链接 SKU 库来源没有提报编号，名称模糊查询会返回多条，用「名称 · 链接」区分
+                var sourceLabel = record.id
+                    ? (record.report_no || '')
+                    : [record.standard_chinese_name, record.supplier_url].filter(Boolean).join(' · ');
                 selectedText.hidden = false;
-                selectedText.textContent = (config.reuseSelected || '').replace(':report_no', record.report_no || '');
+                selectedText.textContent = (config.reuseSelected || '').replace(':report_no', sourceLabel || record.report_no || '');
             }
             closeReuse();
         }
