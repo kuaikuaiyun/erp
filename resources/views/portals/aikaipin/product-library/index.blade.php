@@ -41,12 +41,7 @@
         'fileExisting' => $t('upload.file_existing', ['name' => ':name']),
         'serverFilters' => true,
         'filterResetUrl' => route('aikaipin.product-library.index'),
-        'initialCategories' => $categories->map(static fn ($category): array => [
-            'value' => (string) $category->getKey(),
-            'label' => (string) $category->name,
-        ])->values()->all(),
-        'categoryStoreUrl' => route('aikaipin.product-library.categories.store'),
-        'categoryDeleteUrlTemplate' => route('aikaipin.product-library.categories.destroy', ['category' => '__category__']),
+        'initialCategories' => $categories,
         'csrfToken' => csrf_token(),
         'productStoreUrl' => route('aikaipin.product-library.store'),
         'productEditUrlTemplate' => route('aikaipin.product-library.edit', ['product' => '__product__']),
@@ -75,8 +70,8 @@
         'categoryDuplicateMessage' => $t('messages.category_duplicate_message'),
         'categoryCreatedTitle' => $t('messages.category_created_title'),
         'categoryCreatedMessage' => $t('messages.category_created_message'),
-        'categoryDeletedTitle' => $t('messages.category_deleted_title'),
-        'categoryDeletedMessage' => $t('messages.category_deleted_message'),
+        'categoryDeselectedTitle' => $t('messages.category_deselected_title'),
+        'categoryDeselectedMessage' => $t('messages.category_deselected_message'),
         'removeCategoryAria' => $t('upload.remove_category', ['name' => ':name']),
         'imagePreviewTitle' => $t('image_preview.title', ['name' => ':name']),
         'imagePreviewPosition' => $t('image_preview.position', ['current' => ':current', 'total' => ':total']),
@@ -87,12 +82,12 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261020-3">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261021-2">
 @endpush
 
 @push('scripts')
     <script>window.ErpAikaipinProductLibraryConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261020-3"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261021-2"></script>
 @endpush
 
 @section('content')
@@ -111,7 +106,7 @@
                         <select id="aikaipin-category" class="form-control" name="category" data-aikaipin-filter="category">
                             <option value="">{{ $t('filters.all') }}</option>
                             @foreach ($categories as $category)
-                                <option value="{{ $category->getKey() }}" @selected($filters['category'] === (int) $category->getKey())>{{ $category->name }}</option>
+                                <option value="{{ $category['value'] }}" @selected($filters['category'] === $category['value'])>{{ $category['label'] }}</option>
                             @endforeach
                         </select>
                     </div>
@@ -188,17 +183,21 @@
                     <tbody data-aikaipin-product-list>
                     @foreach ($products as $product)
                         @php
-                            $skus = $product->skus->pluck('sku')->values()->all();
+                            $skus = $product->skuValues();
                             $skuCount = count($skus);
                             $allSkus = implode(', ', $skus);
                             $productName = (string) $product->name;
-                            $imageCount = $product->images->count();
-                            $previewImages = $product->images
-                                ->map(static fn ($image): array => [
-                                    'url' => route('aikaipin.product-library.files.show', ['product' => $product, 'file' => $image]),
-                                ])
-                                ->values()
-                                ->all();
+                            $imageFiles = $product->imageFiles();
+                            $imageCount = count($imageFiles);
+                            $previewImages = array_map(
+                                static fn (array $image, int $index): array => [
+                                    'url' => route('aikaipin.product-library.images.show', ['product' => $product, 'imageIndex' => $index]),
+                                ],
+                                $imageFiles,
+                                array_keys($imageFiles),
+                            );
+                            $referenceFile = $product->referenceFilePayload();
+                            $packageFile = $product->packageFilePayload();
                             $updatedAt = $product->updated_at?->timezone(config('app.timezone'))->format('Y-m-d H:i');
                         @endphp
                         <tr data-aikaipin-product
@@ -244,8 +243,8 @@
                                 @endif
                             </td>
                             <td class="aikaipin-category-cell">
-                                @foreach ($product->categories as $category)
-                                    <span class="label label-default">{{ $category->name }}</span>
+                                @foreach ($product->categoryValues() as $category)
+                                    <span class="label label-default">{{ $category }}</span>
                                 @endforeach
                             </td>
                             <td class="aikaipin-source-cell">
@@ -263,15 +262,15 @@
                                     @else
                                         <button class="btn btn-default" type="button" disabled>{{ $t('actions.landing_page') }}</button>
                                     @endif
-                                    @if ($product->referenceFile)
-                                        <a class="btn btn-default" href="{{ route('aikaipin.product-library.files.show', ['product' => $product, 'file' => $product->referenceFile]) }}" target="_blank" rel="noopener noreferrer">
+                                    @if ($referenceFile)
+                                        <a class="btn btn-default" href="{{ route('aikaipin.product-library.files.show', ['product' => $product, 'kind' => 'reference']) }}" target="_blank" rel="noopener noreferrer">
                                             <i class="fa fa-external-link" aria-hidden="true"></i> {{ $t('actions.reference_page') }}
                                         </a>
                                     @else
                                         <button class="btn btn-default" type="button" disabled>{{ $t('actions.reference_page') }}</button>
                                     @endif
-                                    @if ($product->packageFile)
-                                        <a class="btn btn-default" href="{{ route('aikaipin.product-library.files.show', ['product' => $product, 'file' => $product->packageFile]) }}">
+                                    @if ($packageFile)
+                                        <a class="btn btn-default" href="{{ route('aikaipin.product-library.files.show', ['product' => $product, 'kind' => 'package']) }}">
                                             <i class="fa fa-download" aria-hidden="true"></i> {{ $t('actions.download') }}
                                         </a>
                                     @else

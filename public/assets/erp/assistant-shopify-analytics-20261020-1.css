@@ -129,3 +129,20 @@
         grid-template-columns: minmax(0, 1fr);
     }
 }
+
+/* Five primary filters share one row on wide screens without squeezing labels. */
+.assistant-shopify-analytics-page .assistant-shopify-filter-primary-row {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+@media (min-width: 768px) and (max-width: 1199px) {
+    .assistant-shopify-analytics-page .assistant-shopify-filter-primary-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 767px) {
+    .assistant-shopify-analytics-page .assistant-shopify-filter-primary-row {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

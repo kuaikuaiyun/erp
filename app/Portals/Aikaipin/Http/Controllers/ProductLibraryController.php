@@ -4,8 +4,6 @@ namespace App\Portals\Aikaipin\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\AikaipinProduct;
-use App\Models\AikaipinProductCategory;
-use App\Models\AikaipinProductFile;
 use App\Models\AikaipinProductUploadSession;
 use App\Models\AikaipinPlacementEvaluation;
 use App\Models\AikaipinPlacementEvaluationRecord;
@@ -54,69 +52,10 @@ class ProductLibraryController extends Controller
                 ->paginate(15)
                 ->withQueryString(),
             'filters' => $filters,
-            'categories' => AikaipinProductCategory::query()->orderBy('sort')->orderBy('name')->get(['id', 'name']),
+            'categories' => $this->productCategoryOptions(),
             'canManageProductLibrary' => $canManageProductLibrary,
             'operationVisibilitySource' => $this->authorization->operationVisibilitySource(),
             'quickAuthorizationDepartments' => $this->authorization->quickAuthorizationDepartments(),
-        ]);
-    }
-
-    public function storeCategory(Request $request): JsonResponse|Response
-    {
-        $context = $this->pageContext($request);
-        if ($context instanceof Response) {
-            return $context;
-        }
-
-        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
-
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'max:80'],
-        ]);
-        $name = trim(preg_replace('/\s+/u', ' ', (string) $validated['name']) ?: '');
-
-        if ($name === '') {
-            throw ValidationException::withMessages([
-                'name' => __('aikaipin.messages.category_empty_message'),
-            ]);
-        }
-
-        $category = AikaipinProductCategory::firstOrCreate(
-            ['name' => $name],
-            ['created_by' => (int) $context['user']->getKey()],
-        );
-
-        if (!$category->wasRecentlyCreated) {
-            return response()->json([
-                'message' => __('aikaipin.messages.category_duplicate_message'),
-            ], 422);
-        }
-
-        return response()->json([
-            'category' => $this->categoryPayload($category),
-            'message' => __('aikaipin.messages.category_created_message'),
-        ], 201);
-    }
-
-    public function destroyCategory(Request $request, AikaipinProductCategory $category): JsonResponse|Response
-    {
-        $context = $this->pageContext($request);
-        if ($context instanceof Response) {
-            return $context;
-        }
-
-        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
-
-        if ($category->products()->exists()) {
-            return response()->json([
-                'message' => __('aikaipin.messages.category_in_use_message'),
-            ], 422);
-        }
-
-        $category->delete();
-
-        return response()->json([
-            'message' => __('aikaipin.messages.category_deleted_message'),
         ]);
     }
 
@@ -281,8 +220,8 @@ class ProductLibraryController extends Controller
             'landing_page_url' => ['nullable', 'url', 'max:2048'],
             'skus' => ['nullable', 'array'],
             'skus.*' => ['nullable', 'string', 'max:191', 'distinct'],
-            'category_ids' => ['nullable', 'array'],
-            'category_ids.*' => ['integer', 'distinct'],
+            'categories' => ['nullable', 'array'],
+            'categories.*' => ['nullable', 'string', 'max:80', 'distinct'],
             'images' => ['nullable', 'array', 'max:3'],
             'images.*' => ['file', 'image', 'max:20480'],
             'reference_file' => ['nullable', 'file'],
@@ -290,20 +229,9 @@ class ProductLibraryController extends Controller
             'authorized_department_ids' => ['nullable', 'array'],
             'authorized_department_ids.*' => ['integer', 'distinct'],
         ]);
-        $categoryIds = collect($data['category_ids'] ?? [])->map(static fn ($id): int => (int) $id)->unique()->values()->all();
         $departmentIds = collect($data['authorized_department_ids'] ?? [])->map(static fn ($id): int => (int) $id)->unique()->values()->all();
-        $skuValues = collect($data['skus'] ?? [])
-            ->map(static fn ($sku): string => trim((string) $sku))
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
-
-        if ($categoryIds !== [] && AikaipinProductCategory::query()->whereKey($categoryIds)->count() !== count($categoryIds)) {
-            throw ValidationException::withMessages([
-                'category_ids' => __('aikaipin.messages.product_category_invalid_message'),
-            ]);
-        }
+        $skuValues = $this->normalizeProductValues($data['skus'] ?? []);
+        $categories = $this->normalizeProductValues($data['categories'] ?? []);
 
         $availableDepartments = collect($this->authorization->quickAuthorizationDepartments())->keyBy('id');
         if (collect($departmentIds)->diff($availableDepartments->keys())->isNotEmpty()) {
@@ -317,7 +245,7 @@ class ProductLibraryController extends Controller
 
         try {
             $connection = config('admin.database.connection') ?: config('database.default');
-            $product = DB::connection($connection)->transaction(function () use ($context, $data, $categoryIds, $departmentIds, $skuValues, &$createdPaths): AikaipinProduct {
+            $product = DB::connection($connection)->transaction(function () use ($context, $data, $categories, $departmentIds, $skuValues, &$createdPaths): AikaipinProduct {
                 $session = $this->uploadSessionForUser($context['user'], (string) $data['package_upload_token'], true);
                 if ($session->status !== AikaipinProductUploadSession::STATUS_COMPLETED
                     || !$session->assembled_path
@@ -328,42 +256,48 @@ class ProductLibraryController extends Controller
                 }
 
                 $product = AikaipinProduct::create([
-                    'product_code' => $this->nextProductCode(),
+                    'product_code' => $this->temporaryProductCode(),
                     'name' => trim((string) $data['name']),
+                    'sku' => $this->joinProductValues($skuValues),
+                    'categories' => $categories === [] ? null : $categories,
                     'source_platform' => $data['source_platform'],
                     'product_type' => $data['product_type'],
                     'landing_page_url' => $data['landing_page_url'] ?: null,
+                    'visible_department_ids' => $departmentIds === [] ? null : $departmentIds,
                     'created_by' => (int) $context['user']->getKey(),
                     'created_by_name' => (string) ($context['user']->name ?: $context['user']->username),
                     'updated_by' => (int) $context['user']->getKey(),
                     'updated_by_name' => (string) ($context['user']->name ?: $context['user']->username),
                 ]);
 
-                foreach ($skuValues as $sort => $sku) {
-                    $product->skus()->create(['sku' => $sku, 'sort' => $sort]);
-                }
+                $images = [];
 
-                $product->categories()->sync($categoryIds);
-                $product->authorizedDepartments()->sync($departmentIds);
-
-                foreach (array_values($data['images'] ?? []) as $sort => $image) {
+                foreach (array_values($data['images'] ?? []) as $image) {
                     /** @var UploadedFile $image */
                     $imagePayload = $this->storage->storeUploadedFile($image, 'images');
                     $createdPaths[] = $imagePayload['path'];
-                    $product->files()->create([...$imagePayload, 'kind' => AikaipinProductFile::KIND_IMAGE, 'sort' => $sort, 'disk' => AikaipinProductLibraryStorageService::DISK]);
+                    $images[] = $this->productFilePayload($imagePayload);
                 }
 
+                $referenceFile = null;
                 if (($data['reference_file'] ?? null) instanceof UploadedFile) {
                     /** @var UploadedFile $referenceFile */
                     $referenceFile = $data['reference_file'];
                     $referencePayload = $this->storage->storeUploadedFile($referenceFile, 'references');
                     $createdPaths[] = $referencePayload['path'];
-                    $product->files()->create([...$referencePayload, 'kind' => AikaipinProductFile::KIND_REFERENCE, 'sort' => 0, 'disk' => AikaipinProductLibraryStorageService::DISK]);
+                    $referenceFile = $this->productFilePayload($referencePayload);
                 }
 
                 $packagePayload = $this->storage->copyStoredFile($session->assembled_path, 'packages', $session->original_name, $session->mime_type);
                 $createdPaths[] = $packagePayload['path'];
-                $product->files()->create([...$packagePayload, 'kind' => AikaipinProductFile::KIND_PACKAGE, 'sort' => 0, 'disk' => AikaipinProductLibraryStorageService::DISK]);
+                $packageFile = $this->productFilePayload($packagePayload);
+
+                $product->forceFill([
+                    'product_code' => $this->productCodeForId((int) $product->getKey()),
+                    'images' => $images === [] ? null : $images,
+                    'reference_file' => $referenceFile,
+                    'package_file' => $packageFile,
+                ])->save();
 
                 $session->forceFill([
                     'status' => AikaipinProductUploadSession::STATUS_CONSUMED,
@@ -412,15 +346,6 @@ class ProductLibraryController extends Controller
 
         abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
 
-        $product->load([
-            'skus',
-            'categories',
-            'authorizedDepartments',
-            'images',
-            'referenceFile',
-            'packageFile',
-        ]);
-
         return response()->json($this->productEditPayload($product));
     }
 
@@ -440,32 +365,21 @@ class ProductLibraryController extends Controller
             'landing_page_url' => ['nullable', 'url', 'max:2048'],
             'skus' => ['nullable', 'array'],
             'skus.*' => ['nullable', 'string', 'max:191', 'distinct'],
-            'category_ids' => ['nullable', 'array'],
-            'category_ids.*' => ['integer', 'distinct'],
+            'categories' => ['nullable', 'array'],
+            'categories.*' => ['nullable', 'string', 'max:80', 'distinct'],
             'images' => ['nullable', 'array'],
             'images.*' => ['file', 'image', 'max:20480'],
-            'remove_image_ids' => ['nullable', 'array'],
-            'remove_image_ids.*' => ['integer', 'distinct'],
+            'remove_image_indexes' => ['nullable', 'array'],
+            'remove_image_indexes.*' => ['integer', 'min:0', 'distinct'],
             'reference_file' => ['nullable', 'file'],
             'package_upload_token' => ['nullable', 'uuid'],
             'authorized_department_ids' => ['nullable', 'array'],
             'authorized_department_ids.*' => ['integer', 'distinct'],
         ]);
-        $categoryIds = collect($data['category_ids'] ?? [])->map(static fn ($id): int => (int) $id)->unique()->values()->all();
         $departmentIds = collect($data['authorized_department_ids'] ?? [])->map(static fn ($id): int => (int) $id)->unique()->values()->all();
-        $skuValues = collect($data['skus'] ?? [])
-            ->map(static fn ($sku): string => trim((string) $sku))
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
-        $removedImageIds = collect($data['remove_image_ids'] ?? [])->map(static fn ($id): int => (int) $id)->unique()->values()->all();
-
-        if ($categoryIds !== [] && AikaipinProductCategory::query()->whereKey($categoryIds)->count() !== count($categoryIds)) {
-            throw ValidationException::withMessages([
-                'category_ids' => __('aikaipin.messages.product_category_invalid_message'),
-            ]);
-        }
+        $skuValues = $this->normalizeProductValues($data['skus'] ?? []);
+        $categories = $this->normalizeProductValues($data['categories'] ?? []);
+        $removedImageIndexes = collect($data['remove_image_indexes'] ?? [])->map(static fn ($id): int => (int) $id)->unique()->sort()->values()->all();
 
         $availableDepartments = collect($this->authorization->quickAuthorizationDepartments())->keyBy('id');
         if (collect($departmentIds)->diff($availableDepartments->keys())->isNotEmpty()) {
@@ -474,15 +388,14 @@ class ProductLibraryController extends Controller
             ]);
         }
 
-        $existingImages = $product->images()->get();
-        $existingImageIds = $existingImages->pluck('id')->map(static fn ($id): int => (int) $id)->all();
-        if (collect($removedImageIds)->diff($existingImageIds)->isNotEmpty()) {
+        $existingImages = $product->imageFiles();
+        if (collect($removedImageIndexes)->contains(static fn (int $index): bool => !array_key_exists($index, $existingImages))) {
             throw ValidationException::withMessages([
-                'remove_image_ids' => __('aikaipin.messages.product_image_invalid_message'),
+                'remove_image_indexes' => __('aikaipin.messages.product_image_invalid_message'),
             ]);
         }
 
-        $remainingImageCount = $existingImages->count() - count($removedImageIds);
+        $remainingImageCount = count($existingImages) - count($removedImageIndexes);
         $newImages = array_values($data['images'] ?? []);
         if ($remainingImageCount + count($newImages) > 3) {
             throw ValidationException::withMessages([
@@ -490,61 +403,49 @@ class ProductLibraryController extends Controller
             ]);
         }
 
-        if (!($data['package_upload_token'] ?? null) && !$product->packageFile()->exists()) {
+        if (!($data['package_upload_token'] ?? null) && $product->packageFilePayload() === null) {
             throw ValidationException::withMessages([
                 'package_upload_token' => __('aikaipin.messages.archive_required_message'),
             ]);
         }
 
         $createdPaths = [];
-        $obsoleteFiles = collect();
+        $obsoletePaths = [];
         $completedSession = null;
 
         try {
             $connection = config('admin.database.connection') ?: config('database.default');
-            DB::connection($connection)->transaction(function () use ($context, $product, $data, $categoryIds, $departmentIds, $skuValues, $removedImageIds, $newImages, &$createdPaths, &$obsoleteFiles, &$completedSession): void {
-                $product->forceFill([
-                    'name' => trim((string) $data['name']),
-                    'source_platform' => $data['source_platform'],
-                    'product_type' => $data['product_type'],
-                    'landing_page_url' => $data['landing_page_url'] ?: null,
-                    'updated_by' => (int) $context['user']->getKey(),
-                    'updated_by_name' => (string) ($context['user']->name ?: $context['user']->username),
-                ])->save();
-
-                $product->skus()->delete();
-                foreach ($skuValues as $sort => $sku) {
-                    $product->skus()->create(['sku' => $sku, 'sort' => $sort]);
+            DB::connection($connection)->transaction(function () use ($context, $product, $data, $categories, $departmentIds, $skuValues, $removedImageIndexes, $newImages, &$createdPaths, &$obsoletePaths, &$completedSession): void {
+                $images = $product->imageFiles();
+                foreach (array_reverse($removedImageIndexes) as $index) {
+                    $removedFile = $images[$index] ?? null;
+                    if ($removedFile !== null) {
+                        $obsoletePaths[] = $removedFile['path'];
+                        unset($images[$index]);
+                    }
                 }
+                $images = array_values($images);
 
-                $product->categories()->sync($categoryIds);
-                $product->authorizedDepartments()->sync($departmentIds);
-
-                $removedImages = $product->images()->whereKey($removedImageIds)->get();
-                if ($removedImages->isNotEmpty()) {
-                    $obsoleteFiles = $obsoleteFiles->merge($removedImages);
-                    $product->images()->whereKey($removedImageIds)->delete();
-                }
-
-                $imageSort = (int) ($product->images()->max('sort') ?? -1) + 1;
                 foreach ($newImages as $image) {
                     /** @var UploadedFile $image */
                     $imagePayload = $this->storage->storeUploadedFile($image, 'images');
                     $createdPaths[] = $imagePayload['path'];
-                    $product->files()->create([...$imagePayload, 'kind' => AikaipinProductFile::KIND_IMAGE, 'sort' => $imageSort, 'disk' => AikaipinProductLibraryStorageService::DISK]);
-                    $imageSort += 1;
+                    $images[] = $this->productFilePayload($imagePayload);
                 }
 
+                $referenceFile = $product->referenceFilePayload();
                 if (($data['reference_file'] ?? null) instanceof UploadedFile) {
-                    /** @var UploadedFile $referenceFile */
-                    $referenceFile = $data['reference_file'];
-                    $referencePayload = $this->storage->storeUploadedFile($referenceFile, 'references');
+                    /** @var UploadedFile $uploadedReferenceFile */
+                    $uploadedReferenceFile = $data['reference_file'];
+                    $referencePayload = $this->storage->storeUploadedFile($uploadedReferenceFile, 'references');
                     $createdPaths[] = $referencePayload['path'];
-                    $obsoleteFiles = $obsoleteFiles->merge($product->files()->where('kind', AikaipinProductFile::KIND_REFERENCE)->get());
-                    $product->files()->where('kind', AikaipinProductFile::KIND_REFERENCE)->delete();
-                    $product->files()->create([...$referencePayload, 'kind' => AikaipinProductFile::KIND_REFERENCE, 'sort' => 0, 'disk' => AikaipinProductLibraryStorageService::DISK]);
+                    if ($referenceFile !== null) {
+                        $obsoletePaths[] = $referenceFile['path'];
+                    }
+                    $referenceFile = $this->productFilePayload($referencePayload);
                 }
 
+                $packageFile = $product->packageFilePayload();
                 if ($data['package_upload_token'] ?? null) {
                     $session = $this->uploadSessionForUser($context['user'], (string) $data['package_upload_token'], true);
                     if ($session->status !== AikaipinProductUploadSession::STATUS_COMPLETED
@@ -557,15 +458,31 @@ class ProductLibraryController extends Controller
 
                     $packagePayload = $this->storage->copyStoredFile($session->assembled_path, 'packages', $session->original_name, $session->mime_type);
                     $createdPaths[] = $packagePayload['path'];
-                    $obsoleteFiles = $obsoleteFiles->merge($product->files()->where('kind', AikaipinProductFile::KIND_PACKAGE)->get());
-                    $product->files()->where('kind', AikaipinProductFile::KIND_PACKAGE)->delete();
-                    $product->files()->create([...$packagePayload, 'kind' => AikaipinProductFile::KIND_PACKAGE, 'sort' => 0, 'disk' => AikaipinProductLibraryStorageService::DISK]);
+                    if ($packageFile !== null) {
+                        $obsoletePaths[] = $packageFile['path'];
+                    }
+                    $packageFile = $this->productFilePayload($packagePayload);
                     $session->forceFill([
                         'status' => AikaipinProductUploadSession::STATUS_CONSUMED,
                         'expires_at' => now()->addHour(),
                     ])->save();
                     $completedSession = $session;
                 }
+
+                $product->forceFill([
+                    'name' => trim((string) $data['name']),
+                    'sku' => $this->joinProductValues($skuValues),
+                    'categories' => $categories === [] ? null : $categories,
+                    'source_platform' => $data['source_platform'],
+                    'product_type' => $data['product_type'],
+                    'landing_page_url' => $data['landing_page_url'] ?: null,
+                    'images' => $images === [] ? null : $images,
+                    'reference_file' => $referenceFile,
+                    'package_file' => $packageFile,
+                    'visible_department_ids' => $departmentIds === [] ? null : $departmentIds,
+                    'updated_by' => (int) $context['user']->getKey(),
+                    'updated_by_name' => (string) ($context['user']->name ?: $context['user']->username),
+                ])->save();
             });
         } catch (ValidationException $exception) {
             throw $exception;
@@ -580,9 +497,9 @@ class ProductLibraryController extends Controller
             ], 500);
         }
 
-        foreach ($obsoleteFiles->unique('id') as $file) {
+        foreach (array_unique($obsoletePaths) as $path) {
             try {
-                $this->storage->deleteFile((string) $file->path);
+                $this->storage->deleteFile($path);
             } catch (\Throwable $exception) {
                 report($exception);
             }
@@ -625,11 +542,25 @@ class ProductLibraryController extends Controller
 
         $departmentIds = collect($this->authorization->quickAuthorizationDepartments())->pluck('id')->map(static fn ($id): int => (int) $id)->all();
         foreach ($products as $product) {
+            $currentDepartmentIds = $product->visibleDepartmentIds();
+
             if ($data['action'] === 'enable') {
-                $product->authorizedDepartments()->syncWithoutDetaching($departmentIds);
+                $updatedDepartmentIds = collect([...$currentDepartmentIds, ...$departmentIds])
+                    ->map(static fn ($id): int => (int) $id)
+                    ->filter(static fn (int $id): bool => $id > 0)
+                    ->unique()
+                    ->values()
+                    ->all();
             } else {
-                $product->authorizedDepartments()->detach($departmentIds);
+                $updatedDepartmentIds = collect($currentDepartmentIds)
+                    ->reject(static fn (int $id): bool => in_array($id, $departmentIds, true))
+                    ->values()
+                    ->all();
             }
+
+            $product->forceFill([
+                'visible_department_ids' => $updatedDepartmentIds === [] ? null : $updatedDepartmentIds,
+            ])->save();
         }
 
         return response()->json([
@@ -639,26 +570,50 @@ class ProductLibraryController extends Controller
         ]);
     }
 
-    public function showProductFile(Request $request, AikaipinProduct $product, AikaipinProductFile $file): Response
+    public function showProductImage(Request $request, AikaipinProduct $product, int $imageIndex): Response
     {
         $context = $this->pageContext($request);
         if ($context instanceof Response) {
             return $context;
         }
 
-        abort_unless((int) $file->product_id === (int) $product->getKey(), 404);
         abort_unless($this->canViewProduct($context['user'], $product), 403);
-        abort_unless($file->disk === AikaipinProductLibraryStorageService::DISK && Storage::disk($file->disk)->exists($file->path), 404);
 
-        if ($file->kind === AikaipinProductFile::KIND_PACKAGE) {
-            return response()->download(Storage::disk($file->disk)->path($file->path), $file->original_name, [
-                'Content-Type' => $file->mime_type ?: 'application/octet-stream',
-            ]);
+        $file = $product->imageFiles()[$imageIndex] ?? null;
+        abort_unless($file !== null, 404);
+
+        return $this->serveProductFile($file, false);
+    }
+
+    public function showProductFile(Request $request, AikaipinProduct $product, string $kind): Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
         }
 
-        return response()->file(Storage::disk($file->disk)->path($file->path), [
-            'Content-Type' => $file->mime_type ?: 'application/octet-stream',
-        ]);
+        abort_unless($this->canViewProduct($context['user'], $product), 403);
+        abort_unless(in_array($kind, ['reference', 'package'], true), 404);
+
+        $file = $kind === 'reference'
+            ? $product->referenceFilePayload()
+            : $product->packageFilePayload();
+        abort_unless($file !== null, 404);
+
+        return $this->serveProductFile($file, $kind === 'package');
+    }
+
+    /** @param array{disk:string,path:string,original_name:string,mime_type:?string,size:int,sha256:?string} $file */
+    private function serveProductFile(array $file, bool $download): Response
+    {
+        $disk = (string) $file['disk'];
+        abort_unless($disk === AikaipinProductLibraryStorageService::DISK && Storage::disk($disk)->exists($file['path']), 404);
+
+        $headers = ['Content-Type' => $file['mime_type'] ?: 'application/octet-stream'];
+
+        return $download
+            ? response()->download(Storage::disk($disk)->path($file['path']), $file['original_name'], $headers)
+            : response()->file(Storage::disk($disk)->path($file['path']), $headers);
     }
 
     public function selectionProposal(Request $request): Response|View
@@ -934,7 +889,7 @@ class ProductLibraryController extends Controller
         $canManageProductLibrary = $this->authorization->canManageProductLibrary($context['user']);
         $products = $this->productQuery($context['user'], $canManageProductLibrary, [
             'keyword' => $keyword,
-            'category' => null,
+            'category' => '',
             'source' => '',
             'type' => '',
         ])->limit(12)->get(['id', 'product_code', 'name']);
@@ -1132,17 +1087,18 @@ class ProductLibraryController extends Controller
     /** @return array<string, mixed> */
     private function productEditPayload(AikaipinProduct $product): array
     {
-        $filePayload = function (?AikaipinProductFile $file) use ($product): ?array {
+        $filePayload = function (?array $file, string $kind) use ($product): ?array {
             if ($file === null) {
                 return null;
             }
 
             return [
-                'id' => (int) $file->getKey(),
-                'name' => (string) $file->original_name,
-                'url' => route('aikaipin.product-library.files.show', ['product' => $product, 'file' => $file]),
+                'name' => (string) $file['original_name'],
+                'url' => route('aikaipin.product-library.files.show', ['product' => $product, 'kind' => $kind]),
             ];
         };
+
+        $imageFiles = $product->imageFiles();
 
         return [
             'id' => (int) $product->getKey(),
@@ -1150,14 +1106,18 @@ class ProductLibraryController extends Controller
             'source_platform' => (string) $product->source_platform,
             'product_type' => (string) $product->product_type,
             'landing_page_url' => $product->landing_page_url,
-            'skus' => $product->skus->pluck('sku')->values()->all(),
-            'category_ids' => $product->categories->pluck('id')->map(static fn ($id): string => (string) $id)->values()->all(),
-            'authorized_department_ids' => $product->authorizedDepartments->pluck('id')->map(static fn ($id): string => (string) $id)->values()->all(),
-            'images' => $product->images->map(function (AikaipinProductFile $file) use ($filePayload): array {
-                return $filePayload($file);
-            })->values()->all(),
-            'reference_file' => $filePayload($product->referenceFile),
-            'package_file' => $filePayload($product->packageFile),
+            'skus' => $product->skuValues(),
+            'categories' => $product->categoryValues(),
+            'authorized_department_ids' => $product->visibleDepartmentIds(),
+            'images' => array_map(function (array $file, int $index) use ($product): array {
+                return [
+                    'index' => $index,
+                    'name' => (string) $file['original_name'],
+                    'url' => route('aikaipin.product-library.images.show', ['product' => $product, 'imageIndex' => $index]),
+                ];
+            }, $imageFiles, array_keys($imageFiles)),
+            'reference_file' => $filePayload($product->referenceFilePayload(), 'reference'),
+            'package_file' => $filePayload($product->packageFilePayload(), 'package'),
         ];
     }
 
@@ -1177,7 +1137,7 @@ class ProductLibraryController extends Controller
         $departmentIds = $this->authorization->operationDepartmentIdsForUser($user);
 
         return $departmentIds !== []
-            && $product->authorizedDepartments()->whereKey($departmentIds)->exists();
+            && array_intersect($departmentIds, $product->visibleDepartmentIds()) !== [];
     }
 
     /** @return array{keyword:string} */
@@ -1314,24 +1274,14 @@ class ProductLibraryController extends Controller
         return sprintf('ATE-%s-%06d', $period, $nextNumber);
     }
 
-    private function nextProductCode(): string
+    private function productCodeForId(int $productId): string
     {
-        $connection = config('admin.database.connection') ?: config('database.default');
-        $period = now()->format('Ym');
-        $sequences = DB::connection($connection)->table('aikaipin_product_code_sequences');
-        $sequences->insertOrIgnore([
-            'period' => $period,
-            'last_number' => 0,
-            'updated_at' => now(),
-        ]);
-        $sequence = $sequences->where('period', $period)->lockForUpdate()->first();
-        $nextNumber = (int) ($sequence->last_number ?? 0) + 1;
-        $sequences->where('period', $period)->update([
-            'last_number' => $nextNumber,
-            'updated_at' => now(),
-        ]);
+        return 'kky-'.$productId;
+    }
 
-        return sprintf('AKP-%s-%06d', $period, $nextNumber);
+    private function temporaryProductCode(): string
+    {
+        return 'pending-'.strtolower(Str::random(20));
     }
 
     /** @return array{keyword:string} */
@@ -1467,32 +1417,23 @@ class ProductLibraryController extends Controller
         return sprintf('SPR-%s-%06d', $period, $nextNumber);
     }
 
-    /** @return array{keyword:string,category:?int,source:string,type:string} */
+    /** @return array{keyword:string,category:string,source:string,type:string} */
     private function productFilters(Request $request): array
     {
-        $category = $request->query('category');
-
         return [
             'keyword' => trim((string) $request->query('keyword', '')),
-            'category' => is_numeric($category) && (int) $category > 0 ? (int) $category : null,
+            'category' => trim((string) $request->query('category', '')),
             'source' => trim((string) $request->query('source', '')),
             'type' => trim((string) $request->query('type', '')),
         ];
     }
 
     /**
-     * @param array{keyword:string,category:?int,source:string,type:string} $filters
+     * @param array{keyword:string,category:string,source:string,type:string} $filters
      */
     private function productQuery(AdminUser $user, bool $canManageProductLibrary, array $filters): Builder
     {
         $query = AikaipinProduct::query()
-            ->with([
-                'skus',
-                'categories',
-                'images',
-                'referenceFile',
-                'packageFile',
-            ])
             ->latest('updated_at')
             ->latest('id');
 
@@ -1502,7 +1443,11 @@ class ProductLibraryController extends Controller
             if ($departmentIds === []) {
                 $query->whereRaw('1 = 0');
             } else {
-                $query->whereHas('authorizedDepartments', static fn (Builder $departments) => $departments->whereKey($departmentIds));
+                $query->where(function (Builder $products) use ($departmentIds): void {
+                    foreach ($departmentIds as $departmentId) {
+                        $products->orWhereJsonContains('visible_department_ids', (int) $departmentId);
+                    }
+                });
             }
         }
 
@@ -1512,12 +1457,12 @@ class ProductLibraryController extends Controller
             $query->where(function (Builder $products) use ($like): void {
                 $products->where('product_code', 'like', $like)
                     ->orWhere('name', 'like', $like)
-                    ->orWhereHas('skus', static fn (Builder $skus) => $skus->where('sku', 'like', $like));
+                    ->orWhere('sku', 'like', $like);
             });
         }
 
-        if ($filters['category'] !== null) {
-            $query->whereHas('categories', static fn (Builder $categories) => $categories->whereKey($filters['category']));
+        if ($filters['category'] !== '') {
+            $query->whereJsonContains('categories', $filters['category']);
         }
 
         if ($filters['source'] !== '') {
@@ -1531,12 +1476,65 @@ class ProductLibraryController extends Controller
         return $query;
     }
 
-    /** @return array{value:string,label:string} */
-    private function categoryPayload(AikaipinProductCategory $category): array
+    /** @return list<array{value:string,label:string}> */
+    private function productCategoryOptions(): array
+    {
+        return AikaipinProduct::query()
+            ->whereNotNull('categories')
+            ->get(['categories'])
+            ->flatMap(static fn (AikaipinProduct $product): array => $product->categoryValues())
+            ->map(static fn (string $category): string => trim($category))
+            ->filter()
+            ->unique(static fn (string $category): string => mb_strtolower($category))
+            ->sort(static fn (string $left, string $right): int => strnatcasecmp($left, $right))
+            ->values()
+            ->map(static fn (string $category): array => ['value' => $category, 'label' => $category])
+            ->all();
+    }
+
+    /** @param iterable<mixed> $values
+     *  @return list<string>
+     */
+    private function normalizeProductValues(iterable $values): array
+    {
+        $seen = [];
+        $normalized = [];
+
+        foreach ($values as $value) {
+            $item = trim(preg_replace('/\s+/u', ' ', (string) $value) ?: '');
+            $key = mb_strtolower($item);
+
+            if ($item === '' || isset($seen[$key])) {
+                continue;
+            }
+
+            $seen[$key] = true;
+            $normalized[] = $item;
+        }
+
+        return $normalized;
+    }
+
+    /** @param iterable<mixed> $values */
+    private function joinProductValues(iterable $values): ?string
+    {
+        $items = $this->normalizeProductValues($values);
+
+        return $items === [] ? null : implode(',', $items);
+    }
+
+    /** @param array{path:string,original_name:string,mime_type:?string,size:int,sha256:string} $payload
+     *  @return array{disk:string,path:string,original_name:string,mime_type:?string,size:int,sha256:?string}
+     */
+    private function productFilePayload(array $payload): array
     {
         return [
-            'value' => (string) $category->getKey(),
-            'label' => (string) $category->name,
+            'disk' => AikaipinProductLibraryStorageService::DISK,
+            'path' => (string) $payload['path'],
+            'original_name' => (string) $payload['original_name'],
+            'mime_type' => $payload['mime_type'] ?: null,
+            'size' => (int) $payload['size'],
+            'sha256' => $payload['sha256'] ?: null,
         ];
     }
 

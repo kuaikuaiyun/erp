@@ -96,7 +96,7 @@
                 var key = String(field.key || '');
                 var label = String(field.label || key);
                 return '<label class="assistant-batch-field-selection-option">' +
-                    '<input type="checkbox" value="' + escapeHtml(key) + '" data-batch-field-choice>' +
+                    '<input type="checkbox" name="assistant_batch_field_choices[]" value="' + escapeHtml(key) + '" data-batch-field-choice>' +
                     '<span>' + escapeHtml(label) + '</span>' +
                     '</label>';
             }).join('');
@@ -164,29 +164,9 @@
         return translate('loadFailed') + (xhr.status ? ' (HTTP ' + xhr.status + ')' : '');
     }
 
-    function activateRecord(recordId) {
-        var expandedPanels = body.find('.assistant-batch-record-panels-expanded');
-
-        if (expandedPanels.length) {
-            var expandedTarget = body.find('[data-batch-record-panel="' + recordId + '"]').first();
-
-            if (expandedTarget.length && expandedTarget[0].scrollIntoView) {
-                expandedTarget[0].scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-
-            return;
-        }
-
-        body.find('[data-batch-record-target]').removeClass('is-active');
-        body.find('[data-batch-record-target="' + recordId + '"]').addClass('is-active');
-        body.find('[data-batch-record-panel]').removeClass('is-active');
-        body.find('[data-batch-record-panel="' + recordId + '"]').addClass('is-active');
-    }
-
     function clearValidationErrors() {
         body.find('.assistant-batch-validation-error').remove();
         body.find('[data-batch-field]').removeClass('has-error');
-        body.find('[data-batch-record-target]').removeClass('has-error');
         body.find('.assistant-batch-editor-alert').remove();
     }
 
@@ -217,12 +197,11 @@
 
     function showValidationErrors(response) {
         var errors = response && response.errors ? response.errors : {};
-        var firstRecordId = null;
         var summary = response && response.message ? response.message : translate('saveFailed');
 
         clearValidationErrors();
         Object.keys(errors).forEach(function (key) {
-            var match = key.match(/^records\.([^\.]+)\.([^\.]+)/);
+            var match = key.match(/^values\.([^\.]+)/);
             var message = Array.isArray(errors[key]) ? errors[key][0] : errors[key];
 
             if (!message) {
@@ -234,17 +213,10 @@
                 return;
             }
 
-            var recordId = match[1];
-            var field = match[2];
-            var panel = body.find('[data-batch-record-panel="' + recordId + '"]');
-            var group = panel.find('[data-batch-field="' + field + '"]').first();
+            var field = match[1];
+            var group = body.find('[data-batch-field="' + field + '"]').first();
+            summary = message;
 
-            if (firstRecordId === null) {
-                firstRecordId = recordId;
-                summary = message;
-            }
-
-            body.find('[data-batch-record-target="' + recordId + '"]').addClass('has-error');
             if (group.length) {
                 group.addClass('has-error');
                 $('<span class="help-block assistant-batch-validation-error"></span>').text(message).appendTo(group);
@@ -252,9 +224,6 @@
         });
 
         $('<div class="alert alert-danger assistant-batch-editor-alert" role="alert"></div>').text(summary).prependTo(body.find('.assistant-batch-edit-form'));
-        if (firstRecordId !== null) {
-            activateRecord(firstRecordId);
-        }
     }
 
     function setSaving(saving) {
@@ -321,7 +290,7 @@
             var field = String(input.attr('data-batch-input') || '');
 
             if (field !== '') {
-                syncPresetState(input.closest('[data-batch-record-panel]'), field, field === 'team' || field === 'erp');
+                syncPresetState(input.closest('[data-batch-edit-form]'), field, field === 'team' || field === 'erp');
             }
         }).on('submit.assistantBatchEdit', function (event) {
             event.preventDefault();
@@ -355,16 +324,11 @@
             });
         });
 
-        body.off('click.assistantBatchRecord', '[data-batch-record-target]')
-            .on('click.assistantBatchRecord', '[data-batch-record-target]', function () {
-                activateRecord(String($(this).attr('data-batch-record-target')));
-            });
-
         body.off('click.assistantBatchSingleOption', '[data-batch-single-option]')
             .on('click.assistantBatchSingleOption', '[data-batch-single-option]', function () {
                 var button = $(this);
                 var field = String(button.attr('data-batch-single-option') || '');
-                var panel = button.closest('[data-batch-record-panel]');
+                var panel = button.closest('[data-batch-edit-form]');
                 var input = panel.find('[data-batch-input="' + field + '"]').first();
 
                 if (!input.length) {
@@ -378,7 +342,7 @@
             .on('click.assistantBatchMultiOption', '[data-batch-multi-option]', function () {
                 var button = $(this);
                 var field = String(button.attr('data-batch-multi-option') || '');
-                var panel = button.closest('[data-batch-record-panel]');
+                var panel = button.closest('[data-batch-edit-form]');
                 var input = panel.find('[data-batch-input="' + field + '"]').first();
 
                 if (!input.length) {

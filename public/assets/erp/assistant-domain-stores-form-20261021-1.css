@@ -1,0 +1,46 @@
+.assistant-domain-store-form .assistant-form-owner-section .assistant-owner-form-field {
+    grid-column: span 6;
+}
+
+.assistant-domain-store-form .assistant-owner-form-note {
+    display: flex;
+    grid-column: span 12;
+    align-items: flex-start;
+    gap: 7px;
+    min-width: 0;
+    padding: 9px 11px;
+    border: 1px solid #dbeaf3;
+    border-radius: 3px;
+    background: #f5fbfe;
+    color: #527087;
+    font-size: 12px;
+    line-height: 1.55;
+}
+
+.assistant-domain-store-form .assistant-owner-form-note .fa {
+    flex: 0 0 auto;
+    margin-top: 2px;
+    color: #3c8dbc;
+}
+
+.assistant-domain-store-form .assistant-form-access-section .assistant-status-department-access {
+    grid-column: span 12;
+}
+
+.assistant-domain-store-form .assistant-form-access-section .assistant-option-group {
+    align-content: flex-start;
+}
+
+@media (max-width: 991px) {
+    .assistant-domain-store-form .assistant-form-access-section .assistant-status-department-access {
+        grid-column: span 12;
+    }
+}
+
+@media (max-width: 767px) {
+    .assistant-domain-store-form .assistant-form-owner-section .assistant-owner-form-field,
+    .assistant-domain-store-form .assistant-owner-form-note,
+    .assistant-domain-store-form .assistant-form-access-section .assistant-status-department-access {
+        grid-column: span 1;
+    }
+}

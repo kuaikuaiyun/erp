@@ -45,12 +45,10 @@ class AikaipinPortalAuthorizationService
     {
         $department = Department::business()
             ->where('slug', self::OPERATION_DEPARTMENT_SLUG)
-            ->first(['name', 'short_name', 'slug']);
+            ->first(['name', 'slug']);
 
         return [
-            'name' => $department
-                ? (trim((string) $department->short_name) ?: (string) $department->name)
-                : null,
+            'name' => $department?->name,
             'code' => $department?->slug ?: self::OPERATION_DEPARTMENT_SLUG,
             'is_available' => $department !== null,
         ];

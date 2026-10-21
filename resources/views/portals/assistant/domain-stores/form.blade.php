@@ -48,10 +48,20 @@
         'loading' => $t('email_purchase_status.checking'),
         'failed' => $t('email_purchase_status.lookup_failed'),
     ];
+    $ownerAssignmentJavascriptConfig = [
+        'candidates' => $ownerCandidatesByDepartment ?? [],
+        'selectedDepartmentId' => $ownerOperationDepartmentId ?? null,
+        'selectedOwnerId' => $ownerUserId ?? null,
+        'translations' => [
+            'chooseOwner' => $t('form.owner_user_placeholder'),
+            'empty' => $t('form.owner_candidates_empty'),
+        ],
+    ];
 @endphp
 
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-20261009-7.css?v=20261013-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-form-20261021-1.css?v=20261021-3">
 @endpush
 
 @section('content')
@@ -64,6 +74,9 @@
     <section class="{{ $isModalForm ? 'assistant-modal-form-content' : 'content' }} assistant-domain-stores-page">
         <form method="post" action="{{ $formAction }}" class="assistant-domain-store-form" @if ($isModalForm) data-modal-form novalidate @endif>
             @csrf
+            @if ($canAssignStoreOwner)
+                <script type="application/json" data-owner-form-config>@json($ownerAssignmentJavascriptConfig)</script>
+            @endif
             @unless ($isCreate)
                 @method('PUT')
             @endunless
@@ -476,19 +489,54 @@
                         <input id="remark" name="remark" class="form-control" value="{{ $value('remark') }}" maxlength="2000">
                         @error('remark')<span class="help-block">{{ $message }}</span>@enderror
                     </div>
-                    @if ($canManageDepartmentAccess)
-                        <div class="form-group col-md-4 assistant-status-field @error('owner_department_id') has-error @enderror">
-                            <label for="owner_department_id">{{ $t('fields.owner_department') }}</label>
-                            <select id="owner_department_id" name="owner_department_id" class="form-control">
-                                <option value="">{{ $t('form.owner_department_unassigned') }}</option>
-                                @foreach ($assistantChildDepartments as $department)
-                                    <option value="{{ $department->getKey() }}" @selected((int) $ownerDepartmentId === (int) $department->getKey())>{{ $department->name }}</option>
+                </div>
+            </div>
+
+            @if ($canAssignStoreOwner)
+                <div class="box box-solid assistant-form-section assistant-form-owner-section">
+                    <div class="box-header with-border"><h3 class="box-title">{{ $t('sections.operation_owner') }}</h3></div>
+                    <div class="box-body row assistant-form-grid">
+                        <div class="form-group assistant-owner-form-field @error('operation_department_id') has-error @enderror">
+                            <label for="operation_department_id">{{ $t('fields.owner_operation_department') }}</label>
+                            <select id="operation_department_id" name="operation_department_id" class="form-control" data-owner-operation-department>
+                                <option value="">{{ $t('form.owner_operation_department_placeholder') }}</option>
+                                @foreach ($ownerOperationDepartments as $department)
+                                    <option value="{{ $department->getKey() }}" @selected((int) $ownerOperationDepartmentId === (int) $department->getKey())>{{ $department->name }}</option>
                                 @endforeach
                             </select>
-                            <span class="help-block">{{ $t('form.owner_department_hint') }}</span>
-                            @error('owner_department_id')<span class="help-block">{{ $message }}</span>@enderror
+                            @error('operation_department_id')<span class="help-block">{{ $message }}</span>@enderror
                         </div>
-                        <div class="form-group col-md-12 assistant-status-department-access @error('authorized_department_ids') has-error @enderror">
+                        <div class="form-group assistant-owner-form-field @error('owner_user_id') has-error @enderror">
+                            <label for="owner_user_id">{{ $t('fields.owner_user') }}</label>
+                            <select id="owner_user_id" name="owner_user_id" class="form-control" data-owner-user @disabled($ownerOperationDepartmentId === null && empty($currentOwnerOutsideScope))>
+                                <option value="">{{ $t('form.owner_user_placeholder') }}</option>
+                                @if ($ownerOperationDepartmentId !== null)
+                                    @foreach (($ownerCandidatesByDepartment[$ownerOperationDepartmentId] ?? []) as $candidate)
+                                        <option value="{{ $candidate['id'] }}" @selected((int) $ownerUserId === (int) $candidate['id'])>
+                                            {{ $candidate['name'] }}@if ($candidate['username']) ({{ $candidate['username'] }})@endif @if ($candidate['departments']) - {{ $candidate['departments'] }}@endif
+                                        </option>
+                                    @endforeach
+                                @elseif (!empty($currentOwnerOutsideScope))
+                                    <option value="{{ $currentOwnerOutsideScope['id'] }}" selected>
+                                        {{ $currentOwnerOutsideScope['name'] }}@if ($currentOwnerOutsideScope['username']) ({{ $currentOwnerOutsideScope['username'] }})@endif - {{ $t('form.owner_outside_scope') }}
+                                    </option>
+                                @endif
+                            </select>
+                            @error('owner_user_id')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+                        <div class="assistant-owner-form-note">
+                            <i class="fa fa-info-circle" aria-hidden="true"></i>
+                            <span>{{ $t('form.owner_assignment_hint') }}</span>
+                        </div>
+                    </div>
+                </div>
+            @endif
+
+            @if ($canManageDepartmentAccess)
+                <div class="box box-solid assistant-form-section assistant-form-access-section">
+                    <div class="box-header with-border"><h3 class="box-title">{{ $t('sections.department_access') }}</h3></div>
+                    <div class="box-body row assistant-form-grid">
+                        <div class="form-group assistant-status-department-access @error('authorized_department_ids') has-error @enderror">
                             <label>{{ $t('fields.authorized_departments') }}</label>
                             <div class="assistant-option-group assistant-multi-option-group" data-multi-option-group>
                                 @forelse ($assistantChildDepartments as $department)
@@ -499,12 +547,13 @@
                                     <span class="text-muted">{{ $t('form.no_child_departments') }}</span>
                                 @endforelse
                             </div>
+                            <span class="help-block">{{ $t('form.authorized_departments_hint') }}</span>
                             @error('authorized_department_ids')<span class="help-block">{{ $message }}</span>@enderror
                             @error('authorized_department_ids.*')<span class="help-block">{{ $message }}</span>@enderror
                         </div>
-                    @endif
+                    </div>
                 </div>
-            </div>
+            @endif
 
             <div class="assistant-form-actions">
                 @if ($isModalForm)
@@ -523,6 +572,7 @@
         window.ErpAssistantDomainStoreTagTranslations = @json($tagJavascriptTranslations);
         window.ErpAssistantDomainStoreQuickOptionConfig = @json($quickOptionJavascriptConfig);
         window.ErpAssistantEmailPurchaseConfig = @json($emailPurchaseJavascriptConfig);
+        window.ErpAssistantDomainStoreOwnerForm = @json($ownerAssignmentJavascriptConfig);
     </script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-tags-20261007-3.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-form-20261008-1.js"></script>
@@ -531,4 +581,5 @@
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-team-project-options-20261009-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-domain-check-20261008-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-email-purchase-20261013-1.js?v=20261013-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-owner-form-20261020-1.js?v=20261021-2"></script>
 @endpush

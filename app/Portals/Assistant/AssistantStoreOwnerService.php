@@ -115,6 +115,25 @@ class AssistantStoreOwnerService
             ->values();
     }
 
+    /** @return Collection<int, AdminUser> */
+    public function eligibleUsersForOperationDepartment(int $operationDepartmentId): Collection
+    {
+        $allowedDepartmentIds = $this->departmentIdsIncludingDescendants([$operationDepartmentId]);
+
+        return AdminUser::query()
+            ->where('status', AdminUser::STATUS_ACTIVE)
+            ->whereHas('departments', fn ($query) => $query->whereIn('admin_roles.id', $allowedDepartmentIds))
+            ->with(['departments' => fn ($query) => $query
+                ->whereIn('admin_roles.id', $allowedDepartmentIds)
+                ->orderBy('admin_roles.sort')
+                ->orderBy('admin_roles.name')])
+            ->orderBy('name')
+            ->orderBy('username')
+            ->get()
+            ->unique('id')
+            ->values();
+    }
+
     /** @param list<int> $assistantDepartmentIds
      *  @return Collection<int, AdminUser>
      */

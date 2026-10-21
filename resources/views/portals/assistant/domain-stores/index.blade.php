@@ -90,7 +90,6 @@
             'empty' => $t('javascript.owner_candidates_empty'),
             'chooseOwner' => $t('javascript.owner_choose_required'),
             'chooseDepartmentFirst' => $t('javascript.owner_department_required'),
-            'outsideScope' => $t('javascript.owner_outside_scope_warning', ['count' => '__count__']),
             'clearConfirm' => $t('javascript.owner_clear_confirm', ['count' => '__count__']),
             'scopeSaving' => $t('javascript.owner_scope_saving'),
         ],
@@ -152,11 +151,12 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-20261008-5.css">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-index-20261009-1.css">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-20261010-2.css?v=20261011-1">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-editor-20261010-1.css">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-editor-20261010-1.css?v=20261021-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-field-select-20261010-1.css">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-expanded-20261010-1.css?v=20261010-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-modal-20261009-1.css">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-1.css?v=20261020-2">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-form-20261021-1.css?v=20261021-3">
 @endpush
 
 @section('content')
@@ -165,9 +165,9 @@
     </section>
 
     <section class="content assistant-domain-stores-page">
-        @if ($errors->has('import_file') || $errors->has('scope') || $errors->has('department_ids') || $errors->has('selected_ids') || $errors->has('owner_department_id') || $errors->has('owner_user_id') || $errors->has('scopes') || $errors->batchUpdate->any())
+        @if ($errors->has('import_file') || $errors->has('scope') || $errors->has('department_ids') || $errors->has('selected_ids') || $errors->has('operation_department_id') || $errors->has('owner_user_id') || $errors->has('scopes') || $errors->batchUpdate->any())
             <div class="alert alert-danger {{ $errors->has('import_file') ? 'assistant-import-errors' : ($errors->has('department_ids') ? 'assistant-batch-access-errors' : ($errors->batchUpdate->any() ? 'assistant-batch-update-errors' : 'assistant-export-errors')) }}" role="alert">
-                {{ $errors->first('import_file') ?: $errors->first('department_ids') ?: $errors->first('selected_ids') ?: $errors->first('owner_department_id') ?: $errors->first('owner_user_id') ?: $errors->first('scopes') ?: $errors->batchUpdate->first() ?: $errors->first('scope') }}
+                {{ $errors->first('import_file') ?: $errors->first('department_ids') ?: $errors->first('selected_ids') ?: $errors->first('operation_department_id') ?: $errors->first('owner_user_id') ?: $errors->first('scopes') ?: $errors->batchUpdate->first() ?: $errors->first('scope') }}
             </div>
         @endif
 
@@ -245,7 +245,18 @@
                             <div class="assistant-advanced-filter-field"><label for="filter-email">{{ $t('fields.email') }}</label><input id="filter-email" class="form-control" name="email" value="{{ $filters['email'] }}"></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-email-bound">{{ $t('fields.email_binding') }}</label><select id="filter-email-bound" class="form-control" name="email_bound"><option value="">{{ $t('common.all') }}</option><option value="1" @selected($filters['email_bound'] === '1')>{{ $t('common.yes') }}</option><option value="0" @selected($filters['email_bound'] === '0')>{{ $t('common.no') }}</option></select></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-email-purchased">{{ $t('fields.email_purchase') }}</label><select id="filter-email-purchased" class="form-control" name="email_purchased"><option value="">{{ $t('common.all') }}</option><option value="1" @selected($filters['email_purchased'] === '1')>{{ $t('common.yes') }}</option><option value="0" @selected($filters['email_purchased'] === '0')>{{ $t('common.no') }}</option></select></div>
-                            <div class="assistant-advanced-filter-field"><label for="filter-team">{{ $t('fields.team') }}</label><input id="filter-team" class="form-control" name="team" value="{{ $filters['team'] }}"></div>
+                            <div class="assistant-advanced-filter-field">
+                                <label for="filter-team">{{ $t('fields.team') }}</label>
+                                <select id="filter-team" class="form-control" name="team">
+                                    <option value="">{{ $t('common.all') }}</option>
+                                    @if ($filters['team'] !== '' && !in_array($filters['team'], $quickOptions['team'] ?? [], true))
+                                        <option value="{{ $filters['team'] }}" selected>{{ $filters['team'] }}</option>
+                                    @endif
+                                    @foreach ($quickOptions['team'] ?? [] as $value)
+                                        <option value="{{ $value }}" @selected($filters['team'] === $value)>{{ $value }}</option>
+                                    @endforeach
+                                </select>
+                            </div>
                             <div class="assistant-advanced-filter-field"><label for="filter-project">{{ $t('fields.project') }}</label><input id="filter-project" class="form-control" name="project" value="{{ $filters['project'] }}"></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-user-name">{{ $t('fields.user_short') }}</label><input id="filter-user-name" class="form-control" name="user_name" value="{{ $filters['user_name'] }}"></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-owner-user">{{ $t('fields.owner_user') }}</label><input id="filter-owner-user" class="form-control" name="owner_user" value="{{ $filters['owner_user'] }}"></div>
@@ -281,25 +292,29 @@
 
         <div class="assistant-list-utility-bar">
             <div class="assistant-selection-summary">
-                @if ($canManage)
+                @if ($canManage || $canManageStoreOwnership)
                     <span id="assistant-current-selection-count" data-count-template="{{ $t('selection.count', ['count' => '__count__']) }}">{{ $t('selection.count', ['count' => 0]) }}</span>
-                    <button type="button" class="btn btn-primary btn-sm" id="assistant-batch-update-trigger" data-toggle="modal" data-target="#assistant-batch-update-modal" data-batch-editor-url="{{ route('assistant.domain-stores.batch-edit') }}" hidden><i class="fa fa-pencil-square-o"></i> {{ $t('selection.batch_update') }}</button>
-                    <form method="post" action="{{ route('assistant.domain-stores.check-batch') }}" class="assistant-batch-check-form" id="assistant-batch-check-form" hidden>
-                        @csrf
-                        <span id="assistant-batch-check-inputs"></span>
-                        <button type="submit" class="btn btn-info btn-sm" id="assistant-batch-check-button"><i class="fa fa-refresh"></i> {{ $t('selection.batch_check') }}</button>
-                    </form>
-                    <form method="post" action="{{ route('assistant.domain-stores.destroy-batch') }}" class="assistant-batch-delete-form" id="assistant-batch-delete-form" hidden>
-                        @csrf
-                        @method('DELETE')
-                        <span id="assistant-batch-delete-inputs"></span>
-                        <button type="submit" class="btn btn-danger btn-sm" id="assistant-batch-delete-button"><i class="fa fa-trash"></i> {{ $t('selection.batch_delete') }}</button>
-                    </form>
-                    @if ($canManageDepartmentAccess)
-                        <button type="button" class="btn btn-primary btn-sm assistant-batch-access-trigger" id="assistant-batch-access-trigger" data-toggle="modal" data-target="#assistant-batch-access-modal" hidden><i class="fa fa-share-alt"></i> {{ $t('selection.batch_manage_access') }}</button>
+                    @if ($canManage)
+                        <button type="button" class="btn btn-primary btn-sm" id="assistant-batch-update-trigger" data-toggle="modal" data-target="#assistant-batch-update-modal" data-batch-editor-url="{{ route('assistant.domain-stores.batch-edit') }}" hidden><i class="fa fa-pencil-square-o"></i> {{ $t('selection.batch_update') }}</button>
+                        <form method="post" action="{{ route('assistant.domain-stores.check-batch') }}" class="assistant-batch-check-form" id="assistant-batch-check-form" hidden>
+                            @csrf
+                            <span id="assistant-batch-check-inputs"></span>
+                            <button type="submit" class="btn btn-info btn-sm" id="assistant-batch-check-button"><i class="fa fa-refresh"></i> {{ $t('selection.batch_check') }}</button>
+                        </form>
+                        <form method="post" action="{{ route('assistant.domain-stores.destroy-batch') }}" class="assistant-batch-delete-form" id="assistant-batch-delete-form" hidden>
+                            @csrf
+                            @method('DELETE')
+                            <span id="assistant-batch-delete-inputs"></span>
+                            <button type="submit" class="btn btn-danger btn-sm" id="assistant-batch-delete-button"><i class="fa fa-trash"></i> {{ $t('selection.batch_delete') }}</button>
+                        </form>
+                        @if ($canManageDepartmentAccess)
+                            <button type="button" class="btn btn-primary btn-sm assistant-batch-access-trigger" id="assistant-batch-access-trigger" data-toggle="modal" data-target="#assistant-batch-access-modal" hidden><i class="fa fa-share-alt"></i> {{ $t('selection.batch_manage_access') }}</button>
+                        @endif
                     @endif
                     @if ($canManageStoreOwnership)
                         <button type="button" class="btn btn-success btn-sm" id="assistant-batch-owner-trigger" data-toggle="modal" data-target="#assistant-batch-owner-modal" hidden><i class="fa fa-user"></i> {{ $t('selection.batch_manage_owner') }}</button>
+                    @endif
+                    @if ($canConfigureStoreOwnership)
                         <button type="button" class="btn btn-default btn-sm" data-toggle="modal" data-target="#assistant-owner-scope-modal"><i class="fa fa-sitemap"></i> {{ $t('selection.configure_owner_scopes') }}</button>
                     @endif
                 @else
@@ -345,7 +360,7 @@
                     <thead>
                     <tr>
                         <th class="assistant-selection-column" data-column-key="selection" data-column-resizable="false">
-                            @if ($canManage)
+                            @if ($canManage || $canManageStoreOwnership)
                                 <button type="button" class="btn btn-default btn-xs assistant-select-all assistant-table-select-all" aria-pressed="false" aria-label="{{ $t('selection.select_page') }}">{{ $t('selection.select_page') }}</button>
                             @endif
                         </th>
@@ -380,7 +395,7 @@
                     @forelse ($stores as $store)
                         <tr class="assistant-store-row">
                             <td class="assistant-selection-column assistant-record-selection-cell" rowspan="2">
-                                @if ($canManage)
+                                @if ($canManage || $canManageStoreOwnership)
                                     <button type="button" class="btn btn-default btn-xs assistant-row-selector" data-store-id="{{ $store->getKey() }}" aria-pressed="false" aria-label="{{ $t('selection.select_record', ['name' => $store->shop_name]) }}">{{ $t('common.select') }}</button>
                                 @endif
                             </td>
@@ -400,12 +415,6 @@
                             <td>
                                 <span class="assistant-field-value">
                                     {{ $store->ownerUser?->name ?: $store->ownerUser?->username ?: $t('common.empty') }}
-                                    @if ($store->ownerUser && $store->ownerDepartment)
-                                        <small class="assistant-owner-department">{{ $store->ownerDepartment->name }}</small>
-                                    @endif
-                                    @if (in_array((int) $store->getKey(), $ownerScopeWarningIds, true))
-                                        <small class="assistant-owner-scope-warning" title="{{ $t('form.owner_outside_scope') }}"><i class="fa fa-exclamation-triangle"></i> {{ $t('form.owner_outside_scope') }}</small>
-                                    @endif
                                 </span>
                             </td>
                             <td><span class="assistant-field-value">{{ \App\Models\AssistantDomainStore::displayMultiValue($store->erp) ?: $t('common.empty') }}</span></td>
@@ -587,9 +596,10 @@
                 </div>
             </div>
         @endif
+    @endif
 
-        @if ($canManageStoreOwnership)
-            <div class="modal fade" id="assistant-batch-owner-modal" tabindex="-1" role="dialog" aria-labelledby="assistant-batch-owner-title">
+    @if ($canManageStoreOwnership)
+        <div class="modal fade" id="assistant-batch-owner-modal" tabindex="-1" role="dialog" aria-labelledby="assistant-batch-owner-title">
                 <div class="modal-dialog" role="document">
                     <form method="post" action="{{ route('assistant.domain-stores.owners.assign') }}" class="modal-content" id="assistant-batch-owner-form" data-assign-url="{{ route('assistant.domain-stores.owners.assign') }}" data-clear-url="{{ route('assistant.domain-stores.owners.clear') }}" data-assign-label="{{ $t('selection.confirm_assign_owner') }}" data-clear-label="{{ $t('selection.confirm_clear_owner') }}">
                         @csrf
@@ -605,22 +615,21 @@
                                 <button type="button" class="btn btn-default" data-owner-mode-choice="clear" aria-pressed="false"><i class="fa fa-user-times"></i> {{ $t('selection.clear_owner_action') }}</button>
                             </div>
                             <p class="text-muted" data-owner-selection-summary></p>
-                            <div class="alert alert-warning assistant-owner-warning" data-owner-warning hidden></div>
                             <div data-owner-assign-fields>
                                 <div class="form-group">
-                                    <label for="assistant-owner-department-select">{{ $t('selection.choose_owner_department') }}</label>
-                                    <select class="form-control" id="assistant-owner-department-select" name="owner_department_id">
-                                        <option value="">{{ $t('selection.keep_owner_department') }}</option>
-                                        @foreach ($ownerAssignableDepartments as $department)
-                                            <option value="{{ $department->getKey() }}">{{ $department->name }}</option>
+                                    <label for="assistant-owner-operation-department-select">{{ $t('selection.choose_operation_department') }}</label>
+                                    <select class="form-control" id="assistant-owner-operation-department-select" name="operation_department_id" required>
+                                        <option value="">{{ $t('selection.choose_operation_department_placeholder') }}</option>
+                                        @foreach ($ownerAssignableOperationDepartments as $department)
+                                            <option value="{{ $department->getKey() }}">{{ str_repeat('-- ', (int) ($department->tree_depth ?? 0)) }}{{ $department->name }}</option>
                                         @endforeach
                                     </select>
-                                    <span class="help-block">{{ $t('selection.owner_department_assignment_notice') }}</span>
+                                    <span class="help-block">{{ $t('selection.operation_department_assignment_notice') }}</span>
                                 </div>
                                 <div class="form-group">
                                     <label for="assistant-owner-user-select">{{ $t('selection.choose_owner') }}</label>
                                     <select class="form-control" id="assistant-owner-user-select" name="owner_user_id" required disabled>
-                                        <option value="">{{ $t('javascript.owner_candidates_loading') }}</option>
+                                        <option value="">{{ $t('javascript.owner_department_required') }}</option>
                                     </select>
                                 </div>
                             </div>
@@ -633,9 +642,11 @@
                         </div>
                     </form>
                 </div>
-            </div>
+        </div>
+    @endif
 
-            <div class="modal fade" id="assistant-owner-scope-modal" tabindex="-1" role="dialog" aria-labelledby="assistant-owner-scope-title">
+    @if ($canConfigureStoreOwnership)
+        <div class="modal fade" id="assistant-owner-scope-modal" tabindex="-1" role="dialog" aria-labelledby="assistant-owner-scope-title">
                 <div class="modal-dialog modal-lg" role="document">
                     <form method="post" action="{{ route('assistant.domain-stores.owner-scopes.update') }}" class="modal-content" data-owner-scope-form>
                         @csrf
@@ -654,8 +665,8 @@
                                         <p class="text-muted">{{ $t('selection.choose_operation_departments') }}</p>
                                         <div class="assistant-owner-scope-options">
                                             @forelse ($operationDepartments as $operationDepartment)
-                                                <label style="--owner-scope-depth: {{ (int) $operationDepartment->tree_depth }}">
-                                                    <input type="checkbox" name="scopes[{{ $assistantDepartment->getKey() }}][]" value="{{ $operationDepartment->getKey() }}" data-owner-scope-checkbox data-department-id="{{ $operationDepartment->getKey() }}" data-parent-id="{{ $operationDepartment->parent_id ?: '' }}" @checked(in_array((int) $operationDepartment->getKey(), $operationScopeMap[$assistantDepartment->getKey()] ?? [], true))>
+                                                <label style="--owner-scope-depth: {{ (int) ($operationDepartment->tree_depth ?? 0) }}">
+                                                    <input type="checkbox" @if ((int) ($operationDepartment->tree_depth ?? 0) > 0) name="scopes[{{ $assistantDepartment->getKey() }}][]" @endif value="{{ $operationDepartment->getKey() }}" data-owner-scope-checkbox data-department-id="{{ $operationDepartment->getKey() }}" data-parent-id="{{ $operationDepartment->parent_id ?: '' }}" @checked((int) ($operationDepartment->tree_depth ?? 0) > 0 && in_array((int) $operationDepartment->getKey(), $operationScopeMap[$assistantDepartment->getKey()] ?? [], true))>
                                                     <span>{{ $operationDepartment->name }}</span>
                                                 </label>
                                             @empty
@@ -674,8 +685,7 @@
                         </div>
                     </form>
                 </div>
-            </div>
-        @endif
+        </div>
     @endif
 @endsection
 
@@ -691,14 +701,15 @@
     </script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-20261007-2.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-access-20261020-2.js"></script>
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-editor-20261010-2.js?v=20261011-2"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-editor-20261010-2.js?v=20261021-2"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-check-20261007-3.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-resize-20261008-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-access-guide-20261009-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-quick-options-20261008-2.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-team-project-options-20261009-1.js"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-owner-form-20261020-1.js?v=20261021-2"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-modal-20261009-1.js?v=20261011-2"></script>
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-3.js?v=20261020-4"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-3.js?v=20261020-6"></script>
     @if (session('success'))
         <script>
             window.ErpAdminNotifier.notify({

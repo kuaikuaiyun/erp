@@ -4,18 +4,21 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\BelongsToMany;
-use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class AikaipinProduct extends Model
 {
     protected $fillable = [
         'product_code',
         'name',
+        'sku',
+        'categories',
         'source_platform',
         'product_type',
         'landing_page_url',
+        'images',
+        'reference_file',
+        'package_file',
+        'visible_department_ids',
         'created_by',
         'created_by_name',
         'updated_by',
@@ -29,56 +32,59 @@ class AikaipinProduct extends Model
         parent::__construct($attributes);
     }
 
-    public function skus(): HasMany
+    protected function casts(): array
     {
-        return $this->hasMany(AikaipinProductSku::class, 'product_id')->orderBy('sort')->orderBy('id');
+        return [
+            'categories' => 'array',
+            'images' => 'array',
+            'reference_file' => 'array',
+            'package_file' => 'array',
+            'visible_department_ids' => 'array',
+        ];
     }
 
-    public function categories(): BelongsToMany
+    /** @return list<string> */
+    public function skuValues(): array
     {
-        return $this->belongsToMany(
-            AikaipinProductCategory::class,
-            'aikaipin_product_category_assignments',
-            'product_id',
-            'category_id',
-        )->withTimestamps()->orderBy('sort')->orderBy('name');
+        return $this->normalizeStrings(preg_split('/[,，;；\n]+/u', (string) $this->sku) ?: []);
     }
 
-    public function files(): HasMany
+    /** @return list<string> */
+    public function categoryValues(): array
     {
-        return $this->hasMany(AikaipinProductFile::class, 'product_id')->orderBy('kind')->orderBy('sort')->orderBy('id');
+        return $this->normalizeStrings((array) ($this->categories ?? []));
     }
 
-    public function images(): HasMany
+    /** @return list<array{disk:string,path:string,original_name:string,mime_type:?string,size:int,sha256:?string}> */
+    public function imageFiles(): array
     {
-        return $this->hasMany(AikaipinProductFile::class, 'product_id')
-            ->where('kind', AikaipinProductFile::KIND_IMAGE)
-            ->orderBy('sort')
-            ->orderBy('id');
+        return array_values(array_filter(array_map(
+            fn (mixed $file): ?array => $this->normalizedFilePayload($file),
+            (array) ($this->images ?? []),
+        )));
     }
 
-    public function referenceFile(): HasOne
+    /** @return array{disk:string,path:string,original_name:string,mime_type:?string,size:int,sha256:?string}|null */
+    public function referenceFilePayload(): ?array
     {
-        return $this->hasOne(AikaipinProductFile::class, 'product_id')
-            ->where('kind', AikaipinProductFile::KIND_REFERENCE)
-            ->orderByDesc('id');
+        return $this->normalizedFilePayload($this->reference_file);
     }
 
-    public function packageFile(): HasOne
+    /** @return array{disk:string,path:string,original_name:string,mime_type:?string,size:int,sha256:?string}|null */
+    public function packageFilePayload(): ?array
     {
-        return $this->hasOne(AikaipinProductFile::class, 'product_id')
-            ->where('kind', AikaipinProductFile::KIND_PACKAGE)
-            ->orderByDesc('id');
+        return $this->normalizedFilePayload($this->package_file);
     }
 
-    public function authorizedDepartments(): BelongsToMany
+    /** @return list<int> */
+    public function visibleDepartmentIds(): array
     {
-        return $this->belongsToMany(
-            Department::class,
-            'aikaipin_product_department_visibilities',
-            'product_id',
-            'department_id',
-        )->withTimestamps();
+        return collect((array) ($this->visible_department_ids ?? []))
+            ->map(static fn (mixed $id): int => (int) $id)
+            ->filter(static fn (int $id): bool => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     public function creator(): BelongsTo
@@ -89,5 +95,50 @@ class AikaipinProduct extends Model
     public function updater(): BelongsTo
     {
         return $this->belongsTo(AdminUser::class, 'updated_by');
+    }
+
+    /** @param iterable<mixed> $values
+     *  @return list<string>
+     */
+    private function normalizeStrings(iterable $values): array
+    {
+        $seen = [];
+        $normalized = [];
+
+        foreach ($values as $value) {
+            $item = trim(preg_replace('/\s+/u', ' ', (string) $value) ?: '');
+            $key = mb_strtolower($item);
+
+            if ($item === '' || isset($seen[$key])) {
+                continue;
+            }
+
+            $seen[$key] = true;
+            $normalized[] = $item;
+        }
+
+        return $normalized;
+    }
+
+    /** @return array{disk:string,path:string,original_name:string,mime_type:?string,size:int,sha256:?string}|null */
+    private function normalizedFilePayload(mixed $value): ?array
+    {
+        if (!is_array($value)) {
+            return null;
+        }
+
+        $path = ltrim(str_replace('\\', '/', trim((string) ($value['path'] ?? ''))), '/');
+        if ($path === '' || in_array('..', explode('/', $path), true)) {
+            return null;
+        }
+
+        return [
+            'disk' => trim((string) ($value['disk'] ?? '')) ?: 'local',
+            'path' => $path,
+            'original_name' => trim((string) ($value['original_name'] ?? '')) ?: basename($path),
+            'mime_type' => ($mimeType = trim((string) ($value['mime_type'] ?? ''))) !== '' ? $mimeType : null,
+            'size' => max(0, (int) ($value['size'] ?? 0)),
+            'sha256' => ($sha256 = trim((string) ($value['sha256'] ?? ''))) !== '' ? $sha256 : null,
+        ];
     }
 }
