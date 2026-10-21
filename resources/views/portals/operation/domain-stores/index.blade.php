@@ -185,7 +185,6 @@
                         <th class="assistant-shopify-subscription-list-column">{{ $t('subscriptions.regular') }}</th>
                         <th class="assistant-shopify-subscription-list-column">{{ $t('subscriptions.recurring') }}</th>
                         <th class="assistant-shopify-shop-status-column">{{ $t('table.shop_status') }}</th>
-                        <th class="assistant-shopify-action-column">{{ $t('table.actions') }}</th>
                     </tr>
                     </thead>
                     <tbody>
@@ -193,10 +192,8 @@
                         @php
                             $period = $store->orders_count !== null;
                             $inactive = $store->shop_status !== \App\Models\AssistantDomainStore::SHOP_STATUS_IN_USE;
-                            $syncBusy = (bool) $store->shopifySyncBusy;
                             $originalCurrency = $store->original_currency_code;
                             $hasRate = $period && $referenceRates !== [] && ($referenceRates[strtoupper((string) $originalCurrency)] ?? null) !== null;
-                            $refreshFormId = 'op-shopify-refresh-'.$store->getKey();
                         @endphp
                         <tr class="{{ $inactive ? 'is-inactive' : '' }}">
                             <td class="assistant-shopify-store-cell">
@@ -263,26 +260,10 @@
                                     {{ $shopStatusLabels[$store->shop_status] ?? $t('card.not_available') }}
                                 </span>
                             </td>
-                            <td class="assistant-shopify-action-column">
-                                @if ($inactive)
-                                    <button type="button" class="btn btn-default btn-xs" disabled><i class="fa fa-ban"></i> {{ $t('actions.inactive') }}</button>
-                                @else
-                                    <form id="{{ $refreshFormId }}" method="post" action="{{ route('operation.domain-stores.refresh', $store->getKey()) }}">
-                                        @csrf
-                                        <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
-                                        <input type="hidden" name="timezone" value="{{ $filters['timezone'] }}">
-                                        <input type="hidden" name="from_date" value="{{ $filters['from_date'] }}">
-                                        <input type="hidden" name="to_date" value="{{ $filters['to_date'] }}">
-                                    </form>
-                                    <button type="submit" form="{{ $refreshFormId }}" class="btn btn-primary btn-xs" @disabled($syncBusy)>
-                                        <i class="fa fa-refresh {{ $syncBusy ? 'fa-spin' : '' }}"></i> {{ $t('actions.refresh') }}
-                                    </button>
-                                @endif
-                            </td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="9" class="assistant-shopify-empty-state">
+                            <td colspan="8" class="assistant-shopify-empty-state">
                                 <i class="fa fa-shopping-bag"></i>
                                 <p>{{ $hasFilters ? $t('common.no_results') : $t('common.no_data') }}</p>
                             </td>
