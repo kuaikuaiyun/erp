@@ -259,7 +259,15 @@
                 thumbnail.setAttribute('aria-selected', index === previewImageIndex ? 'true' : 'false');
                 thumbnail.setAttribute('aria-label', replaceTokens(config.imagePreviewThumbnail, {number: index + 1}));
                 thumbnail.setAttribute('data-aikaipin-image-preview-index', String(index));
-                thumbnail.innerHTML = '<i class="fa fa-picture-o" aria-hidden="true"></i>';
+                var thumbnailUrl = previewImageUrl(item);
+                if (thumbnailUrl) {
+                    var thumbnailImage = document.createElement('img');
+                    thumbnailImage.src = thumbnailUrl;
+                    thumbnailImage.alt = replaceTokens(config.imagePreviewThumbnail, {number: index + 1});
+                    thumbnail.appendChild(thumbnailImage);
+                } else {
+                    thumbnail.innerHTML = '<i class="fa fa-picture-o" aria-hidden="true"></i>';
+                }
                 imagePreviewThumbnails.appendChild(thumbnail);
             });
         }

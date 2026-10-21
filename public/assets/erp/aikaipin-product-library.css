@@ -1005,3 +1005,340 @@
         flex-direction: column;
     }
 }
+
+/* Product library list presentation refresh. */
+.aikaipin-table-box {
+    border: 1px solid #dfe8f0;
+    border-top: 0;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(48, 77, 104, .07);
+    overflow: hidden;
+}
+
+.aikaipin-list-toolbar {
+    background: linear-gradient(90deg, #f7fafc, #fff);
+    border-bottom: 1px solid #e4ebf1;
+    justify-content: flex-end;
+    min-height: 58px;
+    padding: 10px 14px;
+}
+
+.aikaipin-list-toolbar-summary {
+    align-items: center;
+    color: #66798d;
+    display: inline-flex;
+    font-size: 12px;
+    font-weight: 600;
+    gap: 7px;
+    letter-spacing: .01em;
+}
+
+.aikaipin-list-toolbar-summary .fa {
+    align-items: center;
+    background: #e8f3fb;
+    border-radius: 50%;
+    color: #3489bb;
+    display: inline-flex;
+    height: 25px;
+    justify-content: center;
+    width: 25px;
+}
+
+.aikaipin-list-toolbar-actions {
+    gap: 7px;
+}
+
+.aikaipin-list-toolbar-actions .btn {
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+.aikaipin-product-table {
+    min-width: 1250px;
+}
+
+.aikaipin-product-table > thead > tr {
+    background: #f8fafc;
+}
+
+.aikaipin-product-table > thead > tr > th {
+    border-bottom-color: #e4ebf1;
+    color: #60748a;
+    letter-spacing: .01em;
+    padding: 12px 14px;
+}
+
+.aikaipin-product-table > tbody > tr {
+    background: #fff;
+    transition: background .16s ease, box-shadow .16s ease;
+}
+
+.aikaipin-product-table > tbody > tr:nth-child(even) {
+    background: #fcfdfe;
+}
+
+.aikaipin-product-table > tbody > tr:hover {
+    background: #f4faff;
+}
+
+.aikaipin-product-table > tbody > tr > td {
+    border-top-color: #edf1f4;
+    padding: 11px 14px;
+}
+
+.aikaipin-image-cell {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+}
+
+.aikaipin-product-image {
+    border-radius: 7px;
+    height: 56px;
+    width: 56px;
+}
+
+.aikaipin-product-image-count {
+    background: #2985bb;
+    box-shadow: 0 2px 5px rgba(27, 100, 144, .24);
+}
+
+.aikaipin-product-code {
+    color: #60758b;
+    font-size: 11px;
+}
+
+.aikaipin-name-cell strong {
+    color: #263f59;
+    font-size: 14px;
+    letter-spacing: .01em;
+}
+
+.aikaipin-sku-line {
+    background: #f4f7fa;
+    border: 1px solid #e3eaf0;
+    border-radius: 10px;
+    margin-top: 5px;
+    padding: 2px 6px;
+}
+
+.aikaipin-category-cell .label {
+    background: #eef2f6;
+    border: 1px solid #dce5ec;
+    border-radius: 10px;
+    color: #53677a;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 7px;
+}
+
+.aikaipin-source {
+    color: #36546d;
+}
+
+.aikaipin-type {
+    color: #8092a5;
+}
+
+.aikaipin-updated-cell time {
+    color: #546b80;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.aikaipin-row-actions {
+    gap: 5px;
+}
+
+.aikaipin-row-actions .btn {
+    border-radius: 4px !important;
+    box-shadow: none;
+    font-size: 12px;
+    padding: 5px 8px;
+}
+
+.aikaipin-row-actions .btn-default {
+    background: #f8fafc;
+    border-color: #dce5ec;
+    color: #4c657b;
+}
+
+.aikaipin-row-actions .btn-default:hover,
+.aikaipin-row-actions .btn-default:focus {
+    background: #eef7fc;
+    border-color: #8ec3e2;
+    color: #247bab;
+}
+
+.aikaipin-row-actions .btn[disabled] {
+    opacity: .45;
+}
+
+#aikaipin-image-preview-modal .modal-dialog {
+    margin: 5vh auto;
+    max-width: 980px;
+}
+
+#aikaipin-image-preview-modal .modal-content {
+    background: #0f1c28;
+    border-radius: 10px;
+    box-shadow: 0 24px 64px rgba(8, 18, 28, .52);
+}
+
+#aikaipin-image-preview-modal .modal-header,
+#aikaipin-image-preview-modal .modal-footer {
+    background: #132433;
+    border-color: rgba(214, 233, 247, .12);
+}
+
+#aikaipin-image-preview-modal .modal-header {
+    padding-bottom: 15px;
+    padding-top: 15px;
+}
+
+#aikaipin-image-preview-modal .modal-title {
+    color: #eff7fd;
+}
+
+#aikaipin-image-preview-modal .close {
+    color: #dceaf4;
+    opacity: .78;
+    text-shadow: none;
+}
+
+#aikaipin-image-preview-modal .close:hover,
+#aikaipin-image-preview-modal .close:focus {
+    color: #fff;
+    opacity: 1;
+}
+
+#aikaipin-image-preview-modal .modal-body {
+    background: #0f1c28;
+    padding: 16px 20px 18px;
+}
+
+#aikaipin-image-preview-modal .modal-footer .btn-default {
+    background: rgba(255, 255, 255, .08);
+    border-color: rgba(220, 234, 244, .22);
+    color: #e6f1f8;
+}
+
+#aikaipin-image-preview-modal .modal-footer .btn-default:hover,
+#aikaipin-image-preview-modal .modal-footer .btn-default:focus {
+    background: rgba(255, 255, 255, .15);
+    color: #fff;
+}
+
+.aikaipin-image-preview-frame {
+    display: block;
+    position: relative;
+}
+
+.aikaipin-image-preview-stage {
+    background: radial-gradient(circle at center, #1a2b39 0, #0a141d 76%);
+    border-color: #2b4355;
+    border-radius: 8px;
+    height: min(66vh, 640px);
+    min-height: 360px;
+}
+
+.aikaipin-image-preview-nav {
+    background: rgba(248, 252, 255, .12);
+    border: 1px solid rgba(235, 247, 255, .24);
+    color: #fff;
+    height: 42px;
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 42px;
+    z-index: 2;
+}
+
+.aikaipin-image-preview-prev {
+    left: 16px;
+}
+
+.aikaipin-image-preview-next {
+    right: 16px;
+}
+
+.aikaipin-image-preview-nav:hover,
+.aikaipin-image-preview-nav:focus {
+    background: #3c8dbc;
+    border-color: #6ab0d9;
+    color: #fff;
+}
+
+.aikaipin-image-preview-nav[disabled],
+.aikaipin-image-preview-nav[disabled]:hover,
+.aikaipin-image-preview-nav[disabled]:focus {
+    background: rgba(248, 252, 255, .05);
+    border-color: rgba(235, 247, 255, .1);
+    color: rgba(255, 255, 255, .32);
+}
+
+.aikaipin-image-preview-position {
+    color: #b9cedd;
+    margin-top: 12px;
+}
+
+.aikaipin-image-preview-thumbnails {
+    gap: 9px;
+    margin-top: 11px;
+}
+
+.aikaipin-image-preview-thumbnail {
+    background: #132433;
+    border-color: transparent;
+    border-radius: 6px;
+    height: 54px;
+    overflow: hidden;
+    width: 54px;
+}
+
+.aikaipin-image-preview-thumbnail img {
+    display: block;
+    height: 100%;
+    object-fit: cover;
+    width: 100%;
+}
+
+.aikaipin-image-preview-thumbnail:hover,
+.aikaipin-image-preview-thumbnail:focus,
+.aikaipin-image-preview-thumbnail.active {
+    border-color: #55a8d7;
+    box-shadow: 0 0 0 2px rgba(85, 168, 215, .22);
+    color: #55a8d7;
+}
+
+@media (max-width: 767px) {
+    .aikaipin-list-toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .aikaipin-list-toolbar-actions {
+        justify-content: flex-start;
+    }
+
+    #aikaipin-image-preview-modal .modal-dialog {
+        margin: 12px auto;
+    }
+
+    #aikaipin-image-preview-modal .modal-body {
+        padding: 12px;
+    }
+
+    .aikaipin-image-preview-stage {
+        height: 64vh;
+        min-height: 250px;
+    }
+
+    .aikaipin-image-preview-prev {
+        left: 10px;
+    }
+
+    .aikaipin-image-preview-next {
+        right: 10px;
+    }
+}

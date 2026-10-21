@@ -140,6 +140,9 @@ return [
         'image_alt' => 'Product image :number',
     ],
     'selection_proposal' => [
+        'list' => [
+            'record_count' => '{0} No proposals|[1,*] :count proposals',
+        ],
         'image_preview' => [
             'title' => 'Product Images - :name',
             'open' => 'View product images for :name',
@@ -246,6 +249,9 @@ return [
         ],
     ],
     'placement_evaluation' => [
+        'list' => [
+            'record_count' => '{0} No evaluations|[1,*] :count evaluations',
+        ],
         'filters' => [
             'keyword' => 'Keyword',
             'keyword_placeholder' => 'Evaluation code, product code, or product name',

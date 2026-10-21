@@ -71,7 +71,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-submissions.css?v=20261020-8">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-submissions.css?v=20261021-2">
 @endpush
 
 @push('scripts')
@@ -101,6 +101,10 @@
 
     <div class="box box-solid aikaipin-submission-list-box">
         <div class="box-header with-border aikaipin-submission-list-toolbar">
+            <div class="aikaipin-submission-list-toolbar-summary">
+                <i class="fa fa-line-chart" aria-hidden="true"></i>
+                <span>{{ trans_choice('aikaipin.placement_evaluation.list.record_count', $evaluations->total(), ['count' => $evaluations->total()]) }}</span>
+            </div>
             <div class="aikaipin-submission-list-toolbar-actions">
                 <button class="btn btn-primary btn-sm" type="button" data-aikaipin-open-placement-modal>
                     <i class="fa fa-plus" aria-hidden="true"></i> {{ $t('placement_evaluation.actions.new') }}
@@ -112,15 +116,15 @@
                 <table class="table table-hover aikaipin-submission-table aikaipin-placement-evaluation-table">
                     <thead>
                     <tr>
-                        <th>{{ $t('placement_evaluation.table.evaluation_code') }}</th>
-                        <th>{{ $t('placement_evaluation.table.related_product') }}</th>
-                        <th>{{ $t('placement_evaluation.table.test_period') }}</th>
-                        <th>{{ $t('placement_evaluation.table.placement_data') }}</th>
-                        <th>{{ $t('placement_evaluation.fields.remark') }}</th>
+                        <th class="aikaipin-placement-code-column">{{ $t('placement_evaluation.table.evaluation_code') }}</th>
+                        <th class="aikaipin-placement-product-column">{{ $t('placement_evaluation.table.related_product') }}</th>
+                        <th class="aikaipin-placement-period-column">{{ $t('placement_evaluation.table.test_period') }}</th>
+                        <th class="aikaipin-placement-data-column">{{ $t('placement_evaluation.table.placement_data') }}</th>
+                        <th class="aikaipin-placement-remark-column">{{ $t('placement_evaluation.fields.remark') }}</th>
                         @if ($canReviewAllPlacementEvaluations)
-                            <th>{{ $t('placement_evaluation.table.submitter') }}</th>
+                            <th class="aikaipin-placement-submitter-column">{{ $t('placement_evaluation.table.submitter') }}</th>
                         @endif
-                        <th>{{ $t('placement_evaluation.table.updated_at') }}</th>
+                        <th class="aikaipin-placement-updated-at-column">{{ $t('placement_evaluation.table.updated_at') }}</th>
                         <th class="aikaipin-submission-operation-column">{{ $t('placement_evaluation.table.operation') }}</th>
                     </tr>
                     </thead>
@@ -132,13 +136,13 @@
                             $canEditEvaluation = (int) $evaluation->created_by === (int) $user->getKey();
                         @endphp
                         <tr data-aikaipin-list-row data-keyword="{{ $keywords }}">
-                            <td><span class="aikaipin-submission-code">{{ $evaluation->evaluation_code }}</span></td>
-                            <td>
+                            <td class="aikaipin-placement-code-cell"><span class="aikaipin-submission-code">{{ $evaluation->evaluation_code }}</span></td>
+                            <td class="aikaipin-placement-product-cell">
                                 <strong class="aikaipin-submission-product-name">{{ $evaluation->product_name }}</strong>
                                 <span class="aikaipin-submission-product-code">{{ $evaluation->product_code }}</span>
                             </td>
-                            <td><span class="aikaipin-submission-date-range">{{ $evaluation->test_started_on?->format('Y-m-d') }} <i class="fa fa-long-arrow-right" aria-hidden="true"></i> {{ $evaluation->data_ended_on?->format('Y-m-d') }}</span></td>
-                            <td>
+                            <td class="aikaipin-placement-period-cell"><span class="aikaipin-submission-date-range">{{ $evaluation->test_started_on?->format('Y-m-d') }} <i class="fa fa-long-arrow-right" aria-hidden="true"></i> {{ $evaluation->data_ended_on?->format('Y-m-d') }}</span></td>
+                            <td class="aikaipin-placement-data-cell">
                                 <div class="aikaipin-placement-summary">
                                     @foreach ($evaluation->records as $record)
                                         <span>{{ $t('placement_evaluation.table.record_summary', [
@@ -150,13 +154,13 @@
                                     @endforeach
                                 </div>
                             </td>
-                            <td>
+                            <td class="aikaipin-placement-remark-cell">
                                 <span class="aikaipin-submission-list-remark" @if ($evaluation->remark) title="{{ $evaluation->remark }}" @endif>{{ $evaluation->remark ?: $t('placement_evaluation.fields.no_value') }}</span>
                             </td>
                             @if ($canReviewAllPlacementEvaluations)
-                                <td>{{ $evaluation->created_by_name }}</td>
+                                <td class="aikaipin-placement-submitter-cell">{{ $evaluation->created_by_name }}</td>
                             @endif
-                            <td><time datetime="{{ $evaluation->updated_at?->toAtomString() }}">{{ $updatedAt }}</time></td>
+                            <td class="aikaipin-placement-updated-at-cell"><time datetime="{{ $evaluation->updated_at?->toAtomString() }}">{{ $updatedAt }}</time></td>
                             <td class="aikaipin-submission-operation-cell">
                                 <div class="btn-group btn-group-sm" role="group" aria-label="{{ $t('placement_evaluation.table.operation') }}">
                                     <button class="btn btn-default" type="button" data-aikaipin-placement-view data-aikaipin-evaluation-id="{{ $evaluation->getKey() }}">

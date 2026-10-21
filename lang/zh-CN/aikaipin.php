@@ -140,6 +140,9 @@ return [
         'image_alt' => '产品图片 :number',
     ],
     'selection_proposal' => [
+        'list' => [
+            'record_count' => '{0} 暂无提报|[1,*] 共 :count 条提报',
+        ],
         'image_preview' => [
             'title' => '产品图片 - :name',
             'open' => '查看 :name 的产品图片',
@@ -246,6 +249,9 @@ return [
         ],
     ],
     'placement_evaluation' => [
+        'list' => [
+            'record_count' => '{0} 暂无测评|[1,*] 共 :count 条测评',
+        ],
         'filters' => [
             'keyword' => '关键词',
             'keyword_placeholder' => '测评编号、产品编号或产品名称',

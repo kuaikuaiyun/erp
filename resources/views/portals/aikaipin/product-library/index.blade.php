@@ -82,12 +82,12 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261021-2">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261021-4">
 @endpush
 
 @push('scripts')
     <script>window.ErpAikaipinProductLibraryConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261021-2"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261021-3"></script>
 @endpush
 
 @section('content')
@@ -143,8 +143,12 @@
 
     <div class="box box-solid aikaipin-table-box">
         <div class="box-header with-border aikaipin-list-toolbar">
-            @if ($canManageProductLibrary)
-                <div class="aikaipin-list-toolbar-actions">
+            <div class="aikaipin-list-toolbar-actions">
+                <div class="aikaipin-list-toolbar-summary">
+                    <i class="fa fa-cubes" aria-hidden="true"></i>
+                    <span>{{ trans_choice('aikaipin.product_library.record_count', $products->total(), ['count' => $products->total()]) }}</span>
+                </div>
+                @if ($canManageProductLibrary)
                     <span class="aikaipin-selected-count" data-aikaipin-selected-count>{{ $t('visibility.selected_none') }}</span>
                     <button class="btn btn-default btn-sm" type="button" disabled data-aikaipin-batch-action="enable">
                         <i class="fa fa-eye" aria-hidden="true"></i> {{ $t('actions.enable_visibility') }}
@@ -155,8 +159,8 @@
                     <button class="btn btn-primary btn-sm" type="button" data-aikaipin-action="upload">
                         <i class="fa fa-upload" aria-hidden="true"></i> {{ $t('actions.upload_product') }}
                     </button>
-                </div>
-            @endif
+                @endif
+            </div>
         </div>
         <div class="box-body no-padding">
             <div class="table-responsive">
