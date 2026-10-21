@@ -7,7 +7,7 @@
     $t = static fn (string $key, array $replace = []): string => __('ai_products.'.$key, $replace);
 @endphp
 @push('styles')
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261019-01">
+<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261022-01">
 <style>
 .ai-status-badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:12px;line-height:16px;white-space:nowrap}
 .ai-status-pending{background:#fcf8e3;color:#8a6d3b;border:1px solid #faebcc}

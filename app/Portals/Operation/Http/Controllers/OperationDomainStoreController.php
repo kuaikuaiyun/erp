@@ -401,13 +401,8 @@ class OperationDomainStoreController extends Controller
             return $query;
         }
 
-        $departmentIds = $user->departments()->pluck('id')->all();
-        if ($departmentIds === []) {
-            return $query->whereRaw('1 = 0');
-        }
-
-        return $query->whereHas('authorizedDepartments', function (Builder $access) use ($departmentIds): void {
-            $access->whereIn('department_id', $departmentIds);
-        });
+        // 非管理员（含刚注册进入的新用户）只显示运营归属人为自己的店铺，
+        // 无归属店铺一律不可见，避免越权看到他人的店铺数据
+        return $query->where('owner_user_id', (int) $user->getKey());
     }
 }

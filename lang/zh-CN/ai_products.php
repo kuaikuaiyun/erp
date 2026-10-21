@@ -29,6 +29,10 @@ return [
         'create_button' => '发起提报',
         'create_title' => '发起已有产品投放连接提报',
         'submit_success' => '提报成功，提报编号：:report_no',
+        'update_success' => '已重新提交审核，提报编号：:report_no',
+        'edit_button' => '重新编辑',
+        'edit_title' => '重新编辑投放链接',
+        'edit_not_allowed' => '只有审核不通过的记录才能重新编辑',
         'list_title' => '提报记录',
     ],
 
