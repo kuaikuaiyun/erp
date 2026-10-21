@@ -326,6 +326,32 @@
 
         return '<div class="product-statistics-overview-disputes"><div class="product-statistics-overview-disputes-heading"><span>' + escapeHtml(t('overviewDisputeSummary')) + '</span></div><p class="product-statistics-overview-disputes-summary">' + escapeHtml(summary) + '</p><h5>' + escapeHtml(t('overviewDisputeBreakdown')) + '</h5><ul>' + rows + '</ul><small class="product-statistics-overview-dispute-formula">' + escapeHtml(t('overviewDisputeFormula')) + '</small></div>';
     }
+    function overviewCreditCardReasonSummary(summary, kind) {
+        summary = summary || {};
+        var reasons = Array.isArray(summary.reason_breakdown) ? summary.reason_breakdown : [];
+        var title = kind === 'alert' ? t('overviewCreditCardAlertSummary') : t('overviewCreditCardDisputeSummary');
+        var counts = replaceTokens(t('overviewCreditCardRecordCounts'), {
+            orders: formatNumber(summary.order_count),
+            records: formatNumber(summary.record_count),
+            amount: formatMoney(summary.amount)
+        });
+        var rows = reasons.length ? reasons.map(function (reason) {
+            return '<li>' + escapeHtml(replaceTokens(t('overviewCreditCardReason'), {
+                reason: reason.reason || blank(),
+                count: formatNumber(reason.count),
+                ratio: formatRate(reason.ratio).replace('%', ''),
+                amount: formatMoney(reason.amount)
+            })) + '</li>';
+        }).join('') : '<li>' + escapeHtml(blank()) + '</li>';
+
+        return '<div class="product-statistics-overview-disputes is-credit-card-' + kind + '"><div class="product-statistics-overview-disputes-heading"><span>' + escapeHtml(title) + '</span></div><p class="product-statistics-overview-disputes-summary">' + escapeHtml(counts) + '</p><h5>' + escapeHtml(t('overviewCreditCardReasonBreakdown')) + '</h5><ul>' + rows + '</ul><small class="product-statistics-overview-dispute-formula">' + escapeHtml(t('overviewCreditCardReasonFormula')) + '</small></div>';
+    }
+    function overviewCreditCardReasonSummaries(subject) {
+        return '<div class="product-statistics-credit-card-record-summaries">'
+            + overviewCreditCardReasonSummary(subject.alert_record_summary, 'alert')
+            + overviewCreditCardReasonSummary(subject.dispute_record_summary, 'dispute')
+            + '</div>';
+    }
     function overviewModule(title, subject, className) {
         subject = subject || {};
         var received = formatMoney(subject.received_amount);
@@ -344,8 +370,15 @@
             orders: formatNumber(subject.order_count)
         });
         var chargebackRateFormula = replaceTokens(t('overviewChargebackRateFormula'), {
-            chargebackOrders: formatNumber(subject.chargeback_order_count),
-            chargebacks: formatNumber(subject.chargeback_count),
+            amount: formatMoney(subject.chargeback_amount),
+            received: received
+        });
+        var customerServiceRefundRateFormula = replaceTokens(t('overviewCustomerServiceRefundRateFormula'), {
+            amount: formatMoney(subject.customer_service_refund_amount),
+            received: received
+        });
+        var creditCardDisputeRateFormula = replaceTokens(t('overviewCreditCardDisputeRateFormula'), {
+            count: formatNumber(subject.credit_card_dispute_count),
             orders: formatNumber(subject.order_count)
         });
 
@@ -357,9 +390,11 @@
             + overviewMetric(t('overviewRefundRate'), formatRate(subject.refund_rate), refundFormula)
             + (subject.dispute_applicable ? overviewMetric(t('overviewDisputeRate'), formatRate(subject.dispute_rate), disputeRateFormula, 'is-dispute-rate') : '')
             + (subject.chargeback_applicable ? overviewMetric(t('overviewChargebackRate'), formatRate(subject.chargeback_rate), chargebackRateFormula, 'is-chargeback-rate') : '')
+            + (subject.chargeback_applicable ? overviewMetric(t('overviewCustomerServiceRefundRate'), formatRate(subject.customer_service_refund_rate), customerServiceRefundRateFormula, 'is-customer-service-refund-rate') : '')
+            + (subject.chargeback_applicable ? overviewMetric(t('overviewCreditCardDisputeRate'), formatRate(subject.credit_card_dispute_rate), creditCardDisputeRateFormula, 'is-credit-card-dispute-rate') : '')
             + overviewMetric(t('overviewShippingRate'), formatRate(subject.shipping_rate), shippingFormula)
             + overviewMetric(t('overviewDeliveryRate'), formatRate(subject.delivery_rate), deliveryFormula)
-            + '</div>' + overviewDisputes(subject) + '</section>';
+            + '</div>' + (subject.chargeback_applicable ? overviewCreditCardReasonSummaries(subject) : overviewDisputes(subject)) + '</section>';
     }
     function negativeMoney(value) { return isNumeric(value) ? '-' + formatMoney(Math.abs(number(value))) : blank(); }
     function detailBreakdown(subject) {
@@ -453,18 +488,36 @@
         var label = escapeHtml(row.shopify_order_number || blank());
         return row.order_id && row.detail_url ? '<button type="button" class="btn btn-link btn-xs js-logistics-order-detail" data-order-detail-url="' + escapeHtml(row.detail_url) + '">' + label + '</button>' : label;
     }
-    function orderRows(orders) {
-        if (!orders.length) return detailEmptyRow(15);
+    function orderColumns(table) {
+        var columns = [
+            ['shopify_order_number', t('orderNumber')], ['store', t('storeName')], ['tongtu_product_codes', t('productCode')], ['tongtu_skus', t('tongtuSku')], ['shopify_skus', t('shopifySku')], ['bill_number', t('billNumber')], ['payment_method', t('paymentMethod')], ['quantity', t('quantity')], ['revenue', t('revenue')]
+        ];
+        if (table === 'paypal_orders') {
+            columns.push(['paypal_refund', t('paypalRefund')], ['paypal_dispute_count', t('paypalDisputes')]);
+        } else if (table === 'credit_card_orders') {
+            columns.push(['credit_card_refund', t('creditCardRefund')]);
+        } else {
+            columns.push(['paypal_refund', t('paypalRefund')], ['credit_card_refund', t('creditCardRefund')], ['paypal_dispute_count', t('paypalDisputes')]);
+        }
+        return columns.concat([['tracking_number', t('trackingNumber')], ['logistics_status', t('logisticsStatus')], ['order_created_at', t('orderCreatedAt')]]);
+    }
+    function orderCell(order, key) {
+        if (key === 'shopify_order_number') return orderLink(order);
+        if (key === 'tongtu_product_codes' || key === 'tongtu_skus' || key === 'shopify_skus') return escapeHtml((order[key] || []).join(' / ') || blank());
+        if (key === 'quantity' || key === 'paypal_dispute_count') return formatNumber(order[key]);
+        if (key === 'revenue' || key === 'paypal_refund' || key === 'credit_card_refund') return formatMoney(order[key]);
+        return escapeHtml(order[key] || blank());
+    }
+    function orderRows(orders, columns) {
+        if (!orders.length) return detailEmptyRow(columns.length);
         return orders.map(function (order) {
-            return '<tr><td>' + orderLink(order) + '</td><td>' + escapeHtml(order.store || blank()) + '</td><td>' + escapeHtml((order.tongtu_product_codes || []).join(' / ') || blank()) + '</td><td>' + escapeHtml((order.tongtu_skus || []).join(' / ') || blank()) + '</td><td>' + escapeHtml((order.shopify_skus || []).join(' / ') || blank()) + '</td><td>' + escapeHtml(order.bill_number || blank()) + '</td><td>' + escapeHtml(order.payment_method || blank()) + '</td><td>' + formatNumber(order.quantity) + '</td><td>' + formatMoney(order.revenue) + '</td><td>' + formatMoney(order.paypal_refund) + '</td><td>' + formatMoney(order.credit_card_refund) + '</td><td>' + formatNumber(order.paypal_dispute_count) + '</td><td>' + escapeHtml(order.tracking_number || blank()) + '</td><td>' + escapeHtml(order.logistics_status || blank()) + '</td><td>' + escapeHtml(order.order_created_at || blank()) + '</td></tr>';
+            return '<tr>' + columns.map(function (column) { return '<td>' + orderCell(order, column[0]) + '</td>'; }).join('') + '</tr>';
         }).join('');
     }
     function renderOrdersTable(id, table, payload) {
-        var headings = [
-            ['shopify_order_number', t('orderNumber')], ['store', t('storeName')], ['tongtu_product_codes', t('productCode')], ['tongtu_skus', t('tongtuSku')], ['shopify_skus', t('shopifySku')], ['bill_number', t('billNumber')], ['payment_method', t('paymentMethod')], ['quantity', t('quantity')], ['revenue', t('revenue')], ['paypal_refund', t('paypalRefund')], ['credit_card_refund', t('creditCardRefund')], ['paypal_dispute_count', t('paypalDisputes')], ['tracking_number', t('trackingNumber')], ['logistics_status', t('logisticsStatus')], ['order_created_at', t('orderCreatedAt')]
-        ];
+        var headings = orderColumns(table);
         var rows = payload.rows || [];
-        document.getElementById(id).innerHTML = '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + headings.map(function (heading) { return '<th>' + detailSortButton(table, heading[0], heading[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' + orderRows(rows) + '</tbody></table></div>' + detailPagination(table, payload.pagination);
+        document.getElementById(id).innerHTML = '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + headings.map(function (heading) { return '<th>' + detailSortButton(table, heading[0], heading[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' + orderRows(rows, headings) + '</tbody></table></div>' + detailPagination(table, payload.pagination);
     }
     function refundRows(rows) {
         if (!rows.length) return detailEmptyRow(10);

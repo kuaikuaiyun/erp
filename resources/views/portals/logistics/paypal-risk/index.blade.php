@@ -73,6 +73,7 @@
                     \App\Models\LogisticsPayPalRefund::statusLabelFor('V'),
                 ],
                 'dispute_type' => [
+                    \App\Models\LogisticsPayPalDispute::typeLabelFor('ALERT'),
                     \App\Models\LogisticsPayPalDispute::typeLabelFor('INTERNAL'),
                     \App\Models\LogisticsPayPalDispute::typeLabelFor('EXTERNAL'),
                 ],

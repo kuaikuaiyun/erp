@@ -194,6 +194,11 @@
 .product-statistics-overview-disputes h5 { margin: 8px 0 5px; color: #8b6a73; font-size: 11px; font-weight: 600; }
 .product-statistics-overview-disputes ul { display: grid; gap: 4px; margin: 0; padding: 0; color: #816b73; font-size: 11px; line-height: 1.45; list-style: none; }
 .product-statistics-overview-disputes li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.product-statistics-credit-card-record-summaries { display: grid; gap: 10px; margin: 11px 12px 12px; }
+.product-statistics-credit-card-record-summaries .product-statistics-overview-disputes { margin: 0; }
+.product-statistics-overview-disputes.is-credit-card-alert { border-color: #f0dfb4; background: #fffdf6; }
+.product-statistics-overview-disputes.is-credit-card-alert .product-statistics-overview-disputes-summary { color: #b67916; }
+.product-statistics-overview-disputes.is-credit-card-dispute { border-color: #f1dde0; background: #fffafb; }
 .product-statistics-overview-dispute-formula { display: block; margin-top: 7px; color: #a38a91; font-size: 10px; line-height: 1.4; }
 .product-statistics-store-order-distribution { margin-top: 16px; padding: 14px 16px; border: 1px solid #dfeaf3; border-radius: 4px; background: #fbfdff; }
 .product-statistics-store-order-distribution h5 { margin: 0 0 10px; color: #42627e; font-size: 13px; font-weight: 700; }
