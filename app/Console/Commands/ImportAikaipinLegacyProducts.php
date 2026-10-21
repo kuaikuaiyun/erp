@@ -25,10 +25,6 @@ class ImportAikaipinLegacyProducts extends Command
         parent::configure();
 
         $this->setDescription(__('aikaipin.import.command_description'));
-        $this->getDefinition()->getArgument('file')->setDescription(__('aikaipin.import.arguments.file'));
-        $this->getDefinition()->getOption('limit')->setDescription(__('aikaipin.import.options.limit'));
-        $this->getDefinition()->getOption('user-id')->setDescription(__('aikaipin.import.options.user_id'));
-        $this->getDefinition()->getOption('dry-run')->setDescription(__('aikaipin.import.options.dry_run'));
     }
 
     public function handle(AikaipinPortalAuthorizationService $authorization): int
