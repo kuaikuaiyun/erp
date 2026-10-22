@@ -14,6 +14,7 @@ use App\Portals\ProductRequests\ProductRequestAccessService;
 use App\Portals\ProductRequests\ProductRequestWorkflowService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Collection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -124,22 +125,85 @@ class ProductRequestController extends Controller
         ]);
     }
 
-    /** 关键词模糊查询：只查 product_request_link_skus.product_name */
+    /** 关键词模糊查询：只查 product_request_link_skus.product_name，支持两字以上的关联匹配 */
     private function dedupeKeywordResults(string $keyword): array
     {
-        $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $keyword);
+        return $this->linkSkuNameMatches($keyword, 30)
+            ->map(fn (ProductRequestLinkSku $row): array => $this->linkSkuReusePayload($row))
+            ->values()
+            ->all();
+    }
 
-        $linkSkuRows = ProductRequestLinkSku::query()
-            ->where('product_name', 'like', '%'.$escaped.'%')
-            ->limit(30)
-            ->get();
-
-        $results = [];
-        foreach ($linkSkuRows as $linkSku) {
-            $results[] = $this->linkSkuReusePayload($linkSku);
+    /**
+     * 产品名关联搜索：把关键词切成两字（英文按整词）片段，
+     * 只要产品名包含任意片段就算命中，命中片段越多排越前。
+     */
+    private function linkSkuNameMatches(string $keyword, int $limit = 20): Collection
+    {
+        $terms = $this->linkSkuNameSearchTerms($keyword);
+        if ($terms === []) {
+            return collect();
         }
 
-        return $results;
+        $rows = ProductRequestLinkSku::query()
+            ->where(function (Builder $query) use ($terms): void {
+                foreach ($terms as $term) {
+                    $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $term);
+                    $query->orWhere('product_name', 'like', '%'.$escaped.'%');
+                }
+            })
+            ->orderByDesc('id')
+            ->limit(300)
+            ->get()
+            ->filter(fn (ProductRequestLinkSku $row): bool => $this->splitSkus((string) $row->skus) !== []);
+
+        $rows = $rows->sortByDesc(function (ProductRequestLinkSku $row) use ($terms): string {
+            $name = mb_strtolower((string) $row->product_name);
+            $score = 0;
+            foreach ($terms as $term) {
+                if ($name !== '' && mb_strpos($name, mb_strtolower($term)) !== false) {
+                    $score++;
+                }
+            }
+
+            return sprintf('%03d-%012d', $score, (int) $row->getKey());
+        })->values();
+
+        return $rows->unique('supplier_url_hash')->take($limit)->values();
+    }
+
+    /** 把关键词拆成用于关联匹配的片段：中文按两字滑动窗口，英文按整词 */
+    private function linkSkuNameSearchTerms(string $keyword): array
+    {
+        $keyword = trim(preg_replace('/\s+/u', ' ', $keyword) ?? $keyword);
+        if ($keyword === '') {
+            return [];
+        }
+
+        $terms = [];
+        foreach (preg_split('/[\s,，、;；\/|]+/u', $keyword) ?: [] as $chunk) {
+            $chunk = trim($chunk);
+            $length = mb_strlen($chunk, 'UTF-8');
+            if ($length === 0) {
+                continue;
+            }
+            if ($length <= 2) {
+                $terms[] = $chunk;
+                continue;
+            }
+            // 纯英文/数字片段按整词匹配，避免被切碎后命中大量无关产品
+            if (preg_match('/^[\x20-\x7E]+$/', $chunk) === 1) {
+                $terms[] = $chunk;
+                continue;
+            }
+            for ($i = 0; $i <= $length - 2; $i++) {
+                $terms[] = mb_substr($chunk, $i, 2, 'UTF-8');
+            }
+        }
+
+        $terms = array_values(array_unique($terms));
+
+        return array_slice($terms, 0, 12);
     }
 
     /** 审核链接问题：投放链接审核失败的需求提报，按提报编号唯一展示 */
@@ -1566,16 +1630,7 @@ class ProductRequestController extends Controller
 
         // 名称模糊查询可能命中多个链接，按链接聚合后全部返回，供采购选择
         if ($keyword !== '') {
-            $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $keyword);
-            $keywordMatches = ProductRequestLinkSku::query()
-                ->where('product_name', 'like', '%'.$escaped.'%')
-                ->latest('id')
-                ->limit(200)
-                ->get()
-                ->filter(fn (ProductRequestLinkSku $row): bool => $this->splitSkus((string) $row->skus) !== [])
-                ->unique('supplier_url_hash')
-                ->take(20)
-                ->values();
+            $keywordMatches = $this->linkSkuNameMatches($keyword, 20);
         }
 
         $linkSkus = $linkMatches->concat($keywordMatches)->unique('supplier_url_hash')->values();
