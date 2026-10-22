@@ -36,6 +36,7 @@
 .dedupe-match-badge{display:inline-block;padding:3px 12px;border-radius:12px;font-size:12px;line-height:18px;font-weight:600}
 .dedupe-match-url{background:#dff0d8;color:#2d6a30;border:1px solid #b8dca0}
 .dedupe-match-keyword{background:#fcf8e3;color:#8a6d3b;border:1px solid #f0d97a}
+.dedupe-match-both{background:#e8f4fd;color:#0958d9;border:1px solid #91d5ff}
 .dedupe-source-badge{display:inline-block;padding:2px 8px;border-radius:3px;font-size:11px;margin-left:6px;background:#5bc0de;color:#fff}
 .dedupe-empty{text-align:center;padding:60px 20px;color:#999}
 .dedupe-empty .fa{font-size:48px;margin-bottom:12px;display:block}
@@ -88,8 +89,8 @@
     @else
         @if($matchType)
             <p style="margin:14px 0 10px;color:#666;font-size:13px">
-                <span class="dedupe-match-badge {{ $matchType === 'supplier_url' ? 'dedupe-match-url' : 'dedupe-match-keyword' }}">
-                    {{ $matchType === 'supplier_url' ? $t('dedupe.match_url') : $t('dedupe.match_keyword') }}
+                <span class="dedupe-match-badge {{ $matchType === 'supplier_url' ? 'dedupe-match-url' : ($matchType === 'mixed' ? 'dedupe-match-both' : 'dedupe-match-keyword') }}">
+                    {{ $matchType === 'supplier_url' ? $t('dedupe.match_url') : ($matchType === 'mixed' ? $t('dedupe.match_both') : $t('dedupe.match_keyword')) }}
                 </span>
                 共 {{ count($results) }} 条结果
             </p>

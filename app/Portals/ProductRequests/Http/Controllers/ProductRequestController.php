@@ -79,22 +79,40 @@ class ProductRequestController extends Controller
         $results = [];
         $matchType = null;
 
+        // 链接与品名不分优先级：两者都填时各自查询，并把结果合并展示
+        $linkResults = [];
         if ($supplierUrl !== '') {
             // 1688 链接精确匹配：只查链接 SKU 库
             $normalizedUrl = $this->workflow->normalizeSupplierUrl($supplierUrl);
             $hash = $this->workflow->supplierUrlHash($normalizedUrl);
-            $matchType = 'supplier_url';
 
             $linkSku = ProductRequestLinkSku::query()->where('supplier_url_hash', $hash)->first();
             if ($linkSku) {
-                $results[] = $this->linkSkuReusePayload($linkSku);
+                $linkResults[] = $this->linkSkuReusePayload($linkSku);
             }
         }
 
-        if ($results === [] && $keyword !== '') {
-            // 产品名称模糊匹配：只查链接 SKU 库
-            $results = $this->dedupeKeywordResults($keyword);
-            $matchType = $results !== [] ? 'keyword' : null;
+        $keywordResults = $keyword !== '' ? $this->dedupeKeywordResults($keyword) : [];
+
+        // 合并去重：同一 1688 链接只展示一条，链接命中的排在前面
+        $seenUrls = [];
+        foreach (array_merge($linkResults, $keywordResults) as $item) {
+            $key = (string) ($item['supplier_url'] ?? '');
+            if ($key !== '') {
+                if (isset($seenUrls[$key])) {
+                    continue;
+                }
+                $seenUrls[$key] = true;
+            }
+            $results[] = $item;
+        }
+
+        if ($linkResults !== [] && $keywordResults !== []) {
+            $matchType = 'mixed';
+        } elseif ($linkResults !== []) {
+            $matchType = 'supplier_url';
+        } elseif ($keywordResults !== []) {
+            $matchType = 'keyword';
         }
 
         return view('portals.product-requests.operation.dedupe', [
@@ -1534,31 +1552,39 @@ class ProductRequestController extends Controller
         ]);
         $normalizedUrl = $this->workflow->normalizeSupplierUrl($data['supplier_url']);
         $hash = $this->workflow->supplierUrlHash($normalizedUrl);
-        // 链接与产品名统一只查 product_request_link_skus 表
-        $matchType = 'supplier_url';
-        $linkSkus = collect();
+        // 链接与产品名统一只查 product_request_link_skus 表；
+        // 两者不分优先级，各自查询后合并展示（同一链接只保留一条，链接命中的排前面）
+        $linkMatches = collect();
         $linkSku = ProductRequestLinkSku::query()->where('supplier_url_hash', $hash)->first();
 
         if ($linkSku && $this->splitSkus((string) $linkSku->skus) !== []) {
-            $linkSkus = collect([$linkSku]);
-        } else {
-            $keyword = trim((string) ($data['standard_chinese_name'] ?? ''));
+            $linkMatches = collect([$linkSku]);
+        }
 
-            // 链接未命中（或该链接没有 SKU）时，回退按产品名模糊匹配同一张表
-            // 名称模糊查询可能命中多个链接，按链接聚合后全部返回，供采购选择
-            if ($keyword !== '') {
-                $matchType = 'standard_chinese_name';
-                $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $keyword);
-                $linkSkus = ProductRequestLinkSku::query()
-                    ->where('product_name', 'like', '%'.$escaped.'%')
-                    ->latest('id')
-                    ->limit(200)
-                    ->get()
-                    ->filter(fn (ProductRequestLinkSku $row): bool => $this->splitSkus((string) $row->skus) !== [])
-                    ->unique('supplier_url_hash')
-                    ->take(20)
-                    ->values();
-            }
+        $keywordMatches = collect();
+        $keyword = trim((string) ($data['standard_chinese_name'] ?? ''));
+
+        // 名称模糊查询可能命中多个链接，按链接聚合后全部返回，供采购选择
+        if ($keyword !== '') {
+            $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $keyword);
+            $keywordMatches = ProductRequestLinkSku::query()
+                ->where('product_name', 'like', '%'.$escaped.'%')
+                ->latest('id')
+                ->limit(200)
+                ->get()
+                ->filter(fn (ProductRequestLinkSku $row): bool => $this->splitSkus((string) $row->skus) !== [])
+                ->unique('supplier_url_hash')
+                ->take(20)
+                ->values();
+        }
+
+        $linkSkus = $linkMatches->concat($keywordMatches)->unique('supplier_url_hash')->values();
+
+        $matchType = 'supplier_url';
+        if ($linkMatches->isNotEmpty() && $keywordMatches->isNotEmpty()) {
+            $matchType = 'mixed';
+        } elseif ($linkMatches->isEmpty() && $keywordMatches->isNotEmpty()) {
+            $matchType = 'standard_chinese_name';
         }
 
         return response()->json([
