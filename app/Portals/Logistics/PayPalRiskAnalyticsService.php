@@ -23,6 +23,14 @@ use Illuminate\Support\Collection;
 class PayPalRiskAnalyticsService
 {
     /**
+     * PayPal reporting day used by every currently configured merchant.
+     *
+     * Keep this as an IANA timezone rather than a fixed UTC offset so that
+     * daylight-saving transitions are handled correctly.
+     */
+    private const REPORT_TIMEZONE = 'America/Los_Angeles';
+
+    /**
      * 退款率与纠纷率的统计口径不同：纠纷风险仅纳入实际与商品/服务
      * 履约相关的索偿、撤销付款，避免预仲裁等后续流程重复放大指标。
      *
@@ -180,8 +188,12 @@ class PayPalRiskAnalyticsService
         $payments = $this->paymentQuery($account, $filters)->get();
         $from = $this->rangeFrom($filters);
         $to = $this->rangeTo($filters);
-        $end = $to !== '' ? Carbon::parse($to)->endOfDay() : now('Asia/Shanghai')->endOfDay();
-        $start = $from !== '' ? Carbon::parse($from)->startOfDay() : $end->copy()->subDays(29)->startOfDay();
+        $end = $to !== ''
+            ? Carbon::parse($to, self::REPORT_TIMEZONE)->endOfDay()
+            : now(self::REPORT_TIMEZONE)->endOfDay();
+        $start = $from !== ''
+            ? Carbon::parse($from, self::REPORT_TIMEZONE)->startOfDay()
+            : $end->copy()->subDays(29)->startOfDay();
         if ($start->diffInDays($end) > 29) {
             $start = $end->copy()->subDays(29)->startOfDay();
         }
@@ -193,7 +205,7 @@ class PayPalRiskAnalyticsService
         // consistent with the KPI denominator even if a historical import
         // happens to contain repeated source events for the same payment.
         foreach ($payments->unique('payment_transaction_id') as $payment) {
-            $key = $payment->paid_at?->timezone('Asia/Shanghai')->format('Y-m-d');
+            $key = $payment->paid_at?->timezone(self::REPORT_TIMEZONE)->format('Y-m-d');
             if ($key && isset($trend[$key])) {
                 $trend[$key]['orders']++;
             }
@@ -205,7 +217,7 @@ class PayPalRiskAnalyticsService
             }
         }
         foreach ($this->qualifyingDisputeQueryForPayments($account, $filters, $payments->pluck('payment_transaction_id')->all())->get() as $dispute) {
-            $key = $dispute->dispute_created_at?->timezone('Asia/Shanghai')->format('Y-m-d');
+            $key = $dispute->dispute_created_at?->timezone(self::REPORT_TIMEZONE)->format('Y-m-d');
             if ($key && isset($trend[$key])) {
                 $trend[$key]['disputes']++;
             }
@@ -441,7 +453,10 @@ class PayPalRiskAnalyticsService
 
     private function paymentQuery(LogisticsPayPalAccount $account, array $filters, bool $applyRange = true): Builder
     {
-        $query = LogisticsPayPalTransaction::query()->where('logistics_paypal_account_id', $account->getKey());
+        $query = LogisticsPayPalTransaction::query()
+            ->where('logistics_paypal_account_id', $account->getKey())
+            ->where('event_code', 'like', 'T00%')
+            ->where('status', 'S');
         if ($applyRange) {
             $this->applyRange($query, 'paid_at', $filters);
         }
@@ -507,10 +522,18 @@ class PayPalRiskAnalyticsService
         $from = $this->rangeFrom($filters);
         $to = $this->rangeTo($filters);
         if ($from !== '') {
-            $query->whereDate($column, '>=', $from);
+            $query->where(
+                $column,
+                '>=',
+                Carbon::parse($from, self::REPORT_TIMEZONE)->startOfDay()->utc()->toDateTimeString(),
+            );
         }
         if ($to !== '') {
-            $query->whereDate($column, '<=', $to);
+            $query->where(
+                $column,
+                '<',
+                Carbon::parse($to, self::REPORT_TIMEZONE)->addDay()->startOfDay()->utc()->toDateTimeString(),
+            );
         }
     }
 
@@ -535,7 +558,7 @@ class PayPalRiskAnalyticsService
             return null;
         }
         try {
-            return Carbon::parse($value)->timezone('Asia/Shanghai')->format('Y-m-d');
+            return Carbon::parse($value)->timezone(self::REPORT_TIMEZONE)->format('Y-m-d');
         } catch (\Throwable) {
             return null;
         }
@@ -671,7 +694,7 @@ class PayPalRiskAnalyticsService
             return '-';
         }
         try {
-            return Carbon::parse($value)->timezone('Asia/Shanghai')->format('Y-m-d H:i:s');
+            return Carbon::parse($value)->timezone(self::REPORT_TIMEZONE)->format('Y-m-d H:i:s');
         } catch (\Throwable) {
             return '-';
         }
