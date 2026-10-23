@@ -123,7 +123,7 @@ class ProductRequestAccessService
             || $this->hasDirectDepartmentSlug($user, self::PROCUREMENT_REVIEW_DEPARTMENT_SLUG);
     }
 
-    /** PCL SKU 管理仅入录审核部门树内任意部门的主管与管理员可见可用 */
+    /** PCL SKU 管理：管理员、入录审核部门树内主管/副主管（含审核主管）、录入部门内的录入人员可见可用 */
     public function canManageLinkSkus(AdminUser $user): bool
     {
         if ($user->isAdministrator()) {
@@ -135,10 +135,20 @@ class ProductRequestAccessService
             return false;
         }
 
-        return $user->departments()
+        // 主管/副主管：入录审核部门树内任意部门（含录入部门、审核部门）
+        $isSupervisor = $user->departments()
             ->whereIn('id', $this->descendantDepartmentIds((int) $root->getKey()))
-            ->wherePivot('position', Department::POSITION_MANAGER)
+            ->wherePivotIn('position', [Department::POSITION_MANAGER, Department::POSITION_DEPUTY])
             ->exists();
+        if ($isSupervisor) {
+            return true;
+        }
+
+        // 录入人员：录入部门（含其后代部门）内的成员
+        $entryIds = $this->assignableDepartmentIds();
+
+        return $entryIds !== []
+            && $user->departments()->whereIn('id', $entryIds)->exists();
     }
 
     /** 入录审核部门树内的所有部门都可查看运营部门提报的数据，不再按“录入部门 => 运营部门”一对一映射 */

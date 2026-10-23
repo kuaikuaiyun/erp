@@ -1395,10 +1395,23 @@ class ProductRequestController extends Controller
             $checkedSkus = $this->splitSkus(implode(',', $data['selected_skus'] ?? []));
             // 面板左列编辑后的运营 SKU（换行/逗号分隔）统一规范为逗号分隔存储
             $data['skus'] = $this->normalizeSkus((string) ($data['skus'] ?? ''));
+            $operationSkus = $this->splitSkus((string) $data['skus']);
+            // 本次面板展示过的 SKU（右栏系统已录入 + 左栏运营填写），用于识别已取消勾选项
+            $displayedSkus = array_values(array_unique(array_merge(
+                $this->splitSkus((string) ($data['link_skus'] ?? '')),
+                $operationSkus,
+            )));
+            // 面板左列被改写/删除的旧运营 SKU，需要从链接记录中移除，不能作为历史数据继续累计
+            $removedOperationSkus = array_values(array_diff($this->splitSkus((string) $locked->skus), $operationSkus));
+            $obsoleteSkus = array_values(array_unique(array_merge($displayedSkus, $removedOperationSkus)));
             $skuValueMap = $this->parseProcurementSkuValues((string) ($data['sku_value_rows'] ?? ''), $checkedSkus);
             unset($data['reuse_source_id'], $data['seller_images'], $data['selected_skus'], $data['link_skus'], $data['sku_value_rows'], $data['removed_seller_images'], $data['inspection_reject_reason']);
-            // 链接级 SKU 集合只增不减：系统已录入的 SKU 始终保留在链接记录中，运营 SKU 勾选后并入；表单仅保存本次勾选的 SKU
-            $linkSkus = $this->mergeLinkSkus($this->linkSkuSet($linkHash), $checkedSkus);
+            // 链接级 SKU 以本次勾选结果为最终集合：展示过但取消勾选的、以及被改写的旧运营 SKU 不再累计保留；
+            // 未查重（右栏未加载）时，未被展示过的历史 SKU 予以保留，避免误删链接已有数据
+            $linkSkus = array_values(array_unique(array_merge(
+                $checkedSkus,
+                array_values(array_diff($this->splitSkus($this->linkSkuSet($linkHash, $locked->getKey())), $obsoleteSkus)),
+            )));
             $procurementSkus = implode(',', $checkedSkus);
             if ($linkSkus !== []) {
                 $linkSkuPayload = [
@@ -1426,17 +1439,7 @@ class ProductRequestController extends Controller
                 }
 
                 if ($linkSku && (string) $linkSku->supplier_url_hash !== $linkHash) {
-                    // 命中同 PCL 的历史记录（不同链接）：保留其原有 SKU 与价格重量，合并后更新
-                    $linkSkuPayload['skus'] = implode(',', $this->mergeLinkSkus(
-                        (string) $linkSku->skus,
-                        $linkSkus,
-                    ));
-                    if ($skuValueMap !== []) {
-                        $linkSkuPayload['sku_values'] = array_merge(
-                            (array) ($linkSku->sku_values ?? []),
-                            $skuValueMap,
-                        );
-                    }
+                    // 命中同 PCL 的历史记录（不同链接）：直接覆盖为本次结果，旧链接 SKU 不再累计保留
                     $linkSkuPayload['supplier_url_hash'] = $linkHash;
                 }
 
