@@ -519,6 +519,80 @@ class ProductLibraryController extends Controller
         ]);
     }
 
+    public function destroyProduct(Request $request, AikaipinProduct $product): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
+
+        $data = $request->validate([
+            'confirm_linked_evaluations' => ['nullable', 'boolean'],
+        ]);
+        $linkedEvaluations = AikaipinPlacementEvaluation::query()
+            ->where('product_id', $product->getKey())
+            ->orderBy('id')
+            ->get(['id', 'evaluation_code']);
+
+        if ($linkedEvaluations->isNotEmpty() && !($data['confirm_linked_evaluations'] ?? false)) {
+            return response()->json([
+                'code' => 'product_has_linked_placement_evaluations',
+                'message' => __('aikaipin.messages.product_delete_linked_message', [
+                    'count' => $linkedEvaluations->count(),
+                ]),
+                'linked_evaluations' => $linkedEvaluations->map(static fn (AikaipinPlacementEvaluation $evaluation): array => [
+                    'id' => (int) $evaluation->getKey(),
+                    'code' => (string) $evaluation->evaluation_code,
+                ])->values()->all(),
+            ], 409);
+        }
+
+        $filePaths = collect($product->imageFiles())
+            ->concat([$product->referenceFilePayload(), $product->packageFilePayload()])
+            ->filter()
+            ->pluck('path')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+        $connection = config('admin.database.connection') ?: config('database.default');
+
+        try {
+            DB::connection($connection)->transaction(function () use ($context, $product): void {
+                AikaipinPlacementEvaluation::query()
+                    ->where('product_id', $product->getKey())
+                    ->update([
+                        'product_id' => null,
+                        'updated_by' => (int) $context['user']->getKey(),
+                        'updated_by_name' => (string) ($context['user']->name ?: $context['user']->username),
+                        'updated_at' => now(),
+                    ]);
+                $product->delete();
+            });
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return response()->json([
+                'message' => __('aikaipin.messages.product_delete_failed_message'),
+            ], 500);
+        }
+
+        foreach ($filePaths as $path) {
+            try {
+                $this->storage->deleteFile($path);
+            } catch (\Throwable $exception) {
+                report($exception);
+            }
+        }
+
+        return response()->json([
+            'message' => __('aikaipin.messages.product_deleted_message'),
+            'redirect_url' => route('aikaipin.product-library.index'),
+        ]);
+    }
+
     public function updateVisibility(Request $request): JsonResponse|Response
     {
         $context = $this->pageContext($request);
@@ -1226,7 +1300,7 @@ class ProductLibraryController extends Controller
             'data_ended_on' => ['required', 'date', 'after_or_equal:test_started_on'],
             'remark' => ['nullable', 'string', 'max:2000'],
             'records' => ['required', 'array', 'min:1', 'max:60'],
-            'records.*.platform' => ['required', 'in:facebook,google,tiktok,mediago,newsbreak'],
+            'records.*.platform' => ['required', 'in:facebook,google,tiktok,mediago,newsbreak,applovin'],
             'records.*.currency' => ['required', 'in:usd,eur,cny'],
             'records.*.actual_spend' => ['required', 'numeric', 'min:0', 'max:99999999999999.99'],
             'records.*.orders' => ['required', 'integer', 'min:0', 'max:4294967295'],

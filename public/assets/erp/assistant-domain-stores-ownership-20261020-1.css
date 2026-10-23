@@ -99,3 +99,12 @@
         grid-template-columns: 1fr;
     }
 }
+
+.assistant-domain-stores-page .assistant-filter-multi-select {
+    height: auto !important;
+    min-height: 76px;
+}
+
+.assistant-domain-stores-page .assistant-advanced-filter-field .help-block {
+    margin: 4px 0 0;
+}

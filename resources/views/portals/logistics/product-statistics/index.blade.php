@@ -21,6 +21,7 @@
     $productStatisticsClientConfig = [
         'products' => $products,
         'summary' => $productSummary,
+        'refundReasonReport' => $refundReasonReport,
         'pagination' => $productPagination,
         'detailUrl' => route('logistics.product-statistics.detail'),
         'sort' => $filters['sort'],
@@ -32,7 +33,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261021-2">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261023-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261015-2">
 @endpush
 
@@ -110,6 +111,8 @@
             <div class="product-statistics-summary-item"><span>{{ __('logistics.product_statistics.metrics.profit') }}</span><strong id="product-statistics-summary-profit">—</strong><em>{{ __('logistics.product_statistics.metrics.current_filter') }}</em></div>
             <div class="product-statistics-summary-item"><span>{{ __('logistics.product_statistics.metrics.profit_rate') }}</span><strong id="product-statistics-summary-profit-rate">—</strong><em>{{ __('logistics.product_statistics.metrics.weighted') }}</em></div>
         </div>
+
+        <section id="product-statistics-reason-report" class="product-statistics-reason-report" aria-live="polite"></section>
 
         <div class="box box-solid product-statistics-table-box">
             <div class="box-header with-border product-statistics-list-toolbar">
@@ -200,6 +203,6 @@
     <script>
         window.ErpLogisticsProductStatistics = @json($productStatisticsClientConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/product-statistics.js?v=20261021-2"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-statistics.js?v=20261023-2"></script>
     <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261015-2"></script>
 @endpush

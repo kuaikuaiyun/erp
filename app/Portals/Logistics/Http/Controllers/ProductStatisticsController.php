@@ -37,6 +37,7 @@ class ProductStatisticsController extends Controller
             ...$this->viewContext($context),
             'products' => $data['products'],
             'productSummary' => $data['summary'],
+            'refundReasonReport' => $data['refund_reason_report'],
             'productPagination' => $data['pagination'],
             'stores' => $this->statistics->storeOptions($filters),
             'filters' => $filters,
@@ -172,6 +173,8 @@ class ProductStatisticsController extends Controller
             'detail_outcome' => ['nullable', 'string', 'max:191'],
             'detail_payment_method' => ['nullable', Rule::in(['paypal', 'credit_card'])],
             'detail_logistics_status' => ['nullable', 'string', 'max:191'],
+            'detail_source_reason' => ['nullable', 'string', 'max:1000'],
+            'detail_manual_reason' => ['nullable', 'string', 'max:1000'],
         ];
     }
 
@@ -215,6 +218,8 @@ class ProductStatisticsController extends Controller
             'outcome' => trim((string) ($input['detail_outcome'] ?? '')),
             'payment_method' => trim((string) ($input['detail_payment_method'] ?? '')),
             'logistics_status' => trim((string) ($input['detail_logistics_status'] ?? '')),
+            'source_reason' => trim((string) ($input['detail_source_reason'] ?? '')),
+            'manual_reason' => trim((string) ($input['detail_manual_reason'] ?? '')),
         ];
     }
 
@@ -351,6 +356,23 @@ class ProductStatisticsController extends Controller
             'refundReference' => __('logistics.product_statistics.ui.refund_reference'),
             'sourceReason' => __('logistics.product_statistics.ui.source_reason'),
             'manualReason' => __('logistics.product_statistics.ui.manual_reason'),
+            'noReason' => __('logistics.product_statistics.ui.no_reason'),
+            'reasonSelectionTitle' => __('logistics.product_statistics.ui.reason_selection_title'),
+            'reasonSelectionCount' => __('logistics.product_statistics.ui.reason_selection_count'),
+            'reasonSelectionAmount' => __('logistics.product_statistics.ui.reason_selection_amount'),
+            'reasonSelectionCountRatio' => __('logistics.product_statistics.ui.reason_selection_count_ratio'),
+            'reasonSelectionAmountRatio' => __('logistics.product_statistics.ui.reason_selection_amount_ratio'),
+            'reasonReportTitle' => __('logistics.product_statistics.ui.reason_report_title'),
+            'reasonReportHint' => __('logistics.product_statistics.ui.reason_report_hint'),
+            'reasonReportSource' => __('logistics.product_statistics.ui.reason_report_source'),
+            'reasonReportManual' => __('logistics.product_statistics.ui.reason_report_manual'),
+            'reasonReportTotal' => __('logistics.product_statistics.ui.reason_report_total'),
+            'reasonReportOther' => __('logistics.product_statistics.ui.reason_report_other'),
+            'reasonReportEmpty' => __('logistics.product_statistics.ui.reason_report_empty'),
+            'reasonReportCountShare' => __('logistics.product_statistics.ui.reason_report_count_share'),
+            'reasonReportAmountShare' => __('logistics.product_statistics.ui.reason_report_amount_share'),
+            'reasonReportExpand' => __('logistics.product_statistics.ui.reason_report_expand'),
+            'reasonReportCollapse' => __('logistics.product_statistics.ui.reason_report_collapse'),
             'linkedRefunds' => __('logistics.product_statistics.ui.linked_refunds'),
             'disputeOutcome' => __('logistics.product_statistics.ui.dispute_outcome'),
             'responseDueAt' => __('logistics.product_statistics.ui.response_due_at'),

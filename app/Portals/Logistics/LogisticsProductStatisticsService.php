@@ -85,6 +85,7 @@ class LogisticsProductStatisticsService
         return [
             'products' => $products,
             'summary' => $summary,
+            'refund_reason_report' => $this->cachedRefundReasonReport($filters),
             'pagination' => [
                 'current_page' => $page,
                 'per_page' => $perPage,
@@ -271,11 +272,120 @@ class LogisticsProductStatisticsService
     private function statisticsCacheKey(string $segment, array $filters): string
     {
         $keyFilters = [];
-        foreach (['date_from', 'date_to', 'name', 'keyword', 'store'] as $key) {
+        foreach (['date_from', 'date_to', 'name', 'keyword', 'store', 'decision'] as $key) {
             $keyFilters[$key] = (string) ($filters[$key] ?? '');
         }
 
         return 'logistics.product-statistics.'.$segment.'.'.sha1(json_encode($keyFilters));
+    }
+
+    /** @param array<string,mixed> $filters @return array<string,mixed> */
+    private function cachedRefundReasonReport(array $filters): array
+    {
+        return Cache::remember(
+            $this->statisticsCacheKey('refund-reasons', $filters),
+            now()->addSeconds(45),
+            fn (): array => $this->refundReasonReport($filters),
+        );
+    }
+
+    /** @param array<string,mixed> $filters @return array<string,mixed> */
+    private function refundReasonReport(array $filters): array
+    {
+        $selectedOrders = $this->selectedOrderIdsForReasonReport($filters);
+        $paypal = $this->database()->table('logistics_paypal_refunds as refund')
+            ->whereIn('refund.logistics_order_id', clone $selectedOrders)
+            ->selectRaw('refund.id as record_id')
+            ->selectRaw('refund.refund_reason as source_reason')
+            ->selectRaw('refund.manual_reason as manual_reason')
+            ->selectRaw("COALESCE(refund.refund_amount_usd, CASE WHEN UPPER(refund.currency_code) = 'USD' THEN refund.original_amount ELSE 0 END) as amount");
+        $creditCard = $this->database()->table('logistics_credit_card_refunds as refund')
+            ->whereIn('refund.logistics_order_id', clone $selectedOrders)
+            ->selectRaw('refund.id as record_id')
+            ->selectRaw("'' as source_reason")
+            ->selectRaw('refund.refund_reason as manual_reason')
+            ->selectRaw('refund.refund_amount_usd as amount');
+        $rows = $this->database()->query()->fromSub($paypal->unionAll($creditCard), 'refund_reason_rows');
+        $totals = (clone $rows)
+            ->selectRaw('COUNT(*) as record_count')
+            ->selectRaw('COALESCE(SUM(amount), 0) as amount')
+            ->first();
+        $totalCount = (int) ($totals->record_count ?? 0);
+        $totalAmount = round((float) ($totals->amount ?? 0), 4);
+
+        return [
+            'record_count' => $totalCount,
+            'amount' => $totalAmount,
+            'source_reason' => $this->refundReasonDistribution(clone $rows, 'source_reason', $totalCount, $totalAmount),
+            'manual_reason' => $this->refundReasonDistribution(clone $rows, 'manual_reason', $totalCount, $totalAmount),
+        ];
+    }
+
+    /** @param array<string,mixed> $filters */
+    private function selectedOrderIdsForReasonReport(array $filters): Builder
+    {
+        $productOrders = $this->productOrderQuery($filters, false);
+        if (trim((string) ($filters['decision'] ?? '')) === '') {
+            return $this->database()->query()
+                ->fromSub($productOrders, 'reason_product_orders')
+                ->select('reason_product_orders.order_id')
+                ->distinct();
+        }
+
+        $productKeys = $this->productStatisticsQuery($filters, false)
+            ->select('product_statistics.product_key');
+
+        return $this->database()->query()
+            ->fromSub($productOrders, 'reason_product_orders')
+            ->joinSub($productKeys, 'reason_products', 'reason_products.product_key', '=', 'reason_product_orders.product_key')
+            ->select('reason_product_orders.order_id')
+            ->distinct();
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function refundReasonDistribution(Builder $query, string $column, int $totalCount, float $totalAmount): array
+    {
+        $rows = $query
+            ->selectRaw("COALESCE(NULLIF(TRIM({$column}), ''), '__empty__') as reason_value")
+            ->selectRaw('COUNT(*) as record_count')
+            ->selectRaw('COALESCE(SUM(amount), 0) as amount')
+            ->groupBy('reason_value')
+            ->orderByDesc('record_count')
+            ->orderByDesc('amount')
+            ->get()
+            ->map(static function (object $row) use ($totalCount, $totalAmount): array {
+                $count = (int) $row->record_count;
+                $amount = round((float) $row->amount, 4);
+
+                return [
+                    'reason' => (string) $row->reason_value,
+                    'record_count' => $count,
+                    'amount' => $amount,
+                    'count_ratio' => $totalCount > 0 ? round($count / $totalCount * 100, 2) : 0.0,
+                    'amount_ratio' => $totalAmount > 0 ? round($amount / $totalAmount * 100, 2) : 0.0,
+                    'is_other' => false,
+                ];
+            })
+            ->all();
+
+        if (count($rows) <= 8) {
+            return $rows;
+        }
+
+        $visible = array_slice($rows, 0, 8);
+        $remaining = array_slice($rows, 8);
+        $otherCount = array_sum(array_column($remaining, 'record_count'));
+        $otherAmount = round(array_sum(array_column($remaining, 'amount')), 4);
+        $visible[] = [
+            'reason' => '__other__',
+            'record_count' => $otherCount,
+            'amount' => $otherAmount,
+            'count_ratio' => $totalCount > 0 ? round($otherCount / $totalCount * 100, 2) : 0.0,
+            'amount_ratio' => $totalAmount > 0 ? round($otherAmount / $totalAmount * 100, 2) : 0.0,
+            'is_other' => true,
+        ];
+
+        return $visible;
     }
 
     /**
@@ -757,14 +867,23 @@ class LogisticsProductStatisticsService
             ->selectRaw('refund.refund_amount_usd as amount')
             ->selectRaw('COALESCE(refund.last_imported_at, refund.updated_at, refund.created_at) as happened_at');
 
-        $query = $this->database()->query()->fromSub($paypal->unionAll($creditCard), 'refund_rows');
-        $this->applyDetailTextFilter($query, $options, ['reference', 'source_reason', 'manual_reason']);
+        $baseQuery = $this->database()->query()->fromSub($paypal->unionAll($creditCard), 'refund_rows');
+        $this->applyDetailTextFilter($baseQuery, $options, ['reference', 'source_reason', 'manual_reason']);
         if (filled($options['payment_method'] ?? null)) {
-            $query->where('payment_method', (string) $options['payment_method']);
+            $baseQuery->where('payment_method', (string) $options['payment_method']);
         }
         if (filled($options['status'] ?? null)) {
-            $query->where('raw_status', (string) $options['status']);
+            $baseQuery->where('raw_status', (string) $options['status']);
         }
+
+        $reasonOptions = [
+            'source_reason' => $this->refundReasonOptions(clone $baseQuery, 'source_reason'),
+            'manual_reason' => $this->refundReasonOptions(clone $baseQuery, 'manual_reason'),
+        ];
+        $query = clone $baseQuery;
+        $this->applyRefundReasonFilter($query, 'source_reason', (string) ($options['source_reason'] ?? ''));
+        $this->applyRefundReasonFilter($query, 'manual_reason', (string) ($options['manual_reason'] ?? ''));
+        $summary = $this->refundReasonSelectionSummary(clone $baseQuery, clone $query);
         $this->applyDetailSort($query, [
             'payment_method_label' => 'payment_method', 'refund_number' => 'reference', 'amount' => 'amount',
             'source_reason' => 'source_reason', 'manual_reason' => 'manual_reason', 'status' => 'raw_status', 'imported_at' => 'happened_at',
@@ -804,7 +923,76 @@ class LogisticsProductStatisticsService
                     ['value' => 'credit_card', 'label' => __('logistics.product_statistics.payment_methods.credit_card')],
                 ],
                 'status' => $this->refundStatusOptions($filters, $key),
+                'source_reason' => $reasonOptions['source_reason'],
+                'manual_reason' => $reasonOptions['manual_reason'],
             ],
+            'summary' => $summary,
+        ];
+    }
+
+    /** @return list<array{value:string,label:string}> */
+    private function refundReasonOptions(Builder $query, string $column): array
+    {
+        $values = $query
+            ->selectRaw("COALESCE(NULLIF(TRIM({$column}), ''), '__empty__') as reason_value")
+            ->distinct()
+            ->orderBy('reason_value')
+            ->pluck('reason_value')
+            ->map(static fn ($value): string => (string) $value)
+            ->all();
+
+        if (!in_array('__empty__', $values, true)) {
+            array_unshift($values, '__empty__');
+        }
+
+        return array_map(static fn (string $value): array => [
+            'value' => $value,
+            'label' => $value === '__empty__'
+                ? __('logistics.product_statistics.ui.no_reason')
+                : $value,
+        ], $values);
+    }
+
+    private function applyRefundReasonFilter(Builder $query, string $column, string $value): void
+    {
+        if ($value === '') {
+            return;
+        }
+
+        if ($value === '__empty__') {
+            $query->where(function (Builder $nested) use ($column): void {
+                $nested->whereNull($column)->orWhereRaw("TRIM({$column}) = ''");
+            });
+
+            return;
+        }
+
+        $query->where($column, $value);
+    }
+
+    /** @return array<string,int|float> */
+    private function refundReasonSelectionSummary(Builder $baseQuery, Builder $filteredQuery): array
+    {
+        $total = $baseQuery
+            ->selectRaw('COUNT(*) as record_count')
+            ->selectRaw('COALESCE(SUM(amount), 0) as amount')
+            ->first();
+        $selected = $filteredQuery
+            ->selectRaw('COUNT(*) as record_count')
+            ->selectRaw('COALESCE(SUM(amount), 0) as amount')
+            ->first();
+        $totalCount = (int) ($total->record_count ?? 0);
+        $selectedCount = (int) ($selected->record_count ?? 0);
+        $totalAmount = round((float) ($total->amount ?? 0), 4);
+        $selectedAmount = round((float) ($selected->amount ?? 0), 4);
+
+        return [
+            'record_count' => $selectedCount,
+            'amount' => $selectedAmount,
+            'total_record_count' => $totalCount,
+            'total_amount' => $totalAmount,
+            'count_ratio' => $totalCount > 0 ? round($selectedCount / $totalCount * 100, 2) : 0.0,
+            'amount_ratio' => $totalAmount > 0 ? round($selectedAmount / $totalAmount * 100, 2) : 0.0,
         ];
     }
 

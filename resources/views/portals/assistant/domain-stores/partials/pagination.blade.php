@@ -32,7 +32,13 @@
     <form method="get" action="{{ route('assistant.domain-stores.index') }}" class="assistant-per-page-form" data-loading="region" data-loading-target=".assistant-domain-stores-list">
         @foreach ($filters as $filterName => $filterValue)
             @if ($filterName !== 'per_page')
-                <input type="hidden" name="{{ $filterName }}" value="{{ $filterValue }}">
+                @if (is_array($filterValue))
+                    @foreach ($filterValue as $item)
+                        <input type="hidden" name="{{ $filterName }}[]" value="{{ $item }}">
+                    @endforeach
+                @else
+                    <input type="hidden" name="{{ $filterName }}" value="{{ $filterValue }}">
+                @endif
             @endif
         @endforeach
         <label>{{ $t('pagination.per_page') }}

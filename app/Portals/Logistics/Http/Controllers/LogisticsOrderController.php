@@ -667,7 +667,7 @@ class LogisticsOrderController extends Controller
             $filters[$field] = is_scalar($value) ? trim((string) $value) : '';
         }
 
-        foreach (['refunded', 'ordered', 'created'] as $prefix) {
+        foreach (['refunded', 'ordered', 'paid'] as $prefix) {
             foreach (['from', 'to'] as $suffix) {
                 $key = $prefix.'_'.$suffix;
                 $value = $request->input($key, '');
@@ -731,7 +731,7 @@ class LogisticsOrderController extends Controller
 
         foreach ([
             'ordered' => 'order_created_at',
-            'created' => 'created_at',
+            'paid' => 'paid_at',
         ] as $prefix => $column) {
             if ($filters[$prefix.'_from'] !== '') {
                 $query->whereDate($column, '>=', $filters[$prefix.'_from']);

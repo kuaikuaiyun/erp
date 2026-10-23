@@ -59,8 +59,9 @@ class AssistantPortalAuthorizationService
     }
 
     /**
-     * System administrators and the Assistant primary manager can manage every
-     * record, including records that are temporarily not shared with any child department.
+     * System administrators and the Assistant primary department's manager or
+     * deputy manager can manage every record, including records that are
+     * temporarily not shared with any child department.
      */
     public function canManageAllDomainStores(AdminUser $user): bool
     {
@@ -197,7 +198,10 @@ class AssistantPortalAuthorizationService
             && $this->canManage($user)
             && $user->departments()
                 ->whereKey($departmentId)
-                ->wherePivot('position', Department::POSITION_MANAGER)
+                ->wherePivotIn('position', [
+                    Department::POSITION_MANAGER,
+                    Department::POSITION_DEPUTY,
+                ])
                 ->exists();
     }
 

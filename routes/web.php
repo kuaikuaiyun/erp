@@ -44,6 +44,7 @@ Route::put('/domain-stores/{domainStore}', [DomainStoreController::class, 'updat
 Route::delete('/domain-stores/{domainStore}', [DomainStoreController::class, 'destroy'])->name('assistant.domain-stores.destroy');
 Route::get('/domain-stores/{domainStore}/history', [DomainStoreController::class, 'history'])->name('assistant.domain-stores.history');
 Route::get('/shopify-analytics', [ShopifyAnalyticsController::class, 'index'])->name('assistant.shopify-analytics.index');
+Route::get('/shopify-analytics/export-orders', [ShopifyAnalyticsController::class, 'exportOrders'])->name('assistant.shopify-analytics.export-orders');
 Route::post('/shopify-analytics/refresh-batch', [ShopifyAnalyticsController::class, 'refreshBatch'])->name('assistant.shopify-analytics.refresh-batch');
 Route::get('/shopify-analytics/sync-batches/{batch}/progress', [ShopifyAnalyticsController::class, 'syncProgress'])->name('assistant.shopify-analytics.sync-progress');
 Route::post('/shopify-analytics/{domainStore}/refresh', [ShopifyAnalyticsController::class, 'refresh'])->name('assistant.shopify-analytics.refresh');
@@ -129,6 +130,7 @@ Route::get('/product-library', [ProductLibraryController::class, 'index'])->name
 Route::post('/product-library', [ProductLibraryController::class, 'storeProduct'])->name('aikaipin.product-library.store');
 Route::get('/product-library/{product}/edit-data', [ProductLibraryController::class, 'editProduct'])->name('aikaipin.product-library.edit');
 Route::put('/product-library/{product}', [ProductLibraryController::class, 'updateProduct'])->name('aikaipin.product-library.update');
+Route::delete('/product-library/{product}', [ProductLibraryController::class, 'destroyProduct'])->name('aikaipin.product-library.destroy');
 Route::post('/product-library/package-uploads', [ProductLibraryController::class, 'initializePackageUpload'])->name('aikaipin.product-library.package-uploads.initialize');
 Route::post('/product-library/package-uploads/{uploadToken}/parts/{chunkIndex}', [ProductLibraryController::class, 'storePackageUploadPart'])->whereNumber('chunkIndex')->name('aikaipin.product-library.package-uploads.parts.store');
 Route::post('/product-library/package-uploads/{uploadToken}/complete', [ProductLibraryController::class, 'completePackageUpload'])->name('aikaipin.product-library.package-uploads.complete');

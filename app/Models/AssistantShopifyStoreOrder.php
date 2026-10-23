@@ -19,6 +19,20 @@ class AssistantShopifyStoreOrder extends Model
 
     public const SUBSCRIPTION_CATEGORY_RECURRING = 'recurring';
 
+    /**
+     * Shopify financial states that prove this order received at least one
+     * successful payment. A later cancellation or refund does not remove the
+     * original sale from gross-sales reporting.
+     *
+     * @var list<string>
+     */
+    public const SUCCESSFUL_FINANCIAL_STATUSES = [
+        'PAID',
+        'PARTIALLY_PAID',
+        'PARTIALLY_REFUNDED',
+        'REFUNDED',
+    ];
+
     /** @return list<string> */
     public static function subscriptionCategories(): array
     {
@@ -27,6 +41,12 @@ class AssistantShopifyStoreOrder extends Model
             self::SUBSCRIPTION_CATEGORY_SUBSCRIBED,
             self::SUBSCRIPTION_CATEGORY_RECURRING,
         ];
+    }
+
+    /** @return list<string> */
+    public static function successfulFinancialStatuses(): array
+    {
+        return self::SUCCESSFUL_FINANCIAL_STATUSES;
     }
 
     protected $fillable = [

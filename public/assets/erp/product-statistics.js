@@ -4,10 +4,11 @@
     var config = window.ErpLogisticsProductStatistics || {};
     var products = Array.isArray(config.products) ? config.products : [];
     var overallSummary = config.summary || {};
+    var refundReasonReport = config.refundReasonReport || {};
     var pagination = config.pagination || { current_page: 1, per_page: 10, total: products.length, last_page: 1, from: 0, to: products.length };
     var decisions = config.decisions || {};
     var labels = config.labels || {};
-    var state = { page: Number(pagination.current_page) || 1, sort: config.sort || '', direction: config.direction || '', selected: {} };
+    var state = { page: Number(pagination.current_page) || 1, sort: config.sort || '', direction: config.direction || '', selected: {}, reasonReportExpanded: false };
     var detailState = { product: null, overviewLoaded: false, loadingTabs: {}, tabData: {}, sorts: {}, filters: {}, pages: {}, perPages: {}, activeTab: 'overview' };
     var body = document.getElementById('product-statistics-body');
     var tableScroll = document.querySelector('.product-statistics-table-scroll');
@@ -141,6 +142,36 @@
         document.getElementById('product-statistics-summary-profit-rate').textContent = formatRate(overallSummary.profit_rate);
         document.getElementById('product-statistics-total-label').textContent = (t('totalProducts') || '').replace(':count', formatNumber(overallSummary.product_count));
     }
+    function reasonReportLabel(row) {
+        if (!row || row.reason === '__empty__') return t('noReason');
+        if (row.reason === '__other__' || row.is_other) return t('reasonReportOther');
+        return row.reason || t('noReason');
+    }
+    function reasonReportPanel(title, rows) {
+        var content = Array.isArray(rows) && rows.length ? rows.map(function (row) {
+            var width = Math.max(0, Math.min(100, Number(row.amount_ratio) || 0));
+            return '<li><div class="product-statistics-reason-row-head"><strong title="' + escapeHtml(reasonReportLabel(row)) + '">' + escapeHtml(reasonReportLabel(row)) + '</strong><span>' + formatMoney(row.amount) + '</span></div>'
+                + '<div class="product-statistics-reason-bar"><i style="width:' + width + '%"></i></div>'
+                + '<small>' + escapeHtml((t('reasonReportCountShare') || '').replace(':count', formatNumber(row.record_count)).replace(':ratio', formatRate(row.count_ratio))) + '<b>·</b>' + escapeHtml((t('reasonReportAmountShare') || '').replace(':ratio', formatRate(row.amount_ratio))) + '</small></li>';
+        }).join('') : '<li class="product-statistics-reason-empty">' + escapeHtml(t('reasonReportEmpty')) + '</li>';
+        return '<section class="product-statistics-reason-panel"><h4>' + escapeHtml(title) + '</h4><ul>' + content + '</ul></section>';
+    }
+    function renderReasonReport() {
+        var container = document.getElementById('product-statistics-reason-report');
+        if (!container) return;
+        var expanded = Boolean(state.reasonReportExpanded);
+        var actionLabel = expanded ? t('reasonReportCollapse') : t('reasonReportExpand');
+        container.classList.toggle('is-expanded', expanded);
+        container.innerHTML = '<header><button type="button" class="product-statistics-reason-toggle" aria-expanded="' + (expanded ? 'true' : 'false') + '" aria-controls="product-statistics-reason-report-content">'
+            + '<span class="product-statistics-reason-heading"><strong><i class="fa fa-pie-chart"></i> ' + escapeHtml(t('reasonReportTitle')) + '</strong><small>' + escapeHtml(t('reasonReportHint')) + '</small></span>'
+            + '<span class="product-statistics-reason-total">' + escapeHtml((t('reasonReportTotal') || '').replace(':count', formatNumber(refundReasonReport.record_count)).replace(':amount', formatMoney(refundReasonReport.amount))) + '</span>'
+            + '<span class="product-statistics-reason-toggle-label"><span>' + escapeHtml(actionLabel) + '</span><i class="fa ' + (expanded ? 'fa-angle-up' : 'fa-angle-down') + '" aria-hidden="true"></i></span>'
+            + '</button></header>'
+            + '<div id="product-statistics-reason-report-content" class="product-statistics-reason-panels"' + (expanded ? '' : ' hidden') + '>'
+            + reasonReportPanel(t('reasonReportSource'), refundReasonReport.source_reason || [])
+            + reasonReportPanel(t('reasonReportManual'), refundReasonReport.manual_reason || [])
+            + '</div>';
+    }
     function renderPagination() {
         var pageNumbers = document.getElementById('product-statistics-page-numbers');
         var totalPages = Number(pagination.last_page) || 1;
@@ -187,6 +218,7 @@
     }
     function renderTable() {
         renderSummary();
+        renderReasonReport();
         renderSortIndicators();
         body.innerHTML = products.map(parentRow).join('');
         empty.hidden = products.length > 0;
@@ -210,7 +242,7 @@
             url.searchParams.set('detail_per_page', detailPerPage(table));
             if (sorting.key) url.searchParams.set('detail_sort', sorting.key);
             if (sorting.direction) url.searchParams.set('detail_direction', sorting.direction);
-            ['keyword', 'status', 'type', 'outcome', 'payment_method', 'logistics_status'].forEach(function (key) {
+            ['keyword', 'status', 'type', 'outcome', 'payment_method', 'logistics_status', 'source_reason', 'manual_reason'].forEach(function (key) {
                 if (filters[key]) url.searchParams.set('detail_' + key, filters[key]);
             });
         }
@@ -473,6 +505,8 @@
         if (table === 'refunds') {
             selects += detailSelect('payment_method', t('paymentMethod'), options.payment_method || [], filters.payment_method);
             selects += detailSelect('status', t('detailFilterStatus'), options.status || [], filters.status);
+            selects += detailSelect('source_reason', t('sourceReason'), options.source_reason || [], filters.source_reason);
+            selects += detailSelect('manual_reason', t('manualReason'), options.manual_reason || [], filters.manual_reason);
         }
         if (table === 'disputes') {
             selects += detailSelect('type', t('detailFilterType'), options.type || [], filters.type);
@@ -537,7 +571,14 @@
     }
     function renderRefunds(payload) {
         var refundHeadings = [['payment_method_label', t('paymentMethod')], ['shopify_order_number', t('orderNumber')], ['bill_number', t('billNumber')], ['refund_number', t('refundReference')], ['amount', t('amount')], ['source_reason', t('sourceReason')], ['manual_reason', t('manualReason')], ['status', t('status')], ['linked_disputes', t('paypalDisputes')], ['imported_at', t('updatedAt')]];
-        document.getElementById('product-statistics-refunds').innerHTML = '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + refundHeadings.map(function (heading) { return '<th>' + detailSortButton('refunds', heading[0], heading[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' + refundRows(payload.rows || []) + '</tbody></table></div>' + detailPagination('refunds', payload.pagination);
+        var summary = payload.summary || {};
+        var summaryHtml = '<section class="product-statistics-refund-selection"><h4>' + escapeHtml(t('reasonSelectionTitle')) + '</h4><div>'
+            + '<article><span>' + escapeHtml(t('reasonSelectionCount')) + '</span><strong>' + formatNumber(summary.record_count) + '</strong><small>/ ' + formatNumber(summary.total_record_count) + '</small></article>'
+            + '<article><span>' + escapeHtml(t('reasonSelectionAmount')) + '</span><strong>' + formatMoney(summary.amount) + '</strong><small>/ ' + formatMoney(summary.total_amount) + '</small></article>'
+            + '<article><span>' + escapeHtml(t('reasonSelectionCountRatio')) + '</span><strong>' + formatRate(summary.count_ratio) + '</strong></article>'
+            + '<article><span>' + escapeHtml(t('reasonSelectionAmountRatio')) + '</span><strong>' + formatRate(summary.amount_ratio) + '</strong></article>'
+            + '</div></section>';
+        document.getElementById('product-statistics-refunds').innerHTML = summaryHtml + '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + refundHeadings.map(function (heading) { return '<th>' + detailSortButton('refunds', heading[0], heading[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' + refundRows(payload.rows || []) + '</tbody></table></div>' + detailPagination('refunds', payload.pagination);
     }
     function renderDisputes(payload) {
         var disputeHeadings = [['dispute_id', t('paypalDisputes')], ['shopify_order_number', t('orderNumber')], ['bill_number', t('billNumber')], ['amount', t('amount')], ['reason', t('reason')], ['stage', t('disputeType')], ['status', t('status')], ['outcome', t('disputeOutcome')], ['seller_response_due_at', t('responseDueAt')], ['linked_refunds', t('linkedRefunds')], ['updated_at', t('updatedAt')]];
@@ -618,6 +659,12 @@
         });
     }
     document.addEventListener('click', function (event) {
+        var reasonReportToggle = event.target.closest('.product-statistics-reason-toggle');
+        if (reasonReportToggle) {
+            state.reasonReportExpanded = !state.reasonReportExpanded;
+            renderReasonReport();
+            return;
+        }
         var imagePreview = event.target.closest('.product-statistics-thumb.is-previewable');
         if (imagePreview) { openImagePreview(imagePreview); return; }
         var detailFilterReset = event.target.closest('.product-statistics-detail-filter-reset');

@@ -13,6 +13,13 @@
     var visibilityTitle = document.querySelector('[data-aikaipin-visibility-title]');
     var visibilityDescription = document.querySelector('[data-aikaipin-visibility-description]');
     var visibilityConfirm = document.querySelector('[data-aikaipin-visibility-confirm]');
+    var productDeleteModal = document.getElementById('aikaipin-product-delete-modal');
+    var productDeleteTitle = document.querySelector('[data-aikaipin-product-delete-title]');
+    var productDeleteDescription = document.querySelector('[data-aikaipin-product-delete-description]');
+    var productDeleteLinkedEvaluations = document.querySelector('[data-aikaipin-product-delete-linked-evaluations]');
+    var productDeleteLinkedLabel = document.querySelector('[data-aikaipin-product-delete-linked-label]');
+    var productDeleteLinkedList = document.querySelector('[data-aikaipin-product-delete-linked-list]');
+    var productDeleteConfirm = document.querySelector('[data-aikaipin-product-delete-confirm]');
     var imagePreviewModal = document.getElementById('aikaipin-image-preview-modal');
     var imagePreviewTitle = document.querySelector('[data-aikaipin-image-preview-title]');
     var imagePreviewStage = document.querySelector('[data-aikaipin-image-preview-stage]');
@@ -53,6 +60,7 @@
     var previewImages = [];
     var previewImageIndex = 0;
     var previewProductTitle = '';
+    var pendingProductDeletion = null;
     var filters = {
         keyword: document.querySelector('[data-aikaipin-filter="keyword"]'),
         category: document.querySelector('[data-aikaipin-filter="category"]'),
@@ -195,6 +203,116 @@
         if (visibilityModal && window.jQuery) {
             window.jQuery(visibilityModal).modal('show');
         }
+    }
+
+    function productDeleteUrl(productId) {
+        return String(config.productDeleteUrlTemplate || '').replace('__product__', encodeURIComponent(productId));
+    }
+
+    function renderLinkedEvaluations(evaluations) {
+        if (!productDeleteLinkedList) {
+            return;
+        }
+
+        productDeleteLinkedList.innerHTML = '';
+        (Array.isArray(evaluations) ? evaluations : []).forEach(function (evaluation) {
+            var item = document.createElement('li');
+            item.textContent = String(evaluation && evaluation.code ? evaluation.code : '-');
+            productDeleteLinkedList.appendChild(item);
+        });
+    }
+
+    function setProductDeleteModalState(linkedEvaluations) {
+        var hasLinkedEvaluations = Array.isArray(linkedEvaluations) && linkedEvaluations.length > 0;
+
+        if (!pendingProductDeletion) {
+            return;
+        }
+
+        if (productDeleteTitle) {
+            productDeleteTitle.textContent = hasLinkedEvaluations
+                ? config.productDeleteLinkedTitle
+                : config.productDeleteTitle;
+        }
+        if (productDeleteDescription) {
+            productDeleteDescription.textContent = hasLinkedEvaluations
+                ? String(pendingProductDeletion.linkedMessage || '')
+                : replaceTokens(config.productDeleteMessage, {
+                    code: pendingProductDeletion.code,
+                    name: pendingProductDeletion.name
+                });
+        }
+        if (productDeleteLinkedEvaluations) {
+            productDeleteLinkedEvaluations.hidden = !hasLinkedEvaluations;
+        }
+        if (productDeleteLinkedLabel) {
+            productDeleteLinkedLabel.textContent = config.productDeleteLinkedListLabel || '';
+        }
+        if (hasLinkedEvaluations) {
+            renderLinkedEvaluations(linkedEvaluations);
+        }
+        if (productDeleteConfirm) {
+            productDeleteConfirm.textContent = hasLinkedEvaluations
+                ? config.productDeleteContinue
+                : config.productDeleteConfirm;
+        }
+    }
+
+    function openProductDeleteModal(button) {
+        pendingProductDeletion = {
+            id: Number(button.getAttribute('data-aikaipin-product-id')),
+            code: button.getAttribute('data-aikaipin-product-code') || '',
+            name: button.getAttribute('data-aikaipin-product-name') || '',
+            linkedEvaluations: [],
+            linkedMessage: '',
+            confirmedLinkedEvaluations: false
+        };
+        setProductDeleteModalState([]);
+
+        if (productDeleteModal && window.jQuery) {
+            window.jQuery(productDeleteModal).modal('show');
+        }
+    }
+
+    function deleteProduct() {
+        var originalLabel;
+        var shouldRestoreOriginalLabel = true;
+
+        if (!pendingProductDeletion || !pendingProductDeletion.id || !productDeleteConfirm) {
+            return;
+        }
+
+        originalLabel = productDeleteConfirm.innerHTML;
+        productDeleteConfirm.disabled = true;
+        jsonRequest(productDeleteUrl(pendingProductDeletion.id), 'DELETE', {
+            confirm_linked_evaluations: pendingProductDeletion.confirmedLinkedEvaluations
+        }).then(function (payload) {
+            if (productDeleteModal && window.jQuery) {
+                window.jQuery(productDeleteModal).modal('hide');
+            }
+            notify('success', config.productDeletedTitle, payload.message || config.productDeletedMessage);
+            window.setTimeout(function () {
+                window.location.assign(payload.redirect_url || window.location.href);
+            }, 350);
+        }).catch(function (error) {
+            var linkedEvaluations = error && error.payload && error.payload.linked_evaluations;
+
+            if (error && error.code === 'product_has_linked_placement_evaluations' && !pendingProductDeletion.confirmedLinkedEvaluations) {
+                pendingProductDeletion.linkedEvaluations = Array.isArray(linkedEvaluations) ? linkedEvaluations : [];
+                pendingProductDeletion.linkedMessage = error.message || '';
+                pendingProductDeletion.confirmedLinkedEvaluations = true;
+                setProductDeleteModalState(pendingProductDeletion.linkedEvaluations);
+                shouldRestoreOriginalLabel = false;
+                return;
+            }
+
+            notify('error', config.productDeleteTitle, error.message || config.productDeleteFailedMessage);
+        }).then(function () {
+            productDeleteConfirm.disabled = false;
+            if (shouldRestoreOriginalLabel) {
+                productDeleteConfirm.innerHTML = originalLabel;
+            }
+        });
     }
 
     function previewImageUrl(image) {
@@ -448,7 +566,10 @@
                 var fieldErrors = payload.errors || {};
                 var firstField = Object.keys(fieldErrors)[0];
                 var firstMessage = firstField && fieldErrors[firstField] && fieldErrors[firstField][0];
-                throw new Error(firstMessage || payload.message || config.productSaveFailedMessage);
+                var error = new Error(firstMessage || payload.message || config.productSaveFailedMessage);
+                error.code = payload.code || '';
+                error.payload = payload;
+                throw error;
             }
 
             return payload;
@@ -1169,6 +1290,12 @@
             return;
         }
 
+        var productDeleteConfirmButton = event.target.closest('[data-aikaipin-product-delete-confirm]');
+        if (productDeleteConfirmButton) {
+            deleteProduct();
+            return;
+        }
+
         var actionButton = event.target.closest('[data-aikaipin-action]');
         if (actionButton) {
             if (actionButton.getAttribute('data-aikaipin-action') === 'upload') {
@@ -1177,6 +1304,10 @@
             }
             if (actionButton.getAttribute('data-aikaipin-action') === 'edit') {
                 openEditModal(Number(actionButton.getAttribute('data-aikaipin-product-id')));
+                return;
+            }
+            if (actionButton.getAttribute('data-aikaipin-action') === 'delete') {
+                openProductDeleteModal(actionButton);
                 return;
             }
             notify('info', config.comingSoonTitle, config.comingSoonMessage);

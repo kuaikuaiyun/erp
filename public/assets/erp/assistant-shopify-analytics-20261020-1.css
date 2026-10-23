@@ -130,9 +130,18 @@
     }
 }
 
-/* Five primary filters share one row on wide screens without squeezing labels. */
+/* Keep the six primary filters readable: three balanced columns per row. */
 .assistant-shopify-analytics-page .assistant-shopify-filter-primary-row {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.assistant-shopify-analytics-page .assistant-shopify-multi-select {
+    height: auto !important;
+    min-height: 76px;
+}
+
+.assistant-shopify-analytics-page .assistant-shopify-filter-primary-row .help-block {
+    margin: 4px 0 0;
 }
 
 @media (min-width: 768px) and (max-width: 1199px) {
@@ -144,5 +153,151 @@
 @media (max-width: 767px) {
     .assistant-shopify-analytics-page .assistant-shopify-filter-primary-row {
         grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* Analytics export dialog. */
+#assistant-shopify-export-modal .assistant-shopify-export-dialog {
+    margin: 10vh auto;
+    width: 470px;
+}
+
+#assistant-shopify-export-modal .modal-content {
+    border: 0;
+    border-radius: 8px;
+    box-shadow: 0 18px 42px rgba(24, 48, 75, .28);
+    overflow: hidden;
+}
+
+#assistant-shopify-export-modal .modal-header {
+    background: #23354d;
+    border: 0;
+    color: #fff;
+    padding: 14px 18px;
+}
+
+#assistant-shopify-export-modal .modal-title {
+    font-size: 16px;
+    font-weight: 600;
+}
+
+#assistant-shopify-export-modal .modal-title .fa {
+    color: #94d2f3;
+    margin-right: 6px;
+}
+
+#assistant-shopify-export-modal .close {
+    color: #fff;
+    opacity: .82;
+    text-shadow: none;
+}
+
+#assistant-shopify-export-modal .close:hover,
+#assistant-shopify-export-modal .close:focus {
+    color: #fff;
+    opacity: 1;
+}
+
+#assistant-shopify-export-modal .modal-body {
+    padding: 20px;
+}
+
+.assistant-shopify-export-range {
+    align-items: center;
+    background: #f5f9fc;
+    border: 1px solid #dce8f1;
+    border-radius: 6px;
+    display: flex;
+    gap: 11px;
+    margin-bottom: 19px;
+    padding: 11px 12px;
+}
+
+.assistant-shopify-export-range-icon {
+    align-items: center;
+    background: #e5f3fb;
+    border-radius: 6px;
+    color: #368abb;
+    display: inline-flex;
+    flex: 0 0 32px;
+    height: 32px;
+    justify-content: center;
+    width: 32px;
+}
+
+.assistant-shopify-export-range small,
+.assistant-shopify-export-range strong,
+.assistant-shopify-export-range em {
+    display: block;
+}
+
+.assistant-shopify-export-range small {
+    color: #71869a;
+    font-size: 12px;
+    font-style: normal;
+    margin-bottom: 2px;
+}
+
+.assistant-shopify-export-range strong {
+    color: #2c4c68;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.assistant-shopify-export-range strong .fa {
+    color: #7f9bb2;
+    margin: 0 5px;
+}
+
+.assistant-shopify-export-range em {
+    color: #8497a8;
+    font-size: 11px;
+    font-style: normal;
+    margin-top: 3px;
+}
+
+.assistant-shopify-export-group {
+    margin-bottom: 0;
+}
+
+.assistant-shopify-export-group label {
+    color: #405a73;
+    font-weight: 600;
+    margin-bottom: 7px;
+}
+
+.assistant-shopify-export-group .form-control {
+    border-color: #b9cbd9;
+    box-shadow: none;
+    color: #344f69;
+    height: 40px;
+}
+
+.assistant-shopify-export-group .form-control:focus {
+    border-color: #5da8d3;
+    box-shadow: 0 0 0 2px rgba(93, 168, 211, .14);
+}
+
+.assistant-shopify-export-group .help-block {
+    color: #7b8d9d;
+    line-height: 1.55;
+    margin: 8px 0 0;
+}
+
+#assistant-shopify-export-modal .modal-footer {
+    background: #f8fafc;
+    border-top-color: #e7eef3;
+    padding: 12px 20px;
+}
+
+#assistant-shopify-export-modal .modal-footer .btn {
+    font-weight: 600;
+    min-width: 82px;
+}
+
+@media (max-width: 520px) {
+    #assistant-shopify-export-modal .assistant-shopify-export-dialog {
+        margin: 20px auto;
+        width: calc(100% - 28px);
     }
 }

@@ -907,7 +907,7 @@ class DomainStoreController extends Controller
         return $context;
     }
 
-    /** @return array<string, int|string> */
+    /** @return array<string, mixed> */
     private function filters(Request $request): array
     {
         $shopStatus = $this->filterEnum($request, 'shop_status', AssistantDomainStore::shopStatusLabels());
@@ -934,10 +934,13 @@ class DomainStoreController extends Controller
             'email' => $this->filterText($request, 'email'),
             'email_bound' => $this->filterBoolean($request, 'email_bound'),
             'email_purchased' => $this->filterBoolean($request, 'email_purchased'),
-            'team' => $this->filterText($request, 'team'),
+            'team' => $this->filterTextList($request, 'team'),
             'project' => $this->filterText($request, 'project'),
             'user_name' => $this->filterText($request, 'user_name'),
-            'owner_user' => $this->filterText($request, 'owner_user'),
+            'owner_assignment' => $this->filterEnum($request, 'owner_assignment', [
+                'assigned' => 'assigned',
+                'unassigned' => 'unassigned',
+            ]),
             'erp' => $this->filterText($request, 'erp'),
             'credit_card' => $this->filterText($request, 'credit_card'),
             'wallet' => $this->filterText($request, 'wallet'),
@@ -955,7 +958,7 @@ class DomainStoreController extends Controller
         ];
     }
 
-    /** @param array<string, int|string> $filters */
+    /** @param array<string, mixed> $filters */
     private function storeQuery(AdminUser $user, array $filters): Builder
     {
         $keywordTerms = $this->keywordTerms((string) $filters['keyword']);
@@ -1002,17 +1005,22 @@ class DomainStoreController extends Controller
             }
         }
 
-        foreach (['team', 'erp'] as $filter) {
-            if ($filters[$filter] !== '') {
-                $query->whereJsonContains($filter, (string) $filters[$filter]);
-            }
+        if ($filters['team'] !== []) {
+            $query->where(function (Builder $teams) use ($filters): void {
+                foreach ($filters['team'] as $team) {
+                    $teams->orWhereJsonContains('team', $team);
+                }
+            });
         }
 
-        if ($filters['owner_user'] !== '') {
-            $ownerKeyword = $this->containsValue((string) $filters['owner_user']);
-            $query->whereHas('ownerUser', static fn (Builder $owner) => $owner
-                ->where('name', 'like', $ownerKeyword)
-                ->orWhere('username', 'like', $ownerKeyword));
+        if ($filters['erp'] !== '') {
+            $query->whereJsonContains('erp', (string) $filters['erp']);
+        }
+
+        if ($filters['owner_assignment'] === 'assigned') {
+            $query->whereNotNull('owner_user_id');
+        } elseif ($filters['owner_assignment'] === 'unassigned') {
+            $query->whereNull('owner_user_id');
         }
 
         foreach ([
@@ -2073,6 +2081,22 @@ class DomainStoreController extends Controller
         $value = $request->input($field, '');
 
         return is_scalar($value) ? trim((string) $value) : '';
+    }
+
+    /** @return list<string> */
+    private function filterTextList(Request $request, string $field): array
+    {
+        $value = $request->input($field, []);
+        $values = is_array($value) ? $value : [$value];
+
+        return collect($values)
+            ->filter(static fn (mixed $item): bool => is_scalar($item))
+            ->map(static fn (mixed $item): string => trim((string) $item))
+            ->filter(static fn (string $item): bool => $item !== '')
+            ->unique()
+            ->take(50)
+            ->values()
+            ->all();
     }
 
     private function filterKeyword(Request $request): string

@@ -9,7 +9,7 @@
         || str_starts_with(strtolower(trim((string) $value)), 'https://');
     $hasFilters = collect($filters)
         ->except(['per_page'])
-        ->contains(static fn (mixed $value): bool => $value !== '');
+        ->contains(static fn (mixed $value): bool => is_array($value) ? $value !== [] : $value !== '');
     $javascriptTranslations = [
         'clickToCopy' => $t('javascript.click_to_copy'),
         'copied' => $t('javascript.copied'),
@@ -155,8 +155,9 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-field-select-20261010-1.css">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-expanded-20261010-1.css?v=20261010-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-modal-20261009-1.css">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-1.css?v=20261020-2">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-1.css?v=20261023-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-form-20261021-1.css?v=20261021-3">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-team-picker-20261023-1.css?v=20261023-1">
 @endpush
 
 @section('content')
@@ -246,20 +247,37 @@
                             <div class="assistant-advanced-filter-field"><label for="filter-email-bound">{{ $t('fields.email_binding') }}</label><select id="filter-email-bound" class="form-control" name="email_bound"><option value="">{{ $t('common.all') }}</option><option value="1" @selected($filters['email_bound'] === '1')>{{ $t('common.yes') }}</option><option value="0" @selected($filters['email_bound'] === '0')>{{ $t('common.no') }}</option></select></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-email-purchased">{{ $t('fields.email_purchase') }}</label><select id="filter-email-purchased" class="form-control" name="email_purchased"><option value="">{{ $t('common.all') }}</option><option value="1" @selected($filters['email_purchased'] === '1')>{{ $t('common.yes') }}</option><option value="0" @selected($filters['email_purchased'] === '0')>{{ $t('common.no') }}</option></select></div>
                             <div class="assistant-advanced-filter-field">
-                                <label for="filter-team">{{ $t('fields.team') }}</label>
-                                <select id="filter-team" class="form-control" name="team">
-                                    <option value="">{{ $t('common.all') }}</option>
-                                    @if ($filters['team'] !== '' && !in_array($filters['team'], $quickOptions['team'] ?? [], true))
-                                        <option value="{{ $filters['team'] }}" selected>{{ $filters['team'] }}</option>
-                                    @endif
-                                    @foreach ($quickOptions['team'] ?? [] as $value)
-                                        <option value="{{ $value }}" @selected($filters['team'] === $value)>{{ $value }}</option>
-                                    @endforeach
-                                </select>
+                                <label id="filter-team-label">{{ $t('fields.team') }}</label>
+                                <div class="assistant-team-picker"
+                                     data-team-picker
+                                     data-empty-label="{{ $t('filters.team_all') }}"
+                                     data-selected-label="{{ $t('filters.team_selected', ['count' => '__count__']) }}">
+                                    <button type="button" class="form-control assistant-team-picker-toggle" data-team-picker-toggle aria-haspopup="true" aria-expanded="false" aria-labelledby="filter-team-label filter-team-summary">
+                                        <span id="filter-team-summary" data-team-picker-summary>{{ $filters['team'] === [] ? $t('filters.team_all') : '' }}</span>
+                                        <i class="fa fa-angle-down" aria-hidden="true"></i>
+                                    </button>
+                                    <div class="assistant-team-picker-menu" data-team-picker-menu hidden>
+                                        <div class="assistant-team-picker-head">
+                                            <strong>{{ $t('fields.team') }}</strong>
+                                            <button type="button" class="btn btn-link btn-xs" data-team-picker-clear>{{ $t('filters.team_clear') }}</button>
+                                        </div>
+                                        <div class="assistant-team-picker-options">
+                                            @forelse (collect($quickOptions['team'] ?? [])->merge($filters['team'])->unique()->values() as $value)
+                                                <label class="assistant-team-picker-option">
+                                                    <input type="checkbox" name="team[]" value="{{ $value }}" @checked(in_array($value, $filters['team'], true))>
+                                                    <span class="assistant-team-picker-check"><i class="fa fa-check"></i></span>
+                                                    <span>{{ $value }}</span>
+                                                </label>
+                                            @empty
+                                                <span class="assistant-team-picker-empty">{{ $t('filters.team_empty') }}</span>
+                                            @endforelse
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                             <div class="assistant-advanced-filter-field"><label for="filter-project">{{ $t('fields.project') }}</label><input id="filter-project" class="form-control" name="project" value="{{ $filters['project'] }}"></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-user-name">{{ $t('fields.user_short') }}</label><input id="filter-user-name" class="form-control" name="user_name" value="{{ $filters['user_name'] }}"></div>
-                            <div class="assistant-advanced-filter-field"><label for="filter-owner-user">{{ $t('fields.owner_user') }}</label><input id="filter-owner-user" class="form-control" name="owner_user" value="{{ $filters['owner_user'] }}"></div>
+                            <div class="assistant-advanced-filter-field"><label for="filter-owner-assignment">{{ $t('filters.owner_assignment') }}</label><select id="filter-owner-assignment" class="form-control" name="owner_assignment"><option value="">{{ $t('common.all') }}</option><option value="assigned" @selected($filters['owner_assignment'] === 'assigned')>{{ $t('filters.owner_assigned') }}</option><option value="unassigned" @selected($filters['owner_assignment'] === 'unassigned')>{{ $t('filters.owner_unassigned') }}</option></select></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-erp">{{ $t('fields.erp') }}</label><input id="filter-erp" class="form-control" name="erp" value="{{ $filters['erp'] }}"></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-credit-card">{{ $t('fields.credit_card') }}</label><input id="filter-credit-card" class="form-control" name="credit_card" value="{{ $filters['credit_card'] }}" list="filter-credit-card-options"><datalist id="filter-credit-card-options">@foreach ($quickOptions['credit_card'] ?? [] as $value)<option value="{{ $value }}">{{ $creditCardOptions[$value] ?? $value }}</option>@endforeach</datalist></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-wallet">{{ $t('fields.wallet') }}</label><input id="filter-wallet" class="form-control" name="wallet" value="{{ $filters['wallet'] }}" list="filter-wallet-options"><datalist id="filter-wallet-options">@foreach ($quickOptions['wallet'] ?? [] as $value)<option value="{{ $value }}">{{ $walletOptions[$value] ?? $value }}</option>@endforeach</datalist></div>
@@ -501,7 +519,13 @@
                 <form method="post" action="{{ route('assistant.domain-stores.export') }}" class="modal-content" id="assistant-export-form" data-loading="download">
                     @csrf
                     @foreach ($filters as $filterName => $filterValue)
-                        <input type="hidden" name="{{ $filterName }}" value="{{ $filterValue }}">
+                        @if (is_array($filterValue))
+                            @foreach ($filterValue as $item)
+                                <input type="hidden" name="{{ $filterName }}[]" value="{{ $item }}">
+                            @endforeach
+                        @else
+                            <input type="hidden" name="{{ $filterName }}" value="{{ $filterValue }}">
+                        @endif
                     @endforeach
                     <div class="modal-header">
                         <button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('common.close') }}"><span aria-hidden="true">&times;</span></button>
@@ -710,6 +734,7 @@
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-owner-form-20261020-1.js?v=20261021-2"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-modal-20261009-1.js?v=20261011-2"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-3.js?v=20261020-6"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-team-picker-20261023-1.js?v=20261023-1"></script>
     @if (session('success'))
         <script>
             window.ErpAdminNotifier.notify({

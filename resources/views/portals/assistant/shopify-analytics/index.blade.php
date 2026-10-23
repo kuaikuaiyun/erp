@@ -64,7 +64,8 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261013-3.css?v=20261013-3">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261014-1.css?v=20261014-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261014-2.css?v=20261014-2">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261020-1.css?v=20261020-7">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261020-1.css?v=20261023-2">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-team-picker-20261023-1.css?v=20261023-1">
 @endpush
 
 @section('content')
@@ -169,15 +170,40 @@
                         </select>
                     </div>
                     <div class="form-group">
-                        <label for="assistant-shopify-team">{{ $t('table.team') }}</label>
-                        <select id="assistant-shopify-team" name="team" class="form-control">
+                        <label id="assistant-shopify-team-label">{{ $t('table.team') }}</label>
+                        <div class="assistant-team-picker"
+                             data-team-picker
+                             data-empty-label="{{ $t('filters.team_all') }}"
+                             data-selected-label="{{ $t('filters.team_selected', ['count' => '__count__']) }}">
+                            <button type="button" class="form-control assistant-team-picker-toggle" data-team-picker-toggle aria-haspopup="true" aria-expanded="false" aria-labelledby="assistant-shopify-team-label assistant-shopify-team-summary">
+                                <span id="assistant-shopify-team-summary" data-team-picker-summary>{{ $filters['team'] === [] ? $t('filters.team_all') : '' }}</span>
+                                <i class="fa fa-angle-down" aria-hidden="true"></i>
+                            </button>
+                            <div class="assistant-team-picker-menu" data-team-picker-menu hidden>
+                                <div class="assistant-team-picker-head">
+                                    <strong>{{ $t('table.team') }}</strong>
+                                    <button type="button" class="btn btn-link btn-xs" data-team-picker-clear>{{ $t('filters.team_clear') }}</button>
+                                </div>
+                                <div class="assistant-team-picker-options">
+                                    @forelse (collect($teamOptions)->merge($filters['team'])->unique()->values() as $teamOption)
+                                        <label class="assistant-team-picker-option">
+                                            <input type="checkbox" name="team[]" value="{{ $teamOption }}" @checked(in_array($teamOption, $filters['team'], true))>
+                                            <span class="assistant-team-picker-check"><i class="fa fa-check"></i></span>
+                                            <span>{{ $teamOption }}</span>
+                                        </label>
+                                    @empty
+                                        <span class="assistant-team-picker-empty">{{ $t('filters.team_empty') }}</span>
+                                    @endforelse
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="assistant-shopify-owner-assignment">{{ $t('filters.owner_assignment') }}</label>
+                        <select id="assistant-shopify-owner-assignment" name="owner_assignment" class="form-control">
                             <option value="">{{ __('assistant.domain_stores.common.all') }}</option>
-                            @if ($filters['team'] !== '' && !in_array($filters['team'], $teamOptions, true))
-                                <option value="{{ $filters['team'] }}" selected>{{ $filters['team'] }}</option>
-                            @endif
-                            @foreach ($teamOptions as $teamOption)
-                                <option value="{{ $teamOption }}" @selected($filters['team'] === $teamOption)>{{ $teamOption }}</option>
-                            @endforeach
+                            <option value="assigned" @selected($filters['owner_assignment'] === 'assigned')>{{ $t('filters.owner_assigned') }}</option>
+                            <option value="unassigned" @selected($filters['owner_assignment'] === 'unassigned')>{{ $t('filters.owner_unassigned') }}</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -200,6 +226,9 @@
                     </div>
                     <div class="assistant-shopify-filter-actions">
                         <button type="submit" class="btn btn-primary"><i class="fa fa-search"></i> {{ $t('filters.submit') }}</button>
+                        <button type="button" class="btn btn-success" data-toggle="modal" data-target="#assistant-shopify-export-modal">
+                            <i class="fa fa-download"></i> {{ $t('actions.export_data') }}
+                        </button>
                         <a href="{{ route('assistant.shopify-analytics.index') }}" class="btn btn-default">{{ $t('filters.reset') }}</a>
                     </div>
                 </div>
@@ -459,6 +488,50 @@
                 </div>
             </div>
         </div>
+
+        <div id="assistant-shopify-export-modal" class="modal fade" tabindex="-1" role="dialog" aria-labelledby="assistant-shopify-export-title">
+            <div class="modal-dialog assistant-shopify-export-dialog" role="document">
+                <form class="modal-content" method="get" action="{{ route('assistant.shopify-analytics.export-orders') }}">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('export.cancel') }}"><span aria-hidden="true">&times;</span></button>
+                        <h4 id="assistant-shopify-export-title" class="modal-title"><i class="fa fa-download"></i> {{ $t('export.title') }}</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="assistant-shopify-export-range">
+                            <span class="assistant-shopify-export-range-icon"><i class="fa fa-calendar" aria-hidden="true"></i></span>
+                            <div>
+                                <small>{{ $t('export.range_label') }}</small>
+                                <strong>{{ $filters['from_date'] }} <i class="fa fa-long-arrow-right" aria-hidden="true"></i> {{ $filters['to_date'] }}</strong>
+                                <em>{{ $filters['timezone'] }}</em>
+                            </div>
+                        </div>
+                        <div class="form-group assistant-shopify-export-group">
+                            <label for="assistant-shopify-export-group-by">{{ $t('export.group_by_label') }}</label>
+                            <select id="assistant-shopify-export-group-by" class="form-control" name="group_by">
+                                <option value="store">{{ $t('export.group_by_store') }}</option>
+                                <option value="date">{{ $t('export.group_by_date') }}</option>
+                            </select>
+                            <p class="help-block">{{ $t('export.group_by_hint') }}</p>
+                        </div>
+
+                        <input type="hidden" name="shop_name" value="{{ $filters['shop_name'] }}">
+                        <input type="hidden" name="domains" value="{{ implode(',', $filters['domains']) }}">
+                        @foreach ($filters['team'] as $team)
+                            <input type="hidden" name="team[]" value="{{ $team }}">
+                        @endforeach
+                        <input type="hidden" name="owner_assignment" value="{{ $filters['owner_assignment'] }}">
+                        <input type="hidden" name="email_purchased" value="{{ $filters['email_purchased'] }}">
+                        <input type="hidden" name="timezone" value="{{ $filters['timezone'] }}">
+                        <input type="hidden" name="from_date" value="{{ $filters['from_date'] }}">
+                        <input type="hidden" name="to_date" value="{{ $filters['to_date'] }}">
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">{{ $t('export.cancel') }}</button>
+                        <button type="submit" class="btn btn-primary"><i class="fa fa-download"></i> {{ $t('export.download') }}</button>
+                    </div>
+                </form>
+            </div>
+        </div>
     </section>
 @endsection
 
@@ -467,6 +540,7 @@
         window.ErpAssistantShopifyAnalyticsConfig = @json($shopifyAnalyticsJavascript);
     </script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-shopify-analytics-20261012-3.js?v=20261012-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-team-picker-20261023-1.js?v=20261023-1"></script>
     @if (session('success'))
         <script>
             window.ErpAdminNotifier.notify({type: 'success', title: @json($t('messages.success_title')), message: @json(session('success'))});
