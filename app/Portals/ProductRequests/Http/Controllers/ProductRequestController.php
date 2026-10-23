@@ -1393,9 +1393,9 @@ class ProductRequestController extends Controller
                 ->pluck('id')
                 ->all();
             $checkedSkus = $this->splitSkus(implode(',', $data['selected_skus'] ?? []));
-            // 面板左列编辑后的运营 SKU（换行/逗号分隔）统一规范为逗号分隔存储
-            $data['skus'] = $this->normalizeSkus((string) ($data['skus'] ?? ''));
-            $operationSkus = $this->splitSkus((string) $data['skus']);
+            // 面板左列可临时修正运营 SKU，仅用于本次勾选与链接级 SKU 处理；
+            // 需求记录保留运营原始提交的 skus，采购确认值写入 procurement_skus，运营端据此提示 SKU 有变动
+            $operationSkus = $this->splitSkus($this->normalizeSkus((string) ($data['skus'] ?? '')));
             // 本次面板展示过的 SKU（右栏系统已录入 + 左栏运营填写），用于识别已取消勾选项
             $displayedSkus = array_values(array_unique(array_merge(
                 $this->splitSkus((string) ($data['link_skus'] ?? '')),
@@ -1405,7 +1405,7 @@ class ProductRequestController extends Controller
             $removedOperationSkus = array_values(array_diff($this->splitSkus((string) $locked->skus), $operationSkus));
             $obsoleteSkus = array_values(array_unique(array_merge($displayedSkus, $removedOperationSkus)));
             $skuValueMap = $this->parseProcurementSkuValues((string) ($data['sku_value_rows'] ?? ''), $checkedSkus);
-            unset($data['reuse_source_id'], $data['seller_images'], $data['selected_skus'], $data['link_skus'], $data['sku_value_rows'], $data['removed_seller_images'], $data['inspection_reject_reason']);
+            unset($data['skus'], $data['reuse_source_id'], $data['seller_images'], $data['selected_skus'], $data['link_skus'], $data['sku_value_rows'], $data['removed_seller_images'], $data['inspection_reject_reason']);
             // 链接级 SKU 以本次勾选结果为最终集合：展示过但取消勾选的、以及被改写的旧运营 SKU 不再累计保留；
             // 未查重（右栏未加载）时，未被展示过的历史 SKU 予以保留，避免误删链接已有数据
             $linkSkus = array_values(array_unique(array_merge(
