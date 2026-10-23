@@ -127,14 +127,17 @@ class WarehouseProductStatisticsController extends Controller
             // 用通途 goodsImageId 临时覆盖接口返回的 product_image_url。
             // 只改 JSON 响应，不动 logistics_order_items 表里的 Shopify 原图 ——
             // 避免污染系统中其他用到 product_image_url 的页面。
+            // 注意：必须按索引直接写 $detail['detail']['rows'][$idx]，
+            // PHP 的 foreach + &$row 在多层数组+中间变量场景下有 COW（写时复制）
+            // 陷阱，引用修改可能不生效。
             $imageMap = $weightRefresh['images'] ?? [];
-            foreach (($detail['detail']['rows'] ?? []) as &$row) {
+            $rows = $detail['detail']['rows'] ?? [];
+            foreach ($rows as $idx => $row) {
                 $skuKey = mb_strtolower(trim((string) ($row['tongtu_sku'] ?? '')));
                 if ($skuKey !== '' && isset($imageMap[$skuKey])) {
-                    $row['product_image_url'] = $imageMap[$skuKey];
+                    $detail['detail']['rows'][$idx]['product_image_url'] = $imageMap[$skuKey];
                 }
             }
-            unset($row);
 
             // 产品级大图（弹窗顶部 identity 区域）也用通途图覆盖。
             // 通途一个 product 下各 SKU 的 goodsImageId 是同一张，取 images map 的第一个即可。

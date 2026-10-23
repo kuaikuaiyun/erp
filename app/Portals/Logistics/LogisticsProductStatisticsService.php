@@ -468,6 +468,7 @@ class LogisticsProductStatisticsService
 
         return [
             'tab' => $tab,
+            'product' => $product, // 所有 tab 都带上 product，方便 Controller 层做临时字段覆盖（比如通途 goodsImageId 覆盖 Shopify 原图）
             'detail' => match ($tab) {
                 'variants' => $this->variantDetailPage($filters, $key, $options),
                 'refunds' => $this->refundDetailPage($filters, $key, $options),
