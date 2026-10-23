@@ -123,13 +123,30 @@ class ProductRequestAccessService
             || $this->hasDirectDepartmentSlug($user, self::PROCUREMENT_REVIEW_DEPARTMENT_SLUG);
     }
 
-    /** PCL SKU 管理仅入录审核部门树内任意部门的主管与管理员可见可用 */
+    /** PCL SKU 管理：管理员、入录审核部门树内主管/副主管（含审核主管）、录入部门内的录入人员可见可用 */
     public function canManageLinkSkus(AdminUser $user): bool
     {
-        if ($user->isAdministrator()) {
+        if ($user->isAdministrator() || $this->isProcurementTreeSupervisor($user)) {
             return true;
         }
 
+        // 录入人员：录入部门（含其后代部门）内的成员
+        $entryIds = $this->assignableDepartmentIds();
+
+        return $entryIds !== []
+            && $user->departments()->whereIn('id', $entryIds)->exists();
+    }
+
+    /** 导入基础数据：boss 账号与入录审核部门树内主管/副主管（含录入主管、审核主管）可用 */
+    public function canImportLinkSkus(AdminUser $user): bool
+    {
+        return (string) $user->username === 'kky_boss'
+            || $this->isProcurementTreeSupervisor($user);
+    }
+
+    /** 是否入录审核部门树（dept-000015 及后代，含录入部门、审核部门）内的主管/副主管 */
+    private function isProcurementTreeSupervisor(AdminUser $user): bool
+    {
         $root = Department::business()->where('slug', self::PROCUREMENT_TREE_ROOT_SLUG)->first(['id']);
         if (!$root) {
             return false;
@@ -137,7 +154,7 @@ class ProductRequestAccessService
 
         return $user->departments()
             ->whereIn('id', $this->descendantDepartmentIds((int) $root->getKey()))
-            ->wherePivot('position', Department::POSITION_MANAGER)
+            ->wherePivotIn('position', [Department::POSITION_MANAGER, Department::POSITION_DEPUTY])
             ->exists();
     }
 

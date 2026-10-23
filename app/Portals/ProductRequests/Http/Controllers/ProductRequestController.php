@@ -14,6 +14,7 @@ use App\Portals\ProductRequests\ProductRequestAccessService;
 use App\Portals\ProductRequests\ProductRequestWorkflowService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Collection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -79,22 +80,40 @@ class ProductRequestController extends Controller
         $results = [];
         $matchType = null;
 
+        // 链接与品名不分优先级：两者都填时各自查询，并把结果合并展示
+        $linkResults = [];
         if ($supplierUrl !== '') {
             // 1688 链接精确匹配：只查链接 SKU 库
             $normalizedUrl = $this->workflow->normalizeSupplierUrl($supplierUrl);
             $hash = $this->workflow->supplierUrlHash($normalizedUrl);
-            $matchType = 'supplier_url';
 
             $linkSku = ProductRequestLinkSku::query()->where('supplier_url_hash', $hash)->first();
             if ($linkSku) {
-                $results[] = $this->linkSkuReusePayload($linkSku);
+                $linkResults[] = $this->linkSkuReusePayload($linkSku);
             }
         }
 
-        if ($results === [] && $keyword !== '') {
-            // 产品名称模糊匹配：只查链接 SKU 库
-            $results = $this->dedupeKeywordResults($keyword);
-            $matchType = $results !== [] ? 'keyword' : null;
+        $keywordResults = $keyword !== '' ? $this->dedupeKeywordResults($keyword) : [];
+
+        // 合并去重：同一 1688 链接只展示一条，链接命中的排在前面
+        $seenUrls = [];
+        foreach (array_merge($linkResults, $keywordResults) as $item) {
+            $key = (string) ($item['supplier_url'] ?? '');
+            if ($key !== '') {
+                if (isset($seenUrls[$key])) {
+                    continue;
+                }
+                $seenUrls[$key] = true;
+            }
+            $results[] = $item;
+        }
+
+        if ($linkResults !== [] && $keywordResults !== []) {
+            $matchType = 'mixed';
+        } elseif ($linkResults !== []) {
+            $matchType = 'supplier_url';
+        } elseif ($keywordResults !== []) {
+            $matchType = 'keyword';
         }
 
         return view('portals.product-requests.operation.dedupe', [
@@ -106,22 +125,85 @@ class ProductRequestController extends Controller
         ]);
     }
 
-    /** 关键词模糊查询：只查 product_request_link_skus.product_name */
+    /** 关键词模糊查询：只查 product_request_link_skus.product_name，支持两字以上的关联匹配 */
     private function dedupeKeywordResults(string $keyword): array
     {
-        $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $keyword);
+        return $this->linkSkuNameMatches($keyword, 30)
+            ->map(fn (ProductRequestLinkSku $row): array => $this->linkSkuReusePayload($row))
+            ->values()
+            ->all();
+    }
 
-        $linkSkuRows = ProductRequestLinkSku::query()
-            ->where('product_name', 'like', '%'.$escaped.'%')
-            ->limit(30)
-            ->get();
-
-        $results = [];
-        foreach ($linkSkuRows as $linkSku) {
-            $results[] = $this->linkSkuReusePayload($linkSku);
+    /**
+     * 产品名关联搜索：把关键词切成两字（英文按整词）片段，
+     * 只要产品名包含任意片段就算命中，命中片段越多排越前。
+     */
+    private function linkSkuNameMatches(string $keyword, int $limit = 20): Collection
+    {
+        $terms = $this->linkSkuNameSearchTerms($keyword);
+        if ($terms === []) {
+            return collect();
         }
 
-        return $results;
+        $rows = ProductRequestLinkSku::query()
+            ->where(function (Builder $query) use ($terms): void {
+                foreach ($terms as $term) {
+                    $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $term);
+                    $query->orWhere('product_name', 'like', '%'.$escaped.'%');
+                }
+            })
+            ->orderByDesc('id')
+            ->limit(300)
+            ->get()
+            ->filter(fn (ProductRequestLinkSku $row): bool => $this->splitSkus((string) $row->skus) !== []);
+
+        $rows = $rows->sortByDesc(function (ProductRequestLinkSku $row) use ($terms): string {
+            $name = mb_strtolower((string) $row->product_name);
+            $score = 0;
+            foreach ($terms as $term) {
+                if ($name !== '' && mb_strpos($name, mb_strtolower($term)) !== false) {
+                    $score++;
+                }
+            }
+
+            return sprintf('%03d-%012d', $score, (int) $row->getKey());
+        })->values();
+
+        return $rows->unique('supplier_url_hash')->take($limit)->values();
+    }
+
+    /** 把关键词拆成用于关联匹配的片段：中文按两字滑动窗口，英文按整词 */
+    private function linkSkuNameSearchTerms(string $keyword): array
+    {
+        $keyword = trim(preg_replace('/\s+/u', ' ', $keyword) ?? $keyword);
+        if ($keyword === '') {
+            return [];
+        }
+
+        $terms = [];
+        foreach (preg_split('/[\s,，、;；\/|]+/u', $keyword) ?: [] as $chunk) {
+            $chunk = trim($chunk);
+            $length = mb_strlen($chunk, 'UTF-8');
+            if ($length === 0) {
+                continue;
+            }
+            if ($length <= 2) {
+                $terms[] = $chunk;
+                continue;
+            }
+            // 纯英文/数字片段按整词匹配，避免被切碎后命中大量无关产品
+            if (preg_match('/^[\x20-\x7E]+$/', $chunk) === 1) {
+                $terms[] = $chunk;
+                continue;
+            }
+            for ($i = 0; $i <= $length - 2; $i++) {
+                $terms[] = mb_substr($chunk, $i, 2, 'UTF-8');
+            }
+        }
+
+        $terms = array_values(array_unique($terms));
+
+        return array_slice($terms, 0, 12);
     }
 
     /** 审核链接问题：投放链接审核失败的需求提报，按提报编号唯一展示 */
@@ -610,10 +692,10 @@ class ProductRequestController extends Controller
         );
     }
 
-    /** 仅 boss 账号可导入链接 SKU 数据 */
+    /** 导入基础数据：boss 账号与入录审核部门树内主管/副主管可用 */
     private function canImportProductRequests(AdminUser $user): bool
     {
-        return $user->username === 'kky_boss';
+        return $this->access->canImportLinkSkus($user);
     }
 
     /** 链接 SKU 记录删除：同时清理产品图、实拍图等磁盘文件，仅移除链接级数据不影响流程记录 */
@@ -1311,12 +1393,25 @@ class ProductRequestController extends Controller
                 ->pluck('id')
                 ->all();
             $checkedSkus = $this->splitSkus(implode(',', $data['selected_skus'] ?? []));
-            // 面板左列编辑后的运营 SKU（换行/逗号分隔）统一规范为逗号分隔存储
-            $data['skus'] = $this->normalizeSkus((string) ($data['skus'] ?? ''));
+            // 面板左列可临时修正运营 SKU，仅用于本次勾选与链接级 SKU 处理；
+            // 需求记录保留运营原始提交的 skus，采购确认值写入 procurement_skus，运营端据此提示 SKU 有变动
+            $operationSkus = $this->splitSkus($this->normalizeSkus((string) ($data['skus'] ?? '')));
+            // 本次面板展示过的 SKU（右栏系统已录入 + 左栏运营填写），用于识别已取消勾选项
+            $displayedSkus = array_values(array_unique(array_merge(
+                $this->splitSkus((string) ($data['link_skus'] ?? '')),
+                $operationSkus,
+            )));
+            // 面板左列被改写/删除的旧运营 SKU，需要从链接记录中移除，不能作为历史数据继续累计
+            $removedOperationSkus = array_values(array_diff($this->splitSkus((string) $locked->skus), $operationSkus));
+            $obsoleteSkus = array_values(array_unique(array_merge($displayedSkus, $removedOperationSkus)));
             $skuValueMap = $this->parseProcurementSkuValues((string) ($data['sku_value_rows'] ?? ''), $checkedSkus);
-            unset($data['reuse_source_id'], $data['seller_images'], $data['selected_skus'], $data['link_skus'], $data['sku_value_rows'], $data['removed_seller_images'], $data['inspection_reject_reason']);
-            // 链接级 SKU 集合只增不减：系统已录入的 SKU 始终保留在链接记录中，运营 SKU 勾选后并入；表单仅保存本次勾选的 SKU
-            $linkSkus = $this->mergeLinkSkus($this->linkSkuSet($linkHash), $checkedSkus);
+            unset($data['skus'], $data['reuse_source_id'], $data['seller_images'], $data['selected_skus'], $data['link_skus'], $data['sku_value_rows'], $data['removed_seller_images'], $data['inspection_reject_reason']);
+            // 链接级 SKU 以本次勾选结果为最终集合：展示过但取消勾选的、以及被改写的旧运营 SKU 不再累计保留；
+            // 未查重（右栏未加载）时，未被展示过的历史 SKU 予以保留，避免误删链接已有数据
+            $linkSkus = array_values(array_unique(array_merge(
+                $checkedSkus,
+                array_values(array_diff($this->splitSkus($this->linkSkuSet($linkHash, $locked->getKey())), $obsoleteSkus)),
+            )));
             $procurementSkus = implode(',', $checkedSkus);
             if ($linkSkus !== []) {
                 $linkSkuPayload = [
@@ -1344,17 +1439,7 @@ class ProductRequestController extends Controller
                 }
 
                 if ($linkSku && (string) $linkSku->supplier_url_hash !== $linkHash) {
-                    // 命中同 PCL 的历史记录（不同链接）：保留其原有 SKU 与价格重量，合并后更新
-                    $linkSkuPayload['skus'] = implode(',', $this->mergeLinkSkus(
-                        (string) $linkSku->skus,
-                        $linkSkus,
-                    ));
-                    if ($skuValueMap !== []) {
-                        $linkSkuPayload['sku_values'] = array_merge(
-                            (array) ($linkSku->sku_values ?? []),
-                            $skuValueMap,
-                        );
-                    }
+                    // 命中同 PCL 的历史记录（不同链接）：直接覆盖为本次结果，旧链接 SKU 不再累计保留
                     $linkSkuPayload['supplier_url_hash'] = $linkHash;
                 }
 
@@ -1534,31 +1619,30 @@ class ProductRequestController extends Controller
         ]);
         $normalizedUrl = $this->workflow->normalizeSupplierUrl($data['supplier_url']);
         $hash = $this->workflow->supplierUrlHash($normalizedUrl);
-        // 链接与产品名统一只查 product_request_link_skus 表
-        $matchType = 'supplier_url';
-        $linkSkus = collect();
+        // 链接与产品名统一只查 product_request_link_skus 表；
+        // 两者不分优先级，各自查询后合并展示（同一链接只保留一条，链接命中的排前面）
+        $linkMatches = collect();
         $linkSku = ProductRequestLinkSku::query()->where('supplier_url_hash', $hash)->first();
 
         if ($linkSku && $this->splitSkus((string) $linkSku->skus) !== []) {
-            $linkSkus = collect([$linkSku]);
-        } else {
-            $keyword = trim((string) ($data['standard_chinese_name'] ?? ''));
+            $linkMatches = collect([$linkSku]);
+        }
 
-            // 链接未命中（或该链接没有 SKU）时，回退按产品名模糊匹配同一张表
-            // 名称模糊查询可能命中多个链接，按链接聚合后全部返回，供采购选择
-            if ($keyword !== '') {
-                $matchType = 'standard_chinese_name';
-                $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $keyword);
-                $linkSkus = ProductRequestLinkSku::query()
-                    ->where('product_name', 'like', '%'.$escaped.'%')
-                    ->latest('id')
-                    ->limit(200)
-                    ->get()
-                    ->filter(fn (ProductRequestLinkSku $row): bool => $this->splitSkus((string) $row->skus) !== [])
-                    ->unique('supplier_url_hash')
-                    ->take(20)
-                    ->values();
-            }
+        $keywordMatches = collect();
+        $keyword = trim((string) ($data['standard_chinese_name'] ?? ''));
+
+        // 名称模糊查询可能命中多个链接，按链接聚合后全部返回，供采购选择
+        if ($keyword !== '') {
+            $keywordMatches = $this->linkSkuNameMatches($keyword, 20);
+        }
+
+        $linkSkus = $linkMatches->concat($keywordMatches)->unique('supplier_url_hash')->values();
+
+        $matchType = 'supplier_url';
+        if ($linkMatches->isNotEmpty() && $keywordMatches->isNotEmpty()) {
+            $matchType = 'mixed';
+        } elseif ($linkMatches->isEmpty() && $keywordMatches->isNotEmpty()) {
+            $matchType = 'standard_chinese_name';
         }
 
         return response()->json([

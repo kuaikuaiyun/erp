@@ -80,6 +80,7 @@ return [
         'no_results' => '没有找到搜索信息，请检查关键词或链接是否正确，或尝试其他搜索条件',
         'match_url' => '按 1688 链接精确匹配',
         'match_keyword' => '按关键词模糊匹配',
+        'match_both' => '按 1688 链接与关键词匹配',
         'result_source_link_sku' => '来自链接 SKU 库',
         'result_source_record' => '来自需求提报记录',
         'pcl_label' => 'PCL 商品编号',
