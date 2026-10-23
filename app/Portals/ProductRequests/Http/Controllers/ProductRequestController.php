@@ -692,10 +692,10 @@ class ProductRequestController extends Controller
         );
     }
 
-    /** 仅 boss 账号可导入链接 SKU 数据 */
+    /** 导入基础数据：boss 账号与入录审核部门树内主管/副主管可用 */
     private function canImportProductRequests(AdminUser $user): bool
     {
-        return $user->username === 'kky_boss';
+        return $this->access->canImportLinkSkus($user);
     }
 
     /** 链接 SKU 记录删除：同时清理产品图、实拍图等磁盘文件，仅移除链接级数据不影响流程记录 */

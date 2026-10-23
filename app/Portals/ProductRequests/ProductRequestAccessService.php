@@ -126,21 +126,7 @@ class ProductRequestAccessService
     /** PCL SKU 管理：管理员、入录审核部门树内主管/副主管（含审核主管）、录入部门内的录入人员可见可用 */
     public function canManageLinkSkus(AdminUser $user): bool
     {
-        if ($user->isAdministrator()) {
-            return true;
-        }
-
-        $root = Department::business()->where('slug', self::PROCUREMENT_TREE_ROOT_SLUG)->first(['id']);
-        if (!$root) {
-            return false;
-        }
-
-        // 主管/副主管：入录审核部门树内任意部门（含录入部门、审核部门）
-        $isSupervisor = $user->departments()
-            ->whereIn('id', $this->descendantDepartmentIds((int) $root->getKey()))
-            ->wherePivotIn('position', [Department::POSITION_MANAGER, Department::POSITION_DEPUTY])
-            ->exists();
-        if ($isSupervisor) {
+        if ($user->isAdministrator() || $this->isProcurementTreeSupervisor($user)) {
             return true;
         }
 
@@ -149,6 +135,27 @@ class ProductRequestAccessService
 
         return $entryIds !== []
             && $user->departments()->whereIn('id', $entryIds)->exists();
+    }
+
+    /** 导入基础数据：boss 账号与入录审核部门树内主管/副主管（含录入主管、审核主管）可用 */
+    public function canImportLinkSkus(AdminUser $user): bool
+    {
+        return (string) $user->username === 'kky_boss'
+            || $this->isProcurementTreeSupervisor($user);
+    }
+
+    /** 是否入录审核部门树（dept-000015 及后代，含录入部门、审核部门）内的主管/副主管 */
+    private function isProcurementTreeSupervisor(AdminUser $user): bool
+    {
+        $root = Department::business()->where('slug', self::PROCUREMENT_TREE_ROOT_SLUG)->first(['id']);
+        if (!$root) {
+            return false;
+        }
+
+        return $user->departments()
+            ->whereIn('id', $this->descendantDepartmentIds((int) $root->getKey()))
+            ->wherePivotIn('position', [Department::POSITION_MANAGER, Department::POSITION_DEPUTY])
+            ->exists();
     }
 
     /** 入录审核部门树内的所有部门都可查看运营部门提报的数据，不再按“录入部门 => 运营部门”一对一映射 */
