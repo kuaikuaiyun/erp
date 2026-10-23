@@ -174,7 +174,12 @@ class LogisticsProductStatisticsService
     {
         $cacheKey = $this->statisticsCacheKey('candidates', $filters);
         $rows = Cache::remember($cacheKey, now()->addSeconds(45), function () use ($filters): array {
-            return $this->lightweightProductCandidateQuery($filters)
+            $query = $this->lightweightProductCandidateQuery($filters);
+            if (!empty($filters['require_tongtu_match'])) {
+                $query->whereRaw("NULLIF(TRIM(first_item.tongtu_product_code), '') IS NOT NULL");
+            }
+
+            return $query
                 ->get()
                 ->map(static fn (object $row): array => (array) $row)
                 ->all();
@@ -1224,6 +1229,9 @@ class LogisticsProductStatisticsService
         if ($decision !== '') {
             $result->where('product_statistics.decision', $decision);
         }
+        if (!empty($filters['require_tongtu_match'])) {
+            $result->whereRaw("NULLIF(TRIM(product_statistics.tongtu_product_code), '') IS NOT NULL");
+        }
 
         return $result;
     }
@@ -2025,10 +2033,24 @@ class LogisticsProductStatisticsService
             $shopifySkus = collect($group)->map(static fn (LogisticsOrderItem $item): string => trim((string) $item->shopify_sku))
                 ->filter()->unique()->sort()->values()->all();
 
+            // 每组选首个有值的货品图片（product_image_url 来自 Shopify 订单行，
+            // 同一 tongtu_sku 下多行图片一致，取首个非空即可）
+            $variantImageUrl = collect($group)
+                ->map(static fn (LogisticsOrderItem $item): string => trim((string) $item->product_image_url))
+                ->first(static fn (string $url): bool => $url !== '');
+
+            // 规格代表性重量：取组内首个非零的 sale_weight_gram（通途 goodsDetail 换算）
+            $variantWeightGram = collect($group)
+                ->map(static fn (LogisticsOrderItem $item): float => (float) ($item->sale_weight_gram ?? 0))
+                ->first(static fn (float $w): bool => $w > 0);
+
             return [
                 'tongtu_sku' => trim((string) $first->tongtu_sku) ?: __('logistics.common.not_available'),
                 'shopify_skus' => $shopifySkus,
                 'tongtu_product_name' => trim((string) $first->tongtu_product_name) ?: __('logistics.common.not_available'),
+                'tongtu_product_code' => trim((string) $first->tongtu_product_code),
+                'product_image_url' => $variantImageUrl !== '' ? $variantImageUrl : null,
+                'sale_weight_gram' => $variantWeightGram ?? 0.0,
                 'stores' => $summary['stores'],
                 'shop_count' => $summary['shop_count'],
                 'order_count' => $this->ordersForItems($group)->count(),

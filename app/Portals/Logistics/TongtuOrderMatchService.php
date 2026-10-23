@@ -711,6 +711,133 @@ class TongtuOrderMatchService
         return $code === 0 || $code === '0' || $code === 200 || $code === '200' || Arr::get($body, 'success') === true;
     }
 
+    /**
+     * 刷新给定 tongtu_sku 的 sale_weight_gram：调通途 goodsQuery，取 goodsDetail[].goodsWeight
+     * 写入 logistics_order_items.sale_weight_gram。用户需求：只要 goodsWeight，不乘 goodsQuantity。
+     *
+     * @param list<string> $tongtuSkus
+     * @return array{refreshed:int, failed:int, not_found:int, skipped:int}
+     */
+    public function refreshWeightsByTongtuSkus(array $tongtuSkus): array
+    {
+        $tongtuSkus = array_values(array_unique(array_filter(array_map('trim', $tongtuSkus))));
+        if ($tongtuSkus === []) {
+            return ['refreshed' => 0, 'failed' => 0, 'not_found' => 0, 'skipped' => 0, 'images' => []];
+        }
+
+        $refreshed = 0;
+        $failed = 0;
+        $notFound = 0;
+        $status = 'success';
+        $message = '';
+        $session = null;
+        /** @var array<string, string> 通途 SKU (lower-trim) => goodsImageUrl */
+        $images = [];
+
+        try {
+            $this->assertConfigured();
+            $session = $this->authenticatedSession();
+        } catch (\Throwable $e) {
+            $status = 'failed';
+            $message = '通途鉴权失败：'.Str::limit($e->getMessage(), 300);
+            $failed = count($tongtuSkus);
+            $this->writeWeightRefreshLog($tongtuSkus, ['refreshed' => 0, 'failed' => $failed, 'not_found' => 0, 'skipped' => 0], $status, $message);
+
+            return ['refreshed' => 0, 'failed' => $failed, 'not_found' => 0, 'skipped' => 0, 'images' => []];
+        }
+
+        try {
+            // 不强制刷新：走 goodsBySku 的缓存（之前自动匹配已缓存 360 分钟）。
+            // 仓库点"查看"的目的是：1) 确保 DB 有最新重量（如果之前没刷新过），
+            // 2) 拿到通途 goodsImageId 覆盖前端弹窗图片。缓存里的 product 含完整
+            // goodsDetail，重量和图片都能从缓存 product 里取到，完全没必要每次都调通途。
+            $catalogue = $this->goodsBySku($tongtuSkus, $session, false /* forceRefresh */);
+        } catch (\Throwable $e) {
+            $status = 'failed';
+            $message = '通途 goodsQuery 异常：'.Str::limit($e->getMessage(), 300);
+            $failed = count($tongtuSkus);
+            $this->writeWeightRefreshLog($tongtuSkus, ['refreshed' => 0, 'failed' => $failed, 'not_found' => 0, 'skipped' => 0], $status, $message);
+
+            return ['refreshed' => 0, 'failed' => $failed, 'not_found' => 0, 'skipped' => 0, 'images' => []];
+        }
+
+        foreach ($tongtuSkus as $sku) {
+            $key = $this->skuKey($sku);
+            $matched = $catalogue[$key] ?? null;
+            if ($matched === null) {
+                $notFound++;
+                continue;
+            }
+
+            $product = $matched['product'];
+            $details = $this->goodsDetails($product);
+
+            // 取第一个有 goodsWeight 的 detail；同时取 goodsImageId 供接口层临时覆盖（不改 DB）
+            $goodsWeight = 0.0;
+            foreach ($details as $detail) {
+                $w = $this->numberValue($detail['goodsWeight'] ?? null);
+                if ($w !== null && $w > 0) {
+                    $goodsWeight = $w;
+                }
+                $img = trim((string) ($detail['goodsImageId'] ?? ''));
+                if ($img !== '' && !isset($images[$key])) {
+                    $images[$key] = $img;
+                }
+                // 重量和图片都拿到就可以停
+                if ($goodsWeight > 0 && isset($images[$key])) break;
+            }
+
+            try {
+                LogisticsOrderItem::query()
+                    ->whereRaw("LOWER(TRIM(tongtu_sku)) = ?", [$key])
+                    ->update(['sale_weight_gram' => $goodsWeight]);
+                $refreshed++;
+            } catch (\Throwable $e) {
+                $failed++;
+            }
+        }
+
+        $result = [
+            'refreshed' => $refreshed,
+            'failed' => $failed,
+            'not_found' => $notFound,
+            'skipped' => count($tongtuSkus) - $refreshed - $failed - $notFound,
+            'images' => $images,
+        ];
+
+        $status = $failed > 0 ? 'partial' : 'success';
+        $message = '通途重量刷新：已刷新'.$refreshed.' SKU';
+        $this->writeWeightRefreshLog($tongtuSkus, $result, $status, $message);
+
+        return $result;
+    }
+
+    /**
+     * 把通途重量刷新写入 logistics_sync_logs 表 —— 方便后续查询通途访问记录。
+     *
+     * @param list<string> $skus
+     * @param array<string,int> $result
+     */
+    private function writeWeightRefreshLog(array $skus, array $result, string $status, string $message): void
+    {
+        try {
+            LogisticsSyncLog::query()->create([
+                'source' => 'tongtu',
+                'action' => 'weight_refresh',
+                'status' => $status,
+                'message' => $message,
+                'context' => json_encode([
+                    'skus' => $skus,
+                    'total' => count($skus),
+                    'result' => $result,
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'logistics_order_id' => null,
+            ]);
+        } catch (\Throwable $e) {
+            // 日志写入失败不阻塞主流程
+        }
+    }
+
     private function isUnauthorized(\Throwable $exception): bool
     {
         $message = $exception->getMessage();
