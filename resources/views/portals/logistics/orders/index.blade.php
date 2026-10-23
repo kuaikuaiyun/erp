@@ -18,7 +18,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics.css?v=20261019-3">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics.css?v=20261023-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261018-1">
 @endpush
 
@@ -89,11 +89,13 @@
                         <div class="logistics-filter-field"><label>账单号</label><input class="form-control" name="bill_number" value="{{ $filters['bill_number'] }}" placeholder="请输入账单号"></div>
                         <div class="logistics-filter-field"><label>物流状态</label><select class="form-control" name="logistics_status"><option value="">请选择状态</option>@foreach($trackingOptions as $value)<option value="{{ $value }}" @selected($filters['logistics_status'] === $value)>{{ $value }}</option>@endforeach</select></div>
                         <div class="logistics-filter-field"><label>实际退款编号</label><input class="form-control" name="refund_number" value="{{ $filters['refund_number'] }}" placeholder="PayPal 退款交易号或信用卡退款流水号"></div>
+                        <div class="logistics-filter-field"><label>实际退款原因</label><input class="form-control" name="refund_reason" value="{{ $filters['refund_reason'] }}" placeholder="请输入 PayPal 或信用卡退款原因"></div>
+                        <div class="logistics-filter-field"><label>数据状态</label><select class="form-control" name="data_status"><option value="">请选择数据状态</option>@foreach($statusOptions as $value)<option value="{{ $value }}" @selected($filters['data_status'] === $value)>{{ $value }}</option>@endforeach</select></div>
+                    </div>
+                    <div class="logistics-filter-date-row">
                         <div class="logistics-filter-field logistics-date-range"><label>实际退款时间</label><div><input type="date" class="form-control" name="refunded_from" value="{{ $filters['refunded_from'] }}"><span>—</span><input type="date" class="form-control" name="refunded_to" value="{{ $filters['refunded_to'] }}"></div></div>
                         <div class="logistics-filter-field logistics-date-range"><label>下单时间</label><div><input type="date" class="form-control" name="ordered_from" value="{{ $filters['ordered_from'] }}"><span>—</span><input type="date" class="form-control" name="ordered_to" value="{{ $filters['ordered_to'] }}"></div></div>
-                        <div class="logistics-filter-field"><label>实际退款原因</label><input class="form-control" name="refund_reason" value="{{ $filters['refund_reason'] }}" placeholder="请输入 PayPal 或信用卡退款原因"></div>
-                        <div class="logistics-filter-field logistics-date-range"><label>创建时间</label><div><input type="date" class="form-control" name="created_from" value="{{ $filters['created_from'] }}"><span>—</span><input type="date" class="form-control" name="created_to" value="{{ $filters['created_to'] }}"></div></div>
-                        <div class="logistics-filter-field"><label>数据状态</label><select class="form-control" name="data_status"><option value="">请选择数据状态</option>@foreach($statusOptions as $value)<option value="{{ $value }}" @selected($filters['data_status'] === $value)>{{ $value }}</option>@endforeach</select></div>
+                        <div class="logistics-filter-field logistics-date-range"><label>付款时间</label><div><input type="date" class="form-control" name="paid_from" value="{{ $filters['paid_from'] }}"><span>—</span><input type="date" class="form-control" name="paid_to" value="{{ $filters['paid_to'] }}"></div></div>
                     </div>
                     <div class="logistics-filter-actions">
                         <button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> 查询</button>

@@ -9,6 +9,11 @@
 .logistics-date-range > div { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; }
 .logistics-date-range .form-control { min-width: 0; }
 .logistics-date-range span { color: #8490a3; }
+.logistics-filter-date-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 28px; margin-top: 18px; padding-top: 18px; border-top: 1px solid #edf0f5; }
+.logistics-filter-date-row .logistics-filter-field { display: block; }
+.logistics-filter-date-row .logistics-filter-field + .logistics-filter-field { border-left: 1px solid #dfe5ed; padding-left: 28px; }
+.logistics-filter-date-row .logistics-filter-field > label { display: block; margin: 0 0 8px; text-align: left; }
+.logistics-filter-date-row .logistics-date-range input[type="date"] { width: 100%; min-width: 0; }
 .logistics-filter-actions { margin-top: 18px; padding-top: 14px; border-top: 1px solid #edf0f5; min-height: 48px; }
 .logistics-list-toolbar { display: flex; align-items: center; gap: 16px; min-height: 51px; }
 .logistics-list-toolbar .box-title { margin-right: auto; }
@@ -140,7 +145,7 @@
 .logistics-form-box textarea.form-control { resize: vertical; white-space: pre-wrap; }
 .logistics-form-actions { padding: 4px 0 24px; }
 @media (max-width: 1300px) { .logistics-filter-grid { grid-template-columns: repeat(2, minmax(280px, 1fr)); } }
-@media (max-width: 767px) { .logistics-filter-grid { grid-template-columns: 1fr; } .logistics-filter-field { grid-template-columns: 118px minmax(0, 1fr); } .logistics-filter-actions .pull-right { float: none !important; margin-top: 10px; } .logistics-list-toolbar { align-items: flex-start; flex-direction: column; } .logistics-list-toolbar .box-title { margin-right: 0; } .logistics-pagination-control { flex-wrap: wrap; gap: 7px; line-height: normal; } .logistics-table-box .box-footer .logistics-pagination-control { justify-content: flex-start; } .logistics-orders-scroll, .logistics-shopify-stores-scroll { max-height: calc(100vh - 125px); min-height: 260px; } .logistics-import-footer-note { flex-direction: column; } .logistics-import-footer-note span { max-width: none; } }
+@media (max-width: 767px) { .logistics-filter-grid, .logistics-filter-date-row { grid-template-columns: 1fr; } .logistics-filter-field { grid-template-columns: 118px minmax(0, 1fr); } .logistics-filter-date-row .logistics-filter-field + .logistics-filter-field { border-left: 0; border-top: 1px solid #dfe5ed; padding-top: 14px; padding-left: 0; } .logistics-filter-actions .pull-right { float: none !important; margin-top: 10px; } .logistics-list-toolbar { align-items: flex-start; flex-direction: column; } .logistics-list-toolbar .box-title { margin-right: 0; } .logistics-pagination-control { flex-wrap: wrap; gap: 7px; line-height: normal; } .logistics-table-box .box-footer .logistics-pagination-control { justify-content: flex-start; } .logistics-orders-scroll, .logistics-shopify-stores-scroll { max-height: calc(100vh - 125px); min-height: 260px; } .logistics-import-footer-note { flex-direction: column; } .logistics-import-footer-note span { max-width: none; } }
 @media (max-width: 520px) { .logistics-filter-box .box-body { padding: 15px; } .logistics-filter-field { grid-template-columns: 1fr; gap: 6px; } .logistics-filter-field > label { text-align: left; } }
 .logistics-ellipsis {
     max-width: 220px;

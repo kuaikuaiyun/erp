@@ -14,6 +14,7 @@ use App\Models\AssistantShopifyStoreMetricPeriod;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantEmailPurchaseSyncService;
+use App\Portals\Assistant\AssistantShopifyAnalyticsCsvExportService;
 use App\Portals\Assistant\ShopifyAnalyticsReferenceRateService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -32,6 +33,7 @@ class ShopifyAnalyticsController extends Controller
         private readonly AssistantPortalAuthorizationService $authorization,
         private readonly AssistantEmailPurchaseSyncService $emailPurchases,
         private readonly ShopifyAnalyticsReferenceRateService $referenceRates,
+        private readonly AssistantShopifyAnalyticsCsvExportService $analyticsExporter,
     ) {
     }
 
@@ -44,19 +46,7 @@ class ShopifyAnalyticsController extends Controller
 
         $this->authorization->ensureCanViewShopifyAnalytics($context['user']);
         $filters = $this->filters($request);
-        $baseQuery = $this->visibleShopifyStores($context['user'])
-            ->when($filters['shop_name'] !== '', function (Builder $stores) use ($filters): void {
-                $stores->where('shop_name', 'like', '%'.$filters['shop_name'].'%');
-            })
-            ->when($filters['domains'] !== [], function (Builder $stores) use ($filters): void {
-                $stores->whereIn('domain', $filters['domains']);
-            })
-            ->when($filters['team'] !== '', function (Builder $stores) use ($filters): void {
-                $stores->whereJsonContains('team', $filters['team']);
-            })
-            ->when($filters['email_purchased'] !== '', function (Builder $stores) use ($filters): void {
-                $this->emailPurchases->applyPurchaseFilter($stores, $filters['email_purchased'] === '1');
-            });
+        $baseQuery = $this->filteredVisibleShopifyStores($context['user'], $filters);
         $periods = $this->periodQuery($filters);
         $summary = $this->summary(clone $baseQuery, clone $periods);
         $storesQuery = $this->withPeriod(clone $baseQuery, clone $periods);
@@ -120,6 +110,25 @@ class ShopifyAnalyticsController extends Controller
             'activeSyncBatch' => $activeSyncBatch,
             'syncIssues' => $syncIssues,
         ]);
+    }
+
+    public function exportOrders(Request $request): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $this->authorization->ensureCanViewShopifyAnalytics($context['user']);
+        $filters = $this->filters($request);
+        $groupBy = (string) $request->input('group_by', 'store');
+        $groupBy = in_array($groupBy, ['store', 'date'], true) ? $groupBy : 'store';
+
+        return $this->analyticsExporter->download(
+            $this->filteredVisibleShopifyStores($context['user'], $filters),
+            $filters,
+            $groupBy,
+        );
     }
 
     public function refresh(Request $request, AssistantDomainStore $domainStore): RedirectResponse
@@ -274,6 +283,38 @@ class ShopifyAnalyticsController extends Controller
             ->where('site_builder', 'shopify');
     }
 
+    /** @param array<string, mixed> $filters
+     *  @return Builder<AssistantDomainStore>
+     */
+    private function filteredVisibleShopifyStores(AdminUser $user, array $filters): Builder
+    {
+        $query = $this->visibleShopifyStores($user)
+            ->when($filters['shop_name'] !== '', function (Builder $stores) use ($filters): void {
+                $stores->where('shop_name', 'like', '%'.$filters['shop_name'].'%');
+            })
+            ->when($filters['domains'] !== [], function (Builder $stores) use ($filters): void {
+                $stores->whereIn('domain', $filters['domains']);
+            })
+            ->when($filters['team'] !== [], function (Builder $stores) use ($filters): void {
+                $stores->where(function (Builder $teams) use ($filters): void {
+                    foreach ($filters['team'] as $team) {
+                        $teams->orWhereJsonContains('team', $team);
+                    }
+                });
+            })
+            ->when($filters['email_purchased'] !== '', function (Builder $stores) use ($filters): void {
+                $this->emailPurchases->applyPurchaseFilter($stores, $filters['email_purchased'] === '1');
+            });
+
+        if ($filters['owner_assignment'] === 'assigned') {
+            $query->whereNotNull('owner_user_id');
+        } elseif ($filters['owner_assignment'] === 'unassigned') {
+            $query->whereNull('owner_user_id');
+        }
+
+        return $query;
+    }
+
     private function canRefresh(AssistantDomainStore $store): bool
     {
         return $store->shop_status === AssistantDomainStore::SHOP_STATUS_IN_USE
@@ -380,7 +421,7 @@ class ShopifyAnalyticsController extends Controller
         return 'assistant.shopify_analytics.sync_batch_id';
     }
 
-    /** @return array{shop_name:string, domains:list<string>, team:string, email_purchased:string, timezone:string, from_date:string, to_date:string, sort:string, direction:string, per_page:int} */
+    /** @return array{shop_name:string, domains:list<string>, team:list<string>, owner_assignment:string, email_purchased:string, timezone:string, from_date:string, to_date:string, sort:string, direction:string, per_page:int} */
     private function filters(Request $request): array
     {
         $perPage = (int) $request->input('per_page', 20);
@@ -410,7 +451,10 @@ class ShopifyAnalyticsController extends Controller
         return [
             'shop_name' => trim((string) $request->input('shop_name')),
             'domains' => $this->domains((string) $request->input('domains')),
-            'team' => trim((string) $request->input('team')),
+            'team' => $this->stringList($request->input('team', [])),
+            'owner_assignment' => in_array((string) $request->input('owner_assignment'), ['assigned', 'unassigned'], true)
+                ? (string) $request->input('owner_assignment')
+                : '',
             'email_purchased' => in_array((string) $request->input('email_purchased'), ['0', '1'], true)
                 ? (string) $request->input('email_purchased')
                 : '',
@@ -421,6 +465,21 @@ class ShopifyAnalyticsController extends Controller
             'direction' => $direction === 'asc' ? 'asc' : 'desc',
             'per_page' => in_array($perPage, [20, 50, 100], true) ? $perPage : 20,
         ];
+    }
+
+    /** @return list<string> */
+    private function stringList(mixed $value): array
+    {
+        $values = is_array($value) ? $value : [$value];
+
+        return collect($values)
+            ->filter(static fn (mixed $item): bool => is_scalar($item))
+            ->map(static fn (mixed $item): string => trim((string) $item))
+            ->filter(static fn (string $item): bool => $item !== '')
+            ->unique()
+            ->take(50)
+            ->values()
+            ->all();
     }
 
     /** @return list<string> */
@@ -486,7 +545,7 @@ class ShopifyAnalyticsController extends Controller
             ->where('shopify_order.shopify_created_at', '>=', $fromUtc->format('Y-m-d H:i:s'))
             ->where('shopify_order.shopify_created_at', '<', $toUtc->format('Y-m-d H:i:s'))
             ->where('shopify_order.is_test', false)
-            ->whereNull('shopify_order.shopify_cancelled_at')
+            ->whereIn('shopify_order.financial_status', AssistantShopifyStoreOrder::successfulFinancialStatuses())
             ->groupBy('shopify_order.assistant_domain_store_id')
             ->havingRaw('COUNT(*) > 0');
 

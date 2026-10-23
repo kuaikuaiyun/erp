@@ -30,7 +30,10 @@
     <form method="get" action="{{ route('assistant.shopify-analytics.index') }}" class="assistant-shopify-per-page-form" data-loading="region" data-loading-target=".assistant-shopify-analytics-page">
         <input type="hidden" name="shop_name" value="{{ $filters['shop_name'] }}">
         <input type="hidden" name="domains" value="{{ implode(',', $filters['domains']) }}">
-        <input type="hidden" name="team" value="{{ $filters['team'] }}">
+        @foreach ($filters['team'] as $team)
+            <input type="hidden" name="team[]" value="{{ $team }}">
+        @endforeach
+        <input type="hidden" name="owner_assignment" value="{{ $filters['owner_assignment'] }}">
         <input type="hidden" name="email_purchased" value="{{ $filters['email_purchased'] }}">
         <input type="hidden" name="timezone" value="{{ $filters['timezone'] }}">
         <input type="hidden" name="from_date" value="{{ $filters['from_date'] }}">

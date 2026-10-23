@@ -446,7 +446,7 @@ class ShopifyStoreAnalyticsService
             ->where('shopify_created_at', '>=', $startUtc->format('Y-m-d H:i:s'))
             ->where('shopify_created_at', '<', $endUtc->format('Y-m-d H:i:s'))
             ->where('is_test', false)
-            ->whereNull('shopify_cancelled_at')
+            ->whereIn('financial_status', AssistantShopifyStoreOrder::successfulFinancialStatuses())
             ->get();
 
         $originalCurrency = strtoupper((string) $orders->pluck('original_currency_code')->filter()->first());

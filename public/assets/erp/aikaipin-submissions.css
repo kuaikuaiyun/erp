@@ -1174,7 +1174,8 @@ button.aikaipin-selection-list-image:focus {
 .aikaipin-submission-list-toolbar {
     background: linear-gradient(90deg, #f7fafc, #fff);
     border-bottom: 1px solid #e4ebf1;
-    justify-content: space-between;
+    gap: 10px;
+    justify-content: flex-end;
     min-height: 58px;
     padding: 10px 14px;
 }

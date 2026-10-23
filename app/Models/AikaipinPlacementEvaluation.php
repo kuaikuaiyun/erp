@@ -36,7 +36,7 @@ class AikaipinPlacementEvaluation extends Model
 
     public function product(): BelongsTo
     {
-        return $this->belongsTo(AikaipinProduct::class, 'product_id');
+        return $this->belongsTo(AikaipinProduct::class, 'product_id')->withDefault();
     }
 
     public function records(): HasMany

@@ -46,6 +46,7 @@
         'productStoreUrl' => route('aikaipin.product-library.store'),
         'productEditUrlTemplate' => route('aikaipin.product-library.edit', ['product' => '__product__']),
         'productUpdateUrlTemplate' => route('aikaipin.product-library.update', ['product' => '__product__']),
+        'productDeleteUrlTemplate' => route('aikaipin.product-library.destroy', ['product' => '__product__']),
         'packageUploadInitializeUrl' => route('aikaipin.product-library.package-uploads.initialize'),
         'packageUploadPartUrlTemplate' => route('aikaipin.product-library.package-uploads.parts.store', ['uploadToken' => '__token__', 'chunkIndex' => '__chunk__']),
         'packageUploadCompleteUrlTemplate' => route('aikaipin.product-library.package-uploads.complete', ['uploadToken' => '__token__']),
@@ -54,6 +55,15 @@
         'productCreatedMessage' => $t('messages.product_created_message'),
         'productUpdatedTitle' => $t('messages.product_updated_title'),
         'productUpdatedMessage' => $t('messages.product_updated_message'),
+        'productDeleteTitle' => $t('messages.product_delete_title'),
+        'productDeleteMessage' => $t('messages.product_delete_message', ['code' => ':code', 'name' => ':name']),
+        'productDeleteConfirm' => $t('messages.product_delete_confirm'),
+        'productDeleteContinue' => $t('messages.product_delete_continue'),
+        'productDeleteLinkedTitle' => $t('messages.product_delete_linked_title'),
+        'productDeleteLinkedListLabel' => $t('messages.product_delete_linked_list_label'),
+        'productDeletedTitle' => $t('messages.product_deleted_title'),
+        'productDeletedMessage' => $t('messages.product_deleted_message'),
+        'productDeleteFailedMessage' => $t('messages.product_delete_failed_message'),
         'productSaveFailedTitle' => $t('messages.product_save_failed_title'),
         'productSaveFailedMessage' => $t('messages.product_save_failed_message'),
         'packageUploadTitle' => $t('messages.package_upload_title'),
@@ -82,12 +92,12 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261021-4">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261023-1">
 @endpush
 
 @push('scripts')
     <script>window.ErpAikaipinProductLibraryConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261021-3"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261023-2"></script>
 @endpush
 
 @section('content')
@@ -257,32 +267,59 @@
                             </td>
                             <td class="aikaipin-updated-cell"><time datetime="{{ $product->updated_at?->toAtomString() }}">{{ $updatedAt }}</time></td>
                             <td class="aikaipin-operation-cell">
-                                <div class="btn-group btn-group-sm aikaipin-row-actions" role="group" aria-label="{{ $t('table.operation') }}">
+                                <div class="aikaipin-row-actions" role="group" aria-label="{{ $t('table.operation') }}">
                                     @if ($product->landing_page_url)
-                                        <a class="btn btn-default" href="{{ $product->landing_page_url }}" target="_blank" rel="noopener noreferrer"
+                                        <a class="btn btn-default aikaipin-row-action-icon" href="{{ $product->landing_page_url }}" target="_blank" rel="noopener noreferrer"
                                             title="{{ $t('actions.open_landing_page') }}" aria-label="{{ $t('actions.open_landing_page') }}">
-                                            <i class="fa fa-external-link" aria-hidden="true"></i> {{ $t('actions.landing_page') }}
+                                            <i class="fa fa-external-link" aria-hidden="true"></i>
+                                            <span class="sr-only">{{ $t('actions.landing_page') }}</span>
                                         </a>
                                     @else
-                                        <button class="btn btn-default" type="button" disabled>{{ $t('actions.landing_page') }}</button>
+                                        <button class="btn btn-default aikaipin-row-action-icon" type="button" disabled
+                                            title="{{ $t('actions.landing_page') }}" aria-label="{{ $t('actions.landing_page') }}">
+                                            <i class="fa fa-external-link" aria-hidden="true"></i>
+                                            <span class="sr-only">{{ $t('actions.landing_page') }}</span>
+                                        </button>
                                     @endif
                                     @if ($referenceFile)
-                                        <a class="btn btn-default" href="{{ route('aikaipin.product-library.reference-preview', ['product' => $product]) }}" target="_blank" rel="noopener noreferrer">
-                                            <i class="fa fa-external-link" aria-hidden="true"></i> {{ $t('actions.reference_page') }}
+                                        <a class="btn btn-default aikaipin-row-action-icon" href="{{ route('aikaipin.product-library.reference-preview', ['product' => $product]) }}" target="_blank" rel="noopener noreferrer"
+                                            title="{{ $t('actions.reference_page') }}" aria-label="{{ $t('actions.reference_page') }}">
+                                            <i class="fa fa-file-text-o" aria-hidden="true"></i>
+                                            <span class="sr-only">{{ $t('actions.reference_page') }}</span>
                                         </a>
                                     @else
-                                        <button class="btn btn-default" type="button" disabled>{{ $t('actions.reference_page') }}</button>
+                                        <button class="btn btn-default aikaipin-row-action-icon" type="button" disabled
+                                            title="{{ $t('actions.reference_page') }}" aria-label="{{ $t('actions.reference_page') }}">
+                                            <i class="fa fa-file-text-o" aria-hidden="true"></i>
+                                            <span class="sr-only">{{ $t('actions.reference_page') }}</span>
+                                        </button>
                                     @endif
                                     @if ($packageFile)
-                                        <a class="btn btn-default" href="{{ route('aikaipin.product-library.files.show', ['product' => $product, 'kind' => 'package']) }}">
-                                            <i class="fa fa-download" aria-hidden="true"></i> {{ $t('actions.download') }}
+                                        <a class="btn btn-default aikaipin-row-action-icon" href="{{ route('aikaipin.product-library.files.show', ['product' => $product, 'kind' => 'package']) }}"
+                                            title="{{ $t('actions.download') }}" aria-label="{{ $t('actions.download') }}">
+                                            <i class="fa fa-download" aria-hidden="true"></i>
+                                            <span class="sr-only">{{ $t('actions.download') }}</span>
                                         </a>
                                     @else
-                                        <button class="btn btn-default" type="button" disabled><i class="fa fa-download" aria-hidden="true"></i> {{ $t('actions.download') }}</button>
+                                        <button class="btn btn-default aikaipin-row-action-icon" type="button" disabled
+                                            title="{{ $t('actions.download') }}" aria-label="{{ $t('actions.download') }}">
+                                            <i class="fa fa-download" aria-hidden="true"></i>
+                                            <span class="sr-only">{{ $t('actions.download') }}</span>
+                                        </button>
                                     @endif
                                     @if ($canManageProductLibrary)
-                                        <button class="btn btn-primary" type="button" data-aikaipin-action="edit" data-aikaipin-product-id="{{ $product->getKey() }}">
-                                            <i class="fa fa-pencil" aria-hidden="true"></i> {{ $t('actions.edit') }}
+                                        <button class="btn btn-primary aikaipin-row-action-icon" type="button" data-aikaipin-action="edit" data-aikaipin-product-id="{{ $product->getKey() }}"
+                                            title="{{ $t('actions.edit') }}" aria-label="{{ $t('actions.edit') }}">
+                                            <i class="fa fa-pencil" aria-hidden="true"></i>
+                                            <span class="sr-only">{{ $t('actions.edit') }}</span>
+                                        </button>
+                                        <button class="btn btn-danger aikaipin-row-action-icon" type="button" data-aikaipin-action="delete"
+                                            data-aikaipin-product-id="{{ $product->getKey() }}"
+                                            data-aikaipin-product-code="{{ $product->product_code }}"
+                                            data-aikaipin-product-name="{{ $productName }}"
+                                            title="{{ $t('actions.delete') }}" aria-label="{{ $t('actions.delete') }}">
+                                            <i class="fa fa-trash" aria-hidden="true"></i>
+                                            <span class="sr-only">{{ $t('actions.delete') }}</span>
                                         </button>
                                     @endif
                                 </div>
@@ -345,6 +382,34 @@
 </div>
 
 @if ($canManageProductLibrary)
+    <div id="aikaipin-product-delete-modal" class="modal fade" tabindex="-1" role="dialog" aria-hidden="true">
+        <div class="modal-dialog aikaipin-product-delete-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal" aria-label="{{ $t('upload.close') }}"><span aria-hidden="true">&times;</span></button>
+                    <div class="aikaipin-product-delete-heading">
+                        <span class="aikaipin-product-delete-icon" aria-hidden="true"><i class="fa fa-exclamation-triangle"></i></span>
+                        <h4 class="modal-title" data-aikaipin-product-delete-title></h4>
+                    </div>
+                </div>
+                <div class="modal-body">
+                    <div class="aikaipin-product-delete-notice">
+                        <i class="fa fa-info-circle" aria-hidden="true"></i>
+                        <p data-aikaipin-product-delete-description></p>
+                    </div>
+                    <div class="alert alert-warning" hidden data-aikaipin-product-delete-linked-evaluations>
+                        <strong data-aikaipin-product-delete-linked-label></strong>
+                        <ul class="list-unstyled mb-0" data-aikaipin-product-delete-linked-list></ul>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-default" data-dismiss="modal">{{ $t('upload.cancel') }}</button>
+                    <button type="button" class="btn btn-danger" data-aikaipin-product-delete-confirm></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="aikaipin-visibility-modal" class="modal fade" tabindex="-1" role="dialog" aria-hidden="true">
         <div class="modal-dialog modal-sm" role="document">
             <div class="modal-content">
