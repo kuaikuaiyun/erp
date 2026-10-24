@@ -88,7 +88,7 @@ class WarehouseWeightExceptionController extends Controller
                 'status' => 'resolved',
                 'resolved_at' => now(),
                 'resolved_by_user_id' => (int) $context['user']->getKey(),
-                'remark' => trim((string) ($validated['resolution_remark'] ?? '')) ?: $exception->remark,
+                'resolution_remark' => trim((string) ($validated['resolution_remark'] ?? '')) ?: $exception->resolution_remark,
             ])->save();
         });
 
@@ -156,7 +156,9 @@ class WarehouseWeightExceptionController extends Controller
                   ->orWhere('shopify_sku', 'like', $like)
                   ->orWhere('tongtu_product_code', 'like', $like)
                   ->orWhere('tongtu_product_name', 'like', $like)
+                  ->orWhere('reject_reason', 'like', $like)
                   ->orWhere('remark', 'like', $like)
+                  ->orWhere('resolution_remark', 'like', $like)
                   ->orWhere('reporter_name', 'like', $like);
             });
         }

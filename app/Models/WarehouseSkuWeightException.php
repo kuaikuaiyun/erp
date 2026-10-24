@@ -18,6 +18,20 @@ class WarehouseSkuWeightException extends Model
         'updated_at' => 'datetime',
     ];
 
+    /** 驳回理由选项：code => 中文名 */
+    public const REJECT_REASONS = [
+        'weight' => '重量不符',
+        'image' => '图片不符',
+        'other' => '其他',
+    ];
+
+    public static function rejectReasonLabel(?string $code): string
+    {
+        $code = trim((string) $code);
+
+        return $code === '' ? '' : (self::REJECT_REASONS[$code] ?? $code);
+    }
+
     public function scopePending($query)
     {
         return $query->where('status', 'pending');

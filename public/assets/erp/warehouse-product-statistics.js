@@ -5,19 +5,119 @@
     var modal = document.getElementById('warehouse-product-statistics-variant-modal');
     if (!modal) return;
 
-    var currentProductId = '';
-    var currentProduct = null;
-    var $ = function (sel, root) { return (root || modal).querySelector(sel); };
-
-    // 保留原生 DOM 引用，同时准备 jQuery 对象用于 Bootstrap Modal 插件
+    var fillModal = document.getElementById('warehouse-product-statistics-fill-modal');
     var jq = window.jQuery || window.$ || null;
     var $modal = jq ? jq(modal) : null;
+    var $fillModal = (jq && fillModal) ? jq(fillModal) : null;
+
+    var currentProductId = '';
+    var currentProduct = null;
+    var fillProductId = '';
+    var fillProduct = null;
+    var fillRows = [];
+    var rejectReasons = config.rejectReasons || {};
+
+    function $(sel, root) { return (root || modal).querySelector(sel); }
 
     function escapeHtml(str) {
         return String(str || '').replace(/[&<>"']/g, function (c) {
             return ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c] || c);
         });
     }
+
+    function csrfToken() {
+        var tokenEls = document.getElementsByName('_token');
+        for (var i = 0; i < tokenEls.length; i++) {
+            if (tokenEls[i].content) return tokenEls[i].content;
+        }
+        var metaToken = document.querySelector('meta[name="csrf-token"]');
+        return metaToken ? (metaToken.getAttribute('content') || '') : '';
+    }
+
+    function openModal($m, el) {
+        if ($m && typeof $m.modal === 'function') {
+            $m.modal('show');
+        } else if (el) {
+            el.style.display = 'block';
+            el.classList.add('in');
+        }
+    }
+
+    function closeModal($m, el) {
+        if ($m && typeof $m.modal === 'function') {
+            $m.modal('hide');
+            return;
+        }
+        if (!el) return;
+        el.classList.remove('in');
+        el.style.display = 'none';
+        el.setAttribute('aria-hidden', 'true');
+        var bd = document.querySelector('.modal-backdrop');
+        if (bd) bd.parentNode && bd.parentNode.removeChild(bd);
+        document.body.style.paddingRight = '';
+        document.body.classList.remove('modal-open');
+    }
+
+    /** 抓取某一页规格数据；detail 接口会顺带调通途刷新重量 */
+    function fetchDetailPage(productId, page) {
+        var url = config.detailUrl;
+        var sep = url.indexOf('?') >= 0 ? '&' : '?';
+        var params = new URLSearchParams(window.location.search);
+        var qs = new URLSearchParams();
+        ['date_from', 'date_to', 'name', 'keyword', 'store', 'decision'].forEach(function (k) {
+            if (params.get(k)) qs.set(k, params.get(k));
+        });
+        qs.set('product_id', productId);
+        qs.set('detail_page', String(page || 1));
+        qs.set('detail_per_page', '20');
+
+        return fetch(url + sep + qs.toString(), { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function (res) {
+                if (!res.ok) {
+                    return res.json().catch(function () { return {}; }).then(function (body) {
+                        throw new Error(body.message || '请求失败 (' + res.status + ')');
+                    });
+                }
+                return res.json();
+            });
+    }
+
+    /** 拉全该产品的所有规格（规格数超过单页上限时按页追加） */
+    function fetchAllVariants(productId) {
+        var all = [];
+        var product = null;
+
+        function walk(page) {
+            return fetchDetailPage(productId, page).then(function (data) {
+                if (data && data.product) product = data.product;
+                var rows = (data && data.detail && data.detail.rows) ? data.detail.rows : [];
+                all = all.concat(rows);
+                var lastPage = (data && data.detail && data.detail.pagination) ? Number(data.detail.pagination.last_page || 1) : 1;
+                if (page < lastPage && page < 5) return walk(page + 1);
+                return { product: product, rows: all, weightRefresh: data && data.weight_refresh ? data.weight_refresh : null };
+            });
+        }
+
+        return walk(1);
+    }
+
+    function identityHtml(product) {
+        if (!product) return '';
+        var html = '';
+        if (product.image_url) {
+            html += '<img src="' + escapeHtml(product.image_url) + '" class="product-statistics-thumb" alt="" style="margin-right:10px;">';
+        }
+        html += '<strong>' + escapeHtml(product.name) + '</strong>';
+        if (product.product_code) {
+            html += ' <code>' + escapeHtml(product.product_code) + '</code>';
+        }
+        if (product.stores && product.stores.length) {
+            html += ' <span class="text-muted">· ' + escapeHtml(product.stores.join('、')) + '</span>';
+        }
+        return html;
+    }
+
+    // ==================== 规格详情（只读） ====================
 
     function showLoading() {
         var loadingEl = $('#warehouse-variant-detail-loading');
@@ -41,7 +141,6 @@
 
     /**
      * 后端 detail 接口会返回 weight_refresh 统计，这里渲染一行绿色/灰色的结果汇总。
-     * null 表示不显示。
      * @param {object|null} stats {refreshed:int, failed:int, not_found:int, skipped:int}
      */
     function setWeightRefreshSummary(stats) {
@@ -68,101 +167,37 @@
         summary.hidden = false;
     }
 
-    function setIdentity(product) {
-        currentProduct = product || null;
-        var box = $('#warehouse-variant-detail-identity');
-        if (!product) { box.innerHTML = ''; return; }
-        var html = '';
-        if (product.image_url) {
-            html += '<img src="' + escapeHtml(product.image_url) + '" class="product-statistics-thumb" alt="" style="margin-right:10px;">';
+    function weightBadgeCell(variant) {
+        var weight = Number(variant.sale_weight_gram);
+        if (!isFinite(weight) || weight <= 0) {
+            return '<span class="wh-weight-missing" title="通途重量缺失，请核对"><i class="fa fa-exclamation-triangle"></i> 缺失</span>';
         }
-        html += '<strong>' + escapeHtml(product.name) + '</strong>';
-        if (product.product_code) {
-            html += ' <code>' + escapeHtml(product.product_code) + '</code>';
-        }
-        if (product.stores && product.stores.length) {
-            html += ' <span class="text-muted">· ' + escapeHtml(product.stores.join('、')) + '</span>';
-        }
-        box.innerHTML = html;
+        return '<span class="wh-weight-badge" title="通途 goodsDetail 计算值">' + weight.toFixed(2).replace(/\.?0+$/, '') + '</span>';
     }
 
-    function buildVariantRow(variant, idx) {
-        var tongtuSku = (variant.tongtu_sku || '').trim();
-
-        var weight = Number(variant.sale_weight_gram);
-        var weightCell;
-        if (!isFinite(weight) || weight <= 0) {
-            weightCell = '<span class="wh-weight-missing" title="通途重量缺失，请核对"><i class="fa fa-exclamation-triangle"></i> 缺失</span>';
-        } else {
-            weightCell = '<span class="wh-weight-badge" title="通途 goodsDetail 计算值">' + weight.toFixed(2).replace(/\.?0+$/, '') + '</span>';
-        }
-
-        var imageCell;
+    function imageCell(variant) {
         if (!variant.product_image_url) {
-            imageCell = '<span class="text-muted" title="未返回图片">—</span>';
-        } else {
-            imageCell = '<img src="' + escapeHtml(variant.product_image_url) + '" ' +
-                'class="wh-thumb erp-zoomable" alt="" ' +
-                'title="点击放大查看" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">';
+            return '<span class="text-muted" title="未返回图片">—</span>';
         }
+        return '<img src="' + escapeHtml(variant.product_image_url) + '" ' +
+            'class="wh-thumb erp-zoomable" alt="" title="点击放大查看" ' +
+            'onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">';
+    }
 
+    function setIdentity(product) {
+        currentProduct = product || null;
+        $('#warehouse-variant-detail-identity').innerHTML = identityHtml(product);
+    }
+
+    function buildVariantRow(variant) {
+        var tongtuSku = (variant.tongtu_sku || '').trim();
         var tr = document.createElement('tr');
-        tr.setAttribute('data-form-index', String(idx));
         tr.innerHTML =
-            '<td>' + imageCell + '</td>' +
+            '<td>' + imageCell(variant) + '</td>' +
             '<td><span class="wh-code" title="' + escapeHtml(variant.tongtu_product_code || '') + '">' + escapeHtml(variant.tongtu_product_code || '') + '</span></td>' +
             '<td><span class="wh-code" title="' + escapeHtml(tongtuSku) + '">' + escapeHtml(tongtuSku) + '</span></td>' +
             '<td><span class="wh-name">' + escapeHtml(variant.tongtu_product_name || '') + '</span></td>' +
-            '<td>' + weightCell + '</td>' +
-            '<td>' +
-                '<button type="button" class="btn btn-warning btn-xs warehouse-report-weight-btn wh-report-btn">' +
-                    '<i class="fa fa-exclamation-triangle"></i> 提报' +
-                '</button>' +
-            '</td>';
-        return tr;
-    }
-
-    function buildReportFormRow(variant, idx) {
-        var tr = document.createElement('tr');
-        tr.setAttribute('data-form-index', String(idx));
-        tr.hidden = true;
-        var colspan = 8;
-        var originalWeight = Number(variant.sale_weight_gram);
-        var weightHint;
-        if (!isFinite(originalWeight) || originalWeight <= 0) {
-            weightHint = '通途返回重量为空，请填写正确值';
-        } else {
-            weightHint = '当前通途重量 ' + originalWeight.toFixed(2).replace(/\.?0+$/, '') + ' g，请填写正确值';
-        }
-
-        tr.innerHTML =
-            '<td colspan="' + colspan + '" style="background:#fff8e1;border-top:2px solid #f0ad4e;">' +
-                '<div class="warehouse-report-form" style="padding:10px 14px;">' +
-                    '<div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;">' +
-                        '<div style="min-width:140px;">' +
-                            '<label class="text-muted" style="font-weight:normal;">通途 SKU</label>' +
-                            '<div><code>' + escapeHtml(variant.tongtu_sku || '') + '</code></div>' +
-                        '</div>' +
-                        '<div style="min-width:180px;">' +
-                            '<label class="text-muted" style="font-weight:normal;">规格产品名</label>' +
-                            '<div>' + escapeHtml(variant.tongtu_product_name || '') + '</div>' +
-                        '</div>' +
-                        '<div style="min-width:200px;">' +
-                            '<label class="text-muted" style="font-weight:normal;">' + escapeHtml(weightHint) + '</label>' +
-                            '<input type="number" step="0.01" min="0.01" class="form-control warehouse-report-corrected-weight" placeholder="填写正确重量 (g)" required>' +
-                        '</div>' +
-                        '<div style="min-width:220px;flex:1;">' +
-                            '<label class="text-muted" style="font-weight:normal;">备注 (可选)</label>' +
-                            '<input type="text" class="form-control warehouse-report-remark" maxlength="500" placeholder="描述异常原因或参考值来源">' +
-                        '</div>' +
-                        '<div style="display:flex;gap:6px;align-items:flex-end;">' +
-                            '<button type="button" class="btn btn-success btn-sm warehouse-report-submit-btn"><i class="fa fa-check"></i> 提交</button>' +
-                            '<button type="button" class="btn btn-default btn-sm warehouse-report-cancel-btn">取消</button>' +
-                        '</div>' +
-                    '</div>' +
-                    '<div class="warehouse-report-status text-muted" style="margin-top:6px;"></div>' +
-                '</div>' +
-            '</td>';
+            '<td>' + weightBadgeCell(variant) + '</td>';
         return tr;
     }
 
@@ -170,65 +205,28 @@
         var body = $('#warehouse-variant-detail-body');
         var empty = $('#warehouse-variant-detail-empty');
         body.innerHTML = '';
-        body.__variants__ = [];
         if (!rows || rows.length === 0) {
             empty.hidden = false;
             $('#warehouse-variant-detail-content').hidden = false;
             $('#warehouse-variant-detail-loading').hidden = true;
             return;
         }
-        rows.forEach(function (variant, idx) {
-            body.__variants__.push(variant);
-            body.appendChild(buildVariantRow(variant, idx));
-            body.appendChild(buildReportFormRow(variant, idx));
-        });
+        rows.forEach(function (variant) { body.appendChild(buildVariantRow(variant)); });
         empty.hidden = true;
         $('#warehouse-variant-detail-content').hidden = false;
         $('#warehouse-variant-detail-loading').hidden = true;
     }
 
-    function buildDetailUrl(productId) {
-        var url = config.detailUrl;
-        var sep = url.indexOf('?') >= 0 ? '&' : '?';
-        var params = new URLSearchParams(window.location.search);
-        var qs = new URLSearchParams();
-        ['date_from', 'date_to', 'name', 'keyword', 'store', 'decision'].forEach(function (k) {
-            if (params.get(k)) qs.set(k, params.get(k));
-        });
-        qs.set('product_id', productId);
-        return url + sep + qs.toString();
-    }
-
     function loadVariants(productId) {
         currentProductId = productId;
         showLoading();
+        // 先打开弹窗显示 loading，再发请求，避免用户以为没反应
+        openModal($modal, modal);
 
-        // 先打开 modal（显示 loading spinner），再发 fetch。
-        // 这样用户点完按钮立刻看到反馈，不会感觉卡住了。
-        if ($modal && typeof $modal.modal === 'function') {
-            $modal.modal('show');
-        } else {
-            modal.style.display = 'block';
-            modal.classList.add('in');
-        }
-
-        fetch(buildDetailUrl(productId), { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-            .then(function (res) {
-                if (!res.ok) {
-                    return res.json().catch(function () { return {}; }).then(function (body) {
-                        throw new Error(body.message || '请求失败 (' + res.status + ')');
-                    });
-                }
-                return res.json();
-            })
+        fetchDetailPage(productId, 1)
             .then(function (data) {
-                var product = null;
-                if (data && data.product) product = data.product;
-                setIdentity(product);
-                var rows = data && data.detail && data.detail.rows ? data.detail.rows : [];
-                renderVariants(rows);
-
-                // 展示后端通途重量刷新统计
+                setIdentity(data && data.product ? data.product : null);
+                renderVariants(data && data.detail && data.detail.rows ? data.detail.rows : []);
                 if (data && data.weight_refresh) {
                     setWeightRefreshSummary(data.weight_refresh);
                 }
@@ -238,186 +236,246 @@
             });
     }
 
-    function submitReport(formRow, variant) {
-        var statusEl = formRow.querySelector('.warehouse-report-status');
-        var correctedInput = formRow.querySelector('.warehouse-report-corrected-weight');
-        var remarkInput = formRow.querySelector('.warehouse-report-remark');
-        var corrected = parseFloat(correctedInput.value);
-        if (!corrected || corrected <= 0) {
-            statusEl.innerHTML = '<span class="text-danger">请填写大于 0 的正确重量值</span>';
-            correctedInput.focus();
+    // ==================== 填写异常数据 ====================
+
+    /** 驳回理由按钮组（点击选中，再次点击取消） */
+    function reasonPillsHtml() {
+        var html = '';
+        Object.keys(rejectReasons).forEach(function (code) {
+            html += '<button type="button" class="wh-reason-pill" data-value="' + escapeHtml(code) + '">' +
+                escapeHtml(rejectReasons[code]) + '</button>';
+        });
+        return html;
+    }
+
+    function refWeightHtml(variant) {
+        var weight = Number(variant.sale_weight_gram);
+        if (!isFinite(weight) || weight <= 0) {
+            return '<span class="wh-fill-ref is-missing">通途重量: <strong>缺失</strong></span>';
+        }
+        return '<span class="wh-fill-ref">通途重量: <strong>' + weight.toFixed(2).replace(/\.?0+$/, '') + ' g</strong></span>';
+    }
+
+    function buildFillRow(variant) {
+        var tongtuSku = (variant.tongtu_sku || '').trim();
+        var item = document.createElement('div');
+        item.className = 'wh-fill-item';
+        item.setAttribute('data-sku', tongtuSku);
+        item.innerHTML =
+            '<div class="wh-fill-item-head">' +
+                '<span class="wh-fill-sku-tag" title="' + escapeHtml(tongtuSku) + '">' + escapeHtml(tongtuSku || '—') + '</span>' +
+                (variant.tongtu_product_code ? '<span class="wh-code">' + escapeHtml(variant.tongtu_product_code) + '</span>' : '') +
+                refWeightHtml(variant) +
+                '<input type="number" step="0.01" min="0.01" class="form-control input-sm wh-fill-weight" placeholder="填写实测重量 g">' +
+            '</div>' +
+            '<div class="wh-fill-item-meta">' +
+                '<span class="wh-fill-label">驳回理由</span>' +
+                reasonPillsHtml() +
+                '<input type="text" class="form-control input-sm wh-fill-remark" maxlength="500" placeholder="备注（可选）">' +
+            '</div>';
+        return item;
+    }
+
+    function showFillLoading() {
+        document.getElementById('warehouse-fill-loading').hidden = false;
+        document.getElementById('warehouse-fill-loading').innerHTML = '<i class="fa fa-spinner fa-spin"></i> 正在从通途 API 刷新最新重量数据…';
+        document.getElementById('warehouse-fill-content').hidden = true;
+        document.getElementById('warehouse-fill-empty').hidden = true;
+        document.getElementById('warehouse-fill-error').hidden = true;
+        document.getElementById('warehouse-fill-status').innerHTML = '';
+        document.getElementById('warehouse-fill-identity').innerHTML = '';
+        var submitBtn = document.getElementById('warehouse-fill-submit');
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="fa fa-check"></i> 提交';
+    }
+
+    function showFillError(message) {
+        var err = document.getElementById('warehouse-fill-error');
+        err.textContent = message || '加载失败，请稍后重试';
+        err.hidden = false;
+        document.getElementById('warehouse-fill-loading').hidden = true;
+        document.getElementById('warehouse-fill-content').hidden = true;
+    }
+
+    function renderFillRows(rows) {
+        var body = document.getElementById('warehouse-fill-body');
+        var empty = document.getElementById('warehouse-fill-empty');
+        body.innerHTML = '';
+        fillRows = rows || [];
+        if (fillRows.length === 0) {
+            empty.hidden = false;
+            document.getElementById('warehouse-fill-content').hidden = false;
+            document.getElementById('warehouse-fill-loading').hidden = true;
+            return;
+        }
+        fillRows.forEach(function (variant) { body.appendChild(buildFillRow(variant)); });
+        empty.hidden = true;
+        document.getElementById('warehouse-fill-content').hidden = false;
+        document.getElementById('warehouse-fill-loading').hidden = true;
+    }
+
+    function loadFill(productId) {
+        fillProductId = productId;
+        fillProduct = null;
+        fillRows = [];
+        showFillLoading();
+        openModal($fillModal, fillModal);
+
+        fetchAllVariants(productId)
+            .then(function (result) {
+                fillProduct = result.product || null;
+                document.getElementById('warehouse-fill-identity').innerHTML = identityHtml(fillProduct);
+                renderFillRows(result.rows || []);
+            })
+            .catch(function (err) {
+                showFillError(err && err.message ? err.message : '加载失败');
+            });
+    }
+
+    function submitFill() {
+        var body = document.getElementById('warehouse-fill-body');
+        var statusEl = document.getElementById('warehouse-fill-status');
+        var submitBtn = document.getElementById('warehouse-fill-submit');
+        var rows = [];
+        var invalid = false;
+
+        fillRows.forEach(function (variant, idx) {
+            var item = body.children[idx];
+            if (!item || invalid) return;
+            var weightInput = item.querySelector('.wh-fill-weight');
+            var activePill = item.querySelector('.wh-reason-pill.active');
+            var remarkInput = item.querySelector('.wh-fill-remark');
+            var weightRaw = (weightInput.value || '').trim();
+            var reason = activePill ? (activePill.getAttribute('data-value') || '').trim() : '';
+            var remark = (remarkInput.value || '').trim();
+            if (weightRaw === '' && reason === '' && remark === '') return;
+
+            var weight = parseFloat(weightRaw);
+            if (weightRaw !== '' && (!isFinite(weight) || weight <= 0)) {
+                weightInput.focus();
+                statusEl.innerHTML = '<span class="text-danger">「' + escapeHtml(variant.tongtu_sku) + '」填写的重量需大于 0</span>';
+                invalid = true;
+                return;
+            }
+
+            rows.push({
+                tongtu_sku: (variant.tongtu_sku || '').trim(),
+                shopify_sku: (variant.shopify_skus || []).join(', '),
+                original_weight_gram: Number(variant.sale_weight_gram) || 0,
+                corrected_weight_gram: isFinite(weight) && weight > 0 ? weight : null,
+                reject_reason: reason,
+                remark: remark,
+            });
+        });
+
+        if (invalid) return;
+        if (rows.length === 0) {
+            statusEl.innerHTML = '<span class="text-warning">请至少为一个 SKU 填写重量、驳回理由或备注</span>';
             return;
         }
 
-        var shopify = (variant.shopify_skus || []).join(', ');
         var payload = {
-            product_id: currentProductId,
-            tongtu_sku: variant.tongtu_sku,
-            shopify_sku: shopify,
-            tongtu_product_code: variant.tongtu_product_code || '',
-            tongtu_product_name: variant.tongtu_product_name || '',
-            product_image_url: variant.product_image_url || (currentProduct && currentProduct.image_url ? currentProduct.image_url : ''),
-            original_weight_gram: Number(variant.sale_weight_gram) || 0,
-            corrected_weight_gram: corrected,
-            remark: (remarkInput.value || '').trim(),
+            product_id: fillProductId,
+            tongtu_product_code: (fillRows[0] && fillRows[0].tongtu_product_code) || (fillProduct && fillProduct.product_code) || '',
+            tongtu_product_name: (fillRows[0] && fillRows[0].tongtu_product_name) || '',
+            product_image_url: (fillRows[0] && fillRows[0].product_image_url) || (fillProduct && fillProduct.image_url) || '',
+            rows: rows,
         };
 
+        submitBtn.disabled = true;
         statusEl.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 正在提交…';
-        var tokenEls = document.getElementsByName('_token');
-        var csrf = '';
-        for (var i = 0; i < tokenEls.length; i++) {
-            if (tokenEls[i].content) { csrf = tokenEls[i].content; break; }
-        }
-        if (!csrf) {
-            var metaToken = document.querySelector('meta[name="csrf-token"]');
-            if (metaToken) csrf = metaToken.getAttribute('content') || '';
-        }
 
-        fetch(config.reportUrl, {
+        fetch(config.fillUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest',
-                'X-CSRF-TOKEN': csrf,
+                'X-CSRF-TOKEN': csrfToken(),
             },
             body: JSON.stringify(payload),
         }).then(function (res) {
-            return res.json().catch(function () { return {}; }).then(function (data) { return { ok: res.ok, status: res.status, data: data }; });
+            return res.json().catch(function () { return {}; }).then(function (data) {
+                return { ok: res.ok, status: res.status, data: data };
+            });
         }).then(function (result) {
             if (!result.ok) {
+                submitBtn.disabled = false;
                 statusEl.innerHTML = '<span class="text-danger">提交失败：' + escapeHtml(result.data.message || '未知错误') + '</span>';
                 return;
             }
-            if (result.data.deduplicated) {
-                statusEl.innerHTML = '<span class="text-info"><i class="fa fa-info-circle"></i> ' + escapeHtml(result.data.message || '已在队列中') + '</span>';
-            } else {
-                statusEl.innerHTML = '<span class="text-success"><i class="fa fa-check-circle"></i> ' + escapeHtml(result.data.message || '提报成功') + '</span>';
-            }
-            var idx = Number(formRow.getAttribute('data-form-index'));
-            var mainRow = formRow.previousElementSibling;
-            if (mainRow) {
-                var btn = mainRow.querySelector('.warehouse-report-weight-btn');
-                if (btn) {
-                    btn.disabled = true;
-                    btn.className = 'btn btn-default btn-xs';
-                    btn.innerHTML = '<i class="fa fa-check"></i> 已提报';
-                }
-            }
-            setTimeout(function () { formRow.hidden = true; }, 1800);
+            statusEl.innerHTML = '<span class="text-success"><i class="fa fa-check-circle"></i> ' +
+                escapeHtml(result.data.message || '提交成功') + '</span>';
+            setTimeout(function () { closeModal($fillModal, fillModal); }, 1200);
         }).catch(function (err) {
+            submitBtn.disabled = false;
             statusEl.innerHTML = '<span class="text-danger">网络异常：' + escapeHtml(err.message) + '</span>';
         });
     }
 
-    function closeModal() {
-        if ($modal && typeof $modal.modal === 'function') {
-            $modal.modal('hide');
-        } else {
-            modal.classList.remove('in');
-            modal.style.display = 'none';
-            modal.setAttribute('aria-hidden', 'true');
-            // 手动清理 backdrop（如果之前手动 show 创建了）
-            var bd = document.querySelector('.modal-backdrop');
-            if (bd) bd.parentNode && bd.parentNode.removeChild(bd);
-            // 恢复 body 滚动
-            document.body.style.paddingRight = '';
-            document.body.classList.remove('modal-open');
-        }
-    }
+    // ==================== 关闭与事件 ====================
 
-    // ESC 键关闭
     document.addEventListener('keydown', function (ev) {
-        if (ev.key === 'Escape' && modal.classList.contains('in')) {
-            closeModal();
-        }
+        if (ev.key !== 'Escape') return;
+        if (fillModal && fillModal.classList.contains('in')) { closeModal($fillModal, fillModal); return; }
+        if (modal.classList.contains('in')) { closeModal($modal, modal); }
     });
 
-    // ============ 事件委托：全部绑在 document 上 ============
-
     document.addEventListener('click', function (ev) {
-        // ① Modal 关闭兜底：拦截 data-dismiss="modal" 和点击 modal 外部遮罩
-        var dismissBtn = ev.target && ev.target.closest && ev.target.closest('[data-dismiss="modal"]');
-        var isInsideOurModal = modal.contains(ev.target);
-        var isBackdrop = !isInsideOurModal
-            && ev.target === document.querySelector('.modal-backdrop')
-            && modal.classList.contains('in');
-        if (dismissBtn && isInsideOurModal) {
-            ev.preventDefault();
-            ev.stopPropagation();
-            closeModal();
-            return;
+        var target = ev.target;
+        if (!target || !target.closest) return;
+
+        // ① Modal 关闭兜底：拦截 data-dismiss="modal" 和点击遮罩
+        var dismissBtn = target.closest('[data-dismiss="modal"]');
+        if (dismissBtn) {
+            if (modal.contains(dismissBtn)) { ev.preventDefault(); closeModal($modal, modal); return; }
+            if (fillModal && fillModal.contains(dismissBtn)) { ev.preventDefault(); closeModal($fillModal, fillModal); return; }
         }
-        if (isBackdrop) {
-            closeModal();
-            return;
+        if (!modal.contains(target) && !(fillModal && fillModal.contains(target))) {
+            var backdrop = document.querySelector('.modal-backdrop');
+            if (backdrop && target === backdrop) {
+                if (fillModal && fillModal.classList.contains('in')) { closeModal($fillModal, fillModal); return; }
+                if (modal.classList.contains('in')) { closeModal($modal, modal); }
+                return;
+            }
         }
 
-        // ② 列表上的"查看"按钮（在 modal 之外）
-        var viewBtn = ev.target && ev.target.closest('.warehouse-product-statistics-view-btn');
+        // ② 列表上的"查看"
+        var viewBtn = target.closest('.warehouse-product-statistics-view-btn');
         if (viewBtn) {
             var productId = viewBtn.getAttribute('data-product-id');
             if (!productId) return;
             ev.preventDefault();
-            $('#warehouse-variant-detail-identity').innerHTML = '';
             loadVariants(productId);
             return;
         }
 
-        // ③ 规格详情里的"提报"按钮：展开表单
-        var reportBtn = ev.target && ev.target.closest('.warehouse-report-weight-btn');
-        if (reportBtn) {
+        // ③ 列表上的"填写"
+        var fillBtn = target.closest('.warehouse-product-statistics-fill-btn');
+        if (fillBtn) {
+            var fillId = fillBtn.getAttribute('data-product-id');
+            if (!fillId) return;
             ev.preventDefault();
-            if (reportBtn.disabled) return;
-            var mainRow = reportBtn.closest('[data-form-index]');
-            if (!mainRow) return;
-            var idx = mainRow.getAttribute('data-form-index');
-            var tbody = mainRow.parentElement;
-            if (!tbody) return;
-            var formRow = tbody.querySelector('[data-form-index="' + idx + '"]');
-            if (!formRow || formRow === mainRow) {
-                // 可能主行和表单行同 index；formRow 应该是下一行，补定位
-                var all = tbody.querySelectorAll('[data-form-index="' + idx + '"]');
-                if (all.length >= 2) formRow = all[1];
-            }
-            if (!formRow) return;
-            // 收起其他展开的表单
-            tbody.querySelectorAll('.warehouse-report-form').forEach(function (f) {
-                var r = f.closest('tr');
-                if (r && r !== formRow) r.hidden = true;
+            loadFill(fillId);
+            return;
+        }
+
+        // ④ 驳回理由按钮组：单选切换，再次点击取消
+        var reasonPill = target.closest('.wh-reason-pill');
+        if (reasonPill) {
+            ev.preventDefault();
+            var wasActive = reasonPill.classList.contains('active');
+            Array.prototype.forEach.call(reasonPill.parentNode.querySelectorAll('.wh-reason-pill'), function (pill) {
+                pill.classList.remove('active');
             });
-            formRow.hidden = !formRow.hidden;
-            if (!formRow.hidden) {
-                var input = formRow.querySelector('.warehouse-report-corrected-weight');
-                if (input) input.focus();
-            }
+            if (!wasActive) reasonPill.classList.add('active');
             return;
         }
 
-        // ④ "取消" 按钮
-        var cancelBtn = ev.target && ev.target.closest('.warehouse-report-cancel-btn');
-        if (cancelBtn) {
+        // ⑤ 填写弹窗提交
+        if (target.closest('#warehouse-fill-submit')) {
             ev.preventDefault();
-            var tr = cancelBtn.closest('[data-form-index]');
-            if (tr) tr.hidden = true;
-            return;
-        }
-
-        // ⑤ "提交" 按钮
-        var submitBtn = ev.target && ev.target.closest('.warehouse-report-submit-btn');
-        if (submitBtn) {
-            ev.preventDefault();
-            var formTr = submitBtn.closest('[data-form-index]');
-            if (!formTr) return;
-            var formTbody = formTr.parentElement;
-            var formIdx = Number(formTr.getAttribute('data-form-index'));
-            var variant = (formTbody && formTbody.__variants__ && formTbody.__variants__[formIdx]) || null;
-            if (!variant) {
-                formTr.querySelector('.warehouse-report-status').innerHTML = '<span class="text-danger">规格数据缺失，请重新打开详情</span>';
-                return;
-            }
-            submitReport(formTr, variant);
-            return;
+            submitFill();
         }
     });
 })();

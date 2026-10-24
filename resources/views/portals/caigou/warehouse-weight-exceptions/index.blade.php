@@ -50,7 +50,7 @@
                     </div>
                     <div class="form-group" style="margin-right:10px;">
                         <label style="margin-right:6px;">搜索</label>
-                        <input name="keyword" type="search" class="form-control input-sm" value="{{ $filters['keyword'] }}" placeholder="通途 SKU / Shopify SKU / 产品名 / 提报人">
+                        <input name="keyword" type="search" class="form-control input-sm" value="{{ $filters['keyword'] }}" placeholder="通途 SKU / Shopify SKU / 产品名 / 驳回理由 / 备注 / 提报人">
                     </div>
                     <button class="btn btn-primary btn-sm" type="submit"><i class="fa fa-search"></i> 查询</button>
                     <a class="btn btn-default btn-sm" href="{{ route('caigou.warehouse-weight-exceptions.index') }}">重置</a>
@@ -68,13 +68,15 @@
                     <tr>
                         <th style="width:60px;">图片</th>
                         <th>通途 SKU / Shopify SKU</th>
-                        <th>通途产品名 / 产品编号</th>
-                        <th style="width:120px;">原始重量(g)</th>
-                        <th style="width:120px;">正确重量(g)</th>
+                        <th>产品编号 / 产品名</th>
+                        <th style="width:110px;">通途重量(g)</th>
+                        <th style="width:110px;">填写重量(g)</th>
+                        <th style="width:110px;">驳回理由</th>
+                        <th>备注</th>
                         <th style="width:80px;">状态</th>
-                        <th>提报人</th>
-                        <th style="width:160px;">提报时间</th>
-                        <th style="width:160px;">操作</th>
+                        <th style="width:110px;">提报人</th>
+                        <th style="width:150px;">时间</th>
+                        <th style="width:130px;">操作</th>
                     </tr>
                     </thead>
                     <tbody>
@@ -94,10 +96,10 @@
                                 @endif
                             </td>
                             <td>
-                                <div>{{ $row->tongtu_product_name ?: '—' }}</div>
                                 @if($row->tongtu_product_code)
                                     <code style="font-size:12px;">{{ $row->tongtu_product_code }}</code>
                                 @endif
+                                <div>{{ $row->tongtu_product_name ?: '—' }}</div>
                             </td>
                             <td class="text-right">
                                 @if($row->original_weight_gram > 0)
@@ -106,7 +108,31 @@
                                     <span class="text-muted">—</span>
                                 @endif
                             </td>
-                            <td class="text-right"><strong>{{ number_format($row->corrected_weight_gram, 2, '.', '') }}</strong></td>
+                            <td class="text-right">
+                                @if($row->corrected_weight_gram > 0)
+                                    <strong>{{ number_format($row->corrected_weight_gram, 2, '.', '') }}</strong>
+                                @else
+                                    <span class="text-muted">—</span>
+                                @endif
+                            </td>
+                            <td>
+                                @if($row->reject_reason)
+                                    <span class="label label-danger">{{ \App\Models\WarehouseSkuWeightException::rejectReasonLabel($row->reject_reason) }}</span>
+                                @else
+                                    <span class="text-muted">—</span>
+                                @endif
+                            </td>
+                            <td>
+                                @if($row->remark)
+                                    <div>{{ \Illuminate\Support\Str::limit($row->remark, 60) }}</div>
+                                @endif
+                                @if($row->status === 'resolved' && $row->resolution_remark)
+                                    <div class="text-muted" style="font-size:12px;"><i class="fa fa-check-circle-o"></i> 处理备注: {{ \Illuminate\Support\Str::limit($row->resolution_remark, 60) }}</div>
+                                @endif
+                                @if(!$row->remark && !($row->status === 'resolved' && $row->resolution_remark))
+                                    <span class="text-muted">—</span>
+                                @endif
+                            </td>
                             <td>
                                 @if($row->status === 'pending')
                                     <span class="label label-warning">待处理</span>
@@ -114,12 +140,7 @@
                                     <span class="label label-success">已处理</span>
                                 @endif
                             </td>
-                            <td>
-                                {{ $row->reporter_name ?: '—' }}
-                                @if($row->remark)
-                                    <div class="text-muted" style="font-size:12px;">{{ \Illuminate\Support\Str::limit($row->remark, 60) }}</div>
-                                @endif
-                            </td>
+                            <td>{{ $row->reporter_name ?: '—' }}</td>
                             <td>
                                 <div>{{ $row->created_at?->format('Y-m-d H:i') }}</div>
                                 @if($row->status === 'resolved' && $row->resolved_at)
@@ -138,7 +159,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="9" class="text-center text-muted" style="padding:40px;">
+                            <td colspan="11" class="text-center text-muted" style="padding:40px;">
                                 <i class="fa fa-inbox fa-2x"></i>
                                 <div style="margin-top:8px;">当前筛选条件下没有异常记录</div>
                             </td>

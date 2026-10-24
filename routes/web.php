@@ -130,7 +130,7 @@ Route::get('/product-statistics/detail', [ProductStatisticsController::class, 'd
 Route::post('/product-statistics/export', [ProductStatisticsController::class, 'export'])->name('logistics.product-statistics.export');
 Route::get('/warehouse-product-statistics', [WarehouseProductStatisticsController::class, 'index'])->name('warehouse.product-statistics.index');
 Route::get('/warehouse-product-statistics/detail', [WarehouseProductStatisticsController::class, 'detail'])->name('warehouse.product-statistics.detail');
-Route::post('/warehouse-product-statistics/report-weight-exception', [WarehouseProductStatisticsController::class, 'reportWeightException'])->name('warehouse.product-statistics.report-weight-exception');
+Route::post('/warehouse-product-statistics/fill-weight-exceptions', [WarehouseProductStatisticsController::class, 'fillWeightExceptions'])->name('warehouse.product-statistics.fill-weight-exceptions');
 Route::get('/warehouse-weight-exceptions', [WarehouseWeightExceptionController::class, 'index'])->name('caigou.warehouse-weight-exceptions.index');
 Route::post('/warehouse-weight-exceptions/{id}/resolve', [WarehouseWeightExceptionController::class, 'resolve'])->name('caigou.warehouse-weight-exceptions.resolve');
 Route::get('/product-library', [ProductLibraryController::class, 'index'])->name('aikaipin.product-library.index');

@@ -47,6 +47,7 @@ class WarehouseProductStatisticsController extends Controller
             'stores' => [], // 仓库视图已移去店铺筛选
             'filters' => $filters,
             'labels' => $this->labels(),
+            'rejectReasonOptions' => WarehouseSkuWeightException::REJECT_REASONS,
         ]);
     }
 
@@ -156,10 +157,10 @@ class WarehouseProductStatisticsController extends Controller
     }
 
     /**
-     * 仓库规格 SKU 重量异常提报：提交一条 warehouse_sku_weight_exceptions 记录。
-     * 同一 tongtu_sku + shopify_sku + product_id 组合若已存在 pending 记录，不重复创建。
+     * 「填写」弹窗提交：一次性提交该产品下多个 SKU 的异常数据
+     * （填写重量 / 驳回理由 / 备注），按 SKU 幂等写入待处理队列。
      */
-    public function reportWeightException(Request $request): Response
+    public function fillWeightExceptions(Request $request): Response
     {
         $context = $this->portalContext($request);
         if ($context instanceof Response) {
@@ -168,61 +169,87 @@ class WarehouseProductStatisticsController extends Controller
 
         $validated = $request->validate([
             'product_id' => ['required', 'string', 'max:512'],
-            'tongtu_sku' => ['required', 'string', 'max:191'],
-            'shopify_sku' => ['nullable', 'string', 'max:191'],
             'tongtu_product_code' => ['nullable', 'string', 'max:191'],
             'tongtu_product_name' => ['nullable', 'string', 'max:255'],
             'product_image_url' => ['nullable', 'string', 'max:1024'],
-            'original_weight_gram' => ['nullable', 'numeric'],
-            'corrected_weight_gram' => ['required', 'numeric', 'gt:0'],
-            'remark' => ['nullable', 'string', 'max:500'],
+            'rows' => ['required', 'array', 'min:1', 'max:200'],
+            'rows.*.tongtu_sku' => ['required', 'string', 'max:191'],
+            'rows.*.shopify_sku' => ['nullable', 'string', 'max:191'],
+            'rows.*.original_weight_gram' => ['nullable', 'numeric'],
+            'rows.*.corrected_weight_gram' => ['nullable', 'numeric', 'gt:0'],
+            'rows.*.reject_reason' => ['nullable', Rule::in(array_keys(WarehouseSkuWeightException::REJECT_REASONS))],
+            'rows.*.remark' => ['nullable', 'string', 'max:500'],
         ]);
 
         $user = $context['user'];
 
-        // 同一 SKU + product 维度已存在 pending 记录时做幂等返回，避免重复提报
-        $existing = WarehouseSkuWeightException::query()
-            ->where('status', 'pending')
-            ->where('product_id', $validated['product_id'])
-            ->where('tongtu_sku', $validated['tongtu_sku'])
-            ->where(function ($q) use ($validated): void {
-                $shopify = trim((string) ($validated['shopify_sku'] ?? ''));
-                if ($shopify !== '') {
-                    $q->where('shopify_sku', $shopify);
-                } else {
-                    $q->whereNull('shopify_sku');
-                }
-            })
-            ->first();
+        // 只处理真正填了内容的行：重量 / 驳回理由 / 备注 全空视为未填写
+        $rows = collect($validated['rows'])->filter(function (array $row): bool {
+            return trim((string) ($row['reject_reason'] ?? '')) !== ''
+                || trim((string) ($row['remark'] ?? '')) !== ''
+                || (float) ($row['corrected_weight_gram'] ?? 0) > 0;
+        })->values();
 
-        if ($existing) {
+        if ($rows->isEmpty()) {
             return response()->json([
-                'ok' => true,
-                'id' => (int) $existing->id,
-                'message' => '该规格 SKU 的重量异常已在提报队列中，请勿重复提交',
-                'deduplicated' => true,
-            ], 200);
+                'ok' => false,
+                'message' => '请至少为一个 SKU 填写重量、驳回理由或备注',
+            ], 422);
         }
 
-        $record = WarehouseSkuWeightException::query()->create([
-            'product_id' => $validated['product_id'],
-            'tongtu_sku' => $validated['tongtu_sku'],
-            'shopify_sku' => trim((string) ($validated['shopify_sku'] ?? '')),
-            'tongtu_product_code' => trim((string) ($validated['tongtu_product_code'] ?? '')),
-            'tongtu_product_name' => trim((string) ($validated['tongtu_product_name'] ?? '')),
-            'product_image_url' => trim((string) ($validated['product_image_url'] ?? '')),
-            'original_weight_gram' => (float) ($validated['original_weight_gram'] ?? 0),
-            'corrected_weight_gram' => (float) $validated['corrected_weight_gram'],
-            'remark' => trim((string) ($validated['remark'] ?? '')),
-            'status' => 'pending',
-            'reported_by_user_id' => (int) $user->getKey(),
-            'reporter_name' => trim((string) $user->getAttribute('username')),
-        ]);
+        $created = 0;
+        $updated = 0;
+        foreach ($rows as $row) {
+            $sku = trim((string) $row['tongtu_sku']);
+            $existing = WarehouseSkuWeightException::query()
+                ->where('status', 'pending')
+                ->where('product_id', $validated['product_id'])
+                ->where('tongtu_sku', $sku)
+                ->first();
+
+            $payload = [
+                'shopify_sku' => trim((string) ($row['shopify_sku'] ?? '')) ?: null,
+                'tongtu_product_code' => trim((string) ($validated['tongtu_product_code'] ?? '')) ?: null,
+                'tongtu_product_name' => trim((string) ($validated['tongtu_product_name'] ?? '')) ?: null,
+                'product_image_url' => trim((string) ($validated['product_image_url'] ?? '')) ?: null,
+                'original_weight_gram' => (float) ($row['original_weight_gram'] ?? 0),
+                'corrected_weight_gram' => (float) ($row['corrected_weight_gram'] ?? 0) ?: null,
+                'reject_reason' => trim((string) ($row['reject_reason'] ?? '')) ?: null,
+                'remark' => trim((string) ($row['remark'] ?? '')) ?: null,
+            ];
+
+            if ($existing) {
+                // 只覆盖本次真正填写过的字段，避免把之前已填的驳回理由/备注清空
+                $changes = array_filter($payload, static function ($value): bool {
+                    if (is_int($value) || is_float($value)) {
+                        return $value > 0;
+                    }
+
+                    return $value !== null && $value !== '';
+                });
+                if ($changes !== []) {
+                    $existing->fill($changes)->save();
+                    $updated++;
+                }
+                continue;
+            }
+
+            WarehouseSkuWeightException::query()->create([
+                'product_id' => $validated['product_id'],
+                'tongtu_sku' => $sku,
+                ...$payload,
+                'status' => 'pending',
+                'reported_by_user_id' => (int) $user->getKey(),
+                'reporter_name' => trim((string) $user->getAttribute('username')),
+            ]);
+            $created++;
+        }
 
         return response()->json([
             'ok' => true,
-            'id' => (int) $record->id,
-            'message' => '重量异常提报成功，入录审核系统将收到该记录',
+            'created' => $created,
+            'updated' => $updated,
+            'message' => sprintf('异常数据已提交：新增 %d 条，更新 %d 条', $created, $updated),
         ], 201);
     }
 
@@ -322,13 +349,10 @@ class WarehouseProductStatisticsController extends Controller
             'refundCount' => '退款/争议',
             'productImage' => '货品图片',
             'tongtuWeight' => '通途重量(g)',
-            'report' => '提报',
-            'weightProblem' => '重量问题',
-            'correctWeight' => '正确重量(g)',
-            'originalWeight' => '原始重量(g)',
+            'fill' => '填写',
+            'filledWeight' => '填写重量(g)',
+            'rejectReason' => '驳回理由',
             'remark' => '备注',
-            'reportSubmit' => '提交提报',
-            'reportCancel' => '取消',
         ];
     }
 }
