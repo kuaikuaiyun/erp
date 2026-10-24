@@ -18,6 +18,40 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261021-2">
+    <style>
+        /* 规格详情弹窗表格美化 */
+        #warehouse-product-statistics-variant-modal .wh-variant-table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13px; }
+        #warehouse-product-statistics-variant-modal .wh-variant-table thead th {
+            background: #f7f9fc; color: #5a6a7a; font-weight: 600; font-size: 12px;
+            padding: 10px 12px; border-bottom: 2px solid #e3e8f0 !important; border-top: none !important;
+            white-space: nowrap;
+        }
+        #warehouse-product-statistics-variant-modal .wh-variant-table tbody td {
+            padding: 10px 12px; vertical-align: middle; border-top: 1px solid #f0f3f8; background: #fff;
+        }
+        #warehouse-product-statistics-variant-modal .wh-variant-table tbody tr:hover td { background: #f6faff; }
+        #warehouse-product-statistics-variant-modal .wh-variant-table .wh-thumb {
+            width: 48px; height: 48px; object-fit: cover; border-radius: 6px;
+            border: 1px solid #e6ebf2; box-shadow: 0 1px 3px rgba(30,45,70,.12); cursor: zoom-in;
+        }
+        #warehouse-product-statistics-variant-modal .wh-code {
+            display: inline-block; padding: 3px 8px; border-radius: 4px;
+            background: #eef4fb; color: #2868b0; font-family: Consolas, monospace; font-size: 12px;
+            max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle;
+        }
+        #warehouse-product-statistics-variant-modal .wh-name { color: #2d3a4a; font-weight: 600; }
+        #warehouse-product-statistics-variant-modal .wh-weight-badge {
+            display: inline-block; min-width: 48px; padding: 3px 10px; border-radius: 12px;
+            background: #e8f5e9; color: #2e7d32; font-weight: 600; text-align: center;
+        }
+        #warehouse-product-statistics-variant-modal .wh-weight-missing {
+            display: inline-block; padding: 3px 10px; border-radius: 12px;
+            background: #fdecea; color: #c62828; font-weight: 600;
+        }
+        #warehouse-product-statistics-variant-modal .wh-report-btn {
+            border-radius: 4px; padding: 4px 12px; font-size: 12px;
+        }
+    </style>
 @endpush
 
 @section('content')
@@ -145,12 +179,12 @@
                     <div id="warehouse-variant-detail-loading" class="text-muted text-center" hidden><i class="fa fa-spinner fa-spin"></i> 正在加载规格详情…</div>
                     <div id="warehouse-variant-detail-error" class="alert alert-danger" hidden></div>
                     <div id="warehouse-variant-detail-content" hidden>
-                        <table class="table table-condensed table-bordered table-hover">
+                        <table class="table wh-variant-table">
                             <thead>
                             <tr>
                                 <th style="width:70px;">货品图片</th>
-                                <th>通途 SKU</th>
-                                <th>Shopify SKU</th>
+                                <th>产品编号</th>
+                                <th>通途SKU</th>
                                 <th>规格产品名</th>
                                 <th style="width:90px;">通途重量(g)</th>
                                 <th style="width:80px;">操作</th>
@@ -173,5 +207,5 @@
     <script>
         window.__warehouseProductStatisticsConfig = @json($warehouseProductStatisticsConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/warehouse-product-statistics.js?v=20261023-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/warehouse-product-statistics.js?v=20261024-1"></script>
 @endpush

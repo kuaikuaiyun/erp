@@ -285,6 +285,8 @@ class WarehouseProductStatisticsController extends Controller
             'decision' => '',
             // 仓库只关心已通途匹配（有 product_code）的产品，过滤掉待通途匹配的数据
             'require_tongtu_match' => true,
+            // 仓库列表不展示退款原因报表，跳过重聚合（约 19s）避免列表/分页卡顿
+            'skip_refund_report' => true,
             'sort' => trim((string) ($input['sort'] ?? '')),
             'direction' => trim((string) ($input['direction'] ?? '')),
             'page' => max(1, (int) ($input['page'] ?? 1)),

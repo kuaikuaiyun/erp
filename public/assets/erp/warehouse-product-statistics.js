@@ -87,25 +87,22 @@
     }
 
     function buildVariantRow(variant, idx) {
-        var shopify = (variant.shopify_skus || []).map(function (s) {
-            return '<span class="label label-default" style="margin:0 2px;">' + escapeHtml(s) + '</span>';
-        }).join('');
+        var tongtuSku = (variant.tongtu_sku || '').trim();
 
         var weight = Number(variant.sale_weight_gram);
         var weightCell;
         if (!isFinite(weight) || weight <= 0) {
-            weightCell = '<span class="label label-danger" title="通途重量缺失，请核对"><i class="fa fa-exclamation-triangle"></i> 缺失</span>';
+            weightCell = '<span class="wh-weight-missing" title="通途重量缺失，请核对"><i class="fa fa-exclamation-triangle"></i> 缺失</span>';
         } else {
-            weightCell = '<span class="label label-default" title="通途 goodsDetail 计算值">' + weight.toFixed(2).replace(/\.?0+$/, '') + '</span>';
+            weightCell = '<span class="wh-weight-badge" title="通途 goodsDetail 计算值">' + weight.toFixed(2).replace(/\.?0+$/, '') + '</span>';
         }
 
         var imageCell;
         if (!variant.product_image_url) {
-            imageCell = '<span class="text-muted" title="Shopify 订单行未返回图片">—</span>';
+            imageCell = '<span class="text-muted" title="未返回图片">—</span>';
         } else {
             imageCell = '<img src="' + escapeHtml(variant.product_image_url) + '" ' +
-                'class="product-statistics-thumb erp-zoomable" ' +
-                'style="width:48px;height:48px;object-fit:cover;border:1px solid #eee;border-radius:3px;cursor:zoom-in;" alt="" ' +
+                'class="wh-thumb erp-zoomable" alt="" ' +
                 'title="点击放大查看" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">';
         }
 
@@ -113,12 +110,12 @@
         tr.setAttribute('data-form-index', String(idx));
         tr.innerHTML =
             '<td>' + imageCell + '</td>' +
-            '<td><code>' + escapeHtml(variant.tongtu_sku || '') + '</code></td>' +
-            '<td>' + (shopify || '<span class="text-muted">—</span>') + '</td>' +
-            '<td>' + escapeHtml(variant.tongtu_product_name || '') + '</td>' +
+            '<td><span class="wh-code" title="' + escapeHtml(variant.tongtu_product_code || '') + '">' + escapeHtml(variant.tongtu_product_code || '') + '</span></td>' +
+            '<td><span class="wh-code" title="' + escapeHtml(tongtuSku) + '">' + escapeHtml(tongtuSku) + '</span></td>' +
+            '<td><span class="wh-name">' + escapeHtml(variant.tongtu_product_name || '') + '</span></td>' +
             '<td>' + weightCell + '</td>' +
             '<td>' +
-                '<button type="button" class="btn btn-warning btn-xs warehouse-report-weight-btn">' +
+                '<button type="button" class="btn btn-warning btn-xs warehouse-report-weight-btn wh-report-btn">' +
                     '<i class="fa fa-exclamation-triangle"></i> 提报' +
                 '</button>' +
             '</td>';

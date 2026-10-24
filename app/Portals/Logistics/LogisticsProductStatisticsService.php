@@ -85,7 +85,9 @@ class LogisticsProductStatisticsService
         return [
             'products' => $products,
             'summary' => $summary,
-            'refund_reason_report' => $this->cachedRefundReasonReport($filters),
+            // 退款原因报表聚合非常重（~19s），不展示它的门户（如仓库系统）可通过
+            // filters.skip_refund_report=true 跳过，避免白等。
+            'refund_reason_report' => !empty($filters['skip_refund_report']) ? [] : $this->cachedRefundReasonReport($filters),
             'pagination' => [
                 'current_page' => $page,
                 'per_page' => $perPage,
