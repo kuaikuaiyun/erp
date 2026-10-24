@@ -1,7 +1,6 @@
 @php
     $display = static fn ($value): string => $value === null || $value === '' ? '—' : (string) $value;
     $money = static fn ($value): string => $value === null || $value === '' ? '—' : '$'.number_format((float) $value, 2);
-    $rate = static fn ($value): string => $value === null || $value === '' ? '—' : number_format((float) $value, 2).'%';
     $date = static function ($value): string {
         if (!$value) return '—';
         try { return \Carbon\Carbon::parse($value)->timezone('Asia/Shanghai')->format('Y-m-d H:i:s'); } catch (\Throwable) { return '—'; }
@@ -174,7 +173,8 @@
                                 <div><dt>数量</dt><dd>{{ $display($item->quantity) }}</dd></div>
                                 <div><dt>单价</dt><dd>{{ $money($item->unit_price_usd) }}</dd></div>
                                 <div><dt>销售额</dt><dd>{{ $money($item->line_revenue_usd) }}</dd></div>
-                                <div><dt>重量</dt><dd>{{ $item->sale_weight_gram === null ? '—' : number_format((float) $item->sale_weight_gram, 2).' g' }}</dd></div>
+                                <div><dt>{{ __('logistics.orders.sale_product_detail_labels.goods_weight') }}</dt><dd>{{ $item->tongtu_goods_weight_gram === null ? __('logistics.common.not_available') : number_format((float) $item->tongtu_goods_weight_gram, 2).' '.__('logistics.orders.sale_product_detail_labels.weight_unit') }}</dd></div>
+                                <div><dt>{{ __('logistics.orders.sale_product_detail_labels.package_weight') }}</dt><dd>{{ $item->tongtu_package_weight_gram === null ? __('logistics.common.not_available') : number_format((float) $item->tongtu_package_weight_gram, 2).' '.__('logistics.orders.sale_product_detail_labels.weight_unit') }}</dd></div>
                             </dl>
                         </article>
                     @empty
@@ -383,13 +383,8 @@
                 <dl><dt>买家实付运费</dt><dd>{{ $money($order->total_shipping_usd) }}</dd></dl>
                 <dl class="is-total"><dt>实付金额</dt><dd>{{ $money($order->paid_amount_usd) }}</dd></dl>
                 <div class="logistics-order-detail-paid"><span>{{ $display($order->payment_status) }}</span><strong>{{ $money($order->paid_amount_usd) }}</strong></div>
-                <dl><dt>货品成本</dt><dd>{{ $money($order->product_cost_usd) }}</dd></dl>
-                <dl><dt>手续费</dt><dd>{{ $money($order->handling_fee_usd) }}</dd></dl>
                 <dl><dt>Shopify 退款</dt><dd>{{ $money($order->shopify_refund_amount_usd) }}</dd></dl>
                 <dl><dt>渠道退款</dt><dd>{{ $money($order->channel_refund_amount_usd) }}</dd></dl>
-                <dl><dt>平台费用</dt><dd>{{ $money($order->platform_fee_usd) }}</dd></dl>
-                <dl class="is-total"><dt>净额</dt><dd>{{ $money($order->net_amount_usd) }}</dd></dl>
-                <div class="logistics-order-detail-profit"><span>财务利润</span><strong>{{ $money($order->financial_profit_usd) }}</strong><em>{{ $rate($order->financial_profit_rate) }}</em></div>
             </section>
             <section class="logistics-order-detail-card logistics-order-detail-source">
                 <div class="logistics-order-detail-card-title"><h4>归属信息</h4></div>

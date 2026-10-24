@@ -17,9 +17,8 @@ use RuntimeException;
 class ShopifyOrderSyncService
 {
     public function __construct(
-        private readonly LogisticsProfitCalculator $profitCalculator,
         private readonly LogisticsOrderItemService $items,
-        private readonly LogisticsTongtuAutomationService $automation,
+        private readonly TongtuSkuMappingService $skuMappings,
         private readonly LogisticsTrackingService $tracking,
         private readonly LogisticsOrderPaymentReferenceService $paymentReferences,
         private readonly PayPalOrderAssociationService $paypalAssociations,
@@ -394,7 +393,7 @@ GRAPHQL, [
         $isAssigned = $store instanceof AssistantDomainStore;
         $tongtuOrderNumber = $isAssigned ? $store->makeTongtuOrderNumber($orderNumber) : null;
 
-        $dataStatus = $this->dataStatus($current, $isAssigned, filled($tongtuOrderNumber), $missingSku);
+        $dataStatus = $this->dataStatus($isAssigned, $missingSku);
         $skuExceptionReason = $missingSku
             ? 'Shopify SKU 缺失'
             : ($current->data_status === LogisticsOrder::STATUS_SKU_EXCEPTION ? $current->sku_exception_reason : null);
@@ -446,8 +445,8 @@ GRAPHQL, [
             'fulfillment_payload' => json_encode($fulfillment['payload'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'first_fulfilled_at' => $current->first_fulfilled_at ?: $fulfillment['first_fulfilled_at'],
             'order_created_at' => $this->dateTime($payload['createdAt'] ?? null),
-            'data_status' => $skuChanged && !$missingSku ? LogisticsOrder::STATUS_PENDING_TONGTU : $dataStatus,
-            'sku_exception_reason' => $skuChanged && !$missingSku ? null : $skuExceptionReason,
+            'data_status' => $dataStatus,
+            'sku_exception_reason' => $skuExceptionReason,
             'sku_fingerprint' => $skuFingerprint,
             'sku_exception_fingerprint' => $skuChanged ? null : $current->sku_exception_fingerprint,
             'shopify_customer_id' => $this->legacyId(Arr::get($payload, 'customer.id')),
@@ -463,12 +462,11 @@ GRAPHQL, [
             'shopify_payload' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         ]);
         $trackingNumberChanged = $current->isDirty('tracking_number');
-        $this->profitCalculator->recalculate($current);
         $current->save();
         $this->paymentReferences->syncFromAttributes($current, $attributes);
         $this->paypalAssociations->reconcileOrder($current);
         $this->items->syncFromShopifyPayload($current, $payload);
-        $this->automation->scheduleForOrder($current);
+        $this->skuMappings->scheduleForOrder($current);
         if ($isNew || $trackingNumberChanged) {
             $this->tracking->scheduleForOrder($current);
         }
@@ -502,26 +500,16 @@ GRAPHQL, [
             : null;
     }
 
-    private function dataStatus(LogisticsOrder $current, bool $isAssigned, bool $hasTongtuOrderNumber, bool $missingSku): string
+    private function dataStatus(bool $isAssigned, bool $missingSku): string
     {
         if (!$isAssigned) {
             return LogisticsOrder::STATUS_STORE_UNMATCHED;
-        }
-        if (!$hasTongtuOrderNumber) {
-            return LogisticsOrder::STATUS_STORE_CONFIG_EXCEPTION;
         }
         if ($missingSku) {
             return LogisticsOrder::STATUS_SKU_EXCEPTION;
         }
 
-        return in_array($current->data_status, [
-            LogisticsOrder::STATUS_NORMAL,
-            LogisticsOrder::STATUS_TONGTU_NOT_FOUND,
-            LogisticsOrder::STATUS_TONGTU_FAILED,
-            LogisticsOrder::STATUS_SKU_EXCEPTION,
-        ], true)
-            ? $current->data_status
-            : LogisticsOrder::STATUS_PENDING_TONGTU;
+        return LogisticsOrder::STATUS_NORMAL;
     }
 
     /** @return array<string, string> */

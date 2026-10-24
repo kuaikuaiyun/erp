@@ -12,14 +12,10 @@
         'subscription_status' => '订阅状态', 'payment_status' => '支付状态', 'payment_method' => '支付方式', 'payment_gateway' => '支付渠道',
         'paid_amount_usd' => '实付金额（USD）', 'paid_at' => '付款时间', 'tongtu_product_code' => __('logistics.product_statistics.headers.product_code'), 'tongtu_sku' => __('logistics.product_statistics.headers.tongtu_sku'),
         'tongtu_product_name' => '通途配货名称', 'sale_quantity' => '出单数量', 'sale_product_weight' => '出单产品重量',
-        'product_cost_usd' => '货品成本（USD）', 'handling_fee_usd' => '手续费（USD）', 'total_shipping_usd' => '总运费（USD）',
-        'proportional_refund_usd' => '比例退款（USD）', 'proportional_profit_usd' => '比例利润（USD）', 'proportional_profit_rate' => '比例利润率',
-        'financial_profit_usd' => '财务利润（USD）', 'financial_profit_rate' => '财务利润率',
-        'operation_profit_usd' => '运营利润（USD）', 'operation_profit_rate' => '运营利润率',
+        'total_shipping_usd' => '总运费（USD）',
         'channel_refund_amount_usd' => '渠道退款额（USD）', 'shopify_refund_amount_usd' => 'Shopify店铺退款额（USD）',
         'refunded_at' => '退款时间', 'refund_reason' => '退款原因', 'collection_account' => '收款账号',
-        'collection_account_email' => '收款账号邮箱', 'received_amount_usd' => '收款账号实收金额（USD）',
-        'platform_fee_usd' => '平台费用（USD）', 'net_amount_usd' => '净额（USD）', 'transaction_id' => '交易号',
+        'collection_account_email' => '收款账号邮箱', 'transaction_id' => '交易号',
         'bill_number' => '账单号', 'destination' => '目的地', 'shipping_company' => '物流公司',
         'tracking_number' => '跟踪单号', 'logistics_status' => '物流状态', 'order_created_at' => '订单创建时间',
         'data_status' => '数据状态', 'sku_exception_reason' => 'SKU异常原因', 'time_zone' => '时区',
@@ -27,12 +23,12 @@
     $groups = [
         '订单基础信息' => ['shopify_order_id', 'shopify_order_number', 'tongtu_order_number', 'store_name', 'operator_name', 'group_names', 'staff_status', 'buyer_name', 'buyer_email', 'buyer_phone', 'is_add_on', 'time_zone', 'destination', 'order_created_at'],
         '订阅与支付' => ['subscription_type', 'subscription_origin_order_id', 'subscription_status', 'payment_status', 'payment_method', 'payment_gateway', 'paid_amount_usd', 'paid_at', 'collection_account', 'collection_account_email', 'transaction_id', 'bill_number'],
-        '通途商品与成本' => ['tongtu_product_code', 'tongtu_sku', 'tongtu_product_name', 'sale_quantity', 'sale_product_weight', 'product_cost_usd', 'handling_fee_usd', 'total_shipping_usd', 'proportional_refund_usd', 'proportional_profit_usd', 'proportional_profit_rate', 'financial_profit_usd', 'financial_profit_rate', 'operation_profit_usd', 'operation_profit_rate'],
-        '退款与结算' => ['channel_refund_amount_usd', 'shopify_refund_amount_usd', 'refunded_at', 'refund_reason', 'received_amount_usd', 'platform_fee_usd', 'net_amount_usd'],
+        __('logistics.orders.form_groups.tongtu_product') => ['tongtu_product_code', 'tongtu_sku', 'tongtu_product_name', 'sale_quantity', 'sale_product_weight', 'total_shipping_usd'],
+        '退款与结算' => ['channel_refund_amount_usd', 'shopify_refund_amount_usd', 'refunded_at', 'refund_reason'],
         '物流与状态' => ['shipping_company', 'tracking_number', 'logistics_status', 'data_status', 'sku_exception_reason'],
     ];
     $textareaFields = ['tongtu_product_code', 'tongtu_sku', 'tongtu_product_name', 'sale_quantity', 'sale_product_weight', 'refund_reason', 'tracking_number', 'sku_exception_reason'];
-    $numberFields = ['paid_amount_usd', 'product_cost_usd', 'handling_fee_usd', 'total_shipping_usd', 'proportional_refund_usd', 'proportional_profit_usd', 'proportional_profit_rate', 'financial_profit_usd', 'financial_profit_rate', 'operation_profit_usd', 'operation_profit_rate', 'channel_refund_amount_usd', 'shopify_refund_amount_usd', 'received_amount_usd', 'platform_fee_usd', 'net_amount_usd'];
+    $numberFields = ['paid_amount_usd', 'total_shipping_usd', 'channel_refund_amount_usd', 'shopify_refund_amount_usd'];
     $dateFields = ['paid_at', 'refunded_at', 'order_created_at'];
     $value = static function (string $field) use ($order, $dateFields) {
         $old = old($field, $order->{$field});

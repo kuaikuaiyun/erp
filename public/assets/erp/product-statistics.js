@@ -6,7 +6,6 @@
     var overallSummary = config.summary || {};
     var refundReasonReport = config.refundReasonReport || {};
     var pagination = config.pagination || { current_page: 1, per_page: 10, total: products.length, last_page: 1, from: 0, to: products.length };
-    var decisions = config.decisions || {};
     var labels = config.labels || {};
     var state = { page: Number(pagination.current_page) || 1, sort: config.sort || '', direction: config.direction || '', selected: {}, reasonReportExpanded: false };
     var detailState = { product: null, overviewLoaded: false, loadingTabs: {}, tabData: {}, sorts: {}, filters: {}, pages: {}, perPages: {}, activeTab: 'overview' };
@@ -78,17 +77,6 @@
         return (amount < 0 ? '-$' : '$') + Math.abs(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
     function formatRate(value) { return isNumeric(value) ? number(value).toFixed(2) + '%' : blank(); }
-    function decisionClass(key) { return ({ continue: 'is-continue', optimize: 'is-optimize', watch: 'is-watch', stop: 'is-stop' })[key] || 'is-watch'; }
-    function decisionBadge(key) { return '<span class="product-statistics-decision ' + decisionClass(key) + '">' + escapeHtml(decisions[key] || blank()) + '</span>'; }
-    function rateClass(value) {
-        if (!isNumeric(value)) return 'is-watch';
-        var rate = number(value);
-        if (rate >= 35) return 'is-strong';
-        if (rate >= 18) return 'is-healthy';
-        if (rate >= 8) return 'is-watch';
-        return 'is-risk';
-    }
-    function productFees(subject) { return number(subject.shipping) + number(subject.handling); }
     function productThumb(product) {
         var imageUrl = product.image_url ? String(product.image_url) : '';
         var image = imageUrl ? '<img src="' + escapeHtml(imageUrl) + '" alt="" loading="lazy">' : '';
@@ -96,12 +84,12 @@
         return '<span class="product-statistics-thumb ' + (image ? 'has-image is-previewable' : '') + '"' + attributes + '>' + image + '<i class="fa fa-cube" aria-hidden="true"></i></span>';
     }
     function hasTongtuMatch(product) {
-        return Boolean(product && product.has_tongtu_match && product.product_code);
+        return Boolean(product && product.match_status === 'matched' && product.product_code);
     }
     function productIdentity(product) {
         if (hasTongtuMatch(product)) return product.product_code;
         var fallbackSku = product && (product.fallback_shopify_sku || product.shopify_sku || product.sku);
-        return fallbackSku ? t('shopifySkuPrefix') + fallbackSku : t('pendingTongtuMatch');
+        return fallbackSku ? t('shopifySkuPrefix') + fallbackSku : (product && product.match_status_label ? product.match_status_label : t('pendingTongtuMatch'));
     }
     function productCodeCell(product) {
         if (hasTongtuMatch(product)) {
@@ -113,11 +101,17 @@
             ? '<small>' + escapeHtml(t('shopifySkuPrefix')) + '<code title="' + escapeHtml(fallbackSku) + '">' + escapeHtml(fallbackSku) + '</code></small>'
             : '';
 
-        return '<div class="product-statistics-pcl-pending"><span>' + escapeHtml(t('pendingTongtuMatch')) + '</span>' + fallback + '</div>';
+        var status = product && product.match_status_label ? product.match_status_label : t('pendingTongtuMatch');
+        return '<div class="product-statistics-pcl-pending"><span class="is-' + escapeHtml((product && product.match_status) || 'unmatched') + '">' + escapeHtml(status) + '</span>' + fallback + '</div>';
     }
     function variantCountCell(product) {
         if (hasTongtuMatch(product)) return formatNumber(product.variant_count);
         return '<span class="product-statistics-pending-dash" title="' + escapeHtml(t('variantCountPending')) + '">—</span>';
+    }
+    function matchStatusCell(product) {
+        var status = String((product && product.match_status) || 'unmatched');
+        var label = product && product.match_status_label ? product.match_status_label : t('pendingTongtuMatch');
+        return '<span class="product-statistics-match-status is-' + escapeHtml(status) + '">' + escapeHtml(label) + '</span>';
     }
     function parentRow(product) {
         var subtitle = product.matched_name || product.category || '';
@@ -125,21 +119,18 @@
             + '<td class="product-statistics-check-column"><input class="product-statistics-check" type="checkbox" value="' + escapeHtml(product.id) + '"' + (state.selected[product.id] ? ' checked' : '') + '></td>'
             + '<td><div class="product-statistics-product-cell">' + productThumb(product) + '<span><strong title="' + escapeHtml(product.name || '') + '">' + escapeHtml(product.name) + '</strong><small class="' + (product.matched_name ? 'product-statistics-matched-name' : '') + '" title="' + escapeHtml(subtitle) + '">' + escapeHtml(subtitle) + '</small></span></div></td>'
             + '<td>' + productCodeCell(product) + '</td>'
-            + '<td>' + variantCountCell(product) + '</td>'
+            + '<td>' + matchStatusCell(product) + '</td>'
             + '<td><span class="product-statistics-store-count">' + formatNumber(product.shop_count) + '</span><small class="product-statistics-store-names">' + escapeHtml((product.stores || []).join('、')) + '</small></td>'
-            + '<td>' + formatNumber(product.sales) + '</td><td>' + formatMoney(product.revenue) + '</td><td>' + formatMoney(product.cost) + '</td><td>' + formatMoney(productFees(product)) + '</td>'
+            + '<td>' + formatNumber(product.sales) + '</td><td>' + formatMoney(product.revenue) + '</td>'
             + '<td>' + formatMoney(product.paypal_refund_amount) + '</td><td>' + formatRate(product.paypal_refund_rate) + '</td><td>' + formatNumber(product.paypal_dispute_count) + '</td><td>' + formatRate(product.paypal_dispute_rate) + '</td>'
             + '<td>' + formatMoney(product.credit_card_refund_amount) + '</td><td>' + formatRate(product.credit_card_refund_rate) + '</td><td>' + formatRate(product.combined_refund_rate) + '</td>'
-            + '<td class="product-statistics-profit ' + (isNumeric(product.profit) && number(product.profit) < 0 ? 'is-negative' : '') + '">' + formatMoney(product.profit) + '</td>'
-            + '<td><span class="product-statistics-rate ' + rateClass(product.profit_rate) + '">' + formatRate(product.profit_rate) + '</span></td>'
-            + '<td>' + decisionBadge(product.decision) + '</td><td><button class="btn btn-primary btn-xs product-statistics-view" type="button" data-product-id="' + escapeHtml(product.id) + '"><i class="fa fa-eye"></i> ' + escapeHtml(t('view')) + '</button></td></tr>';
+            + '<td><button class="btn btn-primary btn-xs product-statistics-view" type="button" data-product-id="' + escapeHtml(product.id) + '"><i class="fa fa-eye"></i> ' + escapeHtml(t('view')) + '</button></td></tr>';
     }
     function renderSummary() {
         document.getElementById('product-statistics-summary-products').textContent = formatNumber(overallSummary.product_count);
         document.getElementById('product-statistics-summary-sales').textContent = formatNumber(overallSummary.sales);
         document.getElementById('product-statistics-summary-revenue').textContent = formatMoney(overallSummary.revenue);
-        document.getElementById('product-statistics-summary-profit').textContent = formatMoney(overallSummary.profit);
-        document.getElementById('product-statistics-summary-profit-rate').textContent = formatRate(overallSummary.profit_rate);
+        document.getElementById('product-statistics-summary-refunds').textContent = formatMoney(overallSummary.actual_refunds);
         document.getElementById('product-statistics-total-label').textContent = (t('totalProducts') || '').replace(':count', formatNumber(overallSummary.product_count));
     }
     function reasonReportLabel(row) {
@@ -257,7 +248,7 @@
         container.innerHTML = '<div class="alert alert-info"><i class="fa fa-spinner fa-spin"></i> ' + escapeHtml(t('detailLoading')) + '</div>';
     }
     function clearDeferredDetailTabs() {
-        ['variants', 'paypal_orders', 'credit_card_orders', 'refunds', 'disputes', 'orders'].forEach(function (tab) {
+        ['paypal_orders', 'credit_card_orders', 'refunds', 'disputes', 'orders'].forEach(function (tab) {
             var container = detailTabElement(tab);
             if (container) container.innerHTML = '';
         });
@@ -428,15 +419,6 @@
             + overviewMetric(t('overviewDeliveryRate'), formatRate(subject.delivery_rate), deliveryFormula)
             + '</div>' + (subject.chargeback_applicable ? overviewCreditCardReasonSummaries(subject) : overviewDisputes(subject)) + '</section>';
     }
-    function negativeMoney(value) { return isNumeric(value) ? '-' + formatMoney(Math.abs(number(value))) : blank(); }
-    function detailBreakdown(subject) {
-        return '<div class="product-statistics-breakdown"><h5>' + escapeHtml(t('profitBreakdown')) + '</h5>'
-            + '<dl><dt>' + escapeHtml(t('revenue')) + '</dt><dd>' + formatMoney(subject.revenue) + '</dd></dl>'
-            + '<dl><dt>' + escapeHtml(t('cost')) + '</dt><dd>' + negativeMoney(subject.cost) + '</dd></dl>'
-            + '<dl><dt>' + escapeHtml(t('fees')) + '</dt><dd>' + negativeMoney(productFees(subject)) + '</dd></dl>'
-            + '<dl><dt>' + escapeHtml(t('actualRefunds')) + '</dt><dd>' + negativeMoney(subject.actual_refunds) + '</dd></dl>'
-            + '<dl class="is-total"><dt>' + escapeHtml(t('actualProfit')) + '</dt><dd>' + formatMoney(subject.actual_profit) + '</dd></dl></div>';
-    }
     function detailStoreOrderDistribution(subject) {
         var stores = Array.isArray(subject.store_order_distribution) ? subject.store_order_distribution : [];
         if (!stores.length) return '';
@@ -500,7 +482,7 @@
         if (!container || !product || !payload || table === 'overview') { if (container) container.hidden = true; return; }
         var filters = detailFilter(table);
         var options = payload.options || {};
-        var placeholder = table === 'refunds' ? t('detailFilterRefundsPlaceholder') : (table === 'disputes' ? t('detailFilterDisputesPlaceholder') : (table === 'variants' ? t('detailFilterVariantsPlaceholder') : t('detailFilterOrdersPlaceholder')));
+        var placeholder = table === 'refunds' ? t('detailFilterRefundsPlaceholder') : (table === 'disputes' ? t('detailFilterDisputesPlaceholder') : t('detailFilterOrdersPlaceholder'));
         var selects = '';
         if (table === 'refunds') {
             selects += detailSelect('payment_method', t('paymentMethod'), options.payment_method || [], filters.payment_method);
@@ -598,16 +580,37 @@
         var tab = detailState.activeTab;
         var detail = detailState.tabData[tab];
         if (!detail || tab === 'overview') return;
-        if (tab === 'variants') renderVariants(detail);
         if (tab === 'paypal_orders') renderOrdersTable('product-statistics-paypal-orders', 'paypal_orders', detail);
         if (tab === 'credit_card_orders') renderOrdersTable('product-statistics-credit-card-orders', 'credit_card_orders', detail);
         if (tab === 'refunds') renderRefunds(detail);
         if (tab === 'disputes') renderDisputes(detail);
         if (tab === 'orders') renderOrdersTable('product-statistics-orders', 'orders', detail);
     }
+    function formatMappingWeight(value) {
+        return isNumeric(value) ? formatNumber(value) + ' g' : blank();
+    }
+    function formatMappingCny(value) {
+        return isNumeric(value) ? '¥' + number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : blank();
+    }
+    function currentPclProductData(product) {
+        var rows = Array.isArray(product.current_pcl_product_data) ? product.current_pcl_product_data : [];
+        if (!rows.length) {
+            return '<section class="product-statistics-current-pcl-data is-empty"><header><i class="fa fa-cubes"></i> ' + escapeHtml(t('currentPclProductData')) + '</header><p>' + escapeHtml(t('currentPclProductDataEmpty')) + '</p></section>';
+        }
+        var headings = [
+            ['tongtu_sku', t('currentSkuData')], ['shopify_sku', t('shopifySkus')], ['product_name', t('tongtuProductName')],
+            ['goods_weight_gram', t('productWeight')], ['package_weight_gram', t('packageWeight')],
+            ['goods_current_cost_cny', t('currentCostCny')], ['goods_average_cost_cny', t('averageCostCny')], ['package_cost_cny', t('packageCostCny')], ['product_guide_cost_cny', t('guideCostCny')],
+            ['product_dimensions', t('productDimensions')], ['package_dimensions', t('packageDimensions')], ['tongtu_updated_at', t('tongtuUpdatedAt')], ['last_synced_at', t('syncedAt')]
+        ];
+        var body = rows.map(function (row) {
+            return '<tr><td><code>' + escapeHtml(row.tongtu_sku || blank()) + '</code></td><td><code>' + escapeHtml(row.shopify_sku || blank()) + '</code></td><td title="' + escapeHtml(row.product_name || '') + '">' + escapeHtml(row.product_name || blank()) + '</td><td>' + formatMappingWeight(row.goods_weight_gram) + '</td><td>' + formatMappingWeight(row.package_weight_gram) + '</td><td>' + formatMappingCny(row.goods_current_cost_cny) + '</td><td>' + formatMappingCny(row.goods_average_cost_cny) + '</td><td>' + formatMappingCny(row.package_cost_cny) + '</td><td>' + formatMappingCny(row.product_guide_cost_cny) + '</td><td>' + escapeHtml(row.product_dimensions || blank()) + '</td><td>' + escapeHtml(row.package_dimensions || blank()) + '</td><td>' + escapeHtml(row.tongtu_updated_at || blank()) + '</td><td>' + escapeHtml(row.last_synced_at || blank()) + '</td></tr>';
+        }).join('');
+        return '<section class="product-statistics-current-pcl-data"><header><i class="fa fa-cubes"></i> ' + escapeHtml(t('currentPclProductData')) + '</header><div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + headings.map(function (heading) { return '<th>' + escapeHtml(heading[1]) + '</th>'; }).join('') + '</tr></thead><tbody>' + body + '</tbody></table></div></section>';
+    }
     function renderOverview(product) {
         var overviewModules = product.overview_modules || {};
-        document.getElementById('product-statistics-overview').innerHTML = '<div class="product-statistics-overview-modules">'
+        document.getElementById('product-statistics-overview').innerHTML = currentPclProductData(product) + '<div class="product-statistics-overview-modules">'
             + overviewModule(t('overviewOverall'), overviewModules.overall, 'is-overall')
             + overviewModule(t('overviewPayPal'), overviewModules.paypal, 'is-paypal')
             + overviewModule(t('overviewCreditCard'), overviewModules.credit_card, 'is-credit-card')
@@ -625,7 +628,7 @@
     function populateExportPayload() {
         if (!exportPayload) return;
         exportPayload.innerHTML = '';
-        [['date_from', document.getElementById('product-statistics-date-from').value], ['date_to', document.getElementById('product-statistics-date-to').value], ['name', document.getElementById('product-statistics-name').value], ['keyword', document.getElementById('product-statistics-keyword').value], ['store', document.getElementById('product-statistics-store').value], ['decision', document.getElementById('product-statistics-decision').value], ['sort', state.sort], ['direction', state.direction]].forEach(function (item) { appendHiddenInput(exportPayload, item[0], item[1]); });
+        [['date_from', document.getElementById('product-statistics-date-from').value], ['date_to', document.getElementById('product-statistics-date-to').value], ['name', document.getElementById('product-statistics-name').value], ['keyword', document.getElementById('product-statistics-keyword').value], ['store', document.getElementById('product-statistics-store').value], ['match_status', document.getElementById('product-statistics-match-status').value], ['sort', state.sort], ['direction', state.direction]].forEach(function (item) { appendHiddenInput(exportPayload, item[0], item[1]); });
         selectedProductIds().forEach(function (id) { appendHiddenInput(exportPayload, 'selected_ids[]', id); });
     }
     filterForm.addEventListener('submit', function () { state.selected = {}; });

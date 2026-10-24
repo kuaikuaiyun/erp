@@ -119,10 +119,23 @@ class DepartmentOrganizationService
      */
     public function departmentOptionsForAccount(AdminUser $actor, ?AdminUser $account = null): Collection
     {
+        $departmentNames = Department::business()->pluck('name', 'id');
+
         return $this->withPositionAvailability(
             $this->departmentOptionsFor($actor),
             $account?->getKey() ? (int) $account->getKey() : null,
-        );
+        )->map(function (array $option) use ($departmentNames): array {
+            // Native selects only display the selected option text after they
+            // close, so include the parent department in account assignments.
+            $parentName = $option['parent_id']
+                ? $departmentNames->get((int) $option['parent_id'])
+                : null;
+            $option['label'] = $parentName
+                ? $parentName.' / '.$option['name']
+                : $option['name'];
+
+            return $option;
+        })->values();
     }
 
     public function findBusinessDepartment(int $departmentId): Department

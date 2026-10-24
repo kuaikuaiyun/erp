@@ -58,12 +58,9 @@ class LogisticsOrderItemService
         }
 
         $revenues = $this->allocate($this->number($order->paid_amount_usd), $weights);
-        $handlings = $this->allocate($this->number($order->handling_fee_usd), $weights);
-        $shippings = $this->allocate($this->number($order->total_shipping_usd), $weights);
-        $refunds = $this->allocate($this->number($order->proportional_refund_usd), $weights);
         $keys = array_column($rows, 'source_key');
 
-        DB::connection($order->getConnectionName())->transaction(function () use ($order, $rows, $keys, $revenues, $handlings, $shippings, $refunds): void {
+        DB::connection($order->getConnectionName())->transaction(function () use ($order, $rows, $keys, $revenues): void {
             foreach ($rows as $index => $row) {
                 $item = LogisticsOrderItem::query()->firstOrNew([
                     'logistics_order_id' => $order->getKey(),
@@ -80,11 +77,7 @@ class LogisticsOrderItemService
                     'quantity' => $this->decimal($row['quantity']),
                     'unit_price_usd' => $this->decimal($row['unit_price_usd']),
                     'line_revenue_usd' => $this->decimal($revenues[$index]),
-                    'handling_fee_usd' => $this->decimal($handlings[$index]),
-                    'total_shipping_usd' => $this->decimal($shippings[$index]),
-                    'proportional_refund_usd' => $this->decimal($refunds[$index]),
                 ]);
-                $this->recalculate($item);
                 $item->save();
             }
 
@@ -95,34 +88,7 @@ class LogisticsOrderItemService
         });
     }
 
-    /**
-     * @param list<array{source_key:string,tongtu_sku:?string,tongtu_product_code:?string,tongtu_product_name:?string,tongtu_product_type:?string,product_cost_usd:?float,sale_weight_gram:?float}> $rows
-     */
-    public function applyTongtuMatch(LogisticsOrder $order, array $rows): void
-    {
-        foreach ($rows as $row) {
-            $item = LogisticsOrderItem::query()
-                ->where('logistics_order_id', $order->getKey())
-                ->where('source_key', $row['source_key'])
-                ->first();
-            if (!$item) {
-                continue;
-            }
-
-            $item->fill([
-                'tongtu_sku' => $row['tongtu_sku'],
-                'tongtu_product_code' => $row['tongtu_product_code'],
-                'tongtu_product_name' => $row['tongtu_product_name'],
-                'tongtu_product_type' => $row['tongtu_product_type'],
-                'product_cost_usd' => $this->decimal($row['product_cost_usd']),
-                'sale_weight_gram' => $this->decimal($row['sale_weight_gram']),
-            ]);
-            $this->recalculate($item);
-            $item->save();
-        }
-    }
-
-    /** Build item rows from already persisted order payloads, without calling external APIs. */
+    /** Build item rows from already persisted Shopify payloads, without calling external APIs. */
     public function backfill(LogisticsOrder $order): int
     {
         $payload = json_decode((string) $order->shopify_payload, true);
@@ -134,27 +100,6 @@ class LogisticsOrderItemService
         $items = $order->items()->orderBy('id')->get();
         if ($items->isEmpty()) {
             return 0;
-        }
-
-        $tongtuSkus = $this->lines($order->tongtu_sku);
-        $tongtuProductCodes = $this->lines($order->tongtu_product_code);
-        $productNames = $this->lines($order->tongtu_product_name);
-        $weights = $this->lines($order->sale_product_weight);
-        $costs = $this->allocate($this->number($order->product_cost_usd), $items->map(fn (LogisticsOrderItem $item): float => max(0.0, (float) $item->quantity))->all());
-
-        foreach ($items->values() as $index => $item) {
-            if ($item->tongtu_product_code !== null || $item->tongtu_sku !== null || $item->product_cost_usd !== null) {
-                continue;
-            }
-            $item->fill([
-                'tongtu_sku' => $this->meaningfulLine($tongtuSkus[$index] ?? null),
-                'tongtu_product_code' => $this->meaningfulLine($tongtuProductCodes[$index] ?? null),
-                'tongtu_product_name' => $this->meaningfulLine($productNames[$index] ?? null),
-                'sale_weight_gram' => $this->number($weights[$index] ?? null),
-                'product_cost_usd' => $this->decimal($costs[$index] ?? null),
-            ]);
-            $this->recalculate($item);
-            $item->save();
         }
 
         return $items->count();
@@ -174,24 +119,6 @@ class LogisticsOrderItemService
             trim((string) ($item['title'] ?? '')),
             trim((string) ($item['quantity'] ?? '')),
         ]));
-    }
-
-    private function recalculate(LogisticsOrderItem $item): void
-    {
-        $revenue = $this->number($item->line_revenue_usd) ?? 0.0;
-        $cost = $this->number($item->product_cost_usd);
-        if ($cost === null) {
-            $item->profit_usd = null;
-            $item->profit_rate = null;
-
-            return;
-        }
-
-        $profit = $revenue - $cost - ($this->number($item->handling_fee_usd) ?? 0.0)
-            - ($this->number($item->total_shipping_usd) ?? 0.0)
-            - ($this->number($item->proportional_refund_usd) ?? 0.0);
-        $item->profit_usd = $this->decimal($profit);
-        $item->profit_rate = $revenue > 0 ? $this->decimal($profit / $revenue * 100) : null;
     }
 
     /** @param list<float|int|null> $weights

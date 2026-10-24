@@ -111,6 +111,12 @@
 .product-statistics-table code, .product-statistics-detail-table code { border-radius: 3px; background: #f4f7fa; color: #526d87; font-size: 11px; }
 .product-statistics-pcl-pending { display: inline-flex; flex-direction: column; align-items: center; gap: 4px; max-width: 160px; }
 .product-statistics-pcl-pending > span { display: inline-block; padding: 3px 7px; border-radius: 3px; background: #fff2db; color: #b56c11; font-size: 12px; font-weight: 600; line-height: 1.35; white-space: nowrap; }
+.product-statistics-pcl-pending > span.is-failed, .product-statistics-pcl-pending > span.is-conflict { background: #fde8e8; color: #bd4343; }
+.product-statistics-pcl-pending > span.is-queued, .product-statistics-pcl-pending > span.is-not_found { background: #fff2db; color: #b56c11; }
+.product-statistics-match-status { display: inline-flex; align-items: center; min-height: 24px; padding: 3px 8px; border: 1px solid #d9e5ef; border-radius: 12px; background: #f4f8fb; color: #627b92; font-size: 11px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
+.product-statistics-match-status.is-matched { border-color: #b9e5cd; background: #effaf4; color: #198152; }
+.product-statistics-match-status.is-queued, .product-statistics-match-status.is-not_found { border-color: #f1d69b; background: #fff8e8; color: #ad7219; }
+.product-statistics-match-status.is-conflict, .product-statistics-match-status.is-failed { border-color: #f1c4c5; background: #fff2f2; color: #bf4247; }
 .product-statistics-pcl-pending small { max-width: 100%; overflow: hidden; color: #8398ad; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .product-statistics-pcl-pending small code { margin-left: 2px; }
 .product-statistics-pending-dash { color: #9aaaba; cursor: help; }
@@ -120,18 +126,6 @@
 .product-statistics-sales-cell strong { display: inline-block; min-width: 43px; color: #35536f; }
 .product-statistics-sales-cell span { display: inline-block; width: 54px; height: 7px; overflow: hidden; border-radius: 10px; background: #e8eef5; vertical-align: middle; }
 .product-statistics-sales-cell i { display: block; height: 100%; border-radius: inherit; background: #4d91ec; }
-.product-statistics-profit { color: #138452 !important; font-weight: 700; }
-.product-statistics-profit.is-negative { color: #d74c4c !important; }
-.product-statistics-rate { display: inline-block; min-width: 58px; padding: 4px 7px; border-radius: 3px; text-align: center; }
-.product-statistics-rate.is-strong { background: #dff5e8; color: #18764b; }
-.product-statistics-rate.is-healthy { background: #edf8f1; color: #248259; }
-.product-statistics-rate.is-watch { background: #fff4d9; color: #a76d12; }
-.product-statistics-rate.is-risk { background: #fde8e8; color: #c64242; }
-.product-statistics-decision { display: inline-block; padding: 4px 9px; border-radius: 13px; font-size: 12px; font-weight: 600; white-space: nowrap; }
-.product-statistics-decision.is-continue { background: #ddf7e8; color: #1d8954; }
-.product-statistics-decision.is-optimize { background: #fff0df; color: #b36d16; }
-.product-statistics-decision.is-watch { background: #e9f2fc; color: #3676b8; }
-.product-statistics-decision.is-stop { background: #fde6e7; color: #c33f45; }
 .product-statistics-child-tag { color: #7290ac; font-size: 12px; }
 .product-statistics-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 260px; gap: 8px; color: #8397aa; }
 .product-statistics-empty[hidden] { display: none !important; }
@@ -239,18 +233,17 @@
 .product-statistics-overview-disputes.is-credit-card-dispute { border-color: #f1dde0; background: #fffafb; }
 .product-statistics-overview-dispute-formula { display: block; margin-top: 7px; color: #a38a91; font-size: 10px; line-height: 1.4; }
 .product-statistics-store-order-distribution { margin-top: 16px; padding: 14px 16px; border: 1px solid #dfeaf3; border-radius: 4px; background: #fbfdff; }
+.product-statistics-current-pcl-data { margin-top: 16px; overflow: hidden; border: 1px solid #d7e6f2; border-radius: 5px; background: #fff; }
+.product-statistics-current-pcl-data > header { padding: 10px 13px; border-bottom: 1px solid #e5eef5; background: linear-gradient(90deg, #f4f9fd, #fbfdff); color: #365d7d; font-size: 13px; font-weight: 700; }
+.product-statistics-current-pcl-data > header .fa { margin-right: 5px; color: #2c84c7; }
+.product-statistics-current-pcl-data.is-empty > p { margin: 0; padding: 18px 14px; color: #8194a7; font-size: 12px; }
+.product-statistics-current-pcl-data .product-statistics-detail-table-wrap { border: 0; border-radius: 0; }
+.product-statistics-current-pcl-data .product-statistics-detail-table td { max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .product-statistics-store-order-distribution h5 { margin: 0 0 10px; color: #42627e; font-size: 13px; font-weight: 700; }
 .product-statistics-store-order-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .product-statistics-store-order { display: inline-flex; align-items: center; gap: 9px; max-width: 100%; padding: 6px 9px; border: 1px solid #dbe7f0; border-radius: 4px; background: #fff; color: #476780; line-height: 18px; }
 .product-statistics-store-order strong { overflow: hidden; color: #31516e; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .product-statistics-store-order span { flex: 0 0 auto; color: #2383c6; font-size: 12px; font-weight: 700; white-space: nowrap; }
-.product-statistics-breakdown { margin-top: 16px; padding: 14px 16px; border: 1px solid #e7edf4; border-radius: 4px; }
-.product-statistics-breakdown h5 { margin: 0 0 10px; color: #42627e; font-size: 13px; font-weight: 700; }
-.product-statistics-breakdown dl { display: flex; justify-content: space-between; margin: 0; padding: 7px 0; border-top: 1px dashed #e8eef4; }
-.product-statistics-breakdown dl:first-of-type { border-top: 0; }
-.product-statistics-breakdown dt { color: #71879c; font-weight: 400; }
-.product-statistics-breakdown dd { margin: 0; color: #465f77; font-weight: 600; }
-.product-statistics-breakdown .is-total dt, .product-statistics-breakdown .is-total dd { color: #1a8553; font-size: 14px; font-weight: 700; }
 .product-statistics-detail-insight { display: flex; gap: 9px; margin-top: 16px; padding: 13px 15px; border: 1px solid #d8ecff; border-radius: 4px; background: #f1f8ff; color: #557994; font-size: 13px; line-height: 1.6; }
 .product-statistics-detail-insight .fa { padding-top: 3px; color: #3185d4; font-size: 16px; }
 .product-statistics-detail-table-wrap { border: 1px solid #dfe8f0; border-radius: 5px; }

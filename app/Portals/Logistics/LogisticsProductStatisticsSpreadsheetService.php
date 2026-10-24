@@ -20,12 +20,9 @@ class LogisticsProductStatisticsSpreadsheetService
         return [
             [__('logistics.product_statistics.headers.product'), 'name', self::TYPE_TEXT, 30],
             [__('logistics.product_statistics.headers.product_code'), 'product_code', self::TYPE_TEXT, 28],
-            [__('logistics.product_statistics.headers.variant_count'), 'variant_count', self::TYPE_TEXT, 12],
             [__('logistics.product_statistics.headers.stores'), 'stores', self::TYPE_TEXT, 24],
             [__('logistics.product_statistics.headers.sales'), 'sales', self::TYPE_TEXT, 15],
             [__('logistics.product_statistics.headers.revenue'), 'revenue', self::TYPE_MONEY, 18],
-            [__('logistics.product_statistics.headers.cost'), 'cost', self::TYPE_MONEY, 18],
-            [__('logistics.product_statistics.headers.fees'), 'fees', self::TYPE_MONEY, 18],
             [__('logistics.product_statistics.headers.paypal_refund_amount'), 'paypal_refund_amount', self::TYPE_MONEY, 20],
             [__('logistics.product_statistics.headers.paypal_refund_rate'), 'paypal_refund_rate', self::TYPE_RATE, 18],
             [__('logistics.product_statistics.headers.paypal_dispute_count'), 'paypal_dispute_count', self::TYPE_TEXT, 19],
@@ -33,9 +30,6 @@ class LogisticsProductStatisticsSpreadsheetService
             [__('logistics.product_statistics.headers.credit_card_refund_amount'), 'credit_card_refund_amount', self::TYPE_MONEY, 21],
             [__('logistics.product_statistics.headers.credit_card_refund_rate'), 'credit_card_refund_rate', self::TYPE_RATE, 19],
             [__('logistics.product_statistics.headers.combined_refund_rate'), 'combined_refund_rate', self::TYPE_RATE, 18],
-            [__('logistics.product_statistics.headers.profit'), 'actual_profit', self::TYPE_MONEY, 18],
-            [__('logistics.product_statistics.headers.profit_rate'), 'profit_rate', self::TYPE_RATE, 15],
-            [__('logistics.product_statistics.headers.decision'), 'decision', self::TYPE_TEXT, 16],
         ];
     }
 
@@ -90,12 +84,9 @@ class LogisticsProductStatisticsSpreadsheetService
         return [
             'name' => (string) $product['name'],
             'product_code' => (string) ($product['product_code'] ?? $product['sku']),
-            'variant_count' => (int) ($product['variant_count'] ?? 0),
             'stores' => implode('、', $product['stores']),
             'sales' => $product['sales'],
             'revenue' => $product['revenue'],
-            'cost' => $product['cost'],
-            'fees' => (float) $product['shipping'] + (float) $product['handling'],
             'paypal_refund_amount' => $product['paypal_refund_amount'],
             'paypal_refund_rate' => $product['paypal_refund_rate'],
             'paypal_dispute_count' => $product['paypal_dispute_count'],
@@ -103,19 +94,7 @@ class LogisticsProductStatisticsSpreadsheetService
             'credit_card_refund_amount' => $product['credit_card_refund_amount'],
             'credit_card_refund_rate' => $product['credit_card_refund_rate'],
             'combined_refund_rate' => $product['combined_refund_rate'],
-            'actual_profit' => $product['actual_profit'],
-            'profit_rate' => $product['profit_rate'],
-            'decision' => $this->decisionLabel((string) $product['decision']),
         ];
     }
 
-    private function decisionLabel(string $decision): string
-    {
-        return [
-            'continue' => __('logistics.product_statistics.decisions.continue'),
-            'optimize' => __('logistics.product_statistics.decisions.optimize'),
-            'watch' => __('logistics.product_statistics.decisions.watch'),
-            'stop' => __('logistics.product_statistics.decisions.stop'),
-        ][$decision] ?? __('logistics.product_statistics.decisions.watch');
-    }
 }

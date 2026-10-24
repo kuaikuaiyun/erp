@@ -3,12 +3,9 @@
 namespace App\Portals\Logistics\Http\Controllers;
 
 use App\Http\Controllers\Controller;
-use App\Jobs\MatchTongtuOrderJob;
 use App\Models\AssistantDomainStore;
 use App\Models\LogisticsOrder;
 use App\Models\LogisticsRefundDetail;
-use App\Models\LogisticsTongtuMatchBatch;
-use App\Models\LogisticsTongtuMatchTask;
 use App\Models\LogisticsTrackingSyncBatch;
 use App\Models\LogisticsTrackingSyncTask;
 use App\Portal\Http\Controllers\PortalEntryController;
@@ -16,7 +13,7 @@ use App\Portals\Logistics\LogisticsOrderSpreadsheetService;
 use App\Portals\Logistics\LogisticsOrderPaymentReferenceService;
 use App\Portals\Logistics\LogisticsPortalService;
 use App\Portals\Logistics\LogisticsRefundImportService;
-use App\Portals\Logistics\LogisticsTongtuAutomationService;
+use App\Portals\Logistics\TongtuSkuMappingService;
 use App\Portals\Logistics\LogisticsTrackingService;
 use App\Portals\Logistics\PayPalOrderAssociationService;
 use Illuminate\Database\Eloquent\Builder;
@@ -24,7 +21,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -39,7 +35,7 @@ class LogisticsOrderController extends Controller
         private readonly LogisticsPortalService $logistics,
         private readonly LogisticsOrderSpreadsheetService $spreadsheets,
         private readonly LogisticsRefundImportService $refundImports,
-        private readonly LogisticsTongtuAutomationService $automation,
+        private readonly TongtuSkuMappingService $skuMappings,
         private readonly LogisticsTrackingService $tracking,
         private readonly LogisticsOrderPaymentReferenceService $paymentReferences,
         private readonly PayPalOrderAssociationService $paypalAssociations,
@@ -56,6 +52,7 @@ class LogisticsOrderController extends Controller
         $filters = $this->filters($request);
         $orders = $this->orderQuery($filters)
             ->with([
+                'items' => fn ($query) => $query->orderBy('id'),
                 'paypalRefunds' => fn ($query) => $query->orderByDesc('refunded_at')->orderByDesc('id'),
                 'creditCardRefunds' => fn ($query) => $query->orderByDesc('last_imported_at')->orderByDesc('id'),
                 'paymentReferences' => fn ($query) => $query->orderByRaw("CASE reference_type WHEN 'primary' THEN 0 ELSE 1 END")->orderBy('id'),
@@ -64,7 +61,6 @@ class LogisticsOrderController extends Controller
             ->orderByDesc('id')
             ->paginate($filters['per_page'])
             ->withQueryString();
-        $matchBatch = $this->currentMatchBatch($request, (int) $context['user']->getKey());
         $trackingBatch = $this->currentTrackingBatch($request, (int) $context['user']->getKey());
 
         return view('portals.logistics.orders.index', [
@@ -75,8 +71,6 @@ class LogisticsOrderController extends Controller
             'statusOptions' => LogisticsOrder::dataStatusOptions(),
             'trackingOptions' => LogisticsOrder::logisticsStatusOptions(),
             'shopifyStores' => $this->shopifyStores(),
-            'activeMatchBatch' => $matchBatch,
-            'matchFailureDetails' => $matchBatch ? $this->matchFailureDetails($matchBatch) : [],
             'activeTrackingBatch' => $trackingBatch,
             'trackingFailureDetails' => $trackingBatch ? $this->trackingFailureDetails($trackingBatch) : [],
         ]);
@@ -185,7 +179,7 @@ class LogisticsOrderController extends Controller
         if ($trackingNumberChanged) {
             $this->tracking->scheduleForOrder($order);
         }
-        $this->automation->scheduleForOrder($order);
+        $this->skuMappings->scheduleForOrder($order);
 
         return redirect()
             ->route('logistics.orders.index')
@@ -313,99 +307,6 @@ class LogisticsOrderController extends Controller
         return back()->with('success', '退款明细已作废，并从退款汇总和产品统计中排除。');
     }
 
-    public function matchTongtu(Request $request): RedirectResponse
-    {
-        $context = $this->portalContext($request);
-        if ($context instanceof Response) {
-            abort(403);
-        }
-
-        $data = $request->validate([
-            'selected_ids' => ['required', 'array', 'min:1', 'max:50'],
-            'selected_ids.*' => ['integer', 'distinct'],
-        ]);
-
-        $orders = LogisticsOrder::query()
-            ->with('store')
-            ->whereIn('id', $data['selected_ids'])
-            ->whereNotNull('assistant_domain_store_id')
-            ->whereNotNull('paid_at')
-            ->orderBy('id')
-            ->get();
-        if ($orders->isEmpty()) {
-            return $this->indexRedirect($request)->with('error', '请选择已付款且已归属店铺的订单后再匹配通途。');
-        }
-
-        $busyOrderIds = LogisticsTongtuMatchTask::query()
-            ->whereIn('logistics_order_id', $orders->modelKeys())
-            ->whereIn('status', LogisticsTongtuMatchTask::activeStatuses())
-            ->pluck('logistics_order_id')
-            ->map(static fn ($id): int => (int) $id)
-            ->all();
-        $queueableOrders = $orders
-            ->reject(static fn (LogisticsOrder $order): bool => in_array((int) $order->getKey(), $busyOrderIds, true))
-            ->values();
-        if ($queueableOrders->isEmpty()) {
-            return $this->indexRedirect($request)->with('error', '所选订单已在通途匹配队列中，请等待当前任务完成。');
-        }
-
-        $connection = config('admin.database.connection') ?: config('database.default');
-        $batch = DB::connection($connection)->transaction(function () use ($queueableOrders, $context): LogisticsTongtuMatchBatch {
-            $batch = LogisticsTongtuMatchBatch::query()->create([
-                'actor_id' => $context['user']->getKey(),
-                'actor_name' => $context['user']->name,
-                'status' => LogisticsTongtuMatchBatch::STATUS_QUEUED,
-                'total_count' => $queueableOrders->count(),
-            ]);
-
-            foreach ($queueableOrders as $order) {
-                LogisticsTongtuMatchTask::query()->create([
-                    'logistics_tongtu_match_batch_id' => $batch->getKey(),
-                    'logistics_order_id' => $order->getKey(),
-                    'status' => LogisticsTongtuMatchTask::STATUS_QUEUED,
-                    'priority' => 10,
-                    'source' => 'manual',
-                    'stage' => null,
-                ]);
-            }
-
-            return $batch;
-        });
-
-        $batch->tasks()->orderBy('id')->pluck('id')->each(function ($taskId): void {
-            MatchTongtuOrderJob::dispatch((int) $taskId)
-                ->onConnection('database')
-                ->onQueue('logistics-tongtu-high');
-        });
-        $request->session()->put('logistics.tongtu_match_batch_id', $batch->getKey());
-
-        $message = '已创建通途后台匹配任务：'.$queueableOrders->count().' 条订单正在排队处理。';
-        if ($busyOrderIds !== []) {
-            $message .= ' 已跳过 '.($orders->count() - $queueableOrders->count()).' 条正在处理的订单。';
-        }
-
-        return $this->indexRedirect($request)->with('success', $message);
-    }
-
-    public function matchProgress(Request $request, LogisticsTongtuMatchBatch $batch): JsonResponse
-    {
-        $context = $this->portalContext($request);
-        if ($context instanceof Response) {
-            abort(403);
-        }
-        if ((int) $batch->actor_id !== (int) $context['user']->getKey()) {
-            abort(403);
-        }
-
-        $batch->refreshProgress();
-
-        $batch = $batch->fresh();
-        $payload = $batch->progressPayload();
-        $payload['failures'] = $this->matchFailureDetails($batch);
-
-        return response()->json($payload);
-    }
-
     public function syncTracking(Request $request): RedirectResponse
     {
         $context = $this->portalContext($request);
@@ -426,6 +327,44 @@ class LogisticsOrderController extends Controller
         return $this->indexRedirect($request)->with(
             'success',
             __('logistics.tracking.queued_message', ['count' => $batch->total_count])
+        );
+    }
+
+    public function retryTongtuSkus(Request $request): RedirectResponse
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            abort(403);
+        }
+
+        $data = $request->validate([
+            'selected_ids' => ['required', 'array', 'min:1', 'max:1000'],
+            'selected_ids.*' => ['integer', 'distinct'],
+        ]);
+        $count = $this->skuMappings->retryUnmatchedForOrders($data['selected_ids']);
+
+        return $this->indexRedirect($request)->with(
+            'success',
+            __('logistics.orders.sku_mapping_actions.retry_queued', ['count' => $count]),
+        );
+    }
+
+    public function refreshTongtuSkuMappings(Request $request): RedirectResponse
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            abort(403);
+        }
+
+        $data = $request->validate([
+            'selected_ids' => ['required', 'array', 'min:1', 'max:1000'],
+            'selected_ids.*' => ['integer', 'distinct'],
+        ]);
+        $count = $this->skuMappings->forceRefreshForOrders($data['selected_ids']);
+
+        return $this->indexRedirect($request)->with(
+            'success',
+            __('logistics.orders.sku_mapping_actions.refresh_queued', ['count' => $count]),
         );
     }
 
@@ -494,48 +433,17 @@ class LogisticsOrderController extends Controller
                 'group_names' => AssistantDomainStore::displayMultiValue($store->team),
                 'staff_status' => '正常',
                 'tongtu_order_number' => $tongtuOrderNumber,
-                'data_status' => blank($tongtuOrderNumber)
-                    ? LogisticsOrder::STATUS_STORE_CONFIG_EXCEPTION
-                    : ($missingSku
-                        ? LogisticsOrder::STATUS_SKU_EXCEPTION
-                        : LogisticsOrder::STATUS_PENDING_TONGTU),
+                'data_status' => $missingSku
+                    ? LogisticsOrder::STATUS_SKU_EXCEPTION
+                    : LogisticsOrder::STATUS_NORMAL,
                 'sku_exception_reason' => $missingSku ? 'Shopify SKU 缺失' : null,
             ])->save();
-            $this->automation->scheduleForOrder($order);
+            $this->skuMappings->scheduleForOrder($order);
             $assigned++;
         }
 
         return $this->indexRedirect($request)
             ->with('success', '批量归属完成：已归属 '.$assigned.' 条，冲突跳过 '.$conflicts.' 条。');
-    }
-
-    private function currentMatchBatch(Request $request, int $actorId): ?LogisticsTongtuMatchBatch
-    {
-        $batchId = (int) $request->session()->get('logistics.tongtu_match_batch_id', 0);
-        if ($batchId > 0) {
-            $latest = LogisticsTongtuMatchBatch::query()
-                ->whereKey($batchId)
-                ->where('actor_id', $actorId)
-                ->where('created_at', '>=', now()->subDay())
-                ->first();
-            if ($latest) {
-                return $latest;
-            }
-        }
-
-        return $this->activeMatchBatch($actorId);
-    }
-
-    private function activeMatchBatch(int $actorId): ?LogisticsTongtuMatchBatch
-    {
-        return LogisticsTongtuMatchBatch::query()
-            ->where('actor_id', $actorId)
-            ->whereIn('status', [
-                LogisticsTongtuMatchBatch::STATUS_QUEUED,
-                LogisticsTongtuMatchBatch::STATUS_PROCESSING,
-            ])
-            ->latest('id')
-            ->first();
     }
 
     private function currentTrackingBatch(Request $request, int $actorId): ?LogisticsTrackingSyncBatch
@@ -557,28 +465,6 @@ class LogisticsOrderController extends Controller
             ->whereIn('status', [LogisticsTrackingSyncBatch::STATUS_QUEUED, LogisticsTrackingSyncBatch::STATUS_PROCESSING])
             ->latest('id')
             ->first();
-    }
-
-    /** @return list<array<string, int|string>> */
-    private function matchFailureDetails(LogisticsTongtuMatchBatch $batch): array
-    {
-        return LogisticsTongtuMatchTask::query()
-            ->with('order:id,shopify_order_number,tongtu_order_number')
-            ->where('logistics_tongtu_match_batch_id', $batch->getKey())
-            ->where('status', LogisticsTongtuMatchTask::STATUS_FAILED)
-            ->latest('id')
-            ->limit(50)
-            ->get()
-            ->map(static function (LogisticsTongtuMatchTask $task): array {
-                return [
-                    'order_id' => (int) $task->logistics_order_id,
-                    'shopify_order_number' => (string) ($task->order?->shopify_order_number ?: '—'),
-                    'tongtu_order_number' => (string) ($task->order?->tongtu_order_number ?: '—'),
-                    'reason' => (string) ($task->last_error ?: '通途接口请求失败。'),
-                ];
-            })
-            ->values()
-            ->all();
     }
 
     /** @return list<array<string, int|string>> */
@@ -812,11 +698,7 @@ class LogisticsOrderController extends Controller
         $rules['data_status'] = ['required', Rule::in(array_keys(LogisticsOrder::dataStatusOptions()))];
         $rules['logistics_status'] = ['required', Rule::in(array_keys(LogisticsOrder::logisticsStatusOptions()))];
         foreach ([
-            'paid_amount_usd', 'product_cost_usd', 'handling_fee_usd', 'total_shipping_usd',
-            'proportional_refund_usd', 'proportional_profit_usd', 'proportional_profit_rate',
-            'financial_profit_usd', 'financial_profit_rate', 'operation_profit_usd', 'operation_profit_rate',
-            'channel_refund_amount_usd', 'shopify_refund_amount_usd', 'received_amount_usd',
-            'platform_fee_usd', 'net_amount_usd',
+            'paid_amount_usd', 'total_shipping_usd', 'channel_refund_amount_usd', 'shopify_refund_amount_usd',
         ] as $field) {
             $rules[$field] = ['nullable', 'numeric'];
         }

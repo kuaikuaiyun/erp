@@ -10,6 +10,10 @@
         if (is_string($value) && preg_match('/^-?\d+\.\d{1,4}$/', $value)) return rtrim(rtrim($value, '0'), '.');
         return (string) $value;
     };
+    $weight = static function ($value) use ($display): string {
+        if ($value === null || $value === '' || !is_numeric($value)) return $display($value);
+        return $display($value).' '.__('logistics.orders.sale_product_detail_labels.weight_unit');
+    };
     $date = static fn ($value): string => $value ? $value->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') : '—';
     $lines = static function ($value) use ($display): array {
         if ($value === null || $value === '') return ['—'];
@@ -18,7 +22,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics.css?v=20261023-2">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics.css?v=20261024-8">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261018-1">
 @endpush
 
@@ -32,20 +36,6 @@
         @if(session('error'))<div class="alert alert-danger">{{ session('error') }}</div>@endif
         @if($errors->has('scope'))<div class="alert alert-danger">{{ $errors->first('scope') }}</div>@endif
         @if($errors->has('refund_file'))<div class="alert alert-danger">{{ $errors->first('refund_file') }}</div>@endif
-        @if($activeMatchBatch)
-            @php
-                $matchProgress = $activeMatchBatch->progressPayload();
-            @endphp
-            <div id="tongtu-match-progress" class="logistics-match-progress" data-url="{{ route('logistics.orders.match-progress', $activeMatchBatch) }}" data-completed="{{ $matchProgress['completed'] ? '1' : '0' }}">
-                <div class="logistics-match-progress-heading"><span><i class="fa fa-refresh fa-spin"></i> <strong data-match-title>{{ $matchProgress['completed'] ? '通途匹配完成' : ($matchProgress['status'] === 'queued' ? '通途任务排队中' : '通途后台匹配中') }}</strong></span><span data-match-percent>{{ $matchProgress['percent'] }}%</span></div>
-                <div class="progress progress-sm active"><div class="progress-bar progress-bar-info progress-bar-striped" role="progressbar" data-match-bar aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ $matchProgress['percent'] }}" style="width: {{ $matchProgress['percent'] }}%"></div></div>
-                <div class="logistics-match-progress-summary" data-match-summary>已处理 {{ $matchProgress['processed'] }} / {{ $matchProgress['total'] }} 条；成功 {{ $matchProgress['matched'] }} 条，SKU 异常 {{ $matchProgress['sku_exception'] }} 条，通途未找到 {{ $matchProgress['not_found'] }} 条，失败 {{ $matchProgress['failed'] }} 条。</div>
-                <div class="logistics-match-progress-note"><i class="fa fa-clock-o"></i> 通途接口正在按每 13 秒 1 次的安全频率处理；可离开本页，返回后仍会显示进度。</div>
-                <div class="logistics-match-failures" data-match-failures @if($matchFailureDetails === []) hidden @endif>
-                    <details open><summary>失败详情（<span data-match-failure-count>{{ count($matchFailureDetails) }}</span>）</summary><ul data-match-failure-list>@foreach($matchFailureDetails as $failure)<li><strong>Shopify 订单：{{ $failure['shopify_order_number'] }}</strong><span>通途订单：{{ $failure['tongtu_order_number'] }}</span><em>{{ $failure['reason'] }}</em></li>@endforeach</ul></details>
-                </div>
-            </div>
-        @endif
         @if($activeTrackingBatch)
             @php
                 $trackingProgress = $activeTrackingBatch->progressPayload();
@@ -105,8 +95,9 @@
             </div>
         </div>
 
-        <form id="tongtu-match-form" method="post" action="{{ route('logistics.orders.match-tongtu') }}">@csrf<input type="hidden" name="return_to" value="{{ request()->fullUrl() }}"></form>
         <form id="tracking-sync-form" method="post" action="{{ route('logistics.orders.sync-tracking') }}">@csrf<input type="hidden" name="return_to" value="{{ request()->fullUrl() }}"></form>
+        <form id="tongtu-sku-retry-form" method="post" action="{{ route('logistics.orders.tongtu-skus.retry') }}">@csrf<input type="hidden" name="return_to" value="{{ request()->fullUrl() }}"></form>
+        <form id="tongtu-sku-refresh-form" method="post" action="{{ route('logistics.orders.tongtu-skus.refresh') }}">@csrf<input type="hidden" name="return_to" value="{{ request()->fullUrl() }}"></form>
         <form id="assign-store-form" method="post" action="{{ route('logistics.orders.assign-store') }}" class="logistics-batch-form">
             @csrf
             <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
@@ -121,7 +112,8 @@
                 <h3 class="box-title">订单列表</h3>
                 <button class="btn btn-default btn-sm" type="button" data-toggle="modal" data-target="#logistics-order-export-modal"><i class="fa fa-download"></i> 导出</button>
                 <button class="btn btn-info btn-sm" type="button" data-toggle="modal" data-target="#logistics-refund-import-modal"><i class="fa fa-upload"></i> {{ __('logistics.refund_import.open_button') }}</button>
-                <button class="btn btn-success btn-sm" type="submit" form="tongtu-match-form" id="tongtu-match-button" disabled><i class="fa fa-exchange"></i> 批量匹配通途订单</button>
+                <button class="btn btn-warning btn-sm" type="submit" form="tongtu-sku-retry-form" id="tongtu-sku-retry-button" disabled><i class="fa fa-repeat"></i> {{ __('logistics.orders.sku_mapping_actions.retry') }}</button>
+                <button class="btn btn-default btn-sm" type="submit" form="tongtu-sku-refresh-form" id="tongtu-sku-refresh-button" disabled><i class="fa fa-refresh"></i> {{ __('logistics.orders.sku_mapping_actions.refresh') }}</button>
                 <button class="btn btn-info btn-sm" type="submit" form="tracking-sync-form" id="tracking-sync-button" disabled><i class="fa fa-truck"></i> {{ __('logistics.tracking.batch_sync') }}</button>
                 <button class="btn btn-warning btn-sm" type="submit" form="assign-store-form" id="assign-store-button" disabled><i class="fa fa-link"></i> 批量归属店铺</button>
                 @include('portals.logistics.partials.pagination', ['paginator' => $orders, 'filters' => $filters, 'routeName' => 'logistics.orders.index', 'loadingTarget' => '.logistics-orders-scroll'])
@@ -130,34 +122,50 @@
                 <table class="table table-hover logistics-table logistics-orders-table">
                     <thead><tr>
                         <th class="logistics-sticky-left"><input id="order-check-all" type="checkbox" aria-label="全选"></th>
-                        <th>编号</th><th>Shopify订单号</th><th>通途订单号</th><th>本订单ID</th><th>店铺名称</th><th>来源Shopify域名</th><th>运营人员</th><th>所属组</th><th>是否加购</th><th>订阅类型</th><th>订阅复购原订单ID</th><th>订阅状态</th><th>{{ __('logistics.product_statistics.headers.product_code') }}</th><th>{{ __('logistics.product_statistics.headers.tongtu_sku') }}</th><th>通途配货名称</th><th>出单数量</th><th>出单产品重量</th><th>支付状态</th><th>支付方式</th><th>支付渠道</th><th>实付金额（USD）</th><th>付款时间</th><th>货品成本（USD）</th><th>手续费（USD）</th><th>总运费（USD）</th><th>比例退款（USD）</th><th>比例利润（USD）</th><th>比例利润率</th><th>财务利润（USD）</th><th>财务利润率</th><th>运营利润（USD）</th><th>运营利润率</th><th>{{ __('logistics.orders.refunds.paypal_actual') }}</th><th>{{ __('logistics.orders.refunds.credit_card_actual') }}</th><th>收款账号</th><th>收款账号邮箱</th><th>收款账号实收金额（USD）</th><th>平台费用（USD）</th><th>净额（USD）</th><th>交易号</th><th>账单号</th><th>买家名称</th><th>Email</th><th>目的地</th><th>物流公司</th><th>跟踪单号</th><th>物流状态</th><th>订单创建时间</th><th>数据状态</th><th>操作</th>
+                        <th>编号</th><th class="logistics-order-identifiers-heading">{{ __('logistics.orders.identifier_information') }}</th><th class="logistics-store-information-heading">{{ __('logistics.orders.store_information') }}</th><th class="logistics-subscription-information-heading">{{ __('logistics.orders.subscription_information') }}</th><th>订阅复购原订单ID</th><th class="logistics-sale-product-details-heading">{{ __('logistics.orders.sale_product_details') }}</th><th class="logistics-payment-information-heading">{{ __('logistics.orders.payment_information') }}</th><th class="logistics-amount-information-heading">{{ __('logistics.orders.amount_information') }}</th><th class="logistics-order-time-information-heading">{{ __('logistics.orders.order_time_information') }}</th><th>{{ __('logistics.orders.refunds.paypal_actual') }}</th><th>{{ __('logistics.orders.refunds.credit_card_actual') }}</th><th>交易号</th><th>账单号</th><th class="logistics-buyer-information-heading">{{ __('logistics.orders.buyer_information') }}</th><th class="logistics-shipping-information-heading">{{ __('logistics.orders.shipping_information') }}</th><th>数据状态</th><th>操作</th>
                     </tr></thead>
                     <tbody>
                     @forelse($orders as $order)
                         @php
                             $paypalRefunds = $order->paypalRefunds;
                             $paypalRefundCount = $paypalRefunds->count();
-                            $paypalRefundAmount = (float) $paypalRefunds->sum(fn ($refund): float => (float) $refund->refund_amount_usd);
-                            $paypalRefundDetails = $paypalRefunds->map(function ($refund) use ($date): string {
-                                return __('logistics.orders.refunds.paypal_item', [
+                            $paypalRefundDetails = $paypalRefunds->map(function ($refund) use ($date): array {
+                                $reason = trim((string) ($refund->manual_reason ?: $refund->refund_reason ?: $refund->eventLabel()));
+                                $reason = $reason !== '' ? $reason : __('logistics.orders.refunds.reason_not_provided');
+                                $amount = number_format((float) $refund->refund_amount_usd, 2);
+
+                                return [
+                                    'reason' => $reason,
+                                    'amount' => $amount,
+                                    'title' => __('logistics.orders.refunds.paypal_item', [
                                     'number' => $refund->refund_transaction_id ?: __('logistics.common.not_available'),
-                                    'amount' => number_format((float) $refund->refund_amount_usd, 2),
-                                    'reason' => $refund->manual_reason ?: $refund->refund_reason ?: $refund->eventLabel(),
+                                    'amount' => $amount,
+                                    'reason' => $reason,
                                     'time' => $date($refund->refunded_at ?: $refund->created_at),
-                                ]);
-                            })->implode("\n");
+                                    ]),
+                                ];
+                            });
+                            $paypalRefundTitle = $paypalRefundDetails->pluck('title')->implode("\n");
                             $creditCardRefunds = $order->creditCardRefunds;
                             $creditCardRefundCount = $creditCardRefunds->count();
-                            $creditCardRefundAmount = (float) $creditCardRefunds->sum(fn ($refund): float => (float) $refund->refund_amount_usd);
-                            $creditCardRefundDetails = $creditCardRefunds->map(function ($refund) use ($date): string {
-                                return __('logistics.orders.refunds.credit_card_item', [
+                            $creditCardRefundDetails = $creditCardRefunds->map(function ($refund) use ($date): array {
+                                $reason = trim((string) $refund->refund_reason);
+                                $reason = $reason !== '' ? $reason : __('logistics.orders.refunds.reason_not_provided');
+                                $amount = number_format((float) $refund->refund_amount_usd, 2);
+
+                                return [
+                                    'reason' => $reason,
+                                    'amount' => $amount,
+                                    'title' => __('logistics.orders.refunds.credit_card_item', [
                                     'bill' => $refund->bill_number ?: __('logistics.common.not_available'),
                                     'reference' => $refund->refund_reference ?: __('logistics.common.not_available'),
-                                    'amount' => number_format((float) $refund->refund_amount_usd, 2),
-                                    'reason' => $refund->refund_reason ?: __('logistics.common.not_available'),
+                                    'amount' => $amount,
+                                    'reason' => $reason,
                                     'time' => $date($refund->last_imported_at ?: $refund->created_at),
-                                ]);
-                            })->implode("\n");
+                                    ]),
+                                ];
+                            });
+                            $creditCardRefundTitle = $creditCardRefundDetails->pluck('title')->implode("\n");
                             $paymentReferences = $order->paymentReferences
                                 ->filter(fn ($reference) => filled($reference->reference_number))
                                 ->values();
@@ -174,27 +182,103 @@
                                 $paymentReferenceTitle = (string) $primaryPaymentReference;
                             }
                             $subscriptionType = (string) $order->subscription_type;
-                            $subscriptionTypeClass = $subscriptionType === '无订阅'
-                                ? 'label-default'
-                                : (str_starts_with($subscriptionType, '订阅复购') ? 'logistics-tag-purple' : 'label-primary');
-                            $subscriptionStatusClass = $order->subscription_status === '已订阅' ? 'label-success' : 'label-default';
+                            $hasAddOn = $order->is_add_on === '已加购';
+                            $hasSubscription = filled($subscriptionType) && $subscriptionType !== '无订阅';
+                            $subscriptionStatus = trim((string) $order->subscription_status);
+                            $subscriptionStatusTone = str_contains($subscriptionStatus, '已')
+                                ? 'is-positive'
+                                : ((str_contains($subscriptionStatus, '未') || str_contains($subscriptionStatus, '无')) ? 'is-negative' : 'is-neutral');
+                            $collectionAccountEmailMatched = filled($order->collection_account_email);
+                            $collectionAccountEmail = $collectionAccountEmailMatched
+                                ? $order->collection_account_email
+                                : __('logistics.orders.payment_identifiers.unmatched');
+                            $saleProductDetails = $order->items->map(function ($item) use ($display, $weight): array {
+                                $hasTongtuName = filled($item->tongtu_product_name);
+
+                                return [
+                                    'product_code' => $display($item->tongtu_product_code),
+                                    'shopify_sku' => $display($item->shopify_sku),
+                                    'tongtu_sku' => $display($item->tongtu_sku),
+                                    'name' => $display($hasTongtuName ? $item->tongtu_product_name : $item->product_title),
+                                    'name_label' => $hasTongtuName ? 'name' : 'shopify_product',
+                                    'quantity' => $display($item->quantity),
+                                    'goods_weight' => $weight($item->tongtu_goods_weight_gram),
+                                    'package_weight' => $weight($item->tongtu_package_weight_gram),
+                                ];
+                            })->all();
+                            if ($saleProductDetails === []) {
+                                $productCodeLines = $lines($order->tongtu_product_code);
+                                $skuLines = $lines($order->tongtu_sku);
+                                $productNameLines = $lines($order->tongtu_product_name);
+                                $quantityLines = $lines($order->sale_quantity);
+                                $weightLines = $lines($order->sale_product_weight);
+                                $saleProductDetailCount = max(count($productCodeLines), count($skuLines), count($productNameLines), count($quantityLines), count($weightLines));
+                                for ($detailIndex = 0; $detailIndex < $saleProductDetailCount; $detailIndex++) {
+                                    $saleProductDetails[] = [
+                                        'product_code' => $productCodeLines[$detailIndex] ?? '—',
+                                        'shopify_sku' => '—',
+                                        'tongtu_sku' => $skuLines[$detailIndex] ?? '—',
+                                        'name' => $productNameLines[$detailIndex] ?? '—',
+                                        'name_label' => 'name',
+                                        'quantity' => $quantityLines[$detailIndex] ?? '—',
+                                        'goods_weight' => $weight($weightLines[$detailIndex] ?? null),
+                                        'package_weight' => '—',
+                                    ];
+                                }
+                            }
                         @endphp
-                        <tr class="{{ $order->hasFailureRow() ? 'logistics-row-failed' : '' }}"
-                            data-data-status="{{ trim((string) $order->data_status) }}"
+                        <tr data-data-status="{{ trim((string) $order->data_status) }}"
                             data-logistics-status="{{ trim((string) $order->logistics_status) }}"
                             data-tracking-status="{{ trim((string) $order->tracking_sync_status) }}">
                             <td class="logistics-sticky-left"><input class="logistics-order-check" type="checkbox" value="{{ $order->id }}" data-unmatched="{{ $order->assistant_domain_store_id ? '0' : '1' }}" aria-label="选择订单 {{ $order->id }}"></td>
-                            <td>{{ $order->id }}</td><td><button class="btn btn-link btn-xs js-logistics-order-detail" type="button" data-order-detail-url="{{ route('logistics.orders.detail', $order) }}">{{ $display($order->shopify_order_number) }}</button></td><td>{{ $display($order->tongtu_order_number) }}</td><td>{{ $display($order->shopify_order_id) }}</td>
-                            <td><span class="label {{ $order->assistant_domain_store_id ? 'label-primary' : 'label-danger' }} logistics-tag">{{ $display($order->store_name) }}</span></td><td>{{ $display($order->source_shop_domain) }}</td><td><span class="label label-primary logistics-tag">{{ $display($order->operator_name) }}</span></td><td><span class="label label-info logistics-tag">{{ $display($order->group_names) }}</span></td>
-                            <td><span class="label {{ $order->is_add_on === '未加购' ? 'label-default' : 'label-warning' }} logistics-tag">{{ $display($order->is_add_on) }}</span></td><td><span class="label {{ $subscriptionTypeClass }} logistics-tag">{{ $display($order->subscription_type) }}</span></td><td>{{ $display($order->subscription_origin_order_id) }}</td><td><span class="label {{ $subscriptionStatusClass }} logistics-tag">{{ $display($order->subscription_status) }}</span></td>
-                            <td class="logistics-multiline {{ $order->data_status === \App\Models\LogisticsOrder::STATUS_SKU_EXCEPTION ? 'text-red' : '' }}">{{ $display($order->tongtu_product_code) }}</td>
-                            <td class="logistics-multiline {{ $order->data_status === \App\Models\LogisticsOrder::STATUS_SKU_EXCEPTION ? 'text-red' : '' }}">{{ $display($order->tongtu_sku) }}</td>
-                            <td class="logistics-multiline">@foreach($lines($order->tongtu_product_name) as $line)<span class="logistics-product-line" title="{{ $line }}">{{ $line }}</span>@endforeach</td>
-                            <td class="logistics-multiline">{{ $display($order->sale_quantity) }}</td><td class="logistics-multiline">{{ $display($order->sale_product_weight) }}</td><td><span class="label {{ $order->payment_status === '已付款' ? 'label-success' : 'label-warning' }} logistics-tag">{{ $display($order->payment_status) }}</span></td><td><span class="label label-info logistics-tag">{{ $display($order->payment_method) }}</span></td><td><span class="label label-primary logistics-tag">{{ $display($order->payment_gateway) }}</span></td>
-                            <td class="js-money-cell">{{ $display($order->paid_amount_usd) }}</td><td>{{ $date($order->paid_at) }}</td><td class="js-money-cell">{{ $display($order->product_cost_usd) }}</td><td class="js-money-cell">{{ $display($order->handling_fee_usd) }}</td><td class="js-money-cell">{{ $display($order->total_shipping_usd) }}</td><td class="js-money-cell">{{ $display($order->proportional_refund_usd) }}</td><td class="js-money-cell js-profit-cell">{{ $display($order->proportional_profit_usd) }}</td><td class="js-rate-cell js-profit-cell">{{ $display($order->proportional_profit_rate) }}</td><td class="js-money-cell js-profit-cell">{{ $display($order->financial_profit_usd) }}</td><td class="js-rate-cell js-profit-cell">{{ $display($order->financial_profit_rate) }}</td><td class="js-money-cell js-profit-cell">{{ $display($order->operation_profit_usd) }}</td><td class="js-rate-cell js-profit-cell">{{ $display($order->operation_profit_rate) }}</td><td class="logistics-refund-summary" @if($paypalRefundCount > 0) title="{{ $paypalRefundDetails }}" @endif>@if($paypalRefundCount > 0)<strong>{{ __('logistics.orders.refunds.summary', ['count' => $paypalRefundCount, 'amount' => number_format($paypalRefundAmount, 2)]) }}</strong><small>{{ __('logistics.orders.refunds.hover_hint') }}</small>@else<span class="text-muted">—</span>@endif</td><td class="logistics-refund-summary" @if($creditCardRefundCount > 0) title="{{ $creditCardRefundDetails }}" @endif>@if($creditCardRefundCount > 0)<strong>{{ __('logistics.orders.refunds.summary', ['count' => $creditCardRefundCount, 'amount' => number_format($creditCardRefundAmount, 2)]) }}</strong><small>{{ __('logistics.orders.refunds.hover_hint') }}</small>@else<span class="text-muted">—</span>@endif</td><td><span class="label label-primary logistics-tag logistics-tag-account">{{ $display($order->collection_account) }}</span></td><td>{{ $display($order->collection_account_email) }}</td><td class="js-money-cell">{{ $display($order->received_amount_usd) }}</td><td class="js-money-cell">{{ $display($order->platform_fee_usd) }}</td><td class="js-money-cell js-profit-cell">{{ $display($order->net_amount_usd) }}</td><td>{{ $display($order->transaction_id) }}</td><td class="logistics-payment-reference-cell" title="{{ $paymentReferenceTitle }}"><span>{{ $display($primaryPaymentReference) }}</span>@if($upsellReferenceCount > 0)<small>{{ __('logistics.payment_references.upsell_count', ['count' => $upsellReferenceCount]) }}</small>@endif</td><td>{{ $display($order->buyer_name) }}</td><td>{{ $display($order->buyer_email) }}</td><td>{{ $display($order->destination) }}</td><td class="logistics-multiline">{{ $display($order->shipping_company) }}</td><td class="logistics-multiline">{{ $display($order->tracking_number) }}</td><td><span class="label {{ $order->logisticsStatusClass() }} logistics-tag">{{ $order->logistics_status }}</span></td><td>{{ $date($order->order_created_at) }}</td><td><span class="label {{ $order->statusClass() }} logistics-tag" title="{{ $order->sku_exception_reason }}">{{ $order->data_status }}</span></td><td class="text-nowrap"><button class="btn btn-info btn-xs js-logistics-order-detail" type="button" data-order-detail-url="{{ route('logistics.orders.detail', $order) }}"><i class="fa fa-eye"></i> 查看</button> <a class="btn btn-primary btn-xs" href="{{ route('logistics.orders.edit', $order) }}"><i class="fa fa-pencil"></i> 编辑</a></td>
+                            <td>{{ $order->id }}</td><td class="logistics-order-identifiers"><div class="logistics-order-identifier-line"><span class="logistics-order-identifier-label">{{ __('logistics.orders.identifiers.shopify_order_number') }}</span><span class="logistics-order-identifier-value">#{{ $display($order->shopify_order_number) }}</span></div><div class="logistics-order-identifier-line"><span class="logistics-order-identifier-label">{{ __('logistics.orders.identifiers.shopify_order_id') }}</span><span class="logistics-order-identifier-value">{{ $display($order->shopify_order_id) }}</span></div><div class="logistics-order-identifier-line"><span class="logistics-order-identifier-label">{{ __('logistics.orders.identifiers.tongtu_order_number') }}</span><span class="logistics-order-identifier-value">{{ $display($order->tongtu_order_number) }}</span></div></td>
+                            <td class="logistics-store-information"><div class="logistics-store-information-line"><span class="logistics-store-information-label">{{ __('logistics.orders.store_identifiers.store_name') }}</span><span class="logistics-store-information-value">{{ $display($order->store_name) }}</span></div><div class="logistics-store-information-line"><span class="logistics-store-information-label">{{ __('logistics.orders.store_identifiers.login_address') }}</span><span class="logistics-store-information-value">{{ $display($order->source_shop_domain) }}</span></div><div class="logistics-store-information-line"><span class="logistics-store-information-label">{{ __('logistics.orders.store_identifiers.operator_name') }}</span><span class="logistics-store-information-value">{{ $display($order->operator_name) }}</span></div><div class="logistics-store-information-line"><span class="logistics-store-information-label">{{ __('logistics.orders.store_identifiers.group_names') }}</span><span class="logistics-store-information-value">{{ $display($order->group_names) }}</span></div></td>
+                            <td class="logistics-subscription-information"><div class="logistics-subscription-information-line"><span class="logistics-subscription-information-label">{{ __('logistics.orders.subscription_identifiers.add_on') }}</span><span class="logistics-subscription-information-value {{ $hasAddOn ? 'is-positive' : 'is-negative' }}">{{ $hasAddOn ? __('logistics.orders.subscription_identifiers.added') : __('logistics.orders.subscription_identifiers.not_added') }}</span></div><div class="logistics-subscription-information-line"><span class="logistics-subscription-information-label">{{ __('logistics.orders.subscription_identifiers.subscription_type') }}</span><span class="logistics-subscription-information-value {{ $hasSubscription ? 'is-subscription' : 'is-negative' }}">{{ $display($order->subscription_type) }}</span></div><div class="logistics-subscription-information-line"><span class="logistics-subscription-information-label">{{ __('logistics.orders.subscription_identifiers.subscription_status') }}</span><span class="logistics-subscription-information-value {{ $subscriptionStatusTone }}">{{ $display($order->subscription_status) }}</span></div></td><td>{{ $display($order->subscription_origin_order_id) }}</td>
+                            <td class="logistics-sale-product-details">@foreach($saleProductDetails as $saleProductDetail)<div class="logistics-sale-product-detail-item"><div class="logistics-sale-product-detail-code {{ $saleProductDetail['product_code'] === '—' ? 'is-empty' : '' }}"><b>{{ __('logistics.orders.sale_product_detail_labels.product_code') }}</b><span title="{{ $saleProductDetail['product_code'] === '—' ? __('logistics.orders.sale_product_detail_labels.unmatched') : $saleProductDetail['product_code'] }}">{{ $saleProductDetail['product_code'] === '—' ? __('logistics.orders.sale_product_detail_labels.unmatched') : $saleProductDetail['product_code'] }}</span></div><div class="logistics-sale-product-detail-skus"><span class="logistics-sale-product-detail-sku is-original"><b>{{ __('logistics.orders.sale_product_detail_labels.shopify_sku') }}</b><span title="{{ $saleProductDetail['shopify_sku'] }}">{{ $saleProductDetail['shopify_sku'] }}</span></span><span class="logistics-sale-product-detail-sku {{ $saleProductDetail['tongtu_sku'] === '—' ? 'is-empty' : 'is-matched' }}"><b>{{ __('logistics.orders.sale_product_detail_labels.tongtu_sku') }}</b><span title="{{ $saleProductDetail['tongtu_sku'] === '—' ? __('logistics.orders.sale_product_detail_labels.unmatched') : $saleProductDetail['tongtu_sku'] }}">{{ $saleProductDetail['tongtu_sku'] === '—' ? __('logistics.orders.sale_product_detail_labels.unmatched') : $saleProductDetail['tongtu_sku'] }}</span></span></div><div class="logistics-sale-product-detail-metrics"><span><b>{{ __('logistics.orders.sale_product_detail_labels.quantity') }}</b>{{ $saleProductDetail['quantity'] }}</span><span><b>{{ __('logistics.orders.sale_product_detail_labels.goods_weight') }}</b>{{ $saleProductDetail['goods_weight'] }}</span><span><b>{{ __('logistics.orders.sale_product_detail_labels.package_weight') }}</b>{{ $saleProductDetail['package_weight'] }}</span></div><div class="logistics-sale-product-detail-name"><b>{{ __('logistics.orders.sale_product_detail_labels.'.$saleProductDetail['name_label']) }}</b><span title="{{ $saleProductDetail['name'] }}">{{ $saleProductDetail['name'] }}</span></div></div>@endforeach</td>
+                            <td class="logistics-payment-information">
+                                <div class="logistics-payment-information-line"><span class="logistics-payment-information-label">{{ __('logistics.orders.payment_identifiers.status') }}</span><span class="logistics-payment-information-value {{ $order->payment_status === '已付款' ? 'is-paid' : 'is-pending' }}">{{ $display($order->payment_status) }}</span></div>
+                                <div class="logistics-payment-information-line"><span class="logistics-payment-information-label">{{ __('logistics.orders.payment_identifiers.method') }}</span><span class="logistics-payment-information-value">{{ $display($order->payment_method) }}</span></div>
+                                <div class="logistics-payment-information-line"><span class="logistics-payment-information-label">{{ __('logistics.orders.payment_identifiers.gateway') }}</span><span class="logistics-payment-information-value">{{ $display($order->payment_gateway) }}</span></div>
+                                <div class="logistics-payment-information-line"><span class="logistics-payment-information-label">{{ __('logistics.orders.payment_identifiers.collection_account') }}</span><span class="logistics-payment-information-value">{{ $display($order->collection_account) }}</span></div>
+                                <div class="logistics-payment-information-line"><span class="logistics-payment-information-label">{{ __('logistics.orders.payment_identifiers.collection_account_email') }}</span><span class="logistics-payment-information-value {{ $collectionAccountEmailMatched ? '' : 'is-unmatched' }}" title="{{ $collectionAccountEmail }}">{{ $collectionAccountEmail }}</span></div>
+                            </td>
+                            <td class="logistics-amount-information"><div class="logistics-amount-information-line"><span class="logistics-amount-information-label">{{ __('logistics.orders.amount_identifiers.paid_amount') }}</span><span class="logistics-amount-information-value js-money-cell">{{ $display($order->paid_amount_usd) }}</span></div><div class="logistics-amount-information-line"><span class="logistics-amount-information-label">{{ __('logistics.orders.amount_identifiers.total_shipping') }}</span><span class="logistics-amount-information-value js-money-cell">{{ $display($order->total_shipping_usd) }}</span></div></td>
+                            <td class="logistics-order-time-information"><div class="logistics-order-time-information-line"><span class="logistics-order-time-information-label">{{ __('logistics.orders.order_time_identifiers.stored') }}</span><span class="logistics-order-time-information-value">{{ $date($order->created_at) }}</span></div><div class="logistics-order-time-information-line"><span class="logistics-order-time-information-label">{{ __('logistics.orders.order_time_identifiers.ordered') }}</span><span class="logistics-order-time-information-value">{{ $date($order->order_created_at) }}</span></div><div class="logistics-order-time-information-line"><span class="logistics-order-time-information-label">{{ __('logistics.orders.order_time_identifiers.paid') }}</span><span class="logistics-order-time-information-value">{{ $date($order->paid_at) }}</span></div></td>
+                            <td class="logistics-refund-summary" @if($paypalRefundCount > 0) title="{{ $paypalRefundTitle }}" @endif>
+                                @if($paypalRefundCount > 0)
+                                    <div class="logistics-refund-list">
+                                        @foreach($paypalRefundDetails as $refundDetail)
+                                            <div class="logistics-refund-item" title="{{ $refundDetail['title'] }}">
+                                                <span class="logistics-refund-reason" title="{{ $refundDetail['reason'] }}">{{ $refundDetail['reason'] }}</span>
+                                                <span class="logistics-refund-amount">US${{ $refundDetail['amount'] }}</span>
+                                            </div>
+                                        @endforeach
+                                    </div>
+                                @else
+                                    <span class="text-muted">—</span>
+                                @endif
+                            </td>
+                            <td class="logistics-refund-summary" @if($creditCardRefundCount > 0) title="{{ $creditCardRefundTitle }}" @endif>
+                                @if($creditCardRefundCount > 0)
+                                    <div class="logistics-refund-list">
+                                        @foreach($creditCardRefundDetails as $refundDetail)
+                                            <div class="logistics-refund-item" title="{{ $refundDetail['title'] }}">
+                                                <span class="logistics-refund-reason" title="{{ $refundDetail['reason'] }}">{{ $refundDetail['reason'] }}</span>
+                                                <span class="logistics-refund-amount">US${{ $refundDetail['amount'] }}</span>
+                                            </div>
+                                        @endforeach
+                                    </div>
+                                @else
+                                    <span class="text-muted">—</span>
+                                @endif
+                            </td>
+                            <td>{{ $display($order->transaction_id) }}</td><td class="logistics-payment-reference-cell" title="{{ $paymentReferenceTitle }}"><span>{{ $display($primaryPaymentReference) }}</span>@if($upsellReferenceCount > 0)<small>{{ __('logistics.payment_references.upsell_count', ['count' => $upsellReferenceCount]) }}</small>@endif</td>
+                            <td class="logistics-buyer-information"><div class="logistics-buyer-information-line"><span class="logistics-buyer-information-label">{{ __('logistics.orders.buyer_identifiers.name') }}</span><span class="logistics-buyer-information-value" title="{{ $display($order->buyer_name) }}">{{ $display($order->buyer_name) }}</span></div><div class="logistics-buyer-information-line"><span class="logistics-buyer-information-label">{{ __('logistics.orders.buyer_identifiers.email') }}</span><span class="logistics-buyer-information-value" title="{{ $display($order->buyer_email) }}">{{ $display($order->buyer_email) }}</span></div><div class="logistics-buyer-information-line"><span class="logistics-buyer-information-label">{{ __('logistics.orders.buyer_identifiers.destination') }}</span><span class="logistics-buyer-information-value" title="{{ $display($order->destination) }}">{{ $display($order->destination) }}</span></div></td>
+                            <td class="logistics-shipping-information"><div class="logistics-shipping-information-line"><span class="logistics-shipping-information-label">{{ __('logistics.orders.shipping_identifiers.company') }}</span><span class="logistics-shipping-information-value" title="{{ $display($order->shipping_company) }}">{{ $display($order->shipping_company) }}</span></div><div class="logistics-shipping-information-line"><span class="logistics-shipping-information-label">{{ __('logistics.orders.shipping_identifiers.tracking_number') }}</span><span class="logistics-shipping-information-value" title="{{ $display($order->tracking_number) }}">{{ $display($order->tracking_number) }}</span></div><div class="logistics-shipping-information-line"><span class="logistics-shipping-information-label">{{ __('logistics.orders.shipping_identifiers.status') }}</span><span class="logistics-shipping-information-value"><span class="label {{ $order->logisticsStatusClass() }} logistics-tag">{{ $order->logistics_status }}</span></span></div></td>
+                            <td><span class="label {{ $order->statusClass() }} logistics-tag" title="{{ $order->sku_exception_reason }}">{{ $order->data_status }}</span></td><td class="text-nowrap"><button class="btn btn-info btn-xs js-logistics-order-detail" type="button" data-order-detail-url="{{ route('logistics.orders.detail', $order) }}"><i class="fa fa-eye"></i> 查看</button> <a class="btn btn-primary btn-xs" href="{{ route('logistics.orders.edit', $order) }}"><i class="fa fa-pencil"></i> 编辑</a></td>
                         </tr>
                     @empty
-                        <tr><td colspan="51" class="text-center text-muted">暂无订单。请先在“Shopify 店铺同步”中执行同步。</td></tr>
+                        <tr><td colspan="18" class="text-center text-muted">暂无订单。请先在“Shopify 店铺同步”中执行同步。</td></tr>
                     @endforelse
                     </tbody>
                 </table>
@@ -289,9 +373,6 @@
                         if (headings[cell.cellIndex]) headings[cell.cellIndex].classList.add('logistics-number-heading');
                         if (value !== null) {
                             cell.textContent = isRate ? value + '%' : '$' + value;
-                            if (cell.classList.contains('js-profit-cell') && Number(value) !== 0) {
-                                cell.classList.add(Number(value) < 0 ? 'is-negative' : 'is-positive');
-                            }
                         } else {
                             cell.classList.add('logistics-empty-value');
                         }
@@ -339,47 +420,6 @@
                     showRefundImportFilename(files[0]);
                 });
             }
-            var matchProgressBox = document.getElementById('tongtu-match-progress');
-            if (matchProgressBox && matchProgressBox.dataset.completed !== '1' && window.fetch) {
-                var progressUrl = matchProgressBox.dataset.url;
-                var progressTitle = matchProgressBox.querySelector('[data-match-title]');
-                var progressPercent = matchProgressBox.querySelector('[data-match-percent]');
-                var progressBar = matchProgressBox.querySelector('[data-match-bar]');
-                var progressSummary = matchProgressBox.querySelector('[data-match-summary]');
-                var progressFailures = matchProgressBox.querySelector('[data-match-failures]');
-                var progressFailureCount = matchProgressBox.querySelector('[data-match-failure-count]');
-                var progressFailureList = matchProgressBox.querySelector('[data-match-failure-list]');
-                var progressTimer = null;
-                var escapeHtml = function (value) { return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;'); };
-                var renderFailureDetails = function (failures) {
-                    if (!progressFailures || !progressFailureCount || !progressFailureList) return;
-                    if (!failures || failures.length === 0) { progressFailures.hidden = true; return; }
-                    progressFailureCount.textContent = failures.length;
-                    progressFailureList.innerHTML = failures.map(function (failure) {
-                        return '<li><strong>Shopify 订单：' + escapeHtml(failure.shopify_order_number) + '</strong><span>通途订单：' + escapeHtml(failure.tongtu_order_number) + '</span><em>' + escapeHtml(failure.reason) + '</em></li>';
-                    }).join('');
-                    progressFailures.hidden = false;
-                };
-                var updateMatchProgress = function () {
-                    window.fetch(progressUrl, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
-                        .then(function (response) { return response.ok ? response.json() : Promise.reject(response); })
-                        .then(function (progress) {
-                            progressTitle.textContent = progress.completed ? '通途匹配完成' : (progress.status === 'queued' ? '通途任务排队中' : '通途后台匹配中');
-                            progressPercent.textContent = progress.percent + '%';
-                            progressBar.style.width = progress.percent + '%';
-                            progressBar.setAttribute('aria-valuenow', progress.percent);
-                            progressSummary.textContent = '已处理 ' + progress.processed + ' / ' + progress.total + ' 条；成功 ' + progress.matched + ' 条，SKU 异常 ' + progress.sku_exception + ' 条，通途未找到 ' + progress.not_found + ' 条，失败 ' + progress.failed + ' 条。';
-                            renderFailureDetails(progress.failures || []);
-                            if (progress.completed) {
-                                window.clearInterval(progressTimer);
-                                window.setTimeout(function () { window.location.reload(); }, 1200);
-                            }
-                        })
-                        .catch(function () { /* 下一次轮询会自动重试。 */ });
-                };
-                updateMatchProgress();
-                progressTimer = window.setInterval(updateMatchProgress, 3000);
-            }
             var trackingProgressBox = document.getElementById('tracking-sync-progress');
             if (trackingProgressBox && trackingProgressBox.dataset.completed !== '1' && window.fetch) {
                 var trackingProgressUrl = trackingProgressBox.dataset.url;
@@ -416,7 +456,8 @@
                 trackingProgressTimer = window.setInterval(updateTrackingProgress, 3000);
             }
             var all = document.getElementById('order-check-all');
-            var matchButton = document.getElementById('tongtu-match-button');
+            var skuRetryButton = document.getElementById('tongtu-sku-retry-button');
+            var skuRefreshButton = document.getElementById('tongtu-sku-refresh-button');
             var trackingButton = document.getElementById('tracking-sync-button');
             var assignButton = document.getElementById('assign-store-button');
             var exportForm = document.getElementById('logistics-order-export-form');
@@ -436,7 +477,8 @@
             };
             var refresh = function () {
                 var selectedItems = selected();
-                matchButton.disabled = selectedItems.length === 0;
+                if (skuRetryButton) skuRetryButton.disabled = selectedItems.length === 0;
+                if (skuRefreshButton) skuRefreshButton.disabled = selectedItems.length === 0;
                 if (trackingButton) trackingButton.disabled = selectedItems.length === 0;
                 assignButton.disabled = selectedItems.length === 0 || !selectedItems.some(function (item) { return item.dataset.unmatched === '1'; });
                 all.checked = checks().length > 0 && selectedItems.length === checks().length;
@@ -447,7 +489,10 @@
             };
             all.addEventListener('change', function () { checks().forEach(function (item) { item.checked = all.checked; }); refresh(); });
             checks().forEach(function (item) { item.addEventListener('change', refresh); });
-            document.getElementById('tongtu-match-form').addEventListener('submit', function () { populate(this); });
+            var skuRetryForm = document.getElementById('tongtu-sku-retry-form');
+            if (skuRetryForm) skuRetryForm.addEventListener('submit', function () { populate(this); });
+            var skuRefreshForm = document.getElementById('tongtu-sku-refresh-form');
+            if (skuRefreshForm) skuRefreshForm.addEventListener('submit', function () { populate(this); });
             var trackingForm = document.getElementById('tracking-sync-form');
             if (trackingForm) trackingForm.addEventListener('submit', function () { populate(this); });
             document.getElementById('assign-store-form').addEventListener('submit', function () { populate(this); });

@@ -125,10 +125,6 @@
 .logistics-order-detail-settlement dl.is-total dd { color: #143f64; font-size: 14px; font-weight: 750; }
 .logistics-order-detail-paid { display: flex; align-items: center; justify-content: space-between; margin: 12px 0; padding: 12px; color: #14659a; background: #eaf6ff; border-radius: 6px; }
 .logistics-order-detail-paid strong { font-size: 18px; }
-.logistics-order-detail-profit { margin-top: 14px; padding: 13px; color: #fff; background: linear-gradient(135deg, #238ebd, #2469a7); border-radius: 7px; }
-.logistics-order-detail-profit span { display: block; opacity: .8; font-size: 10px; }
-.logistics-order-detail-profit strong { display: inline-block; margin-top: 3px; font-size: 21px; }
-.logistics-order-detail-profit em { float: right; margin-top: 8px; font-style: normal; }
 .logistics-order-detail-empty { padding: 28px; color: #8397a9; text-align: center; }
 .js-logistics-order-detail { cursor: pointer; }
 @media (max-width: 991px) {

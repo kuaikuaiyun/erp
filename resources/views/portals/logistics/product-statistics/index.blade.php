@@ -7,7 +7,6 @@
     $productHeaderTooltips = [
         'shop_count' => __('logistics.product_statistics.tooltips.shop_count'),
         'revenue' => __('logistics.product_statistics.tooltips.revenue'),
-        'fees' => __('logistics.product_statistics.tooltips.fees'),
         'paypal_refund_amount' => __('logistics.product_statistics.tooltips.paypal_refund_amount'),
         'paypal_refund_rate' => __('logistics.product_statistics.tooltips.paypal_refund_rate'),
         'paypal_dispute_count' => __('logistics.product_statistics.tooltips.paypal_dispute_count'),
@@ -26,14 +25,13 @@
         'detailUrl' => route('logistics.product-statistics.detail'),
         'sort' => $filters['sort'],
         'direction' => $filters['direction'],
-        'decisions' => $decisionOptions,
         'labels' => $labels,
         'exportValidationError' => $errors->first('scope'),
     ];
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261023-2">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261024-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261015-2">
 @endpush
 
@@ -59,7 +57,7 @@
                     <input id="product-statistics-per-page-field" type="hidden" name="per_page" value="{{ $filters['per_page'] }}">
                     <div class="product-statistics-filters">
                         <div class="product-statistics-filter-field product-statistics-date-field">
-                            <label for="product-statistics-date-from">{{ __('logistics.product_statistics.filters.date_range') }}</label>
+                            <label for="product-statistics-date-from">{{ __('logistics.product_statistics.filters.paid_date_range') }}</label>
                             <div class="product-statistics-date-range">
                                 <input id="product-statistics-date-from" name="date_from" type="date" class="form-control" value="{{ $filters['date_from'] }}">
                                 <span>—</span>
@@ -87,11 +85,11 @@
                             </div>
                         </div>
                         <div class="product-statistics-filter-field">
-                            <label for="product-statistics-decision">{{ __('logistics.product_statistics.filters.decision') }}</label>
-                            <select id="product-statistics-decision" name="decision" class="form-control">
+                            <label for="product-statistics-match-status">{{ __('logistics.product_statistics.filters.match_status') }}</label>
+                            <select id="product-statistics-match-status" name="match_status" class="form-control">
                                 <option value="">{{ __('logistics.common.all') }}</option>
-                                @foreach($decisionOptions as $key => $label)
-                                    <option value="{{ $key }}" @selected($filters['decision'] === $key)>{{ $label }}</option>
+                                @foreach($matchStatusOptions as $key => $label)
+                                    <option value="{{ $key }}" @selected($filters['match_status'] === $key)>{{ $label }}</option>
                                 @endforeach
                             </select>
                         </div>
@@ -108,8 +106,7 @@
             <div class="product-statistics-summary-item"><span>{{ __('logistics.product_statistics.metrics.products') }}</span><strong id="product-statistics-summary-products">—</strong><em>{{ __('logistics.product_statistics.metrics.current_filter') }}</em></div>
             <div class="product-statistics-summary-item"><span>{{ __('logistics.product_statistics.metrics.sales') }}</span><strong id="product-statistics-summary-sales">—</strong><em>{{ __('logistics.product_statistics.metrics.current_filter') }}</em></div>
             <div class="product-statistics-summary-item"><span>{{ __('logistics.product_statistics.metrics.revenue') }}</span><strong id="product-statistics-summary-revenue">—</strong><em>{{ __('logistics.product_statistics.metrics.current_filter') }}</em></div>
-            <div class="product-statistics-summary-item"><span>{{ __('logistics.product_statistics.metrics.profit') }}</span><strong id="product-statistics-summary-profit">—</strong><em>{{ __('logistics.product_statistics.metrics.current_filter') }}</em></div>
-            <div class="product-statistics-summary-item"><span>{{ __('logistics.product_statistics.metrics.profit_rate') }}</span><strong id="product-statistics-summary-profit-rate">—</strong><em>{{ __('logistics.product_statistics.metrics.weighted') }}</em></div>
+            <div class="product-statistics-summary-item"><span>{{ __('logistics.product_statistics.metrics.actual_refunds') }}</span><strong id="product-statistics-summary-refunds">—</strong><em>{{ __('logistics.product_statistics.metrics.current_filter') }}</em></div>
         </div>
 
         <section id="product-statistics-reason-report" class="product-statistics-reason-report" aria-live="polite"></section>
@@ -127,10 +124,9 @@
                     <thead><tr>
                         <th class="product-statistics-check-column"><input id="product-statistics-check-all" type="checkbox" aria-label="{{ __('logistics.product_statistics.ui.select_current_page') }}"></th>
                         @foreach([
-                            'name' => 'product', 'product_code' => 'product_code', 'variant_count' => 'variant_count', 'shop_count' => 'stores', 'sales' => 'sales', 'revenue' => 'revenue', 'cost' => 'cost', 'fees' => 'fees',
+                            'name' => 'product', 'product_code' => 'product_code', 'match_status' => 'match_status', 'shop_count' => 'stores', 'sales' => 'sales', 'revenue' => 'revenue',
                             'paypal_refund_amount' => 'paypal_refund_amount', 'paypal_refund_rate' => 'paypal_refund_rate', 'paypal_dispute_count' => 'paypal_dispute_count', 'paypal_dispute_rate' => 'paypal_dispute_rate',
                             'credit_card_refund_amount' => 'credit_card_refund_amount', 'credit_card_refund_rate' => 'credit_card_refund_rate', 'combined_refund_rate' => 'combined_refund_rate',
-                            'profit' => 'profit', 'profit_rate' => 'profit_rate', 'decision' => 'decision',
                         ] as $sort => $label)
                             <th><button type="button" class="product-statistics-sort" data-sort="{{ $sort }}">{{ __('logistics.product_statistics.headers.'.$label) }} @if(isset($productHeaderTooltips[$sort]))<i class="fa fa-question-circle product-statistics-header-help" title="{{ $productHeaderTooltips[$sort] }}" aria-label="{{ $productHeaderTooltips[$sort] }}"></i>@endif <i class="fa fa-sort product-statistics-sort-indicator"></i></button></th>
                         @endforeach
@@ -175,7 +171,6 @@
                 <div id="product-statistics-detail-identity" class="product-statistics-detail-identity"></div>
                 <ul class="nav nav-tabs product-statistics-tabs" role="tablist">
                     <li class="active"><a href="#product-statistics-overview" role="tab" data-toggle="tab" data-product-detail-tab="overview">{{ __('logistics.product_statistics.ui.overview') }}</a></li>
-                    <li><a href="#product-statistics-variants" role="tab" data-toggle="tab" data-product-detail-tab="variants">{{ __('logistics.product_statistics.ui.variant_details') }}</a></li>
                     <li><a href="#product-statistics-paypal-orders" role="tab" data-toggle="tab" data-product-detail-tab="paypal_orders">{{ __('logistics.product_statistics.ui.paypal_orders') }}</a></li>
                     <li><a href="#product-statistics-credit-card-orders" role="tab" data-toggle="tab" data-product-detail-tab="credit_card_orders">{{ __('logistics.product_statistics.ui.credit_card_orders') }}</a></li>
                     <li><a href="#product-statistics-refunds" role="tab" data-toggle="tab" data-product-detail-tab="refunds">{{ __('logistics.product_statistics.ui.refund_records') }}</a></li>
@@ -183,9 +178,9 @@
                     <li><a href="#product-statistics-orders" role="tab" data-toggle="tab" data-product-detail-tab="orders">{{ __('logistics.product_statistics.ui.related_orders') }}</a></li>
                 </ul>
                 <div id="product-statistics-detail-filters" class="product-statistics-detail-filters" hidden></div>
-                <div class="tab-content product-statistics-tab-content"><div role="tabpanel" class="tab-pane active" id="product-statistics-overview"></div><div role="tabpanel" class="tab-pane" id="product-statistics-variants"></div><div role="tabpanel" class="tab-pane" id="product-statistics-paypal-orders"></div><div role="tabpanel" class="tab-pane" id="product-statistics-credit-card-orders"></div><div role="tabpanel" class="tab-pane" id="product-statistics-refunds"></div><div role="tabpanel" class="tab-pane" id="product-statistics-disputes"></div><div role="tabpanel" class="tab-pane" id="product-statistics-orders"></div></div>
+                <div class="tab-content product-statistics-tab-content"><div role="tabpanel" class="tab-pane active" id="product-statistics-overview"></div><div role="tabpanel" class="tab-pane" id="product-statistics-paypal-orders"></div><div role="tabpanel" class="tab-pane" id="product-statistics-credit-card-orders"></div><div role="tabpanel" class="tab-pane" id="product-statistics-refunds"></div><div role="tabpanel" class="tab-pane" id="product-statistics-disputes"></div><div role="tabpanel" class="tab-pane" id="product-statistics-orders"></div></div>
             </div>
-            <div class="modal-footer"><span class="pull-left product-statistics-modal-footnote"><i class="fa fa-info-circle"></i> {{ __('logistics.product_statistics.ui.known_profit_only') }}</span><button type="button" class="btn btn-default" data-dismiss="modal">{{ __('logistics.common.close') }}</button></div>
+            <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">{{ __('logistics.common.close') }}</button></div>
         </div></div>
     </div>
 
@@ -203,6 +198,6 @@
     <script>
         window.ErpLogisticsProductStatistics = @json($productStatisticsClientConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/product-statistics.js?v=20261023-2"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-statistics.js?v=20261024-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261015-2"></script>
 @endpush

@@ -42,19 +42,15 @@ class LogisticsOrder extends Model
         'buyer_name', 'buyer_email', 'buyer_phone', 'is_add_on', 'subscription_type',
         'subscription_origin_order_id', 'subscription_status', 'tongtu_sku', 'tongtu_product_code', 'tongtu_product_name',
         'sale_quantity', 'sale_product_weight', 'payment_status', 'payment_method', 'payment_gateway', 'paid_amount_usd',
-        'paid_at', 'product_cost_usd', 'handling_fee_usd', 'total_shipping_usd',
-        'proportional_refund_usd', 'proportional_profit_usd', 'proportional_profit_rate',
-        'financial_profit_usd', 'financial_profit_rate', 'operation_profit_usd', 'operation_profit_rate',
+        'paid_at', 'total_shipping_usd',
         'channel_refund_amount_usd', 'shopify_refund_amount_usd', 'refunded_at', 'refund_reason',
-        'received_amount_usd', 'platform_fee_usd', 'net_amount_usd', 'collection_account',
+        'collection_account',
         'collection_account_email', 'transaction_id', 'bill_number', 'destination', 'shipping_company',
         'tracking_number', 'tracking_sync_status', 'order_created_at', 'data_status',
         'sku_exception_reason', 'time_zone', 'shopify_checkout_id', 'shopify_cart_token',
         'payment_gateway_order_id', 'paypal_merchant_id', 'page_source', 'shopify_payload', 'tongtu_payload',
         'shopify_customer_id', 'shopify_customer_order_count', 'subscription_link_source', 'subscription_link_status',
-        'logistics_status', 'fulfillment_payload', 'first_fulfilled_at', 'paid_match_due_at',
-        'paid_match_scheduled_at', 'auto_match_paid_completed_at', 'auto_match_fulfillment_scheduled_at',
-        'auto_match_fulfillment_completed_at',
+        'logistics_status', 'fulfillment_payload', 'first_fulfilled_at',
         'tracking_courier_code', 'tracking_courier_name', 'tracking_api_status', 'tracking_api_substatus',
         'tracking_latest_event', 'tracking_latest_checkpoint_at', 'tracking_signed_by', 'tracking_registered_at',
         'tracking_last_checked_at', 'tracking_next_sync_at', 'tracking_attempts', 'tracking_last_error',
@@ -73,11 +69,7 @@ class LogisticsOrder extends Model
     protected function casts(): array
     {
         $decimalFields = [
-            'paid_amount_usd', 'product_cost_usd', 'handling_fee_usd', 'total_shipping_usd',
-            'proportional_refund_usd', 'proportional_profit_usd', 'proportional_profit_rate',
-            'financial_profit_usd', 'financial_profit_rate', 'operation_profit_usd', 'operation_profit_rate',
-            'channel_refund_amount_usd', 'shopify_refund_amount_usd', 'received_amount_usd',
-            'platform_fee_usd', 'net_amount_usd',
+            'paid_amount_usd', 'total_shipping_usd', 'channel_refund_amount_usd', 'shopify_refund_amount_usd',
         ];
 
         return array_merge(
@@ -87,11 +79,6 @@ class LogisticsOrder extends Model
                 'refunded_at' => 'datetime',
                 'order_created_at' => 'datetime',
                 'first_fulfilled_at' => 'datetime',
-                'paid_match_due_at' => 'datetime',
-                'paid_match_scheduled_at' => 'datetime',
-                'auto_match_paid_completed_at' => 'datetime',
-                'auto_match_fulfillment_scheduled_at' => 'datetime',
-                'auto_match_fulfillment_completed_at' => 'datetime',
                 'paypal_associated_at' => 'datetime',
                 'tracking_latest_checkpoint_at' => 'datetime',
                 'tracking_registered_at' => 'datetime',

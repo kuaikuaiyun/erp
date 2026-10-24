@@ -7,6 +7,7 @@ use App\Models\LogisticsOrderItem;
 use App\Models\LogisticsCreditCardRefund;
 use App\Models\LogisticsPayPalDispute;
 use App\Models\LogisticsPayPalRefund;
+use App\Models\LogisticsTongtuSkuMapping;
 use Carbon\Carbon;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
@@ -65,8 +66,7 @@ class LogisticsProductStatisticsService
                 ->filter()
                 ->values();
         } else {
-            // Some specialised sorts and the decision filter require the
-            // complete calculated data set, so keep their exact SQL path.
+            // Specialised sorts use the complete statistics data set.
             $query = $this->productStatisticsQuery($filters, false);
             $summary = $this->overallSummaryFromQuery($query, $filters);
             $total = (clone $query)->count();
@@ -77,7 +77,7 @@ class LogisticsProductStatisticsService
             $productRows = $query->forPage($page, $perPage)->get();
         }
 
-        $this->hydrateMissingProductImages($productRows);
+        $this->hydrateTongtuProductMetadata($productRows);
         $products = $productRows
             ->map(fn (object $row): array => $this->listProduct($row))
             ->all();
@@ -142,7 +142,7 @@ class LogisticsProductStatisticsService
     public function storeOptions(array $filters): array
     {
         $optionFilters = $filters;
-        unset($optionFilters['store'], $optionFilters['decision'], $optionFilters['sort'], $optionFilters['direction'], $optionFilters['page'], $optionFilters['per_page']);
+        unset($optionFilters['store'], $optionFilters['sort'], $optionFilters['direction'], $optionFilters['page'], $optionFilters['per_page']);
 
         // Reuse the list's lightweight index instead of issuing another
         // whole-table scan just to build the store dropdown.
@@ -158,12 +158,8 @@ class LogisticsProductStatisticsService
     /** @param array<string,mixed> $filters */
     private function canUseLightweightPageQuery(array $filters): bool
     {
-        if (trim((string) ($filters['decision'] ?? '')) !== '') {
-            return false;
-        }
-
         return in_array(trim((string) ($filters['sort'] ?? '')), [
-            '', 'name', 'sku', 'product_code', 'variant_count', 'shop_count', 'sales', 'revenue', 'cost', 'fees',
+            '', 'name', 'sku', 'product_code', 'shop_count', 'sales', 'revenue',
         ], true);
     }
 
@@ -208,14 +204,7 @@ class LogisticsProductStatisticsService
         $refunds = $this->uniqueRefundSummaryForBaseFilters($filters);
         $sales = round((float) $candidates->sum(static fn (object $row): float => (float) $row->sales), 4);
         $revenue = round((float) $candidates->sum(static fn (object $row): float => (float) $row->revenue), 4);
-        $shipping = round((float) $candidates->sum(static fn (object $row): float => (float) $row->shipping), 4);
-        $handling = round((float) $candidates->sum(static fn (object $row): float => (float) $row->handling), 4);
-        $hasMissingCost = $candidates->contains(static fn (object $row): bool => (int) $row->missing_cost_count > 0);
-        $cost = $hasMissingCost
-            ? null
-            : round((float) $candidates->sum(static fn (object $row): float => (float) $row->cost), 4);
         $actualRefunds = round((float) $refunds['paypal'] + (float) $refunds['credit_card'], 4);
-        $profit = $cost === null ? null : round($revenue - $cost - $shipping - $handling - $actualRefunds, 4);
 
         return [
             'product_count' => $candidates->count(),
@@ -223,8 +212,6 @@ class LogisticsProductStatisticsService
             'sales' => $sales,
             'revenue' => $revenue,
             'actual_refunds' => $actualRefunds,
-            'profit' => $profit,
-            'profit_rate' => $profit !== null && $revenue > 0 ? round($profit / $revenue * 100, 2) : null,
         ];
     }
 
@@ -258,12 +245,9 @@ class LogisticsProductStatisticsService
         return match ($sort) {
             'name' => trim((string) ($row->product_title ?: $row->tongtu_product_name)),
             'sku', 'product_code' => trim((string) $row->tongtu_product_code),
-            'variant_count' => (int) $row->tongtu_variant_count,
             'shop_count' => (int) $row->shop_count,
             'sales' => (float) $row->sales,
             'revenue' => (float) $row->revenue,
-            'cost' => (int) $row->missing_cost_count > 0 ? -PHP_FLOAT_MAX : (float) $row->cost,
-            'fees' => (float) $row->shipping + (float) $row->handling,
             default => (int) $row->first_item_id,
         };
     }
@@ -272,7 +256,7 @@ class LogisticsProductStatisticsService
     private function statisticsCacheKey(string $segment, array $filters): string
     {
         $keyFilters = [];
-        foreach (['date_from', 'date_to', 'name', 'keyword', 'store', 'decision'] as $key) {
+        foreach (['date_from', 'date_to', 'name', 'keyword', 'store', 'match_status'] as $key) {
             $keyFilters[$key] = (string) ($filters[$key] ?? '');
         }
 
@@ -324,20 +308,8 @@ class LogisticsProductStatisticsService
     /** @param array<string,mixed> $filters */
     private function selectedOrderIdsForReasonReport(array $filters): Builder
     {
-        $productOrders = $this->productOrderQuery($filters, false);
-        if (trim((string) ($filters['decision'] ?? '')) === '') {
-            return $this->database()->query()
-                ->fromSub($productOrders, 'reason_product_orders')
-                ->select('reason_product_orders.order_id')
-                ->distinct();
-        }
-
-        $productKeys = $this->productStatisticsQuery($filters, false)
-            ->select('product_statistics.product_key');
-
         return $this->database()->query()
-            ->fromSub($productOrders, 'reason_product_orders')
-            ->joinSub($productKeys, 'reason_products', 'reason_products.product_key', '=', 'reason_product_orders.product_key')
+            ->fromSub($this->productOrderQuery($filters, false), 'reason_product_orders')
             ->select('reason_product_orders.order_id')
             ->distinct();
     }
@@ -404,10 +376,7 @@ class LogisticsProductStatisticsService
             return null;
         }
 
-        $product = $this->product($items->all(), $key);
-        $decision = trim((string) ($filters['decision'] ?? ''));
-
-        return $decision === '' || $decision === $product['decision'] ? $product : null;
+        return $this->product($items->all(), $key);
     }
 
     /**
@@ -436,12 +405,8 @@ class LogisticsProductStatisticsService
             return null;
         }
 
+        $this->hydrateTongtuProductMetadata(collect([$row]));
         $product = $this->listProduct($row);
-        $decision = trim((string) ($filters['decision'] ?? ''));
-        if ($decision !== '' && $decision !== $product['decision']) {
-            return null;
-        }
-
         if ($withOverview) {
             // The overview query deliberately keeps the main product list
             // lightweight.  Reason distribution is only needed inside this
@@ -454,6 +419,7 @@ class LogisticsProductStatisticsService
             $product['overview_modules']['credit_card']['alert_record_summary'] = $creditCardReasonSummaries['alert'];
             $product['overview_modules']['credit_card']['dispute_record_summary'] = $creditCardReasonSummaries['dispute'];
             $product['store_order_distribution'] = $this->detailStoreOrderDistribution($filters, $key);
+            $product['current_pcl_product_data'] = $this->currentPclProductData($product);
 
             return [
                 'tab' => 'overview',
@@ -659,11 +625,11 @@ class LogisticsProductStatisticsService
             'payment_method' => 'orders.payment_method',
             'tracking_number' => 'orders.tracking_number',
             'logistics_status' => 'orders.logistics_status',
-            'order_created_at' => 'orders.order_created_at',
+            'order_created_at' => 'orders.paid_at',
             'quantity' => 'detail_order_metrics.quantity',
             'revenue' => 'detail_order_metrics.revenue',
         ];
-        $this->applyDetailSort($rowsQuery, $sortColumns[$sort] ?? 'orders.order_created_at', $options, 'orders.id');
+        $this->applyDetailSort($rowsQuery, $sortColumns[$sort] ?? 'orders.paid_at', $options, 'orders.id');
         $page = $this->paginateDetailQuery($rowsQuery, $options);
         $orderIdsOnPage = $page['rows']
             ->map(static fn (object $row): int => (int) $row->id)
@@ -1179,7 +1145,7 @@ class LogisticsProductStatisticsService
             ])
             ->select('logistics_order_items.*')
             ->selectRaw('logistics_orders.store_name as statistics_store_name')
-            ->selectRaw('logistics_orders.order_created_at as statistics_order_created_at')
+            ->selectRaw('logistics_orders.paid_at as statistics_order_created_at')
             ->join('logistics_orders', 'logistics_orders.id', '=', 'logistics_order_items.logistics_order_id')
             ->whereNotNull('logistics_order_items.line_revenue_usd')
             ->whereRaw($this->productKeyExpression('logistics_order_items').' = ?', [$key])
@@ -1298,7 +1264,7 @@ class LogisticsProductStatisticsService
             ])
             ->select('logistics_order_items.*')
             ->selectRaw('logistics_orders.store_name as statistics_store_name')
-            ->selectRaw('logistics_orders.order_created_at as statistics_order_created_at')
+            ->selectRaw('logistics_orders.paid_at as statistics_order_created_at')
             ->selectRaw('logistics_orders.shopify_order_number as statistics_shopify_order_number')
             ->selectRaw('logistics_orders.bill_number as statistics_bill_number')
             ->join('logistics_orders', 'logistics_orders.id', '=', 'logistics_order_items.logistics_order_id')
@@ -1328,10 +1294,6 @@ class LogisticsProductStatisticsService
                 'item_statistics.tongtu_variant_count',
                 'item_statistics.sales',
                 'item_statistics.revenue',
-                'item_statistics.cost',
-                'item_statistics.missing_cost_count',
-                'item_statistics.shipping',
-                'item_statistics.handling',
                 'first_item.product_title',
                 'first_item.tongtu_product_name',
                 'first_item.tongtu_product_code',
@@ -1383,37 +1345,17 @@ class LogisticsProductStatisticsService
                 ->selectRaw('COALESCE(order_statistics.credit_card_module_delivered_order_count, 0) as credit_card_module_delivered_order_count');
         }
 
-        $cost = 'CASE WHEN product_data.missing_cost_count > 0 THEN NULL ELSE product_data.cost END';
         $refunds = '(product_data.paypal_refund_amount + product_data.credit_card_refund_amount)';
-        $profit = "CASE WHEN product_data.missing_cost_count > 0 THEN NULL ELSE product_data.revenue - product_data.cost - product_data.shipping - product_data.handling - {$refunds} END";
-        $calculated = $this->database()->query()
+        $statistics = $this->database()->query()
             ->fromSub($query, 'product_data')
             ->select('product_data.*')
-            ->selectRaw("{$cost} as cost_complete")
             ->selectRaw("{$refunds} as actual_refunds")
-            ->selectRaw("{$profit} as profit")
             ->selectRaw('CASE WHEN product_data.paypal_order_count > 0 THEN product_data.paypal_refund_order_count / product_data.paypal_order_count * 100 ELSE 0 END as paypal_refund_rate')
             ->selectRaw('CASE WHEN product_data.paypal_order_count > 0 THEN product_data.paypal_dispute_order_count / product_data.paypal_order_count * 100 ELSE 0 END as paypal_dispute_rate')
             ->selectRaw('CASE WHEN product_data.credit_card_order_count > 0 THEN product_data.credit_card_refund_order_count / product_data.credit_card_order_count * 100 ELSE 0 END as credit_card_refund_rate')
             ->selectRaw('CASE WHEN product_data.paid_order_count > 0 THEN product_data.combined_refund_order_count / product_data.paid_order_count * 100 ELSE 0 END as combined_refund_rate');
 
-        $profitStatistics = $this->database()->query()
-            ->fromSub($calculated, 'product_statistics')
-            ->select('product_statistics.*')
-            ->selectRaw('CASE WHEN product_statistics.cost_complete IS NULL OR product_statistics.revenue <= 0 THEN NULL ELSE product_statistics.profit / product_statistics.revenue * 100 END as profit_rate');
-
-        $statistics = $this->database()->query()
-            ->fromSub($profitStatistics, 'product_statistics')
-            ->select('product_statistics.*')
-            ->selectRaw($this->decisionExpression('product_statistics').' as decision');
-
-        $result = $this->database()->query()->fromSub($statistics, 'product_statistics')->select('product_statistics.*');
-        $decision = trim((string) ($filters['decision'] ?? ''));
-        if ($decision !== '') {
-            $result->where('product_statistics.decision', $decision);
-        }
-
-        return $result;
+        return $this->database()->query()->fromSub($statistics, 'product_statistics')->select('product_statistics.*');
     }
 
     /**
@@ -1440,10 +1382,6 @@ class LogisticsProductStatisticsService
                 'item_statistics.tongtu_variant_count',
                 'item_statistics.sales',
                 'item_statistics.revenue',
-                'item_statistics.cost',
-                'item_statistics.missing_cost_count',
-                'item_statistics.shipping',
-                'item_statistics.handling',
                 'first_item.product_title',
                 'first_item.tongtu_product_name',
                 'first_item.tongtu_product_code',
@@ -1475,78 +1413,127 @@ class LogisticsProductStatisticsService
             ->selectRaw("COUNT(DISTINCT NULLIF(TRIM(items.tongtu_sku), '')) as tongtu_variant_count")
             ->selectRaw('SUM(COALESCE(items.quantity, 0)) as sales')
             ->selectRaw('SUM(COALESCE(items.line_revenue_usd, 0)) as revenue')
-            ->selectRaw('SUM(COALESCE(items.product_cost_usd, 0)) as cost')
-            ->selectRaw('SUM(CASE WHEN items.product_cost_usd IS NULL THEN 1 ELSE 0 END) as missing_cost_count')
-            ->selectRaw('SUM(COALESCE(items.total_shipping_usd, 0)) as shipping')
-            ->selectRaw('SUM(COALESCE(items.handling_fee_usd, 0)) as handling')
             ->groupByRaw($key);
     }
 
-    /** @param Collection<int,object> $rows */
-    private function hydrateMissingProductImages(Collection $rows): void
+    /**
+     * Product statistics intentionally uses current Tongtu primary pictures.
+     * Shopify pictures remain exclusive to the logistics order list.
+     *
+     * @param Collection<int,object> $rows
+     */
+    private function hydrateTongtuProductMetadata(Collection $rows): void
     {
-        $missingRows = $rows->filter(static fn (object $row): bool => !filled($row->product_image_url ?? null));
-        if ($missingRows->isEmpty()) {
+        if ($rows->isEmpty()) {
             return;
         }
 
-        $skuKeys = $missingRows
-            ->flatMap(fn (object $row): array => $this->imageSkuKeys($row))
-            ->unique()
-            ->values()
-            ->all();
-        if ($skuKeys === []) {
+        $productCodes = $rows->map(static fn (object $row): string => mb_strtolower(trim((string) ($row->tongtu_product_code ?? ''))))
+            ->filter()->unique()->values()->all();
+        $shopifySkus = $rows->map(static fn (object $row): string => mb_strtolower(trim((string) ($row->shopify_sku ?? ''))))
+            ->filter()->unique()->values()->all();
+        if ($productCodes === [] && $shopifySkus === []) {
+            foreach ($rows as $row) {
+                $row->product_image_url = null;
+                $row->match_status = LogisticsTongtuSkuMapping::STATUS_UNMATCHED;
+                $row->match_status_label = $this->matchStatusLabel($row->match_status);
+            }
+
             return;
         }
 
-        $imageRows = $this->database()
-            ->table('logistics_order_items')
-            ->select(['tongtu_product_code', 'tongtu_sku', 'shopify_sku', 'product_image_url'])
-            ->whereRaw("NULLIF(TRIM(product_image_url), '') IS NOT NULL")
-            ->where(function (Builder $query) use ($skuKeys): void {
-                $query->whereIn(DB::raw("LOWER(NULLIF(TRIM(tongtu_product_code), ''))"), $skuKeys)
-                    ->orWhereIn(DB::raw("LOWER(NULLIF(TRIM(tongtu_sku), ''))"), $skuKeys)
-                    ->orWhereIn(DB::raw("LOWER(NULLIF(TRIM(shopify_sku), ''))"), $skuKeys);
+        $mappings = LogisticsTongtuSkuMapping::query()
+            ->where(function ($query) use ($productCodes, $shopifySkus): void {
+                if ($productCodes !== []) {
+                    $query->whereIn(DB::raw("LOWER(TRIM(tongtu_product_code))"), $productCodes);
+                }
+                if ($shopifySkus !== []) {
+                    $method = $productCodes === [] ? 'whereIn' : 'orWhereIn';
+                    $query->{$method}(DB::raw("LOWER(TRIM(shopify_sku))"), $shopifySkus);
+                }
             })
-            ->orderBy('id')
+            ->orderByDesc('last_synced_at')
+            ->orderByDesc('id')
             ->get();
 
-        $imagesBySku = [];
-        foreach ($imageRows as $imageRow) {
-            $imageUrl = trim((string) ($imageRow->product_image_url ?? ''));
-            if ($imageUrl === '') {
-                continue;
+        $byProductCode = [];
+        $byShopifySku = [];
+        foreach ($mappings as $mapping) {
+            $productCode = mb_strtolower(trim((string) $mapping->tongtu_product_code));
+            $shopifySku = mb_strtolower(trim((string) $mapping->shopify_sku));
+            if ($productCode !== '') {
+                $byProductCode[$productCode] ??= $mapping;
             }
-
-            foreach ($this->imageSkuKeys($imageRow) as $skuKey) {
-                $imagesBySku[$skuKey] ??= $imageUrl;
+            if ($shopifySku !== '') {
+                $byShopifySku[$shopifySku] ??= $mapping;
             }
         }
 
-        foreach ($missingRows as $row) {
-            foreach ($this->imageSkuKeys($row) as $skuKey) {
-                if (!isset($imagesBySku[$skuKey])) {
-                    continue;
-                }
+        foreach ($rows as $row) {
+            $productCode = mb_strtolower(trim((string) ($row->tongtu_product_code ?? '')));
+            $shopifySku = mb_strtolower(trim((string) ($row->shopify_sku ?? '')));
+            $mapping = $byProductCode[$productCode] ?? $byShopifySku[$shopifySku] ?? null;
 
-                $row->product_image_url = $imagesBySku[$skuKey];
-                break;
-            }
+            $row->product_image_url = $mapping?->status === LogisticsTongtuSkuMapping::STATUS_MATCHED
+                ? ($mapping->tongtu_primary_image_url ?: null)
+                : null;
+            $row->match_status = $mapping?->status ?: LogisticsTongtuSkuMapping::STATUS_UNMATCHED;
+            $row->match_status_label = $this->matchStatusLabel((string) $row->match_status);
         }
     }
 
-    /** @return list<string> */
-    private function imageSkuKeys(object $row): array
+    /** @return list<array<string,mixed>> */
+    private function currentPclProductData(array $product): array
     {
-        $keys = [];
-        foreach (['tongtu_product_code', 'tongtu_sku', 'shopify_sku'] as $property) {
-            $value = mb_strtolower(trim((string) ($row->{$property} ?? '')));
-            if ($value !== '') {
-                $keys[] = $value;
-            }
+        $productCode = mb_strtolower(trim((string) ($product['product_code'] ?? '')));
+        if ($productCode === '') {
+            return [];
         }
 
-        return array_values(array_unique($keys));
+        return LogisticsTongtuSkuMapping::query()
+            ->where('status', LogisticsTongtuSkuMapping::STATUS_MATCHED)
+            ->whereRaw("LOWER(TRIM(tongtu_product_code)) = ?", [$productCode])
+            ->orderBy('tongtu_sku')
+            ->orderBy('shopify_sku')
+            ->get()
+            ->map(fn (LogisticsTongtuSkuMapping $mapping): array => [
+                'shopify_sku' => $mapping->shopify_sku,
+                'tongtu_sku' => $mapping->tongtu_sku,
+                'product_name' => $mapping->tongtu_product_packing_name ?: $mapping->tongtu_product_name,
+                'goods_weight_gram' => $mapping->goods_weight_gram,
+                'package_weight_gram' => $mapping->package_weight_gram,
+                'goods_current_cost_cny' => $mapping->goods_current_cost_cny,
+                'goods_average_cost_cny' => $mapping->goods_average_cost_cny,
+                'package_cost_cny' => $mapping->package_cost_cny,
+                'product_guide_cost_cny' => $mapping->product_guide_cost_cny,
+                'product_dimensions' => $this->dimensions($mapping->product_length_cm, $mapping->product_width_cm, $mapping->product_height_cm),
+                'package_dimensions' => $this->dimensions($mapping->package_length_cm, $mapping->package_width_cm, $mapping->package_height_cm),
+                'tongtu_updated_at' => $this->dateTime($mapping->tongtu_updated_at),
+                'last_synced_at' => $this->dateTime($mapping->last_synced_at),
+            ])
+            ->all();
+    }
+
+    private function dimensions(mixed $length, mixed $width, mixed $height): ?string
+    {
+        $values = array_map(fn ($value): ?float => $this->number($value), [$length, $width, $height]);
+        if (in_array(null, $values, true)) {
+            return null;
+        }
+
+        return implode(' × ', array_map(static fn (float $value): string => rtrim(rtrim(number_format($value, 4, '.', ''), '0'), '.'), $values)).' cm';
+    }
+
+    private function matchStatusLabel(string $status): string
+    {
+        return __('logistics.product_statistics.mapping.statuses.'.(in_array($status, [
+            LogisticsTongtuSkuMapping::STATUS_MATCHED,
+            LogisticsTongtuSkuMapping::STATUS_QUEUED,
+            LogisticsTongtuSkuMapping::STATUS_NOT_FOUND,
+            LogisticsTongtuSkuMapping::STATUS_CONFLICT,
+            LogisticsTongtuSkuMapping::STATUS_FAILED,
+            LogisticsTongtuSkuMapping::STATUS_UNMATCHED,
+        ], true) ? $status : LogisticsTongtuSkuMapping::STATUS_UNMATCHED));
     }
 
     /** @param array<string,mixed> $filters */
@@ -1759,8 +1746,9 @@ class LogisticsProductStatisticsService
     {
         $query = $this->database()->table('logistics_order_items as items')
             ->join('logistics_orders as orders', 'orders.id', '=', 'items.logistics_order_id')
+            ->leftJoin('logistics_tongtu_sku_mappings as sku_mappings', DB::raw('LOWER(TRIM(items.shopify_sku))'), '=', 'sku_mappings.shopify_sku')
             ->whereNotNull('items.line_revenue_usd');
-        $this->applyBaseFilters($query, $filters, 'items', 'orders');
+        $this->applyBaseFilters($query, $filters, 'items', 'orders', 'sku_mappings');
 
         return $query;
     }
@@ -1784,28 +1772,15 @@ class LogisticsProductStatisticsService
     /** @param array<string,mixed> $filters */
     private function overallSummaryFromQuery(Builder $products, array $filters): array
     {
-        $decision = trim((string) ($filters['decision'] ?? ''));
-        $productStatistics = $decision === ''
-            ? $this->itemAggregateQuery($filters)
-            : clone $products;
+        $productStatistics = $this->itemAggregateQuery($filters);
         $aggregate = $this->database()->query()->fromSub($productStatistics, 'product_statistics')
             ->selectRaw('COUNT(*) as product_count')
             ->selectRaw('COALESCE(SUM(product_statistics.sales), 0) as sales')
             ->selectRaw('COALESCE(SUM(product_statistics.revenue), 0) as revenue')
-            ->selectRaw('COALESCE(SUM(product_statistics.shipping), 0) as shipping')
-            ->selectRaw('COALESCE(SUM(product_statistics.handling), 0) as handling')
-            ->selectRaw('COALESCE(SUM(product_statistics.cost_complete), 0) as cost')
-            ->selectRaw('SUM(CASE WHEN product_statistics.cost_complete IS NULL THEN 1 ELSE 0 END) as has_missing_cost')
             ->first();
-        $refunds = $decision === ''
-            ? $this->uniqueRefundSummaryForBaseFilters($filters)
-            : $this->uniqueRefundSummary($products, $filters);
+        $refunds = $this->uniqueRefundSummaryForBaseFilters($filters);
         $revenue = round((float) ($aggregate->revenue ?? 0), 4);
-        $cost = (int) ($aggregate->has_missing_cost ?? 0) > 0 ? null : round((float) ($aggregate->cost ?? 0), 4);
-        $shipping = round((float) ($aggregate->shipping ?? 0), 4);
-        $handling = round((float) ($aggregate->handling ?? 0), 4);
         $actualRefunds = round((float) $refunds['paypal'] + (float) $refunds['credit_card'], 4);
-        $profit = $cost === null ? null : round($revenue - $cost - $shipping - $handling - $actualRefunds, 4);
 
         return [
             'product_count' => (int) ($aggregate->product_count ?? 0),
@@ -1813,8 +1788,6 @@ class LogisticsProductStatisticsService
             'sales' => round((float) ($aggregate->sales ?? 0), 4),
             'revenue' => $revenue,
             'actual_refunds' => $actualRefunds,
-            'profit' => $profit,
-            'profit_rate' => $profit !== null && $revenue > 0 ? round($profit / $revenue * 100, 2) : null,
         ];
     }
 
@@ -1841,9 +1814,8 @@ class LogisticsProductStatisticsService
     }
 
     /**
-     * The default page summary does not filter by an outcome decision, so it
-     * can read the matching order IDs directly instead of rebuilding the whole
-     * per-product refunds/disputes statistics query.
+     * The default page summary reads matching order IDs directly instead of
+     * rebuilding the whole per-product refunds/disputes statistics query.
      *
      * @param array<string,mixed> $filters
      * @return array{paypal:float,credit_card:float}
@@ -1890,19 +1862,20 @@ class LogisticsProductStatisticsService
         $shopifySku = trim((string) ($row->shopify_sku ?? ''));
         $tongtuSku = trim((string) ($row->tongtu_sku ?? ''));
         $fallbackSku = $shopifySku !== '' ? $shopifySku : $tongtuSku;
-        $cost = $row->cost_complete === null ? null : round((float) $row->cost_complete, 4);
         $refunds = round((float) $row->paypal_refund_amount + (float) $row->credit_card_refund_amount, 4);
-        $profit = $row->profit === null ? null : round((float) $row->profit, 4);
+        $matchStatus = (string) ($row->match_status ?? ($tongtuProductCode !== '' ? LogisticsTongtuSkuMapping::STATUS_MATCHED : LogisticsTongtuSkuMapping::STATUS_UNMATCHED));
 
         $product = [
             'id' => $this->productId((string) $row->product_key),
-            'name' => trim((string) ($row->product_title ?: $row->tongtu_product_name)) ?: __('logistics.product_statistics.unnamed_product'),
+            'name' => trim((string) ($row->tongtu_product_name ?: $row->product_title)) ?: __('logistics.product_statistics.unnamed_product'),
             'matched_name' => $this->matchedChineseProductName(
                 (string) $row->product_title,
                 (string) $row->tongtu_product_name,
             ),
-            'has_tongtu_match' => $tongtuProductCode !== '',
+            'has_tongtu_match' => $matchStatus === LogisticsTongtuSkuMapping::STATUS_MATCHED && $tongtuProductCode !== '',
             'product_code' => $tongtuProductCode !== '' ? $tongtuProductCode : null,
+            'match_status' => $matchStatus,
+            'match_status_label' => (string) ($row->match_status_label ?? $this->matchStatusLabel($matchStatus)),
             'fallback_shopify_sku' => $fallbackSku !== '' ? $fallbackSku : null,
             // Keep this compatibility key for consumers which have not yet
             // switched from SKU to the product-level PCL identifier.
@@ -1915,9 +1888,6 @@ class LogisticsProductStatisticsService
             'shop_count' => (int) $row->shop_count,
             'sales' => round((float) $row->sales, 4),
             'revenue' => round((float) $row->revenue, 4),
-            'cost' => $cost,
-            'shipping' => round((float) $row->shipping, 4),
-            'handling' => round((float) $row->handling, 4),
             'refunds' => $refunds,
             'actual_refunds' => $refunds,
             'paypal_refund_amount' => round((float) $row->paypal_refund_amount, 4),
@@ -1929,11 +1899,7 @@ class LogisticsProductStatisticsService
             'credit_card_refund_count' => (int) $row->credit_card_refund_count,
             'credit_card_refund_rate' => round((float) $row->credit_card_refund_rate, 2),
             'combined_refund_rate' => round((float) $row->combined_refund_rate, 2),
-            'profit' => $profit,
-            'actual_profit' => $profit,
-            'profit_rate' => $row->profit_rate === null ? null : round((float) $row->profit_rate, 2),
             'refund_rate' => round((float) $row->combined_refund_rate, 2),
-            'decision' => (string) $row->decision,
         ];
 
         if (isset($row->paypal_module_unit_count)) {
@@ -2072,15 +2038,6 @@ class LogisticsProductStatisticsService
         ];
     }
 
-    private function decisionExpression(string $table): string
-    {
-        return "CASE WHEN {$table}.cost_complete IS NULL OR {$table}.revenue <= 0 THEN 'watch' "
-            . "WHEN {$table}.profit_rate < 0 OR {$table}.combined_refund_rate >= 25 THEN 'stop' "
-            . "WHEN {$table}.profit_rate < 15 OR {$table}.combined_refund_rate >= 12 THEN 'optimize' "
-            . "WHEN {$table}.profit_rate >= 30 AND {$table}.combined_refund_rate < 8 THEN 'continue' "
-            . "ELSE 'watch' END";
-    }
-
     private function applyDatabaseSort(Builder $query, string $sort, string $direction): void
     {
         $direction = $direction === 'asc' ? 'asc' : 'desc';
@@ -2090,19 +2047,14 @@ class LogisticsProductStatisticsService
             return;
         }
 
-        if ($sort === 'fees') {
-            $query->orderByRaw('(product_statistics.shipping + product_statistics.handling) '.$direction);
-        } elseif ($sort === 'decision') {
-            $query->orderByRaw("FIELD(product_statistics.decision, 'continue', 'optimize', 'watch', 'stop') {$direction}");
-        } elseif (in_array($sort, [
-            'name', 'sku', 'product_code', 'variant_count', 'shop_count', 'sales', 'revenue', 'cost', 'paypal_refund_amount', 'paypal_refund_rate',
+        if (in_array($sort, [
+            'name', 'sku', 'product_code', 'shop_count', 'sales', 'revenue', 'paypal_refund_amount', 'paypal_refund_rate',
             'paypal_dispute_count', 'paypal_dispute_rate', 'credit_card_refund_amount', 'credit_card_refund_rate',
-            'combined_refund_rate', 'profit', 'profit_rate',
+            'combined_refund_rate',
         ], true)) {
             $column = match ($sort) {
                 'name' => 'product_title',
                 'sku', 'product_code' => 'tongtu_product_code',
-                'variant_count' => 'tongtu_variant_count',
                 default => $sort,
             };
             $query->orderBy('product_statistics.'.$column, $direction);
@@ -2241,14 +2193,9 @@ class LogisticsProductStatisticsService
             ->map(fn (LogisticsOrderItem $item): string => trim((string) $item->getAttribute('statistics_store_name')) ?: __('logistics.common.unassigned_store'))
             ->unique()->sort()->values()->all();
         $orders = $this->ordersForItems($items);
-        $hasUnknownCost = collect($items)->contains(fn (LogisticsOrderItem $item): bool => $this->number($item->product_cost_usd) === null);
         $revenue = $this->sum($items, 'line_revenue_usd');
-        $cost = $hasUnknownCost ? null : $this->sum($items, 'product_cost_usd');
-        $shipping = $this->sum($items, 'total_shipping_usd');
-        $handling = $this->sum($items, 'handling_fee_usd');
         $payment = $this->realPaymentSummary($orders);
         $refunds = round($payment['paypal_refund_amount'] + $payment['credit_card_refund_amount'], 4);
-        $profit = $cost === null ? null : round($revenue - $cost - $shipping - $handling - $refunds, 4);
         $paidOrders = $orders->filter(fn (LogisticsOrder $order): bool => $this->isPaidOrder($order));
         $shippedOrders = $paidOrders->filter(fn (LogisticsOrder $order): bool => $this->isActuallyShipped($order));
         $deliveredOrders = $shippedOrders->filter(fn (LogisticsOrder $order): bool => $this->isDelivered($order));
@@ -2270,9 +2217,6 @@ class LogisticsProductStatisticsService
             'shop_count' => count($stores),
             'sales' => $this->sum($items, 'quantity'),
             'revenue' => $revenue,
-            'cost' => $cost,
-            'shipping' => $shipping,
-            'handling' => $handling,
             // Compatibility aliases now both represent actual, source-backed refunds.
             'refunds' => $refunds,
             'actual_refunds' => $refunds,
@@ -2297,11 +2241,7 @@ class LogisticsProductStatisticsService
             'delivery_rate' => $paidOrders->isEmpty() ? 0.0 : round($deliveredOrders->count() / $paidOrders->count() * 100, 2),
             'related_orders' => $relatedOrders,
             'store_order_distribution' => $this->storeOrderDistribution($relatedOrders),
-            'profit' => $profit,
-            'actual_profit' => $profit,
-            'profit_rate' => $profit !== null && $revenue > 0 ? round($profit / $revenue * 100, 2) : null,
             'refund_rate' => $combinedRefundRate,
-            'decision' => $this->decision($profit, $revenue, $combinedRefundRate),
         ];
     }
 
@@ -2699,8 +2639,8 @@ class LogisticsProductStatisticsService
                 'payment_kind' => $this->isPayPalModuleOrder($order)
                     ? 'paypal'
                     : ($this->isCreditCardOrder($order) ? 'credit_card' : 'unknown'),
-                'order_created_at' => $this->dateTime($order->order_created_at),
-                '_sort_time' => $order->order_created_at?->timestamp ?? 0,
+                'order_created_at' => $this->dateTime($order->paid_at),
+                '_sort_time' => $order->paid_at?->timestamp ?? 0,
             ];
             $orders[$id]['quantity'] += (float) $item->quantity;
             $orders[$id]['revenue'] += (float) $item->line_revenue_usd;
@@ -2787,66 +2727,6 @@ class LogisticsProductStatisticsService
         }, $groups, array_keys($groups));
     }
 
-    /** @param list<array<string,mixed>> $rows
-     * @return array<string,mixed>
-     */
-    private function overallSummary(array $rows): array
-    {
-        $refunds = [];
-        foreach ($rows as $row) {
-            foreach ($row['refund_details'] as $refund) {
-                $refunds[$refund['id']] ??= $refund;
-            }
-        }
-        $revenue = round(array_sum(array_map(static fn (array $row): float => (float) $row['revenue'], $rows)), 4);
-        $costComplete = !collect($rows)->contains(static fn (array $row): bool => $row['cost'] === null);
-        $cost = $costComplete ? round(array_sum(array_map(static fn (array $row): float => (float) $row['cost'], $rows)), 4) : null;
-        $shipping = round(array_sum(array_map(static fn (array $row): float => (float) $row['shipping'], $rows)), 4);
-        $handling = round(array_sum(array_map(static fn (array $row): float => (float) $row['handling'], $rows)), 4);
-        $actualRefunds = round(array_sum(array_map(static fn (array $refund): float => (float) $refund['amount'], $refunds)), 4);
-        $profit = $cost === null ? null : round($revenue - $cost - $shipping - $handling - $actualRefunds, 4);
-
-        return [
-            'product_count' => count($rows),
-            'variant_count' => 0,
-            'sales' => round(array_sum(array_map(static fn (array $row): float => (float) $row['sales'], $rows)), 4),
-            'revenue' => $revenue,
-            'actual_refunds' => $actualRefunds,
-            'profit' => $profit,
-            'profit_rate' => $profit !== null && $revenue > 0 ? round($profit / $revenue * 100, 2) : null,
-        ];
-    }
-
-    /** @param list<array<string,mixed>> $rows */
-    private function sortRows(array &$rows, string $sort, string $direction): void
-    {
-        if ($sort === '' || $direction === '') {
-            usort($rows, static fn (array $left, array $right): int => $left['_first_item_id'] <=> $right['_first_item_id']);
-
-            return;
-        }
-        usort($rows, function (array $left, array $right) use ($sort, $direction): int {
-            $leftValue = $sort === 'fees' ? (float) $left['shipping'] + (float) $left['handling'] : ($left[$sort] ?? null);
-            $rightValue = $sort === 'fees' ? (float) $right['shipping'] + (float) $right['handling'] : ($right[$sort] ?? null);
-            if ($sort === 'decision') {
-                $sequence = ['continue', 'optimize', 'watch', 'stop'];
-                $comparison = array_search($leftValue, $sequence, true) <=> array_search($rightValue, $sequence, true);
-            } elseif ($leftValue === null && $rightValue === null) {
-                $comparison = 0;
-            } elseif ($leftValue === null) {
-                $comparison = 1;
-            } elseif ($rightValue === null) {
-                $comparison = -1;
-            } elseif (is_numeric($leftValue) && is_numeric($rightValue)) {
-                $comparison = (float) $leftValue <=> (float) $rightValue;
-            } else {
-                $comparison = strnatcasecmp((string) $leftValue, (string) $rightValue);
-            }
-
-            return $direction === 'asc' ? $comparison : -$comparison;
-        });
-    }
-
     /**
      * Applies every row-level filter before any product aggregation.  This is
      * intentionally shared by the aggregate query and the detail query so a
@@ -2854,7 +2734,7 @@ class LogisticsProductStatisticsService
      *
      * @param array<string,mixed> $filters
      */
-    private function applyBaseFilters(object $query, array $filters, string $itemTable = 'logistics_order_items', string $orderTable = 'logistics_orders'): void
+    private function applyBaseFilters(object $query, array $filters, string $itemTable = 'logistics_order_items', string $orderTable = 'logistics_orders', ?string $mappingTable = null): void
     {
         $this->applyDateFilters($query, $filters, $orderTable);
         if (trim((string) ($filters['store'] ?? '')) !== '') {
@@ -2880,16 +2760,42 @@ class LogisticsProductStatisticsService
                     ->orWhere($itemTable.'.tongtu_product_name', 'like', '%'.$keyword.'%');
             });
         }
+
+        $matchStatus = trim((string) ($filters['match_status'] ?? ''));
+        if ($matchStatus === 'matched') {
+            $query->whereNotNull($itemTable.'.tongtu_product_code')
+                ->whereRaw("TRIM({$itemTable}.tongtu_product_code) <> ''");
+        } elseif ($matchStatus === 'unmatched') {
+            $query->where(function ($nested) use ($itemTable, $mappingTable): void {
+                $nested->where(function ($productCode) use ($itemTable): void {
+                    $productCode->whereNull($itemTable.'.tongtu_product_code')
+                        ->orWhereRaw("TRIM({$itemTable}.tongtu_product_code) = ''");
+                });
+                if ($mappingTable !== null) {
+                    $nested->where(function ($mapping) use ($mappingTable): void {
+                        $mapping->whereNull($mappingTable.'.id')
+                            ->orWhere($mappingTable.'.status', '<>', LogisticsTongtuSkuMapping::STATUS_MATCHED);
+                    });
+                }
+            });
+        } elseif ($mappingTable !== null && in_array($matchStatus, [
+            LogisticsTongtuSkuMapping::STATUS_QUEUED,
+            LogisticsTongtuSkuMapping::STATUS_NOT_FOUND,
+            LogisticsTongtuSkuMapping::STATUS_CONFLICT,
+            LogisticsTongtuSkuMapping::STATUS_FAILED,
+        ], true)) {
+            $query->where($mappingTable.'.status', $matchStatus);
+        }
     }
 
     /** @param array<string,mixed> $filters */
     private function applyDateFilters(object $query, array $filters, string $orderTable = 'logistics_orders'): void
     {
         if (trim((string) ($filters['date_from'] ?? '')) !== '') {
-            $query->where($orderTable.'.order_created_at', '>=', $filters['date_from'].' 00:00:00');
+            $query->where($orderTable.'.paid_at', '>=', Carbon::parse($filters['date_from'], 'Asia/Shanghai')->startOfDay()->utc()->toDateTimeString());
         }
         if (trim((string) ($filters['date_to'] ?? '')) !== '') {
-            $query->where($orderTable.'.order_created_at', '<=', $filters['date_to'].' 23:59:59');
+            $query->where($orderTable.'.paid_at', '<=', Carbon::parse($filters['date_to'], 'Asia/Shanghai')->endOfDay()->utc()->toDateTimeString());
         }
     }
 
@@ -3062,21 +2968,6 @@ class LogisticsProductStatisticsService
     private function number(mixed $value): ?float
     {
         return is_numeric($value) ? (float) $value : null;
-    }
-
-    private function decision(?float $profit, float $revenue, float $refundRate): string
-    {
-        if ($profit === null || $revenue <= 0.0) {
-            return 'watch';
-        }
-        $profitRate = $profit / $revenue * 100;
-
-        return match (true) {
-            $profitRate < 0 || $refundRate >= 25 => 'stop',
-            $profitRate < 15 || $refundRate >= 12 => 'optimize',
-            $profitRate >= 30 && $refundRate < 8 => 'continue',
-            default => 'watch',
-        };
     }
 
     private function dateTime(mixed $value): string

@@ -113,9 +113,9 @@ Route::post('/orders/export', [LogisticsOrderController::class, 'export'])->name
 Route::get('/orders/refund-import-template', [LogisticsOrderController::class, 'refundImportTemplate'])->name('logistics.orders.refund-import-template');
 Route::post('/orders/import-refunds', [LogisticsOrderController::class, 'importRefunds'])->name('logistics.orders.import-refunds');
 Route::get('/orders/refund-import-errors/{token}', [LogisticsOrderController::class, 'refundImportErrors'])->name('logistics.orders.refund-import-errors');
-Route::post('/orders/match-tongtu', [LogisticsOrderController::class, 'matchTongtu'])->name('logistics.orders.match-tongtu');
-Route::get('/orders/tongtu-match-batches/{batch}/progress', [LogisticsOrderController::class, 'matchProgress'])->name('logistics.orders.match-progress');
 Route::post('/orders/sync-tracking', [LogisticsOrderController::class, 'syncTracking'])->name('logistics.orders.sync-tracking');
+Route::post('/orders/tongtu-skus/retry', [LogisticsOrderController::class, 'retryTongtuSkus'])->name('logistics.orders.tongtu-skus.retry');
+Route::post('/orders/tongtu-skus/refresh', [LogisticsOrderController::class, 'refreshTongtuSkuMappings'])->name('logistics.orders.tongtu-skus.refresh');
 Route::get('/orders/tracking-sync-batches/{batch}/progress', [LogisticsOrderController::class, 'trackingProgress'])->name('logistics.orders.tracking-progress');
 Route::post('/orders/assign-store', [LogisticsOrderController::class, 'assignStore'])->name('logistics.orders.assign-store');
 Route::get('/orders/{order}/detail', [LogisticsOrderController::class, 'detail'])->name('logistics.orders.detail');

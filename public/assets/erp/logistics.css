@@ -24,6 +24,9 @@
 .logistics-per-page-form { margin: 0; }
 .logistics-per-page-form label { display: flex; align-items: center; gap: 5px; margin: 0; color: #536b7e; font-weight: 600; white-space: nowrap; }
 .logistics-per-page-form select { width: 66px; min-width: 66px; }
+.logistics-table-box { border: 1px solid #c5d1dd; }
+.logistics-table-box > .box-header { border-bottom-color: #c5d1dd; }
+.logistics-table-box > .box-footer { border-top-color: #c5d1dd; }
 .logistics-table-box .box-footer .logistics-pagination-control { justify-content: flex-end; }
 .logistics-table-box .table-responsive { overflow-x: auto; }
 .logistics-orders-scroll, .logistics-shopify-stores-scroll { position: relative; min-height: 320px; max-height: calc(100vh - 175px); overflow: auto !important; overscroll-behavior: contain; scrollbar-color: #71869d #e7edf3; scrollbar-width: auto; }
@@ -32,7 +35,13 @@
 .logistics-orders-scroll::-webkit-scrollbar-thumb, .logistics-shopify-stores-scroll::-webkit-scrollbar-thumb { border: 3px solid #e7edf3; border-radius: 9px; background: #71869d; }
 .logistics-orders-scroll::-webkit-scrollbar-thumb:hover, .logistics-shopify-stores-scroll::-webkit-scrollbar-thumb:hover { background: #536c86; }
 .logistics-table { min-width: 1060px; margin-bottom: 0; font-size: 13px; }
-.logistics-orders-table { min-width: 7600px; }
+.logistics-orders-table { width: 3350px; min-width: 3350px; }
+.logistics-orders-table th:nth-child(1), .logistics-orders-table td:nth-child(1) { width: 48px; min-width: 48px; max-width: 48px; }
+.logistics-orders-table th:nth-child(2), .logistics-orders-table td:nth-child(2) { width: 68px; min-width: 68px; max-width: 68px; }
+.logistics-orders-table th:nth-child(6), .logistics-orders-table td:nth-child(6) { width: 160px; min-width: 160px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.logistics-orders-table th:nth-child(10), .logistics-orders-table td:nth-child(10) { width: 205px; min-width: 205px; max-width: 235px; white-space: normal; }
+.logistics-orders-table th:nth-child(13), .logistics-orders-table td:nth-child(13), .logistics-orders-table th:nth-child(14), .logistics-orders-table td:nth-child(14) { width: 130px; min-width: 130px; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.logistics-orders-table th:nth-child(17), .logistics-orders-table td:nth-child(17) { width: 124px; min-width: 124px; max-width: 124px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .logistics-shopify-stores-table { min-width: 2450px; }
 .logistics-shopify-stores-table th, .logistics-shopify-stores-table td { white-space: nowrap; }
 .logistics-shopify-stores-table th:nth-child(1), .logistics-shopify-stores-table td:nth-child(1) { width: 48px; min-width: 48px; }
@@ -45,10 +54,11 @@
 .logistics-shopify-stores-table th:nth-child(8), .logistics-shopify-stores-table td:nth-child(8), .logistics-shopify-stores-table th:nth-child(9), .logistics-shopify-stores-table td:nth-child(9), .logistics-shopify-stores-table th:nth-child(12), .logistics-shopify-stores-table td:nth-child(12) { width: 180px; min-width: 180px; }
 .logistics-shopify-stores-table th:nth-child(10), .logistics-shopify-stores-table td:nth-child(10), .logistics-shopify-stores-table th:nth-child(13), .logistics-shopify-stores-table td:nth-child(13) { width: 300px; min-width: 300px; white-space: normal; overflow-wrap: anywhere; }
 .logistics-shopify-stores-table th:nth-child(11), .logistics-shopify-stores-table td:nth-child(11) { width: 120px; min-width: 120px; }
-.logistics-table thead th { background: #f1f5fa; color: #314b68; border-bottom: 1px solid #d9e2ec; white-space: nowrap; font-weight: 700; vertical-align: middle; }
-.logistics-orders-scroll .logistics-orders-table thead th, .logistics-shopify-stores-scroll .logistics-shopify-stores-table thead th { position: sticky; top: 0; z-index: 4; background: #eaf0f7; box-shadow: 0 1px 0 #cdd8e4, 0 3px 7px rgba(42, 67, 94, .09); }
+.logistics-table thead th { background: #f1f5fa; color: #314b68; border-bottom: 1px solid #c5d1dd; white-space: nowrap; font-weight: 700; vertical-align: middle; }
+.logistics-orders-scroll .logistics-orders-table thead th, .logistics-shopify-stores-scroll .logistics-shopify-stores-table thead th { position: sticky; top: 0; z-index: 4; background: #eaf0f7; box-shadow: 0 1px 0 #bdcad7, 0 3px 7px rgba(42, 67, 94, .09); }
 .logistics-table td { vertical-align: middle !important; color: #384961; max-width: 220px; }
-.logistics-table td, .logistics-table th { padding: 10px 12px !important; border-right: 1px solid #e5ebf2; }
+.logistics-table td, .logistics-table th { padding: 10px 12px !important; border-right: 1px solid #ced9e3; }
+.logistics-table > tbody > tr > td { border-top-color: #d2dce6; }
 .logistics-table td:last-child, .logistics-table th:last-child { border-right: 0; }
 .logistics-table tbody tr:nth-child(even):not(.logistics-row-failed) > td { background: #f8fafc; }
 .logistics-table tbody tr:not(.logistics-row-failed) > td { transition: background-color .14s ease, color .14s ease; }
@@ -57,10 +67,76 @@
 .logistics-action-column, .logistics-actions { min-width: 270px; white-space: nowrap; }
 .logistics-inline-form { display: inline-block; margin-left: 4px; }
 .logistics-multiline { white-space: pre-line; min-width: 120px; line-height: 24px !important; }
+.logistics-orders-table th.logistics-order-identifiers-heading { min-width: 175px; width: 190px; padding: 7px 8px !important; text-align: left; font-weight: 800 !important; }
+.logistics-orders-table td.logistics-order-identifiers { min-width: 175px; width: 190px; max-width: 205px; padding: 7px 8px !important; text-align: left; white-space: normal; }
+.logistics-order-identifier-line { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: baseline; min-width: 0; line-height: 18px; }
+.logistics-order-identifier-label { color: #45617c; font-size: 11px; font-weight: 800; padding-right: 3px; text-align: left; white-space: nowrap; }
+.logistics-order-identifier-value { min-width: 0; overflow: hidden; color: #58738d; font-family: SFMono-Regular, Consolas, 'Liberation Mono', monospace; font-size: 11px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.logistics-orders-table th.logistics-store-information-heading { min-width: 235px; width: 260px; padding: 7px 8px !important; text-align: left; font-weight: 800 !important; }
+.logistics-orders-table td.logistics-store-information { min-width: 235px; width: 260px; max-width: 290px; padding: 7px 8px !important; text-align: left; white-space: normal; }
+.logistics-store-information-line { display: grid; grid-template-columns: 68px minmax(0, 1fr); align-items: baseline; min-width: 0; line-height: 18px; }
+.logistics-store-information-label { color: #45617c; font-size: 11px; font-weight: 800; padding-right: 3px; text-align: left; white-space: nowrap; }
+.logistics-store-information-value { min-width: 0; overflow: hidden; color: #58738d; font-size: 11px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.logistics-orders-table th.logistics-subscription-information-heading { min-width: 175px; width: 190px; padding: 7px 8px !important; text-align: left; font-weight: 800 !important; }
+.logistics-orders-table td.logistics-subscription-information { min-width: 175px; width: 190px; max-width: 205px; padding: 7px 8px !important; text-align: left; white-space: normal; }
+.logistics-subscription-information-line { display: grid; grid-template-columns: 62px minmax(0, 1fr); align-items: baseline; min-width: 0; line-height: 18px; }
+.logistics-subscription-information-label { color: #45617c; font-size: 11px; font-weight: 800; padding-right: 3px; text-align: left; white-space: nowrap; }
+.logistics-subscription-information-value { min-width: 0; overflow: hidden; font-size: 11px; font-weight: 700; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.logistics-subscription-information-value.is-positive { color: #168553; }
+.logistics-subscription-information-value.is-negative { color: #7a8997; }
+.logistics-subscription-information-value.is-subscription { color: #5b54a6; }
+.logistics-subscription-information-value.is-neutral { color: #58738d; }
+.logistics-orders-table th.logistics-sale-product-details-heading { min-width: 340px; width: 360px; padding: 7px 8px !important; text-align: left; font-weight: 800 !important; }
+.logistics-orders-table td.logistics-sale-product-details { min-width: 340px; width: 360px; max-width: 400px; padding: 7px 8px !important; text-align: left; white-space: normal; }
+.logistics-sale-product-detail-item + .logistics-sale-product-detail-item { margin-top: 5px; padding-top: 4px; border-top: 1px dashed #dce5ee; }
+.logistics-sale-product-detail-code { display: flex; min-width: 0; color: #168553; font-size: 11px; line-height: 18px; }
+.logistics-sale-product-detail-code b { flex: 0 0 auto; margin-right: 2px; color: #45617c; font-weight: 800; white-space: nowrap; }
+.logistics-sale-product-detail-code > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.logistics-sale-product-detail-code.is-empty { color: #7a8997; }
+.logistics-sale-product-detail-skus { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; min-width: 0; font-size: 11px; line-height: 18px; }
+.logistics-sale-product-detail-sku { display: flex; min-width: 0; }
+.logistics-sale-product-detail-sku b { flex: 0 0 auto; margin-right: 2px; font-weight: 800; white-space: nowrap; }
+.logistics-sale-product-detail-sku > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.logistics-sale-product-detail-sku.is-original { color: #2e75b6; }
+.logistics-sale-product-detail-sku.is-matched { color: #168553; }
+.logistics-sale-product-detail-sku.is-empty { color: #7a8997; }
+.logistics-sale-product-detail-metrics { display: flex; align-items: baseline; gap: 12px; color: #58738d; font-size: 11px; line-height: 18px; white-space: nowrap; }
+.logistics-sale-product-detail-metrics b, .logistics-sale-product-detail-name b { margin-right: 2px; color: #45617c; font-weight: 800; }
+.logistics-sale-product-detail-name { display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: baseline; min-width: 0; color: #58738d; font-size: 11px; line-height: 18px; }
+.logistics-sale-product-detail-name b { margin-right: 0; }
+.logistics-sale-product-detail-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.logistics-orders-table th.logistics-payment-information-heading { min-width: 210px; width: 225px; padding: 7px 8px !important; text-align: left; font-weight: 800 !important; }
+.logistics-orders-table td.logistics-payment-information { min-width: 210px; width: 225px; max-width: 255px; padding: 7px 8px !important; text-align: left; white-space: normal; }
+.logistics-payment-information-line { display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: baseline; min-width: 0; line-height: 18px; }
+.logistics-payment-information-label { color: #45617c; font-size: 11px; font-weight: 800; padding-right: 3px; text-align: left; white-space: nowrap; }
+.logistics-payment-information-value { min-width: 0; overflow: hidden; color: #58738d; font-size: 11px; font-weight: 700; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.logistics-payment-information-value.is-paid { color: #168553; }
+.logistics-payment-information-value.is-pending { color: #be781f; }
+.logistics-payment-information-value.is-unmatched { color: #7a8997; }
+.logistics-orders-table th.logistics-buyer-information-heading { min-width: 205px; width: 220px; padding: 7px 8px !important; text-align: left; font-weight: 800 !important; }
+.logistics-orders-table td.logistics-buyer-information { min-width: 205px; width: 220px; max-width: 250px; padding: 7px 8px !important; text-align: left; white-space: normal; }
+.logistics-buyer-information-line { display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: baseline; min-width: 0; line-height: 18px; }
+.logistics-buyer-information-label { color: #45617c; font-size: 11px; font-weight: 800; padding-right: 3px; text-align: left; white-space: nowrap; }
+.logistics-buyer-information-value { min-width: 0; overflow: hidden; color: #58738d; font-size: 11px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.logistics-orders-table th.logistics-shipping-information-heading { min-width: 245px; width: 260px; padding: 7px 8px !important; text-align: left; font-weight: 800 !important; }
+.logistics-orders-table td.logistics-shipping-information { min-width: 245px; width: 260px; max-width: 290px; padding: 7px 8px !important; text-align: left; white-space: normal; }
+.logistics-shipping-information-line { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: baseline; min-width: 0; line-height: 18px; }
+.logistics-shipping-information-label { color: #45617c; font-size: 11px; font-weight: 800; padding-right: 3px; text-align: left; white-space: nowrap; }
+.logistics-shipping-information-value { min-width: 0; overflow: hidden; color: #58738d; font-size: 11px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.logistics-shipping-information-value .logistics-tag { vertical-align: baseline; }
+.logistics-orders-table th.logistics-order-time-information-heading { min-width: 205px; width: 220px; padding: 7px 8px !important; text-align: left; font-weight: 800 !important; }
+.logistics-orders-table td.logistics-order-time-information { min-width: 205px; width: 220px; max-width: 235px; padding: 7px 8px !important; text-align: left; white-space: normal; }
+.logistics-order-time-information-line { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: baseline; min-width: 0; line-height: 18px; }
+.logistics-order-time-information-label { color: #45617c; font-size: 11px; font-weight: 800; padding-right: 3px; text-align: left; white-space: nowrap; }
+.logistics-order-time-information-value { min-width: 0; overflow: hidden; color: #58738d; font-family: SFMono-Regular, Consolas, 'Liberation Mono', monospace; font-size: 11px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.logistics-orders-table td:nth-child(17) .logistics-tag { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.logistics-orders-table th.logistics-amount-information-heading { min-width: 165px; width: 180px; padding: 7px 8px !important; text-align: left; font-weight: 800 !important; }
+.logistics-orders-table td.logistics-amount-information { min-width: 165px; width: 180px; max-width: 205px; padding: 7px 8px !important; text-align: left; white-space: normal; }
+.logistics-amount-information-line { display: grid; grid-template-columns: 62px minmax(0, 1fr); align-items: baseline; min-width: 0; line-height: 18px; }
+.logistics-amount-information-label { color: #45617c; font-size: 11px; font-weight: 800; padding-right: 3px; text-align: left; white-space: nowrap; }
+.logistics-amount-information-value { min-width: 0; overflow: hidden; color: #294b6c; font-size: 11px; font-weight: 700; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.logistics-amount-information-value.logistics-number-cell { text-align: left !important; }
 .logistics-product-line { display: block; max-width: 220px; height: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 24px; }
-.logistics-row-failed > td { background: #d98787 !important; color: #3b1010; }
-.logistics-row-failed > .logistics-sticky-left { background: #d98787 !important; color: #3b1010; }
-.logistics-row-failed > td.logistics-number-cell, .logistics-row-failed > td.logistics-empty-value { color: #3b1010 !important; }
 .logistics-number-cell, .logistics-number-heading { text-align: right !important; font-variant-numeric: tabular-nums; }
 .logistics-number-cell { color: #294b6c !important; font-weight: 600; }
 .logistics-number-cell.is-positive { color: #168553 !important; }
@@ -87,23 +163,14 @@
 .logistics-tag-account { max-width: 260px; }
 .logistics-sticky-left { position: sticky; left: 0; z-index: 2; background: #fff !important; box-shadow: 1px 0 0 #edf0f5; }
 .logistics-table thead .logistics-sticky-left { background: #eaf0f7 !important; z-index: 6; }
-.logistics-table tbody tr:nth-child(even):not(.logistics-row-failed) > .logistics-sticky-left { background: #f8fafc !important; }
-.logistics-table.table-hover tbody tr:not(.logistics-row-failed):hover > .logistics-sticky-left { background: #edf5fb !important; }
+.logistics-table tbody tr:nth-child(even) > .logistics-sticky-left { background: #f8fafc !important; }
+.logistics-table.table-hover tbody tr:hover > .logistics-sticky-left { background: #edf5fb !important; }
 .logistics-orders-table th:last-child, .logistics-orders-table td:last-child:not([colspan]), .logistics-shopify-stores-table th:last-child, .logistics-shopify-stores-table td:last-child:not([colspan]) { position: sticky; right: 0; background: #fff !important; box-shadow: -3px 0 8px rgba(45, 69, 94, .08); }
-.logistics-orders-table th:last-child, .logistics-orders-table td:last-child:not([colspan]) { min-width: 82px; }
+.logistics-orders-table th:last-child, .logistics-orders-table td:last-child:not([colspan]) { width: 140px; min-width: 140px; max-width: 140px; }
 .logistics-orders-table thead th:last-child, .logistics-shopify-stores-table thead th:last-child { z-index: 6; background: #eaf0f7 !important; }
 .logistics-orders-table tbody td:last-child:not([colspan]), .logistics-shopify-stores-table tbody td:last-child:not([colspan]) { z-index: 3; }
-.logistics-orders-table tbody tr:nth-child(even):not(.logistics-row-failed) > td:last-child:not([colspan]), .logistics-shopify-stores-table tbody tr:nth-child(even):not(.logistics-row-failed) > td:last-child:not([colspan]) { background: #f8fafc !important; }
-.logistics-orders-table.table-hover tbody tr:not(.logistics-row-failed):hover > td:last-child:not([colspan]), .logistics-shopify-stores-table.table-hover tbody tr:not(.logistics-row-failed):hover > td:last-child:not([colspan]) { background: #edf5fb !important; }
-.logistics-orders-table tbody tr.logistics-row-failed > td:last-child:not([colspan]), .logistics-shopify-stores-table tbody tr.logistics-row-failed > td:last-child:not([colspan]) { background: #d98787 !important; color: #3b1010; }
-.logistics-page .logistics-table > tbody > tr.logistics-row-failed > td,
-.logistics-page .logistics-orders-table > tbody > tr[data-data-status="SKU异常"] > td,
-.logistics-page .logistics-orders-table > tbody > tr[data-data-status="通途未找到"] > td,
-.logistics-page .logistics-orders-table > tbody > tr[data-data-status="通途匹配失败"] > td,
-.logistics-page .logistics-orders-table > tbody > tr[data-data-status="Shopify同步失败"] > td,
-.logistics-page .logistics-orders-table > tbody > tr[data-data-status="店铺匹配失败"] > td,
-.logistics-page .logistics-orders-table > tbody > tr[data-logistics-status="物流异常"] > td,
-.logistics-page .logistics-orders-table > tbody > tr[data-tracking-status="通途查询失败"] > td { background-color: #d98787 !important; color: #3b1010; }
+.logistics-orders-table tbody tr:nth-child(even) > td:last-child:not([colspan]), .logistics-shopify-stores-table tbody tr:nth-child(even) > td:last-child:not([colspan]) { background: #f8fafc !important; }
+.logistics-orders-table.table-hover tbody tr:hover > td:last-child:not([colspan]), .logistics-shopify-stores-table.table-hover tbody tr:hover > td:last-child:not([colspan]) { background: #edf5fb !important; }
 .logistics-refund-import-body { padding: 18px 20px 20px; }
 .logistics-import-header-rule { display: flex; align-items: flex-start; gap: 9px; margin: 12px 0 15px; padding: 10px 12px; border-left: 3px solid #2f80c9; border-radius: 3px; background: #eef6fc; color: #43627e; line-height: 1.6; }
 .logistics-import-header-rule > .fa { margin-top: 4px; color: #2f80c9; }
@@ -180,25 +247,40 @@
 }
 
 .logistics-refund-summary {
-    min-width: 168px;
-    max-width: 250px;
+    min-width: 178px;
+    max-width: 268px;
     line-height: 1.35 !important;
     white-space: normal;
 }
 
-.logistics-refund-summary strong {
-    display: block;
-    color: #294f77;
-    font-weight: 700;
+.logistics-refund-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.logistics-refund-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.logistics-refund-reason {
+    min-width: 0;
+    overflow: hidden;
+    color: #536d85;
+    text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.logistics-refund-summary small {
-    display: block;
-    margin-top: 3px;
-    color: #7d94aa;
-    font-size: 11px;
-    line-height: 1.3;
+.logistics-refund-amount {
+    flex: 0 0 auto;
+    color: #d9534f;
+    font-weight: 700;
+    white-space: nowrap;
 }
 
 .logistics-refund-detail-table input {

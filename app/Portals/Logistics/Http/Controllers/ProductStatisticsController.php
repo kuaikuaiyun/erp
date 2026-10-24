@@ -41,7 +41,7 @@ class ProductStatisticsController extends Controller
             'productPagination' => $data['pagination'],
             'stores' => $this->statistics->storeOptions($filters),
             'filters' => $filters,
-            'decisionOptions' => $this->decisionOptions(),
+            'matchStatusOptions' => $this->matchStatusOptions(),
             'labels' => $this->labels(),
         ]);
     }
@@ -139,12 +139,11 @@ class ProductStatisticsController extends Controller
             'name' => ['nullable', 'string', 'max:191'],
             'keyword' => ['nullable', 'string', 'max:191'],
             'store' => ['nullable', 'string', 'max:191'],
-            'decision' => ['nullable', Rule::in(['', 'continue', 'optimize', 'watch', 'stop'])],
+            'match_status' => ['nullable', Rule::in(['', 'matched', 'unmatched', 'queued', 'not_found', 'conflict', 'failed'])],
             'sort' => ['nullable', Rule::in([
-                '', 'name', 'sku', 'product_code', 'variant_count', 'shop_count', 'sales', 'revenue', 'cost', 'fees',
+                '', 'name', 'sku', 'product_code', 'shop_count', 'sales', 'revenue',
                 'paypal_refund_amount', 'paypal_refund_rate', 'paypal_dispute_count', 'paypal_dispute_rate',
                 'credit_card_refund_amount', 'credit_card_refund_rate', 'combined_refund_rate',
-                'profit', 'profit_rate', 'decision',
             ])],
             'direction' => ['nullable', Rule::in(['', 'asc', 'desc'])],
         ];
@@ -161,7 +160,7 @@ class ProductStatisticsController extends Controller
     {
         return [
             'detail_tab' => ['nullable', Rule::in([
-                'overview', 'variants', 'paypal_orders', 'credit_card_orders', 'refunds', 'disputes', 'orders',
+                'overview', 'paypal_orders', 'credit_card_orders', 'refunds', 'disputes', 'orders',
             ])],
             'detail_page' => ['nullable', 'integer', 'min:1'],
             'detail_per_page' => ['nullable', 'integer', Rule::in([5, 10, 20])],
@@ -189,7 +188,7 @@ class ProductStatisticsController extends Controller
             'name' => trim((string) ($input['name'] ?? '')),
             'keyword' => trim((string) ($input['keyword'] ?? '')),
             'store' => trim((string) ($input['store'] ?? '')),
-            'decision' => trim((string) ($input['decision'] ?? '')),
+            'match_status' => trim((string) ($input['match_status'] ?? '')),
             'sort' => trim((string) ($input['sort'] ?? '')),
             'direction' => trim((string) ($input['direction'] ?? '')),
             'page' => max(1, (int) ($input['page'] ?? 1)),
@@ -224,13 +223,15 @@ class ProductStatisticsController extends Controller
     }
 
     /** @return array<string,string> */
-    private function decisionOptions(): array
+    private function matchStatusOptions(): array
     {
         return [
-            'continue' => __('logistics.product_statistics.decisions.continue'),
-            'optimize' => __('logistics.product_statistics.decisions.optimize'),
-            'watch' => __('logistics.product_statistics.decisions.watch'),
-            'stop' => __('logistics.product_statistics.decisions.stop'),
+            'matched' => __('logistics.product_statistics.mapping.statuses.matched'),
+            'unmatched' => __('logistics.product_statistics.mapping.statuses.unmatched'),
+            'queued' => __('logistics.product_statistics.mapping.statuses.queued'),
+            'not_found' => __('logistics.product_statistics.mapping.statuses.not_found'),
+            'conflict' => __('logistics.product_statistics.mapping.statuses.conflict'),
+            'failed' => __('logistics.product_statistics.mapping.statuses.failed'),
         ];
     }
 
@@ -289,7 +290,6 @@ class ProductStatisticsController extends Controller
             'overviewRefundFormula' => __('logistics.product_statistics.ui.overview_refund_formula'),
             'overviewShippingFormula' => __('logistics.product_statistics.ui.overview_shipping_formula'),
             'overviewDeliveryFormula' => __('logistics.product_statistics.ui.overview_delivery_formula'),
-            'profitBreakdown' => __('logistics.product_statistics.ui.profit_breakdown'),
             'storeOrderDistribution' => __('logistics.product_statistics.ui.store_order_distribution'),
             'orders' => __('logistics.product_statistics.ui.orders'),
             'storeName' => __('logistics.product_statistics.ui.store_name'),
@@ -305,8 +305,6 @@ class ProductStatisticsController extends Controller
             'tongtuProductName' => __('logistics.product_statistics.headers.tongtu_product_name'),
             'orderCount' => __('logistics.product_statistics.headers.order_count'),
             'revenue' => __('logistics.product_statistics.headers.revenue'),
-            'cost' => __('logistics.product_statistics.headers.cost'),
-            'fees' => __('logistics.product_statistics.headers.fees'),
             'refunds' => __('logistics.product_statistics.headers.refunds'),
             'paypalRefundAmount' => __('logistics.product_statistics.headers.paypal_refund_amount'),
             'paypalRefundRate' => __('logistics.product_statistics.headers.paypal_refund_rate'),
@@ -317,8 +315,6 @@ class ProductStatisticsController extends Controller
             'combinedRefundRate' => __('logistics.product_statistics.headers.combined_refund_rate'),
             'shippingRate' => __('logistics.product_statistics.headers.shipping_rate'),
             'deliveryRate' => __('logistics.product_statistics.headers.delivery_rate'),
-            'profit' => __('logistics.product_statistics.headers.profit'),
-            'profitRate' => __('logistics.product_statistics.headers.profit_rate'),
             'refundRate' => __('logistics.product_statistics.headers.refund_rate'),
             'actualRefunds' => __('logistics.product_statistics.ui.actual_refunds'),
             'actualRefundCount' => __('logistics.product_statistics.ui.actual_refund_count'),
@@ -383,7 +379,6 @@ class ProductStatisticsController extends Controller
             'trackingNumber' => __('logistics.product_statistics.ui.tracking_number'),
             'logisticsStatus' => __('logistics.product_statistics.ui.logistics_status'),
             'quantity' => __('logistics.product_statistics.ui.quantity'),
-            'actualProfit' => __('logistics.product_statistics.ui.actual_profit'),
             'amount' => __('logistics.product_statistics.ui.amount'),
             'reason' => __('logistics.product_statistics.ui.reason'),
             'status' => __('logistics.product_statistics.ui.status'),
@@ -391,6 +386,21 @@ class ProductStatisticsController extends Controller
             'emptyRows' => __('logistics.product_statistics.ui.empty_rows'),
             'viewOrder' => __('logistics.product_statistics.ui.view_order'),
             'salesChange' => __('logistics.product_statistics.ui.sales_change'),
+            'matchStatus' => __('logistics.product_statistics.headers.match_status'),
+            'currentPclProductData' => __('logistics.product_statistics.mapping.current_pcl_product_data'),
+            'currentPclProductDataEmpty' => __('logistics.product_statistics.mapping.current_pcl_product_data_empty'),
+            'currentSkuData' => __('logistics.product_statistics.mapping.current_sku_data'),
+            'shopifySkus' => __('logistics.product_statistics.mapping.shopify_skus'),
+            'productWeight' => __('logistics.product_statistics.mapping.product_weight'),
+            'packageWeight' => __('logistics.product_statistics.mapping.package_weight'),
+            'currentCostCny' => __('logistics.product_statistics.mapping.current_cost_cny'),
+            'averageCostCny' => __('logistics.product_statistics.mapping.average_cost_cny'),
+            'packageCostCny' => __('logistics.product_statistics.mapping.package_cost_cny'),
+            'guideCostCny' => __('logistics.product_statistics.mapping.guide_cost_cny'),
+            'productDimensions' => __('logistics.product_statistics.mapping.product_dimensions'),
+            'packageDimensions' => __('logistics.product_statistics.mapping.package_dimensions'),
+            'tongtuUpdatedAt' => __('logistics.product_statistics.mapping.tongtu_updated_at'),
+            'syncedAt' => __('logistics.product_statistics.mapping.synced_at'),
         ];
     }
 }

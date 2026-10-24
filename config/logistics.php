@@ -6,11 +6,6 @@ return [
         'sync_days' => (int) env('SHOPIFY_SYNC_DAYS', 60),
         'webhook_url' => env('SHOPIFY_WEBHOOK_URL', 'https://wuliu.digilabreview.com/shopify/webhooks/orders'),
     ],
-    'profit' => [
-        'cny_per_usd' => (float) env('LOGISTICS_CNY_PER_USD', 6.7049),
-        'handling_fee_rate' => (float) env('LOGISTICS_HANDLING_FEE_RATE', 0.06),
-        'proportional_refund_rate' => (float) env('LOGISTICS_PROPORTIONAL_REFUND_RATE', 0.08),
-    ],
     'tongtu' => [
         'app_key' => 'dc10c1ffab5e4b74b1a948c0aac49f12',
         'app_secret' => 'e021ce952acb42a6a8db74316b8133631ff1d61378b64befaa7c3398c7fd22db',
