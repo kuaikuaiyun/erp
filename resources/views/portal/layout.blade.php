@@ -125,5 +125,60 @@
         })();
     </script>
 @endif
+
+{{-- 全局图片放大 overlay：所有 portal 页面的 .erp-zoomable 图片点击放大都用这一个。零依赖、零影响（默认 display:none）。 --}}
+<div id="erp-image-zoom" role="dialog" aria-modal="true" aria-label="图片放大预览"
+     style="position:fixed;inset:0;z-index:9999;display:none;background:rgba(0,0,0,0.88);cursor:zoom-out;"
+     tabindex="-1">
+    <button type="button" id="erp-image-zoom-close" aria-label="关闭"
+            style="position:absolute;top:16px;right:20px;background:none;border:none;color:#fff;font-size:28px;line-height:1;cursor:pointer;padding:4px 10px;opacity:0.7;">×</button>
+    <img id="erp-image-zoom-img" alt=""
+         style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);max-width:92vw;max-height:90vh;object-fit:contain;border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,0.6);pointer-events:none;">
+</div>
+<script>
+(function(){
+    var overlay = document.getElementById('erp-image-zoom');
+    if (!overlay) return;
+    var img = document.getElementById('erp-image-zoom-img');
+    var closeBtn = document.getElementById('erp-image-zoom-close');
+
+    function open(src) {
+        if (!src) return;
+        img.src = src;
+        overlay.style.display = 'block';
+        document.body.style.overflow = 'hidden';
+        overlay.focus();
+    }
+    function close() {
+        overlay.style.display = 'none';
+        document.body.style.overflow = '';
+        img.src = '';
+    }
+
+    // 暴露到 window，供内联 onclick="window.erpZoomOpen(this.src)" 直接调用
+    window.erpZoomOpen = open;
+    window.erpZoomClose = close;
+
+    // 事件委托兜底：点击任意 .erp-zoomable 图片也能放大
+    document.addEventListener('click', function(ev){
+        var target = ev.target;
+        if (!target || !target.tagName) return;
+        // 放大后点 overlay 本体或 × 关闭
+        if (overlay.style.display === 'block') {
+            if (target === overlay || target === closeBtn) { close(); ev.stopPropagation(); return; }
+        }
+        // 拦截 .erp-zoomable 图片点击
+        if (target.tagName === 'IMG' && target.classList.contains('erp-zoomable')) {
+            var src = target.getAttribute('data-full-src') || target.src;
+            if (src) { open(src); ev.preventDefault(); ev.stopPropagation(); }
+        }
+    }, false); // false = 冒泡阶段
+
+    // ESC 关闭
+    document.addEventListener('keydown', function(ev){
+        if (ev.key === 'Escape' && overlay.style.display === 'block') close();
+    });
+})();
+</script>
 </body>
 </html>

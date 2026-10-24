@@ -281,6 +281,94 @@ class TongtuSkuMappingService
         return count($ids);
     }
 
+    /**
+     * Refresh warehouse-facing Tongtu weights and images for the requested SKUs.
+     *
+     * This compatibility entry point keeps the warehouse product view on the
+     * current SKU-mapping architecture instead of restoring the removed legacy
+     * order-match service.
+     *
+     * @param list<string> $tongtuSkus
+     * @return array{refreshed:int,failed:int,not_found:int,skipped:int,images:array<string,string>}
+     */
+    public function refreshWeightsByTongtuSkus(array $tongtuSkus): array
+    {
+        $skus = array_values(array_unique(array_filter(array_map(
+            static fn ($sku): string => LogisticsTongtuSkuMapping::normalizedSku((string) $sku),
+            $tongtuSkus,
+        ))));
+        if ($skus === []) {
+            return ['refreshed' => 0, 'failed' => 0, 'not_found' => 0, 'skipped' => 0, 'images' => []];
+        }
+
+        $mappings = LogisticsTongtuSkuMapping::query()
+            ->whereIn('shopify_sku', $skus)
+            ->orWhereIn(DB::raw('LOWER(TRIM(tongtu_sku))'), $skus)
+            ->get();
+
+        $knownKeys = $mappings
+            ->flatMap(static fn (LogisticsTongtuSkuMapping $mapping): array => array_filter([
+                LogisticsTongtuSkuMapping::normalizedSku((string) $mapping->shopify_sku),
+                LogisticsTongtuSkuMapping::normalizedSku((string) $mapping->tongtu_sku),
+            ]))
+            ->unique()
+            ->all();
+        $missing = array_values(array_diff($skus, $knownKeys));
+        if ($missing !== []) {
+            $this->ensureMappings($missing);
+        }
+
+        $mappings = LogisticsTongtuSkuMapping::query()
+            ->whereIn('shopify_sku', $skus)
+            ->orWhereIn(DB::raw('LOWER(TRIM(tongtu_sku))'), $skus)
+            ->get();
+
+        $ids = $mappings->pluck('id')->map(static fn ($id): int => (int) $id)->all();
+        if ($ids !== []) {
+            $this->refreshMappings($ids);
+        }
+
+        $mappings = LogisticsTongtuSkuMapping::query()->whereIn('id', $ids)->get();
+        $refreshed = 0;
+        $failed = 0;
+        $notFound = 0;
+        $images = [];
+
+        foreach ($mappings as $mapping) {
+            $key = LogisticsTongtuSkuMapping::normalizedSku((string) ($mapping->tongtu_sku ?: $mapping->shopify_sku));
+            if ($mapping->status === LogisticsTongtuSkuMapping::STATUS_MATCHED) {
+                $weight = (float) ($mapping->goods_weight_gram ?? 0);
+                LogisticsOrderItem::query()
+                    ->where(function ($query) use ($mapping): void {
+                        $query->whereRaw('LOWER(TRIM(shopify_sku)) = ?', [$mapping->shopify_sku]);
+                        if (filled($mapping->tongtu_sku)) {
+                            $query->orWhereRaw('LOWER(TRIM(tongtu_sku)) = ?', [LogisticsTongtuSkuMapping::normalizedSku((string) $mapping->tongtu_sku)]);
+                        }
+                    })
+                    ->update(['sale_weight_gram' => $weight]);
+                if (filled($mapping->tongtu_primary_image_url)) {
+                    $images[$key] = (string) $mapping->tongtu_primary_image_url;
+                }
+                $refreshed++;
+                continue;
+            }
+
+            if ($mapping->status === LogisticsTongtuSkuMapping::STATUS_NOT_FOUND) {
+                $notFound++;
+            } else {
+                $failed++;
+            }
+        }
+
+        return [
+            'refreshed' => $refreshed,
+            'failed' => $failed,
+            'not_found' => $notFound,
+            'skipped' => max(0, count($skus) - $refreshed - $failed - $notFound),
+            'images' => $images,
+        ];
+    }
+
     /** @param list<int> $mappingIds
      *  @return Collection<int, LogisticsTongtuSkuMapping>
      */

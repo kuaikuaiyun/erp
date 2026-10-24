@@ -85,7 +85,9 @@ class LogisticsProductStatisticsService
         return [
             'products' => $products,
             'summary' => $summary,
-            'refund_reason_report' => $this->cachedRefundReasonReport($filters),
+            // 退款原因报表聚合非常重（~19s），不展示它的门户（如仓库系统）可通过
+            // filters.skip_refund_report=true 跳过，避免白等。
+            'refund_reason_report' => !empty($filters['skip_refund_report']) ? [] : $this->cachedRefundReasonReport($filters),
             'pagination' => [
                 'current_page' => $page,
                 'per_page' => $perPage,
@@ -171,7 +173,12 @@ class LogisticsProductStatisticsService
     {
         $cacheKey = $this->statisticsCacheKey('candidates', $filters);
         $rows = Cache::remember($cacheKey, now()->addSeconds(45), function () use ($filters): array {
-            return $this->lightweightProductCandidateQuery($filters)
+            $query = $this->lightweightProductCandidateQuery($filters);
+            if (!empty($filters['require_tongtu_match'])) {
+                $query->whereRaw("NULLIF(TRIM(first_item.tongtu_product_code), '') IS NOT NULL");
+            }
+
+            return $query
                 ->get()
                 ->map(static fn (object $row): array => (array) $row)
                 ->all();
@@ -429,6 +436,7 @@ class LogisticsProductStatisticsService
 
         return [
             'tab' => $tab,
+            'product' => $product, // 所有 tab 都带上 product，方便 Controller 层做临时字段覆盖（比如通途 goodsImageId 覆盖 Shopify 原图）
             'detail' => match ($tab) {
                 'variants' => $this->variantDetailPage($filters, $key, $options),
                 'refunds' => $this->refundDetailPage($filters, $key, $options),
@@ -1355,7 +1363,12 @@ class LogisticsProductStatisticsService
             ->selectRaw('CASE WHEN product_data.credit_card_order_count > 0 THEN product_data.credit_card_refund_order_count / product_data.credit_card_order_count * 100 ELSE 0 END as credit_card_refund_rate')
             ->selectRaw('CASE WHEN product_data.paid_order_count > 0 THEN product_data.combined_refund_order_count / product_data.paid_order_count * 100 ELSE 0 END as combined_refund_rate');
 
-        return $this->database()->query()->fromSub($statistics, 'product_statistics')->select('product_statistics.*');
+        $result = $this->database()->query()->fromSub($statistics, 'product_statistics')->select('product_statistics.*');
+        if (!empty($filters['require_tongtu_match'])) {
+            $result->whereRaw("NULLIF(TRIM(product_statistics.tongtu_product_code), '') IS NOT NULL");
+        }
+
+        return $result;
     }
 
     /**
@@ -2165,10 +2178,24 @@ class LogisticsProductStatisticsService
             $shopifySkus = collect($group)->map(static fn (LogisticsOrderItem $item): string => trim((string) $item->shopify_sku))
                 ->filter()->unique()->sort()->values()->all();
 
+            // 每组选首个有值的货品图片（product_image_url 来自 Shopify 订单行，
+            // 同一 tongtu_sku 下多行图片一致，取首个非空即可）
+            $variantImageUrl = collect($group)
+                ->map(static fn (LogisticsOrderItem $item): string => trim((string) $item->product_image_url))
+                ->first(static fn (string $url): bool => $url !== '');
+
+            // 规格代表性重量：取组内首个非零的 sale_weight_gram（通途 goodsDetail 换算）
+            $variantWeightGram = collect($group)
+                ->map(static fn (LogisticsOrderItem $item): float => (float) ($item->sale_weight_gram ?? 0))
+                ->first(static fn (float $w): bool => $w > 0);
+
             return [
                 'tongtu_sku' => trim((string) $first->tongtu_sku) ?: __('logistics.common.not_available'),
                 'shopify_skus' => $shopifySkus,
                 'tongtu_product_name' => trim((string) $first->tongtu_product_name) ?: __('logistics.common.not_available'),
+                'tongtu_product_code' => trim((string) $first->tongtu_product_code),
+                'product_image_url' => $variantImageUrl !== '' ? $variantImageUrl : null,
+                'sale_weight_gram' => $variantWeightGram ?? 0.0,
                 'stores' => $summary['stores'],
                 'shop_count' => $summary['shop_count'],
                 'order_count' => $this->ordersForItems($group)->count(),

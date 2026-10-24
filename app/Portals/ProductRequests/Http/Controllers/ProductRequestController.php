@@ -1897,6 +1897,8 @@ class ProductRequestController extends Controller
         abort_unless($this->access->canManageLinkSkus($context['user']), 403);
 
         $data = $request->validate([
+            'supplier_url' => ['nullable', 'string', 'max:500', 'regex:#^https?://detail\.1688\.com/#i'],
+            'product_name' => ['nullable', 'string', 'max:255'],
             'pcl_product_no' => ['nullable', 'string', 'max:100'],
             'skus' => ['nullable', 'string', 'max:10000'],
             'sku_values' => ['nullable', 'array', 'max:100'],
@@ -1908,11 +1910,32 @@ class ProductRequestController extends Controller
             'remove_images.*' => ['integer'],
         ]);
 
+        // 1688 主链接可编辑：改动后需规范化并重算哈希；若新链接已被其他记录占用则拒绝
+        $submittedUrl = trim((string) ($data['supplier_url'] ?? ''));
+        if ($submittedUrl !== '') {
+            $normalizedUrl = $this->workflow->normalizeSupplierUrl($submittedUrl);
+            $newHash = $this->workflow->supplierUrlHash($normalizedUrl);
+            if ($newHash !== (string) $linkSku->supplier_url_hash) {
+                $occupied = ProductRequestLinkSku::query()
+                    ->where('supplier_url_hash', $newHash)
+                    ->whereKeyNot($linkSku->getKey())
+                    ->exists();
+                if ($occupied) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'supplier_url' => '该 1688 链接已存在另一条 SKU 记录，不能重复关联。',
+                    ]);
+                }
+                $linkSku->supplier_url = $normalizedUrl;
+                $linkSku->supplier_url_hash = $newHash;
+            }
+        }
+
         // PCL SKU 管理为全量维护：提交内容即最终集合，删除的 SKU 会被移除
         $submitted = $this->splitSkus(str_replace(["\r\n", "\r", "\n"], ',', (string) ($data['skus'] ?? '')));
         $linkSku->forceFill([
             'skus' => implode(',', $submitted),
             'pcl_product_no' => trim((string) ($data['pcl_product_no'] ?? '')) !== '' ? trim((string) $data['pcl_product_no']) : null,
+            'product_name' => trim((string) ($data['product_name'] ?? '')) !== '' ? trim((string) $data['product_name']) : null,
         ])->save();
 
         // 按 SKU 的采购价/重量同步到链接表（仅保留本次提交 SKU 的数值，两项都清空表示移除）
