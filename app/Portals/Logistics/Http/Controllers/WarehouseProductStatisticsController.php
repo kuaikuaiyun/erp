@@ -350,7 +350,7 @@ class WarehouseProductStatisticsController extends Controller
             'productImage' => '货品图片',
             'tongtuWeight' => '通途重量(g)',
             'fill' => '填写',
-            'filledWeight' => '填写重量(g)',
+            'filledWeight' => '实际重量(g)',
             'rejectReason' => '驳回理由',
             'remark' => '备注',
         ];

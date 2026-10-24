@@ -70,7 +70,7 @@
                         <th>通途 SKU / Shopify SKU</th>
                         <th>产品编号 / 产品名</th>
                         <th style="width:110px;">通途重量(g)</th>
-                        <th style="width:110px;">填写重量(g)</th>
+                        <th style="width:110px;">实际重量(g)</th>
                         <th style="width:110px;">驳回理由</th>
                         <th>备注</th>
                         <th style="width:80px;">状态</th>
