@@ -89,17 +89,36 @@
         .wh-fill-upload-trigger:hover { background: #eaf4fb; border-color: #2f7ba8; color: #2f7ba8; }
         .wh-fill-physical-preview { min-width: 72px; height: 72px; display: flex; align-items: center; justify-content: center; border: 1px dashed #dfe6ed; border-radius: 4px; background: #fafbfc; }
         .wh-fill-physical-remove { font-size: 12px; color: #c0392b; cursor: pointer; }
+        /* 仓库页只有 4 列，覆盖物流门户的 2080px 最小宽度，改成固定列宽铺满容器 */
+        #warehouse-product-statistics-table { min-width: 0 !important; width: 100%; table-layout: fixed; }
+        #warehouse-product-statistics-table th:nth-child(1),
+        #warehouse-product-statistics-table td:nth-child(1),
+        #warehouse-product-statistics-table th:nth-child(2),
+        #warehouse-product-statistics-table td:nth-child(2),
+        #warehouse-product-statistics-table th:nth-child(3),
+        #warehouse-product-statistics-table td:nth-child(3) { width: 33.33%; min-width: 0; }
+        #warehouse-product-statistics-table th:nth-child(4),
+        #warehouse-product-statistics-table td:nth-child(4) { width: 140px; min-width: 0; }
+        #warehouse-product-statistics-table td:nth-child(1) { overflow: hidden; }
+        #warehouse-product-statistics-table td:nth-child(1) .product-statistics-product-cell { min-width: 0; }
+        #warehouse-product-statistics-table td:nth-child(1) .product-statistics-product-meta { min-width: 0; }
+        #warehouse-product-statistics-table td:nth-child(1) .product-statistics-product-cell strong { max-width: 100%; }
+        #warehouse-product-statistics-table td:nth-child(2) code {
+            display: inline-block; max-width: 100%; overflow: hidden;
+            text-overflow: ellipsis; vertical-align: middle;
+        }
+        #warehouse-product-statistics-table td:nth-child(4) .btn { margin: 1px 1px; padding: 3px 7px; }
         /* 列表列：SKU 与重量 */
         #warehouse-product-statistics-table .product-statistics-variant-summary { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
         #warehouse-product-statistics-table .wh-count-badge { font-size: 11px; font-weight: 600; padding: 2px 7px; }
         .wh-sku-weight-list { display: flex; flex-direction: column; gap: 4px; width: 100%; }
         .wh-sku-weight-item {
-            display: flex; align-items: center; justify-content: space-between; gap: 8px;
-            max-width: 330px; padding: 3px 8px; border-radius: 4px;
+            display: flex; align-items: center; justify-content: space-between; gap: 6px;
+            max-width: 100%; padding: 3px 8px; border-radius: 4px;
             background: #f6f9fc; border: 1px solid #e8eef5;
         }
         .wh-sku-weight-name {
-            font-family: Consolas, monospace; font-size: 12px; color: #2868b0;
+            min-width: 0; font-family: Consolas, monospace; font-size: 12px; color: #2868b0;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
         .wh-sku-weight-value {
@@ -153,8 +172,8 @@
                     <thead>
                     <tr>
                         <th>{{ $labels['productInfo'] }}</th>
-                        <th>{{ $labels['productCode'] }}</th>
-                        <th>{{ $labels['specification'] }}</th>
+                        <th style="width:150px;">{{ $labels['productCode'] }}</th>
+                        <th style="width:250px;">{{ $labels['specification'] }}</th>
                         <th class="product-statistics-operation-column" style="width:150px;">操作</th>
                     </tr>
                     </thead>
