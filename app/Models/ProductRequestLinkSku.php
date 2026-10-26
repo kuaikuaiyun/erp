@@ -8,10 +8,13 @@ class ProductRequestLinkSku extends Model
 {
     /** 不可跑原因选项 */
     public const NOT_RUNNABLE_REASONS = [
-        'mismatch'    => '货不对版',
-        'size_exceed' => '尺寸超标',
-        'complaint'   => '客诉高',
-        'infringement'=> '侵权',
+        'mismatch'        => '货不对版',
+        'size_exceed'     => '尺寸超标',
+        'complaint'       => '客诉高',
+        'infringement'    => '侵权',
+        'not_runnable'    => '不可跑产品',
+        'xiaohai'         => '小黑',
+        'other'           => '其他',
     ];
 
     protected $guarded = [];

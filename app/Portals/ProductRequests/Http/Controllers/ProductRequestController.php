@@ -1803,6 +1803,7 @@ class ProductRequestController extends Controller
             $perPage = 10;
         }
         $links = ProductRequestLinkSku::query()
+            ->where('is_runnable', true)
             ->when($keyword !== '', function (Builder $query) use ($keyword): Builder {
                 $matchedHashes = ProductRequest::query()
                     ->where(function (Builder $inner) use ($keyword): void {
@@ -1849,6 +1850,9 @@ class ProductRequestController extends Controller
         }
         abort_unless($this->access->canViewExistingProductLibrary($context['user']), 403);
 
+        // 不可跑的产品不让看详情
+        abort_unless((bool) ($linkSku->is_runnable ?? true), 404);
+
         if (!$this->isModalRequest($request)) {
             return redirect()->route('product-requests.operation.existing-product-library');
         }
@@ -1891,6 +1895,8 @@ class ProductRequestController extends Controller
         $keyword = trim((string) $request->query('keyword', ''));
         $sourceFilter = (string) $request->query('source', '');
         $reviewStatusFilter = (string) $request->query('review_status', '');
+        $runnableFilter = (string) $request->query('is_runnable', '');
+        $reasonFilter = (string) $request->query('not_runnable_reason', '');
         // 每页条数仅支持 20 / 50，非法值回落到默认 20
         $perPage = (int) $request->query('per_page', 20);
         if (!in_array($perPage, [20, 50], true)) {
@@ -1916,7 +1922,13 @@ class ProductRequestController extends Controller
             })
             ->when(in_array($sourceFilter, ['system', 'import'], true), fn (Builder $query): Builder => $query->where('source', $sourceFilter))
             ->when(in_array($reviewStatusFilter, ['pending', 'done'], true), fn (Builder $query): Builder => $query->where('review_status', $reviewStatusFilter))
-            ->orderByDesc('updated_at')
+            ->when($runnableFilter !== '' && in_array($runnableFilter, ['0', '1'], true), function (Builder $query) use ($runnableFilter): Builder {
+                return $query->where('is_runnable', (bool) $runnableFilter);
+            })
+            ->when($reasonFilter !== '' && isset(ProductRequestLinkSku::NOT_RUNNABLE_REASONS[$reasonFilter]), function (Builder $query) use ($reasonFilter): Builder {
+                return $query->where('not_runnable_reason', $reasonFilter);
+            })
+            ->orderByDesc('id')
             ->paginate($perPage)
             ->withQueryString();
 
@@ -2002,7 +2014,7 @@ class ProductRequestController extends Controller
             'remove_images' => ['nullable', 'array'],
             'remove_images.*' => ['integer'],
             'is_runnable' => ['required', 'in:0,1'],
-            'not_runnable_reason' => ['nullable', 'required_if:is_runnable,0', 'in:mismatch,size_exceed,complaint,infringement'],
+            'not_runnable_reason' => ['nullable', 'required_if:is_runnable,0', 'in:'.implode(',', array_keys(\App\Models\ProductRequestLinkSku::NOT_RUNNABLE_REASONS))],
         ]);
 
         // 是否可跑：不可跑必须选原因
