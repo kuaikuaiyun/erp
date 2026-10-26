@@ -198,7 +198,7 @@
                             </td>
                             <td>
                                 @if(!empty($product['product_code']))
-                                    <code>{{ $product['product_code'] }}</code>
+                                    <code style="display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ $product['product_code'] }}">{{ $product['product_code'] }}</code>
                                 @else
                                     <span class="text-muted">—</span>
                                 @endif
