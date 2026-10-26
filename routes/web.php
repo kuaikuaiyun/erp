@@ -53,6 +53,8 @@ Route::post('/shopify-analytics/{domainStore}/refresh', [ShopifyAnalyticsControl
 Route::get('/product-requests', [ProductRequestController::class, 'operationIndex'])->name('product-requests.operation.index');
 Route::get('/product-request-dedupe', [ProductRequestController::class, 'operationDedupeIndex'])->name('product-requests.operation.dedupe');
 Route::get('/operation/domain-stores', [OperationDomainStoreController::class, 'index'])->name('operation.domain-stores.index');
+Route::get('/operation/existing-product-library', [ProductRequestController::class, 'existingProductLibraryIndex'])->name('product-requests.operation.existing-product-library');
+Route::get('/operation/existing-product-library/{linkSku}', [ProductRequestController::class, 'existingProductLibraryDetail'])->name('product-requests.operation.existing-product-library.detail');
 Route::post('/operation/domain-stores/{domainStore}/refresh', [OperationDomainStoreController::class, 'refresh'])->name('operation.domain-stores.refresh');
 Route::get('/api/product-requests/operation-pending-count', [ProductRequestController::class, 'operationPendingCount'])->name('product-requests.operation.pending-count');
 Route::get('/api/procurement-inspections/pending-count', [ProductRequestController::class, 'procurementPendingCount'])->name('product-requests.procurement.pending-count');
