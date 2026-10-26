@@ -63,6 +63,19 @@ class WarehouseWeightExceptionController extends Controller
         ]);
     }
 
+    /** 侧边栏菜单待处理计数 */
+    public function pendingCount(Request $request): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        return response()->json([
+            'count' => WarehouseSkuWeightException::query()->where('status', 'pending')->count(),
+        ]);
+    }
+
     /** 将异常标记为已处理（入录审核手动关闭队列） */
     public function resolve(Request $request, int $id): Response
     {

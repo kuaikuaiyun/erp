@@ -57,6 +57,8 @@
             <span id="placement-review-pending-badge" class="badge bg-yellow" style="margin-left:6px;">0</span>
             @elseif($menu->code === 'warehouse_acceptances')
             <span id="warehouse-pending-badge" class="badge bg-yellow" style="margin-left:6px;">0</span>
+            @elseif($menu->code === 'caigou_warehouse_weight_exceptions')
+            <span id="warehouse-weight-exception-badge" class="badge bg-yellow" style="margin-left:6px;">0</span>
             @endif
         </a>
     </li>

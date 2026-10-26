@@ -58,6 +58,7 @@ Route::get('/api/product-requests/operation-pending-count', [ProductRequestContr
 Route::get('/api/procurement-inspections/pending-count', [ProductRequestController::class, 'procurementPendingCount'])->name('product-requests.procurement.pending-count');
 Route::get('/api/placement-reviews/pending-count', [ProductRequestController::class, 'placementReviewPendingCount'])->name('product-requests.placement.pending-count');
 Route::get('/api/warehouse-acceptances/pending-count', [ProductRequestController::class, 'warehousePendingCount'])->name('product-requests.warehouse.pending-count');
+Route::get('/api/warehouse-weight-exceptions/pending-count', [WarehouseWeightExceptionController::class, 'pendingCount'])->name('caigou.warehouse-weight-exceptions.pending-count');
 Route::get('/product-requests/create', [ProductRequestController::class, 'operationCreate'])->name('product-requests.operation.create');
 Route::post('/product-requests', [ProductRequestController::class, 'operationStore'])->name('product-requests.operation.store');
 Route::post('/link-sku-manager/import', [ProductRequestController::class, 'linkSkuImport'])->name('product-requests.link-skus.import');
