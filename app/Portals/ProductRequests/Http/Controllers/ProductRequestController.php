@@ -1798,12 +1798,15 @@ class ProductRequestController extends Controller
         abort_unless($this->access->canViewExistingProductLibrary($context['user']), 403);
 
         $keyword = trim((string) $request->query('keyword', ''));
+        $runnableFilter = (string) $request->query('is_runnable', '');
+        $reasonFilter = (string) $request->query('not_runnable_reason', '');
         $perPage = (int) $request->query('per_page', 10);
         if (!in_array($perPage, [10, 20], true)) {
             $perPage = 10;
         }
         $links = ProductRequestLinkSku::query()
-            ->where('is_runnable', true)
+            ->when(in_array($runnableFilter, ['0', '1'], true), fn (Builder $query): Builder => $query->where('is_runnable', $runnableFilter === '1'))
+            ->when($reasonFilter !== '' && array_key_exists($reasonFilter, ProductRequestLinkSku::NOT_RUNNABLE_REASONS), fn (Builder $query): Builder => $query->where('not_runnable_reason', $reasonFilter))
             ->when($keyword !== '', function (Builder $query) use ($keyword): Builder {
                 $matchedHashes = ProductRequest::query()
                     ->where(function (Builder $inner) use ($keyword): void {
@@ -1837,7 +1840,12 @@ class ProductRequestController extends Controller
             'pclMap' => $pclMap,
             'nameMap' => $nameMap,
             'coverMap' => $coverMap,
-            'filters' => ['keyword' => $keyword, 'per_page' => $perPage],
+            'filters' => [
+                'keyword' => $keyword,
+                'is_runnable' => $runnableFilter,
+                'not_runnable_reason' => $reasonFilter,
+                'per_page' => $perPage,
+            ],
         ]);
     }
 
@@ -1849,9 +1857,6 @@ class ProductRequestController extends Controller
             return $context;
         }
         abort_unless($this->access->canViewExistingProductLibrary($context['user']), 403);
-
-        // 不可跑的产品不让看详情
-        abort_unless((bool) ($linkSku->is_runnable ?? true), 404);
 
         if (!$this->isModalRequest($request)) {
             return redirect()->route('product-requests.operation.existing-product-library');

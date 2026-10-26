@@ -6,10 +6,21 @@
             <p>只读视图，不可编辑</p>
         </div>
         <div class="product-request-detail-modal-status">
+            @if($linkSku->is_runnable ?? true)
+                <span class="label label-success">可跑</span>
+            @else
+                <span class="label label-danger">不可跑</span>
+            @endif
             <span class="product-request-badge link-source-{{ $linkSku->source ?: 'system' }}">{{ ($linkSku->source ?: 'system') === 'system' ? '系统' : '导入' }}</span>
             <span class="product-request-badge link-review-{{ $linkSku->review_status === 'pending' ? 'pending' : 'done' }}">{{ $linkSku->review_status === 'pending' ? '待录入' : '已录入' }}</span>
         </div>
     </header>
+
+    @if(!($linkSku->is_runnable ?? true))
+    <div style="margin:12px 18px 0;padding:10px 14px;background:#fff5f5;border:1px solid #ffd6d6;border-radius:6px;color:#c0392b;font-size:13px;">
+        <i class="fa fa-ban" style="margin-right:6px"></i>该产品已标记为不可跑，原因：<strong>{{ $linkSku->not_runnable_reason_label ?: '未填写' }}</strong>
+    </div>
+    @endif
 
     <div class="modal-body product-request-detail-modal-body">
         {{-- 基础信息 --}}
@@ -42,6 +53,14 @@
                     <div class="product-request-detail-item">
                         <span class="product-request-detail-label">更新时间</span>
                         <span class="product-request-detail-value">{{ optional($linkSku->updated_at)->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') }}</span>
+                    </div>
+                    <div class="product-request-detail-item">
+                        <span class="product-request-detail-label">是否可跑</span>
+                        <span class="product-request-detail-value">@if($linkSku->is_runnable ?? true)<span class="label label-success">可跑</span>@else<span class="label label-danger">不可跑</span>@endif</span>
+                    </div>
+                    <div class="product-request-detail-item">
+                        <span class="product-request-detail-label">不可跑原因</span>
+                        <span class="product-request-detail-value">@if(!($linkSku->is_runnable ?? true))<span class="text-danger">{{ $linkSku->not_runnable_reason_label ?: '未填写' }}</span>@else<span class="text-muted">—</span>@endif</span>
                     </div>
                 </div>
             </div>
