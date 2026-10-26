@@ -7,6 +7,7 @@ use App\Models\AdminUser;
 use App\Models\WarehouseSkuWeightException;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Logistics\LogisticsProductStatisticsService;
+use App\Portals\Logistics\TongtuSkuMappingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -27,6 +28,7 @@ class WarehouseProductStatisticsController extends Controller
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly LogisticsProductStatisticsService $statistics,
+        private readonly TongtuSkuMappingService $tongtuMappings,
     ) {
     }
 
@@ -119,6 +121,42 @@ class WarehouseProductStatisticsController extends Controller
         return response()->json([
             ...$detail,
             'existing_exceptions' => $existingExceptions,
+        ]);
+    }
+
+    /**
+     * 缺重量的 SKU 手动补抓：调用通途 goodsQuery 把 goodsWeight 同步回
+     * logistics_tongtu_sku_mappings.goods_weight_gram 与订单行 sale_weight_gram。
+     */
+    public function refreshWeights(Request $request): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $validated = $request->validate([
+            'skus' => ['required', 'array', 'min:1', 'max:200'],
+            'skus.*' => ['required', 'string', 'max:191'],
+        ]);
+
+        try {
+            $result = $this->tongtuMappings->refreshWeightsByTongtuSkus($validated['skus']);
+        } catch (\Throwable $exception) {
+            return response()->json([
+                'ok' => false,
+                'message' => '抓取失败：'.$exception->getMessage(),
+            ], 422);
+        }
+
+        $refreshed = (int) ($result['refreshed'] ?? 0);
+
+        return response()->json([
+            'ok' => $refreshed > 0,
+            'result' => $result,
+            'message' => $refreshed > 0
+                ? sprintf('已抓取 %d 个 SKU 的重量', $refreshed)
+                : '通途未返回可用的重量数据，请稍后重试或检查 SKU 是否已在通途建档',
         ]);
     }
 

@@ -1641,7 +1641,7 @@ class LogisticsProductStatisticsService
             ->filter()->unique()->values()->all();
         if ($productCodes === [] && $shopifySkus === []) {
             foreach ($rows as $row) {
-                $row->product_image_url = null;
+                $row->product_image_url = $row->product_image_url ?: null;
                 $row->match_status = LogisticsTongtuSkuMapping::STATUS_UNMATCHED;
                 $row->match_status_label = $this->matchStatusLabel($row->match_status);
             }
@@ -1682,8 +1682,11 @@ class LogisticsProductStatisticsService
             $mapping = $byProductCode[$productCode] ?? $byShopifySku[$shopifySku] ?? null;
 
             $row->product_image_url = $mapping?->status === LogisticsTongtuSkuMapping::STATUS_MATCHED
-                ? ($mapping->tongtu_primary_image_url ?: null)
-                : null;
+                && filled($mapping->tongtu_primary_image_url)
+                // 优先用通途货品图；通途没匹配上或没图时，保留订单行自带的
+                // Shopify 货品图，避免列表出现无图。
+                ? (string) $mapping->tongtu_primary_image_url
+                : ($row->product_image_url ?: null);
             $row->match_status = $mapping?->status ?: LogisticsTongtuSkuMapping::STATUS_UNMATCHED;
             $row->match_status_label = $this->matchStatusLabel((string) $row->match_status);
         }

@@ -353,6 +353,47 @@
             });
     }
 
+    /** 缺重量的 SKU 手动调通途接口补抓重量。 */
+    function refreshWeights(btn) {
+        var skus = (btn.getAttribute('data-skus') || '')
+            .split(',')
+            .map(function (sku) { return sku.trim(); })
+            .filter(Boolean);
+        if (!skus.length) return;
+
+        var originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 抓取中';
+
+        fetch(config.refreshWeightUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': csrfToken(),
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify({ skus: skus })
+        }).then(function (response) {
+            return response.json().then(function (data) {
+                return { ok: response.ok, data: data };
+            });
+        }).then(function (result) {
+            var message = (result.data && result.data.message) || '抓取完成';
+            if (result.ok && result.data && result.data.ok) {
+                window.alert(message);
+                window.location.reload();
+                return;
+            }
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+            window.alert(message);
+        }).catch(function (error) {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+            window.alert('网络异常：' + (error && error.message ? error.message : '抓取失败'));
+        });
+    }
+
     function submitFill() {
         var body = document.getElementById('warehouse-fill-body');
         var statusEl = document.getElementById('warehouse-fill-status');
@@ -502,7 +543,15 @@
             return;
         }
 
-        // ④ 驳回理由按钮组：单选切换，再次点击取消
+        // ④ 列表上的"抓重量"：调通途接口补抓缺失的 SKU 重量
+        var refreshWeightBtn = target.closest('.warehouse-product-statistics-refresh-weight-btn');
+        if (refreshWeightBtn) {
+            ev.preventDefault();
+            refreshWeights(refreshWeightBtn);
+            return;
+        }
+
+        // ⑤ 驳回理由按钮组：单选切换，再次点击取消
         var reasonPill = target.closest('.wh-reason-pill');
         if (reasonPill) {
             ev.preventDefault();

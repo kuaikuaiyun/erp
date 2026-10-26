@@ -9,6 +9,7 @@
         'pagination' => $productPagination,
         'detailUrl' => route('warehouse.product-statistics.detail'),
         'fillUrl' => route('warehouse.product-statistics.fill-weight-exceptions'),
+        'refreshWeightUrl' => route('warehouse.product-statistics.refresh-weights'),
         'rejectReasons' => $rejectReasonOptions,
         'sort' => $filters['sort'],
         'direction' => $filters['direction'],
@@ -98,7 +99,7 @@
         #warehouse-product-statistics-table th:nth-child(3),
         #warehouse-product-statistics-table td:nth-child(3) { width: 33.33%; min-width: 0; }
         #warehouse-product-statistics-table th:nth-child(4),
-        #warehouse-product-statistics-table td:nth-child(4) { width: 140px; min-width: 0; }
+        #warehouse-product-statistics-table td:nth-child(4) { width: 190px; min-width: 0; }
         #warehouse-product-statistics-table td:nth-child(1) { overflow: hidden; }
         #warehouse-product-statistics-table td:nth-child(1) .product-statistics-product-cell { min-width: 0; }
         #warehouse-product-statistics-table td:nth-child(1) .product-statistics-product-meta { min-width: 0; }
@@ -235,12 +236,27 @@
                                 </div>
                             </td>
                             <td>
+                                @php
+                                    $missingWeightSkus = collect($product['variant_skus'] ?? [])
+                                        ->filter(fn ($variant) => (float) ($variant['weight'] ?? 0) <= 0)
+                                        ->pluck('sku')
+                                        ->filter()
+                                        ->unique()
+                                        ->values();
+                                @endphp
                                 <button type="button" class="btn btn-default btn-xs warehouse-product-statistics-view-btn" data-product-id="{{ $product['id'] }}">
                                     <i class="fa fa-eye"></i> {{ $labels['view'] }}
                                 </button>
                                 <button type="button" class="btn btn-warning btn-xs warehouse-product-statistics-fill-btn" data-product-id="{{ $product['id'] }}">
                                     <i class="fa fa-pencil"></i> {{ $labels['fill'] }}
                                 </button>
+                                @if($missingWeightSkus->isNotEmpty())
+                                    <button type="button" class="btn btn-info btn-xs warehouse-product-statistics-refresh-weight-btn"
+                                            data-skus="{{ $missingWeightSkus->implode(',') }}"
+                                            title="通过通途接口抓取这些 SKU 的重量">
+                                        <i class="fa fa-cloud-download"></i> 抓重量
+                                    </button>
+                                @endif
                             </td>
                         </tr>
                     @empty
@@ -336,5 +352,5 @@
     <script>
         window.__warehouseProductStatisticsConfig = @json($warehouseProductStatisticsConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/warehouse-product-statistics.js?v=20261026-4"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/warehouse-product-statistics.js?v=20261026-5"></script>
 @endpush
