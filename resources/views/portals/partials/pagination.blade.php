@@ -27,10 +27,15 @@
         ->sort()
         ->values();
 
-    $buildUrl = function (int $page, ?int $pp = null) use ($routeName, $queryParams): string {
-        $params = array_merge($queryParams, ['page' => $page]);
-        if ($pp !== null) $params['per_page'] = $pp;
+    // 页码链接必须带上当前 per_page，否则从 10 条切到下一页时
+    // 会丢失该参数、回落到默认每页条数。
+    $buildUrl = function (int $page, ?int $pp = null) use ($routeName, $queryParams, $perPage): string {
+        $params = array_merge($queryParams, ['page' => $page, 'per_page' => $pp ?? $perPage]);
         return route($routeName, $params);
+    };
+    // per_page 选择器需要不带 per_page 的基础 URL，避免出现重复参数。
+    $buildUrlWithoutPerPage = function (int $page) use ($routeName, $queryParams): string {
+        return route($routeName, array_merge($queryParams, ['page' => $page]));
     };
 @endphp
 
@@ -47,7 +52,7 @@
         @if ($showPerPage && $total > max($perPageOptions))
             <span style="display:inline-flex;align-items:center;gap:4px;">
                 每页
-                <select class="form-control input-sm erp-pagination-perpage" style="width:auto;height:28px;padding:2px 6px;font-size:12px;" onchange="this.form && this.form.submit ? null : (function(url){ var sep = url.indexOf('?')>=0 ? '&' : '?'; location.href = url + sep + 'per_page=' + this.value; }.call(this, '{{ $buildUrl($current) }}'))">
+                <select class="form-control input-sm erp-pagination-perpage" style="width:auto;height:28px;padding:2px 6px;font-size:12px;" onchange="this.form && this.form.submit ? null : (function(url){ var sep = url.indexOf('?')>=0 ? '&' : '?'; location.href = url + sep + 'per_page=' + this.value; }.call(this, '{{ $buildUrlWithoutPerPage($current) }}'))">
                     @foreach ($perPageOptions as $opt)
                         <option value="{{ $opt }}" @selected($opt === $perPage)>{{ $opt }}</option>
                     @endforeach

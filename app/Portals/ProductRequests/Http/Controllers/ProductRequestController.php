@@ -1788,6 +1788,101 @@ class ProductRequestController extends Controller
             ->all();
     }
 
+    /** 已有产品库（运营系统只读版）：数据源与 PCL SKU 管理完全一致，仅查看与搜索 */
+    public function existingProductLibraryIndex(Request $request): Response|View
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        abort_unless($this->access->canViewExistingProductLibrary($context['user']), 403);
+
+        $keyword = trim((string) $request->query('keyword', ''));
+        $perPage = (int) $request->query('per_page', 10);
+        if (!in_array($perPage, [10, 20], true)) {
+            $perPage = 10;
+        }
+        $links = ProductRequestLinkSku::query()
+            ->where('is_runnable', true)
+            ->when($keyword !== '', function (Builder $query) use ($keyword): Builder {
+                $matchedHashes = ProductRequest::query()
+                    ->where(function (Builder $inner) use ($keyword): void {
+                        $inner->where('pcl_product_no', 'like', '%'.$keyword.'%')
+                            ->orWhere('standard_chinese_name', 'like', '%'.$keyword.'%');
+                    })
+                    ->pluck('supplier_url_hash');
+
+                return $query->where(function (Builder $q) use ($keyword, $matchedHashes): void {
+                    $q->where('supplier_url', 'like', '%'.$keyword.'%')
+                        ->orWhere('skus', 'like', '%'.$keyword.'%')
+                        ->orWhere('pcl_product_no', 'like', '%'.$keyword.'%')
+                        ->orWhere('product_name', 'like', '%'.$keyword.'%')
+                        ->when($matchedHashes->isNotEmpty(), fn (Builder $inner): Builder => $inner->orWhereIn('supplier_url_hash', $matchedHashes));
+                });
+            })
+            ->orderByDesc('updated_at')
+            ->paginate($perPage)
+            ->withQueryString();
+
+        $pclMap = $links->pluck('pcl_product_no', 'supplier_url_hash')
+            ->filter(fn (?string $pcl): bool => trim((string) $pcl) !== '');
+        $nameMap = $links->pluck('product_name', 'supplier_url_hash')
+            ->filter(fn (?string $name): bool => trim((string) $name) !== '');
+        $coverMap = $links->pluck('product_image', 'supplier_url_hash')
+            ->filter(fn (?string $path): bool => trim((string) $path) !== '');
+
+        return view('portals.product-requests.operation.existing-product-library', [
+            ...$this->viewContext($context),
+            'links' => $links,
+            'pclMap' => $pclMap,
+            'nameMap' => $nameMap,
+            'coverMap' => $coverMap,
+            'filters' => ['keyword' => $keyword, 'per_page' => $perPage],
+        ]);
+    }
+
+    /** 已有产品库详情弹窗（只读） */
+    public function existingProductLibraryDetail(Request $request, ProductRequestLinkSku $linkSku): Response|View
+    {
+        $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        abort_unless($this->access->canViewExistingProductLibrary($context['user']), 403);
+
+        // 不可跑的产品不让看详情
+        abort_unless((bool) ($linkSku->is_runnable ?? true), 404);
+
+        if (!$this->isModalRequest($request)) {
+            return redirect()->route('product-requests.operation.existing-product-library');
+        }
+
+        $pcl = trim((string) $linkSku->pcl_product_no) !== ''
+            ? $linkSku->pcl_product_no
+            : ProductRequest::query()
+                ->where('supplier_url_hash', $linkSku->supplier_url_hash)
+                ->whereNotNull('pcl_product_no')
+                ->where('pcl_product_no', '!=', '')
+                ->orderByDesc('updated_at')
+                ->value('pcl_product_no');
+        $productName = trim((string) $linkSku->product_name) !== ''
+            ? $linkSku->product_name
+            : ProductRequest::query()
+                ->where('supplier_url_hash', $linkSku->supplier_url_hash)
+                ->whereNotNull('standard_chinese_name')
+                ->where('standard_chinese_name', '!=', '')
+                ->orderByDesc('updated_at')
+                ->value('standard_chinese_name');
+
+        return view('portals.product-requests.operation.existing-product-library-detail', [
+            'linkSku' => $linkSku,
+            'pcl' => $pcl,
+            'productName' => $productName,
+            'skus' => $this->splitSkus((string) $linkSku->skus),
+            'skuValues' => $this->linkSkuValues($linkSku->supplier_url_hash),
+        ]);
+    }
+
     /** PCL 与 SKU 管理列表（按 1688 链接维度） */
     public function linkSkuIndex(Request $request): Response|View
     {
@@ -1800,6 +1895,8 @@ class ProductRequestController extends Controller
         $keyword = trim((string) $request->query('keyword', ''));
         $sourceFilter = (string) $request->query('source', '');
         $reviewStatusFilter = (string) $request->query('review_status', '');
+        $runnableFilter = (string) $request->query('is_runnable', '');
+        $reasonFilter = (string) $request->query('not_runnable_reason', '');
         // 每页条数仅支持 20 / 50，非法值回落到默认 20
         $perPage = (int) $request->query('per_page', 20);
         if (!in_array($perPage, [20, 50], true)) {
@@ -1825,7 +1922,13 @@ class ProductRequestController extends Controller
             })
             ->when(in_array($sourceFilter, ['system', 'import'], true), fn (Builder $query): Builder => $query->where('source', $sourceFilter))
             ->when(in_array($reviewStatusFilter, ['pending', 'done'], true), fn (Builder $query): Builder => $query->where('review_status', $reviewStatusFilter))
-            ->orderByDesc('updated_at')
+            ->when($runnableFilter !== '' && in_array($runnableFilter, ['0', '1'], true), function (Builder $query) use ($runnableFilter): Builder {
+                return $query->where('is_runnable', (bool) $runnableFilter);
+            })
+            ->when($reasonFilter !== '' && isset(ProductRequestLinkSku::NOT_RUNNABLE_REASONS[$reasonFilter]), function (Builder $query) use ($reasonFilter): Builder {
+                return $query->where('not_runnable_reason', $reasonFilter);
+            })
+            ->orderByDesc('id')
             ->paginate($perPage)
             ->withQueryString();
 
@@ -1904,11 +2007,24 @@ class ProductRequestController extends Controller
             'sku_values' => ['nullable', 'array', 'max:100'],
             'sku_values.*.price' => ['nullable', 'string', 'max:100'],
             'sku_values.*.weight' => ['nullable', 'string', 'max:100'],
+            'product_image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'remove_product_image' => ['nullable', 'boolean'],
             'images' => ['nullable', 'array', 'max:3'],
             'images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
             'remove_images' => ['nullable', 'array'],
             'remove_images.*' => ['integer'],
+            'is_runnable' => ['required', 'in:0,1'],
+            'not_runnable_reason' => ['nullable', 'required_if:is_runnable,0', 'in:'.implode(',', array_keys(\App\Models\ProductRequestLinkSku::NOT_RUNNABLE_REASONS))],
         ]);
+
+        // 是否可跑：不可跑必须选原因
+        $isRunnable = (bool) ($data['is_runnable'] ?? true);
+        $notRunnableReason = $isRunnable ? null : ($data['not_runnable_reason'] ?? null);
+        if (!$isRunnable && empty($notRunnableReason)) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'not_runnable_reason' => '设为不可跑时必须选择原因。',
+            ]);
+        }
 
         // 1688 主链接可编辑：改动后需规范化并重算哈希；若新链接已被其他记录占用则拒绝
         $submittedUrl = trim((string) ($data['supplier_url'] ?? ''));
@@ -1936,6 +2052,8 @@ class ProductRequestController extends Controller
             'skus' => implode(',', $submitted),
             'pcl_product_no' => trim((string) ($data['pcl_product_no'] ?? '')) !== '' ? trim((string) $data['pcl_product_no']) : null,
             'product_name' => trim((string) ($data['product_name'] ?? '')) !== '' ? trim((string) $data['product_name']) : null,
+            'is_runnable' => $isRunnable,
+            'not_runnable_reason' => $notRunnableReason,
         ])->save();
 
         // 按 SKU 的采购价/重量同步到链接表（仅保留本次提交 SKU 的数值，两项都清空表示移除）
@@ -1954,6 +2072,29 @@ class ProductRequestController extends Controller
             }
         }
         $linkSku->forceFill(['sku_values' => $linkValues === [] ? null : $linkValues])->save();
+
+        // 产品主图编辑：勾选删除 → 删旧图并清空；上传新图 → 覆盖旧图
+        $oldProductImage = (string) ($linkSku->product_image ?? '');
+        $newProductImage = $oldProductImage;
+        if (!empty($data['remove_product_image'])) {
+            if ($oldProductImage !== '') {
+                Storage::disk('local')->delete($oldProductImage);
+            }
+            $newProductImage = '';
+        }
+        if ($request->hasFile('product_image')) {
+            $file = $request->file('product_image');
+            $ext = strtolower((string) ($file->getClientOriginalExtension() ?: 'jpg'));
+            $path = 'link-skus/'.$linkSku->getKey().'/product-image.'.$ext;
+            Storage::disk('local')->put($path, file_get_contents($file->getRealPath()));
+            if ($oldProductImage !== '' && $oldProductImage !== $path) {
+                Storage::disk('local')->delete($oldProductImage);
+            }
+            $newProductImage = $path;
+        }
+        if ($newProductImage !== $oldProductImage) {
+            $linkSku->forceFill(['product_image' => $newProductImage === '' ? null : $newProductImage])->save();
+        }
 
         // 实拍图编辑：先移除勾选删除的旧图并清理磁盘文件，再追加新上传图片，合计最多 3 张
         $currentImages = array_values((array) ($linkSku->images ?? []));
@@ -2497,14 +2638,23 @@ class ProductRequestController extends Controller
 
     private function modalSuccess(Request $request, string $message, string $routeName): JsonResponse|RedirectResponse
     {
+        $url = route($routeName);
+        // 优先从 referer 拿 query string（保留列表页的 page/per_page/keyword 等）
+        $referer = $request->headers->get('referer', '');
+        if ($referer !== '' && ($query = parse_url($referer, PHP_URL_QUERY))) {
+            $url .= '?'.$query;
+        } elseif ($request->getQueryString()) {
+            $url .= '?'.$request->getQueryString();
+        }
+
         if ($this->isModalRequest($request)) {
             return response()->json([
                 'message' => $message,
-                'redirect' => route($routeName),
+                'redirect' => $url,
             ]);
         }
 
-        return redirect()->route($routeName)->with('success', $message);
+        return redirect($url)->with('success', $message);
     }
 
     /** @param array{portal:\App\Models\Portal,user:AdminUser} $context
@@ -3071,6 +3221,9 @@ class ProductRequestController extends Controller
             'skus' => $this->splitSkus($this->linkSkuSet($hash)),
             'sku_values' => (object) $this->linkSkuValues($hash),
             'seller_images' => $sellerImages,
+            'is_runnable' => (bool) ($linkSku->is_runnable ?? true),
+            'not_runnable_reason' => $linkSku->not_runnable_reason,
+            'not_runnable_reason_label' => $linkSku->not_runnable_reason_label,
         ];
     }
 }

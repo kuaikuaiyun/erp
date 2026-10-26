@@ -35,7 +35,7 @@
 @endpush
 @push('scripts')
     <script>window.ErpProductRequestConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261019-03"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261026-02"></script>
 @endpush
 
 @section('content')

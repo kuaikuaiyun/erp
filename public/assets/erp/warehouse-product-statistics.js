@@ -82,19 +82,21 @@
             });
     }
 
-    /** 拉全该产品的所有规格（规格数超过单页上限时按页追加） */
+    /** 拉全该产品的所有规格（规格数超过单页上限时按页追加）+ 已填异常记录 */
     function fetchAllVariants(productId) {
         var all = [];
         var product = null;
+        var existing = null;
 
         function walk(page) {
             return fetchDetailPage(productId, page).then(function (data) {
                 if (data && data.product) product = data.product;
+                if (page === 1 && data && data.existing_exceptions) existing = data.existing_exceptions;
                 var rows = (data && data.detail && data.detail.rows) ? data.detail.rows : [];
                 all = all.concat(rows);
                 var lastPage = (data && data.detail && data.detail.pagination) ? Number(data.detail.pagination.last_page || 1) : 1;
                 if (page < lastPage && page < 5) return walk(page + 1);
-                return { product: product, rows: all, weightRefresh: data && data.weight_refresh ? data.weight_refresh : null };
+                return { product: product, rows: all, existing: existing || {} };
             });
         }
 
@@ -122,11 +124,10 @@
     function showLoading() {
         var loadingEl = $('#warehouse-variant-detail-loading');
         loadingEl.hidden = false;
-        loadingEl.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 正在从通途 API 刷新最新重量数据…';
+        loadingEl.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 正在加载规格数据…';
         $('#warehouse-variant-detail-content').hidden = true;
         $('#warehouse-variant-detail-empty').hidden = true;
         $('#warehouse-variant-detail-error').hidden = true;
-        setWeightRefreshSummary(null);
     }
 
     function showError(message) {
@@ -136,35 +137,6 @@
         $('#warehouse-variant-detail-loading').hidden = true;
         $('#warehouse-variant-detail-content').hidden = true;
         $('#warehouse-variant-detail-empty').hidden = true;
-        setWeightRefreshSummary(null);
-    }
-
-    /**
-     * 后端 detail 接口会返回 weight_refresh 统计，这里渲染一行绿色/灰色的结果汇总。
-     * @param {object|null} stats {refreshed:int, failed:int, not_found:int, skipped:int}
-     */
-    function setWeightRefreshSummary(stats) {
-        var summary = document.getElementById('warehouse-variant-detail-refresh-summary');
-        if (!summary) return;
-        if (!stats) { summary.hidden = true; summary.innerHTML = ''; return; }
-
-        var html = '';
-        if (stats.refreshed > 0) {
-            html += '<span class="label label-success" style="margin-right:4px;"><i class="fa fa-check-circle"></i> 已刷新 ' + stats.refreshed + '</span>';
-        }
-        if (stats.not_found > 0) {
-            html += '<span class="label label-default" style="margin-right:4px;">通途未找到 ' + stats.not_found + '</span>';
-        }
-        if (stats.failed > 0) {
-            html += '<span class="label label-danger" style="margin-right:4px;"><i class="fa fa-exclamation-triangle"></i> 失败 ' + stats.failed + '</span>';
-        }
-        if (stats.refreshed === 0 && stats.not_found === 0 && stats.failed === 0) {
-            html = '<span class="text-muted">通途刷新完成，无更新</span>';
-        } else if (stats.refreshed > 0) {
-            html += '<span class="text-success" style="font-weight:normal;margin-left:6px;">重量已从通途 goodsDetail 同步</span>';
-        }
-        summary.innerHTML = html;
-        summary.hidden = false;
     }
 
     function weightBadgeCell(variant) {
@@ -194,8 +166,14 @@
         var tr = document.createElement('tr');
         tr.innerHTML =
             '<td>' + imageCell(variant) + '</td>' +
-            '<td><span class="wh-code" title="' + escapeHtml(variant.tongtu_product_code || '') + '">' + escapeHtml(variant.tongtu_product_code || '') + '</span></td>' +
-            '<td><span class="wh-code" title="' + escapeHtml(tongtuSku) + '">' + escapeHtml(tongtuSku) + '</span></td>' +
+            '<td>' +
+                '<div class="wh-cell-label">PCL 编号</div>' +
+                '<span class="wh-code" title="' + escapeHtml(variant.tongtu_product_code || '') + '">' + escapeHtml(variant.tongtu_product_code || '—') + '</span>' +
+            '</td>' +
+            '<td>' +
+                '<div class="wh-cell-label">SKU</div>' +
+                '<span class="wh-code wh-code-sku" title="' + escapeHtml(tongtuSku) + '">' + escapeHtml(tongtuSku || '—') + '</span>' +
+            '</td>' +
             '<td><span class="wh-name">' + escapeHtml(variant.tongtu_product_name || '') + '</span></td>' +
             '<td>' + weightBadgeCell(variant) + '</td>';
         return tr;
@@ -227,9 +205,6 @@
             .then(function (data) {
                 setIdentity(data && data.product ? data.product : null);
                 renderVariants(data && data.detail && data.detail.rows ? data.detail.rows : []);
-                if (data && data.weight_refresh) {
-                    setWeightRefreshSummary(data.weight_refresh);
-                }
             })
             .catch(function (err) {
                 showError(err && err.message ? err.message : '加载失败');
@@ -261,24 +236,65 @@
         var item = document.createElement('div');
         item.className = 'wh-fill-item';
         item.setAttribute('data-sku', tongtuSku);
+
+        // 回填已填异常
+        var ex = variant._existing_exception || null;
+        var initWeight = ex && ex.corrected_weight_gram != null ? ex.corrected_weight_gram : '';
+        var initReason = ex && ex.reject_reason ? ex.reject_reason : '';
+        var initRemark = ex && ex.remark ? ex.remark : '';
+        var initPhysicalUrl = ex && ex.physical_image_url ? ex.physical_image_url : '';
+        var exceptionId = ex ? ex.id : '';
+
+        var reasonHtml = '';
+        Object.keys(rejectReasons).forEach(function (code) {
+            reasonHtml += '<button type="button" class="wh-reason-pill' + (code === initReason ? ' active' : '') + '" data-value="' + escapeHtml(code) + '">' +
+                escapeHtml(rejectReasons[code]) + '</button>';
+        });
+
+        // 实物图上传区（大虚线框 + 粘贴按钮 + 拖拽，和列表实拍图风格一致）
+        var imgSection = '<div class="wh-fill-item-images">' +
+            '<label class="wh-upload-zone wh-physical-upload-zone" for="wh-fill-img-' + exceptionId + '-' + escapeHtml(tongtuSku) + '" title="点击选择文件、拖拽图片到此处，或 Ctrl+V 粘贴">' +
+                '<i class="fa fa-cloud-upload wh-upload-icon"></i>' +
+                '<div class="wh-upload-hint-text">拖拽 / <strong>粘贴图片</strong> / 点击选择</div>' +
+                '<button type="button" class="wh-paste-btn wh-fill-physical-paste" data-fill-sku="' + escapeHtml(tongtuSku) + '" data-fill-exception="' + exceptionId + '" title="设为粘贴目标后 Ctrl+V 粘贴">' +
+                    '<i class="fa fa-clipboard wh-clip-icon"></i> 粘贴图片 <kbd>Ctrl+V</kbd>' +
+                '</button>' +
+                '<input type="file" class="wh-fill-physical-input" id="wh-fill-img-' + exceptionId + '-' + escapeHtml(tongtuSku) + '" accept="image/jpeg,image/png,image/webp" style="display:none;">' +
+            '</label>' +
+            '<div class="wh-fill-physical-preview" data-role="physical-preview">' +
+                (initPhysicalUrl !== '' ?
+                    '<img src="' + initPhysicalUrl + '" alt="" class="erp-zoomable" style="width:72px;height:72px;object-fit:cover;border:1px solid #dfe6ed;border-radius:4px;cursor:zoom-in;" title="点击放大查看" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">' :
+                    '<span class="text-muted" style="font-size:12px;">未上传</span>') +
+            '</div>' +
+            (initPhysicalUrl !== '' ? '<label class="wh-fill-physical-remove"><input type="checkbox" class="wh-fill-physical-remove-checkbox" data-role="remove-physical"> 删除原图</label>' : '') +
+        '</div>';
+
         item.innerHTML =
             '<div class="wh-fill-item-head">' +
-                '<span class="wh-fill-sku-tag" title="' + escapeHtml(tongtuSku) + '">' + escapeHtml(tongtuSku || '—') + '</span>' +
-                (variant.tongtu_product_code ? '<span class="wh-code">' + escapeHtml(variant.tongtu_product_code) + '</span>' : '') +
-                refWeightHtml(variant) +
-                '<input type="number" step="0.01" min="0.01" class="form-control input-sm wh-fill-weight" placeholder="填写实测重量 g">' +
+                '<div class="wh-fill-head-left">' +
+                    '<span class="wh-fill-head-label">PCL</span>' +
+                    '<span class="wh-code">' + escapeHtml(variant.tongtu_product_code || '—') + '</span>' +
+                    '<span class="wh-fill-head-label">SKU</span>' +
+                    '<span class="wh-code wh-code-sku" title="' + escapeHtml(tongtuSku) + '">' + escapeHtml(tongtuSku || '—') + '</span>' +
+                '</div>' +
+                '<div class="wh-fill-head-right">' +
+                    refWeightHtml(variant) +
+                '</div>' +
+                '<input type="number" step="0.01" min="0.01" class="form-control input-sm wh-fill-weight" placeholder="填写实测重量 g" value="' + escapeHtml(String(initWeight)) + '">' +
             '</div>' +
             '<div class="wh-fill-item-meta">' +
                 '<span class="wh-fill-label">驳回理由</span>' +
-                reasonPillsHtml() +
-                '<input type="text" class="form-control input-sm wh-fill-remark" maxlength="500" placeholder="备注（可选）">' +
-            '</div>';
+                reasonHtml +
+                '<input type="text" class="form-control input-sm wh-fill-remark" maxlength="500" placeholder="备注（可选）" value="' + escapeHtml(initRemark) + '">' +
+            '</div>' +
+            imgSection;
+
         return item;
     }
 
     function showFillLoading() {
         document.getElementById('warehouse-fill-loading').hidden = false;
-        document.getElementById('warehouse-fill-loading').innerHTML = '<i class="fa fa-spinner fa-spin"></i> 正在从通途 API 刷新最新重量数据…';
+        document.getElementById('warehouse-fill-loading').innerHTML = '<i class="fa fa-spinner fa-spin"></i> 正在加载规格数据…';
         document.getElementById('warehouse-fill-content').hidden = true;
         document.getElementById('warehouse-fill-empty').hidden = true;
         document.getElementById('warehouse-fill-error').hidden = true;
@@ -325,11 +341,61 @@
             .then(function (result) {
                 fillProduct = result.product || null;
                 document.getElementById('warehouse-fill-identity').innerHTML = identityHtml(fillProduct);
-                renderFillRows(result.rows || []);
+                // 把已填异常合并进 rows，让 buildFillRow 能回填
+                var existing = result.existing || {};
+                var merged = (result.rows || []).map(function (variant) {
+                    var sku = (variant.tongtu_sku || '').trim();
+                    if (existing[sku]) {
+                        variant._existing_exception = existing[sku];
+                    }
+                    return variant;
+                });
+                renderFillRows(merged);
             })
             .catch(function (err) {
                 showFillError(err && err.message ? err.message : '加载失败');
             });
+    }
+
+    /** 缺重量的 SKU 手动调通途接口补抓重量。 */
+    function refreshWeights(btn) {
+        var skus = (btn.getAttribute('data-skus') || '')
+            .split(',')
+            .map(function (sku) { return sku.trim(); })
+            .filter(Boolean);
+        if (!skus.length) return;
+
+        var originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 抓取中';
+
+        fetch(config.refreshWeightUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': csrfToken(),
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify({ skus: skus })
+        }).then(function (response) {
+            return response.json().then(function (data) {
+                return { ok: response.ok, data: data };
+            });
+        }).then(function (result) {
+            var message = (result.data && result.data.message) || '抓取完成';
+            if (result.ok && result.data && result.data.ok) {
+                window.alert(message);
+                window.location.reload();
+                return;
+            }
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+            window.alert(message);
+        }).catch(function (error) {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+            window.alert('网络异常：' + (error && error.message ? error.message : '抓取失败'));
+        });
     }
 
     function submitFill() {
@@ -337,6 +403,7 @@
         var statusEl = document.getElementById('warehouse-fill-status');
         var submitBtn = document.getElementById('warehouse-fill-submit');
         var rows = [];
+        var formData = new FormData();
         var invalid = false;
 
         fillRows.forEach(function (variant, idx) {
@@ -345,10 +412,14 @@
             var weightInput = item.querySelector('.wh-fill-weight');
             var activePill = item.querySelector('.wh-reason-pill.active');
             var remarkInput = item.querySelector('.wh-fill-remark');
+            var fileInput = item.querySelector('.wh-fill-physical-input');
+            var removeCheckbox = item.querySelector('.wh-fill-physical-remove-checkbox');
             var weightRaw = (weightInput.value || '').trim();
             var reason = activePill ? (activePill.getAttribute('data-value') || '').trim() : '';
             var remark = (remarkInput.value || '').trim();
-            if (weightRaw === '' && reason === '' && remark === '') return;
+            var hasNewFile = fileInput && fileInput.files && fileInput.files.length > 0;
+            var removeImg = removeCheckbox ? removeCheckbox.checked : false;
+            if (weightRaw === '' && reason === '' && remark === '' && !hasNewFile && !removeImg) return;
 
             var weight = parseFloat(weightRaw);
             if (weightRaw !== '' && (!isFinite(weight) || weight <= 0)) {
@@ -358,29 +429,29 @@
                 return;
             }
 
-            rows.push({
-                tongtu_sku: (variant.tongtu_sku || '').trim(),
-                shopify_sku: (variant.shopify_skus || []).join(', '),
-                original_weight_gram: Number(variant.sale_weight_gram) || 0,
-                corrected_weight_gram: isFinite(weight) && weight > 0 ? weight : null,
-                reject_reason: reason,
-                remark: remark,
-            });
+            var skuKey = 'rows[' + idx + ']';
+            formData.append(skuKey + '[tongtu_sku]', (variant.tongtu_sku || '').trim());
+            formData.append(skuKey + '[shopify_sku]', (variant.shopify_skus || []).join(', '));
+            formData.append(skuKey + '[original_weight_gram]', Number(variant.sale_weight_gram) || 0);
+            if (isFinite(weight) && weight > 0) formData.append(skuKey + '[corrected_weight_gram]', weight);
+            if (reason) formData.append(skuKey + '[reject_reason]', reason);
+            if (remark) formData.append(skuKey + '[remark]', remark);
+            if (hasNewFile) formData.append(skuKey + '[physical_image]', fileInput.files[0]);
+            if (removeImg) formData.append(skuKey + '[remove_physical_image]', '1');
+
+            rows.push({ sku: (variant.tongtu_sku || '').trim() });
         });
 
         if (invalid) return;
         if (rows.length === 0) {
-            statusEl.innerHTML = '<span class="text-warning">请至少为一个 SKU 填写重量、驳回理由或备注</span>';
+            statusEl.innerHTML = '<span class="text-warning">请至少为一个 SKU 填写重量、驳回理由、备注或上传实物图</span>';
             return;
         }
 
-        var payload = {
-            product_id: fillProductId,
-            tongtu_product_code: (fillRows[0] && fillRows[0].tongtu_product_code) || (fillProduct && fillProduct.product_code) || '',
-            tongtu_product_name: (fillRows[0] && fillRows[0].tongtu_product_name) || '',
-            product_image_url: (fillRows[0] && fillRows[0].product_image_url) || (fillProduct && fillProduct.image_url) || '',
-            rows: rows,
-        };
+        formData.append('product_id', fillProductId);
+        formData.append('tongtu_product_code', (fillRows[0] && fillRows[0].tongtu_product_code) || (fillProduct && fillProduct.product_code) || '');
+        formData.append('tongtu_product_name', (fillRows[0] && fillRows[0].tongtu_product_name) || '');
+        formData.append('product_image_url', (fillRows[0] && fillRows[0].product_image_url) || (fillProduct && fillProduct.image_url) || '');
 
         submitBtn.disabled = true;
         statusEl.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 正在提交…';
@@ -388,12 +459,11 @@
         fetch(config.fillUrl, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
                 'Accept': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest',
                 'X-CSRF-TOKEN': csrfToken(),
             },
-            body: JSON.stringify(payload),
+            body: formData,
         }).then(function (res) {
             return res.json().catch(function () { return {}; }).then(function (data) {
                 return { ok: res.ok, status: res.status, data: data };
@@ -420,6 +490,63 @@
         if (fillModal && fillModal.classList.contains('in')) { closeModal($fillModal, fillModal); return; }
         if (modal.classList.contains('in')) { closeModal($modal, modal); }
     });
+
+    // 实物图文件选择后做本地预览
+    document.addEventListener('change', function (ev) {
+        var target = ev.target;
+        if (!target || !target.classList || !target.classList.contains('wh-fill-physical-input')) return;
+        var file = target.files && target.files[0];
+        if (!file) return;
+        var item = target.closest('.wh-fill-item-images');
+        if (!item) return;
+        var preview = item.querySelector('[data-role="physical-preview"]');
+        if (!preview) return;
+        var reader = new FileReader();
+        reader.onload = function () {
+            preview.innerHTML = '<img src="' + reader.result + '" alt="" style="width:72px;height:72px;object-fit:cover;border:1px solid #dfe6ed;border-radius:4px;cursor:zoom-in;" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">';
+        };
+        reader.readAsDataURL(file);
+    });
+
+    // 实物图粘贴支持
+    var fillPasteTarget = null;
+    var fillPasteTimer = null;
+    document.addEventListener('paste', function (ev) {
+        if (!fillPasteTarget) return;
+        var fillItem = document.querySelector('.wh-fill-item-images.is-paste-target');
+        if (!fillItem) return;
+        var clipboard = ev.clipboardData || window.clipboardData;
+        if (!clipboard) return;
+        var file = null;
+        for (var i = 0; i < clipboard.items.length; i++) {
+            if (clipboard.items[i].kind === 'file') {
+                var f = clipboard.items[i].getAsFile();
+                if (f && (f.type === 'image/jpeg' || f.type === 'image/jpg' || f.type === 'image/png' || f.type === 'image/webp')) {
+                    file = f; break;
+                }
+            }
+        }
+        if (!file) return;
+        ev.preventDefault();
+        var input = fillItem.querySelector('.wh-fill-physical-input');
+        if (!input) return;
+        // 把粘贴的文件塞到 input 里（用 DataTransfer 触发 change 事件）
+        try {
+            var dt = new DataTransfer();
+            dt.items.add(file);
+            input.files = dt.files;
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch (e) {
+            alert('浏览器不支持粘贴上传，请直接选择文件');
+        }
+        // 取消高亮
+        clearFillPasteTarget();
+    });
+    function clearFillPasteTarget() {
+        clearTimeout(fillPasteTimer);
+        var el = document.querySelector('.wh-fill-item-images.is-paste-target');
+        if (el) el.classList.remove('is-paste-target');
+    }
 
     document.addEventListener('click', function (ev) {
         var target = ev.target;
@@ -460,7 +587,15 @@
             return;
         }
 
-        // ④ 驳回理由按钮组：单选切换，再次点击取消
+        // ④ 列表上的"抓重量"：调通途接口补抓缺失的 SKU 重量
+        var refreshWeightBtn = target.closest('.warehouse-product-statistics-refresh-weight-btn');
+        if (refreshWeightBtn) {
+            ev.preventDefault();
+            refreshWeights(refreshWeightBtn);
+            return;
+        }
+
+        // ⑤ 驳回理由按钮组：单选切换，再次点击取消
         var reasonPill = target.closest('.wh-reason-pill');
         if (reasonPill) {
             ev.preventDefault();
@@ -469,6 +604,38 @@
                 pill.classList.remove('active');
             });
             if (!wasActive) reasonPill.classList.add('active');
+            return;
+        }
+
+        // ④-1 实物图删除 checkbox
+        var removeCb = target.closest('[data-role="remove-physical"]');
+        if (removeCb) {
+            var preview = removeCb.closest('.wh-fill-item-images').querySelector('[data-role="physical-preview"]');
+            if (preview) {
+                if (removeCb.checked) {
+                    var existingImg = preview.querySelector('img');
+                    if (existingImg) existingImg.style.opacity = '0.25';
+                } else {
+                    var existingImg2 = preview.querySelector('img');
+                    if (existingImg2) existingImg2.style.opacity = '1';
+                }
+            }
+            return;
+        }
+
+        // ④-2 实物图粘贴按钮 → 设为粘贴目标
+        var fillPasteBtn = target.closest('.wh-fill-physical-paste');
+        if (fillPasteBtn) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            clearFillPasteTarget();
+            var fillItem = fillPasteBtn.closest('.wh-fill-item-images');
+            if (fillItem) {
+                fillPasteTarget = true;
+                fillItem.classList.add('is-paste-target');
+                fillPasteTimer = setTimeout(clearFillPasteTarget, 10000);
+            }
+            document.activeElement && document.activeElement.blur();
             return;
         }
 

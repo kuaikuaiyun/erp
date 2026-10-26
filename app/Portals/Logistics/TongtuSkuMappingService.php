@@ -653,6 +653,29 @@ class TongtuSkuMappingService
             }
         }
 
+        // 传入的是产品编号（productCode）时，通途规格 SKU 往往带后缀，
+        // 用前缀匹配唯一命中，避免把整个产品的多条规格误判为无法确定。
+        $prefixed = array_values(array_filter(
+            $details,
+            static fn ($detail): bool => $key !== ''
+                && str_starts_with(LogisticsTongtuSkuMapping::normalizedSku((string) ($detail['goodsSku'] ?? '')), $key)
+        ));
+        if (count($prefixed) === 1) {
+            return $prefixed[0];
+        }
+
+        // 一个产品下多条规格都以该 SKU 为前缀（例如产品编号对应多个颜色规格）时，
+        // 只有当这些规格的重量完全一致才采用，避免取到错误规格的重量。
+        if (count($prefixed) > 1) {
+            $weights = array_values(array_unique(array_map(
+                static fn (array $detail): string => trim((string) ($detail['goodsWeight'] ?? '')),
+                $prefixed
+            )));
+            if (count($weights) === 1) {
+                return $prefixed[0];
+            }
+        }
+
         return count($details) === 1 ? $details[0] : [];
     }
 
@@ -662,7 +685,10 @@ class TongtuSkuMappingService
     private function productSkuKeys(array $product): array
     {
         $keys = [];
-        foreach (['sku', 'productSku', 'skuAlias'] as $field) {
+        // productCode（产品编号）也作为可匹配键：通途侧 SKU 被改名或加后缀
+        // 时（例如 XMSantaClaus26093001 → XMSantaClaus26093001-1pc-停用），
+        // 仓库仍只有产品编号，用它发起查询也能命中同一个产品。
+        foreach (['sku', 'productSku', 'skuAlias', 'productCode'] as $field) {
             $value = $this->text($product[$field] ?? null);
             if ($value !== null) {
                 $keys[] = LogisticsTongtuSkuMapping::normalizedSku($value);

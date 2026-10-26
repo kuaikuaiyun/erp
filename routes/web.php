@@ -54,11 +54,14 @@ Route::post('/shopify-analytics/{domainStore}/refresh', [ShopifyAnalyticsControl
 Route::get('/product-requests', [ProductRequestController::class, 'operationIndex'])->name('product-requests.operation.index');
 Route::get('/product-request-dedupe', [ProductRequestController::class, 'operationDedupeIndex'])->name('product-requests.operation.dedupe');
 Route::get('/operation/domain-stores', [OperationDomainStoreController::class, 'index'])->name('operation.domain-stores.index');
+Route::get('/operation/existing-product-library', [ProductRequestController::class, 'existingProductLibraryIndex'])->name('product-requests.operation.existing-product-library');
+Route::get('/operation/existing-product-library/{linkSku}', [ProductRequestController::class, 'existingProductLibraryDetail'])->name('product-requests.operation.existing-product-library.detail');
 Route::post('/operation/domain-stores/{domainStore}/refresh', [OperationDomainStoreController::class, 'refresh'])->name('operation.domain-stores.refresh');
 Route::get('/api/product-requests/operation-pending-count', [ProductRequestController::class, 'operationPendingCount'])->name('product-requests.operation.pending-count');
 Route::get('/api/procurement-inspections/pending-count', [ProductRequestController::class, 'procurementPendingCount'])->name('product-requests.procurement.pending-count');
 Route::get('/api/placement-reviews/pending-count', [ProductRequestController::class, 'placementReviewPendingCount'])->name('product-requests.placement.pending-count');
 Route::get('/api/warehouse-acceptances/pending-count', [ProductRequestController::class, 'warehousePendingCount'])->name('product-requests.warehouse.pending-count');
+Route::get('/api/warehouse-weight-exceptions/pending-count', [WarehouseWeightExceptionController::class, 'pendingCount'])->name('caigou.warehouse-weight-exceptions.pending-count');
 Route::get('/product-requests/create', [ProductRequestController::class, 'operationCreate'])->name('product-requests.operation.create');
 Route::post('/product-requests', [ProductRequestController::class, 'operationStore'])->name('product-requests.operation.store');
 Route::post('/link-sku-manager/import', [ProductRequestController::class, 'linkSkuImport'])->name('product-requests.link-skus.import');
@@ -132,6 +135,11 @@ Route::post('/product-statistics/export', [ProductStatisticsController::class, '
 Route::get('/warehouse-product-statistics', [WarehouseProductStatisticsController::class, 'index'])->name('warehouse.product-statistics.index');
 Route::get('/warehouse-product-statistics/detail', [WarehouseProductStatisticsController::class, 'detail'])->name('warehouse.product-statistics.detail');
 Route::post('/warehouse-product-statistics/fill-weight-exceptions', [WarehouseProductStatisticsController::class, 'fillWeightExceptions'])->name('warehouse.product-statistics.fill-weight-exceptions');
+Route::post('/warehouse-product-statistics/refresh-weights', [WarehouseProductStatisticsController::class, 'refreshWeights'])->name('warehouse.product-statistics.refresh-weights');
+Route::get('/warehouse-product-statistics/link-sku-images', [WarehouseProductStatisticsController::class, 'linkSkuImages'])->name('warehouse.product-statistics.link-sku-images');
+Route::post('/warehouse-product-statistics/link-sku-images/upload', [WarehouseProductStatisticsController::class, 'linkSkuImageUpload'])->name('warehouse.product-statistics.link-sku-images.upload');
+Route::delete('/warehouse-product-statistics/link-sku-images/delete', [WarehouseProductStatisticsController::class, 'linkSkuImageDelete'])->name('warehouse.product-statistics.link-sku-images.delete');
+Route::get('/warehouse-weight-exceptions/{id}/physical-image', [WarehouseProductStatisticsController::class, 'physicalImage'])->name('warehouse.weight-exceptions.physical-image');
 Route::get('/warehouse-weight-exceptions', [WarehouseWeightExceptionController::class, 'index'])->name('caigou.warehouse-weight-exceptions.index');
 Route::post('/warehouse-weight-exceptions/{id}/resolve', [WarehouseWeightExceptionController::class, 'resolve'])->name('caigou.warehouse-weight-exceptions.resolve');
 Route::get('/product-library', [ProductLibraryController::class, 'index'])->name('aikaipin.product-library.index');

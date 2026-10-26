@@ -52,6 +52,14 @@
                         <label style="margin-right:6px;">搜索</label>
                         <input name="keyword" type="search" class="form-control input-sm" value="{{ $filters['keyword'] }}" placeholder="通途 SKU / Shopify SKU / 产品名 / 驳回理由 / 备注 / 提报人">
                     </div>
+                    <div class="form-group" style="margin-right:10px;">
+                        <label style="margin-right:6px;">每页</label>
+                        <select name="per_page" class="form-control input-sm" onchange="this.form.submit()">
+                            @foreach([10, 20, 50] as $size)
+                                <option value="{{ $size }}" @selected((int) $filters['per_page'] === $size)>{{ $size }} 条</option>
+                            @endforeach
+                        </select>
+                    </div>
                     <button class="btn btn-primary btn-sm" type="submit"><i class="fa fa-search"></i> 查询</button>
                     <a class="btn btn-default btn-sm" href="{{ route('caigou.warehouse-weight-exceptions.index') }}">重置</a>
                 </form>
@@ -72,7 +80,8 @@
                         <th style="width:110px;">通途重量(g)</th>
                         <th style="width:110px;">实际重量(g)</th>
                         <th style="width:110px;">驳回理由</th>
-                        <th>备注</th>
+                        <th style="min-width:220px;">备注</th>
+                        <th style="width:80px;">实物图<small class="text-muted" style="display:block;font-weight:normal;font-size:11px;">点击放大</small></th>
                         <th style="width:80px;">状态</th>
                         <th style="width:110px;">提报人</th>
                         <th style="width:150px;">时间</th>
@@ -122,7 +131,7 @@
                                     <span class="text-muted">—</span>
                                 @endif
                             </td>
-                            <td>
+                            <td style="min-width:220px;word-break:break-word;line-height:1.6;white-space:normal;">
                                 @if($row->remark)
                                     <div>{{ \Illuminate\Support\Str::limit($row->remark, 60) }}</div>
                                 @endif
@@ -130,6 +139,13 @@
                                     <div class="text-muted" style="font-size:12px;"><i class="fa fa-check-circle-o"></i> 处理备注: {{ \Illuminate\Support\Str::limit($row->resolution_remark, 60) }}</div>
                                 @endif
                                 @if(!$row->remark && !($row->status === 'resolved' && $row->resolution_remark))
+                                    <span class="text-muted">—</span>
+                                @endif
+                            </td>
+                            <td>
+                                @if($row->physical_image_path)
+                                    <img src="{{ route('warehouse.weight-exceptions.physical-image', $row->id) }}" class="product-statistics-thumb erp-zoomable" style="width:48px;height:48px;object-fit:cover;border:1px solid #dfe6ed;border-radius:3px;cursor:zoom-in;" alt="" title="点击放大查看实物图" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">
+                                @else
                                     <span class="text-muted">—</span>
                                 @endif
                             </td>
@@ -159,7 +175,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="11" class="text-center text-muted" style="padding:40px;">
+                            <td colspan="12" class="text-center text-muted" style="padding:40px;">
                                 <i class="fa fa-inbox fa-2x"></i>
                                 <div style="margin-top:8px;">当前筛选条件下没有异常记录</div>
                             </td>

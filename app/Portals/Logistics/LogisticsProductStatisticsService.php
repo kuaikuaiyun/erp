@@ -81,6 +81,7 @@ class LogisticsProductStatisticsService
         $products = $productRows
             ->map(fn (object $row): array => $this->listProduct($row))
             ->all();
+        $this->fillVariantSkuWeights($products);
 
         return [
             'products' => $products,
@@ -155,6 +156,157 @@ class LogisticsProductStatisticsService
             ->sort()
             ->values()
             ->all();
+    }
+
+    /**
+     * 订单行 sale_weight_gram 本身来自通途 goodsWeight，优先使用（精确到该 SKU）；
+     * 为空时再取 PCL 商品资料（logistics_tongtu_sku_mappings.goods_weight_gram）。
+     * 订单行的 tongtu_sku 可能是产品级（无规格后缀），PCL 资料里的 tongtu_sku 带
+     * 规格后缀，所以 SKU 精确匹配不到时按 tongtu_product_code 回落。
+     *
+     * @param list<array<string,mixed>> $products
+     */
+    private function fillVariantSkuWeights(array &$products): void
+    {
+        [$skus, $codes] = $this->collectWeightLookupKeys($products, 'variant_skus', 'sku', 'product_code');
+        $weights = $this->lookupPclWeights($skus, $codes);
+        if ($weights === null) {
+            return;
+        }
+
+        [$bySku, $byCode] = $weights;
+        foreach ($products as $index => $product) {
+            $code = mb_strtolower(trim((string) ($product['product_code'] ?? '')));
+            foreach (($product['variant_skus'] ?? []) as $variantIndex => $variant) {
+                if ((float) ($variant['weight'] ?? 0) > 0) {
+                    continue;
+                }
+                $sku = mb_strtolower(trim((string) ($variant['sku'] ?? '')));
+                $weight = $bySku[$sku] ?? $byCode[$code] ?? null;
+                if ($weight !== null) {
+                    $products[$index]['variant_skus'][$variantIndex]['weight'] = $weight;
+                }
+            }
+        }
+    }
+
+    /**
+     * 从产品列表里收集重量查询键：SKU 与产品编号（均小写去空格）。
+     *
+     * @param list<array<string,mixed>> $products
+     * @return array{0: array<string,string>, 1: array<string,string>}
+     */
+    private function collectWeightLookupKeys(array $products, string $listKey, string $skuKey, string $codeKey): array
+    {
+        $skus = [];
+        $codes = [];
+        foreach ($products as $product) {
+            $code = mb_strtolower(trim((string) ($product[$codeKey] ?? '')));
+            if ($code !== '') {
+                $codes[$code] = $code;
+            }
+            foreach (($product[$listKey] ?? []) as $item) {
+                $sku = mb_strtolower(trim((string) ($item[$skuKey] ?? '')));
+                if ($sku !== '') {
+                    $skus[$sku] = $sku;
+                }
+            }
+        }
+
+        return [$skus, $codes];
+    }
+
+    /**
+     * 一次查询取 PCL 商品资料的重量，返回 [按 SKU => 重量, 按产品编号 => 重量]。
+     *
+     * @param array<string,string> $skus
+     * @param array<string,string> $codes
+     * @return array{0: array<string,float>, 1: array<string,float>}|null
+     */
+    private function lookupPclWeights(array $skus, array $codes): ?array
+    {
+        if ($skus === [] && $codes === []) {
+            return null;
+        }
+
+        $mappings = LogisticsTongtuSkuMapping::query()
+            ->where('status', LogisticsTongtuSkuMapping::STATUS_MATCHED)
+            ->whereNotNull('goods_weight_gram')
+            ->where(function ($query) use ($skus, $codes): void {
+                if ($skus !== []) {
+                    $query->whereIn(DB::raw('LOWER(TRIM(tongtu_sku))'), array_values($skus));
+                }
+                if ($codes !== []) {
+                    $method = $skus === [] ? 'whereIn' : 'orWhereIn';
+                    $query->{$method}(DB::raw('LOWER(TRIM(tongtu_product_code))'), array_values($codes));
+                }
+            })
+            ->get(['tongtu_sku', 'tongtu_product_code', 'goods_weight_gram']);
+
+        $bySku = [];
+        $byCode = [];
+        foreach ($mappings as $mapping) {
+            $weight = (float) $mapping->goods_weight_gram;
+            if ($weight <= 0) {
+                continue;
+            }
+            $sku = mb_strtolower(trim((string) $mapping->tongtu_sku));
+            $code = mb_strtolower(trim((string) $mapping->tongtu_product_code));
+            if ($sku !== '' && !isset($bySku[$sku])) {
+                $bySku[$sku] = $weight;
+            }
+            if ($code !== '' && !isset($byCode[$code])) {
+                $byCode[$code] = $weight;
+            }
+        }
+
+        if ($bySku === [] && $byCode === []) {
+            return null;
+        }
+
+        return [$bySku, $byCode];
+    }
+
+    /**
+     * 解析 GROUP_CONCAT 拼出来的 SKU 片段。
+     * 格式：`SKU|重量`（旧格式兼容：裸 `SKU`），按 SKU 去重取最小重量。
+     *
+     * @return array<int, array{sku:string, weight:float}>
+     */
+    public static function parseVariantSkus(string $raw): array
+    {
+        if ($raw === '') {
+            return [];
+        }
+
+        $weightBySku = [];
+        foreach (explode("\x1F", $raw) as $segment) {
+            $segment = trim((string) $segment);
+            if ($segment === '') {
+                continue;
+            }
+            if (str_contains($segment, '|')) {
+                [$sku, $weightStr] = explode('|', $segment, 2);
+                $sku = trim((string) $sku);
+                $weight = (float) $weightStr;
+            } else {
+                $sku = $segment;
+                $weight = 0.0;
+            }
+            if ($sku === '') {
+                continue;
+            }
+            if (!isset($weightBySku[$sku]) || $weightBySku[$sku] > $weight) {
+                $weightBySku[$sku] = $weight;
+            }
+        }
+
+        $result = [];
+        foreach ($weightBySku as $sku => $weight) {
+            $result[] = ['sku' => $sku, 'weight' => $weight];
+        }
+
+        return $result;
     }
 
     /** @param array<string,mixed> $filters */
@@ -1270,11 +1422,53 @@ class LogisticsProductStatisticsService
             $groups[$variantKey] = $metrics[0] ?? null;
         }
 
+        $rows = array_values(array_filter(array_map(static fn (string $variantKey): ?array => $groups[$variantKey] ?? null, $keys)));
+        $this->fillRowWeightsFromMappings($rows);
+
         return [
-            'rows' => array_values(array_filter(array_map(static fn (string $variantKey): ?array => $groups[$variantKey] ?? null, $keys))),
+            'rows' => $rows,
             'pagination' => $page['pagination'],
             'options' => [],
         ];
+    }
+
+    /**
+     * 详情行重量同样统一取 PCL 商品资料的产品重量，精确 SKU 匹配不到时按产品编号回落。
+     *
+     * @param list<array<string,mixed>> $rows
+     */
+    private function fillRowWeightsFromMappings(array &$rows): void
+    {
+        $skus = [];
+        $codes = [];
+        foreach ($rows as $row) {
+            $sku = mb_strtolower(trim((string) ($row['tongtu_sku'] ?? '')));
+            $code = mb_strtolower(trim((string) ($row['tongtu_product_code'] ?? '')));
+            if ($sku !== '') {
+                $skus[$sku] = $sku;
+            }
+            if ($code !== '') {
+                $codes[$code] = $code;
+            }
+        }
+
+        $weights = $this->lookupPclWeights($skus, $codes);
+        if ($weights === null) {
+            return;
+        }
+
+        [$bySku, $byCode] = $weights;
+        foreach ($rows as $index => $row) {
+            if ((float) ($row['sale_weight_gram'] ?? 0) > 0) {
+                continue;
+            }
+            $sku = mb_strtolower(trim((string) ($row['tongtu_sku'] ?? '')));
+            $code = mb_strtolower(trim((string) ($row['tongtu_product_code'] ?? '')));
+            $weight = $bySku[$sku] ?? $byCode[$code] ?? null;
+            if ($weight !== null) {
+                $rows[$index]['sale_weight_gram'] = $weight;
+            }
+        }
     }
 
     /** @param array<string,mixed> $options */
@@ -1530,7 +1724,7 @@ class LogisticsProductStatisticsService
             ->selectRaw("MIN(CASE WHEN NULLIF(TRIM(items.product_image_url), '') IS NOT NULL THEN items.id END) as image_item_id")
             ->selectRaw("GROUP_CONCAT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__') ORDER BY COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__') SEPARATOR 0x1F) as store_names")
             ->selectRaw("COUNT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__')) as shop_count")
-            ->selectRaw("GROUP_CONCAT(DISTINCT NULLIF(TRIM(items.tongtu_sku), '') ORDER BY NULLIF(TRIM(items.tongtu_sku), '') SEPARATOR 0x1F) as tongtu_skus")
+            ->selectRaw("GROUP_CONCAT(DISTINCT CONCAT(NULLIF(TRIM(items.tongtu_sku), ''), '|', CAST(ROUND(COALESCE(items.sale_weight_gram, 0), 2) AS CHAR)) ORDER BY NULLIF(TRIM(items.tongtu_sku), '') SEPARATOR 0x1F) as tongtu_skus")
             ->selectRaw("COUNT(DISTINCT NULLIF(TRIM(items.tongtu_sku), '')) as tongtu_variant_count")
             ->selectRaw('SUM(COALESCE(items.quantity, 0)) as sales')
             ->selectRaw('SUM(COALESCE(items.line_revenue_usd, 0)) as revenue')
@@ -1555,7 +1749,7 @@ class LogisticsProductStatisticsService
             ->filter()->unique()->values()->all();
         if ($productCodes === [] && $shopifySkus === []) {
             foreach ($rows as $row) {
-                $row->product_image_url = null;
+                $row->product_image_url = $row->product_image_url ?: null;
                 $row->match_status = LogisticsTongtuSkuMapping::STATUS_UNMATCHED;
                 $row->match_status_label = $this->matchStatusLabel($row->match_status);
             }
@@ -1596,8 +1790,11 @@ class LogisticsProductStatisticsService
             $mapping = $byProductCode[$productCode] ?? $byShopifySku[$shopifySku] ?? null;
 
             $row->product_image_url = $mapping?->status === LogisticsTongtuSkuMapping::STATUS_MATCHED
-                ? ($mapping->tongtu_primary_image_url ?: null)
-                : null;
+                && filled($mapping->tongtu_primary_image_url)
+                // 优先用通途货品图；通途没匹配上或没图时，保留订单行自带的
+                // Shopify 货品图，避免列表出现无图。
+                ? (string) $mapping->tongtu_primary_image_url
+                : ($row->product_image_url ?: null);
             $row->match_status = $mapping?->status ?: LogisticsTongtuSkuMapping::STATUS_UNMATCHED;
             $row->match_status_label = $this->matchStatusLabel((string) $row->match_status);
         }
@@ -2001,7 +2198,7 @@ class LogisticsProductStatisticsService
             // switched from SKU to the product-level PCL identifier.
             'sku' => $tongtuProductCode !== '' ? $tongtuProductCode : ($fallbackSku ?: __('logistics.common.not_available')),
             'variant_count' => (int) ($row->tongtu_variant_count ?? 0),
-            'variant_skus' => array_values(array_filter(explode("\x1F", (string) ($row->tongtu_skus ?? '')))),
+            'variant_skus' => static::parseVariantSkus((string) ($row->tongtu_skus ?? '')),
             'category' => __('logistics.product_statistics.sold_product'),
             'image_url' => filled($row->product_image_url) ? (string) $row->product_image_url : null,
             'stores' => $stores,

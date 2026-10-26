@@ -34,6 +34,7 @@
         'procurement_inspections' => app(\App\Portals\ProductRequests\ProductRequestAccessService::class)->canInspectProcurement($user),
         'placement_reviews' => app(\App\Portals\ProductRequests\ProductRequestAccessService::class)->canReviewPlacement($user),
         'link_sku_manager' => app(\App\Portals\ProductRequests\ProductRequestAccessService::class)->canManageLinkSkus($user),
+        'existing_product_library' => app(\App\Portals\ProductRequests\ProductRequestAccessService::class)->canViewExistingProductLibrary($user),
         default => true,
     };
     $canAccessAssistantAnalyticsMenu = $menu->code !== 'assistant_shopify_analytics'
@@ -57,6 +58,8 @@
             <span id="placement-review-pending-badge" class="badge bg-yellow" style="margin-left:6px;">0</span>
             @elseif($menu->code === 'warehouse_acceptances')
             <span id="warehouse-pending-badge" class="badge bg-yellow" style="margin-left:6px;">0</span>
+            @elseif($menu->code === 'caigou_warehouse_weight_exceptions')
+            <span id="warehouse-weight-exception-badge" class="badge bg-yellow" style="margin-left:6px;">0</span>
             @endif
         </a>
     </li>

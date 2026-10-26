@@ -100,7 +100,7 @@
 <script src="{{ $portalOrigin }}/assets/erp/interaction-loading-20261011-1.js?v=20261012-1"></script>
 <script>$(function(){ $('[data-toggle="tooltip"]').tooltip({container:'body',placement:'top'}); });</script>
 @if(in_array($portal->code, ['yunying', 'caigou', 'cangku'], true))
-<script src="{{ $portalOrigin }}/assets/erp/procurement-pending-watcher.js?v=20261014-4"></script>
+<script src="{{ $portalOrigin }}/assets/erp/procurement-pending-watcher.js?v=20261026-1"></script>
 @endif
 @stack('scripts')
 @if ($watermarkScript !== null)

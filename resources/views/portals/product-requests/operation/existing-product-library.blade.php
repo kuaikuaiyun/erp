@@ -1,0 +1,25 @@
+@extends('portal.layout')
+
+@section('page_title', '已有产品库')
+
+@php($portalOrigin = rtrim(request()->getSchemeAndHttpHost(), '/'))
+@push('styles')<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261022-01">@endpush
+@push('scripts')<script src="{{ $portalOrigin }}/assets/erp/product-requests.js?v=20261018-20"></script>@endpush
+
+@section('content')
+<section class="content product-request-page">
+    <header class="content-header"><h1>已有产品库</h1><p>查看和搜索已录入的 PCL SKU 产品数据（只读）</p></header>
+    @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
+    @if(session('error'))<div class="alert alert-danger">{{ session('error') }}</div>@endif
+    <div class="box box-solid product-request-filter-box"><div class="box-header with-border"><h3 class="box-title"><i class="fa fa-filter"></i> 筛选条件</h3></div><div class="box-body"><form class="product-request-filter-form" method="get" action="{{ route('product-requests.operation.existing-product-library') }}" data-loading="region" data-loading-target=".product-request-table-box"><div class="product-request-filter-grid"><div class="product-request-filter-field"><label>关键词</label><input class="form-control" name="keyword" value="{{ $filters['keyword'] }}" placeholder="商品名称 / PCL编号 / SKU / 1688链接"></div><div class="product-request-filter-field"><label>每页条数</label><select class="form-control" name="per_page">@foreach([10, 20] as $perPage)<option value="{{ $perPage }}" @selected(($filters['per_page'] ?? 10) === $perPage)>{{ $perPage }}</option>@endforeach</select></div></div><div class="product-request-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> 搜索</button><a class="btn btn-default" href="{{ route('product-requests.operation.existing-product-library') }}">重置</a></div></form></div></div>
+    <div class="box box-solid product-request-table-box"><div class="box-header with-border product-request-list-toolbar"><h3 class="box-title">已有产品库</h3><span class="product-request-toolbar-spacer"></span><span style="font-size:12px;color:#999;"><i class="fa fa-lock"></i> 只读模式</span></div><div class="box-body table-responsive no-padding product-request-table-scroll"><table class="table table-hover product-request-table product-request-link-sku-table"><thead><tr><th class="product-request-sticky-left product-request-image-cell">商品</th><th>商品名称</th><th>PCL 编号</th><th class="product-request-sku-cell">SKU</th><th>1688 链接</th><th>更新时间</th><th class="product-request-sticky-right">操作</th></tr></thead><tbody>
+        @forelse($links as $link)
+            @php($linkImages = array_values((array) ($link->images ?? [])))
+            <tr><td class="product-request-sticky-left product-request-image-cell">@if($link->product_image)<img class="product-request-thumbnail" src="{{ route('product-requests.link-skus.product-image', $link) }}" alt="商品图片" data-product-request-image-preview data-product-request-image-alt="商品图片">@elseif($linkImages !== [])<img class="product-request-thumbnail" src="{{ route('product-requests.link-skus.image', [$link, 0]) }}" alt="商品图片" data-product-request-image-preview data-product-request-image-alt="商品图片">@else 暂无图片 @endif</td><td class="product-request-name-cell" title="{{ $nameMap[$link->supplier_url_hash] ?? '' }}">{{ $nameMap[$link->supplier_url_hash] ?? '未填写' }}</td><td>{{ $pclMap[$link->supplier_url_hash] ?? '未填写' }}</td><td class="product-request-sku-cell">@include('portals.product-requests.partials.sku-tags', ['skus' => $link->skus, 'empty' => '暂无 SKU'])</td><td class="product-request-link-wrap">@if($link->supplier_url)<a href="{{ $link->supplier_url }}" target="_blank" rel="noopener" title="{{ $link->supplier_url }}">{{ $link->supplier_url }}</a>@else 未填写 @endif</td><td>{{ optional($link->updated_at)->timezone('Asia/Shanghai')->format('Y-m-d H:i') }}</td><td class="product-request-sticky-right product-request-actions"><button type="button" class="btn btn-info btn-xs product-request-action-button" data-product-request-modal-url="{{ route('product-requests.operation.existing-product-library.detail', $link) }}"><i class="fa fa-eye"></i> 查看详情</button></td></tr>
+        @empty
+            <tr><td colspan="7" class="product-request-empty">暂无数据</td></tr>
+        @endforelse
+    </tbody></table></div>{{ $links->links('portals.product-requests.partials.pagination') }}</div>
+    @include('portals.product-requests.partials.modal')
+</section>
+@endsection

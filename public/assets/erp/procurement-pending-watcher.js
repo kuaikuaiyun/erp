@@ -5,12 +5,14 @@
     var OPERATION_API = '/api/product-requests/operation-pending-count';
     var PLACEMENT_REVIEW_API = '/api/placement-reviews/pending-count';
     var WAREHOUSE_API = '/api/warehouse-acceptances/pending-count';
+    var WAREHOUSE_WEIGHT_EXCEPTION_API = '/api/warehouse-weight-exceptions/pending-count';
     var POLL_INTERVAL = 60000;
 
     var PROCUREMENT_BADGE_ID = 'procurement-pending-badge';
     var OPERATION_BADGE_ID = 'operation-pending-badge';
     var PLACEMENT_REVIEW_BADGE_ID = 'placement-review-pending-badge';
     var WAREHOUSE_BADGE_ID = 'warehouse-pending-badge';
+    var WAREHOUSE_WEIGHT_EXCEPTION_BADGE_ID = 'warehouse-weight-exception-badge';
 
     // 已通知过的记录 ID 持久化到浏览器本地，刷新页面后不会重复提醒同一条记录
     var STORAGE_PREFIX = 'erpPendingNotified:';
@@ -201,6 +203,15 @@
         });
     }
 
+    function pollWarehouseWeightExceptions() {
+        fetchCount(WAREHOUSE_WEIGHT_EXCEPTION_API).then(function (data) {
+            if (!data || typeof data.count === 'undefined') {
+                return;
+            }
+            updateBadge(WAREHOUSE_WEIGHT_EXCEPTION_BADGE_ID, Number(data.count));
+        });
+    }
+
     function poll() {
         if (document.getElementById(PROCUREMENT_BADGE_ID)) {
             pollProcurement();
@@ -213,6 +224,9 @@
         }
         if (document.getElementById(WAREHOUSE_BADGE_ID)) {
             pollWarehouse();
+        }
+        if (document.getElementById(WAREHOUSE_WEIGHT_EXCEPTION_BADGE_ID)) {
+            pollWarehouseWeightExceptions();
         }
     }
 

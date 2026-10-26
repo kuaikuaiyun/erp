@@ -3,6 +3,25 @@
 
     var config = window.ErpProductRequestConfig || {};
     var editorModal = document.querySelector('[data-product-request-editor-modal]');
+
+    // 恢复 modal form 提交后的滚动/定位（由 submit handler 存入 sessionStorage）
+    try {
+        var savedTarget = window.sessionStorage.getItem('pr_restore_target');
+        window.sessionStorage.removeItem('pr_restore_target');
+        if (savedTarget) {
+            window.setTimeout(function () {
+                var node = null;
+                // savedTarget 可以是 "#link-sku-{id}" 选择器，或数字 scrollY 兜底
+                if (/^#/.test(savedTarget)) { node = document.querySelector(savedTarget); }
+                if (node && typeof node.scrollIntoView === 'function') {
+                    node.scrollIntoView({ block: 'center', behavior: 'instant' in window ? 'instant' : 'auto' });
+                } else {
+                    var savedTop = parseInt(savedTarget, 10);
+                    if (!isNaN(savedTop) && savedTop > 0) { window.scrollTo(0, savedTop); }
+                }
+            }, 80);
+        }
+    } catch (e) {}
     var editorContent = editorModal ? editorModal.querySelector('[data-product-request-modal-content]') : null;
 
     function notify(type, text) {
@@ -205,6 +224,17 @@
             form.appendChild(wrapper);
         }
         return wrapper;
+    }
+
+    function initializeRunnableToggle(root) {
+        var select = root.querySelector('#is_runnable');
+        var wrap = root.querySelector('#not-runnable-reason-wrap');
+        if (!select || !wrap) return;
+        var sync = function () {
+            wrap.style.display = select.value === '0' ? '' : 'none';
+        };
+        sync();
+        select.addEventListener('change', sync);
     }
 
     function initializeUploads(root) {
@@ -473,6 +503,21 @@
                 });
                 skuLine.appendChild(skuTags);
                 content.appendChild(skuLine);
+            }
+            if (record.is_runnable === false) {
+                var runnableBadge = document.createElement('span');
+                runnableBadge.className = 'product-request-badge link-review-pending';
+                runnableBadge.textContent = '⚠ 不可跑';
+                var reasonLine = document.createElement('span');
+                reasonLine.className = 'product-request-reuse-skus';
+                reasonLine.style.color = '#d9534f';
+                var reasonLabel = document.createElement('span');
+                reasonLabel.textContent = '原因：';
+                reasonLabel.style.color = '#888';
+                reasonLine.appendChild(reasonLabel);
+                reasonLine.appendChild(document.createTextNode(record.not_runnable_reason_label || record.not_runnable_reason || '未填写'));
+                content.appendChild(runnableBadge);
+                content.appendChild(reasonLine);
             }
             row.appendChild(content);
 
@@ -1290,6 +1335,11 @@
             reportInitializationError('upload initializer failed', error);
         }
         try {
+            initializeRunnableToggle(root);
+        } catch (error) {
+            reportInitializationError('runnable toggle initializer failed', error);
+        }
+        try {
             initializeSkuBuilder(root);
         } catch (error) {
             reportInitializationError('sku builder initializer failed', error);
@@ -1414,6 +1464,14 @@
             }
             return;
         }
+        // SKU 标签 +N 更多/收起
+        var skuToggle = event.target.closest ? event.target.closest('[data-toggle="sku-tags"]') : null;
+        if (skuToggle) {
+            event.preventDefault();
+            var tagsWrap = skuToggle.closest('.product-request-sku-tags');
+            if (tagsWrap) { tagsWrap.classList.toggle('sku-tags-expanded'); }
+            return;
+        }
         var deleteButton = event.target.closest ? event.target.closest('[data-product-request-delete]') : null;
         if (deleteButton) {
             event.preventDefault();
@@ -1435,6 +1493,11 @@
         var opener = event.target.closest ? event.target.closest('[data-product-request-modal-url]') : null;
         if (!opener) { return; }
         event.preventDefault();
+        // 存目标行，redirect 回来后滚回那一行
+        var row = opener.closest ? opener.closest('tr, .list-group-item, .product-request-reuse-item') : null;
+        if (row && row.id) {
+            try { window.sessionStorage.setItem('pr_restore_target', '#' + row.id); } catch (e) {}
+        }
         openEditor(opener.getAttribute('data-product-request-modal-url'));
     });
 
@@ -1467,6 +1530,12 @@
         var form = event.target;
         if (!form || !form.matches || !form.matches('[data-product-request-modal-form]')) { return; }
         event.preventDefault();
+        // 没在行里存过目标（inline form 等场景），兜底存 scrollY
+        try {
+            if (!window.sessionStorage.getItem('pr_restore_target')) {
+                window.sessionStorage.setItem('pr_restore_target', String(window.scrollY || window.pageYOffset || 0));
+            }
+        } catch (e) {}
         clearValidationErrors(form);
         var submitter = event.submitter || null;
         var isRejected = submitter && submitter.name === 'result' && submitter.value === 'rejected';

@@ -18,6 +18,11 @@ class ProductRequestAccessService
     public const PROCUREMENT_REVIEW_DEPARTMENT_SLUG = 'dept-000017';
     public const PROCUREMENT_ENTRY_DEPARTMENT_SLUG = 'dept-000016';
 
+    /** 运营部门根节点（含厦门/郑州/西安/深圳运营等子部门） */
+    public const OPERATION_DEPARTMENT_ROOT_SLUG = 'dept-000022';
+    /** 雨果团队（运营部门下独立团队，不可见已有产品库） */
+    public const HUGO_DEPARTMENT_SLUG = 'dept-000031';
+
     public function assertPortal(Portal $portal, string $expectedCode): void
     {
         abort_unless($portal->code === $expectedCode, 404);
@@ -142,6 +147,29 @@ class ProductRequestAccessService
     {
         return (string) $user->username === 'kky_boss'
             || $this->isProcurementTreeSupervisor($user);
+    }
+
+    /** 已有产品库（运营系统）：运营部门树内用户可见，雨果团队（dept-000031）不可见 */
+    public function canViewExistingProductLibrary(AdminUser $user): bool
+    {
+        if ($user->isAdministrator()) {
+            return true;
+        }
+
+        // 雨果团队不可见
+        if ($this->hasDirectDepartmentSlug($user, self::HUGO_DEPARTMENT_SLUG)) {
+            return false;
+        }
+
+        // 运营部门树内（含厦门/郑州/西安/深圳运营子部门）可见
+        $root = Department::business()->where('slug', self::OPERATION_DEPARTMENT_ROOT_SLUG)->first(['id']);
+        if (!$root) {
+            return false;
+        }
+
+        return $user->departments()
+            ->whereIn('id', $this->descendantDepartmentIds((int) $root->getKey()))
+            ->exists();
     }
 
     /** 是否入录审核部门树（dept-000015 及后代，含录入部门、审核部门）内的主管/副主管 */
