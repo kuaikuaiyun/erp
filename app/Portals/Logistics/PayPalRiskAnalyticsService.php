@@ -71,6 +71,31 @@ class PayPalRiskAnalyticsService
         ];
     }
 
+    /**
+     * Return only the metrics for the requested reporting period.
+     *
+     * The payment portal account board does not display cumulative metrics, so
+     * avoiding the second all-history scan keeps its server-side filters fast.
+     *
+     * @return array<string,mixed>
+     */
+    public function currentSummary(LogisticsPayPalAccount $account, array $filters): array
+    {
+        return [
+            'id' => (int) $account->getKey(),
+            'account_name' => (string) $account->account_name,
+            'merchant_id' => (string) ($account->merchant_id ?: '-'),
+            'account_email' => (string) ($account->account_email ?: '-'),
+            'masked_email' => $this->maskEmail($account->account_email),
+            'environment' => (string) $account->environment,
+            'is_enabled' => (bool) $account->is_enabled,
+            ...$this->paymentMetrics($account, $filters),
+            'last_imported_at' => $this->dateTime($account->last_imported_at),
+            'last_import_status' => (string) ($account->last_import_status ?: 'never'),
+            'last_import_message' => (string) ($account->last_import_message ?: __('logistics.paypal_risk.messages.no_import_yet')),
+        ];
+    }
+
     /** @param Collection<int,LogisticsPayPalAccount> $accounts
      *  @return array<string,float|int>
      */
@@ -99,19 +124,25 @@ class PayPalRiskAnalyticsService
         string $sort = '',
         string $direction = '',
         array $tabFilters = [],
+        bool $includeHistory = true,
+        int $perPage = 10,
     ): array {
-        $payload = ['summary' => $this->summary($account, $filters), 'tab' => $tab];
+        $perPage = in_array($perPage, [10, 20, 50, 100], true) ? $perPage : 50;
+        $payload = [
+            'summary' => $includeHistory ? $this->summary($account, $filters) : $this->currentSummary($account, $filters),
+            'tab' => $tab,
+        ];
 
         return match ($tab) {
-            'orders' => $payload + ['rows' => $this->orderRows($account, $filters, $page, $sort, $direction, 10, $tabFilters)],
-            'products' => $payload + ['rows' => $this->productRows($account, $filters, $page, $sort, $direction, 10, $tabFilters)],
+            'orders' => $payload + ['rows' => $this->orderRows($account, $filters, $page, $sort, $direction, $perPage, $tabFilters)],
+            'products' => $payload + ['rows' => $this->productRows($account, $filters, $page, $sort, $direction, $perPage, $tabFilters)],
             'refunds' => $payload + ['rows' => $this->paginate($this->sortRows(
                 $this->filterRows($this->refundRows($account, $filters), $tabFilters, ['refund_id', 'order_number', 'bill_numbers', 'store_name', 'source_reason', 'manual_reason', 'linked_disputes']),
                 $sort,
                 $direction,
                 ['refund_id', 'order_number', 'store_name', 'source', 'amount', 'source_reason', 'manual_reason', 'status', 'linked_disputes', 'happened_at', 'match_status'],
-            ), $page)],
-            'disputes' => $payload + ['rows' => $this->disputeRows($account, $filters, $page, $sort, $direction, 10, $tabFilters)],
+            ), $page, $perPage)],
+            'disputes' => $payload + ['rows' => $this->disputeRows($account, $filters, $page, $sort, $direction, $perPage, $tabFilters)],
             default => $payload + $this->overview($account, $filters),
         };
     }
@@ -223,7 +254,6 @@ class PayPalRiskAnalyticsService
             }
         }
 
-        $summary = $this->summary($account, $filters);
         $exceptions = array_merge(
             array_map(fn (array $refund): array => [
                 'order_id' => $refund['order_id'], 'order_detail_url' => $refund['order_detail_url'], 'order_number' => $refund['order_number'],
@@ -398,6 +428,7 @@ class PayPalRiskAnalyticsService
                     'order_id' => $order?->getKey(),
                     'order_detail_url' => $order ? route('logistics.orders.detail', $order) : null,
                     'dispute_id' => (string) $dispute->dispute_id,
+                    'payment_transaction_id' => (string) ($dispute->disputed_transaction_id ?: '-'),
                     'match_status' => $order instanceof LogisticsOrder ? __('logistics.paypal_risk.detail.matched') : __('logistics.paypal_risk.detail.unmatched'),
                     'order_number' => (string) ($order?->shopify_order_number ?: '-'),
                     'bill_numbers' => $this->orderBillNumbers($order),
@@ -418,9 +449,9 @@ class PayPalRiskAnalyticsService
                     'sort_time' => $dispute->dispute_created_at?->timestamp ?? 0,
                 ];
             })->all();
-        $rows = $this->filterRows($rows, $tabFilters, ['dispute_id', 'order_number', 'bill_numbers', 'store_name', 'reason', 'stage', 'status', 'outcome', 'linked_refunds', 'match_status']);
+        $rows = $this->filterRows($rows, $tabFilters, ['dispute_id', 'payment_transaction_id', 'order_number', 'bill_numbers', 'store_name', 'reason', 'stage', 'status', 'outcome', 'linked_refunds', 'match_status']);
 
-        return $this->paginate($this->sortRows($rows, $sort, $direction, ['dispute_id', 'match_status', 'order_number', 'bill_numbers', 'store_name', 'amount', 'reason', 'stage', 'status', 'happened_at', 'outcome', 'seller_response_due_at', 'updated_at', 'linked_refunds']), $page, $perPage);
+        return $this->paginate($this->sortRows($rows, $sort, $direction, ['dispute_id', 'payment_transaction_id', 'match_status', 'order_number', 'bill_numbers', 'store_name', 'amount', 'reason', 'stage', 'status', 'happened_at', 'outcome', 'seller_response_due_at', 'updated_at', 'linked_refunds']), $page, $perPage);
     }
 
     private function orderBillNumbers(?LogisticsOrder $order): string

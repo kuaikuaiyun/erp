@@ -65,4 +65,9 @@ class LogisticsPayPalAccount extends Model
     {
         return $this->hasMany(LogisticsPayPalImport::class, 'logistics_paypal_account_id');
     }
+
+    public function balanceSnapshots(): HasMany
+    {
+        return $this->hasMany(LogisticsPayPalBalanceSnapshot::class, 'logistics_paypal_account_id');
+    }
 }

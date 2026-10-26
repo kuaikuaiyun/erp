@@ -160,6 +160,10 @@ class LogisticsProductStatisticsService
     /** @param array<string,mixed> $filters */
     private function canUseLightweightPageQuery(array $filters): bool
     {
+        if (!empty($filters['only_abnormal'])) {
+            return false;
+        }
+
         return in_array(trim((string) ($filters['sort'] ?? '')), [
             '', 'name', 'sku', 'product_code', 'shop_count', 'sales', 'revenue',
         ], true);
@@ -441,10 +445,108 @@ class LogisticsProductStatisticsService
                 'variants' => $this->variantDetailPage($filters, $key, $options),
                 'refunds' => $this->refundDetailPage($filters, $key, $options),
                 'disputes' => $this->disputeDetailPage($filters, $key, $options),
+                'first_renewal' => $this->firstRenewalDetailPage($filters, $key),
                 'paypal_orders' => $this->orderDetailPage($filters, $key, $options, 'paypal'),
                 'credit_card_orders' => $this->orderDetailPage($filters, $key, $options, 'credit_card'),
                 default => $this->orderDetailPage($filters, $key, $options),
             },
+        ];
+    }
+
+    /**
+     * Build the subscription lifecycle from the same logistics orders used by
+     * product statistics. No stage is guessed when the subscription fields are
+     * absent: those orders remain in the one-time group.
+     *
+     * @param array<string,mixed> $filters
+     * @return array<string,mixed>
+     */
+    private function firstRenewalDetailPage(array $filters, string $key): array
+    {
+        $orderIds = $this->detailOrderIdsQuery($filters, $key)->pluck('order_id')
+            ->map(static fn ($id): int => (int) $id)->all();
+        $rows = collect($this->hydratedOrderRows($filters, $key, $orderIds))->keyBy('order_id');
+        $orders = LogisticsOrder::query()->whereIn('id', $orderIds)
+            ->orderBy('paid_at')->orderBy('id')->get();
+
+        $groups = [];
+        foreach (['one_time', 'first_charge', 'first_renewal', 'later_renewal'] as $group) {
+            $groups[$group] = [
+                'order_count' => 0, 'unit_count' => 0.0, 'received_amount' => 0.0,
+                'refund_count' => 0, 'refund_amount' => 0.0, 'dispute_count' => 0,
+                'realised_loss' => 0.0,
+            ];
+        }
+
+        $chains = [];
+        $seenRecurring = [];
+        $subscriptionFirstCount = 0;
+        $linkedSubscriptionCount = 0;
+        foreach ($orders as $order) {
+            $row = $rows->get((int) $order->getKey(), []);
+            $type = trim((string) $order->subscription_type);
+            $origin = trim((string) $order->subscription_origin_order_id);
+            $isSubscription = $origin !== '' || ($type !== '' && !str_contains($type, '无订阅'));
+            if (!$isSubscription) {
+                $group = 'one_time';
+            } elseif ($origin === '') {
+                $group = 'first_charge';
+                $subscriptionFirstCount++;
+            } else {
+                $seenRecurring[$origin] = ($seenRecurring[$origin] ?? 0) + 1;
+                preg_match('/(\d+)/u', $type, $renewalMatch);
+                $renewalNumber = isset($renewalMatch[1]) ? (int) $renewalMatch[1] : $seenRecurring[$origin];
+                $group = $renewalNumber <= 1 ? 'first_renewal' : 'later_renewal';
+                $linkedSubscriptionCount++;
+            }
+
+            $refundAmount = (float) ($row['actual_refund'] ?? 0);
+            $groups[$group]['order_count']++;
+            $groups[$group]['unit_count'] += (float) ($row['quantity'] ?? 0);
+            $groups[$group]['received_amount'] += (float) ($row['revenue'] ?? 0);
+            $groups[$group]['refund_count'] += $refundAmount > 0 ? 1 : 0;
+            $groups[$group]['refund_amount'] += $refundAmount;
+            $groups[$group]['dispute_count'] += (int) ($row['paypal_dispute_count'] ?? 0);
+            $groups[$group]['realised_loss'] += $refundAmount;
+
+            if ($isSubscription) {
+                $chainKey = $origin !== '' ? $origin : (string) ($order->shopify_order_id ?: $order->getKey());
+                $chains[$chainKey] ??= ['origin' => $origin !== '' ? $origin : (string) ($order->shopify_order_number ?: $order->getKey()), 'orders' => []];
+                $chains[$chainKey]['orders'][] = [
+                    'order_id' => (int) $order->getKey(),
+                    'order_number' => (string) ($order->shopify_order_number ?: $order->getKey()),
+                    'stage' => $group,
+                    'paid_at' => $this->dateTime($order->paid_at),
+                    'amount' => round((float) ($row['revenue'] ?? 0), 4),
+                    'refund_amount' => round($refundAmount, 4),
+                    'link_status' => (string) ($order->subscription_link_status ?: ''),
+                ];
+            }
+        }
+
+        foreach ($groups as &$group) {
+            $group['unit_count'] = round($group['unit_count'], 4);
+            $group['received_amount'] = round($group['received_amount'], 4);
+            $group['refund_amount'] = round($group['refund_amount'], 4);
+            $group['realised_loss'] = round($group['realised_loss'], 4);
+            $group['refund_rate'] = $group['received_amount'] > 0 ? round($group['refund_amount'] / $group['received_amount'] * 100, 2) : 0.0;
+            $group['dispute_rate'] = $group['order_count'] > 0 ? round($group['dispute_count'] / $group['order_count'] * 100, 2) : 0.0;
+        }
+        unset($group);
+
+        $firstRenewalCount = $groups['first_renewal']['order_count'];
+        $laterRenewalCount = $groups['later_renewal']['order_count'];
+
+        return [
+            'groups' => $groups,
+            'metrics' => [
+                'renewal_success_rate' => $subscriptionFirstCount > 0 ? round($firstRenewalCount / $subscriptionFirstCount * 100, 2) : 0.0,
+                'first_renewal_retention' => $subscriptionFirstCount > 0 ? round($firstRenewalCount / $subscriptionFirstCount * 100, 2) : 0.0,
+                'later_renewal_rate' => $firstRenewalCount > 0 ? round($laterRenewalCount / $firstRenewalCount * 100, 2) : 0.0,
+                'link_coverage_rate' => ($subscriptionFirstCount + $linkedSubscriptionCount) > 0
+                    ? round($linkedSubscriptionCount / ($subscriptionFirstCount + $linkedSubscriptionCount) * 100, 2) : 0.0,
+            ],
+            'chains' => array_values($chains),
         ];
     }
 
@@ -1204,7 +1306,7 @@ class LogisticsProductStatisticsService
      */
     private function paginateDetailQuery(object $query, array $options): array
     {
-        $perPage = in_array((int) ($options['per_page'] ?? 10), [5, 10, 20], true) ? (int) $options['per_page'] : 10;
+        $perPage = in_array((int) ($options['per_page'] ?? 10), [5, 10, 20, 50, 100], true) ? (int) $options['per_page'] : 10;
         $countQuery = clone $query;
         if (method_exists($countQuery, 'reorder')) {
             $countQuery->reorder();
@@ -1366,6 +1468,12 @@ class LogisticsProductStatisticsService
         $result = $this->database()->query()->fromSub($statistics, 'product_statistics')->select('product_statistics.*');
         if (!empty($filters['require_tongtu_match'])) {
             $result->whereRaw("NULLIF(TRIM(product_statistics.tongtu_product_code), '') IS NOT NULL");
+        }
+        if (!empty($filters['only_abnormal'])) {
+            $result->where(function (Builder $query): void {
+                $query->where('product_statistics.combined_refund_order_count', '>', 0)
+                    ->orWhere('product_statistics.paypal_dispute_count', '>', 0);
+            });
         }
 
         return $result;
@@ -1785,13 +1893,12 @@ class LogisticsProductStatisticsService
     /** @param array<string,mixed> $filters */
     private function overallSummaryFromQuery(Builder $products, array $filters): array
     {
-        $productStatistics = $this->itemAggregateQuery($filters);
-        $aggregate = $this->database()->query()->fromSub($productStatistics, 'product_statistics')
+        $aggregate = $this->database()->query()->fromSub(clone $products, 'filtered_products')
             ->selectRaw('COUNT(*) as product_count')
-            ->selectRaw('COALESCE(SUM(product_statistics.sales), 0) as sales')
-            ->selectRaw('COALESCE(SUM(product_statistics.revenue), 0) as revenue')
+            ->selectRaw('COALESCE(SUM(filtered_products.sales), 0) as sales')
+            ->selectRaw('COALESCE(SUM(filtered_products.revenue), 0) as revenue')
             ->first();
-        $refunds = $this->uniqueRefundSummaryForBaseFilters($filters);
+        $refunds = $this->uniqueRefundSummary($products, $filters);
         $revenue = round((float) ($aggregate->revenue ?? 0), 4);
         $actualRefunds = round((float) $refunds['paypal'] + (float) $refunds['credit_card'], 4);
 
@@ -2550,6 +2657,9 @@ class LogisticsProductStatisticsService
             'store' => (string) ($order->store_name ?: __('logistics.common.unassigned_store')),
             'shopify_order_number' => (string) ($order->shopify_order_number ?: __('logistics.common.not_available')),
             'bill_number' => (string) ($order->bill_number ?: __('logistics.common.not_available')),
+            'subscription_type' => (string) ($order->subscription_type ?: __('logistics.common.not_available')),
+            'original_payment_amount' => round((float) $order->paid_amount_usd, 4),
+            'payment_status' => (string) ($order->payment_status ?: __('logistics.common.not_available')),
             'refund_number' => (string) $refund->refund_transaction_id,
             'amount' => $this->paypalRefundAmount($refund),
             'refund_reason' => (string) ($refund->manual_reason ?: $refund->refund_reason ?: $refund->eventLabel()),
@@ -2574,6 +2684,9 @@ class LogisticsProductStatisticsService
             'store' => (string) ($order->store_name ?: __('logistics.common.unassigned_store')),
             'shopify_order_number' => (string) ($order->shopify_order_number ?: __('logistics.common.not_available')),
             'bill_number' => (string) ($order->bill_number ?: __('logistics.common.not_available')),
+            'subscription_type' => (string) ($order->subscription_type ?: __('logistics.common.not_available')),
+            'original_payment_amount' => round((float) $order->paid_amount_usd, 4),
+            'payment_status' => (string) ($order->payment_status ?: __('logistics.common.not_available')),
             'refund_number' => (string) $refund->refund_reference,
             'amount' => round((float) $refund->refund_amount_usd, 4),
             'refund_reason' => (string) ($refund->refund_reason ?: __('logistics.common.not_available')),

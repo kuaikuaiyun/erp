@@ -66,6 +66,8 @@ class PayPalImportController extends Controller
             'source_responses.dispute_search' => ['required', 'array'],
             'source_responses.dispute_search.list_responses' => ['present', 'array'],
             'source_responses.dispute_search.detail_responses' => ['present', 'array'],
+            'source_responses.balance_snapshot' => ['sometimes', 'nullable', 'array'],
+            'source_responses.balance_snapshot.balances' => ['required_with:source_responses.balance_snapshot', 'array'],
             'collection_summary' => ['required', 'array'],
             'collection_summary.transactions' => ['required', 'integer', 'min:0'],
             'collection_summary.disputes' => ['required', 'integer', 'min:0'],
