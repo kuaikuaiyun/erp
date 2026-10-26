@@ -8,6 +8,7 @@ use App\Models\LogisticsPayPalDisputeRefund;
 use App\Models\LogisticsPayPalRefund;
 use App\Models\LogisticsPayPalImport;
 use App\Models\LogisticsPayPalTransaction;
+use App\Models\LogisticsPayPalBalanceSnapshot;
 use Carbon\Carbon;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Arr;
@@ -33,6 +34,7 @@ class PayPalImportService
         $transactions = $this->sourceResponses->transactions($payload);
         $disputes = $this->sourceResponses->disputes($payload);
         $errors = $this->sourceResponses->errors($payload['errors'] ?? []);
+        $balanceCount = $this->persistBalances($account, $import, $payload);
         $paymentCount = 0;
         $paymentMatched = 0;
         $paymentUnmatched = 0;
@@ -171,8 +173,50 @@ class PayPalImportService
             'matched' => $matched,
             'unmatched' => $unmatched,
             'errors' => count($allErrors),
+            'balances' => $balanceCount,
             'message' => $message,
         ];
+    }
+
+    private function persistBalances(LogisticsPayPalAccount $account, LogisticsPayPalImport $import, array $payload): int
+    {
+        $snapshot = Arr::get($payload, 'source_responses.balance_snapshot');
+        if (!is_array($snapshot) || !is_array($snapshot['balances'] ?? null)) {
+            return 0;
+        }
+
+        $count = 0;
+        foreach ($snapshot['balances'] as $balance) {
+            if (!is_array($balance)) {
+                continue;
+            }
+            $currency = strtoupper(trim((string) ($balance['currency'] ?? Arr::get($balance, 'available_balance.currency_code', ''))));
+            if (!preg_match('/^[A-Z]{3}$/', $currency)) {
+                continue;
+            }
+            LogisticsPayPalBalanceSnapshot::query()->updateOrCreate([
+                'upload_id' => $import->upload_id,
+                'currency_code' => $currency,
+            ], [
+                'logistics_paypal_account_id' => $account->getKey(),
+                'logistics_paypal_import_id' => $import->getKey(),
+                'merchant_id' => $account->merchant_id,
+                'total_balance' => $this->money(Arr::get($balance, 'total_balance.value')),
+                'available_balance' => $this->money(Arr::get($balance, 'available_balance.value')),
+                'withheld_balance' => $this->money(Arr::get($balance, 'withheld_balance.value')),
+                'as_of_time' => $this->dateTime($snapshot['as_of_time'] ?? null),
+                'last_refresh_time' => $this->dateTime($snapshot['last_refresh_time'] ?? null),
+                'raw_payload' => $balance,
+            ]);
+            $count++;
+        }
+
+        return $count;
+    }
+
+    private function money(mixed $value): ?string
+    {
+        return is_numeric($value) ? number_format((float) $value, 8, '.', '') : null;
     }
 
     private function persistPayment(LogisticsPayPalAccount $account, array $detail): bool

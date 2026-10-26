@@ -16,6 +16,7 @@ use App\Portals\Logistics\Http\Controllers\ShopifyWebhookController;
 use App\Portals\Operation\Http\Controllers\OperationDomainStoreController;
 use App\Portals\ProductRequests\Http\Controllers\ProductRequestController;
 use App\Portals\Aikaipin\Http\Controllers\ProductLibraryController;
+use App\Portals\Payment\Http\Controllers\PaymentPortalController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [PortalEntryController::class, 'root'])->name('portal.root');
@@ -142,6 +143,17 @@ Route::get('/warehouse-weight-exceptions/{id}/physical-image', [WarehouseProduct
 Route::get('/warehouse-weight-exceptions', [WarehouseWeightExceptionController::class, 'index'])->name('caigou.warehouse-weight-exceptions.index');
 Route::post('/warehouse-weight-exceptions/{id}/resolve', [WarehouseWeightExceptionController::class, 'resolve'])->name('caigou.warehouse-weight-exceptions.resolve');
 Route::get('/product-library', [ProductLibraryController::class, 'index'])->name('aikaipin.product-library.index');
+Route::get('/account-risk', [PaymentPortalController::class, 'accountRisk'])->name('payment.account-risk.index');
+Route::post('/account-risk/accounts', [PaymentPortalController::class, 'storeAccountRiskAccount'])->name('payment.account-risk.accounts.store');
+Route::get('/account-risk/accounts/{account}/detail', [PaymentPortalController::class, 'accountRiskDetail'])->name('payment.account-risk.accounts.detail');
+Route::get('/product-risk-profit', [PaymentPortalController::class, 'productRiskProfit'])->name('payment.product-risk-profit.index');
+Route::get('/product-risk-profit/detail', [PaymentPortalController::class, 'productRiskProfitDetail'])->name('payment.product-risk-profit.detail');
+Route::get('/product-alerts', [PaymentPortalController::class, 'productAlerts'])->name('payment.product-alerts.index');
+Route::put('/product-alerts/rules', [PaymentPortalController::class, 'updateProductAlertRules'])->name('payment.product-alerts.rules.update');
+Route::put('/product-alerts/{alert}/assignment', [PaymentPortalController::class, 'assignProductAlert'])->where('alert', 'PW-[0-9]+')->name('payment.product-alerts.assignment.update');
+Route::get('/product-alerts/{alert}', [PaymentPortalController::class, 'productAlertDetail'])->where('alert', 'PW-[0-9]+')->name('payment.product-alerts.show');
+Route::get('/payment-orders', [PaymentPortalController::class, 'paymentOrders'])->name('payment.orders.index');
+Route::get('/payment-orders/detail', [PaymentPortalController::class, 'paymentOrderDetail'])->name('payment.orders.detail');
 Route::post('/product-library', [ProductLibraryController::class, 'storeProduct'])->name('aikaipin.product-library.store');
 Route::get('/product-library/{product}/edit-data', [ProductLibraryController::class, 'editProduct'])->name('aikaipin.product-library.edit');
 Route::put('/product-library/{product}', [ProductLibraryController::class, 'updateProduct'])->name('aikaipin.product-library.update');

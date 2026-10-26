@@ -7,6 +7,8 @@ use App\Models\Portal;
 use App\Portal\Services\PortalAccessService;
 use App\Portal\Services\PortalDomainService;
 use App\Portal\Services\PortalReturnUrlService;
+use App\Portals\Payment\Http\Controllers\PaymentPortalController;
+use App\Portals\Payment\PaymentPortalService;
 use Encore\Admin\Facades\Admin;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -128,6 +130,10 @@ class PortalEntryController extends Controller
 
         $portal->load('menus');
 
+        if ($isHome && app(PaymentPortalService::class)->isPaymentPortal($portal)) {
+            return app(PaymentPortalController::class)->workbenchFromContext($context);
+        }
+
         if ($isHome) {
             return response()->view('portal.home', [
                 'portal' => $portal,
@@ -187,4 +193,3 @@ class PortalEntryController extends Controller
         ], $type === 'maintenance' ? 503 : 200);
     }
 }
-

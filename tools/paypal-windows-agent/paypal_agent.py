@@ -523,6 +523,26 @@ def collect_dispute_responses(
     return result, len(list_items), errors
 
 
+def collect_balance_snapshot(client: PayPalClient) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    try:
+        body = client.get(
+            "/v1/reporting/balances",
+            {},
+            "PayPal 账户余额查询失败",
+        )
+        balances = body.get("balances")
+        balance_count = len(balances) if isinstance(balances, list) else 0
+        logging.info("PayPal 账户余额采集成功：%d 个币种。", balance_count)
+        return body, None
+    except RuntimeError as exception:
+        error = {
+            "source": "balance_snapshot",
+            "message": str(exception),
+        }
+        logging.warning("PayPal 账户余额采集失败，不影响交易和纠纷继续上传：%s", exception)
+        return None, error
+
+
 def collect_payload() -> dict[str, Any]:
     start, end = sync_range()
     client = PayPalClient()
@@ -534,6 +554,7 @@ def collect_payload() -> dict[str, Any]:
         end,
     )
     dispute_responses, dispute_count, dispute_errors = collect_dispute_responses(client, start, end)
+    balance_snapshot, balance_error = collect_balance_snapshot(client)
     errors = [*transaction_errors, *dispute_errors]
 
     upload_id = str(uuid.uuid4())
@@ -549,14 +570,17 @@ def collect_payload() -> dict[str, Any]:
                 "segments": transaction_responses,
             },
             "dispute_search": dispute_responses,
+            "balance_snapshot": balance_snapshot,
         },
         "collection_summary": {
             "transactions": transaction_count,
             "disputes": dispute_count,
             "errors": len(errors),
+            "balance_collected": balance_snapshot is not None,
+            "balance_error": balance_error,
         },
         "errors": errors,
-        "collector": {"name": "KKY PayPal Windows Agent", "version": "2.0"},
+        "collector": {"name": "KKY PayPal Windows Agent", "version": "2.1"},
     }
 
 

@@ -45,7 +45,9 @@ logs：每日运行日志。
 state.json：最近一次完整成功的时间游标。
 
 JSON 使用 schema_version=2，保存交易查询每个分段、每个分页的完整响应，
-以及纠纷列表分页和逐条纠纷详情的完整响应。文件中不包含 Access Token、
+以及纠纷列表分页、逐条纠纷详情和官方余额快照的完整响应。余额快照包含
+可用金额、暂不可用金额及 PayPal 官方数据时间；余额采集失败不会阻断其他数据上传。
+文件中不包含 Access Token、
 Client Secret、ERP 接收密钥或 Authorization 请求头。
 
 五、注意
@@ -54,7 +56,7 @@ Client Secret、ERP 接收密钥或 Authorization 请求头。
 3. 返回 413 时，需要检查宝塔/Nginx client_max_body_size 和 ERP 的 LOGISTICS_PAYPAL_IMPORT_MAX_BYTES。
 4. config.json 包含明文密钥，只保存在对应 PayPal 账号的 VPS，不要在不同账号 VPS 之间混用。
 5. 更新 EXE 时只替换 paypal_agent.exe，不要覆盖已填写的 config.json、state.json、pending 和 archive。
-6. schema_version=2 不兼容旧 ERP 接收代码，必须先上传新版 ERP 文件，再更换新版 EXE。
+6. 必须先上传新版 ERP 文件并执行数据库迁移，再更换新版 EXE；未升级的旧 EXE 可继续上传原有数据。
 
 六、开发机重新打包
 开发机需要 Python，VPS 不需要。右键使用 PowerShell 运行 build_exe.ps1，成品会生成到 release 目录。
