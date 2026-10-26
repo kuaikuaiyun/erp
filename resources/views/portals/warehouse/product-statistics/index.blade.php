@@ -320,23 +320,23 @@
                             <td class="wh-real-images-cell" data-pcl-code="{{ $product['product_code'] ?? '' }}" data-link-sku-id="{{ $product['link_sku_id'] ?? '' }}">
                                 <div class="wh-real-images-grid">
                                     @if(!empty($product['link_sku_images_urls']))
+                                        {{-- 已匹配实拍图：只读展示，不可删不可传 --}}
                                         @foreach($product['link_sku_images_urls'] as $idx => $url)
                                             <span class="wh-real-image-item">
                                                 <img src="{{ $url }}" alt="实拍图{{ $idx + 1 }}" class="wh-real-image-thumb erp-zoomable" loading="lazy" decoding="async" title="点击放大查看" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">
-                                                <button type="button" class="wh-real-image-delete" data-index="{{ $idx }}" title="删除此图">
-                                                    <i class="fa fa-times"></i>
-                                                </button>
                                             </span>
                                         @endforeach
+                                    @else
+                                        {{-- 无实拍图：可上传（点击 / 拖拽 / 粘贴） --}}
+                                        <label class="wh-upload-zone" title="点击选择文件、拖拽图片到此处，或 Ctrl+V 粘贴">
+                                            <i class="fa fa-cloud-upload wh-upload-icon"></i>
+                                            <div class="wh-upload-hint-text">拖拽 / <strong>粘贴图片</strong> / 点击选择</div>
+                                            <button type="button" class="wh-paste-btn wh-paste-trigger" title="设为粘贴目标后 Ctrl+V 粘贴">
+                                                <i class="fa fa-clipboard wh-clip-icon"></i> 粘贴图片 <kbd>Ctrl+V</kbd>
+                                            </button>
+                                            <input type="file" name="image" accept="image/jpeg,image/jpg,image/png,image/webp" class="wh-real-image-input" style="display:none;">
+                                        </label>
                                     @endif
-                                    <label class="wh-upload-zone" title="点击选择文件、拖拽图片到此处，或 Ctrl+V 粘贴">
-                                        <i class="fa fa-cloud-upload wh-upload-icon"></i>
-                                        <div class="wh-upload-hint-text">拖拽 / <strong>粘贴图片</strong> / 点击选择</div>
-                                        <button type="button" class="wh-paste-btn wh-paste-trigger" title="设为粘贴目标后 Ctrl+V 粘贴">
-                                            <i class="fa fa-clipboard wh-clip-icon"></i> 粘贴图片 <kbd>Ctrl+V</kbd>
-                                        </button>
-                                        <input type="file" name="image" accept="image/jpeg,image/jpg,image/png,image/webp" class="wh-real-image-input" style="display:none;">
-                                    </label>
                                 </div>
                             </td>
                             <td>
@@ -544,17 +544,14 @@
                 var urls = images.map(function (_, i) {
                     return '/link-sku-manager/' + linkSkuId + '/images/' + i;
                 });
-                // 先保存 upload zone 节点
-                var uploadZone = grid.querySelector('.wh-upload-zone');
                 grid.innerHTML = '';
+                // 只渲染图片（只读），不再附加上传区——有图即锁定
                 images.forEach(function (imgPath, idx) {
                     var item = document.createElement('span');
                     item.className = 'wh-real-image-item';
-                    item.innerHTML = '<img src="' + urls[idx] + '" alt="实拍图' + (idx + 1) + '" class="wh-real-image-thumb erp-zoomable" loading="lazy" decoding="async" title="点击放大查看" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">'
-                        + '<button type="button" class="wh-real-image-delete" data-index="' + idx + '" title="删除此图"><i class="fa fa-times"></i></button>';
+                    item.innerHTML = '<img src="' + urls[idx] + '" alt="实拍图' + (idx + 1) + '" class="wh-real-image-thumb erp-zoomable" loading="lazy" decoding="async" title="点击放大查看" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">';
                     grid.appendChild(item);
                 });
-                if (uploadZone) grid.appendChild(uploadZone);
             }
 
             // ==== 点击：文件选择 ====
