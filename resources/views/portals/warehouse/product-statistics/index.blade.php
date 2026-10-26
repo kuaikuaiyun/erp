@@ -328,14 +328,14 @@
                                         @endforeach
                                     @else
                                         {{-- 无实拍图：可上传（点击 / 拖拽 / 粘贴） --}}
-                                        <label class="wh-upload-zone" title="点击选择文件、拖拽图片到此处，或 Ctrl+V 粘贴">
+                                        <div class="wh-upload-zone wh-upload-trigger" title="点击选择文件、拖拽图片到此处，或 Ctrl+V 粘贴">
                                             <i class="fa fa-cloud-upload wh-upload-icon"></i>
                                             <div class="wh-upload-hint-text">拖拽 / <strong>粘贴图片</strong> / 点击选择</div>
                                             <button type="button" class="wh-paste-btn wh-paste-trigger" title="设为粘贴目标后 Ctrl+V 粘贴">
                                                 <i class="fa fa-clipboard wh-clip-icon"></i> 粘贴图片 <kbd>Ctrl+V</kbd>
                                             </button>
-                                            <input type="file" name="image" accept="image/jpeg,image/jpg,image/png,image/webp" class="wh-real-image-input" style="display:none;">
-                                        </label>
+                                        </div>
+                                        <input type="file" name="image" accept="image/jpeg,image/jpg,image/png,image/webp" class="wh-real-image-input" style="display:none;">
                                     @endif
                                 </div>
                             </td>
@@ -554,7 +554,20 @@
                 });
             }
 
-            // ==== 点击：文件选择 ====
+            // ==== 点击虚线上传区 → 触发隐藏 input（排除点击粘贴按钮）====
+            document.addEventListener('click', function (e) {
+                var pasteBtn = e.target.closest('.wh-paste-trigger');
+                if (pasteBtn) return; // 粘贴按钮自己处理
+                var trigger = e.target.closest('.wh-upload-trigger');
+                if (!trigger) return;
+                var cell = trigger.closest('.wh-real-images-cell');
+                if (!cell) return;
+                var input = cell.querySelector('.wh-real-image-input');
+                if (!input) return;
+                input.click();
+            });
+
+            // ==== change：文件选择后上传 ====
             document.addEventListener('change', function (e) {
                 var input = e.target.closest('.wh-real-image-input');
                 if (!input || !input.files || !input.files[0]) return;
