@@ -1823,7 +1823,8 @@ class ProductRequestController extends Controller
                         ->when($matchedHashes->isNotEmpty(), fn (Builder $inner): Builder => $inner->orWhereIn('supplier_url_hash', $matchedHashes));
                 });
             })
-            ->orderByDesc('updated_at')
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
             ->paginate($perPage)
             ->withQueryString();
 
