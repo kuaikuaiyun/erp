@@ -40,6 +40,8 @@
             background: #eef4fb; color: #2868b0; font-family: Consolas, monospace; font-size: 12px;
             max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle;
         }
+        .wh-code-sku { background: #fff7e6; color: #b85b00; border: 1px solid #ffe0a3; }
+        .wh-cell-label { font-size: 11px; color: #90a0b0; margin-bottom: 2px; letter-spacing: 0.5px; }
         .wh-name { color: #2d3a4a; font-weight: 600; }
         .wh-weight-badge {
             display: inline-block; min-width: 48px; padding: 3px 10px; border-radius: 12px;
@@ -59,7 +61,10 @@
         }
         .wh-fill-list { display: flex; flex-direction: column; gap: 10px; max-height: 55vh; overflow-y: auto; padding-right: 4px; }
         .wh-fill-item { padding: 10px 12px; border: 1px solid #e6ebf2; border-radius: 6px; background: #fbfdff; }
-        .wh-fill-item-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .wh-fill-item-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .wh-fill-head-left { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+        .wh-fill-head-label { font-size: 11px; color: #90a0b0; font-weight: 600; letter-spacing: 0.5px; padding: 2px 6px; background: #f0f3f8; border-radius: 3px; }
+        .wh-fill-head-right { display: flex; align-items: center; gap: 6px; }
         .wh-fill-sku-tag {
             display: inline-block; max-width: 50%; padding: 2px 9px; border: 1px solid #cfe0ee;
             border-radius: 12px; background: #eef6fc; color: #2f7ba8; font-size: 12px;
@@ -84,6 +89,25 @@
         .wh-fill-upload-trigger:hover { background: #eaf4fb; border-color: #2f7ba8; color: #2f7ba8; }
         .wh-fill-physical-preview { min-width: 72px; height: 72px; display: flex; align-items: center; justify-content: center; border: 1px dashed #dfe6ed; border-radius: 4px; background: #fafbfc; }
         .wh-fill-physical-remove { font-size: 12px; color: #c0392b; cursor: pointer; }
+        /* 列表列：SKU 与重量 */
+        #warehouse-product-statistics-table .product-statistics-variant-summary { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
+        #warehouse-product-statistics-table .wh-count-badge { font-size: 11px; font-weight: 600; padding: 2px 7px; }
+        .wh-sku-weight-list { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+        .wh-sku-weight-item {
+            display: flex; align-items: center; justify-content: space-between; gap: 8px;
+            max-width: 330px; padding: 3px 8px; border-radius: 4px;
+            background: #f6f9fc; border: 1px solid #e8eef5;
+        }
+        .wh-sku-weight-name {
+            font-family: Consolas, monospace; font-size: 12px; color: #2868b0;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .wh-sku-weight-value {
+            flex: 0 0 auto; padding: 1px 8px; border-radius: 10px;
+            background: #e8f5e9; color: #2e7d32; font-size: 12px; font-weight: 700; white-space: nowrap;
+        }
+        .wh-sku-weight-value.is-missing { background: #fdecea; color: #c62828; font-weight: 600; }
+        .wh-sku-weight-more { font-size: 11px; color: #90a0b0; padding-left: 2px; }
     </style>
 @endpush
 
@@ -161,13 +185,33 @@
                             </td>
                             <td>
                                 <div class="product-statistics-variant-summary">
-                                    <span class="label label-info" title="{{ $labels['variantCount'] }}">
-                                        {{ $product['variant_count'] }} 个规格
+                                    <span class="label label-info wh-count-badge" title="{{ $labels['variantCount'] }}">
+                                        {{ $product['variant_count'] }} 个 SKU
                                     </span>
                                     @if(!empty($product['variant_skus']))
-                                        <span class="product-statistics-variant-preview text-muted" title="{{ implode('，', $product['variant_skus']) }}">
-                                            {{ implode('，', array_slice($product['variant_skus'], 0, 2)) }}{{ count($product['variant_skus']) > 2 ? ' …' : '' }}
-                                        </span>
+                                        @php
+                                            $skuItems = collect($product['variant_skus']);
+                                            $hiddenCount = max(0, $skuItems->count() - 2);
+                                            $titleText = $skuItems->map(fn ($v) => ((float) ($v['weight'] ?? 0)) > 0
+                                                ? $v['sku'].' - '.rtrim(rtrim(number_format((float) $v['weight'], 2, '.', ''), '0'), '.').' g'
+                                                : $v['sku'].' - 缺重量')->implode('；');
+                                        @endphp
+                                        <div class="wh-sku-weight-list" title="{{ $titleText }}">
+                                            @foreach($skuItems->take(2) as $v)
+                                                @php $w = (float) ($v['weight'] ?? 0); @endphp
+                                                <div class="wh-sku-weight-item">
+                                                    <span class="wh-sku-weight-name">{{ $v['sku'] }}</span>
+                                                    @if($w > 0)
+                                                        <span class="wh-sku-weight-value">{{ rtrim(rtrim(number_format($w, 2, '.', ''), '0'), '.') }} g</span>
+                                                    @else
+                                                        <span class="wh-sku-weight-value is-missing">缺重量</span>
+                                                    @endif
+                                                </div>
+                                            @endforeach
+                                            @if($hiddenCount > 0)
+                                                <span class="wh-sku-weight-more">+{{ $hiddenCount }} 个</span>
+                                            @endif
+                                        </div>
                                     @endif
                                 </div>
                             </td>
@@ -218,10 +262,10 @@
                             <thead>
                             <tr>
                                 <th style="width:70px;">货品图片</th>
-                                <th>产品编号</th>
-                                <th>通途SKU</th>
+                                <th style="width:130px;">PCL 产品编号</th>
+                                <th style="width:180px;">SKU（通途规格）</th>
                                 <th>规格产品名</th>
-                                <th style="width:90px;">通途重量(g)</th>
+                                <th style="width:110px;">SKU 重量(g)</th>
                             </tr>
                             </thead>
                             <tbody id="warehouse-variant-detail-body"></tbody>
@@ -273,5 +317,5 @@
     <script>
         window.__warehouseProductStatisticsConfig = @json($warehouseProductStatisticsConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/warehouse-product-statistics.js?v=20261026-2"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/warehouse-product-statistics.js?v=20261026-4"></script>
 @endpush

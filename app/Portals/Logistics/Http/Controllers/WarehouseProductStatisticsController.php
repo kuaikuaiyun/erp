@@ -100,13 +100,18 @@ class WarehouseProductStatisticsController extends Controller
             ->groupBy('tongtu_sku')
             ->map(static function ($group) {
                 $first = $group->first();
+                $physicalPath = (string) $first->physical_image_path;
+                $physicalUrl = '';
+                if ($physicalPath !== '' && Storage::disk('local')->exists($physicalPath)) {
+                    $physicalUrl = route('warehouse.weight-exceptions.physical-image', ['id' => $first->id]);
+                }
 
                 return [
                     'id' => (int) $first->id,
                     'corrected_weight_gram' => $first->corrected_weight_gram,
                     'reject_reason' => $first->reject_reason,
                     'remark' => $first->remark,
-                    'has_physical_image' => (string) $first->physical_image_path !== '',
+                    'physical_image_url' => $physicalUrl,
                 ];
             })
             ->all();
@@ -366,8 +371,8 @@ class WarehouseProductStatisticsController extends Controller
             'subtitle' => '已出单产品列表数据，可以操作提报异常数据',
             'productInfo' => '产品信息',
             'productCode' => '产品编号',
-            'specification' => '规格信息',
-            'variantCount' => '规格数',
+            'specification' => 'SKU 与重量',
+            'variantCount' => 'SKU 数',
             'view' => '查看',
             'close' => '关闭',
             'emptyRows' => '暂无匹配的产品数据',

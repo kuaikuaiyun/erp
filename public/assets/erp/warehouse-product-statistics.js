@@ -166,8 +166,14 @@
         var tr = document.createElement('tr');
         tr.innerHTML =
             '<td>' + imageCell(variant) + '</td>' +
-            '<td><span class="wh-code" title="' + escapeHtml(variant.tongtu_product_code || '') + '">' + escapeHtml(variant.tongtu_product_code || '') + '</span></td>' +
-            '<td><span class="wh-code" title="' + escapeHtml(tongtuSku) + '">' + escapeHtml(tongtuSku) + '</span></td>' +
+            '<td>' +
+                '<div class="wh-cell-label">PCL 编号</div>' +
+                '<span class="wh-code" title="' + escapeHtml(variant.tongtu_product_code || '') + '">' + escapeHtml(variant.tongtu_product_code || '—') + '</span>' +
+            '</td>' +
+            '<td>' +
+                '<div class="wh-cell-label">SKU</div>' +
+                '<span class="wh-code wh-code-sku" title="' + escapeHtml(tongtuSku) + '">' + escapeHtml(tongtuSku || '—') + '</span>' +
+            '</td>' +
             '<td><span class="wh-name">' + escapeHtml(variant.tongtu_product_name || '') + '</span></td>' +
             '<td>' + weightBadgeCell(variant) + '</td>';
         return tr;
@@ -236,7 +242,7 @@
         var initWeight = ex && ex.corrected_weight_gram != null ? ex.corrected_weight_gram : '';
         var initReason = ex && ex.reject_reason ? ex.reject_reason : '';
         var initRemark = ex && ex.remark ? ex.remark : '';
-        var initHasImg = !!(ex && ex.has_physical_image);
+        var initPhysicalUrl = ex && ex.physical_image_url ? ex.physical_image_url : '';
         var exceptionId = ex ? ex.id : '';
 
         var reasonHtml = '';
@@ -252,18 +258,24 @@
             '</label>' +
             '<input type="file" class="wh-fill-physical-input" id="wh-fill-img-' + exceptionId + '-' + escapeHtml(tongtuSku) + '" accept="image/jpeg,image/png,image/webp" hidden>' +
             '<div class="wh-fill-physical-preview" data-role="physical-preview">' +
-                (initHasImg ?
-                    '<img src="' + config.fillUrl.replace('fill-weight-exceptions', '') + 'warehouse-weight-exceptions/' + exceptionId + '/physical-image" alt="" style="width:72px;height:72px;object-fit:cover;border:1px solid #dfe6ed;border-radius:4px;cursor:zoom-in;" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">' :
+                (initPhysicalUrl !== '' ?
+                    '<img src="' + initPhysicalUrl + '" alt="" style="width:72px;height:72px;object-fit:cover;border:1px solid #dfe6ed;border-radius:4px;cursor:zoom-in;" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">' :
                     '<span class="text-muted" style="font-size:12px;">未上传</span>') +
             '</div>' +
-            (initHasImg ? '<label class="wh-fill-physical-remove"><input type="checkbox" class="wh-fill-physical-remove-checkbox" data-role="remove-physical"> 删除原图</label>' : '') +
+            (initPhysicalUrl !== '' ? '<label class="wh-fill-physical-remove"><input type="checkbox" class="wh-fill-physical-remove-checkbox" data-role="remove-physical"> 删除原图</label>' : '') +
         '</div>';
 
         item.innerHTML =
             '<div class="wh-fill-item-head">' +
-                '<span class="wh-fill-sku-tag" title="' + escapeHtml(tongtuSku) + '">' + escapeHtml(tongtuSku || '—') + '</span>' +
-                (variant.tongtu_product_code ? '<span class="wh-code">' + escapeHtml(variant.tongtu_product_code) + '</span>' : '') +
-                refWeightHtml(variant) +
+                '<div class="wh-fill-head-left">' +
+                    '<span class="wh-fill-head-label">PCL</span>' +
+                    '<span class="wh-code">' + escapeHtml(variant.tongtu_product_code || '—') + '</span>' +
+                    '<span class="wh-fill-head-label">SKU</span>' +
+                    '<span class="wh-code wh-code-sku" title="' + escapeHtml(tongtuSku) + '">' + escapeHtml(tongtuSku || '—') + '</span>' +
+                '</div>' +
+                '<div class="wh-fill-head-right">' +
+                    refWeightHtml(variant) +
+                '</div>' +
                 '<input type="number" step="0.01" min="0.01" class="form-control input-sm wh-fill-weight" placeholder="填写实测重量 g" value="' + escapeHtml(String(initWeight)) + '">' +
             '</div>' +
             '<div class="wh-fill-item-meta">' +

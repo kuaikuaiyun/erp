@@ -157,6 +157,48 @@ class LogisticsProductStatisticsService
             ->all();
     }
 
+    /**
+     * 解析 GROUP_CONCAT 拼出来的 SKU 片段。
+     * 格式：`SKU|重量`（旧格式兼容：裸 `SKU`），按 SKU 去重取最小重量。
+     *
+     * @return array<int, array{sku:string, weight:float}>
+     */
+    public static function parseVariantSkus(string $raw): array
+    {
+        if ($raw === '') {
+            return [];
+        }
+
+        $weightBySku = [];
+        foreach (explode("\x1F", $raw) as $segment) {
+            $segment = trim((string) $segment);
+            if ($segment === '') {
+                continue;
+            }
+            if (str_contains($segment, '|')) {
+                [$sku, $weightStr] = explode('|', $segment, 2);
+                $sku = trim((string) $sku);
+                $weight = (float) $weightStr;
+            } else {
+                $sku = $segment;
+                $weight = 0.0;
+            }
+            if ($sku === '') {
+                continue;
+            }
+            if (!isset($weightBySku[$sku]) || $weightBySku[$sku] > $weight) {
+                $weightBySku[$sku] = $weight;
+            }
+        }
+
+        $result = [];
+        foreach ($weightBySku as $sku => $weight) {
+            $result[] = ['sku' => $sku, 'weight' => $weight];
+        }
+
+        return $result;
+    }
+
     /** @param array<string,mixed> $filters */
     private function canUseLightweightPageQuery(array $filters): bool
     {
@@ -1422,7 +1464,7 @@ class LogisticsProductStatisticsService
             ->selectRaw("MIN(CASE WHEN NULLIF(TRIM(items.product_image_url), '') IS NOT NULL THEN items.id END) as image_item_id")
             ->selectRaw("GROUP_CONCAT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__') ORDER BY COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__') SEPARATOR 0x1F) as store_names")
             ->selectRaw("COUNT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__')) as shop_count")
-            ->selectRaw("GROUP_CONCAT(DISTINCT NULLIF(TRIM(items.tongtu_sku), '') ORDER BY NULLIF(TRIM(items.tongtu_sku), '') SEPARATOR 0x1F) as tongtu_skus")
+            ->selectRaw("GROUP_CONCAT(DISTINCT CONCAT(NULLIF(TRIM(items.tongtu_sku), ''), '|', CAST(ROUND(COALESCE(items.sale_weight_gram, 0), 2) AS CHAR)) ORDER BY NULLIF(TRIM(items.tongtu_sku), '') SEPARATOR 0x1F) as tongtu_skus")
             ->selectRaw("COUNT(DISTINCT NULLIF(TRIM(items.tongtu_sku), '')) as tongtu_variant_count")
             ->selectRaw('SUM(COALESCE(items.quantity, 0)) as sales')
             ->selectRaw('SUM(COALESCE(items.line_revenue_usd, 0)) as revenue')
@@ -1894,7 +1936,7 @@ class LogisticsProductStatisticsService
             // switched from SKU to the product-level PCL identifier.
             'sku' => $tongtuProductCode !== '' ? $tongtuProductCode : ($fallbackSku ?: __('logistics.common.not_available')),
             'variant_count' => (int) ($row->tongtu_variant_count ?? 0),
-            'variant_skus' => array_values(array_filter(explode("\x1F", (string) ($row->tongtu_skus ?? '')))),
+            'variant_skus' => static::parseVariantSkus((string) ($row->tongtu_skus ?? '')),
             'category' => __('logistics.product_statistics.sold_product'),
             'image_url' => filled($row->product_image_url) ? (string) $row->product_image_url : null,
             'stores' => $stores,
