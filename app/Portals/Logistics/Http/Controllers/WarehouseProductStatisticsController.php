@@ -4,10 +4,12 @@ namespace App\Portals\Logistics\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
+use App\Models\ProductRequestLinkSku;
 use App\Models\WarehouseSkuWeightException;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Logistics\LogisticsProductStatisticsService;
 use App\Portals\Logistics\TongtuSkuMappingService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -41,6 +43,9 @@ class WarehouseProductStatisticsController extends Controller
 
         $filters = $this->filters($request);
         $data = $this->statistics->page($filters);
+
+        // 批量匹配 PCL SKU 管理（product_request_link_skus）中的实拍图
+        $this->enrichLinkSkuImages($data['products']);
 
         return view('portals.warehouse.product-statistics.index', [
             ...$this->viewContext($context),
@@ -405,10 +410,10 @@ class WarehouseProductStatisticsController extends Controller
     private function labels(): array
     {
         return [
-            'pageTitle' => '出单产品',
-            'subtitle' => '已出单产品列表数据，可以操作提报异常数据',
+            'pageTitle' => '出单产品验收',
+            'subtitle' => '已出单产品验收列表，可操作提报异常数据',
             'productInfo' => '产品信息',
-            'productCode' => '产品编号',
+            'productCode' => 'PCL 编号',
             'specification' => 'SKU 与重量',
             'variantCount' => 'SKU 数',
             'view' => '查看',
@@ -432,5 +437,187 @@ class WarehouseProductStatisticsController extends Controller
             'rejectReason' => '驳回理由',
             'remark' => '备注',
         ];
+    }
+
+    /**
+     * 批量匹配 PCL SKU 管理的实拍图，注入到出单产品列表数据。
+     * 按 LOWER(TRIM(product_code)) = LOWER(TRIM(pcl_product_no)) 匹配。
+     *
+     * @param list<array<string,mixed>> $products
+     */
+    private function enrichLinkSkuImages(array &$products): void
+    {
+        $codes = collect($products)
+            ->pluck('product_code')
+            ->filter()
+            ->map(static fn ($code): string => mb_strtolower(trim((string) $code)))
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($codes === []) {
+            foreach ($products as &$product) {
+                $product['link_sku_id'] = null;
+                $product['link_sku_images'] = [];
+                $product['link_sku_images_json'] = '[]';
+            }
+            unset($product);
+            return;
+        }
+
+        $linkSkus = ProductRequestLinkSku::query()
+            ->where('is_runnable', true)
+            ->whereRaw('LOWER(TRIM(pcl_product_no)) IN (' . implode(',', array_fill(0, count($codes), '?')) . ')', $codes)
+            ->get(['id', 'pcl_product_no', 'images']);
+
+        $linkSkuMap = [];
+        foreach ($linkSkus as $linkSku) {
+            $key = mb_strtolower(trim((string) $linkSku->pcl_product_no));
+            $rawImages = array_values(array_filter((array) ($linkSku->images ?? [])));
+            if ($rawImages === []) {
+                continue;
+            }
+            // 每张图绑定自己的 link_sku_id + index，这样 route 才能正确解析
+            $imageRefs = [];
+            foreach ($rawImages as $idx => $path) {
+                $imageRefs[] = [
+                    'link_sku_id' => (int) $linkSku->getKey(),
+                    'path' => $path,
+                    'index' => $idx,
+                ];
+            }
+            if (!isset($linkSkuMap[$key])) {
+                $linkSkuMap[$key] = ['link_sku_id' => (int) $linkSku->getKey(), 'image_refs' => $imageRefs];
+            } else {
+                // 去重追加
+                $existingPaths = array_column($linkSkuMap[$key]['image_refs'], 'path');
+                foreach ($imageRefs as $ref) {
+                    if (!in_array($ref['path'], $existingPaths, true)) {
+                        $linkSkuMap[$key]['image_refs'][] = $ref;
+                    }
+                }
+            }
+        }
+
+        foreach ($products as &$product) {
+            $code = mb_strtolower(trim((string) ($product['product_code'] ?? '')));
+            $entry = $linkSkuMap[$code] ?? null;
+            if ($entry !== null && $entry['image_refs'] !== []) {
+                $product['link_sku_id'] = $entry['link_sku_id'];
+                $rawImages = array_column($entry['image_refs'], 'path');
+                $product['link_sku_images'] = $rawImages;
+                $product['link_sku_images_urls'] = array_map(
+                    static fn (array $ref): string => route('product-requests.link-skus.image', ['linkSku' => $ref['link_sku_id'], 'index' => $ref['index']]),
+                    $entry['image_refs'],
+                );
+            } else {
+                $product['link_sku_id'] = null;
+                $product['link_sku_images'] = [];
+                $product['link_sku_images_urls'] = [];
+            }
+            $product['link_sku_images_json'] = json_encode($product['link_sku_images'], JSON_UNESCAPED_UNICODE);
+        }
+        unset($product);
+    }
+
+    /** 获取某 PCL 的 link_sku 实拍图列表（JSON） */
+    public function linkSkuImages(Request $request): JsonResponse
+    {
+        $this->portalContext($request);
+
+        $validated = $request->validate([
+            'pcl_code' => ['required', 'string', 'max:255'],
+        ]);
+        $pclCode = mb_strtolower(trim((string) $validated['pcl_code']));
+
+        $linkSku = ProductRequestLinkSku::query()
+            ->whereRaw('LOWER(TRIM(pcl_product_no)) = ?', [$pclCode])
+            ->first(['id', 'pcl_product_no', 'images']);
+
+        return response()->json([
+            'link_sku_id' => $linkSku?->getKey(),
+            'pcl_product_no' => $linkSku?->pcl_product_no ?? trim((string) $validated['pcl_code']),
+            'images' => $linkSku ? array_values(array_filter((array) ($linkSku->images ?? []))) : [],
+        ]);
+    }
+
+    /** 上传实拍图（POST multipart）：追加到 images 数组；若无 link_sku 记录则自动创建 */
+    public function linkSkuImageUpload(Request $request): JsonResponse
+    {
+        $this->portalContext($request);
+
+        $validated = $request->validate([
+            'pcl_code' => ['required', 'string', 'max:255'],
+            'image' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+        ]);
+        $pclCode = mb_strtolower(trim((string) $validated['pcl_code']));
+
+        $linkSku = ProductRequestLinkSku::query()
+            ->whereRaw('LOWER(TRIM(pcl_product_no)) = ?', [$pclCode])
+            ->first();
+
+        if ($linkSku === null) {
+            $linkSku = ProductRequestLinkSku::query()->create([
+                'pcl_product_no' => trim((string) $validated['pcl_code']),
+                'images' => [],
+                'source' => 'import',
+                'review_status' => 'done',
+                'supplier_url_hash' => 'wgh-' . substr(bin2hex(random_bytes(8)), 0, 16),
+            ]);
+        }
+
+        $path = $validated['image']->store('link-sku-images', 'local');
+        $images = array_values(array_filter((array) ($linkSku->images ?? [])));
+        $images[] = $path;
+        $linkSku->update(['images' => $images]);
+
+        return response()->json([
+            'link_sku_id' => $linkSku->getKey(),
+            'images' => $images,
+        ]);
+    }
+
+    /** 删除指定 index 的实拍图 */
+    public function linkSkuImageDelete(Request $request): JsonResponse
+    {
+        $this->portalContext($request);
+
+        $validated = $request->validate([
+            'pcl_code' => ['required', 'string', 'max:255'],
+            'index' => ['required', 'integer', 'min:0'],
+        ]);
+        $pclCode = mb_strtolower(trim((string) $validated['pcl_code']));
+        $index = (int) $validated['index'];
+
+        $linkSku = ProductRequestLinkSku::query()
+            ->whereRaw('LOWER(TRIM(pcl_product_no)) = ?', [$pclCode])
+            ->first();
+
+        if ($linkSku === null) {
+            return response()->json(['message' => '未找到对应的 PCL 记录'], 404);
+        }
+
+        $images = array_values(array_filter((array) ($linkSku->images ?? [])));
+        if (!isset($images[$index])) {
+            return response()->json(['message' => '图片索引越界'], 404);
+        }
+
+        $removedPath = $images[$index];
+        unset($images[$index]);
+        $images = array_values($images);
+        $linkSku->update(['images' => $images]);
+
+        // 删除存储文件（忽略不存在的错误）
+        try {
+            if ($removedPath !== '' && Storage::disk('local')->exists($removedPath)) {
+                Storage::disk('local')->delete($removedPath);
+            }
+        } catch (\Throwable) {
+        }
+
+        return response()->json([
+            'link_sku_id' => $linkSku->getKey(),
+            'images' => $images,
+        ]);
     }
 }

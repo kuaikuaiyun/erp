@@ -207,6 +207,17 @@
         return wrapper;
     }
 
+    function initializeRunnableToggle(root) {
+        var select = root.querySelector('#is_runnable');
+        var wrap = root.querySelector('#not-runnable-reason-wrap');
+        if (!select || !wrap) return;
+        var sync = function () {
+            wrap.style.display = select.value === '0' ? '' : 'none';
+        };
+        sync();
+        select.addEventListener('change', sync);
+    }
+
     function initializeUploads(root) {
         root.querySelectorAll('[data-product-request-upload]').forEach(function (container) {
             if (container.dataset.productRequestUploadReady === '1') { return; }
@@ -1288,6 +1299,11 @@
             initializeUploads(root);
         } catch (error) {
             reportInitializationError('upload initializer failed', error);
+        }
+        try {
+            initializeRunnableToggle(root);
+        } catch (error) {
+            reportInitializationError('runnable toggle initializer failed', error);
         }
         try {
             initializeSkuBuilder(root);

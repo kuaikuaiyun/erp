@@ -1798,9 +1798,9 @@ class ProductRequestController extends Controller
         abort_unless($this->access->canViewExistingProductLibrary($context['user']), 403);
 
         $keyword = trim((string) $request->query('keyword', ''));
-        $perPage = (int) $request->query('per_page', 20);
-        if (!in_array($perPage, [20, 50], true)) {
-            $perPage = 20;
+        $perPage = (int) $request->query('per_page', 10);
+        if (!in_array($perPage, [10, 20], true)) {
+            $perPage = 10;
         }
         $links = ProductRequestLinkSku::query()
             ->when($keyword !== '', function (Builder $query) use ($keyword): Builder {
@@ -2001,7 +2001,18 @@ class ProductRequestController extends Controller
             'images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
             'remove_images' => ['nullable', 'array'],
             'remove_images.*' => ['integer'],
+            'is_runnable' => ['required', 'in:0,1'],
+            'not_runnable_reason' => ['nullable', 'required_if:is_runnable,0', 'in:mismatch,size_exceed,complaint,infringement'],
         ]);
+
+        // 是否可跑：不可跑必须选原因
+        $isRunnable = (bool) ($data['is_runnable'] ?? true);
+        $notRunnableReason = $isRunnable ? null : ($data['not_runnable_reason'] ?? null);
+        if (!$isRunnable && empty($notRunnableReason)) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'not_runnable_reason' => '设为不可跑时必须选择原因。',
+            ]);
+        }
 
         // 1688 主链接可编辑：改动后需规范化并重算哈希；若新链接已被其他记录占用则拒绝
         $submittedUrl = trim((string) ($data['supplier_url'] ?? ''));
@@ -2029,6 +2040,8 @@ class ProductRequestController extends Controller
             'skus' => implode(',', $submitted),
             'pcl_product_no' => trim((string) ($data['pcl_product_no'] ?? '')) !== '' ? trim((string) $data['pcl_product_no']) : null,
             'product_name' => trim((string) ($data['product_name'] ?? '')) !== '' ? trim((string) $data['product_name']) : null,
+            'is_runnable' => $isRunnable,
+            'not_runnable_reason' => $notRunnableReason,
         ])->save();
 
         // 按 SKU 的采购价/重量同步到链接表（仅保留本次提交 SKU 的数值，两项都清空表示移除）

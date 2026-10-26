@@ -135,6 +135,9 @@ Route::get('/warehouse-product-statistics', [WarehouseProductStatisticsControlle
 Route::get('/warehouse-product-statistics/detail', [WarehouseProductStatisticsController::class, 'detail'])->name('warehouse.product-statistics.detail');
 Route::post('/warehouse-product-statistics/fill-weight-exceptions', [WarehouseProductStatisticsController::class, 'fillWeightExceptions'])->name('warehouse.product-statistics.fill-weight-exceptions');
 Route::post('/warehouse-product-statistics/refresh-weights', [WarehouseProductStatisticsController::class, 'refreshWeights'])->name('warehouse.product-statistics.refresh-weights');
+Route::get('/warehouse-product-statistics/link-sku-images', [WarehouseProductStatisticsController::class, 'linkSkuImages'])->name('warehouse.product-statistics.link-sku-images');
+Route::post('/warehouse-product-statistics/link-sku-images/upload', [WarehouseProductStatisticsController::class, 'linkSkuImageUpload'])->name('warehouse.product-statistics.link-sku-images.upload');
+Route::delete('/warehouse-product-statistics/link-sku-images/delete', [WarehouseProductStatisticsController::class, 'linkSkuImageDelete'])->name('warehouse.product-statistics.link-sku-images.delete');
 Route::get('/warehouse-weight-exceptions/{id}/physical-image', [WarehouseProductStatisticsController::class, 'physicalImage'])->name('warehouse.weight-exceptions.physical-image');
 Route::get('/warehouse-weight-exceptions', [WarehouseWeightExceptionController::class, 'index'])->name('caigou.warehouse-weight-exceptions.index');
 Route::post('/warehouse-weight-exceptions/{id}/resolve', [WarehouseWeightExceptionController::class, 'resolve'])->name('caigou.warehouse-weight-exceptions.resolve');

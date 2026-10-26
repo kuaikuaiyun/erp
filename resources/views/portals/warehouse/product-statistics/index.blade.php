@@ -10,6 +10,8 @@
         'detailUrl' => route('warehouse.product-statistics.detail'),
         'fillUrl' => route('warehouse.product-statistics.fill-weight-exceptions'),
         'refreshWeightUrl' => route('warehouse.product-statistics.refresh-weights'),
+        'linkSkuImageUploadUrl' => route('warehouse.product-statistics.link-sku-images.upload'),
+        'linkSkuImageDeleteUrl' => route('warehouse.product-statistics.link-sku-images.delete'),
         'rejectReasons' => $rejectReasonOptions,
         'sort' => $filters['sort'],
         'direction' => $filters['direction'],
@@ -61,6 +63,72 @@
             color: #c0392b; font-size: 12px; line-height: 18px;
         }
         .wh-fill-list { display: flex; flex-direction: column; gap: 10px; max-height: 55vh; overflow-y: auto; padding-right: 4px; }
+
+        /* 实拍图列 */
+        .wh-real-images-cell { padding: 6px 8px !important; vertical-align: middle; }
+        .wh-real-images-grid { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-height: 52px; }
+        .wh-real-image-item { position: relative; width: 48px; height: 48px; }
+        .wh-real-image-thumb {
+            width: 48px; height: 48px; object-fit: cover; border-radius: 4px;
+            border: 1px solid #e6ebf2; cursor: zoom-in; transition: transform .15s;
+        }
+        .wh-real-image-thumb:hover { transform: scale(1.05); }
+        .wh-real-image-delete {
+            position: absolute; top: -6px; right: -6px; width: 18px; height: 18px;
+            border-radius: 50%; background: #e74c3c; color: #fff; border: none;
+            font-size: 10px; cursor: pointer; line-height: 18px; text-align: center;
+            opacity: 0; transition: opacity .15s; padding: 0;
+            box-shadow: 0 1px 3px rgba(0,0,0,.3);
+        }
+        .wh-real-image-item:hover .wh-real-image-delete { opacity: 1; }
+
+        /* 统一上传区域样式（参考 PCL SKU 管理） */
+        .wh-upload-zone {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 6px; width: 100%; min-width: 190px; padding: 10px 12px;
+            border: 2px dashed #c0d0e0; border-radius: 6px; background: #fafbfc;
+            cursor: pointer; transition: all .15s;
+            position: relative;
+        }
+        .wh-upload-zone:hover { border-color: #3498db; background: #eef6fc; }
+        .wh-upload-zone.is-active,
+        .wh-upload-zone:focus-within { border-color: #3498db; box-shadow: 0 0 0 2px rgba(52,152,219,.2); }
+        .wh-upload-zone.is-paste-target {
+            border-color: #3498db; box-shadow: 0 0 0 2px rgba(52,152,219,.35); background: #eaf4fc;
+            animation: wh-pulse 1.2s ease-in-out infinite;
+        }
+        @keyframes wh-pulse {
+            0%, 100% { box-shadow: 0 0 0 2px rgba(52,152,219,.35); }
+            50% { box-shadow: 0 0 0 4px rgba(52,152,219,.15); }
+        }
+        .wh-upload-icon { font-size: 22px; color: #7a90a8; margin-bottom: 2px; }
+        .wh-upload-zone:hover .wh-upload-icon { color: #3498db; }
+        .wh-upload-hint-text { font-size: 12px; color: #7a90a8; line-height: 1.5; text-align: center; }
+        .wh-upload-hint-text strong { color: #3498db; }
+        .wh-paste-btn {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 5px 14px; margin-top: 2px;
+            background: #3c8dbc; color: #fff; border: none; border-radius: 4px;
+            font-size: 12px; font-weight: 500; cursor: pointer; transition: all .15s;
+            font-family: inherit;
+        }
+        .wh-paste-btn:hover { background: #2f7ba8; }
+        .wh-paste-btn kbd {
+            display: inline-block; padding: 0 4px; font-family: Consolas, monospace;
+            font-size: 10px; line-height: 16px; border: 1px solid rgba(255,255,255,.4);
+            border-radius: 3px; background: rgba(255,255,255,.15); color: #fff;
+        }
+        .wh-paste-btn .wh-clip-icon { font-size: 13px; }
+        /* 有图时的"继续添加"小按钮 */
+        .wh-real-image-add {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 48px; height: 48px; border: 1.5px dashed #c0d0e0; border-radius: 4px;
+            color: #7a90a8; cursor: pointer; font-size: 16px; background: #fafbfc;
+            transition: all .15s; flex-shrink: 0;
+        }
+        .wh-real-image-add:hover { border-color: #3498db; color: #3498db; background: #eef6fc; }
+
+        .wh-real-images-cell input[type="file"].wh-real-image-input { display: none !important; }
         .wh-fill-item { padding: 10px 12px; border: 1px solid #e6ebf2; border-radius: 6px; background: #fbfdff; }
         .wh-fill-item-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         .wh-fill-head-left { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -90,16 +158,29 @@
         .wh-fill-upload-trigger:hover { background: #eaf4fb; border-color: #2f7ba8; color: #2f7ba8; }
         .wh-fill-physical-preview { min-width: 72px; height: 72px; display: flex; align-items: center; justify-content: center; border: 1px dashed #dfe6ed; border-radius: 4px; background: #fafbfc; }
         .wh-fill-physical-remove { font-size: 12px; color: #c0392b; cursor: pointer; }
-        /* 仓库页只有 4 列，覆盖物流门户的 2080px 最小宽度，改成固定列宽铺满容器 */
+        .wh-fill-item-images.is-paste-target {
+            padding: 4px 8px; border-radius: 6px; border: 2px dashed #3498db;
+            box-shadow: 0 0 0 2px rgba(52,152,219,.2); background: #eaf4fc;
+        }
+        /* 弹窗内大虚线框适配 */
+        .wh-fill-item-images .wh-upload-zone {
+            width: 200px; min-width: 200px; flex-shrink: 0;
+        }
+        .wh-fill-item-images .wh-fill-physical-preview {
+            width: 72px; min-width: 72px; height: 72px;
+        }
+        /* 5 列布局：产品信息 | PCL 编号 | SKU与重量 | 实拍图 | 操作 */
         #warehouse-product-statistics-table { min-width: 0 !important; width: 100%; table-layout: fixed; }
         #warehouse-product-statistics-table th:nth-child(1),
-        #warehouse-product-statistics-table td:nth-child(1),
+        #warehouse-product-statistics-table td:nth-child(1) { width: 28%; min-width: 0; }
         #warehouse-product-statistics-table th:nth-child(2),
-        #warehouse-product-statistics-table td:nth-child(2),
+        #warehouse-product-statistics-table td:nth-child(2) { width: 150px; min-width: 150px; }
         #warehouse-product-statistics-table th:nth-child(3),
-        #warehouse-product-statistics-table td:nth-child(3) { width: 33.33%; min-width: 0; }
+        #warehouse-product-statistics-table td:nth-child(3) { width: 250px; min-width: 250px; }
         #warehouse-product-statistics-table th:nth-child(4),
-        #warehouse-product-statistics-table td:nth-child(4) { width: 190px; min-width: 0; }
+        #warehouse-product-statistics-table td:nth-child(4) { width: 210px; min-width: 210px; }
+        #warehouse-product-statistics-table th:nth-child(5),
+        #warehouse-product-statistics-table td:nth-child(5) { width: 150px; min-width: 150px; }
         #warehouse-product-statistics-table td:nth-child(1) { overflow: hidden; }
         #warehouse-product-statistics-table td:nth-child(1) .product-statistics-product-cell { min-width: 0; }
         #warehouse-product-statistics-table td:nth-child(1) .product-statistics-product-meta { min-width: 0; }
@@ -108,7 +189,7 @@
             display: inline-block; max-width: 100%; overflow: hidden;
             text-overflow: ellipsis; vertical-align: middle;
         }
-        #warehouse-product-statistics-table td:nth-child(4) .btn { margin: 1px 1px; padding: 3px 7px; }
+        #warehouse-product-statistics-table td:nth-child(5) .btn { margin: 1px 1px; padding: 3px 7px; }
         /* 列表列：SKU 与重量 */
         #warehouse-product-statistics-table .product-statistics-variant-summary { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
         #warehouse-product-statistics-table .wh-count-badge { font-size: 11px; font-weight: 600; padding: 2px 7px; }
@@ -175,6 +256,7 @@
                         <th>{{ $labels['productInfo'] }}</th>
                         <th style="width:150px;">{{ $labels['productCode'] }}</th>
                         <th style="width:250px;">{{ $labels['specification'] }}</th>
+                        <th style="width:210px;">实拍图</th>
                         <th class="product-statistics-operation-column" style="width:150px;">操作</th>
                     </tr>
                     </thead>
@@ -235,6 +317,28 @@
                                     @endif
                                 </div>
                             </td>
+                            <td class="wh-real-images-cell" data-pcl-code="{{ $product['product_code'] ?? '' }}" data-link-sku-id="{{ $product['link_sku_id'] ?? '' }}">
+                                <div class="wh-real-images-grid">
+                                    @if(!empty($product['link_sku_images_urls']))
+                                        @foreach($product['link_sku_images_urls'] as $idx => $url)
+                                            <span class="wh-real-image-item">
+                                                <img src="{{ $url }}" alt="实拍图{{ $idx + 1 }}" class="wh-real-image-thumb erp-zoomable" loading="lazy" decoding="async" title="点击放大查看" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">
+                                                <button type="button" class="wh-real-image-delete" data-index="{{ $idx }}" title="删除此图">
+                                                    <i class="fa fa-times"></i>
+                                                </button>
+                                            </span>
+                                        @endforeach
+                                    @endif
+                                    <label class="wh-upload-zone" title="点击选择文件、拖拽图片到此处，或 Ctrl+V 粘贴">
+                                        <i class="fa fa-cloud-upload wh-upload-icon"></i>
+                                        <div class="wh-upload-hint-text">拖拽 / <strong>粘贴图片</strong> / 点击选择</div>
+                                        <button type="button" class="wh-paste-btn wh-paste-trigger" title="设为粘贴目标后 Ctrl+V 粘贴">
+                                            <i class="fa fa-clipboard wh-clip-icon"></i> 粘贴图片 <kbd>Ctrl+V</kbd>
+                                        </button>
+                                        <input type="file" name="image" accept="image/jpeg,image/jpg,image/png,image/webp" class="wh-real-image-input" style="display:none;">
+                                    </label>
+                                </div>
+                            </td>
                             <td>
                                 @php
                                     $missingWeightSkus = collect($product['variant_skus'] ?? [])
@@ -261,7 +365,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="4" class="product-statistics-empty-row text-center text-muted">
+                            <td colspan="5" class="product-statistics-empty-row text-center text-muted">
                                 <i class="fa fa-search"></i> {{ $labels['emptyRows'] }}
                             </td>
                         </tr>
@@ -353,4 +457,226 @@
         window.__warehouseProductStatisticsConfig = @json($warehouseProductStatisticsConfig);
     </script>
     <script src="{{ $portalOrigin }}/assets/erp/warehouse-product-statistics.js?v=20261026-5"></script>
+    <script>
+        // 实拍图上传/删除/粘贴/拖拽交互（参考 PCL SKU 管理）
+        (function () {
+            var cfg = window.__warehouseProductStatisticsConfig || {};
+            var uploadUrl = cfg.linkSkuImageUploadUrl || '';
+            var deleteUrl = cfg.linkSkuImageDeleteUrl || '';
+            var IMAGE_MIMES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+            var TARGET_TIMEOUT = null;
+
+            function csrfToken() {
+                var meta = document.querySelector('meta[name="csrf-token"]');
+                return meta ? (meta.getAttribute('content') || '') : '';
+            }
+
+            function setPasteTarget(cell) {
+                clearTimeout(TARGET_TIMEOUT);
+                // 清掉旧的高亮
+                document.querySelectorAll('.wh-real-images-cell.is-paste-target').forEach(function (c) {
+                    c.classList.remove('is-paste-target');
+                    var zone = c.querySelector('.wh-upload-zone');
+                    if (zone) zone.classList.remove('is-paste-target');
+                });
+                cell.classList.add('is-paste-target');
+                var zone = cell.querySelector('.wh-upload-zone');
+                if (zone) zone.classList.add('is-paste-target');
+                // 自动过期
+                TARGET_TIMEOUT = setTimeout(function () {
+                    cell.classList.remove('is-paste-target');
+                    if (zone) zone.classList.remove('is-paste-target');
+                }, 10000);
+            }
+
+            function clearPasteTarget() {
+                clearTimeout(TARGET_TIMEOUT);
+                document.querySelectorAll('.wh-real-images-cell.is-paste-target').forEach(function (c) {
+                    c.classList.remove('is-paste-target');
+                    var zone = c.querySelector('.wh-upload-zone');
+                    if (zone) zone.classList.remove('is-paste-target');
+                });
+            }
+
+            function uploadImage(pclCode, file, onDone) {
+                if (!pclCode) { alert('缺少 PCL 编号'); return; }
+                if (!file || IMAGE_MIMES.indexOf(file.type) === -1) {
+                    alert('请上传 jpg/png/webp 格式的图片'); return;
+                }
+                if (file.size > 5 * 1024 * 1024) {
+                    alert('图片大小不能超过 5MB'); return;
+                }
+                var fd = new FormData();
+                fd.append('_token', csrfToken());
+                fd.append('pcl_code', pclCode);
+                fd.append('image', file);
+                fetch(uploadUrl, {
+                    method: 'POST', body: fd,
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                })
+                .then(function (res) {
+                    return res.json().then(function (data) {
+                        if (!res.ok) throw new Error(data.message || '上传失败');
+                        return data;
+                    });
+                })
+                .then(onDone)
+                .catch(function (err) { alert('上传失败：' + (err.message || '未知错误')); });
+            }
+
+            function uploadMany(pclCode, files, cell) {
+                if (!files || !files.length) return;
+                var remaining = Array.prototype.filter.call(files, function (f) {
+                    return IMAGE_MIMES.indexOf(f.type) !== -1;
+                });
+                if (!remaining.length) { alert('请上传 jpg/png/webp 格式的图片'); return; }
+                var next = remaining.shift();
+                uploadImage(pclCode, next, function (data) {
+                    renderImages(cell, data.images || [], data.link_sku_id);
+                    if (remaining.length) uploadMany(pclCode, remaining, cell);
+                });
+            }
+
+            function renderImages(cell, images, linkSkuId) {
+                cell.setAttribute('data-link-sku-id', linkSkuId || '');
+                var grid = cell.querySelector('.wh-real-images-grid');
+                if (!grid) return;
+                var urls = images.map(function (_, i) {
+                    return '/link-sku-manager/' + linkSkuId + '/images/' + i;
+                });
+                // 先保存 upload zone 节点
+                var uploadZone = grid.querySelector('.wh-upload-zone');
+                grid.innerHTML = '';
+                images.forEach(function (imgPath, idx) {
+                    var item = document.createElement('span');
+                    item.className = 'wh-real-image-item';
+                    item.innerHTML = '<img src="' + urls[idx] + '" alt="实拍图' + (idx + 1) + '" class="wh-real-image-thumb erp-zoomable" loading="lazy" decoding="async" title="点击放大查看" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">'
+                        + '<button type="button" class="wh-real-image-delete" data-index="' + idx + '" title="删除此图"><i class="fa fa-times"></i></button>';
+                    grid.appendChild(item);
+                });
+                if (uploadZone) grid.appendChild(uploadZone);
+            }
+
+            // ==== 点击：文件选择 ====
+            document.addEventListener('change', function (e) {
+                var input = e.target.closest('.wh-real-image-input');
+                if (!input || !input.files || !input.files[0]) return;
+                var cell = input.closest('.wh-real-images-cell');
+                if (!cell) return;
+                var pclCode = cell.getAttribute('data-pcl-code') || '';
+                uploadMany(pclCode, input.files, cell);
+                input.value = '';
+            });
+
+            // ==== 粘贴 ====
+            document.addEventListener('paste', function (e) {
+                var cell = document.querySelector('.wh-real-images-cell.is-paste-target');
+                if (!cell) return;
+                var clipboard = e.clipboardData || window.clipboardData;
+                if (!clipboard) return;
+                var files = [];
+                for (var i = 0; i < clipboard.items.length; i++) {
+                    if (clipboard.items[i].kind === 'file') {
+                        var f = clipboard.items[i].getAsFile();
+                        if (f && IMAGE_MIMES.indexOf(f.type) !== -1) files.push(f);
+                    }
+                }
+                if (!files.length) return;
+                e.preventDefault();
+                var pclCode = cell.getAttribute('data-pcl-code') || '';
+                uploadMany(pclCode, files, cell);
+            });
+
+            // ==== 点击粘贴按钮 / 上传区域 → 设为粘贴目标 ====
+            document.addEventListener('click', function (e) {
+                var btn = e.target.closest('.wh-paste-trigger');
+                if (btn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    var cell = btn.closest('.wh-real-images-cell');
+                    if (!cell) return;
+                    setPasteTarget(cell);
+                    // 聚焦文档确保 Ctrl+V 有效
+                    document.activeElement && document.activeElement.blur();
+                    return;
+                }
+                // 点击 upload zone 的文字区域也设为粘贴目标（文件选择靠 input）
+                var zone = e.target.closest('.wh-upload-zone');
+                if (zone && !e.target.closest('.wh-real-image-input')) {
+                    var cell = zone.closest('.wh-real-images-cell');
+                    if (!cell) return;
+                    setPasteTarget(cell);
+                }
+            });
+
+            // ==== 拖拽进入 ====
+            document.addEventListener('dragenter', function (e) {
+                var zone = e.target.closest('.wh-upload-zone');
+                if (!zone) return;
+                if (e.dataTransfer && e.dataTransfer.types && Array.prototype.indexOf.call(e.dataTransfer.types, 'Files') !== -1) {
+                    zone.classList.add('is-active');
+                    e.preventDefault();
+                }
+            });
+            document.addEventListener('dragover', function (e) {
+                var zone = e.target.closest('.wh-upload-zone');
+                if (!zone) return;
+                if (e.dataTransfer && e.dataTransfer.types && Array.prototype.indexOf.call(e.dataTransfer.types, 'Files') !== -1) {
+                    e.preventDefault();
+                }
+            });
+            document.addEventListener('dragleave', function (e) {
+                var zone = e.target.closest('.wh-upload-zone');
+                if (!zone) return;
+                if (zone.contains(e.relatedTarget)) return;
+                zone.classList.remove('is-active');
+            });
+            document.addEventListener('drop', function (e) {
+                var zone = e.target.closest('.wh-upload-zone');
+                if (!zone) return;
+                zone.classList.remove('is-active');
+                e.preventDefault();
+                var cell = zone.closest('.wh-real-images-cell');
+                if (!cell) return;
+                var pclCode = cell.getAttribute('data-pcl-code') || '';
+                var files = e.dataTransfer ? e.dataTransfer.files : null;
+                if (!files || !files.length) return;
+                uploadMany(pclCode, files, cell);
+            });
+
+            // ==== 删除 ====
+            document.addEventListener('click', function (e) {
+                var btn = e.target.closest('.wh-real-image-delete');
+                if (!btn) return;
+                var cell = btn.closest('.wh-real-images-cell');
+                if (!cell) return;
+                var pclCode = cell.getAttribute('data-pcl-code') || '';
+                var index = parseInt(btn.getAttribute('data-index'), 10);
+                if (!pclCode || isNaN(index)) return;
+                if (!confirm('确定要删除这张实拍图吗？')) return;
+                var body = '_token=' + encodeURIComponent(csrfToken())
+                    + '&pcl_code=' + encodeURIComponent(pclCode)
+                    + '&index=' + index;
+                fetch(deleteUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-HTTP-Method-Override': 'DELETE'
+                    },
+                    body: body
+                })
+                .then(function (res) {
+                    return res.json().then(function (data) {
+                        if (!res.ok) throw new Error(data.message || '删除失败');
+                        return data;
+                    });
+                })
+                .then(function (data) {
+                    renderImages(cell, data.images || [], data.link_sku_id || cell.getAttribute('data-link-sku-id'));
+                })
+                .catch(function (err) { alert('删除失败：' + (err.message || '未知错误')); });
+            });
+        })();
+    </script>
 @endpush

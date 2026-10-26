@@ -251,15 +251,19 @@
                 escapeHtml(rejectReasons[code]) + '</button>';
         });
 
-        // 实物图上传区
+        // 实物图上传区（大虚线框 + 粘贴按钮 + 拖拽，和列表实拍图风格一致）
         var imgSection = '<div class="wh-fill-item-images">' +
-            '<label class="wh-fill-upload-trigger" for="wh-fill-img-' + exceptionId + '-' + escapeHtml(tongtuSku) + '" title="上传实物图">' +
-                '<i class="fa fa-cloud-upload"></i> 上传实物图' +
+            '<label class="wh-upload-zone wh-physical-upload-zone" for="wh-fill-img-' + exceptionId + '-' + escapeHtml(tongtuSku) + '" title="点击选择文件、拖拽图片到此处，或 Ctrl+V 粘贴">' +
+                '<i class="fa fa-cloud-upload wh-upload-icon"></i>' +
+                '<div class="wh-upload-hint-text">拖拽 / <strong>粘贴图片</strong> / 点击选择</div>' +
+                '<button type="button" class="wh-paste-btn wh-fill-physical-paste" data-fill-sku="' + escapeHtml(tongtuSku) + '" data-fill-exception="' + exceptionId + '" title="设为粘贴目标后 Ctrl+V 粘贴">' +
+                    '<i class="fa fa-clipboard wh-clip-icon"></i> 粘贴图片 <kbd>Ctrl+V</kbd>' +
+                '</button>' +
+                '<input type="file" class="wh-fill-physical-input" id="wh-fill-img-' + exceptionId + '-' + escapeHtml(tongtuSku) + '" accept="image/jpeg,image/png,image/webp" style="display:none;">' +
             '</label>' +
-            '<input type="file" class="wh-fill-physical-input" id="wh-fill-img-' + exceptionId + '-' + escapeHtml(tongtuSku) + '" accept="image/jpeg,image/png,image/webp" hidden>' +
             '<div class="wh-fill-physical-preview" data-role="physical-preview">' +
                 (initPhysicalUrl !== '' ?
-                    '<img src="' + initPhysicalUrl + '" alt="" style="width:72px;height:72px;object-fit:cover;border:1px solid #dfe6ed;border-radius:4px;cursor:zoom-in;" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">' :
+                    '<img src="' + initPhysicalUrl + '" alt="" class="erp-zoomable" style="width:72px;height:72px;object-fit:cover;border:1px solid #dfe6ed;border-radius:4px;cursor:zoom-in;" title="点击放大查看" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">' :
                     '<span class="text-muted" style="font-size:12px;">未上传</span>') +
             '</div>' +
             (initPhysicalUrl !== '' ? '<label class="wh-fill-physical-remove"><input type="checkbox" class="wh-fill-physical-remove-checkbox" data-role="remove-physical"> 删除原图</label>' : '') +
@@ -504,6 +508,46 @@
         reader.readAsDataURL(file);
     });
 
+    // 实物图粘贴支持
+    var fillPasteTarget = null;
+    var fillPasteTimer = null;
+    document.addEventListener('paste', function (ev) {
+        if (!fillPasteTarget) return;
+        var fillItem = document.querySelector('.wh-fill-item-images.is-paste-target');
+        if (!fillItem) return;
+        var clipboard = ev.clipboardData || window.clipboardData;
+        if (!clipboard) return;
+        var file = null;
+        for (var i = 0; i < clipboard.items.length; i++) {
+            if (clipboard.items[i].kind === 'file') {
+                var f = clipboard.items[i].getAsFile();
+                if (f && (f.type === 'image/jpeg' || f.type === 'image/jpg' || f.type === 'image/png' || f.type === 'image/webp')) {
+                    file = f; break;
+                }
+            }
+        }
+        if (!file) return;
+        ev.preventDefault();
+        var input = fillItem.querySelector('.wh-fill-physical-input');
+        if (!input) return;
+        // 把粘贴的文件塞到 input 里（用 DataTransfer 触发 change 事件）
+        try {
+            var dt = new DataTransfer();
+            dt.items.add(file);
+            input.files = dt.files;
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch (e) {
+            alert('浏览器不支持粘贴上传，请直接选择文件');
+        }
+        // 取消高亮
+        clearFillPasteTarget();
+    });
+    function clearFillPasteTarget() {
+        clearTimeout(fillPasteTimer);
+        var el = document.querySelector('.wh-fill-item-images.is-paste-target');
+        if (el) el.classList.remove('is-paste-target');
+    }
+
     document.addEventListener('click', function (ev) {
         var target = ev.target;
         if (!target || !target.closest) return;
@@ -576,6 +620,22 @@
                     if (existingImg2) existingImg2.style.opacity = '1';
                 }
             }
+            return;
+        }
+
+        // ④-2 实物图粘贴按钮 → 设为粘贴目标
+        var fillPasteBtn = target.closest('.wh-fill-physical-paste');
+        if (fillPasteBtn) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            clearFillPasteTarget();
+            var fillItem = fillPasteBtn.closest('.wh-fill-item-images');
+            if (fillItem) {
+                fillPasteTarget = true;
+                fillItem.classList.add('is-paste-target');
+                fillPasteTimer = setTimeout(clearFillPasteTarget, 10000);
+            }
+            document.activeElement && document.activeElement.blur();
             return;
         }
 
