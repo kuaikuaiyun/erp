@@ -107,6 +107,9 @@
                 <div class="dedupe-card-header">
                     <h3>
                         {{ $item['standard_chinese_name'] ?? '—' }}
+                        @if(($item['is_runnable'] ?? true) === false)
+                            <span class="product-request-badge link-review-pending" style="margin-left:6px">⚠ 不可跑</span>
+                        @endif
                         @if($reportNo && $reportNo !== __('product_requests.procurement.dedupe_link_sku_source'))
                             <span style="color:#999;font-weight:normal;font-size:12px;margin-left:8px">#{{ $reportNo }}</span>
                         @endif
@@ -129,6 +132,15 @@
                             <div class="dedupe-value">@if(!empty($item['supplier_url']))<a class="dedupe-link" href="{{ $item['supplier_url'] }}" target="_blank" rel="noopener" title="{{ $item['supplier_url'] }}">{{ \Illuminate\Support\Str::limit($item['supplier_url'], 60) }}</a>@else — @endif</div>
                         </div>
                     </div>
+
+                    @if(($item['is_runnable'] ?? true) === false)
+                    <div class="dedupe-card-row" style="background:#fff5f5;border:1px solid #ffd6d6;border-radius:6px;padding:8px 12px">
+                        <div class="dedupe-card-col">
+                            <span class="dedupe-label" style="color:#c0392b">不可跑原因</span>
+                            <div class="dedupe-value" style="color:#c0392b;font-weight:600">{{ $item['not_runnable_reason_label'] ?? '未填写' }}</div>
+                        </div>
+                    </div>
+                    @endif
 
                     @if($skus !== [])
                     <div class="dedupe-card-row">

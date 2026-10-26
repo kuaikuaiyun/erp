@@ -12,7 +12,7 @@ class ProductRequestLinkSku extends Model
         'size_exceed'     => '尺寸超标',
         'complaint'       => '客诉高',
         'infringement'    => '侵权',
-        'not_runnable'    => '不可跑产品',
+        'not_runnable'    => '违禁品',
         'xiaohai'         => '小黑',
         'other'           => '其他',
     ];

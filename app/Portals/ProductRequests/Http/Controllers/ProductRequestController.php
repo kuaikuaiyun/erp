@@ -2638,14 +2638,23 @@ class ProductRequestController extends Controller
 
     private function modalSuccess(Request $request, string $message, string $routeName): JsonResponse|RedirectResponse
     {
+        $url = route($routeName);
+        // 优先从 referer 拿 query string（保留列表页的 page/per_page/keyword 等）
+        $referer = $request->headers->get('referer', '');
+        if ($referer !== '' && ($query = parse_url($referer, PHP_URL_QUERY))) {
+            $url .= '?'.$query;
+        } elseif ($request->getQueryString()) {
+            $url .= '?'.$request->getQueryString();
+        }
+
         if ($this->isModalRequest($request)) {
             return response()->json([
                 'message' => $message,
-                'redirect' => route($routeName),
+                'redirect' => $url,
             ]);
         }
 
-        return redirect()->route($routeName)->with('success', $message);
+        return redirect($url)->with('success', $message);
     }
 
     /** @param array{portal:\App\Models\Portal,user:AdminUser} $context
@@ -3212,6 +3221,9 @@ class ProductRequestController extends Controller
             'skus' => $this->splitSkus($this->linkSkuSet($hash)),
             'sku_values' => (object) $this->linkSkuValues($hash),
             'seller_images' => $sellerImages,
+            'is_runnable' => (bool) ($linkSku->is_runnable ?? true),
+            'not_runnable_reason' => $linkSku->not_runnable_reason,
+            'not_runnable_reason_label' => $linkSku->not_runnable_reason_label,
         ];
     }
 }
