@@ -78,6 +78,12 @@
         .wh-reason-pill:hover { border-color: #8fb8d6; color: #2f7ba8; }
         .wh-reason-pill.active { border-color: #3c8dbc; background: #eaf4fb; color: #2f7ba8; font-weight: 600; }
         .wh-fill-remark { flex: 1 1 180px; min-width: 160px; height: 30px; }
+        .wh-fill-modal-lg { width: 980px; max-width: 95vw; }
+        .wh-fill-item-images { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+        .wh-fill-upload-trigger { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border: 1px dashed #3c8dbc; border-radius: 4px; background: #f4f8fc; color: #3c8dbc; font-size: 13px; font-weight: 500; cursor: pointer; transition: all .15s; }
+        .wh-fill-upload-trigger:hover { background: #eaf4fb; border-color: #2f7ba8; color: #2f7ba8; }
+        .wh-fill-physical-preview { min-width: 72px; height: 72px; display: flex; align-items: center; justify-content: center; border: 1px dashed #dfe6ed; border-radius: 4px; background: #fafbfc; }
+        .wh-fill-physical-remove { font-size: 12px; color: #c0392b; cursor: pointer; }
     </style>
 @endpush
 
@@ -205,7 +211,6 @@
                 </div>
                 <div class="modal-body">
                     <div id="warehouse-variant-detail-identity" class="product-statistics-detail-identity"></div>
-                    <div id="warehouse-variant-detail-refresh-summary" hidden style="margin:8px 0 12px;padding:6px 10px;background:#f4f6f9;border-left:3px solid #3c8dbc;border-radius:2px;font-size:13px;"></div>
                     <div id="warehouse-variant-detail-loading" class="text-muted text-center" hidden><i class="fa fa-spinner fa-spin"></i> 正在加载规格详情…</div>
                     <div id="warehouse-variant-detail-error" class="alert alert-danger" hidden></div>
                     <div id="warehouse-variant-detail-content" hidden>
@@ -231,9 +236,9 @@
         </div>
     </div>
 
-    {{-- 填写异常数据弹窗：按 SKU 填写重量 / 驳回理由 / 备注，未填写的不提交 --}}
+    {{-- 填写异常数据弹窗：按 SKU 填写重量 / 驳回理由 / 备注 / 实物图，未填写的不提交 --}}
     <div class="modal fade" id="warehouse-product-statistics-fill-modal" tabindex="-1" role="dialog">
-        <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-dialog wh-fill-modal-lg" role="document">
             <div class="modal-content">
                 <div class="modal-header">
                     <button type="button" class="close" data-dismiss="modal" aria-label="{{ $labels['close'] }}"><span aria-hidden="true">&times;</span></button>
@@ -242,7 +247,7 @@
                 </div>
                 <div class="modal-body">
                     <div id="warehouse-fill-identity" class="product-statistics-detail-identity"></div>
-                    <div id="warehouse-fill-loading" class="text-muted text-center"><i class="fa fa-spinner fa-spin"></i> 正在从通途 API 刷新最新重量数据…</div>
+                    <div id="warehouse-fill-loading" class="text-muted text-center"><i class="fa fa-spinner fa-spin"></i> 正在加载规格数据…</div>
                     <div id="warehouse-fill-error" class="alert alert-danger" hidden></div>
                     <div id="warehouse-fill-content" hidden>
                         <div class="wh-fill-section-title">SKU 异常数据 <span style="color:#c0392b;">*</span></div>
@@ -268,5 +273,5 @@
     <script>
         window.__warehouseProductStatisticsConfig = @json($warehouseProductStatisticsConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/warehouse-product-statistics.js?v=20261024-3"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/warehouse-product-statistics.js?v=20261026-2"></script>
 @endpush

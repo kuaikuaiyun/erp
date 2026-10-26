@@ -31,16 +31,19 @@
             <span class="help-block">{{ __('product_requests.link_skus.sku_values_help') }}</span>
         </div>
         @endif
-        @if($linkSku->product_image)
-        <div class="form-group"><label>{{ __('product_requests.link_skus.product_image_label') }}</label>
+        <div class="form-group @error('product_image') has-error @enderror"><label>{{ __('product_requests.link_skus.product_image_label') }}</label>
+            @if($linkSku->product_image)
             <div class="link-sku-image-list">
                 <div class="link-sku-image-item">
                     <a href="{{ route('product-requests.link-skus.product-image', $linkSku) }}" data-product-request-image-preview data-product-request-image-alt="{{ __('product_requests.link_skus.product_image_label') }}"><img src="{{ route('product-requests.link-skus.product-image', $linkSku) }}" alt="{{ __('product_requests.link_skus.product_image_label') }}"></a>
+                    <label class="link-sku-image-remove"><input type="checkbox" name="remove_product_image" value="1"> {{ __('product_requests.uploads.remove_image') }}</label>
                 </div>
             </div>
-            <span class="help-block">{{ __('product_requests.link_skus.product_image_help') }}</span>
+            @endif
+            @include('portals.product-requests.partials.upload', ['inputName' => 'product_image', 'inputId' => 'link_sku_product_image', 'maxFiles' => 1, 'required' => false, 'existingAttachments' => collect()])
+            <span class="help-block">{{ __('product_requests.link_skus.product_image_help') }} 支持 jpg/png/webp，最大 5MB。</span>
+            @error('product_image')<span class="help-block text-red">{{ $message }}</span>@enderror
         </div>
-        @endif
         @php($existingImages = array_values((array) ($linkSku->images ?? [])))
         <div class="form-group"><label>{{ __('product_requests.link_skus.images_label') }}</label>
             @if($existingImages !== [])

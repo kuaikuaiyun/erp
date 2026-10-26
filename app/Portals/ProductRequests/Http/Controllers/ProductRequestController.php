@@ -1904,6 +1904,8 @@ class ProductRequestController extends Controller
             'sku_values' => ['nullable', 'array', 'max:100'],
             'sku_values.*.price' => ['nullable', 'string', 'max:100'],
             'sku_values.*.weight' => ['nullable', 'string', 'max:100'],
+            'product_image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'remove_product_image' => ['nullable', 'boolean'],
             'images' => ['nullable', 'array', 'max:3'],
             'images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
             'remove_images' => ['nullable', 'array'],
@@ -1954,6 +1956,29 @@ class ProductRequestController extends Controller
             }
         }
         $linkSku->forceFill(['sku_values' => $linkValues === [] ? null : $linkValues])->save();
+
+        // 产品主图编辑：勾选删除 → 删旧图并清空；上传新图 → 覆盖旧图
+        $oldProductImage = (string) ($linkSku->product_image ?? '');
+        $newProductImage = $oldProductImage;
+        if (!empty($data['remove_product_image'])) {
+            if ($oldProductImage !== '') {
+                Storage::disk('local')->delete($oldProductImage);
+            }
+            $newProductImage = '';
+        }
+        if ($request->hasFile('product_image')) {
+            $file = $request->file('product_image');
+            $ext = strtolower((string) ($file->getClientOriginalExtension() ?: 'jpg'));
+            $path = 'link-skus/'.$linkSku->getKey().'/product-image.'.$ext;
+            Storage::disk('local')->put($path, file_get_contents($file->getRealPath()));
+            if ($oldProductImage !== '' && $oldProductImage !== $path) {
+                Storage::disk('local')->delete($oldProductImage);
+            }
+            $newProductImage = $path;
+        }
+        if ($newProductImage !== $oldProductImage) {
+            $linkSku->forceFill(['product_image' => $newProductImage === '' ? null : $newProductImage])->save();
+        }
 
         // 实拍图编辑：先移除勾选删除的旧图并清理磁盘文件，再追加新上传图片，合计最多 3 张
         $currentImages = array_values((array) ($linkSku->images ?? []));

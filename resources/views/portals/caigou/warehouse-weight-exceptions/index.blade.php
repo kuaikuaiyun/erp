@@ -67,6 +67,7 @@
                     <thead>
                     <tr>
                         <th style="width:60px;">图片</th>
+                        <th style="width:60px;">实物图</th>
                         <th>通途 SKU / Shopify SKU</th>
                         <th>产品编号 / 产品名</th>
                         <th style="width:110px;">通途重量(g)</th>
@@ -85,6 +86,13 @@
                             <td>
                                 @if($row->product_image_url)
                                     <img src="{{ $row->product_image_url }}" class="product-statistics-thumb erp-zoomable" style="width:48px;height:48px;object-fit:cover;border:1px solid #eee;border-radius:3px;cursor:zoom-in;" alt="" title="点击放大查看" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">
+                                @else
+                                    <span class="text-muted">—</span>
+                                @endif
+                            </td>
+                            <td>
+                                @if($row->physical_image_path)
+                                    <img src="{{ route('warehouse.weight-exceptions.physical-image', $row->id) }}" class="product-statistics-thumb erp-zoomable" style="width:48px;height:48px;object-fit:cover;border:1px solid #dfe6ed;border-radius:3px;cursor:zoom-in;" alt="" title="点击放大查看实物图" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">
                                 @else
                                     <span class="text-muted">—</span>
                                 @endif
@@ -159,7 +167,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="11" class="text-center text-muted" style="padding:40px;">
+                            <td colspan="12" class="text-center text-muted" style="padding:40px;">
                                 <i class="fa fa-inbox fa-2x"></i>
                                 <div style="margin-top:8px;">当前筛选条件下没有异常记录</div>
                             </td>

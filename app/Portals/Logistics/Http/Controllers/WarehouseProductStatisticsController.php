@@ -7,8 +7,9 @@ use App\Models\AdminUser;
 use App\Models\WarehouseSkuWeightException;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Logistics\LogisticsProductStatisticsService;
-use App\Portals\Logistics\TongtuSkuMappingService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
@@ -18,14 +19,14 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * 数据源完全复用 LogisticsProductStatisticsService，仅在仓库门户上下文内可用，
  * 列表视图只保留产品信息 / 产品编号 / 规格信息 / 查看按钮四个关键区域。
- * 点击规格详情时主动调通途 goodsQuery 刷新每个 SKU 的 sale_weight_gram。
+ * 重量直接取 DB（logistics_order_items.sale_weight_gram）中已同步的值，
+ * 不再额外调通途 API。
  */
 class WarehouseProductStatisticsController extends Controller
 {
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly LogisticsProductStatisticsService $statistics,
-        private readonly TongtuSkuMappingService $tongtu,
     ) {
     }
 
@@ -90,69 +91,29 @@ class WarehouseProductStatisticsController extends Controller
             ], 404);
         }
 
-        // 点击"查看"时先调通途 goodsQuery，把当前 product 下所有 tongtu_sku 的
-        // goodsDetail[].goodsWeight 写回 logistics_order_items.sale_weight_gram，
-        // 然后重新走 detailPage 让 variantMetrics 拿到最新重量值。
-        $skusToRefresh = collect($detail['detail']['rows'] ?? [])
-            ->pluck('tongtu_sku')
-            ->filter()
-            ->unique()
-            ->values()
+        // 附带当前 product 下已有的待处理异常记录（按 SKU 分组），前端据此回填已填值
+        $existingExceptions = WarehouseSkuWeightException::query()
+            ->where('product_id', (string) $validated['product_id'])
+            ->where('status', 'pending')
+            ->orderByDesc('id')
+            ->get(['id', 'tongtu_sku', 'corrected_weight_gram', 'reject_reason', 'remark', 'physical_image_path'])
+            ->groupBy('tongtu_sku')
+            ->map(static function ($group) {
+                $first = $group->first();
+
+                return [
+                    'id' => (int) $first->id,
+                    'corrected_weight_gram' => $first->corrected_weight_gram,
+                    'reject_reason' => $first->reject_reason,
+                    'remark' => $first->remark,
+                    'has_physical_image' => (string) $first->physical_image_path !== '',
+                ];
+            })
             ->all();
 
-        $weightRefresh = [
-            'refreshed' => 0,
-            'failed' => 0,
-            'not_found' => 0,
-            'skipped' => 0,
-        ];
-
-        if ($skusToRefresh !== []) {
-            $weightRefresh = $this->tongtu->refreshWeightsByTongtuSkus($skusToRefresh);
-
-            $detail = $this->statistics->detailPage(
-                $filters,
-                (string) $validated['product_id'],
-                [
-                    'tab' => 'variants',
-                    'page' => max(1, (int) ($validated['detail_page'] ?? 1)),
-                    'per_page' => in_array((int) ($validated['detail_per_page'] ?? 10), [5, 10, 20], true)
-                        ? (int) ($validated['detail_per_page'] ?? 10)
-                        : 10,
-                    'sort' => trim((string) ($validated['detail_sort'] ?? '')),
-                    'direction' => trim((string) ($validated['detail_direction'] ?? '')),
-                    'keyword' => trim((string) ($validated['detail_keyword'] ?? '')),
-                ],
-            );
-
-            // 用通途 goodsImageId 临时覆盖接口返回的 product_image_url。
-            // 只改 JSON 响应，不动 logistics_order_items 表里的 Shopify 原图 ——
-            // 避免污染系统中其他用到 product_image_url 的页面。
-            // 注意：必须按索引直接写 $detail['detail']['rows'][$idx]，
-            // PHP 的 foreach + &$row 在多层数组+中间变量场景下有 COW（写时复制）
-            // 陷阱，引用修改可能不生效。
-            $imageMap = $weightRefresh['images'] ?? [];
-            $rows = $detail['detail']['rows'] ?? [];
-            foreach ($rows as $idx => $row) {
-                $skuKey = mb_strtolower(trim((string) ($row['tongtu_sku'] ?? '')));
-                if ($skuKey !== '' && isset($imageMap[$skuKey])) {
-                    $detail['detail']['rows'][$idx]['product_image_url'] = $imageMap[$skuKey];
-                }
-            }
-
-            // 产品级大图（弹窗顶部 identity 区域）也用通途图覆盖。
-            // 通途一个 product 下各 SKU 的 goodsImageId 是同一张，取 images map 的第一个即可。
-            if ($imageMap !== []) {
-                $firstTongtuImage = reset($imageMap);
-                if ($firstTongtuImage && isset($detail['product']) && is_array($detail['product'])) {
-                    $detail['product']['image_url'] = $firstTongtuImage;
-                }
-            }
-        }
-
         return response()->json([
-            ...($detail ?? []),
-            'weight_refresh' => $weightRefresh,
+            ...$detail,
+            'existing_exceptions' => $existingExceptions,
         ]);
     }
 
@@ -179,21 +140,53 @@ class WarehouseProductStatisticsController extends Controller
             'rows.*.corrected_weight_gram' => ['nullable', 'numeric', 'gt:0'],
             'rows.*.reject_reason' => ['nullable', Rule::in(array_keys(WarehouseSkuWeightException::REJECT_REASONS))],
             'rows.*.remark' => ['nullable', 'string', 'max:500'],
+            'rows.*.remove_physical_image' => ['nullable', 'boolean'],
         ]);
+
+        // 逐文件验证每个 SKU 的实物图
+        $indexedFileMap = [];
+        foreach ((array) $request->file('rows') as $idx => $rowFiles) {
+            if (is_array($rowFiles) && isset($rowFiles['physical_image']) && $rowFiles['physical_image'] !== null) {
+                $file = $rowFiles['physical_image'];
+                if (!$file->isValid()) {
+                    return response()->json(['ok' => false, 'message' => '第 ' . ($idx + 1) . ' 行实物图上传失败'], 422);
+                }
+                $mime = strtolower((string) $file->getMimeType());
+                $allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+                if (!in_array($mime, $allowed, true)) {
+                    return response()->json(['ok' => false, 'message' => '实物图仅支持 jpg/png/webp'], 422);
+                }
+                if ($file->getSize() > 5 * 1024 * 1024) {
+                    return response()->json(['ok' => false, 'message' => '实物图不得超过 5MB'], 422);
+                }
+                $indexedFileMap[$idx] = $file;
+            }
+        }
 
         $user = $context['user'];
 
+        // 先按 SKU 把实物图文件归好档（避免后面 filter+values 重排后索引对不上）
+        $fileBySku = [];
+        foreach ((array) $validated['rows'] as $idx => $row) {
+            if (isset($indexedFileMap[$idx])) {
+                $fileBySku[trim((string) ($row['tongtu_sku'] ?? ''))] = $indexedFileMap[$idx];
+            }
+        }
+
         // 只处理真正填了内容的行：重量 / 驳回理由 / 备注 全空视为未填写
-        $rows = collect($validated['rows'])->filter(function (array $row): bool {
+        $rows = collect($validated['rows'])->filter(function (array $row) use ($fileBySku) {
+            $sku = trim((string) ($row['tongtu_sku'] ?? ''));
             return trim((string) ($row['reject_reason'] ?? '')) !== ''
                 || trim((string) ($row['remark'] ?? '')) !== ''
-                || (float) ($row['corrected_weight_gram'] ?? 0) > 0;
+                || (float) ($row['corrected_weight_gram'] ?? 0) > 0
+                || isset($fileBySku[$sku])
+                || !empty($row['remove_physical_image']);
         })->values();
 
         if ($rows->isEmpty()) {
             return response()->json([
                 'ok' => false,
-                'message' => '请至少为一个 SKU 填写重量、驳回理由或备注',
+                'message' => '请至少为一个 SKU 填写重量、驳回理由、备注或上传实物图',
             ], 422);
         }
 
@@ -207,6 +200,25 @@ class WarehouseProductStatisticsController extends Controller
                 ->where('tongtu_sku', $sku)
                 ->first();
 
+            // 实物图处理：按 SKU 从预先整理好的 map 里取
+            $physicalPath = (string) ($existing?->physical_image_path ?? '');
+            $removePhysical = !empty($row['remove_physical_image']);
+            $newFile = $fileBySku[$sku] ?? null;
+
+            if ($newFile !== null) {
+                // 有新图：存新图，删旧图
+                $ext = strtolower((string) ($newFile->getClientOriginalExtension() ?: 'jpg'));
+                $path = 'warehouse-exceptions/'.Str::uuid().'.'.$ext;
+                Storage::disk('local')->put($path, file_get_contents($newFile->getRealPath()));
+                if ($physicalPath !== '' && $physicalPath !== $path) {
+                    Storage::disk('local')->delete($physicalPath);
+                }
+                $physicalPath = $path;
+            } elseif ($removePhysical && $physicalPath !== '') {
+                Storage::disk('local')->delete($physicalPath);
+                $physicalPath = '';
+            }
+
             $payload = [
                 'shopify_sku' => trim((string) ($row['shopify_sku'] ?? '')) ?: null,
                 'tongtu_product_code' => trim((string) ($validated['tongtu_product_code'] ?? '')) ?: null,
@@ -216,6 +228,7 @@ class WarehouseProductStatisticsController extends Controller
                 'corrected_weight_gram' => (float) ($row['corrected_weight_gram'] ?? 0) ?: null,
                 'reject_reason' => trim((string) ($row['reject_reason'] ?? '')) ?: null,
                 'remark' => trim((string) ($row['remark'] ?? '')) ?: null,
+                'physical_image_path' => $physicalPath !== '' ? $physicalPath : null,
             ];
 
             if ($existing) {
@@ -227,6 +240,10 @@ class WarehouseProductStatisticsController extends Controller
 
                     return $value !== null && $value !== '';
                 });
+                // 实物图路径如果是明确变更过（null 也需要写入），强制带上
+                if ($newFile !== null || $removePhysical) {
+                    $changes['physical_image_path'] = $payload['physical_image_path'];
+                }
                 if ($changes !== []) {
                     $existing->fill($changes)->save();
                     $updated++;
@@ -251,6 +268,24 @@ class WarehouseProductStatisticsController extends Controller
             'updated' => $updated,
             'message' => sprintf('异常数据已提交：新增 %d 条，更新 %d 条', $created, $updated),
         ], 201);
+    }
+
+    /** 实物图访问：本地文件直接流式输出，不受 portal 限制 */
+    public function physicalImage(Request $request, int $id): Response
+    {
+        $exception = WarehouseSkuWeightException::query()->find($id);
+        abort_if($exception === null, 404);
+
+        $path = (string) ($exception->physical_image_path ?? '');
+        abort_if($path === '' || !Storage::disk('local')->exists($path), 404);
+
+        $local = Storage::disk('local')->path($path);
+        $mime = mime_content_type($local) ?: 'image/jpeg';
+
+        return response()->file($local, [
+            'Content-Type' => $mime,
+            'Cache-Control' => 'public, max-age=86400',
+        ]);
     }
 
     /** @return array{portal: \App\Models\Portal, user: \App\Models\AdminUser}|Response */
