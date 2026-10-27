@@ -179,6 +179,14 @@ class TongtuSkuMappingService
 
             foreach ($firstPass as $type => $typeMappings) {
                 $this->findProductsByType($typeMappings, (string) $type, $session, $pending);
+
+                // A Shopify SKU can be maintained as a Tongtu SKU alias instead
+                // of the canonical SKU. Only query the still-unresolved values by
+                // alias, so a normal SKU match always has priority.
+                $aliasFallback = array_intersect_key($typeMappings, $pending);
+                if ($aliasFallback !== []) {
+                    $this->findProductsByType($aliasFallback, (string) $type, $session, $pending, 'skuAliases');
+                }
             }
 
             foreach (array_slice(self::PRODUCT_TYPES, 1) as $type) {
@@ -190,6 +198,11 @@ class TongtuSkuMappingService
                 }
                 if ($fallback !== []) {
                     $this->findProductsByType($fallback, $type, $session, $pending);
+
+                    $aliasFallback = array_intersect_key($fallback, $pending);
+                    if ($aliasFallback !== []) {
+                        $this->findProductsByType($aliasFallback, $type, $session, $pending, 'skuAliases');
+                    }
                 }
             }
 
@@ -426,8 +439,18 @@ class TongtuSkuMappingService
      * @param array{app_token:string, app_secret:string, merchant_id:string} $session
      * @param array<string, LogisticsTongtuSkuMapping> $pending
      */
-    private function findProductsByType(array $mappings, string $productType, array $session, array &$pending): void
+    private function findProductsByType(
+        array $mappings,
+        string $productType,
+        array $session,
+        array &$pending,
+        string $queryField = 'skus',
+    ): void
     {
+        if (!in_array($queryField, ['skus', 'skuAliases'], true)) {
+            throw new RuntimeException('Unsupported Tongtu SKU query field: '.$queryField);
+        }
+
         foreach (array_chunk($mappings, self::REQUEST_SKU_LIMIT, true) as $chunk) {
             $body = $this->postJson(
                 (string) config('logistics.tongtu.goods_query_url'),
@@ -435,7 +458,7 @@ class TongtuSkuMappingService
                 [
                     'merchantId' => $session['merchant_id'],
                     'productType' => $productType,
-                    'skus' => array_keys($chunk),
+                    $queryField => array_keys($chunk),
                     'pageNo' => 1,
                     'pageSize' => 100,
                 ],
