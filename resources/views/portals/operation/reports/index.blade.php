@@ -38,7 +38,7 @@
         <div class="op-kpi"><span>交易退货费</span><strong>${{ number_format($metricTotals['first_return_fee'],2) }}</strong></div>
     </div>
 
-    <div class="box"><div class="box-header with-border"><h3 class="box-title op-section-title">系统统计数据</h3><p class="op-help">采购费＝指导价 × 数量；运费按每张首单计算：SKU 总重量 ÷ 1000 × 80 ＋ 20；交易退货费＝首单营业额 × 12%。</p></div>
+    <div class="box"><div class="box-header with-border"><h3 class="box-title op-section-title">营业额数据</h3><p class="op-help">采购费＝指导价 × 数量；运费按每张首单计算：SKU 总重量 ÷ 1000 × 80 ＋ 20；交易退货费＝首单营业额 × 12%。</p></div>
         <div class="box-body no-padding op-table-wrap"><table class="table table-bordered table-hover op-table">
             <thead><tr><th>日期</th><th>人名</th><th>店铺域名</th><th>媒体</th><th class="first">首单订阅单量</th><th class="first">首单订阅营业额($)</th><th class="first">首单普通单量</th><th class="first">首单普通营业额($)</th><th class="first">首单合计单量</th><th class="first">首单合计营业额($)</th><th class="cost">首单总采购费($)</th><th class="cost">首单总运费</th><th class="cost">首单交易退货费($)</th><th class="renew">续费单量</th><th class="renew">续费营业额($)</th><th class="renew">续费费用($)</th><th>总单量</th><th>总营业额($)</th></tr></thead>
             <tbody>@forelse($metricRows as $row)<tr>
@@ -56,7 +56,7 @@
 
     @php($adRows = count($advertisingRows) ? $advertisingRows : [[]])
     <form method="post" enctype="multipart/form-data" action="{{ route('operation.reports.store') }}" id="operation-report-form">
-        @csrf<input type="hidden" name="report_date" value="{{ $reportDate }}">@if($isBoss)<input type="hidden" name="operator_user_id" value="{{ $selectedOperator->id }}">@endif
+        @csrf<input type="hidden" name="report_date" value="{{ $reportDate }}">@if($editingReport)<input type="hidden" name="report_id" value="{{ $editingReport->id }}">@endif @if($isBoss)<input type="hidden" name="operator_user_id" value="{{ $selectedOperator->id }}">@endif
         <div class="box"><div class="box-header with-border"><h3 class="box-title op-section-title">广告信息填写</h3><p class="op-help">当天运营的每个广告账户填写一次；实际广告费自动按“账面广告费 × 结算系数”计算。带 <span class="text-red">*</span> 的字段均为必填项。</p></div>
             <div class="box-body">@if(!$canEditReport)<div class="alert alert-info"><i class="fa fa-eye"></i> 当前正在查看 {{ $selectedOperator->name ?: $selectedOperator->username }} 已提交的内容，仅可查看和审核。</div>@endif<fieldset @disabled(!$canEditReport)><div class="table-responsive"><table class="table table-bordered ad-table"><thead><tr><th>广告社媒 <span class="text-red">*</span></th><th>广告代理 <span class="text-red">*</span></th><th>广告账户名称 <span class="text-red">*</span></th><th>广告账户编号 <span class="text-red">*</span></th><th>账面广告费($) <span class="text-red">*</span></th><th>结算系数 <span class="text-red">*</span></th><th>实际广告费($)</th><th>广告消耗截图 <span class="text-red">*</span></th><th></th></tr></thead><tbody id="ad-rows">
                 @foreach($adRows as $i=>$ad)<tr data-ad-row>
@@ -73,7 +73,7 @@
             </tbody></table></div>
             <div class="op-actions"><button type="button" class="btn btn-default btn-sm" id="add-ad"><i class="fa fa-plus"></i> 添加广告账户</button></div></fieldset>
             <div class="op-actions" style="margin-top:10px">
-                @if(!$report)<button class="btn btn-primary" type="submit"><i class="fa fa-paper-plane"></i> 提交报表</button>@else<a class="btn btn-info" href="{{ route('operation.reports.show',$report) }}"><i class="fa fa-eye"></i> 查看已提交报表</a><span class="text-muted">当天报表已提交，填报内容不会在当前页面回填。</span>@endif
+                @if($editingReport)<button class="btn btn-primary" type="submit"><i class="fa fa-save"></i> 保存并重新提交</button><a class="btn btn-default" href="{{ route('operation.reports.show',$editingReport) }}">取消编辑</a>@elseif(!$report)<button class="btn btn-primary" type="submit"><i class="fa fa-paper-plane"></i> 提交报表</button>@else<a class="btn btn-info" href="{{ route('operation.reports.show',$report) }}"><i class="fa fa-eye"></i> 查看已提交报表</a><span class="text-muted">当天报表已提交，填报内容不会在当前页面回填。</span>@endif
             </div></div>
         </div>
     </form>

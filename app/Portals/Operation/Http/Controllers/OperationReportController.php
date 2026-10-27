@@ -39,19 +39,26 @@ class OperationReportController extends Controller
         $validated = $request->validate([
             'report_date' => ['nullable', 'date_format:Y-m-d'],
             'operator_user_id' => ['nullable', 'integer'],
+            'edit_report' => ['nullable', 'integer'],
         ]);
-        $date = (string) ($validated['report_date'] ?? now('Asia/Shanghai')->format('Y-m-d'));
+        $editingReport = ! empty($validated['edit_report']) ? OperationReport::query()->findOrFail((int) $validated['edit_report']) : null;
+        if ($editingReport) {
+            abort_unless($editingReport->status === OperationReport::STATUS_PENDING, 422, '只有待审核报表可以重新编辑。');
+            abort_unless($isBoss || (int) $editingReport->operator_user_id === (int) $user->getKey(), 403);
+        }
+        $date = $editingReport?->report_date?->format('Y-m-d')
+            ?: (string) ($validated['report_date'] ?? now('Asia/Shanghai')->format('Y-m-d'));
         $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
-        $operatorId = $isBoss
+        $operatorId = $editingReport ? (int) $editingReport->operator_user_id : ($isBoss
             ? (int) ($validated['operator_user_id'] ?? $operatorOptions->first()?->getKey() ?? $user->getKey())
-            : (int) $user->getKey();
+            : (int) $user->getKey());
         $operator = AdminUser::query()->findOrFail($operatorId);
         if ($isBoss) $this->assertAssignableOperator($operatorId);
 
         $calculated = $this->metrics->build($date, $operatorId);
         $report = OperationReport::query()->whereDate('report_date', $date)->where('operator_user_id', $operatorId)->first();
         $metricRows = $calculated['rows'];
-        $advertisingRows = [];
+        $advertisingRows = $editingReport?->advertising_rows ?: [];
         $history = OperationReport::query()
             ->when(! $isBoss && ! $canReview, fn ($query) => $query->where('operator_user_id', $user->getKey()))
             ->orderByDesc('report_date')->orderByDesc('id')->limit(60)->get();
@@ -59,6 +66,7 @@ class OperationReportController extends Controller
         return view('portals.operation.reports.index', [
             'portal' => $context['portal']->load('menus'), 'user' => $user,
             'reportDate' => $date, 'selectedOperator' => $operator, 'report' => $report,
+            'editingReport' => $editingReport,
             'metricRows' => $metricRows, 'metricTotals' => $this->sumRows($metricRows),
             'metricRowspans' => $this->identityRowspans($metricRows),
             'advertisingRows' => $advertisingRows, 'warnings' => $calculated['warnings'],
@@ -85,6 +93,8 @@ class OperationReportController extends Controller
             'metricRows' => $rows, 'metricTotals' => $this->sumRows($rows),
             'metricRowspans' => $this->identityRowspans($rows),
             'advertisingRows' => $report->advertising_rows ?: [], 'canReview' => $this->canReview($user),
+            'canEdit' => $report->status === OperationReport::STATUS_PENDING
+                && ($this->isBoss($user) || (int) $report->operator_user_id === (int) $user->getKey()),
         ]);
     }
 
@@ -96,6 +106,7 @@ class OperationReportController extends Controller
         $isBoss = $this->isBoss($user);
         $validated = $request->validate([
             'report_date' => ['required', 'date_format:Y-m-d'],
+            'report_id' => ['nullable', 'integer'],
             'operator_user_id' => ['nullable', 'integer'],
             'ads' => ['required', 'array', 'min:1', 'max:100'],
             'ads.*.media_source' => ['required', Rule::in(array_values([...LogisticsOrder::MEDIA_SOURCES, LogisticsOrder::MEDIA_SOURCE_OTHER]))],
@@ -109,10 +120,16 @@ class OperationReportController extends Controller
         ]);
         $operatorId = $isBoss && ! empty($validated['operator_user_id'])
             ? (int) $validated['operator_user_id'] : (int) $user->getKey();
+        $editingReport = ! empty($validated['report_id']) ? OperationReport::query()->findOrFail((int) $validated['report_id']) : null;
+        if ($editingReport) {
+            abort_unless($editingReport->status === OperationReport::STATUS_PENDING, 422, '只有待审核报表可以重新编辑。');
+            abort_unless($isBoss || (int) $editingReport->operator_user_id === (int) $user->getKey(), 403);
+            abort_unless((int) $editingReport->operator_user_id === $operatorId && $editingReport->report_date->format('Y-m-d') === $validated['report_date'], 422);
+        }
         if ($isBoss) $this->assertAssignableOperator($operatorId);
         $operator = AdminUser::query()->findOrFail($operatorId);
         $existing = OperationReport::query()->whereDate('report_date', $validated['report_date'])->where('operator_user_id', $operatorId)->first();
-        if ($existing) {
+        if ($existing && (! $editingReport || (int) $existing->getKey() !== (int) $editingReport->getKey())) {
             throw ValidationException::withMessages(['report_date' => '该运营当天的报表已经提交，请到提交记录中查看。']);
         }
 
@@ -147,7 +164,7 @@ class OperationReportController extends Controller
         $adSpend = collect($ads)->sum('actual_spend');
         $firstProfit = $totals['first_total_revenue'] - $totals['first_purchase_cost'] - $totals['first_shipping_cost'] - $totals['first_return_fee'] - $adSpend;
         $renewalNet = $totals['renewal_revenue'] - $totals['renewal_cost'];
-        OperationReport::query()->create([
+        $values = [
                 'report_date' => $validated['report_date'], 'operator_user_id' => $operatorId,
                 'operator_name' => (string) ($operator->name ?: $operator->username),
                 'metric_rows' => $calculated['rows'], 'advertising_rows' => $ads,
@@ -158,9 +175,11 @@ class OperationReportController extends Controller
                 'overall_profit' => $firstProfit + $renewalNet,
                 'status' => OperationReport::STATUS_PENDING, 'submitted_by' => $user->getKey(),
                 'submitted_at' => now(), 'reviewed_by' => null, 'reviewed_at' => null,
-            ]);
+            ];
+        if ($editingReport) $editingReport->update($values);
+        else OperationReport::query()->create($values);
 
-        return redirect()->route('operation.reports.index', ['report_date' => $validated['report_date'], 'operator_user_id' => $isBoss ? $operatorId : null])->with('success', '运营报表已提交，当前状态为待审核。');
+        return redirect()->route('operation.reports.index', ['report_date' => $validated['report_date'], 'operator_user_id' => $isBoss ? $operatorId : null])->with('success', $editingReport ? '运营报表已重新提交，状态仍为待审核。' : '运营报表已提交，当前状态为待审核。');
     }
 
     public function approve(Request $request, OperationReport $report): RedirectResponse
