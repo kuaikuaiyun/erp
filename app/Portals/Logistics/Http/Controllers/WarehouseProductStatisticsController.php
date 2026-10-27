@@ -479,11 +479,16 @@ class WarehouseProductStatisticsController extends Controller
             $key = mb_strtolower(trim((string) $linkSku->pcl_product_no));
             $rawImages = array_values(array_filter((array) ($linkSku->images ?? [])));
             // 同时记录审核状态（每条 link_sku 一条）
-            $linkSkuMap[$key] = [
-                'link_sku_id' => (int) $linkSku->getKey(),
-                'warehouse_review_status' => $linkSku->warehouse_review_status ?: ProductRequestLinkSku::WAREHOUSE_REVIEW_STATUS_PENDING,
-                'image_refs' => [],
-            ];
+            if (!isset($linkSkuMap[$key])) {
+                $linkSkuMap[$key] = [
+                    'link_sku_id' => (int) $linkSku->getKey(),
+                    'warehouse_review_status' => ProductRequestLinkSku::WAREHOUSE_REVIEW_STATUS_PENDING,
+                    'image_refs' => [],
+                ];
+            }
+            if ($linkSku->warehouse_review_status === ProductRequestLinkSku::WAREHOUSE_REVIEW_STATUS_APPROVED) {
+                $linkSkuMap[$key]['warehouse_review_status'] = ProductRequestLinkSku::WAREHOUSE_REVIEW_STATUS_APPROVED;
+            }
             if ($rawImages === []) {
                 continue;
             }
@@ -496,7 +501,7 @@ class WarehouseProductStatisticsController extends Controller
                     'index' => $idx,
                 ];
             }
-            $linkSkuMap[$key]['image_refs'] = $imageRefs;
+            $linkSkuMap[$key]['image_refs'] = array_merge($linkSkuMap[$key]['image_refs'], $imageRefs);
         }
 
         foreach ($products as &$product) {
@@ -642,29 +647,30 @@ class WarehouseProductStatisticsController extends Controller
 
         $pclCode = mb_strtolower(trim((string) $validated['pcl_code']));
 
-        $linkSku = ProductRequestLinkSku::query()
+        $reviewedAt = now();
+        $updated = ProductRequestLinkSku::query()
             ->whereRaw('LOWER(TRIM(pcl_product_no)) = ?', [$pclCode])
-            ->first();
+            ->update([
+                'warehouse_review_status' => ProductRequestLinkSku::WAREHOUSE_REVIEW_STATUS_APPROVED,
+                'warehouse_reviewed_at' => $reviewedAt,
+            ]);
 
-        if ($linkSku === null) {
+        if ($updated === 0) {
             // 允许首次审核就创建记录（和上传图片的策略一致）
-            $linkSku = ProductRequestLinkSku::query()->create([
+            ProductRequestLinkSku::query()->create([
                 'pcl_product_no' => trim((string) $validated['pcl_code']),
                 'images' => [],
                 'source' => 'import',
                 'review_status' => 'done',
                 'supplier_url_hash' => 'wgh-' . substr(bin2hex(random_bytes(8)), 0, 16),
+                'warehouse_review_status' => ProductRequestLinkSku::WAREHOUSE_REVIEW_STATUS_APPROVED,
+                'warehouse_reviewed_at' => $reviewedAt,
             ]);
         }
 
-        $linkSku->update([
-            'warehouse_review_status' => ProductRequestLinkSku::WAREHOUSE_REVIEW_STATUS_APPROVED,
-            'warehouse_reviewed_at' => now(),
-        ]);
-
         return response()->json([
             'ok' => true,
-            'warehouse_review_status' => $linkSku->warehouse_review_status,
+            'warehouse_review_status' => ProductRequestLinkSku::WAREHOUSE_REVIEW_STATUS_APPROVED,
             'message' => '已审核通过',
         ]);
     }
