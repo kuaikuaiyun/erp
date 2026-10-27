@@ -358,6 +358,21 @@ class LogisticsProductStatisticsService
     }
 
     /**
+     * Product keys depend on the current Tongtu mapping status.  A manual
+     * retry changes that status immediately, so the short-lived candidate
+     * cache must be discarded before the browser is redirected back to the
+     * list; otherwise cached keys and live row data can briefly disagree.
+     *
+     * @param array<string,mixed> $filters
+     */
+    public function forgetPageCache(array $filters): void
+    {
+        Cache::forget($this->statisticsCacheKey('candidates', $filters));
+        Cache::forget($this->statisticsCacheKey('summary', $filters));
+        Cache::forget($this->statisticsCacheKey('refund-reasons', $filters));
+    }
+
+    /**
      * @param Collection<int,object> $candidates
      * @param array<string,mixed> $filters
      * @return array<string,mixed>

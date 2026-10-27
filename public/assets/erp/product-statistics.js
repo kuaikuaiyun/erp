@@ -186,6 +186,9 @@
     function selectedProductIds() { return Object.keys(state.selected).filter(function (id) { return state.selected[id]; }); }
     function refreshSelection() {
         var selected = products.filter(function (product) { return state.selected[product.id]; });
+        Array.prototype.slice.call(document.querySelectorAll('.product-statistics-check')).forEach(function (checkbox) {
+            checkbox.checked = Boolean(state.selected[checkbox.value]);
+        });
         if (checkAll) {
             checkAll.checked = products.length > 0 && selected.length === products.length;
             checkAll.indeterminate = selected.length > 0 && !checkAll.checked;

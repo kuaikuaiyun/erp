@@ -117,11 +117,13 @@ class ProductStatisticsController extends Controller
             ...$this->filterRules(false),
         ]);
 
+        $filters = $this->normaliseFilters($validated);
         $skus = $this->statistics->shopifySkusForProductIds(
-            $this->normaliseFilters($validated),
+            $filters,
             $validated['selected_ids'],
         );
         $queued = $this->tongtuMappings->retryUnmatchedForSkus($skus);
+        $this->statistics->forgetPageCache($filters);
 
         return redirect()->back()->with(
             $queued > 0 ? 'success' : 'info',
