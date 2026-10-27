@@ -14,8 +14,16 @@
     var currentProduct = null;
     var fillProductId = '';
     var fillProduct = null;
+    var fillPclCode = '';
     var fillRows = [];
+    var fillRealImages = [];       // [{ path, url, link_sku_id, index }]
+    var fillPasteActive = false;
+    var fillPasteTimer = null;
     var rejectReasons = config.rejectReasons || {};
+    var IMAGE_MIMES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    var IMAGES_URL = config.linkSkuImagesUrl || '';
+    var IMAGE_UPLOAD_URL = config.linkSkuImageUploadUrl || '';
+    var IMAGE_DELETE_URL = config.linkSkuImageDeleteUrl || '';
 
     function $(sel, root) { return (root || modal).querySelector(sel); }
 
@@ -44,6 +52,7 @@
     }
 
     function closeModal($m, el) {
+        clearFillPaste();
         if ($m && typeof $m.modal === 'function') {
             $m.modal('hide');
             return;
@@ -351,10 +360,128 @@
                     return variant;
                 });
                 renderFillRows(merged);
+
+                // 加载实拍图（PCL 级别）
+                fillPclCode = (fillProduct && fillProduct.product_code) ? String(fillProduct.product_code) : '';
+                loadFillRealImages();
             })
             .catch(function (err) {
                 showFillError(err && err.message ? err.message : '加载失败');
             });
+    }
+
+    /** 实拍图模块（PCL 级别，挂在 fill modal 顶部） */
+    function loadFillRealImages() {
+        fillRealImages = [];
+        renderFillRealImages();
+        if (!fillPclCode || !IMAGES_URL) return;
+        var sep = IMAGES_URL.indexOf('?') >= 0 ? '&' : '?';
+        fetch(IMAGES_URL + sep + 'pcl_code=' + encodeURIComponent(fillPclCode), {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        }).then(function (res) {
+            return res.json().then(function (data) {
+                if (!res.ok) throw new Error(data.message || '加载失败');
+                return data;
+            });
+        }).then(function (data) {
+            fillRealImages = buildRealEntries(data.images || [], data.link_sku_id || 0);
+            renderFillRealImages();
+        }).catch(function () { /* 静默忽略 */ });
+    }
+
+    function buildRealEntries(paths, linkSkuId) {
+        if (!paths || !paths.length) return [];
+        return paths.map(function (path, idx) {
+            return { path: path, url: '/link-sku-manager/' + linkSkuId + '/images/' + idx, link_sku_id: linkSkuId, index: idx };
+        });
+    }
+
+    function renderFillRealImages() {
+        var grid = document.getElementById('wh-fill-real-images');
+        if (!grid) return;
+        grid.innerHTML = '';
+        if (!fillRealImages.length) return;
+        fillRealImages.forEach(function (entry) {
+            var item = document.createElement('span');
+            item.className = 'wh-real-image-item';
+            item.innerHTML =
+                '<img src="' + entry.url + '" alt="实拍图" class="wh-real-image-thumb erp-zoomable" loading="lazy" decoding="async" title="点击放大查看" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">' +
+                '<button type="button" class="wh-real-image-delete" data-real-index="' + entry.index + '" title="删除">&times;</button>';
+            grid.appendChild(item);
+        });
+    }
+
+    function syncFillRealImages(data) {
+        fillRealImages = buildRealEntries(data.images || [], data.link_sku_id || 0);
+        renderFillRealImages();
+    }
+
+    function uploadFillReal(file) {
+        if (!fillPclCode || !IMAGE_UPLOAD_URL) return Promise.reject(new Error('缺少上传配置'));
+        var fd = new FormData();
+        fd.append('_token', csrfToken());
+        fd.append('pcl_code', fillPclCode);
+        fd.append('image', file);
+        return fetch(IMAGE_UPLOAD_URL, {
+            method: 'POST', body: fd,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        }).then(function (res) {
+            return res.json().then(function (data) {
+                if (!res.ok) throw new Error(data.message || '上传失败');
+                return data;
+            });
+        });
+    }
+
+    function deleteFillReal(index) {
+        if (!fillPclCode || !IMAGE_DELETE_URL) return Promise.reject(new Error('缺少删除配置'));
+        var body = '_token=' + encodeURIComponent(csrfToken())
+            + '&pcl_code=' + encodeURIComponent(fillPclCode)
+            + '&index=' + encodeURIComponent(index);
+        return fetch(IMAGE_DELETE_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+            body: body
+        }).then(function (res) {
+            return res.json().then(function (data) {
+                if (!res.ok) throw new Error(data.message || '删除失败');
+                return data;
+            });
+        });
+    }
+
+    function handleFillRealFiles(files) {
+        if (!files || !files.length) return;
+        if (!fillPclCode) {
+            alert('缺少 PCL 编号，暂时无法上传实拍图');
+            return;
+        }
+        var arr = Array.prototype.slice.call(files).filter(function (f) {
+            return f && IMAGE_MIMES.indexOf(f.type) !== -1;
+        });
+        if (!arr.length) { alert('请选择 jpg/png/webp 图片'); return; }
+        function recurse(file) {
+            uploadFillReal(file).then(function (data) {
+                syncFillRealImages(data);
+                if (arr.length) recurse(arr.shift());
+            }).catch(function (err) { alert('上传失败：' + (err.message || '未知错误')); });
+        }
+        recurse(arr.shift());
+    }
+
+    function activateFillPaste() {
+        fillPasteActive = true;
+        clearTimeout(fillPasteTimer);
+        fillPasteTimer = setTimeout(clearFillPaste, 15000);
+        var zone = document.getElementById('wh-fill-real-upload');
+        if (zone) zone.classList.add('is-paste-target');
+        document.activeElement && document.activeElement.blur();
+    }
+    function clearFillPaste() {
+        fillPasteActive = false;
+        clearTimeout(fillPasteTimer);
+        var zone = document.getElementById('wh-fill-real-upload');
+        if (zone) zone.classList.remove('is-paste-target');
     }
 
     /** 缺重量的 SKU 手动调通途接口补抓重量。 */
@@ -639,10 +766,87 @@
             return;
         }
 
+        // ④-3 fill modal 实拍图上传区：点击虚线框 → 选文件
+        if (fillModal && fillModal.contains(target)) {
+            var realUploadZone = target.closest('#wh-fill-real-upload');
+            if (realUploadZone) {
+                if (target.closest('#wh-fill-real-paste')) {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    activateFillPaste();
+                    return;
+                }
+                if (target.closest('#wh-fill-real-file')) return;
+                ev.preventDefault();
+                var realFile = document.getElementById('wh-fill-real-file');
+                if (realFile) realFile.click();
+                return;
+            }
+
+            // ④-4 fill modal 实拍图粘贴按钮
+            var realPasteBtn = target.closest('#wh-fill-real-paste');
+            if (realPasteBtn) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                activateFillPaste();
+                return;
+            }
+
+            // ④-5 fill modal 实拍图删除按钮
+            var realDelBtn = target.closest('.wh-real-image-delete[data-real-index]');
+            if (realDelBtn) {
+                ev.preventDefault();
+                var idx = parseInt(realDelBtn.getAttribute('data-real-index') || '0', 10);
+                if (!confirm('确认删除该图片？')) return;
+                deleteFillReal(idx).then(syncFillRealImages).catch(function (err) {
+                    alert('删除失败：' + (err.message || '未知错误'));
+                });
+                return;
+            }
+        }
+
         // ⑤ 填写弹窗提交
         if (target.closest('#warehouse-fill-submit')) {
             ev.preventDefault();
             submitFill();
         }
+    });
+
+    // ==== fill modal 实拍图：file input change ====
+    document.addEventListener('change', function (ev) {
+        if (ev.target && ev.target.id === 'wh-fill-real-file') {
+            handleFillRealFiles(ev.target.files);
+            ev.target.value = '';
+        }
+    });
+
+    // ==== fill modal 实拍图：拖拽 ====
+    (function bindFillRealDrop() {
+        var zone = document.getElementById('wh-fill-real-upload');
+        if (!zone) return;
+        zone.addEventListener('dragover', function (ev) { ev.preventDefault(); zone.classList.add('is-active'); });
+        zone.addEventListener('dragleave', function (ev) { ev.preventDefault(); zone.classList.remove('is-active'); });
+        zone.addEventListener('drop', function (ev) {
+            ev.preventDefault();
+            zone.classList.remove('is-active');
+            handleFillRealFiles(ev.dataTransfer && ev.dataTransfer.files);
+        });
+    })();
+
+    // ==== fill modal 实拍图：Ctrl+V 粘贴 ====
+    document.addEventListener('paste', function (ev) {
+        if (!fillPasteActive || !fillPclCode) return;
+        var clipboard = ev.clipboardData || window.clipboardData;
+        if (!clipboard) return;
+        var files = [];
+        for (var i = 0; i < clipboard.items.length; i++) {
+            if (clipboard.items[i].kind === 'file') {
+                var f = clipboard.items[i].getAsFile();
+                if (f && IMAGE_MIMES.indexOf(f.type) !== -1) files.push(f);
+            }
+        }
+        if (!files.length) return;
+        ev.preventDefault();
+        handleFillRealFiles(files);
     });
 })();

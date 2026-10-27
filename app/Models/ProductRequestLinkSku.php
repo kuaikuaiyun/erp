@@ -23,7 +23,19 @@ class ProductRequestLinkSku extends Model
         'sku_values' => 'array',
         'images' => 'array',
         'is_runnable' => 'boolean',
+        'warehouse_reviewed_at' => 'datetime',
     ];
+
+    public const WAREHOUSE_REVIEW_STATUS_PENDING = 'pending';
+    public const WAREHOUSE_REVIEW_STATUS_APPROVED = 'approved';
+
+    public static function warehouseReviewStatusLabel(?string $status): string
+    {
+        return match ($status) {
+            self::WAREHOUSE_REVIEW_STATUS_APPROVED => '已审核',
+            default => '待审核',
+        };
+    }
 
     public function getNotRunnableReasonLabelAttribute(): string
     {
