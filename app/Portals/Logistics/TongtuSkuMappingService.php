@@ -253,6 +253,25 @@ class TongtuSkuMappingService
     public function retryUnmatchedForOrders(array $orderIds): int
     {
         $mappings = $this->mappingsForOrders($orderIds);
+        return $this->retryUnmatchedMappings($mappings);
+    }
+
+    /**
+     * Requeue unresolved mappings directly by Shopify SKU. This is intended for
+     * the product-statistics screen: one SKU mapping is shared by every order
+     * that contains that SKU, so it is both more focused and more efficient than
+     * retrying a collection of orders.
+     *
+     * @param list<string> $skus
+     */
+    public function retryUnmatchedForSkus(array $skus): int
+    {
+        return $this->retryUnmatchedMappings($this->ensureMappings($skus));
+    }
+
+    /** @param Collection<int, LogisticsTongtuSkuMapping> $mappings */
+    private function retryUnmatchedMappings(Collection $mappings): int
+    {
         $ids = [];
         foreach ($mappings as $mapping) {
             if ($mapping->status === LogisticsTongtuSkuMapping::STATUS_MATCHED) {

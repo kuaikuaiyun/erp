@@ -543,6 +543,37 @@ class LogisticsProductStatisticsService
     }
 
     /**
+     * Return the source Shopify SKUs behind selected statistics products.
+     * Product keys may be a Tongtu PCL or an unresolved Shopify SKU; querying
+     * the item rows keeps the retry target correct in both cases.
+     *
+     * @param array<string,mixed> $filters
+     * @param list<string> $productIds
+     * @return list<string>
+     */
+    public function shopifySkusForProductIds(array $filters, array $productIds): array
+    {
+        $keys = array_values(array_filter(array_map(
+            fn (string $id): ?string => $this->decodeProductId($id),
+            $productIds,
+        )));
+        if ($keys === []) {
+            return [];
+        }
+
+        return $this->baseItemQuery($filters)
+            ->whereIn(DB::raw($this->productKeyExpression('items')), $keys)
+            ->whereNotNull('items.shopify_sku')
+            ->whereRaw("TRIM(items.shopify_sku) <> ''")
+            ->selectRaw('LOWER(TRIM(items.shopify_sku)) as shopify_sku')
+            ->distinct()
+            ->orderBy('shopify_sku')
+            ->pluck('shopify_sku')
+            ->map(static fn ($sku): string => (string) $sku)
+            ->all();
+    }
+
+    /**
      * Returns the product modal in small, independently paginated pieces.
      *
      * The old detail() method remains for compatibility with any external

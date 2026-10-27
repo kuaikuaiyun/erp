@@ -23,6 +23,7 @@
         'refundReasonReport' => $refundReasonReport,
         'pagination' => $productPagination,
         'detailUrl' => route('logistics.product-statistics.detail'),
+        'retryTongtuSkusUrl' => route('logistics.product-statistics.tongtu-skus.retry'),
         'sort' => $filters['sort'],
         'direction' => $filters['direction'],
         'labels' => $labels,
@@ -31,7 +32,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261024-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261027-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261015-2">
 @endpush
 
@@ -43,6 +44,12 @@
     <section class="content logistics-page product-statistics-page">
         @if($errors->has('scope'))
             <div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> {{ $errors->first('scope') }}</div>
+        @endif
+        @if(session('success'))
+            <div class="alert alert-success"><i class="fa fa-check-circle"></i> {{ session('success') }}</div>
+        @endif
+        @if(session('info'))
+            <div class="alert alert-info"><i class="fa fa-info-circle"></i> {{ session('info') }}</div>
         @endif
 
         <div class="alert alert-info product-statistics-demo-notice">
@@ -116,6 +123,8 @@
                 <h3 class="box-title">{{ __('logistics.product_statistics.headers.list') }} <small id="product-statistics-total-label">—</small></h3>
                 <div class="product-statistics-toolbar-actions">
                     <span class="product-statistics-toolbar-hint"><i class="fa fa-info-circle"></i> {{ __('logistics.product_statistics.ui.cross_product_note') }}</span>
+                    <span id="product-statistics-selected-count" class="product-statistics-toolbar-hint"></span>
+                    <button id="product-statistics-retry-tongtu" class="btn btn-warning btn-sm" type="button" disabled><i class="fa fa-refresh"></i> {{ __('logistics.product_statistics.ui.retry_tongtu_skus') }}</button>
                     <button class="btn btn-default btn-sm" type="button" data-toggle="modal" data-target="#product-statistics-export-modal"><i class="fa fa-download"></i> {{ __('logistics.common.export') }}</button>
                 </div>
             </div>
@@ -148,6 +157,11 @@
                 <div class="product-statistics-page-size"><label>{{ __('logistics.product_statistics.ui.per_page') }} <select id="product-statistics-page-size" class="form-control input-sm"><option value="5" @selected($filters['per_page'] === 5)>5</option><option value="10" @selected($filters['per_page'] === 10)>10</option><option value="20" @selected($filters['per_page'] === 20)>20</option></select> {{ __('logistics.product_statistics.ui.items') }}</label></div>
             </div>
         </div>
+
+        <form id="product-statistics-retry-tongtu-form" method="post" action="{{ route('logistics.product-statistics.tongtu-skus.retry') }}" data-loading="submit" hidden>
+            @csrf
+            <div id="product-statistics-retry-tongtu-payload"></div>
+        </form>
 
         <div class="modal fade" id="product-statistics-export-modal" tabindex="-1" role="dialog" aria-labelledby="product-statistics-export-title">
             <div class="modal-dialog" role="document"><form method="post" action="{{ route('logistics.product-statistics.export') }}" class="modal-content" id="product-statistics-export-form" data-loading="download">@csrf
@@ -198,6 +212,6 @@
     <script>
         window.ErpLogisticsProductStatistics = @json($productStatisticsClientConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/product-statistics.js?v=20261024-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/product-statistics.js?v=20261027-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261015-2"></script>
 @endpush

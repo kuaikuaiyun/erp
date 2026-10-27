@@ -132,6 +132,7 @@ Route::delete('/orders/{order}/refunds/{refund}', [LogisticsOrderController::cla
 Route::get('/product-statistics', [ProductStatisticsController::class, 'index'])->name('logistics.product-statistics.index');
 Route::get('/product-statistics/detail', [ProductStatisticsController::class, 'detail'])->name('logistics.product-statistics.detail');
 Route::post('/product-statistics/export', [ProductStatisticsController::class, 'export'])->name('logistics.product-statistics.export');
+Route::post('/product-statistics/tongtu-skus/retry', [ProductStatisticsController::class, 'retryTongtuSkus'])->name('logistics.product-statistics.tongtu-skus.retry');
 Route::get('/warehouse-product-statistics', [WarehouseProductStatisticsController::class, 'index'])->name('warehouse.product-statistics.index');
 Route::get('/warehouse-product-statistics/detail', [WarehouseProductStatisticsController::class, 'detail'])->name('warehouse.product-statistics.detail');
 Route::post('/warehouse-product-statistics/fill-weight-exceptions', [WarehouseProductStatisticsController::class, 'fillWeightExceptions'])->name('warehouse.product-statistics.fill-weight-exceptions');

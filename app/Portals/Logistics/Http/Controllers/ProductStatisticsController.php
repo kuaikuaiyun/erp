@@ -7,6 +7,7 @@ use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Logistics\LogisticsPortalService;
 use App\Portals\Logistics\LogisticsProductStatisticsService;
 use App\Portals\Logistics\LogisticsProductStatisticsSpreadsheetService;
+use App\Portals\Logistics\TongtuSkuMappingService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -20,6 +21,7 @@ class ProductStatisticsController extends Controller
         private readonly LogisticsPortalService $logistics,
         private readonly LogisticsProductStatisticsService $statistics,
         private readonly LogisticsProductStatisticsSpreadsheetService $spreadsheets,
+        private readonly TongtuSkuMappingService $tongtuMappings,
     ) {
     }
 
@@ -99,6 +101,33 @@ class ProductStatisticsController extends Controller
                 $this->statistics->exportRows($filters, $selectedIds),
                 $filters,
             ),
+        );
+    }
+
+    public function retryTongtuSkus(Request $request): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $validated = $request->validate([
+            'selected_ids' => ['required', 'array', 'min:1', 'max:1000'],
+            'selected_ids.*' => ['string', 'distinct', 'max:512'],
+            ...$this->filterRules(false),
+        ]);
+
+        $skus = $this->statistics->shopifySkusForProductIds(
+            $this->normaliseFilters($validated),
+            $validated['selected_ids'],
+        );
+        $queued = $this->tongtuMappings->retryUnmatchedForSkus($skus);
+
+        return redirect()->back()->with(
+            $queued > 0 ? 'success' : 'info',
+            $queued > 0
+                ? __('logistics.product_statistics.ui.retry_tongtu_skus_queued', ['count' => $queued])
+                : __('logistics.product_statistics.ui.retry_tongtu_skus_none'),
         );
     }
 
@@ -248,6 +277,7 @@ class ProductStatisticsController extends Controller
             'pageSummary' => __('logistics.product_statistics.ui.page_summary'),
             'totalProducts' => __('logistics.product_statistics.ui.total_products'),
             'selectedCount' => __('logistics.product_statistics.ui.selected_count'),
+            'retryTongtuSkusConfirm' => __('logistics.product_statistics.ui.retry_tongtu_skus_confirm'),
             'filteredCount' => __('logistics.product_statistics.ui.filtered_count'),
             'selectExportWarning' => __('logistics.product_statistics.ui.select_export_warning'),
             'detailTitle' => __('logistics.product_statistics.ui.detail_title'),

@@ -423,6 +423,10 @@ return [
             'selected_count' => '当前页已选择 :count 个产品。',
             'filtered_count' => '当前筛选结果共 :products 个产品。',
             'image_preview' => '图片预览',
+            'retry_tongtu_skus' => '重新匹配通途 SKU',
+            'retry_tongtu_skus_confirm' => '将重新请求已选产品下未匹配的 Shopify SKU，是否继续？',
+            'retry_tongtu_skus_queued' => '已将 :count 个未匹配 Shopify SKU 加入通途查询队列。',
+            'retry_tongtu_skus_none' => '所选产品没有需要重新匹配的 Shopify SKU。',
         ],
         'mapping' => [
             'current_pcl_product_data' => '当前 PCL 商品资料',
