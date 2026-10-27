@@ -59,6 +59,10 @@ Route::get('/operation/domain-stores', [OperationDomainStoreController::class, '
 Route::get('/operation/ai-product-library', [OperationAiProductLibraryController::class, 'index'])->name('operation.ai-product-library.index');
 Route::get('/operation/reports', [OperationReportController::class, 'index'])->name('operation.reports.index');
 Route::get('/operation/reports/export', [OperationReportController::class, 'export'])->name('operation.reports.export');
+Route::get('/operation/reports/screenshot', [OperationReportController::class, 'screenshot'])->name('operation.reports.screenshot');
+Route::post('/operation/reports', [OperationReportController::class, 'store'])->name('operation.reports.store');
+Route::get('/operation/reports/{report}', [OperationReportController::class, 'show'])->whereNumber('report')->name('operation.reports.show');
+Route::post('/operation/reports/{report}/approve', [OperationReportController::class, 'approve'])->name('operation.reports.approve');
 Route::get('/operation/ai-product-library/{product}/detail', [OperationAiProductLibraryController::class, 'detail'])->name('operation.ai-product-library.detail');
 Route::get('/operation/ai-product-library/{product}/images/{imageIndex}', [OperationAiProductLibraryController::class, 'image'])->whereNumber('imageIndex')->name('operation.ai-product-library.images.show');
 Route::get('/operation/ai-product-library/{product}/package', [OperationAiProductLibraryController::class, 'downloadPackage'])->name('operation.ai-product-library.package.download');
