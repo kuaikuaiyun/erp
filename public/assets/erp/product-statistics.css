@@ -207,18 +207,19 @@
 .product-statistics-detail-metric.is-negative strong { color: #cf4949; }
 .product-statistics-detail-metric.is-strong strong, .product-statistics-detail-metric.is-healthy strong { color: #228254; }
 .product-statistics-detail-metric.is-risk strong { color: #cc4949; }
-.product-statistics-overview-modules { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.product-statistics-overview-module { min-width: 0; overflow: hidden; border: 1px solid #dce8f2; border-top: 3px solid #4c9ed4; border-radius: 5px; background: #fff; }
+.product-statistics-overview-modules { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.product-statistics-overview-module { min-width: 0; overflow: hidden; border: 1px solid #dce8f2; border-top: 3px solid #4c9ed4; border-radius: 6px; background: #fff; box-shadow: 0 2px 8px rgba(32, 72, 107, .045); }
 .product-statistics-overview-module.is-paypal { border-top-color: #2479bd; }
 .product-statistics-overview-module.is-credit-card { border-top-color: #9365c4; }
-.product-statistics-overview-module > h4 { margin: 0; padding: 10px 12px; border-bottom: 1px solid #e5edf4; color: #31516e; font-size: 14px; font-weight: 700; background: #f8fbfe; }
+.product-statistics-overview-module > h4 { margin: 0; padding: 11px 14px; border-bottom: 1px solid #e5edf4; color: #31516e; font-size: 14px; font-weight: 700; background: #f8fbfe; }
+.product-statistics-overview-module.is-paypal > h4 { background: #f4f9fd; color: #21669f; }
+.product-statistics-overview-module.is-credit-card > h4 { background: #faf7fd; color: #7650a2; }
 .product-statistics-overview-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.product-statistics-overview-metric { min-width: 0; min-height: 85px; padding: 10px 12px; border-right: 1px solid #edf2f6; border-bottom: 1px solid #edf2f6; background: #fff; }
+.product-statistics-overview-metric { min-width: 0; min-height: 74px; padding: 11px 14px; border-right: 1px solid #edf2f6; border-bottom: 1px solid #edf2f6; background: #fff; }
 .product-statistics-overview-metric:nth-child(even) { border-right: 0; }
-.product-statistics-overview-metric:nth-last-child(-n+1) { border-bottom: 0; }
 .product-statistics-overview-metric span { display: block; overflow: hidden; color: #7089a1; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.product-statistics-overview-metric strong { display: block; margin-top: 5px; overflow: hidden; color: #284c6e; font-size: 18px; font-weight: 700; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
-.product-statistics-overview-metric small { display: block; min-height: 27px; margin-top: 5px; color: #8296a9; font-size: 11px; line-height: 1.35; }
+.product-statistics-overview-metric strong { display: block; margin-top: 6px; overflow: hidden; color: #284c6e; font-size: 18px; font-weight: 700; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.product-statistics-overview-metric small { display: block; min-height: 27px; margin-top: 6px; color: #8296a9; font-size: 11px; line-height: 1.35; }
 .product-statistics-overview-disputes { margin: 11px 12px 12px; padding: 10px; border: 1px solid #f1dde0; border-radius: 4px; background: #fffafb; }
 .product-statistics-overview-disputes.is-not-applicable { border-color: #e4ddf1; background: #fbf9fe; color: #7c6796; font-size: 12px; line-height: 1.5; }
 .product-statistics-overview-disputes-heading { display: flex; align-items: center; gap: 8px; color: #6f5663; font-size: 12px; font-weight: 700; }
@@ -233,12 +234,13 @@
 .product-statistics-overview-disputes.is-credit-card-dispute { border-color: #f1dde0; background: #fffafb; }
 .product-statistics-overview-dispute-formula { display: block; margin-top: 7px; color: #a38a91; font-size: 10px; line-height: 1.4; }
 .product-statistics-store-order-distribution { margin-top: 16px; padding: 14px 16px; border: 1px solid #dfeaf3; border-radius: 4px; background: #fbfdff; }
-.product-statistics-current-pcl-data { margin-top: 16px; overflow: hidden; border: 1px solid #d7e6f2; border-radius: 5px; background: #fff; }
-.product-statistics-current-pcl-data > header { padding: 10px 13px; border-bottom: 1px solid #e5eef5; background: linear-gradient(90deg, #f4f9fd, #fbfdff); color: #365d7d; font-size: 13px; font-weight: 700; }
+.product-statistics-current-pcl-data { margin: 0 0 16px; overflow: hidden; border: 1px solid #d7e6f2; border-radius: 6px; background: #fff; box-shadow: 0 2px 8px rgba(32, 72, 107, .035); }
+.product-statistics-current-pcl-data > header { padding: 11px 14px; border-bottom: 1px solid #e5eef5; background: linear-gradient(90deg, #f1f8fe, #fbfdff); color: #365d7d; font-size: 13px; font-weight: 700; }
 .product-statistics-current-pcl-data > header .fa { margin-right: 5px; color: #2c84c7; }
 .product-statistics-current-pcl-data.is-empty > p { margin: 0; padding: 18px 14px; color: #8194a7; font-size: 12px; }
 .product-statistics-current-pcl-data .product-statistics-detail-table-wrap { border: 0; border-radius: 0; }
-.product-statistics-current-pcl-data .product-statistics-detail-table td { max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.product-statistics-current-pcl-data .product-statistics-detail-table th { padding-top: 9px !important; padding-bottom: 9px !important; background: #f7fbfe; }
+.product-statistics-current-pcl-data .product-statistics-detail-table td { max-width: 210px; padding-top: 9px !important; padding-bottom: 9px !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .product-statistics-store-order-distribution h5 { margin: 0 0 10px; color: #42627e; font-size: 13px; font-weight: 700; }
 .product-statistics-store-order-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .product-statistics-store-order { display: inline-flex; align-items: center; gap: 9px; max-width: 100%; padding: 6px 9px; border: 1px solid #dbe7f0; border-radius: 4px; background: #fff; color: #476780; line-height: 18px; }

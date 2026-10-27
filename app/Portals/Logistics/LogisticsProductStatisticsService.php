@@ -358,6 +358,21 @@ class LogisticsProductStatisticsService
     }
 
     /**
+     * Product keys depend on the current Tongtu mapping status.  A manual
+     * retry changes that status immediately, so the short-lived candidate
+     * cache must be discarded before the browser is redirected back to the
+     * list; otherwise cached keys and live row data can briefly disagree.
+     *
+     * @param array<string,mixed> $filters
+     */
+    public function forgetPageCache(array $filters): void
+    {
+        Cache::forget($this->statisticsCacheKey('candidates', $filters));
+        Cache::forget($this->statisticsCacheKey('summary', $filters));
+        Cache::forget($this->statisticsCacheKey('refund-reasons', $filters));
+    }
+
+    /**
      * @param Collection<int,object> $candidates
      * @param array<string,mixed> $filters
      * @return array<string,mixed>
@@ -540,6 +555,37 @@ class LogisticsProductStatisticsService
         }
 
         return $this->product($items->all(), $key);
+    }
+
+    /**
+     * Return the source Shopify SKUs behind selected statistics products.
+     * Product keys may be a Tongtu PCL or an unresolved Shopify SKU; querying
+     * the item rows keeps the retry target correct in both cases.
+     *
+     * @param array<string,mixed> $filters
+     * @param list<string> $productIds
+     * @return list<string>
+     */
+    public function shopifySkusForProductIds(array $filters, array $productIds): array
+    {
+        $keys = array_values(array_filter(array_map(
+            fn (string $id): ?string => $this->decodeProductId($id),
+            $productIds,
+        )));
+        if ($keys === []) {
+            return [];
+        }
+
+        return $this->baseItemQuery($filters)
+            ->whereIn(DB::raw($this->productKeyExpression('items')), $keys)
+            ->whereNotNull('items.shopify_sku')
+            ->whereRaw("TRIM(items.shopify_sku) <> ''")
+            ->selectRaw('LOWER(TRIM(items.shopify_sku)) as shopify_sku')
+            ->distinct()
+            ->orderBy('shopify_sku')
+            ->pluck('shopify_sku')
+            ->map(static fn ($sku): string => (string) $sku)
+            ->all();
     }
 
     /**
@@ -1787,7 +1833,15 @@ class LogisticsProductStatisticsService
         foreach ($rows as $row) {
             $productCode = mb_strtolower(trim((string) ($row->tongtu_product_code ?? '')));
             $shopifySku = mb_strtolower(trim((string) ($row->shopify_sku ?? '')));
-            $mapping = $byProductCode[$productCode] ?? $byShopifySku[$shopifySku] ?? null;
+            // The match-status filter is evaluated against the current
+            // Shopify SKU mapping.  A PCL can contain several variants and
+            // one of its other SKU mappings may already be matched, so using
+            // the PCL mapping first would incorrectly render a failed SKU as
+            // "matched" in a failed/queued/conflict result set.
+            //
+            // Keep the PCL lookup only as a fallback for legacy order rows
+            // that have no Shopify SKU mapping record.
+            $mapping = $byShopifySku[$shopifySku] ?? $byProductCode[$productCode] ?? null;
 
             $row->product_image_url = $mapping?->status === LogisticsTongtuSkuMapping::STATUS_MATCHED
                 && filled($mapping->tongtu_primary_image_url)

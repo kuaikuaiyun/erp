@@ -21,6 +21,10 @@
     var exportSelectedCount = document.getElementById('product-statistics-export-selected-count');
     var exportFilteredCount = document.getElementById('product-statistics-export-filtered-count');
     var exportPayload = document.getElementById('product-statistics-export-payload');
+    var retryTongtuButton = document.getElementById('product-statistics-retry-tongtu');
+    var retryTongtuForm = document.getElementById('product-statistics-retry-tongtu-form');
+    var retryTongtuPayload = document.getElementById('product-statistics-retry-tongtu-payload');
+    var selectedCountLabel = document.getElementById('product-statistics-selected-count');
 
     if (!body || !filterForm) return;
 
@@ -182,12 +186,17 @@
     function selectedProductIds() { return Object.keys(state.selected).filter(function (id) { return state.selected[id]; }); }
     function refreshSelection() {
         var selected = products.filter(function (product) { return state.selected[product.id]; });
+        Array.prototype.slice.call(document.querySelectorAll('.product-statistics-check')).forEach(function (checkbox) {
+            checkbox.checked = Boolean(state.selected[checkbox.value]);
+        });
         if (checkAll) {
             checkAll.checked = products.length > 0 && selected.length === products.length;
             checkAll.indeterminate = selected.length > 0 && !checkAll.checked;
             checkAll.disabled = products.length === 0;
         }
         if (exportSelectedCount) exportSelectedCount.textContent = (t('selectedCount') || '').replace(':count', selected.length);
+        if (selectedCountLabel) selectedCountLabel.textContent = (t('selectedCount') || '').replace(':count', selected.length);
+        if (retryTongtuButton) retryTongtuButton.disabled = selected.length === 0;
         if (exportFilteredCount) exportFilteredCount.textContent = (t('filteredCount') || '').replace(':products', Number(overallSummary.product_count) || 0).replace(':variants', 0);
         if (exportSelectedScope && exportFilteredScope) {
             exportSelectedScope.disabled = selected.length === 0;
@@ -631,6 +640,12 @@
         [['date_from', document.getElementById('product-statistics-date-from').value], ['date_to', document.getElementById('product-statistics-date-to').value], ['name', document.getElementById('product-statistics-name').value], ['keyword', document.getElementById('product-statistics-keyword').value], ['store', document.getElementById('product-statistics-store').value], ['match_status', document.getElementById('product-statistics-match-status').value], ['sort', state.sort], ['direction', state.direction]].forEach(function (item) { appendHiddenInput(exportPayload, item[0], item[1]); });
         selectedProductIds().forEach(function (id) { appendHiddenInput(exportPayload, 'selected_ids[]', id); });
     }
+    function populateRetryTongtuPayload() {
+        if (!retryTongtuPayload) return;
+        retryTongtuPayload.innerHTML = '';
+        [['date_from', document.getElementById('product-statistics-date-from').value], ['date_to', document.getElementById('product-statistics-date-to').value], ['name', document.getElementById('product-statistics-name').value], ['keyword', document.getElementById('product-statistics-keyword').value], ['store', document.getElementById('product-statistics-store').value], ['match_status', document.getElementById('product-statistics-match-status').value], ['sort', state.sort], ['direction', state.direction]].forEach(function (item) { appendHiddenInput(retryTongtuPayload, item[0], item[1]); });
+        selectedProductIds().forEach(function (id) { appendHiddenInput(retryTongtuPayload, 'selected_ids[]', id); });
+    }
     filterForm.addEventListener('submit', function () { state.selected = {}; });
     pageSizeInput.addEventListener('change', function () { navigate({ per_page: pageSizeInput.value, page: 1 }); });
     document.getElementById('product-statistics-prev-page').addEventListener('click', function () { if (state.page > 1) navigate({ page: state.page - 1 }); });
@@ -644,6 +659,14 @@
             populateExportPayload();
         });
         if ($) $('#product-statistics-export-modal').on('show.bs.modal', function () { refreshSelection(); populateExportPayload(); });
+    }
+    if (retryTongtuButton && retryTongtuForm) {
+        retryTongtuButton.addEventListener('click', function () {
+            if (!selectedProductIds().length) return;
+            if (!window.confirm(t('retryTongtuSkusConfirm'))) return;
+            populateRetryTongtuPayload();
+            retryTongtuForm.submit();
+        });
     }
     document.addEventListener('submit', function (event) {
         var form = event.target.closest('.product-statistics-detail-filter-form');
