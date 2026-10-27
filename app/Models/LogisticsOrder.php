@@ -85,13 +85,27 @@ class LogisticsOrder extends Model
 
     public static function mediaSourceFromTags(mixed $tags): string
     {
-        if (is_string($tags)) {
-            $tags = preg_split('/[,，;；|]+/u', $tags) ?: [];
-        }
+        $values = [];
+        $append = function (mixed $value) use (&$append, &$values): void {
+            if (is_array($value) || is_object($value)) {
+                foreach ((array) $value as $nested) {
+                    $append($nested);
+                }
+                return;
+            }
+            if (is_scalar($value)) {
+                $values[] = (string) $value;
+            }
+        };
+        $append($tags);
 
-        foreach ((array) $tags as $tag) {
-            $normalised = mb_strtolower((string) preg_replace('/[^\pL\pN]+/u', '', (string) $tag));
-            foreach (self::MEDIA_SOURCES as $needle => $label) {
+        $normalisedTags = array_map(
+            static fn (string $tag): string => mb_strtolower((string) preg_replace('/[^\pL\pN]+/u', '', $tag)),
+            $values,
+        );
+
+        foreach (self::MEDIA_SOURCES as $needle => $label) {
+            foreach ($normalisedTags as $normalised) {
                 if ($normalised !== '' && str_contains($normalised, $needle)) {
                     return $label;
                 }
