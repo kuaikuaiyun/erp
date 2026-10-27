@@ -63,7 +63,10 @@
                     </div>
                     <footer class="payment-account-compact-footer {{ ($merchant['balance']['is_stale'] ?? false) ? 'is-stale' : '' }}">
                         @if($merchant['balance'])
-                            <div class="payment-account-compact-balance"><p><span>{{ __($translationPrefix.'.balance.available') }}：</span><strong>{{ $merchant['balance']['available'] }}</strong></p><p><span>{{ __($translationPrefix.'.balance.withheld') }}：</span><strong>{{ $merchant['balance']['withheld'] }}</strong></p><small><i class="fa fa-clock-o" aria-hidden="true"></i> {{ __($translationPrefix.'.balance.updated_ago', ['time' => __($translationPrefix.'.balance.relative.'.$merchant['balance']['relative_time']['key'], ['count' => $merchant['balance']['relative_time']['count']])]) }}@if($merchant['balance']['is_stale']) · {{ __($translationPrefix.'.balance.stale') }}@endif</small></div>
+                            <div class="payment-account-compact-balance">
+                                <div class="payment-account-compact-values"><p><span>{{ __($translationPrefix.'.balance.available') }}：</span><strong>{{ $merchant['balance']['available'] }}</strong></p><p><span>{{ __($translationPrefix.'.balance.withheld') }}：</span><strong>{{ $merchant['balance']['withheld'] }}</strong></p></div>
+                                <small><i class="fa fa-clock-o" aria-hidden="true"></i> {{ __($translationPrefix.'.balance.updated_ago', ['time' => __($translationPrefix.'.balance.relative.'.$merchant['balance']['relative_time']['key'], ['count' => $merchant['balance']['relative_time']['count']])]) }}@if($merchant['balance']['is_stale']) · {{ __($translationPrefix.'.balance.stale') }}@endif</small>
+                            </div>
                         @else
                             <p class="payment-account-balance-pending"><i class="fa fa-info-circle" aria-hidden="true"></i> {{ __($translationPrefix.'.balance.pending') }}</p>
                         @endif
