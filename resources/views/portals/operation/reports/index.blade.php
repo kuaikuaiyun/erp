@@ -19,7 +19,7 @@
             <div class="form-group"><label>流媒体源</label><select class="form-control input-sm" name="media_source"><option value="">全部</option>@foreach($mediaSources as $source)<option value="{{ $source }}" @selected($filters['media_source'] === $source)>{{ $source }}</option>@endforeach</select></div>
             <button class="btn btn-primary btn-sm" type="submit"><i class="fa fa-search"></i> 查询</button>
             <a class="btn btn-default btn-sm" href="{{ route('operation.reports.index') }}">重置</a>
-            <span class="operation-report-summary">共 {{ $rows->count() }} 个统计分组</span>
+            <span class="operation-report-summary">查看范围：{{ $reportScopeLabel }}，共 {{ $rows->count() }} 个统计分组</span>
         </form>
     </div></div>
     <div class="operation-report-kpis">

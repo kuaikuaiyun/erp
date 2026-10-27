@@ -28,6 +28,10 @@ class OperationReportController extends Controller
         }
         $this->access->assertPortal($context['portal'], ProductRequestAccessService::OPERATION_PORTAL_CODE);
 
+        $user = $context['user'];
+        $canViewAllStores = $user->isAdministrator()
+            || strcasecmp((string) $user->username, 'kky_boss') === 0;
+
         $validated = $request->validate([
             'filtered' => ['nullable', 'in:1'],
             'date_from' => ['nullable', 'date_format:Y-m-d'],
@@ -44,6 +48,11 @@ class OperationReportController extends Controller
 
         $rows = LogisticsOrder::query()
             ->whereBetween('order_created_at', [$start, $end])
+            ->when(! $canViewAllStores, function ($query) use ($user): void {
+                $query->whereHas('store', function ($storeQuery) use ($user): void {
+                    $storeQuery->where('owner_user_id', (int) $user->getKey());
+                });
+            })
             ->when($mediaSource !== '', fn ($query) => $query->where('media_source', $mediaSource))
             ->selectRaw("DATE(CONVERT_TZ(order_created_at, '+00:00', '+08:00')) AS order_date")
             ->selectRaw("COALESCE(NULLIF(TRIM(operator_name), ''), '未分配') AS operator_name")
@@ -82,6 +91,7 @@ class OperationReportController extends Controller
             'totals' => $totals,
             'filters' => ['date_from' => $dateFrom, 'date_to' => $dateTo, 'media_source' => $mediaSource],
             'mediaSources' => array_values([...LogisticsOrder::MEDIA_SOURCES, LogisticsOrder::MEDIA_SOURCE_OTHER]),
+            'reportScopeLabel' => $canViewAllStores ? '全部店铺' : '我的已分配店铺',
         ]);
     }
 }
