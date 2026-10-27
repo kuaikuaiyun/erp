@@ -119,6 +119,7 @@ class OperationAiProductLibraryController extends Controller
         }
 
         $this->access->assertPortal($context['portal'], ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        abort_unless($this->access->canViewOperationAiProductLibrary($context['user']), 404);
 
         return $context;
     }

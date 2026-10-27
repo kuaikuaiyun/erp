@@ -29,7 +29,16 @@ class WarehouseSkuWeightException extends Model
     {
         $code = trim((string) $code);
 
-        return $code === '' ? '' : (self::REJECT_REASONS[$code] ?? $code);
+        if ($code === '') {
+            return '';
+        }
+
+        $codes = array_values(array_unique(array_filter(array_map('trim', explode(',', $code)))));
+
+        return implode('、', array_map(
+            static fn (string $reason): string => self::REJECT_REASONS[$reason] ?? $reason,
+            $codes,
+        ));
     }
 
     public function scopePending($query)

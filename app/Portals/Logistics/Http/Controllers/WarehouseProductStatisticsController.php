@@ -186,7 +186,17 @@ class WarehouseProductStatisticsController extends Controller
             'rows.*.shopify_sku' => ['nullable', 'string', 'max:191'],
             'rows.*.original_weight_gram' => ['nullable', 'numeric'],
             'rows.*.corrected_weight_gram' => ['nullable', 'numeric', 'gt:0'],
-            'rows.*.reject_reason' => ['nullable', Rule::in(array_keys(WarehouseSkuWeightException::REJECT_REASONS))],
+            'rows.*.reject_reason' => [
+                'nullable',
+                'string',
+                'max:64',
+                static function (string $attribute, mixed $value, \Closure $fail): void {
+                    $reasons = array_values(array_unique(array_filter(array_map('trim', explode(',', (string) $value)))));
+                    if (array_diff($reasons, array_keys(WarehouseSkuWeightException::REJECT_REASONS)) !== []) {
+                        $fail('驳回理由包含无效选项。');
+                    }
+                },
+            ],
             'rows.*.remark' => ['nullable', 'string', 'max:500'],
             'rows.*.remove_physical_image' => ['nullable', 'boolean'],
         ]);
@@ -544,12 +554,12 @@ class WarehouseProductStatisticsController extends Controller
 
         $linkSku = ProductRequestLinkSku::query()
             ->whereRaw('LOWER(TRIM(pcl_product_no)) = ?', [$pclCode])
-            ->first(['id', 'pcl_product_no', 'images']);
+            ->first(['id', 'pcl_product_no', 'warehouse_images']);
 
         return response()->json([
             'link_sku_id' => $linkSku?->getKey(),
             'pcl_product_no' => $linkSku?->pcl_product_no ?? trim((string) $validated['pcl_code']),
-            'images' => $linkSku ? array_values(array_filter((array) ($linkSku->images ?? []))) : [],
+            'images' => $linkSku ? array_values(array_filter((array) ($linkSku->warehouse_images ?? []))) : [],
         ]);
     }
 
@@ -571,17 +581,17 @@ class WarehouseProductStatisticsController extends Controller
         if ($linkSku === null) {
             $linkSku = ProductRequestLinkSku::query()->create([
                 'pcl_product_no' => trim((string) $validated['pcl_code']),
-                'images' => [],
+                'warehouse_images' => [],
                 'source' => 'import',
                 'review_status' => 'done',
                 'supplier_url_hash' => 'wgh-' . substr(bin2hex(random_bytes(8)), 0, 16),
             ]);
         }
 
-        $path = $validated['image']->store('link-sku-images', 'local');
-        $images = array_values(array_filter((array) ($linkSku->images ?? [])));
+        $path = $validated['image']->store('warehouse-link-sku-images', 'local');
+        $images = array_values(array_filter((array) ($linkSku->warehouse_images ?? [])));
         $images[] = $path;
-        $linkSku->update(['images' => $images]);
+        $linkSku->update(['warehouse_images' => $images]);
 
         return response()->json([
             'link_sku_id' => $linkSku->getKey(),
@@ -609,7 +619,7 @@ class WarehouseProductStatisticsController extends Controller
             return response()->json(['message' => '未找到对应的 PCL 记录'], 404);
         }
 
-        $images = array_values(array_filter((array) ($linkSku->images ?? [])));
+        $images = array_values(array_filter((array) ($linkSku->warehouse_images ?? [])));
         if (!isset($images[$index])) {
             return response()->json(['message' => '图片索引越界'], 404);
         }
@@ -617,7 +627,7 @@ class WarehouseProductStatisticsController extends Controller
         $removedPath = $images[$index];
         unset($images[$index]);
         $images = array_values($images);
-        $linkSku->update(['images' => $images]);
+        $linkSku->update(['warehouse_images' => $images]);
 
         // 删除存储文件（忽略不存在的错误）
         try {
@@ -630,6 +640,20 @@ class WarehouseProductStatisticsController extends Controller
         return response()->json([
             'link_sku_id' => $linkSku->getKey(),
             'images' => $images,
+        ]);
+    }
+
+    /** 仓库异常反馈实拍图，与 PCL SKU 产品实拍图分开存储。 */
+    public function warehouseImage(Request $request, ProductRequestLinkSku $linkSku, int $index): Response
+    {
+        $this->portalContext($request);
+
+        $images = array_values(array_filter((array) ($linkSku->warehouse_images ?? [])));
+        $path = (string) ($images[$index] ?? '');
+        abort_if($path === '' || !Storage::disk('local')->exists($path), 404);
+
+        return response()->file(Storage::disk('local')->path($path), [
+            'Cache-Control' => 'private, max-age=3600',
         ]);
     }
 
@@ -659,7 +683,7 @@ class WarehouseProductStatisticsController extends Controller
             // 允许首次审核就创建记录（和上传图片的策略一致）
             ProductRequestLinkSku::query()->create([
                 'pcl_product_no' => trim((string) $validated['pcl_code']),
-                'images' => [],
+                'warehouse_images' => [],
                 'source' => 'import',
                 'review_status' => 'done',
                 'supplier_url_hash' => 'wgh-' . substr(bin2hex(random_bytes(8)), 0, 16),

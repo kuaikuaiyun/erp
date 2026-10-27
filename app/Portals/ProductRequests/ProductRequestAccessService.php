@@ -172,6 +172,13 @@ class ProductRequestAccessService
             ->exists();
     }
 
+    /** AI产品库（运营系统）：雨果团队成员不可见，系统管理员不受限制。 */
+    public function canViewOperationAiProductLibrary(AdminUser $user): bool
+    {
+        return $user->isAdministrator()
+            || !$this->hasDirectDepartmentSlug($user, self::HUGO_DEPARTMENT_SLUG);
+    }
+
     /** 是否入录审核部门树（dept-000015 及后代，含录入部门、审核部门）内的主管/副主管 */
     private function isProcurementTreeSupervisor(AdminUser $user): bool
     {

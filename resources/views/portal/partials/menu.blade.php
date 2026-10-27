@@ -35,6 +35,7 @@
         'placement_reviews' => app(\App\Portals\ProductRequests\ProductRequestAccessService::class)->canReviewPlacement($user),
         'link_sku_manager' => app(\App\Portals\ProductRequests\ProductRequestAccessService::class)->canManageLinkSkus($user),
         'existing_product_library' => app(\App\Portals\ProductRequests\ProductRequestAccessService::class)->canViewExistingProductLibrary($user),
+        'operation_ai_product_library' => app(\App\Portals\ProductRequests\ProductRequestAccessService::class)->canViewOperationAiProductLibrary($user),
         default => true,
     };
     $canAccessAssistantAnalyticsMenu = $menu->code !== 'assistant_shopify_analytics'

@@ -3,6 +3,7 @@
 return [
     'menus' => [
         'product_library' => '产品资料库',
+        'existing_product_library' => '已有产品库',
         'operation_ai_product_library' => 'AI产品库',
         'selection_proposals' => '选品提报',
         'placement_evaluations' => '投放测评',

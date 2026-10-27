@@ -3,11 +3,13 @@
 namespace App\Portals\Logistics\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\ProductRequestLinkSku;
 use App\Models\WarehouseSkuWeightException;
 use App\Portal\Http\Controllers\PortalEntryController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
@@ -37,11 +39,13 @@ class WarehouseWeightExceptionController extends Controller
 
         $total = $query->count();
         $rows = $query
-            ->orderByDesc('status')
+            ->orderByRaw("CASE WHEN status = 'pending' THEN 0 WHEN status = 'resolved' THEN 1 ELSE 2 END")
             ->orderByDesc('updated_at')
             ->limit($filters['per_page'])
             ->offset(($filters['page'] - 1) * $filters['per_page'])
             ->get();
+
+        $this->attachWarehouseImages($rows);
 
         $pendingCount = WarehouseSkuWeightException::query()->where('status', 'pending')->count();
         $resolvedCount = WarehouseSkuWeightException::query()->where('status', 'resolved')->count();
@@ -109,6 +113,56 @@ class WarehouseWeightExceptionController extends Controller
             'ok' => true,
             'message' => '已标记为处理完成',
         ]);
+    }
+
+    /** 显示异常反馈中上传的仓库实拍图。 */
+    public function warehouseImage(Request $request, ProductRequestLinkSku $linkSku, int $index): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $images = array_values(array_filter((array) ($linkSku->warehouse_images ?? [])));
+        $path = (string) ($images[$index] ?? '');
+        abort_if($path === '' || !Storage::disk('local')->exists($path), 404);
+
+        return response()->file(Storage::disk('local')->path($path), [
+            'Cache-Control' => 'private, max-age=3600',
+        ]);
+    }
+
+    private function attachWarehouseImages(\Illuminate\Support\Collection $rows): void
+    {
+        $codes = $rows->pluck('tongtu_product_code')
+            ->map(static fn ($code): string => mb_strtolower(trim((string) $code)))
+            ->filter()
+            ->unique()
+            ->values();
+
+        $imageMap = [];
+        if ($codes->isNotEmpty()) {
+            $linkSkus = ProductRequestLinkSku::query()
+                ->whereRaw('LOWER(TRIM(pcl_product_no)) IN ('.implode(',', array_fill(0, $codes->count(), '?')).')', $codes->all())
+                ->get(['id', 'pcl_product_no', 'warehouse_images']);
+
+            foreach ($linkSkus as $linkSku) {
+                $key = mb_strtolower(trim((string) $linkSku->pcl_product_no));
+                foreach (array_values(array_filter((array) ($linkSku->warehouse_images ?? []))) as $index => $path) {
+                    $imageMap[$key][] = [
+                        'url' => route('caigou.warehouse-weight-exceptions.warehouse-image', [
+                            'linkSku' => $linkSku->getKey(),
+                            'index' => $index,
+                        ]),
+                    ];
+                }
+            }
+        }
+
+        foreach ($rows as $row) {
+            $key = mb_strtolower(trim((string) $row->tongtu_product_code));
+            $row->setAttribute('warehouse_image_refs', $imageMap[$key] ?? []);
+        }
     }
 
     /** @return array{portal: \App\Models\Portal, user: \App\Models\AdminUser}|Response */

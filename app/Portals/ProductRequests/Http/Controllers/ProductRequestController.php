@@ -1791,11 +1791,11 @@ class ProductRequestController extends Controller
     /** 已有产品库（运营系统只读版）：数据源与 PCL SKU 管理完全一致，仅查看与搜索 */
     public function existingProductLibraryIndex(Request $request): Response|View
     {
-        $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        $context = $this->anyPortalContext($request);
         if ($context instanceof Response) {
             return $context;
         }
-        abort_unless($this->access->canViewExistingProductLibrary($context['user']), 403);
+        abort_unless($context['portal']->code === 'aikaipin' || $this->access->canViewExistingProductLibrary($context['user']), 403);
 
         $keyword = trim((string) $request->query('keyword', ''));
         $runnableFilter = (string) $request->query('is_runnable', '');
@@ -1853,11 +1853,11 @@ class ProductRequestController extends Controller
     /** 已有产品库详情弹窗（只读） */
     public function existingProductLibraryDetail(Request $request, ProductRequestLinkSku $linkSku): Response|View
     {
-        $context = $this->portalContext($request, ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        $context = $this->anyPortalContext($request);
         if ($context instanceof Response) {
             return $context;
         }
-        abort_unless($this->access->canViewExistingProductLibrary($context['user']), 403);
+        abort_unless($context['portal']->code === 'aikaipin' || $this->access->canViewExistingProductLibrary($context['user']), 403);
 
         if (!$this->isModalRequest($request)) {
             return redirect()->route('product-requests.operation.existing-product-library');
@@ -2631,6 +2631,7 @@ class ProductRequestController extends Controller
             ProductRequestAccessService::OPERATION_PORTAL_CODE,
             ProductRequestAccessService::PROCUREMENT_PORTAL_CODE,
             ProductRequestAccessService::WAREHOUSE_PORTAL_CODE,
+            'aikaipin',
         ], true), 404);
         app()->setLocale('zh-CN');
 
