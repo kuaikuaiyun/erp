@@ -37,6 +37,8 @@ class OperationReportController extends Controller
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:date_from'],
             'media_source' => ['nullable', Rule::in(array_values([...LogisticsOrder::MEDIA_SOURCES, LogisticsOrder::MEDIA_SOURCE_OTHER]))],
+            'operator_name' => ['nullable', 'string', 'max:255'],
+            'shop_domain' => ['nullable', 'string', 'max:255'],
         ]);
         $today = now('Asia/Shanghai')->format('Y-m-d');
         $isFiltered = ($validated['filtered'] ?? '') === '1';
@@ -45,6 +47,11 @@ class OperationReportController extends Controller
         $start = Carbon::createFromFormat('Y-m-d H:i:s', $dateFrom.' 00:00:00', 'Asia/Shanghai')->utc();
         $end = Carbon::createFromFormat('Y-m-d H:i:s', $dateTo.' 23:59:59', 'Asia/Shanghai')->utc();
         $mediaSource = $isFiltered ? (string) ($validated['media_source'] ?? '') : '';
+        $operatorName = $canViewAllStores && $isFiltered ? trim((string) ($validated['operator_name'] ?? '')) : '';
+        $shopDomain = $canViewAllStores && $isFiltered ? trim((string) ($validated['shop_domain'] ?? '')) : '';
+
+        $operatorExpression = "COALESCE(NULLIF(TRIM(operator_name), ''), '未分配')";
+        $shopExpression = "COALESCE(NULLIF(TRIM(source_shop_domain), ''), NULLIF(TRIM(store_name), ''), '未知店铺')";
 
         $rows = LogisticsOrder::query()
             ->whereBetween('order_created_at', [$start, $end])
@@ -54,6 +61,8 @@ class OperationReportController extends Controller
                 });
             })
             ->when($mediaSource !== '', fn ($query) => $query->where('media_source', $mediaSource))
+            ->when($operatorName !== '', fn ($query) => $query->whereRaw($operatorExpression.' = ?', [$operatorName]))
+            ->when($shopDomain !== '', fn ($query) => $query->whereRaw($shopExpression.' = ?', [$shopDomain]))
             ->selectRaw("DATE(CONVERT_TZ(order_created_at, '+00:00', '+08:00')) AS order_date")
             ->selectRaw("COALESCE(NULLIF(TRIM(operator_name), ''), '未分配') AS operator_name")
             ->selectRaw("COALESCE(NULLIF(TRIM(source_shop_domain), ''), NULLIF(TRIM(store_name), ''), '未知店铺') AS shop_domain")
@@ -108,14 +117,38 @@ class OperationReportController extends Controller
             'total_revenue' => $rows->sum('total_revenue'),
         ];
 
+        $operatorOptions = collect();
+        $shopOptions = collect();
+        if ($canViewAllStores) {
+            $operatorOptions = LogisticsOrder::query()
+                ->selectRaw($operatorExpression.' AS filter_value')
+                ->distinct()
+                ->orderBy('filter_value')
+                ->pluck('filter_value');
+            $shopOptions = LogisticsOrder::query()
+                ->selectRaw($shopExpression.' AS filter_value')
+                ->distinct()
+                ->orderBy('filter_value')
+                ->pluck('filter_value');
+        }
+
         return view('portals.operation.reports.index', [
             'portal' => $context['portal']->load('menus'),
             'user' => $context['user'],
             'rows' => $rows,
             'identityRowspans' => $identityRowspans,
             'totals' => $totals,
-            'filters' => ['date_from' => $dateFrom, 'date_to' => $dateTo, 'media_source' => $mediaSource],
+            'filters' => [
+                'date_from' => $dateFrom,
+                'date_to' => $dateTo,
+                'media_source' => $mediaSource,
+                'operator_name' => $operatorName,
+                'shop_domain' => $shopDomain,
+            ],
             'mediaSources' => array_values([...LogisticsOrder::MEDIA_SOURCES, LogisticsOrder::MEDIA_SOURCE_OTHER]),
+            'canFilterAllStores' => $canViewAllStores,
+            'operatorOptions' => $operatorOptions,
+            'shopOptions' => $shopOptions,
             'reportScopeLabel' => $canViewAllStores ? '全部店铺' : '我的已分配店铺',
         ]);
     }

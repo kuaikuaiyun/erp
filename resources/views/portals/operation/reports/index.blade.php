@@ -17,6 +17,10 @@
             <input type="hidden" name="filtered" value="1">
             <div class="form-group"><label>下单开始日期</label><input type="date" class="form-control input-sm" name="date_from" value="{{ $filters['date_from'] }}"></div>
             <div class="form-group"><label>下单结束日期</label><input type="date" class="form-control input-sm" name="date_to" value="{{ $filters['date_to'] }}"></div>
+            @if($canFilterAllStores)
+                <div class="form-group"><label>运营</label><select class="form-control input-sm" name="operator_name"><option value="">全部运营</option>@foreach($operatorOptions as $operator)<option value="{{ $operator }}" @selected($filters['operator_name'] === $operator)>{{ $operator }}</option>@endforeach</select></div>
+                <div class="form-group"><label>店铺域名</label><select class="form-control input-sm" name="shop_domain"><option value="">全部店铺</option>@foreach($shopOptions as $domain)<option value="{{ $domain }}" @selected($filters['shop_domain'] === $domain)>{{ $domain }}</option>@endforeach</select></div>
+            @endif
             <div class="form-group"><label>流媒体源</label><select class="form-control input-sm" name="media_source"><option value="">全部</option>@foreach($mediaSources as $source)<option value="{{ $source }}" @selected($filters['media_source'] === $source)>{{ $source }}</option>@endforeach</select></div>
             <button class="btn btn-primary btn-sm" type="submit"><i class="fa fa-search"></i> 查询</button>
             <a class="btn btn-default btn-sm" href="{{ route('operation.reports.index') }}">重置</a>
