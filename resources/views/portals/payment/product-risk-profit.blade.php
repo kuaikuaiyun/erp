@@ -17,6 +17,7 @@
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261026-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261026-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-statistics.css?v=20261021-2">
 @endpush
 
 @section('content')
@@ -49,13 +50,15 @@
 
     <div class="modal fade payment-product-detail-modal" id="payment-product-detail-modal" tabindex="-1" role="dialog" aria-labelledby="payment-product-detail-title"><div class="modal-dialog modal-lg" role="document"><div class="modal-content"><div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ __($translationPrefix.'.detail.close') }}"><span>&times;</span></button><h4 id="payment-product-detail-title">{{ __($translationPrefix.'.detail.title') }}</h4><p data-payment-product-detail-subtitle></p></div><div class="modal-body">
         <div class="payment-detail-tabs" role="tablist">@foreach(['overview','first_renewal','orders','variants','refunds','disputes'] as $tab)<button type="button" class="{{ $loop->first ? 'active' : '' }}" data-payment-product-detail-tab="{{ $tab }}">{{ __($translationPrefix.'.detail.tabs.'.$tab) }}</button>@endforeach</div>
-        <form class="payment-detail-filter payment-risk-style-filter" data-payment-product-detail-filter hidden><label class="payment-detail-filter-keyword"><span>{{ __($translationPrefix.'.detail.filters.keyword') }}</span><input class="form-control" name="detail_keyword" type="search" placeholder="{{ __($translationPrefix.'.detail.search_placeholder') }}"></label><div class="payment-detail-filter-selects" data-payment-product-extra-filters></div><div class="payment-detail-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ __('payment.common.query') }}</button><button class="btn btn-default" type="reset">{{ __('payment.common.reset') }}</button></div></form>
+        <form class="payment-detail-filter payment-risk-style-filter product-statistics-detail-filter-form" data-payment-product-detail-filter hidden><label class="payment-detail-filter-keyword is-keyword"><span>{{ __($translationPrefix.'.detail.filters.keyword') }}</span><input class="form-control" name="detail_keyword" type="search" placeholder="{{ __($translationPrefix.'.detail.search_placeholder') }}"></label><div class="payment-detail-filter-selects" data-payment-product-extra-filters></div><div class="payment-detail-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ __('payment.common.query') }}</button><button class="btn btn-default" type="reset">{{ __('payment.common.reset') }}</button></div></form>
         <div class="payment-detail-state" data-payment-product-loading><i class="fa fa-spinner fa-spin"></i> {{ __($translationPrefix.'.detail.loading') }}</div><div class="payment-detail-state payment-detail-error" data-payment-product-error hidden></div><div data-payment-product-detail-body></div><div class="payment-detail-pagination" data-payment-product-detail-pagination></div>
     </div><div class="modal-footer"><button class="btn btn-default" type="button" data-dismiss="modal">{{ __($translationPrefix.'.detail.close') }}</button></div></div></div></div>
+    @include('portals.logistics.partials.order-detail-modal')
 </section>
 @endsection
 
 @push('scripts')
 <script>window.PaymentPortal = { productTabUrl: @json(route('payment.product-risk-profit.tab')), productMainTabs: @json(__($translationPrefix.'.main_tabs')), productDetailUrl: @json(route('payment.product-risk-profit.detail')), productDetail: @json(__($translationPrefix.'.detail')), pagination: @json(__('payment.common.pagination')) };</script>
 <script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261026-6"></script>
+<script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261015-2"></script>
 @endpush

@@ -2,6 +2,7 @@
 
 namespace App\Portals\Payment;
 
+use App\Models\LogisticsOrder;
 use App\Portals\Logistics\LogisticsProductStatisticsService;
 use App\Portals\Logistics\LogisticsCreditCardRefundReason;
 use Illuminate\Support\Facades\DB;
@@ -125,6 +126,19 @@ class PaymentProductRiskService
     /** @param array<string,mixed> $filters @param array<string,mixed> $options @return array<string,mixed>|null */
     public function detail(array $filters, string $productId, array $options): ?array
     {
+        if (($options['tab'] ?? '') === 'variants') {
+            $key = $this->decodeProductKey($productId);
+            if ($key === null) {
+                return null;
+            }
+
+            return [
+                'tab' => 'variants',
+                'product' => [],
+                'detail' => $this->variantDetailPage($filters, $key, $options),
+            ];
+        }
+
         $detail = $this->statistics->detailPage($filters, $productId, $options);
         if ($detail === null) {
             return null;
@@ -138,6 +152,168 @@ class PaymentProductRiskService
         }
 
         return $detail;
+    }
+
+    /**
+     * 支付中台使用独立的轻量规格汇总，避免产品表现页加载完整订单关系树。
+     *
+     * @param array<string,mixed> $filters
+     * @param array<string,mixed> $options
+     * @return array<string,mixed>
+     */
+    private function variantDetailPage(array $filters, string $productKey, array $options): array
+    {
+        $database = DB::connection(config('admin.database.connection') ?: config('database.default'));
+        $productExpression = $this->productKeyExpression('items');
+        $variantExpression = $this->variantKeyExpression('items');
+        $query = $database->table('logistics_order_items as items')
+            ->join('logistics_orders as orders', 'orders.id', '=', 'items.logistics_order_id')
+            ->whereNotNull('items.line_revenue_usd')
+            ->whereRaw("{$productExpression} = ?", [$productKey]);
+        $this->applyVariantFilters($query, $filters, $options);
+
+        $grouped = (clone $query)
+            ->selectRaw("{$variantExpression} as variant_key")
+            ->selectRaw("MIN(NULLIF(TRIM(items.tongtu_sku), '')) as tongtu_sku")
+            ->selectRaw("MIN(NULLIF(TRIM(items.tongtu_product_name), '')) as tongtu_product_name")
+            ->selectRaw("MIN(NULLIF(TRIM(items.tongtu_product_code), '')) as tongtu_product_code")
+            ->selectRaw("MIN(NULLIF(TRIM(items.product_image_url), '')) as product_image_url")
+            ->selectRaw('COUNT(DISTINCT orders.id) as order_count')
+            ->selectRaw('COALESCE(SUM(items.quantity), 0) as sales')
+            ->selectRaw('COALESCE(SUM(items.line_revenue_usd), 0) as revenue')
+            ->selectRaw("GROUP_CONCAT(DISTINCT NULLIF(TRIM(items.shopify_sku), '') ORDER BY items.shopify_sku SEPARATOR '|||') as shopify_skus")
+            ->selectRaw("GROUP_CONCAT(DISTINCT NULLIF(TRIM(orders.store_name), '') ORDER BY orders.store_name SEPARATOR '|||') as stores")
+            ->groupByRaw($variantExpression);
+
+        $countQuery = (clone $query)->selectRaw("{$variantExpression} as variant_key")->groupByRaw($variantExpression);
+        $total = $database->query()->fromSub($countQuery, 'payment_variant_count')->count();
+        $perPage = (int) ($options['per_page'] ?? 50) === 100 ? 100 : 50;
+        $lastPage = max(1, (int) ceil($total / $perPage));
+        $page = min(max(1, (int) ($options['page'] ?? 1)), $lastPage);
+        $direction = ($options['direction'] ?? '') === 'asc' ? 'asc' : 'desc';
+        $sortColumns = [
+            'tongtu_sku' => 'tongtu_sku', 'tongtu_product_name' => 'tongtu_product_name',
+            'order_count' => 'order_count', 'sales' => 'sales', 'revenue' => 'revenue',
+        ];
+        $sort = $sortColumns[(string) ($options['sort'] ?? '')] ?? 'variant_key';
+        $rows = $grouped->orderBy($sort, $direction)->orderBy('variant_key')->forPage($page, $perPage)->get();
+        $variantKeys = $rows->pluck('variant_key')->map(static fn ($key): string => (string) $key)->all();
+        $orderGroups = [];
+        $orderRows = collect();
+        if ($variantKeys !== []) {
+            $orderQuery = $database->table('logistics_order_items as items')
+                ->join('logistics_orders as orders', 'orders.id', '=', 'items.logistics_order_id')
+                ->whereRaw("{$productExpression} = ?", [$productKey])
+                ->whereIn(DB::raw($variantExpression), $variantKeys)
+                ->selectRaw("{$variantExpression} as variant_key")
+                ->addSelect(['orders.id', 'orders.logistics_status']);
+            $this->applyVariantFilters($orderQuery, $filters, []);
+            $orderRows = $orderQuery->distinct()->get();
+            foreach ($orderRows as $order) {
+                $orderGroups[(string) $order->variant_key][(int) $order->id] = true;
+            }
+        }
+
+        $orderIds = $orderRows->pluck('id')->map(static fn ($id): int => (int) $id)->unique()->values()->all();
+        $paypalRefunds = $orderIds === [] ? collect() : $database->table('logistics_paypal_refunds')
+            ->whereIn('logistics_order_id', $orderIds)
+            ->selectRaw("logistics_order_id, SUM(COALESCE(refund_amount_usd, CASE WHEN UPPER(currency_code) = 'USD' THEN original_amount ELSE 0 END)) as amount")
+            ->groupBy('logistics_order_id')->pluck('amount', 'logistics_order_id');
+        $paypalDisputes = $orderIds === [] ? collect() : $database->table('logistics_paypal_disputes')
+            ->whereIn('logistics_order_id', $orderIds)->selectRaw('logistics_order_id, COUNT(DISTINCT id) as total')
+            ->groupBy('logistics_order_id')->pluck('total', 'logistics_order_id');
+        $creditCardRows = $orderIds === [] ? collect() : $database->table('logistics_credit_card_refunds')
+            ->whereIn('logistics_order_id', $orderIds)->get(['logistics_order_id', 'refund_amount_usd', 'refund_reason'])->groupBy('logistics_order_id');
+        $statusByOrder = $orderRows->keyBy('id');
+
+        $resultRows = $rows->map(function (object $row) use ($orderGroups, $paypalRefunds, $paypalDisputes, $creditCardRows, $statusByOrder): array {
+            $ids = array_keys($orderGroups[(string) $row->variant_key] ?? []);
+            $paypalRefundAmount = 0.0;
+            $paypalDisputeCount = 0;
+            $creditCardRefundAmount = 0.0;
+            $shipped = 0;
+            $delivered = 0;
+            foreach ($ids as $orderId) {
+                $paypalRefundAmount += (float) ($paypalRefunds[$orderId] ?? 0);
+                $paypalDisputeCount += (int) ($paypalDisputes[$orderId] ?? 0);
+                foreach ($creditCardRows->get($orderId, collect()) as $risk) {
+                    $reason = LogisticsCreditCardRefundReason::normalize((string) $risk->refund_reason);
+                    if (in_array($reason, LogisticsCreditCardRefundReason::CUSTOMER_SERVICE, true)) {
+                        $creditCardRefundAmount += (float) $risk->refund_amount_usd;
+                    }
+                }
+                $status = (string) ($statusByOrder[$orderId]->logistics_status ?? '');
+                if (in_array($status, [LogisticsOrder::LOGISTICS_IN_TRANSIT, LogisticsOrder::LOGISTICS_EXCEPTION, LogisticsOrder::LOGISTICS_DELIVERED], true)) $shipped++;
+                if ($status === LogisticsOrder::LOGISTICS_DELIVERED) $delivered++;
+            }
+            $orderCount = count($ids);
+
+            return [
+                'tongtu_sku' => (string) ($row->tongtu_sku ?: '-'),
+                'tongtu_product_name' => (string) ($row->tongtu_product_name ?: '-'),
+                'tongtu_product_code' => (string) ($row->tongtu_product_code ?: ''),
+                'product_image_url' => $row->product_image_url ?: null,
+                'shopify_skus' => $this->splitVariantList($row->shopify_skus),
+                'stores' => $this->splitVariantList($row->stores),
+                'order_count' => $orderCount,
+                'sales' => (float) $row->sales,
+                'revenue' => round((float) $row->revenue, 2),
+                'paypal_refund_amount' => round($paypalRefundAmount, 2),
+                'paypal_dispute_count' => $paypalDisputeCount,
+                'credit_card_refund_amount' => round($creditCardRefundAmount, 2),
+                'shipping_rate' => $orderCount > 0 ? round($shipped / $orderCount * 100, 2) : 0.0,
+                'delivery_rate' => $orderCount > 0 ? round($delivered / $orderCount * 100, 2) : 0.0,
+            ];
+        })->values()->all();
+
+        return [
+            'rows' => $resultRows,
+            'pagination' => [
+                'current_page' => $page, 'per_page' => $perPage, 'total' => $total, 'last_page' => $lastPage,
+                'from' => $total === 0 ? 0 : (($page - 1) * $perPage) + 1, 'to' => min($page * $perPage, $total),
+            ],
+            'options' => [],
+        ];
+    }
+
+    private function productKeyExpression(string $alias): string
+    {
+        return "CASE WHEN NULLIF(TRIM({$alias}.tongtu_product_code), '') IS NOT NULL THEN CONCAT('tongtu-product-code:', LOWER(TRIM({$alias}.tongtu_product_code))) "
+            ."WHEN NULLIF(TRIM({$alias}.shopify_sku), '') IS NOT NULL THEN CONCAT('shopify-sku:', LOWER(TRIM({$alias}.shopify_sku))) "
+            ."WHEN NULLIF(TRIM({$alias}.tongtu_sku), '') IS NOT NULL THEN CONCAT('tongtu-sku:', LOWER(TRIM({$alias}.tongtu_sku))) "
+            ."WHEN NULLIF(TRIM({$alias}.shopify_product_id), '') IS NOT NULL THEN CONCAT('shopify-product:', LOWER(TRIM({$alias}.shopify_product_id))) "
+            ."WHEN NULLIF(TRIM(COALESCE({$alias}.tongtu_product_name, {$alias}.product_title)), '') IS NOT NULL THEN CONCAT('product-name:', LOWER(TRIM(COALESCE({$alias}.tongtu_product_name, {$alias}.product_title)))) "
+            ."ELSE CONCAT('sku:', COALESCE(NULLIF(LOWER(TRIM({$alias}.tongtu_product_code)), ''), NULLIF(LOWER(TRIM({$alias}.tongtu_sku)), ''), NULLIF(LOWER(TRIM({$alias}.shopify_sku)), ''), '__missing__')) END";
+    }
+
+    private function variantKeyExpression(string $alias): string
+    {
+        return "CASE WHEN NULLIF(TRIM({$alias}.tongtu_sku), '') IS NOT NULL THEN CONCAT('tongtu:', LOWER(TRIM({$alias}.tongtu_sku))) "
+            ."WHEN NULLIF(TRIM({$alias}.shopify_sku), '') IS NOT NULL THEN CONCAT('shopify:', LOWER(TRIM({$alias}.shopify_sku))) "
+            ."ELSE CONCAT('item:', {$alias}.id) END";
+    }
+
+    /** @param array<string,mixed> $filters @param array<string,mixed> $options */
+    private function applyVariantFilters(object $query, array $filters, array $options): void
+    {
+        if (($filters['date_from'] ?? '') !== '') $query->whereDate('orders.paid_at', '>=', $filters['date_from']);
+        if (($filters['date_to'] ?? '') !== '') $query->whereDate('orders.paid_at', '<=', $filters['date_to']);
+        if (($filters['store'] ?? '') !== '') $query->where('orders.store_name', $filters['store']);
+        $keyword = trim((string) ($options['keyword'] ?? ''));
+        if ($keyword !== '') {
+            $query->where(function ($nested) use ($keyword): void {
+                $like = '%'.$keyword.'%';
+                $nested->where('items.tongtu_sku', 'like', $like)->orWhere('items.shopify_sku', 'like', $like)
+                    ->orWhere('items.tongtu_product_name', 'like', $like)->orWhere('items.product_title', 'like', $like)
+                    ->orWhere('orders.store_name', 'like', $like);
+            });
+        }
+    }
+
+    /** @return list<string> */
+    private function splitVariantList(mixed $value): array
+    {
+        return array_values(array_filter(array_map('trim', explode('|||', (string) $value))));
     }
 
     private function decodeProductKey(string $productId): ?string

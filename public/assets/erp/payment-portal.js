@@ -851,10 +851,10 @@
             var productState = { id: '', name: '', tab: 'overview', page: 1, perPage: 50, sort: '', direction: 'desc', request: null, refundRows: [], filterOptions: {} };
             var productPaginationText = config.pagination || {};
             var productColumns = {
-                orders: ['shopify_order_number', 'store', 'bill_number', 'payment_method', 'quantity', 'revenue', 'actual_refund', 'tracking_number', 'logistics_status', 'order_created_at'],
+                orders: ['shopify_order_number', 'store', 'tongtu_product_codes', 'tongtu_skus', 'shopify_skus', 'bill_number', 'payment_method', 'quantity', 'revenue', 'paypal_refund', 'credit_card_refund', 'paypal_dispute_count', 'tracking_number', 'logistics_status', 'order_created_at'],
                 variants: ['tongtu_sku', 'tongtu_product_name', 'shopify_skus', 'stores', 'order_count', 'sales', 'revenue', 'paypal_refund_amount', 'paypal_dispute_count', 'credit_card_refund_amount', 'shipping_rate', 'delivery_rate'],
-                refunds: ['payment_method_label', 'shopify_order_number', 'store', 'bill_number', 'refund_number', 'amount', 'source_reason', 'manual_reason', 'status', 'imported_at'],
-                disputes: ['dispute_id', 'shopify_order_number', 'store', 'bill_number', 'amount', 'reason', 'stage', 'status', 'outcome', 'seller_response_due_at', 'updated_at']
+                refunds: ['payment_method_label', 'shopify_order_number', 'bill_number', 'refund_number', 'amount', 'source_reason', 'manual_reason', 'status', 'linked_disputes', 'imported_at'],
+                disputes: ['dispute_id', 'shopify_order_number', 'bill_number', 'amount', 'reason', 'stage', 'status', 'outcome', 'seller_response_due_at', 'linked_refunds', 'updated_at']
             };
 
             function pEscape(value) {
@@ -940,7 +940,7 @@
                             var lost = Math.max(0, previousSubscriptionCount - currentCount);
                             var lostRate = previousSubscriptionCount > 0 ? lost / previousSubscriptionCount * 100 : 0;
                             var churnFormula = replaceProductTokens(formulas.churn_rate, { previous: pNumber(previousSubscriptionCount), current: pNumber(currentCount), lost: pNumber(lost) });
-                            connector = '<div class="payment-order-analysis-connector' + (lostRate >= 50 ? ' is-high' : ' is-moderate') + '"><span class="payment-order-analysis-arrow"><i class="fa fa-long-arrow-down"></i></span><span class="payment-order-analysis-churn"><strong>' + pEscape(text.churn_label) + formulaIcon(churnFormula) + '</strong><b>' + pEscape(pNumber(lost) + ' ' + text.record_unit + ' / ' + pRate(lostRate)) + '</b></span></div>';
+                            connector = '<div class="payment-product-lifecycle-connector' + (lostRate >= 50 ? ' is-high' : ' is-moderate') + '"><i class="fa fa-long-arrow-down" aria-hidden="true"></i><span>' + pEscape(text.churn_label) + formulaIcon(churnFormula) + '</span><strong>' + pEscape(pNumber(lost) + ' ' + text.record_unit + ' / ' + pRate(lostRate)) + '</strong></div>';
                         }
                         if (key === 'first_charge' || key === 'first_renewal' || key === 'later_renewal') previousSubscriptionCount = currentCount;
                         return connector + '<article class="payment-lifecycle-card"><h4>' + pEscape((text.groups || {})[key]) + '</h4><strong>' + pEscape(pNumber(group.order_count)) + ' ' + pEscape(text.record_unit) + ' / ' + pEscape(pMoney(group.received_amount)) + '</strong><dl><div><dt>' + pEscape(text.refund_rate) + formulaIcon(replaceProductTokens(formulas.refund_rate, { refund: pMoney(group.refund_amount), received: pMoney(group.received_amount) })) + '</dt><dd>' + pEscape(pRate(group.refund_rate)) + '</dd></div><div><dt>' + pEscape(text.dispute_rate) + formulaIcon(replaceProductTokens(formulas.dispute_rate, { count: pNumber(group.dispute_count), orders: pNumber(group.order_count) })) + '</dt><dd>' + pEscape(pRate(group.dispute_rate)) + '<small>' + pEscape(pNumber(group.dispute_count) + text.record_unit + ' / ' + pNumber(group.order_count) + text.record_unit) + '</small></dd></div><div><dt>' + pEscape(text.realised_loss) + formulaIcon(formulas.realised_loss) + '</dt><dd>' + pEscape(pMoney(group.realised_loss)) + '</dd></div></dl></article>';
@@ -1004,15 +1004,58 @@
                         '<label><span>' + pEscape(labels.outcome) + '</span><select class="form-control" name="detail_outcome"><option value="">' + pEscape(labels.all) + '</option>' + productOptionHtml(productState.filterOptions.outcome) + '</select></label>';
                 }
                 productModal.find('[data-payment-product-extra-filters]').html(html);
+                var placeholders = productText.search_placeholders || {};
+                productModal.find('[name="detail_keyword"]').attr('placeholder', placeholders[productState.tab] || productText.search_placeholder || '');
                 Object.keys(selected).forEach(function (name) { productModal.find('[name="' + name + '"]').val(selected[name]); });
+            }
+
+            function productDetailSortButton(tab, key) {
+                var labels = productText.columns || {};
+                var active = productState.sort === key;
+                return '<button type="button" class="payment-detail-sort' + (active ? ' active' : '') + '" data-payment-product-detail-sort="' + pEscape(key) + '">' + pEscape(labels[key] || key) + ' <i class="fa ' + (active ? (productState.direction === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort') + '"></i></button>';
+            }
+
+            function productOrderLink(row) {
+                var label = pEscape(row.shopify_order_number || '-');
+                var detailUrl = row.detail_url || row.order_detail_url || '';
+                return row.order_id && detailUrl
+                    ? '<button type="button" class="btn btn-link btn-xs js-logistics-order-detail" data-order-detail-url="' + pEscape(detailUrl) + '">' + label + '</button>'
+                    : label;
+            }
+
+            function productDetailCell(row, key) {
+                var value = row[key];
+                if (key === 'shopify_order_number') return productOrderLink(row);
+                if (key === 'linked_refunds') {
+                    value = (value || []).map(function (item) { return (item.refund_number || '-') + ' (' + pMoney(item.amount) + ')'; });
+                }
+                if (Array.isArray(value)) value = value.map(function (item) { return typeof item === 'object' ? (item.refund_number || item.name || '-') : item; }).join('、');
+                if (['amount', 'revenue', 'paypal_refund', 'credit_card_refund', 'actual_refund', 'paypal_refund_amount', 'credit_card_refund_amount'].indexOf(key) !== -1) return pEscape(pMoney(value));
+                if (['quantity', 'paypal_dispute_count', 'order_count', 'sales'].indexOf(key) !== -1) return pEscape(pNumber(value));
+                if (['shipping_rate', 'delivery_rate'].indexOf(key) !== -1) return pEscape(pRate(value));
+                if (key === 'tongtu_sku') return '<code>' + pEscape(value || '-') + '</code>';
+                return pEscape(value || '-');
+            }
+
+            function renderRefundSummary(detail) {
+                var summary = detail.summary || {};
+                var text = productText.refund_summary || {};
+                return '<section class="product-statistics-refund-selection"><h4>' + pEscape(text.title) + '</h4><div>' +
+                    '<article><span>' + pEscape(text.record_count) + '</span><strong>' + pEscape(pNumber(summary.record_count)) + '</strong><small>/ ' + pEscape(pNumber(summary.total_record_count)) + '</small></article>' +
+                    '<article><span>' + pEscape(text.amount) + '</span><strong>' + pEscape(pMoney(summary.amount)) + '</strong><small>/ ' + pEscape(pMoney(summary.total_amount)) + '</small></article>' +
+                    '<article><span>' + pEscape(text.count_ratio) + '</span><strong>' + pEscape(pRate(summary.count_ratio)) + '</strong></article>' +
+                    '<article><span>' + pEscape(text.amount_ratio) + '</span><strong>' + pEscape(pRate(summary.amount_ratio)) + '</strong></article>' +
+                    '</div></section>';
             }
 
             function renderProductRows(detail, tab) {
                 var rows = detail.rows || [];
                 var columns = productColumns[tab] || [];
-                var labels = productText.columns || {};
-                if (!rows.length) return '<div class="payment-detail-empty">' + pEscape(productText.empty) + '</div>';
-                return '<div class="table-responsive"><table class="table payment-detail-table payment-risk-data-table"><thead><tr>' + columns.map(function (key) { var active = productState.sort === key; return '<th><button type="button" class="payment-detail-sort' + (active ? ' active' : '') + '" data-payment-product-detail-sort="' + pEscape(key) + '">' + pEscape(labels[key] || key) + ' <i class="fa ' + (active ? (productState.direction === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort') + '"></i></button></th>'; }).join('') + '</tr></thead><tbody>' + rows.map(function (row) { return '<tr>' + columns.map(function (key) { return '<td>' + pEscape(productCell(row, key)) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>';
+                var body = rows.length
+                    ? rows.map(function (row) { return '<tr>' + columns.map(function (key) { return '<td>' + productDetailCell(row, key) + '</td>'; }).join('') + '</tr>'; }).join('')
+                    : '<tr><td colspan="' + columns.length + '" class="text-center text-muted">' + pEscape(productText.empty) + '</td></tr>';
+                var table = '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + columns.map(function (key) { return '<th>' + productDetailSortButton(tab, key) + '</th>'; }).join('') + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+                return (tab === 'refunds' ? renderRefundSummary(detail) : '') + table;
             }
 
             function renderProductPagination(meta) {
@@ -1036,11 +1079,17 @@
                     date_from: page.find('[name="date_from"]').val(), date_to: page.find('[name="date_to"]').val(),
                     store: page.find('[name="store"]').val(), keyword: page.find('[name="keyword"]').val()
                 };
+                if (productState.request) {
+                    productState.request.abort();
+                    productState.request = null;
+                }
+                productModal.addClass('is-loading').attr('aria-busy', 'true');
                 productModal.find('[data-payment-product-loading]').prop('hidden', false);
                 productModal.find('[data-payment-product-error]').prop('hidden', true);
                 productModal.find('[data-payment-product-detail-body], [data-payment-product-detail-pagination]').empty();
-                if (productState.request) productState.request.abort();
-                productState.request = $.getJSON(config.productDetailUrl, query).done(function (payload) {
+                var request = $.getJSON(config.productDetailUrl, query);
+                productState.request = request;
+                request.done(function (payload) {
                     var dashboard = productState.tab === 'overview' || productState.tab === 'first_renewal';
                     var content = productState.tab === 'overview' ? renderProductOverview(payload.product || {}) : (productState.tab === 'first_renewal' ? renderFirstRenewal(payload.detail || {}, payload.channel_risk || {}) : renderProductRows(payload.detail || {}, productState.tab));
                     productModal.find('[data-payment-product-detail-body]').toggleClass('payment-detail-dashboard-body', dashboard).html(content);
@@ -1049,7 +1098,12 @@
                     initFormulaTooltips(productModal);
                 }).fail(function (xhr, status) {
                     if (status !== 'abort') productModal.find('[data-payment-product-error]').text(productText.load_failed || '').prop('hidden', false);
-                }).always(function () { productModal.find('[data-payment-product-loading]').prop('hidden', true); productState.request = null; });
+                }).always(function () {
+                    if (productState.request !== request) return;
+                    productModal.removeClass('is-loading').attr('aria-busy', 'false');
+                    productModal.find('[data-payment-product-loading]').prop('hidden', true);
+                    productState.request = null;
+                });
             }
 
             page.on('click keydown', '[data-payment-product-detail]', function (event) {
@@ -1083,7 +1137,12 @@
                 $(this).addClass('selected').attr('aria-selected', 'true');
                 productModal.find('[data-payment-refund-event-detail]').html(renderRefundSelection(row));
             });
-            productModal.on('hidden.bs.modal', function () { if (productState.request) productState.request.abort(); });
+            productModal.on('hidden.bs.modal', function () {
+                if (productState.request) productState.request.abort();
+                productState.request = null;
+                productModal.removeClass('is-loading').attr('aria-busy', 'false');
+                productModal.find('[data-payment-product-loading]').prop('hidden', true);
+            });
         }
     });
 })(jQuery);
