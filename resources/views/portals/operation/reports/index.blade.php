@@ -22,7 +22,6 @@
             <div class="form-group"><label>报表日期</label><input class="form-control input-sm" type="date" name="report_date" value="{{ $reportDate }}"></div>
             @if($isBoss)<div class="form-group"><label>填报运营身份</label><select class="form-control input-sm" name="operator_user_id">@foreach($operatorOptions as $option)<option value="{{ $option->id }}" @selected($selectedOperator->id === $option->id)>{{ $option->name ?: $option->username }}</option>@endforeach</select></div>@endif
             <button class="btn btn-primary btn-sm"><i class="fa fa-search"></i> 加载数据</button>
-            <a class="btn btn-success btn-sm" href="{{ route('operation.reports.export', ['report_date'=>$reportDate,'operator_user_id'=>$isBoss?$selectedOperator->id:null]) }}"><i class="fa fa-download"></i> 导出 Excel</a>
             <span>当前运营：<strong>{{ $selectedOperator->name ?: $selectedOperator->username }}</strong></span>
             @if($report)<span class="op-status {{ $report->status }}">{{ $report->status === 'approved' ? '已审核' : '待审核' }}</span>@else<span class="label label-default">未提交</span>@endif
         </form>
@@ -54,12 +53,12 @@
         </table></div>
     </div>
 
-    @php($adRows = count($advertisingRows) ? $advertisingRows : [[]])
+    @php($adRows = old('ads', count($advertisingRows) ? $advertisingRows : [[]]))
     <form method="post" enctype="multipart/form-data" action="{{ route('operation.reports.store') }}" id="operation-report-form">
         @csrf<input type="hidden" name="report_date" value="{{ $reportDate }}">@if($editingReport)<input type="hidden" name="report_id" value="{{ $editingReport->id }}">@endif @if($isBoss)<input type="hidden" name="operator_user_id" value="{{ $selectedOperator->id }}">@endif
         <div class="box"><div class="box-header with-border"><h3 class="box-title op-section-title">广告信息填写</h3><p class="op-help">当天运营的每个广告账户填写一次；实际广告费自动按“账面广告费 × 结算系数”计算。带 <span class="text-red">*</span> 的字段均为必填项。</p></div>
             <div class="box-body">@if(!$canEditReport)<div class="alert alert-info"><i class="fa fa-eye"></i> 当前正在查看 {{ $selectedOperator->name ?: $selectedOperator->username }} 已提交的内容，仅可查看和审核。</div>@endif<fieldset @disabled(!$canEditReport)><div class="table-responsive"><table class="table table-bordered ad-table"><thead><tr><th>广告社媒 <span class="text-red">*</span></th><th>广告代理 <span class="text-red">*</span></th><th>广告账户名称 <span class="text-red">*</span></th><th>广告账户编号 <span class="text-red">*</span></th><th>账面广告费($) <span class="text-red">*</span></th><th>结算系数 <span class="text-red">*</span></th><th>实际广告费($)</th><th>广告消耗截图 <span class="text-red">*</span></th><th></th></tr></thead><tbody id="ad-rows">
-                @foreach($adRows as $i=>$ad)<tr data-ad-row>
+                @foreach($adRows as $i=>$ad)@php($adScreenshot = $ad['screenshot'] ?? $ad['existing_screenshot'] ?? null)<tr data-ad-row>
                     <td><select class="form-control input-sm" required name="ads[{{ $i }}][media_source]"><option value="">请选择媒体</option>@foreach($mediaSources as $source)<option value="{{ $source }}" @selected(($ad['media_source']??'')===$source)>{{ $source }}</option>@endforeach</select></td>
                     <td><input class="form-control input-sm" required name="ads[{{ $i }}][agency]" value="{{ $ad['agency']??'' }}"></td>
                     <td><input class="form-control input-sm" required name="ads[{{ $i }}][account_name]" value="{{ $ad['account_name']??'' }}"></td>
@@ -67,7 +66,7 @@
                     <td><input class="form-control input-sm ad-spend" required type="number" min="0" step="0.01" name="ads[{{ $i }}][book_spend]" value="{{ $ad['book_spend']??'' }}"></td>
                     <td><input class="form-control input-sm ad-rate" required type="number" min="0" step="0.0001" name="ads[{{ $i }}][settlement_coefficient]" value="{{ $ad['settlement_coefficient']??1 }}"></td>
                     <td class="actual-spend money">{{ number_format($ad['actual_spend']??0,2) }}</td>
-                    <td class="ad-image-cell"><span class="ad-image-summary">@if(!empty($ad['screenshot']))<img class="ad-image-thumb" src="{{ asset('storage/'.$ad['screenshot']) }}" alt="广告截图" onclick="window.erpZoomOpen&&window.erpZoomOpen(this.src)">@endif</span>@if(!empty($ad['screenshot']))<input type="hidden" name="ads[{{ $i }}][existing_screenshot]" value="{{ $ad['screenshot'] }}">@endif<input class="ad-image-input" type="file" hidden name="ads[{{ $i }}][screenshot]" accept="image/jpeg,image/png,image/webp"><button type="button" class="btn btn-info btn-xs ad-image-open" data-existing-url="{{ !empty($ad['screenshot']) ? asset('storage/'.$ad['screenshot']) : '' }}"><i class="fa fa-picture-o"></i> {{ !empty($ad['screenshot']) ? '更换截图' : '上传截图' }}</button></td>
+                    <td class="ad-image-cell"><span class="ad-image-summary">@if($adScreenshot)<img class="ad-image-thumb" src="{{ route('operation.reports.screenshot',['path'=>$adScreenshot]) }}" alt="广告截图" onclick="window.erpZoomOpen&&window.erpZoomOpen(this.src)">@endif</span>@if($adScreenshot)<input type="hidden" name="ads[{{ $i }}][existing_screenshot]" value="{{ $adScreenshot }}">@endif<input class="ad-image-input" type="file" hidden name="ads[{{ $i }}][screenshot]" accept="image/jpeg,image/png,image/webp"><button type="button" class="btn btn-info btn-xs ad-image-open" data-existing-url="{{ $adScreenshot ? route('operation.reports.screenshot',['path'=>$adScreenshot]) : '' }}"><i class="fa fa-picture-o"></i> {{ $adScreenshot ? '更换截图' : '上传截图' }}</button></td>
                     <td><button type="button" class="btn btn-xs btn-danger remove-ad"><i class="fa fa-trash"></i></button></td>
                 </tr>@endforeach
             </tbody></table></div>

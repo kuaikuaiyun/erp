@@ -14,6 +14,7 @@ use App\Portals\Operation\OperationReportMetricsService;
 use App\Portals\ProductRequests\ProductRequestAccessService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
@@ -104,6 +105,19 @@ class OperationReportController extends Controller
         if ($context instanceof Response) abort($context->getStatusCode());
         $user = $context['user'];
         $isBoss = $this->isBoss($user);
+        $request->validate([
+            'ads.*.screenshot' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+        ]);
+        $inputAds = $request->input('ads', []);
+        foreach ($inputAds as $index => &$ad) {
+            if ($request->hasFile('ads.'.$index.'.screenshot')) {
+                $ad['existing_screenshot'] = $request->file('ads.'.$index.'.screenshot')
+                    ->store('operation-reports/ads', 'public');
+            }
+        }
+        unset($ad);
+        $request->merge(['ads' => $inputAds]);
+
         $validated = $request->validate([
             'report_date' => ['required', 'date_format:Y-m-d'],
             'report_id' => ['nullable', 'integer'],
@@ -115,8 +129,7 @@ class OperationReportController extends Controller
             'ads.*.account_number' => ['required', 'string', 'max:191'],
             'ads.*.book_spend' => ['required', 'numeric', 'min:0'],
             'ads.*.settlement_coefficient' => ['required', 'numeric', 'min:0'],
-            'ads.*.existing_screenshot' => ['nullable', 'string', 'max:500'],
-            'ads.*.screenshot' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'ads.*.existing_screenshot' => ['nullable', 'string', 'max:500', 'regex:/^operation-reports\/ads\/[A-Za-z0-9._-]+$/'],
         ]);
         $operatorId = $isBoss && ! empty($validated['operator_user_id'])
             ? (int) $validated['operator_user_id'] : (int) $user->getKey();
@@ -135,16 +148,13 @@ class OperationReportController extends Controller
 
         $ads = [];
         foreach (($validated['ads'] ?? []) as $index => $ad) {
-            if (empty($ad['existing_screenshot']) && ! $request->hasFile('ads.'.$index.'.screenshot')) {
+            if (empty($ad['existing_screenshot'])) {
                 throw ValidationException::withMessages(['ads.'.$index.'.screenshot' => '请上传第 '.($index + 1).' 条广告账户的广告消耗截图。']);
             }
             $hasContent = collect(['media_source','agency','account_name','account_number','book_spend','settlement_coefficient'])
                 ->contains(fn ($field) => ($ad[$field] ?? '') !== '' && ($ad[$field] ?? null) !== null);
-            if (! $hasContent && ! $request->hasFile('ads.'.$index.'.screenshot')) continue;
+            if (! $hasContent && empty($ad['existing_screenshot'])) continue;
             $path = $ad['existing_screenshot'] ?? null;
-            if ($request->hasFile('ads.'.$index.'.screenshot')) {
-                $path = $request->file('ads.'.$index.'.screenshot')->store('operation-reports/ads', 'public');
-            }
             $bookSpend = (float) ($ad['book_spend'] ?? 0);
             $coefficient = ($ad['settlement_coefficient'] ?? '') === '' ? 1.0 : (float) $ad['settlement_coefficient'];
             $ads[] = [
@@ -180,6 +190,19 @@ class OperationReportController extends Controller
         else OperationReport::query()->create($values);
 
         return redirect()->route('operation.reports.index', ['report_date' => $validated['report_date'], 'operator_user_id' => $isBoss ? $operatorId : null])->with('success', $editingReport ? '运营报表已重新提交，状态仍为待审核。' : '运营报表已提交，当前状态为待审核。');
+    }
+
+    public function screenshot(Request $request): Response
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+
+        $validated = $request->validate([
+            'path' => ['required', 'string', 'max:500', 'regex:/^operation-reports\/ads\/[A-Za-z0-9._-]+$/'],
+        ]);
+        abort_unless(Storage::disk('public')->exists($validated['path']), 404);
+
+        return Storage::disk('public')->response($validated['path']);
     }
 
     public function approve(Request $request, OperationReport $report): RedirectResponse
