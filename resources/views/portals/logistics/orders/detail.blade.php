@@ -146,6 +146,7 @@
             <span class="label {{ $order->logisticsStatusClass() }}">{{ $display($order->logistics_status) }}</span>
             <span class="label {{ $order->is_add_on === '已加购' ? 'label-warning' : 'label-default' }}">{{ $display($order->is_add_on) }}</span>
             <span class="label label-info">{{ $display($order->subscription_type) }}</span>
+            <span class="label label-default">流媒体源：{{ $display($order->media_source ?: \App\Models\LogisticsOrder::MEDIA_SOURCE_OTHER) }}</span>
         </div>
     </header>
 
@@ -173,7 +174,8 @@
                                 <div><dt>数量</dt><dd>{{ $display($item->quantity) }}</dd></div>
                                 <div><dt>单价</dt><dd>{{ $money($item->unit_price_usd) }}</dd></div>
                                 <div><dt>销售额</dt><dd>{{ $money($item->line_revenue_usd) }}</dd></div>
-                                <div><dt>{{ __('logistics.orders.sale_product_detail_labels.goods_weight') }}</dt><dd>{{ $item->tongtu_goods_weight_gram === null ? __('logistics.common.not_available') : number_format((float) $item->tongtu_goods_weight_gram, 2).' '.__('logistics.orders.sale_product_detail_labels.weight_unit') }}</dd></div>
+                                <div><dt>{{ __('logistics.orders.sale_product_detail_labels.goods_weight') }}</dt><dd>{{ $item->sku_database_weight_gram === null ? __('logistics.common.not_available') : number_format((float) $item->sku_database_weight_gram, 2).' '.__('logistics.orders.sale_product_detail_labels.weight_unit') }}</dd></div>
+                                <div><dt>指导价</dt><dd>{{ $item->sku_database_guide_cost_cny === null ? __('logistics.common.not_available') : '¥'.number_format((float) $item->sku_database_guide_cost_cny, 2) }}</dd></div>
                                 <div><dt>{{ __('logistics.orders.sale_product_detail_labels.package_weight') }}</dt><dd>{{ $item->tongtu_package_weight_gram === null ? __('logistics.common.not_available') : number_format((float) $item->tongtu_package_weight_gram, 2).' '.__('logistics.orders.sale_product_detail_labels.weight_unit') }}</dd></div>
                             </dl>
                         </article>

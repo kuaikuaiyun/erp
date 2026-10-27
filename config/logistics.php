@@ -20,6 +20,12 @@ return [
         'shopify_order_query_url' => 'https://open.tongtool.com/api-service/openapi/tongtool/shopifyOrderQuery',
         'goods_query_url' => 'https://open.tongtool.com/api-service/openapi/tongtool/goodsQuery',
     ],
+    'sku_database' => [
+        'url' => env('LOGISTICS_SKU_DATABASE_URL', 'https://www.kuaiyun888.com/blog/sku-sync/index.php?action=database_lookup'),
+        'token' => env('LOGISTICS_SKU_DATABASE_TOKEN', ''),
+        'timeout' => (int) env('LOGISTICS_SKU_DATABASE_TIMEOUT', 15),
+        'cache_minutes' => (int) env('LOGISTICS_SKU_DATABASE_CACHE_MINUTES', 10),
+    ],
     'paypal' => [
         'import_secret' => env('LOGISTICS_PAYPAL_IMPORT_SECRET', ''),
         'import_max_bytes' => (int) env('LOGISTICS_PAYPAL_IMPORT_MAX_BYTES', 20 * 1024 * 1024),

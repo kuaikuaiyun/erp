@@ -39,6 +39,7 @@ class LogisticsOrderController extends Controller
         private readonly LogisticsTrackingService $tracking,
         private readonly LogisticsOrderPaymentReferenceService $paymentReferences,
         private readonly PayPalOrderAssociationService $paypalAssociations,
+        private readonly \App\Portals\Logistics\SkuDatabaseLookupService $skuDatabase,
     ) {
     }
 
@@ -107,6 +108,22 @@ class LogisticsOrderController extends Controller
             'creditCardRefunds' => fn ($query) => $query->orderByDesc('last_imported_at')->orderByDesc('id'),
             'logs' => fn ($query) => $query->latest('id')->limit(20),
         ]);
+
+        $skuDatabaseRows = $this->skuDatabase->lookup($order->items
+            ->flatMap(fn ($item): array => [$item->tongtu_sku, $item->shopify_sku])
+            ->all());
+        foreach ($order->items as $item) {
+            $candidateKeys = collect([$item->tongtu_sku, $item->shopify_sku])
+                ->map(fn ($sku): string => mb_strtolower(trim((string) $sku)))
+                ->filter()
+                ->unique();
+            $databaseRow = $candidateKeys
+                ->map(fn (string $key): array => $skuDatabaseRows[$key] ?? [])
+                ->first(fn (array $row): bool => ($row['match_status'] ?? '') !== 'not_found'
+                    && (($row['weight_gram'] ?? null) !== null || ($row['guide_cost_cny'] ?? null) !== null), []);
+            $item->setAttribute('sku_database_weight_gram', $databaseRow['weight_gram'] ?? $item->tongtu_goods_weight_gram);
+            $item->setAttribute('sku_database_guide_cost_cny', $databaseRow['guide_cost_cny'] ?? null);
+        }
 
         return view('portals.logistics.orders.detail', [
             'order' => $order,
