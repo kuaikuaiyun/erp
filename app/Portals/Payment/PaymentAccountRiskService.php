@@ -119,7 +119,17 @@ class PaymentAccountRiskService
                 'order_analysis' => $this->orderAnalysis($account, $filters, $summary),
             ];
         } else {
-            $detail = $this->analytics->detail($account, $filters, $tab, $page, '', '', $tabFilters, false, $perPage);
+            $detail = $this->analytics->detail(
+                $account,
+                $filters,
+                $tab,
+                $page,
+                (string) ($tabFilters['sort'] ?? ''),
+                (string) ($tabFilters['direction'] ?? 'desc'),
+                $tabFilters,
+                false,
+                $perPage,
+            );
         }
         $balance = LogisticsPayPalBalanceSnapshot::query()
             ->where('logistics_paypal_account_id', $account->getKey())->where('currency_code', 'USD')

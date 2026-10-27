@@ -4,7 +4,8 @@
     $translationPrefix = 'payment.product_alerts';
     $portalOrigin = rtrim(request()->getSchemeAndHttpHost(), '/');
     $kpiPresentation = [
-        'in_progress' => ['icon' => 'fa-cogs', 'tone' => 'orange'],
+        'pending' => ['icon' => 'fa-clock-o', 'tone' => 'orange'],
+        'processing' => ['icon' => 'fa-cogs', 'tone' => 'orange'],
         'completed' => ['icon' => 'fa-check-circle', 'tone' => 'blue'],
     ];
 @endphp
@@ -24,7 +25,10 @@
     <div class="box box-solid payment-filter-box">
         <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-filter"></i> {{ __('payment.common.filter_title') }}</h3></div>
         <div class="box-body"><form class="payment-operation-filter-form" method="get" action="{{ route('payment.product-alerts.index') }}" data-payment-filter-form data-payment-server-filter-form>
-            <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.status') }}</span><select class="form-control" name="status" data-payment-filter="status"><option value="">{{ __($translationPrefix.'.filters.all_statuses') }}</option>@foreach (['in_progress', 'completed'] as $status)<option value="{{ $status }}" @selected(($dashboard['filters']['status'] ?? '') === $status)>{{ __($translationPrefix.'.statuses.'.$status) }}</option>@endforeach</select></label>
+            <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.status') }}</span><select class="form-control" name="status" data-payment-filter="status"><option value="">{{ __($translationPrefix.'.filters.all_statuses') }}</option>@foreach (['pending','stopped','observing','backend_optimized','other','completed'] as $status)<option value="{{ $status }}" @selected(($dashboard['filters']['status'] ?? 'pending') === $status)>{{ __($translationPrefix.'.statuses.'.$status) }}</option>@endforeach</select></label>
+            <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.channel') }}</span><select class="form-control" name="channel"><option value="">{{ __($translationPrefix.'.filters.all_channels') }}</option>@foreach(['paypal','credit_card'] as $channel)<option value="{{ $channel }}" @selected(($dashboard['filters']['channel'] ?? '') === $channel)>{{ __($translationPrefix.'.channels.'.$channel) }}</option>@endforeach</select></label>
+            <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.severity') }}</span><select class="form-control" name="severity"><option value="">{{ __($translationPrefix.'.filters.all_severities') }}</option>@foreach(['warning','critical'] as $severity)<option value="{{ $severity }}" @selected(($dashboard['filters']['severity'] ?? '') === $severity)>{{ __($translationPrefix.'.severities.'.$severity) }}</option>@endforeach</select></label>
+            <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.sample') }}</span><select class="form-control" name="sample"><option value="">{{ __($translationPrefix.'.filters.all_samples') }}</option>@foreach(['under_50','50_500','over_500'] as $sample)<option value="{{ $sample }}" @selected(($dashboard['filters']['sample'] ?? '') === $sample)>{{ __($translationPrefix.'.sample_ranges.'.$sample) }}</option>@endforeach</select></label>
             <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.product') }}</span><input class="form-control" type="search" name="product" value="{{ $dashboard['filters']['product'] ?? '' }}" data-payment-filter="product" placeholder="{{ __($translationPrefix.'.filters.product_placeholder') }}"></label>
             <div class="payment-operation-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ __('payment.common.query') }}</button><button class="btn btn-default" type="button" onclick="window.location.href=@json(route('payment.product-alerts.index'))">{{ __('payment.common.reset') }}</button></div>
         </form></div>
@@ -41,15 +45,15 @@
 
     <article class="payment-panel payment-alert-list-panel">
         <h2>{{ __($translationPrefix.'.list_title') }}</h2>
-        <div class="table-responsive"><table class="table payment-data-table payment-alert-table"><thead><tr>@foreach (['alert_product', 'channel', 'sample', 'threshold', 'status', 'progress', 'action'] as $column)<th>{{ __($translationPrefix.'.table.'.$column) }}</th>@endforeach</tr></thead><tbody>
+        <div class="table-responsive"><table class="table payment-data-table payment-alert-table"><thead><tr>@foreach (['pcl', 'channel', 'summary', 'threshold', 'status', 'status_message', 'action'] as $column)<th>{{ __($translationPrefix.'.table.'.$column) }}</th>@endforeach</tr></thead><tbody>
         @foreach ($dashboard['alerts'] as $alert)
             <tr class="payment-alert-severity-{{ $alert['severity_key'] }}" tabindex="0" data-payment-alert-detail="{{ route('payment.product-alerts.show', ['alert' => $alert['code']]) }}">
-                <td><strong>{{ $alert['product_name'] }}</strong><br><small>{{ $alert['sku'] }}</small></td>
+                <td><strong>{{ $alert['sku'] }}</strong></td>
                 <td>{{ __($translationPrefix.'.channels.'.$alert['channel_key']) }}</td>
-                <td>{{ $alert['sample'] }}<br><small>{{ __($translationPrefix.'.sample_note') }}</small></td>
-                <td><span class="payment-alert-threshold payment-alert-threshold-{{ $alert['severity_key'] }}">{{ number_format($alert['dispute_rate'], 2) }}% <i class="fa fa-info-circle payment-formula-icon" tabindex="0" data-payment-formula-tooltip data-toggle="tooltip" data-container="body" title="{{ __($translationPrefix.'.formulas.'.$alert['threshold_key']) }}"></i></span><br><small>{{ __($translationPrefix.'.threshold_value', ['threshold' => number_format($alert['threshold'], 2)]) }}</small></td>
-                <td><span class="payment-table-status payment-table-status-{{ $alert['status_key'] }}">{{ __($translationPrefix.'.statuses.'.$alert['status_key']) }}</span></td>
-                <td>{{ __($translationPrefix.'.progress.real_metrics', ['orders' => number_format($alert['eligible_order_count']), 'disputes' => number_format($alert['dispute_order_count']), 'amount' => number_format($alert['dispute_amount'], 2)]) }}</td>
+                <td>{{ __($translationPrefix.'.progress.real_metrics', ['orders' => number_format($alert['eligible_order_count']), 'disputes' => number_format($alert['dispute_count']), 'amount' => number_format($alert['dispute_amount'], 2)]) }}</td>
+                <td>@foreach($alert['trigger_metrics'] as $metric)<span class="payment-alert-threshold payment-alert-threshold-{{ $alert['severity_key'] }}">{{ number_format($metric['value'], 2) }}%</span><small>{{ __($translationPrefix.'.metrics.'.$metric['key']) }}</small>@if(!$loop->last)<br>@endif @endforeach</td>
+                <td><span class="payment-table-status payment-table-status-{{ $alert['status_key'] }}" @if($alert['latest_remark'] !== '') title="{{ $alert['latest_remark'] }}" data-toggle="tooltip"@endif>{{ __($translationPrefix.'.statuses.'.$alert['status_key']) }}</span></td>
+                <td>@forelse($alert['status_history'] as $history)<div class="payment-alert-history-line">{{ __($translationPrefix.'.history.line', ['status' => __($translationPrefix.'.statuses.'.$history['status']), 'remark' => $history['remark'], 'actor' => $history['actor'], 'time' => $history['time']]) }}</div>@empty<span>-</span>@endforelse</td>
                 <td>
                     <button type="button" class="btn btn-primary btn-sm payment-alert-action-button" data-payment-alert-detail="{{ route('payment.product-alerts.show', ['alert' => $alert['code']]) }}">
                         {{ __($translationPrefix.'.actions.'.$alert['action_key']) }} <i class="fa fa-angle-right"></i>

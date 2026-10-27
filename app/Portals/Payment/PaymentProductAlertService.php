@@ -5,6 +5,7 @@ namespace App\Portals\Payment;
 use App\Models\PaymentProductAlertAssignment;
 use App\Models\PaymentProductAlertAssignmentLog;
 use App\Models\AdminUser;
+use App\Portals\Logistics\LogisticsCreditCardRefundReason;
 use Illuminate\Database\Connection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -13,7 +14,7 @@ class PaymentProductAlertService
 {
     public const MINIMUM_ORDER_COUNT = 1;
 
-    public const DISPUTE_RATE_THRESHOLD = 3.0;
+    public const DISPUTE_RATE_THRESHOLD = 0.5;
 
     /**
      * @param array<string,mixed> $filters
@@ -21,7 +22,7 @@ class PaymentProductAlertService
      */
     public function dashboard(array $filters, int $page = 1, int $perPage = 50): array
     {
-        $allAlerts = $this->withStatuses($this->metricRows());
+        $allAlerts = $this->alertRows();
         $filtered = $this->filterRows($allAlerts, $filters);
         $total = $filtered->count();
         $lastPage = max(1, (int) ceil($total / $perPage));
@@ -31,7 +32,8 @@ class PaymentProductAlertService
         return [
             'filters' => $filters,
             'kpis' => [
-                ['key' => 'in_progress', 'value' => (string) $allAlerts->where('status_key', 'in_progress')->count(), 'note_key' => 'in_progress_note', 'tone' => 'warning'],
+                ['key' => 'pending', 'value' => (string) $allAlerts->where('status_key', 'pending')->count(), 'note_key' => 'pending_note', 'tone' => 'warning'],
+                ['key' => 'processing', 'value' => (string) $allAlerts->whereIn('status_key', ['stopped', 'observing', 'backend_optimized', 'other'])->count(), 'note_key' => 'processing_note', 'tone' => 'warning'],
                 ['key' => 'completed', 'value' => (string) $allAlerts->where('status_key', 'completed')->count(), 'note_key' => 'completed_note', 'tone' => 'primary'],
             ],
             'alerts' => $filtered->slice($offset, $perPage)->values()->all(),
@@ -49,7 +51,7 @@ class PaymentProductAlertService
     /** @return array<string,mixed>|null */
     public function find(string $alertCode): ?array
     {
-        $alert = $this->withStatuses($this->metricRows())->firstWhere('code', $alertCode);
+        $alert = $this->alertRows()->firstWhere('code', $alertCode);
 
         return $alert === null ? null : [...$alert, ...$this->detailData($alert)];
     }
@@ -57,15 +59,35 @@ class PaymentProductAlertService
     /** @return list<array<string,mixed>> */
     public function exportRows(): array
     {
-        return $this->metricRows(false)->values()->all();
+        return $this->metricRows(false)->groupBy('product_key')->map(function (Collection $rows): array {
+            $paypal = (array) ($rows->firstWhere('channel_type', 'paypal') ?? $rows->first());
+            $card = (array) ($rows->firstWhere('channel_type', 'credit_card') ?? []);
+            $paypal['card_order_count'] = (int) ($card['eligible_order_count'] ?? 0);
+            $paypal['card_complaint_count'] = (int) ($card['complaint_count'] ?? 0);
+            $paypal['card_dispute_count'] = (int) ($card['dispute_count'] ?? 0);
+            $paypal['card_dispute_rate'] = (float) ($card['dispute_rate'] ?? 0);
+            $paypal['export_dispute_alert'] = (float) ($paypal['dispute_rate'] ?? 0) > 3;
+            $paypal['export_mismatch_alert'] = (float) ($paypal['description_mismatch_rate'] ?? 0) > 50;
+            $paypal['is_alert'] = $paypal['export_dispute_alert'] || $paypal['export_mismatch_alert'];
+
+            return $paypal;
+        })->values()->all();
+    }
+
+    /** @return array<string,array<string,mixed>> */
+    public function metricsByProductKey(array $productKeys = []): array
+    {
+        return $this->metricRows(false, $productKeys)->groupBy('product_key')->map(
+            fn (Collection $rows): array => $rows->keyBy('channel_type')->all()
+        )->all();
     }
 
     public function updateStatus(string $alertCode, string $status, string $operation, string $remark, AdminUser $actor): void
     {
-        abort_unless(in_array($status, ['in_progress', 'completed'], true), 422);
+        abort_unless(in_array($status, ['pending', 'stopped', 'observing', 'backend_optimized', 'other', 'completed'], true), 422);
 
         $record = PaymentProductAlertAssignment::query()->firstOrNew(['alert_code' => $alertCode]);
-        $previousStatus = $record->exists && $record->status === 'completed' ? 'completed' : 'in_progress';
+        $previousStatus = $record->exists ? (string) $record->status : 'pending';
         $record->status = $status;
         $record->save();
 
@@ -98,9 +120,13 @@ class PaymentProductAlertService
             ->where(function ($query): void {
                 $query->whereNotNull('detail_orders.paid_at')->orWhere('detail_orders.paid_amount_usd', '>', 0);
             })
-            ->whereNotNull('detail_orders.paypal_account_id')
-            ->where('detail_orders.paypal_association_source', 'actual_transaction')
             ->select('detail_orders.id')->distinct();
+        if (($alert['channel_type'] ?? 'paypal') === 'credit_card') {
+            $orderIds->whereRaw("CASE WHEN JSON_VALID(COALESCE(detail_orders.shopify_payload, '')) THEN JSON_SEARCH(JSON_EXTRACT(detail_orders.shopify_payload, '$.tags'), 'one', '%CreditCardBy%') ELSE NULL END IS NOT NULL");
+        } else {
+            $orderIds->whereNotNull('detail_orders.paypal_account_id')
+                ->where('detail_orders.paypal_association_source', 'actual_transaction');
+        }
 
         $disputes = $database->table('logistics_paypal_disputes')
             ->whereIn('logistics_order_id', clone $orderIds)
@@ -151,18 +177,35 @@ class PaymentProductAlertService
                 'type' => 'refund', 'reference' => (string) ($row->refund_transaction_id ?: '-'),
                 'related_reference' => (string) ($row->original_transaction_id ?: '-'), 'status' => (string) ($row->status ?: '-'),
                 'amount' => (float) ($row->refund_amount_usd ?? $row->original_amount ?? 0),
-                'reason' => (string) ($row->manual_reason ?: $row->refund_reason ?: '-'),
+                'reason' => (string) ($row->refund_reason ?: '-'),
                 'time' => $row->refunded_at ? date('Y-m-d H:i', strtotime((string) $row->refunded_at)) : '-',
                 'sort_time' => (string) ($row->refunded_at ?: ''),
             ]);
+
+        if (($alert['channel_type'] ?? 'paypal') === 'credit_card') {
+            $paymentEvents = collect();
+            $refundEvents = $database->table('logistics_credit_card_refunds')
+                ->whereIn('logistics_order_id', clone $orderIds)->orderByDesc('last_imported_at')->limit(100)->get()
+                ->map(static fn (object $row): array => [
+                    'type' => 'refund', 'reference' => (string) ($row->refund_reference ?: '-'),
+                    'related_reference' => (string) ($row->bill_number ?: '-'), 'status' => '-',
+                    'amount' => (float) ($row->refund_amount_usd ?? 0), 'reason' => (string) ($row->refund_reason ?: '-'),
+                    'time' => $row->last_imported_at ? date('Y-m-d H:i', strtotime((string) $row->last_imported_at)) : '-',
+                    'sort_time' => (string) ($row->last_imported_at ?: ''),
+                ]);
+        }
 
         $logs = PaymentProductAlertAssignmentLog::query()->where('alert_code', $alert['code'])
             ->where('event', 'status_changed')->latest('created_at')->limit(100)->get()
             ->map(static function (PaymentProductAlertAssignmentLog $log): array {
                 $payload = json_decode((string) $log->note, true);
+                $from = is_array($payload) ? (string) ($payload['from_status'] ?? 'pending') : 'pending';
+                $to = is_array($payload) ? (string) ($payload['to_status'] ?? 'pending') : 'pending';
+                if (in_array($from, ['in_progress', 'to_assign'], true)) $from = 'pending';
+                if (in_array($to, ['in_progress', 'to_assign'], true)) $to = 'pending';
                 return [
-                    'from_status' => is_array($payload) ? ($payload['from_status'] ?? 'in_progress') : 'in_progress',
-                    'to_status' => is_array($payload) ? ($payload['to_status'] ?? 'in_progress') : 'in_progress',
+                    'from_status' => $from,
+                    'to_status' => $to,
                     'operation' => is_array($payload) ? ($payload['operation'] ?? 'process') : 'process',
                     'remark' => is_array($payload) ? ($payload['remark'] ?? (string) $log->note) : (string) $log->note,
                     'actor' => (string) ($log->actor_name_snapshot ?: '-'),
@@ -185,11 +228,11 @@ class PaymentProductAlertService
     public static function qualifies(int $eligibleOrders, int $disputeOrders): bool
     {
         return $eligibleOrders >= self::MINIMUM_ORDER_COUNT
-            && self::disputeRate($eligibleOrders, $disputeOrders) > self::DISPUTE_RATE_THRESHOLD;
+            && self::disputeRate($eligibleOrders, $disputeOrders) >= self::DISPUTE_RATE_THRESHOLD;
     }
 
     /** @return Collection<int,array<string,mixed>> */
-    private function metricRows(bool $onlyQualified = true): Collection
+    private function metricRows(bool $onlyQualified = true, array $productKeys = []): Collection
     {
         $database = $this->database();
         $productKey = $this->productKeyExpression('items');
@@ -212,6 +255,9 @@ class PaymentProductAlertService
             ->selectRaw('MAX(orders.paypal_association_source) as paypal_association_source')
             ->selectRaw('MAX(orders.shopify_payload) as shopify_payload')
             ->groupByRaw("{$productKey}, orders.id");
+        if ($productKeys !== []) {
+            $productOrders->whereIn(DB::raw($productKey), array_values(array_unique($productKeys)));
+        }
 
         $disputes = $database->table('logistics_paypal_disputes as dispute')
             ->whereNotNull('dispute.logistics_order_id')
@@ -221,14 +267,31 @@ class PaymentProductAlertService
             ->selectRaw("SUM(CASE WHEN UPPER(COALESCE(dispute.reason, '')) LIKE '%NOT_AS_DESCRIBED%' OR UPPER(COALESCE(dispute.reason, '')) LIKE '%MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED%' THEN COALESCE(dispute.dispute_amount_usd, CASE WHEN UPPER(dispute.currency_code) = 'USD' THEN dispute.original_amount ELSE 0 END) ELSE 0 END) as description_mismatch_amount")
             ->groupBy('dispute.logistics_order_id', 'dispute.logistics_paypal_account_id');
 
-        $cardComplaints = $database->table('logistics_credit_card_refunds as refund')
-            ->where(function ($query): void {
-                $query->whereRaw("LOWER(COALESCE(refund.refund_reason, '')) LIKE '%ethoca%'")
-                    ->orWhereRaw("LOWER(COALESCE(refund.refund_reason, '')) LIKE '%cdrn%'")
-                    ->orWhereRaw("LOWER(COALESCE(refund.refund_reason, '')) LIKE '%rdr%'");
-            })
+        $paypalRefunds = $database->table('logistics_paypal_refunds as refund')
+            ->whereNotNull('refund.logistics_order_id')
+            ->select(['refund.logistics_order_id', 'refund.logistics_paypal_account_id'])
+            ->selectRaw('COUNT(DISTINCT refund.id) as refund_count')
+            ->selectRaw("SUM(COALESCE(refund.refund_amount_usd, CASE WHEN UPPER(refund.currency_code) = 'USD' THEN refund.original_amount ELSE 0 END)) as refund_amount")
+            ->groupBy('refund.logistics_order_id', 'refund.logistics_paypal_account_id');
+
+        $reasonExpression = "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(refund.refund_reason, ''), '（', ''), '）', ''), '(', ''), ')', ''), ' ', ''))";
+        $reasonList = function (array $reasons) use ($database): string {
+            return implode(', ', array_map(
+                fn (string $reason): string => $database->getPdo()->quote(LogisticsCreditCardRefundReason::normalize($reason)),
+                $reasons,
+            ));
+        };
+        $alertReasons = $reasonList(LogisticsCreditCardRefundReason::ALERT);
+        $serviceReasons = $reasonList(LogisticsCreditCardRefundReason::CUSTOMER_SERVICE);
+        $disputeReasons = $reasonList(LogisticsCreditCardRefundReason::DISPUTE);
+        $cardRisk = $database->table('logistics_credit_card_refunds as refund')
             ->select('refund.logistics_order_id')
-            ->selectRaw('COUNT(DISTINCT refund.id) as complaint_count')
+            ->selectRaw("SUM(CASE WHEN {$reasonExpression} IN ({$alertReasons}) THEN 1 ELSE 0 END) as complaint_count")
+            ->selectRaw("SUM(CASE WHEN {$reasonExpression} IN ({$serviceReasons}) THEN 1 ELSE 0 END) as refund_count")
+            ->selectRaw("MAX(CASE WHEN {$reasonExpression} IN ({$serviceReasons}) THEN 1 ELSE 0 END) as refund_order_flag")
+            ->selectRaw("SUM(CASE WHEN {$reasonExpression} IN ({$serviceReasons}) THEN COALESCE(refund.refund_amount_usd, 0) ELSE 0 END) as refund_amount")
+            ->selectRaw("SUM(CASE WHEN {$reasonExpression} IN ({$disputeReasons}) THEN 1 ELSE 0 END) as dispute_count")
+            ->selectRaw("SUM(CASE WHEN {$reasonExpression} IN ({$disputeReasons}) THEN COALESCE(refund.refund_amount_usd, 0) ELSE 0 END) as dispute_amount")
             ->groupBy('refund.logistics_order_id');
 
         $actualPayPal = "(product_orders.paypal_account_id IS NOT NULL AND product_orders.paypal_association_source = 'actual_transaction')";
@@ -243,7 +306,11 @@ class PaymentProductAlertService
                 $join->on('paypal_disputes.logistics_order_id', '=', 'product_orders.order_id')
                     ->on('paypal_disputes.logistics_paypal_account_id', '=', 'product_orders.paypal_account_id');
             })
-            ->leftJoinSub($cardComplaints, 'card_complaints', 'card_complaints.logistics_order_id', '=', 'product_orders.order_id')
+            ->leftJoinSub($paypalRefunds, 'paypal_refunds', function ($join): void {
+                $join->on('paypal_refunds.logistics_order_id', '=', 'product_orders.order_id')
+                    ->on('paypal_refunds.logistics_paypal_account_id', '=', 'product_orders.paypal_account_id');
+            })
+            ->leftJoinSub($cardRisk, 'card_risk', 'card_risk.logistics_order_id', '=', 'product_orders.order_id')
             ->select('product_orders.product_key')
             ->selectRaw('MIN(product_orders.first_item_id) as first_item_id')
             ->selectRaw('MIN(first_item.product_title) as product_title')
@@ -259,23 +326,30 @@ class PaymentProductAlertService
             ->selectRaw("SUM(CASE WHEN {$actualPayPal} AND COALESCE(paypal_disputes.dispute_count, 0) > 0 THEN 1 ELSE 0 END) as paypal_dispute_order_count")
             ->selectRaw("SUM(CASE WHEN {$actualPayPal} THEN COALESCE(paypal_disputes.dispute_amount, 0) ELSE 0 END) as paypal_dispute_amount")
             ->selectRaw("SUM(CASE WHEN {$actualPayPal} THEN COALESCE(paypal_disputes.description_mismatch_amount, 0) ELSE 0 END) as description_mismatch_amount")
+            ->selectRaw("SUM(CASE WHEN {$actualPayPal} THEN COALESCE(paypal_refunds.refund_count, 0) ELSE 0 END) as paypal_refund_count")
+            ->selectRaw("SUM(CASE WHEN {$actualPayPal} AND COALESCE(paypal_refunds.refund_count, 0) > 0 THEN 1 ELSE 0 END) as paypal_refund_order_count")
+            ->selectRaw("SUM(CASE WHEN {$actualPayPal} THEN COALESCE(paypal_refunds.refund_amount, 0) ELSE 0 END) as paypal_refund_amount")
             ->selectRaw("SUM(CASE WHEN {$yunhui} THEN 1 ELSE 0 END) as yunhui_payment_count")
-            ->selectRaw("SUM(CASE WHEN {$yunhui} THEN COALESCE(card_complaints.complaint_count, 0) ELSE 0 END) as yunhui_complaint_count")
+            ->selectRaw("SUM(CASE WHEN {$yunhui} THEN COALESCE(card_risk.complaint_count, 0) ELSE 0 END) as yunhui_complaint_count")
             ->selectRaw("SUM(CASE WHEN {$qianhai} THEN 1 ELSE 0 END) as qianhai_payment_count")
-            ->selectRaw("SUM(CASE WHEN {$qianhai} THEN COALESCE(card_complaints.complaint_count, 0) ELSE 0 END) as qianhai_complaint_count")
+            ->selectRaw("SUM(CASE WHEN {$qianhai} THEN COALESCE(card_risk.complaint_count, 0) ELSE 0 END) as qianhai_complaint_count")
+            ->selectRaw("SUM(CASE WHEN {$creditCard} THEN 1 ELSE 0 END) as card_order_count")
+            ->selectRaw("SUM(CASE WHEN {$creditCard} THEN product_orders.paid_amount_usd ELSE 0 END) as card_received_amount")
+            ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(card_risk.complaint_count, 0) ELSE 0 END) as card_complaint_count")
+            ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(card_risk.refund_count, 0) ELSE 0 END) as card_refund_count")
+            ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(card_risk.refund_order_flag, 0) ELSE 0 END) as card_refund_order_count")
+            ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(card_risk.refund_amount, 0) ELSE 0 END) as card_refund_amount")
+            ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(card_risk.dispute_count, 0) ELSE 0 END) as card_dispute_count")
+            ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(card_risk.dispute_amount, 0) ELSE 0 END) as card_dispute_amount")
             ->groupBy('product_orders.product_key')
             ->get();
 
         $globalDisputeAmount = $this->globalInitialPayPalDisputeAmount($disputes);
 
-        return $rows->map(function (object $row) use ($globalDisputeAmount, $onlyQualified): ?array {
+        return $rows->flatMap(function (object $row) use ($globalDisputeAmount, $onlyQualified): array {
             $eligibleOrders = (int) $row->paypal_order_count;
             $disputeOrders = (int) $row->paypal_dispute_order_count;
             $isAlert = self::qualifies($eligibleOrders, $disputeOrders);
-            if ($onlyQualified && !$isAlert) {
-                return null;
-            }
-
             $received = round((float) $row->paypal_received_amount, 4);
             $disputeAmount = round((float) $row->paypal_dispute_amount, 4);
             $mismatchAmount = round((float) $row->description_mismatch_amount, 4);
@@ -286,27 +360,14 @@ class PaymentProductAlertService
             $yunhuiPayments = (int) $row->yunhui_payment_count;
             $qianhaiPayments = (int) $row->qianhai_payment_count;
 
-            return [
-                'code' => 'PW-'.(int) $row->first_item_id,
+            $base = [
                 'product_key' => (string) $row->product_key,
                 'product_name' => $matchedName !== '' ? $matchedName : ($productTitle !== '' ? $productTitle : __('payment.product_alerts.unnamed_product')),
                 'source_product_name' => $productTitle,
                 'sku' => $productCode !== '' ? $productCode : ($fallbackSku !== '' ? $fallbackSku : __('payment.product_alerts.missing_sku')),
-                'severity_key' => 'critical',
-                'channel_key' => 'paypal_initial',
-                'threshold_key' => 'dispute_order_rate',
                 'minimum_sample' => self::MINIMUM_ORDER_COUNT,
-                'threshold' => self::DISPUTE_RATE_THRESHOLD,
-                'is_alert' => $isAlert,
                 'total_sales' => round((float) $row->total_sales, 4),
                 'total_order_count' => (int) $row->total_order_count,
-                'eligible_order_count' => $eligibleOrders,
-                'dispute_order_count' => $disputeOrders,
-                'dispute_count' => (int) $row->paypal_dispute_count,
-                'dispute_rate' => self::disputeRate($eligibleOrders, $disputeOrders),
-                'received_amount' => $received,
-                'dispute_amount' => $disputeAmount,
-                'dispute_amount_rate' => $received > 0 ? round($disputeAmount / $received * 100, 2) : 0.0,
                 'description_mismatch_amount' => $mismatchAmount,
                 'description_mismatch_rate' => $disputeAmount > 0 ? round($mismatchAmount / $disputeAmount * 100, 2) : 0.0,
                 'sku_dispute_amount_share' => $globalDisputeAmount > 0 ? round($disputeAmount / $globalDisputeAmount * 100, 2) : 0.0,
@@ -316,11 +377,69 @@ class PaymentProductAlertService
                 'qianhai_complaint_count' => (int) $row->qianhai_complaint_count,
                 'qianhai_payment_count' => $qianhaiPayments,
                 'qianhai_dispute_rate' => $qianhaiPayments > 0 ? round((int) $row->qianhai_complaint_count / $qianhaiPayments * 100, 2) : 0.0,
-                'sample' => $eligibleOrders.' / '.$disputeOrders,
-                'status_key' => 'in_progress',
+                'status_key' => 'pending',
                 'action_key' => 'process',
             ];
-        })->filter()->sortByDesc('dispute_rate')->values();
+            $paypalDisputeRecords = (int) $row->paypal_dispute_count;
+            $paypalRate = self::disputeRate($eligibleOrders, $paypalDisputeRecords);
+            $paypalRefundOrderRate = self::disputeRate($eligibleOrders, (int) $row->paypal_refund_order_count);
+            $paypalRefundAmount = round((float) $row->paypal_refund_amount, 4);
+            $paypalRefundAmountRate = $received > 0 ? round($paypalRefundAmount / $received * 100, 2) : 0.0;
+            $paypalAlert = $paypalRate >= 0.5 || $paypalRefundOrderRate >= 3 || $paypalRefundAmountRate >= 3;
+            $paypalRed = $paypalRate >= 1 || $paypalRefundOrderRate >= 5 || $paypalRefundAmountRate >= 5;
+            $paypal = [...$base,
+                'code' => 'PW-P-'.(int) $row->first_item_id, 'channel_type' => 'paypal', 'channel_key' => 'paypal',
+                'threshold_key' => $paypalRefundOrderRate >= 3 ? 'refund_order_rate' : ($paypalRefundAmountRate >= 3 ? 'refund_amount_rate' : 'paypal_dispute_rate'),
+                'threshold' => ($paypalRefundOrderRate >= 3 || $paypalRefundAmountRate >= 3) ? 3.0 : 0.5,
+                'severity_key' => $paypalRed ? 'critical' : 'warning', 'is_alert' => $paypalAlert,
+                'eligible_order_count' => $eligibleOrders, 'dispute_order_count' => $disputeOrders,
+                'dispute_count' => $paypalDisputeRecords, 'dispute_rate' => $paypalRate,
+                'received_amount' => $received, 'dispute_amount' => $disputeAmount,
+                'dispute_amount_rate' => $received > 0 ? round($disputeAmount / $received * 100, 2) : 0.0,
+                'refund_count' => (int) $row->paypal_refund_count, 'refund_order_count' => (int) $row->paypal_refund_order_count,
+                'refund_order_rate' => $paypalRefundOrderRate, 'refund_amount' => $paypalRefundAmount,
+                'refund_amount_rate' => $paypalRefundAmountRate, 'complaint_count' => 0,
+                'sample' => $eligibleOrders.' / '.$disputeOrders,
+                'trigger_metrics' => array_values(array_filter([
+                    $paypalRefundOrderRate >= 3 ? ['key' => 'refund_order_rate', 'value' => $paypalRefundOrderRate] : null,
+                    $paypalRefundAmountRate >= 3 ? ['key' => 'refund_amount_rate', 'value' => $paypalRefundAmountRate] : null,
+                    $paypalRate >= 0.5 ? ['key' => 'paypal_dispute_rate', 'value' => $paypalRate] : null,
+                ])),
+            ];
+            $cardOrders = (int) $row->card_order_count;
+            $cardDisputes = (int) $row->card_dispute_count;
+            $cardRate = self::disputeRate($cardOrders, $cardDisputes);
+            $cardReceived = round((float) $row->card_received_amount, 4);
+            $cardDisputeAmount = round((float) $row->card_dispute_amount, 4);
+            $cardRefundCount = (int) $row->card_refund_count;
+            $cardRefundOrders = (int) $row->card_refund_order_count;
+            $cardRefundAmount = round((float) $row->card_refund_amount, 4);
+            $cardRefundOrderRate = self::disputeRate($cardOrders, $cardRefundOrders);
+            $cardRefundAmountRate = $cardReceived > 0 ? round($cardRefundAmount / $cardReceived * 100, 2) : 0.0;
+            $cardAlert = $cardRate >= 0.5 || $cardRefundOrderRate >= 3 || $cardRefundAmountRate >= 3;
+            $cardRed = $cardRate >= 1 || $cardRefundOrderRate >= 5 || $cardRefundAmountRate >= 5;
+            $card = [...$base,
+                'code' => 'PW-C-'.(int) $row->first_item_id, 'channel_type' => 'credit_card', 'channel_key' => 'credit_card',
+                'threshold_key' => $cardRefundOrderRate >= 3 ? 'refund_order_rate' : ($cardRefundAmountRate >= 3 ? 'refund_amount_rate' : 'credit_card_dispute_rate'),
+                'threshold' => ($cardRefundOrderRate >= 3 || $cardRefundAmountRate >= 3) ? 3.0 : 0.5,
+                'severity_key' => $cardRed ? 'critical' : 'warning', 'is_alert' => $cardAlert,
+                'eligible_order_count' => $cardOrders, 'dispute_order_count' => $cardDisputes,
+                'dispute_count' => $cardDisputes, 'dispute_rate' => $cardRate,
+                'received_amount' => $cardReceived, 'dispute_amount' => $cardDisputeAmount,
+                'dispute_amount_rate' => $cardReceived > 0 ? round($cardDisputeAmount / $cardReceived * 100, 2) : 0.0,
+                'refund_count' => $cardRefundCount, 'refund_order_count' => $cardRefundOrders,
+                'refund_order_rate' => $cardRefundOrderRate, 'refund_amount' => $cardRefundAmount,
+                'refund_amount_rate' => $cardRefundAmountRate,
+                'complaint_count' => (int) $row->card_complaint_count,
+                'sample' => $cardOrders.' / '.$cardDisputes,
+                'trigger_metrics' => array_values(array_filter([
+                    $cardRefundOrderRate >= 3 ? ['key' => 'refund_order_rate', 'value' => $cardRefundOrderRate] : null,
+                    $cardRefundAmountRate >= 3 ? ['key' => 'refund_amount_rate', 'value' => $cardRefundAmountRate] : null,
+                    $cardRate >= 0.5 ? ['key' => 'credit_card_dispute_rate', 'value' => $cardRate] : null,
+                ])),
+            ];
+            return collect([$paypal, $card])->filter(fn (array $item): bool => !$onlyQualified || ($item['eligible_order_count'] > 0 && $item['is_alert']))->all();
+        })->sortByDesc('dispute_rate')->values();
     }
 
     /** @param \Illuminate\Database\Query\Builder $disputes */
@@ -355,18 +474,45 @@ class PaymentProductAlertService
         $statuses = PaymentProductAlertAssignment::query()
             ->whereIn('alert_code', $alerts->pluck('code')->all())
             ->get()->keyBy('alert_code');
+        $logs = PaymentProductAlertAssignmentLog::query()
+            ->whereIn('alert_code', $alerts->pluck('code')->all())
+            ->where('event', 'status_changed')->latest('created_at')->get()->groupBy('alert_code');
 
-        return $alerts->map(function (array $alert) use ($statuses): array {
+        return $alerts->map(function (array $alert) use ($statuses, $logs): array {
             $record = $statuses->get($alert['code']);
+            $history = collect($logs->get($alert['code'], collect()))->map(static function (PaymentProductAlertAssignmentLog $log): array {
+                $payload = json_decode((string) $log->note, true);
+                $status = is_array($payload) ? (string) ($payload['to_status'] ?? 'pending') : 'pending';
+                if ($status === 'in_progress' || $status === 'to_assign') $status = 'pending';
+                return [
+                    'status' => $status,
+                    'remark' => is_array($payload) ? (string) ($payload['remark'] ?? '') : (string) $log->note,
+                    'actor' => (string) ($log->actor_name_snapshot ?: '-'),
+                    'time' => $log->created_at ? $log->created_at->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') : '-',
+                ];
+            })->values()->all();
+            $alert['status_history'] = $history;
+            $alert['latest_remark'] = (string) ($history[0]['remark'] ?? '');
             if (!$record) {
                 return $alert;
             }
 
-            $alert['status_key'] = $record->status === 'completed' ? 'completed' : 'in_progress';
-            $alert['action_key'] = $alert['status_key'] === 'completed' ? 'view_completed' : 'process';
-
+            $allowed = ['pending', 'stopped', 'observing', 'backend_optimized', 'other', 'completed'];
+            $alert['status_key'] = in_array((string) $record->status, $allowed, true) ? (string) $record->status : 'pending';
+            $alert['action_key'] = 'view';
             return $alert;
         });
+    }
+
+    /** @return Collection<int,array<string,mixed>> */
+    private function alertRows(): Collection
+    {
+        $rows = $this->metricRows(false);
+        $historicalCodes = PaymentProductAlertAssignment::query()->pluck('alert_code')->flip();
+
+        return $this->withStatuses($rows->filter(
+            fn (array $row): bool => (bool) ($row['is_alert'] ?? false) || $historicalCodes->has($row['code'])
+        )->values());
     }
 
     /**
@@ -376,10 +522,13 @@ class PaymentProductAlertService
      */
     private function filterRows(Collection $alerts, array $filters): Collection
     {
-        $status = trim((string) ($filters['status'] ?? ''));
+        $status = trim((string) ($filters['status'] ?? 'pending'));
         $product = mb_strtolower(trim((string) ($filters['product'] ?? '')));
+        $channel = trim((string) ($filters['channel'] ?? ''));
+        $severity = trim((string) ($filters['severity'] ?? ''));
+        $sample = trim((string) ($filters['sample'] ?? ''));
 
-        return $alerts->filter(function (array $row) use ($status, $product): bool {
+        return $alerts->filter(function (array $row) use ($status, $product, $channel, $severity, $sample): bool {
             if ($status !== '' && $row['status_key'] !== $status) {
                 return false;
             }
@@ -389,6 +538,16 @@ class PaymentProductAlertService
                     return false;
                 }
             }
+            if ($channel !== '' && ($row['channel_type'] ?? '') !== $channel) {
+                return false;
+            }
+            if ($severity !== '' && ($row['severity_key'] ?? '') !== $severity) {
+                return false;
+            }
+            $count = (int) ($row['eligible_order_count'] ?? 0);
+            if ($sample === 'under_50' && $count >= 50) return false;
+            if ($sample === '50_500' && ($count < 50 || $count > 500)) return false;
+            if ($sample === 'over_500' && $count <= 500) return false;
             return true;
         })->values();
     }

@@ -88,6 +88,12 @@ class PaymentPortalController extends Controller
             'period_start' => ['nullable', 'date'],
             'period_end' => ['nullable', 'date', 'after_or_equal:period_start'],
             'keyword' => ['nullable', 'string', 'max:191'],
+            'sort' => ['nullable', 'string', 'max:64'],
+            'direction' => ['nullable', Rule::in(['asc', 'desc'])],
+            'status' => ['nullable', 'string', 'max:100'],
+            'type' => ['nullable', 'string', 'max:100'],
+            'outcome' => ['nullable', 'string', 'max:100'],
+            'match_status' => ['nullable', Rule::in(['', 'matched', 'unmatched'])],
         ]);
         $today = now('Asia/Shanghai');
 
@@ -101,7 +107,15 @@ class PaymentPortalController extends Controller
             (string) ($validated['tab'] ?? 'overview'),
             (int) ($validated['page'] ?? 1),
             (int) ($validated['per_page'] ?? 50),
-            ['keyword' => trim((string) ($validated['keyword'] ?? ''))],
+            [
+                'keyword' => trim((string) ($validated['keyword'] ?? '')),
+                'sort' => trim((string) ($validated['sort'] ?? '')),
+                'direction' => (string) ($validated['direction'] ?? 'desc'),
+                'status' => trim((string) ($validated['status'] ?? '')),
+                'type' => trim((string) ($validated['type'] ?? '')),
+                'outcome' => trim((string) ($validated['outcome'] ?? '')),
+                'match_status' => trim((string) ($validated['match_status'] ?? '')),
+            ],
         ));
     }
 
@@ -148,18 +162,35 @@ class PaymentPortalController extends Controller
             'store' => ['nullable', 'string', 'max:191'],
             'name' => ['nullable', 'string', 'max:191'],
             'keyword' => ['nullable', 'string', 'max:191'],
-            'detail_tab' => ['nullable', Rule::in(['overview', 'first_renewal', 'paypal_orders', 'credit_card_orders', 'refunds', 'disputes', 'orders'])],
+            'detail_tab' => ['nullable', Rule::in(['overview', 'first_renewal', 'orders', 'variants', 'refunds', 'disputes'])],
             'detail_page' => ['nullable', 'integer', 'min:1'],
             'detail_per_page' => ['nullable', Rule::in([50, 100, '50', '100'])],
             'detail_keyword' => ['nullable', 'string', 'max:191'],
+            'detail_sort' => ['nullable', 'string', 'max:64'],
+            'detail_direction' => ['nullable', Rule::in(['asc', 'desc'])],
+            'detail_logistics_status' => ['nullable', 'string', 'max:100'],
+            'detail_payment_method' => ['nullable', Rule::in(['', 'paypal', 'credit_card'])],
+            'detail_status' => ['nullable', 'string', 'max:100'],
+            'detail_source_reason' => ['nullable', 'string', 'max:255'],
+            'detail_manual_reason' => ['nullable', 'string', 'max:255'],
+            'detail_type' => ['nullable', 'string', 'max:100'],
+            'detail_outcome' => ['nullable', 'string', 'max:100'],
         ]);
         $filters = $this->normaliseProductRiskFilters($validated);
         $detail = $this->productRisk->detail($filters, (string) $validated['product_id'], [
             'tab' => (string) ($validated['detail_tab'] ?? 'overview'),
             'page' => max(1, (int) ($validated['detail_page'] ?? 1)),
             'per_page' => (int) ($validated['detail_per_page'] ?? 50),
-            'sort' => '', 'direction' => '',
+            'sort' => trim((string) ($validated['detail_sort'] ?? '')),
+            'direction' => (string) ($validated['detail_direction'] ?? 'desc'),
             'keyword' => trim((string) ($validated['detail_keyword'] ?? '')),
+            'logistics_status' => trim((string) ($validated['detail_logistics_status'] ?? '')),
+            'payment_method' => trim((string) ($validated['detail_payment_method'] ?? '')),
+            'status' => trim((string) ($validated['detail_status'] ?? '')),
+            'source_reason' => trim((string) ($validated['detail_source_reason'] ?? '')),
+            'manual_reason' => trim((string) ($validated['detail_manual_reason'] ?? '')),
+            'type' => trim((string) ($validated['detail_type'] ?? '')),
+            'outcome' => trim((string) ($validated['detail_outcome'] ?? '')),
         ]);
 
         return $detail === null
@@ -208,16 +239,11 @@ class PaymentPortalController extends Controller
         abort_if($record === null, 404);
         $request->merge(['remark' => trim((string) $request->input('remark'))]);
         $validated = $request->validate([
-            'operation' => ['required', Rule::in(['process', 'complete', 'reopen'])],
+            'status' => ['required', Rule::in(['pending', 'stopped', 'observing', 'backend_optimized', 'other', 'completed'])],
             'remark' => ['required', 'string', 'max:1000'],
         ]);
-        $operation = (string) $validated['operation'];
-        $currentStatus = (string) $record['status_key'];
-        $allowed = ($currentStatus === 'in_progress' && in_array($operation, ['process', 'complete'], true))
-            || ($currentStatus === 'completed' && $operation === 'reopen');
-        abort_unless($allowed, 422);
-        $status = $operation === 'complete' ? 'completed' : 'in_progress';
-        $this->productAlerts->updateStatus($alert, $status, $operation, (string) $validated['remark'], $context['user']);
+        $status = (string) $validated['status'];
+        $this->productAlerts->updateStatus($alert, $status, 'process', (string) $validated['remark'], $context['user']);
 
         return redirect()->route('payment.product-alerts.index')
             ->with('success', __('payment.product_alerts.status_update.success'));
@@ -425,9 +451,16 @@ class PaymentPortalController extends Controller
     /** @return array<string,mixed> */
     private function productAlertFilters(Request $request): array
     {
-        $status = trim((string) $request->query('status', ''));
+        $status = trim((string) $request->query('status', 'pending'));
+        $allowedStatuses = ['pending', 'stopped', 'observing', 'backend_optimized', 'other', 'completed'];
+        $channel = trim((string) $request->query('channel', ''));
+        $severity = trim((string) $request->query('severity', ''));
+        $sample = trim((string) $request->query('sample', '50_500'));
         return [
-            'status' => in_array($status, ['in_progress', 'completed'], true) ? $status : '',
+            'status' => in_array($status, $allowedStatuses, true) ? $status : 'pending',
+            'channel' => in_array($channel, ['paypal', 'credit_card'], true) ? $channel : '',
+            'severity' => in_array($severity, ['warning', 'critical'], true) ? $severity : '',
+            'sample' => in_array($sample, ['under_50', '50_500', 'over_500'], true) ? $sample : '50_500',
             'product' => mb_substr(trim((string) $request->query('product', '')), 0, 191),
         ];
     }

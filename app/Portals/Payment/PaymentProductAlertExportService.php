@@ -67,12 +67,12 @@ class PaymentProductAlertExportService
                 (float) $row['description_mismatch_amount'],
                 (float) $row['description_mismatch_rate'] / 100,
                 (float) $row['sku_dispute_amount_share'] / 100,
-                (int) $row['yunhui_complaint_count'],
-                (int) $row['yunhui_payment_count'],
-                (float) $row['yunhui_dispute_rate'] / 100,
-                (int) $row['qianhai_complaint_count'],
-                (int) $row['qianhai_payment_count'],
-                (float) $row['qianhai_dispute_rate'] / 100,
+                (int) ($row['card_order_count'] ?? 0),
+                (int) ($row['card_complaint_count'] ?? 0),
+                (float) ($row['card_dispute_rate'] ?? 0) / 100,
+                (int) ($row['card_dispute_count'] ?? 0),
+                (float) ($row['card_dispute_rate'] ?? 0) / 100,
+                (float) ($row['card_dispute_rate'] ?? 0) / 100,
                 (bool) ($row['is_alert'] ?? false)
                     ? __('payment.product_risk_profit.export.results.alert')
                     : __('payment.product_risk_profit.export.results.normal'),
@@ -86,6 +86,14 @@ class PaymentProductAlertExportService
                 } else {
                     $sheet->setCellValue($coordinate, $value);
                 }
+            }
+            if ((bool) ($row['export_dispute_alert'] ?? false)) {
+                $sheet->getStyle('H'.$rowNumber)->getFont()->setBold(true)->getColor()->setRGB('C00000');
+                $sheet->getStyle('H'.$rowNumber)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('FCE4D6');
+            }
+            if ((bool) ($row['export_mismatch_alert'] ?? false)) {
+                $sheet->getStyle('K'.$rowNumber)->getFont()->setBold(true)->getColor()->setRGB('C00000');
+                $sheet->getStyle('K'.$rowNumber)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('FCE4D6');
             }
             $rowNumber++;
         }
@@ -102,17 +110,14 @@ class PaymentProductAlertExportService
             $sheet->getStyle("C3:D{$lastRow}")->getNumberFormat()->setFormatCode('#,##0');
             $sheet->getStyle("F3:F{$lastRow}")->getNumberFormat()->setFormatCode('#,##0');
             $sheet->getStyle("M3:N{$lastRow}")->getNumberFormat()->setFormatCode('#,##0');
-            $sheet->getStyle("P3:Q{$lastRow}")->getNumberFormat()->setFormatCode('#,##0');
+            $sheet->getStyle("P3:P{$lastRow}")->getNumberFormat()->setFormatCode('#,##0');
             $sheet->getStyle("E3:E{$lastRow}")->getNumberFormat()->setFormatCode('$#,##0.00');
             $sheet->getStyle("G3:G{$lastRow}")->getNumberFormat()->setFormatCode('$#,##0.00');
             $sheet->getStyle("J3:J{$lastRow}")->getNumberFormat()->setFormatCode('$#,##0.00');
             $sheet->getStyle("H3:I{$lastRow}")->getNumberFormat()->setFormatCode('0.00%');
             $sheet->getStyle("K3:L{$lastRow}")->getNumberFormat()->setFormatCode('0.00%');
             $sheet->getStyle("O3:O{$lastRow}")->getNumberFormat()->setFormatCode('0.00%');
-            $sheet->getStyle("R3:R{$lastRow}")->getNumberFormat()->setFormatCode('0.00%');
-            $sheet->getStyle("H3:H{$lastRow}")->getFont()->setBold(true)->getColor()->setRGB('C00000');
-            $sheet->getStyle("H3:H{$lastRow}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('FCE4D6');
-            $sheet->getStyle("S3:S{$lastRow}")->getFont()->setBold(true)->getColor()->setRGB('C00000');
+            $sheet->getStyle("Q3:R{$lastRow}")->getNumberFormat()->setFormatCode('0.00%');
             $sheet->getStyle("A3:S{$lastRow}")->getAlignment()->setWrapText(false);
         }
 

@@ -41,7 +41,17 @@
         <span id="payment-account-deduction-note" class="sr-only">{{ __($translationPrefix.'.filters.deduction_pending') }}</span>
         @if (session('success'))<div class="alert alert-success payment-account-result-message"><i class="fa fa-check-circle" aria-hidden="true"></i> {{ session('success') }}</div>@endif
         @if ($errors->any())<div class="alert alert-danger payment-account-result-message"><i class="fa fa-exclamation-circle" aria-hidden="true"></i> {{ __($translationPrefix.'.create_modal.validation_failed') }}<ul>@foreach ($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>@endif
-        <div class="payment-kpi-grid payment-kpi-grid-four">@foreach ($dashboard['kpis'] as $kpi) @php($presentation = $kpiPresentation[$kpi['key']]) <article class="payment-kpi-card payment-tone-{{ $kpi['tone'] ?? 'primary' }}"><span class="payment-kpi-icon payment-kpi-icon-{{ $presentation['tone'] }}"><i class="fa {{ $presentation['icon'] }}" aria-hidden="true"></i></span><div><p>{{ __($translationPrefix.'.kpis.'.$kpi['key']) }}</p><strong>{{ $kpi['value'] }}</strong><small>{{ __($translationPrefix.'.kpis.'.$kpi['note_key']) }}</small></div></article> @endforeach</div>
+        <div class="payment-kpi-grid payment-kpi-grid-four">
+            @foreach ($dashboard['kpis'] as $kpi)
+                @php
+                    $presentation = $kpiPresentation[$kpi['key']];
+                @endphp
+                <article class="payment-kpi-card payment-tone-{{ $kpi['tone'] ?? 'primary' }}">
+                    <span class="payment-kpi-icon payment-kpi-icon-{{ $presentation['tone'] }}"><i class="fa {{ $presentation['icon'] }}" aria-hidden="true"></i></span>
+                    <div><p>{{ __($translationPrefix.'.kpis.'.$kpi['key']) }}</p><strong>{{ $kpi['value'] }}</strong><small>{{ __($translationPrefix.'.kpis.'.$kpi['note_key']) }}</small></div>
+                </article>
+            @endforeach
+        </div>
         <div class="payment-section-heading payment-account-board-heading"><h2>{{ __($translationPrefix.'.dashboard_title') }}</h2><div class="payment-account-board-actions"><span>{{ __($translationPrefix.'.dashboard_note') }}</span><button type="button" class="btn btn-primary btn-sm" data-payment-account-create><i class="fa fa-plus" aria-hidden="true"></i> {{ __($translationPrefix.'.add_account') }}</button></div></div>
         <div class="payment-merchant-grid">
             @foreach ($dashboard['merchants'] as $merchant)
@@ -98,9 +108,9 @@
             <div class="modal-dialog modal-lg" role="document"><div class="modal-content">
                 <div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ __($translationPrefix.'.detail.close') }}"><span aria-hidden="true">&times;</span></button><h4 class="modal-title" id="payment-account-detail-title">{{ __($translationPrefix.'.detail.title') }}</h4><p data-payment-detail-subtitle></p></div>
                 <div class="modal-body">
-                    <div class="payment-detail-tabs" role="tablist">@foreach (['overview', 'order_analysis', 'orders', 'products', 'refunds', 'disputes', 'funding'] as $tab)<button type="button" class="{{ $tab === 'overview' ? 'active' : '' }}" data-payment-detail-tab="{{ $tab }}" role="tab" aria-selected="{{ $tab === 'overview' ? 'true' : 'false' }}">{{ __($translationPrefix.'.detail.tabs.'.$tab) }}</button>@endforeach</div>
+                    <div class="payment-detail-tabs" role="tablist">@foreach (['overview', 'order_analysis', 'products', 'orders', 'refunds', 'disputes', 'funding'] as $tab)<button type="button" class="{{ $tab === 'overview' ? 'active' : '' }}" data-payment-detail-tab="{{ $tab }}" role="tab" aria-selected="{{ $tab === 'overview' ? 'true' : 'false' }}">{{ __($translationPrefix.'.detail.tabs.'.$tab) }}</button>@endforeach</div>
                     <div class="payment-detail-summary" data-payment-detail-summary hidden></div>
-                    <form class="payment-detail-filter" data-payment-detail-filter hidden><input class="form-control" type="search" name="keyword" maxlength="191" placeholder="{{ __($translationPrefix.'.detail.keyword_placeholder') }}"><button class="btn btn-primary" type="submit"><i class="fa fa-search" aria-hidden="true"></i> {{ __($translationPrefix.'.detail.query') }}</button><button class="btn btn-default" type="reset">{{ __($translationPrefix.'.detail.reset') }}</button></form>
+                    <form class="payment-detail-filter payment-risk-style-filter" data-payment-detail-filter hidden><label class="payment-detail-filter-keyword"><span>{{ __($translationPrefix.'.detail.filters.keyword') }}</span><input class="form-control" type="search" name="keyword" maxlength="191" placeholder="{{ __($translationPrefix.'.detail.keyword_placeholder') }}"></label><div class="payment-detail-filter-selects" data-payment-detail-extra-filters></div><div class="payment-detail-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search" aria-hidden="true"></i> {{ __($translationPrefix.'.detail.query') }}</button><button class="btn btn-default" type="reset">{{ __($translationPrefix.'.detail.reset') }}</button></div></form>
                     <div class="payment-detail-state" data-payment-detail-loading><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {{ __($translationPrefix.'.detail.loading') }}</div>
                     <div class="payment-detail-state payment-detail-error" data-payment-detail-error hidden></div>
                     <div class="payment-detail-body" data-payment-detail-body></div>
@@ -113,11 +123,44 @@
 @endsection
 
 @push('scripts')
+    @php
+        $accountDetailConfig = array_replace_recursive(__($translationPrefix.'.detail'), [
+            'filter_options' => [
+                'refund_status' => [
+                    \App\Models\LogisticsPayPalRefund::statusLabelFor('D'),
+                    \App\Models\LogisticsPayPalRefund::statusLabelFor('P'),
+                    \App\Models\LogisticsPayPalRefund::statusLabelFor('S'),
+                    \App\Models\LogisticsPayPalRefund::statusLabelFor('V'),
+                ],
+                'dispute_type' => [
+                    \App\Models\LogisticsPayPalDispute::typeLabelFor('ALERT'),
+                    \App\Models\LogisticsPayPalDispute::typeLabelFor('INTERNAL', 'INQUIRY'),
+                    \App\Models\LogisticsPayPalDispute::typeLabelFor('INTERNAL'),
+                    \App\Models\LogisticsPayPalDispute::typeLabelFor('EXTERNAL'),
+                ],
+                'dispute_status' => [
+                    \App\Models\LogisticsPayPalDispute::statusLabelFor('OPEN'),
+                    \App\Models\LogisticsPayPalDispute::statusLabelFor('WAITING_FOR_BUYER_RESPONSE'),
+                    \App\Models\LogisticsPayPalDispute::statusLabelFor('WAITING_FOR_SELLER_RESPONSE'),
+                    \App\Models\LogisticsPayPalDispute::statusLabelFor('UNDER_REVIEW'),
+                    \App\Models\LogisticsPayPalDispute::statusLabelFor('RESOLVED'),
+                ],
+                'dispute_outcome' => [
+                    \App\Models\LogisticsPayPalDispute::outcomeLabelFor('RESOLVED_BUYER_FAVOUR'),
+                    \App\Models\LogisticsPayPalDispute::outcomeLabelFor('RESOLVED_SELLER_FAVOUR'),
+                    \App\Models\LogisticsPayPalDispute::outcomeLabelFor('CANCELED_BY_BUYER'),
+                    \App\Models\LogisticsPayPalDispute::outcomeLabelFor('CANCELED_BY_SELLER'),
+                    \App\Models\LogisticsPayPalDispute::outcomeLabelFor('RESOLVED_WITH_REFUND'),
+                    \App\Models\LogisticsPayPalDispute::outcomeLabelFor('RESOLVED_WITH_PAYOUT'),
+                ],
+            ],
+        ]);
+    @endphp
     <script>window.PaymentPortal = {
         actionTitle: @json(__('payment.common.mock_action_title')),
         actionMessage: @json(__('payment.common.mock_action_message')),
         accountDetailUrl: @json(route('payment.account-risk.accounts.detail', ['account' => '__ACCOUNT__'])),
-        accountDetail: @json(__($translationPrefix.'.detail')),
+        accountDetail: @json($accountDetailConfig),
         pagination: @json(__('payment.common.pagination'))
     };</script>
     @if ($errors->any())<script>jQuery(function () { jQuery('#payment-account-create-modal').modal('show'); });</script>@endif
