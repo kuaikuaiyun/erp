@@ -22,6 +22,7 @@ class ProductRequestLinkSku extends Model
     protected $casts = [
         'sku_values' => 'array',
         'images' => 'array',
+        'warehouse_images' => 'array',
         'is_runnable' => 'boolean',
         'warehouse_reviewed_at' => 'datetime',
     ];

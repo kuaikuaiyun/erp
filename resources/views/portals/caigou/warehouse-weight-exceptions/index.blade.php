@@ -82,6 +82,7 @@
                         <th style="width:110px;">驳回理由</th>
                         <th style="min-width:220px;">备注</th>
                         <th style="width:80px;">实物图<small class="text-muted" style="display:block;font-weight:normal;font-size:11px;">点击放大</small></th>
+                        <th style="min-width:110px;">仓库实拍图<small class="text-muted" style="display:block;font-weight:normal;font-size:11px;">点击放大</small></th>
                         <th style="width:80px;">状态</th>
                         <th style="width:110px;">提报人</th>
                         <th style="width:150px;">时间</th>
@@ -150,6 +151,13 @@
                                 @endif
                             </td>
                             <td>
+                                @forelse((array) $row->warehouse_image_refs as $warehouseImage)
+                                    <img src="{{ $warehouseImage['url'] }}" class="product-statistics-thumb erp-zoomable" style="width:48px;height:48px;object-fit:cover;border:1px solid #dfe6ed;border-radius:3px;cursor:zoom-in;margin:0 4px 4px 0;" alt="仓库实拍图" title="点击放大查看仓库实拍图" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">
+                                @empty
+                                    <span class="text-muted">—</span>
+                                @endforelse
+                            </td>
+                            <td>
                                 @if($row->status === 'pending')
                                     <span class="label label-warning">待处理</span>
                                 @else
@@ -175,7 +183,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="12" class="text-center text-muted" style="padding:40px;">
+                            <td colspan="13" class="text-center text-muted" style="padding:40px;">
                                 <i class="fa fa-inbox fa-2x"></i>
                                 <div style="margin-top:8px;">当前筛选条件下没有异常记录</div>
                             </td>

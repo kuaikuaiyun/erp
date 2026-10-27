@@ -249,14 +249,16 @@
         // 回填已填异常
         var ex = variant._existing_exception || null;
         var initWeight = ex && ex.corrected_weight_gram != null ? ex.corrected_weight_gram : '';
-        var initReason = ex && ex.reject_reason ? ex.reject_reason : '';
+        var initReasons = ex && ex.reject_reason
+            ? String(ex.reject_reason).split(',').map(function (reason) { return reason.trim(); }).filter(Boolean)
+            : [];
         var initRemark = ex && ex.remark ? ex.remark : '';
         var initPhysicalUrl = ex && ex.physical_image_url ? ex.physical_image_url : '';
         var exceptionId = ex ? ex.id : '';
 
         var reasonHtml = '';
         Object.keys(rejectReasons).forEach(function (code) {
-            reasonHtml += '<button type="button" class="wh-reason-pill' + (code === initReason ? ' active' : '') + '" data-value="' + escapeHtml(code) + '">' +
+            reasonHtml += '<button type="button" class="wh-reason-pill' + (initReasons.indexOf(code) !== -1 ? ' active' : '') + '" data-value="' + escapeHtml(code) + '">' +
                 escapeHtml(rejectReasons[code]) + '</button>';
         });
 
@@ -292,7 +294,7 @@
                 '<input type="number" step="0.01" min="0.01" class="form-control input-sm wh-fill-weight" placeholder="填写实测重量 g" value="' + escapeHtml(String(initWeight)) + '">' +
             '</div>' +
             '<div class="wh-fill-item-meta">' +
-                '<span class="wh-fill-label">驳回理由</span>' +
+                '<span class="wh-fill-label">驳回理由（可多选）</span>' +
                 reasonHtml +
                 '<input type="text" class="form-control input-sm wh-fill-remark" maxlength="500" placeholder="备注（可选）" value="' + escapeHtml(initRemark) + '">' +
             '</div>' +
@@ -392,7 +394,7 @@
     function buildRealEntries(paths, linkSkuId) {
         if (!paths || !paths.length) return [];
         return paths.map(function (path, idx) {
-            return { path: path, url: '/link-sku-manager/' + linkSkuId + '/images/' + idx, link_sku_id: linkSkuId, index: idx };
+            return { path: path, url: '/warehouse-product-statistics/warehouse-images/' + linkSkuId + '/' + idx, link_sku_id: linkSkuId, index: idx };
         });
     }
 
@@ -537,12 +539,14 @@
             var item = body.children[idx];
             if (!item || invalid) return;
             var weightInput = item.querySelector('.wh-fill-weight');
-            var activePill = item.querySelector('.wh-reason-pill.active');
+            var activePills = item.querySelectorAll('.wh-reason-pill.active');
             var remarkInput = item.querySelector('.wh-fill-remark');
             var fileInput = item.querySelector('.wh-fill-physical-input');
             var removeCheckbox = item.querySelector('.wh-fill-physical-remove-checkbox');
             var weightRaw = (weightInput.value || '').trim();
-            var reason = activePill ? (activePill.getAttribute('data-value') || '').trim() : '';
+            var reason = Array.prototype.map.call(activePills, function (pill) {
+                return (pill.getAttribute('data-value') || '').trim();
+            }).filter(Boolean).join(',');
             var remark = (remarkInput.value || '').trim();
             var hasNewFile = fileInput && fileInput.files && fileInput.files.length > 0;
             var removeImg = removeCheckbox ? removeCheckbox.checked : false;
@@ -722,15 +726,11 @@
             return;
         }
 
-        // ⑤ 驳回理由按钮组：单选切换，再次点击取消
+        // ⑤ 驳回理由按钮组：支持多选，再次点击取消当前选项
         var reasonPill = target.closest('.wh-reason-pill');
         if (reasonPill) {
             ev.preventDefault();
-            var wasActive = reasonPill.classList.contains('active');
-            Array.prototype.forEach.call(reasonPill.parentNode.querySelectorAll('.wh-reason-pill'), function (pill) {
-                pill.classList.remove('active');
-            });
-            if (!wasActive) reasonPill.classList.add('active');
+            reasonPill.classList.toggle('active');
             return;
         }
 

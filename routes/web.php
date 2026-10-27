@@ -144,9 +144,11 @@ Route::post('/warehouse-product-statistics/refresh-weights', [WarehouseProductSt
 Route::get('/warehouse-product-statistics/link-sku-images', [WarehouseProductStatisticsController::class, 'linkSkuImages'])->name('warehouse.product-statistics.link-sku-images');
 Route::post('/warehouse-product-statistics/link-sku-images/upload', [WarehouseProductStatisticsController::class, 'linkSkuImageUpload'])->name('warehouse.product-statistics.link-sku-images.upload');
 Route::delete('/warehouse-product-statistics/link-sku-images/delete', [WarehouseProductStatisticsController::class, 'linkSkuImageDelete'])->name('warehouse.product-statistics.link-sku-images.delete');
+Route::get('/warehouse-product-statistics/warehouse-images/{linkSku}/{index}', [WarehouseProductStatisticsController::class, 'warehouseImage'])->whereNumber('linkSku')->whereNumber('index')->name('warehouse.product-statistics.warehouse-image');
 Route::post('/warehouse-product-statistics/approve', [WarehouseProductStatisticsController::class, 'approve'])->name('warehouse.product-statistics.approve');
 Route::get('/warehouse-weight-exceptions/{id}/physical-image', [WarehouseProductStatisticsController::class, 'physicalImage'])->name('warehouse.weight-exceptions.physical-image');
 Route::get('/warehouse-weight-exceptions', [WarehouseWeightExceptionController::class, 'index'])->name('caigou.warehouse-weight-exceptions.index');
+Route::get('/warehouse-weight-exceptions/warehouse-images/{linkSku}/{index}', [WarehouseWeightExceptionController::class, 'warehouseImage'])->whereNumber('linkSku')->whereNumber('index')->name('caigou.warehouse-weight-exceptions.warehouse-image');
 Route::post('/warehouse-weight-exceptions/{id}/resolve', [WarehouseWeightExceptionController::class, 'resolve'])->name('caigou.warehouse-weight-exceptions.resolve');
 Route::get('/product-library', [ProductLibraryController::class, 'index'])->name('aikaipin.product-library.index');
 Route::get('/account-risk', [PaymentPortalController::class, 'accountRisk'])->name('payment.account-risk.index');

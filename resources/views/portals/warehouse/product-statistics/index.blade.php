@@ -469,7 +469,7 @@
                         <div id="warehouse-fill-empty" class="text-muted text-center" hidden>暂无规格记录</div>
 
                         {{-- 实拍图（PCL 级别）--}}
-                        <div class="wh-fill-section-title" style="margin-top:14px;">实拍图</div>
+                        <div class="wh-fill-section-title" style="margin-top:14px;">仓库实拍图</div>
                         <div class="wh-upload-modal-images" id="wh-fill-real-images"></div>
                         <div class="wh-upload-zone" id="wh-fill-real-upload">
                             <i class="fa fa-cloud-upload wh-upload-icon"></i>
@@ -479,7 +479,7 @@
                             </button>
                             <input type="file" id="wh-fill-real-file" accept="image/jpeg,image/jpg,image/png,image/webp" multiple style="display:none;">
                         </div>
-                        <p class="wh-upload-modal-notice">可多张上传实拍图，保存后追加到链接图片中。</p>
+                        <p class="wh-upload-modal-notice">可多张上传仓库实拍图，仅用于异常反馈，不会写入 PCL SKU 产品实拍图。</p>
                     </div>
                 </div>
                 <div class="modal-footer">
