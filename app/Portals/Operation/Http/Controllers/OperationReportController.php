@@ -3,13 +3,19 @@
 namespace App\Portals\Operation\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\AdminUser;
+use App\Models\AssistantDomainStore;
+use App\Models\Department;
 use App\Models\LogisticsOrder;
+use App\Models\OperationReport;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Logistics\StreamedXlsxWriter;
+use App\Portals\Operation\OperationReportMetricsService;
 use App\Portals\ProductRequests\ProductRequestAccessService;
-use Carbon\Carbon;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -18,227 +24,232 @@ class OperationReportController extends Controller
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly ProductRequestAccessService $access,
+        private readonly OperationReportMetricsService $metrics,
         private readonly StreamedXlsxWriter $xlsxWriter,
     ) {
     }
 
     public function index(Request $request): Response|View
     {
-        $context = $this->portalEntries->portalContext($request);
-        if ($context instanceof Response) {
-            return $context;
-        }
-        $this->access->assertPortal($context['portal'], ProductRequestAccessService::OPERATION_PORTAL_CODE);
-
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
         $user = $context['user'];
-        $canViewAllStores = $user->isAdministrator()
-            || strcasecmp((string) $user->username, 'kky_boss') === 0;
-
+        $isBoss = $this->isBoss($user);
+        $canReview = $this->canReview($user);
         $validated = $request->validate([
-            'filtered' => ['nullable', 'in:1'],
-            'date_from' => ['nullable', 'date_format:Y-m-d'],
-            'date_to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:date_from'],
-            'media_source' => ['nullable', Rule::in(array_values([...LogisticsOrder::MEDIA_SOURCES, LogisticsOrder::MEDIA_SOURCE_OTHER]))],
-            'operator_name' => ['nullable', 'string', 'max:255'],
-            'shop_domain' => ['nullable', 'string', 'max:255'],
+            'report_date' => ['nullable', 'date_format:Y-m-d'],
+            'operator_user_id' => ['nullable', 'integer'],
         ]);
-        $today = now('Asia/Shanghai')->format('Y-m-d');
-        $isFiltered = ($validated['filtered'] ?? '') === '1';
-        $dateFrom = $isFiltered ? (string) ($validated['date_from'] ?? $today) : $today;
-        $dateTo = $isFiltered ? (string) ($validated['date_to'] ?? $today) : $today;
-        $start = Carbon::createFromFormat('Y-m-d H:i:s', $dateFrom.' 00:00:00', 'Asia/Shanghai')->utc();
-        $end = Carbon::createFromFormat('Y-m-d H:i:s', $dateTo.' 23:59:59', 'Asia/Shanghai')->utc();
-        $mediaSource = $isFiltered ? (string) ($validated['media_source'] ?? '') : '';
-        $operatorName = $canViewAllStores && $isFiltered ? trim((string) ($validated['operator_name'] ?? '')) : '';
-        $shopDomain = $canViewAllStores && $isFiltered ? trim((string) ($validated['shop_domain'] ?? '')) : '';
+        $date = (string) ($validated['report_date'] ?? now('Asia/Shanghai')->format('Y-m-d'));
+        $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
+        $operatorId = $isBoss
+            ? (int) ($validated['operator_user_id'] ?? $operatorOptions->first()?->getKey() ?? $user->getKey())
+            : (int) $user->getKey();
+        $operator = AdminUser::query()->findOrFail($operatorId);
+        if ($isBoss) $this->assertAssignableOperator($operatorId);
 
-        $operatorExpression = "COALESCE(NULLIF(TRIM(operator_name), ''), '未分配')";
-        $shopExpression = "COALESCE(NULLIF(TRIM(source_shop_domain), ''), NULLIF(TRIM(store_name), ''), '未知店铺')";
-
-        $rows = LogisticsOrder::query()
-            ->whereBetween('order_created_at', [$start, $end])
-            ->when(! $canViewAllStores, function ($query) use ($user): void {
-                $query->whereHas('store', function ($storeQuery) use ($user): void {
-                    $storeQuery->where('owner_user_id', (int) $user->getKey());
-                });
-            })
-            ->when($mediaSource !== '', fn ($query) => $query->where('media_source', $mediaSource))
-            ->when($operatorName !== '', fn ($query) => $query->whereRaw($operatorExpression.' = ?', [$operatorName]))
-            ->when($shopDomain !== '', fn ($query) => $query->whereRaw($shopExpression.' = ?', [$shopDomain]))
-            ->selectRaw("DATE(CONVERT_TZ(order_created_at, '+00:00', '+08:00')) AS order_date")
-            ->selectRaw("COALESCE(NULLIF(TRIM(operator_name), ''), '未分配') AS operator_name")
-            ->selectRaw("COALESCE(NULLIF(TRIM(source_shop_domain), ''), NULLIF(TRIM(store_name), ''), '未知店铺') AS shop_domain")
-            ->selectRaw("COALESCE(NULLIF(TRIM(media_source), ''), '其他') AS media_source")
-            ->selectRaw("SUM(CASE WHEN subscription_type = '订阅首次购买' THEN 1 ELSE 0 END) AS first_subscription_orders")
-            ->selectRaw("SUM(CASE WHEN subscription_type = '订阅首次购买' THEN COALESCE(paid_amount_usd, 0) ELSE 0 END) AS first_subscription_revenue")
-            ->selectRaw("SUM(CASE WHEN subscription_type = '无订阅' THEN 1 ELSE 0 END) AS first_normal_orders")
-            ->selectRaw("SUM(CASE WHEN subscription_type = '无订阅' THEN COALESCE(paid_amount_usd, 0) ELSE 0 END) AS first_normal_revenue")
-            ->selectRaw("SUM(CASE WHEN subscription_type LIKE '订阅复购%' THEN 1 ELSE 0 END) AS renewal_orders")
-            ->selectRaw("SUM(CASE WHEN subscription_type LIKE '订阅复购%' THEN COALESCE(paid_amount_usd, 0) ELSE 0 END) AS renewal_revenue")
-            ->selectRaw('COUNT(*) AS total_orders')
-            ->selectRaw('SUM(COALESCE(paid_amount_usd, 0)) AS total_revenue')
-            ->groupByRaw("DATE(CONVERT_TZ(order_created_at, '+00:00', '+08:00')), COALESCE(NULLIF(TRIM(operator_name), ''), '未分配'), COALESCE(NULLIF(TRIM(source_shop_domain), ''), NULLIF(TRIM(store_name), ''), '未知店铺'), COALESCE(NULLIF(TRIM(media_source), ''), '其他')")
-            ->orderByDesc('order_date')
-            ->orderBy('operator_name')
-            ->orderBy('shop_domain')
-            ->orderBy('media_source')
-            ->get();
-
-        $identityRowspans = [];
-        for ($index = 0, $rowCount = $rows->count(); $index < $rowCount; $index++) {
-            $row = $rows[$index];
-            $identityKey = [$row->order_date, $row->operator_name, $row->shop_domain];
-
-            if ($index > 0) {
-                $previous = $rows[$index - 1];
-                if ($identityKey === [$previous->order_date, $previous->operator_name, $previous->shop_domain]) {
-                    $identityRowspans[$index] = 0;
-                    continue;
-                }
-            }
-
-            $rowspan = 1;
-            while ($index + $rowspan < $rowCount) {
-                $next = $rows[$index + $rowspan];
-                if ($identityKey !== [$next->order_date, $next->operator_name, $next->shop_domain]) {
-                    break;
-                }
-                $rowspan++;
-            }
-            $identityRowspans[$index] = $rowspan;
-        }
-
-        $totals = [
-            'first_subscription_orders' => $rows->sum('first_subscription_orders'),
-            'first_subscription_revenue' => $rows->sum('first_subscription_revenue'),
-            'first_normal_orders' => $rows->sum('first_normal_orders'),
-            'first_normal_revenue' => $rows->sum('first_normal_revenue'),
-            'renewal_orders' => $rows->sum('renewal_orders'),
-            'renewal_revenue' => $rows->sum('renewal_revenue'),
-            'total_orders' => $rows->sum('total_orders'),
-            'total_revenue' => $rows->sum('total_revenue'),
-        ];
-
-        $operatorOptions = collect();
-        $shopOptions = collect();
-        if ($canViewAllStores) {
-            $operatorOptions = LogisticsOrder::query()
-                ->selectRaw($operatorExpression.' AS filter_value')
-                ->distinct()
-                ->orderBy('filter_value')
-                ->pluck('filter_value');
-            $shopOptions = LogisticsOrder::query()
-                ->selectRaw($shopExpression.' AS filter_value')
-                ->distinct()
-                ->orderBy('filter_value')
-                ->pluck('filter_value');
-        }
+        $calculated = $this->metrics->build($date, $operatorId);
+        $report = OperationReport::query()->whereDate('report_date', $date)->where('operator_user_id', $operatorId)->first();
+        $metricRows = $calculated['rows'];
+        $advertisingRows = [];
+        $history = OperationReport::query()
+            ->when(! $isBoss && ! $canReview, fn ($query) => $query->where('operator_user_id', $user->getKey()))
+            ->orderByDesc('report_date')->orderByDesc('id')->limit(60)->get();
 
         return view('portals.operation.reports.index', [
-            'portal' => $context['portal']->load('menus'),
-            'user' => $context['user'],
-            'rows' => $rows,
-            'identityRowspans' => $identityRowspans,
-            'totals' => $totals,
-            'filters' => [
-                'date_from' => $dateFrom,
-                'date_to' => $dateTo,
-                'media_source' => $mediaSource,
-                'operator_name' => $operatorName,
-                'shop_domain' => $shopDomain,
-            ],
-            'mediaSources' => array_values([...LogisticsOrder::MEDIA_SOURCES, LogisticsOrder::MEDIA_SOURCE_OTHER]),
-            'canFilterAllStores' => $canViewAllStores,
+            'portal' => $context['portal']->load('menus'), 'user' => $user,
+            'reportDate' => $date, 'selectedOperator' => $operator, 'report' => $report,
+            'metricRows' => $metricRows, 'metricTotals' => $this->sumRows($metricRows),
+            'metricRowspans' => $this->identityRowspans($metricRows),
+            'advertisingRows' => $advertisingRows, 'warnings' => $calculated['warnings'],
             'operatorOptions' => $operatorOptions,
-            'shopOptions' => $shopOptions,
-            'reportScopeLabel' => $canViewAllStores ? '全部店铺' : '我的已分配店铺',
+            'mediaSources' => array_values([...LogisticsOrder::MEDIA_SOURCES, LogisticsOrder::MEDIA_SOURCE_OTHER]),
+            'isBoss' => $isBoss, 'canReview' => $canReview,
+            'canEditReport' => true, 'history' => $history,
         ]);
+    }
+
+    public function show(Request $request, OperationReport $report): Response|View
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+        $user = $context['user'];
+        abort_unless(
+            $this->isBoss($user) || $this->canReview($user) || (int) $report->operator_user_id === (int) $user->getKey(),
+            403,
+        );
+        $rows = $report->metric_rows ?: [];
+
+        return view('portals.operation.reports.show', [
+            'portal' => $context['portal']->load('menus'), 'user' => $user, 'report' => $report,
+            'metricRows' => $rows, 'metricTotals' => $this->sumRows($rows),
+            'metricRowspans' => $this->identityRowspans($rows),
+            'advertisingRows' => $report->advertising_rows ?: [], 'canReview' => $this->canReview($user),
+        ]);
+    }
+
+    public function store(Request $request): RedirectResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        $user = $context['user'];
+        $isBoss = $this->isBoss($user);
+        $validated = $request->validate([
+            'report_date' => ['required', 'date_format:Y-m-d'],
+            'operator_user_id' => ['nullable', 'integer'],
+            'ads' => ['required', 'array', 'min:1', 'max:100'],
+            'ads.*.media_source' => ['required', Rule::in(array_values([...LogisticsOrder::MEDIA_SOURCES, LogisticsOrder::MEDIA_SOURCE_OTHER]))],
+            'ads.*.agency' => ['required', 'string', 'max:191'],
+            'ads.*.account_name' => ['required', 'string', 'max:191'],
+            'ads.*.account_number' => ['required', 'string', 'max:191'],
+            'ads.*.book_spend' => ['required', 'numeric', 'min:0'],
+            'ads.*.settlement_coefficient' => ['required', 'numeric', 'min:0'],
+            'ads.*.existing_screenshot' => ['nullable', 'string', 'max:500'],
+            'ads.*.screenshot' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+        ]);
+        $operatorId = $isBoss && ! empty($validated['operator_user_id'])
+            ? (int) $validated['operator_user_id'] : (int) $user->getKey();
+        if ($isBoss) $this->assertAssignableOperator($operatorId);
+        $operator = AdminUser::query()->findOrFail($operatorId);
+        $existing = OperationReport::query()->whereDate('report_date', $validated['report_date'])->where('operator_user_id', $operatorId)->first();
+        if ($existing) {
+            throw ValidationException::withMessages(['report_date' => '该运营当天的报表已经提交，请到提交记录中查看。']);
+        }
+
+        $ads = [];
+        foreach (($validated['ads'] ?? []) as $index => $ad) {
+            if (empty($ad['existing_screenshot']) && ! $request->hasFile('ads.'.$index.'.screenshot')) {
+                throw ValidationException::withMessages(['ads.'.$index.'.screenshot' => '请上传第 '.($index + 1).' 条广告账户的广告消耗截图。']);
+            }
+            $hasContent = collect(['media_source','agency','account_name','account_number','book_spend','settlement_coefficient'])
+                ->contains(fn ($field) => ($ad[$field] ?? '') !== '' && ($ad[$field] ?? null) !== null);
+            if (! $hasContent && ! $request->hasFile('ads.'.$index.'.screenshot')) continue;
+            $path = $ad['existing_screenshot'] ?? null;
+            if ($request->hasFile('ads.'.$index.'.screenshot')) {
+                $path = $request->file('ads.'.$index.'.screenshot')->store('operation-reports/ads', 'public');
+            }
+            $bookSpend = (float) ($ad['book_spend'] ?? 0);
+            $coefficient = ($ad['settlement_coefficient'] ?? '') === '' ? 1.0 : (float) $ad['settlement_coefficient'];
+            $ads[] = [
+                'media_source' => trim((string) ($ad['media_source'] ?? '')),
+                'agency' => trim((string) ($ad['agency'] ?? '')),
+                'account_name' => trim((string) ($ad['account_name'] ?? '')),
+                'account_number' => trim((string) ($ad['account_number'] ?? '')),
+                'book_spend' => round($bookSpend, 4),
+                'settlement_coefficient' => round($coefficient, 4),
+                'actual_spend' => round($bookSpend * $coefficient, 4),
+                'screenshot' => $path,
+            ];
+        }
+
+        $calculated = $this->metrics->build($validated['report_date'], $operatorId);
+        $totals = $calculated['totals'];
+        $adSpend = collect($ads)->sum('actual_spend');
+        $firstProfit = $totals['first_total_revenue'] - $totals['first_purchase_cost'] - $totals['first_shipping_cost'] - $totals['first_return_fee'] - $adSpend;
+        $renewalNet = $totals['renewal_revenue'] - $totals['renewal_cost'];
+        OperationReport::query()->create([
+                'report_date' => $validated['report_date'], 'operator_user_id' => $operatorId,
+                'operator_name' => (string) ($operator->name ?: $operator->username),
+                'metric_rows' => $calculated['rows'], 'advertising_rows' => $ads,
+                'first_purchase_cost' => $totals['first_purchase_cost'],
+                'first_shipping_cost' => $totals['first_shipping_cost'],
+                'first_return_fee' => $totals['first_return_fee'], 'actual_ad_spend' => $adSpend,
+                'first_profit' => $firstProfit, 'renewal_net_revenue' => $renewalNet,
+                'overall_profit' => $firstProfit + $renewalNet,
+                'status' => OperationReport::STATUS_PENDING, 'submitted_by' => $user->getKey(),
+                'submitted_at' => now(), 'reviewed_by' => null, 'reviewed_at' => null,
+            ]);
+
+        return redirect()->route('operation.reports.index', ['report_date' => $validated['report_date'], 'operator_user_id' => $isBoss ? $operatorId : null])->with('success', '运营报表已提交，当前状态为待审核。');
+    }
+
+    public function approve(Request $request, OperationReport $report): RedirectResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        abort_unless($this->canReview($context['user']), 403, '只有主管和 boss 可以审核运营报表。');
+        $report->update(['status' => OperationReport::STATUS_APPROVED, 'reviewed_by' => $context['user']->getKey(), 'reviewed_at' => now()]);
+        return back()->with('success', '运营报表已审核通过。');
     }
 
     public function export(Request $request): Response
     {
-        $report = $this->index($request);
-        if ($report instanceof Response) {
-            return $report;
+        $view = $this->index($request);
+        if ($view instanceof Response) return $view;
+        $data = $view->getData();
+        $metrics = collect($data['metricRows'])->values();
+        $ads = collect($data['advertisingRows'])->values();
+        $count = max($metrics->count(), $ads->count(), 1);
+        $columns = collect(['日期','人名','店铺域名','媒体','首单订阅单量','首单订阅营业额($)','首单普通单量','首单普通营业额($)','首单合计单量','首单合计营业额($)','首单总采购费','首单总运费','广告社媒','广告代理','广告账户名称','广告账户编号','账面广告费($)','结算系数','实际广告费($)','广告消耗截图','首单交易退货费','运营首单利润($)','续费净收益($)','运营整体净利润($)','运营社媒首单ROI','运营社媒整体ROI','填写状态','续费单量','续费营业额($)','续费费用','总单量','总营业额($)'])
+            ->map(fn ($label) => ['label' => $label, 'width' => mb_strlen($label) > 8 ? 20 : 15])->all();
+        return $this->xlsxWriter->response('运营报表_'.$data['reportDate'].'_'.$data['selectedOperator']->name.'.xlsx', '运营报表', $columns, static function () use ($metrics, $ads, $count, $data): iterable {
+            for ($i = 0; $i < $count; $i++) {
+                $m = $metrics->get($i, []); $a = $ads->get($i, []);
+                $report = $data['report'];
+                $adSpend = (float) ($report?->actual_ad_spend ?? $ads->sum('actual_spend'));
+                $firstRevenue = (float) $data['metricTotals']['first_total_revenue'];
+                $totalRevenue = (float) $data['metricTotals']['total_revenue'];
+                $values = [$data['reportDate'],$data['selectedOperator']->name,$m['shop_domain']??'',$m['media_source']??'',
+                    $m['first_subscription_orders']??'', $m['first_subscription_revenue']??'', $m['first_normal_orders']??'', $m['first_normal_revenue']??'',
+                    $m['first_total_orders']??'', $m['first_total_revenue']??'', $m['first_purchase_cost']??'', $m['first_shipping_cost']??'',
+                    $a['media_source']??'', $a['agency']??'', $a['account_name']??'', $a['account_number']??'', $a['book_spend']??'', $a['settlement_coefficient']??'', $a['actual_spend']??'', $a['screenshot']??'',
+                    $m['first_return_fee']??'', $i === 0 ? ($report?->first_profit ?? '') : '', $i === 0 ? ($report?->renewal_net_revenue ?? '') : '', $i === 0 ? ($report?->overall_profit ?? '') : '',
+                    $i === 0 && $adSpend > 0 ? $firstRevenue / $adSpend : '', $i === 0 && $adSpend > 0 ? $totalRevenue / $adSpend : '', $i === 0 ? ($report ? ($report->status === OperationReport::STATUS_APPROVED ? '已审核' : '待审核') : '未提交') : '',
+                    $m['renewal_orders']??'', $m['renewal_revenue']??'', $m['renewal_cost']??'', $m['total_orders']??'', $m['total_revenue']??''];
+                $textIndexes = [0,1,2,3,12,13,14,15,19,26];
+                yield ['kind' => $i % 2 ? 'variant' : 'normal', 'height' => 25, 'cells' => array_map(fn ($value, $index) => ['value' => $value, 'type' => in_array($index, $textIndexes, true) ? 'text' : 'number', 'align' => in_array($index, $textIndexes, true) ? 'left' : 'right'], $values, array_keys($values))];
+            }
+        }, false);
+    }
+
+    private function context(Request $request): array|Response
+    {
+        $context = $this->portalEntries->portalContext($request);
+        if ($context instanceof Response) return $context;
+        $this->access->assertPortal($context['portal'], ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        return $context;
+    }
+
+    private function isBoss(AdminUser $user): bool
+    {
+        return $user->isAdministrator() || strcasecmp((string) $user->username, 'kky_boss') === 0;
+    }
+
+    private function canReview(AdminUser $user): bool
+    {
+        return $this->isBoss($user) || $user->departments()->wherePivot('position', Department::POSITION_MANAGER)->exists();
+    }
+
+    private function operatorOptions()
+    {
+        $ids = AssistantDomainStore::query()->whereNotNull('owner_user_id')->distinct()->pluck('owner_user_id');
+        return AdminUser::query()->whereIn('id', $ids)->orderBy('name')->get(['id','name','username']);
+    }
+
+    private function assertAssignableOperator(int $operatorId): void
+    {
+        abort_unless(AssistantDomainStore::query()->where('owner_user_id', $operatorId)->exists(), 422, '该账号没有已分配店铺。');
+    }
+
+    private function sumRows(array $rows): array
+    {
+        $fields = ['first_subscription_orders','first_subscription_revenue','first_normal_orders','first_normal_revenue','first_total_orders','first_total_revenue','first_purchase_cost','first_shipping_cost','first_return_fee','renewal_orders','renewal_revenue','renewal_cost','total_orders','total_revenue'];
+        return collect($fields)->mapWithKeys(fn ($field) => [$field => collect($rows)->sum($field)])->all();
+    }
+
+    private function identityRowspans(array $rows): array
+    {
+        $spans = [];
+        for ($index = 0, $count = count($rows); $index < $count; $index++) {
+            $key = [$rows[$index]['date'], $rows[$index]['operator_name'], $rows[$index]['shop_domain']];
+            if ($index > 0 && $key === [$rows[$index - 1]['date'], $rows[$index - 1]['operator_name'], $rows[$index - 1]['shop_domain']]) {
+                $spans[$index] = 0;
+                continue;
+            }
+            $span = 1;
+            while ($index + $span < $count && $key === [$rows[$index + $span]['date'], $rows[$index + $span]['operator_name'], $rows[$index + $span]['shop_domain']]) $span++;
+            $spans[$index] = $span;
         }
-
-        $data = $report->getData();
-        $rows = $data['rows'];
-        $identityRowspans = $data['identityRowspans'];
-        $totals = $data['totals'];
-        $filters = $data['filters'];
-        $columns = [
-            ['label' => '日期', 'width' => 13],
-            ['label' => '人名', 'width' => 16],
-            ['label' => '店铺域名', 'width' => 32],
-            ['label' => '媒体', 'width' => 16],
-            ['label' => '首单订阅单量', 'width' => 16],
-            ['label' => '首单订阅营业额($)', 'width' => 20],
-            ['label' => '首单普通单量', 'width' => 16],
-            ['label' => '首单普通营业额($)', 'width' => 20],
-            ['label' => '首单合计单量', 'width' => 16],
-            ['label' => '首单合计营业额($)', 'width' => 20],
-            ['label' => '续费单量', 'width' => 14],
-            ['label' => '续费营业额($)', 'width' => 18],
-            ['label' => '续费费用($)', 'width' => 16],
-            ['label' => '总单量', 'width' => 13],
-            ['label' => '总营业额($)', 'width' => 18],
-        ];
-
-        return $this->xlsxWriter->response(
-            '运营报表_'.$filters['date_from'].'_'.$filters['date_to'].'_'.now('Asia/Shanghai')->format('His').'.xlsx',
-            '运营报表',
-            $columns,
-            static function () use ($rows, $identityRowspans, $totals): iterable {
-                $groupNumber = -1;
-                $rowKind = 'normal';
-                foreach ($rows as $index => $row) {
-                    $rowspan = (int) ($identityRowspans[$index] ?? 0);
-                    $isGroupStart = $rowspan > 0;
-                    if ($isGroupStart) {
-                        $groupNumber++;
-                        $rowKind = $groupNumber % 2 === 0 ? 'normal' : 'variant';
-                    }
-
-                    yield [
-                        'kind' => $rowKind,
-                        'height' => 25,
-                        'mergeDown' => $rowspan > 1 ? [0 => $rowspan, 1 => $rowspan, 2 => $rowspan] : [],
-                        'cells' => [
-                        ['value' => $isGroupStart ? $row->order_date : '', 'align' => 'center'],
-                        ['value' => $isGroupStart ? $row->operator_name : '', 'align' => 'center'],
-                        ['value' => $isGroupStart ? $row->shop_domain : '', 'align' => 'left'],
-                        ['value' => $row->media_source, 'align' => 'center'],
-                        ['value' => (int) $row->first_subscription_orders, 'type' => 'number', 'align' => 'center'],
-                        ['value' => (float) $row->first_subscription_revenue, 'type' => 'money', 'align' => 'right'],
-                        ['value' => (int) $row->first_normal_orders, 'type' => 'number', 'align' => 'center'],
-                        ['value' => (float) $row->first_normal_revenue, 'type' => 'money', 'align' => 'right'],
-                        ['value' => (int) $row->first_subscription_orders + (int) $row->first_normal_orders, 'type' => 'number', 'align' => 'center'],
-                        ['value' => (float) $row->first_subscription_revenue + (float) $row->first_normal_revenue, 'type' => 'money', 'align' => 'right'],
-                        ['value' => (int) $row->renewal_orders, 'type' => 'number', 'align' => 'center'],
-                        ['value' => (float) $row->renewal_revenue, 'type' => 'money', 'align' => 'right'],
-                        ['value' => 0, 'type' => 'money', 'align' => 'right'],
-                        ['value' => (int) $row->total_orders, 'type' => 'number', 'align' => 'center'],
-                        ['value' => (float) $row->total_revenue, 'type' => 'money', 'align' => 'right'],
-                    ]];
-                }
-
-                yield ['kind' => 'parent', 'height' => 28, 'mergeAcross' => [0 => 4], 'cells' => [
-                    ['value' => '合计', 'align' => 'center'], ['value' => ''], ['value' => ''], ['value' => ''],
-                    ['value' => (int) $totals['first_subscription_orders'], 'type' => 'number'],
-                    ['value' => (float) $totals['first_subscription_revenue'], 'type' => 'money'],
-                    ['value' => (int) $totals['first_normal_orders'], 'type' => 'number'],
-                    ['value' => (float) $totals['first_normal_revenue'], 'type' => 'money'],
-                    ['value' => (int) $totals['first_subscription_orders'] + (int) $totals['first_normal_orders'], 'type' => 'number'],
-                    ['value' => (float) $totals['first_subscription_revenue'] + (float) $totals['first_normal_revenue'], 'type' => 'money'],
-                    ['value' => (int) $totals['renewal_orders'], 'type' => 'number'],
-                    ['value' => (float) $totals['renewal_revenue'], 'type' => 'money'],
-                    ['value' => 0, 'type' => 'money'],
-                    ['value' => (int) $totals['total_orders'], 'type' => 'number'],
-                    ['value' => (float) $totals['total_revenue'], 'type' => 'money'],
-                ]];
-            },
-            false,
-        );
+        return $spans;
     }
 }
