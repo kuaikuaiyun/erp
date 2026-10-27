@@ -10,6 +10,17 @@
         window.alert(message);
     }
 
+    function formulaIcon(formula) {
+        if (!formula) return '';
+        var escaped = $('<div>').text(String(formula)).html().replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        return ' <i class="fa fa-info-circle payment-formula-icon" tabindex="0" role="img" data-payment-formula-tooltip data-toggle="tooltip" data-container="body" data-placement="top" title="' + escaped + '" aria-label="' + escaped + '"></i>';
+    }
+
+    function initFormulaTooltips(scope) {
+        if (!$.fn.tooltip) return;
+        $(scope).find('[data-payment-rate-tooltip], [data-payment-formula-tooltip]').tooltip();
+    }
+
     $(function () {
         var page = $('.payment-portal-page');
         var config = window.PaymentPortal || {};
@@ -18,9 +29,15 @@
             return;
         }
 
+        initFormulaTooltips(page);
+
         page.on('change', '[data-payment-per-page]', function () {
             $(this).closest('form').find('[name="page"]').val('1');
-            this.form.submit();
+            if ($(this).closest('[data-payment-product-main-tab]').length) {
+                $(this.form).trigger('submit');
+            } else {
+                this.form.submit();
+            }
         });
         page.on('submit', '.payment-pagination-form', function (event) {
             if ($.trim($(this).find('[name="page"]').val()) === '') {
@@ -89,6 +106,7 @@
             if (alertDetailRequest) alertDetailRequest.abort();
             alertDetailRequest = $.ajax({ url: url, dataType: 'html', headers: { 'X-Requested-With': 'XMLHttpRequest' } }).done(function (html) {
                 alertDetailModal.find('[data-payment-alert-detail-body]').html(html);
+                initFormulaTooltips(alertDetailModal);
             }).fail(function (xhr, status) {
                 if (status !== 'abort') alertDetailModal.find('[data-payment-alert-detail-error]').text((config.alertDetail || {}).load_failed || '').prop('hidden', false);
             }).always(function () {
@@ -121,7 +139,80 @@
             page.find('[data-payment-tab]').removeClass('active').attr('aria-selected', 'false');
             $(this).addClass('active').attr('aria-selected', 'true');
             page.find('[data-payment-tab-panel]').prop('hidden', true);
-            page.find('[data-payment-tab-panel="' + tab + '"]').prop('hidden', false);
+            var panel = page.find('[data-payment-tab-panel="' + tab + '"]');
+            panel.prop('hidden', false);
+            if (panel.is('[data-payment-product-main-tab]') && panel.attr('data-loaded') !== '1') {
+                loadProductMainTab(tab);
+            }
+        });
+
+        var productMainRequests = {};
+        var productMainCache = {};
+        var productMainUrls = {};
+        function productMainUrl(tab) {
+            var query = page.find('[data-payment-product-filter]').serializeArray().filter(function (field) {
+                return field.name !== 'page';
+            });
+            query.push({ name: 'tab', value: tab });
+            return String(config.productTabUrl || '') + '?' + $.param(query);
+        }
+        function loadProductMainTab(tab, url, force) {
+            if (!config.productTabUrl) return;
+            var panel = page.find('[data-payment-tab-panel="' + tab + '"]');
+            var mainTabText = config.productMainTabs || {};
+            var targetUrl = url || productMainUrls[tab] || productMainUrl(tab);
+            productMainUrls[tab] = targetUrl;
+            if (!force && productMainCache[targetUrl]) {
+                panel.html(productMainCache[targetUrl]).attr('data-loaded', '1').removeClass('is-loading');
+                initFormulaTooltips(panel);
+                return;
+            }
+            if (productMainRequests[tab]) productMainRequests[tab].abort();
+            if (panel.attr('data-loaded') !== '1') panel.empty();
+            panel.addClass('is-loading').append('<div class="payment-main-tab-loading payment-main-tab-loading-overlay"><i class="fa fa-spinner fa-spin"></i> ' + $('<div>').text(mainTabText.loading || '').html() + '</div>');
+            productMainRequests[tab] = $.ajax({ url: targetUrl, dataType: 'html', headers: { 'X-Requested-With': 'XMLHttpRequest' } }).done(function (html) {
+                productMainCache[targetUrl] = html;
+                panel.html(html).attr('data-loaded', '1');
+                initFormulaTooltips(panel);
+            }).fail(function (xhr, status) {
+                if (status === 'abort') return;
+                panel.html('<div class="payment-main-tab-error"><p>' + $('<div>').text(mainTabText.load_failed || '').html() + '</p><button class="btn btn-primary btn-sm" type="button" data-payment-main-tab-retry>' + $('<div>').text(mainTabText.retry || '').html() + '</button></div>');
+            }).always(function () {
+                panel.removeClass('is-loading');
+                productMainRequests[tab] = null;
+            });
+        }
+        page.on('click', '[data-payment-product-main-tab] .payment-unified-pagination a', function (event) {
+            event.preventDefault();
+            if ($(this).hasClass('disabled')) return;
+            var panel = $(this).closest('[data-payment-product-main-tab]');
+            loadProductMainTab(String(panel.data('paymentTabPanel')), this.href);
+        });
+        page.on('submit', '[data-payment-product-main-tab] .payment-pagination-form', function (event) {
+            event.preventDefault();
+            var panel = $(this).closest('[data-payment-product-main-tab]');
+            var pageValue = $.trim($(this).find('[name="page"]').val() || '');
+            var url = $(this).attr('action') + '?' + $(this).serialize() + (pageValue === '' ? '&page=1' : '');
+            loadProductMainTab(String(panel.data('paymentTabPanel')), url);
+        });
+        page.on('click', '[data-payment-main-tab-retry]', function () {
+            var panel = $(this).closest('[data-payment-product-main-tab]');
+            loadProductMainTab(String(panel.data('paymentTabPanel')), productMainUrls[String(panel.data('paymentTabPanel'))], true);
+        });
+        var productImageModal = $('#payment-product-image-modal');
+        page.on('click', '[data-payment-product-image]', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            var trigger = $(this);
+            var imageUrl = String(trigger.data('imageUrl') || '');
+            var imageName = String(trigger.data('imageName') || '');
+            if (!imageUrl || !productImageModal.length) return;
+            productImageModal.find('[data-payment-product-image-name]').text(imageName);
+            productImageModal.find('[data-payment-product-image-preview]').attr({ src: imageUrl, alt: imageName });
+            productImageModal.modal('show');
+        });
+        productImageModal.on('hidden.bs.modal', function () {
+            productImageModal.find('[data-payment-product-image-preview]').attr({ src: '', alt: '' });
         });
 
         page.on('click', '[data-payment-account-create]', function () {
@@ -135,6 +226,7 @@
             var empty = page.find('[data-payment-filter-empty]');
             var accountCombobox = form.find('[data-payment-account-combobox]');
             var accountInput = accountCombobox.find('[data-payment-account-input]');
+            var accountClear = accountCombobox.find('[data-payment-account-clear]');
             var accountOptions = accountCombobox.find('[data-payment-account-option]');
             var accountOptionList = accountCombobox.find('[data-payment-account-options]');
 
@@ -193,6 +285,10 @@
                 accountCombobox.find('[data-payment-account-toggle]').attr('aria-expanded', 'false');
             }
 
+            function syncAccountClear() {
+                accountClear.prop('hidden', String(accountInput.val() || '').trim() === '');
+            }
+
             function openAccountOptions() {
                 var accountQuery = String(accountInput.val() || '').trim().toLowerCase();
                 var visibleOptions = 0;
@@ -225,6 +321,7 @@
                     if (!serverFilterForm) {
                         filterRows();
                     }
+                    syncAccountClear();
                     closeAccountOptions();
                 }, 0);
             });
@@ -233,7 +330,12 @@
             }
 
             if (accountCombobox.length) {
-                accountInput.on('focus input', openAccountOptions);
+                syncAccountClear();
+                accountInput.on('focus', openAccountOptions);
+                accountInput.on('input', function () {
+                    syncAccountClear();
+                    openAccountOptions();
+                });
                 accountInput.on('keydown', function (event) {
                     if (event.key === 'Escape') {
                         closeAccountOptions();
@@ -249,6 +351,11 @@
                 accountCombobox.on('click', '[data-payment-account-option]', function () {
                     accountInput.val($(this).text()).trigger('input').trigger('change');
                     closeAccountOptions();
+                });
+                accountCombobox.on('click', '[data-payment-account-clear]', function (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    accountInput.val('').trigger('input').trigger('change').trigger('focus');
                 });
                 $(document).on('mousedown.payment-account-combobox', function (event) {
                     if (!$(event.target).closest('[data-payment-account-combobox]').length) {
@@ -349,6 +456,7 @@
 
             function renderSummary(summary) {
                 var labels = detailText.summary || {};
+                var formulas = detailText.formulas || {};
                 var items = [
                     ['orders', formatNumber(summary.order_count, 0)],
                     ['paid_amount', '$' + formatNumber(summary.paid_amount, 2)],
@@ -358,7 +466,7 @@
                     ['unmatched_count', formatNumber(summary.unmatched_count, 0)]
                 ];
                 detailModal.find('[data-payment-detail-summary]').html(items.map(function (item) {
-                    return '<div><span>' + escapeHtml(labels[item[0]] || item[0]) + '</span><strong>' + escapeHtml(item[1]) + '</strong></div>';
+                    return '<div><span>' + escapeHtml(labels[item[0]] || item[0]) + formulaIcon(formulas[item[0]]) + '</span><strong>' + escapeHtml(item[1]) + '</strong></div>';
                 }).join(''));
             }
 
@@ -372,6 +480,7 @@
 
             function overviewKpis(summary, exceptions) {
                 var text = detailText.overview || {};
+                var formulas = detailText.formulas || {};
                 var kpis = [
                     ['disputes_recent', formatNumber(summary.dispute_order_count, 0), text.disputes_recent_note],
                     ['disputes_period', formatNumber(summary.overall_dispute_order_count, 0) + ' / ' + formatNumber(summary.overall_dispute_rate, 2) + '%', text.disputes_period_note],
@@ -379,7 +488,7 @@
                     ['urgent', formatNumber(exceptions.length, 0), text.urgent_note]
                 ];
                 return '<div class="payment-detail-kpis">' + kpis.map(function (item, index) {
-                    return '<article class="payment-detail-kpi payment-detail-kpi-' + index + '"><span>' + escapeHtml((text.kpis || {})[item[0]]) + '</span><strong>' + escapeHtml(item[1]) + '</strong><small>' + escapeHtml(item[2]) + '</small></article>';
+                    return '<article class="payment-detail-kpi payment-detail-kpi-' + index + '"><span>' + escapeHtml((text.kpis || {})[item[0]]) + formulaIcon(formulas[item[0]]) + '</span><strong>' + escapeHtml(item[1]) + '</strong><small>' + escapeHtml(item[2]) + '</small></article>';
                 }).join('') + '</div>';
             }
 
@@ -569,6 +678,7 @@
                         detailState.tab === 'overview' ? renderOverview(payload) : (detailState.tab === 'funding' ? renderFunding(payload.summary || {}) : (detailState.tab === 'disputes' ? renderDisputes(rows, (payload.rows || {}).meta, 0) : renderTable(rows, detailState.tab)))
                     );
                     renderPagination(isDashboard ? null : (payload.rows || {}).meta);
+                    initFormulaTooltips(detailModal);
                 }).fail(function (xhr, status) {
                     if (status !== 'abort') {
                         detailModal.find('[data-payment-detail-error]').text(detailText.load_failed || '').prop('hidden', false);
@@ -637,7 +747,17 @@
             var direction = String(form.find('[name="direction"]').val() || '');
             form.find('[name="sort"]').val(field);
             form.find('[name="direction"]').val(current === field && direction === 'desc' ? 'asc' : 'desc');
-            form.trigger('submit');
+            var panel = $(this).closest('[data-payment-product-main-tab]');
+            if (panel.length && config.productTabUrl) {
+                var currentRiskUrl = new URL(productMainUrls.risk_metrics || productMainUrl('risk_metrics'), window.location.origin);
+                currentRiskUrl.searchParams.set('sort', field);
+                currentRiskUrl.searchParams.set('direction', form.find('[name="direction"]').val());
+                currentRiskUrl.searchParams.set('page', '1');
+                productMainUrls.risk_metrics = currentRiskUrl.toString();
+                loadProductMainTab('risk_metrics', productMainUrls.risk_metrics, true);
+            } else {
+                form.trigger('submit');
+            }
         });
         if (productModal.length && config.productDetailUrl) {
             var productText = config.productDetail || {};
@@ -657,34 +777,54 @@
             function pNumber(value) { return Number(value || 0).toLocaleString('zh-CN', { maximumFractionDigits: 2 }); }
             function pMoney(value) { return '$' + Number(value || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
             function pRate(value) { return Number(value || 0).toFixed(2) + '%'; }
+            function replaceProductTokens(template, values) {
+                return Object.keys(values).reduce(function (text, key) {
+                    return text.replace(new RegExp(':' + key, 'g'), values[key]);
+                }, String(template || ''));
+            }
 
             function renderProductOverview(product) {
                 var modules = product.overview_modules || {};
                 var labels = productText.overview || {};
+                function metric(label, value, note) {
+                    return '<div class="payment-product-metric"><dt>' + pEscape(label) + formulaIcon(note) + '</dt><dd>' + pEscape(value) + '</dd></div>';
+                }
+                function riskSummary(title, summary, tone) {
+                    summary = summary || {};
+                    var reasons = summary.reason_breakdown || [];
+                    var totals = replaceProductTokens(labels.summary_totals, { orders: pNumber(summary.order_count), records: pNumber(summary.record_count), amount: pMoney(summary.amount) });
+                    return '<section class="payment-product-risk-box is-' + tone + '"><h5>' + pEscape(title) + '</h5><strong>' + pEscape(totals) + '</strong>' + (reasons.length ? reasons.slice(0, 5).map(function (reason) { return '<p><span>' + pEscape(reason.reason || reason.name) + '</span><b>' + pEscape(pNumber(reason.count || reason.record_count)) + '</b></p>'; }).join('') : '<small>' + pEscape(labels.no_risk_record) + '</small>') + '</section>';
+                }
                 return '<div class="payment-product-detail-identity">' + (product.image_url ? '<img src="' + pEscape(product.image_url) + '" alt="">' : '<span><i class="fa fa-cube"></i></span>') + '<div><h3>' + pEscape(product.name) + '</h3><p>' + pEscape(product.product_code || product.sku) + '</p><small>' + pEscape((product.stores || []).join('、')) + '</small></div></div><div class="payment-product-module-grid">' + ['overall', 'paypal', 'credit_card'].map(function (key) {
                     var module = modules[key] || {};
-                    var values = [
-                        [labels.sales, pNumber(module.unit_count)], [labels.orders, pNumber(module.order_count)],
-                        [labels.receipts, pMoney(module.received_amount)], [labels.refunds, pMoney(module.refund_amount) + ' / ' + pRate(module.refund_rate)],
-                        [labels.shipping, pRate(module.shipping_rate)], [labels.delivery, pRate(module.delivery_rate)]
-                    ];
-                    if (key === 'paypal') values.push([labels.disputes, pNumber(module.dispute_count) + ' / ' + pRate(module.dispute_rate)]);
-                    var reasons = module.dispute_reason_breakdown || (module.alert_record_summary || {}).reason_breakdown || [];
-                    return '<article class="payment-product-channel-panel payment-product-channel-' + key + '"><h4>' + pEscape(labels[key]) + '</h4><dl>' + values.map(function (value) { return '<div><dt>' + pEscape(value[0]) + '</dt><dd>' + pEscape(value[1]) + '</dd></div>'; }).join('') + '</dl><div class="payment-product-risk-summary"><strong>' + pEscape(labels.reason_summary) + '</strong>' + (reasons.length ? reasons.slice(0, 4).map(function (reason) { return '<p><span>' + pEscape(reason.reason || reason.name) + '</span><b>' + pEscape(pNumber(reason.count || reason.record_count)) + '</b></p>'; }).join('') : '<small>' + pEscape(labels.no_risk_record) + '</small>') + '</div></article>';
+                    var metrics = metric(labels.unit_count, pNumber(module.unit_count)) + metric(labels.order_count, pNumber(module.order_count)) + metric(labels.received_amount, pMoney(module.received_amount)) + metric(labels.refund_amount, pMoney(module.refund_amount));
+                    metrics += metric(labels.refund_rate, pRate(module.refund_rate), replaceProductTokens(labels.refund_formula, { refund: pMoney(module.refund_amount), received: pMoney(module.received_amount) }));
+                    if (key === 'credit_card') {
+                        metrics += metric(labels.warning_rate, pRate(module.chargeback_rate), replaceProductTokens(labels.warning_formula, { amount: pMoney(module.chargeback_amount), received: pMoney(module.received_amount) }));
+                        metrics += metric(labels.customer_service_rate, pRate(module.customer_service_refund_rate), replaceProductTokens(labels.customer_service_formula, { amount: pMoney(module.customer_service_refund_amount), received: pMoney(module.received_amount) }));
+                        metrics += metric(labels.card_dispute_rate, pRate(module.credit_card_dispute_rate), replaceProductTokens(labels.card_dispute_formula, { count: pNumber(module.credit_card_dispute_count), orders: pNumber(module.order_count) }));
+                    } else {
+                        metrics += metric(labels.paypal_dispute_rate, pRate(module.dispute_rate), replaceProductTokens(labels.dispute_formula, { count: pNumber(module.dispute_order_count), orders: pNumber(module.order_count) }));
+                    }
+                    metrics += metric(labels.shipping_rate, pRate(module.shipping_rate), replaceProductTokens(labels.shipping_formula, { count: pNumber(module.shipping_count), orders: pNumber(module.order_count) }));
+                    metrics += metric(labels.delivery_rate, pRate(module.delivery_rate), replaceProductTokens(labels.delivery_formula, { count: pNumber(module.delivery_count), shipped: pNumber(module.shipping_count) }));
+                    var summaries = key === 'credit_card' ? riskSummary(labels.warning_summary, module.alert_record_summary, 'warning') + riskSummary(labels.card_dispute_summary, module.dispute_record_summary, 'danger') : riskSummary(labels.paypal_summary, { order_count: module.dispute_order_count, record_count: module.dispute_count, amount: module.dispute_amount, reason_breakdown: module.dispute_reason_breakdown }, 'danger');
+                    return '<article class="payment-product-channel-panel payment-product-channel-' + key + '"><h4>' + pEscape(labels[key]) + '</h4><dl>' + metrics + '</dl><div class="payment-product-risk-boxes">' + summaries + '</div></article>';
                 }).join('') + '</div><div class="payment-product-store-distribution"><h4>' + pEscape(labels.store_distribution) + '</h4>' + (product.store_order_distribution || []).map(function (store) { return '<div><span>' + pEscape(store.name) + '</span><strong>' + pEscape(pNumber(store.order_count)) + '</strong></div>'; }).join('') + '</div>';
             }
 
             function renderFirstRenewal(detail) {
                 var text = productText.first_renewal || {};
+                var formulas = text.formulas || {};
                 var groups = detail.groups || {};
                 var order = ['one_time', 'first_charge', 'first_renewal', 'later_renewal'];
                 var cards = order.map(function (key) {
                     var group = groups[key] || {};
-                    return '<article class="payment-lifecycle-card"><h4>' + pEscape((text.groups || {})[key]) + '</h4><strong>' + pEscape(pNumber(group.order_count)) + ' ' + pEscape((productText.overview || {}).record) + ' / ' + pEscape(pMoney(group.received_amount)) + '</strong><dl><div><dt>' + pEscape(text.refund_rate) + '</dt><dd>' + pEscape(pRate(group.refund_rate)) + '</dd></div><div><dt>' + pEscape(text.dispute_rate) + '</dt><dd>' + pEscape(pNumber(group.dispute_count)) + ' / ' + pEscape(pRate(group.dispute_rate)) + '</dd></div><div><dt>' + pEscape(text.realised_loss) + '</dt><dd>' + pEscape(pMoney(group.realised_loss)) + '</dd></div><div><dt>' + pEscape(text.expected_loss) + '</dt><dd class="is-muted">' + pEscape(text.unavailable) + '</dd></div><div><dt>' + pEscape(text.contribution) + '</dt><dd class="is-muted">' + pEscape(text.unavailable) + '</dd></div></dl></article>';
+                    return '<article class="payment-lifecycle-card"><h4>' + pEscape((text.groups || {})[key]) + '</h4><strong>' + pEscape(pNumber(group.order_count)) + ' ' + pEscape((productText.overview || {}).record) + ' / ' + pEscape(pMoney(group.received_amount)) + '</strong><dl><div><dt>' + pEscape(text.refund_rate) + formulaIcon(replaceProductTokens(formulas.refund_rate, { refund: pMoney(group.refund_amount), received: pMoney(group.received_amount) })) + '</dt><dd>' + pEscape(pRate(group.refund_rate)) + '</dd></div><div><dt>' + pEscape(text.dispute_rate) + formulaIcon(replaceProductTokens(formulas.dispute_rate, { count: pNumber(group.dispute_count), orders: pNumber(group.order_count) })) + '</dt><dd>' + pEscape(pNumber(group.dispute_count)) + ' / ' + pEscape(pRate(group.dispute_rate)) + '</dd></div><div><dt>' + pEscape(text.realised_loss) + formulaIcon(formulas.realised_loss) + '</dt><dd>' + pEscape(pMoney(group.realised_loss)) + '</dd></div><div><dt>' + pEscape(text.expected_loss) + formulaIcon(formulas.expected_loss) + '</dt><dd class="is-muted">' + pEscape(text.unavailable) + '</dd></div><div><dt>' + pEscape(text.contribution) + formulaIcon(formulas.contribution) + '</dt><dd class="is-muted">' + pEscape(text.unavailable) + '</dd></div></dl></article>';
                 }).join('');
                 var metrics = detail.metrics || {};
                 var metricKeys = ['renewal_success_rate', 'first_renewal_retention', 'later_renewal_rate', 'link_coverage_rate'];
-                var metricPanel = '<article class="payment-lifecycle-panel"><h4>' + pEscape(text.metrics_title) + '</h4><div class="payment-lifecycle-metrics">' + metricKeys.map(function (key) { return '<div><span>' + pEscape(text[key]) + '</span><strong>' + pEscape(pRate(metrics[key])) + '</strong></div>'; }).join('') + '</div></article>';
+                var metricPanel = '<article class="payment-lifecycle-panel"><h4>' + pEscape(text.metrics_title) + '</h4><div class="payment-lifecycle-metrics">' + metricKeys.map(function (key) { return '<div><span>' + pEscape(text[key]) + formulaIcon(formulas[key]) + '</span><strong>' + pEscape(pRate(metrics[key])) + '</strong></div>'; }).join('') + '</div></article>';
                 var chains = detail.chains || [];
                 var chainPanel = '<article class="payment-lifecycle-panel"><h4>' + pEscape(text.chain_title) + '</h4>' + (chains.length ? '<div class="payment-lifecycle-chains">' + chains.slice(0, 8).map(function (chain) { return '<div><b>' + pEscape(text.origin) + ' ' + pEscape(chain.origin) + '</b><span>' + (chain.orders || []).map(function (item) { return pEscape(((text.groups || {})[item.stage] || item.stage) + ' ' + item.order_number + ' · ' + pMoney(item.amount) + (Number(item.refund_amount) > 0 ? ' · ' + text.refund + ' ' + pMoney(item.refund_amount) : '')); }).join('<i class="fa fa-long-arrow-right"></i>') + '</span></div>'; }).join('') + '</div>' : '<p class="payment-detail-empty">' + pEscape(text.chain_empty) + '</p>') + '</article>';
                 return '<div class="payment-lifecycle-grid">' + cards + '</div><div class="payment-lifecycle-bottom">' + metricPanel + chainPanel + '</div>';
@@ -746,12 +886,16 @@
                     var content = productState.tab === 'overview' ? renderProductOverview(payload.product || {}) : (productState.tab === 'first_renewal' ? renderFirstRenewal(payload.detail || {}) : (productState.tab === 'refunds' ? renderRefundEvents(payload.detail || {}) : renderProductRows(payload.detail || {}, productState.tab)));
                     productModal.find('[data-payment-product-detail-body]').toggleClass('payment-detail-dashboard-body', dashboard || productState.tab === 'refunds').html(content);
                     renderProductPagination(dashboard ? null : (payload.detail || {}).pagination);
+                    initFormulaTooltips(productModal);
                 }).fail(function (xhr, status) {
                     if (status !== 'abort') productModal.find('[data-payment-product-error]').text(productText.load_failed || '').prop('hidden', false);
                 }).always(function () { productModal.find('[data-payment-product-loading]').prop('hidden', true); productState.request = null; });
             }
 
-            page.on('click', '[data-payment-product-detail]', function () {
+            page.on('click keydown', '[data-payment-product-detail]', function (event) {
+                if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
+                if ($(event.target).closest('button, a, input, select, textarea, label').length) return;
+                event.preventDefault();
                 productState.id = String($(this).data('productId')); productState.name = String($(this).data('productName')); productState.tab = 'overview'; productState.page = 1;
                 productModal.find('[data-payment-product-detail-tab]').removeClass('active').attr('aria-selected', 'false').first().addClass('active').attr('aria-selected', 'true');
                 productModal.find('[data-payment-product-detail-filter]').prop('hidden', true).get(0).reset();

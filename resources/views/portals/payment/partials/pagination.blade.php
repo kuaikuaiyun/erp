@@ -1,5 +1,5 @@
 @php
-    $query = request()->except(['page', 'per_page']);
+    $query = array_merge(request()->except(['page', 'per_page']), $extraQuery ?? []);
     $pageRoute = $routeName ?? request()->route()->getName();
     $pageUrl = static fn (int $page) => route($pageRoute, array_merge($query, ['page' => $page, 'per_page' => $pagination['per_page']]));
 @endphp

@@ -119,6 +119,23 @@ class PaymentPortalController extends Controller
         ]);
     }
 
+    public function productRiskProfitTab(Request $request): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        $validated = $request->validate([
+            'tab' => ['required', Rule::in(['risk_metrics', 'loss_profit', 'refund_reason'])],
+        ]);
+        $tab = (string) $validated['tab'];
+
+        return response()->view('portals.payment.partials.product-risk-tab', [
+            'tab' => $tab,
+            'dashboard' => $this->productRisk->tab($this->productRiskFilters($request), $tab),
+        ]);
+    }
+
     public function productRiskProfitDetail(Request $request): Response
     {
         $context = $this->portalContext($request);

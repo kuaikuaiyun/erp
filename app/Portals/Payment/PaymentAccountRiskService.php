@@ -168,6 +168,7 @@ class PaymentAccountRiskService
                 'available' => $this->currency((float) $balance->available_balance),
                 'withheld' => $this->currency((float) $balance->withheld_balance),
                 'as_of_time' => $this->formatDateTime($balanceTime),
+                'relative_time' => $this->relativeTime($balanceTime),
                 'is_stale' => !$balanceTime || $balanceTime->lt(now()->subHours(12)),
             ] : null,
             'rates' => [
@@ -224,6 +225,27 @@ class PaymentAccountRiskService
     private function formatDateTime(mixed $value): string
     {
         return $value instanceof CarbonInterface ? $value->timezone('Asia/Shanghai')->format('Y-m-d H:i') : '-';
+    }
+
+    /** @return array{key:string,count:int} */
+    private function relativeTime(?CarbonInterface $value): array
+    {
+        if (!$value) {
+            return ['key' => 'unknown', 'count' => 0];
+        }
+
+        $seconds = (int) abs($value->diffInSeconds(now()));
+        if ($seconds < 60) {
+            return ['key' => 'just_now', 'count' => 0];
+        }
+        if ($seconds < 3600) {
+            return ['key' => 'minutes', 'count' => max(1, (int) floor($seconds / 60))];
+        }
+        if ($seconds < 86400) {
+            return ['key' => 'hours', 'count' => max(1, (int) floor($seconds / 3600))];
+        }
+
+        return ['key' => 'days', 'count' => max(1, (int) floor($seconds / 86400))];
     }
 
     private function contains(string $value): string

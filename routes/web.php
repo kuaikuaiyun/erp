@@ -154,6 +154,7 @@ Route::get('/account-risk', [PaymentPortalController::class, 'accountRisk'])->na
 Route::post('/account-risk/accounts', [PaymentPortalController::class, 'storeAccountRiskAccount'])->name('payment.account-risk.accounts.store');
 Route::get('/account-risk/accounts/{account}/detail', [PaymentPortalController::class, 'accountRiskDetail'])->name('payment.account-risk.accounts.detail');
 Route::get('/product-risk-profit', [PaymentPortalController::class, 'productRiskProfit'])->name('payment.product-risk-profit.index');
+Route::get('/product-risk-profit/tab', [PaymentPortalController::class, 'productRiskProfitTab'])->name('payment.product-risk-profit.tab');
 Route::get('/product-risk-profit/detail', [PaymentPortalController::class, 'productRiskProfitDetail'])->name('payment.product-risk-profit.detail');
 Route::get('/product-alerts', [PaymentPortalController::class, 'productAlerts'])->name('payment.product-alerts.index');
 Route::put('/product-alerts/rules', [PaymentPortalController::class, 'updateProductAlertRules'])->name('payment.product-alerts.rules.update');
