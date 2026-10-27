@@ -10,8 +10,10 @@
         'detailUrl' => route('warehouse.product-statistics.detail'),
         'fillUrl' => route('warehouse.product-statistics.fill-weight-exceptions'),
         'refreshWeightUrl' => route('warehouse.product-statistics.refresh-weights'),
+        'linkSkuImagesUrl' => route('warehouse.product-statistics.link-sku-images'),
         'linkSkuImageUploadUrl' => route('warehouse.product-statistics.link-sku-images.upload'),
         'linkSkuImageDeleteUrl' => route('warehouse.product-statistics.link-sku-images.delete'),
+        'approveUrl' => route('warehouse.product-statistics.approve'),
         'rejectReasons' => $rejectReasonOptions,
         'sort' => $filters['sort'],
         'direction' => $filters['direction'],
@@ -169,18 +171,20 @@
         .wh-fill-item-images .wh-fill-physical-preview {
             width: 72px; min-width: 72px; height: 72px;
         }
-        /* 5 列布局：产品信息 | PCL 编号 | SKU与重量 | 实拍图 | 操作 */
+        /* 6 列布局：产品信息 | PCL 编号 | SKU与重量 | 实拍图 | 审核状态 | 操作 */
         #warehouse-product-statistics-table { min-width: 0 !important; width: 100%; table-layout: fixed; }
         #warehouse-product-statistics-table th:nth-child(1),
-        #warehouse-product-statistics-table td:nth-child(1) { width: 28%; min-width: 0; }
+        #warehouse-product-statistics-table td:nth-child(1) { width: 24%; min-width: 0; }
         #warehouse-product-statistics-table th:nth-child(2),
-        #warehouse-product-statistics-table td:nth-child(2) { width: 150px; min-width: 150px; }
+        #warehouse-product-statistics-table td:nth-child(2) { width: 130px; min-width: 130px; }
         #warehouse-product-statistics-table th:nth-child(3),
-        #warehouse-product-statistics-table td:nth-child(3) { width: 250px; min-width: 250px; }
+        #warehouse-product-statistics-table td:nth-child(3) { width: 240px; min-width: 240px; }
         #warehouse-product-statistics-table th:nth-child(4),
-        #warehouse-product-statistics-table td:nth-child(4) { width: 210px; min-width: 210px; }
+        #warehouse-product-statistics-table td:nth-child(4) { width: 200px; min-width: 200px; }
         #warehouse-product-statistics-table th:nth-child(5),
-        #warehouse-product-statistics-table td:nth-child(5) { width: 150px; min-width: 150px; }
+        #warehouse-product-statistics-table td:nth-child(5) { width: 90px; min-width: 90px; }
+        #warehouse-product-statistics-table th:nth-child(6),
+        #warehouse-product-statistics-table td:nth-child(6) { width: 220px; min-width: 220px; }
         #warehouse-product-statistics-table td:nth-child(1) { overflow: hidden; }
         #warehouse-product-statistics-table td:nth-child(1) .product-statistics-product-cell { min-width: 0; }
         #warehouse-product-statistics-table td:nth-child(1) .product-statistics-product-meta { min-width: 0; }
@@ -189,7 +193,7 @@
             display: inline-block; max-width: 100%; overflow: hidden;
             text-overflow: ellipsis; vertical-align: middle;
         }
-        #warehouse-product-statistics-table td:nth-child(5) .btn { margin: 1px 1px; padding: 3px 7px; }
+        #warehouse-product-statistics-table td:nth-child(6) .btn { margin: 1px 1px; padding: 3px 7px; }
         /* 列表列：SKU 与重量 */
         #warehouse-product-statistics-table .product-statistics-variant-summary { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
         #warehouse-product-statistics-table .wh-count-badge { font-size: 11px; font-weight: 600; padding: 2px 7px; }
@@ -209,6 +213,24 @@
         }
         .wh-sku-weight-value.is-missing { background: #fdecea; color: #c62828; font-weight: 600; }
         .wh-sku-weight-more { font-size: 11px; color: #90a0b0; padding-left: 2px; }
+
+        /* 实拍图上传弹窗 */
+        .wh-upload-modal-images {
+            display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start;
+            margin-bottom: 12px; padding: 10px;
+            border: 1px solid #e6ebf2; border-radius: 6px; background: #fafbfc;
+            min-height: 60px;
+        }
+        .wh-upload-modal-images:empty::before {
+            content: '暂无已上传的实拍图'; color: #90a0b0; font-size: 12px;
+            display: block; width: 100%; text-align: center; padding: 12px 0;
+        }
+        .wh-upload-modal-images .wh-real-image-item { width: 72px; height: 72px; }
+        .wh-upload-modal-images .wh-real-image-thumb { width: 72px; height: 72px; }
+        .wh-upload-modal-notice {
+            margin: 10px 0 0; font-size: 12px; color: #90a0b0; text-align: center;
+        }
+        #wh-upload-zone { margin-top: 8px; }
     </style>
 @endpush
 
@@ -254,15 +276,16 @@
                     <thead>
                     <tr>
                         <th>{{ $labels['productInfo'] }}</th>
-                        <th style="width:150px;">{{ $labels['productCode'] }}</th>
-                        <th style="width:250px;">{{ $labels['specification'] }}</th>
-                        <th style="width:210px;">实拍图</th>
-                        <th class="product-statistics-operation-column" style="width:150px;">操作</th>
+                        <th style="width:130px;">{{ $labels['productCode'] }}</th>
+                        <th style="width:240px;">{{ $labels['specification'] }}</th>
+                        <th style="width:200px;">实拍图</th>
+                        <th style="width:90px;">审核状态</th>
+                        <th class="product-statistics-operation-column" style="width:220px;">操作</th>
                     </tr>
                     </thead>
                     <tbody id="warehouse-product-statistics-body">
                     @forelse($products as $product)
-                        <tr data-product-id="{{ $product['id'] }}">
+                        <tr data-product-id="{{ $product['id'] }}" data-pcl-code="{{ $product['product_code'] ?? '' }}">
                             <td>
                                 <div class="product-statistics-cell product-statistics-product-cell">
                                     @if(!empty($product['image_url']))
@@ -317,28 +340,29 @@
                                     @endif
                                 </div>
                             </td>
+                            {{-- 实拍图：只读显示，无图则空 --}}
                             <td class="wh-real-images-cell" data-pcl-code="{{ $product['product_code'] ?? '' }}" data-link-sku-id="{{ $product['link_sku_id'] ?? '' }}">
                                 <div class="wh-real-images-grid">
                                     @if(!empty($product['link_sku_images_urls']))
-                                        {{-- 已匹配实拍图：只读展示，不可删不可传 --}}
                                         @foreach($product['link_sku_images_urls'] as $idx => $url)
                                             <span class="wh-real-image-item">
                                                 <img src="{{ $url }}" alt="实拍图{{ $idx + 1 }}" class="wh-real-image-thumb erp-zoomable" loading="lazy" decoding="async" title="点击放大查看" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">
                                             </span>
                                         @endforeach
                                     @else
-                                        {{-- 无实拍图：可上传（点击 / 拖拽 / 粘贴） --}}
-                                        <div class="wh-upload-zone wh-upload-trigger" title="点击选择文件、拖拽图片到此处，或 Ctrl+V 粘贴">
-                                            <i class="fa fa-cloud-upload wh-upload-icon"></i>
-                                            <div class="wh-upload-hint-text">拖拽 / <strong>粘贴图片</strong> / 点击选择</div>
-                                            <button type="button" class="wh-paste-btn wh-paste-trigger" title="设为粘贴目标后 Ctrl+V 粘贴">
-                                                <i class="fa fa-clipboard wh-clip-icon"></i> 粘贴图片 <kbd>Ctrl+V</kbd>
-                                            </button>
-                                        </div>
-                                        <input type="file" name="image" accept="image/jpeg,image/jpg,image/png,image/webp" class="wh-real-image-input" style="display:none;">
+                                        <span class="text-muted" style="font-size:12px;">—</span>
                                     @endif
                                 </div>
                             </td>
+                            {{-- 审核状态 --}}
+                            <td>
+                                @if(($product['warehouse_review_status'] ?? 'pending') === 'approved')
+                                    <span class="label label-success">{{ $labels['reviewApproved'] }}</span>
+                                @else
+                                    <span class="label label-warning">{{ $labels['reviewPending'] }}</span>
+                                @endif
+                            </td>
+                            {{-- 操作 --}}
                             <td>
                                 @php
                                     $missingWeightSkus = collect($product['variant_skus'] ?? [])
@@ -352,7 +376,10 @@
                                     <i class="fa fa-eye"></i> {{ $labels['view'] }}
                                 </button>
                                 <button type="button" class="btn btn-warning btn-xs warehouse-product-statistics-fill-btn" data-product-id="{{ $product['id'] }}">
-                                    <i class="fa fa-pencil"></i> {{ $labels['fill'] }}
+                                    <i class="fa fa-exclamation-triangle"></i> {{ $labels['fill'] }}
+                                </button>
+                                <button type="button" class="btn btn-success btn-xs warehouse-product-statistics-approve-btn" data-pcl-code="{{ $product['product_code'] ?? '' }}" data-review-status="{{ $product['warehouse_review_status'] ?? 'pending' }}">
+                                    <i class="fa fa-check"></i> {{ $labels['approve'] }}
                                 </button>
                                 @if($missingWeightSkus->isNotEmpty())
                                     <button type="button" class="btn btn-info btn-xs warehouse-product-statistics-refresh-weight-btn"
@@ -365,7 +392,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="5" class="product-statistics-empty-row text-center text-muted">
+                            <td colspan="6" class="product-statistics-empty-row text-center text-muted">
                                 <i class="fa fa-search"></i> {{ $labels['emptyRows'] }}
                             </td>
                         </tr>
@@ -440,6 +467,19 @@
                         </div>
                         <div id="warehouse-fill-body" class="wh-fill-list"></div>
                         <div id="warehouse-fill-empty" class="text-muted text-center" hidden>暂无规格记录</div>
+
+                        {{-- 实拍图（PCL 级别）--}}
+                        <div class="wh-fill-section-title" style="margin-top:14px;">实拍图</div>
+                        <div class="wh-upload-modal-images" id="wh-fill-real-images"></div>
+                        <div class="wh-upload-zone" id="wh-fill-real-upload">
+                            <i class="fa fa-cloud-upload wh-upload-icon"></i>
+                            <div class="wh-upload-hint-text">拖拽图片到这里、粘贴图片，或<strong>点击选择文件</strong></div>
+                            <button type="button" class="wh-paste-btn" id="wh-fill-real-paste">
+                                <i class="fa fa-clipboard wh-clip-icon"></i> 粘贴图片 <kbd>Ctrl+V</kbd>
+                            </button>
+                            <input type="file" id="wh-fill-real-file" accept="image/jpeg,image/jpg,image/png,image/webp" multiple style="display:none;">
+                        </div>
+                        <p class="wh-upload-modal-notice">可多张上传实拍图，保存后追加到链接图片中。</p>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -456,236 +496,56 @@
     <script>
         window.__warehouseProductStatisticsConfig = @json($warehouseProductStatisticsConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/warehouse-product-statistics.js?v=20261026-5"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/warehouse-product-statistics.js?v=20261027-1"></script>
     <script>
-        // 实拍图上传/删除/粘贴/拖拽交互（参考 PCL SKU 管理）
+        // 审核通过
         (function () {
             var cfg = window.__warehouseProductStatisticsConfig || {};
-            var uploadUrl = cfg.linkSkuImageUploadUrl || '';
-            var deleteUrl = cfg.linkSkuImageDeleteUrl || '';
-            var IMAGE_MIMES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-            var TARGET_TIMEOUT = null;
+            var approveUrl = cfg.approveUrl || '';
 
             function csrfToken() {
                 var meta = document.querySelector('meta[name="csrf-token"]');
                 return meta ? (meta.getAttribute('content') || '') : '';
             }
 
-            function setPasteTarget(cell) {
-                clearTimeout(TARGET_TIMEOUT);
-                // 清掉旧的高亮
-                document.querySelectorAll('.wh-real-images-cell.is-paste-target').forEach(function (c) {
-                    c.classList.remove('is-paste-target');
-                    var zone = c.querySelector('.wh-upload-zone');
-                    if (zone) zone.classList.remove('is-paste-target');
-                });
-                cell.classList.add('is-paste-target');
-                var zone = cell.querySelector('.wh-upload-zone');
-                if (zone) zone.classList.add('is-paste-target');
-                // 自动过期
-                TARGET_TIMEOUT = setTimeout(function () {
-                    cell.classList.remove('is-paste-target');
-                    if (zone) zone.classList.remove('is-paste-target');
-                }, 10000);
+            function rowOf(btn) {
+                return btn && btn.closest ? btn.closest('tr') : null;
             }
 
-            function clearPasteTarget() {
-                clearTimeout(TARGET_TIMEOUT);
-                document.querySelectorAll('.wh-real-images-cell.is-paste-target').forEach(function (c) {
-                    c.classList.remove('is-paste-target');
-                    var zone = c.querySelector('.wh-upload-zone');
-                    if (zone) zone.classList.remove('is-paste-target');
-                });
+            function renderReviewStatus(row, status) {
+                var td = row.querySelectorAll('td')[4];
+                if (!td) return;
+                td.innerHTML = status === 'approved'
+                    ? '<span class="label label-success">已审核</span>'
+                    : '<span class="label label-warning">待审核</span>';
             }
 
-            function uploadImage(pclCode, file, onDone) {
+            document.addEventListener('click', function (e) {
+                var approveBtn = e.target.closest('.warehouse-product-statistics-approve-btn');
+                if (!approveBtn) return;
+                e.preventDefault();
+                var row = rowOf(approveBtn);
+                var pclCode = row ? (row.getAttribute('data-pcl-code') || '') : '';
                 if (!pclCode) { alert('缺少 PCL 编号'); return; }
-                if (!file || IMAGE_MIMES.indexOf(file.type) === -1) {
-                    alert('请上传 jpg/png/webp 格式的图片'); return;
-                }
-                if (file.size > 5 * 1024 * 1024) {
-                    alert('图片大小不能超过 5MB'); return;
-                }
-                var fd = new FormData();
-                fd.append('_token', csrfToken());
-                fd.append('pcl_code', pclCode);
-                fd.append('image', file);
-                fetch(uploadUrl, {
-                    method: 'POST', body: fd,
-                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
-                })
-                .then(function (res) {
-                    return res.json().then(function (data) {
-                        if (!res.ok) throw new Error(data.message || '上传失败');
-                        return data;
-                    });
-                })
-                .then(onDone)
-                .catch(function (err) { alert('上传失败：' + (err.message || '未知错误')); });
-            }
-
-            function uploadMany(pclCode, files, cell) {
-                if (!files || !files.length) return;
-                var remaining = Array.prototype.filter.call(files, function (f) {
-                    return IMAGE_MIMES.indexOf(f.type) !== -1;
-                });
-                if (!remaining.length) { alert('请上传 jpg/png/webp 格式的图片'); return; }
-                var next = remaining.shift();
-                uploadImage(pclCode, next, function (data) {
-                    renderImages(cell, data.images || [], data.link_sku_id);
-                    if (remaining.length) uploadMany(pclCode, remaining, cell);
-                });
-            }
-
-            function renderImages(cell, images, linkSkuId) {
-                cell.setAttribute('data-link-sku-id', linkSkuId || '');
-                var grid = cell.querySelector('.wh-real-images-grid');
-                if (!grid) return;
-                var urls = images.map(function (_, i) {
-                    return '/link-sku-manager/' + linkSkuId + '/images/' + i;
-                });
-                grid.innerHTML = '';
-                // 只渲染图片（只读），不再附加上传区——有图即锁定
-                images.forEach(function (imgPath, idx) {
-                    var item = document.createElement('span');
-                    item.className = 'wh-real-image-item';
-                    item.innerHTML = '<img src="' + urls[idx] + '" alt="实拍图' + (idx + 1) + '" class="wh-real-image-thumb erp-zoomable" loading="lazy" decoding="async" title="点击放大查看" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">';
-                    grid.appendChild(item);
-                });
-            }
-
-            // ==== 点击虚线上传区 → 触发隐藏 input（排除点击粘贴按钮）====
-            document.addEventListener('click', function (e) {
-                var pasteBtn = e.target.closest('.wh-paste-trigger');
-                if (pasteBtn) return; // 粘贴按钮自己处理
-                var trigger = e.target.closest('.wh-upload-trigger');
-                if (!trigger) return;
-                var cell = trigger.closest('.wh-real-images-cell');
-                if (!cell) return;
-                var input = cell.querySelector('.wh-real-image-input');
-                if (!input) return;
-                input.click();
-            });
-
-            // ==== change：文件选择后上传 ====
-            document.addEventListener('change', function (e) {
-                var input = e.target.closest('.wh-real-image-input');
-                if (!input || !input.files || !input.files[0]) return;
-                var cell = input.closest('.wh-real-images-cell');
-                if (!cell) return;
-                var pclCode = cell.getAttribute('data-pcl-code') || '';
-                uploadMany(pclCode, input.files, cell);
-                input.value = '';
-            });
-
-            // ==== 粘贴 ====
-            document.addEventListener('paste', function (e) {
-                var cell = document.querySelector('.wh-real-images-cell.is-paste-target');
-                if (!cell) return;
-                var clipboard = e.clipboardData || window.clipboardData;
-                if (!clipboard) return;
-                var files = [];
-                for (var i = 0; i < clipboard.items.length; i++) {
-                    if (clipboard.items[i].kind === 'file') {
-                        var f = clipboard.items[i].getAsFile();
-                        if (f && IMAGE_MIMES.indexOf(f.type) !== -1) files.push(f);
-                    }
-                }
-                if (!files.length) return;
-                e.preventDefault();
-                var pclCode = cell.getAttribute('data-pcl-code') || '';
-                uploadMany(pclCode, files, cell);
-            });
-
-            // ==== 点击粘贴按钮 / 上传区域 → 设为粘贴目标 ====
-            document.addEventListener('click', function (e) {
-                var btn = e.target.closest('.wh-paste-trigger');
-                if (btn) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    var cell = btn.closest('.wh-real-images-cell');
-                    if (!cell) return;
-                    setPasteTarget(cell);
-                    // 聚焦文档确保 Ctrl+V 有效
-                    document.activeElement && document.activeElement.blur();
-                    return;
-                }
-                // 点击 upload zone 的文字区域也设为粘贴目标（文件选择靠 input）
-                var zone = e.target.closest('.wh-upload-zone');
-                if (zone && !e.target.closest('.wh-real-image-input')) {
-                    var cell = zone.closest('.wh-real-images-cell');
-                    if (!cell) return;
-                    setPasteTarget(cell);
-                }
-            });
-
-            // ==== 拖拽进入 ====
-            document.addEventListener('dragenter', function (e) {
-                var zone = e.target.closest('.wh-upload-zone');
-                if (!zone) return;
-                if (e.dataTransfer && e.dataTransfer.types && Array.prototype.indexOf.call(e.dataTransfer.types, 'Files') !== -1) {
-                    zone.classList.add('is-active');
-                    e.preventDefault();
-                }
-            });
-            document.addEventListener('dragover', function (e) {
-                var zone = e.target.closest('.wh-upload-zone');
-                if (!zone) return;
-                if (e.dataTransfer && e.dataTransfer.types && Array.prototype.indexOf.call(e.dataTransfer.types, 'Files') !== -1) {
-                    e.preventDefault();
-                }
-            });
-            document.addEventListener('dragleave', function (e) {
-                var zone = e.target.closest('.wh-upload-zone');
-                if (!zone) return;
-                if (zone.contains(e.relatedTarget)) return;
-                zone.classList.remove('is-active');
-            });
-            document.addEventListener('drop', function (e) {
-                var zone = e.target.closest('.wh-upload-zone');
-                if (!zone) return;
-                zone.classList.remove('is-active');
-                e.preventDefault();
-                var cell = zone.closest('.wh-real-images-cell');
-                if (!cell) return;
-                var pclCode = cell.getAttribute('data-pcl-code') || '';
-                var files = e.dataTransfer ? e.dataTransfer.files : null;
-                if (!files || !files.length) return;
-                uploadMany(pclCode, files, cell);
-            });
-
-            // ==== 删除 ====
-            document.addEventListener('click', function (e) {
-                var btn = e.target.closest('.wh-real-image-delete');
-                if (!btn) return;
-                var cell = btn.closest('.wh-real-images-cell');
-                if (!cell) return;
-                var pclCode = cell.getAttribute('data-pcl-code') || '';
-                var index = parseInt(btn.getAttribute('data-index'), 10);
-                if (!pclCode || isNaN(index)) return;
-                if (!confirm('确定要删除这张实拍图吗？')) return;
+                if (!confirm('确认审核通过？')) return;
+                approveBtn.disabled = true;
                 var body = '_token=' + encodeURIComponent(csrfToken())
-                    + '&pcl_code=' + encodeURIComponent(pclCode)
-                    + '&index=' + index;
-                fetch(deleteUrl, {
+                    + '&pcl_code=' + encodeURIComponent(pclCode);
+                fetch(approveUrl, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'X-HTTP-Method-Override': 'DELETE'
-                    },
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
                     body: body
-                })
-                .then(function (res) {
+                }).then(function (res) {
                     return res.json().then(function (data) {
-                        if (!res.ok) throw new Error(data.message || '删除失败');
+                        if (!res.ok) throw new Error(data.message || '操作失败');
                         return data;
                     });
-                })
-                .then(function (data) {
-                    renderImages(cell, data.images || [], data.link_sku_id || cell.getAttribute('data-link-sku-id'));
-                })
-                .catch(function (err) { alert('删除失败：' + (err.message || '未知错误')); });
+                }).then(function () {
+                    approveBtn.setAttribute('data-review-status', 'approved');
+                    if (row) renderReviewStatus(row, 'approved');
+                }).catch(function (err) {
+                    alert('审核失败：' + (err.message || '未知错误'));
+                }).finally(function () { approveBtn.disabled = false; });
             });
         })();
     </script>
