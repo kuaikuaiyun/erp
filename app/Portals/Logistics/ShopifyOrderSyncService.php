@@ -414,6 +414,7 @@ GRAPHQL, [
             'operator_name' => $isAssigned ? $store->user_name : null,
             'group_names' => $isAssigned ? AssistantDomainStore::displayMultiValue($store->team) : null,
             'staff_status' => $isAssigned ? '正常' : '—',
+            'media_source' => LogisticsOrder::mediaSourceFromTags($payload['tags'] ?? []),
             'buyer_name' => $this->incoming($this->buyerName($payload), $current->buyer_name),
             'buyer_email' => $this->incoming($payload['email'] ?? Arr::get($payload, 'customer.email'), $current->buyer_email),
             'buyer_phone' => $this->incoming($payload['phone'] ?? Arr::get($payload, 'shippingAddress.phone') ?? Arr::get($payload, 'customer.phone'), $current->buyer_phone),

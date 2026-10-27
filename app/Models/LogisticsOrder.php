@@ -8,6 +8,23 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class LogisticsOrder extends Model
 {
+    public const MEDIA_SOURCE_OTHER = '其他';
+
+    public const MEDIA_SOURCES = [
+        'mintegral' => 'Mintegral',
+        'applovin' => 'AppLovin',
+        'google' => 'Google',
+        'snapchat' => 'Snapchat',
+        'mediago' => 'MediaGo',
+        'smartnews' => 'SmartNews',
+        'pinterest' => 'Pinterest',
+        'brainx' => 'BrainX',
+        'bigo' => 'Bigo',
+        'newsbreak' => 'NewsBreak',
+        'facebook' => 'Facebook',
+        'tiktok' => 'TikTok',
+    ];
+
     public const STATUS_PENDING_AUTHORIZATION = '待授权';
     public const STATUS_PENDING_TONGTU = '已同步待匹配';
     public const STATUS_NORMAL = '正常数据';
@@ -38,7 +55,7 @@ class LogisticsOrder extends Model
 
     protected $fillable = [
         'assistant_domain_store_id', 'source_shop_domain', 'shopify_order_id', 'shopify_order_number', 'tongtu_order_number',
-        'store_name', 'department_name', 'operator_name', 'group_names', 'staff_status',
+        'store_name', 'department_name', 'operator_name', 'group_names', 'staff_status', 'media_source',
         'buyer_name', 'buyer_email', 'buyer_phone', 'is_add_on', 'subscription_type',
         'subscription_origin_order_id', 'subscription_status', 'tongtu_sku', 'tongtu_product_code', 'tongtu_product_name',
         'sale_quantity', 'sale_product_weight', 'payment_status', 'payment_method', 'payment_gateway', 'paid_amount_usd',
@@ -64,6 +81,24 @@ class LogisticsOrder extends Model
         $this->setConnection(config('admin.database.connection') ?: config('database.default'));
 
         parent::__construct($attributes);
+    }
+
+    public static function mediaSourceFromTags(mixed $tags): string
+    {
+        if (is_string($tags)) {
+            $tags = preg_split('/[,，;；|]+/u', $tags) ?: [];
+        }
+
+        foreach ((array) $tags as $tag) {
+            $normalised = mb_strtolower((string) preg_replace('/[^\pL\pN]+/u', '', (string) $tag));
+            foreach (self::MEDIA_SOURCES as $needle => $label) {
+                if ($normalised !== '' && str_contains($normalised, $needle)) {
+                    return $label;
+                }
+            }
+        }
+
+        return self::MEDIA_SOURCE_OTHER;
     }
 
     protected function casts(): array
