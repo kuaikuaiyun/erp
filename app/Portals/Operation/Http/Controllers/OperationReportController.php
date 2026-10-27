@@ -73,6 +73,30 @@ class OperationReportController extends Controller
             ->orderBy('media_source')
             ->get();
 
+        $identityRowspans = [];
+        for ($index = 0, $rowCount = $rows->count(); $index < $rowCount; $index++) {
+            $row = $rows[$index];
+            $identityKey = [$row->order_date, $row->operator_name, $row->shop_domain];
+
+            if ($index > 0) {
+                $previous = $rows[$index - 1];
+                if ($identityKey === [$previous->order_date, $previous->operator_name, $previous->shop_domain]) {
+                    $identityRowspans[$index] = 0;
+                    continue;
+                }
+            }
+
+            $rowspan = 1;
+            while ($index + $rowspan < $rowCount) {
+                $next = $rows[$index + $rowspan];
+                if ($identityKey !== [$next->order_date, $next->operator_name, $next->shop_domain]) {
+                    break;
+                }
+                $rowspan++;
+            }
+            $identityRowspans[$index] = $rowspan;
+        }
+
         $totals = [
             'first_subscription_orders' => $rows->sum('first_subscription_orders'),
             'first_subscription_revenue' => $rows->sum('first_subscription_revenue'),
@@ -88,6 +112,7 @@ class OperationReportController extends Controller
             'portal' => $context['portal']->load('menus'),
             'user' => $context['user'],
             'rows' => $rows,
+            'identityRowspans' => $identityRowspans,
             'totals' => $totals,
             'filters' => ['date_from' => $dateFrom, 'date_to' => $dateTo, 'media_source' => $mediaSource],
             'mediaSources' => array_values([...LogisticsOrder::MEDIA_SOURCES, LogisticsOrder::MEDIA_SOURCE_OTHER]),
