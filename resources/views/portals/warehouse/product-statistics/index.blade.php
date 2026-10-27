@@ -289,7 +289,7 @@
                             <td>
                                 <div class="product-statistics-cell product-statistics-product-cell">
                                     @if(!empty($product['image_url']))
-                                        <img src="{{ $product['image_url'] }}" alt="{{ $product['name'] }}" class="product-statistics-thumb" loading="lazy" decoding="async">
+                                        <img src="{{ $product['image_url'] }}" alt="{{ $product['name'] }}" class="product-statistics-thumb erp-zoomable" loading="lazy" decoding="async" title="点击放大查看" style="cursor:zoom-in;" onclick="window.erpZoomOpen && window.erpZoomOpen(this.src); return false;">
                                     @endif
                                     <div class="product-statistics-product-meta">
                                         <strong class="product-statistics-product-name" title="{{ $product['name'] }}">{{ $product['name'] }}</strong>
