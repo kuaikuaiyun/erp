@@ -58,6 +58,7 @@ Route::get('/product-request-dedupe', [ProductRequestController::class, 'operati
 Route::get('/operation/domain-stores', [OperationDomainStoreController::class, 'index'])->name('operation.domain-stores.index');
 Route::get('/operation/ai-product-library', [OperationAiProductLibraryController::class, 'index'])->name('operation.ai-product-library.index');
 Route::get('/operation/reports', [OperationReportController::class, 'index'])->name('operation.reports.index');
+Route::get('/operation/reports/export', [OperationReportController::class, 'export'])->name('operation.reports.export');
 Route::get('/operation/ai-product-library/{product}/detail', [OperationAiProductLibraryController::class, 'detail'])->name('operation.ai-product-library.detail');
 Route::get('/operation/ai-product-library/{product}/images/{imageIndex}', [OperationAiProductLibraryController::class, 'image'])->whereNumber('imageIndex')->name('operation.ai-product-library.images.show');
 Route::get('/operation/ai-product-library/{product}/package', [OperationAiProductLibraryController::class, 'downloadPackage'])->name('operation.ai-product-library.package.download');

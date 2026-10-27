@@ -10,7 +10,7 @@ class StreamedXlsxWriter
 {
     /**
      * @param list<array{label:string,width:float|int}> $columns
-     * @param callable():iterable<array{kind?:string,height?:float|int,outline?:int,cells:list<array{value:mixed,type?:string,align?:string,wrap?:bool}>}> $rows
+     * @param callable():iterable<array{kind?:string,height?:float|int,outline?:int,mergeDown?:array<int,int>,mergeAcross?:array<int,int>,cells:list<array{value:mixed,type?:string,align?:string,wrap?:bool}>}> $rows
      */
     public function response(
         string $filename,
@@ -52,7 +52,7 @@ class StreamedXlsxWriter
 
     /**
      * @param list<array{label:string,width:float|int}> $columns
-     * @param callable():iterable<array{kind?:string,height?:float|int,outline?:int,cells:list<array{value:mixed,type?:string,align?:string,wrap?:bool}>}> $rows
+     * @param callable():iterable<array{kind?:string,height?:float|int,outline?:int,mergeDown?:array<int,int>,mergeAcross?:array<int,int>,cells:list<array{value:mixed,type?:string,align?:string,wrap?:bool}>}> $rows
      */
     private function writeSheet(string $path, array $columns, callable $rows, bool $showGridlines): int
     {
@@ -81,6 +81,7 @@ class StreamedXlsxWriter
         fwrite($handle, '</row>');
 
         $rowNumber = 2;
+        $mergedRanges = [];
         foreach (($rows)() as $row) {
             $kind = in_array(($row['kind'] ?? 'normal'), ['normal', 'parent', 'variant'], true)
                 ? (string) ($row['kind'] ?? 'normal')
@@ -91,6 +92,25 @@ class StreamedXlsxWriter
             }
             if (($row['outline'] ?? 0) > 0) {
                 $attributes .= ' outlineLevel="'.min(7, (int) $row['outline']).'"';
+            }
+            foreach (($row['mergeDown'] ?? []) as $columnIndex => $span) {
+                $columnIndex = (int) $columnIndex;
+                $span = (int) $span;
+                if ($columnIndex < 0 || $columnIndex >= count($columns) || $span < 2) {
+                    continue;
+                }
+                $column = $this->columnName($columnIndex + 1);
+                $mergedRanges[] = $column.$rowNumber.':'.$column.($rowNumber + $span - 1);
+            }
+            foreach (($row['mergeAcross'] ?? []) as $columnIndex => $span) {
+                $columnIndex = (int) $columnIndex;
+                $span = (int) $span;
+                if ($columnIndex < 0 || $span < 2 || $columnIndex + $span > count($columns)) {
+                    continue;
+                }
+                $startColumn = $this->columnName($columnIndex + 1);
+                $endColumn = $this->columnName($columnIndex + $span);
+                $mergedRanges[] = $startColumn.$rowNumber.':'.$endColumn.$rowNumber;
             }
             fwrite($handle, '<row'.$attributes.'>');
             foreach ($columns as $index => $_column) {
@@ -116,7 +136,15 @@ class StreamedXlsxWriter
 
         $lastRow = max(1, $rowNumber - 1);
         $lastColumn = $this->columnName(count($columns));
-        fwrite($handle, '</sheetData><autoFilter ref="A1:'.$lastColumn.$lastRow.'"/>');
+        fwrite($handle, '</sheetData>');
+        if ($mergedRanges !== []) {
+            fwrite($handle, '<mergeCells count="'.count($mergedRanges).'">');
+            foreach ($mergedRanges as $range) {
+                fwrite($handle, '<mergeCell ref="'.$range.'"/>');
+            }
+            fwrite($handle, '</mergeCells>');
+        }
+        fwrite($handle, '<autoFilter ref="A1:'.$lastColumn.$lastRow.'"/>');
         fwrite($handle, '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>');
         fwrite($handle, '</worksheet>');
         fclose($handle);

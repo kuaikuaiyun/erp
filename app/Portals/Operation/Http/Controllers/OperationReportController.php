@@ -5,6 +5,7 @@ namespace App\Portals\Operation\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\LogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
+use App\Portals\Logistics\StreamedXlsxWriter;
 use App\Portals\ProductRequests\ProductRequestAccessService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -17,6 +18,7 @@ class OperationReportController extends Controller
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly ProductRequestAccessService $access,
+        private readonly StreamedXlsxWriter $xlsxWriter,
     ) {
     }
 
@@ -151,5 +153,92 @@ class OperationReportController extends Controller
             'shopOptions' => $shopOptions,
             'reportScopeLabel' => $canViewAllStores ? '全部店铺' : '我的已分配店铺',
         ]);
+    }
+
+    public function export(Request $request): Response
+    {
+        $report = $this->index($request);
+        if ($report instanceof Response) {
+            return $report;
+        }
+
+        $data = $report->getData();
+        $rows = $data['rows'];
+        $identityRowspans = $data['identityRowspans'];
+        $totals = $data['totals'];
+        $filters = $data['filters'];
+        $columns = [
+            ['label' => '日期', 'width' => 13],
+            ['label' => '人名', 'width' => 16],
+            ['label' => '店铺域名', 'width' => 32],
+            ['label' => '媒体', 'width' => 16],
+            ['label' => '首单订阅单量', 'width' => 16],
+            ['label' => '首单订阅营业额($)', 'width' => 20],
+            ['label' => '首单普通单量', 'width' => 16],
+            ['label' => '首单普通营业额($)', 'width' => 20],
+            ['label' => '首单合计单量', 'width' => 16],
+            ['label' => '首单合计营业额($)', 'width' => 20],
+            ['label' => '续费单量', 'width' => 14],
+            ['label' => '续费营业额($)', 'width' => 18],
+            ['label' => '续费费用($)', 'width' => 16],
+            ['label' => '总单量', 'width' => 13],
+            ['label' => '总营业额($)', 'width' => 18],
+        ];
+
+        return $this->xlsxWriter->response(
+            '运营报表_'.$filters['date_from'].'_'.$filters['date_to'].'_'.now('Asia/Shanghai')->format('His').'.xlsx',
+            '运营报表',
+            $columns,
+            static function () use ($rows, $identityRowspans, $totals): iterable {
+                $groupNumber = -1;
+                $rowKind = 'normal';
+                foreach ($rows as $index => $row) {
+                    $rowspan = (int) ($identityRowspans[$index] ?? 0);
+                    $isGroupStart = $rowspan > 0;
+                    if ($isGroupStart) {
+                        $groupNumber++;
+                        $rowKind = $groupNumber % 2 === 0 ? 'normal' : 'variant';
+                    }
+
+                    yield [
+                        'kind' => $rowKind,
+                        'height' => 25,
+                        'mergeDown' => $rowspan > 1 ? [0 => $rowspan, 1 => $rowspan, 2 => $rowspan] : [],
+                        'cells' => [
+                        ['value' => $isGroupStart ? $row->order_date : '', 'align' => 'center'],
+                        ['value' => $isGroupStart ? $row->operator_name : '', 'align' => 'center'],
+                        ['value' => $isGroupStart ? $row->shop_domain : '', 'align' => 'left'],
+                        ['value' => $row->media_source, 'align' => 'center'],
+                        ['value' => (int) $row->first_subscription_orders, 'type' => 'number', 'align' => 'center'],
+                        ['value' => (float) $row->first_subscription_revenue, 'type' => 'money', 'align' => 'right'],
+                        ['value' => (int) $row->first_normal_orders, 'type' => 'number', 'align' => 'center'],
+                        ['value' => (float) $row->first_normal_revenue, 'type' => 'money', 'align' => 'right'],
+                        ['value' => (int) $row->first_subscription_orders + (int) $row->first_normal_orders, 'type' => 'number', 'align' => 'center'],
+                        ['value' => (float) $row->first_subscription_revenue + (float) $row->first_normal_revenue, 'type' => 'money', 'align' => 'right'],
+                        ['value' => (int) $row->renewal_orders, 'type' => 'number', 'align' => 'center'],
+                        ['value' => (float) $row->renewal_revenue, 'type' => 'money', 'align' => 'right'],
+                        ['value' => 0, 'type' => 'money', 'align' => 'right'],
+                        ['value' => (int) $row->total_orders, 'type' => 'number', 'align' => 'center'],
+                        ['value' => (float) $row->total_revenue, 'type' => 'money', 'align' => 'right'],
+                    ]];
+                }
+
+                yield ['kind' => 'parent', 'height' => 28, 'mergeAcross' => [0 => 4], 'cells' => [
+                    ['value' => '合计', 'align' => 'center'], ['value' => ''], ['value' => ''], ['value' => ''],
+                    ['value' => (int) $totals['first_subscription_orders'], 'type' => 'number'],
+                    ['value' => (float) $totals['first_subscription_revenue'], 'type' => 'money'],
+                    ['value' => (int) $totals['first_normal_orders'], 'type' => 'number'],
+                    ['value' => (float) $totals['first_normal_revenue'], 'type' => 'money'],
+                    ['value' => (int) $totals['first_subscription_orders'] + (int) $totals['first_normal_orders'], 'type' => 'number'],
+                    ['value' => (float) $totals['first_subscription_revenue'] + (float) $totals['first_normal_revenue'], 'type' => 'money'],
+                    ['value' => (int) $totals['renewal_orders'], 'type' => 'number'],
+                    ['value' => (float) $totals['renewal_revenue'], 'type' => 'money'],
+                    ['value' => 0, 'type' => 'money'],
+                    ['value' => (int) $totals['total_orders'], 'type' => 'number'],
+                    ['value' => (float) $totals['total_revenue'], 'type' => 'money'],
+                ]];
+            },
+            false,
+        );
     }
 }
