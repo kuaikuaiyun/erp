@@ -47,6 +47,7 @@ class OperationReportMetricsService
         }
         $groups = [];
         $missingGuide = 0;
+        $missingGuideSkus = [];
         $missingWeight = 0;
 
         foreach ($orders as $order) {
@@ -89,6 +90,7 @@ class OperationReportMetricsService
                     $weight = $item->sale_weight_gram ?: $item->tongtu_goods_weight_gram ?: $mapping?->goods_weight_gram;
                     if ($guide === null || (float) $guide <= 0) {
                         $missingGuide++;
+                        $missingGuideSkus[] = $this->itemSku($item);
                     } else {
                         $row['first_purchase_cost'] += (float) $guide * $quantity;
                     }
@@ -128,10 +130,23 @@ class OperationReportMetricsService
         }
 
         $warnings = [];
-        if ($missingGuide > 0) $warnings[] = $missingGuide.' 个首单商品缺少指导价，采购费未包含这些商品。';
+        if ($missingGuide > 0) {
+            $skus = implode('、', array_values(array_unique($missingGuideSkus)));
+            $warnings[] = $missingGuide.' 个首单商品缺少指导价，采购费未包含这些商品。对应 SKU：'.$skus.'。';
+        }
         if ($missingWeight > 0) $warnings[] = $missingWeight.' 个首单商品缺少重量，运费可能偏低。';
 
         return ['rows' => $rows, 'totals' => $totals, 'warnings' => $warnings];
+    }
+
+    private function itemSku(object $item): string
+    {
+        foreach ([$item->shopify_sku, $item->tongtu_sku, $item->tongtu_product_code] as $sku) {
+            $sku = trim((string) $sku);
+            if ($sku !== '') return $sku;
+        }
+
+        return '未填写SKU（商品明细ID：'.$item->getKey().'）';
     }
 
     private function emptyRow(string $date, string $operator, string $domain, string $media): array
