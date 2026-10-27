@@ -20,7 +20,11 @@
 .payment-account-date-range .form-control { min-width: 0; padding-right: 7px; padding-left: 7px; }
 .payment-account-combobox { position: relative; z-index: 3; }
 .payment-account-combobox:focus-within { z-index: 35; }
-.payment-account-combobox .form-control { padding-right: 35px; }
+.payment-account-combobox .form-control { padding-right: 66px; }
+.payment-account-combobox-clear { position: absolute; top: 1px; right: 35px; width: 30px; height: 34px; border: 0; background: transparent; color: #8a9eaf; }
+.payment-account-combobox-clear[hidden] { display: none; }
+.payment-account-combobox-clear:hover,
+.payment-account-combobox-clear:focus { color: #d1535b; outline: 0; }
 .payment-account-combobox-toggle { position: absolute; top: 1px; right: 1px; width: 34px; height: 34px; border: 0; border-left: 1px solid #e1e9f0; border-radius: 0 5px 5px 0; background: #f8fbfe; color: #2f6d9f; }
 .payment-account-combobox-toggle:hover,
 .payment-account-combobox-toggle:focus { background: #edf6fd; color: #1f5f93; outline: 0; }
@@ -94,6 +98,17 @@
 .payment-account-risk-page .payment-text-action { padding: 0; border: 0; background: transparent; color: #2d6fd8; font-size: 11px; font-weight: 700; white-space: nowrap; }
 .payment-account-risk-page .payment-text-action:hover,
 .payment-account-risk-page .payment-text-action:focus { color: #2055ac; text-decoration: underline; }
+.payment-account-risk-page .payment-account-compact-footer { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px 14px; }
+.payment-account-risk-page .payment-account-compact-balance { display: grid; min-width: 0; gap: 8px; }
+.payment-account-risk-page .payment-account-compact-values { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 22px; }
+.payment-account-risk-page .payment-account-compact-balance p { display: inline-flex; align-items: baseline; gap: 4px; color: #617f98; white-space: nowrap; }
+.payment-account-risk-page .payment-account-compact-balance p strong { display: inline; color: #153f62; font-size: 12px; }
+.payment-account-risk-page .payment-account-compact-balance small { margin: 0; white-space: normal; line-height: 1.45; }
+.payment-account-risk-page .payment-account-compact-footer.is-stale small { color: #bc7410; }
+.payment-account-risk-page .payment-account-balance-pending { flex: 1 1 auto; color: #6d86a1 !important; }
+.payment-account-risk-page .payment-account-detail-button { flex: 0 0 auto; min-width: 76px; border-color: #cfdce7; border-radius: 4px; color: #2d6fd8; font-size: 10px; font-weight: 600; }
+.payment-account-risk-page .payment-account-detail-button:hover,
+.payment-account-risk-page .payment-account-detail-button:focus { border-color: #91b7d6; background: #f1f8fd; color: #2055ac; }
 .payment-account-risk-page .payment-empty-filter { margin: 15px 0 3px; color: #748ba2; font-size: 12px; text-align: center; }
 .payment-account-board-heading { align-items: center !important; }
 .payment-account-board-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; }
@@ -132,7 +147,7 @@
 .payment-detail-summary > div:last-child { border-right: 0; }
 .payment-detail-summary span { display: block; overflow: hidden; color: #6d879f; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .payment-detail-summary strong { display: block; margin-top: 4px; overflow: hidden; color: #113d65; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
-.payment-detail-tabs { display: flex; gap: 4px; padding: 0 4px; border-bottom: 1px solid #cfdde8; }
+.payment-detail-tabs { display: flex; gap: 4px; margin-bottom: 12px; padding: 0 4px; border-bottom: 1px solid #cfdde8; }
 .payment-detail-tabs button { padding: 9px 14px 8px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #658098; font-size: 12px; font-weight: 600; }
 .payment-detail-tabs button.active { border-bottom-color: #2788c9; color: #176ca7; }
 .payment-detail-filter { display: flex; gap: 8px; padding: 12px 0 0; }
@@ -265,6 +280,8 @@
     .payment-account-board-actions { align-items: flex-start; flex-direction: column; }
     .payment-account-risk-page .payment-merchant-card > header,
     .payment-account-risk-page .payment-merchant-card footer { align-items: flex-start; flex-direction: column; }
+    .payment-account-risk-page .payment-account-compact-footer { display: grid; grid-template-columns: 1fr; }
+    .payment-account-risk-page .payment-account-detail-button { justify-self: start; }
     .payment-account-detail-modal .modal-dialog { width: calc(100vw - 16px); margin: 8px auto; }
     .payment-detail-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .payment-detail-summary > div { border-bottom: 1px solid #e2ebf2; }
