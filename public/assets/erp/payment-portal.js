@@ -49,52 +49,6 @@
             notify('info', config.actionTitle, config.actionMessage);
         });
 
-        page.on('click', '[data-payment-alert-assignment]', function (event) {
-            event.stopPropagation();
-            var trigger = $(this);
-            var modal = $('#payment-alert-assignment-modal');
-            var form = modal.find('[data-payment-assignment-form]');
-            var assignment = trigger.data('assignment') || {};
-            var code = String(trigger.data('alertCode') || '');
-            form.attr('action', String(config.assignmentUrl || '').replace('__ALERT__', encodeURIComponent(code)));
-            form[0].reset();
-            modal.find('[data-payment-assignment-summary]').text(code + ' · ' + String(trigger.data('alertProduct') || ''));
-            modal.find('[name="department_id"]').val(assignment.department_id || '');
-            filterAssignmentUsers(assignment.assignee_id || '');
-            modal.find('[name="deadline_at"]').val(assignment.deadline_at || defaultAssignmentDeadline());
-            modal.find('[name="assignment_note"]').val(assignment.note || '');
-            modal.modal('show');
-        });
-
-        function defaultAssignmentDeadline() {
-            var date = new Date(Date.now() + 24 * 60 * 60 * 1000);
-            date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
-            return date.toISOString().slice(0, 16);
-        }
-
-        function filterAssignmentUsers(selectedUser) {
-            var modal = $('#payment-alert-assignment-modal');
-            var departmentId = String(modal.find('[data-payment-assignment-department]').val() || '');
-            var userSelect = modal.find('[data-payment-assignment-user]');
-            userSelect.find('option[data-department-id]').each(function () {
-                $(this).prop('hidden', String($(this).data('departmentId')) !== departmentId);
-            });
-            userSelect.val(selectedUser ? String(selectedUser) : '');
-            if (!userSelect.val()) userSelect.val('');
-        }
-
-        page.on('change', '[data-payment-assignment-department]', function () {
-            filterAssignmentUsers('');
-        });
-
-        page.on('click', '[data-payment-alert-rules]', function (event) {
-            event.stopPropagation();
-            $('#payment-alert-rules-modal').modal('show');
-        });
-        if (config.openAlertRules && $('#payment-alert-rules-modal').length) {
-            $('#payment-alert-rules-modal').modal('show');
-        }
-
         var alertDetailModal = $('#payment-alert-detail-modal');
         var alertDetailRequest = null;
         function openAlertDetail(url) {
@@ -115,7 +69,6 @@
             });
         }
         page.on('click', '[data-payment-alert-detail]', function (event) {
-            if ($(event.target).closest('[data-payment-alert-assignment]').length) return;
             event.preventDefault();
             event.stopPropagation();
             openAlertDetail(String($(this).data('paymentAlertDetail') || ''));
@@ -126,6 +79,19 @@
             openAlertDetail(String($(this).data('paymentAlertDetail') || ''));
         });
         alertDetailModal.on('hidden.bs.modal', function () { if (alertDetailRequest) alertDetailRequest.abort(); });
+
+        page.on('click', '[data-payment-alert-status]', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            var trigger = $(this);
+            var modal = $('#payment-alert-status-modal');
+            var form = modal.find('[data-payment-alert-status-form]');
+            form[0].reset();
+            form.attr('action', String(trigger.data('action') || ''));
+            form.find('[name="operation"]').val(String(trigger.data('operation') || ''));
+            modal.find('[data-payment-alert-status-summary]').text(String(trigger.data('product') || '') + ' · ' + $.trim(trigger.text()));
+            modal.modal('show');
+        });
 
         page.on('submit', '[data-payment-quick-search]', function (event) {
             event.preventDefault();
@@ -555,6 +521,72 @@
                 return overviewKpis(summary, exceptions) + '<div class="payment-detail-overview-two">' + overviewFunds(summary) + overviewRisk(summary, exceptions) + '</div><div class="payment-detail-overview-bottom">' + trendChart(payload.trend || []) + overviewTasks(exceptions) + '</div>';
             }
 
+            function renderOrderAnalysis(analysis, summary) {
+                var text = detailText.order_analysis || {};
+                var formulas = text.formulas || {};
+                var groups = analysis.groups || [];
+                summary = summary || {};
+                if (!groups.length && Number(summary.order_count || 0) > 0) {
+                    groups = [{
+                        key: 'unmatched', renewal_number: null, unmatched: true,
+                        order_count: Number(summary.order_count || 0),
+                        received_amount: Number(summary.paid_amount || 0),
+                        refund_amount: Number(summary.refund_amount || 0),
+                        refund_rate: Number(summary.refund_amount_rate || 0),
+                        dispute_count: Number(summary.dispute_order_count || 0),
+                        dispute_rate: Number(summary.dispute_rate || 0),
+                        realised_loss: Number(summary.refund_amount || 0)
+                    }];
+                    analysis.total_orders = Number(summary.order_count || 0);
+                    analysis.classified_orders = 0;
+                    analysis.unmatched_orders = Number(summary.order_count || 0);
+                }
+                if (!groups.length) {
+                    return '<div class="payment-detail-empty">' + escapeHtml(text.empty || detailText.empty) + '</div>';
+                }
+                function renderAnalysisCard(group, showConnector, stageNumber) {
+                    var title = group.key === 'one_time' ? text.one_time : (group.key === 'first_charge' ? text.first_charge : (group.key === 'unmatched' ? text.unmatched : replaceTokens(text.renewal, { count: group.renewal_number })));
+                    var tone = group.key === 'unmatched' ? ' is-unmatched' : '';
+                    var refundFormula = replaceTokens(formulas.refund_rate, { refund: '$' + formatNumber(group.refund_amount, 2), received: '$' + formatNumber(group.received_amount, 2) });
+                    var disputeFormula = replaceTokens(formulas.dispute_rate, { disputes: formatNumber(group.dispute_count, 0), orders: formatNumber(group.order_count, 0) });
+                    var lossFormula = replaceTokens(formulas.realised_loss, { refund: '$' + formatNumber(group.refund_amount, 2) });
+                    var connector = '';
+                    if (showConnector && group.churn) {
+                        var churnFormula = replaceTokens(formulas.churn_rate, {
+                            previous: formatNumber(group.churn.previous_count, 0),
+                            current: formatNumber(group.churn.current_count, 0),
+                            lost: formatNumber(group.churn.lost_count, 0)
+                        });
+                        var churnValue = group.churn.has_growth
+                            ? escapeHtml(text.churn_growth)
+                            : escapeHtml(replaceTokens(text.churn_value, { count: formatNumber(group.churn.lost_count, 0), rate: formatNumber(group.churn.lost_rate, 2) }));
+                        var churnTone = group.churn.has_growth ? ' has-growth' : (Number(group.churn.lost_rate || 0) >= 50 ? ' is-high' : ' is-moderate');
+                        connector = '<div class="payment-order-analysis-connector' + churnTone + '"><span class="payment-order-analysis-arrow"><i class="fa fa-long-arrow-down" aria-hidden="true"></i></span><span class="payment-order-analysis-churn"><strong>' + escapeHtml(text.churn_label) + formulaIcon(churnFormula) + '</strong><b>' + churnValue + '</b></span></div>';
+                    }
+                    var stageBadge = stageNumber ? '<span class="payment-order-analysis-stage">' + escapeHtml(replaceTokens(text.stage_badge, { count: stageNumber })) + '</span>' : '';
+                    return connector + '<article class="payment-order-analysis-card' + tone + '"><header><div class="payment-order-analysis-title">' + stageBadge + '<h5>' + escapeHtml(title) + '</h5></div>' + (group.key === 'unmatched' ? '<span><i class="fa fa-exclamation-circle"></i> ' + escapeHtml(text.unmatched) + '</span>' : '') + '</header><strong class="payment-order-analysis-total"><small>' + escapeHtml(text.orders_amount) + '</small>' + escapeHtml(formatNumber(group.order_count, 0) + ' ' + text.record_unit + ' / $' + formatNumber(group.received_amount, 2)) + '</strong>' + (group.key === 'unmatched' ? '<p class="payment-order-analysis-note">' + escapeHtml(text.unmatched_note) + '</p>' : '') + '<dl><div><dt>' + escapeHtml(text.refund_rate) + formulaIcon(refundFormula) + '</dt><dd>' + escapeHtml(formatNumber(group.refund_rate, 2) + '%') + '</dd></div><div><dt>' + escapeHtml(text.dispute_rate) + formulaIcon(disputeFormula) + '</dt><dd>' + escapeHtml(formatNumber(group.dispute_count, 0) + ' / ' + formatNumber(group.dispute_rate, 2) + '%') + '</dd></div><div><dt>' + escapeHtml(text.realised_loss) + formulaIcon(lossFormula) + '</dt><dd>' + escapeHtml('$' + formatNumber(group.realised_loss, 2)) + '</dd></div></dl></article>';
+                }
+                var oneTimeGroups = groups.filter(function (group) { return group.key === 'one_time'; });
+                var subscriptionGroups = groups.filter(function (group) { return group.key === 'first_charge' || String(group.key || '').indexOf('renewal_') === 0; });
+                var unmatchedGroups = groups.filter(function (group) { return group.key === 'unmatched'; });
+                var sections = [];
+                if (oneTimeGroups.length) {
+                    sections.push('<section class="payment-order-analysis-section"><div class="payment-order-analysis-heading"><div><h4>' + escapeHtml(text.one_time_section) + '</h4><p>' + escapeHtml(text.one_time_section_note) + '</p></div></div><div class="payment-order-analysis-grid">' + oneTimeGroups.map(function (group) { return renderAnalysisCard(group, false); }).join('') + '</div></section>');
+                }
+                if (subscriptionGroups.length) {
+                    sections.push('<section class="payment-order-analysis-section is-subscription"><div class="payment-order-analysis-heading"><div><h4>' + escapeHtml(text.subscription_section) + '</h4><p>' + escapeHtml(text.subscription_section_note) + '</p></div><span>' + escapeHtml(text.period_scope) + '</span></div><div class="payment-order-analysis-grid">' + subscriptionGroups.map(function (group, index) { return renderAnalysisCard(group, true, index + 1); }).join('') + '</div></section>');
+                }
+                if (unmatchedGroups.length) {
+                    sections.push('<section class="payment-order-analysis-section is-unmatched-section"><div class="payment-order-analysis-heading"><div><h4>' + escapeHtml(text.unmatched_section) + '</h4><p>' + escapeHtml(text.unmatched_section_note) + '</p></div></div><div class="payment-order-analysis-grid">' + unmatchedGroups.map(function (group) { return renderAnalysisCard(group, false); }).join('') + '</div></section>');
+                }
+                var reconciliation = replaceTokens(text.reconciliation, {
+                    classified: formatNumber(analysis.classified_orders, 0),
+                    unmatched: formatNumber(analysis.unmatched_orders, 0),
+                    total: formatNumber(analysis.total_orders, 0)
+                });
+                return '<div class="payment-order-analysis-layout">' + sections.join('') + '</div><p class="payment-order-analysis-reconciliation"><i class="fa fa-check-circle"></i> ' + escapeHtml(reconciliation) + '</p>';
+            }
+
             function renderFunding(summary) {
                 var text = detailText.funding || {};
                 var balance = summary.official_balance || null;
@@ -669,13 +701,13 @@
                     detailState.request.abort();
                 }
                 detailState.request = $.getJSON(url, query).done(function (payload) {
-                    var isDashboard = detailState.tab === 'overview' || detailState.tab === 'funding';
+                    var isDashboard = detailState.tab === 'overview' || detailState.tab === 'order_analysis' || detailState.tab === 'funding';
                     var rows = isDashboard ? [] : ((payload.rows || {}).data || []);
                     detailState.disputeRows = detailState.tab === 'disputes' ? rows : [];
                     detailModal.find('[data-payment-detail-summary]').prop('hidden', isDashboard);
                     renderSummary(payload.summary || {});
                     detailModal.find('[data-payment-detail-body]').toggleClass('payment-detail-dashboard-body', isDashboard).toggleClass('payment-detail-dispute-body', detailState.tab === 'disputes').html(
-                        detailState.tab === 'overview' ? renderOverview(payload) : (detailState.tab === 'funding' ? renderFunding(payload.summary || {}) : (detailState.tab === 'disputes' ? renderDisputes(rows, (payload.rows || {}).meta, 0) : renderTable(rows, detailState.tab)))
+                        detailState.tab === 'overview' ? renderOverview(payload) : (detailState.tab === 'order_analysis' ? renderOrderAnalysis(payload.order_analysis || {}, payload.summary || {}) : (detailState.tab === 'funding' ? renderFunding(payload.summary || {}) : (detailState.tab === 'disputes' ? renderDisputes(rows, (payload.rows || {}).meta, 0) : renderTable(rows, detailState.tab))))
                     );
                     renderPagination(isDashboard ? null : (payload.rows || {}).meta);
                     initFormulaTooltips(detailModal);
@@ -705,7 +737,7 @@
                 detailState.page = 1;
                 detailModal.find('[data-payment-detail-tab]').removeClass('active').attr('aria-selected', 'false');
                 $(this).addClass('active').attr('aria-selected', 'true');
-                detailModal.find('[data-payment-detail-filter]').prop('hidden', detailState.tab === 'overview' || detailState.tab === 'funding');
+                detailModal.find('[data-payment-detail-filter]').prop('hidden', detailState.tab === 'overview' || detailState.tab === 'order_analysis' || detailState.tab === 'funding');
                 loadDetail();
             });
             detailModal.on('submit', '[data-payment-detail-filter]', function (event) {
@@ -818,16 +850,25 @@
                 var formulas = text.formulas || {};
                 var groups = detail.groups || {};
                 var order = ['one_time', 'first_charge', 'first_renewal', 'later_renewal'];
+                var previousSubscriptionCount = null;
                 var cards = order.map(function (key) {
                     var group = groups[key] || {};
-                    return '<article class="payment-lifecycle-card"><h4>' + pEscape((text.groups || {})[key]) + '</h4><strong>' + pEscape(pNumber(group.order_count)) + ' ' + pEscape((productText.overview || {}).record) + ' / ' + pEscape(pMoney(group.received_amount)) + '</strong><dl><div><dt>' + pEscape(text.refund_rate) + formulaIcon(replaceProductTokens(formulas.refund_rate, { refund: pMoney(group.refund_amount), received: pMoney(group.received_amount) })) + '</dt><dd>' + pEscape(pRate(group.refund_rate)) + '</dd></div><div><dt>' + pEscape(text.dispute_rate) + formulaIcon(replaceProductTokens(formulas.dispute_rate, { count: pNumber(group.dispute_count), orders: pNumber(group.order_count) })) + '</dt><dd>' + pEscape(pNumber(group.dispute_count)) + ' / ' + pEscape(pRate(group.dispute_rate)) + '</dd></div><div><dt>' + pEscape(text.realised_loss) + formulaIcon(formulas.realised_loss) + '</dt><dd>' + pEscape(pMoney(group.realised_loss)) + '</dd></div><div><dt>' + pEscape(text.expected_loss) + formulaIcon(formulas.expected_loss) + '</dt><dd class="is-muted">' + pEscape(text.unavailable) + '</dd></div><div><dt>' + pEscape(text.contribution) + formulaIcon(formulas.contribution) + '</dt><dd class="is-muted">' + pEscape(text.unavailable) + '</dd></div></dl></article>';
+                    var currentCount = Number(group.order_count || 0);
+                    var connector = '';
+                    if ((key === 'first_renewal' || key === 'later_renewal') && previousSubscriptionCount !== null) {
+                        var lostCount = Math.max(0, previousSubscriptionCount - currentCount);
+                        var lostRate = previousSubscriptionCount > 0 ? lostCount / previousSubscriptionCount * 100 : 0;
+                        var hasGrowth = currentCount > previousSubscriptionCount;
+                        var churnFormula = replaceProductTokens(formulas.churn_rate, { previous: pNumber(previousSubscriptionCount), current: pNumber(currentCount), lost: pNumber(lostCount) });
+                        var churnValue = hasGrowth ? text.churn_growth : replaceProductTokens(text.churn_value, { count: pNumber(lostCount), rate: pRate(lostRate) });
+                        connector = '<div class="payment-product-lifecycle-connector' + (hasGrowth ? ' has-growth' : (lostRate >= 50 ? ' is-high' : '')) + '"><i class="fa fa-long-arrow-down" aria-hidden="true"></i><span>' + pEscape(text.churn_label) + formulaIcon(churnFormula) + '</span><strong>' + pEscape(churnValue) + '</strong></div>';
+                    }
+                    if (key === 'first_charge' || key === 'first_renewal' || key === 'later_renewal') previousSubscriptionCount = currentCount;
+                    return connector + '<article class="payment-lifecycle-card"><h4>' + pEscape((text.groups || {})[key]) + '</h4><strong>' + pEscape(pNumber(group.order_count)) + ' ' + pEscape((productText.overview || {}).record) + ' / ' + pEscape(pMoney(group.received_amount)) + '</strong><dl><div><dt>' + pEscape(text.refund_rate) + formulaIcon(replaceProductTokens(formulas.refund_rate, { refund: pMoney(group.refund_amount), received: pMoney(group.received_amount) })) + '</dt><dd>' + pEscape(pRate(group.refund_rate)) + '</dd></div><div><dt>' + pEscape(text.dispute_rate) + formulaIcon(replaceProductTokens(formulas.dispute_rate, { count: pNumber(group.dispute_count), orders: pNumber(group.order_count) })) + '</dt><dd>' + pEscape(pNumber(group.dispute_count)) + ' / ' + pEscape(pRate(group.dispute_rate)) + '</dd></div><div><dt>' + pEscape(text.realised_loss) + formulaIcon(formulas.realised_loss) + '</dt><dd>' + pEscape(pMoney(group.realised_loss)) + '</dd></div></dl></article>';
                 }).join('');
-                var metrics = detail.metrics || {};
-                var metricKeys = ['renewal_success_rate', 'first_renewal_retention', 'later_renewal_rate', 'link_coverage_rate'];
-                var metricPanel = '<article class="payment-lifecycle-panel"><h4>' + pEscape(text.metrics_title) + '</h4><div class="payment-lifecycle-metrics">' + metricKeys.map(function (key) { return '<div><span>' + pEscape(text[key]) + formulaIcon(formulas[key]) + '</span><strong>' + pEscape(pRate(metrics[key])) + '</strong></div>'; }).join('') + '</div></article>';
                 var chains = detail.chains || [];
                 var chainPanel = '<article class="payment-lifecycle-panel"><h4>' + pEscape(text.chain_title) + '</h4>' + (chains.length ? '<div class="payment-lifecycle-chains">' + chains.slice(0, 8).map(function (chain) { return '<div><b>' + pEscape(text.origin) + ' ' + pEscape(chain.origin) + '</b><span>' + (chain.orders || []).map(function (item) { return pEscape(((text.groups || {})[item.stage] || item.stage) + ' ' + item.order_number + ' · ' + pMoney(item.amount) + (Number(item.refund_amount) > 0 ? ' · ' + text.refund + ' ' + pMoney(item.refund_amount) : '')); }).join('<i class="fa fa-long-arrow-right"></i>') + '</span></div>'; }).join('') + '</div>' : '<p class="payment-detail-empty">' + pEscape(text.chain_empty) + '</p>') + '</article>';
-                return '<div class="payment-lifecycle-grid">' + cards + '</div><div class="payment-lifecycle-bottom">' + metricPanel + chainPanel + '</div>';
+                return '<div class="payment-lifecycle-grid">' + cards + '</div>';
             }
 
             function renderRefundSelection(row) {

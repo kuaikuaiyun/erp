@@ -62,6 +62,9 @@
 .payment-account-risk-page .payment-account-identity > div { min-width: 0; }
 .payment-account-risk-page .payment-merchant-card h3 { overflow: hidden; margin: 0; color: #153957; font-size: 14px; font-weight: 700; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
 .payment-account-risk-page .payment-merchant-card header p { overflow: hidden; margin: 3px 0 0; color: #738da6; font-size: 10px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.payment-account-risk-page .payment-account-order-times { display: flex; flex-wrap: nowrap; gap: 12px; margin-top: 5px; color: #8196a9; font-size: 9px; line-height: 1.4; white-space: nowrap; }
+.payment-account-risk-page .payment-account-order-times span { white-space: nowrap; }
+.payment-account-risk-page .payment-account-order-times b { color: #58748b; font-weight: 600; font-variant-numeric: tabular-nums; }
 .payment-account-risk-page .payment-status-badge { display: inline-flex; align-items: center; align-self: flex-start; padding: 4px 6px; border-radius: 4px; background: #eff5fb; color: #2773d8; font-size: 10px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
 .payment-account-risk-page .payment-status-normal { background: #fff2f1; color: #ea6662; }
 .payment-account-risk-page .payment-status-attention { background: #fff1de; color: #c98218; }
@@ -142,6 +145,7 @@
 .payment-account-detail-modal .modal-title { color: #153d60; font-size: 17px; font-weight: 700; }
 .payment-account-detail-modal .modal-header p { margin: 4px 0 0; color: #718ba2; font-size: 11px; }
 .payment-account-detail-modal .modal-body { min-height: 360px; padding: 16px 18px; background: #f5f9fc; }
+.payment-account-detail-modal [hidden] { display: none !important; }
 .payment-detail-summary { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); overflow: hidden; margin-bottom: 14px; border: 1px solid #d8e6ef; border-radius: 6px; background: #fff; }
 .payment-detail-summary > div { min-width: 0; padding: 11px 9px; border-right: 1px solid #e2ebf2; text-align: center; }
 .payment-detail-summary > div:last-child { border-right: 0; }
@@ -163,6 +167,46 @@
 .payment-detail-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding-top: 12px; color: #678098; font-size: 11px; }
 .payment-account-detail-modal .modal-footer { padding: 10px 18px; border-top-color: #dce7f0; background: #fbfdff; }
 .payment-detail-dashboard-body { margin-top: 14px; overflow: visible; border: 0; border-radius: 0; background: transparent; }
+.payment-order-analysis-layout { width: 100%; margin: 0; }
+.payment-order-analysis-section + .payment-order-analysis-section { margin-top: 15px; }
+.payment-order-analysis-section { overflow: hidden; border: 1px solid #d8e3eb; border-radius: 4px; background: #fff; }
+.payment-order-analysis-section.is-subscription { padding: 0; border: 1px solid #d8e3eb; background: #fff; }
+.payment-order-analysis-section.is-unmatched-section { padding-top: 0; border: 1px solid #e5d6b5; }
+.payment-order-analysis-heading { display: flex; min-height: 45px; align-items: center; justify-content: space-between; gap: 16px; margin: 0; padding: 9px 12px; border-bottom: 1px solid #dfe7ed; background: #f8fafc; }
+.payment-order-analysis-heading h4 { margin: 0; color: #173f60; font-size: 15px; font-weight: 700; }
+.payment-order-analysis-heading p { margin: 4px 0 0; color: #7890a3; font-size: 10px; }
+.payment-order-analysis-heading > span { padding: 3px 7px; border: 1px solid #d9e4eb; border-radius: 3px; background: #f5f8fa; color: #647d91; font-size: 9px; white-space: nowrap; }
+.payment-order-analysis-grid { display: grid; grid-template-columns: 1fr; gap: 0; }
+.payment-order-analysis-card { position: relative; display: grid; grid-template-columns: minmax(210px, 1.2fr) minmax(205px, 1.05fr) minmax(480px, 2.55fr); align-items: stretch; padding: 0 12px; border-bottom: 1px solid #dfe7ed; background: #fff; }
+.payment-order-analysis-grid > .payment-order-analysis-card:last-child { border-bottom: 0; }
+.payment-order-analysis-card > header { display: flex; grid-column: 1; grid-row: 1; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px 10px 0; border-right: 1px solid #e3eaef; }
+.payment-order-analysis-title { display: flex; align-items: center; gap: 9px; }
+.payment-order-analysis-card h5 { margin: 0; color: #173f60; font-size: 14px; font-weight: 700; }
+.payment-order-analysis-stage { display: inline-flex; height: 20px; align-items: center; padding: 0 7px; border: 1px solid #d9e4eb; border-radius: 3px; background: #f4f7f9; color: #587287; font-size: 9px; font-weight: 600; white-space: nowrap; }
+.payment-order-analysis-card > header span { color: #b77512; font-size: 9px; white-space: nowrap; }
+.payment-order-analysis-card > header .payment-order-analysis-stage { color: #587287; }
+.payment-order-analysis-total { display: flex; grid-column: 2; grid-row: 1; align-items: center; padding: 10px 18px; border-right: 1px solid #e3eaef; color: #123d61; font-size: 14px; line-height: 1.2; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.payment-order-analysis-total small { display: none; }
+.payment-order-analysis-note { grid-column: 1 / -1; grid-row: 2; margin: 0; padding: 6px 0 8px; border-top: 1px dashed #eadfca; color: #9a711f; font-size: 9px; line-height: 1.35; }
+.payment-order-analysis-card dl { display: grid; grid-column: 3; grid-row: 1; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; padding: 0; }
+.payment-order-analysis-card dl > div { display: flex; min-width: 0; align-items: center; gap: 7px; padding: 10px 14px; border-right: 1px solid #e3eaef; white-space: nowrap; }
+.payment-order-analysis-card dl > div:last-child { border-right: 0; }
+.payment-order-analysis-card dl > div:last-child { border-bottom: 0; }
+.payment-order-analysis-card dt { color: #6e879c; font-size: 11px; font-weight: 400; }
+.payment-order-analysis-card dt { display: flex; align-items: center; gap: 4px; }
+.payment-order-analysis-card dd { margin: 0; color: #183f60; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.payment-order-analysis-card.is-unmatched { margin-top: 0; padding: 0 12px; border-bottom: 0; border-left: 3px solid #d59627; background: #fffaf0; }
+.payment-order-analysis-connector { position: relative; display: flex; min-height: 30px; align-items: center; justify-content: center; gap: 7px; border-bottom: 1px solid #dfe7ed; background: #f8fafb; color: #667f94; font-size: 10px; z-index: 1; }
+.payment-order-analysis-connector::before,
+.payment-order-analysis-connector::after { width: 45px; height: 1px; background: #d9e3ea; content: ''; }
+.payment-order-analysis-arrow { display: inline-flex; align-items: center; justify-content: center; color: #477b9e; }
+.payment-order-analysis-churn { display: inline-flex; align-items: center; gap: 7px; padding: 3px 0; background: transparent; }
+.payment-order-analysis-connector strong { color: #647b8e; font-weight: 500; }
+.payment-order-analysis-connector b { color: #415f75; font-size: 11px; font-variant-numeric: tabular-nums; }
+.payment-order-analysis-connector.is-high b { color: #d05258; }
+.payment-order-analysis-connector.has-growth b { color: #367da9; }
+.payment-order-analysis-reconciliation { width: 100%; margin: 10px 0 0; padding: 8px 10px; border: 1px solid #d8e3eb; border-radius: 3px; background: #fff; color: #66839a; font-size: 10px; }
+.payment-order-analysis-reconciliation .fa { margin-right: 4px; color: #18a06b; }
 .payment-detail-dispute-body { margin-top: 12px; overflow: visible; border: 0; border-radius: 0; background: transparent; }
 .payment-detail-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .payment-detail-kpi { min-width: 0; padding: 13px 14px; border: 1px solid #d8e5ee; border-radius: 8px; background: #fff; box-shadow: 0 2px 7px rgba(22, 63, 94, .04); }
@@ -264,6 +308,12 @@
 @media (max-width: 1199px) {
     .payment-account-risk-page .payment-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
     .payment-account-risk-page .payment-merchant-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .payment-order-analysis-grid { grid-template-columns: 1fr; }
+    .payment-order-analysis-card { grid-template-columns: minmax(0, 1fr) auto; }
+    .payment-order-analysis-card > header { border-right: 0; }
+    .payment-order-analysis-card dl { grid-column: 1 / -1; grid-row: 2; margin-top: 7px; }
+    .payment-order-analysis-card dl > div:first-child { padding-left: 0; }
+    .payment-order-analysis-note { grid-row: 3; }
 }
 
 @media (max-width: 767px) {
@@ -282,6 +332,7 @@
     .payment-account-risk-page .payment-merchant-card footer { align-items: flex-start; flex-direction: column; }
     .payment-account-risk-page .payment-account-compact-footer { display: grid; grid-template-columns: 1fr; }
     .payment-account-risk-page .payment-account-detail-button { justify-self: start; }
+    .payment-account-risk-page .payment-account-order-times { flex-wrap: wrap; gap: 2px 10px; white-space: normal; }
     .payment-account-detail-modal .modal-dialog { width: calc(100vw - 16px); margin: 8px auto; }
     .payment-detail-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .payment-detail-summary > div { border-bottom: 1px solid #e2ebf2; }
@@ -293,4 +344,19 @@
     .payment-funding-grid,
     .payment-dispute-bottom { grid-template-columns: 1fr; }
     .payment-dispute-fields { grid-template-columns: 1fr; gap: 12px; }
+    .payment-order-analysis-grid { grid-template-columns: 1fr; }
+    .payment-order-analysis-card { grid-template-columns: 1fr; }
+    .payment-order-analysis-card > header,
+    .payment-order-analysis-total,
+    .payment-order-analysis-note { grid-column: 1; grid-row: auto; border-right: 0; }
+    .payment-order-analysis-total { padding-top: 2px; }
+    .payment-order-analysis-total small { text-align: left; }
+    .payment-order-analysis-card dl { grid-column: 1; grid-row: auto; grid-template-columns: 1fr; }
+    .payment-order-analysis-card dl > div { padding: 8px 0; border-right: 0; border-bottom: 1px solid #edf2f5; }
+    .payment-order-analysis-card dl > div:last-child { border-bottom: 0; }
+    .payment-order-analysis-heading { align-items: flex-start; flex-direction: column; gap: 6px; }
+    .payment-order-analysis-title { align-items: flex-start; flex-direction: column; gap: 5px; }
+    .payment-order-analysis-churn { align-items: flex-start; flex-direction: column; gap: 2px; border-radius: 8px; }
+    .payment-order-analysis-connector::before,
+    .payment-order-analysis-connector::after { width: 22px; }
 }

@@ -5,18 +5,16 @@ namespace App\Portals\Payment\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
 use App\Models\LogisticsPayPalAccount;
-use App\Models\PaymentProductAlertRule;
-use App\Models\PaymentProductAlertAssignment;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Payment\PaymentAccountRiskService;
 use App\Portals\Payment\PaymentOrderSearchService;
 use App\Portals\Payment\PaymentPortalService;
+use App\Portals\Payment\PaymentProductAlertExportService;
+use App\Portals\Payment\PaymentProductAlertService;
 use App\Portals\Payment\PaymentProductRiskService;
-use App\Portals\Payment\PaymentProductAlertAssignmentService;
 use App\Portals\Payment\PaymentWorkbenchService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -28,7 +26,8 @@ class PaymentPortalController extends Controller
         private readonly PaymentAccountRiskService $accountRisk,
         private readonly PaymentProductRiskService $productRisk,
         private readonly PaymentOrderSearchService $paymentOrders,
-        private readonly PaymentProductAlertAssignmentService $alertAssignments,
+        private readonly PaymentProductAlertService $productAlerts,
+        private readonly PaymentProductAlertExportService $productAlertExport,
         private readonly PaymentWorkbenchService $workbench,
     ) {
     }
@@ -83,7 +82,7 @@ class PaymentPortalController extends Controller
         }
 
         $validated = $request->validate([
-            'tab' => ['nullable', Rule::in(['overview', 'orders', 'products', 'refunds', 'disputes'])],
+            'tab' => ['nullable', Rule::in(['overview', 'order_analysis', 'orders', 'products', 'refunds', 'disputes'])],
             'page' => ['nullable', 'integer', 'min:1'],
             'per_page' => ['nullable', Rule::in([50, 100, '50', '100'])],
             'period_start' => ['nullable', 'date'],
@@ -175,75 +174,53 @@ class PaymentPortalController extends Controller
             return $context;
         }
 
+        $filters = $this->productAlertFilters($request);
+
         return response()->view('portals.payment.product-alerts', [
             ...$this->viewContext($context),
-            'dashboard' => $this->productAlertsData(
+            'dashboard' => $this->productAlerts->dashboard(
+                $filters,
                 max(1, $request->integer('page', 1)),
                 in_array($request->integer('per_page', 50), [50, 100], true) ? $request->integer('per_page', 50) : 50,
             ),
-            'alertRules' => PaymentProductAlertRule::query()->orderBy('id')->get(),
-            'assignmentContext' => $this->alertAssignments->context($context['portal'], $context['user']),
         ]);
     }
 
-    public function assignProductAlert(Request $request, string $alert): RedirectResponse
+    public function exportProductRiskProfit(Request $request): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        return $this->productAlertExport->download(
+            $this->productAlerts->exportRows(),
+        );
+    }
+
+    public function updateProductAlertStatus(Request $request, string $alert): RedirectResponse
     {
         $context = $this->portalContext($request);
         if ($context instanceof Response) {
             return redirect()->route('payment.product-alerts.index');
         }
-        abort_unless(collect($this->baseProductAlerts())->contains('code', $alert), 404);
-
+        $record = $this->productAlerts->find($alert);
+        abort_if($record === null, 404);
+        $request->merge(['remark' => trim((string) $request->input('remark'))]);
         $validated = $request->validate([
-            'department_id' => ['required', 'integer'],
-            'assignee_id' => ['required', 'integer'],
-            'deadline_at' => ['required', 'date', 'after:now'],
-            'assignment_note' => ['nullable', 'string', 'max:1000'],
+            'operation' => ['required', Rule::in(['process', 'complete', 'reopen'])],
+            'remark' => ['required', 'string', 'max:1000'],
         ]);
-        $this->alertAssignments->assign($context['portal'], $context['user'], $alert, $validated);
+        $operation = (string) $validated['operation'];
+        $currentStatus = (string) $record['status_key'];
+        $allowed = ($currentStatus === 'in_progress' && in_array($operation, ['process', 'complete'], true))
+            || ($currentStatus === 'completed' && $operation === 'reopen');
+        abort_unless($allowed, 422);
+        $status = $operation === 'complete' ? 'completed' : 'in_progress';
+        $this->productAlerts->updateStatus($alert, $status, $operation, (string) $validated['remark'], $context['user']);
 
         return redirect()->route('payment.product-alerts.index')
-            ->with('success', __('payment.product_alerts.assignment.save_success', ['code' => $alert]));
-    }
-
-    public function updateProductAlertRules(Request $request): RedirectResponse
-    {
-        $context = $this->portalContext($request);
-        if ($context instanceof Response) {
-            return redirect()->route('payment.product-alerts.index');
-        }
-
-        $validated = $request->validate([
-            'rules' => ['required', 'array', 'min:1'],
-            'rules.*.yellow_condition' => ['required', 'string', 'max:255'],
-            'rules.*.red_condition' => ['required', 'string', 'max:255'],
-            'rules.*.minimum_sample' => ['required', 'integer', 'min:0', 'max:1000000'],
-            'rules.*.action_text' => ['nullable', 'string', 'max:500'],
-            'rules.*.is_enabled' => ['required', 'boolean'],
-        ]);
-        $ruleIds = PaymentProductAlertRule::query()->pluck('id')->map(static fn ($id): string => (string) $id)->all();
-        $submittedIds = array_keys($validated['rules']);
-        if (array_diff($submittedIds, $ruleIds) !== []) {
-            return back()->withErrors(['rules' => __('payment.product_alerts.rule_modal.invalid_rule')])->withInput();
-        }
-
-        DB::connection(config('admin.database.connection') ?: config('database.default'))->transaction(function () use ($validated, $context): void {
-            foreach ($validated['rules'] as $id => $values) {
-                PaymentProductAlertRule::query()->whereKey((int) $id)->update([
-                    'yellow_condition' => trim((string) $values['yellow_condition']),
-                    'red_condition' => trim((string) $values['red_condition']),
-                    'minimum_sample' => (int) $values['minimum_sample'],
-                    'action_text' => trim((string) ($values['action_text'] ?? '')),
-                    'is_enabled' => (bool) $values['is_enabled'],
-                    'updated_by' => $context['user']->getKey(),
-                    'updated_by_name' => $context['user']->name,
-                    'updated_at' => now(),
-                ]);
-            }
-        });
-
-        return redirect()->route('payment.product-alerts.index')
-            ->with('success', __('payment.product_alerts.rule_modal.save_success'));
+            ->with('success', __('payment.product_alerts.status_update.success'));
     }
 
     public function productAlertDetail(Request $request, string $alert): Response
@@ -252,8 +229,7 @@ class PaymentPortalController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
-        $record = collect($this->productAlertsData()['alerts'])
-            ->first(static fn (array $row): bool => $row['code'] === $alert);
+        $record = $this->productAlerts->find($alert);
         abort_if($record === null, 404);
 
         if ($request->ajax()) {
@@ -446,54 +422,13 @@ class PaymentPortalController extends Controller
         ];
     }
 
-    /** @return array<string, mixed> */
-    private function productAlertsData(int $page = 1, int $perPage = 50): array
+    /** @return array<string,mixed> */
+    private function productAlertFilters(Request $request): array
     {
-        $alerts = $this->baseProductAlerts();
-        $assignments = PaymentProductAlertAssignment::query()
-            ->whereIn('alert_code', array_column($alerts, 'code'))->get()->keyBy('alert_code');
-        $alerts = array_map(function (array $alert) use ($assignments): array {
-            $assignment = $assignments->get($alert['code']);
-            if (!$assignment) {
-                return $alert;
-            }
-            $alert['owner_name'] = $assignment->assignee_name_snapshot;
-            $alert['owner_note'] = $assignment->department_name_snapshot;
-            $alert['owner_filter'] = (string) $assignment->assignee_id;
-            $alert['status_key'] = $assignment->status;
-            $alert['deadline'] = optional($assignment->deadline_at)->format('Y-m-d H:i');
-            $alert['assignment'] = [
-                'department_id' => (int) $assignment->department_id,
-                'assignee_id' => (int) $assignment->assignee_id,
-                'deadline_at' => optional($assignment->deadline_at)->format('Y-m-d\TH:i'),
-                'note' => (string) $assignment->assignment_note,
-            ];
-            return $alert;
-        }, $alerts);
-
-        $total = count($alerts);
-        $lastPage = max(1, (int) ceil($total / $perPage));
-        $page = min(max(1, $page), $lastPage);
-
+        $status = trim((string) $request->query('status', ''));
         return [
-            'kpis' => [
-                ['key' => 'to_assign', 'value' => (string) collect($alerts)->where('status_key', 'to_assign')->count(), 'note_key' => 'to_assign_note', 'tone' => 'danger'],
-                ['key' => 'in_progress', 'value' => (string) collect($alerts)->where('status_key', 'in_progress')->count(), 'note_key' => 'in_progress_note', 'tone' => 'warning'],
-                ['key' => 'pending_review', 'value' => (string) collect($alerts)->where('status_key', 'pending_review')->count(), 'note_key' => 'pending_review_note', 'tone' => 'primary'],
-                ['key' => 'overdue', 'value' => (string) collect($alerts)->filter(fn (array $row): bool => !empty($row['deadline']) && strtotime($row['deadline']) < time())->count(), 'note_key' => 'overdue_note', 'tone' => 'danger'],
-            ],
-            'alerts' => array_slice($alerts, ($page - 1) * $perPage, $perPage),
-            'pagination' => ['current_page' => $page, 'last_page' => $lastPage, 'per_page' => $perPage, 'total' => $total, 'from' => $total === 0 ? 0 : (($page - 1) * $perPage + 1), 'to' => min($page * $perPage, $total)],
-        ];
-    }
-
-    /** @return list<array<string, mixed>> */
-    private function baseProductAlerts(): array
-    {
-        return [
-            ['code' => 'PW-001', 'severity_key' => 'critical', 'product_key' => 'vacuum', 'channel_key' => 'paypal_renewal', 'sample' => '400 / 400', 'threshold_key' => 'refund_amount_ratio', 'owner_key' => 'product_manager_a', 'status_key' => 'in_progress', 'deadline_key' => 'october_26_1800', 'action_key' => 'recent_orders'],
-            ['code' => 'PW-002', 'severity_key' => 'warning', 'product_key' => 'insurance_set', 'channel_key' => 'card_one_time', 'sample' => '40 / 40', 'threshold_key' => 'refund_count_ratio', 'owner_key' => 'to_assign', 'status_key' => 'to_assign', 'deadline_key' => 'today_1800', 'action_key' => 'assign_owner'],
-            ['code' => 'PW-003', 'severity_key' => 'review', 'product_key' => 'foam_cleaner', 'channel_key' => 'all_subscription', 'sample' => '80 / 80', 'threshold_key' => 'estimated_profit', 'owner_key' => 'product_manager_b', 'status_key' => 'pending_review', 'deadline_key' => 'october_27_1800', 'action_key' => 'view_review'],
+            'status' => in_array($status, ['in_progress', 'completed'], true) ? $status : '',
+            'product' => mb_substr(trim((string) $request->query('product', '')), 0, 191),
         ];
     }
 

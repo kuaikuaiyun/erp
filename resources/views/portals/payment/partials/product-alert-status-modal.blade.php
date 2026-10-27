@@ -1,0 +1,7 @@
+<div class="modal fade payment-alert-status-modal" id="payment-alert-status-modal" tabindex="-1" role="dialog" aria-labelledby="payment-alert-status-title" aria-hidden="true"><div class="modal-dialog" role="document"><form class="modal-content" method="post" data-payment-alert-status-form>
+    @csrf @method('PUT')
+    <input type="hidden" name="operation" value="">
+    <div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ __('payment.product_alerts.modals.close') }}"><span>&times;</span></button><h4 id="payment-alert-status-title">{{ __('payment.product_alerts.status_modal.title') }}</h4><p data-payment-alert-status-summary></p></div>
+    <div class="modal-body"><label class="payment-alert-status-remark"><span>{{ __('payment.product_alerts.status_modal.remark') }}</span><textarea class="form-control" name="remark" rows="5" maxlength="1000" required placeholder="{{ __('payment.product_alerts.status_modal.remark_placeholder') }}"></textarea></label><p><i class="fa fa-info-circle"></i> {{ __('payment.product_alerts.status_modal.note') }}</p></div>
+    <div class="modal-footer"><button class="btn btn-default" type="button" data-dismiss="modal">{{ __('payment.product_alerts.modals.close') }}</button><button class="btn btn-primary" type="submit"><i class="fa fa-check"></i> {{ __('payment.product_alerts.status_modal.submit') }}</button></div>
+</form></div></div>

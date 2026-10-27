@@ -47,7 +47,7 @@
             @foreach ($dashboard['merchants'] as $merchant)
                 <article class="payment-merchant-card">
                     <header>
-                        <div class="payment-account-identity"><span class="payment-account-logo"><i class="fa fa-paypal" aria-hidden="true"></i></span><div><h3>{{ $merchant['name'] }}</h3><p>{{ __('payment.common.channels.paypal') }} {{ __('payment.common.separator') }} {{ $merchant['meta'] }}</p></div></div>
+                        <div class="payment-account-identity"><span class="payment-account-logo"><i class="fa fa-paypal" aria-hidden="true"></i></span><div><h3>{{ $merchant['name'] }}</h3><p>{{ __('payment.common.channels.paypal') }} {{ __('payment.common.separator') }} {{ $merchant['meta'] }}</p><div class="payment-account-order-times"><span>{{ __($translationPrefix.'.order_times.first') }}：<b>{{ $merchant['first_order_at'] }}</b></span><span>{{ __($translationPrefix.'.order_times.last') }}：<b>{{ $merchant['last_order_at'] }}</b></span></div></div></div>
                         <span class="payment-status-badge payment-status-{{ $merchant['status'] }}">{{ __($translationPrefix.'.status.'.$merchant['status']) }}</span>
                     </header>
                     <div class="payment-merchant-overview">
@@ -98,7 +98,7 @@
             <div class="modal-dialog modal-lg" role="document"><div class="modal-content">
                 <div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ __($translationPrefix.'.detail.close') }}"><span aria-hidden="true">&times;</span></button><h4 class="modal-title" id="payment-account-detail-title">{{ __($translationPrefix.'.detail.title') }}</h4><p data-payment-detail-subtitle></p></div>
                 <div class="modal-body">
-                    <div class="payment-detail-tabs" role="tablist">@foreach (['overview', 'orders', 'products', 'refunds', 'disputes', 'funding'] as $tab)<button type="button" class="{{ $tab === 'overview' ? 'active' : '' }}" data-payment-detail-tab="{{ $tab }}" role="tab" aria-selected="{{ $tab === 'overview' ? 'true' : 'false' }}">{{ __($translationPrefix.'.detail.tabs.'.$tab) }}</button>@endforeach</div>
+                    <div class="payment-detail-tabs" role="tablist">@foreach (['overview', 'order_analysis', 'orders', 'products', 'refunds', 'disputes', 'funding'] as $tab)<button type="button" class="{{ $tab === 'overview' ? 'active' : '' }}" data-payment-detail-tab="{{ $tab }}" role="tab" aria-selected="{{ $tab === 'overview' ? 'true' : 'false' }}">{{ __($translationPrefix.'.detail.tabs.'.$tab) }}</button>@endforeach</div>
                     <div class="payment-detail-summary" data-payment-detail-summary hidden></div>
                     <form class="payment-detail-filter" data-payment-detail-filter hidden><input class="form-control" type="search" name="keyword" maxlength="191" placeholder="{{ __($translationPrefix.'.detail.keyword_placeholder') }}"><button class="btn btn-primary" type="submit"><i class="fa fa-search" aria-hidden="true"></i> {{ __($translationPrefix.'.detail.query') }}</button><button class="btn btn-default" type="reset">{{ __($translationPrefix.'.detail.reset') }}</button></form>
                     <div class="payment-detail-state" data-payment-detail-loading><i class="fa fa-spinner fa-spin" aria-hidden="true"></i> {{ __($translationPrefix.'.detail.loading') }}</div>
