@@ -1833,7 +1833,15 @@ class LogisticsProductStatisticsService
         foreach ($rows as $row) {
             $productCode = mb_strtolower(trim((string) ($row->tongtu_product_code ?? '')));
             $shopifySku = mb_strtolower(trim((string) ($row->shopify_sku ?? '')));
-            $mapping = $byProductCode[$productCode] ?? $byShopifySku[$shopifySku] ?? null;
+            // The match-status filter is evaluated against the current
+            // Shopify SKU mapping.  A PCL can contain several variants and
+            // one of its other SKU mappings may already be matched, so using
+            // the PCL mapping first would incorrectly render a failed SKU as
+            // "matched" in a failed/queued/conflict result set.
+            //
+            // Keep the PCL lookup only as a fallback for legacy order rows
+            // that have no Shopify SKU mapping record.
+            $mapping = $byShopifySku[$shopifySku] ?? $byProductCode[$productCode] ?? null;
 
             $row->product_image_url = $mapping?->status === LogisticsTongtuSkuMapping::STATUS_MATCHED
                 && filled($mapping->tongtu_primary_image_url)
