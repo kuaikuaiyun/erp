@@ -14,6 +14,7 @@ use App\Portals\Logistics\Http\Controllers\WarehouseWeightExceptionController;
 use App\Portals\Logistics\Http\Controllers\ShopifyStoreController;
 use App\Portals\Logistics\Http\Controllers\ShopifyWebhookController;
 use App\Portals\Operation\Http\Controllers\OperationDomainStoreController;
+use App\Portals\Operation\Http\Controllers\OperationAiProductLibraryController;
 use App\Portals\ProductRequests\Http\Controllers\ProductRequestController;
 use App\Portals\Aikaipin\Http\Controllers\ProductLibraryController;
 use App\Portals\Payment\Http\Controllers\PaymentPortalController;
@@ -54,6 +55,10 @@ Route::post('/shopify-analytics/{domainStore}/refresh', [ShopifyAnalyticsControl
 Route::get('/product-requests', [ProductRequestController::class, 'operationIndex'])->name('product-requests.operation.index');
 Route::get('/product-request-dedupe', [ProductRequestController::class, 'operationDedupeIndex'])->name('product-requests.operation.dedupe');
 Route::get('/operation/domain-stores', [OperationDomainStoreController::class, 'index'])->name('operation.domain-stores.index');
+Route::get('/operation/ai-product-library', [OperationAiProductLibraryController::class, 'index'])->name('operation.ai-product-library.index');
+Route::get('/operation/ai-product-library/{product}/detail', [OperationAiProductLibraryController::class, 'detail'])->name('operation.ai-product-library.detail');
+Route::get('/operation/ai-product-library/{product}/images/{imageIndex}', [OperationAiProductLibraryController::class, 'image'])->whereNumber('imageIndex')->name('operation.ai-product-library.images.show');
+Route::get('/operation/ai-product-library/{product}/package', [OperationAiProductLibraryController::class, 'downloadPackage'])->name('operation.ai-product-library.package.download');
 Route::get('/operation/existing-product-library', [ProductRequestController::class, 'existingProductLibraryIndex'])->name('product-requests.operation.existing-product-library');
 Route::get('/operation/existing-product-library/{linkSku}', [ProductRequestController::class, 'existingProductLibraryDetail'])->name('product-requests.operation.existing-product-library.detail');
 Route::post('/operation/domain-stores/{domainStore}/refresh', [OperationDomainStoreController::class, 'refresh'])->name('operation.domain-stores.refresh');
