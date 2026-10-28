@@ -439,7 +439,7 @@ class LogisticsProductStatisticsService
     /** @param array<string,mixed> $filters */
     private function statisticsCacheKey(string $segment, array $filters): string
     {
-        $keyFilters = ['schema_version' => 2];
+        $keyFilters = ['schema_version' => 5];
         foreach (['date_from', 'date_to', 'name', 'keyword', 'store', 'match_status'] as $key) {
             $keyFilters[$key] = (string) ($filters[$key] ?? '');
         }
@@ -1789,8 +1789,8 @@ class LogisticsProductStatisticsService
             ->selectRaw("MIN(CASE WHEN NULLIF(TRIM(items.product_image_url), '') IS NOT NULL THEN items.id END) as image_item_id")
             ->selectRaw("GROUP_CONCAT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__') ORDER BY COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__') SEPARATOR 0x1F) as store_names")
             ->selectRaw("COUNT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__')) as shop_count")
-            ->selectRaw("GROUP_CONCAT(DISTINCT CONCAT(NULLIF(TRIM(sku_mappings.tongtu_sku), ''), '|', CAST(ROUND(COALESCE(items.sale_weight_gram, 0), 2) AS CHAR)) ORDER BY NULLIF(TRIM(sku_mappings.tongtu_sku), '') SEPARATOR 0x1F) as tongtu_skus")
-            ->selectRaw("COUNT(DISTINCT NULLIF(TRIM(sku_mappings.tongtu_sku), '')) as tongtu_variant_count")
+            ->selectRaw("GROUP_CONCAT(DISTINCT CONCAT(COALESCE(NULLIF(TRIM(sku_mappings.tongtu_sku), ''), NULLIF(TRIM(items.tongtu_sku), ''), NULLIF(TRIM(items.shopify_sku), ''), '未填写 SKU'), '|', CAST(ROUND(COALESCE(items.sale_weight_gram, 0), 2) AS CHAR)) ORDER BY COALESCE(NULLIF(TRIM(sku_mappings.tongtu_sku), ''), NULLIF(TRIM(items.tongtu_sku), ''), NULLIF(TRIM(items.shopify_sku), ''), '未填写 SKU') SEPARATOR 0x1F) as tongtu_skus")
+            ->selectRaw("COUNT(DISTINCT COALESCE(NULLIF(TRIM(sku_mappings.tongtu_sku), ''), NULLIF(TRIM(items.tongtu_sku), ''), NULLIF(TRIM(items.shopify_sku), ''), '未填写 SKU')) as tongtu_variant_count")
             ->selectRaw('SUM(COALESCE(items.quantity, 0)) as sales')
             ->selectRaw('SUM(COALESCE(items.line_revenue_usd, 0)) as revenue')
             ->groupByRaw($key);
@@ -2159,10 +2159,20 @@ class LogisticsProductStatisticsService
         $query = $this->database()->table('logistics_order_items as items')
             ->join('logistics_orders as orders', 'orders.id', '=', 'items.logistics_order_id')
             ->leftJoin('logistics_tongtu_sku_mappings as sku_mappings', DB::raw('LOWER(TRIM(items.shopify_sku))'), '=', 'sku_mappings.shopify_sku')
-            ->whereNotNull('items.line_revenue_usd');
+            ->whereNotNull('items.line_revenue_usd')
+            ->whereRaw('NOT ('.$this->shippingInsuranceExpression('items').')');
         $this->applyBaseFilters($query, $filters, 'items', 'orders', 'sku_mappings');
 
         return $query;
+    }
+
+    private function shippingInsuranceExpression(string $alias): string
+    {
+        $productTitle = "LOWER(TRIM(COALESCE({$alias}.product_title, '')))";
+        $tongtuName = "LOWER(TRIM(COALESCE({$alias}.tongtu_product_name, '')))";
+        $productCode = "LOWER(TRIM(COALESCE({$alias}.tongtu_product_code, '')))";
+
+        return "({$productTitle} LIKE '%shipping protection%' OR {$productTitle} LIKE '%shipping insurance%' OR {$productTitle} LIKE '%freight insurance%' OR {$productTitle} LIKE '%运费险%' OR {$tongtuName} LIKE '%运费险%' OR {$productCode} = 'arc-2yu9u1i-aa')";
     }
 
     /** @param array<string,mixed> $filters */
