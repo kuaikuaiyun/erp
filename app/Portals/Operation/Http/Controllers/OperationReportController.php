@@ -4,9 +4,10 @@ namespace App\Portals\Operation\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
+use App\Models\AssistantAdvertisingMedia;
+use App\Models\AssistantAdvertisingAgency;
 use App\Models\AssistantDomainStore;
 use App\Models\Department;
-use App\Models\LogisticsOrder;
 use App\Models\OperationReport;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Logistics\StreamedXlsxWriter;
@@ -72,7 +73,8 @@ class OperationReportController extends Controller
             'metricRowspans' => $this->identityRowspans($metricRows),
             'advertisingRows' => $advertisingRows, 'warnings' => $calculated['warnings'],
             'operatorOptions' => $operatorOptions,
-            'mediaSources' => array_values([...LogisticsOrder::MEDIA_SOURCES, LogisticsOrder::MEDIA_SOURCE_OTHER]),
+            'mediaSources' => $this->advertisingMedia(),
+            'advertisingAgencies' => AssistantAdvertisingAgency::enabledOptions(),
             'isBoss' => $isBoss, 'canReview' => $canReview,
             'canEditReport' => true, 'history' => $history,
         ]);
@@ -105,6 +107,8 @@ class OperationReportController extends Controller
         if ($context instanceof Response) abort($context->getStatusCode());
         $user = $context['user'];
         $isBoss = $this->isBoss($user);
+        $mediaSources = $this->advertisingMedia();
+        $agencyOptions = AssistantAdvertisingAgency::enabledOptions();
         $request->validate([
             'ads.*.screenshot' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
         ]);
@@ -123,8 +127,8 @@ class OperationReportController extends Controller
             'report_id' => ['nullable', 'integer'],
             'operator_user_id' => ['nullable', 'integer'],
             'ads' => ['required', 'array', 'min:1', 'max:100'],
-            'ads.*.media_source' => ['required', Rule::in(array_values([...LogisticsOrder::MEDIA_SOURCES, LogisticsOrder::MEDIA_SOURCE_OTHER]))],
-            'ads.*.agency' => ['required', 'string', 'max:191'],
+            'ads.*.media_source' => ['required', Rule::in($mediaSources)],
+            'ads.*.agency' => ['required', 'string', 'max:191', Rule::in(array_keys($agencyOptions))],
             'ads.*.account_name' => ['required', 'string', 'max:191'],
             'ads.*.account_number' => ['required', 'string', 'max:191'],
             'ads.*.book_spend' => ['required', 'numeric', 'min:0'],
@@ -156,7 +160,7 @@ class OperationReportController extends Controller
             if (! $hasContent && empty($ad['existing_screenshot'])) continue;
             $path = $ad['existing_screenshot'] ?? null;
             $bookSpend = (float) ($ad['book_spend'] ?? 0);
-            $coefficient = ($ad['settlement_coefficient'] ?? '') === '' ? 1.0 : (float) $ad['settlement_coefficient'];
+            $coefficient = (float) $agencyOptions[$ad['agency']];
             $ads[] = [
                 'media_source' => trim((string) ($ad['media_source'] ?? '')),
                 'agency' => trim((string) ($ad['agency'] ?? '')),
@@ -222,7 +226,7 @@ class OperationReportController extends Controller
         $metrics = collect($data['metricRows'])->values();
         $ads = collect($data['advertisingRows'])->values();
         $count = max($metrics->count(), $ads->count(), 1);
-        $columns = collect(['日期','人名','店铺域名','媒体','首单订阅单量','首单订阅营业额($)','首单普通单量','首单普通营业额($)','首单合计单量','首单合计营业额($)','首单总采购费','首单总运费','广告社媒','广告代理','广告账户名称','广告账户编号','账面广告费($)','结算系数','实际广告费($)','广告消耗截图','首单交易退货费','运营首单利润($)','续费净收益($)','运营整体净利润($)','运营社媒首单ROI','运营社媒整体ROI','填写状态','续费单量','续费营业额($)','续费费用','总单量','总营业额($)'])
+        $columns = collect(['日期','人名','店铺域名','媒体','首单订阅单量','首单订阅营业额($)','首单普通单量','首单普通营业额($)','首单合计单量','首单合计营业额($)','首单总采购费','首单总运费','广告代理','广告社媒','广告账户名称','广告账户编号','账面广告费($)','结算系数','实际广告费($)','广告消耗截图','首单交易退货费','运营首单利润($)','续费净收益($)','运营整体净利润($)','运营社媒首单ROI','运营社媒整体ROI','填写状态','续费单量','续费营业额($)','续费费用','总单量','总营业额($)'])
             ->map(fn ($label) => ['label' => $label, 'width' => mb_strlen($label) > 8 ? 20 : 15])->all();
         return $this->xlsxWriter->response('运营报表_'.$data['reportDate'].'_'.$data['selectedOperator']->name.'.xlsx', '运营报表', $columns, static function () use ($metrics, $ads, $count, $data): iterable {
             for ($i = 0; $i < $count; $i++) {
@@ -234,7 +238,7 @@ class OperationReportController extends Controller
                 $values = [$data['reportDate'],$data['selectedOperator']->name,$m['shop_domain']??'',$m['media_source']??'',
                     $m['first_subscription_orders']??'', $m['first_subscription_revenue']??'', $m['first_normal_orders']??'', $m['first_normal_revenue']??'',
                     $m['first_total_orders']??'', $m['first_total_revenue']??'', $m['first_purchase_cost']??'', $m['first_shipping_cost']??'',
-                    $a['media_source']??'', $a['agency']??'', $a['account_name']??'', $a['account_number']??'', $a['book_spend']??'', $a['settlement_coefficient']??'', $a['actual_spend']??'', $a['screenshot']??'',
+                    $a['agency']??'', $a['media_source']??'', $a['account_name']??'', $a['account_number']??'', $a['book_spend']??'', $a['settlement_coefficient']??'', $a['actual_spend']??'', $a['screenshot']??'',
                     $m['first_return_fee']??'', $i === 0 ? ($report?->first_profit ?? '') : '', $i === 0 ? ($report?->renewal_net_revenue ?? '') : '', $i === 0 ? ($report?->overall_profit ?? '') : '',
                     $i === 0 && $adSpend > 0 ? $firstRevenue / $adSpend : '', $i === 0 && $adSpend > 0 ? $totalRevenue / $adSpend : '', $i === 0 ? ($report ? ($report->status === OperationReport::STATUS_APPROVED ? '已审核' : '待审核') : '未提交') : '',
                     $m['renewal_orders']??'', $m['renewal_revenue']??'', $m['renewal_cost']??'', $m['total_orders']??'', $m['total_revenue']??''];
@@ -271,6 +275,12 @@ class OperationReportController extends Controller
     private function assertAssignableOperator(int $operatorId): void
     {
         abort_unless(AssistantDomainStore::query()->where('owner_user_id', $operatorId)->exists(), 422, '该账号没有已分配店铺。');
+    }
+
+    /** @return list<string> */
+    private function advertisingMedia(): array
+    {
+        return AssistantAdvertisingMedia::enabledNames();
     }
 
     private function sumRows(array $rows): array

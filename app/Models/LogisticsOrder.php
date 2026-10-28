@@ -104,7 +104,13 @@ class LogisticsOrder extends Model
             $values,
         );
 
-        foreach (self::MEDIA_SOURCES as $needle => $label) {
+        $sources = array_values(array_unique([
+            ...array_values(self::MEDIA_SOURCES),
+            ...AssistantAdvertisingMedia::enabledNames(),
+        ]));
+        foreach ($sources as $label) {
+            if ($label === self::MEDIA_SOURCE_OTHER) continue;
+            $needle = mb_strtolower((string) preg_replace('/[^\pL\pN]+/u', '', $label));
             foreach ($normalisedTags as $normalised) {
                 if ($normalised !== '' && str_contains($normalised, $needle)) {
                     return $label;
