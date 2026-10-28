@@ -69,6 +69,7 @@ Route::get('/operation/domain-stores', [OperationDomainStoreController::class, '
 Route::get('/operation/ai-product-library', [OperationAiProductLibraryController::class, 'index'])->name('operation.ai-product-library.index');
 Route::get('/operation/reports', [OperationReportController::class, 'index'])->name('operation.reports.index');
 Route::get('/operation/reports/export', [OperationReportController::class, 'export'])->name('operation.reports.export');
+Route::get('/operation/reports/missing-guide-skus.txt', [OperationReportController::class, 'exportMissingGuideSkus'])->name('operation.reports.missing-guide-skus.export');
 Route::get('/operation/reports/screenshot', [OperationReportController::class, 'screenshot'])->name('operation.reports.screenshot');
 Route::post('/operation/reports', [OperationReportController::class, 'store'])->name('operation.reports.store');
 Route::get('/operation/reports/{report}', [OperationReportController::class, 'show'])->whereNumber('report')->name('operation.reports.show');

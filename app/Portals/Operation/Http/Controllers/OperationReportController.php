@@ -77,6 +77,7 @@ class OperationReportController extends Controller
             'advertisingAgencies' => AssistantAdvertisingAgency::enabledOptions(),
             'isBoss' => $isBoss, 'canReview' => $canReview,
             'canEditReport' => true, 'history' => $history,
+            'missingGuideSkus' => $isBoss ? $this->metrics->missingGuideSkuSummary() : [],
         ]);
     }
 
@@ -246,6 +247,25 @@ class OperationReportController extends Controller
                 yield ['kind' => $i % 2 ? 'variant' : 'normal', 'height' => 25, 'cells' => array_map(fn ($value, $index) => ['value' => $value, 'type' => in_array($index, $textIndexes, true) ? 'text' : 'number', 'align' => in_array($index, $textIndexes, true) ? 'left' : 'right'], $values, array_keys($values))];
             }
         }, false);
+    }
+
+    public function exportMissingGuideSkus(Request $request): Response
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+        abort_unless($this->isBoss($context['user']), 403, '只有 Boss 账号可以导出缺少指导价的 SKU。');
+
+        $rows = $this->metrics->missingGuideSkuSummary();
+        $content = collect($rows)
+            ->pluck('sku')
+            ->filter(fn ($sku) => $sku !== '未填写 SKU')
+            ->unique()
+            ->implode("\r\n");
+
+        return response("\xEF\xBB\xBF".$content."\r\n", 200, [
+            'Content-Type' => 'text/plain; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="missing-guide-skus-'.now('Asia/Shanghai')->format('Ymd-His').'.txt"',
+        ]);
     }
 
     private function context(Request $request): array|Response
