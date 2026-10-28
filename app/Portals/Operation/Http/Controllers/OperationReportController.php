@@ -77,7 +77,8 @@ class OperationReportController extends Controller
             'advertisingAgencies' => AssistantAdvertisingAgency::enabledOptions(),
             'isBoss' => $isBoss, 'canReview' => $canReview,
             'canEditReport' => true, 'history' => $history,
-            'missingGuideSkus' => $isBoss ? $this->metrics->missingGuideSkuSummary() : [],
+            'canViewMissingGuideSkus' => $this->canViewMissingGuideSkus($user),
+            'missingGuideSkus' => $this->canViewMissingGuideSkus($user) ? $this->metrics->missingGuideSkuSummary() : [],
         ]);
     }
 
@@ -253,7 +254,7 @@ class OperationReportController extends Controller
     {
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
-        abort_unless($this->isBoss($context['user']), 403, '只有 Boss 账号可以导出缺少指导价的 SKU。');
+        abort_unless($this->canViewMissingGuideSkus($context['user']), 403, '只有 Boss 账号可以导出缺少指导价的 SKU。');
 
         $rows = $this->metrics->missingGuideSkuSummary();
         $content = collect($rows)
@@ -279,6 +280,11 @@ class OperationReportController extends Controller
     private function isBoss(AdminUser $user): bool
     {
         return $user->isAdministrator() || strcasecmp((string) $user->username, 'kky_boss') === 0;
+    }
+
+    private function canViewMissingGuideSkus(AdminUser $user): bool
+    {
+        return strcasecmp((string) $user->username, 'kky_boss') === 0;
     }
 
     private function canReview(AdminUser $user): bool

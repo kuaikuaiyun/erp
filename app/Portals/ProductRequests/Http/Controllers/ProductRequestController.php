@@ -2704,6 +2704,7 @@ class ProductRequestController extends Controller
                 $search->where('report_no', 'like', $keyword)
                     ->orWhere('skus', 'like', $keyword)
                     ->orWhere('procurement_skus', 'like', $keyword)
+                    ->orWhere('operation_user_name', 'like', $keyword)
                     ->orWhere('operation_display_name', 'like', $keyword)
                     ->orWhere('operation_department_name', 'like', $keyword)
                     ->orWhere('standard_chinese_name', 'like', $keyword)
