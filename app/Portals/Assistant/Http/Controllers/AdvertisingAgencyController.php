@@ -4,6 +4,7 @@ namespace App\Portals\Assistant\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\AssistantAdvertisingAgency;
+use App\Models\AssistantAdvertisingMedia;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use Illuminate\Http\RedirectResponse;
@@ -28,7 +29,8 @@ class AdvertisingAgencyController extends Controller
         return view('portals.assistant.advertising-agencies.index', [
             'portal' => $context['portal']->load('menus'),
             'user' => $context['user'],
-            'agencies' => AssistantAdvertisingAgency::query()->orderBy('sort')->orderBy('id')->get(),
+            'agencies' => AssistantAdvertisingAgency::query()->with('advertisingMedia')->orderBy('sort')->orderBy('id')->get(),
+            'media' => AssistantAdvertisingMedia::query()->where('is_enabled', true)->orderBy('sort')->orderBy('id')->get(),
         ]);
     }
 
@@ -38,7 +40,9 @@ class AdvertisingAgencyController extends Controller
         if ($context instanceof Response) abort($context->getStatusCode());
         $request->merge(['name' => trim((string) $request->input('name'))]);
         $validated = $request->validate([
-            'name' => ['required', 'string', 'max:100', Rule::unique('assistant_advertising_agencies', 'name')],
+            'name' => ['required', 'string', 'max:100', Rule::unique('assistant_advertising_agencies', 'name')
+                ->where(fn ($query) => $query->where('advertising_media_id', $request->integer('advertising_media_id')))],
+            'advertising_media_id' => ['required', 'integer', Rule::exists('assistant_advertising_media', 'id')->where('is_enabled', true)],
             'settlement_coefficient' => ['required', 'numeric', 'min:0', 'max:9999'],
         ], [
             'name.required' => '请输入广告代理名称。', 'name.unique' => '该广告代理已经存在。',
@@ -65,7 +69,10 @@ class AdvertisingAgencyController extends Controller
         if ($context instanceof Response) abort($context->getStatusCode());
         $request->merge(['name' => trim((string) $request->input('name'))]);
         $validated = $request->validate([
-            'name' => ['required', 'string', 'max:100', Rule::unique('assistant_advertising_agencies', 'name')->ignore($advertisingAgency->getKey())],
+            'name' => ['required', 'string', 'max:100', Rule::unique('assistant_advertising_agencies', 'name')
+                ->where(fn ($query) => $query->where('advertising_media_id', $request->integer('advertising_media_id')))
+                ->ignore($advertisingAgency->getKey())],
+            'advertising_media_id' => ['required', 'integer', Rule::exists('assistant_advertising_media', 'id')->where('is_enabled', true)],
             'settlement_coefficient' => ['required', 'numeric', 'min:0', 'max:9999'],
         ], [
             'name.required' => '请输入广告代理名称。', 'name.unique' => '该广告代理已经存在。',

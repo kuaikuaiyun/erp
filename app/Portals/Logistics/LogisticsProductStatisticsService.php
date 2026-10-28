@@ -3166,6 +3166,16 @@ class LogisticsProductStatisticsService
             $query->where($orderTable.'.store_name', $filters['store']);
         }
 
+        if (array_key_exists('include_product_codes', $filters)) {
+            $codes = array_values(array_filter((array) $filters['include_product_codes']));
+            if ($codes === []) $query->whereRaw('1 = 0');
+            else $query->whereIn(DB::raw("LOWER(TRIM({$itemTable}.tongtu_product_code))"), $codes);
+        }
+        $excludedCodes = array_values(array_filter((array) ($filters['exclude_product_codes'] ?? [])));
+        if ($excludedCodes !== []) {
+            $query->whereNotIn(DB::raw("LOWER(TRIM({$itemTable}.tongtu_product_code))"), $excludedCodes);
+        }
+
         $name = trim((string) ($filters['name'] ?? ''));
         if ($name !== '') {
             $query->where(function ($nested) use ($itemTable, $name): void {

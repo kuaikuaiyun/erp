@@ -18,6 +18,7 @@ use App\Portals\Logistics\Http\Controllers\ShopifyWebhookController;
 use App\Portals\Operation\Http\Controllers\OperationDomainStoreController;
 use App\Portals\Operation\Http\Controllers\OperationAiProductLibraryController;
 use App\Portals\Operation\Http\Controllers\OperationReportController;
+use App\Portals\Assistant\Http\Controllers\OperationReportReviewController;
 use App\Portals\ProductRequests\Http\Controllers\ProductRequestController;
 use App\Portals\Aikaipin\Http\Controllers\ProductLibraryController;
 use App\Portals\Payment\Http\Controllers\PaymentPortalController;
@@ -29,6 +30,7 @@ Route::post('/management/menus/order', [PortalMenuConfigurationController::class
 Route::get('/domain-stores', [DomainStoreController::class, 'index'])->name('assistant.domain-stores.index');
 Route::get('/advertising-media', [AdvertisingMediaController::class, 'index'])->name('assistant.advertising-media.index');
 Route::post('/advertising-media', [AdvertisingMediaController::class, 'store'])->name('assistant.advertising-media.store');
+Route::patch('/advertising-media/{advertisingMedium}', [AdvertisingMediaController::class, 'update'])->name('assistant.advertising-media.update');
 Route::patch('/advertising-media/{advertisingMedium}/toggle', [AdvertisingMediaController::class, 'toggle'])->name('assistant.advertising-media.toggle');
 Route::delete('/advertising-media/{advertisingMedium}', [AdvertisingMediaController::class, 'destroy'])->name('assistant.advertising-media.destroy');
 Route::get('/advertising-agencies', [AdvertisingAgencyController::class, 'index'])->name('assistant.advertising-agencies.index');
@@ -75,6 +77,10 @@ Route::get('/operation/reports/screenshot', [OperationReportController::class, '
 Route::post('/operation/reports', [OperationReportController::class, 'store'])->name('operation.reports.store');
 Route::get('/operation/reports/{report}', [OperationReportController::class, 'show'])->whereNumber('report')->name('operation.reports.show');
 Route::post('/operation/reports/{report}/approve', [OperationReportController::class, 'approve'])->name('operation.reports.approve');
+Route::get('/operation-report-reviews', [OperationReportReviewController::class, 'index'])->name('assistant.operation-report-reviews.index');
+Route::get('/operation-report-reviews/screenshot', [OperationReportReviewController::class, 'screenshot'])->name('assistant.operation-report-reviews.screenshot');
+Route::get('/operation-report-reviews/{report}', [OperationReportReviewController::class, 'show'])->whereNumber('report')->name('assistant.operation-report-reviews.show');
+Route::post('/operation-report-reviews/{report}/approve', [OperationReportReviewController::class, 'approve'])->whereNumber('report')->name('assistant.operation-report-reviews.approve');
 Route::get('/operation/ai-product-library/{product}/detail', [OperationAiProductLibraryController::class, 'detail'])->name('operation.ai-product-library.detail');
 Route::get('/operation/ai-product-library/{product}/images/{imageIndex}', [OperationAiProductLibraryController::class, 'image'])->whereNumber('imageIndex')->name('operation.ai-product-library.images.show');
 Route::get('/operation/ai-product-library/{product}/package', [OperationAiProductLibraryController::class, 'downloadPackage'])->name('operation.ai-product-library.package.download');
@@ -168,6 +174,8 @@ Route::get('/warehouse-weight-exceptions/{id}/physical-image', [WarehouseProduct
 Route::get('/warehouse-weight-exceptions', [WarehouseWeightExceptionController::class, 'index'])->name('caigou.warehouse-weight-exceptions.index');
 Route::get('/warehouse-weight-exceptions/warehouse-images/{linkSku}/{index}', [WarehouseWeightExceptionController::class, 'warehouseImage'])->whereNumber('linkSku')->whereNumber('index')->name('caigou.warehouse-weight-exceptions.warehouse-image');
 Route::post('/warehouse-weight-exceptions/{id}/resolve', [WarehouseWeightExceptionController::class, 'resolve'])->name('caigou.warehouse-weight-exceptions.resolve');
+Route::post('/warehouse-weight-exceptions/{id}/refresh', [WarehouseWeightExceptionController::class, 'refresh'])->name('caigou.warehouse-weight-exceptions.refresh');
+Route::post('/warehouse-weight-exceptions/{id}/approve', [WarehouseWeightExceptionController::class, 'approve'])->name('caigou.warehouse-weight-exceptions.approve');
 Route::get('/product-library', [ProductLibraryController::class, 'index'])->name('aikaipin.product-library.index');
 Route::get('/account-risk', [PaymentPortalController::class, 'accountRisk'])->name('payment.account-risk.index');
 Route::post('/account-risk/accounts', [PaymentPortalController::class, 'storeAccountRiskAccount'])->name('payment.account-risk.accounts.store');

@@ -258,6 +258,16 @@
                                 <input name="keyword" type="search" class="form-control" value="{{ $filters['keyword'] }}" placeholder="搜索产品名、PCL 或 SKU">
                             </div>
                         </div>
+                        <div class="product-statistics-filter-field">
+                            <label>审核状态</label>
+                            <select name="warehouse_status" class="form-control">
+                                <option value="">全部</option>
+                                <option value="pending_review" @selected(($filters['warehouse_status'] ?? '') === 'pending_review')>待审核</option>
+                                <option value="pending" @selected(($filters['warehouse_status'] ?? '') === 'pending')>待整改</option>
+                                <option value="resolved" @selected(($filters['warehouse_status'] ?? '') === 'resolved')>已整改</option>
+                                <option value="approved" @selected(($filters['warehouse_status'] ?? '') === 'approved')>已审核</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="product-statistics-filter-actions">
                         <button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> 查询</button>
@@ -356,11 +366,12 @@
                             </td>
                             {{-- 审核状态 --}}
                             <td>
-                                @if(($product['warehouse_review_status'] ?? 'pending') === 'approved')
-                                    <span class="label label-success">{{ $labels['reviewApproved'] }}</span>
-                                @else
-                                    <span class="label label-warning">{{ $labels['reviewPending'] }}</span>
-                                @endif
+                                @switch($product['warehouse_display_status'] ?? 'pending_review')
+                                    @case('approved') <span class="label label-success">已审核</span> @break
+                                    @case('pending') <span class="label label-warning">待整改</span> @break
+                                    @case('resolved') <span class="label label-info">已整改</span> @break
+                                    @default <span class="label label-default">待审核</span>
+                                @endswitch
                             </td>
                             {{-- 操作 --}}
                             <td>
@@ -371,6 +382,9 @@
                                         ->filter()
                                         ->unique()
                                         ->values();
+                                    $refreshSkus = ($product['warehouse_display_status'] ?? '') === 'resolved'
+                                        ? collect($product['variant_skus'] ?? [])->pluck('sku')->filter()->unique()->values()
+                                        : $missingWeightSkus;
                                 @endphp
                                 <button type="button" class="btn btn-default btn-xs warehouse-product-statistics-view-btn" data-product-id="{{ $product['id'] }}">
                                     <i class="fa fa-eye"></i> {{ $labels['view'] }}
@@ -378,14 +392,16 @@
                                 <button type="button" class="btn btn-warning btn-xs warehouse-product-statistics-fill-btn" data-product-id="{{ $product['id'] }}">
                                     <i class="fa fa-exclamation-triangle"></i> {{ $labels['fill'] }}
                                 </button>
-                                <button type="button" class="btn btn-success btn-xs warehouse-product-statistics-approve-btn" data-pcl-code="{{ $product['product_code'] ?? '' }}" data-review-status="{{ $product['warehouse_review_status'] ?? 'pending' }}">
-                                    <i class="fa fa-check"></i> {{ $labels['approve'] }}
-                                </button>
-                                @if($missingWeightSkus->isNotEmpty())
+                                @if(in_array(($product['warehouse_display_status'] ?? 'pending_review'), ['pending_review', 'resolved'], true))
+                                    <button type="button" class="btn btn-success btn-xs warehouse-product-statistics-approve-btn" data-pcl-code="{{ $product['product_code'] ?? '' }}" data-review-status="{{ $product['warehouse_review_status'] ?? 'pending' }}">
+                                        <i class="fa fa-check"></i> {{ $labels['approve'] }}
+                                    </button>
+                                @endif
+                                @if($refreshSkus->isNotEmpty())
                                     <button type="button" class="btn btn-info btn-xs warehouse-product-statistics-refresh-weight-btn"
-                                            data-skus="{{ $missingWeightSkus->implode(',') }}"
-                                            title="通过通途接口抓取这些 SKU 的重量">
-                                        <i class="fa fa-cloud-download"></i> 抓重量
+                                            data-skus="{{ $refreshSkus->implode(',') }}"
+                                            title="{{ ($product['warehouse_display_status'] ?? '') === 'resolved' ? '该异常已整改，抓取全部 SKU 最新数据' : '重量缺失，抓取 SKU 最新数据' }}">
+                                        <i class="fa fa-cloud-download"></i> 抓取最新数据
                                     </button>
                                 @endif
                             </td>
@@ -496,7 +512,7 @@
     <script>
         window.__warehouseProductStatisticsConfig = @json($warehouseProductStatisticsConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/warehouse-product-statistics.js?v=20261027-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/warehouse-product-statistics.js?v=20261028-2"></script>
     <script>
         // 审核通过
         (function () {

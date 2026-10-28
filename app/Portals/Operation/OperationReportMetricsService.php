@@ -10,6 +10,8 @@ use Carbon\Carbon;
 
 class OperationReportMetricsService
 {
+    private const CNY_PER_USD = 6.5;
+
     /** @return list<array{sku:string,product_name:string,item_count:int,quantity:float,latest_order_at:?string}> */
     public function missingGuideSkuSummary(): array
     {
@@ -28,6 +30,11 @@ class OperationReportMetricsService
         return LogisticsOrderItem::query()
             ->join('logistics_orders', 'logistics_orders.id', '=', 'logistics_order_items.logistics_order_id')
             ->whereIn('logistics_orders.subscription_type', ['订阅首次购买', '无订阅'])
+            ->where(function ($query): void {
+                $query->whereRaw("TRIM(COALESCE(logistics_order_items.shopify_sku, '')) <> ''")
+                    ->orWhereRaw("TRIM(COALESCE(logistics_order_items.tongtu_sku, '')) <> ''")
+                    ->orWhereRaw("TRIM(COALESCE(logistics_order_items.tongtu_product_code, '')) <> ''");
+            })
             ->select([
                 'logistics_order_items.shopify_sku',
                 'logistics_order_items.tongtu_sku',
@@ -107,7 +114,8 @@ class OperationReportMetricsService
         $missingWeight = 0;
 
         foreach ($orders as $order) {
-            $domain = trim((string) ($order->source_shop_domain ?: $order->store?->domain ?: $order->store_name ?: '未知店铺'));
+            // “域名与店铺信息管理”是店铺域名的权威数据源；订单字段仅作为未关联店铺时的兜底。
+            $domain = trim((string) ($order->store?->domain ?: $order->source_shop_domain ?: $order->store_name ?: '未知店铺'));
             $media = trim((string) ($order->media_source ?: LogisticsOrder::MEDIA_SOURCE_OTHER));
             $key = $domain."\x1F".$media;
             $groups[$key] ??= $this->emptyRow($date, $operatorName, $domain, $media);
@@ -148,7 +156,7 @@ class OperationReportMetricsService
                         $missingGuide++;
                         $missingGuideSkus[] = $this->itemSku($item);
                     } else {
-                        $row['first_purchase_cost'] += (float) $guide * $quantity;
+                        $row['first_purchase_cost'] += (float) $guide * $quantity / self::CNY_PER_USD;
                     }
                     if ($weight === null || (float) $weight <= 0) {
                         $missingWeight++;
@@ -156,7 +164,7 @@ class OperationReportMetricsService
                         $orderWeight += (float) $weight * $quantity;
                     }
                 }
-                $row['first_shipping_cost'] += $orderWeight / 1000 * 80 + 20;
+                $row['first_shipping_cost'] += ($orderWeight / 1000 * 80 + 20) / self::CNY_PER_USD;
             }
             unset($row);
         }
@@ -193,6 +201,38 @@ class OperationReportMetricsService
         if ($missingWeight > 0) $warnings[] = $missingWeight.' 个首单商品缺少重量，运费可能偏低。';
 
         return ['rows' => $rows, 'totals' => $totals, 'warnings' => $warnings];
+    }
+
+    /**
+     * @return list<array{media_source:string,first_revenue:float,actual_ad_spend:float,first_roi:?float}>
+     */
+    public function mediaRoiSummary(array $metricRows, array $advertisingRows): array
+    {
+        $groups = [];
+        foreach ($metricRows as $row) {
+            $name = trim((string) ($row['media_source'] ?? '')) ?: LogisticsOrder::MEDIA_SOURCE_OTHER;
+            $key = mb_strtolower($name);
+            $groups[$key] ??= ['media_source' => $name, 'first_revenue' => 0.0, 'actual_ad_spend' => 0.0];
+            $groups[$key]['first_revenue'] += (float) ($row['first_total_revenue'] ?? 0);
+        }
+        foreach ($advertisingRows as $row) {
+            $name = trim((string) ($row['media_source'] ?? '')) ?: LogisticsOrder::MEDIA_SOURCE_OTHER;
+            $key = mb_strtolower($name);
+            $groups[$key] ??= ['media_source' => $name, 'first_revenue' => 0.0, 'actual_ad_spend' => 0.0];
+            $groups[$key]['actual_ad_spend'] += (float) ($row['actual_spend'] ?? 0);
+        }
+
+        $rows = array_map(static function (array $row): array {
+            $row['first_revenue'] = round($row['first_revenue'], 4);
+            $row['actual_ad_spend'] = round($row['actual_ad_spend'], 4);
+            $row['first_roi'] = $row['actual_ad_spend'] > 0
+                ? round($row['first_revenue'] / $row['actual_ad_spend'], 4)
+                : null;
+            return $row;
+        }, array_values($groups));
+        usort($rows, fn (array $a, array $b) => strcasecmp($a['media_source'], $b['media_source']));
+
+        return $rows;
     }
 
     private function itemSku(object $item): string

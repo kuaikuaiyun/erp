@@ -21,7 +21,7 @@
                 <div class="info-box bg-yellow">
                     <span class="info-box-icon"><i class="fa fa-exclamation-triangle"></i></span>
                     <div class="info-box-content">
-                        <span class="info-box-text">待处理</span>
+                        <span class="info-box-text">待整改</span>
                         <span class="info-box-number">{{ $pendingCount }}</span>
                     </div>
                 </div>
@@ -30,7 +30,7 @@
                 <div class="info-box bg-green">
                     <span class="info-box-icon"><i class="fa fa-check-circle"></i></span>
                     <div class="info-box-content">
-                        <span class="info-box-text">已处理</span>
+                        <span class="info-box-text">已整改</span>
                         <span class="info-box-number">{{ $resolvedCount }}</span>
                     </div>
                 </div>
@@ -44,8 +44,8 @@
                         <label style="margin-right:6px;">状态</label>
                         <select name="status" class="form-control input-sm">
                             <option value="">全部</option>
-                            <option value="pending" @selected($filters['status'] === 'pending')>待处理</option>
-                            <option value="resolved" @selected($filters['status'] === 'resolved')>已处理</option>
+                            <option value="pending" @selected($filters['status'] === 'pending')>待整改</option>
+                            <option value="resolved" @selected($filters['status'] === 'resolved')>已整改</option>
                         </select>
                     </div>
                     <div class="form-group" style="margin-right:10px;">
@@ -137,7 +137,7 @@
                                     <div>{{ \Illuminate\Support\Str::limit($row->remark, 60) }}</div>
                                 @endif
                                 @if($row->status === 'resolved' && $row->resolution_remark)
-                                    <div class="text-muted" style="font-size:12px;"><i class="fa fa-check-circle-o"></i> 处理备注: {{ \Illuminate\Support\Str::limit($row->resolution_remark, 60) }}</div>
+                                    <div class="text-muted" style="font-size:12px;"><i class="fa fa-check-circle-o"></i> 整改备注: {{ \Illuminate\Support\Str::limit($row->resolution_remark, 60) }}</div>
                                 @endif
                                 @if(!$row->remark && !($row->status === 'resolved' && $row->resolution_remark))
                                     <span class="text-muted">—</span>
@@ -159,25 +159,29 @@
                             </td>
                             <td>
                                 @if($row->status === 'pending')
-                                    <span class="label label-warning">待处理</span>
+                                    <span class="label label-warning">待整改</span>
                                 @else
-                                    <span class="label label-success">已处理</span>
+                                    <span class="label label-success">已整改</span>
                                 @endif
                             </td>
                             <td>{{ $row->reporter_name ?: '—' }}</td>
                             <td>
                                 <div>{{ $row->created_at?->format('Y-m-d H:i') }}</div>
                                 @if($row->status === 'resolved' && $row->resolved_at)
-                                    <div class="text-muted" style="font-size:12px;">已处理: {{ $row->resolved_at->format('m-d H:i') }}</div>
+                                    <div class="text-muted" style="font-size:12px;">已整改: {{ $row->resolved_at->format('m-d H:i') }}</div>
                                 @endif
                             </td>
                             <td>
                                 @if($row->status === 'pending')
                                     <button type="button" class="btn btn-success btn-xs warehouse-weight-resolve-btn" data-id="{{ $row->id }}">
-                                        <i class="fa fa-check"></i> 标记已处理
+                                        <i class="fa fa-check"></i> 标记已整改
+                                    </button>
+                                @elseif(!$row->warehouse_review_approved)
+                                    <button type="button" class="btn btn-success btn-xs warehouse-weight-approve-btn" data-id="{{ $row->id }}">
+                                        <i class="fa fa-check"></i> 审核通过
                                     </button>
                                 @else
-                                    <span class="text-muted">—</span>
+                                    <span class="label label-success">已审核</span>
                                 @endif
                             </td>
                         </tr>
@@ -209,11 +213,11 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <button type="button" class="close" data-dismiss="modal" aria-label="关闭"><span aria-hidden="true">&times;</span></button>
-                    <h4 class="modal-title">标记异常已处理</h4>
+                    <h4 class="modal-title">标记异常已整改</h4>
                 </div>
                 <div class="modal-body">
                     <input type="hidden" id="warehouse-weight-resolve-id">
-                    <label>处理备注（可选）</label>
+                    <label>整改备注（可选）</label>
                     <textarea id="warehouse-weight-resolve-remark" class="form-control" rows="3" maxlength="500" placeholder="简要说明处理方式或参考来源"></textarea>
                 </div>
                 <div class="modal-footer">
@@ -246,6 +250,29 @@
 
     $('.warehouse-weight-resolve-btn').on('click', function () {
         openResolve($(this).data('id'));
+    });
+
+    function postAction(id, action, button, confirmText) {
+        if (confirmText && !confirm(confirmText)) return;
+        var token = $('meta[name="csrf-token"]').attr('content') || '';
+        button.prop('disabled', true);
+        $.ajax({
+            url: resolveUrl + '/' + id + '/' + action,
+            method: 'POST',
+            headers: { 'X-CSRF-TOKEN': token },
+            success: function (res) {
+                alert((res && res.message) || '操作成功');
+                location.reload();
+            },
+            error: function (xhr) {
+                button.prop('disabled', false);
+                alert((xhr.responseJSON && xhr.responseJSON.message) || '操作失败');
+            }
+        });
+    }
+
+    $('.warehouse-weight-approve-btn').on('click', function () {
+        postAction($(this).data('id'), 'approve', $(this), '确认审核通过？');
     });
 
     $('#warehouse-weight-resolve-confirm').on('click', function () {
