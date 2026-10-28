@@ -18,6 +18,7 @@ use App\Portals\Logistics\Http\Controllers\ShopifyWebhookController;
 use App\Portals\Operation\Http\Controllers\OperationDomainStoreController;
 use App\Portals\Operation\Http\Controllers\OperationAiProductLibraryController;
 use App\Portals\Operation\Http\Controllers\OperationReportController;
+use App\Portals\Assistant\Http\Controllers\OperationReportReviewController;
 use App\Portals\ProductRequests\Http\Controllers\ProductRequestController;
 use App\Portals\Aikaipin\Http\Controllers\ProductLibraryController;
 use App\Portals\Payment\Http\Controllers\PaymentPortalController;
@@ -76,6 +77,10 @@ Route::get('/operation/reports/screenshot', [OperationReportController::class, '
 Route::post('/operation/reports', [OperationReportController::class, 'store'])->name('operation.reports.store');
 Route::get('/operation/reports/{report}', [OperationReportController::class, 'show'])->whereNumber('report')->name('operation.reports.show');
 Route::post('/operation/reports/{report}/approve', [OperationReportController::class, 'approve'])->name('operation.reports.approve');
+Route::get('/operation-report-reviews', [OperationReportReviewController::class, 'index'])->name('assistant.operation-report-reviews.index');
+Route::get('/operation-report-reviews/screenshot', [OperationReportReviewController::class, 'screenshot'])->name('assistant.operation-report-reviews.screenshot');
+Route::get('/operation-report-reviews/{report}', [OperationReportReviewController::class, 'show'])->whereNumber('report')->name('assistant.operation-report-reviews.show');
+Route::post('/operation-report-reviews/{report}/approve', [OperationReportReviewController::class, 'approve'])->whereNumber('report')->name('assistant.operation-report-reviews.approve');
 Route::get('/operation/ai-product-library/{product}/detail', [OperationAiProductLibraryController::class, 'detail'])->name('operation.ai-product-library.detail');
 Route::get('/operation/ai-product-library/{product}/images/{imageIndex}', [OperationAiProductLibraryController::class, 'image'])->whereNumber('imageIndex')->name('operation.ai-product-library.images.show');
 Route::get('/operation/ai-product-library/{product}/package', [OperationAiProductLibraryController::class, 'downloadPackage'])->name('operation.ai-product-library.package.download');

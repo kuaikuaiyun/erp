@@ -10,6 +10,7 @@
 .ad-table tbody tr:only-child .remove-ad{display:none!important}
 .ad-table .ad-media{background:#f4f7f9;color:#52697b;pointer-events:none}
 .missing-guide-wrap{max-height:410px;overflow:auto}.missing-guide-table{margin:0}.missing-guide-table th{position:sticky;top:0;z-index:1;background:#fff4dc!important;color:#76551e}.missing-guide-table td,.missing-guide-table th{vertical-align:middle!important}.missing-guide-sku{font-family:Consolas,monospace;color:#b34d24}.missing-guide-empty{text-align:center;color:#80909d;padding:32px!important}
+.media-roi-table th{background:#eef5fa!important;color:#36536b}.media-roi-table td,.media-roi-table th{text-align:center;vertical-align:middle!important}.media-roi-value{font-size:16px;font-weight:700;color:#237daf}
 #ad-modal-file{display:none!important}
 </style>
 @endpush
@@ -92,8 +93,9 @@
         <div class="op-kpi"><span>实际广告费</span><strong>${{ number_format($report->actual_ad_spend,2) }}</strong></div>
         <div class="op-kpi"><span>续费净收益</span><strong>${{ number_format($report->renewal_net_revenue,2) }}</strong></div>
         <div class="op-kpi"><span>首单 ROI</span><strong>{{ $report->actual_ad_spend > 0 ? number_format($metricTotals['first_total_revenue']/$report->actual_ad_spend,2) : '—' }}</strong></div>
-        <div class="op-kpi"><span>整体 ROI</span><strong>{{ $report->actual_ad_spend > 0 ? number_format($metricTotals['total_revenue']/$report->actual_ad_spend,2) : '—' }}</strong></div>
-    </div>@endif
+    </div>
+    <div class="box"><div class="box-header with-border"><h3 class="box-title op-section-title">媒体首单 ROI</h3><p class="op-help">按媒体汇总计算：该媒体首单营业额 ÷ 该媒体实际广告费。</p></div><div class="box-body no-padding table-responsive"><table class="table table-bordered media-roi-table"><thead><tr><th>媒体</th><th>首单营业额($)</th><th>实际广告费($)</th><th>首单 ROI</th></tr></thead><tbody>@forelse($mediaRoiRows as $row)<tr><td>{{ $row['media_source'] }}</td><td>{{ number_format($row['first_revenue'],2) }}</td><td>{{ number_format($row['actual_ad_spend'],2) }}</td><td class="media-roi-value">{{ $row['first_roi'] === null ? '—' : number_format($row['first_roi'],2) }}</td></tr>@empty<tr><td colspan="4" class="text-center text-muted">暂无媒体 ROI 数据</td></tr>@endforelse</tbody></table></div></div>
+    @endif
 
     <div class="box"><div class="box-header with-border"><h3 class="box-title op-section-title">提交记录</h3></div><div class="box-body no-padding table-responsive"><table class="table table-hover history-table"><thead><tr><th>日期</th><th>运营</th><th>广告费</th><th>首单利润</th><th>整体利润率</th><th>状态</th><th>提交时间</th><th>操作</th></tr></thead><tbody>@forelse($history as $item)@php($itemTotalRevenue = collect($item->metric_rows ?? [])->sum('total_revenue'))@php($overallProfitMargin = $itemTotalRevenue > 0 ? (float)$item->overall_profit / $itemTotalRevenue * 100 : null)<tr><td>{{ $item->report_date->format('Y-m-d') }}</td><td>{{ $item->operator_name }}</td><td>${{ number_format($item->actual_ad_spend,2) }}</td><td>${{ number_format($item->first_profit,2) }}</td><td>{{ $overallProfitMargin === null ? '—' : number_format($overallProfitMargin,2).'%' }}</td><td><span class="op-status {{ $item->status }}">{{ $item->status==='approved'?'已审核':'待审核' }}</span></td><td>{{ optional($item->submitted_at)->format('Y-m-d H:i') }}</td><td><a class="btn btn-xs btn-default" href="{{ route('operation.reports.show',$item) }}"><i class="fa fa-eye"></i> 查看</a></td></tr>@empty<tr><td colspan="8" class="text-center text-muted">暂无提交记录</td></tr>@endforelse</tbody></table></div></div>
 </section>

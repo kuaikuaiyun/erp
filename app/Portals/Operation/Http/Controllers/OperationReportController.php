@@ -61,6 +61,8 @@ class OperationReportController extends Controller
         $report = OperationReport::query()->whereDate('report_date', $date)->where('operator_user_id', $operatorId)->first();
         $metricRows = $calculated['rows'];
         $advertisingRows = $editingReport?->advertising_rows ?: [];
+        $submittedMetricRows = $report?->metric_rows ?: [];
+        $submittedAdvertisingRows = $report?->advertising_rows ?: [];
         $history = OperationReport::query()
             ->when(! $isBoss && ! $canReview, fn ($query) => $query->where('operator_user_id', $user->getKey()))
             ->orderByDesc('report_date')->orderByDesc('id')->limit(60)->get();
@@ -72,6 +74,7 @@ class OperationReportController extends Controller
             'metricRows' => $metricRows, 'metricTotals' => $this->sumRows($metricRows),
             'metricRowspans' => $this->identityRowspans($metricRows),
             'advertisingRows' => $advertisingRows, 'warnings' => $calculated['warnings'],
+            'mediaRoiRows' => $this->metrics->mediaRoiSummary($submittedMetricRows, $submittedAdvertisingRows),
             'operatorOptions' => $operatorOptions,
             'mediaSources' => $this->advertisingMedia(),
             'advertisingAgencies' => AssistantAdvertisingAgency::enabledOptions(),
@@ -99,7 +102,9 @@ class OperationReportController extends Controller
             'portal' => $context['portal']->load('menus'), 'user' => $user, 'report' => $report,
             'metricRows' => $rows, 'metricTotals' => $this->sumRows($rows),
             'metricRowspans' => $this->identityRowspans($rows),
-            'advertisingRows' => $report->advertising_rows ?: [], 'canReview' => $this->canReview($user),
+            'advertisingRows' => $report->advertising_rows ?: [],
+            'mediaRoiRows' => $this->metrics->mediaRoiSummary($rows, $report->advertising_rows ?: []),
+            'canReview' => false,
             'canEdit' => $report->status === OperationReport::STATUS_PENDING
                 && ($this->isBoss($user) || (int) $report->operator_user_id === (int) $user->getKey()),
         ]);
@@ -223,9 +228,8 @@ class OperationReportController extends Controller
     {
         $context = $this->context($request);
         if ($context instanceof Response) abort($context->getStatusCode());
-        abort_unless($this->canReview($context['user']), 403, '只有主管和 boss 可以审核运营报表。');
-        $report->update(['status' => OperationReport::STATUS_APPROVED, 'reviewed_by' => $context['user']->getKey(), 'reviewed_at' => now()]);
-        return back()->with('success', '运营报表已审核通过。');
+        return redirect()->route('operation.reports.show', $report)
+            ->with('error', '审核流程已迁移到助理系统，请在“运营报表审核”菜单中操作。');
     }
 
     public function export(Request $request): Response
@@ -236,7 +240,7 @@ class OperationReportController extends Controller
         $metrics = collect($data['metricRows'])->values();
         $ads = collect($data['advertisingRows'])->values();
         $count = max($metrics->count(), $ads->count(), 1);
-        $columns = collect(['日期','人名','店铺域名','媒体','首单订阅单量','首单订阅营业额($)','首单普通单量','首单普通营业额($)','首单合计单量','首单合计营业额($)','首单总采购费','首单总运费','广告代理','广告社媒','广告账户名称','广告账户编号','账面广告费($)','结算系数','实际广告费($)','广告消耗截图','首单交易退货费','运营首单利润($)','续费净收益($)','运营整体净利润($)','运营社媒首单ROI','运营社媒整体ROI','填写状态','续费单量','续费营业额($)','续费费用','总单量','总营业额($)'])
+        $columns = collect(['日期','人名','店铺域名','媒体','首单订阅单量','首单订阅营业额($)','首单普通单量','首单普通营业额($)','首单合计单量','首单合计营业额($)','首单总采购费','首单总运费','广告代理','广告社媒','广告账户名称','广告账户编号','账面广告费($)','结算系数','实际广告费($)','广告消耗截图','首单交易退货费','运营首单利润($)','续费净收益($)','运营整体净利润($)','运营社媒首单ROI','填写状态','续费单量','续费营业额($)','续费费用','总单量','总营业额($)'])
             ->map(fn ($label) => ['label' => $label, 'width' => mb_strlen($label) > 8 ? 20 : 15])->all();
         return $this->xlsxWriter->response('运营报表_'.$data['reportDate'].'_'.$data['selectedOperator']->name.'.xlsx', '运营报表', $columns, static function () use ($metrics, $ads, $count, $data): iterable {
             for ($i = 0; $i < $count; $i++) {
@@ -244,15 +248,14 @@ class OperationReportController extends Controller
                 $report = $data['report'];
                 $adSpend = (float) ($report?->actual_ad_spend ?? $ads->sum('actual_spend'));
                 $firstRevenue = (float) $data['metricTotals']['first_total_revenue'];
-                $totalRevenue = (float) $data['metricTotals']['total_revenue'];
                 $values = [$data['reportDate'],$data['selectedOperator']->name,$m['shop_domain']??'',$m['media_source']??'',
                     $m['first_subscription_orders']??'', $m['first_subscription_revenue']??'', $m['first_normal_orders']??'', $m['first_normal_revenue']??'',
                     $m['first_total_orders']??'', $m['first_total_revenue']??'', $m['first_purchase_cost']??'', $m['first_shipping_cost']??'',
                     $a['agency']??'', $a['media_source']??'', $a['account_name']??'', $a['account_number']??'', $a['book_spend']??'', $a['settlement_coefficient']??'', $a['actual_spend']??'', $a['screenshot']??'',
                     $m['first_return_fee']??'', $i === 0 ? ($report?->first_profit ?? '') : '', $i === 0 ? ($report?->renewal_net_revenue ?? '') : '', $i === 0 ? ($report?->overall_profit ?? '') : '',
-                    $i === 0 && $adSpend > 0 ? $firstRevenue / $adSpend : '', $i === 0 && $adSpend > 0 ? $totalRevenue / $adSpend : '', $i === 0 ? ($report ? ($report->status === OperationReport::STATUS_APPROVED ? '已审核' : '待审核') : '未提交') : '',
+                    $i === 0 && $adSpend > 0 ? $firstRevenue / $adSpend : '', $i === 0 ? ($report ? ($report->status === OperationReport::STATUS_APPROVED ? '已审核' : '待审核') : '未提交') : '',
                     $m['renewal_orders']??'', $m['renewal_revenue']??'', $m['renewal_cost']??'', $m['total_orders']??'', $m['total_revenue']??''];
-                $textIndexes = [0,1,2,3,12,13,14,15,19,26];
+                $textIndexes = [0,1,2,3,12,13,14,15,19,25];
                 yield ['kind' => $i % 2 ? 'variant' : 'normal', 'height' => 25, 'cells' => array_map(fn ($value, $index) => ['value' => $value, 'type' => in_array($index, $textIndexes, true) ? 'text' : 'number', 'align' => in_array($index, $textIndexes, true) ? 'left' : 'right'], $values, array_keys($values))];
             }
         }, false);
