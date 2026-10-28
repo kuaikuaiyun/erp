@@ -76,6 +76,7 @@ class OperationReportController extends Controller
             'mediaSources' => $this->advertisingMedia(),
             'advertisingAgencies' => AssistantAdvertisingAgency::enabledOptions(),
             'advertisingAgencyMedia' => AssistantAdvertisingAgency::enabledMediaNames(),
+            'advertisingAgencyNames' => AssistantAdvertisingAgency::enabledNames(),
             'isBoss' => $isBoss, 'canReview' => $canReview,
             'canEditReport' => true, 'history' => $history,
             'canViewMissingGuideSkus' => $this->canViewMissingGuideSkus($user),
@@ -113,6 +114,7 @@ class OperationReportController extends Controller
         $mediaSources = $this->advertisingMedia();
         $agencyOptions = AssistantAdvertisingAgency::enabledOptions();
         $agencyMedia = AssistantAdvertisingAgency::enabledMediaNames();
+        $agencyNames = AssistantAdvertisingAgency::enabledNames();
         $request->validate([
             'ads.*.screenshot' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
         ]);
@@ -132,7 +134,7 @@ class OperationReportController extends Controller
             'operator_user_id' => ['nullable', 'integer'],
             'ads' => ['required', 'array', 'min:1', 'max:100'],
             'ads.*.media_source' => ['required', Rule::in($mediaSources)],
-            'ads.*.agency' => ['required', 'string', 'max:191', Rule::in(array_keys($agencyOptions))],
+            'ads.*.agency' => ['required', 'string', Rule::in(array_keys($agencyOptions))],
             'ads.*.account_name' => ['required', 'string', 'max:191'],
             'ads.*.account_number' => ['required', 'string', 'max:191'],
             'ads.*.book_spend' => ['required', 'numeric', 'min:0'],
@@ -171,7 +173,7 @@ class OperationReportController extends Controller
             }
             $ads[] = [
                 'media_source' => $mediaSource,
-                'agency' => trim((string) ($ad['agency'] ?? '')),
+                'agency' => trim((string) ($agencyNames[$ad['agency']] ?? '')),
                 'account_name' => trim((string) ($ad['account_name'] ?? '')),
                 'account_number' => trim((string) ($ad['account_number'] ?? '')),
                 'book_spend' => round($bookSpend, 4),

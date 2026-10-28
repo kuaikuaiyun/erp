@@ -34,9 +34,9 @@ class AssistantAdvertisingAgency extends Model
         $connection = config('admin.database.connection') ?: config('database.default');
         if (! Schema::connection($connection)->hasTable((new static)->getTable())) return [];
 
-        return static::query()->where('is_enabled', true)->orderBy('sort')->orderBy('id')
-            ->get(['name', 'settlement_coefficient'])
-            ->mapWithKeys(fn (self $agency) => [$agency->name => (float) $agency->settlement_coefficient])
+        return static::query()->where('is_enabled', true)->with('advertisingMedia')->orderBy('sort')->orderBy('id')
+            ->get()
+            ->mapWithKeys(fn (self $agency) => [$agency->optionKey() => (float) $agency->settlement_coefficient])
             ->all();
     }
 
@@ -50,7 +50,21 @@ class AssistantAdvertisingAgency extends Model
 
         return static::query()->where('is_enabled', true)->with('advertisingMedia')
             ->orderBy('sort')->orderBy('id')->get()
-            ->mapWithKeys(fn (self $agency) => [$agency->name => (string) ($agency->advertisingMedia?->name ?? '')])
+            ->mapWithKeys(fn (self $agency) => [$agency->optionKey() => (string) ($agency->advertisingMedia?->name ?? '')])
             ->all();
+    }
+
+    /** @return array<string, string> */
+    public static function enabledNames(): array
+    {
+        return static::query()->where('is_enabled', true)->with('advertisingMedia')->orderBy('sort')->orderBy('id')
+            ->get()
+            ->mapWithKeys(fn (self $agency) => [$agency->optionKey() => (string) $agency->name])
+            ->all();
+    }
+
+    private function optionKey(): string
+    {
+        return (string) $this->name.'｜'.(string) ($this->advertisingMedia?->name ?? $this->advertising_media_id);
     }
 }

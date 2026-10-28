@@ -40,7 +40,8 @@ class AdvertisingAgencyController extends Controller
         if ($context instanceof Response) abort($context->getStatusCode());
         $request->merge(['name' => trim((string) $request->input('name'))]);
         $validated = $request->validate([
-            'name' => ['required', 'string', 'max:100', Rule::unique('assistant_advertising_agencies', 'name')],
+            'name' => ['required', 'string', 'max:100', Rule::unique('assistant_advertising_agencies', 'name')
+                ->where(fn ($query) => $query->where('advertising_media_id', $request->integer('advertising_media_id')))],
             'advertising_media_id' => ['required', 'integer', Rule::exists('assistant_advertising_media', 'id')->where('is_enabled', true)],
             'settlement_coefficient' => ['required', 'numeric', 'min:0', 'max:9999'],
         ], [
@@ -68,7 +69,9 @@ class AdvertisingAgencyController extends Controller
         if ($context instanceof Response) abort($context->getStatusCode());
         $request->merge(['name' => trim((string) $request->input('name'))]);
         $validated = $request->validate([
-            'name' => ['required', 'string', 'max:100', Rule::unique('assistant_advertising_agencies', 'name')->ignore($advertisingAgency->getKey())],
+            'name' => ['required', 'string', 'max:100', Rule::unique('assistant_advertising_agencies', 'name')
+                ->where(fn ($query) => $query->where('advertising_media_id', $request->integer('advertising_media_id')))
+                ->ignore($advertisingAgency->getKey())],
             'advertising_media_id' => ['required', 'integer', Rule::exists('assistant_advertising_media', 'id')->where('is_enabled', true)],
             'settlement_coefficient' => ['required', 'numeric', 'min:0', 'max:9999'],
         ], [
