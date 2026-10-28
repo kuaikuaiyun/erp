@@ -57,6 +57,24 @@ class AdvertisingMediaController extends Controller
         return back()->with('success', $advertisingMedium->is_enabled ? '广告社媒已启用。' : '广告社媒已停用。');
     }
 
+    public function update(Request $request, AssistantAdvertisingMedia $advertisingMedium): RedirectResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        abort_if($advertisingMedium->name === '其他', 422, '“其他”是系统兜底社媒，不能编辑。');
+
+        $request->merge(['name' => trim((string) $request->input('name'))]);
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:50', Rule::unique('assistant_advertising_media', 'name')->ignore($advertisingMedium->getKey())],
+        ], [
+            'name.required' => '请输入广告社媒名称。',
+            'name.unique' => '该广告社媒已经存在。',
+        ]);
+        $advertisingMedium->update($validated);
+
+        return back()->with('success', '广告社媒修改成功。');
+    }
+
     public function destroy(Request $request, AssistantAdvertisingMedia $advertisingMedium): RedirectResponse
     {
         $context = $this->context($request);

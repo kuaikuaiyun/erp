@@ -39,4 +39,18 @@ class AssistantAdvertisingAgency extends Model
             ->mapWithKeys(fn (self $agency) => [$agency->name => (float) $agency->settlement_coefficient])
             ->all();
     }
+
+    /** @return array<string, string> */
+    public static function enabledMediaNames(): array
+    {
+        $connection = config('admin.database.connection') ?: config('database.default');
+        $schema = Schema::connection($connection);
+        if (! $schema->hasTable((new static)->getTable())
+            || ! $schema->hasColumn((new static)->getTable(), 'advertising_media_id')) return [];
+
+        return static::query()->where('is_enabled', true)->with('advertisingMedia')
+            ->orderBy('sort')->orderBy('id')->get()
+            ->mapWithKeys(fn (self $agency) => [$agency->name => (string) ($agency->advertisingMedia?->name ?? '')])
+            ->all();
+    }
 }

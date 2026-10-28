@@ -75,6 +75,7 @@ class OperationReportController extends Controller
             'operatorOptions' => $operatorOptions,
             'mediaSources' => $this->advertisingMedia(),
             'advertisingAgencies' => AssistantAdvertisingAgency::enabledOptions(),
+            'advertisingAgencyMedia' => AssistantAdvertisingAgency::enabledMediaNames(),
             'isBoss' => $isBoss, 'canReview' => $canReview,
             'canEditReport' => true, 'history' => $history,
             'canViewMissingGuideSkus' => $this->canViewMissingGuideSkus($user),
@@ -111,6 +112,7 @@ class OperationReportController extends Controller
         $isBoss = $this->isBoss($user);
         $mediaSources = $this->advertisingMedia();
         $agencyOptions = AssistantAdvertisingAgency::enabledOptions();
+        $agencyMedia = AssistantAdvertisingAgency::enabledMediaNames();
         $request->validate([
             'ads.*.screenshot' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
         ]);
@@ -163,8 +165,12 @@ class OperationReportController extends Controller
             $path = $ad['existing_screenshot'] ?? null;
             $bookSpend = (float) ($ad['book_spend'] ?? 0);
             $coefficient = (float) $agencyOptions[$ad['agency']];
+            $mediaSource = trim((string) ($agencyMedia[$ad['agency']] ?? ''));
+            if ($mediaSource === '') {
+                throw ValidationException::withMessages(['ads.'.$index.'.agency' => '该广告代理尚未关联广告社媒，请先到助理系统中设置。']);
+            }
             $ads[] = [
-                'media_source' => trim((string) ($ad['media_source'] ?? '')),
+                'media_source' => $mediaSource,
                 'agency' => trim((string) ($ad['agency'] ?? '')),
                 'account_name' => trim((string) ($ad['account_name'] ?? '')),
                 'account_number' => trim((string) ($ad['account_number'] ?? '')),

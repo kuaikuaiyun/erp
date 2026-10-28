@@ -29,6 +29,7 @@ Route::post('/management/menus/order', [PortalMenuConfigurationController::class
 Route::get('/domain-stores', [DomainStoreController::class, 'index'])->name('assistant.domain-stores.index');
 Route::get('/advertising-media', [AdvertisingMediaController::class, 'index'])->name('assistant.advertising-media.index');
 Route::post('/advertising-media', [AdvertisingMediaController::class, 'store'])->name('assistant.advertising-media.store');
+Route::patch('/advertising-media/{advertisingMedium}', [AdvertisingMediaController::class, 'update'])->name('assistant.advertising-media.update');
 Route::patch('/advertising-media/{advertisingMedium}/toggle', [AdvertisingMediaController::class, 'toggle'])->name('assistant.advertising-media.toggle');
 Route::delete('/advertising-media/{advertisingMedium}', [AdvertisingMediaController::class, 'destroy'])->name('assistant.advertising-media.destroy');
 Route::get('/advertising-agencies', [AdvertisingAgencyController::class, 'index'])->name('assistant.advertising-agencies.index');
