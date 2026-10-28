@@ -177,9 +177,6 @@
                                         <i class="fa fa-check"></i> 标记已处理
                                     </button>
                                 @elseif(!$row->warehouse_review_approved)
-                                    <button type="button" class="btn btn-info btn-xs warehouse-weight-refresh-btn" data-id="{{ $row->id }}">
-                                        <i class="fa fa-cloud-download"></i> 抓取最新数据
-                                    </button>
                                     <button type="button" class="btn btn-success btn-xs warehouse-weight-approve-btn" data-id="{{ $row->id }}">
                                         <i class="fa fa-check"></i> 审核通过
                                     </button>
@@ -273,10 +270,6 @@
             }
         });
     }
-
-    $('.warehouse-weight-refresh-btn').on('click', function () {
-        postAction($(this).data('id'), 'refresh', $(this), '确认抓取该 SKU 的最新数据？');
-    });
 
     $('.warehouse-weight-approve-btn').on('click', function () {
         postAction($(this).data('id'), 'approve', $(this), '确认审核通过？');

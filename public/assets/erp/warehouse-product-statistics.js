@@ -607,7 +607,10 @@
             }
             statusEl.innerHTML = '<span class="text-success"><i class="fa fa-check-circle"></i> ' +
                 escapeHtml(result.data.message || '提交成功') + '</span>';
-            setTimeout(function () { closeModal($fillModal, fillModal); }, 1200);
+            setTimeout(function () {
+                closeModal($fillModal, fillModal);
+                window.location.reload();
+            }, 600);
         }).catch(function (err) {
             submitBtn.disabled = false;
             statusEl.innerHTML = '<span class="text-danger">网络异常：' + escapeHtml(err.message) + '</span>';

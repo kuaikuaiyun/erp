@@ -382,6 +382,9 @@
                                         ->filter()
                                         ->unique()
                                         ->values();
+                                    $refreshSkus = ($product['warehouse_display_status'] ?? '') === 'resolved'
+                                        ? collect($product['variant_skus'] ?? [])->pluck('sku')->filter()->unique()->values()
+                                        : $missingWeightSkus;
                                 @endphp
                                 <button type="button" class="btn btn-default btn-xs warehouse-product-statistics-view-btn" data-product-id="{{ $product['id'] }}">
                                     <i class="fa fa-eye"></i> {{ $labels['view'] }}
@@ -394,11 +397,11 @@
                                         <i class="fa fa-check"></i> {{ $labels['approve'] }}
                                     </button>
                                 @endif
-                                @if($missingWeightSkus->isNotEmpty())
+                                @if($refreshSkus->isNotEmpty())
                                     <button type="button" class="btn btn-info btn-xs warehouse-product-statistics-refresh-weight-btn"
-                                            data-skus="{{ $missingWeightSkus->implode(',') }}"
-                                            title="通过通途接口抓取这些 SKU 的重量">
-                                        <i class="fa fa-cloud-download"></i> 抓重量
+                                            data-skus="{{ $refreshSkus->implode(',') }}"
+                                            title="{{ ($product['warehouse_display_status'] ?? '') === 'resolved' ? '该异常已处理，抓取全部 SKU 最新数据' : '重量缺失，抓取 SKU 最新数据' }}">
+                                        <i class="fa fa-cloud-download"></i> 抓取最新数据
                                     </button>
                                 @endif
                             </td>
@@ -509,7 +512,7 @@
     <script>
         window.__warehouseProductStatisticsConfig = @json($warehouseProductStatisticsConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/warehouse-product-statistics.js?v=20261027-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/warehouse-product-statistics.js?v=20261028-2"></script>
     <script>
         // 审核通过
         (function () {
