@@ -596,7 +596,10 @@ class LogisticsOrderController extends Controller
         }
         if ($filters['shopify_sku_status'] === 'empty') {
             $query->whereHas('items', fn (Builder $items) => $items
-                ->whereNull('shopify_sku')->orWhereRaw("TRIM(shopify_sku) = ''"));
+                ->where(function (Builder $missingSku): void {
+                    $missingSku->whereNull('shopify_sku')->orWhereRaw("TRIM(shopify_sku) = ''");
+                })
+                ->whereRaw("LOWER(TRIM(COALESCE(product_title, ''))) <> 'tipping'"));
         } elseif ($filters['shopify_sku_status'] === 'filled') {
             $query->whereHas('items', fn (Builder $items) => $items
                 ->whereNotNull('shopify_sku')->whereRaw("TRIM(shopify_sku) <> ''"));

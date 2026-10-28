@@ -84,6 +84,7 @@ class OperationReportController extends Controller
             'canEditReport' => true, 'history' => $history,
             'canViewMissingGuideSkus' => $this->canViewMissingGuideSkus($user),
             'missingGuideSkus' => $this->canViewMissingGuideSkus($user) ? $this->metrics->missingGuideSkuSummary() : [],
+            'missingOriginalSkuItems' => $isBoss ? $this->metrics->missingOriginalSkuSummary($date) : [],
         ]);
     }
 

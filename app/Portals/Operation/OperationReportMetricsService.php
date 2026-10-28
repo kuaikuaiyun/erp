@@ -72,6 +72,60 @@ class OperationReportMetricsService
             ->all();
     }
 
+    /** @return list<array{item_id:int,order_id:int,product_name:string,shop_domain:string,quantity:float,ordered_at:string}> */
+    public function missingOriginalSkuSummary(string $date): array
+    {
+        $start = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 00:00:00', 'Asia/Shanghai')->utc();
+        $end = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 23:59:59', 'Asia/Shanghai')->utc();
+
+        $items = LogisticsOrderItem::query()
+            ->join('logistics_orders', 'logistics_orders.id', '=', 'logistics_order_items.logistics_order_id')
+            ->leftJoin('assistant_domain_stores', 'assistant_domain_stores.id', '=', 'logistics_orders.assistant_domain_store_id')
+            ->whereBetween('logistics_orders.order_created_at', [$start, $end])
+            ->where(function ($query): void {
+                $query->whereNull('logistics_order_items.shopify_sku')
+                    ->orWhereRaw("TRIM(logistics_order_items.shopify_sku) = ''");
+            })
+            ->whereRaw("LOWER(TRIM(COALESCE(logistics_order_items.product_title, ''))) <> 'tipping'")
+            ->whereRaw("LOWER(TRIM(COALESCE(logistics_order_items.product_title, ''))) NOT LIKE '%shipping protection%'")
+            ->whereRaw("LOWER(TRIM(COALESCE(logistics_order_items.product_title, ''))) NOT LIKE '%shipping insurance%'")
+            ->whereRaw("LOWER(TRIM(COALESCE(logistics_order_items.product_title, ''))) NOT LIKE '%freight insurance%'")
+            ->whereRaw("TRIM(COALESCE(logistics_order_items.tongtu_product_name, '')) NOT LIKE '%运费险%'")
+            ->orderByDesc('logistics_orders.order_created_at')
+            ->orderByDesc('logistics_order_items.id')
+            ->get([
+                'logistics_orders.id as order_id',
+                'logistics_orders.order_created_at',
+                'assistant_domain_stores.domain as managed_domain',
+                'logistics_orders.source_shop_domain',
+                'logistics_orders.store_name',
+                'logistics_order_items.id as item_id',
+                'logistics_order_items.product_title',
+                'logistics_order_items.variant_title',
+                'logistics_order_items.tongtu_product_name',
+                'logistics_order_items.quantity',
+            ]);
+
+        return $items
+            ->unique(static function ($row): string {
+                $productName = trim((string) ($row->product_title ?: $row->tongtu_product_name ?: ''));
+                $variantName = trim((string) $row->variant_title);
+
+                return mb_strtolower($productName.'|'.$variantName);
+            })
+            ->map(static function ($row): array {
+                return [
+                    'item_id' => (int) $row->item_id,
+                    'order_id' => (int) $row->order_id,
+                    'product_name' => trim((string) ($row->product_title ?: $row->tongtu_product_name ?: $row->variant_title)) ?: '未填写商品名称',
+                    'shop_domain' => trim((string) ($row->managed_domain ?: $row->source_shop_domain ?: $row->store_name)) ?: '未知店铺',
+                    'quantity' => (float) $row->quantity,
+                    'ordered_at' => Carbon::parse($row->order_created_at, 'UTC')->timezone('Asia/Shanghai')->format('Y-m-d H:i:s'),
+                ];
+            })
+            ->all();
+    }
+
     /** @return array{rows:list<array<string,mixed>>,totals:array<string,float|int>,warnings:list<string>} */
     public function build(string $date, int $operatorUserId): array
     {
