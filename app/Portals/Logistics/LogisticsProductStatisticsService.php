@@ -454,6 +454,7 @@ class LogisticsProductStatisticsService
             $keyFilters[$key] = (string) ($filters[$key] ?? '');
         }
         $keyFilters['require_tongtu_match'] = (bool) ($filters['require_tongtu_match'] ?? false);
+        $keyFilters['exclude_tipping'] = (bool) ($filters['exclude_tipping'] ?? false);
         $keyFilters['include_product_codes'] = array_values($filters['include_product_codes'] ?? []);
         $keyFilters['exclude_product_codes'] = array_values($filters['exclude_product_codes'] ?? []);
 
@@ -3218,6 +3219,11 @@ class LogisticsProductStatisticsService
         $excludedCodes = array_values(array_filter((array) ($filters['exclude_product_codes'] ?? [])));
         if ($excludedCodes !== []) {
             $query->whereNotIn(DB::raw("LOWER(TRIM({$itemTable}.tongtu_product_code))"), $excludedCodes);
+        }
+
+        if (!empty($filters['exclude_tipping'])) {
+            $query->whereRaw("LOWER(TRIM(COALESCE({$itemTable}.product_title, ''))) <> 'tipping'")
+                ->whereRaw("LOWER(TRIM(COALESCE({$itemTable}.tongtu_product_name, ''))) <> 'tipping'");
         }
 
         $name = trim((string) ($filters['name'] ?? ''));

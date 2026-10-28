@@ -421,6 +421,8 @@ class WarehouseProductStatisticsController extends Controller
             'decision' => '',
             // 所有真实出单商品均进入验收列表；未匹配通途/PCL 的商品也不能遗漏。
             'require_tongtu_match' => false,
+            // Tipping is an order surcharge, not a physical product requiring warehouse acceptance.
+            'exclude_tipping' => true,
             // 仓库列表不展示退款原因报表，跳过重聚合（约 19s）避免列表/分页卡顿
             'skip_refund_report' => true,
             'sort' => trim((string) ($input['sort'] ?? '')),
