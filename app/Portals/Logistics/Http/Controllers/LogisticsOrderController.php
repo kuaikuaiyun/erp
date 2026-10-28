@@ -572,7 +572,11 @@ class LogisticsOrderController extends Controller
     /** @param array<string, string|int> $filters */
     private function orderQuery(array $filters): Builder
     {
-        $query = LogisticsOrder::query();
+        $query = LogisticsOrder::query()
+            ->where(function (Builder $operator): void {
+                $operator->whereNull('operator_name')
+                    ->orWhere('operator_name', 'not like', $this->contains('刷单'));
+            });
         $textColumns = [
             'id', 'shopify_order_id', 'shopify_order_number', 'tongtu_order_number', 'store_name',
             'operator_name', 'group_names', 'staff_status', 'buyer_name', 'buyer_email',
@@ -667,6 +671,10 @@ class LogisticsOrderController extends Controller
     {
         $values = static function (string $column): array {
             return LogisticsOrder::query()
+                ->where(function (Builder $operator): void {
+                    $operator->whereNull('operator_name')
+                        ->orWhere('operator_name', 'not like', '%刷单%');
+                })
                 ->whereNotNull($column)
                 ->where($column, '!=', '')
                 ->distinct()

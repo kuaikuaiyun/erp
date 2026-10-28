@@ -31,7 +31,7 @@ class PaymentAccountRiskService
      */
     public function dashboard(array $filters): array
     {
-        $query = LogisticsPayPalAccount::query()->orderByDesc('is_enabled')->orderBy('account_name');
+        $query = LogisticsPayPalAccount::query()->orderByDesc('created_at')->orderByDesc('id');
         if ($filters['account'] !== '') {
             $keyword = $this->contains($filters['account']);
             $query->where(function ($accounts) use ($keyword): void {

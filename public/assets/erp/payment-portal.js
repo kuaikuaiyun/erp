@@ -21,6 +21,10 @@
         $(scope).find('[data-payment-rate-tooltip], [data-payment-formula-tooltip]').tooltip();
     }
 
+    function escapeHtml(value) {
+        return $('<div>').text(value === null || typeof value === 'undefined' || value === '' ? '-' : String(value)).html();
+    }
+
     $(function () {
         var page = $('.payment-portal-page');
         var config = window.PaymentPortal || {};
@@ -217,6 +221,12 @@
         var accountModal = $('#payment-account-create-modal');
         var accountForm = accountModal.find('[data-payment-account-form]');
         var accountMethod = accountForm.find('[data-payment-account-method]');
+        var accountFormText = config.accountForm || {};
+        var accountEnabled = accountForm.find('[data-payment-account-enabled]');
+        var accountEnabledValue = accountForm.find('[data-payment-account-enabled-value]');
+        function syncAccountEnabled() {
+            accountEnabledValue.val(accountEnabled.prop('checked') ? '1' : '0');
+        }
         function prepareAccountForm(mode, trigger) {
             if (!accountForm.length) return;
             accountForm.get(0).reset();
@@ -225,19 +235,22 @@
                 ? String(config.accountUpdateUrl || '').replace('__ACCOUNT__', encodeURIComponent(String(trigger.data('accountId'))))
                 : String(config.accountStoreUrl || ''));
             accountMethod.prop('disabled', !editing);
-            accountModal.find('[data-payment-account-modal-title]').html('<i class="fa fa-paypal" aria-hidden="true"></i> ' + escapeHtml(editing ? config.accountForm.edit_title : config.accountForm.create_title));
-            accountModal.find('[data-payment-account-modal-note]').text(editing ? config.accountForm.edit_note : config.accountForm.create_note);
+            accountModal.find('[data-payment-account-modal-title]').html('<i class="fa fa-paypal" aria-hidden="true"></i> ' + escapeHtml(editing ? (accountFormText.edit_title || '') : (accountFormText.create_title || '')));
+            accountModal.find('[data-payment-account-modal-note]').text(editing ? (accountFormText.edit_note || '') : (accountFormText.create_note || ''));
             if (editing) {
                 accountForm.find('[name="account_name"]').val(String(trigger.data('accountName') || ''));
                 accountForm.find('[name="merchant_id"]').val(String(trigger.data('accountMerchant') || ''));
                 accountForm.find('[name="account_email"]').val(String(trigger.data('accountEmail') || ''));
                 accountForm.find('[name="environment"]').val(String(trigger.data('accountEnvironment') || 'live'));
-                accountForm.find('[name="is_enabled"][type="checkbox"]').prop('checked', String(trigger.data('accountEnabled')) === '1');
+                accountEnabled.prop('checked', String(trigger.data('accountEnabled')) === '1');
             }
+            syncAccountEnabled();
             accountModal.modal('show');
         }
-        page.on('click', '[data-payment-account-create]', function () { prepareAccountForm('create', $(this)); });
-        page.on('click', '[data-payment-account-edit]', function () { prepareAccountForm('edit', $(this)); });
+        page.on('click', '[data-payment-account-create]', function (event) { event.preventDefault(); prepareAccountForm('create', $(this)); });
+        page.on('click', '[data-payment-account-edit]', function (event) { event.preventDefault(); prepareAccountForm('edit', $(this)); });
+        accountForm.on('change', '[data-payment-account-enabled]', syncAccountEnabled);
+        accountForm.on('submit', syncAccountEnabled);
 
         page.find('[data-payment-filter-form]').each(function () {
             var form = $(this);
@@ -462,10 +475,6 @@
                 refunds: ['refund_id', 'match_status', 'order_number', 'bill_numbers', 'store_name', 'source', 'amount', 'source_reason', 'manual_reason', 'linked_disputes', 'status', 'happened_at'],
                 disputes: ['dispute_id', 'payment_transaction_id', 'match_status', 'order_number', 'bill_numbers', 'store_name', 'amount', 'reason', 'stage', 'status', 'outcome', 'seller_response_due_at', 'linked_refunds', 'updated_at', 'happened_at']
             };
-
-            function escapeHtml(value) {
-                return $('<div>').text(value === null || typeof value === 'undefined' || value === '' ? '-' : String(value)).html();
-            }
 
             function displayValue(value) {
                 if (Array.isArray(value)) {
