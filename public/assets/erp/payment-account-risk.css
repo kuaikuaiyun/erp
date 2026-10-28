@@ -364,6 +364,82 @@
 .payment-monthly-detail .table th { padding: 8px; background: #f0f5f9; color: #496980; font-size: 9px; white-space: nowrap; }
 .payment-monthly-detail .table td { padding: 8px; border-top-color: #e6edf3; color: #3f5e75; font-size: 9px; white-space: normal; overflow-wrap: anywhere; }
 
+/* Account detail modal typography */
+.payment-account-detail-modal .modal-title { font-size: 19px; }
+.payment-account-detail-modal .modal-header p { font-size: 12px; }
+.payment-account-detail-modal .modal-body,
+.payment-account-detail-modal .modal-footer { font-size: 13px; }
+.payment-account-detail-modal .modal-footer .btn { font-size: 13px; }
+.payment-account-detail-modal .payment-detail-tabs button { padding: 10px 16px 9px; font-size: 14px; }
+.payment-account-detail-modal .payment-detail-summary span { font-size: 12px; }
+.payment-account-detail-modal .payment-detail-summary strong { font-size: 18px; }
+.payment-account-detail-modal .payment-detail-filter label { font-size: 12px; }
+.payment-account-detail-modal .payment-detail-filter .form-control,
+.payment-account-detail-modal .payment-detail-filter .btn { font-size: 13px; }
+.payment-account-detail-modal .payment-detail-state,
+.payment-account-detail-modal .payment-detail-empty { font-size: 13px; }
+.payment-account-detail-modal .payment-detail-table { font-size: 12px; }
+.payment-account-detail-modal .payment-detail-table > thead > tr > th { font-size: 12px; }
+.payment-account-detail-modal .payment-risk-match-status,
+.payment-account-detail-modal .payment-detail-pagination { font-size: 12px; }
+.payment-account-detail-modal .payment-order-analysis-heading h4 { font-size: 16px; }
+.payment-account-detail-modal .payment-order-analysis-heading p,
+.payment-account-detail-modal .payment-order-analysis-heading > span,
+.payment-account-detail-modal .payment-order-analysis-stage,
+.payment-account-detail-modal .payment-order-analysis-card > header span,
+.payment-account-detail-modal .payment-order-analysis-note,
+.payment-account-detail-modal .payment-order-analysis-reconciliation { font-size: 11px; }
+.payment-account-detail-modal .payment-order-analysis-card h5 { font-size: 15px; }
+.payment-account-detail-modal .payment-order-analysis-total { font-size: 15px; }
+.payment-account-detail-modal .payment-order-analysis-card dt { font-size: 12px; }
+.payment-account-detail-modal .payment-order-analysis-card dd { font-size: 13px; }
+.payment-account-detail-modal .payment-order-analysis-connector { font-size: 12px; }
+.payment-account-detail-modal .payment-order-analysis-connector b { font-size: 12px; }
+.payment-account-detail-modal .payment-detail-kpi span,
+.payment-account-detail-modal .payment-detail-kpi small { font-size: 12px; }
+.payment-account-detail-modal .payment-detail-kpi strong { font-size: 22px; }
+.payment-account-detail-modal .payment-detail-panel h5,
+.payment-account-detail-modal .payment-funding-intro h5,
+.payment-account-detail-modal .payment-dispute-list-heading h5,
+.payment-account-detail-modal .payment-dispute-expanded h5,
+.payment-account-detail-modal .payment-dispute-workflow h5 { font-size: 15px; }
+.payment-account-detail-modal .payment-detail-fund-list > div,
+.payment-account-detail-modal .payment-detail-risk-list > div > div:first-child,
+.payment-account-detail-modal .payment-funding-intro p { font-size: 12px; }
+.payment-account-detail-modal .payment-detail-panel-note,
+.payment-account-detail-modal .payment-detail-panel-heading small,
+.payment-account-detail-modal .payment-detail-legend,
+.payment-account-detail-modal .payment-detail-chart-labels,
+.payment-account-detail-modal .payment-detail-task span { font-size: 11px; }
+.payment-account-detail-modal .payment-detail-task strong { font-size: 13px; }
+.payment-account-detail-modal .payment-funding-grid span,
+.payment-account-detail-modal .payment-funding-grid small { font-size: 12px; }
+.payment-account-detail-modal .payment-funding-grid strong { font-size: 20px; }
+.payment-account-detail-modal .payment-dispute-list-heading span { font-size: 11px; }
+.payment-account-detail-modal .payment-dispute-table { font-size: 12px; }
+.payment-account-detail-modal .payment-dispute-table > thead > tr > th { font-size: 11px; }
+.payment-account-detail-modal .payment-dispute-table td strong { font-size: 12px; }
+.payment-account-detail-modal .payment-dispute-table td small,
+.payment-account-detail-modal .payment-dispute-expanded > p,
+.payment-account-detail-modal .payment-dispute-fields span,
+.payment-account-detail-modal .payment-dispute-workflow span { font-size: 11px; }
+.payment-account-detail-modal .payment-dispute-fields strong { font-size: 15px; }
+.payment-account-detail-modal .payment-dispute-workflow strong { font-size: 12px; }
+.payment-account-detail-modal .payment-dispute-workflow b { font-size: 11px; }
+.payment-account-detail-modal .payment-monthly-toolbar label > span,
+.payment-account-detail-modal .payment-monthly-dimension > span,
+.payment-account-detail-modal .payment-monthly-dimension-note { font-size: 12px; }
+.payment-account-detail-modal .payment-monthly-dimension button { font-size: 13px; }
+.payment-account-detail-modal .payment-monthly-table { font-size: 12px; }
+.payment-account-detail-modal .payment-monthly-table > thead > tr > th { font-size: 11px; }
+.payment-account-detail-modal .payment-monthly-table td strong { font-size: 13px; }
+.payment-account-detail-modal .payment-monthly-table td small,
+.payment-account-detail-modal .payment-monthly-na,
+.payment-account-detail-modal .payment-monthly-coverage,
+.payment-account-detail-modal .payment-monthly-detail-heading,
+.payment-account-detail-modal .payment-monthly-detail .table th,
+.payment-account-detail-modal .payment-monthly-detail .table td { font-size: 11px; }
+
 @media (max-width: 1359px) {
     .payment-account-filter-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .payment-account-filter-actions { justify-content: flex-start; }

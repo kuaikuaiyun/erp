@@ -22,7 +22,7 @@ class PaymentPayPalMonthlyReportExportService
     {
         $dimension = $dimension === PaymentPayPalMonthlyReportService::DIMENSION_EVENT ? 'event' : 'payment';
         $filename = __('payment.account_risk.monthly_report.export.filename', [
-            'account' => preg_replace('/[\\\/:*?"<>|]+/u', '_', (string) $account->account_name),
+            'account' => preg_replace('~[\\\\/:*?"<>|]+~u', '_', (string) $account->account_name),
             'year' => $year,
             'dimension' => __('payment.account_risk.monthly_report.dimensions.'.$dimension),
         ]);
