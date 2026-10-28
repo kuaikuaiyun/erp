@@ -125,7 +125,7 @@ class ProductRequestController extends Controller
         ]);
     }
 
-    /** 关键词模糊查询：只查 product_request_link_skus.product_name，支持两字以上的关联匹配 */
+    /** 关键词模糊查询：只查 product_request_link_skus.product_name，中文按单字关联匹配 */
     private function dedupeKeywordResults(string $keyword): array
     {
         return $this->linkSkuNameMatches($keyword, 30)
@@ -135,7 +135,7 @@ class ProductRequestController extends Controller
     }
 
     /**
-     * 产品名关联搜索：把关键词切成两字（英文按整词）片段，
+     * 产品名关联搜索：把中文关键词切成单字（英文按整词）片段，
      * 只要产品名包含任意片段就算命中，命中片段越多排越前。
      */
     private function linkSkuNameMatches(string $keyword, int $limit = 20): Collection
@@ -172,7 +172,7 @@ class ProductRequestController extends Controller
         return $rows->unique('supplier_url_hash')->take($limit)->values();
     }
 
-    /** 把关键词拆成用于关联匹配的片段：中文按两字滑动窗口，英文按整词 */
+    /** 把关键词拆成用于关联匹配的片段：中文按单字，英文按整词 */
     private function linkSkuNameSearchTerms(string $keyword): array
     {
         $keyword = trim(preg_replace('/\s+/u', ' ', $keyword) ?? $keyword);
@@ -187,17 +187,13 @@ class ProductRequestController extends Controller
             if ($length === 0) {
                 continue;
             }
-            if ($length <= 2) {
-                $terms[] = $chunk;
-                continue;
-            }
             // 纯英文/数字片段按整词匹配，避免被切碎后命中大量无关产品
             if (preg_match('/^[\x20-\x7E]+$/', $chunk) === 1) {
                 $terms[] = $chunk;
                 continue;
             }
-            for ($i = 0; $i <= $length - 2; $i++) {
-                $terms[] = mb_substr($chunk, $i, 2, 'UTF-8');
+            for ($i = 0; $i < $length; $i++) {
+                $terms[] = mb_substr($chunk, $i, 1, 'UTF-8');
             }
         }
 
@@ -1633,7 +1629,7 @@ class ProductRequestController extends Controller
 
         // 名称模糊查询可能命中多个链接，按链接聚合后全部返回，供采购选择
         if ($keyword !== '') {
-            $keywordMatches = $this->linkSkuNameMatches($keyword, 20);
+            $keywordMatches = $this->linkSkuNameMatches($keyword, 50);
         }
 
         $linkSkus = $linkMatches->concat($keywordMatches)->unique('supplier_url_hash')->values();
@@ -2704,6 +2700,7 @@ class ProductRequestController extends Controller
                 $search->where('report_no', 'like', $keyword)
                     ->orWhere('skus', 'like', $keyword)
                     ->orWhere('procurement_skus', 'like', $keyword)
+                    ->orWhere('operation_user_name', 'like', $keyword)
                     ->orWhere('operation_display_name', 'like', $keyword)
                     ->orWhere('operation_department_name', 'like', $keyword)
                     ->orWhere('standard_chinese_name', 'like', $keyword)

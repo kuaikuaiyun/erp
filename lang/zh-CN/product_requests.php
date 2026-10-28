@@ -15,7 +15,7 @@ return [
     'link_skus' => [
         'title' => 'PCL SKU 管理',
         'subtitle' => '按 1688 链接维护 PCL 商品编号与系统中已录入的 SKU。',
-        'keyword_placeholder' => '1688 链接 / PCL 商品编号 / 商品名称 / SKU',
+        'keyword_placeholder' => '1688 链接 / PCL 商品编号 / 商品名称 / SKU / 提报人',
         'edit_title' => '编辑 SKU',
         'edit_subtitle' => '可直接新增、修改或删除 SKU，并维护每个 SKU 的采购价与重量。',
         'skus_placeholder' => '每行一个 SKU，或使用英文逗号分隔',
@@ -264,7 +264,7 @@ return [
     ],
     'filters' => [
         'keyword' => '关键词',
-        'keyword_placeholder' => '提报编号、SKU、1688 链接',
+        'keyword_placeholder' => '提报编号、SKU、1688 链接、提报人',
         'status' => '主状态',
         'review_status' => '链接审核状态',
         'warehouse_status' => '仓库状态',

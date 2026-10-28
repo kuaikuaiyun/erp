@@ -4,11 +4,67 @@ namespace App\Portals\Operation;
 
 use App\Models\AdminUser;
 use App\Models\LogisticsOrder;
+use App\Models\LogisticsOrderItem;
 use App\Models\LogisticsTongtuSkuMapping;
 use Carbon\Carbon;
 
 class OperationReportMetricsService
 {
+    /** @return list<array{sku:string,product_name:string,item_count:int,quantity:float,latest_order_at:?string}> */
+    public function missingGuideSkuSummary(): array
+    {
+        $mappedValues = [];
+        LogisticsTongtuSkuMapping::query()
+            ->whereNotNull('product_guide_cost_cny')
+            ->where('product_guide_cost_cny', '>', 0)
+            ->get(['shopify_sku', 'tongtu_sku', 'tongtu_product_code'])
+            ->each(function (LogisticsTongtuSkuMapping $mapping) use (&$mappedValues): void {
+                foreach ([$mapping->shopify_sku, $mapping->tongtu_sku, $mapping->tongtu_product_code] as $value) {
+                    $value = mb_strtolower(trim((string) $value));
+                    if ($value !== '') $mappedValues[$value] = true;
+                }
+            });
+
+        return LogisticsOrderItem::query()
+            ->join('logistics_orders', 'logistics_orders.id', '=', 'logistics_order_items.logistics_order_id')
+            ->whereIn('logistics_orders.subscription_type', ['订阅首次购买', '无订阅'])
+            ->select([
+                'logistics_order_items.shopify_sku',
+                'logistics_order_items.tongtu_sku',
+                'logistics_order_items.tongtu_product_code',
+            ])
+            ->selectRaw('MAX(logistics_order_items.product_title) as product_name')
+            ->selectRaw('COUNT(*) as item_count')
+            ->selectRaw('SUM(logistics_order_items.quantity) as total_quantity')
+            ->selectRaw('MAX(logistics_orders.order_created_at) as latest_order_at')
+            ->groupBy('logistics_order_items.shopify_sku', 'logistics_order_items.tongtu_sku', 'logistics_order_items.tongtu_product_code')
+            ->get()
+            ->filter(function ($row) use ($mappedValues): bool {
+                foreach ([$row->shopify_sku, $row->tongtu_sku, $row->tongtu_product_code] as $value) {
+                    $value = mb_strtolower(trim((string) $value));
+                    if ($value !== '' && isset($mappedValues[$value])) return false;
+                }
+                return true;
+            })
+            ->map(function ($row): array {
+                $sku = collect([$row->shopify_sku, $row->tongtu_sku, $row->tongtu_product_code])
+                    ->map(fn ($value) => trim((string) $value))->first(fn ($value) => $value !== '');
+
+                return [
+                    'sku' => $sku ?: '未填写 SKU',
+                    'product_name' => trim((string) $row->product_name) ?: '—',
+                    'item_count' => (int) $row->item_count,
+                    'quantity' => (float) $row->total_quantity,
+                    'latest_order_at' => $row->latest_order_at
+                        ? Carbon::parse($row->latest_order_at, 'UTC')->timezone('Asia/Shanghai')->format('Y-m-d H:i:s')
+                        : null,
+                ];
+            })
+            ->sortByDesc('latest_order_at')
+            ->values()
+            ->all();
+    }
+
     /** @return array{rows:list<array<string,mixed>>,totals:array<string,float|int>,warnings:list<string>} */
     public function build(string $date, int $operatorUserId): array
     {
