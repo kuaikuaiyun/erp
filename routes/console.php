@@ -21,6 +21,11 @@ Schedule::command('logistics:tongtu-skus:refresh --limit=200')
     ->withoutOverlapping(5)
     ->runInBackground();
 
+Schedule::command('logistics:sku-database:backfill-guide-costs')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(10)
+    ->runInBackground();
+
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
