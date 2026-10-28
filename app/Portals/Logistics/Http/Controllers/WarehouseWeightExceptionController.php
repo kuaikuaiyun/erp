@@ -99,7 +99,7 @@ class WarehouseWeightExceptionController extends Controller
         if ($exception->status === 'resolved') {
             return response()->json([
                 'ok' => false,
-                'message' => '该异常已处理，请勿重复操作',
+                'message' => '该异常已整改，请勿重复操作',
             ], 409);
         }
 
@@ -114,7 +114,7 @@ class WarehouseWeightExceptionController extends Controller
 
         return response()->json([
             'ok' => true,
-            'message' => '已标记为处理完成',
+            'message' => '已标记为整改完成',
         ]);
     }
 
@@ -126,7 +126,7 @@ class WarehouseWeightExceptionController extends Controller
         }
 
         $exception = WarehouseSkuWeightException::query()->findOrFail($id);
-        abort_unless($exception->status === 'resolved', 422, '请先将异常标记为已处理');
+        abort_unless($exception->status === 'resolved', 422, '请先将异常标记为已整改');
 
         try {
             $result = $this->tongtuMappings->refreshWeightsByTongtuSkus([(string) $exception->tongtu_sku]);
@@ -160,7 +160,7 @@ class WarehouseWeightExceptionController extends Controller
         }
 
         $exception = WarehouseSkuWeightException::query()->findOrFail($id);
-        abort_unless($exception->status === 'resolved', 422, '待处理异常不能审核通过');
+        abort_unless($exception->status === 'resolved', 422, '待整改异常不能审核通过');
         $code = trim((string) $exception->tongtu_product_code);
         abort_if($code === '', 422, '该记录缺少 PCL 编号，无法审核');
 

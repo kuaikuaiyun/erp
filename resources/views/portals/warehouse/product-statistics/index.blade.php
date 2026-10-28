@@ -263,8 +263,8 @@
                             <select name="warehouse_status" class="form-control">
                                 <option value="">全部</option>
                                 <option value="pending_review" @selected(($filters['warehouse_status'] ?? '') === 'pending_review')>待审核</option>
-                                <option value="pending" @selected(($filters['warehouse_status'] ?? '') === 'pending')>待处理</option>
-                                <option value="resolved" @selected(($filters['warehouse_status'] ?? '') === 'resolved')>已处理</option>
+                                <option value="pending" @selected(($filters['warehouse_status'] ?? '') === 'pending')>待整改</option>
+                                <option value="resolved" @selected(($filters['warehouse_status'] ?? '') === 'resolved')>已整改</option>
                                 <option value="approved" @selected(($filters['warehouse_status'] ?? '') === 'approved')>已审核</option>
                             </select>
                         </div>
@@ -368,8 +368,8 @@
                             <td>
                                 @switch($product['warehouse_display_status'] ?? 'pending_review')
                                     @case('approved') <span class="label label-success">已审核</span> @break
-                                    @case('pending') <span class="label label-warning">待处理</span> @break
-                                    @case('resolved') <span class="label label-info">已处理</span> @break
+                                    @case('pending') <span class="label label-warning">待整改</span> @break
+                                    @case('resolved') <span class="label label-info">已整改</span> @break
                                     @default <span class="label label-default">待审核</span>
                                 @endswitch
                             </td>
@@ -400,7 +400,7 @@
                                 @if($refreshSkus->isNotEmpty())
                                     <button type="button" class="btn btn-info btn-xs warehouse-product-statistics-refresh-weight-btn"
                                             data-skus="{{ $refreshSkus->implode(',') }}"
-                                            title="{{ ($product['warehouse_display_status'] ?? '') === 'resolved' ? '该异常已处理，抓取全部 SKU 最新数据' : '重量缺失，抓取 SKU 最新数据' }}">
+                                            title="{{ ($product['warehouse_display_status'] ?? '') === 'resolved' ? '该异常已整改，抓取全部 SKU 最新数据' : '重量缺失，抓取 SKU 最新数据' }}">
                                         <i class="fa fa-cloud-download"></i> 抓取最新数据
                                     </button>
                                 @endif
