@@ -288,6 +288,8 @@
                         <th>{{ $labels['productInfo'] }}</th>
                         <th style="width:130px;">{{ $labels['productCode'] }}</th>
                         <th style="width:240px;">{{ $labels['specification'] }}</th>
+                        <th style="width:165px;">最新出单时间</th>
+                        <th style="width:130px;">对应订单 ID</th>
                         <th style="width:200px;">实拍图</th>
                         <th style="width:90px;">审核状态</th>
                         <th class="product-statistics-operation-column" style="width:220px;">操作</th>
@@ -350,6 +352,8 @@
                                     @endif
                                 </div>
                             </td>
+                            <td class="product-statistics-nowrap-cell">{{ $product['latest_order_at'] ?? '—' }}</td>
+                            <td class="product-statistics-nowrap-cell"><code>{{ $product['latest_order_id'] ?: '—' }}</code></td>
                             {{-- 实拍图：只读显示，无图则空 --}}
                             <td class="wh-real-images-cell" data-pcl-code="{{ $product['product_code'] ?? '' }}" data-link-sku-id="{{ $product['link_sku_id'] ?? '' }}">
                                 <div class="wh-real-images-grid">
@@ -408,7 +412,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="6" class="product-statistics-empty-row text-center text-muted">
+                            <td colspan="8" class="product-statistics-empty-row text-center text-muted">
                                 <i class="fa fa-search"></i> {{ $labels['emptyRows'] }}
                             </td>
                         </tr>

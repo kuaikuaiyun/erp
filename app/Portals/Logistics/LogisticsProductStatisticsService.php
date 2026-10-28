@@ -399,7 +399,7 @@ class LogisticsProductStatisticsService
      */
     private function sortLightweightCandidates(Collection $candidates, string $sort, string $direction): Collection
     {
-        $descending = $direction === 'desc';
+        $descending = $sort === '' || $direction === 'desc';
         $rows = $candidates->all();
         usort($rows, function (object $left, object $right) use ($sort, $descending): int {
             $leftValue = $this->lightweightCandidateSortValue($left, $sort);
@@ -412,7 +412,13 @@ class LogisticsProductStatisticsService
                 $comparison *= -1;
             }
 
-            return $comparison ?: ((int) $left->first_item_id <=> (int) $right->first_item_id);
+            if ($comparison !== 0) {
+                return $comparison;
+            }
+
+            return $descending
+                ? ((int) $right->first_item_id <=> (int) $left->first_item_id)
+                : ((int) $left->first_item_id <=> (int) $right->first_item_id);
         });
 
         return collect($rows)->values();
@@ -426,17 +432,20 @@ class LogisticsProductStatisticsService
             'shop_count' => (int) $row->shop_count,
             'sales' => (float) $row->sales,
             'revenue' => (float) $row->revenue,
-            default => (int) $row->first_item_id,
+            default => (string) ($row->latest_order_at ?? ''),
         };
     }
 
     /** @param array<string,mixed> $filters */
     private function statisticsCacheKey(string $segment, array $filters): string
     {
-        $keyFilters = [];
+        $keyFilters = ['schema_version' => 2];
         foreach (['date_from', 'date_to', 'name', 'keyword', 'store', 'match_status'] as $key) {
             $keyFilters[$key] = (string) ($filters[$key] ?? '');
         }
+        $keyFilters['require_tongtu_match'] = (bool) ($filters['require_tongtu_match'] ?? false);
+        $keyFilters['include_product_codes'] = array_values($filters['include_product_codes'] ?? []);
+        $keyFilters['exclude_product_codes'] = array_values($filters['exclude_product_codes'] ?? []);
 
         return 'logistics.product-statistics.'.$segment.'.'.sha1(json_encode($keyFilters));
     }
@@ -1638,6 +1647,8 @@ class LogisticsProductStatisticsService
             ->select([
                 'item_statistics.product_key',
                 'item_statistics.first_item_id',
+                'item_statistics.latest_order_at',
+                'item_statistics.latest_order_id',
                 'item_statistics.store_names',
                 'item_statistics.shop_count',
                 'item_statistics.tongtu_skus',
@@ -1737,6 +1748,8 @@ class LogisticsProductStatisticsService
             ->select([
                 'item_statistics.product_key',
                 'item_statistics.first_item_id',
+                'item_statistics.latest_order_at',
+                'item_statistics.latest_order_id',
                 'item_statistics.store_names',
                 'item_statistics.shop_count',
                 'item_statistics.tongtu_skus',
@@ -1767,6 +1780,8 @@ class LogisticsProductStatisticsService
         return $query
             ->selectRaw("{$key} as product_key")
             ->selectRaw('MIN(items.id) as first_item_id')
+            ->selectRaw('MAX(COALESCE(orders.order_created_at, orders.paid_at, orders.created_at)) as latest_order_at')
+            ->selectRaw('SUBSTRING_INDEX(GROUP_CONCAT(orders.id ORDER BY COALESCE(orders.order_created_at, orders.paid_at, orders.created_at) DESC, orders.id DESC SEPARATOR 0x1F), 0x1F, 1) as latest_order_id')
             ->selectRaw("MIN(CASE WHEN NULLIF(TRIM(items.product_image_url), '') IS NOT NULL THEN items.id END) as image_item_id")
             ->selectRaw("GROUP_CONCAT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__') ORDER BY COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__') SEPARATOR 0x1F) as store_names")
             ->selectRaw("COUNT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__')) as shop_count")
@@ -2255,6 +2270,8 @@ class LogisticsProductStatisticsService
             'variant_skus' => static::parseVariantSkus((string) ($row->tongtu_skus ?? '')),
             'category' => __('logistics.product_statistics.sold_product'),
             'image_url' => filled($row->product_image_url) ? (string) $row->product_image_url : null,
+            'latest_order_at' => $this->dateTime($row->latest_order_at ?? null),
+            'latest_order_id' => (int) ($row->latest_order_id ?? 0),
             'stores' => $stores,
             'shop_count' => (int) $row->shop_count,
             'sales' => round((float) $row->sales, 4),
@@ -2413,7 +2430,8 @@ class LogisticsProductStatisticsService
     {
         $direction = $direction === 'asc' ? 'asc' : 'desc';
         if ($sort === '') {
-            $query->orderBy('product_statistics.first_item_id');
+            $query->orderByDesc('product_statistics.latest_order_at')
+                ->orderByDesc('product_statistics.first_item_id');
 
             return;
         }
