@@ -144,8 +144,6 @@ Route::get('/orders/refund-import-template', [LogisticsOrderController::class, '
 Route::post('/orders/import-refunds', [LogisticsOrderController::class, 'importRefunds'])->name('logistics.orders.import-refunds');
 Route::get('/orders/refund-import-errors/{token}', [LogisticsOrderController::class, 'refundImportErrors'])->name('logistics.orders.refund-import-errors');
 Route::post('/orders/sync-tracking', [LogisticsOrderController::class, 'syncTracking'])->name('logistics.orders.sync-tracking');
-Route::post('/orders/tongtu-skus/retry', [LogisticsOrderController::class, 'retryTongtuSkus'])->name('logistics.orders.tongtu-skus.retry');
-Route::post('/orders/tongtu-skus/refresh', [LogisticsOrderController::class, 'refreshTongtuSkuMappings'])->name('logistics.orders.tongtu-skus.refresh');
 Route::get('/orders/tracking-sync-batches/{batch}/progress', [LogisticsOrderController::class, 'trackingProgress'])->name('logistics.orders.tracking-progress');
 Route::post('/orders/assign-store', [LogisticsOrderController::class, 'assignStore'])->name('logistics.orders.assign-store');
 Route::get('/orders/{order}/detail', [LogisticsOrderController::class, 'detail'])->name('logistics.orders.detail');
@@ -173,7 +171,9 @@ Route::post('/warehouse-weight-exceptions/{id}/resolve', [WarehouseWeightExcepti
 Route::get('/product-library', [ProductLibraryController::class, 'index'])->name('aikaipin.product-library.index');
 Route::get('/account-risk', [PaymentPortalController::class, 'accountRisk'])->name('payment.account-risk.index');
 Route::post('/account-risk/accounts', [PaymentPortalController::class, 'storeAccountRiskAccount'])->name('payment.account-risk.accounts.store');
+Route::put('/account-risk/accounts/{account}', [PaymentPortalController::class, 'updateAccountRiskAccount'])->name('payment.account-risk.accounts.update');
 Route::get('/account-risk/accounts/{account}/detail', [PaymentPortalController::class, 'accountRiskDetail'])->name('payment.account-risk.accounts.detail');
+Route::get('/account-risk/accounts/{account}/monthly-report/export', [PaymentPortalController::class, 'exportAccountMonthlyReport'])->name('payment.account-risk.accounts.monthly-report.export');
 Route::get('/product-risk-profit', [PaymentPortalController::class, 'productRiskProfit'])->name('payment.product-risk-profit.index');
 Route::get('/product-risk-profit/export', [PaymentPortalController::class, 'exportProductRiskProfit'])->name('payment.product-risk-profit.export');
 Route::get('/product-risk-profit/tab', [PaymentPortalController::class, 'productRiskProfitTab'])->name('payment.product-risk-profit.tab');

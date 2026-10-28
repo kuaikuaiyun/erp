@@ -331,7 +331,7 @@ class LogisticsProductStatisticsService
         $rows = Cache::remember($cacheKey, now()->addSeconds(45), function () use ($filters): array {
             $query = $this->lightweightProductCandidateQuery($filters);
             if (!empty($filters['require_tongtu_match'])) {
-                $query->whereRaw("NULLIF(TRIM(first_item.tongtu_product_code), '') IS NOT NULL");
+                $query->where('item_statistics.product_key', 'like', 'tongtu-product-code:%');
             }
 
             return $query
@@ -577,7 +577,7 @@ class LogisticsProductStatisticsService
         }
 
         return $this->baseItemQuery($filters)
-            ->whereIn(DB::raw($this->productKeyExpression('items')), $keys)
+            ->whereIn(DB::raw($this->productKeyExpression('items', 'sku_mappings')), $keys)
             ->whereNotNull('items.shopify_sku')
             ->whereRaw("TRIM(items.shopify_sku) <> ''")
             ->selectRaw('LOWER(TRIM(items.shopify_sku)) as shopify_sku')
@@ -755,7 +755,7 @@ class LogisticsProductStatisticsService
     private function detailStoreOrderDistribution(array $filters, string $key): array
     {
         return $this->baseItemQuery($filters)
-            ->whereRaw($this->productKeyExpression('items').' = ?', [$key])
+            ->whereRaw($this->productKeyExpression('items', 'sku_mappings').' = ?', [$key])
             ->selectRaw("COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__') as store_name")
             ->selectRaw('COUNT(DISTINCT orders.id) as order_count')
             ->groupBy('store_name')
@@ -781,7 +781,7 @@ class LogisticsProductStatisticsService
     {
         $creditCardTag = "(CASE WHEN JSON_VALID(COALESCE(orders.shopify_payload, '')) THEN JSON_SEARCH(JSON_EXTRACT(orders.shopify_payload, '$.tags'), 'one', '%CreditCardBy%') ELSE NULL END IS NOT NULL)";
         $productOrders = $this->baseItemQuery($filters)
-            ->whereRaw($this->productKeyExpression('items').' = ?', [$key])
+            ->whereRaw($this->productKeyExpression('items', 'sku_mappings').' = ?', [$key])
             ->whereNotNull('orders.paypal_account_id')
             ->where('orders.paypal_association_source', 'actual_transaction')
             ->whereRaw("NOT {$creditCardTag}")
@@ -974,8 +974,10 @@ class LogisticsProductStatisticsService
             ->keyBy(static fn (LogisticsOrder $order): int => (int) $order->getKey());
 
         $items = LogisticsOrderItem::query()
+            ->leftJoin('logistics_tongtu_sku_mappings as sku_mappings', DB::raw('LOWER(TRIM(logistics_order_items.shopify_sku))'), '=', 'sku_mappings.shopify_sku')
+            ->select('logistics_order_items.*')
             ->whereIn('logistics_order_id', $orderIds)
-            ->whereRaw($this->productKeyExpression('logistics_order_items').' = ?', [$key])
+            ->whereRaw($this->productKeyExpression('logistics_order_items', 'sku_mappings').' = ?', [$key])
             ->get()
             ->filter(function (LogisticsOrderItem $item) use ($orders): bool {
                 $order = $orders->get((int) $item->logistics_order_id);
@@ -1021,7 +1023,7 @@ class LogisticsProductStatisticsService
     private function detailOrderIdsQuery(array $filters, string $key, array $options = [], ?string $paymentKind = null): Builder
     {
         $query = $this->baseItemQuery($filters)
-            ->whereRaw($this->productKeyExpression('items').' = ?', [$key]);
+            ->whereRaw($this->productKeyExpression('items', 'sku_mappings').' = ?', [$key]);
         $this->applyDetailPaymentKind($query, $paymentKind, 'orders');
         $this->applyDetailOrderFilters($query, $options, 'orders');
 
@@ -1035,7 +1037,7 @@ class LogisticsProductStatisticsService
     private function detailOrderMetricsQuery(array $filters, string $key, array $options = [], ?string $paymentKind = null): Builder
     {
         $query = $this->baseItemQuery($filters)
-            ->whereRaw($this->productKeyExpression('items').' = ?', [$key]);
+            ->whereRaw($this->productKeyExpression('items', 'sku_mappings').' = ?', [$key]);
         $this->applyDetailPaymentKind($query, $paymentKind, 'orders');
         $this->applyDetailOrderFilters($query, $options, 'orders');
 
@@ -1092,7 +1094,7 @@ class LogisticsProductStatisticsService
     private function detailLogisticsStatuses(array $filters, string $key, ?string $paymentKind): array
     {
         $query = $this->baseItemQuery($filters)
-            ->whereRaw($this->productKeyExpression('items').' = ?', [$key]);
+            ->whereRaw($this->productKeyExpression('items', 'sku_mappings').' = ?', [$key]);
         $this->applyDetailPaymentKind($query, $paymentKind, 'orders');
 
         return $query
@@ -1431,7 +1433,7 @@ class LogisticsProductStatisticsService
     {
         $variantExpression = $this->detailVariantKeyExpression('items');
         $query = $this->baseItemQuery($filters)
-            ->whereRaw($this->productKeyExpression('items').' = ?', [$key])
+            ->whereRaw($this->productKeyExpression('items', 'sku_mappings').' = ?', [$key])
             ->selectRaw("{$variantExpression} as variant_key")
             ->groupByRaw($variantExpression);
         $this->applyDetailTextFilter($query, $options, ['items.tongtu_sku', 'items.shopify_sku', 'items.tongtu_product_name', 'items.product_title', 'orders.store_name']);
@@ -1455,10 +1457,11 @@ class LogisticsProductStatisticsService
             ->selectRaw('logistics_orders.store_name as statistics_store_name')
             ->selectRaw('logistics_orders.paid_at as statistics_order_created_at')
             ->join('logistics_orders', 'logistics_orders.id', '=', 'logistics_order_items.logistics_order_id')
+            ->leftJoin('logistics_tongtu_sku_mappings as sku_mappings', DB::raw('LOWER(TRIM(logistics_order_items.shopify_sku))'), '=', 'sku_mappings.shopify_sku')
             ->whereNotNull('logistics_order_items.line_revenue_usd')
-            ->whereRaw($this->productKeyExpression('logistics_order_items').' = ?', [$key])
+            ->whereRaw($this->productKeyExpression('logistics_order_items', 'sku_mappings').' = ?', [$key])
             ->whereIn(DB::raw($this->detailVariantKeyExpression('logistics_order_items')), $keys);
-        $this->applyBaseFilters($items, $filters);
+        $this->applyBaseFilters($items, $filters, 'logistics_order_items', 'logistics_orders', 'sku_mappings');
         $groups = [];
         foreach ($items->get()->all() as $item) {
             $groups[$this->detailVariantKeyFromItem($item)][] = $item;
@@ -1618,9 +1621,10 @@ class LogisticsProductStatisticsService
             ->selectRaw('logistics_orders.shopify_order_number as statistics_shopify_order_number')
             ->selectRaw('logistics_orders.bill_number as statistics_bill_number')
             ->join('logistics_orders', 'logistics_orders.id', '=', 'logistics_order_items.logistics_order_id')
+            ->leftJoin('logistics_tongtu_sku_mappings as sku_mappings', DB::raw('LOWER(TRIM(logistics_order_items.shopify_sku))'), '=', 'sku_mappings.shopify_sku')
             ->whereNotNull('logistics_order_items.line_revenue_usd')
-            ->whereRaw($this->productKeyExpression('logistics_order_items').' = ?', [$key]);
-        $this->applyBaseFilters($query, $filters);
+            ->whereRaw($this->productKeyExpression('logistics_order_items', 'sku_mappings').' = ?', [$key]);
+        $this->applyBaseFilters($query, $filters, 'logistics_order_items', 'logistics_orders', 'sku_mappings');
 
         return $query->orderBy('logistics_order_items.id')->get();
     }
@@ -1707,7 +1711,7 @@ class LogisticsProductStatisticsService
 
         $result = $this->database()->query()->fromSub($statistics, 'product_statistics')->select('product_statistics.*');
         if (!empty($filters['require_tongtu_match'])) {
-            $result->whereRaw("NULLIF(TRIM(product_statistics.tongtu_product_code), '') IS NOT NULL");
+            $result->where('product_statistics.product_key', 'like', 'tongtu-product-code:%');
         }
         if (!empty($filters['only_abnormal'])) {
             $result->where(function (Builder $query): void {
@@ -1758,7 +1762,7 @@ class LogisticsProductStatisticsService
      */
     private function itemAggregateQuery(array $filters, ?array $productKeys = null): Builder
     {
-        $key = $this->productKeyExpression('items');
+        $key = $this->productKeyExpression('items', 'sku_mappings');
         $query = $this->baseItemQuery($filters);
         if ($productKeys !== null) {
             $query->whereIn(DB::raw($key), $productKeys);
@@ -1770,8 +1774,8 @@ class LogisticsProductStatisticsService
             ->selectRaw("MIN(CASE WHEN NULLIF(TRIM(items.product_image_url), '') IS NOT NULL THEN items.id END) as image_item_id")
             ->selectRaw("GROUP_CONCAT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__') ORDER BY COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__') SEPARATOR 0x1F) as store_names")
             ->selectRaw("COUNT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__')) as shop_count")
-            ->selectRaw("GROUP_CONCAT(DISTINCT CONCAT(NULLIF(TRIM(items.tongtu_sku), ''), '|', CAST(ROUND(COALESCE(items.sale_weight_gram, 0), 2) AS CHAR)) ORDER BY NULLIF(TRIM(items.tongtu_sku), '') SEPARATOR 0x1F) as tongtu_skus")
-            ->selectRaw("COUNT(DISTINCT NULLIF(TRIM(items.tongtu_sku), '')) as tongtu_variant_count")
+            ->selectRaw("GROUP_CONCAT(DISTINCT CONCAT(NULLIF(TRIM(sku_mappings.tongtu_sku), ''), '|', CAST(ROUND(COALESCE(items.sale_weight_gram, 0), 2) AS CHAR)) ORDER BY NULLIF(TRIM(sku_mappings.tongtu_sku), '') SEPARATOR 0x1F) as tongtu_skus")
+            ->selectRaw("COUNT(DISTINCT NULLIF(TRIM(sku_mappings.tongtu_sku), '')) as tongtu_variant_count")
             ->selectRaw('SUM(COALESCE(items.quantity, 0)) as sales')
             ->selectRaw('SUM(COALESCE(items.line_revenue_usd, 0)) as revenue')
             ->groupByRaw($key);
@@ -1789,7 +1793,14 @@ class LogisticsProductStatisticsService
             return;
         }
 
-        $productCodes = $rows->map(static fn (object $row): string => mb_strtolower(trim((string) ($row->tongtu_product_code ?? ''))))
+        $productCodes = $rows->map(function (object $row): string {
+            $key = (string) ($row->product_key ?? '');
+            if (str_starts_with($key, 'tongtu-product-code:')) {
+                return mb_strtolower(trim(substr($key, strlen('tongtu-product-code:'))));
+            }
+
+            return mb_strtolower(trim((string) ($row->tongtu_product_code ?? '')));
+        })
             ->filter()->unique()->values()->all();
         $shopifySkus = $rows->map(static fn (object $row): string => mb_strtolower(trim((string) ($row->shopify_sku ?? ''))))
             ->filter()->unique()->values()->all();
@@ -1831,7 +1842,10 @@ class LogisticsProductStatisticsService
         }
 
         foreach ($rows as $row) {
-            $productCode = mb_strtolower(trim((string) ($row->tongtu_product_code ?? '')));
+            $key = (string) ($row->product_key ?? '');
+            $productCode = str_starts_with($key, 'tongtu-product-code:')
+                ? mb_strtolower(trim(substr($key, strlen('tongtu-product-code:'))))
+                : mb_strtolower(trim((string) ($row->tongtu_product_code ?? '')));
             $shopifySku = mb_strtolower(trim((string) ($row->shopify_sku ?? '')));
             // The match-status filter is evaluated against the current
             // Shopify SKU mapping.  A PCL can contain several variants and
@@ -1842,6 +1856,17 @@ class LogisticsProductStatisticsService
             // Keep the PCL lookup only as a fallback for legacy order rows
             // that have no Shopify SKU mapping record.
             $mapping = $byShopifySku[$shopifySku] ?? $byProductCode[$productCode] ?? null;
+
+            if ($mapping?->status === LogisticsTongtuSkuMapping::STATUS_MATCHED) {
+                $row->tongtu_product_code = $mapping->tongtu_product_code;
+                $row->tongtu_sku = $mapping->tongtu_sku;
+                $row->tongtu_product_name = $mapping->tongtu_product_packing_name ?: $mapping->tongtu_product_name;
+            } elseif (str_starts_with($key, 'shopify-sku:')) {
+                // Do not inherit a legacy PCL after a mapping was reset or failed.
+                $row->tongtu_product_code = null;
+                $row->tongtu_sku = null;
+                $row->tongtu_product_name = null;
+            }
 
             $row->product_image_url = $mapping?->status === LogisticsTongtuSkuMapping::STATUS_MATCHED
                 && filled($mapping->tongtu_primary_image_url)
@@ -2018,7 +2043,7 @@ class LogisticsProductStatisticsService
     /** @param array<string,mixed> $filters */
     private function productOrderQuery(array $filters, bool $withOverviewModules = true, ?array $productKeys = null): Builder
     {
-        $key = $this->productKeyExpression('items');
+        $key = $this->productKeyExpression('items', 'sku_mappings');
         $query = $this->baseItemQuery($filters);
         if ($productKeys !== null) {
             $query->whereIn(DB::raw($key), $productKeys);
@@ -2454,8 +2479,17 @@ class LogisticsProductStatisticsService
         return $decoded === false || $decoded === '' ? null : $decoded;
     }
 
-    private function productKeyExpression(string $alias): string
+    private function productKeyExpression(string $alias, ?string $mappingAlias = null): string
     {
+        if ($mappingAlias !== null) {
+            return "CASE "
+                . "WHEN {$mappingAlias}.status = '".LogisticsTongtuSkuMapping::STATUS_MATCHED."' AND NULLIF(TRIM({$mappingAlias}.tongtu_product_code), '') IS NOT NULL THEN CONCAT('tongtu-product-code:', LOWER(TRIM({$mappingAlias}.tongtu_product_code))) "
+                . "WHEN NULLIF(TRIM({$alias}.shopify_sku), '') IS NOT NULL THEN CONCAT('shopify-sku:', LOWER(TRIM({$alias}.shopify_sku))) "
+                . "WHEN NULLIF(TRIM({$alias}.tongtu_sku), '') IS NOT NULL THEN CONCAT('tongtu-sku:', LOWER(TRIM({$alias}.tongtu_sku))) "
+                . "WHEN NULLIF(TRIM({$alias}.shopify_product_id), '') IS NOT NULL THEN CONCAT('shopify-product:', LOWER(TRIM({$alias}.shopify_product_id))) "
+                . "ELSE CONCAT('item:', {$alias}.id) END";
+        }
+
         return "CASE "
             . "WHEN NULLIF(TRIM({$alias}.tongtu_product_code), '') IS NOT NULL THEN CONCAT('tongtu-product-code:', LOWER(TRIM({$alias}.tongtu_product_code))) "
             . "WHEN NULLIF(TRIM({$alias}.shopify_sku), '') IS NOT NULL THEN CONCAT('shopify-sku:', LOWER(TRIM({$alias}.shopify_sku))) "
@@ -3142,33 +3176,42 @@ class LogisticsProductStatisticsService
 
         $keyword = trim((string) ($filters['keyword'] ?? ''));
         if ($keyword !== '') {
-            $query->where(function ($nested) use ($itemTable, $keyword): void {
+            $query->where(function ($nested) use ($itemTable, $mappingTable, $keyword): void {
                 $nested->where($itemTable.'.shopify_sku', 'like', '%'.$keyword.'%')
                     ->orWhere($itemTable.'.tongtu_product_code', 'like', '%'.$keyword.'%')
                     ->orWhere($itemTable.'.tongtu_sku', 'like', '%'.$keyword.'%')
                     ->orWhere($itemTable.'.variant_title', 'like', '%'.$keyword.'%')
                     ->orWhere($itemTable.'.product_title', 'like', '%'.$keyword.'%')
                     ->orWhere($itemTable.'.tongtu_product_name', 'like', '%'.$keyword.'%');
+                if ($mappingTable !== null) {
+                    $nested->orWhere($mappingTable.'.tongtu_product_code', 'like', '%'.$keyword.'%')
+                        ->orWhere($mappingTable.'.tongtu_sku', 'like', '%'.$keyword.'%')
+                        ->orWhere($mappingTable.'.tongtu_product_name', 'like', '%'.$keyword.'%')
+                        ->orWhere($mappingTable.'.tongtu_product_packing_name', 'like', '%'.$keyword.'%');
+                }
             });
         }
 
         $matchStatus = trim((string) ($filters['match_status'] ?? ''));
         if ($matchStatus === 'matched') {
-            $query->whereNotNull($itemTable.'.tongtu_product_code')
-                ->whereRaw("TRIM({$itemTable}.tongtu_product_code) <> ''");
+            if ($mappingTable !== null) {
+                $query->where($mappingTable.'.status', LogisticsTongtuSkuMapping::STATUS_MATCHED);
+            } else {
+                $query->whereNotNull($itemTable.'.tongtu_product_code')
+                    ->whereRaw("TRIM({$itemTable}.tongtu_product_code) <> ''");
+            }
         } elseif ($matchStatus === 'unmatched') {
-            $query->where(function ($nested) use ($itemTable, $mappingTable): void {
-                $nested->where(function ($productCode) use ($itemTable): void {
+            if ($mappingTable !== null) {
+                $query->where(function ($mapping) use ($mappingTable): void {
+                    $mapping->whereNull($mappingTable.'.id')
+                        ->orWhere($mappingTable.'.status', '<>', LogisticsTongtuSkuMapping::STATUS_MATCHED);
+                });
+            } else {
+                $query->where(function ($productCode) use ($itemTable): void {
                     $productCode->whereNull($itemTable.'.tongtu_product_code')
                         ->orWhereRaw("TRIM({$itemTable}.tongtu_product_code) = ''");
                 });
-                if ($mappingTable !== null) {
-                    $nested->where(function ($mapping) use ($mappingTable): void {
-                        $mapping->whereNull($mappingTable.'.id')
-                            ->orWhere($mappingTable.'.status', '<>', LogisticsTongtuSkuMapping::STATUS_MATCHED);
-                    });
-                }
-            });
+            }
         } elseif ($mappingTable !== null && in_array($matchStatus, [
             LogisticsTongtuSkuMapping::STATUS_QUEUED,
             LogisticsTongtuSkuMapping::STATUS_NOT_FOUND,

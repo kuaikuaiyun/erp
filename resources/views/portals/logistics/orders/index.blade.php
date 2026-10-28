@@ -96,8 +96,6 @@
         </div>
 
         <form id="tracking-sync-form" method="post" action="{{ route('logistics.orders.sync-tracking') }}">@csrf<input type="hidden" name="return_to" value="{{ request()->fullUrl() }}"></form>
-        <form id="tongtu-sku-retry-form" method="post" action="{{ route('logistics.orders.tongtu-skus.retry') }}">@csrf<input type="hidden" name="return_to" value="{{ request()->fullUrl() }}"></form>
-        <form id="tongtu-sku-refresh-form" method="post" action="{{ route('logistics.orders.tongtu-skus.refresh') }}">@csrf<input type="hidden" name="return_to" value="{{ request()->fullUrl() }}"></form>
         <form id="assign-store-form" method="post" action="{{ route('logistics.orders.assign-store') }}" class="logistics-batch-form">
             @csrf
             <input type="hidden" name="return_to" value="{{ request()->fullUrl() }}">
@@ -112,8 +110,6 @@
                 <h3 class="box-title">订单列表</h3>
                 <button class="btn btn-default btn-sm" type="button" data-toggle="modal" data-target="#logistics-order-export-modal"><i class="fa fa-download"></i> 导出</button>
                 <button class="btn btn-info btn-sm" type="button" data-toggle="modal" data-target="#logistics-refund-import-modal"><i class="fa fa-upload"></i> {{ __('logistics.refund_import.open_button') }}</button>
-                <button class="btn btn-warning btn-sm" type="submit" form="tongtu-sku-retry-form" id="tongtu-sku-retry-button" disabled><i class="fa fa-repeat"></i> {{ __('logistics.orders.sku_mapping_actions.retry') }}</button>
-                <button class="btn btn-default btn-sm" type="submit" form="tongtu-sku-refresh-form" id="tongtu-sku-refresh-button" disabled><i class="fa fa-refresh"></i> {{ __('logistics.orders.sku_mapping_actions.refresh') }}</button>
                 <button class="btn btn-info btn-sm" type="submit" form="tracking-sync-form" id="tracking-sync-button" disabled><i class="fa fa-truck"></i> {{ __('logistics.tracking.batch_sync') }}</button>
                 <button class="btn btn-warning btn-sm" type="submit" form="assign-store-form" id="assign-store-button" disabled><i class="fa fa-link"></i> 批量归属店铺</button>
                 @include('portals.logistics.partials.pagination', ['paginator' => $orders, 'filters' => $filters, 'routeName' => 'logistics.orders.index', 'loadingTarget' => '.logistics-orders-scroll'])
@@ -456,8 +452,6 @@
                 trackingProgressTimer = window.setInterval(updateTrackingProgress, 3000);
             }
             var all = document.getElementById('order-check-all');
-            var skuRetryButton = document.getElementById('tongtu-sku-retry-button');
-            var skuRefreshButton = document.getElementById('tongtu-sku-refresh-button');
             var trackingButton = document.getElementById('tracking-sync-button');
             var assignButton = document.getElementById('assign-store-button');
             var exportForm = document.getElementById('logistics-order-export-form');
@@ -477,8 +471,6 @@
             };
             var refresh = function () {
                 var selectedItems = selected();
-                if (skuRetryButton) skuRetryButton.disabled = selectedItems.length === 0;
-                if (skuRefreshButton) skuRefreshButton.disabled = selectedItems.length === 0;
                 if (trackingButton) trackingButton.disabled = selectedItems.length === 0;
                 assignButton.disabled = selectedItems.length === 0 || !selectedItems.some(function (item) { return item.dataset.unmatched === '1'; });
                 all.checked = checks().length > 0 && selectedItems.length === checks().length;
@@ -489,10 +481,6 @@
             };
             all.addEventListener('change', function () { checks().forEach(function (item) { item.checked = all.checked; }); refresh(); });
             checks().forEach(function (item) { item.addEventListener('change', refresh); });
-            var skuRetryForm = document.getElementById('tongtu-sku-retry-form');
-            if (skuRetryForm) skuRetryForm.addEventListener('submit', function () { populate(this); });
-            var skuRefreshForm = document.getElementById('tongtu-sku-refresh-form');
-            if (skuRefreshForm) skuRefreshForm.addEventListener('submit', function () { populate(this); });
             var trackingForm = document.getElementById('tracking-sync-form');
             if (trackingForm) trackingForm.addEventListener('submit', function () { populate(this); });
             document.getElementById('assign-store-form').addEventListener('submit', function () { populate(this); });

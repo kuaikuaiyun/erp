@@ -9,6 +9,7 @@ use App\Models\LogisticsPayPalRefund;
 use App\Models\LogisticsPayPalImport;
 use App\Models\LogisticsPayPalTransaction;
 use App\Models\LogisticsPayPalBalanceSnapshot;
+use App\Portals\Payment\PaymentPayPalLedgerImportService;
 use Carbon\Carbon;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Arr;
@@ -21,6 +22,7 @@ class PayPalImportService
     public function __construct(
         private readonly PayPalOrderAssociationService $associations,
         private readonly PayPalSourceResponseParser $sourceResponses,
+        private readonly PaymentPayPalLedgerImportService $paymentLedger,
     ) {
     }
 
@@ -121,8 +123,9 @@ class PayPalImportService
             }
         }
 
-        $allErrors = [...$errors, ...$itemErrors];
-        $processedCount = $paymentCount + $refundCount + $disputeCount;
+        $ledgerResult = $this->paymentLedger->persist($account, $import, $transactions);
+        $allErrors = [...$errors, ...$itemErrors, ...$ledgerResult['errors']];
+        $processedCount = $paymentCount + $refundCount + $disputeCount + $ledgerResult['count'];
         $status = $allErrors === [] ? 'success' : ($processedCount > 0 ? 'partial' : 'failed');
         $message = sprintf(
             '文件接收%s：交易 %d 条，付款事件 %d 条（已匹配 %d、未匹配 %d），退款 %d 条，纠纷 %d 条，全部业务记录已匹配 %d 条、未匹配 %d 条，异常 %d 条。',
@@ -174,6 +177,7 @@ class PayPalImportService
             'unmatched' => $unmatched,
             'errors' => count($allErrors),
             'balances' => $balanceCount,
+            'ledger_entries' => $ledgerResult['count'],
             'message' => $message,
         ];
     }

@@ -6,8 +6,8 @@ use Illuminate\Support\Facades\Schedule;
 use App\Models\LogisticsOrder;
 use App\Portals\Logistics\LogisticsOrderItemService;
 use App\Portals\Logistics\TongtuSkuMappingService;
-use App\Portals\Logistics\SkuDatabaseLookupService;
-use App\Portals\Operation\OperationReportMetricsService;
+use App\Portals\Payment\PaymentAccountRiskSnapshotService;
+use App\Portals\Payment\PaymentPayPalLedgerBackfillService;
 
 require __DIR__.'/assistant_shopify_analytics_schedule.php';
 
@@ -21,10 +21,26 @@ Schedule::command('logistics:tongtu-skus:refresh --limit=200')
     ->withoutOverlapping(5)
     ->runInBackground();
 
-Schedule::command('logistics:sku-database:backfill-guide-costs')
-    ->everyFiveMinutes()
-    ->withoutOverlapping(10)
+Schedule::command('payment:paypal-risk:refresh-weekly')
+    ->mondays()
+    ->at('00:10')
+    ->timezone('Asia/Shanghai')
+    ->withoutOverlapping(30)
     ->runInBackground();
+
+Artisan::command('payment:paypal-risk:refresh-weekly', function (PaymentAccountRiskSnapshotService $snapshots): int {
+    $count = $snapshots->refresh();
+    $this->info(__('payment.account_risk.risk_snapshot.refreshed', ['count' => $count]));
+
+    return 0;
+})->purpose(__('payment.account_risk.risk_snapshot.purpose'));
+
+Artisan::command('payment:paypal-ledger:backfill {--limit=0 : '.__('payment.account_risk.monthly_report.backfill_limit').' }', function (PaymentPayPalLedgerBackfillService $backfill): int {
+    $result = $backfill->run(max(0, (int) $this->option('limit')));
+    $this->info(__('payment.account_risk.monthly_report.backfill_complete', $result));
+
+    return $result['errors'] > 0 ? 1 : 0;
+})->purpose(__('payment.account_risk.monthly_report.backfill_purpose'));
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
@@ -64,7 +80,12 @@ Artisan::command('logistics:tongtu-skus:backfill {--limit=100 : '.__('logistics.
     return 0;
 })->purpose(__('logistics.sku_mapping_commands.backfill_purpose'));
 
-Artisan::command('logistics:sku-database:backfill-guide-costs {--limit=0 : 最多处理的 SKU 数，0 表示全部} {--batch=100 : 每批请求数量，最大 100}', function (OperationReportMetricsService $metrics, SkuDatabaseLookupService $database): int {
+/*
+ * The legacy private-SKU-database backfill is intentionally not scheduled.
+ * It wrote costs and warehouse measurements into the same mapping state used
+ * for product matching, which made product attribution non-deterministic.
+ */
+/* Artisan::command('logistics:sku-database:backfill-guide-costs {--limit=0} {--batch=100}', function ($metrics, $database): int {
     $rows = collect($metrics->missingGuideSkuSummary());
     $skus = $rows->pluck('sku')
         ->map(fn ($sku): string => trim((string) $sku))
@@ -94,4 +115,15 @@ Artisan::command('logistics:sku-database:backfill-guide-costs {--limit=0 : 最�
     $this->info('批量回填完成：接口共返回 '.$returned.' 个 SKU，其中 '.$withGuideCost.' 个有有效指导价；当前仍缺少 '.$remaining.' 个。');
 
     return 0;
-})->purpose('通过私有 SKU 数据库批量回填运营报表缺失的指导价和重量');
+})->purpose('deprecated'); */
+
+Artisan::command('logistics:tongtu-skus:reset-all {--execute : Actually reset mapping rows and Tongtu SKU jobs}', function (TongtuSkuMappingService $mappings): int {
+    if (!$this->option('execute')) {
+        $this->warn('Dry run only. No data changed. Re-run with --execute to reset only Tongtu SKU mappings and their queued jobs.');
+        return 0;
+    }
+
+    $result = $mappings->resetMappingsForRebuild();
+    $this->info("Completed. Mapping rows removed: {$result['deleted_mappings']}; queued Tongtu jobs removed: {$result['deleted_jobs']}; SKU mappings queued: {$result['queued_skus']}.");
+    return 0;
+})->purpose('Safely rebuild Tongtu SKU mapping state without deleting logistics orders or order items');
