@@ -5,7 +5,9 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
 use App\Models\LogisticsOrder;
 use App\Portals\Logistics\LogisticsOrderItemService;
+use App\Portals\Logistics\SkuDatabaseLookupService;
 use App\Portals\Logistics\TongtuSkuMappingService;
+use App\Portals\Operation\OperationReportMetricsService;
 use App\Portals\Payment\PaymentAccountRiskSnapshotService;
 use App\Portals\Payment\PaymentPayPalLedgerBackfillService;
 
@@ -19,6 +21,11 @@ Schedule::command('logistics:tracking:process --limit=80')
 Schedule::command('logistics:tongtu-skus:refresh --limit=200')
     ->everyTenMinutes()
     ->withoutOverlapping(5)
+    ->runInBackground();
+
+Schedule::command('logistics:sku-database:backfill-guide-costs --batch=100')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(10)
     ->runInBackground();
 
 Schedule::command('payment:paypal-risk:refresh-weekly')
@@ -80,12 +87,7 @@ Artisan::command('logistics:tongtu-skus:backfill {--limit=100 : '.__('logistics.
     return 0;
 })->purpose(__('logistics.sku_mapping_commands.backfill_purpose'));
 
-/*
- * The legacy private-SKU-database backfill is intentionally not scheduled.
- * It wrote costs and warehouse measurements into the same mapping state used
- * for product matching, which made product attribution non-deterministic.
- */
-/* Artisan::command('logistics:sku-database:backfill-guide-costs {--limit=0} {--batch=100}', function ($metrics, $database): int {
+Artisan::command('logistics:sku-database:backfill-guide-costs {--limit=0} {--batch=100}', function (OperationReportMetricsService $metrics, SkuDatabaseLookupService $database): int {
     $rows = collect($metrics->missingGuideSkuSummary());
     $skus = $rows->pluck('sku')
         ->map(fn ($sku): string => trim((string) $sku))
@@ -115,7 +117,7 @@ Artisan::command('logistics:tongtu-skus:backfill {--limit=100 : '.__('logistics.
     $this->info('批量回填完成：接口共返回 '.$returned.' 个 SKU，其中 '.$withGuideCost.' 个有有效指导价；当前仍缺少 '.$remaining.' 个。');
 
     return 0;
-})->purpose('deprecated'); */
+})->purpose('从私有 SKU 数据库批量同步缺失的指导价和重量');
 
 Artisan::command('logistics:tongtu-skus:reset-all {--execute : Actually reset mapping rows and Tongtu SKU jobs}', function (TongtuSkuMappingService $mappings): int {
     if (!$this->option('execute')) {
