@@ -12,18 +12,19 @@ class OperationReportMetricsService
 {
     private const CNY_PER_USD = 6.5;
 
-    /** @return list<array{sku:string,product_name:string,item_count:int,quantity:float,latest_order_at:?string}> */
+    /** @return list<array{sku:string,product_name:string,missing_fields:list<string>,item_count:int,quantity:float,latest_order_at:?string}> */
     public function missingGuideSkuSummary(): array
     {
         $mappedValues = [];
         LogisticsTongtuSkuMapping::query()
-            ->whereNotNull('product_guide_cost_cny')
-            ->where('product_guide_cost_cny', '>', 0)
-            ->get(['shopify_sku', 'tongtu_sku', 'tongtu_product_code'])
+            ->get(['shopify_sku', 'tongtu_sku', 'tongtu_product_code', 'product_guide_cost_cny', 'goods_weight_gram'])
             ->each(function (LogisticsTongtuSkuMapping $mapping) use (&$mappedValues): void {
                 foreach ([$mapping->shopify_sku, $mapping->tongtu_sku, $mapping->tongtu_product_code] as $value) {
                     $value = mb_strtolower(trim((string) $value));
-                    if ($value !== '') $mappedValues[$value] = true;
+                    if ($value === '') continue;
+                    $mappedValues[$value] ??= ['guide' => false, 'weight' => false];
+                    $mappedValues[$value]['guide'] = $mappedValues[$value]['guide'] || (float) $mapping->product_guide_cost_cny > 0;
+                    $mappedValues[$value]['weight'] = $mappedValues[$value]['weight'] || (float) $mapping->goods_weight_gram > 0;
                 }
             });
 
@@ -43,15 +44,24 @@ class OperationReportMetricsService
             ->selectRaw('MAX(logistics_order_items.product_title) as product_name')
             ->selectRaw('COUNT(*) as item_count')
             ->selectRaw('SUM(logistics_order_items.quantity) as total_quantity')
+            ->selectRaw('MAX(GREATEST(COALESCE(logistics_order_items.sale_weight_gram, 0), COALESCE(logistics_order_items.tongtu_goods_weight_gram, 0))) as saved_weight_gram')
             ->selectRaw('MAX(logistics_orders.order_created_at) as latest_order_at')
             ->groupBy('logistics_order_items.shopify_sku', 'logistics_order_items.tongtu_sku', 'logistics_order_items.tongtu_product_code')
             ->get()
             ->filter(function ($row) use ($mappedValues): bool {
+                $coverage = ['guide' => false, 'weight' => (float) $row->saved_weight_gram > 0];
                 foreach ([$row->shopify_sku, $row->tongtu_sku, $row->tongtu_product_code] as $value) {
                     $value = mb_strtolower(trim((string) $value));
-                    if ($value !== '' && isset($mappedValues[$value])) return false;
+                    if ($value === '' || !isset($mappedValues[$value])) continue;
+                    $coverage['guide'] = $coverage['guide'] || $mappedValues[$value]['guide'];
+                    $coverage['weight'] = $coverage['weight'] || $mappedValues[$value]['weight'];
                 }
-                return true;
+                $row->missing_fields = array_values(array_filter([
+                    $coverage['guide'] ? null : '指导价',
+                    $coverage['weight'] ? null : '重量',
+                ]));
+
+                return $row->missing_fields !== [];
             })
             ->map(function ($row): array {
                 $sku = collect([$row->shopify_sku, $row->tongtu_sku, $row->tongtu_product_code])
@@ -60,6 +70,7 @@ class OperationReportMetricsService
                 return [
                     'sku' => $sku ?: '未填写 SKU',
                     'product_name' => trim((string) $row->product_name) ?: '—',
+                    'missing_fields' => $row->missing_fields,
                     'item_count' => (int) $row->item_count,
                     'quantity' => (float) $row->total_quantity,
                     'latest_order_at' => $row->latest_order_at
