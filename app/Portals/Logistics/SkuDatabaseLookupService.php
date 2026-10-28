@@ -13,7 +13,7 @@ class SkuDatabaseLookupService
     /** @param array<int, string|null> $skus
      *  @return array<string, array{sku:string,guide_cost_cny:?float,weight_gram:?float,data_time:?string,match_status:?string}>
      */
-    public function lookup(array $skus): array
+    public function lookup(array $skus, bool $forceRefresh = false): array
     {
         $skus = collect($skus)->map(fn ($sku) => trim((string) $sku))->filter()->unique()->take(100)->values()->all();
         $url = trim((string) config('logistics.sku_database.url'));
@@ -23,6 +23,9 @@ class SkuDatabaseLookupService
         }
 
         $cacheKey = 'logistics:sku-database:v2:'.sha1(implode('|', array_map('mb_strtolower', $skus)));
+        if ($forceRefresh) {
+            Cache::forget($cacheKey);
+        }
 
         return Cache::remember($cacheKey, now()->addMinutes(max(1, (int) config('logistics.sku_database.cache_minutes', 10))), function () use ($url, $token, $skus): array {
             try {
