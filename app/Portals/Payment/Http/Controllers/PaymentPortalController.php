@@ -8,6 +8,8 @@ use App\Models\LogisticsPayPalAccount;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Payment\PaymentAccountRiskService;
 use App\Portals\Payment\PaymentOrderSearchService;
+use App\Portals\Payment\PaymentPayPalMonthlyReportExportService;
+use App\Portals\Payment\PaymentPayPalMonthlyReportService;
 use App\Portals\Payment\PaymentPortalService;
 use App\Portals\Payment\PaymentProductAlertExportService;
 use App\Portals\Payment\PaymentProductAlertService;
@@ -29,6 +31,8 @@ class PaymentPortalController extends Controller
         private readonly PaymentProductAlertService $productAlerts,
         private readonly PaymentProductAlertExportService $productAlertExport,
         private readonly PaymentWorkbenchService $workbench,
+        private readonly PaymentPayPalMonthlyReportService $monthlyReports,
+        private readonly PaymentPayPalMonthlyReportExportService $monthlyReportExport,
     ) {
     }
 
@@ -74,6 +78,24 @@ class PaymentPortalController extends Controller
             ->with('success', __('payment.account_risk.create_modal.success_message'));
     }
 
+    public function updateAccountRiskAccount(Request $request, LogisticsPayPalAccount $account): RedirectResponse
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return redirect()->route('payment.account-risk.index');
+        }
+
+        $this->accountRisk->updateAccount(
+            $account,
+            $this->validatedAccount($request, $account),
+            $context['user']->getKey(),
+            $context['user']->name,
+        );
+
+        return redirect()->route('payment.account-risk.index')
+            ->with('success', __('payment.account_risk.edit_modal.success_message'));
+    }
+
     public function accountRiskDetail(Request $request, LogisticsPayPalAccount $account): Response
     {
         $context = $this->portalContext($request);
@@ -82,11 +104,12 @@ class PaymentPortalController extends Controller
         }
 
         $validated = $request->validate([
-            'tab' => ['nullable', Rule::in(['overview', 'order_analysis', 'orders', 'products', 'refunds', 'disputes'])],
+            'tab' => ['nullable', Rule::in(['overview', 'monthly_report', 'order_analysis', 'orders', 'products', 'refunds', 'disputes'])],
             'page' => ['nullable', 'integer', 'min:1'],
             'per_page' => ['nullable', Rule::in([50, 100, '50', '100'])],
             'period_start' => ['nullable', 'date'],
             'period_end' => ['nullable', 'date', 'after_or_equal:period_start'],
+            'date_mode' => ['nullable', Rule::in(['order', 'event'])],
             'keyword' => ['nullable', 'string', 'max:191'],
             'sort' => ['nullable', 'string', 'max:64'],
             'direction' => ['nullable', Rule::in(['asc', 'desc'])],
@@ -94,17 +117,36 @@ class PaymentPortalController extends Controller
             'type' => ['nullable', 'string', 'max:100'],
             'outcome' => ['nullable', 'string', 'max:100'],
             'match_status' => ['nullable', Rule::in(['', 'matched', 'unmatched'])],
+            'report_year' => ['nullable', 'integer', 'min:2000', 'max:'.now('America/Los_Angeles')->year],
+            'report_dimension' => ['nullable', Rule::in(['payment', 'event'])],
+            'report_month' => ['nullable', 'integer', 'between:1,12'],
         ]);
         $today = now('Asia/Shanghai');
+        $tab = (string) ($validated['tab'] ?? 'overview');
+
+        if ($tab === 'monthly_report') {
+            return response()->json($this->monthlyReports->report(
+                $account,
+                (int) ($validated['report_year'] ?? now('America/Los_Angeles')->year),
+                (string) ($validated['report_dimension'] ?? 'payment'),
+                isset($validated['report_month']) ? (int) $validated['report_month'] : null,
+            ));
+        }
+
+        $dateMode = (string) ($validated['date_mode'] ?? 'order');
+        $periodStart = (string) ($validated['period_start'] ?? $today->copy()->subDays(29)->format('Y-m-d'));
+        $periodEnd = (string) ($validated['period_end'] ?? $today->format('Y-m-d'));
 
         return response()->json($this->accountRisk->detail(
             $account,
             [
-                'date_from' => (string) ($validated['period_start'] ?? $today->copy()->subDays(29)->format('Y-m-d')),
-                'date_to' => (string) ($validated['period_end'] ?? $today->format('Y-m-d')),
-                'date_mode' => 'order',
+                'date_from' => $dateMode === 'order' ? $periodStart : '',
+                'date_to' => $dateMode === 'order' ? $periodEnd : '',
+                'event_date_from' => $dateMode === 'event' ? $periodStart : '',
+                'event_date_to' => $dateMode === 'event' ? $periodEnd : '',
+                'date_mode' => $dateMode,
             ],
-            (string) ($validated['tab'] ?? 'overview'),
+            $tab,
             (int) ($validated['page'] ?? 1),
             (int) ($validated['per_page'] ?? 50),
             [
@@ -117,6 +159,24 @@ class PaymentPortalController extends Controller
                 'match_status' => trim((string) ($validated['match_status'] ?? '')),
             ],
         ));
+    }
+
+    public function exportAccountMonthlyReport(Request $request, LogisticsPayPalAccount $account): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        $validated = $request->validate([
+            'year' => ['required', 'integer', 'min:2000', 'max:'.now('America/Los_Angeles')->year],
+            'dimension' => ['required', Rule::in(['payment', 'event'])],
+        ]);
+
+        return $this->monthlyReportExport->download(
+            $account,
+            (int) $validated['year'],
+            (string) $validated['dimension'],
+        );
     }
 
     public function productRiskProfit(Request $request): Response
@@ -330,13 +390,14 @@ class PaymentPortalController extends Controller
         return $context;
     }
 
-    /** @return array{account:string,period_start:string,period_end:string,import_status:string,page:int,per_page:int} */
+    /** @return array{account:string,period_start:string,period_end:string,date_mode:string,import_status:string,page:int,per_page:int} */
     private function accountRiskFilters(Request $request): array
     {
         $validated = $request->validate([
             'account' => ['nullable', 'string', 'max:191'],
             'period_start' => ['nullable', 'date'],
             'period_end' => ['nullable', 'date', 'after_or_equal:period_start'],
+            'date_mode' => ['nullable', Rule::in(['order', 'event'])],
             'import_status' => ['nullable', Rule::in(['', 'never', 'success', 'partial', 'failed'])],
             'page' => ['nullable', 'integer', 'min:1'],
             'per_page' => ['nullable', Rule::in([50, 100, '50', '100'])],
@@ -347,6 +408,7 @@ class PaymentPortalController extends Controller
             'account' => trim((string) ($validated['account'] ?? '')),
             'period_start' => (string) ($validated['period_start'] ?? $today->copy()->subDays(29)->format('Y-m-d')),
             'period_end' => (string) ($validated['period_end'] ?? $today->format('Y-m-d')),
+            'date_mode' => (string) ($validated['date_mode'] ?? 'order'),
             'import_status' => (string) ($validated['import_status'] ?? ''),
             'page' => max(1, (int) ($validated['page'] ?? 1)),
             'per_page' => (int) ($validated['per_page'] ?? 50),
@@ -354,7 +416,7 @@ class PaymentPortalController extends Controller
     }
 
     /** @return array{account_name:string,merchant_id:string,account_email:?string,environment:string,is_enabled:bool} */
-    private function validatedAccount(Request $request): array
+    private function validatedAccount(Request $request, ?LogisticsPayPalAccount $account = null): array
     {
         foreach (['account_name', 'merchant_id', 'account_email'] as $field) {
             if ($request->has($field)) {
@@ -362,10 +424,17 @@ class PaymentPortalController extends Controller
             }
         }
 
+        $merchantUnique = Rule::unique(LogisticsPayPalAccount::class, 'merchant_id');
+        $emailUnique = Rule::unique(LogisticsPayPalAccount::class, 'account_email');
+        if ($account) {
+            $merchantUnique->ignore($account->getKey());
+            $emailUnique->ignore($account->getKey());
+        }
+
         $data = $request->validate([
             'account_name' => ['required', 'string', 'max:191'],
-            'merchant_id' => ['required', 'string', 'max:100', Rule::unique(LogisticsPayPalAccount::class, 'merchant_id')],
-            'account_email' => ['nullable', 'email', 'max:191', Rule::unique(LogisticsPayPalAccount::class, 'account_email')],
+            'merchant_id' => ['required', 'string', 'max:100', $merchantUnique],
+            'account_email' => ['nullable', 'email', 'max:191', $emailUnique],
             'environment' => ['required', Rule::in([LogisticsPayPalAccount::ENVIRONMENT_LIVE, LogisticsPayPalAccount::ENVIRONMENT_SANDBOX])],
             'is_enabled' => ['required', 'boolean'],
         ]);

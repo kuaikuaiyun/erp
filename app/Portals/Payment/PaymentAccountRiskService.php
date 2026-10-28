@@ -4,6 +4,7 @@ namespace App\Portals\Payment;
 
 use App\Models\LogisticsPayPalAccount;
 use App\Models\LogisticsPayPalBalanceSnapshot;
+use App\Models\PaymentPayPalAccountRiskSnapshot;
 use App\Portals\Logistics\PayPalRiskAnalyticsService;
 use Carbon\Carbon;
 use Carbon\CarbonInterface;
@@ -19,11 +20,13 @@ class PaymentAccountRiskService
     ];
     private const QUALIFYING_DISPUTE_TYPES = ['INQUIRY', 'CHARGEBACK'];
 
-    public function __construct(private readonly PayPalRiskAnalyticsService $analytics)
-    {
+    public function __construct(
+        private readonly PayPalRiskAnalyticsService $analytics,
+        private readonly PaymentAccountRiskSnapshotService $riskSnapshots,
+    ) {
     }
 
-    /** @param array{account:string,period_start:string,period_end:string,import_status:string,page:int,per_page:int} $filters
+    /** @param array{account:string,period_start:string,period_end:string,date_mode:string,import_status:string,page:int,per_page:int} $filters
      *  @return array<string,mixed>
      */
     public function dashboard(array $filters): array
@@ -51,11 +54,14 @@ class PaymentAccountRiskService
         }
 
         $accounts = $query->get();
+        $dateMode = $filters['date_mode'] === 'event' ? 'event' : 'order';
         $summaries = $accounts
             ->map(fn (LogisticsPayPalAccount $account): array => $this->analytics->currentSummary($account, [
-                'date_from' => $filters['period_start'],
-                'date_to' => $filters['period_end'],
-                'date_mode' => 'order',
+                'date_from' => $dateMode === 'order' ? $filters['period_start'] : '',
+                'date_to' => $dateMode === 'order' ? $filters['period_end'] : '',
+                'event_date_from' => $dateMode === 'event' ? $filters['period_start'] : '',
+                'event_date_to' => $dateMode === 'event' ? $filters['period_end'] : '',
+                'date_mode' => $dateMode,
             ]));
 
         $portfolio = $this->portfolio($summaries);
@@ -66,6 +72,8 @@ class PaymentAccountRiskService
         $page = min(max(1, (int) $filters['page']), $lastPage);
         $merchants = $summaries->forPage($page, $perPage);
         $merchantIds = $merchants->pluck('id')->map(static fn ($id): int => (int) $id)->all();
+        $accountModels = $accounts->keyBy('id');
+        $weeklyRiskSnapshots = $this->riskSnapshots->currentForAccounts($merchantIds);
         $balanceSnapshots = LogisticsPayPalBalanceSnapshot::query()
             ->whereIn('logistics_paypal_account_id', $merchantIds)
             ->where('currency_code', 'USD')->orderByDesc('as_of_time')->orderByDesc('id')->get()
@@ -84,6 +92,7 @@ class PaymentAccountRiskService
         return [
             'period_start' => $filters['period_start'],
             'period_end' => $filters['period_end'],
+            'date_mode' => $dateMode,
             'cutoff' => $this->formatDateTime($cutoff),
             'filters' => $filters,
             'account_options' => $accounts->map(fn (LogisticsPayPalAccount $account): array => [
@@ -100,6 +109,8 @@ class PaymentAccountRiskService
                 $summary,
                 $balanceSnapshots->get((int) $summary['id']),
                 $orderTimes->get((int) $summary['id']),
+                $accountModels->get((int) $summary['id']),
+                $weeklyRiskSnapshots->get((int) $summary['id']),
             ))->values()->all(),
             'pagination' => [
                 'current_page' => $page, 'last_page' => $lastPage, 'per_page' => $perPage, 'total' => $total,
@@ -298,6 +309,18 @@ class PaymentAccountRiskService
         ]);
     }
 
+    /** @param array{account_name:string,merchant_id:string,account_email:?string,environment:string,is_enabled:bool} $data */
+    public function updateAccount(LogisticsPayPalAccount $account, array $data, int|string|null $userId, ?string $userName): LogisticsPayPalAccount
+    {
+        $account->fill([
+            ...$data,
+            'updated_by' => $userId,
+            'updated_by_name' => $userName,
+        ])->save();
+
+        return $account->refresh();
+    }
+
     /** @param Collection<int,array<string,mixed>> $summaries
      *  @return array<string,int|float>
      */
@@ -324,7 +347,13 @@ class PaymentAccountRiskService
     /** @param array<string,mixed> $summary
      *  @return array<string,mixed>
      */
-    private function merchant(array $summary, ?LogisticsPayPalBalanceSnapshot $balance = null, ?object $orderTimes = null): array
+    private function merchant(
+        array $summary,
+        ?LogisticsPayPalBalanceSnapshot $balance = null,
+        ?object $orderTimes = null,
+        ?LogisticsPayPalAccount $account = null,
+        ?PaymentPayPalAccountRiskSnapshot $riskSnapshot = null,
+    ): array
     {
         $balanceTime = $balance?->as_of_time ?: $balance?->last_refresh_time;
         $orders = (int) $summary['order_count'];
@@ -339,6 +368,16 @@ class PaymentAccountRiskService
             'name' => (string) $summary['account_name'],
             'meta' => trim((string) $summary['masked_email']) !== '-' ? (string) $summary['masked_email'] : (string) $summary['merchant_id'],
             'status' => $this->status($summary),
+            'risk_status' => !((bool) ($account?->is_enabled ?? false)) ? 'disabled' : (((float) ($riskSnapshot?->dispute_rate ?? 0)) > PaymentAccountRiskSnapshotService::RISK_THRESHOLD ? 'risk' : 'normal'),
+            'risk_rate' => $this->percentage((float) ($riskSnapshot?->dispute_rate ?? 0)),
+            'risk_window' => $riskSnapshot ? $this->formatRiskWindow($riskSnapshot) : '-',
+            'edit' => [
+                'account_name' => (string) ($account?->account_name ?? ''),
+                'merchant_id' => (string) ($account?->merchant_id ?? ''),
+                'account_email' => (string) ($account?->account_email ?? ''),
+                'environment' => (string) ($account?->environment ?? LogisticsPayPalAccount::ENVIRONMENT_LIVE),
+                'is_enabled' => (bool) ($account?->is_enabled ?? false),
+            ],
             'orders' => $this->integer($orders),
             'amount' => $this->currency($paidAmount),
             'stores' => $this->integer((int) $summary['store_count']),
@@ -348,6 +387,7 @@ class PaymentAccountRiskService
             'last_imported_at' => (string) $summary['last_imported_at'],
             'first_order_at' => $this->formatDateTime($orderTimes?->first_order_at),
             'last_order_at' => $this->formatDateTime($orderTimes?->last_order_at),
+            'usage_days' => $this->usageDays($orderTimes?->first_order_at, $orderTimes?->last_order_at),
             'balance' => $balance ? [
                 'available' => $this->currency((float) $balance->available_balance),
                 'withheld' => $this->currency((float) $balance->withheld_balance),
@@ -363,6 +403,12 @@ class PaymentAccountRiskService
                 $this->rate('full_refund', (float) $summary['overall_dispute_rate'], ['disputes' => $this->integer($overallDisputeOrders), 'orders' => $this->integer($orders)]),
             ],
         ];
+    }
+
+    private function formatRiskWindow(PaymentPayPalAccountRiskSnapshot $snapshot): string
+    {
+        return $snapshot->window_start->timezone('Asia/Shanghai')->format('Y-m-d').' 至 '
+            .$snapshot->window_end->timezone('Asia/Shanghai')->format('Y-m-d');
     }
 
     /** @return array{key:string,value:string,tone:string,progress:int,note_params:array<string,string>} */
@@ -416,6 +462,22 @@ class PaymentAccountRiskService
         }
 
         return Carbon::parse($value, 'UTC')->timezone('Asia/Shanghai')->format('Y-m-d H:i');
+    }
+
+    private function usageDays(mixed $firstOrderAt, mixed $lastOrderAt): ?int
+    {
+        if (!$firstOrderAt || !$lastOrderAt) {
+            return null;
+        }
+
+        $first = $firstOrderAt instanceof CarbonInterface
+            ? $firstOrderAt->copy()->timezone('Asia/Shanghai')
+            : Carbon::parse((string) $firstOrderAt, 'UTC')->timezone('Asia/Shanghai');
+        $last = $lastOrderAt instanceof CarbonInterface
+            ? $lastOrderAt->copy()->timezone('Asia/Shanghai')
+            : Carbon::parse((string) $lastOrderAt, 'UTC')->timezone('Asia/Shanghai');
+
+        return (int) $first->startOfDay()->diffInDays($last->startOfDay(), true);
     }
 
     /** @return array{key:string,count:int} */

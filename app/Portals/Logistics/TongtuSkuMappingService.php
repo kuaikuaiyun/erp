@@ -6,7 +6,6 @@ use App\Jobs\RefreshTongtuSkuMappingsJob;
 use App\Models\LogisticsOrder;
 use App\Models\LogisticsOrderItem;
 use App\Models\LogisticsTongtuSkuMapping;
-use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Arr;
@@ -19,7 +18,6 @@ use Throwable;
 
 class TongtuSkuMappingService
 {
-    private const REFRESH_HOURS = 6;
     private const REQUEST_SKU_LIMIT = 10;
     private const LOCK_MINUTES = 60;
 
@@ -43,26 +41,11 @@ class TongtuSkuMappingService
         }
 
         $mappings = $this->ensureMappings($skus);
-        $refreshIds = [];
         foreach ($mappings as $mapping) {
-            if ($mapping->isFresh()) {
+            if ($mapping->status === LogisticsTongtuSkuMapping::STATUS_MATCHED) {
                 $this->applyMappingToOrderItems($mapping, $order);
-                continue;
             }
-
-            if ($mapping->status === LogisticsTongtuSkuMapping::STATUS_FAILED) {
-                continue;
-            }
-            if ($mapping->status === LogisticsTongtuSkuMapping::STATUS_NOT_FOUND
-                && $mapping->next_retry_at
-                && $mapping->next_retry_at->isFuture()) {
-                continue;
-            }
-
-            $refreshIds[] = (int) $mapping->getKey();
         }
-
-        $this->queueRefresh($refreshIds);
     }
 
     /** @param list<string> $skus
@@ -114,32 +97,14 @@ class TongtuSkuMappingService
     {
         $now = now();
         $ids = LogisticsTongtuSkuMapping::query()
-            ->where(function ($query) use ($now): void {
-                $query->where(function ($matched) use ($now): void {
-                    $matched->where('status', LogisticsTongtuSkuMapping::STATUS_MATCHED)
-                        ->where(function ($due) use ($now): void {
-                            $due->where(function ($retry) use ($now): void {
-                                $retry->whereNotNull('next_retry_at')
-                                    ->where('next_retry_at', '<=', $now);
-                            })->orWhere(function ($cadence) use ($now): void {
-                                $cadence->whereNull('next_retry_at')
-                                    ->whereRaw('COALESCE(last_requested_at, last_synced_at) <= ?', [$now->copy()->subHours(self::REFRESH_HOURS)]);
-                            });
-                        });
-                })->orWhere(function ($retry) use ($now): void {
-                    $retry->whereIn('status', [
-                        LogisticsTongtuSkuMapping::STATUS_QUEUED,
-                        LogisticsTongtuSkuMapping::STATUS_NOT_FOUND,
-                    ])->where(function ($due) use ($now): void {
-                        $due->whereNull('next_retry_at')->orWhere('next_retry_at', '<=', $now);
-                    });
-                });
+            ->where('status', LogisticsTongtuSkuMapping::STATUS_QUEUED)
+            ->where(function ($due) use ($now): void {
+                $due->whereNull('next_retry_at')->orWhere('next_retry_at', '<=', $now);
             })
             ->where(function ($locks) use ($now): void {
                 $locks->whereNull('refresh_lock_until')->orWhere('refresh_lock_until', '<=', $now);
             })
-            ->orderByRaw("CASE WHEN status = 'queued' THEN 0 WHEN status = 'not_found' THEN 1 ELSE 2 END")
-            ->orderBy('last_synced_at')
+            ->orderBy('created_at')
             ->limit(max(1, min(1000, $limit)))
             ->pluck('id')
             ->map(static fn ($id): int => (int) $id)
@@ -155,9 +120,9 @@ class TongtuSkuMappingService
      *
      * @param list<int> $mappingIds
      */
-    public function refreshMappings(array $mappingIds): void
+    public function refreshMappings(array $mappingIds, bool $warehouseWeightRefresh = false): void
     {
-        $mappings = $this->claimMappings($mappingIds);
+        $mappings = $this->claimMappings($mappingIds, $warehouseWeightRefresh);
         if ($mappings->isEmpty()) {
             return;
         }
@@ -178,14 +143,14 @@ class TongtuSkuMappingService
             }
 
             foreach ($firstPass as $type => $typeMappings) {
-                $this->findProductsByType($typeMappings, (string) $type, $session, $pending);
+                $this->findProductsByType($typeMappings, (string) $type, $session, $pending, 'skus', $warehouseWeightRefresh);
 
                 // A Shopify SKU can be maintained as a Tongtu SKU alias instead
                 // of the canonical SKU. Only query the still-unresolved values by
                 // alias, so a normal SKU match always has priority.
                 $aliasFallback = array_intersect_key($typeMappings, $pending);
                 if ($aliasFallback !== []) {
-                    $this->findProductsByType($aliasFallback, (string) $type, $session, $pending, 'skuAliases');
+                    $this->findProductsByType($aliasFallback, (string) $type, $session, $pending, 'skuAliases', $warehouseWeightRefresh);
                 }
             }
 
@@ -197,11 +162,11 @@ class TongtuSkuMappingService
                     }
                 }
                 if ($fallback !== []) {
-                    $this->findProductsByType($fallback, $type, $session, $pending);
+                    $this->findProductsByType($fallback, $type, $session, $pending, 'skus', $warehouseWeightRefresh);
 
                     $aliasFallback = array_intersect_key($fallback, $pending);
                     if ($aliasFallback !== []) {
-                        $this->findProductsByType($aliasFallback, $type, $session, $pending, 'skuAliases');
+                        $this->findProductsByType($aliasFallback, $type, $session, $pending, 'skuAliases', $warehouseWeightRefresh);
                     }
                 }
             }
@@ -243,17 +208,70 @@ class TongtuSkuMappingService
             ->map(static fn ($sku): string => (string) $sku)
             ->all();
 
-        $mappings = $this->ensureMappings($skus);
-        $this->queueRefresh($mappings->pluck('id')->map(static fn ($id): int => (int) $id)->all());
+        $this->ensureMappings($skus);
 
         return count($skus);
     }
 
-    /** @param list<int> $orderIds */
-    public function retryUnmatchedForOrders(array $orderIds): int
+    /**
+     * Clear only Tongtu SKU mapping state and rebuild a queued SKU list from
+     * existing order-item rows. Orders and order items are deliberately left
+     * untouched, so the new matching rule can be applied safely.
+     *
+     * @return array{deleted_mappings:int,deleted_jobs:int,queued_skus:int}
+     */
+    public function resetMappingsForRebuild(): array
     {
-        $mappings = $this->mappingsForOrders($orderIds);
-        return $this->retryUnmatchedMappings($mappings);
+        $connection = DB::connection(config('admin.database.connection') ?: config('database.default'));
+
+        return $connection->transaction(function () use ($connection): array {
+            $deletedMappings = $connection->table('logistics_tongtu_sku_mappings')->delete();
+            $deletedJobs = 0;
+            if ($connection->getSchemaBuilder()->hasTable('jobs')) {
+                $deletedJobs = $connection->table('jobs')
+                    ->whereIn('queue', ['logistics-tongtu', 'logistics-tongtu-high'])
+                    ->delete();
+            }
+
+            $now = now();
+            $rows = $connection->table('logistics_order_items')
+                ->selectRaw('LOWER(TRIM(shopify_sku)) as shopify_sku')
+                ->whereNotNull('shopify_sku')
+                ->whereRaw("TRIM(shopify_sku) <> ''")
+                ->groupByRaw('LOWER(TRIM(shopify_sku))')
+                ->orderBy('shopify_sku')
+                ->cursor();
+            $batch = [];
+            $queued = 0;
+            foreach ($rows as $row) {
+                $sku = LogisticsTongtuSkuMapping::normalizedSku((string) $row->shopify_sku);
+                if ($sku === '') {
+                    continue;
+                }
+                $batch[] = [
+                    'shopify_sku' => $sku,
+                    'status' => LogisticsTongtuSkuMapping::STATUS_QUEUED,
+                    'next_retry_at' => $now,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+                if (count($batch) >= 500) {
+                    $connection->table('logistics_tongtu_sku_mappings')->insertOrIgnore($batch);
+                    $queued += count($batch);
+                    $batch = [];
+                }
+            }
+            if ($batch !== []) {
+                $connection->table('logistics_tongtu_sku_mappings')->insertOrIgnore($batch);
+                $queued += count($batch);
+            }
+
+            return [
+                'deleted_mappings' => $deletedMappings,
+                'deleted_jobs' => $deletedJobs,
+                'queued_skus' => $queued,
+            ];
+        });
     }
 
     /**
@@ -272,7 +290,6 @@ class TongtuSkuMappingService
     /** @param Collection<int, LogisticsTongtuSkuMapping> $mappings */
     private function retryUnmatchedMappings(Collection $mappings): int
     {
-        $ids = [];
         foreach ($mappings as $mapping) {
             if ($mapping->status === LogisticsTongtuSkuMapping::STATUS_MATCHED) {
                 continue;
@@ -285,32 +302,9 @@ class TongtuSkuMappingService
                 'refresh_lock_until' => null,
                 'last_error' => null,
             ])->save();
-            $ids[] = (int) $mapping->getKey();
         }
-        $this->queueRefresh($ids);
 
-        return count($ids);
-    }
-
-    /** @param list<int> $orderIds */
-    public function forceRefreshForOrders(array $orderIds): int
-    {
-        $mappings = $this->mappingsForOrders($orderIds);
-        $ids = [];
-        foreach ($mappings as $mapping) {
-            if ($mapping->status !== LogisticsTongtuSkuMapping::STATUS_MATCHED) {
-                $mapping->status = LogisticsTongtuSkuMapping::STATUS_QUEUED;
-                $mapping->not_found_attempts = 0;
-                $mapping->next_retry_at = now();
-                $mapping->last_error = null;
-            }
-            $mapping->refresh_lock_until = null;
-            $mapping->save();
-            $ids[] = (int) $mapping->getKey();
-        }
-        $this->queueRefresh($ids);
-
-        return count($ids);
+        return $mappings->where('status', '!=', LogisticsTongtuSkuMapping::STATUS_MATCHED)->count();
     }
 
     /**
@@ -357,7 +351,7 @@ class TongtuSkuMappingService
 
         $ids = $mappings->pluck('id')->map(static fn ($id): int => (int) $id)->all();
         if ($ids !== []) {
-            $this->refreshMappings($ids);
+            $this->refreshMappings($ids, true);
         }
 
         $mappings = LogisticsTongtuSkuMapping::query()->whereIn('id', $ids)->get();
@@ -404,7 +398,7 @@ class TongtuSkuMappingService
     /** @param list<int> $mappingIds
      *  @return Collection<int, LogisticsTongtuSkuMapping>
      */
-    private function claimMappings(array $mappingIds): Collection
+    private function claimMappings(array $mappingIds, bool $allowMatched = false): Collection
     {
         $now = now();
         $claimed = new Collection();
@@ -414,6 +408,7 @@ class TongtuSkuMappingService
                 ->where(function ($query) use ($now): void {
                     $query->whereNull('refresh_lock_until')->orWhere('refresh_lock_until', '<=', $now);
                 })
+                ->when(!$allowMatched, fn ($query) => $query->where('status', LogisticsTongtuSkuMapping::STATUS_QUEUED))
                 ->update([
                     'refresh_lock_until' => $now->copy()->addMinutes(self::LOCK_MINUTES),
                     'last_requested_at' => $now,
@@ -431,28 +426,6 @@ class TongtuSkuMappingService
         return $claimed;
     }
 
-    /** @param list<int> $orderIds
-     *  @return Collection<int, LogisticsTongtuSkuMapping>
-     */
-    private function mappingsForOrders(array $orderIds): Collection
-    {
-        $orderIds = array_values(array_unique(array_filter(array_map('intval', $orderIds))));
-        if ($orderIds === []) {
-            return new Collection();
-        }
-
-        $skus = LogisticsOrderItem::query()
-            ->whereIn('logistics_order_id', $orderIds)
-            ->pluck('shopify_sku')
-            ->map(static fn ($sku): string => LogisticsTongtuSkuMapping::normalizedSku((string) $sku))
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
-
-        return $this->ensureMappings($skus);
-    }
-
     /**
      * @param array<string, LogisticsTongtuSkuMapping> $mappings
      * @param array{app_token:string, app_secret:string, merchant_id:string} $session
@@ -464,6 +437,7 @@ class TongtuSkuMappingService
         array $session,
         array &$pending,
         string $queryField = 'skus',
+        bool $warehouseWeightRefresh = false,
     ): void
     {
         if (!in_array($queryField, ['skus', 'skuAliases'], true)) {
@@ -504,7 +478,7 @@ class TongtuSkuMappingService
                     continue;
                 }
 
-                $this->storeMatchedProduct($mapping, $products[0], $productType);
+                $this->storeMatchedProduct($mapping, $products[0], $productType, $warehouseWeightRefresh);
                 unset($pending[$sku]);
             }
         }
@@ -527,12 +501,12 @@ class TongtuSkuMappingService
     }
 
     /** @param array<string,mixed> $product */
-    private function storeMatchedProduct(LogisticsTongtuSkuMapping $mapping, array $product, string $productType): void
+    private function storeMatchedProduct(LogisticsTongtuSkuMapping $mapping, array $product, string $productType, bool $warehouseWeightRefresh = false): void
     {
         $detail = $this->matchingDetail($product, $mapping->shopify_sku);
         $images = $this->images($product);
         $now = now();
-        $mapping->fill([
+        $values = [
             'status' => LogisticsTongtuSkuMapping::STATUS_MATCHED,
             'not_found_attempts' => 0,
             'next_retry_at' => null,
@@ -544,29 +518,27 @@ class TongtuSkuMappingService
             'tongtu_product_type' => $productType,
             'tongtu_product_name' => $this->text($product['productName'] ?? null),
             'tongtu_product_packing_name' => $this->text($product['productPackingName'] ?? $product['productPackingEnName'] ?? null),
-            'goods_current_cost_cny' => $this->decimal($detail['goodsCurCost'] ?? null),
-            'goods_average_cost_cny' => $this->decimal($detail['goodsAveCost'] ?? null),
-            'package_cost_cny' => $this->decimal($product['packageCost'] ?? null),
-            'product_guide_cost_cny' => $this->decimal($product['productGuideCost'] ?? null),
-            'cost_currency' => 'CNY',
-            'goods_weight_gram' => $this->decimal($detail['goodsWeight'] ?? null),
-            'package_weight_gram' => $this->decimal($product['packageWeight'] ?? null),
-            'product_length_cm' => $this->decimal($product['productLength'] ?? null),
-            'product_width_cm' => $this->decimal($product['productWidth'] ?? null),
-            'product_height_cm' => $this->decimal($product['productHeight'] ?? null),
-            'package_length_cm' => $this->decimal($product['packageLength'] ?? null),
-            'package_width_cm' => $this->decimal($product['packageWidth'] ?? null),
-            'package_height_cm' => $this->decimal($product['packageHeight'] ?? null),
             'tongtu_primary_image_url' => $images['primary'],
             'tongtu_images' => json_encode($images['all'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'tongtu_updated_at' => $this->date($product['updatedDate'] ?? null),
             'last_synced_at' => $now,
             'last_error' => null,
             'last_response' => json_encode($product, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-        ]);
+        ];
+        if ($warehouseWeightRefresh) {
+            $values += [
+                'goods_weight_gram' => $this->decimal($detail['goodsWeight'] ?? null),
+                'package_weight_gram' => $this->decimal($product['packageWeight'] ?? null),
+                'product_length_cm' => $this->decimal($product['productLength'] ?? null),
+                'product_width_cm' => $this->decimal($product['productWidth'] ?? null),
+                'product_height_cm' => $this->decimal($product['productHeight'] ?? null),
+                'package_length_cm' => $this->decimal($product['packageLength'] ?? null),
+                'package_width_cm' => $this->decimal($product['packageWidth'] ?? null),
+                'package_height_cm' => $this->decimal($product['packageHeight'] ?? null),
+            ];
+        }
+        $mapping->fill($values);
         $mapping->save();
-
-        $this->applyMappingToOrderItems($mapping);
     }
 
     /** @param list<array<string,mixed>> $products */
@@ -593,18 +565,10 @@ class TongtuSkuMappingService
             return;
         }
 
-        $attempts = (int) $mapping->not_found_attempts + 1;
-        $terminal = $attempts >= 4;
-        $delayHours = match ($attempts) {
-            1 => 6,
-            2 => 18,
-            3 => 24,
-            default => null,
-        };
         $mapping->forceFill([
-            'status' => $terminal ? LogisticsTongtuSkuMapping::STATUS_FAILED : LogisticsTongtuSkuMapping::STATUS_NOT_FOUND,
-            'not_found_attempts' => $attempts,
-            'next_retry_at' => $delayHours === null ? null : now()->addHours($delayHours),
+            'status' => LogisticsTongtuSkuMapping::STATUS_FAILED,
+            'not_found_attempts' => (int) $mapping->not_found_attempts + 1,
+            'next_retry_at' => null,
             'refresh_lock_until' => null,
             'last_error' => 'Tongtu did not return a product for this Shopify SKU.',
         ])->save();
@@ -616,7 +580,8 @@ class TongtuSkuMappingService
         foreach ($mappings as $mapping) {
             $mapping->forceFill([
                 'refresh_lock_until' => null,
-                'next_retry_at' => now()->addMinutes(15),
+                'status' => LogisticsTongtuSkuMapping::STATUS_FAILED,
+                'next_retry_at' => null,
                 'last_error' => Str::limit($reason, 1000),
             ])->save();
         }
@@ -624,51 +589,14 @@ class TongtuSkuMappingService
 
     private function applyMappingToOrderItems(LogisticsTongtuSkuMapping $mapping, ?LogisticsOrder $onlyOrder = null): void
     {
-        $items = LogisticsOrderItem::query()
-            ->with('order:id,paid_at')
-            ->whereRaw("LOWER(TRIM(shopify_sku)) = ?", [$mapping->shopify_sku]);
-        if ($onlyOrder) {
-            $items->where('logistics_order_id', $onlyOrder->getKey());
+        if (!$onlyOrder) {
+            return;
         }
 
-        $today = Carbon::now('Asia/Shanghai')->startOfDay();
-        foreach ($items->cursor() as $item) {
-            $order = $item->order;
-            $isToday = $order?->paid_at && Carbon::parse($order->paid_at)->setTimezone('Asia/Shanghai')->greaterThanOrEqualTo($today);
-            // Older orders may contain a legacy Tongtu order-match snapshot
-            // without the new mapping ID. Keep that historical snapshot
-            // frozen; only fill genuinely unmapped lines (or today\'s lines).
-            $isUnmapped = !$item->tongtu_sku_mapping_id
-                && blank($item->tongtu_product_code)
-                && blank($item->tongtu_sku);
-            $needsLegacySupplement = !$item->tongtu_sku_mapping_id
-                && ($item->tongtu_goods_weight_gram === null || $item->tongtu_package_weight_gram === null);
-            if (!$isToday && !$isUnmapped && !$needsLegacySupplement) {
-                continue;
-            }
-
-            if (!$isToday && !$isUnmapped) {
-                $supplement = [
-                    'tongtu_sku_mapping_id' => $mapping->getKey(),
-                ];
-                if (blank($item->tongtu_product_id)) {
-                    $supplement['tongtu_product_id'] = $mapping->tongtu_product_id;
-                }
-                if (blank($item->tongtu_goods_detail_id)) {
-                    $supplement['tongtu_goods_detail_id'] = $mapping->tongtu_goods_detail_id;
-                }
-                if ($item->tongtu_goods_weight_gram === null) {
-                    $supplement['tongtu_goods_weight_gram'] = $mapping->goods_weight_gram;
-                }
-                if ($item->tongtu_package_weight_gram === null) {
-                    $supplement['tongtu_package_weight_gram'] = $mapping->package_weight_gram;
-                }
-
-                $item->fill($supplement)->save();
-                continue;
-            }
-
-            $item->fill([
+        LogisticsOrderItem::query()
+            ->where('logistics_order_id', $onlyOrder->getKey())
+            ->whereRaw("LOWER(TRIM(shopify_sku)) = ?", [$mapping->shopify_sku])
+            ->update([
                 'tongtu_sku_mapping_id' => $mapping->getKey(),
                 'tongtu_product_id' => $mapping->tongtu_product_id,
                 'tongtu_goods_detail_id' => $mapping->tongtu_goods_detail_id,
@@ -676,10 +604,7 @@ class TongtuSkuMappingService
                 'tongtu_product_code' => $mapping->tongtu_product_code,
                 'tongtu_product_name' => $mapping->tongtu_product_packing_name ?: $mapping->tongtu_product_name,
                 'tongtu_product_type' => $mapping->tongtu_product_type,
-                'tongtu_goods_weight_gram' => $mapping->goods_weight_gram,
-                'tongtu_package_weight_gram' => $mapping->package_weight_gram,
-            ])->save();
-        }
+            ]);
     }
 
     /** @param array<string,mixed> $product
@@ -697,11 +622,9 @@ class TongtuSkuMappingService
 
         // 传入的是产品编号（productCode）时，通途规格 SKU 往往带后缀，
         // 用前缀匹配唯一命中，避免把整个产品的多条规格误判为无法确定。
-        $prefixed = array_values(array_filter(
-            $details,
-            static fn ($detail): bool => $key !== ''
-                && str_starts_with(LogisticsTongtuSkuMapping::normalizedSku((string) ($detail['goodsSku'] ?? '')), $key)
-        ));
+        // Prefix matching can select a different product variant. Normal SKU
+        // matching must be exact; aliases are handled by the API request.
+        $prefixed = [];
         if (count($prefixed) === 1) {
             return $prefixed[0];
         }
@@ -730,7 +653,7 @@ class TongtuSkuMappingService
         // productCode（产品编号）也作为可匹配键：通途侧 SKU 被改名或加后缀
         // 时（例如 XMSantaClaus26093001 → XMSantaClaus26093001-1pc-停用），
         // 仓库仍只有产品编号，用它发起查询也能命中同一个产品。
-        foreach (['sku', 'productSku', 'skuAlias', 'productCode'] as $field) {
+        foreach (['sku', 'productSku', 'skuAlias'] as $field) {
             $value = $this->text($product[$field] ?? null);
             if ($value !== null) {
                 $keys[] = LogisticsTongtuSkuMapping::normalizedSku($value);

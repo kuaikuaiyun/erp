@@ -9,7 +9,7 @@
 .payment-account-risk-page .payment-account-filter-box .box-title { font-size: 13px; font-weight: 600; }
 .payment-account-risk-page .payment-account-filter-box .box-body { position: relative; padding: 13px 14px; border-radius: 0 0 7px 7px; background: #fff; }
 
-.payment-account-filter-form { display: grid; grid-template-columns: minmax(254px, 1.2fr) minmax(185px, .88fr) minmax(170px, .82fr) minmax(170px, .82fr) minmax(195px, .9fr) auto; gap: 13px; align-items: end; }
+.payment-account-filter-form { display: grid; grid-template-columns: minmax(250px, 1.08fr) minmax(250px, 1.12fr) minmax(180px, .86fr) minmax(150px, .72fr) minmax(150px, .72fr) minmax(175px, .82fr) auto; gap: 11px; align-items: end; }
 .payment-account-filter-field { min-width: 0; margin: 0; }
 .payment-account-filter-field > span,
 .payment-account-filter-field > label { display: block; margin-bottom: 6px; color: #5e7891; font-size: 12px; font-weight: 600; }
@@ -18,6 +18,12 @@
 .payment-account-date-range { display: grid !important; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 6px; margin: 0 !important; }
 .payment-account-date-range b { color: #7890a7; font-size: 12px; font-weight: 400; }
 .payment-account-date-range .form-control { min-width: 0; padding-right: 7px; padding-left: 7px; }
+.payment-account-date-mode { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: hidden; height: 36px; border: 1px solid #d8e3ed; border-radius: 5px; background: #fbfdff; }
+.payment-account-date-mode button { min-width: 0; padding: 0 10px; border: 0; border-right: 1px solid #d8e3ed; background: transparent; color: #52718d; font-size: 12px; white-space: nowrap; }
+.payment-account-date-mode button:last-child { border-right: 0; }
+.payment-account-date-mode button:hover,
+.payment-account-date-mode button:focus { background: #edf6fd; color: #1f6ea7; outline: 0; }
+.payment-account-date-mode button.active { background: #338dc7; color: #fff; }
 .payment-account-combobox { position: relative; z-index: 3; }
 .payment-account-combobox:focus-within { z-index: 35; }
 .payment-account-combobox .form-control { padding-right: 66px; }
@@ -65,6 +71,12 @@
 .payment-account-risk-page .payment-account-order-times { display: flex; flex-wrap: nowrap; gap: 12px; margin-top: 5px; color: #8196a9; font-size: 9px; line-height: 1.4; white-space: nowrap; }
 .payment-account-risk-page .payment-account-order-times span { white-space: nowrap; }
 .payment-account-risk-page .payment-account-order-times b { color: #58748b; font-weight: 600; font-variant-numeric: tabular-nums; }
+.payment-account-header-badges { display: flex; flex: 0 0 auto; align-items: center; gap: 5px; }
+.payment-account-usage-badge { display: inline-flex; align-items: center; padding: 4px 6px; border-radius: 4px; background: #edf6fd; color: #2872a9; font-size: 10px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
+.payment-account-risk-badge { display: inline-flex; align-items: center; padding: 4px 7px; border-radius: 4px; font-size: 10px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
+.payment-account-risk-normal { background: #e8f7ef; color: #168453; }
+.payment-account-risk-risk { background: #fff1d7; color: #b56c00; }
+.payment-account-risk-disabled { background: #fee8e8; color: #cf3f46; }
 .payment-account-risk-page .payment-status-badge { display: inline-flex; align-items: center; align-self: flex-start; padding: 4px 6px; border-radius: 4px; background: #eff5fb; color: #2773d8; font-size: 10px; font-weight: 700; line-height: 1.2; white-space: nowrap; }
 .payment-account-risk-page .payment-status-normal { background: #fff2f1; color: #ea6662; }
 .payment-account-risk-page .payment-status-attention { background: #fff1de; color: #c98218; }
@@ -80,6 +92,7 @@
 .payment-account-risk-page .payment-rate-list small { display: block; margin-top: 3px; color: #7890a5; font-size: 9px; line-height: 1.3; }
 .payment-account-risk-page .payment-rate-list { display: grid; gap: 10px; padding: 12px 13px 13px; }
 .payment-account-risk-page .payment-rate-item { min-width: 0; }
+.payment-account-risk-page .payment-rate-formula { margin: 2px 0 5px; color: #8297aa; font-size: 9px; line-height: 1.35; }
 .payment-account-risk-page .payment-rate-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .payment-account-risk-page .payment-rate-heading span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .payment-account-risk-page .payment-rate-heading span .fa { margin-left: 3px; color: #3990c4; font-size: 9px; }
@@ -112,6 +125,10 @@
 .payment-account-risk-page .payment-account-detail-button { flex: 0 0 auto; min-width: 76px; border-color: #cfdce7; border-radius: 4px; color: #2d6fd8; font-size: 10px; font-weight: 600; }
 .payment-account-risk-page .payment-account-detail-button:hover,
 .payment-account-risk-page .payment-account-detail-button:focus { border-color: #91b7d6; background: #f1f8fd; color: #2055ac; }
+.payment-account-card-actions { display: flex; flex: 0 0 auto; gap: 5px; }
+.payment-account-edit-button { border-color: #cfdce7; border-radius: 4px; color: #55728a; font-size: 10px; font-weight: 600; }
+.payment-account-edit-button:hover,
+.payment-account-edit-button:focus { border-color: #91b7d6; background: #f1f8fd; color: #205f91; }
 .payment-account-risk-page .payment-empty-filter { margin: 15px 0 3px; color: #748ba2; font-size: 12px; text-align: center; }
 .payment-account-board-heading { align-items: center !important; }
 .payment-account-board-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; }
@@ -309,6 +326,43 @@
 .payment-dispute-workflow span { display: block; }
 .payment-dispute-workflow strong { color: #31536d; font-size: 10px; }
 .payment-dispute-workflow span { margin-top: 3px; color: #71889d; font-size: 9px; }
+.payment-monthly-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 13px 15px; border: 1px solid #d7e4ee; border-radius: 7px; background: #fff; }
+.payment-monthly-toolbar-main { display: flex; align-items: flex-end; gap: 16px; }
+.payment-monthly-toolbar label,
+.payment-monthly-dimension { margin: 0; }
+.payment-monthly-toolbar label > span,
+.payment-monthly-dimension > span { display: block; margin-bottom: 5px; color: #607c92; font-size: 10px; font-weight: 600; }
+.payment-monthly-toolbar select { width: 108px; min-height: 34px; }
+.payment-monthly-dimension > div { display: inline-flex; overflow: hidden; border: 1px solid #cddce8; border-radius: 5px; background: #f7fafc; }
+.payment-monthly-dimension button { min-width: 145px; padding: 8px 14px; border: 0; border-right: 1px solid #d8e4ed; background: transparent; color: #496a83; font-size: 11px; }
+.payment-monthly-dimension button:last-child { border-right: 0; }
+.payment-monthly-dimension button.active { background: #348ec5; color: #fff; font-weight: 700; }
+.payment-monthly-currency strong { display: flex; min-width: 72px; min-height: 34px; align-items: center; justify-content: center; border: 1px solid #d5e2eb; border-radius: 5px; background: #f7fafc; color: #183f60; }
+.payment-monthly-dimension-note { margin: 9px 2px 12px; color: #6c8396; font-size: 10px; }
+.payment-monthly-dimension-note i { color: #328ac1; }
+.payment-monthly-table-wrap { overflow: auto; border: 1px solid #d7e4ee; border-radius: 7px; background: #fff; }
+.payment-monthly-table { min-width: 1420px; margin: 0; color: #294d69; font-size: 10px; }
+.payment-monthly-table > thead > tr > th { padding: 10px 9px; border-bottom: 1px solid #cfdeea; background: #eaf2f8; color: #315773; font-size: 9px; font-weight: 700; white-space: nowrap; vertical-align: middle; }
+.payment-monthly-table > tbody > tr.payment-monthly-row > td { padding: 11px 9px; border-top-color: #e3ebf2; vertical-align: middle; white-space: nowrap; }
+.payment-monthly-table > tbody > tr.payment-monthly-row:hover,
+.payment-monthly-table > tbody > tr.payment-monthly-row.is-expanded { background: #f6fafe; }
+.payment-monthly-table td strong,
+.payment-monthly-table td small { display: block; }
+.payment-monthly-table td strong { color: #173f60; font-size: 11px; }
+.payment-monthly-table td small { margin-top: 3px; color: #758da0; font-size: 9px; }
+.payment-monthly-na { display: inline-block; max-width: 110px; color: #8193a2; font-size: 9px; white-space: normal; }
+.payment-monthly-coverage { display: inline-flex; padding: 3px 7px; border-radius: 10px; background: #edf2f6; color: #637b8d; font-size: 9px; font-weight: 700; }
+.payment-monthly-coverage.is-complete { background: #e6f6ef; color: #21815a; }
+.payment-monthly-coverage.is-partial,
+.payment-monthly-coverage.is-current { background: #fff2dc; color: #ad6c09; }
+.payment-monthly-coverage.is-missing { background: #fbe8e8; color: #c64b51; }
+.payment-monthly-detail-row > td { padding: 0 !important; border-top: 2px solid #3a91c8 !important; background: #f7fafc; }
+.payment-monthly-detail { padding: 13px; }
+.payment-monthly-detail-heading { display: flex; justify-content: flex-end; margin-bottom: 7px; color: #607a90; font-size: 9px; }
+.payment-monthly-detail .table-responsive { max-height: 300px; overflow: auto; border: 1px solid #dce7ef; border-radius: 5px; background: #fff; }
+.payment-monthly-detail .table { min-width: 1050px; margin: 0; }
+.payment-monthly-detail .table th { padding: 8px; background: #f0f5f9; color: #496980; font-size: 9px; white-space: nowrap; }
+.payment-monthly-detail .table td { padding: 8px; border-top-color: #e6edf3; color: #3f5e75; font-size: 9px; white-space: normal; overflow-wrap: anywhere; }
 
 @media (max-width: 1359px) {
     .payment-account-filter-form { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -371,6 +425,10 @@
     .payment-order-analysis-heading { align-items: flex-start; flex-direction: column; gap: 6px; }
     .payment-order-analysis-title { align-items: flex-start; flex-direction: column; gap: 5px; }
     .payment-order-analysis-churn { align-items: flex-start; flex-direction: column; gap: 2px; border-radius: 8px; }
+    .payment-monthly-toolbar,
+    .payment-monthly-toolbar-main { align-items: stretch; flex-direction: column; }
+    .payment-monthly-dimension > div { display: flex; }
+    .payment-monthly-dimension button { min-width: 0; flex: 1; }
     .payment-order-analysis-connector::before,
     .payment-order-analysis-connector::after { width: 22px; }
 }
