@@ -562,7 +562,7 @@ class LogisticsOrderController extends Controller
             'buyer_phone', 'is_add_on', 'subscription_type', 'subscription_status', 'payment_method', 'payment_gateway',
             'collection_account_email', 'transaction_id', 'bill_number', 'logistics_status', 'refund_reason', 'data_status',
             'time_zone',
-            'source_shop_domain', 'store_assignment_status', 'refund_number',
+            'source_shop_domain', 'store_assignment_status', 'refund_number', 'shopify_sku',
         ];
         $filters = ['per_page' => $perPage];
         foreach ($fields as $field) {
@@ -598,6 +598,11 @@ class LogisticsOrderController extends Controller
             if ($filters[$column] !== '') {
                 $query->where($column, 'like', $this->contains((string) $filters[$column]));
             }
+        }
+
+        if ($filters['shopify_sku'] !== '') {
+            $sku = $this->contains((string) $filters['shopify_sku']);
+            $query->whereHas('items', fn (Builder $items) => $items->where('shopify_sku', 'like', $sku));
         }
 
         if ($filters['bill_number'] !== '') {

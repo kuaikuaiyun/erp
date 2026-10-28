@@ -10,6 +10,8 @@ use Carbon\Carbon;
 
 class OperationReportMetricsService
 {
+    private const CNY_PER_USD = 6.5;
+
     /** @return list<array{sku:string,product_name:string,item_count:int,quantity:float,latest_order_at:?string}> */
     public function missingGuideSkuSummary(): array
     {
@@ -153,7 +155,7 @@ class OperationReportMetricsService
                         $missingGuide++;
                         $missingGuideSkus[] = $this->itemSku($item);
                     } else {
-                        $row['first_purchase_cost'] += (float) $guide * $quantity;
+                        $row['first_purchase_cost'] += (float) $guide * $quantity / self::CNY_PER_USD;
                     }
                     if ($weight === null || (float) $weight <= 0) {
                         $missingWeight++;
@@ -161,7 +163,7 @@ class OperationReportMetricsService
                         $orderWeight += (float) $weight * $quantity;
                     }
                 }
-                $row['first_shipping_cost'] += $orderWeight / 1000 * 80 + 20;
+                $row['first_shipping_cost'] += ($orderWeight / 1000 * 80 + 20) / self::CNY_PER_USD;
             }
             unset($row);
         }
