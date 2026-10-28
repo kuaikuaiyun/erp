@@ -177,8 +177,8 @@ Route::get('/product-risk-profit/export', [PaymentPortalController::class, 'expo
 Route::get('/product-risk-profit/tab', [PaymentPortalController::class, 'productRiskProfitTab'])->name('payment.product-risk-profit.tab');
 Route::get('/product-risk-profit/detail', [PaymentPortalController::class, 'productRiskProfitDetail'])->name('payment.product-risk-profit.detail');
 Route::get('/product-alerts', [PaymentPortalController::class, 'productAlerts'])->name('payment.product-alerts.index');
-Route::put('/product-alerts/{alert}/status', [PaymentPortalController::class, 'updateProductAlertStatus'])->where('alert', 'PW-[0-9]+')->name('payment.product-alerts.status.update');
-Route::get('/product-alerts/{alert}', [PaymentPortalController::class, 'productAlertDetail'])->where('alert', 'PW-[0-9]+')->name('payment.product-alerts.show');
+Route::put('/product-alerts/{alert}/status', [PaymentPortalController::class, 'updateProductAlertStatus'])->where('alert', 'PW-(?:[PC]-)?[0-9]+')->name('payment.product-alerts.status.update');
+Route::get('/product-alerts/{alert}', [PaymentPortalController::class, 'productAlertDetail'])->where('alert', 'PW-(?:[PC]-)?[0-9]+')->name('payment.product-alerts.show');
 Route::get('/payment-orders', [PaymentPortalController::class, 'paymentOrders'])->name('payment.orders.index');
 Route::get('/payment-orders/detail', [PaymentPortalController::class, 'paymentOrderDetail'])->name('payment.orders.detail');
 Route::post('/product-library', [ProductLibraryController::class, 'storeProduct'])->name('aikaipin.product-library.store');

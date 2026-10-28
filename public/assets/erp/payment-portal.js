@@ -88,7 +88,6 @@
             var form = modal.find('[data-payment-alert-status-form]');
             form[0].reset();
             form.attr('action', String(trigger.data('action') || ''));
-            form.find('[name="operation"]').val(String(trigger.data('operation') || ''));
             modal.find('[data-payment-alert-status-summary]').text(String(trigger.data('product') || '') + ' · ' + $.trim(trigger.text()));
             modal.modal('show');
         });
@@ -389,14 +388,14 @@
         var detailModal = $('#payment-account-detail-modal');
         if (detailModal.length && config.accountDetailUrl) {
             var detailText = config.accountDetail || {};
-            var detailState = { accountId: '', accountName: '', tab: 'overview', page: 1, perPage: 50, request: null, disputeRows: [] };
+            var detailState = { accountId: '', accountName: '', tab: 'overview', page: 1, perPage: 50, sort: '', direction: 'desc', request: null, disputeRows: [] };
             var paginationText = config.pagination || {};
             var detailColumns = {
                 overview: ['happened_at', 'type', 'order_number', 'store_name', 'amount', 'reason', 'status'],
-                orders: ['paid_at', 'payment_transaction_id', 'order_number', 'store_name', 'products', 'paid_amount', 'refund_status', 'dispute_status', 'match_status'],
+                orders: ['payment_transaction_id', 'match_status', 'order_number', 'tongtu_order_number', 'bill_numbers', 'store_name', 'products', 'paid_amount', 'refund_status', 'dispute_status', 'tracking_number', 'logistics_status', 'paid_at'],
                 products: ['product_name', 'sku', 'quantity', 'paid_amount', 'refund_orders', 'refund_rate', 'dispute_orders', 'dispute_rate'],
-                refunds: ['happened_at', 'refund_id', 'order_number', 'store_name', 'amount', 'source_reason', 'status'],
-                disputes: ['happened_at', 'dispute_id', 'order_number', 'store_name', 'amount', 'reason', 'stage', 'status', 'outcome']
+                refunds: ['refund_id', 'match_status', 'order_number', 'bill_numbers', 'store_name', 'source', 'amount', 'source_reason', 'manual_reason', 'linked_disputes', 'status', 'happened_at'],
+                disputes: ['dispute_id', 'payment_transaction_id', 'match_status', 'order_number', 'bill_numbers', 'store_name', 'amount', 'reason', 'stage', 'status', 'outcome', 'seller_response_due_at', 'linked_refunds', 'updated_at', 'happened_at']
             };
 
             function escapeHtml(value) {
@@ -609,8 +608,10 @@
                 if (!rows.length) {
                     return '<div class="payment-detail-empty">' + escapeHtml(detailText.empty) + '</div>';
                 }
-                return '<div class="table-responsive"><table class="table payment-detail-table"><thead><tr>' + columns.map(function (column) {
-                    return '<th>' + escapeHtml(labels[column] || column) + '</th>';
+                return '<div class="table-responsive"><table class="table payment-detail-table payment-risk-data-table"><thead><tr>' + columns.map(function (column) {
+                    var active = detailState.sort === column;
+                    var icon = active ? (detailState.direction === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort';
+                    return '<th><button type="button" class="payment-detail-sort' + (active ? ' active' : '') + '" data-payment-detail-sort="' + escapeHtml(column) + '">' + escapeHtml(labels[column] || column) + ' <i class="fa ' + icon + '"></i></button></th>';
                 }).join('') + '</tr></thead><tbody>' + rows.map(function (row) {
                     return '<tr>' + columns.map(function (column) {
                         var value = displayValue(row[column]);
@@ -620,9 +621,42 @@
                         if ((column === 'refund_rate' || column === 'dispute_rate') && value !== '-' && value !== '') {
                             value = formatNumber(value, 2) + '%';
                         }
+                        if (column === 'match_status') {
+                            var matched = String(value || '') === String((detailText.filters || {}).matched || '');
+                            return '<td><span class="payment-risk-match-status ' + (matched ? 'is-matched' : 'is-unmatched') + '">' + escapeHtml(value) + '</span></td>';
+                        }
+                        if (tab === 'products' && column === 'product_name') {
+                            var media = row.image_url ? '<img src="' + escapeHtml(row.image_url) + '" alt="">' : '<span><i class="fa fa-cube"></i></span>';
+                            return '<td class="text-left"><div class="payment-risk-product-cell">' + media + '<b>' + escapeHtml(value) + '</b></div></td>';
+                        }
                         return '<td>' + escapeHtml(value) + '</td>';
                     }).join('') + '</tr>';
                 }).join('') + '</tbody></table></div>';
+            }
+
+            function detailOptionHtml(options, selected) {
+                return (options || []).map(function (option) {
+                    var value = typeof option === 'object' ? option.value : option;
+                    var label = typeof option === 'object' ? option.label : option;
+                    return '<option value="' + escapeHtml(value) + '"' + (String(value) === String(selected || '') ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
+                }).join('');
+            }
+
+            function renderDetailFilters() {
+                var target = detailModal.find('[data-payment-detail-extra-filters]');
+                var filters = detailText.filters || {};
+                var options = detailText.filter_options || {};
+                var html = '';
+                if (detailState.tab === 'orders') {
+                    html = '<label><span>' + escapeHtml(filters.match_status) + '</span><select class="form-control" name="match_status"><option value="">' + escapeHtml(filters.all) + '</option><option value="matched">' + escapeHtml(filters.matched) + '</option><option value="unmatched">' + escapeHtml(filters.unmatched) + '</option></select></label>';
+                } else if (detailState.tab === 'refunds') {
+                    html = '<label><span>' + escapeHtml(filters.status) + '</span><select class="form-control" name="status"><option value="">' + escapeHtml(filters.all) + '</option>' + detailOptionHtml(options.refund_status) + '</select></label>';
+                } else if (detailState.tab === 'disputes') {
+                    html = '<label><span>' + escapeHtml(filters.type) + '</span><select class="form-control" name="type"><option value="">' + escapeHtml(filters.all) + '</option>' + detailOptionHtml(options.dispute_type) + '</select></label>' +
+                        '<label><span>' + escapeHtml(filters.status) + '</span><select class="form-control" name="status"><option value="">' + escapeHtml(filters.all) + '</option>' + detailOptionHtml(options.dispute_status) + '</select></label>' +
+                        '<label><span>' + escapeHtml(filters.outcome) + '</span><select class="form-control" name="outcome"><option value="">' + escapeHtml(filters.all) + '</option>' + detailOptionHtml(options.dispute_outcome) + '</select></label>';
+                }
+                target.html(html);
             }
 
             function disputePair(primary, secondary) {
@@ -666,7 +700,8 @@
                     return '<div class="payment-detail-empty">' + escapeHtml(detailText.empty) + '</div>';
                 }
                 var headers = text.headers || [];
-                return '<section class="payment-dispute-list"><div class="payment-dispute-list-heading"><h5>' + escapeHtml(text.list_title) + '</h5><span>' + escapeHtml(replaceTokens(text.record_count, { count: meta ? meta.total : rows.length })) + '</span></div><div class="table-responsive"><table class="table payment-dispute-table"><thead><tr>' + headers.map(function (header) { return '<th>' + escapeHtml(header) + '</th>'; }).join('') + '</tr></thead><tbody>' + rows.map(function (row, index) {
+                var disputeSorts = ['dispute_id','order_number','reason','amount','status','seller_response_due_at','refund_id','owner','next_step'];
+                return '<section class="payment-dispute-list"><div class="payment-dispute-list-heading"><h5>' + escapeHtml(text.list_title) + '</h5><span>' + escapeHtml(replaceTokens(text.record_count, { count: meta ? meta.total : rows.length })) + '</span></div><div class="table-responsive"><table class="table payment-dispute-table"><thead><tr>' + headers.map(function (header, index) { var key = disputeSorts[index]; var active = detailState.sort === key; return '<th><button type="button" class="payment-detail-sort' + (active ? ' active' : '') + '" data-payment-detail-sort="' + key + '">' + escapeHtml(header) + ' <i class="fa ' + (active ? (detailState.direction === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort') + '"></i></button></th>'; }).join('') + '</tr></thead><tbody>' + rows.map(function (row, index) {
                     var refundText = disputeRefunds(row);
                     return '<tr tabindex="0" class="' + (index === selectedIndex ? 'selected' : '') + '" data-payment-dispute-row="' + index + '"><td>' + disputePair(row.dispute_id, row.payment_transaction_id) + '</td><td>' + disputePair(row.order_number, row.store_name) + '</td><td>' + disputePair(row.reason, row.stage) + '</td><td>' + escapeHtml((row.currency || '') + ' ' + formatNumber(row.amount, 2)) + '</td><td>' + disputePair(row.status, row.outcome) + '</td><td>' + escapeHtml(row.seller_response_due_at) + '</td><td>' + escapeHtml(refundText) + '</td><td>' + escapeHtml(text.owner_pending) + '</td><td>' + escapeHtml(text.next_step_pending) + '</td></tr>';
                 }).join('') + '</tbody></table></div></section><div data-payment-dispute-selection>' + renderDisputeSelection(rows[selectedIndex] || rows[0]) + '</div>';
@@ -691,7 +726,13 @@
                     per_page: detailState.perPage,
                     period_start: page.find('[name="period_start"]').val(),
                     period_end: page.find('[name="period_end"]').val(),
-                    keyword: detailModal.find('[name="keyword"]').val()
+                    keyword: detailModal.find('[name="keyword"]').val(),
+                    match_status: detailModal.find('[name="match_status"]').val(),
+                    status: detailModal.find('[name="status"]').val(),
+                    type: detailModal.find('[name="type"]').val(),
+                    outcome: detailModal.find('[name="outcome"]').val(),
+                    sort: detailState.sort,
+                    direction: detailState.direction
                 };
                 var url = String(config.accountDetailUrl).replace('__ACCOUNT__', encodeURIComponent(detailState.accountId));
                 detailModal.find('[data-payment-detail-loading]').prop('hidden', false);
@@ -706,8 +747,8 @@
                     detailState.disputeRows = detailState.tab === 'disputes' ? rows : [];
                     detailModal.find('[data-payment-detail-summary]').prop('hidden', isDashboard);
                     renderSummary(payload.summary || {});
-                    detailModal.find('[data-payment-detail-body]').toggleClass('payment-detail-dashboard-body', isDashboard).toggleClass('payment-detail-dispute-body', detailState.tab === 'disputes').html(
-                        detailState.tab === 'overview' ? renderOverview(payload) : (detailState.tab === 'order_analysis' ? renderOrderAnalysis(payload.order_analysis || {}, payload.summary || {}) : (detailState.tab === 'funding' ? renderFunding(payload.summary || {}) : (detailState.tab === 'disputes' ? renderDisputes(rows, (payload.rows || {}).meta, 0) : renderTable(rows, detailState.tab))))
+                    detailModal.find('[data-payment-detail-body]').toggleClass('payment-detail-dashboard-body', isDashboard).removeClass('payment-detail-dispute-body').html(
+                        detailState.tab === 'overview' ? renderOverview(payload) : (detailState.tab === 'order_analysis' ? renderOrderAnalysis(payload.order_analysis || {}, payload.summary || {}) : (detailState.tab === 'funding' ? renderFunding(payload.summary || {}) : renderTable(rows, detailState.tab)))
                     );
                     renderPagination(isDashboard ? null : (payload.rows || {}).meta);
                     initFormulaTooltips(detailModal);
@@ -726,8 +767,11 @@
                 detailState.accountName = String($(this).data('accountName'));
                 detailState.tab = 'overview';
                 detailState.page = 1;
+                detailState.sort = '';
+                detailState.direction = 'desc';
                 detailModal.find('[data-payment-detail-tab]').removeClass('active').attr('aria-selected', 'false').filter('[data-payment-detail-tab="overview"]').addClass('active').attr('aria-selected', 'true');
                 detailModal.find('[data-payment-detail-filter]').prop('hidden', true).get(0).reset();
+                renderDetailFilters();
                 detailModal.find('[data-payment-detail-subtitle]').text(String(detailText.subtitle || '').replace(':account', detailState.accountName));
                 detailModal.modal('show');
                 loadDetail();
@@ -735,9 +779,20 @@
             detailModal.on('click', '[data-payment-detail-tab]', function () {
                 detailState.tab = String($(this).data('paymentDetailTab'));
                 detailState.page = 1;
+                detailState.sort = '';
+                detailState.direction = 'desc';
                 detailModal.find('[data-payment-detail-tab]').removeClass('active').attr('aria-selected', 'false');
                 $(this).addClass('active').attr('aria-selected', 'true');
                 detailModal.find('[data-payment-detail-filter]').prop('hidden', detailState.tab === 'overview' || detailState.tab === 'order_analysis' || detailState.tab === 'funding');
+                detailModal.find('[data-payment-detail-filter]').get(0).reset();
+                renderDetailFilters();
+                loadDetail();
+            });
+            detailModal.on('click', '[data-payment-detail-sort]', function () {
+                var sort = String($(this).data('paymentDetailSort') || '');
+                detailState.direction = detailState.sort === sort && detailState.direction === 'desc' ? 'asc' : 'desc';
+                detailState.sort = sort;
+                detailState.page = 1;
                 loadDetail();
             });
             detailModal.on('submit', '[data-payment-detail-filter]', function (event) {
@@ -793,14 +848,13 @@
         });
         if (productModal.length && config.productDetailUrl) {
             var productText = config.productDetail || {};
-            var productState = { id: '', name: '', tab: 'overview', page: 1, perPage: 50, request: null, refundRows: [] };
+            var productState = { id: '', name: '', tab: 'overview', page: 1, perPage: 50, sort: '', direction: 'desc', request: null, refundRows: [], filterOptions: {} };
             var productPaginationText = config.pagination || {};
             var productColumns = {
-                paypal_orders: ['shopify_order_number', 'store_name', 'bill_number', 'quantity', 'revenue', 'paypal_refund', 'paypal_dispute_count', 'logistics_status'],
-                credit_card_orders: ['shopify_order_number', 'store_name', 'bill_number', 'quantity', 'revenue', 'credit_card_refund', 'logistics_status'],
-                orders: ['shopify_order_number', 'store_name', 'bill_number', 'payment_method_label', 'quantity', 'revenue', 'actual_refund', 'logistics_status'],
-                refunds: ['payment_method_label', 'shopify_order_number', 'refund_number', 'amount', 'source_reason', 'manual_reason', 'status', 'imported_at'],
-                disputes: ['dispute_id', 'shopify_order_number', 'amount', 'reason', 'stage', 'status', 'outcome', 'seller_response_due_at', 'updated_at']
+                orders: ['shopify_order_number', 'store', 'tongtu_product_codes', 'tongtu_skus', 'shopify_skus', 'bill_number', 'payment_method', 'quantity', 'revenue', 'paypal_refund', 'credit_card_refund', 'paypal_dispute_count', 'tracking_number', 'logistics_status', 'order_created_at'],
+                variants: ['tongtu_sku', 'tongtu_product_name', 'shopify_skus', 'stores', 'order_count', 'sales', 'revenue', 'paypal_refund_amount', 'paypal_dispute_count', 'credit_card_refund_amount', 'shipping_rate', 'delivery_rate'],
+                refunds: ['payment_method_label', 'shopify_order_number', 'bill_number', 'refund_number', 'amount', 'source_reason', 'manual_reason', 'status', 'linked_disputes', 'imported_at'],
+                disputes: ['dispute_id', 'shopify_order_number', 'bill_number', 'amount', 'reason', 'stage', 'status', 'outcome', 'seller_response_due_at', 'linked_refunds', 'updated_at']
             };
 
             function pEscape(value) {
@@ -845,7 +899,7 @@
                 }).join('') + '</div><div class="payment-product-store-distribution"><h4>' + pEscape(labels.store_distribution) + '</h4>' + (product.store_order_distribution || []).map(function (store) { return '<div><span>' + pEscape(store.name) + '</span><strong>' + pEscape(pNumber(store.order_count)) + '</strong></div>'; }).join('') + '</div>';
             }
 
-            function renderFirstRenewal(detail) {
+            function renderFirstRenewal(detail, channelRisk) {
                 var text = productText.first_renewal || {};
                 var formulas = text.formulas || {};
                 var groups = detail.groups || {};
@@ -868,7 +922,32 @@
                 }).join('');
                 var chains = detail.chains || [];
                 var chainPanel = '<article class="payment-lifecycle-panel"><h4>' + pEscape(text.chain_title) + '</h4>' + (chains.length ? '<div class="payment-lifecycle-chains">' + chains.slice(0, 8).map(function (chain) { return '<div><b>' + pEscape(text.origin) + ' ' + pEscape(chain.origin) + '</b><span>' + (chain.orders || []).map(function (item) { return pEscape(((text.groups || {})[item.stage] || item.stage) + ' ' + item.order_number + ' · ' + pMoney(item.amount) + (Number(item.refund_amount) > 0 ? ' · ' + text.refund + ' ' + pMoney(item.refund_amount) : '')); }).join('<i class="fa fa-long-arrow-right"></i>') + '</span></div>'; }).join('') + '</div>' : '<p class="payment-detail-empty">' + pEscape(text.chain_empty) + '</p>') + '</article>';
-                return '<div class="payment-lifecycle-grid">' + cards + '</div>';
+                channelRisk = channelRisk || {};
+                var channelSummary = ['paypal', 'credit_card'].map(function (channel) {
+                    var risk = channelRisk[channel] || {};
+                    return '<article><span>' + pEscape(channel === 'paypal' ? text.paypal_initial : text.credit_card_initial) + '</span><strong>' + pEscape(pRate(risk.dispute_rate || 0)) + '</strong><small>' + pEscape(pNumber(risk.dispute_count || 0) + text.record_unit + ' / ' + pNumber(risk.eligible_order_count || 0) + text.record_unit) + '</small></article>';
+                }).join('');
+                var channelGroups = detail.channel_groups || {};
+                var channelPanels = ['paypal', 'credit_card'].map(function (channel) {
+                    var groupsForChannel = channelGroups[channel] || {};
+                    if (!Object.keys(groupsForChannel).length) return '';
+                    var previousSubscriptionCount = null;
+                    var rows = order.map(function (key) {
+                        var group = groupsForChannel[key] || {};
+                        var currentCount = Number(group.order_count || 0);
+                        var connector = '';
+                        if ((key === 'first_renewal' || key === 'later_renewal') && previousSubscriptionCount !== null) {
+                            var lost = Math.max(0, previousSubscriptionCount - currentCount);
+                            var lostRate = previousSubscriptionCount > 0 ? lost / previousSubscriptionCount * 100 : 0;
+                            var churnFormula = replaceProductTokens(formulas.churn_rate, { previous: pNumber(previousSubscriptionCount), current: pNumber(currentCount), lost: pNumber(lost) });
+                            connector = '<div class="payment-product-lifecycle-connector' + (lostRate >= 50 ? ' is-high' : ' is-moderate') + '"><i class="fa fa-long-arrow-down" aria-hidden="true"></i><span>' + pEscape(text.churn_label) + formulaIcon(churnFormula) + '</span><strong>' + pEscape(pNumber(lost) + ' ' + text.record_unit + ' / ' + pRate(lostRate)) + '</strong></div>';
+                        }
+                        if (key === 'first_charge' || key === 'first_renewal' || key === 'later_renewal') previousSubscriptionCount = currentCount;
+                        return connector + '<article class="payment-lifecycle-card"><h4>' + pEscape((text.groups || {})[key]) + '</h4><strong>' + pEscape(pNumber(group.order_count)) + ' ' + pEscape(text.record_unit) + ' / ' + pEscape(pMoney(group.received_amount)) + '</strong><dl><div><dt>' + pEscape(text.refund_rate) + formulaIcon(replaceProductTokens(formulas.refund_rate, { refund: pMoney(group.refund_amount), received: pMoney(group.received_amount) })) + '</dt><dd>' + pEscape(pRate(group.refund_rate)) + '</dd></div><div><dt>' + pEscape(text.dispute_rate) + formulaIcon(replaceProductTokens(formulas.dispute_rate, { count: pNumber(group.dispute_count), orders: pNumber(group.order_count) })) + '</dt><dd>' + pEscape(pRate(group.dispute_rate)) + '<small>' + pEscape(pNumber(group.dispute_count) + text.record_unit + ' / ' + pNumber(group.order_count) + text.record_unit) + '</small></dd></div><div><dt>' + pEscape(text.realised_loss) + formulaIcon(formulas.realised_loss) + '</dt><dd>' + pEscape(pMoney(group.realised_loss)) + '</dd></div></dl></article>';
+                    }).join('');
+                    return '<section class="payment-channel-lifecycle"><h4>' + pEscape(channel === 'paypal' ? text.paypal_channel : text.credit_card_channel) + '</h4><div class="payment-lifecycle-grid">' + rows + '</div></section>';
+                }).join('');
+                return '<section class="payment-order-analysis-channel-summary">' + channelSummary + '</section>' + (channelPanels || '<div class="payment-lifecycle-grid">' + cards + '</div>');
             }
 
             function renderRefundSelection(row) {
@@ -892,17 +971,91 @@
             function productCell(row, key) {
                 var value = row[key];
                 if (Array.isArray(value)) value = value.map(function (item) { return typeof item === 'object' ? (item.refund_number || item.name || JSON.stringify(item)) : item; }).join('、');
-                if (['amount', 'revenue', 'paypal_refund', 'credit_card_refund', 'actual_refund'].indexOf(key) !== -1) return pMoney(value);
-                if (key === 'quantity' || key === 'paypal_dispute_count') return pNumber(value);
+                if (['amount', 'revenue', 'paypal_refund', 'credit_card_refund', 'actual_refund', 'paypal_refund_amount', 'credit_card_refund_amount'].indexOf(key) !== -1) return pMoney(value);
+                if (['quantity', 'paypal_dispute_count', 'order_count', 'sales'].indexOf(key) !== -1) return pNumber(value);
+                if (['shipping_rate', 'delivery_rate'].indexOf(key) !== -1) return pRate(value);
                 return value || '-';
+            }
+
+            function productOptionHtml(options, selected) {
+                return (options || []).map(function (option) {
+                    var value = typeof option === 'object' ? option.value : option;
+                    var label = typeof option === 'object' ? option.label : option;
+                    return '<option value="' + pEscape(value) + '"' + (String(value) === String(selected || '') ? ' selected' : '') + '>' + pEscape(label) + '</option>';
+                }).join('');
+            }
+
+            function renderProductFilters(options) {
+                var selected = {};
+                productModal.find('[data-payment-product-extra-filters] select').each(function () { selected[this.name] = $(this).val(); });
+                productState.filterOptions = options || productState.filterOptions || {};
+                var labels = productText.filters || {};
+                var html = '';
+                if (productState.tab === 'orders') {
+                    html = '<label><span>' + pEscape(labels.logistics_status || labels.status) + '</span><select class="form-control" name="detail_logistics_status"><option value="">' + pEscape(labels.all) + '</option>' + productOptionHtml(productState.filterOptions.logistics_status) + '</select></label>';
+                } else if (productState.tab === 'refunds') {
+                    html = '<label><span>' + pEscape(labels.payment_method) + '</span><select class="form-control" name="detail_payment_method"><option value="">' + pEscape(labels.all) + '</option>' + productOptionHtml(productState.filterOptions.payment_method) + '</select></label>' +
+                        '<label><span>' + pEscape(labels.status) + '</span><select class="form-control" name="detail_status"><option value="">' + pEscape(labels.all) + '</option>' + productOptionHtml(productState.filterOptions.status) + '</select></label>' +
+                        '<label><span>' + pEscape(labels.source_reason) + '</span><select class="form-control" name="detail_source_reason"><option value="">' + pEscape(labels.all) + '</option>' + productOptionHtml(productState.filterOptions.source_reason) + '</select></label>' +
+                        '<label><span>' + pEscape(labels.manual_reason) + '</span><select class="form-control" name="detail_manual_reason"><option value="">' + pEscape(labels.all) + '</option>' + productOptionHtml(productState.filterOptions.manual_reason) + '</select></label>';
+                } else if (productState.tab === 'disputes') {
+                    html = '<label><span>' + pEscape(labels.type) + '</span><select class="form-control" name="detail_type"><option value="">' + pEscape(labels.all) + '</option>' + productOptionHtml(productState.filterOptions.type) + '</select></label>' +
+                        '<label><span>' + pEscape(labels.status) + '</span><select class="form-control" name="detail_status"><option value="">' + pEscape(labels.all) + '</option>' + productOptionHtml(productState.filterOptions.status) + '</select></label>' +
+                        '<label><span>' + pEscape(labels.outcome) + '</span><select class="form-control" name="detail_outcome"><option value="">' + pEscape(labels.all) + '</option>' + productOptionHtml(productState.filterOptions.outcome) + '</select></label>';
+                }
+                productModal.find('[data-payment-product-extra-filters]').html(html);
+                var placeholders = productText.search_placeholders || {};
+                productModal.find('[name="detail_keyword"]').attr('placeholder', placeholders[productState.tab] || productText.search_placeholder || '');
+                Object.keys(selected).forEach(function (name) { productModal.find('[name="' + name + '"]').val(selected[name]); });
+            }
+
+            function productDetailSortButton(tab, key) {
+                var labels = productText.columns || {};
+                var active = productState.sort === key;
+                return '<button type="button" class="payment-detail-sort' + (active ? ' active' : '') + '" data-payment-product-detail-sort="' + pEscape(key) + '">' + pEscape(labels[key] || key) + ' <i class="fa ' + (active ? (productState.direction === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort') + '"></i></button>';
+            }
+
+            function productOrderLink(row) {
+                var label = pEscape(row.shopify_order_number || '-');
+                var detailUrl = row.detail_url || row.order_detail_url || '';
+                return row.order_id && detailUrl
+                    ? '<button type="button" class="btn btn-link btn-xs js-logistics-order-detail" data-order-detail-url="' + pEscape(detailUrl) + '">' + label + '</button>'
+                    : label;
+            }
+
+            function productDetailCell(row, key) {
+                var value = row[key];
+                if (key === 'shopify_order_number') return productOrderLink(row);
+                if (key === 'linked_refunds') {
+                    value = (value || []).map(function (item) { return (item.refund_number || '-') + ' (' + pMoney(item.amount) + ')'; });
+                }
+                if (Array.isArray(value)) value = value.map(function (item) { return typeof item === 'object' ? (item.refund_number || item.name || '-') : item; }).join('、');
+                if (['amount', 'revenue', 'paypal_refund', 'credit_card_refund', 'actual_refund', 'paypal_refund_amount', 'credit_card_refund_amount'].indexOf(key) !== -1) return pEscape(pMoney(value));
+                if (['quantity', 'paypal_dispute_count', 'order_count', 'sales'].indexOf(key) !== -1) return pEscape(pNumber(value));
+                if (['shipping_rate', 'delivery_rate'].indexOf(key) !== -1) return pEscape(pRate(value));
+                if (key === 'tongtu_sku') return '<code>' + pEscape(value || '-') + '</code>';
+                return pEscape(value || '-');
+            }
+
+            function renderRefundSummary(detail) {
+                var summary = detail.summary || {};
+                var text = productText.refund_summary || {};
+                return '<section class="product-statistics-refund-selection"><h4>' + pEscape(text.title) + '</h4><div>' +
+                    '<article><span>' + pEscape(text.record_count) + '</span><strong>' + pEscape(pNumber(summary.record_count)) + '</strong><small>/ ' + pEscape(pNumber(summary.total_record_count)) + '</small></article>' +
+                    '<article><span>' + pEscape(text.amount) + '</span><strong>' + pEscape(pMoney(summary.amount)) + '</strong><small>/ ' + pEscape(pMoney(summary.total_amount)) + '</small></article>' +
+                    '<article><span>' + pEscape(text.count_ratio) + '</span><strong>' + pEscape(pRate(summary.count_ratio)) + '</strong></article>' +
+                    '<article><span>' + pEscape(text.amount_ratio) + '</span><strong>' + pEscape(pRate(summary.amount_ratio)) + '</strong></article>' +
+                    '</div></section>';
             }
 
             function renderProductRows(detail, tab) {
                 var rows = detail.rows || [];
                 var columns = productColumns[tab] || [];
-                var labels = productText.columns || {};
-                if (!rows.length) return '<div class="payment-detail-empty">' + pEscape(productText.empty) + '</div>';
-                return '<div class="table-responsive"><table class="table payment-detail-table"><thead><tr>' + columns.map(function (key) { return '<th>' + pEscape(labels[key] || key) + '</th>'; }).join('') + '</tr></thead><tbody>' + rows.map(function (row) { return '<tr>' + columns.map(function (key) { return '<td>' + pEscape(productCell(row, key)) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>';
+                var body = rows.length
+                    ? rows.map(function (row) { return '<tr>' + columns.map(function (key) { return '<td>' + productDetailCell(row, key) + '</td>'; }).join('') + '</tr>'; }).join('')
+                    : '<tr><td colspan="' + columns.length + '" class="text-center text-muted">' + pEscape(productText.empty) + '</td></tr>';
+                var table = '<div class="table-responsive product-statistics-detail-table-wrap"><table class="table product-statistics-detail-table"><thead><tr>' + columns.map(function (key) { return '<th>' + productDetailSortButton(tab, key) + '</th>'; }).join('') + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+                return (tab === 'refunds' ? renderRefundSummary(detail) : '') + table;
             }
 
             function renderProductPagination(meta) {
@@ -915,39 +1068,60 @@
                 var query = {
                     product_id: productState.id, detail_tab: productState.tab, detail_page: productState.page, detail_per_page: productState.perPage,
                     detail_keyword: productModal.find('[name="detail_keyword"]').val(),
+                    detail_sort: productState.sort, detail_direction: productState.direction,
+                    detail_logistics_status: productModal.find('[name="detail_logistics_status"]').val(),
+                    detail_payment_method: productModal.find('[name="detail_payment_method"]').val(),
+                    detail_status: productModal.find('[name="detail_status"]').val(),
+                    detail_source_reason: productModal.find('[name="detail_source_reason"]').val(),
+                    detail_manual_reason: productModal.find('[name="detail_manual_reason"]').val(),
+                    detail_type: productModal.find('[name="detail_type"]').val(),
+                    detail_outcome: productModal.find('[name="detail_outcome"]').val(),
                     date_from: page.find('[name="date_from"]').val(), date_to: page.find('[name="date_to"]').val(),
                     store: page.find('[name="store"]').val(), keyword: page.find('[name="keyword"]').val()
                 };
+                if (productState.request) {
+                    productState.request.abort();
+                    productState.request = null;
+                }
+                productModal.addClass('is-loading').attr('aria-busy', 'true');
                 productModal.find('[data-payment-product-loading]').prop('hidden', false);
                 productModal.find('[data-payment-product-error]').prop('hidden', true);
                 productModal.find('[data-payment-product-detail-body], [data-payment-product-detail-pagination]').empty();
-                if (productState.request) productState.request.abort();
-                productState.request = $.getJSON(config.productDetailUrl, query).done(function (payload) {
+                var request = $.getJSON(config.productDetailUrl, query);
+                productState.request = request;
+                request.done(function (payload) {
                     var dashboard = productState.tab === 'overview' || productState.tab === 'first_renewal';
-                    var content = productState.tab === 'overview' ? renderProductOverview(payload.product || {}) : (productState.tab === 'first_renewal' ? renderFirstRenewal(payload.detail || {}) : (productState.tab === 'refunds' ? renderRefundEvents(payload.detail || {}) : renderProductRows(payload.detail || {}, productState.tab)));
-                    productModal.find('[data-payment-product-detail-body]').toggleClass('payment-detail-dashboard-body', dashboard || productState.tab === 'refunds').html(content);
+                    var content = productState.tab === 'overview' ? renderProductOverview(payload.product || {}) : (productState.tab === 'first_renewal' ? renderFirstRenewal(payload.detail || {}, payload.channel_risk || {}) : renderProductRows(payload.detail || {}, productState.tab));
+                    productModal.find('[data-payment-product-detail-body]').toggleClass('payment-detail-dashboard-body', dashboard).html(content);
+                    renderProductFilters((payload.detail || {}).options || {});
                     renderProductPagination(dashboard ? null : (payload.detail || {}).pagination);
                     initFormulaTooltips(productModal);
                 }).fail(function (xhr, status) {
                     if (status !== 'abort') productModal.find('[data-payment-product-error]').text(productText.load_failed || '').prop('hidden', false);
-                }).always(function () { productModal.find('[data-payment-product-loading]').prop('hidden', true); productState.request = null; });
+                }).always(function () {
+                    if (productState.request !== request) return;
+                    productModal.removeClass('is-loading').attr('aria-busy', 'false');
+                    productModal.find('[data-payment-product-loading]').prop('hidden', true);
+                    productState.request = null;
+                });
             }
 
             page.on('click keydown', '[data-payment-product-detail]', function (event) {
                 if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
                 if ($(event.target).closest('button, a, input, select, textarea, label').length) return;
                 event.preventDefault();
-                productState.id = String($(this).data('productId')); productState.name = String($(this).data('productName')); productState.tab = 'overview'; productState.page = 1;
+                productState.id = String($(this).data('productId')); productState.name = String($(this).data('productName')); productState.tab = 'overview'; productState.page = 1; productState.sort = ''; productState.direction = 'desc'; productState.filterOptions = {};
                 productModal.find('[data-payment-product-detail-tab]').removeClass('active').attr('aria-selected', 'false').first().addClass('active').attr('aria-selected', 'true');
                 productModal.find('[data-payment-product-detail-filter]').prop('hidden', true).get(0).reset();
                 productModal.find('[data-payment-product-detail-subtitle]').text(productState.name);
                 productModal.modal('show'); loadProductDetail();
             });
             productModal.on('click', '[data-payment-product-detail-tab]', function () {
-                productState.tab = String($(this).data('paymentProductDetailTab')); productState.page = 1;
+                productState.tab = String($(this).data('paymentProductDetailTab')); productState.page = 1; productState.sort = ''; productState.direction = 'desc'; productState.filterOptions = {};
                 productModal.find('[data-payment-product-detail-tab]').removeClass('active').attr('aria-selected', 'false'); $(this).addClass('active').attr('aria-selected', 'true');
-                productModal.find('[data-payment-product-detail-filter]').prop('hidden', productState.tab === 'overview' || productState.tab === 'first_renewal'); loadProductDetail();
+                productModal.find('[data-payment-product-detail-filter]').prop('hidden', productState.tab === 'overview' || productState.tab === 'first_renewal').get(0).reset(); renderProductFilters({}); loadProductDetail();
             });
+            productModal.on('click', '[data-payment-product-detail-sort]', function () { var sort = String($(this).data('paymentProductDetailSort') || ''); productState.direction = productState.sort === sort && productState.direction === 'desc' ? 'asc' : 'desc'; productState.sort = sort; productState.page = 1; loadProductDetail(); });
             productModal.on('submit', '[data-payment-product-detail-filter]', function (event) { event.preventDefault(); productState.page = 1; loadProductDetail(); });
             productModal.on('reset', '[data-payment-product-detail-filter]', function () { window.setTimeout(function () { productState.page = 1; loadProductDetail(); }, 0); });
             productModal.on('click', '[data-payment-product-page]', function () { productState.page = Number($(this).data('paymentProductPage')) || 1; loadProductDetail(); });
@@ -963,7 +1137,12 @@
                 $(this).addClass('selected').attr('aria-selected', 'true');
                 productModal.find('[data-payment-refund-event-detail]').html(renderRefundSelection(row));
             });
-            productModal.on('hidden.bs.modal', function () { if (productState.request) productState.request.abort(); });
+            productModal.on('hidden.bs.modal', function () {
+                if (productState.request) productState.request.abort();
+                productState.request = null;
+                productModal.removeClass('is-loading').attr('aria-busy', 'false');
+                productModal.find('[data-payment-product-loading]').prop('hidden', true);
+            });
         }
     });
 })(jQuery);

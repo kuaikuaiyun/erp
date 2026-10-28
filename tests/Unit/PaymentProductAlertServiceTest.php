@@ -14,8 +14,8 @@ class PaymentProductAlertServiceTest extends TestCase
         yield '没有有效订单' => [0, 0, false];
         yield '一笔订单无纠纷' => [1, 0, false];
         yield '一笔订单一笔纠纷' => [1, 1, true];
-        yield '刚好百分之三' => [100, 3, false];
-        yield '严格大于百分之三' => [1000, 31, true];
+        yield '刚好百分之零点五' => [200, 1, true];
+        yield '低于百分之零点五' => [201, 1, false];
     }
 
     #[DataProvider('qualificationCases')]
