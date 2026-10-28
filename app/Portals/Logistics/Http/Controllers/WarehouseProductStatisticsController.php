@@ -42,6 +42,7 @@ class WarehouseProductStatisticsController extends Controller
         }
 
         $filters = $this->filters($request);
+        $filters = $this->applyWarehouseReviewFilter($filters);
         $data = $this->statistics->page($filters);
 
         // 批量匹配 PCL SKU 管理（product_request_link_skus）中的实拍图
@@ -248,6 +249,16 @@ class WarehouseProductStatisticsController extends Controller
             ], 422);
         }
 
+        $pclCode = trim((string) ($validated['tongtu_product_code'] ?? ''));
+        if ($pclCode !== '') {
+            ProductRequestLinkSku::query()
+                ->whereRaw('LOWER(TRIM(pcl_product_no)) = ?', [mb_strtolower($pclCode)])
+                ->update([
+                    'warehouse_review_status' => ProductRequestLinkSku::WAREHOUSE_REVIEW_STATUS_PENDING,
+                    'warehouse_reviewed_at' => null,
+                ]);
+        }
+
         $created = 0;
         $updated = 0;
         foreach ($rows as $row) {
@@ -379,6 +390,7 @@ class WarehouseProductStatisticsController extends Controller
         $rules = [
             'name' => ['nullable', 'string', 'max:191'],
             'keyword' => ['nullable', 'string', 'max:191'],
+            'warehouse_status' => ['nullable', Rule::in(['', 'pending_review', 'pending', 'resolved', 'approved'])],
             'sort' => ['nullable', Rule::in([
                 '', 'name', 'sku', 'product_code', 'variant_count', 'shop_count', 'sales', 'revenue', 'cost', 'fees',
             ])],
@@ -401,6 +413,7 @@ class WarehouseProductStatisticsController extends Controller
             'date_to' => '',
             'name' => trim((string) ($input['name'] ?? '')),
             'keyword' => trim((string) ($input['keyword'] ?? '')),
+            'warehouse_status' => trim((string) ($input['warehouse_status'] ?? '')),
             'store' => '',
             'decision' => '',
             // 仓库只关心已通途匹配（有 product_code）的产品，过滤掉待通途匹配的数据
@@ -414,6 +427,32 @@ class WarehouseProductStatisticsController extends Controller
                 ? (int) ($input['per_page'] ?? 10)
                 : 10,
         ];
+    }
+
+    /** @param array<string,mixed> $filters @return array<string,mixed> */
+    private function applyWarehouseReviewFilter(array $filters): array
+    {
+        $status = (string) ($filters['warehouse_status'] ?? '');
+        if ($status === '') return $filters;
+
+        $approvedCodes = ProductRequestLinkSku::query()
+            ->where('warehouse_review_status', ProductRequestLinkSku::WAREHOUSE_REVIEW_STATUS_APPROVED)
+            ->whereNotNull('pcl_product_no')->pluck('pcl_product_no')
+            ->map(fn ($code): string => mb_strtolower(trim((string) $code)))->filter()->unique()->values();
+        $pendingCodes = WarehouseSkuWeightException::query()->where('status', 'pending')
+            ->whereNotNull('tongtu_product_code')->pluck('tongtu_product_code')
+            ->map(fn ($code): string => mb_strtolower(trim((string) $code)))->filter()->unique()->values();
+        $resolvedCodes = WarehouseSkuWeightException::query()->where('status', 'resolved')
+            ->whereNotNull('tongtu_product_code')->pluck('tongtu_product_code')
+            ->map(fn ($code): string => mb_strtolower(trim((string) $code)))->filter()->unique()->values()
+            ->diff($pendingCodes)->diff($approvedCodes)->values();
+
+        if ($status === 'approved') $filters['include_product_codes'] = $approvedCodes->all();
+        elseif ($status === 'pending') $filters['include_product_codes'] = $pendingCodes->all();
+        elseif ($status === 'resolved') $filters['include_product_codes'] = $resolvedCodes->all();
+        else $filters['exclude_product_codes'] = $approvedCodes->merge($pendingCodes)->merge($resolvedCodes)->unique()->values()->all();
+
+        return $filters;
     }
 
     /** @return array<string,string> */
@@ -514,6 +553,19 @@ class WarehouseProductStatisticsController extends Controller
             $linkSkuMap[$key]['image_refs'] = array_merge($linkSkuMap[$key]['image_refs'], $imageRefs);
         }
 
+        $exceptionStatusMap = [];
+        WarehouseSkuWeightException::query()
+            ->whereRaw('LOWER(TRIM(tongtu_product_code)) IN (' . implode(',', array_fill(0, count($codes), '?')) . ')', $codes)
+            ->get(['tongtu_product_code', 'status'])
+            ->each(function (WarehouseSkuWeightException $exception) use (&$exceptionStatusMap): void {
+                $key = mb_strtolower(trim((string) $exception->tongtu_product_code));
+                if ($exception->status === 'pending') {
+                    $exceptionStatusMap[$key] = 'pending';
+                } elseif (!isset($exceptionStatusMap[$key])) {
+                    $exceptionStatusMap[$key] = 'resolved';
+                }
+            });
+
         foreach ($products as &$product) {
             $code = mb_strtolower(trim((string) ($product['product_code'] ?? '')));
             $entry = $linkSkuMap[$code] ?? null;
@@ -537,6 +589,9 @@ class WarehouseProductStatisticsController extends Controller
                 $product['link_sku_images_urls'] = [];
                 $product['warehouse_review_status'] = ProductRequestLinkSku::WAREHOUSE_REVIEW_STATUS_PENDING;
             }
+            $product['warehouse_display_status'] = $product['warehouse_review_status'] === ProductRequestLinkSku::WAREHOUSE_REVIEW_STATUS_APPROVED
+                ? 'approved'
+                : ($exceptionStatusMap[$code] ?? 'pending_review');
             $product['link_sku_images_json'] = json_encode($product['link_sku_images'], JSON_UNESCAPED_UNICODE);
         }
         unset($product);

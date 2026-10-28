@@ -4,8 +4,10 @@ namespace App\Portals\Logistics\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\ProductRequestLinkSku;
+use App\Models\LogisticsTongtuSkuMapping;
 use App\Models\WarehouseSkuWeightException;
 use App\Portal\Http\Controllers\PortalEntryController;
+use App\Portals\Logistics\TongtuSkuMappingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -24,6 +26,7 @@ class WarehouseWeightExceptionController extends Controller
 {
     public function __construct(
         private readonly PortalEntryController $portalEntries,
+        private readonly TongtuSkuMappingService $tongtuMappings,
     ) {
     }
 
@@ -115,6 +118,65 @@ class WarehouseWeightExceptionController extends Controller
         ]);
     }
 
+    public function refresh(Request $request, int $id): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $exception = WarehouseSkuWeightException::query()->findOrFail($id);
+        abort_unless($exception->status === 'resolved', 422, '请先将异常标记为已处理');
+
+        try {
+            $result = $this->tongtuMappings->refreshWeightsByTongtuSkus([(string) $exception->tongtu_sku]);
+        } catch (\Throwable $throwable) {
+            return response()->json(['ok' => false, 'message' => '抓取失败：'.$throwable->getMessage()], 422);
+        }
+
+        $refreshed = (int) ($result['refreshed'] ?? 0);
+        if ($refreshed > 0) {
+            $normalizedSku = LogisticsTongtuSkuMapping::normalizedSku((string) $exception->tongtu_sku);
+            $mapping = LogisticsTongtuSkuMapping::query()
+                ->whereRaw('LOWER(TRIM(tongtu_sku)) = ?', [$normalizedSku])
+                ->orWhere('shopify_sku', $normalizedSku)
+                ->first();
+            if ($mapping && (float) $mapping->goods_weight_gram > 0) {
+                $exception->forceFill(['original_weight_gram' => (float) $mapping->goods_weight_gram])->save();
+            }
+        }
+        return response()->json([
+            'ok' => $refreshed > 0,
+            'message' => $refreshed > 0 ? '已抓取最新数据' : '未抓取到可用的最新数据，请检查 SKU',
+            'result' => $result,
+        ], $refreshed > 0 ? 200 : 422);
+    }
+
+    public function approve(Request $request, int $id): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $exception = WarehouseSkuWeightException::query()->findOrFail($id);
+        abort_unless($exception->status === 'resolved', 422, '待处理异常不能审核通过');
+        $code = trim((string) $exception->tongtu_product_code);
+        abort_if($code === '', 422, '该记录缺少 PCL 编号，无法审核');
+
+        $updated = ProductRequestLinkSku::query()
+            ->whereRaw('LOWER(TRIM(pcl_product_no)) = ?', [mb_strtolower($code)])
+            ->update([
+                'warehouse_review_status' => ProductRequestLinkSku::WAREHOUSE_REVIEW_STATUS_APPROVED,
+                'warehouse_reviewed_at' => now(),
+            ]);
+
+        return response()->json([
+            'ok' => $updated > 0,
+            'message' => $updated > 0 ? '审核通过成功' : '未找到对应的 PCL SKU 数据',
+        ], $updated > 0 ? 200 : 422);
+    }
+
     /** 显示异常反馈中上传的仓库实拍图。 */
     public function warehouseImage(Request $request, ProductRequestLinkSku $linkSku, int $index): Response
     {
@@ -144,12 +206,15 @@ class WarehouseWeightExceptionController extends Controller
         if ($codes->isNotEmpty()) {
             $linkSkus = ProductRequestLinkSku::query()
                 ->whereRaw('LOWER(TRIM(pcl_product_no)) IN ('.implode(',', array_fill(0, $codes->count(), '?')).')', $codes->all())
-                ->get(['id', 'pcl_product_no', 'warehouse_images']);
+                ->get(['id', 'pcl_product_no', 'warehouse_images', 'warehouse_review_status']);
 
             foreach ($linkSkus as $linkSku) {
                 $key = mb_strtolower(trim((string) $linkSku->pcl_product_no));
+                if ($linkSku->warehouse_review_status === ProductRequestLinkSku::WAREHOUSE_REVIEW_STATUS_APPROVED) {
+                    $imageMap[$key]['approved'] = true;
+                }
                 foreach (array_values(array_filter((array) ($linkSku->warehouse_images ?? []))) as $index => $path) {
-                    $imageMap[$key][] = [
+                    $imageMap[$key]['images'][] = [
                         'url' => route('caigou.warehouse-weight-exceptions.warehouse-image', [
                             'linkSku' => $linkSku->getKey(),
                             'index' => $index,
@@ -161,7 +226,8 @@ class WarehouseWeightExceptionController extends Controller
 
         foreach ($rows as $row) {
             $key = mb_strtolower(trim((string) $row->tongtu_product_code));
-            $row->setAttribute('warehouse_image_refs', $imageMap[$key] ?? []);
+            $row->setAttribute('warehouse_image_refs', $imageMap[$key]['images'] ?? []);
+            $row->setAttribute('warehouse_review_approved', (bool) ($imageMap[$key]['approved'] ?? false));
         }
     }
 

@@ -171,6 +171,8 @@ Route::get('/warehouse-weight-exceptions/{id}/physical-image', [WarehouseProduct
 Route::get('/warehouse-weight-exceptions', [WarehouseWeightExceptionController::class, 'index'])->name('caigou.warehouse-weight-exceptions.index');
 Route::get('/warehouse-weight-exceptions/warehouse-images/{linkSku}/{index}', [WarehouseWeightExceptionController::class, 'warehouseImage'])->whereNumber('linkSku')->whereNumber('index')->name('caigou.warehouse-weight-exceptions.warehouse-image');
 Route::post('/warehouse-weight-exceptions/{id}/resolve', [WarehouseWeightExceptionController::class, 'resolve'])->name('caigou.warehouse-weight-exceptions.resolve');
+Route::post('/warehouse-weight-exceptions/{id}/refresh', [WarehouseWeightExceptionController::class, 'refresh'])->name('caigou.warehouse-weight-exceptions.refresh');
+Route::post('/warehouse-weight-exceptions/{id}/approve', [WarehouseWeightExceptionController::class, 'approve'])->name('caigou.warehouse-weight-exceptions.approve');
 Route::get('/product-library', [ProductLibraryController::class, 'index'])->name('aikaipin.product-library.index');
 Route::get('/account-risk', [PaymentPortalController::class, 'accountRisk'])->name('payment.account-risk.index');
 Route::post('/account-risk/accounts', [PaymentPortalController::class, 'storeAccountRiskAccount'])->name('payment.account-risk.accounts.store');
