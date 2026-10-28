@@ -31,6 +31,40 @@
 
         initFormulaTooltips(page);
 
+        page.on('click', '[data-payment-product-export]', function () {
+            var button = $(this);
+            if (button.prop('disabled')) return;
+            var url = String(button.data('exportUrl') || '');
+            if (!url) return;
+            var text = config.productExport || {};
+            var originalHtml = button.html();
+            button.prop('disabled', true).attr('aria-busy', 'true').html('<i class="fa fa-spinner fa-spin"></i> ' + $('<div>').text(text.exporting || '').html());
+
+            fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } }).then(function (response) {
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                var disposition = response.headers.get('Content-Disposition') || '';
+                return response.blob().then(function (blob) { return { blob: blob, disposition: disposition }; });
+            }).then(function (result) {
+                var filename = 'payment-product-risk-profit.xlsx';
+                var utf8Match = result.disposition.match(/filename\*=UTF-8''([^;]+)/i);
+                var plainMatch = result.disposition.match(/filename="?([^";]+)"?/i);
+                if (utf8Match) filename = decodeURIComponent(utf8Match[1]);
+                else if (plainMatch) filename = plainMatch[1];
+                var objectUrl = window.URL.createObjectURL(result.blob);
+                var link = document.createElement('a');
+                link.href = objectUrl;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                window.setTimeout(function () { window.URL.revokeObjectURL(objectUrl); }, 1000);
+            }).catch(function () {
+                notify('error', text.failed_title || '', text.failed_message || '');
+            }).then(function () {
+                button.prop('disabled', false).attr('aria-busy', 'false').html(originalHtml);
+            });
+        });
+
         page.on('change', '[data-payment-per-page]', function () {
             $(this).closest('form').find('[name="page"]').val('1');
             if ($(this).closest('[data-payment-product-main-tab]').length) {

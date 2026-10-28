@@ -5,6 +5,7 @@ namespace App\Portals\Payment;
 use App\Models\LogisticsOrder;
 use App\Portals\Logistics\LogisticsProductStatisticsService;
 use App\Portals\Logistics\LogisticsCreditCardRefundReason;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class PaymentProductRiskService
@@ -99,8 +100,22 @@ class PaymentProductRiskService
             ->get(['payment_product_names.product_key', 'source_item.product_title', 'source_item.tongtu_product_name'])
             ->keyBy('product_key');
 
-        $riskMetrics = $this->alerts->metricsByProductKey(array_values($keys));
-        $data['products'] = collect($products)->map(function (array $product) use ($names, $riskMetrics): array {
+        $latestPaidQuery = DB::connection(config('admin.database.connection') ?: config('database.default'))
+            ->table('logistics_order_items as items')
+            ->join('logistics_orders as orders', 'orders.id', '=', 'items.logistics_order_id')
+            ->whereIn(DB::raw($keyExpression), array_values($keys))
+            ->whereNotNull('orders.paid_at');
+        $activeFilters = (array) ($data['filters'] ?? []);
+        if (($activeFilters['date_from'] ?? '') !== '') $latestPaidQuery->whereDate('orders.paid_at', '>=', $activeFilters['date_from']);
+        if (($activeFilters['date_to'] ?? '') !== '') $latestPaidQuery->whereDate('orders.paid_at', '<=', $activeFilters['date_to']);
+        if (($activeFilters['store'] ?? '') !== '') $latestPaidQuery->where('orders.store_name', $activeFilters['store']);
+        $latestPaidTimes = $latestPaidQuery
+            ->selectRaw("{$keyExpression} as product_key")
+            ->selectRaw('MAX(orders.paid_at) as latest_paid_at')
+            ->groupByRaw($keyExpression)->pluck('latest_paid_at', 'product_key');
+
+        $riskMetrics = $this->alerts->metricsByProductKey(array_values($keys), $activeFilters);
+        $data['products'] = collect($products)->map(function (array $product) use ($names, $riskMetrics, $latestPaidTimes): array {
             $encoded = substr((string) $product['id'], 8);
             $encoded = strtr($encoded, '-_', '+/').str_repeat('=', (4 - strlen($encoded) % 4) % 4);
             $key = base64_decode($encoded, true);
@@ -113,10 +128,26 @@ class PaymentProductRiskService
             $product['paypal_initial_order_count'] = (int) ($paypal['eligible_order_count'] ?? 0);
             $product['paypal_initial_dispute_count'] = (int) ($paypal['dispute_count'] ?? 0);
             $product['paypal_initial_dispute_rate'] = (float) ($paypal['dispute_rate'] ?? 0);
+            $product['paypal_initial_refund_amount'] = (float) ($paypal['refund_amount'] ?? 0);
+            $product['paypal_initial_received_amount'] = (float) ($paypal['received_amount'] ?? 0);
+            $product['paypal_initial_refund_amount_rate'] = (float) ($paypal['refund_amount_rate'] ?? 0);
+            $product['paypal_delivered_order_count'] = (int) ($paypal['delivered_order_count'] ?? 0);
+            $product['paypal_delivered_dispute_count'] = (int) ($paypal['delivered_dispute_order_count'] ?? 0);
+            $product['paypal_delivered_dispute_rate'] = (float) ($paypal['delivered_dispute_rate'] ?? 0);
             $product['credit_card_order_count'] = (int) ($card['eligible_order_count'] ?? 0);
             $product['credit_card_complaint_count'] = (int) ($card['complaint_count'] ?? 0);
             $product['credit_card_dispute_count'] = (int) ($card['dispute_count'] ?? 0);
             $product['credit_card_dispute_rate'] = (float) ($card['dispute_rate'] ?? 0);
+            $product['credit_card_initial_refund_amount'] = (float) ($card['refund_amount'] ?? 0);
+            $product['credit_card_initial_received_amount'] = (float) ($card['received_amount'] ?? 0);
+            $product['credit_card_initial_refund_amount_rate'] = (float) ($card['refund_amount_rate'] ?? 0);
+            $product['credit_card_delivered_order_count'] = (int) ($card['delivered_order_count'] ?? 0);
+            $product['credit_card_delivered_dispute_count'] = (int) ($card['delivered_dispute_order_count'] ?? 0);
+            $product['credit_card_delivered_dispute_rate'] = (float) ($card['delivered_dispute_rate'] ?? 0);
+            $latestPaidAt = $key === false ? null : $latestPaidTimes->get($key);
+            $product['latest_paid_at'] = $latestPaidAt
+                ? Carbon::parse((string) $latestPaidAt, 'UTC')->timezone('Asia/Shanghai')->format('Y-m-d H:i')
+                : '-';
             return $product;
         })->all();
 

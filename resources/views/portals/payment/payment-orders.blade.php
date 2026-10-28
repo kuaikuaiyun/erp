@@ -43,7 +43,6 @@
         </tbody></table></div></article>
 
     @include('portals.payment.partials.pagination', ['pagination' => $pagination, 'routeName' => 'payment.orders.index'])
-    <div class="payment-dashboard-grid payment-order-bottom-grid"><article class="payment-panel payment-return-panel"><h2>{{ __($translationPrefix.'.return.title') }}</h2><p>{{ __($translationPrefix.'.return.description') }}</p></article><article class="payment-panel payment-tips-panel"><h2>{{ __($translationPrefix.'.tips.title') }}</h2><p>{{ __($translationPrefix.'.tips.description') }}</p></article></div>
 </section>
 @include('portals.payment.partials.payment-order-detail')
 @endsection
