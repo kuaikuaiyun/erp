@@ -364,14 +364,22 @@ class TongtuSkuMappingService
             $key = LogisticsTongtuSkuMapping::normalizedSku((string) ($mapping->tongtu_sku ?: $mapping->shopify_sku));
             if ($mapping->status === LogisticsTongtuSkuMapping::STATUS_MATCHED) {
                 $weight = (float) ($mapping->goods_weight_gram ?? 0);
+                if ($weight <= 0) {
+                    $failed++;
+                    continue;
+                }
                 LogisticsOrderItem::query()
                     ->where(function ($query) use ($mapping): void {
-                        $query->whereRaw('LOWER(TRIM(shopify_sku)) = ?', [$mapping->shopify_sku]);
+                        $query->whereRaw('LOWER(TRIM(shopify_sku)) = ?', [LogisticsTongtuSkuMapping::normalizedSku((string) $mapping->shopify_sku)]);
                         if (filled($mapping->tongtu_sku)) {
                             $query->orWhereRaw('LOWER(TRIM(tongtu_sku)) = ?', [LogisticsTongtuSkuMapping::normalizedSku((string) $mapping->tongtu_sku)]);
                         }
                     })
-                    ->update(['sale_weight_gram' => $weight]);
+                    ->update([
+                        'tongtu_sku_mapping_id' => $mapping->getKey(),
+                        'tongtu_goods_weight_gram' => $weight,
+                        'sale_weight_gram' => $weight,
+                    ]);
                 if (filled($mapping->tongtu_primary_image_url)) {
                     $images[$key] = (string) $mapping->tongtu_primary_image_url;
                 }

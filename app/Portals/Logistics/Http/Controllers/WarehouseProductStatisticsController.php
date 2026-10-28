@@ -156,6 +156,9 @@ class WarehouseProductStatisticsController extends Controller
         }
 
         $refreshed = (int) ($result['refreshed'] ?? 0);
+        if ($refreshed > 0) {
+            $this->statistics->invalidateAllPageCaches();
+        }
 
         return response()->json([
             'ok' => $refreshed > 0,

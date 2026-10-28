@@ -439,7 +439,10 @@ class LogisticsProductStatisticsService
     /** @param array<string,mixed> $filters */
     private function statisticsCacheKey(string $segment, array $filters): string
     {
-        $keyFilters = ['schema_version' => 5];
+        $keyFilters = [
+            'schema_version' => 5,
+            'data_version' => Cache::get('logistics.product-statistics.data-version', 1),
+        ];
         foreach (['date_from', 'date_to', 'name', 'keyword', 'store', 'match_status'] as $key) {
             $keyFilters[$key] = (string) ($filters[$key] ?? '');
         }
@@ -448,6 +451,12 @@ class LogisticsProductStatisticsService
         $keyFilters['exclude_product_codes'] = array_values($filters['exclude_product_codes'] ?? []);
 
         return 'logistics.product-statistics.'.$segment.'.'.sha1(json_encode($keyFilters));
+    }
+
+    /** Invalidate every filtered product-statistics cache after live SKU data changes. */
+    public function invalidateAllPageCaches(): void
+    {
+        Cache::forever('logistics.product-statistics.data-version', (string) microtime(true));
     }
 
     /** @param array<string,mixed> $filters @return array<string,mixed> */
