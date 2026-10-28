@@ -21,12 +21,30 @@
         </form>
     </div></div>
     <div class="box agency-card"><div class="box-header with-border"><h3 class="box-title">代理列表</h3><span class="text-muted"> 共 {{ $agencies->count() }} 条</span></div><div class="box-body no-padding table-responsive">
-        <table class="table table-hover agency-table"><thead><tr><th style="width:90px">序号</th><th>广告代理名称</th><th style="width:180px">结算系数</th><th style="width:120px">状态</th><th style="width:190px">操作</th></tr></thead><tbody>
+        <table class="table table-hover agency-table"><thead><tr><th style="width:90px">序号</th><th>广告代理名称</th><th style="width:180px">结算系数</th><th style="width:120px">状态</th><th style="width:250px">操作</th></tr></thead><tbody>
         @forelse($agencies as $item)<tr><td>{{ $loop->iteration }}</td><td><strong>{{ $item->name }}</strong></td><td>{{ rtrim(rtrim(number_format((float)$item->settlement_coefficient,4,'.',''),'0'),'.') }}</td><td><span class="agency-state {{ $item->is_enabled ? 'on' : 'off' }}">{{ $item->is_enabled ? '已启用' : '已停用' }}</span></td><td><div class="agency-actions">
+            <button type="button" class="btn btn-xs btn-primary agency-edit" data-action="{{ route('assistant.advertising-agencies.update',$item) }}" data-name="{{ $item->name }}" data-coefficient="{{ (float)$item->settlement_coefficient }}"><i class="fa fa-pencil"></i> 编辑</button>
             <form method="post" action="{{ route('assistant.advertising-agencies.toggle',$item) }}">@csrf @method('patch')<button class="btn btn-xs {{ $item->is_enabled ? 'btn-default' : 'btn-success' }}">{{ $item->is_enabled ? '停用' : '启用' }}</button></form>
             <form method="post" action="{{ route('assistant.advertising-agencies.destroy',$item) }}" onsubmit="return confirm('确定删除该广告代理吗？历史报表不会被删除。')">@csrf @method('delete')<button class="btn btn-xs btn-danger"><i class="fa fa-trash"></i> 删除</button></form>
         </div></td></tr>@empty<tr><td colspan="5" class="agency-empty">暂无广告代理</td></tr>@endforelse
         </tbody></table>
     </div></div>
 </section>
+
+<div class="modal fade" id="agency-edit-modal" tabindex="-1" role="dialog"><div class="modal-dialog" role="document"><div class="modal-content">
+    <form method="post" id="agency-edit-form">@csrf @method('patch')
+        <div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title">编辑广告代理</h4></div>
+        <div class="modal-body">
+            <div class="form-group"><label for="agency-edit-name">广告代理名称 <span class="text-red">*</span></label><input id="agency-edit-name" class="form-control" name="name" maxlength="100" required></div>
+            <div class="form-group"><label for="agency-edit-coefficient">结算系数 <span class="text-red">*</span></label><input id="agency-edit-coefficient" class="form-control" type="number" name="settlement_coefficient" min="0" max="9999" step="0.0001" required></div>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">取消</button><button class="btn btn-primary"><i class="fa fa-save"></i> 保存修改</button></div>
+    </form>
+</div></div></div>
 @endsection
+
+@push('scripts')
+<script>
+(function(){var modal=document.getElementById('agency-edit-modal'),form=document.getElementById('agency-edit-form'),name=document.getElementById('agency-edit-name'),coefficient=document.getElementById('agency-edit-coefficient');if(!modal)return;document.addEventListener('click',function(e){var button=e.target.closest&&e.target.closest('.agency-edit');if(!button)return;form.action=button.getAttribute('data-action');name.value=button.getAttribute('data-name')||'';coefficient.value=button.getAttribute('data-coefficient')||'';jQuery(modal).modal('show')})})();
+</script>
+@endpush

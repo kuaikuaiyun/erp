@@ -59,6 +59,23 @@ class AdvertisingAgencyController extends Controller
         return back()->with('success', $advertisingAgency->is_enabled ? '广告代理已启用。' : '广告代理已停用。');
     }
 
+    public function update(Request $request, AssistantAdvertisingAgency $advertisingAgency): RedirectResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        $request->merge(['name' => trim((string) $request->input('name'))]);
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:100', Rule::unique('assistant_advertising_agencies', 'name')->ignore($advertisingAgency->getKey())],
+            'settlement_coefficient' => ['required', 'numeric', 'min:0', 'max:9999'],
+        ], [
+            'name.required' => '请输入广告代理名称。', 'name.unique' => '该广告代理已经存在。',
+            'settlement_coefficient.required' => '请输入结算系数。',
+        ]);
+        $advertisingAgency->update($validated);
+
+        return back()->with('success', '广告代理修改成功。');
+    }
+
     public function destroy(Request $request, AssistantAdvertisingAgency $advertisingAgency): RedirectResponse
     {
         $context = $this->context($request);

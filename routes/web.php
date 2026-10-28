@@ -33,6 +33,7 @@ Route::patch('/advertising-media/{advertisingMedium}/toggle', [AdvertisingMediaC
 Route::delete('/advertising-media/{advertisingMedium}', [AdvertisingMediaController::class, 'destroy'])->name('assistant.advertising-media.destroy');
 Route::get('/advertising-agencies', [AdvertisingAgencyController::class, 'index'])->name('assistant.advertising-agencies.index');
 Route::post('/advertising-agencies', [AdvertisingAgencyController::class, 'store'])->name('assistant.advertising-agencies.store');
+Route::patch('/advertising-agencies/{advertisingAgency}', [AdvertisingAgencyController::class, 'update'])->name('assistant.advertising-agencies.update');
 Route::patch('/advertising-agencies/{advertisingAgency}/toggle', [AdvertisingAgencyController::class, 'toggle'])->name('assistant.advertising-agencies.toggle');
 Route::delete('/advertising-agencies/{advertisingAgency}', [AdvertisingAgencyController::class, 'destroy'])->name('assistant.advertising-agencies.destroy');
 Route::post('/domain-stores/email-purchases/sync', [DomainStoreController::class, 'syncEmailPurchases'])->name('assistant.domain-stores.email-purchases.sync');
