@@ -30,7 +30,7 @@
             <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.store') }}</span><select class="form-control" name="store"><option value="">{{ __($translationPrefix.'.filters.all_stores') }}</option>@foreach($dashboard['stores'] as $store)<option value="{{ $store }}" @selected($filters['store'] === $store)>{{ $store }}</option>@endforeach</select></label>
             <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.product') }}</span><input class="form-control" type="search" name="keyword" value="{{ $filters['keyword'] }}" placeholder="{{ __($translationPrefix.'.filters.product_placeholder') }}"></label>
             <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.only_abnormal') }}</span><select class="form-control" name="only_abnormal"><option value="">{{ __($translationPrefix.'.filters.all_products') }}</option><option value="1" @selected($filters['only_abnormal'] === '1')>{{ __($translationPrefix.'.filters.abnormal') }}</option></select></label>
-            <div class="payment-operation-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ __('payment.common.query') }}</button><a class="btn btn-default" href="{{ route('payment.product-risk-profit.index') }}">{{ __('payment.common.reset') }}</a><button class="btn btn-success" type="button" onclick="window.location.assign('{{ route('payment.product-risk-profit.export') }}')"><i class="fa fa-file-excel-o"></i> {{ __($translationPrefix.'.export.button') }}</button></div>
+            <div class="payment-operation-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ __('payment.common.query') }}</button><a class="btn btn-default" href="{{ route('payment.product-risk-profit.index') }}">{{ __('payment.common.reset') }}</a><button class="btn btn-success" type="button" data-payment-product-export data-export-url="{{ route('payment.product-risk-profit.export') }}"><i class="fa fa-file-excel-o"></i> {{ __($translationPrefix.'.export.button') }}</button></div>
         </form>
     </div></div>
 
@@ -58,7 +58,7 @@
 @endsection
 
 @push('scripts')
-<script>window.PaymentPortal = { productTabUrl: @json(route('payment.product-risk-profit.tab')), productMainTabs: @json(__($translationPrefix.'.main_tabs')), productDetailUrl: @json(route('payment.product-risk-profit.detail')), productDetail: @json(__($translationPrefix.'.detail')), pagination: @json(__('payment.common.pagination')) };</script>
+<script>window.PaymentPortal = { productTabUrl: @json(route('payment.product-risk-profit.tab')), productMainTabs: @json(__($translationPrefix.'.main_tabs')), productDetailUrl: @json(route('payment.product-risk-profit.detail')), productDetail: @json(__($translationPrefix.'.detail')), productExport: @json(__($translationPrefix.'.export')), pagination: @json(__('payment.common.pagination')) };</script>
 <script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261026-6"></script>
 <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261015-2"></script>
 @endpush
