@@ -69,6 +69,28 @@
                     </div></div>
                 </div>
             @endforeach
+            <div class="box box-solid logistics-form-box">
+                <div class="box-header with-border"><h3 class="box-title">订单商品原始 SKU</h3></div>
+                <div class="box-body table-responsive no-padding">
+                    <table class="table table-bordered table-hover">
+                        <thead><tr><th style="width:80px;">序号</th><th>商品名称</th><th style="width:360px;">原始 SKU</th></tr></thead>
+                        <tbody>
+                        @forelse($order->items as $item)
+                            <tr>
+                                <td>{{ $loop->iteration }}<input type="hidden" name="items[{{ $loop->index }}][id]" value="{{ $item->id }}"></td>
+                                <td>{{ $item->product_title ?: '—' }}</td>
+                                <td>
+                                    <input class="form-control" name="items[{{ $loop->index }}][shopify_sku]" value="{{ old('items.'.$loop->index.'.shopify_sku', $item->shopify_sku) }}" placeholder="原始 SKU 为空，可在这里补录">
+                                    @error('items.'.$loop->index.'.shopify_sku')<span class="help-block text-red">{{ $message }}</span>@enderror
+                                </td>
+                            </tr>
+                        @empty
+                            <tr><td colspan="3" class="text-center text-muted">该订单没有商品明细</td></tr>
+                        @endforelse
+                        </tbody>
+                    </table>
+                </div>
+            </div>
             <div class="logistics-form-actions">
                 <a class="btn btn-default" href="{{ route('logistics.orders.index') }}">取消</a>
                 <button class="btn btn-success" type="submit"><i class="fa fa-save"></i> 保存修改</button>

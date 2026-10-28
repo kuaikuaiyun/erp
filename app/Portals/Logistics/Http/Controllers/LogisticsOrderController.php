@@ -86,7 +86,10 @@ class LogisticsOrderController extends Controller
 
         return view('portals.logistics.orders.form', [
             ...$this->viewContext($context),
-            'order' => $order->load(['refundDetails' => fn ($query) => $query->orderByDesc('id')]),
+            'order' => $order->load([
+                'items' => fn ($query) => $query->orderBy('id'),
+                'refundDetails' => fn ($query) => $query->orderByDesc('id'),
+            ]),
             'statusOptions' => LogisticsOrder::dataStatusOptions(),
             'trackingOptions' => LogisticsOrder::logisticsStatusOptions(),
         ]);
@@ -178,6 +181,8 @@ class LogisticsOrderController extends Controller
         }
 
         $data = $this->validatedData($request);
+        $itemRows = $data['items'] ?? [];
+        unset($data['items']);
         $duplicate = LogisticsOrder::query()
             ->where('assistant_domain_store_id', $order->assistant_domain_store_id)
             ->where('shopify_order_id', $data['shopify_order_id'])
@@ -191,6 +196,42 @@ class LogisticsOrderController extends Controller
         $order->fill($data);
         $trackingNumberChanged = $order->isDirty('tracking_number');
         $order->save();
+        foreach ($itemRows as $itemRow) {
+            $item = $order->items()->whereKey((int) $itemRow['id'])->firstOrFail();
+            $newSku = trim((string) ($itemRow['shopify_sku'] ?? '')) ?: null;
+            $skuChanged = mb_strtolower(trim((string) $item->shopify_sku)) !== mb_strtolower((string) $newSku);
+            $changes = ['shopify_sku' => $newSku];
+            if ($skuChanged) {
+                $changes += [
+                    'tongtu_sku_mapping_id' => null,
+                    'tongtu_product_id' => null,
+                    'tongtu_goods_detail_id' => null,
+                    'tongtu_sku' => null,
+                    'tongtu_product_code' => null,
+                    'tongtu_product_name' => null,
+                    'tongtu_product_type' => null,
+                    'tongtu_goods_weight_gram' => null,
+                    'tongtu_package_weight_gram' => null,
+                ];
+            }
+            $item->forceFill($changes)->save();
+        }
+        if ($itemRows !== []) {
+            $hasMissingSku = $order->items()->where(function (Builder $items): void {
+                $items->whereNull('shopify_sku')->orWhereRaw("TRIM(shopify_sku) = ''");
+            })->exists();
+            if ($hasMissingSku) {
+                $order->forceFill([
+                    'data_status' => LogisticsOrder::STATUS_SKU_EXCEPTION,
+                    'sku_exception_reason' => 'Shopify SKU 缺失',
+                ])->save();
+            } elseif ($order->data_status === LogisticsOrder::STATUS_SKU_EXCEPTION) {
+                $order->forceFill([
+                    'data_status' => LogisticsOrder::STATUS_NORMAL,
+                    'sku_exception_reason' => null,
+                ])->save();
+            }
+        }
         $this->paymentReferences->syncFromAttributes($order, []);
         $this->paypalAssociations->reconcileOrder($order);
         if ($trackingNumberChanged) {
@@ -562,7 +603,7 @@ class LogisticsOrderController extends Controller
             'buyer_phone', 'is_add_on', 'subscription_type', 'subscription_status', 'payment_method', 'payment_gateway',
             'collection_account_email', 'transaction_id', 'bill_number', 'logistics_status', 'refund_reason', 'data_status',
             'time_zone',
-            'source_shop_domain', 'store_assignment_status', 'refund_number', 'shopify_sku',
+            'source_shop_domain', 'store_assignment_status', 'refund_number', 'shopify_sku', 'shopify_sku_status',
         ];
         $filters = ['per_page' => $perPage];
         foreach ($fields as $field) {
@@ -603,6 +644,13 @@ class LogisticsOrderController extends Controller
         if ($filters['shopify_sku'] !== '') {
             $sku = $this->contains((string) $filters['shopify_sku']);
             $query->whereHas('items', fn (Builder $items) => $items->where('shopify_sku', 'like', $sku));
+        }
+        if ($filters['shopify_sku_status'] === 'empty') {
+            $query->whereHas('items', fn (Builder $items) => $items
+                ->whereNull('shopify_sku')->orWhereRaw("TRIM(shopify_sku) = ''"));
+        } elseif ($filters['shopify_sku_status'] === 'filled') {
+            $query->whereHas('items', fn (Builder $items) => $items
+                ->whereNotNull('shopify_sku')->whereRaw("TRIM(shopify_sku) <> ''"));
         }
 
         if ($filters['bill_number'] !== '') {
@@ -727,6 +775,10 @@ class LogisticsOrderController extends Controller
         foreach (['paid_at', 'refunded_at', 'order_created_at'] as $field) {
             $rules[$field] = ['nullable', 'date'];
         }
+
+        $rules['items'] = ['nullable', 'array'];
+        $rules['items.*.id'] = ['required', 'integer'];
+        $rules['items.*.shopify_sku'] = ['nullable', 'string', 'max:191'];
 
         return $request->validate($rules);
     }
