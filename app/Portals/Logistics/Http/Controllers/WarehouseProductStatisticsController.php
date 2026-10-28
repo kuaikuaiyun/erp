@@ -416,8 +416,8 @@ class WarehouseProductStatisticsController extends Controller
             'warehouse_status' => trim((string) ($input['warehouse_status'] ?? '')),
             'store' => '',
             'decision' => '',
-            // 仓库只关心已通途匹配（有 product_code）的产品，过滤掉待通途匹配的数据
-            'require_tongtu_match' => true,
+            // 所有真实出单商品均进入验收列表；未匹配通途/PCL 的商品也不能遗漏。
+            'require_tongtu_match' => false,
             // 仓库列表不展示退款原因报表，跳过重聚合（约 19s）避免列表/分页卡顿
             'skip_refund_report' => true,
             'sort' => trim((string) ($input['sort'] ?? '')),
