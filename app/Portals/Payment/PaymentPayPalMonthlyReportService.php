@@ -355,7 +355,7 @@ class PaymentPayPalMonthlyReportService
                     $cursor->addDay();
                 }
             }
-            $expected = $start->diffInDays($end) + 1;
+            $expected = (int) $start->diffInDays($end->copy()->startOfDay()) + 1;
             $covered = count($days);
             $status = $year === $current->year && $month === $current->month
                 ? 'current'

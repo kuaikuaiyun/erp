@@ -319,7 +319,7 @@ return array_replace_recursive($translations, [
                 'event' => '收款按付款发生月，退款、纠纷本金与费用按实际发生月归属；实际出款仅在此口径计算。',
             ],
             'query' => '查询',
-            'export' => '导出月报',
+            'export_button' => '导出月报',
             'exporting' => '正在生成…',
             'export_failed' => '月报导出失败，请稍后重试。',
             'expand' => '查看资金明细',

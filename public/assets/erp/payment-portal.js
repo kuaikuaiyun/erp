@@ -599,7 +599,7 @@
                     return '<option value="' + Number(year) + '"' + (Number(year) === detailState.reportYear ? ' selected' : '') + '>' + Number(year) + '</option>';
                 }).join('') + '</select></label><div class="payment-monthly-dimension"><span>' + escapeHtml(text.dimension) + '</span><div>' + ['payment', 'event'].map(function (key) {
                     return '<button type="button" class="' + (dimension === key ? 'active' : '') + '" data-payment-monthly-dimension="' + key + '">' + escapeHtml((text.dimensions || {})[key]) + '</button>';
-                }).join('') + '</div></div><label class="payment-monthly-currency"><span>' + escapeHtml(text.currency) + '</span><strong>' + escapeHtml(payload.currency || 'USD') + '</strong></label></div><button type="button" class="btn btn-success" data-payment-monthly-export><i class="fa fa-file-excel-o" aria-hidden="true"></i> <span>' + escapeHtml(text.export) + '</span></button></section>';
+                }).join('') + '</div></div><label class="payment-monthly-currency"><span>' + escapeHtml(text.currency) + '</span><strong>' + escapeHtml(payload.currency || 'USD') + '</strong></label></div><button type="button" class="btn btn-success" data-payment-monthly-export><i class="fa fa-file-excel-o" aria-hidden="true"></i> <span>' + escapeHtml(text.export_button) + '</span></button></section>';
                 var note = '<p class="payment-monthly-dimension-note"><i class="fa fa-info-circle" aria-hidden="true"></i> ' + escapeHtml((text.dimension_notes || {})[dimension]) + '</p>';
                 if (!rows.length) {
                     return controls + note + '<div class="payment-detail-empty">' + escapeHtml(detailText.empty) + '</div>';
