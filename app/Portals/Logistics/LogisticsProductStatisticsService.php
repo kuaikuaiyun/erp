@@ -234,14 +234,17 @@ class LogisticsProductStatisticsService
             ->whereNotNull('goods_weight_gram')
             ->where(function ($query) use ($skus, $codes): void {
                 if ($skus !== []) {
-                    $query->whereIn(DB::raw('LOWER(TRIM(tongtu_sku))'), array_values($skus));
+                    $query->where(function ($skuQuery) use ($skus): void {
+                        $skuQuery->whereIn(DB::raw('LOWER(TRIM(tongtu_sku))'), array_values($skus))
+                            ->orWhereIn(DB::raw('LOWER(TRIM(shopify_sku))'), array_values($skus));
+                    });
                 }
                 if ($codes !== []) {
                     $method = $skus === [] ? 'whereIn' : 'orWhereIn';
                     $query->{$method}(DB::raw('LOWER(TRIM(tongtu_product_code))'), array_values($codes));
                 }
             })
-            ->get(['tongtu_sku', 'tongtu_product_code', 'goods_weight_gram']);
+            ->get(['shopify_sku', 'tongtu_sku', 'tongtu_product_code', 'goods_weight_gram']);
 
         $bySku = [];
         $byCode = [];
@@ -251,9 +254,13 @@ class LogisticsProductStatisticsService
                 continue;
             }
             $sku = mb_strtolower(trim((string) $mapping->tongtu_sku));
+            $shopifySku = mb_strtolower(trim((string) $mapping->shopify_sku));
             $code = mb_strtolower(trim((string) $mapping->tongtu_product_code));
             if ($sku !== '' && !isset($bySku[$sku])) {
                 $bySku[$sku] = $weight;
+            }
+            if ($shopifySku !== '' && !isset($bySku[$shopifySku])) {
+                $bySku[$shopifySku] = $weight;
             }
             if ($code !== '' && !isset($byCode[$code])) {
                 $byCode[$code] = $weight;
@@ -296,7 +303,7 @@ class LogisticsProductStatisticsService
             if ($sku === '') {
                 continue;
             }
-            if (!isset($weightBySku[$sku]) || $weightBySku[$sku] > $weight) {
+            if (!isset($weightBySku[$sku]) || $weightBySku[$sku] < $weight) {
                 $weightBySku[$sku] = $weight;
             }
         }

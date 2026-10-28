@@ -328,7 +328,7 @@ class TongtuSkuMappingService
         }
 
         $mappings = LogisticsTongtuSkuMapping::query()
-            ->whereIn('shopify_sku', $skus)
+            ->whereIn(DB::raw('LOWER(TRIM(shopify_sku))'), $skus)
             ->orWhereIn(DB::raw('LOWER(TRIM(tongtu_sku))'), $skus)
             ->get();
 
@@ -345,7 +345,7 @@ class TongtuSkuMappingService
         }
 
         $mappings = LogisticsTongtuSkuMapping::query()
-            ->whereIn('shopify_sku', $skus)
+            ->whereIn(DB::raw('LOWER(TRIM(shopify_sku))'), $skus)
             ->orWhereIn(DB::raw('LOWER(TRIM(tongtu_sku))'), $skus)
             ->get();
 
