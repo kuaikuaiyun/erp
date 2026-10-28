@@ -28,6 +28,11 @@ class OperationReportMetricsService
         return LogisticsOrderItem::query()
             ->join('logistics_orders', 'logistics_orders.id', '=', 'logistics_order_items.logistics_order_id')
             ->whereIn('logistics_orders.subscription_type', ['订阅首次购买', '无订阅'])
+            ->where(function ($query): void {
+                $query->whereRaw("TRIM(COALESCE(logistics_order_items.shopify_sku, '')) <> ''")
+                    ->orWhereRaw("TRIM(COALESCE(logistics_order_items.tongtu_sku, '')) <> ''")
+                    ->orWhereRaw("TRIM(COALESCE(logistics_order_items.tongtu_product_code, '')) <> ''");
+            })
             ->select([
                 'logistics_order_items.shopify_sku',
                 'logistics_order_items.tongtu_sku',

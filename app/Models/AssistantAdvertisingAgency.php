@@ -3,13 +3,14 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Schema;
 
 class AssistantAdvertisingAgency extends Model
 {
     protected $table = 'assistant_advertising_agencies';
 
-    protected $fillable = ['name', 'settlement_coefficient', 'is_enabled', 'sort'];
+    protected $fillable = ['name', 'advertising_media_id', 'settlement_coefficient', 'is_enabled', 'sort'];
 
     public function __construct(array $attributes = [])
     {
@@ -19,7 +20,12 @@ class AssistantAdvertisingAgency extends Model
 
     protected function casts(): array
     {
-        return ['settlement_coefficient' => 'decimal:4', 'is_enabled' => 'boolean', 'sort' => 'integer'];
+        return ['advertising_media_id' => 'integer', 'settlement_coefficient' => 'decimal:4', 'is_enabled' => 'boolean', 'sort' => 'integer'];
+    }
+
+    public function advertisingMedia(): BelongsTo
+    {
+        return $this->belongsTo(AssistantAdvertisingMedia::class, 'advertising_media_id');
     }
 
     /** @return array<string, float> */
