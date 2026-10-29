@@ -13,16 +13,16 @@
 <section class="content">
     <div class="filter-card">
         <form method="get" class="form-inline" action="{{ route('caigou.abnormal-skus.index') }}">
-            <div class="form-group"><label>原始SKU统计日期（UTC-4）</label> <input class="form-control input-sm" type="date" name="report_date" value="{{ $reportDate }}"></div>
+            <div class="form-group"><label>统计范围</label> <span class="form-control-static">截至当前时间的全部订单</span></div>
             <div class="form-group" style="margin-left:10px"><label>每页</label> <select class="form-control input-sm" name="per_page">@foreach([20,50,100] as $size)<option value="{{ $size }}" @selected($perPage===$size)>{{ $size }}条</option>@endforeach</select></div>
             <button class="btn btn-primary btn-sm" style="margin-left:8px"><i class="fa fa-search"></i> 查询</button>
-            <a class="btn btn-default btn-sm" href="{{ route('caigou.abnormal-skus.index') }}">今天</a>
+            <a class="btn btn-default btn-sm" href="{{ route('caigou.abnormal-skus.index') }}">重置</a>
         </form>
     </div>
 
     <div class="abnormal-summary">
         <div class="abnormal-card"><span>指导价或重量缺失 SKU</span><strong>{{ $missing['total'] }}</strong></div>
-        <div class="abnormal-card original"><span>{{ $reportDate }} 原始 SKU 为空商品</span><strong>{{ $original['total'] }}</strong></div>
+        <div class="abnormal-card original"><span>全部订单原始 SKU 为空商品</span><strong>{{ $original['total'] }}</strong></div>
     </div>
 
     <div class="box box-solid">
@@ -38,7 +38,7 @@
     </div>
 
     <div class="box box-solid">
-        <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-ban text-red"></i> 原始 SKU 为空的商品</h3><p class="abnormal-help">统计日期：{{ $reportDate }}；数据不按运营人员隔离，按商品去重后展示。</p></div>
+        <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-ban text-red"></i> 原始 SKU 为空的商品</h3><p class="abnormal-help">统计截至当前时间的全部历史订单；数据不按运营人员隔离，按商品去重后展示。</p></div>
         <div class="box-body no-padding table-responsive">
             <table class="table table-bordered table-hover abnormal-table"><thead><tr><th style="width:70px">序号</th><th>商品名称</th><th style="width:260px">店铺域名</th><th style="width:100px">商品数量</th><th style="width:175px">下单时间</th><th style="width:100px">订单ID</th></tr></thead><tbody>
             @forelse($original['items'] as $item)

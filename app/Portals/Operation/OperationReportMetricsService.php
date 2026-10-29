@@ -87,15 +87,23 @@ class OperationReportMetricsService
     }
 
     /** @return list<array{item_id:int,order_id:int,product_name:string,shop_domain:string,quantity:float,ordered_at:string}> */
-    public function missingOriginalSkuSummary(string $date): array
+    public function missingOriginalSkuSummary(?string $date = null): array
     {
-        $start = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 00:00:00', self::REPORT_TIMEZONE)->utc();
-        $end = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 23:59:59', self::REPORT_TIMEZONE)->utc();
+        $start = $date !== null
+            ? Carbon::createFromFormat('Y-m-d H:i:s', $date.' 00:00:00', self::REPORT_TIMEZONE)->utc()
+            : null;
+        $end = $date !== null
+            ? Carbon::createFromFormat('Y-m-d H:i:s', $date.' 23:59:59', self::REPORT_TIMEZONE)->utc()
+            : Carbon::now('UTC');
 
         $items = LogisticsOrderItem::query()
             ->join('logistics_orders', 'logistics_orders.id', '=', 'logistics_order_items.logistics_order_id')
             ->leftJoin('assistant_domain_stores', 'assistant_domain_stores.id', '=', 'logistics_orders.assistant_domain_store_id')
-            ->whereBetween('logistics_orders.order_created_at', [$start, $end])
+            ->when(
+                $start !== null,
+                fn ($query) => $query->whereBetween('logistics_orders.order_created_at', [$start, $end]),
+                fn ($query) => $query->where('logistics_orders.order_created_at', '<=', $end),
+            )
             ->where(function ($query): void {
                 $query->whereNull('logistics_order_items.shopify_sku')
                     ->orWhereRaw("TRIM(logistics_order_items.shopify_sku) = ''");

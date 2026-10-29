@@ -28,12 +28,10 @@ class AbnormalSkuController extends Controller
         app()->setLocale('zh-CN');
 
         $validated = $request->validate([
-            'report_date' => ['nullable', 'date_format:Y-m-d'],
             'missing_page' => ['nullable', 'integer', 'min:1'],
             'original_page' => ['nullable', 'integer', 'min:1'],
             'per_page' => ['nullable', 'integer', Rule::in([20, 50, 100])],
         ]);
-        $date = (string) ($validated['report_date'] ?? now(OperationReportMetricsService::REPORT_TIMEZONE)->format('Y-m-d'));
         $perPage = (int) ($validated['per_page'] ?? 20);
 
         $missing = $this->paginate(
@@ -42,7 +40,7 @@ class AbnormalSkuController extends Controller
             $perPage,
         );
         $original = $this->paginate(
-            $this->metrics->missingOriginalSkuSummary($date),
+            $this->metrics->missingOriginalSkuSummary(),
             (int) ($validated['original_page'] ?? 1),
             $perPage,
         );
@@ -50,7 +48,6 @@ class AbnormalSkuController extends Controller
         return view('portals.caigou.abnormal-skus.index', [
             'portal' => $context['portal']->loadMissing('menus'),
             'user' => $context['user'],
-            'reportDate' => $date,
             'perPage' => $perPage,
             'missing' => $missing,
             'original' => $original,
