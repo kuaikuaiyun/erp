@@ -31,7 +31,7 @@ class RefreshTongtuSkuMappingsJob implements ShouldQueue
 
     public function handle(TongtuSkuMappingService $mappings): void
     {
-        $mappings->refreshMappings($this->mappingIds);
+        $mappings->refreshMappings($this->mappingIds, true);
     }
 
     public function failed(Throwable $exception): void

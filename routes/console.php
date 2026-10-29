@@ -20,7 +20,7 @@ Schedule::command('logistics:tracking:process --limit=80')
     ->runInBackground();
 
 Schedule::command('logistics:tongtu-skus:refresh --limit=200')
-    ->everyTenMinutes()
+    ->everyMinute()
     ->withoutOverlapping(5)
     ->runInBackground();
 
