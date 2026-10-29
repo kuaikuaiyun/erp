@@ -9,6 +9,7 @@ use App\Portals\Logistics\PayPalRiskAnalyticsService;
 use Carbon\Carbon;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class PaymentAccountRiskService
@@ -30,6 +31,30 @@ class PaymentAccountRiskService
      *  @return array<string,mixed>
      */
     public function dashboard(array $filters): array
+    {
+        $accountVersion = LogisticsPayPalAccount::query()
+            ->selectRaw('MAX(updated_at) as updated_at, MAX(last_imported_at) as last_imported_at, COUNT(*) as total')
+            ->first();
+        $cacheKey = 'payment:account-risk-dashboard:v2:'.sha1((string) json_encode([
+            'filters' => $filters,
+            'accounts' => [
+                'updated_at' => (string) ($accountVersion->updated_at ?? ''),
+                'last_imported_at' => (string) ($accountVersion->last_imported_at ?? ''),
+                'total' => (int) ($accountVersion->total ?? 0),
+            ],
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+        return Cache::remember(
+            $cacheKey,
+            now()->addSeconds(30),
+            fn (): array => $this->buildDashboard($filters),
+        );
+    }
+
+    /** @param array{account:string,period_start:string,period_end:string,date_mode:string,import_status:string,page:int,per_page:int} $filters
+     *  @return array<string,mixed>
+     */
+    private function buildDashboard(array $filters): array
     {
         $query = LogisticsPayPalAccount::query()->orderByDesc('created_at')->orderByDesc('id');
         if ($filters['account'] !== '') {
@@ -54,15 +79,16 @@ class PaymentAccountRiskService
         }
 
         $accounts = $query->get();
-        $dateMode = $filters['date_mode'] === 'event' ? 'event' : 'order';
-        $summaries = $accounts
-            ->map(fn (LogisticsPayPalAccount $account): array => $this->analytics->currentSummary($account, [
+        $dateMode = ($filters['date_mode'] ?? 'order') === 'event' ? 'event' : 'order';
+        $summaryFilters = [
                 'date_from' => $dateMode === 'order' ? $filters['period_start'] : '',
                 'date_to' => $dateMode === 'order' ? $filters['period_end'] : '',
                 'event_date_from' => $dateMode === 'event' ? $filters['period_start'] : '',
                 'event_date_to' => $dateMode === 'event' ? $filters['period_end'] : '',
                 'date_mode' => $dateMode,
-            ]));
+            ];
+        $summaries = $accounts
+            ->map(fn (LogisticsPayPalAccount $account): array => $this->cachedCurrentSummary($account, $summaryFilters));
 
         $portfolio = $this->portfolio($summaries);
         $cutoff = $accounts->pluck('last_imported_at')->filter()->sortDesc()->first();
@@ -122,8 +148,29 @@ class PaymentAccountRiskService
     /** @return array<string,mixed> */
     public function detail(LogisticsPayPalAccount $account, array $filters, string $tab, int $page, int $perPage, array $tabFilters): array
     {
+        $cacheKey = 'payment:account-risk-detail:v2:'.sha1((string) json_encode([
+            'account' => (int) $account->getKey(),
+            'last_imported_at' => optional($account->last_imported_at)->format('Y-m-d H:i:s.u'),
+            'updated_at' => optional($account->updated_at)->format('Y-m-d H:i:s.u'),
+            'filters' => $filters,
+            'tab' => $tab,
+            'page' => $page,
+            'per_page' => $perPage,
+            'tab_filters' => $tabFilters,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+        return Cache::remember(
+            $cacheKey,
+            now()->addSeconds(30),
+            fn (): array => $this->buildDetail($account, $filters, $tab, $page, $perPage, $tabFilters),
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function buildDetail(LogisticsPayPalAccount $account, array $filters, string $tab, int $page, int $perPage, array $tabFilters): array
+    {
         if ($tab === 'order_analysis') {
-            $summary = $this->analytics->currentSummary($account, $filters);
+            $summary = $this->cachedCurrentSummary($account, $filters);
             $detail = [
                 'summary' => $summary,
                 'tab' => $tab,
@@ -141,6 +188,12 @@ class PaymentAccountRiskService
                 false,
                 $perPage,
             );
+            if ($tab === 'overview' && !empty($detail['exceptions'])) {
+                $detail['exceptions'] = $this->enrichOverviewExceptionReferences($account, $detail['exceptions']);
+            }
+            if ($tab === 'overview') {
+                $detail['overview_month'] = (string) ($filters['overview_month'] ?? '');
+            }
         }
         $balance = LogisticsPayPalBalanceSnapshot::query()
             ->where('logistics_paypal_account_id', $account->getKey())->where('currency_code', 'USD')
@@ -153,6 +206,53 @@ class PaymentAccountRiskService
         ] : null;
 
         return $detail;
+    }
+
+    /** @param array<string,mixed> $filters @return array<string,mixed> */
+    private function cachedCurrentSummary(LogisticsPayPalAccount $account, array $filters): array
+    {
+        $cacheKey = 'payment:account-risk-summary:v2:'.sha1((string) json_encode([
+            'account' => (int) $account->getKey(),
+            'last_imported_at' => optional($account->last_imported_at)->format('Y-m-d H:i:s.u'),
+            'updated_at' => optional($account->updated_at)->format('Y-m-d H:i:s.u'),
+            'filters' => [
+                'date_from' => (string) ($filters['date_from'] ?? ''),
+                'date_to' => (string) ($filters['date_to'] ?? ''),
+                'event_date_from' => (string) ($filters['event_date_from'] ?? ''),
+                'event_date_to' => (string) ($filters['event_date_to'] ?? ''),
+                'date_mode' => (string) ($filters['date_mode'] ?? 'order'),
+            ],
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+        return Cache::remember(
+            $cacheKey,
+            now()->addMinutes(5),
+            fn (): array => $this->analytics->currentSummary($account, $filters),
+        );
+    }
+
+    /** @param list<array<string,mixed>> $exceptions @return list<array<string,mixed>> */
+    private function enrichOverviewExceptionReferences(LogisticsPayPalAccount $account, array $exceptions): array
+    {
+        $orderIds = collect($exceptions)->pluck('order_id')->filter()->map(static fn ($id): int => (int) $id)->unique()->all();
+        if ($orderIds === []) return $exceptions;
+        $connection = DB::connection(config('admin.database.connection') ?: config('database.default'));
+        $refunds = $connection->table('logistics_paypal_refunds')->where('logistics_paypal_account_id', $account->getKey())
+            ->whereIn('logistics_order_id', $orderIds)->orderByDesc('refunded_at')->orderByDesc('id')->get(['logistics_order_id', 'refund_transaction_id'])
+            ->unique('logistics_order_id')->keyBy('logistics_order_id');
+        $disputes = $connection->table('logistics_paypal_disputes')->where('logistics_paypal_account_id', $account->getKey())
+            ->whereIn('logistics_order_id', $orderIds)->orderByDesc('dispute_created_at')->orderByDesc('id')->get(['logistics_order_id', 'dispute_id'])
+            ->unique('logistics_order_id')->keyBy('logistics_order_id');
+        $refundLabel = (string) __('logistics.paypal_risk.detail.refund');
+
+        return collect($exceptions)->map(static function (array $row) use ($refunds, $disputes, $refundLabel): array {
+            $orderId = (int) ($row['order_id'] ?? 0);
+            $isRefund = (string) ($row['type'] ?? '') === $refundLabel;
+            $row['reference_id'] = $isRefund
+                ? (string) ($refunds->get($orderId)->refund_transaction_id ?? '')
+                : (string) ($disputes->get($orderId)->dispute_id ?? '');
+            return $row;
+        })->all();
     }
 
     /** @param array<string,mixed> $filters @param array<string,mixed> $summary @return array<string,mixed> */

@@ -72,11 +72,13 @@ $translations = [
     ],
     'product_risk_profit' => [
         'page_title' => '产品风险与利润',
+        'page_subtitle' => '产品收款、退款、争议与经营风险概览',
         'filters' => ['store' => '店铺', 'all_stores' => '全部店铺', 'product' => '产品', 'product_placeholder' => '搜索产品 / PCL / SKU', 'only_abnormal' => '仅看异常', 'abnormal' => '异常产品', 'stores' => ['store_a' => '店铺 A', 'store_b' => '店铺 B', 'store_c' => '店铺 C']],
         'kpis' => ['products' => '已售产品 / 付费', 'products_note' => '共 3,200 笔成功付款', 'receipts' => '分摊实收金额', 'receipts_note' => '按订单行为分组，可财务实拍', 'refund' => '真实退款 / 金额比', 'refund_note' => '单件回归原付款批次', 'loss' => '预计损失利润', 'loss_note' => '且扣除退款付风险、示例'],
         'tabs' => ['risk_metrics' => '风险指标', 'loss_profit' => '损失与收益', 'refund_reason' => '退款原因报表'], 'credit_card' => '信用卡',
         'products' => ['portable_vacuum' => ['name' => '蓬松定型喷雾', 'sku' => 'PENGSONGZAO-ENG-090', 'meta' => '2 规格 / 8 店铺'], 'insurance_set' => ['name' => '一次性保鲜膜套', 'sku' => 'FOOD-COVER-20', 'meta' => '1 规格 / 5 店铺'], 'foam_cleaner' => ['name' => '多功能泡沫清洗剂', 'sku' => 'FOAM-CLEANER', 'meta' => '2 规格 / 3 店铺']],
         'metric_labels' => ['orders' => '订单 / 收款', 'refund' => '退款率 / 金额', 'cases' => '纠纷率 / 笔数'], 'refund_ratio' => '综合退款金额比', 'loss_ratio' => '贡献利润率', 'suggestions' => ['continue_observing' => '续费需跟查', 'sustained_observation' => '持续观察', 'beneficial_growth' => '利润为负 / 核查'], 'view_detail' => '查看完整经营明细',
+        'sort' => ['product_name' => '产品名称'],
         'tab_descriptions' => ['loss_profit' => '当前展示前端模拟的损失与收益口径，数据接入后将按付款、退款、费用和风险损失汇总。', 'refund_reason' => '当前展示前端模拟的退款原因归集入口，后续将连接案件与退款明细。'],
         'export' => [
             'button' => '导出 Excel', 'exporting' => '正在生成 Excel…',
@@ -102,11 +104,12 @@ $translations = [
     ],
     'product_alerts' => [
         'page_title' => '产品预警',
+        'page_subtitle' => '产品风险预警、处理状态与历史记录',
         'filters' => ['status' => '状态', 'all_statuses' => '全部状态', 'channel' => '渠道', 'all_channels' => '全部渠道', 'severity' => '预警级别', 'all_severities' => '全部级别', 'sample' => '订单样本量', 'all_samples' => '全部样本量', 'product' => '产品 / PCL', 'product_placeholder' => '搜索产品名称、PCL 或 SKU'],
         'sample_ranges' => ['under_50' => '50单以内', '50_500' => '50–500单', 'over_500' => '500单以上'],
         'severities' => ['warning' => '黄色预警', 'critical' => '红色预警'],
         'kpis' => ['pending' => '待处理', 'pending_note' => '尚未提交处理记录', 'processing' => '处理中', 'processing_note' => '已有处理结论、尚未完结', 'completed' => '已完成', 'completed_note' => '已完结的产品预警'], 'order_unit' => '单', 'list_title' => '产品预警列表',
-        'table' => ['pcl' => 'PCL', 'channel' => '渠道', 'summary' => '数据摘要', 'threshold' => '命中指标 / 进入原因', 'status' => '处理状态', 'status_message' => '状态消息', 'action' => '操作'],
+        'table' => ['pcl' => 'PCL', 'channel' => '渠道', 'summary' => '数据摘要', 'alert_data' => '预警数据', 'threshold' => '命中指标 / 进入原因', 'status' => '处理状态', 'status_message' => '状态消息', 'action' => '操作'],
         'channels' => ['paypal' => 'PayPal', 'credit_card' => '信用卡'],
         'metrics' => ['refund_order_rate' => '退款率（按订单数）', 'refund_amount_rate' => '退款金额比', 'paypal_dispute_rate' => 'PayPal 全部纠纷率', 'credit_card_dispute_rate' => '信用卡争议率'],
         'thresholds' => ['refund_amount_ratio' => '退款 $6400 – 1.5%', 'refund_count_ratio' => "退款 5%\n2 笔/40 付款", 'estimated_profit' => '预计贡献利润≈0'], 'owners' => ['product_manager_a' => '产品跟进中', 'to_assign' => '待分配', 'product_manager_b' => '产品跟进下'], 'owner_note' => ['product_manager_a' => '客服 Z / 运营岗', 'to_assign' => '需跟专认领', 'product_manager_b' => '运营岗 / 财务已'],
@@ -435,6 +438,10 @@ return array_replace_recursive($translations, [
                 'refunds' => '本期真实退款率＝成功退款金额 ÷ 同期成功收款金额 × 100%',
             ],
             'overview' => [
+                'month_filter' => [
+                    'label' => '统计月份',
+                    'note' => '按所选自然月统计；当前月统计至今天，历史月份统计完整自然月。',
+                ],
                 'kpis' => [
                     'disputes_recent' => '期间风险纠纷',
                     'disputes_period' => '全部纠纷 / 纠纷率',
@@ -463,11 +470,11 @@ return array_replace_recursive($translations, [
                     'refund_keyword' => '退款',
                 ],
                 'trend' => [
-                    'title' => '订单、退款与纠纷趋势',
-                    'note' => '按当前筛选期间和真实流水日期汇总',
+                    'title' => '每日新增退款与纠纷趋势',
+                    'note' => '按真实事件发生日期统计每日新增笔数，鼠标悬浮数据点可查看数值',
                     'orders' => '订单',
-                    'refunds' => '退款',
-                    'disputes' => '纠纷',
+                    'refunds' => '新增退款',
+                    'disputes' => '新增纠纷',
                 ],
                 'tasks' => [
                     'title' => '今天要做什么',
@@ -600,6 +607,8 @@ return array_replace_recursive($translations, [
                 'sales' => '销量', 'orders' => '订单数', 'receipts' => '销售额',
                 'refunds' => '真实退款', 'shipping' => '发货率', 'delivery' => '签收率',
                 'disputes' => '纠纷数 / 纠纷率', 'store_distribution' => '店铺订单分布',
+                'store' => '店铺', 'operator' => '运营名', 'order_count' => '订单笔数', 'no_store_record' => '当前产品暂无店铺订单记录',
+                'product_name' => '产品名称', 'product_pcl' => '产品 PCL', 'related_stores' => '相关店铺', 'no_related_store' => '暂无关联店铺',
                 'unit' => '件', 'record' => '笔', 'reason_summary' => '风险记录摘要',
                 'no_risk_record' => '当前没有风险记录',
                 'unit_count' => '总销量（件）', 'order_count' => '关联订单数',
@@ -616,6 +625,8 @@ return array_replace_recursive($translations, [
                 'delivery_formula' => '已签收 :count 笔 ÷ 已发货 :shipped 笔 × 100%',
                 'paypal_summary' => 'PayPal 纠纷明细', 'warning_summary' => '预警记录总结',
                 'card_dispute_summary' => '争议记录总结', 'summary_totals' => '涉及订单 :orders 笔；记录 :records 条；涉及金额 :amount',
+                'reason_breakdown' => '原因分布（按记录）', 'reason_row' => ':reason：:count 条（:ratio），金额 :amount',
+                'reason_formula' => '原因占比 = 该原因记录数 ÷ 当前分类记录总数 × 100%',
             ],
             'first_renewal' => [
                 'groups' => ['one_time' => '一次性购买', 'first_charge' => '订阅首次扣款', 'first_renewal' => '第一次续费', 'later_renewal' => '第二次及以后'],
@@ -702,5 +713,62 @@ return array_replace_recursive($translations, [
             'view_order' => '查看关联物流订单', 'unmatched_order' => '暂无关联物流订单',
             'actions_note' => '关闭弹窗后保留当前搜索、筛选、排序及分页位置。',
         ],
+    ],
+], [
+    'product_alerts' => [
+        'filters' => [
+            'flow_status' => '流程状态',
+            'processing_status' => '处理状态',
+            'all_statuses' => '全部处理状态',
+        ],
+        'flows' => ['open' => '待处理流程', 'completed' => '已完结流程', 'all' => '全部流程'],
+        'statuses' => ['pending' => '待处理', 'processing' => '处理中', 'completed' => '已完结'],
+        'table' => ['alert_data' => '预警数据', 'description_mismatch' => '物品与描述不符占比'],
+        'summary' => [
+            'orders' => '有效订单',
+            'disputes' => '纠纷订单',
+            'amount' => '纠纷金额',
+            'delivered_rate' => '已签收争议率',
+        ],
+        'metrics' => ['delivered_dispute_rate' => '首次付款已签收纠纷率'],
+        'formulas' => [
+            'delivered_dispute_rate' => '首次付款且已签收的纠纷订单数 ÷ 首次付款且已签收订单数 × 100%',
+            'description_mismatch_rate' => '物品与描述不符争议金额 ÷ PayPal 总争议金额 × 100%',
+        ],
+        'export' => [
+            'button' => '导出 Excel', 'exporting' => '正在生成 Excel…',
+            'failed_title' => '导出失败', 'failed_message' => '产品预警 Excel 生成失败，请稍后重试。',
+            'filename' => '产品预警全量清单_:time.xlsx', 'sheet_name' => '产品预警',
+            'columns' => [
+                'pcl' => 'PCL', 'channel' => '渠道', 'orders' => '有效订单', 'dispute_orders' => '纠纷订单',
+                'dispute_amount' => '纠纷金额', 'dispute_rate' => '纠纷率', 'description_mismatch_rate' => '物品与描述不符占比',
+                'delivered_dispute_rate' => '首次付款已签收纠纷率', 'severity' => '预警级别', 'workflow_status' => '流程状态',
+                'processing_result' => '处理结果', 'latest_remark' => '最新处理备注', 'first_paid_at' => '首次订单时间', 'latest_paid_at' => '最后订单时间',
+            ],
+        ],
+        'guidance' => ['fixed_rule' => 'PayPal 与信用卡独立计算且采用相同阈值；首次付款已签收纠纷率严格大于 2.5% 且小于 3% 为黄色预警，达到或超过 3% 为红色预警。'],
+        'detail_page' => [
+            'fields' => ['first_order_at' => '首次订单时间', 'last_order_at' => '最后订单时间'],
+            'store_distribution' => [
+                'title' => '店铺订单分布', 'store' => '店铺', 'operator' => '运营名', 'orders' => '订单笔数',
+                'first_order' => '首次订单时间', 'last_order' => '最后订单时间',
+            ],
+        ],
+    ],
+    'product_risk_profit' => [
+        'table' => [
+            'sales' => '订单笔数', 'paypal_description_mismatch' => 'PayPal 物品与描述不符占比',
+            'product_info' => '产品信息', 'basic_info' => '基础信息', 'paypal_fee_info' => 'PayPal 费用信息',
+            'card_fee_info' => '信用卡费用信息',
+        ],
+        'compact' => [
+            'pcl' => 'PCL', 'match_status' => '通途状态', 'order_count' => '订单笔数', 'order_unit' => '笔', 'sales_amount' => '销售额',
+            'refund_rate' => '退款率', 'dispute_rate' => '纠纷率', 'description_mismatch_rate' => '物品与描述不符占比率',
+            'initial_dispute_rate' => '一次性＋首次争议率', 'delivered_dispute_rate' => '首次付款已签收纠纷率',
+            'initial_refund_amount_rate' => '首次付款金额退款率',
+        ],
+        'sort' => ['product_name' => '产品名称'],
+        'formulas' => ['paypal_description_mismatch_rate' => '物品与描述不符争议金额 ÷ PayPal 总争议金额 × 100%'],
+        'detail' => ['overview' => ['first_order_at' => '首次订单时间', 'last_order_at' => '最后订单时间', 'operator' => '运营名']],
     ],
 ]);

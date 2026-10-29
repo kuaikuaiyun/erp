@@ -225,8 +225,8 @@ class PayPalRiskAnalyticsService
         $start = $from !== ''
             ? Carbon::parse($from, self::REPORT_TIMEZONE)->startOfDay()
             : $end->copy()->subDays(29)->startOfDay();
-        if ($start->diffInDays($end) > 29) {
-            $start = $end->copy()->subDays(29)->startOfDay();
+        if ($start->diffInDays($end) > 30) {
+            $start = $end->copy()->subDays(30)->startOfDay();
         }
         $trend = [];
         for ($cursor = $start->copy(); $cursor->lessThanOrEqualTo($end); $cursor->addDay()) {
@@ -241,16 +241,24 @@ class PayPalRiskAnalyticsService
                 $trend[$key]['orders']++;
             }
         }
+        $seenDailyRefunds = [];
         foreach ($this->refundRows($account, $filters) as $refund) {
             $key = $this->dateKey($refund['happened_at'] ?? null);
-            if ($key && isset($trend[$key])) {
+            $identity = trim((string) ($refund['payment_transaction_id'] ?? '')) ?: (string) ($refund['refund_id'] ?? '');
+            $dailyIdentity = $key.'|'.$identity;
+            if ($key && isset($trend[$key]) && !isset($seenDailyRefunds[$dailyIdentity])) {
                 $trend[$key]['refunds']++;
+                $seenDailyRefunds[$dailyIdentity] = true;
             }
         }
+        $seenDailyDisputes = [];
         foreach ($this->qualifyingDisputeQueryForPayments($account, $filters, $payments->pluck('payment_transaction_id')->all())->get() as $dispute) {
             $key = $dispute->dispute_created_at?->timezone(self::REPORT_TIMEZONE)->format('Y-m-d');
-            if ($key && isset($trend[$key])) {
+            $identity = trim((string) ($dispute->disputed_transaction_id ?? '')) ?: (string) $dispute->getKey();
+            $dailyIdentity = $key.'|'.$identity;
+            if ($key && isset($trend[$key]) && !isset($seenDailyDisputes[$dailyIdentity])) {
                 $trend[$key]['disputes']++;
+                $seenDailyDisputes[$dailyIdentity] = true;
             }
         }
 
@@ -394,6 +402,7 @@ class PayPalRiskAnalyticsService
             'order_id' => $order?->getKey(),
             'order_detail_url' => $order ? route('logistics.orders.detail', $order) : null,
             'refund_id' => (string) $refund->refund_transaction_id,
+            'payment_transaction_id' => (string) $refund->original_transaction_id,
             'match_status' => $matched ? __('logistics.paypal_risk.detail.matched') : __('logistics.paypal_risk.detail.unmatched'),
             'order_number' => (string) ($order?->shopify_order_number ?: '-'),
             'bill_numbers' => $this->orderBillNumbers($order),

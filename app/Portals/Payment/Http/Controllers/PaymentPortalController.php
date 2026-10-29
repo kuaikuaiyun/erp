@@ -15,6 +15,7 @@ use App\Portals\Payment\PaymentProductAlertExportService;
 use App\Portals\Payment\PaymentProductAlertService;
 use App\Portals\Payment\PaymentProductRiskService;
 use App\Portals\Payment\PaymentWorkbenchService;
+use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -120,6 +121,7 @@ class PaymentPortalController extends Controller
             'report_year' => ['nullable', 'integer', 'min:2000', 'max:'.now('America/Los_Angeles')->year],
             'report_dimension' => ['nullable', Rule::in(['payment', 'event'])],
             'report_month' => ['nullable', 'integer', 'between:1,12'],
+            'overview_month' => ['nullable', 'date_format:Y-m'],
         ]);
         $today = now('Asia/Shanghai');
         $tab = (string) ($validated['tab'] ?? 'overview');
@@ -137,6 +139,20 @@ class PaymentPortalController extends Controller
         $periodStart = (string) ($validated['period_start'] ?? $today->copy()->subDays(29)->format('Y-m-d'));
         $periodEnd = (string) ($validated['period_end'] ?? $today->format('Y-m-d'));
 
+        if ($tab === 'overview') {
+            $now = now('America/Los_Angeles');
+            $month = isset($validated['overview_month'])
+                ? Carbon::createFromFormat('Y-m', (string) $validated['overview_month'], 'America/Los_Angeles')->startOfMonth()
+                : $now->copy()->startOfMonth();
+            if ($month->greaterThan($now->copy()->startOfMonth())) {
+                $month = $now->copy()->startOfMonth();
+            }
+            $dateMode = 'event';
+            $periodStart = $month->format('Y-m-d');
+            $periodEnd = $month->isSameMonth($now) ? $now->format('Y-m-d') : $month->copy()->endOfMonth()->format('Y-m-d');
+            $validated['overview_month'] = $month->format('Y-m');
+        }
+
         return response()->json($this->accountRisk->detail(
             $account,
             [
@@ -145,6 +161,7 @@ class PaymentPortalController extends Controller
                 'event_date_from' => $dateMode === 'event' ? $periodStart : '',
                 'event_date_to' => $dateMode === 'event' ? $periodEnd : '',
                 'date_mode' => $dateMode,
+                'overview_month' => (string) ($validated['overview_month'] ?? ''),
             ],
             $tab,
             (int) ($validated['page'] ?? 1),
@@ -289,21 +306,38 @@ class PaymentPortalController extends Controller
         );
     }
 
-    public function updateProductAlertStatus(Request $request, string $alert): RedirectResponse
+    public function exportProductAlerts(Request $request): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        return $this->productAlertExport->downloadAlerts(
+            $this->productAlerts->exportAlertRows(),
+        );
+    }
+
+    public function updateProductAlertStatus(Request $request, string $alert): Response
     {
         $context = $this->portalContext($request);
         if ($context instanceof Response) {
             return redirect()->route('payment.product-alerts.index');
         }
-        $record = $this->productAlerts->find($alert);
-        abort_if($record === null, 404);
+        abort_unless($this->productAlerts->hasAlert($alert), 404);
         $request->merge(['remark' => trim((string) $request->input('remark'))]);
         $validated = $request->validate([
-            'status' => ['required', Rule::in(['pending', 'stopped', 'observing', 'backend_optimized', 'other', 'completed'])],
+            'status' => ['required', Rule::in(['stopped', 'observing', 'backend_optimized', 'other', 'completed'])],
             'remark' => ['required', 'string', 'max:1000'],
         ]);
         $status = (string) $validated['status'];
         $this->productAlerts->updateStatus($alert, $status, 'process', (string) $validated['remark'], $context['user']);
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'message' => __('payment.product_alerts.status_update.success'),
+            ]);
+        }
 
         return redirect()->route('payment.product-alerts.index')
             ->with('success', __('payment.product_alerts.status_update.success'));
@@ -520,13 +554,14 @@ class PaymentPortalController extends Controller
     /** @return array<string,mixed> */
     private function productAlertFilters(Request $request): array
     {
-        $status = trim((string) $request->query('status', 'pending'));
-        $allowedStatuses = ['pending', 'stopped', 'observing', 'backend_optimized', 'other', 'completed'];
+        $flowStatus = trim((string) $request->query('flow_status', 'open'));
+        $processingStatus = trim((string) $request->query('processing_status', ''));
         $channel = trim((string) $request->query('channel', ''));
         $severity = trim((string) $request->query('severity', ''));
         $sample = trim((string) $request->query('sample', '50_500'));
         return [
-            'status' => in_array($status, $allowedStatuses, true) ? $status : 'pending',
+            'flow_status' => in_array($flowStatus, ['open', 'completed', 'all'], true) ? $flowStatus : 'open',
+            'processing_status' => in_array($processingStatus, ['pending', 'stopped', 'observing', 'backend_optimized', 'other', 'completed'], true) ? $processingStatus : '',
             'channel' => in_array($channel, ['paypal', 'credit_card'], true) ? $channel : '',
             'severity' => in_array($severity, ['warning', 'critical'], true) ? $severity : '',
             'sample' => in_array($sample, ['under_50', '50_500', 'over_500'], true) ? $sample : '50_500',

@@ -89,14 +89,24 @@
 
         var alertDetailModal = $('#payment-alert-detail-modal');
         var alertDetailRequest = null;
+        var alertDetailCache = {};
         function openAlertDetail(url) {
             if (!alertDetailModal.length || !url) return;
             alertDetailModal.modal('show');
+            var cached = alertDetailCache[url];
+            if (cached && cached.expires > Date.now()) {
+                if (alertDetailRequest) alertDetailRequest.abort();
+                alertDetailModal.find('[data-payment-alert-detail-loading], [data-payment-alert-detail-error]').prop('hidden', true);
+                alertDetailModal.find('[data-payment-alert-detail-body]').html(cached.html);
+                initFormulaTooltips(alertDetailModal);
+                return;
+            }
             alertDetailModal.find('[data-payment-alert-detail-loading]').prop('hidden', false);
             alertDetailModal.find('[data-payment-alert-detail-error]').prop('hidden', true);
             alertDetailModal.find('[data-payment-alert-detail-body]').empty();
             if (alertDetailRequest) alertDetailRequest.abort();
             alertDetailRequest = $.ajax({ url: url, dataType: 'html', headers: { 'X-Requested-With': 'XMLHttpRequest' } }).done(function (html) {
+                alertDetailCache[url] = { html: html, expires: Date.now() + 30000 };
                 alertDetailModal.find('[data-payment-alert-detail-body]').html(html);
                 initFormulaTooltips(alertDetailModal);
             }).fail(function (xhr, status) {
@@ -125,9 +135,34 @@
             var modal = $('#payment-alert-status-modal');
             var form = modal.find('[data-payment-alert-status-form]');
             form[0].reset();
+            var currentStatus = String(trigger.data('currentStatus') || 'pending');
+            form.find('[name="status"][value="' + currentStatus + '"]').prop('checked', true);
             form.attr('action', String(trigger.data('action') || ''));
             modal.find('[data-payment-alert-status-summary]').text(String(trigger.data('product') || '') + ' · ' + $.trim(trigger.text()));
             modal.modal('show');
+        });
+
+        page.on('submit', '[data-payment-alert-status-form]', function (event) {
+            event.preventDefault();
+            var form = $(this);
+            var submit = form.find('[type="submit"]');
+            if (submit.prop('disabled')) return;
+            submit.prop('disabled', true);
+            $.ajax({
+                url: String(form.attr('action') || ''),
+                method: 'POST',
+                data: form.serialize(),
+                dataType: 'json',
+                headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+            }).done(function () {
+                $('#payment-alert-status-modal').modal('hide');
+                window.location.reload();
+            }).fail(function (xhr) {
+                var message = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : (config.actionMessage || '');
+                notify('error', config.actionTitle || '', message);
+            }).always(function () {
+                submit.prop('disabled', false);
+            });
         });
 
         page.on('submit', '[data-payment-quick-search]', function (event) {
@@ -466,7 +501,11 @@
         var detailModal = $('#payment-account-detail-modal');
         if (detailModal.length && config.accountDetailUrl) {
             var detailText = config.accountDetail || {};
-            var detailState = { accountId: '', accountName: '', tab: 'overview', page: 1, perPage: 50, sort: '', direction: 'desc', request: null, disputeRows: [], reportYear: new Date().getFullYear(), reportDimension: 'payment', reportMonth: null };
+            function currentMonthValue() {
+                var now = new Date();
+                return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+            }
+            var detailState = { accountId: '', accountName: '', tab: 'overview', page: 1, perPage: 50, sort: '', direction: 'desc', request: null, cache: {}, disputeRows: [], reportYear: new Date().getFullYear(), reportDimension: 'payment', reportMonth: null, overviewMonth: currentMonthValue() };
             var paginationText = config.pagination || {};
             var detailColumns = {
                 overview: ['happened_at', 'type', 'order_number', 'store_name', 'amount', 'reason', 'status'],
@@ -517,14 +556,13 @@
                 return result;
             }
 
-            function overviewKpis(summary, exceptions) {
+            function overviewKpis(summary) {
                 var text = detailText.overview || {};
                 var formulas = detailText.formulas || {};
                 var kpis = [
                     ['disputes_recent', formatNumber(summary.dispute_order_count, 0), text.disputes_recent_note],
                     ['disputes_period', formatNumber(summary.overall_dispute_order_count, 0) + ' / ' + formatNumber(summary.overall_dispute_rate, 2) + '%', text.disputes_period_note],
-                    ['refunds', '$' + formatNumber(summary.refund_amount, 2) + ' / ' + formatNumber(summary.refund_amount_rate, 2) + '%', text.refunds_note],
-                    ['urgent', formatNumber(exceptions.length, 0), text.urgent_note]
+                    ['refunds', '$' + formatNumber(summary.refund_amount, 2) + ' / ' + formatNumber(summary.refund_amount_rate, 2) + '%', text.refunds_note]
                 ];
                 return '<div class="payment-detail-kpis">' + kpis.map(function (item, index) {
                     return '<article class="payment-detail-kpi payment-detail-kpi-' + index + '"><span>' + escapeHtml((text.kpis || {})[item[0]]) + formulaIcon(formulas[item[0]]) + '</span><strong>' + escapeHtml(item[1]) + '</strong><small>' + escapeHtml(item[2]) + '</small></article>';
@@ -566,32 +604,43 @@
                 if (!trend.length) {
                     return '<article class="payment-detail-panel payment-detail-trend"><h5>' + escapeHtml(text.title) + '</h5><div class="payment-detail-empty">' + escapeHtml(detailText.empty) + '</div></article>';
                 }
-                var width = 640;
-                var height = 150;
-                var max = Math.max.apply(null, trend.map(function (item) { return Math.max(Number(item.orders || 0), Number(item.refunds || 0), Number(item.disputes || 0)); }).concat([1]));
+                var width = Math.max(760, trend.length * 42);
+                var height = 210;
+                var left = 42;
+                var right = 16;
+                var top = 16;
+                var bottom = 32;
+                var plotWidth = width - left - right;
+                var plotHeight = height - top - bottom;
+                var rawMax = Math.max.apply(null, trend.map(function (item) { return Math.max(Number(item.refunds || 0), Number(item.disputes || 0)); }).concat([1]));
+                var max = rawMax <= 4 ? rawMax : Math.ceil(rawMax / 4) * 4;
+                function xAt(index) { return trend.length === 1 ? left + plotWidth / 2 : left + index * plotWidth / (trend.length - 1); }
+                function yAt(value) { return top + plotHeight - Number(value || 0) / max * plotHeight; }
                 function points(key) {
                     return trend.map(function (item, index) {
-                        var x = trend.length === 1 ? width / 2 : index * width / (trend.length - 1);
-                        var y = height - Number(item[key] || 0) / max * (height - 18) - 8;
-                        return x.toFixed(1) + ',' + y.toFixed(1);
+                        return xAt(index).toFixed(1) + ',' + yAt(item[key]).toFixed(1);
                     }).join(' ');
                 }
-                var labels = trend.filter(function (item, index) { return index === 0 || index === trend.length - 1 || index % Math.max(1, Math.ceil(trend.length / 6)) === 0; }).map(function (item) { return '<span>' + escapeHtml(item.label) + '</span>'; }).join('');
-                return '<article class="payment-detail-panel payment-detail-trend"><div class="payment-detail-panel-heading"><div><h5>' + escapeHtml(text.title) + '</h5><small>' + escapeHtml(text.note) + '</small></div><div class="payment-detail-legend"><span class="orders">' + escapeHtml(text.orders) + '</span><span class="refunds">' + escapeHtml(text.refunds) + '</span><span class="disputes">' + escapeHtml(text.disputes) + '</span></div></div><div class="payment-detail-chart"><svg viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="35" x2="640" y2="35"></line><line x1="0" y1="80" x2="640" y2="80"></line><line x1="0" y1="125" x2="640" y2="125"></line><polyline class="orders" points="' + points('orders') + '"></polyline><polyline class="refunds" points="' + points('refunds') + '"></polyline><polyline class="disputes" points="' + points('disputes') + '"></polyline></svg><div class="payment-detail-chart-labels">' + labels + '</div></div></article>';
-            }
-
-            function overviewTasks(exceptions) {
-                var text = (detailText.overview || {}).tasks || {};
-                var rows = exceptions.slice(0, 2);
-                return '<article class="payment-detail-panel payment-detail-tasks"><h5>' + escapeHtml(text.title) + '</h5>' + (rows.length ? rows.map(function (row, index) {
-                    return '<div class="payment-detail-task task-' + index + '"><strong>' + escapeHtml(row.type || text.exception) + '</strong><span>' + escapeHtml([row.order_number, row.status].filter(Boolean).join(' · ')) + '</span></div>';
-                }).join('') : '<div class="payment-detail-task task-empty"><strong>' + escapeHtml(text.no_tasks) + '</strong><span>' + escapeHtml(text.no_tasks_note) + '</span></div>') + '</article>';
+                var grid = [0, 1, 2, 3, 4].map(function (tick) {
+                    var value = max * tick / 4;
+                    var y = yAt(value);
+                    return '<line x1="' + left + '" y1="' + y + '" x2="' + (width - right) + '" y2="' + y + '"></line><text class="payment-trend-y-label" x="' + (left - 8) + '" y="' + (y + 3) + '">' + escapeHtml(formatNumber(value, value % 1 ? 1 : 0)) + '</text>';
+                }).join('');
+                var labels = trend.map(function (item, index) { return '<text class="payment-trend-x-label" x="' + xAt(index) + '" y="' + (height - 8) + '">' + escapeHtml(item.label) + '</text>'; }).join('');
+                var pointsHtml = trend.map(function (item, index) {
+                    var data = ' data-payment-trend-point data-date="' + escapeHtml(item.label) + '" data-refunds="' + Number(item.refunds || 0) + '" data-disputes="' + Number(item.disputes || 0) + '"';
+                    return '<circle class="refunds" cx="' + xAt(index) + '" cy="' + yAt(item.refunds) + '" r="4"' + data + '></circle><circle class="disputes" cx="' + xAt(index) + '" cy="' + yAt(item.disputes) + '" r="4"' + data + '></circle>';
+                }).join('');
+                return '<article class="payment-detail-panel payment-detail-trend"><div class="payment-detail-panel-heading"><div><h5>' + escapeHtml(text.title) + '</h5><small>' + escapeHtml(text.note) + '</small></div><div class="payment-detail-legend"><span class="refunds">' + escapeHtml(text.refunds) + '</span><span class="disputes">' + escapeHtml(text.disputes) + '</span></div></div><div class="payment-detail-chart-scroll"><div class="payment-detail-chart" style="width:' + width + 'px"><svg viewBox="0 0 ' + width + ' ' + height + '" role="img">' + grid + '<polyline class="refunds" points="' + points('refunds') + '"></polyline><polyline class="disputes" points="' + points('disputes') + '"></polyline>' + pointsHtml + labels + '</svg></div></div><div class="payment-trend-tooltip" data-payment-trend-tooltip hidden></div></article>';
             }
 
             function renderOverview(payload) {
                 var summary = payload.summary || {};
                 var exceptions = payload.exceptions || [];
-                return overviewKpis(summary, exceptions) + '<div class="payment-detail-overview-two">' + overviewFunds(summary) + overviewRisk(summary, exceptions) + '</div><div class="payment-detail-overview-bottom">' + trendChart(payload.trend || []) + overviewTasks(exceptions) + '</div>';
+                detailState.overviewMonth = String(payload.overview_month || detailState.overviewMonth || currentMonthValue());
+                var text = detailText.overview || {};
+                var toolbar = '<div class="payment-overview-toolbar"><label><span>' + escapeHtml((text.month_filter || {}).label) + '</span><input type="month" class="form-control" max="' + currentMonthValue() + '" value="' + escapeHtml(detailState.overviewMonth) + '" data-payment-overview-month></label><small>' + escapeHtml((text.month_filter || {}).note) + '</small></div>';
+                return toolbar + overviewKpis(summary) + '<div class="payment-detail-overview-two">' + overviewFunds(summary) + overviewRisk(summary, exceptions) + '</div>' + trendChart(payload.trend || []);
             }
 
             function renderMonthlyReport(payload) {
@@ -857,6 +906,19 @@
                 target.html('<label><span>' + escapeHtml(paginationText.per_page) + '</span><select class="form-control input-sm" data-payment-detail-per-page><option value="50" ' + (detailState.perPage === 50 ? 'selected' : '') + '>50</option><option value="100" ' + (detailState.perPage === 100 ? 'selected' : '') + '>100</option></select></label><button type="button" class="btn btn-default btn-sm" data-payment-detail-page="' + (meta.current_page - 1) + '" ' + (meta.current_page <= 1 ? 'disabled' : '') + '>' + escapeHtml(detailText.previous) + '</button><span>' + escapeHtml(status) + '</span><button type="button" class="btn btn-default btn-sm" data-payment-detail-page="' + (meta.current_page + 1) + '" ' + (meta.current_page >= meta.last_page ? 'disabled' : '') + '>' + escapeHtml(detailText.next) + '</button><label><span>' + escapeHtml(paginationText.jump_to) + '</span><input class="form-control input-sm payment-page-jump-input" type="number" min="1" max="' + meta.last_page + '" placeholder="' + escapeHtml(paginationText.page_placeholder) + '" autocomplete="off" data-payment-detail-jump-input></label><button type="button" class="btn btn-primary btn-sm" data-payment-detail-jump>' + escapeHtml(paginationText.jump) + '</button>');
             }
 
+            function renderDetailPayload(payload) {
+                var isDashboard = detailState.tab === 'overview' || detailState.tab === 'monthly_report' || detailState.tab === 'order_analysis' || detailState.tab === 'funding';
+                var rows = isDashboard ? [] : ((payload.rows || {}).data || []);
+                detailState.disputeRows = detailState.tab === 'disputes' ? rows : [];
+                detailModal.find('[data-payment-detail-summary]').prop('hidden', isDashboard);
+                renderSummary(payload.summary || {});
+                detailModal.find('[data-payment-detail-body]').toggleClass('payment-detail-dashboard-body', isDashboard).removeClass('payment-detail-dispute-body').html(
+                    detailState.tab === 'overview' ? renderOverview(payload) : (detailState.tab === 'monthly_report' ? renderMonthlyReport(payload) : (detailState.tab === 'order_analysis' ? renderOrderAnalysis(payload.order_analysis || {}, payload.summary || {}) : (detailState.tab === 'funding' ? renderFunding(payload.summary || {}) : renderTable(rows, detailState.tab))))
+                );
+                renderPagination(isDashboard ? null : (payload.rows || {}).meta);
+                initFormulaTooltips(detailModal);
+            }
+
             function loadDetail() {
                 var requestTab = detailState.tab === 'funding' ? 'overview' : detailState.tab;
                 var query = {
@@ -879,32 +941,35 @@
                     query.report_dimension = detailState.reportDimension;
                     if (detailState.reportMonth) query.report_month = detailState.reportMonth;
                 }
+                if (detailState.tab === 'overview') query.overview_month = detailState.overviewMonth;
                 var url = String(config.accountDetailUrl).replace('__ACCOUNT__', encodeURIComponent(detailState.accountId));
+                var cacheKey = url + '?' + $.param(query);
+                var cached = detailState.cache[cacheKey];
+                if (cached && cached.expires > Date.now()) {
+                    if (detailState.request) detailState.request.abort();
+                    detailModal.find('[data-payment-detail-loading], [data-payment-detail-error]').prop('hidden', true);
+                    renderDetailPayload(cached.payload);
+                    return;
+                }
                 detailModal.find('[data-payment-detail-loading]').prop('hidden', false);
                 detailModal.find('[data-payment-detail-error]').prop('hidden', true);
                 detailModal.find('[data-payment-detail-body], [data-payment-detail-pagination]').empty();
                 if (detailState.request) {
                     detailState.request.abort();
                 }
-                detailState.request = $.getJSON(url, query).done(function (payload) {
-                    var isDashboard = detailState.tab === 'overview' || detailState.tab === 'monthly_report' || detailState.tab === 'order_analysis' || detailState.tab === 'funding';
-                    var rows = isDashboard ? [] : ((payload.rows || {}).data || []);
-                    detailState.disputeRows = detailState.tab === 'disputes' ? rows : [];
-                    detailModal.find('[data-payment-detail-summary]').prop('hidden', isDashboard);
-                    renderSummary(payload.summary || {});
-                    detailModal.find('[data-payment-detail-body]').toggleClass('payment-detail-dashboard-body', isDashboard).removeClass('payment-detail-dispute-body').html(
-                        detailState.tab === 'overview' ? renderOverview(payload) : (detailState.tab === 'monthly_report' ? renderMonthlyReport(payload) : (detailState.tab === 'order_analysis' ? renderOrderAnalysis(payload.order_analysis || {}, payload.summary || {}) : (detailState.tab === 'funding' ? renderFunding(payload.summary || {}) : renderTable(rows, detailState.tab))))
-                    );
-                    renderPagination(isDashboard ? null : (payload.rows || {}).meta);
-                    initFormulaTooltips(detailModal);
+                var request = $.getJSON(url, query).done(function (payload) {
+                    detailState.cache[cacheKey] = { payload: payload, expires: Date.now() + 30000 };
+                    renderDetailPayload(payload);
                 }).fail(function (xhr, status) {
                     if (status !== 'abort') {
                         detailModal.find('[data-payment-detail-error]').text(detailText.load_failed || '').prop('hidden', false);
                     }
                 }).always(function () {
+                    if (detailState.request !== request) return;
                     detailModal.find('[data-payment-detail-loading]').prop('hidden', true);
                     detailState.request = null;
                 });
+                detailState.request = request;
             }
 
             page.on('click', '[data-payment-account-detail]', function () {
@@ -915,6 +980,7 @@
                 detailState.sort = '';
                 detailState.direction = 'desc';
                 detailState.reportMonth = null;
+                detailState.overviewMonth = currentMonthValue();
                 detailModal.find('[data-payment-detail-tab]').removeClass('active').attr('aria-selected', 'false').filter('[data-payment-detail-tab="overview"]').addClass('active').attr('aria-selected', 'true');
                 detailModal.find('[data-payment-detail-filter]').prop('hidden', true).get(0).reset();
                 renderDetailFilters();
@@ -959,6 +1025,12 @@
             detailModal.on('change', '[data-payment-monthly-year]', function () { detailState.reportYear = Number($(this).val()) || new Date().getFullYear(); detailState.reportMonth = null; loadDetail(); });
             detailModal.on('click', '[data-payment-monthly-dimension]', function () { detailState.reportDimension = String($(this).data('paymentMonthlyDimension') || 'payment'); detailState.reportMonth = null; loadDetail(); });
             detailModal.on('click', '[data-payment-monthly-month]', function () { var month = Number($(this).data('paymentMonthlyMonth')) || null; detailState.reportMonth = detailState.reportMonth === month ? null : month; loadDetail(); });
+            detailModal.on('change', '[data-payment-overview-month]', function () { detailState.overviewMonth = String($(this).val() || currentMonthValue()); loadDetail(); });
+            detailModal.on('mouseenter focus', '[data-payment-trend-point]', function () {
+                var point = $(this);
+                var text = (detailText.overview || {}).trend || {};
+                detailModal.find('[data-payment-trend-tooltip]').prop('hidden', false).html('<strong>' + escapeHtml(point.data('date')) + '</strong><span>' + escapeHtml(text.refunds) + '：' + escapeHtml(point.data('refunds')) + '</span><span>' + escapeHtml(text.disputes) + '：' + escapeHtml(point.data('disputes')) + '</span>');
+            }).on('mouseleave blur', '[data-payment-trend-point]', function () { detailModal.find('[data-payment-trend-tooltip]').prop('hidden', true); });
             detailModal.on('click', '[data-payment-monthly-export]', function () {
                 var button = $(this);
                 var text = detailText.monthly_report || {};
@@ -1016,7 +1088,7 @@
         });
         if (productModal.length && config.productDetailUrl) {
             var productText = config.productDetail || {};
-            var productState = { id: '', name: '', tab: 'overview', page: 1, perPage: 50, sort: '', direction: 'desc', request: null, refundRows: [], filterOptions: {} };
+            var productState = { id: '', name: '', tab: 'overview', page: 1, perPage: 50, sort: '', direction: 'desc', request: null, cache: {}, refundRows: [], filterOptions: {} };
             var productPaginationText = config.pagination || {};
             var productColumns = {
                 orders: ['shopify_order_number', 'store', 'tongtu_product_codes', 'tongtu_skus', 'shopify_skus', 'bill_number', 'payment_method', 'quantity', 'revenue', 'paypal_refund', 'credit_card_refund', 'paypal_dispute_count', 'tracking_number', 'logistics_status', 'order_created_at'],
@@ -1040,16 +1112,28 @@
             function renderProductOverview(product) {
                 var modules = product.overview_modules || {};
                 var labels = productText.overview || {};
+                var relatedStores = product.stores || [];
+                var storeTags = relatedStores.length ? relatedStores.map(function (store) {
+                    return '<span class="payment-product-store-tag">' + pEscape(store) + '</span>';
+                }).join('') : '<span class="payment-product-store-empty-tag">' + pEscape(labels.no_related_store) + '</span>';
                 function metric(label, value, note) {
-                    return '<div class="payment-product-metric"><dt>' + pEscape(label) + formulaIcon(note) + '</dt><dd>' + pEscape(value) + '</dd></div>';
+                    return '<div class="payment-product-metric' + (note ? ' has-formula' : '') + '"><dt>' + pEscape(label) + formulaIcon(note) + '</dt><dd>' + pEscape(value) + '</dd>' + (note ? '<small>' + pEscape(note) + '</small>' : '') + '</div>';
                 }
                 function riskSummary(title, summary, tone) {
                     summary = summary || {};
                     var reasons = summary.reason_breakdown || [];
                     var totals = replaceProductTokens(labels.summary_totals, { orders: pNumber(summary.order_count), records: pNumber(summary.record_count), amount: pMoney(summary.amount) });
-                    return '<section class="payment-product-risk-box is-' + tone + '"><h5>' + pEscape(title) + '</h5><strong>' + pEscape(totals) + '</strong>' + (reasons.length ? reasons.slice(0, 5).map(function (reason) { return '<p><span>' + pEscape(reason.reason || reason.name) + '</span><b>' + pEscape(pNumber(reason.count || reason.record_count)) + '</b></p>'; }).join('') : '<small>' + pEscape(labels.no_risk_record) + '</small>') + '</section>';
+                    var reasonRows = reasons.length ? '<h6>' + pEscape(labels.reason_breakdown) + '</h6><ul>' + reasons.map(function (reason) {
+                        return '<li>' + pEscape(replaceProductTokens(labels.reason_row, {
+                            reason: reason.reason || reason.name || '-',
+                            count: pNumber(reason.count || reason.record_count),
+                            ratio: pRate(reason.ratio),
+                            amount: pMoney(reason.amount)
+                        })) + '</li>';
+                    }).join('') + '</ul><small class="payment-product-risk-formula">' + pEscape(labels.reason_formula) + '</small>' : '<small class="payment-product-risk-empty">' + pEscape(labels.no_risk_record) + '</small>';
+                    return '<section class="payment-product-risk-box is-' + tone + '"><h5>' + pEscape(title) + '</h5><strong>' + pEscape(totals) + '</strong>' + reasonRows + '</section>';
                 }
-                return '<div class="payment-product-detail-identity">' + (product.image_url ? '<img src="' + pEscape(product.image_url) + '" alt="">' : '<span><i class="fa fa-cube"></i></span>') + '<div><h3>' + pEscape(product.name) + '</h3><p>' + pEscape(product.product_code || product.sku) + '</p><small>' + pEscape((product.stores || []).join('、')) + '</small></div></div><div class="payment-product-module-grid">' + ['overall', 'paypal', 'credit_card'].map(function (key) {
+                return '<div class="payment-product-detail-identity">' + (product.image_url ? '<img src="' + pEscape(product.image_url) + '" alt="">' : '<span><i class="fa fa-cube"></i></span>') + '<div class="payment-product-identity-fields"><div class="payment-product-identity-field"><b>' + pEscape(labels.product_name) + '：</b><strong>' + pEscape(product.name) + '</strong></div><div class="payment-product-identity-field"><b>' + pEscape(labels.product_pcl) + '：</b><span>' + pEscape(product.product_code || product.sku) + '</span></div><div class="payment-product-identity-field payment-product-identity-stores"><b>' + pEscape(labels.related_stores) + '：</b><span class="payment-product-store-tags">' + storeTags + '</span></div></div></div><div class="payment-product-module-grid">' + ['overall', 'paypal', 'credit_card'].map(function (key) {
                     var module = modules[key] || {};
                     var metrics = metric(labels.unit_count, pNumber(module.unit_count)) + metric(labels.order_count, pNumber(module.order_count)) + metric(labels.received_amount, pMoney(module.received_amount)) + metric(labels.refund_amount, pMoney(module.refund_amount));
                     metrics += metric(labels.refund_rate, pRate(module.refund_rate), replaceProductTokens(labels.refund_formula, { refund: pMoney(module.refund_amount), received: pMoney(module.received_amount) }));
@@ -1064,7 +1148,7 @@
                     metrics += metric(labels.delivery_rate, pRate(module.delivery_rate), replaceProductTokens(labels.delivery_formula, { count: pNumber(module.delivery_count), shipped: pNumber(module.shipping_count) }));
                     var summaries = key === 'credit_card' ? riskSummary(labels.warning_summary, module.alert_record_summary, 'warning') + riskSummary(labels.card_dispute_summary, module.dispute_record_summary, 'danger') : riskSummary(labels.paypal_summary, { order_count: module.dispute_order_count, record_count: module.dispute_count, amount: module.dispute_amount, reason_breakdown: module.dispute_reason_breakdown }, 'danger');
                     return '<article class="payment-product-channel-panel payment-product-channel-' + key + '"><h4>' + pEscape(labels[key]) + '</h4><dl>' + metrics + '</dl><div class="payment-product-risk-boxes">' + summaries + '</div></article>';
-                }).join('') + '</div><div class="payment-product-store-distribution"><h4>' + pEscape(labels.store_distribution) + '</h4>' + (product.store_order_distribution || []).map(function (store) { return '<div><span>' + pEscape(store.name) + '</span><strong>' + pEscape(pNumber(store.order_count)) + '</strong></div>'; }).join('') + '</div>';
+                }).join('') + '</div><section class="payment-product-store-distribution"><h4>' + pEscape(labels.store_distribution) + '</h4><p class="payment-product-order-range"><span><b>' + pEscape(labels.first_order_at) + '</b>' + pEscape(product.first_order_at) + '</span><span><b>' + pEscape(labels.last_order_at) + '</b>' + pEscape(product.last_order_at) + '</span></p><div class="table-responsive"><table class="payment-product-store-table"><thead><tr><th>' + pEscape(labels.store) + '</th><th>' + pEscape(labels.operator) + '</th><th>' + pEscape(labels.order_count) + '</th><th>' + pEscape(labels.first_order_at) + '</th><th>' + pEscape(labels.last_order_at) + '</th></tr></thead><tbody>' + ((product.store_order_distribution || []).length ? (product.store_order_distribution || []).map(function (store) { return '<tr><td><strong>' + pEscape(store.name) + '</strong></td><td>' + pEscape(store.operator_name) + '</td><td><b>' + pEscape(pNumber(store.order_count)) + '</b></td><td>' + pEscape(store.first_order_at) + '</td><td>' + pEscape(store.last_order_at) + '</td></tr>'; }).join('') : '<tr><td colspan="5" class="payment-product-store-empty">' + pEscape(labels.no_store_record) + '</td></tr>') + '</tbody></table></div></section>';
             }
 
             function renderFirstRenewal(detail, channelRisk) {
@@ -1247,9 +1331,15 @@
                     date_from: page.find('[name="date_from"]').val(), date_to: page.find('[name="date_to"]').val(),
                     store: page.find('[name="store"]').val(), keyword: page.find('[name="keyword"]').val()
                 };
+                var cacheKey = String(config.productDetailUrl) + '?' + $.param(query);
+                var cached = productState.cache[cacheKey];
                 if (productState.request) {
                     productState.request.abort();
                     productState.request = null;
+                }
+                if (cached && cached.expires > Date.now()) {
+                    renderProductDetailPayload(cached.payload);
+                    return;
                 }
                 productModal.addClass('is-loading').attr('aria-busy', 'true');
                 productModal.find('[data-payment-product-loading]').prop('hidden', false);
@@ -1258,12 +1348,8 @@
                 var request = $.getJSON(config.productDetailUrl, query);
                 productState.request = request;
                 request.done(function (payload) {
-                    var dashboard = productState.tab === 'overview' || productState.tab === 'first_renewal';
-                    var content = productState.tab === 'overview' ? renderProductOverview(payload.product || {}) : (productState.tab === 'first_renewal' ? renderFirstRenewal(payload.detail || {}, payload.channel_risk || {}) : renderProductRows(payload.detail || {}, productState.tab));
-                    productModal.find('[data-payment-product-detail-body]').toggleClass('payment-detail-dashboard-body', dashboard).html(content);
-                    renderProductFilters((payload.detail || {}).options || {});
-                    renderProductPagination(dashboard ? null : (payload.detail || {}).pagination);
-                    initFormulaTooltips(productModal);
+                    productState.cache[cacheKey] = { payload: payload, expires: Date.now() + 30000 };
+                    renderProductDetailPayload(payload);
                 }).fail(function (xhr, status) {
                     if (status !== 'abort') productModal.find('[data-payment-product-error]').text(productText.load_failed || '').prop('hidden', false);
                 }).always(function () {
@@ -1272,6 +1358,17 @@
                     productModal.find('[data-payment-product-loading]').prop('hidden', true);
                     productState.request = null;
                 });
+            }
+
+            function renderProductDetailPayload(payload) {
+                var dashboard = productState.tab === 'overview' || productState.tab === 'first_renewal';
+                var content = productState.tab === 'overview' ? renderProductOverview(payload.product || {}) : (productState.tab === 'first_renewal' ? renderFirstRenewal(payload.detail || {}, payload.channel_risk || {}) : renderProductRows(payload.detail || {}, productState.tab));
+                productModal.removeClass('is-loading').attr('aria-busy', 'false');
+                productModal.find('[data-payment-product-loading], [data-payment-product-error]').prop('hidden', true);
+                productModal.find('[data-payment-product-detail-body]').toggleClass('payment-detail-dashboard-body', dashboard).html(content);
+                renderProductFilters((payload.detail || {}).options || {});
+                renderProductPagination(dashboard ? null : (payload.detail || {}).pagination);
+                initFormulaTooltips(productModal);
             }
 
             page.on('click keydown', '[data-payment-product-detail]', function (event) {
