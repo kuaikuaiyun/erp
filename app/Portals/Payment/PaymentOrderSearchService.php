@@ -147,7 +147,7 @@ class PaymentOrderSearchService
                 $operator->whereNull('orders.operator_name')
                     ->orWhere('orders.operator_name', 'not like', '%刷单%');
             })
-            ->whereRaw("LOWER(TRIM(COALESCE(orders.payment_gateway, ''))) = 'fintrixv2'")
+            ->where('orders.payment_gateway', 'like', '%FintrixV2%')
             ->selectRaw("CONCAT('card:', orders.id) as record_key, 'card' as channel, orders.id as source_id")
             ->selectRaw("COALESCE(orders.transaction_id, orders.payment_gateway_order_id, orders.bill_number, CONCAT('ORDER-', orders.id)) as transaction_id")
             ->selectRaw("COALESCE(orders.bill_number, '') as invoice_id")
@@ -176,7 +176,7 @@ class PaymentOrderSearchService
                 $operator->whereNull('operator_name')
                     ->orWhere('operator_name', 'not like', '%刷单%');
             })
-            ->whereRaw("LOWER(TRIM(COALESCE(payment_gateway, ''))) = 'fintrixv2'")
+            ->where('payment_gateway', 'like', '%FintrixV2%')
             ->where(fn ($query) => $query->whereNotNull('collection_account')->where('collection_account', '<>', '')->orWhere(fn ($nested) => $nested->whereNotNull('collection_account_email')->where('collection_account_email', '<>', '')))
             ->select(['collection_account', 'collection_account_email'])->distinct()->get()->map(function ($order): array {
                 $key = (string) ($order->collection_account_email ?: $order->collection_account ?: 'unknown');
