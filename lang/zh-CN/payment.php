@@ -233,7 +233,7 @@ $translations = [
         ],
     ],
     'payment_orders' => [
-        'page_title' => '支付订单检索', 'filters' => ['keyword' => '搜索订单 / 付款 / 案件 ID', 'account' => '收款账户', 'all_accounts' => '全部收款账户', 'channel' => '支付渠道', 'all_channels' => '全部支付渠道', 'deduction_type' => '扣款类型', 'all_deduction_types' => '全部扣款类型', 'success_period' => '成功付款期', 'accounts' => ['merchant_a' => '商户 A', 'merchant_b' => '商户 B', 'merchant_c' => '商户 C'], 'channels' => ['paypal' => 'PayPal', 'card' => '信用卡'], 'deduction_types' => ['renewal' => '续费', 'subscription' => '订阅首扣', 'unmatched' => '待匹配']],
+        'page_title' => '支付订单检索', 'filters' => ['keyword' => '搜索订单 / 付款 / 案件 ID', 'payment_gateway' => '支付渠道', 'all_payment_gateways' => '请选择支付渠道', 'deduction_type' => '扣款类型', 'all_deduction_types' => '全部扣款类型', 'success_period' => '成功付款期', 'deduction_types' => ['renewal' => '续费', 'subscription' => '订阅首扣', 'unmatched' => '待匹配']],
         'kpis' => ['paid_orders' => '成功付款交易', 'paid_orders_note' => '当前授权筛选范围', 'received_amount' => '收款金额', 'received_amount_note' => '基准币 USD，可展开原币', 'risk_events' => '含风险事件', 'risk_events_note' => '交易去重，事件可多条', 'missing_orders' => '未关联订单', 'missing_orders_note' => '账户统计仍完整'], 'order_unit' => '笔', 'list_title' => '付款列表 · 点击交易进入原生详情',
         'table' => ['id' => '原付款 / 账单', 'channel' => '渠道 / 收款账户', 'store_order' => '店铺 / 订单', 'product' => '产品 / 扣款类型', 'amount' => '原币 / 基准币', 'status' => '付款 / 事件状态', 'time' => '通知 / 关联', 'action' => '操作'],
         'channels' => ['paypal_merchant_a' => 'PayPal / 商户 A', 'card_merchant_b' => '信用卡 / 商户 B', 'paypal_merchant_c' => 'PayPal / 商户 C'], 'products' => ['spray_renewal' => 'SPRAY / 续费 1', 'spray_subscription' => 'SPRAY / 订阅首扣', 'product_to_confirm' => '产品待归属'], 'store_orders' => ['order_pending_association' => '订单待关联'], 'statuses' => ['success_case' => '成功 / CASE-001', 'success_refund' => '成功 / 已退款', 'success_negotiation' => '成功 / 待议中', 'success_unmatched' => '成功 / 无事件'], 'times' => ['october_15_confirmed' => '10.15 / 已确认', 'october_16_confirmed' => '10.16 / 已确认', 'october_17_renewed' => '10.17 / 续新', 'october_18_pending_match' => '10.18 / 待匹配'], 'view_detail' => '查看详情',
@@ -688,11 +688,12 @@ return array_replace_recursive($translations, [
     'payment_orders' => [
         'filters' => [
             'keyword' => '搜索付款 / 订单 / 退款 / 纠纷', 'keyword_placeholder' => '输入支付流水、订单号、退款或纠纷编号',
-            'account' => '收款账户', 'all_accounts' => '全部收款账户', 'channel' => '支付渠道',
-            'all_channels' => '全部支付渠道', 'deduction_type' => '扣款类型',
-            'all_deduction_types' => '全部扣款类型', 'success_period' => '成功付款时间',
+            'payment_gateway' => '支付渠道', 'all_payment_gateways' => '请选择支付渠道', 'deduction_type' => '扣款类型',
+            'all_deduction_types' => '全部扣款类型', 'date_mode' => '时间口径',
+            'paid_date' => '付款时间', 'order_date' => '下单时间',
+            'success_period' => '成功付款时间', 'order_period' => '下单时间',
         ],
-        'channels' => ['paypal' => 'PayPal', 'card' => '信用卡'],
+        'channels' => ['paypal' => 'PayPal', 'fintrix' => 'Fintrix', 'card' => 'Fintrix'],
         'deduction_types' => ['one_time' => '一次性购买', 'subscription' => '订阅首次扣款', 'renewal' => '续费', 'unmatched' => '订单待关联'],
         'table' => ['transaction_id' => '原付款 / 流水', 'channel_account' => '渠道 / 收款账户', 'store_order' => '店铺 / 订单', 'product_type' => '产品 / 扣款类型', 'amount' => '原币 / 基准币', 'status' => '付款 / 事件状态', 'time_match' => '支付时间 / 关联', 'action' => '操作'],
         'unmatched' => '订单待关联', 'pending_product' => '产品待归属', 'paid' => '付款成功',

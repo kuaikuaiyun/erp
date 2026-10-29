@@ -486,9 +486,9 @@ class PaymentPortalController extends Controller
     {
         $validated = $request->validate([
             'keyword' => ['nullable', 'string', 'max:191'],
-            'account' => ['nullable', 'string', 'max:255'],
-            'channel' => ['nullable', Rule::in(['', 'paypal', 'card'])],
+            'payment_gateway' => ['nullable', 'string', 'max:100'],
             'deduction_type' => ['nullable', Rule::in(['', 'one_time', 'subscription', 'renewal', 'unmatched'])],
+            'date_mode' => ['nullable', Rule::in(['order', 'paid'])],
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
             'sort' => ['nullable', Rule::in(['', 'paid_at', 'amount', 'transaction_id', 'account', 'channel'])],
@@ -500,9 +500,9 @@ class PaymentPortalController extends Controller
 
         return [
             'keyword' => trim((string) ($validated['keyword'] ?? '')),
-            'account' => (string) ($validated['account'] ?? ''),
-            'channel' => (string) ($validated['channel'] ?? ''),
+            'payment_gateway' => trim((string) ($validated['payment_gateway'] ?? '')),
             'deduction_type' => (string) ($validated['deduction_type'] ?? ''),
+            'date_mode' => (string) ($validated['date_mode'] ?? 'paid'),
             'date_from' => (string) ($validated['date_from'] ?? $today->copy()->subDays(29)->format('Y-m-d')),
             'date_to' => (string) ($validated['date_to'] ?? $today->format('Y-m-d')),
             'sort' => (string) ($validated['sort'] ?? 'paid_at'),
