@@ -33,7 +33,7 @@ class AbnormalSkuController extends Controller
             'original_page' => ['nullable', 'integer', 'min:1'],
             'per_page' => ['nullable', 'integer', Rule::in([20, 50, 100])],
         ]);
-        $date = (string) ($validated['report_date'] ?? now('Asia/Shanghai')->format('Y-m-d'));
+        $date = (string) ($validated['report_date'] ?? now(OperationReportMetricsService::REPORT_TIMEZONE)->format('Y-m-d'));
         $perPage = (int) ($validated['per_page'] ?? 20);
 
         $missing = $this->paginate(

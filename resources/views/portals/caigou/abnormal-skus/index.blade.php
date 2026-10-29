@@ -13,7 +13,7 @@
 <section class="content">
     <div class="filter-card">
         <form method="get" class="form-inline" action="{{ route('caigou.abnormal-skus.index') }}">
-            <div class="form-group"><label>原始SKU统计日期</label> <input class="form-control input-sm" type="date" name="report_date" value="{{ $reportDate }}"></div>
+            <div class="form-group"><label>原始SKU统计日期（UTC-4）</label> <input class="form-control input-sm" type="date" name="report_date" value="{{ $reportDate }}"></div>
             <div class="form-group" style="margin-left:10px"><label>每页</label> <select class="form-control input-sm" name="per_page">@foreach([20,50,100] as $size)<option value="{{ $size }}" @selected($perPage===$size)>{{ $size }}条</option>@endforeach</select></div>
             <button class="btn btn-primary btn-sm" style="margin-left:8px"><i class="fa fa-search"></i> 查询</button>
             <a class="btn btn-default btn-sm" href="{{ route('caigou.abnormal-skus.index') }}">今天</a>

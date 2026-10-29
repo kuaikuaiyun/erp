@@ -23,7 +23,7 @@
 
     <div class="box"><div class="box-body">
         <form class="op-toolbar" method="get" action="{{ route('operation.reports.index') }}">
-            <div class="form-group"><label>报表日期</label><input class="form-control input-sm" type="date" name="report_date" value="{{ $reportDate }}"></div>
+            <div class="form-group"><label>报表日期（UTC-4）</label><input class="form-control input-sm" type="date" name="report_date" value="{{ $reportDate }}"></div>
             @if($isBoss)<div class="form-group"><label>填报运营身份</label><select class="form-control input-sm" name="operator_user_id">@foreach($operatorOptions as $option)<option value="{{ $option->id }}" @selected($selectedOperator->id === $option->id)>{{ $option->name ?: $option->username }}</option>@endforeach</select></div>@endif
             <button class="btn btn-primary btn-sm"><i class="fa fa-search"></i> 加载数据</button>
             <span>当前运营：<strong>{{ $selectedOperator->name ?: $selectedOperator->username }}</strong></span>
@@ -47,7 +47,7 @@
         <div class="op-kpi"><span>交易退货费</span><strong>${{ number_format($metricTotals['first_return_fee'],2) }}</strong></div>
     </div>
 
-    <div class="box"><div class="box-header with-border"><h3 class="box-title op-section-title">营业额数据</h3><p class="op-help">采购费($)＝采购价(CNY) × 数量 ÷ 6.5；运费($)＝（SKU 总重量 ÷ 1000 × 80 ＋ 20）÷ 6.5；交易退货费＝首单营业额 × 12%。</p></div>
+    <div class="box"><div class="box-header with-border"><h3 class="box-title op-section-title">营业额数据</h3><p class="op-help">订单按固定 UTC-4 时区的下单日期统计（不区分夏令时）；每单采购费＝采购价(CNY) × 数量 ÷ 6.5；每单运费＝（每单SKU重量 ÷ 1000 × 80 ＋ 20）÷ 6.5；交易退货费＝首单营业额 × 12%。</p></div>
         <div class="box-body no-padding op-table-wrap"><table class="table table-bordered table-hover op-table">
             <thead><tr><th>日期</th><th>人名</th><th>店铺域名</th><th>媒体</th><th class="first">首单订阅单量</th><th class="first">首单订阅营业额($)</th><th class="first">首单普通单量</th><th class="first">首单普通营业额($)</th><th class="first">首单合计单量</th><th class="first">首单合计营业额($)</th><th class="cost">首单总采购费($)</th><th class="cost">首单总运费</th><th class="cost">首单交易退货费($)</th><th class="renew">续费单量</th><th class="renew">续费营业额($)</th><th class="renew">续费费用($)</th><th>总单量</th><th>总营业额($)</th></tr></thead>
             <tbody>@forelse($metricRows as $row)<tr>

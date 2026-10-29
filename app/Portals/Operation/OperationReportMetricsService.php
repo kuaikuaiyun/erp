@@ -12,6 +12,9 @@ class OperationReportMetricsService
 {
     private const CNY_PER_USD = 6.5;
 
+    /** 运营业绩按固定 UTC-4 统计，不跟随夏令时变化。 */
+    public const REPORT_TIMEZONE = '-04:00';
+
     /** @return list<array{sku:string,product_name:string,missing_fields:list<string>,item_count:int,quantity:float,latest_order_at:?string}> */
     public function missingGuideSkuSummary(): array
     {
@@ -74,7 +77,7 @@ class OperationReportMetricsService
                     'item_count' => (int) $row->item_count,
                     'quantity' => (float) $row->total_quantity,
                     'latest_order_at' => $row->latest_order_at
-                        ? Carbon::parse($row->latest_order_at, 'UTC')->timezone('Asia/Shanghai')->format('Y-m-d H:i:s')
+                        ? Carbon::parse($row->latest_order_at, 'UTC')->timezone(self::REPORT_TIMEZONE)->format('Y-m-d H:i:s')
                         : null,
                 ];
             })
@@ -86,8 +89,8 @@ class OperationReportMetricsService
     /** @return list<array{item_id:int,order_id:int,product_name:string,shop_domain:string,quantity:float,ordered_at:string}> */
     public function missingOriginalSkuSummary(string $date): array
     {
-        $start = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 00:00:00', 'Asia/Shanghai')->utc();
-        $end = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 23:59:59', 'Asia/Shanghai')->utc();
+        $start = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 00:00:00', self::REPORT_TIMEZONE)->utc();
+        $end = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 23:59:59', self::REPORT_TIMEZONE)->utc();
 
         $items = LogisticsOrderItem::query()
             ->join('logistics_orders', 'logistics_orders.id', '=', 'logistics_order_items.logistics_order_id')
@@ -131,7 +134,7 @@ class OperationReportMetricsService
                     'product_name' => trim((string) ($row->product_title ?: $row->tongtu_product_name ?: $row->variant_title)) ?: '未填写商品名称',
                     'shop_domain' => trim((string) ($row->managed_domain ?: $row->source_shop_domain ?: $row->store_name)) ?: '未知店铺',
                     'quantity' => (float) $row->quantity,
-                    'ordered_at' => Carbon::parse($row->order_created_at, 'UTC')->timezone('Asia/Shanghai')->format('Y-m-d H:i:s'),
+                    'ordered_at' => Carbon::parse($row->order_created_at, 'UTC')->timezone(self::REPORT_TIMEZONE)->format('Y-m-d H:i:s'),
                 ];
             })
             ->all();
@@ -140,8 +143,8 @@ class OperationReportMetricsService
     /** @return array{rows:list<array<string,mixed>>,totals:array<string,float|int>,warnings:list<string>} */
     public function build(string $date, int $operatorUserId): array
     {
-        $start = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 00:00:00', 'Asia/Shanghai')->utc();
-        $end = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 23:59:59', 'Asia/Shanghai')->utc();
+        $start = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 00:00:00', self::REPORT_TIMEZONE)->utc();
+        $end = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 23:59:59', self::REPORT_TIMEZONE)->utc();
         $orders = LogisticsOrder::query()
             ->with(['items', 'store'])
             ->whereBetween('order_created_at', [$start, $end])
