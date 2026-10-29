@@ -54,6 +54,7 @@ class LogisticsOrderController extends Controller
         $orders = $this->orderQuery($filters)
             ->with([
                 'items' => fn ($query) => $query->orderBy('id'),
+                'store:id,domain',
                 'paypalRefunds' => fn ($query) => $query->orderByDesc('refunded_at')->orderByDesc('id'),
                 'creditCardRefunds' => fn ($query) => $query->orderByDesc('last_imported_at')->orderByDesc('id'),
                 'paymentReferences' => fn ($query) => $query->orderByRaw("CASE reference_type WHEN 'primary' THEN 0 ELSE 1 END")->orderBy('id'),
@@ -585,7 +586,7 @@ class LogisticsOrderController extends Controller
             'buyer_phone', 'is_add_on', 'subscription_type', 'subscription_status', 'payment_method', 'payment_gateway',
             'collection_account_email', 'transaction_id', 'bill_number', 'logistics_status', 'refund_reason', 'data_status',
             'time_zone',
-            'source_shop_domain', 'store_assignment_status', 'refund_number', 'shopify_sku', 'shopify_sku_status',
+            'source_shop_domain', 'store_domain', 'product_name', 'store_assignment_status', 'refund_number', 'shopify_sku', 'shopify_sku_status',
         ];
         $filters = ['per_page' => $perPage];
         foreach ($fields as $field) {
@@ -630,6 +631,19 @@ class LogisticsOrderController extends Controller
         if ($filters['shopify_sku'] !== '') {
             $sku = $this->contains((string) $filters['shopify_sku']);
             $query->whereHas('items', fn (Builder $items) => $items->where('shopify_sku', 'like', $sku));
+        }
+        if ($filters['product_name'] !== '') {
+            $productName = $this->contains((string) $filters['product_name']);
+            $query->whereHas('items', fn (Builder $items) => $items
+                ->where(function (Builder $names) use ($productName): void {
+                    $names->where('product_title', 'like', $productName)
+                        ->orWhere('variant_title', 'like', $productName)
+                        ->orWhere('tongtu_product_name', 'like', $productName);
+                }));
+        }
+        if ($filters['store_domain'] !== '') {
+            $domain = $this->contains((string) $filters['store_domain']);
+            $query->whereHas('store', fn (Builder $store) => $store->where('domain', 'like', $domain));
         }
         if ($filters['shopify_sku_status'] === 'empty') {
             $query->whereHas('items', fn (Builder $items) => $items
