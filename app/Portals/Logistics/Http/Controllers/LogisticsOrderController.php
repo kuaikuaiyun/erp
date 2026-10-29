@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AssistantDomainStore;
 use App\Models\LogisticsOrder;
 use App\Models\LogisticsRefundDetail;
+use App\Models\LogisticsTongtuSkuMapping;
 use App\Models\LogisticsTrackingSyncBatch;
 use App\Models\LogisticsTrackingSyncTask;
 use App\Portal\Http\Controllers\PortalEntryController;
@@ -102,7 +103,7 @@ class LogisticsOrderController extends Controller
         }
 
         $order->load([
-            'items' => fn ($query) => $query->orderBy('id'),
+            'items' => fn ($query) => $query->with('skuMapping')->orderBy('id'),
             'paypalAccount',
             'paypalRefunds' => fn ($query) => $query->orderByDesc('refunded_at')->orderByDesc('id'),
             'paypalDisputes' => fn ($query) => $query->orderByDesc('dispute_created_at')->orderByDesc('id'),
@@ -110,6 +111,42 @@ class LogisticsOrderController extends Controller
             'creditCardRefunds' => fn ($query) => $query->orderByDesc('last_imported_at')->orderByDesc('id'),
             'logs' => fn ($query) => $query->latest('id')->limit(20),
         ]);
+
+        // Older order rows may contain a SKU but predate the mapping-id
+        // backfill. Resolve those mappings in one batch so detail values are
+        // visible immediately without requiring another full historical run.
+        $skuKeys = $order->items->flatMap(fn ($item): array => [
+            mb_strtolower(trim((string) $item->shopify_sku)),
+            mb_strtolower(trim((string) $item->tongtu_sku)),
+            mb_strtolower(trim((string) $item->tongtu_product_code)),
+        ])->filter()->unique()->values()->all();
+        if ($skuKeys !== []) {
+            $mappingBySku = LogisticsTongtuSkuMapping::query()
+                ->where(function ($query) use ($skuKeys): void {
+                    $query->whereIn(\Illuminate\Support\Facades\DB::raw('LOWER(TRIM(shopify_sku))'), $skuKeys)
+                        ->orWhereIn(\Illuminate\Support\Facades\DB::raw('LOWER(TRIM(tongtu_sku))'), $skuKeys)
+                        ->orWhereIn(\Illuminate\Support\Facades\DB::raw('LOWER(TRIM(tongtu_product_code))'), $skuKeys);
+                })
+                ->get()
+                ->flatMap(static function (LogisticsTongtuSkuMapping $mapping): array {
+                    $keys = array_filter(array_map(
+                        static fn ($value): string => mb_strtolower(trim((string) $value)),
+                        [$mapping->shopify_sku, $mapping->tongtu_sku, $mapping->tongtu_product_code],
+                    ));
+
+                    return array_fill_keys($keys, $mapping);
+                });
+            foreach ($order->items as $item) {
+                if ($item->skuMapping !== null) continue;
+                foreach ([$item->shopify_sku, $item->tongtu_sku, $item->tongtu_product_code] as $value) {
+                    $mapping = $mappingBySku->get(mb_strtolower(trim((string) $value)));
+                    if ($mapping) {
+                        $item->setRelation('skuMapping', $mapping);
+                        break;
+                    }
+                }
+            }
+        }
 
         return view('portals.logistics.orders.detail', [
             'order' => $order,
