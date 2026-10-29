@@ -249,7 +249,7 @@
                     </div>
                     <div class="table-responsive">
                         <table class="table table-bordered table-hover">
-                            <thead><tr><th>产品名</th><th>店铺</th><th>店铺域名</th><th>运营人员</th><th class="text-right">订单数</th><th class="text-right">商品数量</th><th>最近下单时间</th></tr></thead>
+                            <thead><tr><th>产品名</th><th>店铺</th><th>店铺域名</th><th>团队</th><th>运营人员</th><th class="text-right">订单数</th><th class="text-right">商品数量</th><th>最近下单时间</th></tr></thead>
                             <tbody id="warehouse-weight-sales-body"></tbody>
                         </table>
                     </div>
@@ -296,7 +296,7 @@
         $('#warehouse-weight-sales-summary').html('<i class="fa fa-spinner fa-spin"></i> 正在查询出单记录...');
         $('#warehouse-weight-sales-image').html('<span class="warehouse-sales-image-empty">加载中</span>');
         $('#warehouse-weight-sales-exception').empty();
-        body.html('<tr><td colspan="7" class="text-center text-muted" style="padding:30px;">正在加载...</td></tr>');
+        body.html('<tr><td colspan="8" class="text-center text-muted" style="padding:30px;">正在加载...</td></tr>');
         salesModal.modal('show');
 
         $.ajax({
@@ -320,7 +320,7 @@
                 if (res.resolution_remark) exceptionHtml += '<span class="warehouse-sales-meta-item warehouse-sales-remark"><strong>整改备注：</strong>' + escapeHtml(res.resolution_remark) + '</span>';
                 $('#warehouse-weight-sales-exception').html(exceptionHtml);
                 if (!rows.length) {
-                    body.html('<tr><td colspan="7" class="text-center text-muted" style="padding:30px;"><i class="fa fa-inbox"></i> 暂未找到该 SKU 的出单记录</td></tr>');
+                    body.html('<tr><td colspan="8" class="text-center text-muted" style="padding:30px;"><i class="fa fa-inbox"></i> 暂未找到该 SKU 的出单记录</td></tr>');
                     return;
                 }
                 body.html(rows.map(function (row) {
@@ -329,6 +329,7 @@
                         + '<td>' + escapeHtml(row.product_name || '未填写产品名') + '</td>'
                         + '<td>' + escapeHtml(row.store_name || '未识别店铺') + '</td>'
                         + '<td>' + escapeHtml(row.shop_domain || '—') + '</td>'
+                        + '<td>' + escapeHtml(row.team_name || '未填写团队') + '</td>'
                         + '<td><strong>' + escapeHtml(row.operator_name || '未分配运营') + '</strong></td>'
                         + '<td class="text-right">' + Number(row.order_count || 0) + '</td>'
                         + '<td class="text-right">' + quantity.toLocaleString(undefined, {maximumFractionDigits:4}) + '</td>'
@@ -338,7 +339,7 @@
             },
             error: function (xhr) {
                 $('#warehouse-weight-sales-summary').text('查询失败');
-                body.html('<tr><td colspan="7" class="text-center text-danger" style="padding:30px;">' + escapeHtml((xhr.responseJSON && xhr.responseJSON.message) || '无法加载出单记录') + '</td></tr>');
+                body.html('<tr><td colspan="8" class="text-center text-danger" style="padding:30px;">' + escapeHtml((xhr.responseJSON && xhr.responseJSON.message) || '无法加载出单记录') + '</td></tr>');
             },
             complete: function () { button.prop('disabled', false); }
         });

@@ -109,6 +109,7 @@ class WarehouseWeightExceptionController extends Controller
             $domainExpression = "COALESCE(NULLIF(TRIM({$storesTable}.domain), ''), NULLIF(TRIM({$ordersTable}.source_shop_domain), ''), NULLIF(TRIM({$ordersTable}.store_name), ''), '未知店铺')";
             $storeExpression = "COALESCE(NULLIF(TRIM({$storesTable}.shop_name), ''), NULLIF(TRIM({$ordersTable}.store_name), ''), {$domainExpression})";
             $operatorExpression = "COALESCE(NULLIF(TRIM({$ordersTable}.operator_name), ''), '未分配运营')";
+            $teamExpression = "COALESCE(NULLIF(TRIM({$storesTable}.team), ''), NULLIF(TRIM({$ordersTable}.group_names), ''), NULLIF(TRIM({$ordersTable}.department_name), ''), '未填写团队')";
 
             $rows = \App\Models\LogisticsOrderItem::query()
                 ->join($ordersTable, "{$ordersTable}.id", '=', "{$itemsTable}.logistics_order_id")
@@ -121,10 +122,11 @@ class WarehouseWeightExceptionController extends Controller
                 ->selectRaw("{$storeExpression} as store_name")
                 ->selectRaw("{$domainExpression} as shop_domain")
                 ->selectRaw("{$operatorExpression} as operator_name")
+                ->selectRaw("{$teamExpression} as team_name")
                 ->selectRaw("COUNT(DISTINCT {$ordersTable}.id) as order_count")
                 ->selectRaw("COALESCE(SUM({$itemsTable}.quantity), 0) as product_quantity")
                 ->selectRaw("MAX({$ordersTable}.order_created_at) as latest_order_at")
-                ->groupByRaw("{$productExpression}, {$storeExpression}, {$domainExpression}, {$operatorExpression}")
+                ->groupByRaw("{$productExpression}, {$storeExpression}, {$domainExpression}, {$operatorExpression}, {$teamExpression}")
                 ->orderByDesc('latest_order_at')
                 ->get();
         }
@@ -147,6 +149,7 @@ class WarehouseWeightExceptionController extends Controller
                 'store_name' => (string) $row->store_name,
                 'shop_domain' => trim((string) $row->shop_domain),
                 'operator_name' => (string) $row->operator_name,
+                'team_name' => \App\Models\AssistantDomainStore::displayMultiValue($row->team_name) ?: '未填写团队',
                 'order_count' => (int) $row->order_count,
                 'product_quantity' => (float) $row->product_quantity,
                 'latest_order_at' => $row->latest_order_at ? (string) $row->latest_order_at : null,
