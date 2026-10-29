@@ -41,12 +41,13 @@ class OperationReportController extends Controller
         $user = $context['user'];
         $isBoss = $this->isBoss($user);
         $validated = $request->validate([
-            'date' => ['nullable', 'date_format:Y-m-d'],
+            'date_from' => ['nullable', 'date_format:Y-m-d'],
+            'date_to' => ['nullable', 'date_format:Y-m-d'],
             'operator_user_id' => ['nullable', 'integer'],
         ]);
-        $defaultDate = Carbon::now('Asia/Shanghai')->subDay()->format('Y-m-d');
-        $dateFrom = (string) ($validated['date'] ?? $defaultDate);
-        $dateTo = $dateFrom;
+        $beijingNow = Carbon::now('Asia/Shanghai');
+        $dateFrom = (string) ($validated['date_from'] ?? $beijingNow->copy()->startOfMonth()->format('Y-m-d'));
+        $dateTo = (string) ($validated['date_to'] ?? $beijingNow->copy()->endOfMonth()->format('Y-m-d'));
         abort_if($dateFrom > $dateTo, 422, '开始日期不能晚于结束日期。');
         $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
         $operatorId = $isBoss
@@ -59,6 +60,13 @@ class OperationReportController extends Controller
             ->where('operator_user_id', $operatorId)
             ->whereBetween('report_date', [$dateFrom, $dateTo])
             ->orderByDesc('report_date')->orderByDesc('id')->get();
+        $submittedReportsByDate = $submittedReports->keyBy(
+            fn (OperationReport $report) => $report->report_date->format('Y-m-d')
+        );
+        $submittedAdSpendTotal = (float) $submittedReports->sum('actual_ad_spend');
+        $submittedFirstRevenueTotal = (float) $submittedReports->sum(
+            fn (OperationReport $report) => collect($report->metric_rows ?? [])->sum('first_total_revenue')
+        );
 
         return view('portals.operation.reports.monthly', [
             'portal' => $context['portal']->loadMissing('menus'),
@@ -71,8 +79,14 @@ class OperationReportController extends Controller
             'metricRows' => $calculated['rows'],
             'metricTotals' => $this->sumRows($calculated['rows']),
             'metricRowspans' => $this->identityRowspans($calculated['rows']),
+            'metricDateRowspans' => $this->dateRowspans($calculated['rows']),
             'warnings' => $calculated['warnings'],
             'submittedReports' => $submittedReports,
+            'submittedReportsByDate' => $submittedReportsByDate,
+            'submittedAdSpendTotal' => $submittedAdSpendTotal,
+            'submittedFirstRoi' => $submittedAdSpendTotal > 0
+                ? $submittedFirstRevenueTotal / $submittedAdSpendTotal
+                : null,
         ]);
     }
 
@@ -463,6 +477,24 @@ class OperationReportController extends Controller
             while ($index + $span < $count && $key === [$rows[$index + $span]['date'], $rows[$index + $span]['operator_name'], $rows[$index + $span]['shop_domain']]) $span++;
             $spans[$index] = $span;
         }
+        return $spans;
+    }
+
+    private function dateRowspans(array $rows): array
+    {
+        $spans = [];
+        for ($index = 0, $count = count($rows); $index < $count; $index++) {
+            $date = $rows[$index]['date'];
+            if ($index > 0 && $date === $rows[$index - 1]['date']) {
+                $spans[$index] = 0;
+                continue;
+            }
+
+            $span = 1;
+            while ($index + $span < $count && $date === $rows[$index + $span]['date']) $span++;
+            $spans[$index] = $span;
+        }
+
         return $spans;
     }
 }
