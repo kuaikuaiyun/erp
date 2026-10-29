@@ -80,6 +80,7 @@ class OperationReportController extends Controller
             'advertisingAgencies' => AssistantAdvertisingAgency::enabledOptions(),
             'advertisingAgencyMedia' => AssistantAdvertisingAgency::enabledMediaNames(),
             'advertisingAgencyNames' => AssistantAdvertisingAgency::enabledNames(),
+            'advertisingAgencyGroups' => $this->advertisingAgencyGroups(),
             'isBoss' => $isBoss, 'canReview' => $canReview,
             'canEditReport' => true, 'history' => $history,
             'canViewMissingGuideSkus' => $this->canViewMissingGuideSkus($user),
@@ -173,6 +174,7 @@ class OperationReportController extends Controller
             $path = $ad['existing_screenshot'] ?? null;
             $bookSpend = (float) ($ad['book_spend'] ?? 0);
             $coefficient = (float) $agencyOptions[$ad['agency']];
+            $handlingFee = $bookSpend * $coefficient;
             $mediaSource = trim((string) ($agencyMedia[$ad['agency']] ?? ''));
             if ($mediaSource === '') {
                 throw ValidationException::withMessages(['ads.'.$index.'.agency' => '该广告代理尚未关联广告社媒，请先到助理系统中设置。']);
@@ -184,7 +186,8 @@ class OperationReportController extends Controller
                 'account_number' => trim((string) ($ad['account_number'] ?? '')),
                 'book_spend' => round($bookSpend, 4),
                 'settlement_coefficient' => round($coefficient, 4),
-                'actual_spend' => round($bookSpend * $coefficient, 4),
+                'handling_fee' => round($handlingFee, 4),
+                'actual_spend' => round($bookSpend + $handlingFee, 4),
                 'screenshot' => $path,
             ];
         }
@@ -241,7 +244,7 @@ class OperationReportController extends Controller
         $metrics = collect($data['metricRows'])->values();
         $ads = collect($data['advertisingRows'])->values();
         $count = max($metrics->count(), $ads->count(), 1);
-        $columns = collect(['日期','人名','店铺域名','媒体','首单订阅单量','首单订阅营业额($)','首单普通单量','首单普通营业额($)','首单合计单量','首单合计营业额($)','首单总采购费','首单总运费','广告代理','广告社媒','广告账户名称','广告账户编号','账面广告费($)','结算系数','实际广告费($)','广告消耗截图','首单交易退货费','运营首单利润($)','续费净收益($)','运营整体净利润($)','运营社媒首单ROI','填写状态','续费单量','续费营业额($)','续费费用','总单量','总营业额($)'])
+        $columns = collect(['日期','人名','店铺域名','媒体','首单订阅单量','首单订阅营业额($)','首单普通单量','首单普通营业额($)','首单合计单量','首单合计营业额($)','首单总采购费','首单总运费','广告代理','广告社媒','广告账户名称','广告账户编号','账面广告费($)','结算系数','手续费($)','实际广告费($)','广告消耗截图','首单交易退货费','运营首单利润($)','续费净收益($)','运营整体净利润($)','运营社媒首单ROI','填写状态','续费单量','续费营业额($)','续费费用','总单量','总营业额($)'])
             ->map(fn ($label) => ['label' => $label, 'width' => mb_strlen($label) > 8 ? 20 : 15])->all();
         return $this->xlsxWriter->response('运营报表_'.$data['reportDate'].'_'.$data['selectedOperator']->name.'.xlsx', '运营报表', $columns, static function () use ($metrics, $ads, $count, $data): iterable {
             for ($i = 0; $i < $count; $i++) {
@@ -252,11 +255,11 @@ class OperationReportController extends Controller
                 $values = [$data['reportDate'],$data['selectedOperator']->name,$m['shop_domain']??'',$m['media_source']??'',
                     $m['first_subscription_orders']??'', $m['first_subscription_revenue']??'', $m['first_normal_orders']??'', $m['first_normal_revenue']??'',
                     $m['first_total_orders']??'', $m['first_total_revenue']??'', $m['first_purchase_cost']??'', $m['first_shipping_cost']??'',
-                    $a['agency']??'', $a['media_source']??'', $a['account_name']??'', $a['account_number']??'', $a['book_spend']??'', $a['settlement_coefficient']??'', $a['actual_spend']??'', $a['screenshot']??'',
+                    $a['agency']??'', $a['media_source']??'', $a['account_name']??'', $a['account_number']??'', $a['book_spend']??'', $a['settlement_coefficient']??'', $a['handling_fee']??'', $a['actual_spend']??'', $a['screenshot']??'',
                     $m['first_return_fee']??'', $i === 0 ? ($report?->first_profit ?? '') : '', $i === 0 ? ($report?->renewal_net_revenue ?? '') : '', $i === 0 ? ($report?->overall_profit ?? '') : '',
                     $i === 0 && $adSpend > 0 ? $firstRevenue / $adSpend : '', $i === 0 ? ($report ? ($report->status === OperationReport::STATUS_APPROVED ? '已审核' : '待审核') : '未提交') : '',
                     $m['renewal_orders']??'', $m['renewal_revenue']??'', $m['renewal_cost']??'', $m['total_orders']??'', $m['total_revenue']??''];
-                $textIndexes = [0,1,2,3,12,13,14,15,19,25];
+                $textIndexes = [0,1,2,3,12,13,14,15,20,26];
                 yield ['kind' => $i % 2 ? 'variant' : 'normal', 'height' => 25, 'cells' => array_map(fn ($value, $index) => ['value' => $value, 'type' => in_array($index, $textIndexes, true) ? 'text' : 'number', 'align' => in_array($index, $textIndexes, true) ? 'left' : 'right'], $values, array_keys($values))];
             }
         }, false);
@@ -319,6 +322,29 @@ class OperationReportController extends Controller
     private function advertisingMedia(): array
     {
         return AssistantAdvertisingMedia::enabledNames();
+    }
+
+    /** @return array<string, list<array{key:string,media:string,coefficient:float}>> */
+    private function advertisingAgencyGroups(): array
+    {
+        $options = AssistantAdvertisingAgency::enabledOptions();
+        $mediaNames = AssistantAdvertisingAgency::enabledMediaNames();
+        $agencyNames = AssistantAdvertisingAgency::enabledNames();
+        $groups = [];
+
+        foreach ($options as $key => $coefficient) {
+            $agencyName = trim((string) ($agencyNames[$key] ?? ''));
+            $mediaName = trim((string) ($mediaNames[$key] ?? ''));
+            if ($agencyName === '' || $mediaName === '') continue;
+
+            $groups[$agencyName][] = [
+                'key' => (string) $key,
+                'media' => $mediaName,
+                'coefficient' => (float) $coefficient,
+            ];
+        }
+
+        return $groups;
     }
 
     private function sumRows(array $rows): array
