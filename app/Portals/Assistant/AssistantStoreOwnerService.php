@@ -32,6 +32,64 @@ class AssistantStoreOwnerService
         return $result->values();
     }
 
+    public function operationDepartmentForUser(AdminUser $user): ?Department
+    {
+        $operationDepartmentIds = $this->operationDepartments()->pluck('id')->map(static fn ($id): int => (int) $id);
+        if ($operationDepartmentIds->isEmpty()) return null;
+
+        $rolesTable = config('admin.database.roles_table');
+        $departments = $user->departments()
+            ->whereIn($rolesTable.'.id', $operationDepartmentIds->all())
+            ->get([$rolesTable.'.id', $rolesTable.'.name', $rolesTable.'.parent_id']);
+
+        return $departments->first(static fn (Department $department): bool => (bool) ($department->pivot->is_primary ?? false))
+            ?: $departments->sortBy('id')->first();
+    }
+
+    /** @return list<int> */
+    public function visibleOperationDepartmentIds(AdminUser $assistantUser): array
+    {
+        if ($assistantUser->isAdministrator()) {
+            return $this->operationDepartments()->pluck('id')->map(static fn ($id): int => (int) $id)->all();
+        }
+
+        $assistantRootId = Department::business()->where('slug', AssistantPortalAuthorizationService::EDITOR_DEPARTMENT_CODE)->value('id');
+        if ($assistantRootId === null) return [];
+
+        $assistantDepartmentIds = $assistantUser->departments()
+            ->where('parent_id', (int) $assistantRootId)
+            ->pluck(config('admin.database.roles_table').'.id')
+            ->map(static fn ($id): int => (int) $id);
+        if ($assistantDepartmentIds->isEmpty()) return [];
+
+        $configuredOperationIds = AssistantDepartmentOperationScope::query()
+            ->whereIn('assistant_department_id', $assistantDepartmentIds->all())
+            ->pluck('operation_department_id')
+            ->map(static fn ($id): int => (int) $id)
+            ->unique()
+            ->values();
+
+        return $configuredOperationIds->isEmpty()
+            ? []
+            : $this->departmentIdsIncludingDescendants($configuredOperationIds->all());
+    }
+
+    /** @return list<int> */
+    public function assistantDepartmentIdsForOperationDepartment(int $operationDepartmentId): array
+    {
+        $department = Department::business()->find($operationDepartmentId);
+        if (! $department) return [];
+
+        $candidateIds = collect([$department->getKey(), $department->parent_id])
+            ->filter()->map(static fn ($id): int => (int) $id)->unique()->values();
+
+        return AssistantDepartmentOperationScope::query()
+            ->whereIn('operation_department_id', $candidateIds->all())
+            ->pluck('assistant_department_id')
+            ->map(static fn ($id): int => (int) $id)
+            ->unique()->values()->all();
+    }
+
     /** @return array<int, list<int>> */
     public function scopeMap(): array
     {

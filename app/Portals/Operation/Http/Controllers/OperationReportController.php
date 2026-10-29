@@ -11,6 +11,7 @@ use App\Models\Department;
 use App\Models\OperationReport;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Logistics\StreamedXlsxWriter;
+use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Operation\OperationReportMetricsService;
 use App\Portals\ProductRequests\ProductRequestAccessService;
 use Illuminate\Http\RedirectResponse;
@@ -28,6 +29,7 @@ class OperationReportController extends Controller
         private readonly ProductRequestAccessService $access,
         private readonly OperationReportMetricsService $metrics,
         private readonly StreamedXlsxWriter $xlsxWriter,
+        private readonly AssistantStoreOwnerService $assistantStoreOwners,
     ) {
     }
 
@@ -56,6 +58,10 @@ class OperationReportController extends Controller
             : (int) $user->getKey());
         $operator = AdminUser::query()->findOrFail($operatorId);
         if ($isBoss) $this->assertAssignableOperator($operatorId);
+        $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($operator);
+        $advertisingAssistantDepartmentIds = $operationDepartment
+            ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $operationDepartment->getKey())
+            : [];
 
         $calculated = $this->metrics->build($date, $operatorId);
         $report = OperationReport::query()->whereDate('report_date', $date)->where('operator_user_id', $operatorId)->first();
@@ -76,11 +82,11 @@ class OperationReportController extends Controller
             'advertisingRows' => $advertisingRows, 'warnings' => $calculated['warnings'],
             'mediaRoiRows' => $this->metrics->mediaRoiSummary($submittedMetricRows, $submittedAdvertisingRows),
             'operatorOptions' => $operatorOptions,
-            'mediaSources' => $this->advertisingMedia(),
-            'advertisingAgencies' => AssistantAdvertisingAgency::enabledOptions(),
-            'advertisingAgencyMedia' => AssistantAdvertisingAgency::enabledMediaNames(),
-            'advertisingAgencyNames' => AssistantAdvertisingAgency::enabledNames(),
-            'advertisingAgencyGroups' => $this->advertisingAgencyGroups(),
+            'mediaSources' => $this->advertisingMedia($advertisingAssistantDepartmentIds),
+            'advertisingAgencies' => AssistantAdvertisingAgency::enabledOptions($advertisingAssistantDepartmentIds),
+            'advertisingAgencyMedia' => AssistantAdvertisingAgency::enabledMediaNames($advertisingAssistantDepartmentIds),
+            'advertisingAgencyNames' => AssistantAdvertisingAgency::enabledNames($advertisingAssistantDepartmentIds),
+            'advertisingAgencyGroups' => $this->advertisingAgencyGroups($advertisingAssistantDepartmentIds),
             'isBoss' => $isBoss, 'canReview' => $canReview,
             'canEditReport' => true, 'history' => $history,
             'canViewMissingGuideSkus' => $this->canViewMissingGuideSkus($user),
@@ -118,10 +124,16 @@ class OperationReportController extends Controller
         if ($context instanceof Response) abort($context->getStatusCode());
         $user = $context['user'];
         $isBoss = $this->isBoss($user);
-        $mediaSources = $this->advertisingMedia();
-        $agencyOptions = AssistantAdvertisingAgency::enabledOptions();
-        $agencyMedia = AssistantAdvertisingAgency::enabledMediaNames();
-        $agencyNames = AssistantAdvertisingAgency::enabledNames();
+        $configOperatorId = $isBoss && $request->filled('operator_user_id') ? $request->integer('operator_user_id') : (int) $user->getKey();
+        $configOperator = AdminUser::query()->find($configOperatorId);
+        $configOperationDepartment = $configOperator ? $this->assistantStoreOwners->operationDepartmentForUser($configOperator) : null;
+        $advertisingAssistantDepartmentIds = $configOperationDepartment
+            ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $configOperationDepartment->getKey())
+            : [];
+        $mediaSources = $this->advertisingMedia($advertisingAssistantDepartmentIds);
+        $agencyOptions = AssistantAdvertisingAgency::enabledOptions($advertisingAssistantDepartmentIds);
+        $agencyMedia = AssistantAdvertisingAgency::enabledMediaNames($advertisingAssistantDepartmentIds);
+        $agencyNames = AssistantAdvertisingAgency::enabledNames($advertisingAssistantDepartmentIds);
         $request->validate([
             'ads.*.screenshot' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
         ]);
@@ -158,6 +170,12 @@ class OperationReportController extends Controller
         }
         if ($isBoss) $this->assertAssignableOperator($operatorId);
         $operator = AdminUser::query()->findOrFail($operatorId);
+        $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($operator);
+        if (! $operationDepartment) {
+            throw ValidationException::withMessages([
+                'operator_user_id' => '该运营人员尚未归属运营部门，无法提交报表。',
+            ]);
+        }
         $existing = OperationReport::query()->whereDate('report_date', $validated['report_date'])->where('operator_user_id', $operatorId)->first();
         if ($existing && (! $editingReport || (int) $existing->getKey() !== (int) $editingReport->getKey())) {
             throw ValidationException::withMessages(['report_date' => '该运营当天的报表已经提交，请到提交记录中查看。']);
@@ -200,6 +218,8 @@ class OperationReportController extends Controller
         $values = [
                 'report_date' => $validated['report_date'], 'operator_user_id' => $operatorId,
                 'operator_name' => (string) ($operator->name ?: $operator->username),
+                'operation_department_id' => (int) $operationDepartment->getKey(),
+                'operation_department_name' => (string) $operationDepartment->name,
                 'metric_rows' => $calculated['rows'], 'advertising_rows' => $ads,
                 'first_purchase_cost' => $totals['first_purchase_cost'],
                 'first_shipping_cost' => $totals['first_shipping_cost'],
@@ -319,17 +339,17 @@ class OperationReportController extends Controller
     }
 
     /** @return list<string> */
-    private function advertisingMedia(): array
+    private function advertisingMedia(array $assistantDepartmentIds): array
     {
-        return AssistantAdvertisingMedia::enabledNames();
+        return AssistantAdvertisingMedia::enabledNames($assistantDepartmentIds);
     }
 
     /** @return array<string, list<array{key:string,media:string,coefficient:float}>> */
-    private function advertisingAgencyGroups(): array
+    private function advertisingAgencyGroups(array $assistantDepartmentIds): array
     {
-        $options = AssistantAdvertisingAgency::enabledOptions();
-        $mediaNames = AssistantAdvertisingAgency::enabledMediaNames();
-        $agencyNames = AssistantAdvertisingAgency::enabledNames();
+        $options = AssistantAdvertisingAgency::enabledOptions($assistantDepartmentIds);
+        $mediaNames = AssistantAdvertisingAgency::enabledMediaNames($assistantDepartmentIds);
+        $agencyNames = AssistantAdvertisingAgency::enabledNames($assistantDepartmentIds);
         $groups = [];
 
         foreach ($options as $key => $coefficient) {

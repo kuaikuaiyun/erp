@@ -17,6 +17,7 @@ class AdvertisingMediaController extends Controller
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
+        private readonly AssistantAdvertisingScopeService $advertisingScope,
     ) {
     }
 
@@ -24,11 +25,14 @@ class AdvertisingMediaController extends Controller
     {
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
+        $department = $this->advertisingScope->selectedDepartment($context['user'], $request->input('assistant_department_id'));
 
         return view('portals.assistant.advertising-media.index', [
             'portal' => $context['portal']->load('menus'),
             'user' => $context['user'],
-            'media' => AssistantAdvertisingMedia::query()->orderBy('sort')->orderBy('id')->get(),
+            'media' => AssistantAdvertisingMedia::query()->where('assistant_department_id', $department->id)->orderBy('sort')->orderBy('id')->get(),
+            'assistantDepartments' => $this->advertisingScope->departmentsFor($context['user']),
+            'selectedAssistantDepartment' => $department,
         ]);
     }
 
@@ -36,13 +40,14 @@ class AdvertisingMediaController extends Controller
     {
         $context = $this->context($request);
         if ($context instanceof Response) abort($context->getStatusCode());
+        $department = $this->advertisingScope->selectedDepartment($context['user'], $request->input('assistant_department_id'));
         $request->merge(['name' => trim((string) $request->input('name'))]);
         $validated = $request->validate([
-            'name' => ['required', 'string', 'max:50', Rule::unique('assistant_advertising_media', 'name')],
+            'name' => ['required', 'string', 'max:50', Rule::unique('assistant_advertising_media', 'name')->where('assistant_department_id', $department->id)],
         ], ['name.required' => '请输入广告社媒名称。', 'name.unique' => '该广告社媒已经存在。']);
 
-        $sort = ((int) AssistantAdvertisingMedia::query()->max('sort')) + 10;
-        AssistantAdvertisingMedia::query()->create(['name' => $validated['name'], 'is_enabled' => true, 'sort' => $sort]);
+        $sort = ((int) AssistantAdvertisingMedia::query()->where('assistant_department_id', $department->id)->max('sort')) + 10;
+        AssistantAdvertisingMedia::query()->create(['assistant_department_id' => $department->id, 'name' => $validated['name'], 'is_enabled' => true, 'sort' => $sort]);
 
         return back()->with('success', '广告社媒添加成功。');
     }
@@ -51,6 +56,7 @@ class AdvertisingMediaController extends Controller
     {
         $context = $this->context($request);
         if ($context instanceof Response) abort($context->getStatusCode());
+        abort_unless($this->advertisingScope->canAccessDepartment($context['user'], $advertisingMedium->assistant_department_id), 403);
         abort_if($advertisingMedium->name === '其他', 422, '“其他”是系统兜底媒介，不能停用。');
         $advertisingMedium->update(['is_enabled' => ! $advertisingMedium->is_enabled]);
 
@@ -61,11 +67,12 @@ class AdvertisingMediaController extends Controller
     {
         $context = $this->context($request);
         if ($context instanceof Response) abort($context->getStatusCode());
+        abort_unless($this->advertisingScope->canAccessDepartment($context['user'], $advertisingMedium->assistant_department_id), 403);
         abort_if($advertisingMedium->name === '其他', 422, '“其他”是系统兜底社媒，不能编辑。');
 
         $request->merge(['name' => trim((string) $request->input('name'))]);
         $validated = $request->validate([
-            'name' => ['required', 'string', 'max:50', Rule::unique('assistant_advertising_media', 'name')->ignore($advertisingMedium->getKey())],
+            'name' => ['required', 'string', 'max:50', Rule::unique('assistant_advertising_media', 'name')->where('assistant_department_id', $advertisingMedium->assistant_department_id)->ignore($advertisingMedium->getKey())],
         ], [
             'name.required' => '请输入广告社媒名称。',
             'name.unique' => '该广告社媒已经存在。',
@@ -79,6 +86,7 @@ class AdvertisingMediaController extends Controller
     {
         $context = $this->context($request);
         if ($context instanceof Response) abort($context->getStatusCode());
+        abort_unless($this->advertisingScope->canAccessDepartment($context['user'], $advertisingMedium->assistant_department_id), 403);
         abort_if($advertisingMedium->name === '其他', 422, '“其他”是系统兜底媒介，不能删除。');
         $advertisingMedium->delete();
 

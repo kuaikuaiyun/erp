@@ -13,8 +13,9 @@
 <section class="content agency-page">
     @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
     @if($errors->any())<div class="alert alert-danger">{{ $errors->first() }}</div>@endif
+    <div class="box agency-card"><div class="box-body"><form method="get" class="form-inline"><label style="margin-right:8px">当前助理部门</label><select class="form-control" name="assistant_department_id" onchange="this.form.submit()">@foreach($assistantDepartments as $department)<option value="{{ $department->id }}" @selected($selectedAssistantDepartment->id===$department->id)>{{ $department->name }}</option>@endforeach</select></form></div></div>
     <div class="box agency-card"><div class="box-header with-border"><h3 class="box-title">添加广告代理</h3></div><div class="box-body">
-        <form class="agency-add" method="post" action="{{ route('assistant.advertising-agencies.store') }}">@csrf
+        <form class="agency-add" method="post" action="{{ route('assistant.advertising-agencies.store') }}">@csrf<input type="hidden" name="assistant_department_id" value="{{ $selectedAssistantDepartment->id }}">
             <div class="form-group"><input class="form-control" name="name" maxlength="100" value="{{ old('name') }}" placeholder="广告代理名称" required></div>
             <div class="form-group"><select class="form-control" name="advertising_media_id" required><option value="">请选择广告社媒</option>@foreach($media as $medium)<option value="{{ $medium->id }}" @selected((string)old('advertising_media_id')===(string)$medium->id)>{{ $medium->name }}</option>@endforeach</select></div>
             <div class="form-group"><input class="form-control" type="number" name="settlement_coefficient" min="0" max="9999" step="0.0001" value="{{ old('settlement_coefficient') }}" placeholder="结算系数" required></div>
@@ -25,15 +26,15 @@
         <table class="table table-hover agency-table"><thead><tr><th style="width:90px">序号</th><th>广告代理名称</th><th style="width:180px">广告社媒</th><th style="width:180px">结算系数</th><th style="width:120px">状态</th><th style="width:250px">操作</th></tr></thead><tbody>
         @forelse($agencies as $item)<tr><td>{{ $loop->iteration }}</td><td><strong>{{ $item->name }}</strong></td><td>{{ $item->advertisingMedia?->name ?: '—' }}</td><td>{{ rtrim(rtrim(number_format((float)$item->settlement_coefficient,4,'.',''),'0'),'.') }}</td><td><span class="agency-state {{ $item->is_enabled ? 'on' : 'off' }}">{{ $item->is_enabled ? '已启用' : '已停用' }}</span></td><td><div class="agency-actions">
             <button type="button" class="btn btn-xs btn-primary agency-edit" data-action="{{ route('assistant.advertising-agencies.update',$item) }}" data-name="{{ $item->name }}" data-media-id="{{ $item->advertising_media_id }}" data-coefficient="{{ (float)$item->settlement_coefficient }}"><i class="fa fa-pencil"></i> 编辑</button>
-            <form method="post" action="{{ route('assistant.advertising-agencies.toggle',$item) }}">@csrf @method('patch')<button class="btn btn-xs {{ $item->is_enabled ? 'btn-default' : 'btn-success' }}">{{ $item->is_enabled ? '停用' : '启用' }}</button></form>
-            <form method="post" action="{{ route('assistant.advertising-agencies.destroy',$item) }}" onsubmit="return confirm('确定删除该广告代理吗？历史报表不会被删除。')">@csrf @method('delete')<button class="btn btn-xs btn-danger"><i class="fa fa-trash"></i> 删除</button></form>
+            <form method="post" action="{{ route('assistant.advertising-agencies.toggle',$item) }}">@csrf @method('patch')<input type="hidden" name="assistant_department_id" value="{{ $selectedAssistantDepartment->id }}"><button class="btn btn-xs {{ $item->is_enabled ? 'btn-default' : 'btn-success' }}">{{ $item->is_enabled ? '停用' : '启用' }}</button></form>
+            <form method="post" action="{{ route('assistant.advertising-agencies.destroy',$item) }}" onsubmit="return confirm('确定删除该广告代理吗？历史报表不会被删除。')">@csrf @method('delete')<input type="hidden" name="assistant_department_id" value="{{ $selectedAssistantDepartment->id }}"><button class="btn btn-xs btn-danger"><i class="fa fa-trash"></i> 删除</button></form>
         </div></td></tr>@empty<tr><td colspan="6" class="agency-empty">暂无广告代理</td></tr>@endforelse
         </tbody></table>
     </div></div>
 </section>
 
 <div class="modal fade" id="agency-edit-modal" tabindex="-1" role="dialog"><div class="modal-dialog" role="document"><div class="modal-content">
-    <form method="post" id="agency-edit-form">@csrf @method('patch')
+    <form method="post" id="agency-edit-form">@csrf @method('patch')<input type="hidden" name="assistant_department_id" value="{{ $selectedAssistantDepartment->id }}">
         <div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title">编辑广告代理</h4></div>
         <div class="modal-body">
             <div class="form-group"><label for="agency-edit-name">广告代理名称 <span class="text-red">*</span></label><input id="agency-edit-name" class="form-control" name="name" maxlength="100" required></div>

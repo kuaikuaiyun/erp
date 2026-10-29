@@ -8,6 +8,8 @@ use App\Models\AdminUser;
 use App\Models\Department;
 use App\Services\DepartmentAuthorizationService;
 use App\Services\DepartmentOrganizationService;
+use App\Portals\Assistant\AssistantPortalAuthorizationService;
+use App\Portals\Assistant\AssistantStoreOwnerService;
 use Encore\Admin\Facades\Admin;
 use Encore\Admin\Form;
 use Encore\Admin\Grid;
@@ -23,6 +25,8 @@ class DepartmentController extends Controller
     public function __construct(
         private readonly DepartmentOrganizationService $organization,
         private readonly DepartmentAuthorizationService $authorization,
+        private readonly AssistantPortalAuthorizationService $assistantAuthorization,
+        private readonly AssistantStoreOwnerService $assistantStoreOwners,
     )
     {
     }
@@ -33,6 +37,59 @@ class DepartmentController extends Controller
             ->title(__('organization.departments.title'))
             ->description(__('organization.departments.description'))
             ->body($this->grid());
+    }
+
+    public function bindings(Content $content): Content
+    {
+        abort_unless($this->administrator()->isAdministrator(), 403);
+
+        return $content
+            ->title('运营部门与助理部门绑定')
+            ->description('设置每个助理部门对应的运营部门')
+            ->body(view('admin.organization.departments.bindings', [
+                'assistantDepartments' => $this->assistantAuthorization->assistantChildDepartments(),
+                'operationDepartments' => $this->assistantStoreOwners->operationDepartments(),
+                'scopeMap' => $this->assistantStoreOwners->scopeMap(),
+            ])->render());
+    }
+
+    public function updateBindings(Request $request): RedirectResponse
+    {
+        $actor = $this->administrator();
+        abort_unless($actor->isAdministrator(), 403);
+
+        $validated = $request->validate([
+            'bindings' => ['nullable', 'array'],
+            'bindings.*' => ['nullable', 'array'],
+            'bindings.*.*' => ['integer', 'distinct'],
+        ]);
+        $assistantIds = $this->assistantAuthorization->assistantChildDepartments()
+            ->pluck('id')->map(static fn ($id): int => (int) $id);
+        $operationIds = $this->assistantStoreOwners->operationDepartments()
+            ->pluck('id')->map(static fn ($id): int => (int) $id);
+        $bindings = [];
+
+        foreach ((array) ($validated['bindings'] ?? []) as $assistantDepartmentId => $selectedOperationIds) {
+            $assistantDepartmentId = (int) $assistantDepartmentId;
+            $selectedOperationIds = collect((array) $selectedOperationIds)
+                ->map(static fn ($id): int => (int) $id)
+                ->unique()
+                ->values();
+
+            if (! $assistantIds->contains($assistantDepartmentId)
+                || $selectedOperationIds->diff($operationIds)->isNotEmpty()) {
+                throw ValidationException::withMessages([
+                    'bindings' => ['提交的助理部门或运营部门不存在，请刷新页面后重试。'],
+                ]);
+            }
+
+            $bindings[$assistantDepartmentId] = $selectedOperationIds->all();
+        }
+
+        $this->assistantStoreOwners->replaceScopes($bindings, $actor);
+        admin_success('部门绑定', '运营部门与助理部门的绑定关系已保存。');
+
+        return redirect(admin_url('organization/departments/bindings'));
     }
 
     public function create(Request $request, Content $content): Content
@@ -264,7 +321,10 @@ class DepartmentController extends Controller
             }
         });
 
-        $grid->tools(function (Tools $tools): void {
+        $grid->tools(function (Tools $tools) use ($isSystemAdministrator): void {
+            if ($isSystemAdministrator) {
+                $tools->append('<a href="'.e(admin_url('organization/departments/bindings')).'" class="btn btn-sm btn-primary"><i class="fa fa-link"></i> 运营/助理部门绑定</a>');
+            }
             $tools->batch(function (Tools\BatchActions $actions): void {
                 $actions->disableDelete();
             });
@@ -407,5 +467,4 @@ class DepartmentController extends Controller
         return $administrator;
     }
 }
-
 
