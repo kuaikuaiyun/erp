@@ -30,7 +30,7 @@ class AdvertisingAgencyController extends Controller
         $department = $this->advertisingScope->selectedDepartment($context['user'], $request->input('assistant_department_id'));
 
         return view('portals.assistant.advertising-agencies.index', [
-            'portal' => $context['portal']->load('menus'),
+            'portal' => $context['portal']->loadMissing('menus'),
             'user' => $context['user'],
             'agencies' => AssistantAdvertisingAgency::query()->where('assistant_department_id', $department->id)->with('advertisingMedia')->orderBy('sort')->orderBy('id')->get(),
             'media' => AssistantAdvertisingMedia::query()->where('assistant_department_id', $department->id)->where('is_enabled', true)->orderBy('sort')->orderBy('id')->get(),

@@ -56,7 +56,7 @@ class OperationReportReviewController extends Controller
             ->withQueryString();
 
         return view('portals.assistant.operation-report-reviews.index', [
-            'portal' => $context['portal']->load('menus'),
+            'portal' => $context['portal']->loadMissing('menus'),
             'user' => $context['user'],
             'reports' => $reports,
             'pendingCount' => $this->scopeReports(OperationReport::query(), $context['user'])
@@ -79,7 +79,7 @@ class OperationReportReviewController extends Controller
         $rows = $report->metric_rows ?: [];
 
         return view('portals.operation.reports.show', [
-            'portal' => $context['portal']->load('menus'), 'user' => $context['user'], 'report' => $report,
+            'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'], 'report' => $report,
             'metricRows' => $rows, 'metricTotals' => $this->sumRows($rows),
             'metricRowspans' => $this->identityRowspans($rows),
             'advertisingRows' => $report->advertising_rows ?: [],

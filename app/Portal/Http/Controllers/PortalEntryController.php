@@ -20,6 +20,7 @@ class PortalEntryController extends Controller
         private readonly PortalDomainService $domains,
         private readonly PortalAccessService $access,
         private readonly PortalReturnUrlService $returnUrls,
+        private readonly \App\Portal\Services\PortalMenuAuthorizationService $menuAuthorization,
     ) {
     }
 
@@ -111,6 +112,15 @@ class PortalEntryController extends Controller
             );
         }
 
+        $portal->loadMissing('menus');
+        if (!$requiresSystemAdministrator) {
+            $requestedMenu = $this->menuAuthorization->menuForRequest($portal, $request->path());
+            if ($requestedMenu && !$this->menuAuthorization->canAccess($user, $requestedMenu)) {
+                abort(403, '您没有访问该页面的权限。');
+            }
+        }
+        $portal->setRelation('menus', $this->menuAuthorization->visibleMenus($portal, $user));
+
         return [
             'portal' => $portal,
             'user' => $user,
@@ -127,8 +137,6 @@ class PortalEntryController extends Controller
 
         $portal = $context['portal'];
         $user = $context['user'];
-
-        $portal->load('menus');
 
         if ($isHome && app(PaymentPortalService::class)->isPaymentPortal($portal)) {
             return app(PaymentPortalController::class)->workbenchFromContext($context);
@@ -150,7 +158,7 @@ class PortalEntryController extends Controller
         }
 
         return response()->view('portal.menu-page', [
-            'portal' => $portal->load('menus'),
+            'portal' => $portal,
             'user' => $user,
             'menu' => $menu,
             'parentMenu' => $portal->menus->firstWhere('id', $menu->parent_id),

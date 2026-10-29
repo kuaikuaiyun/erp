@@ -6,12 +6,14 @@ use App\Models\AdminUser;
 use App\Models\Department;
 use App\Models\DepartmentChangeLog;
 use App\Models\DepartmentPermissionScope;
+use App\Models\UserPermissionOverride;
 use App\Portal\Services\PortalService;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -660,7 +662,48 @@ class DepartmentOrganizationService
                 ->all();
         };
 
-        return $build(0);
+        $tree = $build(0);
+
+        if (Schema::connection($this->connectionName())->hasColumn('portal_menus', 'permission_slug')) {
+            $portals = \App\Models\Portal::query()->with('menus')->orderBy('name')->get();
+            foreach ($portals as $portal) {
+                $portalMenus = $portal->menus;
+                $portalByParent = $portalMenus->groupBy(fn ($menu) => $menu->parent_id ?: 0);
+                $buildPortal = function (int $parentId) use (&$buildPortal, $portalByParent, $permissions): array {
+                    return $portalByParent->get($parentId, collect())
+                        ->map(function ($menu) use (&$buildPortal, $permissions): ?array {
+                            if (in_array($menu->code, ['home', 'backend_management', 'menu_configuration'], true)) {
+                                return null;
+                            }
+                            $children = $buildPortal((int) $menu->id);
+                            $permission = $menu->path !== '#' && $menu->permission_slug ? $permissions->get($menu->permission_slug) : null;
+                            if (!$permission && $children === []) {
+                                return null;
+                            }
+
+                            return [
+                                'id' => 'portal-'.$menu->id,
+                                'title' => $menu->title ?: __($menu->title_key),
+                                'permission_id' => $permission?->id,
+                                'permission_slug' => $permission?->slug,
+                                'children' => $children,
+                            ];
+                        })->filter()->values()->all();
+                };
+                $children = $buildPortal(0);
+                if ($children !== []) {
+                    $tree[] = [
+                        'id' => 'portal-root-'.$portal->id,
+                        'title' => $portal->name,
+                        'permission_id' => null,
+                        'permission_slug' => null,
+                        'children' => $children,
+                    ];
+                }
+            }
+        }
+
+        return $tree;
     }
 
     public function assignedPagePermissions(Department $department): Collection
@@ -696,6 +739,56 @@ class DepartmentOrganizationService
             ->pluck('permission_id')
             ->unique()
             ->values();
+    }
+
+    public function assignedUserPageOverrides(AdminUser $user): Collection
+    {
+        return UserPermissionOverride::query()
+            ->where('user_id', $user->getKey())
+            ->get(['permission_id', 'effect'])
+            ->keyBy('permission_id');
+    }
+
+    public function saveUserPageOverrides(AdminUser $user, array $overrides, AdminUser $actor): void
+    {
+        if ($user->isAdministrator()) {
+            throw ValidationException::withMessages(['permissions' => ['系统超级管理员不需要配置页面权限。']]);
+        }
+
+        $validPermissionIds = $this->assignablePermissionIds();
+        $normalized = collect($overrides)
+            ->filter(fn ($effect, $permissionId) => is_numeric($permissionId) && in_array($effect, [
+                UserPermissionOverride::EFFECT_ALLOW,
+                UserPermissionOverride::EFFECT_DENY,
+            ], true))
+            ->map(fn ($effect, $permissionId) => [
+                'permission_id' => (int) $permissionId,
+                'effect' => $effect,
+            ])->values();
+
+        if ($normalized->pluck('permission_id')->diff($validPermissionIds)->isNotEmpty()) {
+            throw ValidationException::withMessages(['permissions' => ['提交中包含不可配置的页面权限。']]);
+        }
+
+        DB::connection($this->connectionName())->transaction(function () use ($user, $normalized, $actor): void {
+            UserPermissionOverride::query()->where('user_id', $user->getKey())->delete();
+            if ($normalized->isNotEmpty()) {
+                $timestamp = now();
+                UserPermissionOverride::query()->insert($normalized->map(fn (array $row) => [
+                    'user_id' => $user->getKey(),
+                    'permission_id' => $row['permission_id'],
+                    'effect' => $row['effect'],
+                    'updated_by' => $actor->getKey(),
+                    'created_at' => $timestamp,
+                    'updated_at' => $timestamp,
+                ])->all());
+            }
+
+            $this->record($actor, null, 'user_page_permissions_saved', [
+                'user_id' => (int) $user->getKey(),
+                'overrides' => $normalized->all(),
+            ]);
+        });
     }
 
     public function positionOptions(): array
@@ -1212,11 +1305,20 @@ class DepartmentOrganizationService
 
     private function assignablePermissionIds(): Collection
     {
-        return $this->assignableMenus()
+        $permissionIds = $this->assignableMenus()
             ->pluck('permission_id')
             ->filter()
-            ->unique()
-            ->values();
+            ->unique();
+
+        if (Schema::connection($this->connectionName())->hasColumn('portal_menus', 'permission_slug')) {
+            $permissionModel = config('admin.database.permissions_model');
+            $portalSlugs = \App\Models\PortalMenu::query()->whereNotNull('permission_slug')->pluck('permission_slug');
+            $permissionIds = $permissionIds->merge(
+                $permissionModel::query()->whereIn('slug', $portalSlugs)->pluck('id'),
+            );
+        }
+
+        return $permissionIds->filter()->unique()->values();
     }
 
     private function assignableMenus(): Collection

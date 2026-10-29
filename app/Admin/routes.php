@@ -6,6 +6,7 @@ use App\Admin\Controllers\ConfigurationCenter\BasicConfigurationController;
 use App\Admin\Controllers\ConfigurationCenter\CaptchaController;
 use App\Admin\Controllers\ConfigurationCenter\WatermarkController;
 use App\Admin\Controllers\Organization\AccountController;
+use App\Admin\Controllers\Organization\AccountPermissionController;
 use App\Admin\Controllers\Organization\DepartmentController;
 use App\Admin\Controllers\Organization\DepartmentPermissionController;
 use App\Admin\Controllers\Portal\PortalController;
@@ -21,6 +22,8 @@ Route::group([
     'as' => config('admin.route.prefix').'.',
 ], function (Router $router): void {
     $router->resource('organization/accounts', AccountController::class)->except(['show'])->middleware('admin.permission:check,organization.accounts')->names('organization.accounts');
+    $router->get('organization/accounts/{account}/permissions', [AccountPermissionController::class, 'edit'])->whereNumber('account')->middleware(['admin.permission:check,organization.accounts', RequireSystemAdministrator::class])->name('organization.accounts.permissions.edit');
+    $router->put('organization/accounts/{account}/permissions', [AccountPermissionController::class, 'update'])->whereNumber('account')->middleware(['admin.permission:check,organization.accounts', RequireSystemAdministrator::class])->name('organization.accounts.permissions.update');
     $router->get('organization/departments/bindings', [DepartmentController::class, 'bindings'])->middleware(['admin.permission:check,organization.departments', RequireSystemAdministrator::class])->name('organization.departments.bindings');
     $router->put('organization/departments/bindings', [DepartmentController::class, 'updateBindings'])->middleware(['admin.permission:check,organization.departments', RequireSystemAdministrator::class])->name('organization.departments.bindings.update');
     $router->resource('organization/departments', DepartmentController::class)->except(['show'])->middleware('admin.permission:check,organization.departments')->names('organization.departments');

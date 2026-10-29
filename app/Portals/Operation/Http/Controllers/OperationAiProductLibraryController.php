@@ -30,7 +30,7 @@ class OperationAiProductLibraryController extends Controller
         $filters = $this->filters($request);
 
         return view('portals.operation.ai-product-library.index', [
-            'portal' => $context['portal']->load('menus'),
+            'portal' => $context['portal']->loadMissing('menus'),
             'user' => $context['user'],
             'products' => $this->productQuery($filters)->paginate(15)->withQueryString(),
             'filters' => $filters,

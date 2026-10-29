@@ -15,6 +15,7 @@ class PortalMenu extends Model
         'title',
         'title_key',
         'path',
+        'permission_slug',
         'icon',
         'sort',
         'is_enabled',
@@ -50,5 +51,4 @@ class PortalMenu extends Model
         return $this->hasMany(self::class, 'parent_id')->orderBy('sort')->orderBy('id');
     }
 }
-
 

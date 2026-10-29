@@ -220,7 +220,8 @@ class AccountController extends Controller
             return e($updatedAt instanceof \DateTimeInterface ? $updatedAt->format('Y-m-d H:i') : (string) $updatedAt);
         });
 
-        $grid->actions(function (OrganizationActions $actions): void {
+        $isSystemAdministrator = $actor->isAdministrator();
+        $grid->actions(function (OrganizationActions $actions) use ($isSystemAdministrator): void {
             $actions->disableView();
             $actions->disableEdit();
             $actions->disableDelete();
@@ -228,6 +229,10 @@ class AccountController extends Controller
             $actions->append($actions->editButton());
 
             if (!$account->isAdministrator()) {
+                if ($isSystemAdministrator) {
+                    $url = admin_url('organization/accounts/'.$account->getKey().'/permissions');
+                    $actions->append('<a href="'.e($url).'" class="btn btn-xs btn-info organization-grid-action"><i class="fa fa-key"></i> 页面权限</a>');
+                }
                 $actions->append($actions->deleteButton());
             }
         });
@@ -383,5 +388,4 @@ class AccountController extends Controller
         return config('admin.database.connection') ?: config('database.default');
     }
 }
-
 

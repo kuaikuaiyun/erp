@@ -388,7 +388,7 @@ class WarehouseProductStatisticsController extends Controller
     /** @param array{portal: \App\Models\Portal, user: \App\Models\AdminUser} $context */
     private function viewContext(array $context): array
     {
-        $context['portal']->load('menus');
+        $context['portal']->loadMissing('menus');
 
         return $context;
     }

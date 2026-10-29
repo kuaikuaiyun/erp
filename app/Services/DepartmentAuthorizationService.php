@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AdminUser;
 use App\Models\Department;
 use App\Models\DepartmentPermissionScope;
+use App\Models\UserPermissionOverride;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -111,6 +112,33 @@ class DepartmentAuthorizationService
      */
     public function permissionsFor(AdminUser $user): Collection
     {
+        $permissionIds = $this->departmentPermissionIdsFor($user);
+
+        $overrides = UserPermissionOverride::query()
+            ->where('user_id', $user->getKey())
+            ->get(['permission_id', 'effect']);
+
+        $permissionIds = $permissionIds
+            ->merge($user->permissions()->pluck('id'))
+            ->merge($overrides->where('effect', UserPermissionOverride::EFFECT_ALLOW)->pluck('permission_id'))
+            ->diff($overrides->where('effect', UserPermissionOverride::EFFECT_DENY)->pluck('permission_id'))
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($permissionIds->isEmpty()) {
+            return collect();
+        }
+
+        $permissionModel = config('admin.database.permissions_model');
+
+        return $permissionModel::query()
+            ->whereIn('id', $permissionIds)
+            ->get();
+    }
+
+    public function departmentPermissionIdsFor(AdminUser $user): Collection
+    {
         $directDepartmentIds = $this->directDepartmentIds($user);
         $permissionIds = collect();
 
@@ -133,21 +161,7 @@ class DepartmentAuthorizationService
             }
         }
 
-        $permissionIds = $permissionIds
-            ->merge($user->permissions()->pluck('id'))
-            ->filter()
-            ->unique()
-            ->values();
-
-        if ($permissionIds->isEmpty()) {
-            return collect();
-        }
-
-        $permissionModel = config('admin.database.permissions_model');
-
-        return $permissionModel::query()
-            ->whereIn('id', $permissionIds)
-            ->get();
+        return $permissionIds->filter()->unique()->values();
     }
 
     public function hasPermission(AdminUser $user, string $permission): bool
@@ -260,5 +274,3 @@ class DepartmentAuthorizationService
         return config('admin.database.connection') ?: config('database.default');
     }
 }
-
-
