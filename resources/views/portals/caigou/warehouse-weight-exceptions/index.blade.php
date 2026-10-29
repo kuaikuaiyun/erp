@@ -158,6 +158,9 @@
                                 @endforelse
                             </td>
                             <td>
+                                <button type="button" class="btn btn-info btn-xs warehouse-weight-sales-btn" data-id="{{ $row->id }}">
+                                    <i class="fa fa-eye"></i> 查看出单
+                                </button>
                                 @if($row->status === 'pending')
                                     <span class="label label-warning">待整改</span>
                                 @else
@@ -227,12 +230,34 @@
             </div>
         </div>
     </div>
+
+    <div class="modal fade" id="warehouse-weight-sales-modal" tabindex="-1" role="dialog">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal" aria-label="关闭"><span aria-hidden="true">&times;</span></button>
+                    <h4 class="modal-title"><i class="fa fa-shopping-cart text-aqua"></i> SKU 出单店铺与运营人员</h4>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info" id="warehouse-weight-sales-summary" style="margin-bottom:12px;"></div>
+                    <div class="table-responsive">
+                        <table class="table table-bordered table-hover">
+                            <thead><tr><th>产品名</th><th>店铺</th><th>店铺域名</th><th>运营人员</th><th class="text-right">订单数</th><th class="text-right">商品数量</th><th>最近下单时间</th></tr></thead>
+                            <tbody id="warehouse-weight-sales-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">关闭</button></div>
+            </div>
+        </div>
+    </div>
 @endsection
 
 @push('scripts')
 <script>
 (function () {
     var modal = $('#warehouse-weight-resolve-modal');
+    var salesModal = $('#warehouse-weight-sales-modal');
     if (!modal.length) return;
     var resolveUrl = '{{ route("caigou.warehouse-weight-exceptions.index") }}';
 
@@ -250,6 +275,46 @@
 
     $('.warehouse-weight-resolve-btn').on('click', function () {
         openResolve($(this).data('id'));
+    });
+
+    $('.warehouse-weight-sales-btn').on('click', function () {
+        var button = $(this);
+        var id = button.data('id');
+        var body = $('#warehouse-weight-sales-body');
+        button.prop('disabled', true);
+        $('#warehouse-weight-sales-summary').html('<i class="fa fa-spinner fa-spin"></i> 正在查询出单记录...');
+        body.html('<tr><td colspan="7" class="text-center text-muted" style="padding:30px;">正在加载...</td></tr>');
+        salesModal.modal('show');
+
+        $.ajax({
+            url: resolveUrl + '/' + id + '/sales-detail',
+            method: 'GET',
+            success: function (res) {
+                var rows = (res && res.rows) || [];
+                $('#warehouse-weight-sales-summary').html('<strong>SKU：</strong>' + escapeHtml(res.sku || '—') + '　<strong>产品名：</strong>' + escapeHtml(res.product_name || '未填写产品名') + '　<strong>店铺/运营组合：</strong>' + rows.length + ' 条');
+                if (!rows.length) {
+                    body.html('<tr><td colspan="7" class="text-center text-muted" style="padding:30px;"><i class="fa fa-inbox"></i> 暂未找到该 SKU 的出单记录</td></tr>');
+                    return;
+                }
+                body.html(rows.map(function (row) {
+                    var quantity = Number(row.product_quantity || 0);
+                    return '<tr>'
+                        + '<td>' + escapeHtml(row.product_name || '未填写产品名') + '</td>'
+                        + '<td>' + escapeHtml(row.store_name || '未识别店铺') + '</td>'
+                        + '<td>' + escapeHtml(row.shop_domain || '—') + '</td>'
+                        + '<td><strong>' + escapeHtml(row.operator_name || '未分配运营') + '</strong></td>'
+                        + '<td class="text-right">' + Number(row.order_count || 0) + '</td>'
+                        + '<td class="text-right">' + quantity.toLocaleString(undefined, {maximumFractionDigits:4}) + '</td>'
+                        + '<td>' + escapeHtml(row.latest_order_at || '—') + '</td>'
+                        + '</tr>';
+                }).join(''));
+            },
+            error: function (xhr) {
+                $('#warehouse-weight-sales-summary').text('查询失败');
+                body.html('<tr><td colspan="7" class="text-center text-danger" style="padding:30px;">' + escapeHtml((xhr.responseJSON && xhr.responseJSON.message) || '无法加载出单记录') + '</td></tr>');
+            },
+            complete: function () { button.prop('disabled', false); }
+        });
     });
 
     function postAction(id, action, button, confirmText) {

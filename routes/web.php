@@ -172,6 +172,7 @@ Route::get('/warehouse-product-statistics/warehouse-images/{linkSku}/{index}', [
 Route::post('/warehouse-product-statistics/approve', [WarehouseProductStatisticsController::class, 'approve'])->name('warehouse.product-statistics.approve');
 Route::get('/warehouse-weight-exceptions/{id}/physical-image', [WarehouseProductStatisticsController::class, 'physicalImage'])->name('warehouse.weight-exceptions.physical-image');
 Route::get('/warehouse-weight-exceptions', [WarehouseWeightExceptionController::class, 'index'])->name('caigou.warehouse-weight-exceptions.index');
+Route::get('/warehouse-weight-exceptions/{id}/sales-detail', [WarehouseWeightExceptionController::class, 'salesDetail'])->whereNumber('id')->name('caigou.warehouse-weight-exceptions.sales-detail');
 Route::get('/warehouse-weight-exceptions/warehouse-images/{linkSku}/{index}', [WarehouseWeightExceptionController::class, 'warehouseImage'])->whereNumber('linkSku')->whereNumber('index')->name('caigou.warehouse-weight-exceptions.warehouse-image');
 Route::post('/warehouse-weight-exceptions/{id}/resolve', [WarehouseWeightExceptionController::class, 'resolve'])->name('caigou.warehouse-weight-exceptions.resolve');
 Route::post('/warehouse-weight-exceptions/{id}/refresh', [WarehouseWeightExceptionController::class, 'refresh'])->name('caigou.warehouse-weight-exceptions.refresh');

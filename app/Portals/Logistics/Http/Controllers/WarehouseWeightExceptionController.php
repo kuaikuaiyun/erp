@@ -83,6 +83,64 @@ class WarehouseWeightExceptionController extends Controller
         ]);
     }
 
+    /** 查看该异常 SKU 曾在哪些店铺、由哪些运营人员出单。 */
+    public function salesDetail(Request $request, int $id): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $exception = WarehouseSkuWeightException::query()->findOrFail($id);
+        $skuValues = collect([$exception->tongtu_sku, $exception->shopify_sku])
+            ->map(static fn ($sku): string => mb_strtolower(trim((string) $sku)))
+            ->filter()
+            ->unique()
+            ->values();
+
+        $rows = collect();
+        if ($skuValues->isNotEmpty()) {
+            $itemsTable = (new \App\Models\LogisticsOrderItem())->getTable();
+            $ordersTable = (new \App\Models\LogisticsOrder())->getTable();
+            $placeholders = implode(',', array_fill(0, $skuValues->count(), '?'));
+            $productExpression = "COALESCE(NULLIF(TRIM({$itemsTable}.tongtu_product_name), ''), NULLIF(TRIM({$itemsTable}.product_title), ''))";
+            $storeExpression = "COALESCE(NULLIF(TRIM({$ordersTable}.store_name), ''), NULLIF(TRIM({$ordersTable}.source_shop_domain), ''), '未识别店铺')";
+            $operatorExpression = "COALESCE(NULLIF(TRIM({$ordersTable}.operator_name), ''), '未分配运营')";
+
+            $rows = \App\Models\LogisticsOrderItem::query()
+                ->join($ordersTable, "{$ordersTable}.id", '=', "{$itemsTable}.logistics_order_id")
+                ->where(function ($query) use ($itemsTable, $skuValues, $placeholders): void {
+                    $query->whereRaw("LOWER(TRIM({$itemsTable}.tongtu_sku)) IN ({$placeholders})", $skuValues->all())
+                        ->orWhereRaw("LOWER(TRIM({$itemsTable}.shopify_sku)) IN ({$placeholders})", $skuValues->all());
+                })
+                ->selectRaw("{$productExpression} as product_name")
+                ->selectRaw("{$storeExpression} as store_name")
+                ->selectRaw("{$ordersTable}.source_shop_domain as shop_domain")
+                ->selectRaw("{$operatorExpression} as operator_name")
+                ->selectRaw("COUNT(DISTINCT {$ordersTable}.id) as order_count")
+                ->selectRaw("COALESCE(SUM({$itemsTable}.quantity), 0) as product_quantity")
+                ->selectRaw("MAX({$ordersTable}.order_created_at) as latest_order_at")
+                ->groupByRaw("{$productExpression}, {$storeExpression}, {$ordersTable}.source_shop_domain, {$operatorExpression}")
+                ->orderByDesc('latest_order_at')
+                ->get();
+        }
+
+        return response()->json([
+            'sku' => $exception->tongtu_sku ?: $exception->shopify_sku,
+            'product_name' => $exception->tongtu_product_name ?: $rows->pluck('product_name')->first() ?: '未填写产品名',
+            'total' => $rows->count(),
+            'rows' => $rows->map(static fn ($row): array => [
+                'product_name' => trim((string) $row->product_name) ?: ($exception->tongtu_product_name ?: '未填写产品名'),
+                'store_name' => (string) $row->store_name,
+                'shop_domain' => trim((string) $row->shop_domain),
+                'operator_name' => (string) $row->operator_name,
+                'order_count' => (int) $row->order_count,
+                'product_quantity' => (float) $row->product_quantity,
+                'latest_order_at' => $row->latest_order_at ? (string) $row->latest_order_at : null,
+            ])->values(),
+        ]);
+    }
+
     /** 将异常标记为已处理（入录审核手动关闭队列） */
     public function resolve(Request $request, int $id): Response
     {
