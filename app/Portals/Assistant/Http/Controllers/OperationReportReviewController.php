@@ -7,6 +7,7 @@ use App\Models\OperationReport;
 use App\Models\AdminUser;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
+use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Operation\OperationReportMetricsService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;

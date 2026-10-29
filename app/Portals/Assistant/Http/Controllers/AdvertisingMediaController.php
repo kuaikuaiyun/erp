@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AssistantAdvertisingMedia;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
+use App\Portals\Assistant\AssistantAdvertisingScopeService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
