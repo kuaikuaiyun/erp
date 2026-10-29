@@ -191,7 +191,7 @@ class OperationReportController extends Controller
             'report' => $report,
             'advertisingRows' => $report->advertising_rows ?: [],
             'canEdit' => in_array($report->status, [OperationReport::STATUS_PENDING, OperationReport::STATUS_REJECTED], true),
-            'canDelete' => $report->status === OperationReport::STATUS_REJECTED,
+            'canDelete' => in_array($report->status, [OperationReport::STATUS_PENDING, OperationReport::STATUS_REJECTED], true),
         ]);
     }
 
@@ -318,12 +318,12 @@ class OperationReportController extends Controller
         if ($context instanceof Response) abort($context->getStatusCode());
         $user = $context['user'];
         abort_unless($this->isBoss($user) || (int) $report->operator_user_id === (int) $user->getKey(), 403);
-        abort_unless($report->status === OperationReport::STATUS_REJECTED, 422, '只有审核不通过的提报可以删除。');
+        abort_unless(in_array($report->status, [OperationReport::STATUS_PENDING, OperationReport::STATUS_REJECTED], true), 422, '只有待审核或审核不通过的提报可以删除。');
         $screenshots = collect($report->advertising_rows ?: [])->pluck('screenshot')->filter()->all();
         $report->delete();
         if ($screenshots !== []) Storage::disk('public')->delete($screenshots);
 
-        return redirect()->route('operation.advertising-reports.index')->with('success', '审核不通过的广告费提报已删除。');
+        return redirect()->route('operation.advertising-reports.index')->with('success', '广告费提报已删除。');
     }
 
     public function screenshot(Request $request): Response
