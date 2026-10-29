@@ -107,8 +107,7 @@ class PaymentOrderSearchService
         if ($filters['date_from'] ?? '') $query->whereDate($dateColumn, '>=', $filters['date_from']);
         if ($filters['date_to'] ?? '') $query->whereDate($dateColumn, '<=', $filters['date_to']);
         if ($filters['payment_gateway'] ?? '') {
-            $gateway = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], (string) $filters['payment_gateway']).'%';
-            $query->where('payment_gateway', 'like', $gateway);
+            $query->where('payment_gateway', (string) $filters['payment_gateway']);
         }
         if ($filters['deduction_type'] ?? '') $query->where('deduction_type', $filters['deduction_type']);
         $keyword = trim((string) ($filters['keyword'] ?? ''));
