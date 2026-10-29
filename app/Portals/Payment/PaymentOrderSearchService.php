@@ -17,7 +17,7 @@ class PaymentOrderSearchService
     public function page(array $filters): array
     {
         $query = $this->filteredQuery($filters);
-        $summary = $this->summarize($query);
+        $summary = $this->summary($filters);
         $total = $summary['payment_count'];
         $perPage = in_array((int) ($filters['per_page'] ?? 50), [50, 100], true) ? (int) $filters['per_page'] : 50;
         $lastPage = max(1, (int) ceil($total / $perPage));
@@ -27,6 +27,9 @@ class PaymentOrderSearchService
             'account' => 'account_name', 'channel' => 'channel',
         ];
         $sort = $sortColumns[(string) ($filters['sort'] ?? '')] ?? 'paid_at';
+        if ($sort === 'paid_at' && ($filters['date_mode'] ?? 'paid') === 'order') {
+            $sort = 'order_created_at';
+        }
         $direction = ($filters['direction'] ?? 'desc') === 'asc' ? 'asc' : 'desc';
         $records = (clone $query)->orderBy($sort, $direction)->orderBy('source_id', $direction)
             ->forPage($page, $perPage)->get();
@@ -100,8 +103,9 @@ class PaymentOrderSearchService
     private function filteredQuery(array $filters): Builder
     {
         $query = $this->database()->query()->fromSub($this->sourceQuery(), 'payments');
-        if ($filters['date_from'] ?? '') $query->whereDate('paid_at', '>=', $filters['date_from']);
-        if ($filters['date_to'] ?? '') $query->whereDate('paid_at', '<=', $filters['date_to']);
+        $dateColumn = ($filters['date_mode'] ?? 'paid') === 'order' ? 'order_created_at' : 'paid_at';
+        if ($filters['date_from'] ?? '') $query->whereDate($dateColumn, '>=', $filters['date_from']);
+        if ($filters['date_to'] ?? '') $query->whereDate($dateColumn, '<=', $filters['date_to']);
         if ($filters['account'] ?? '') $query->where('account_key', $filters['account']);
         if ($filters['channel'] ?? '') $query->where('channel', $filters['channel']);
         if ($filters['deduction_type'] ?? '') $query->where('deduction_type', $filters['deduction_type']);
@@ -131,7 +135,7 @@ class PaymentOrderSearchService
             ->selectRaw("CONCAT('paypal:', payment.logistics_paypal_account_id) as account_key")
             ->selectRaw("COALESCE(account.account_name, account.account_email, account.merchant_id, '-') as account_name")
             ->selectRaw("COALESCE(account.merchant_id, '') as merchant_id")
-            ->selectRaw('payment.logistics_order_id as order_id, payment.paid_at as paid_at, payment.payment_amount_usd as amount_usd')
+            ->selectRaw('payment.logistics_order_id as order_id, payment.paid_at as paid_at, orders.order_created_at as order_created_at, payment.payment_amount_usd as amount_usd')
             ->selectRaw('payment.original_amount as original_amount, payment.currency_code as currency_code, payment.status as payment_status')
             ->selectRaw("CASE WHEN orders.subscription_origin_order_id IS NOT NULL AND orders.subscription_origin_order_id <> '' THEN 'renewal' WHEN orders.subscription_type IS NOT NULL AND orders.subscription_type <> '' AND orders.subscription_type NOT LIKE '%无订阅%' THEN 'subscription' WHEN payment.logistics_order_id IS NULL THEN 'unmatched' ELSE 'one_time' END as deduction_type")
             ->selectRaw("COALESCE(orders.shopify_order_number, '') as shopify_order_number, COALESCE(orders.tongtu_order_number, '') as tongtu_order_number, COALESCE(orders.bill_number, '') as bill_number")
@@ -139,18 +143,18 @@ class PaymentOrderSearchService
             ->selectRaw('(SELECT COUNT(*) FROM logistics_paypal_refunds pr WHERE pr.original_transaction_id = payment.payment_transaction_id) + (SELECT COUNT(*) FROM logistics_paypal_disputes pd WHERE pd.disputed_transaction_id = payment.payment_transaction_id) as risk_count');
 
         $card = $database->table('logistics_orders as orders')
-            ->where(function (Builder $query): void {
-                $query->whereRaw("LOWER(COALESCE(orders.payment_method, '')) LIKE '%card%'")
-                    ->orWhereRaw("LOWER(COALESCE(orders.payment_gateway, '')) LIKE '%card%'")
-                    ->orWhereRaw("CASE WHEN JSON_VALID(COALESCE(orders.shopify_payload, '')) THEN JSON_SEARCH(JSON_EXTRACT(orders.shopify_payload, '$.tags'), 'one', '%CreditCardBy%') ELSE NULL END IS NOT NULL");
+            ->where(function (Builder $operator): void {
+                $operator->whereNull('orders.operator_name')
+                    ->orWhere('orders.operator_name', 'not like', '%刷单%');
             })
+            ->whereRaw("LOWER(TRIM(COALESCE(orders.payment_gateway, ''))) = 'fintrixv2'")
             ->selectRaw("CONCAT('card:', orders.id) as record_key, 'card' as channel, orders.id as source_id")
             ->selectRaw("COALESCE(orders.transaction_id, orders.payment_gateway_order_id, orders.bill_number, CONCAT('ORDER-', orders.id)) as transaction_id")
             ->selectRaw("COALESCE(orders.bill_number, '') as invoice_id")
             ->selectRaw("CONCAT('card:', COALESCE(NULLIF(orders.collection_account_email, ''), NULLIF(orders.collection_account, ''), 'unknown')) as account_key")
             ->selectRaw("COALESCE(NULLIF(orders.collection_account, ''), NULLIF(orders.collection_account_email, ''), '-') as account_name")
             ->selectRaw("COALESCE(orders.collection_account_email, '') as merchant_id")
-            ->selectRaw('orders.id as order_id, orders.paid_at as paid_at, orders.paid_amount_usd as amount_usd')
+            ->selectRaw('orders.id as order_id, orders.paid_at as paid_at, orders.order_created_at as order_created_at, orders.paid_amount_usd as amount_usd')
             ->selectRaw('orders.paid_amount_usd as original_amount, \'USD\' as currency_code, orders.payment_status as payment_status')
             ->selectRaw("CASE WHEN orders.subscription_origin_order_id IS NOT NULL AND orders.subscription_origin_order_id <> '' THEN 'renewal' WHEN orders.subscription_type IS NOT NULL AND orders.subscription_type <> '' AND orders.subscription_type NOT LIKE '%无订阅%' THEN 'subscription' ELSE 'one_time' END as deduction_type")
             ->selectRaw("COALESCE(orders.shopify_order_number, '') as shopify_order_number, COALESCE(orders.tongtu_order_number, '') as tongtu_order_number, COALESCE(orders.bill_number, '') as bill_number")
@@ -168,6 +172,11 @@ class PaymentOrderSearchService
             'label' => (string) ($account->account_name ?: $account->account_email ?: $account->merchant_id),
         ]);
         $cards = LogisticsOrder::query()
+            ->where(function ($operator): void {
+                $operator->whereNull('operator_name')
+                    ->orWhere('operator_name', 'not like', '%刷单%');
+            })
+            ->whereRaw("LOWER(TRIM(COALESCE(payment_gateway, ''))) = 'fintrixv2'")
             ->where(fn ($query) => $query->whereNotNull('collection_account')->where('collection_account', '<>', '')->orWhere(fn ($nested) => $nested->whereNotNull('collection_account_email')->where('collection_account_email', '<>', '')))
             ->select(['collection_account', 'collection_account_email'])->distinct()->get()->map(function ($order): array {
                 $key = (string) ($order->collection_account_email ?: $order->collection_account ?: 'unknown');
@@ -190,6 +199,7 @@ class PaymentOrderSearchService
             'amount_usd' => round((float) $row->amount_usd, 2), 'original_amount' => round((float) $row->original_amount, 2),
             'currency_code' => (string) ($row->currency_code ?: 'USD'), 'payment_status' => (string) $row->payment_status,
             'risk_count' => (int) $row->risk_count, 'paid_at' => $row->paid_at ? (string) $row->paid_at : '',
+            'order_created_at' => $row->order_created_at ? (string) $row->order_created_at : '',
             'match_status' => $row->order_id ? 'matched' : 'unmatched',
         ])->all();
     }
