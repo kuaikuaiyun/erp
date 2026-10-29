@@ -67,6 +67,14 @@ class OperationReportController extends Controller
         $submittedFirstRevenueTotal = (float) $submittedReports->sum(
             fn (OperationReport $report) => collect($report->metric_rows ?? [])->sum('first_total_revenue')
         );
+        $submittedMediaRoiByDate = $submittedReports->mapWithKeys(function (OperationReport $report): array {
+            $rows = collect($this->metrics->mediaRoiSummary(
+                $report->metric_rows ?? [],
+                $report->advertising_rows ?? []
+            ))->keyBy(fn (array $row) => mb_strtolower(trim((string) $row['media_source'])))->all();
+
+            return [$report->report_date->format('Y-m-d') => $rows];
+        })->all();
 
         return view('portals.operation.reports.monthly', [
             'portal' => $context['portal']->loadMissing('menus'),
@@ -80,9 +88,11 @@ class OperationReportController extends Controller
             'metricTotals' => $this->sumRows($calculated['rows']),
             'metricRowspans' => $this->identityRowspans($calculated['rows']),
             'metricDateRowspans' => $this->dateRowspans($calculated['rows']),
+            'metricDateBands' => $this->dateBands($calculated['rows']),
             'warnings' => $calculated['warnings'],
             'submittedReports' => $submittedReports,
             'submittedReportsByDate' => $submittedReportsByDate,
+            'submittedMediaRoiByDate' => $submittedMediaRoiByDate,
             'submittedAdSpendTotal' => $submittedAdSpendTotal,
             'submittedFirstRoi' => $submittedAdSpendTotal > 0
                 ? $submittedFirstRevenueTotal / $submittedAdSpendTotal
@@ -496,5 +506,21 @@ class OperationReportController extends Controller
         }
 
         return $spans;
+    }
+
+    private function dateBands(array $rows): array
+    {
+        $bands = [];
+        $lastDate = null;
+        $band = 1;
+        foreach ($rows as $index => $row) {
+            if ($row['date'] !== $lastDate) {
+                $band = $band === 0 ? 1 : 0;
+                $lastDate = $row['date'];
+            }
+            $bands[$index] = $band;
+        }
+
+        return $bands;
     }
 }
