@@ -36,7 +36,7 @@ class PaymentOrderSearchService
 
         return [
             'filters' => $filters,
-            'accounts' => $this->accountOptions(),
+            'payment_gateways' => $this->paymentGatewayOptions(),
             'summary' => $summary,
             'rows' => $this->hydrateRows($records),
             'pagination' => ['current_page' => $page, 'last_page' => $lastPage, 'per_page' => $perPage, 'total' => $total, 'from' => $total === 0 ? 0 : (($page - 1) * $perPage + 1), 'to' => min($page * $perPage, $total)],
@@ -106,8 +106,10 @@ class PaymentOrderSearchService
         $dateColumn = ($filters['date_mode'] ?? 'paid') === 'order' ? 'order_created_at' : 'paid_at';
         if ($filters['date_from'] ?? '') $query->whereDate($dateColumn, '>=', $filters['date_from']);
         if ($filters['date_to'] ?? '') $query->whereDate($dateColumn, '<=', $filters['date_to']);
-        if ($filters['account'] ?? '') $query->where('account_key', $filters['account']);
-        if ($filters['channel'] ?? '') $query->where('channel', $filters['channel']);
+        if ($filters['payment_gateway'] ?? '') {
+            $gateway = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], (string) $filters['payment_gateway']).'%';
+            $query->where('payment_gateway', 'like', $gateway);
+        }
         if ($filters['deduction_type'] ?? '') $query->where('deduction_type', $filters['deduction_type']);
         $keyword = trim((string) ($filters['keyword'] ?? ''));
         if ($keyword !== '') {
@@ -131,6 +133,7 @@ class PaymentOrderSearchService
             ->leftJoin('logistics_paypal_accounts as account', 'account.id', '=', 'payment.logistics_paypal_account_id')
             ->leftJoin('logistics_orders as orders', 'orders.id', '=', 'payment.logistics_order_id')
             ->selectRaw("CONCAT('paypal:', payment.id) as record_key, 'paypal' as channel, payment.id as source_id")
+            ->selectRaw("'PayPal' as payment_gateway")
             ->selectRaw('payment.payment_transaction_id as transaction_id, payment.invoice_id as invoice_id')
             ->selectRaw("CONCAT('paypal:', payment.logistics_paypal_account_id) as account_key")
             ->selectRaw("COALESCE(account.account_name, account.account_email, account.merchant_id, '-') as account_name")
@@ -147,8 +150,11 @@ class PaymentOrderSearchService
                 $operator->whereNull('orders.operator_name')
                     ->orWhere('orders.operator_name', 'not like', '%刷单%');
             })
-            ->where('orders.payment_gateway', 'like', '%Fintrix%')
+            ->whereNotNull('orders.payment_gateway')
+            ->whereRaw("TRIM(orders.payment_gateway) <> ''")
+            ->where('orders.payment_gateway', 'not like', '%PayPal%')
             ->selectRaw("CONCAT('card:', orders.id) as record_key, 'card' as channel, orders.id as source_id")
+            ->selectRaw('orders.payment_gateway as payment_gateway')
             ->selectRaw("COALESCE(orders.transaction_id, orders.payment_gateway_order_id, orders.bill_number, CONCAT('ORDER-', orders.id)) as transaction_id")
             ->selectRaw("COALESCE(orders.bill_number, '') as invoice_id")
             ->selectRaw("CONCAT('card:', COALESCE(NULLIF(orders.collection_account_email, ''), NULLIF(orders.collection_account, ''), 'unknown')) as account_key")
@@ -164,27 +170,23 @@ class PaymentOrderSearchService
         return $paypal->unionAll($card);
     }
 
-    /** @return list<array{value:string,label:string}> */
-    private function accountOptions(): array
+    /** @return list<string> */
+    private function paymentGatewayOptions(): array
     {
-        $paypal = LogisticsPayPalAccount::query()->orderBy('account_name')->get()->map(fn ($account): array => [
-            'value' => 'paypal:'.$account->getKey(),
-            'label' => (string) ($account->account_name ?: $account->account_email ?: $account->merchant_id),
-        ]);
-        $cards = LogisticsOrder::query()
+        $gateways = LogisticsOrder::query()
             ->where(function ($operator): void {
                 $operator->whereNull('operator_name')
                     ->orWhere('operator_name', 'not like', '%刷单%');
             })
-            ->where('payment_gateway', 'like', '%Fintrix%')
-            ->where(fn ($query) => $query->whereNotNull('collection_account')->where('collection_account', '<>', '')->orWhere(fn ($nested) => $nested->whereNotNull('collection_account_email')->where('collection_account_email', '<>', '')))
-            ->select(['collection_account', 'collection_account_email'])->distinct()->get()->map(function ($order): array {
-                $key = (string) ($order->collection_account_email ?: $order->collection_account ?: 'unknown');
-                $label = (string) ($order->collection_account ?: $order->collection_account_email ?: '-');
-                return ['value' => 'card:'.$key, 'label' => $label];
-            })->unique('value');
+            ->whereNotNull('payment_gateway')
+            ->whereRaw("TRIM(payment_gateway) <> ''")
+            ->distinct()->orderBy('payment_gateway')->pluck('payment_gateway')
+            ->map(static fn ($gateway): string => trim((string) $gateway))
+            ->filter()->values();
 
-        return $paypal->concat($cards)->values()->all();
+        return $gateways->contains('PayPal')
+            ? $gateways->all()
+            : $gateways->push('PayPal')->sort()->values()->all();
     }
 
     /** @return list<array<string,mixed>> */
@@ -193,6 +195,7 @@ class PaymentOrderSearchService
         return $records->map(fn (object $row): array => [
             'record_key' => (string) $row->record_key, 'transaction_id' => (string) $row->transaction_id,
             'channel' => (string) $row->channel, 'account_name' => (string) $row->account_name,
+            'payment_gateway' => (string) $row->payment_gateway,
             'merchant_id' => (string) $row->merchant_id, 'order_id' => $row->order_id ? (int) $row->order_id : null,
             'shopify_order_number' => (string) $row->shopify_order_number, 'store_name' => (string) $row->store_name,
             'product_text' => (string) $row->product_text, 'deduction_type' => (string) $row->deduction_type,
