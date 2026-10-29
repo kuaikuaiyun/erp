@@ -8,6 +8,7 @@ use App\Models\LogisticsPayPalDispute;
 use App\Models\LogisticsPayPalRefund;
 use App\Models\LogisticsPayPalTransaction;
 use Illuminate\Database\Query\Builder;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class PaymentOrderSearchService
@@ -16,12 +17,8 @@ class PaymentOrderSearchService
     public function page(array $filters): array
     {
         $query = $this->filteredQuery($filters);
-        $summaryRow = (clone $query)->selectRaw('COUNT(*) as payment_count')
-            ->selectRaw('COALESCE(SUM(amount_usd), 0) as received_amount')
-            ->selectRaw('COALESCE(SUM(CASE WHEN risk_count > 0 THEN 1 ELSE 0 END), 0) as risk_payment_count')
-            ->selectRaw('COALESCE(SUM(CASE WHEN order_id IS NULL THEN 1 ELSE 0 END), 0) as unmatched_count')
-            ->first();
-        $total = (int) ($summaryRow->payment_count ?? 0);
+        $summary = $this->summarize($query);
+        $total = $summary['payment_count'];
         $perPage = in_array((int) ($filters['per_page'] ?? 50), [50, 100], true) ? (int) $filters['per_page'] : 50;
         $lastPage = max(1, (int) ceil($total / $perPage));
         $page = min(max(1, (int) ($filters['page'] ?? 1)), $lastPage);
@@ -37,14 +34,41 @@ class PaymentOrderSearchService
         return [
             'filters' => $filters,
             'accounts' => $this->accountOptions(),
-            'summary' => [
-                'payment_count' => (int) ($summaryRow->payment_count ?? 0),
-                'received_amount' => round((float) ($summaryRow->received_amount ?? 0), 2),
-                'risk_payment_count' => (int) ($summaryRow->risk_payment_count ?? 0),
-                'unmatched_count' => (int) ($summaryRow->unmatched_count ?? 0),
-            ],
+            'summary' => $summary,
             'rows' => $this->hydrateRows($records),
             'pagination' => ['current_page' => $page, 'last_page' => $lastPage, 'per_page' => $perPage, 'total' => $total, 'from' => $total === 0 ? 0 : (($page - 1) * $perPage + 1), 'to' => min($page * $perPage, $total)],
+        ];
+    }
+
+    /** @param array<string,mixed> $filters @return array<string,int|float> */
+    public function summary(array $filters): array
+    {
+        $cacheKey = 'payment:order-search-summary:v2:'.sha1((string) json_encode(
+            $filters,
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
+        ));
+
+        return Cache::remember(
+            $cacheKey,
+            now()->addSeconds(30),
+            fn (): array => $this->summarize($this->filteredQuery($filters)),
+        );
+    }
+
+    /** @return array{payment_count:int,received_amount:float,risk_payment_count:int,unmatched_count:int} */
+    private function summarize(Builder $query): array
+    {
+        $row = (clone $query)->selectRaw('COUNT(*) as payment_count')
+            ->selectRaw('COALESCE(SUM(amount_usd), 0) as received_amount')
+            ->selectRaw('COALESCE(SUM(CASE WHEN risk_count > 0 THEN 1 ELSE 0 END), 0) as risk_payment_count')
+            ->selectRaw('COALESCE(SUM(CASE WHEN order_id IS NULL THEN 1 ELSE 0 END), 0) as unmatched_count')
+            ->first();
+
+        return [
+            'payment_count' => (int) ($row->payment_count ?? 0),
+            'received_amount' => round((float) ($row->received_amount ?? 0), 2),
+            'risk_payment_count' => (int) ($row->risk_payment_count ?? 0),
+            'unmatched_count' => (int) ($row->unmatched_count ?? 0),
         ];
     }
 

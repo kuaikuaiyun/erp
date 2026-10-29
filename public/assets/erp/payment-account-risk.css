@@ -1,13 +1,9 @@
-.payment-account-risk-header { margin-bottom: 4px; }
-.payment-account-risk-header h1 { margin: 0; color: #153d66; font-size: 25px; font-weight: 500; line-height: 1.35; }
-.payment-account-risk-header h1 small { margin-left: 7px; color: #7890aa; font-size: 14px; font-weight: 400; }
-
 .payment-account-risk-page { width: 100%; max-width: none; color: #163d68; }
 
 .payment-account-risk-page .payment-account-filter-box { position: relative; z-index: 20; margin: 0 0 15px; border: 1px solid #dbe7f1; border-radius: 8px; box-shadow: none; overflow: visible; }
 .payment-account-risk-page .payment-account-filter-box .box-header { padding: 10px 14px; border-bottom: 1px solid #e5edf4; border-radius: 7px 7px 0 0; background: #f8fbfe; color: #274866; }
 .payment-account-risk-page .payment-account-filter-box .box-title { font-size: 13px; font-weight: 600; }
-.payment-account-risk-page .payment-account-filter-box .box-body { position: relative; padding: 13px 14px; border-radius: 0 0 7px 7px; background: #fff; }
+.payment-account-risk-page .payment-account-filter-box .box-body { position: relative; padding: 13px 14px; border-radius: 7px; background: #fff; }
 
 .payment-account-filter-form { display: grid; grid-template-columns: minmax(250px, 1.08fr) minmax(250px, 1.12fr) minmax(180px, .86fr) minmax(150px, .72fr) minmax(150px, .72fr) minmax(175px, .82fr) auto; gap: 11px; align-items: end; }
 .payment-account-filter-field { min-width: 0; margin: 0; }
@@ -116,7 +112,7 @@
 .payment-account-risk-page .payment-text-action:focus { color: #2055ac; text-decoration: underline; }
 .payment-account-risk-page .payment-account-compact-footer { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px 14px; }
 .payment-account-risk-page .payment-account-compact-balance { display: grid; min-width: 0; gap: 8px; }
-.payment-account-risk-page .payment-account-compact-values { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 22px; }
+.payment-account-risk-page .payment-account-compact-values { display: flex; align-items: baseline; flex-wrap: nowrap; gap: 6px 16px; white-space: nowrap; }
 .payment-account-risk-page .payment-account-compact-balance p { display: inline-flex; align-items: baseline; gap: 4px; color: #617f98; white-space: nowrap; }
 .payment-account-risk-page .payment-account-compact-balance p strong { display: inline; color: #153f62; font-size: 12px; }
 .payment-account-risk-page .payment-account-compact-balance small { margin: 0; white-space: normal; line-height: 1.45; }
@@ -239,7 +235,11 @@
 .payment-order-analysis-reconciliation { width: 100%; margin: 10px 0 0; padding: 8px 10px; border: 1px solid #d8e3eb; border-radius: 3px; background: #fff; color: #66839a; font-size: 10px; }
 .payment-order-analysis-reconciliation .fa { margin-right: 4px; color: #18a06b; }
 .payment-detail-dispute-body { margin-top: 12px; overflow: visible; border: 0; border-radius: 0; background: transparent; }
-.payment-detail-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.payment-overview-toolbar { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 12px; padding: 10px 12px; border: 1px solid #d8e5ee; border-radius: 8px; background: #fff; }
+.payment-overview-toolbar label { display: grid; gap: 5px; margin: 0; color: #536f85; font-size: 10px; }
+.payment-overview-toolbar .form-control { width: 170px; height: 34px; }
+.payment-overview-toolbar small { padding-bottom: 7px; color: #7890a3; font-size: 9px; }
+.payment-detail-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .payment-detail-kpi { min-width: 0; padding: 13px 14px; border: 1px solid #d8e5ee; border-radius: 8px; background: #fff; box-shadow: 0 2px 7px rgba(22, 63, 94, .04); }
 .payment-detail-kpi span,
 .payment-detail-kpi small { display: block; color: #748ca1; font-size: 10px; }
@@ -268,23 +268,23 @@
 .payment-detail-legend span::before { display: inline-block; width: 7px; height: 7px; margin-right: 4px; border-radius: 50%; background: #2b79d3; content: ''; }
 .payment-detail-legend .refunds::before { background: #d39526; }
 .payment-detail-legend .disputes::before { background: #df575d; }
-.payment-detail-chart { margin-top: 12px; }
-.payment-detail-chart svg { display: block; width: 100%; height: 150px; }
+.payment-detail-trend { position: relative; margin-top: 12px; }
+.payment-detail-chart-scroll { margin-top: 12px; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.payment-detail-chart { min-width: 100%; }
+.payment-detail-chart svg { display: block; width: 100%; height: 210px; overflow: visible; }
 .payment-detail-chart line { stroke: #e1eaf1; stroke-width: 1; }
 .payment-detail-chart polyline { fill: none; stroke: #2b79d3; stroke-width: 2; vector-effect: non-scaling-stroke; }
 .payment-detail-chart polyline.refunds { stroke: #d39526; }
 .payment-detail-chart polyline.disputes { stroke: #df575d; }
-.payment-detail-chart-labels { display: flex; justify-content: space-between; color: #7d91a3; font-size: 8px; }
-.payment-detail-tasks { display: flex; flex-direction: column; gap: 10px; }
-.payment-detail-task { padding: 12px; border-radius: 6px; background: #fff0ee; }
-.payment-detail-task.task-1 { background: #fff5e5; }
-.payment-detail-task.task-empty { background: #eef8f3; }
-.payment-detail-task strong,
-.payment-detail-task span { display: block; }
-.payment-detail-task strong { color: #d95055; font-size: 11px; }
-.payment-detail-task.task-1 strong { color: #bb7918; }
-.payment-detail-task.task-empty strong { color: #24845b; }
-.payment-detail-task span { margin-top: 5px; color: #546f84; font-size: 9px; }
+.payment-detail-chart circle { cursor: crosshair; stroke: #fff; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.payment-detail-chart circle.refunds { fill: #d39526; }
+.payment-detail-chart circle.disputes { fill: #df575d; }
+.payment-detail-chart circle:hover { r: 5.5; }
+.payment-trend-y-label { fill: #71889b; font-size: 9px; text-anchor: end; }
+.payment-trend-x-label { fill: #71889b; font-size: 8px; text-anchor: middle; }
+.payment-trend-tooltip { position: absolute; z-index: 5; top: 52px; right: 14px; display: flex; gap: 10px; padding: 7px 10px; border: 1px solid #cadbe7; border-radius: 5px; background: rgba(255,255,255,.96); color: #4d687d; box-shadow: 0 3px 10px rgba(26,61,86,.12); font-size: 9px; }
+.payment-trend-tooltip strong { color: #173f61; }
+.payment-trend-tooltip[hidden] { display: none; }
 .payment-funding-intro { padding: 15px; border: 1px solid #d8e5ee; border-radius: 8px; background: #fff; }
 .payment-funding-intro p { margin: 6px 0 0; color: #6e879c; font-size: 11px; }
 .payment-funding-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
@@ -410,8 +410,6 @@
 .payment-account-detail-modal .payment-detail-panel-heading small,
 .payment-account-detail-modal .payment-detail-legend,
 .payment-account-detail-modal .payment-detail-chart-labels,
-.payment-account-detail-modal .payment-detail-task span { font-size: 11px; }
-.payment-account-detail-modal .payment-detail-task strong { font-size: 13px; }
 .payment-account-detail-modal .payment-funding-grid span,
 .payment-account-detail-modal .payment-funding-grid small { font-size: 12px; }
 .payment-account-detail-modal .payment-funding-grid strong { font-size: 20px; }

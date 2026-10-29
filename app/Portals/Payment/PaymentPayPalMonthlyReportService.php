@@ -7,6 +7,7 @@ use Carbon\Carbon;
 use Carbon\CarbonInterface;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class PaymentPayPalMonthlyReportService
@@ -33,23 +34,34 @@ class PaymentPayPalMonthlyReportService
         $dimension = $dimension === self::DIMENSION_EVENT ? self::DIMENSION_EVENT : self::DIMENSION_PAYMENT;
         $year = max(2000, min(now(self::REPORT_TIMEZONE)->year, $year));
         $detailMonth = $detailMonth !== null && $detailMonth >= 1 && $detailMonth <= 12 ? $detailMonth : null;
-        $result = $this->aggregate($account, $year, $dimension, $detailMonth, false);
-
-        return [
-            'account' => [
-                'id' => (int) $account->getKey(),
-                'name' => (string) $account->account_name,
-                'merchant_id' => (string) $account->merchant_id,
-            ],
+        $cacheKey = 'payment:paypal-monthly-report:v2:'.sha1((string) json_encode([
+            'account' => (int) $account->getKey(),
+            'last_imported_at' => optional($account->last_imported_at)->format('Y-m-d H:i:s.u'),
+            'updated_at' => optional($account->updated_at)->format('Y-m-d H:i:s.u'),
             'year' => $year,
             'dimension' => $dimension,
-            'currency' => 'USD',
-            'available_years' => $this->availableYears($account, $year),
-            'rows' => $result['rows'],
             'detail_month' => $detailMonth,
-            'details' => $result['details'],
-            'formula_version' => '2026-10-28',
-        ];
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+        return Cache::remember($cacheKey, now()->addSeconds(45), function () use ($account, $year, $dimension, $detailMonth): array {
+            $result = $this->aggregate($account, $year, $dimension, $detailMonth, false);
+
+            return [
+                'account' => [
+                    'id' => (int) $account->getKey(),
+                    'name' => (string) $account->account_name,
+                    'merchant_id' => (string) $account->merchant_id,
+                ],
+                'year' => $year,
+                'dimension' => $dimension,
+                'currency' => 'USD',
+                'available_years' => $this->availableYears($account, $year),
+                'rows' => $result['rows'],
+                'detail_month' => $detailMonth,
+                'details' => $result['details'],
+                'formula_version' => '2026-10-28',
+            ];
+        });
     }
 
     /** @return array{rows:list<array<string,mixed>>,details:list<array<string,mixed>>} */
@@ -180,6 +192,7 @@ class PaymentPayPalMonthlyReportService
         }
 
         $coverage = $this->coverageByMonth($connection, $account, $year);
+        $currentMonth = now(self::REPORT_TIMEZONE)->format('Y-m');
         $rows = collect($months)->map(function (array $month, string $key) use ($dimension, $coverage): array {
             $month['refund_order_count'] = count($month['_refund_orders']);
             $month['dispute_order_count'] = count($month['_dispute_orders']);
@@ -191,7 +204,11 @@ class PaymentPayPalMonthlyReportService
                 ...$this->calculator->calculate($month, $dimension === self::DIMENSION_EVENT),
                 'coverage' => $coverage[$key] ?? ['status' => 'missing', 'covered_days' => 0, 'expected_days' => 0],
             ];
-        })->sortByDesc('month')->values()->all();
+        })->reject(static fn (array $row): bool => $row['month'] < $currentMonth && (int) ($row['coverage']['covered_days'] ?? 0) === 0)
+            ->sortByDesc('month')->values()->all();
+
+        $visibleMonths = array_fill_keys(array_column($rows, 'month'), true);
+        $details = array_values(array_filter($details, static fn (array $detail): bool => isset($visibleMonths[(string) ($detail['month'] ?? '')])));
 
         usort($details, static fn (array $left, array $right): int => strcmp((string) $right['happened_at'], (string) $left['happened_at']));
 

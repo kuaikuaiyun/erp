@@ -20,12 +20,11 @@
 @endpush
 
 @section('content')
-    <section class="content-header payment-account-risk-header">
+    <section class="content-header payment-page-heading">
         <h1>{{ __($translationPrefix.'.title') }} <small>{{ __($translationPrefix.'.subtitle') }}</small></h1>
     </section>
     <section class="content payment-portal-page payment-account-risk-page">
         <div class="box box-solid payment-account-filter-box">
-            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-filter" aria-hidden="true"></i> {{ __($translationPrefix.'.filters.title') }}</h3></div>
             <div class="box-body">
                 <form class="payment-account-filter-form" method="get" action="{{ route('payment.account-risk.index') }}" data-payment-filter-form data-payment-server-filter-form>
                     <input type="hidden" name="per_page" value="{{ $dashboard['pagination']['per_page'] }}">

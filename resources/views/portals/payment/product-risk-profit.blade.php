@@ -21,8 +21,11 @@
 @endpush
 
 @section('content')
+<section class="content-header payment-page-heading">
+    <h1>{{ __($translationPrefix.'.page_title') }} <small>{{ __($translationPrefix.'.page_subtitle') }}</small></h1>
+</section>
 <section class="content payment-portal-page payment-product-risk-page">
-    <div class="box box-solid payment-filter-box"><div class="box-header with-border"><h3 class="box-title"><i class="fa fa-filter" aria-hidden="true"></i> {{ __('payment.common.filter_title') }}</h3></div><div class="box-body">
+    <div class="box box-solid payment-filter-box"><div class="box-body">
         <form class="payment-operation-filter-form" method="get" action="{{ route('payment.product-risk-profit.index') }}" data-payment-product-filter>
             <input type="hidden" name="per_page" value="{{ $pagination['per_page'] }}">
             <input type="hidden" name="sort" value="{{ $filters['sort'] }}"><input type="hidden" name="direction" value="{{ $filters['direction'] }}">
@@ -34,17 +37,13 @@
         </form>
     </div></div>
 
-    <div class="payment-kpi-grid payment-kpi-grid-four">
+    <div class="payment-kpi-grid payment-kpi-grid-three">
         <article class="payment-kpi-card"><span class="payment-kpi-icon payment-kpi-icon-blue"><i class="fa fa-cubes"></i></span><div><p>{{ __($translationPrefix.'.kpis.products') }}</p><strong>{{ $number($summary['product_count']) }} / {{ $number($summary['sales']) }}</strong><small>{{ __($translationPrefix.'.kpis.products_real_note') }}</small></div></article>
         <article class="payment-kpi-card"><span class="payment-kpi-icon payment-kpi-icon-cyan"><i class="fa fa-usd"></i></span><div><p>{{ __($translationPrefix.'.kpis.receipts') }}</p><strong>{{ $money($summary['revenue']) }}</strong><small>{{ __($translationPrefix.'.kpis.receipts_real_note') }}</small></div></article>
         <article class="payment-kpi-card payment-tone-warning"><span class="payment-kpi-icon payment-kpi-icon-orange"><i class="fa fa-reply"></i></span><div><p>{{ __($translationPrefix.'.kpis.refund') }} <i class="fa fa-info-circle payment-formula-icon" tabindex="0" data-payment-formula-tooltip data-toggle="tooltip" data-container="body" title="{{ __($translationPrefix.'.formulas.refund_amount_rate') }}"></i></p><strong>{{ $money($summary['actual_refunds']) }} / {{ $rate($dashboard['refund_rate']) }}</strong><small>{{ __($translationPrefix.'.kpis.refund_real_note') }}</small></div></article>
-        <article class="payment-kpi-card"><span class="payment-kpi-icon payment-kpi-icon-red"><i class="fa fa-line-chart"></i></span><div><p>{{ __($translationPrefix.'.kpis.profit_pending') }}</p><strong>{{ __($translationPrefix.'.pending_cost') }}</strong><small>{{ __($translationPrefix.'.kpis.profit_pending_note') }}</small></div></article>
     </div>
 
-    <div class="payment-tabs" role="tablist">@foreach(['risk_metrics','loss_profit','refund_reason'] as $tab)<button type="button" class="{{ $loop->first ? 'active' : '' }}" data-payment-tab="{{ $tab }}" role="tab" aria-selected="{{ $loop->first ? 'true' : 'false' }}">{{ __($translationPrefix.'.tabs.'.$tab) }}</button>@endforeach</div>
-
-    <div class="payment-tab-panel" data-payment-tab-panel="risk_metrics" data-payment-product-main-tab data-loaded="1">@include('portals.payment.partials.product-risk-tab', ['tab' => 'risk_metrics', 'dashboard' => $dashboard])</div>
-    @foreach(['loss_profit','refund_reason'] as $tab)<div class="payment-tab-panel" data-payment-tab-panel="{{ $tab }}" data-payment-product-main-tab data-loaded="0" hidden><div class="payment-main-tab-loading"><i class="fa fa-spinner fa-spin"></i> {{ __($translationPrefix.'.main_tabs.loading') }}</div></div>@endforeach
+    <div class="payment-tab-panel payment-product-risk-primary-panel">@include('portals.payment.partials.product-risk-tab', ['tab' => 'risk_metrics', 'dashboard' => $dashboard])</div>
 
     <div class="modal fade payment-product-image-modal" id="payment-product-image-modal" tabindex="-1" role="dialog" aria-labelledby="payment-product-image-title"><div class="modal-dialog modal-lg" role="document"><div class="modal-content"><div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ __($translationPrefix.'.detail.close') }}"><span>&times;</span></button><h4 id="payment-product-image-title">{{ __($translationPrefix.'.image_preview.title') }}</h4><p data-payment-product-image-name></p></div><div class="modal-body"><img data-payment-product-image-preview src="" alt=""></div></div></div></div>
 
@@ -58,7 +57,7 @@
 @endsection
 
 @push('scripts')
-<script>window.PaymentPortal = { productTabUrl: @json(route('payment.product-risk-profit.tab')), productMainTabs: @json(__($translationPrefix.'.main_tabs')), productDetailUrl: @json(route('payment.product-risk-profit.detail')), productDetail: @json(__($translationPrefix.'.detail')), productExport: @json(__($translationPrefix.'.export')), pagination: @json(__('payment.common.pagination')) };</script>
+<script>window.PaymentPortal = { productDetailUrl: @json(route('payment.product-risk-profit.detail')), productDetail: @json(__($translationPrefix.'.detail')), productExport: @json(__($translationPrefix.'.export')), pagination: @json(__('payment.common.pagination')) };</script>
 <script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261026-6"></script>
 <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261015-2"></script>
 @endpush

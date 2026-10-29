@@ -187,6 +187,7 @@ Route::get('/product-risk-profit/export', [PaymentPortalController::class, 'expo
 Route::get('/product-risk-profit/tab', [PaymentPortalController::class, 'productRiskProfitTab'])->name('payment.product-risk-profit.tab');
 Route::get('/product-risk-profit/detail', [PaymentPortalController::class, 'productRiskProfitDetail'])->name('payment.product-risk-profit.detail');
 Route::get('/product-alerts', [PaymentPortalController::class, 'productAlerts'])->name('payment.product-alerts.index');
+Route::get('/product-alerts/export', [PaymentPortalController::class, 'exportProductAlerts'])->name('payment.product-alerts.export');
 Route::put('/product-alerts/{alert}/status', [PaymentPortalController::class, 'updateProductAlertStatus'])->where('alert', 'PW-(?:[PC]-)?[0-9]+')->name('payment.product-alerts.status.update');
 Route::get('/product-alerts/{alert}', [PaymentPortalController::class, 'productAlertDetail'])->where('alert', 'PW-(?:[PC]-)?[0-9]+')->name('payment.product-alerts.show');
 Route::get('/payment-orders', [PaymentPortalController::class, 'paymentOrders'])->name('payment.orders.index');

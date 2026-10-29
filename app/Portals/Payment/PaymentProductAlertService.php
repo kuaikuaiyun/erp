@@ -9,13 +9,20 @@ use App\Portals\Logistics\LogisticsCreditCardRefundReason;
 use Illuminate\Database\Connection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class PaymentProductAlertService
 {
+    private const METRIC_CACHE_SECONDS = 45;
+
     public const MINIMUM_ORDER_COUNT = 1;
 
     public const DISPUTE_RATE_THRESHOLD = 0.5;
+
+    public const DELIVERED_DISPUTE_WARNING_THRESHOLD = 2.5;
+
+    public const DELIVERED_DISPUTE_CRITICAL_THRESHOLD = 3.0;
 
     /**
      * @param array<string,mixed> $filters
@@ -30,14 +37,16 @@ class PaymentProductAlertService
         $page = min(max(1, $page), $lastPage);
         $offset = ($page - 1) * $perPage;
 
+        $pageAlerts = $this->withStatuses($filtered->slice($offset, $perPage)->values(), true);
+
         return [
             'filters' => $filters,
             'kpis' => [
-                ['key' => 'pending', 'value' => (string) $allAlerts->where('status_key', 'pending')->count(), 'note_key' => 'pending_note', 'tone' => 'warning'],
-                ['key' => 'processing', 'value' => (string) $allAlerts->whereIn('status_key', ['stopped', 'observing', 'backend_optimized', 'other'])->count(), 'note_key' => 'processing_note', 'tone' => 'warning'],
-                ['key' => 'completed', 'value' => (string) $allAlerts->where('status_key', 'completed')->count(), 'note_key' => 'completed_note', 'tone' => 'primary'],
+                ['key' => 'pending', 'value' => (string) $allAlerts->where('workflow_status_key', 'pending')->count(), 'note_key' => 'pending_note', 'tone' => 'warning'],
+                ['key' => 'processing', 'value' => (string) $allAlerts->where('workflow_status_key', 'processing')->count(), 'note_key' => 'processing_note', 'tone' => 'warning'],
+                ['key' => 'completed', 'value' => (string) $allAlerts->where('workflow_status_key', 'completed')->count(), 'note_key' => 'completed_note', 'tone' => 'primary'],
             ],
-            'alerts' => $filtered->slice($offset, $perPage)->values()->all(),
+            'alerts' => $pageAlerts->all(),
             'pagination' => [
                 'current_page' => $page,
                 'last_page' => $lastPage,
@@ -54,13 +63,58 @@ class PaymentProductAlertService
     {
         $alert = $this->alertRows()->firstWhere('code', $alertCode);
 
-        return $alert === null ? null : [...$alert, ...$this->detailData($alert)];
+        if ($alert !== null) {
+            $alert = $this->withStatuses(collect([$alert]), true)->first();
+        }
+
+        if ($alert === null) {
+            return null;
+        }
+
+        $detailCacheKey = 'payment:product-alert-detail:v2:'.sha1((string) json_encode([
+            'code' => (string) $alert['code'],
+            'channel' => (string) ($alert['channel_type'] ?? ''),
+            'orders' => (int) ($alert['eligible_order_count'] ?? 0),
+            'disputes' => (int) ($alert['dispute_count'] ?? 0),
+            'amount' => (float) ($alert['dispute_amount'] ?? 0),
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        $detail = Cache::remember(
+            $detailCacheKey,
+            now()->addSeconds(30),
+            fn (): array => $this->detailData($alert),
+        );
+
+        return [...$alert, ...$detail];
+    }
+
+    public function hasAlert(string $alertCode): bool
+    {
+        if (PaymentProductAlertAssignment::query()->where('alert_code', $alertCode)->exists()) {
+            return true;
+        }
+
+        return $this->alertRows()->contains(
+            fn (array $alert): bool => hash_equals((string) $alert['code'], $alertCode),
+        );
+    }
+
+    /** @return array{total:int,alerts:list<array<string,mixed>>} */
+    public function workbenchAlerts(int $limit = 5): array
+    {
+        $alerts = $this->alertRows()
+            ->where('workflow_status_key', '!=', 'completed')
+            ->values();
+
+        return [
+            'total' => $alerts->count(),
+            'alerts' => $alerts->take(max(1, $limit))->all(),
+        ];
     }
 
     /** @return list<array<string,mixed>> */
     public function exportRows(): array
     {
-        $metricRows = $this->metricRows(false);
+        $metricRows = $this->cachedMetricRows(false);
         $productKeys = $metricRows->pluck('product_key')->filter()->unique()->values()->all();
         $latestPaidTimes = collect();
         if ($productKeys !== []) {
@@ -106,20 +160,26 @@ class PaymentProductAlertService
         })->values()->all();
     }
 
+    /** @return list<array<string,mixed>> */
+    public function exportAlertRows(): array
+    {
+        return $this->alertRows()->values()->all();
+    }
+
     /** @return array<string,array<string,mixed>> */
     public function metricsByProductKey(array $productKeys = [], array $filters = []): array
     {
-        return $this->metricRows(false, $productKeys, $filters)->groupBy('product_key')->map(
+        return $this->cachedMetricRows(false, $productKeys, $filters)->groupBy('product_key')->map(
             fn (Collection $rows): array => $rows->keyBy('channel_type')->all()
         )->all();
     }
 
     public function updateStatus(string $alertCode, string $status, string $operation, string $remark, AdminUser $actor): void
     {
-        abort_unless(in_array($status, ['pending', 'stopped', 'observing', 'backend_optimized', 'other', 'completed'], true), 422);
+        abort_unless(in_array($status, ['stopped', 'observing', 'backend_optimized', 'other', 'completed'], true), 422);
 
         $record = PaymentProductAlertAssignment::query()->firstOrNew(['alert_code' => $alertCode]);
-        $previousStatus = $record->exists ? (string) $record->status : 'pending';
+        $previousStatus = $record->exists ? $this->normaliseResultStatus((string) $record->status) : 'pending';
         $record->status = $status;
         $record->save();
 
@@ -159,6 +219,28 @@ class PaymentProductAlertService
             $orderIds->whereNotNull('detail_orders.paypal_account_id')
                 ->where('detail_orders.paypal_association_source', 'actual_transaction');
         }
+
+        $orderTimeline = $database->table('logistics_orders as timeline_orders')
+            ->whereIn('timeline_orders.id', clone $orderIds)
+            ->selectRaw('MIN(timeline_orders.paid_at) as first_order_at')
+            ->selectRaw('MAX(timeline_orders.paid_at) as last_order_at')
+            ->first();
+        $storeDistribution = $database->table('logistics_orders as store_orders')
+            ->whereIn('store_orders.id', clone $orderIds)
+            ->selectRaw("COALESCE(NULLIF(TRIM(store_orders.store_name), ''), '-') as store_name")
+            ->selectRaw("COALESCE(NULLIF(TRIM(store_orders.operator_name), ''), '-') as operator_name")
+            ->selectRaw('COUNT(DISTINCT store_orders.id) as order_count')
+            ->selectRaw('MIN(store_orders.paid_at) as first_order_at')
+            ->selectRaw('MAX(store_orders.paid_at) as last_order_at')
+            ->groupBy('store_name', 'operator_name')
+            ->orderByDesc('order_count')->orderByDesc('last_order_at')->get()
+            ->map(fn (object $row): array => [
+                'name' => (string) $row->store_name,
+                'operator_name' => (string) $row->operator_name,
+                'order_count' => (int) $row->order_count,
+                'first_order_at' => $this->formatDateTime($row->first_order_at),
+                'last_order_at' => $this->formatDateTime($row->last_order_at),
+            ])->all();
 
         $disputes = $database->table('logistics_paypal_disputes')
             ->whereIn('logistics_order_id', clone $orderIds)
@@ -229,12 +311,12 @@ class PaymentProductAlertService
 
         $logs = PaymentProductAlertAssignmentLog::query()->where('alert_code', $alert['code'])
             ->where('event', 'status_changed')->latest('created_at')->limit(100)->get()
-            ->map(static function (PaymentProductAlertAssignmentLog $log): array {
+            ->map(function (PaymentProductAlertAssignmentLog $log): array {
                 $payload = json_decode((string) $log->note, true);
                 $from = is_array($payload) ? (string) ($payload['from_status'] ?? 'pending') : 'pending';
                 $to = is_array($payload) ? (string) ($payload['to_status'] ?? 'pending') : 'pending';
-                if (in_array($from, ['in_progress', 'to_assign'], true)) $from = 'pending';
-                if (in_array($to, ['in_progress', 'to_assign'], true)) $to = 'pending';
+                $from = $this->normaliseResultStatus($from);
+                $to = $this->normaliseResultStatus($to);
                 return [
                     'from_status' => $from,
                     'to_status' => $to,
@@ -249,6 +331,9 @@ class PaymentProductAlertService
             'payments' => $payments,
             'payment_events' => $paymentEvents->merge($refundEvents)->sortByDesc('sort_time')->take(100)->values()->all(),
             'processing_logs' => $logs,
+            'store_order_distribution' => $storeDistribution,
+            'first_order_at' => $this->formatDateTime($orderTimeline?->first_order_at),
+            'last_order_at' => $this->formatDateTime($orderTimeline?->last_order_at),
         ];
     }
 
@@ -365,6 +450,7 @@ class PaymentProductAlertService
             ->selectRaw("SUM(CASE WHEN {$actualPayPal} AND COALESCE(paypal_disputes.dispute_count, 0) > 0 THEN 1 ELSE 0 END) as paypal_dispute_order_count")
             ->selectRaw("SUM(CASE WHEN {$actualPayPal} AND product_orders.logistics_status = {$delivered} THEN 1 ELSE 0 END) as paypal_delivered_order_count")
             ->selectRaw("SUM(CASE WHEN {$actualPayPal} AND product_orders.logistics_status = {$delivered} AND COALESCE(paypal_disputes.dispute_count, 0) > 0 THEN 1 ELSE 0 END) as paypal_delivered_dispute_order_count")
+            ->selectRaw("MIN(CASE WHEN {$actualPayPal} THEN product_orders.paid_at ELSE NULL END) as paypal_first_paid_at")
             ->selectRaw("MAX(CASE WHEN {$actualPayPal} THEN product_orders.paid_at ELSE NULL END) as paypal_latest_paid_at")
             ->selectRaw("SUM(CASE WHEN {$actualPayPal} THEN COALESCE(paypal_disputes.dispute_amount, 0) ELSE 0 END) as paypal_dispute_amount")
             ->selectRaw("SUM(CASE WHEN {$actualPayPal} THEN COALESCE(paypal_disputes.description_mismatch_amount, 0) ELSE 0 END) as description_mismatch_amount")
@@ -385,6 +471,7 @@ class PaymentProductAlertService
             ->selectRaw("SUM(CASE WHEN {$creditCard} THEN COALESCE(card_risk.dispute_amount, 0) ELSE 0 END) as card_dispute_amount")
             ->selectRaw("SUM(CASE WHEN {$creditCard} AND product_orders.logistics_status = {$delivered} THEN 1 ELSE 0 END) as card_delivered_order_count")
             ->selectRaw("SUM(CASE WHEN {$creditCard} AND product_orders.logistics_status = {$delivered} AND COALESCE(card_risk.dispute_count, 0) > 0 THEN 1 ELSE 0 END) as card_delivered_dispute_order_count")
+            ->selectRaw("MIN(CASE WHEN {$creditCard} THEN product_orders.paid_at ELSE NULL END) as card_first_paid_at")
             ->selectRaw("MAX(CASE WHEN {$creditCard} THEN product_orders.paid_at ELSE NULL END) as card_latest_paid_at")
             ->groupBy('product_orders.product_key')
             ->get();
@@ -423,6 +510,7 @@ class PaymentProductAlertService
                 'qianhai_payment_count' => $qianhaiPayments,
                 'qianhai_dispute_rate' => $qianhaiPayments > 0 ? round((int) $row->qianhai_complaint_count / $qianhaiPayments * 100, 2) : 0.0,
                 'status_key' => 'pending',
+                'workflow_status_key' => 'pending',
                 'action_key' => 'process',
             ];
             $paypalDisputeRecords = (int) $row->paypal_dispute_count;
@@ -432,12 +520,14 @@ class PaymentProductAlertService
             $paypalRefundAmountRate = $received > 0 ? round($paypalRefundAmount / $received * 100, 2) : 0.0;
             $paypalDeliveredOrders = (int) $row->paypal_delivered_order_count;
             $paypalDeliveredDisputes = (int) $row->paypal_delivered_dispute_order_count;
-            $paypalAlert = $paypalRate >= 0.5 || $paypalRefundOrderRate >= 3 || $paypalRefundAmountRate >= 3;
-            $paypalRed = $paypalRate >= 1 || $paypalRefundOrderRate >= 5 || $paypalRefundAmountRate >= 5;
+            $paypalDeliveredRate = self::disputeRate($paypalDeliveredOrders, $paypalDeliveredDisputes);
+            $paypalDeliveredAlert = $paypalDeliveredRate > self::DELIVERED_DISPUTE_WARNING_THRESHOLD;
+            $paypalAlert = $paypalRate >= 0.5 || $paypalRefundOrderRate >= 3 || $paypalRefundAmountRate >= 3 || $paypalDeliveredAlert;
+            $paypalRed = $paypalRate >= 1 || $paypalRefundOrderRate >= 5 || $paypalRefundAmountRate >= 5 || $paypalDeliveredRate >= self::DELIVERED_DISPUTE_CRITICAL_THRESHOLD;
             $paypal = [...$base,
                 'code' => 'PW-P-'.(int) $row->first_item_id, 'channel_type' => 'paypal', 'channel_key' => 'paypal',
-                'threshold_key' => $paypalRefundOrderRate >= 3 ? 'refund_order_rate' : ($paypalRefundAmountRate >= 3 ? 'refund_amount_rate' : 'paypal_dispute_rate'),
-                'threshold' => ($paypalRefundOrderRate >= 3 || $paypalRefundAmountRate >= 3) ? 3.0 : 0.5,
+                'threshold_key' => $paypalDeliveredAlert ? 'delivered_dispute_rate' : ($paypalRefundOrderRate >= 3 ? 'refund_order_rate' : ($paypalRefundAmountRate >= 3 ? 'refund_amount_rate' : 'paypal_dispute_rate')),
+                'threshold' => $paypalDeliveredAlert ? self::DELIVERED_DISPUTE_WARNING_THRESHOLD : (($paypalRefundOrderRate >= 3 || $paypalRefundAmountRate >= 3) ? 3.0 : 0.5),
                 'severity_key' => $paypalRed ? 'critical' : 'warning', 'is_alert' => $paypalAlert,
                 'eligible_order_count' => $eligibleOrders, 'dispute_order_count' => $disputeOrders,
                 'dispute_count' => $paypalDisputeRecords, 'dispute_rate' => $paypalRate,
@@ -448,13 +538,15 @@ class PaymentProductAlertService
                 'refund_amount_rate' => $paypalRefundAmountRate, 'complaint_count' => 0,
                 'delivered_order_count' => $paypalDeliveredOrders,
                 'delivered_dispute_order_count' => $paypalDeliveredDisputes,
-                'delivered_dispute_rate' => self::disputeRate($paypalDeliveredOrders, $paypalDeliveredDisputes),
+                'delivered_dispute_rate' => $paypalDeliveredRate,
+                'first_paid_at' => (string) ($row->paypal_first_paid_at ?? ''),
                 'latest_paid_at' => (string) ($row->paypal_latest_paid_at ?? ''),
                 'sample' => $eligibleOrders.' / '.$disputeOrders,
                 'trigger_metrics' => array_values(array_filter([
                     $paypalRefundOrderRate >= 3 ? ['key' => 'refund_order_rate', 'value' => $paypalRefundOrderRate] : null,
                     $paypalRefundAmountRate >= 3 ? ['key' => 'refund_amount_rate', 'value' => $paypalRefundAmountRate] : null,
                     $paypalRate >= 0.5 ? ['key' => 'paypal_dispute_rate', 'value' => $paypalRate] : null,
+                    $paypalDeliveredAlert ? ['key' => 'delivered_dispute_rate', 'value' => $paypalDeliveredRate] : null,
                 ])),
             ];
             $cardOrders = (int) $row->card_order_count;
@@ -469,12 +561,14 @@ class PaymentProductAlertService
             $cardRefundAmountRate = $cardReceived > 0 ? round($cardRefundAmount / $cardReceived * 100, 2) : 0.0;
             $cardDeliveredOrders = (int) $row->card_delivered_order_count;
             $cardDeliveredDisputes = (int) $row->card_delivered_dispute_order_count;
-            $cardAlert = $cardRate >= 0.5 || $cardRefundOrderRate >= 3 || $cardRefundAmountRate >= 3;
-            $cardRed = $cardRate >= 1 || $cardRefundOrderRate >= 5 || $cardRefundAmountRate >= 5;
+            $cardDeliveredRate = self::disputeRate($cardDeliveredOrders, $cardDeliveredDisputes);
+            $cardDeliveredAlert = $cardDeliveredRate > self::DELIVERED_DISPUTE_WARNING_THRESHOLD;
+            $cardAlert = $cardRate >= 0.5 || $cardRefundOrderRate >= 3 || $cardRefundAmountRate >= 3 || $cardDeliveredAlert;
+            $cardRed = $cardRate >= 1 || $cardRefundOrderRate >= 5 || $cardRefundAmountRate >= 5 || $cardDeliveredRate >= self::DELIVERED_DISPUTE_CRITICAL_THRESHOLD;
             $card = [...$base,
                 'code' => 'PW-C-'.(int) $row->first_item_id, 'channel_type' => 'credit_card', 'channel_key' => 'credit_card',
-                'threshold_key' => $cardRefundOrderRate >= 3 ? 'refund_order_rate' : ($cardRefundAmountRate >= 3 ? 'refund_amount_rate' : 'credit_card_dispute_rate'),
-                'threshold' => ($cardRefundOrderRate >= 3 || $cardRefundAmountRate >= 3) ? 3.0 : 0.5,
+                'threshold_key' => $cardDeliveredAlert ? 'delivered_dispute_rate' : ($cardRefundOrderRate >= 3 ? 'refund_order_rate' : ($cardRefundAmountRate >= 3 ? 'refund_amount_rate' : 'credit_card_dispute_rate')),
+                'threshold' => $cardDeliveredAlert ? self::DELIVERED_DISPUTE_WARNING_THRESHOLD : (($cardRefundOrderRate >= 3 || $cardRefundAmountRate >= 3) ? 3.0 : 0.5),
                 'severity_key' => $cardRed ? 'critical' : 'warning', 'is_alert' => $cardAlert,
                 'eligible_order_count' => $cardOrders, 'dispute_order_count' => $cardDisputes,
                 'dispute_count' => $cardDisputes, 'dispute_rate' => $cardRate,
@@ -486,13 +580,15 @@ class PaymentProductAlertService
                 'complaint_count' => (int) $row->card_complaint_count,
                 'delivered_order_count' => $cardDeliveredOrders,
                 'delivered_dispute_order_count' => $cardDeliveredDisputes,
-                'delivered_dispute_rate' => self::disputeRate($cardDeliveredOrders, $cardDeliveredDisputes),
+                'delivered_dispute_rate' => $cardDeliveredRate,
+                'first_paid_at' => (string) ($row->card_first_paid_at ?? ''),
                 'latest_paid_at' => (string) ($row->card_latest_paid_at ?? ''),
                 'sample' => $cardOrders.' / '.$cardDisputes,
                 'trigger_metrics' => array_values(array_filter([
                     $cardRefundOrderRate >= 3 ? ['key' => 'refund_order_rate', 'value' => $cardRefundOrderRate] : null,
                     $cardRefundAmountRate >= 3 ? ['key' => 'refund_amount_rate', 'value' => $cardRefundAmountRate] : null,
                     $cardRate >= 0.5 ? ['key' => 'credit_card_dispute_rate', 'value' => $cardRate] : null,
+                    $cardDeliveredAlert ? ['key' => 'delivered_dispute_rate', 'value' => $cardDeliveredRate] : null,
                 ])),
             ];
             return collect([$paypal, $card])->filter(fn (array $item): bool => !$onlyQualified || ($item['eligible_order_count'] > 0 && $item['is_alert']))->all();
@@ -522,7 +618,7 @@ class PaymentProductAlertService
     }
 
     /** @param Collection<int,array<string,mixed>> $alerts @return Collection<int,array<string,mixed>> */
-    private function withStatuses(Collection $alerts): Collection
+    private function withStatuses(Collection $alerts, bool $includeHistory = false): Collection
     {
         if ($alerts->isEmpty()) {
             return $alerts;
@@ -531,16 +627,18 @@ class PaymentProductAlertService
         $statuses = PaymentProductAlertAssignment::query()
             ->whereIn('alert_code', $alerts->pluck('code')->all())
             ->get()->keyBy('alert_code');
-        $logs = PaymentProductAlertAssignmentLog::query()
-            ->whereIn('alert_code', $alerts->pluck('code')->all())
-            ->where('event', 'status_changed')->latest('created_at')->get()->groupBy('alert_code');
+        $logs = $includeHistory
+            ? PaymentProductAlertAssignmentLog::query()
+                ->whereIn('alert_code', $alerts->pluck('code')->all())
+                ->where('event', 'status_changed')->latest('created_at')->get()->groupBy('alert_code')
+            : collect();
 
         return $alerts->map(function (array $alert) use ($statuses, $logs): array {
             $record = $statuses->get($alert['code']);
-            $history = collect($logs->get($alert['code'], collect()))->map(static function (PaymentProductAlertAssignmentLog $log): array {
+            $history = collect($logs->get($alert['code'], collect()))->map(function (PaymentProductAlertAssignmentLog $log): array {
                 $payload = json_decode((string) $log->note, true);
                 $status = is_array($payload) ? (string) ($payload['to_status'] ?? 'pending') : 'pending';
-                if ($status === 'in_progress' || $status === 'to_assign') $status = 'pending';
+                $status = $this->normaliseResultStatus($status);
                 return [
                     'status' => $status,
                     'remark' => is_array($payload) ? (string) ($payload['remark'] ?? '') : (string) $log->note,
@@ -554,8 +652,8 @@ class PaymentProductAlertService
                 return $alert;
             }
 
-            $allowed = ['pending', 'stopped', 'observing', 'backend_optimized', 'other', 'completed'];
-            $alert['status_key'] = in_array((string) $record->status, $allowed, true) ? (string) $record->status : 'pending';
+            $alert['status_key'] = $this->normaliseResultStatus((string) $record->status);
+            $alert['workflow_status_key'] = $this->workflowStatus($alert['status_key']);
             $alert['action_key'] = 'view';
             return $alert;
         });
@@ -564,12 +662,41 @@ class PaymentProductAlertService
     /** @return Collection<int,array<string,mixed>> */
     private function alertRows(): Collection
     {
-        $rows = $this->metricRows(false);
+        $rows = $this->cachedMetricRows(false);
         $historicalCodes = PaymentProductAlertAssignment::query()->pluck('alert_code')->flip();
 
         return $this->withStatuses($rows->filter(
             fn (array $row): bool => (bool) ($row['is_alert'] ?? false) || $historicalCodes->has($row['code'])
         )->values());
+    }
+
+    /** @return Collection<int,array<string,mixed>> */
+    private function cachedMetricRows(bool $onlyQualified = true, array $productKeys = [], array $filters = []): Collection
+    {
+        $productKeys = array_values(array_unique(array_filter(array_map(
+            static fn (mixed $value): string => trim((string) $value),
+            $productKeys,
+        ))));
+        sort($productKeys);
+
+        $metricFilters = [
+            'date_from' => (string) ($filters['date_from'] ?? ''),
+            'date_to' => (string) ($filters['date_to'] ?? ''),
+            'store' => (string) ($filters['store'] ?? ''),
+        ];
+        $cacheKey = 'payment:product-alert-metrics:v3:'.sha1((string) json_encode([
+            'qualified' => $onlyQualified,
+            'products' => $productKeys,
+            'filters' => $metricFilters,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+        $rows = Cache::remember(
+            $cacheKey,
+            now()->addSeconds(self::METRIC_CACHE_SECONDS),
+            fn (): array => $this->metricRows($onlyQualified, $productKeys, $metricFilters)->values()->all(),
+        );
+
+        return collect($rows);
     }
 
     /**
@@ -579,14 +706,21 @@ class PaymentProductAlertService
      */
     private function filterRows(Collection $alerts, array $filters): Collection
     {
-        $status = trim((string) ($filters['status'] ?? 'pending'));
+        $flowStatus = trim((string) ($filters['flow_status'] ?? 'open'));
+        $processingStatus = trim((string) ($filters['processing_status'] ?? ''));
         $product = mb_strtolower(trim((string) ($filters['product'] ?? '')));
         $channel = trim((string) ($filters['channel'] ?? ''));
         $severity = trim((string) ($filters['severity'] ?? ''));
         $sample = trim((string) ($filters['sample'] ?? ''));
 
-        return $alerts->filter(function (array $row) use ($status, $product, $channel, $severity, $sample): bool {
-            if ($status !== '' && $row['status_key'] !== $status) {
+        return $alerts->filter(function (array $row) use ($flowStatus, $processingStatus, $product, $channel, $severity, $sample): bool {
+            if ($flowStatus === 'open' && $row['workflow_status_key'] === 'completed') {
+                return false;
+            }
+            if ($flowStatus === 'completed' && $row['workflow_status_key'] !== 'completed') {
+                return false;
+            }
+            if ($processingStatus !== '' && $row['status_key'] !== $processingStatus) {
                 return false;
             }
             if ($product !== '') {
@@ -607,6 +741,28 @@ class PaymentProductAlertService
             if ($sample === 'over_500' && $count <= 500) return false;
             return true;
         })->values();
+    }
+
+    private function normaliseResultStatus(string $status): string
+    {
+        return match ($status) {
+            'stopped', 'observing', 'backend_optimized', 'other', 'completed', 'processing' => $status,
+            default => 'pending',
+        };
+    }
+
+    private function workflowStatus(string $status): string
+    {
+        return match ($status) {
+            'completed' => 'completed',
+            'stopped', 'observing', 'backend_optimized', 'other', 'processing' => 'processing',
+            default => 'pending',
+        };
+    }
+
+    private function formatDateTime(mixed $value): string
+    {
+        return $value ? Carbon::parse((string) $value, 'UTC')->timezone('Asia/Shanghai')->format('Y-m-d H:i') : '-';
     }
 
     private function productKeyExpression(string $alias): string

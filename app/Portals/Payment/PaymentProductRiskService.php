@@ -6,6 +6,7 @@ use App\Models\LogisticsOrder;
 use App\Portals\Logistics\LogisticsProductStatisticsService;
 use App\Portals\Logistics\LogisticsCreditCardRefundReason;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class PaymentProductRiskService
@@ -19,6 +20,21 @@ class PaymentProductRiskService
 
     /** @param array<string,mixed> $filters @return array<string,mixed> */
     public function dashboard(array $filters): array
+    {
+        $cacheKey = 'payment:product-risk-dashboard:v2:'.sha1((string) json_encode(
+            $filters,
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
+        ));
+
+        return Cache::remember(
+            $cacheKey,
+            now()->addSeconds(30),
+            fn (): array => $this->buildDashboard($filters),
+        );
+    }
+
+    /** @param array<string,mixed> $filters @return array<string,mixed> */
+    private function buildDashboard(array $filters): array
     {
         $data = $this->withPaymentProductNames($this->statistics->page([...$filters, 'skip_refund_report' => true]));
         $summary = $data['summary'];
@@ -35,6 +51,21 @@ class PaymentProductRiskService
 
     /** @param array<string,mixed> $filters @return array<string,mixed> */
     public function tab(array $filters, string $tab): array
+    {
+        $cacheKey = 'payment:product-risk-tab:v2:'.sha1((string) json_encode([
+            'filters' => $filters,
+            'tab' => $tab,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+        return Cache::remember(
+            $cacheKey,
+            now()->addSeconds(30),
+            fn (): array => $this->buildTab($filters, $tab),
+        );
+    }
+
+    /** @param array<string,mixed> $filters @return array<string,mixed> */
+    private function buildTab(array $filters, string $tab): array
     {
         if ($tab !== 'refund_reason') {
             return [
@@ -109,13 +140,15 @@ class PaymentProductRiskService
         if (($activeFilters['date_from'] ?? '') !== '') $latestPaidQuery->whereDate('orders.paid_at', '>=', $activeFilters['date_from']);
         if (($activeFilters['date_to'] ?? '') !== '') $latestPaidQuery->whereDate('orders.paid_at', '<=', $activeFilters['date_to']);
         if (($activeFilters['store'] ?? '') !== '') $latestPaidQuery->where('orders.store_name', $activeFilters['store']);
-        $latestPaidTimes = $latestPaidQuery
+        $orderFacts = $latestPaidQuery
             ->selectRaw("{$keyExpression} as product_key")
+            ->selectRaw('COUNT(DISTINCT orders.id) as order_count')
+            ->selectRaw('MIN(orders.paid_at) as first_paid_at')
             ->selectRaw('MAX(orders.paid_at) as latest_paid_at')
-            ->groupByRaw($keyExpression)->pluck('latest_paid_at', 'product_key');
+            ->groupByRaw($keyExpression)->get()->keyBy('product_key');
 
         $riskMetrics = $this->alerts->metricsByProductKey(array_values($keys), $activeFilters);
-        $data['products'] = collect($products)->map(function (array $product) use ($names, $riskMetrics, $latestPaidTimes): array {
+        $data['products'] = collect($products)->map(function (array $product) use ($names, $riskMetrics, $orderFacts): array {
             $encoded = substr((string) $product['id'], 8);
             $encoded = strtr($encoded, '-_', '+/').str_repeat('=', (4 - strlen($encoded) % 4) % 4);
             $key = base64_decode($encoded, true);
@@ -134,6 +167,8 @@ class PaymentProductRiskService
             $product['paypal_delivered_order_count'] = (int) ($paypal['delivered_order_count'] ?? 0);
             $product['paypal_delivered_dispute_count'] = (int) ($paypal['delivered_dispute_order_count'] ?? 0);
             $product['paypal_delivered_dispute_rate'] = (float) ($paypal['delivered_dispute_rate'] ?? 0);
+            $product['paypal_description_mismatch_amount'] = (float) ($paypal['description_mismatch_amount'] ?? 0);
+            $product['paypal_description_mismatch_rate'] = (float) ($paypal['description_mismatch_rate'] ?? 0);
             $product['credit_card_order_count'] = (int) ($card['eligible_order_count'] ?? 0);
             $product['credit_card_complaint_count'] = (int) ($card['complaint_count'] ?? 0);
             $product['credit_card_dispute_count'] = (int) ($card['dispute_count'] ?? 0);
@@ -144,7 +179,13 @@ class PaymentProductRiskService
             $product['credit_card_delivered_order_count'] = (int) ($card['delivered_order_count'] ?? 0);
             $product['credit_card_delivered_dispute_count'] = (int) ($card['delivered_dispute_order_count'] ?? 0);
             $product['credit_card_delivered_dispute_rate'] = (float) ($card['delivered_dispute_rate'] ?? 0);
-            $latestPaidAt = $key === false ? null : $latestPaidTimes->get($key);
+            $facts = $key === false ? null : $orderFacts->get($key);
+            $product['order_count'] = (int) ($facts->order_count ?? 0);
+            $firstPaidAt = $facts->first_paid_at ?? null;
+            $product['first_paid_at'] = $firstPaidAt
+                ? Carbon::parse((string) $firstPaidAt, 'UTC')->timezone('Asia/Shanghai')->format('Y-m-d H:i')
+                : '-';
+            $latestPaidAt = $facts->latest_paid_at ?? null;
             $product['latest_paid_at'] = $latestPaidAt
                 ? Carbon::parse((string) $latestPaidAt, 'UTC')->timezone('Asia/Shanghai')->format('Y-m-d H:i')
                 : '-';
@@ -156,6 +197,22 @@ class PaymentProductRiskService
 
     /** @param array<string,mixed> $filters @param array<string,mixed> $options @return array<string,mixed>|null */
     public function detail(array $filters, string $productId, array $options): ?array
+    {
+        $cacheKey = 'payment:product-risk-detail:v2:'.sha1((string) json_encode([
+            'filters' => $filters,
+            'product_id' => $productId,
+            'options' => $options,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+        return Cache::remember(
+            $cacheKey,
+            now()->addSeconds(30),
+            fn (): ?array => $this->buildDetail($filters, $productId, $options),
+        );
+    }
+
+    /** @param array<string,mixed> $filters @param array<string,mixed> $options @return array<string,mixed>|null */
+    private function buildDetail(array $filters, string $productId, array $options): ?array
     {
         if (($options['tab'] ?? '') === 'variants') {
             $key = $this->decodeProductKey($productId);
@@ -177,12 +234,54 @@ class PaymentProductRiskService
         $key = $this->decodeProductKey($productId);
         if ($key !== null) {
             $detail['channel_risk'] = $this->alerts->metricsByProductKey([$key])[$key] ?? [];
+            $context = $this->productOrderContext($filters, $key);
+            $detail['product'] = [...($detail['product'] ?? []), ...$context];
             if (($options['tab'] ?? '') === 'first_renewal' && isset($detail['detail'])) {
                 $detail['detail']['channel_groups'] = $this->channelLifecycleGroups($filters, $key);
             }
         }
 
         return $detail;
+    }
+
+    /** @param array<string,mixed> $filters @return array<string,mixed> */
+    private function productOrderContext(array $filters, string $productKey): array
+    {
+        $database = DB::connection(config('admin.database.connection') ?: config('database.default'));
+        $expression = $this->productKeyExpression('items');
+        $query = $database->table('logistics_order_items as items')
+            ->join('logistics_orders as orders', 'orders.id', '=', 'items.logistics_order_id')
+            ->whereRaw("{$expression} = ?", [$productKey]);
+        if (($filters['date_from'] ?? '') !== '') $query->whereDate('orders.paid_at', '>=', $filters['date_from']);
+        if (($filters['date_to'] ?? '') !== '') $query->whereDate('orders.paid_at', '<=', $filters['date_to']);
+        if (($filters['store'] ?? '') !== '') $query->where('orders.store_name', $filters['store']);
+
+        $timeline = (clone $query)->selectRaw('MIN(orders.paid_at) as first_order_at, MAX(orders.paid_at) as last_order_at')->first();
+        $stores = (clone $query)
+            ->selectRaw("COALESCE(NULLIF(TRIM(orders.store_name), ''), '-') as name")
+            ->selectRaw("COALESCE(NULLIF(TRIM(orders.operator_name), ''), '-') as operator_name")
+            ->selectRaw('COUNT(DISTINCT orders.id) as order_count')
+            ->selectRaw('MIN(orders.paid_at) as first_order_at')
+            ->selectRaw('MAX(orders.paid_at) as last_order_at')
+            ->groupBy('name', 'operator_name')->orderByDesc('order_count')->orderByDesc('last_order_at')->get()
+            ->map(fn (object $row): array => [
+                'name' => (string) $row->name,
+                'operator_name' => (string) $row->operator_name,
+                'order_count' => (int) $row->order_count,
+                'first_order_at' => $this->displayDateTime($row->first_order_at),
+                'last_order_at' => $this->displayDateTime($row->last_order_at),
+            ])->all();
+
+        return [
+            'first_order_at' => $this->displayDateTime($timeline?->first_order_at),
+            'last_order_at' => $this->displayDateTime($timeline?->last_order_at),
+            'store_order_distribution' => $stores,
+        ];
+    }
+
+    private function displayDateTime(mixed $value): string
+    {
+        return $value ? Carbon::parse((string) $value, 'UTC')->timezone('Asia/Shanghai')->format('Y-m-d H:i') : '-';
     }
 
     /**

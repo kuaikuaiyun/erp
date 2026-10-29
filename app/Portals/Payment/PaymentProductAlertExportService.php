@@ -31,6 +31,92 @@ class PaymentProductAlertExportService
     }
 
     /** @param list<array<string,mixed>> $rows */
+    public function downloadAlerts(array $rows): StreamedResponse
+    {
+        $filename = __('payment.product_alerts.export.filename', [
+            'time' => now('Asia/Shanghai')->format('Ymd_His'),
+        ]);
+
+        return response()->streamDownload(function () use ($rows): void {
+            $spreadsheet = $this->alertSpreadsheet($rows);
+            (new Xlsx($spreadsheet))->save('php://output');
+            $spreadsheet->disconnectWorksheets();
+        }, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Cache-Control' => 'max-age=0, must-revalidate',
+        ]);
+    }
+
+    /** @param list<array<string,mixed>> $rows */
+    private function alertSpreadsheet(array $rows): Spreadsheet
+    {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle(__('payment.product_alerts.export.sheet_name'));
+        $sheet->setShowGridlines(false);
+        $sheet->freezePane('A2');
+
+        $headers = array_values(__('payment.product_alerts.export.columns'));
+        foreach ($headers as $index => $label) {
+            $sheet->setCellValue(Coordinate::stringFromColumnIndex($index + 1).'1', $label);
+        }
+
+        $rowNumber = 2;
+        foreach ($rows as $row) {
+            $isPayPal = ($row['channel_type'] ?? '') === 'paypal';
+            $values = [
+                (string) ($row['sku'] ?? '-'),
+                __('payment.product_alerts.channels.'.($row['channel_key'] ?? 'paypal')),
+                (int) ($row['eligible_order_count'] ?? 0),
+                (int) ($row['dispute_order_count'] ?? 0),
+                (float) ($row['dispute_amount'] ?? 0),
+                (float) ($row['dispute_rate'] ?? 0) / 100,
+                $isPayPal ? (float) ($row['description_mismatch_rate'] ?? 0) / 100 : '',
+                (float) ($row['delivered_dispute_rate'] ?? 0) / 100,
+                __('payment.product_alerts.severities.'.($row['severity_key'] ?? 'warning')),
+                __('payment.product_alerts.statuses.'.($row['workflow_status_key'] ?? 'pending')),
+                __('payment.product_alerts.statuses.'.($row['status_key'] ?? 'pending')),
+                (string) ($row['latest_remark'] ?? ''),
+                (string) ($row['first_paid_at'] ?? '-'),
+                (string) ($row['latest_paid_at'] ?? '-'),
+            ];
+            foreach ($values as $index => $value) {
+                $coordinate = Coordinate::stringFromColumnIndex($index + 1).$rowNumber;
+                if (in_array($index + 1, [1, 2, 9, 10, 11, 12, 13, 14], true)) {
+                    $sheet->setCellValueExplicit($coordinate, (string) $value, DataType::TYPE_STRING);
+                } else {
+                    $sheet->setCellValue($coordinate, $value);
+                }
+            }
+            $rowNumber++;
+        }
+
+        $lastRow = max(1, $rowNumber - 1);
+        $sheet->setAutoFilter("A1:N{$lastRow}");
+        $sheet->getStyle("A1:N1")->getFont()->setBold(true)->getColor()->setRGB('17365D');
+        $sheet->getStyle("A1:N1")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('EAF2F8');
+        $sheet->getStyle("A1:N{$lastRow}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('D9E2F3');
+        $sheet->getStyle("A1:N{$lastRow}")->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
+        if ($lastRow >= 2) {
+            $sheet->getStyle("C2:D{$lastRow}")->getNumberFormat()->setFormatCode('#,##0');
+            $sheet->getStyle("E2:E{$lastRow}")->getNumberFormat()->setFormatCode('$#,##0.00');
+            foreach (['F', 'G', 'H'] as $column) {
+                $sheet->getStyle("{$column}2:{$column}{$lastRow}")->getNumberFormat()->setFormatCode('0.00%');
+            }
+        }
+        foreach (range('A', 'N') as $column) {
+            $sheet->getColumnDimension($column)->setWidth(18);
+        }
+        $sheet->getColumnDimension('A')->setWidth(26);
+        $sheet->getColumnDimension('L')->setWidth(42);
+        $sheet->getColumnDimension('M')->setWidth(20);
+        $sheet->getColumnDimension('N')->setWidth(20);
+        $sheet->getStyle("A1:N{$lastRow}")->getAlignment()->setWrapText(false);
+
+        return $spreadsheet;
+    }
+
+    /** @param list<array<string,mixed>> $rows */
     private function spreadsheet(array $rows): Spreadsheet
     {
         $spreadsheet = new Spreadsheet();
