@@ -102,25 +102,29 @@ class WarehouseWeightExceptionController extends Controller
         if ($skuValues->isNotEmpty()) {
             $itemsTable = (new \App\Models\LogisticsOrderItem())->getTable();
             $ordersTable = (new \App\Models\LogisticsOrder())->getTable();
+            $storesTable = (new \App\Models\AssistantDomainStore())->getTable();
             $placeholders = implode(',', array_fill(0, $skuValues->count(), '?'));
             $productExpression = "COALESCE(NULLIF(TRIM({$itemsTable}.tongtu_product_name), ''), NULLIF(TRIM({$itemsTable}.product_title), ''))";
-            $storeExpression = "COALESCE(NULLIF(TRIM({$ordersTable}.store_name), ''), NULLIF(TRIM({$ordersTable}.source_shop_domain), ''), '未识别店铺')";
+            // 与运营报表保持一致：“域名与店铺信息管理”的 domain 是权威域名，订单字段仅作为未关联店铺时的兜底。
+            $domainExpression = "COALESCE(NULLIF(TRIM({$storesTable}.domain), ''), NULLIF(TRIM({$ordersTable}.source_shop_domain), ''), NULLIF(TRIM({$ordersTable}.store_name), ''), '未知店铺')";
+            $storeExpression = "COALESCE(NULLIF(TRIM({$storesTable}.shop_name), ''), NULLIF(TRIM({$ordersTable}.store_name), ''), {$domainExpression})";
             $operatorExpression = "COALESCE(NULLIF(TRIM({$ordersTable}.operator_name), ''), '未分配运营')";
 
             $rows = \App\Models\LogisticsOrderItem::query()
                 ->join($ordersTable, "{$ordersTable}.id", '=', "{$itemsTable}.logistics_order_id")
+                ->leftJoin($storesTable, "{$storesTable}.id", '=', "{$ordersTable}.assistant_domain_store_id")
                 ->where(function ($query) use ($itemsTable, $skuValues, $placeholders): void {
                     $query->whereRaw("LOWER(TRIM({$itemsTable}.tongtu_sku)) IN ({$placeholders})", $skuValues->all())
                         ->orWhereRaw("LOWER(TRIM({$itemsTable}.shopify_sku)) IN ({$placeholders})", $skuValues->all());
                 })
                 ->selectRaw("{$productExpression} as product_name")
                 ->selectRaw("{$storeExpression} as store_name")
-                ->selectRaw("{$ordersTable}.source_shop_domain as shop_domain")
+                ->selectRaw("{$domainExpression} as shop_domain")
                 ->selectRaw("{$operatorExpression} as operator_name")
                 ->selectRaw("COUNT(DISTINCT {$ordersTable}.id) as order_count")
                 ->selectRaw("COALESCE(SUM({$itemsTable}.quantity), 0) as product_quantity")
                 ->selectRaw("MAX({$ordersTable}.order_created_at) as latest_order_at")
-                ->groupByRaw("{$productExpression}, {$storeExpression}, {$ordersTable}.source_shop_domain, {$operatorExpression}")
+                ->groupByRaw("{$productExpression}, {$storeExpression}, {$domainExpression}, {$operatorExpression}")
                 ->orderByDesc('latest_order_at')
                 ->get();
         }
@@ -128,6 +132,15 @@ class WarehouseWeightExceptionController extends Controller
         return response()->json([
             'sku' => $exception->tongtu_sku ?: $exception->shopify_sku,
             'product_name' => $exception->tongtu_product_name ?: $rows->pluck('product_name')->first() ?: '未填写产品名',
+            'product_image_url' => trim((string) $exception->product_image_url),
+            'status' => (string) $exception->status,
+            'status_label' => $exception->status === 'pending' ? '待整改' : '已整改',
+            'reject_reason' => WarehouseSkuWeightException::rejectReasonLabel($exception->reject_reason) ?: '未填写',
+            'remark' => trim((string) $exception->remark),
+            'resolution_remark' => trim((string) $exception->resolution_remark),
+            'reporter_name' => trim((string) $exception->reporter_name) ?: '未填写',
+            'original_weight_gram' => (float) $exception->original_weight_gram,
+            'corrected_weight_gram' => (float) $exception->corrected_weight_gram,
             'total' => $rows->count(),
             'rows' => $rows->map(static fn ($row): array => [
                 'product_name' => trim((string) $row->product_name) ?: ($exception->tongtu_product_name ?: '未填写产品名'),
