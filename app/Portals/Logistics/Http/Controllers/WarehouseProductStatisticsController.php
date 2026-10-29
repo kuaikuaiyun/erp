@@ -8,7 +8,7 @@ use App\Models\ProductRequestLinkSku;
 use App\Models\WarehouseSkuWeightException;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Logistics\LogisticsProductStatisticsService;
-use App\Portals\Logistics\TongtuSkuMappingService;
+use App\Portals\Logistics\SkuDatabaseLookupService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -30,7 +30,7 @@ class WarehouseProductStatisticsController extends Controller
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly LogisticsProductStatisticsService $statistics,
-        private readonly TongtuSkuMappingService $tongtuMappings,
+        private readonly SkuDatabaseLookupService $skuDatabase,
     ) {
     }
 
@@ -130,10 +130,7 @@ class WarehouseProductStatisticsController extends Controller
         ]);
     }
 
-    /**
-     * 缺重量的 SKU 手动补抓：调用通途 goodsQuery 把 goodsWeight 同步回
-     * logistics_tongtu_sku_mappings.goods_weight_gram 与订单行 sale_weight_gram。
-     */
+    /** 从私有 SKU 数据库直接抓取最新重量并同步到映射表与订单明细。 */
     public function refreshWeights(Request $request): Response
     {
         $context = $this->portalContext($request);
@@ -147,7 +144,23 @@ class WarehouseProductStatisticsController extends Controller
         ]);
 
         try {
-            $result = $this->tongtuMappings->refreshWeightsByTongtuSkus($validated['skus']);
+            $skus = collect($validated['skus'])
+                ->map(fn ($sku): string => trim((string) $sku))
+                ->filter()->unique(fn (string $sku): string => mb_strtolower($sku))->values();
+            $rows = collect();
+            foreach ($skus->chunk(100) as $chunk) {
+                $rows = $rows->merge($this->skuDatabase->lookup($chunk->all(), true));
+            }
+            $refreshed = $rows->filter(
+                fn (array $row): bool => ($row['weight_gram'] ?? null) !== null
+                    && (float) $row['weight_gram'] > 0
+            )->count();
+            $result = [
+                'requested' => $skus->count(),
+                'returned' => $rows->count(),
+                'refreshed' => $refreshed,
+                'missing_weight' => max(0, $skus->count() - $refreshed),
+            ];
         } catch (\Throwable $exception) {
             return response()->json([
                 'ok' => false,
@@ -155,14 +168,16 @@ class WarehouseProductStatisticsController extends Controller
             ], 422);
         }
 
-        $refreshed = (int) ($result['refreshed'] ?? 0);
+        if ($refreshed > 0) {
+            $this->statistics->invalidateAllPageCaches();
+        }
 
         return response()->json([
             'ok' => $refreshed > 0,
             'result' => $result,
             'message' => $refreshed > 0
-                ? sprintf('已抓取 %d 个 SKU 的重量', $refreshed)
-                : '通途未返回可用的重量数据，请稍后重试或检查 SKU 是否已在通途建档',
+                ? sprintf('已从 SKU 数据库获取 %d 个 SKU 的最新重量', $refreshed)
+                : 'SKU 数据库未返回大于 0 的有效重量，请检查该 SKU 是否已经收录。',
         ]);
     }
 
@@ -418,6 +433,8 @@ class WarehouseProductStatisticsController extends Controller
             'decision' => '',
             // 所有真实出单商品均进入验收列表；未匹配通途/PCL 的商品也不能遗漏。
             'require_tongtu_match' => false,
+            // Tipping is an order surcharge, not a physical product requiring warehouse acceptance.
+            'exclude_tipping' => true,
             // 仓库列表不展示退款原因报表，跳过重聚合（约 19s）避免列表/分页卡顿
             'skip_refund_report' => true,
             'sort' => trim((string) ($input['sort'] ?? '')),

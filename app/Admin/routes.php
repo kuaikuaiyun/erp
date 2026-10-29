@@ -21,6 +21,8 @@ Route::group([
     'as' => config('admin.route.prefix').'.',
 ], function (Router $router): void {
     $router->resource('organization/accounts', AccountController::class)->except(['show'])->middleware('admin.permission:check,organization.accounts')->names('organization.accounts');
+    $router->get('organization/departments/bindings', [DepartmentController::class, 'bindings'])->middleware(['admin.permission:check,organization.departments', RequireSystemAdministrator::class])->name('organization.departments.bindings');
+    $router->put('organization/departments/bindings', [DepartmentController::class, 'updateBindings'])->middleware(['admin.permission:check,organization.departments', RequireSystemAdministrator::class])->name('organization.departments.bindings.update');
     $router->resource('organization/departments', DepartmentController::class)->except(['show'])->middleware('admin.permission:check,organization.departments')->names('organization.departments');
     $router->get('organization/departments/{department}/dissolution', [DepartmentController::class, 'dissolution'])->whereNumber('department')->middleware(['admin.permission:check,organization.departments', RequireSystemAdministrator::class])->name('organization.departments.dissolution');
     $router->post('organization/departments/{department}/dissolution', [DepartmentController::class, 'dissolve'])->whereNumber('department')->middleware(['admin.permission:check,organization.departments', RequireSystemAdministrator::class])->name('organization.departments.dissolve');

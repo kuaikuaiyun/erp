@@ -4,11 +4,14 @@ namespace App\Portals\Assistant\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\OperationReport;
+use App\Models\AdminUser;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
+use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Operation\OperationReportMetricsService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
@@ -20,6 +23,7 @@ class OperationReportReviewController extends Controller
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
         private readonly OperationReportMetricsService $metrics,
+        private readonly AssistantStoreOwnerService $assistantStoreOwners,
     ) {
     }
 
@@ -39,7 +43,8 @@ class OperationReportReviewController extends Controller
         $operator = trim((string) ($filters['operator'] ?? ''));
         $perPage = (int) ($filters['per_page'] ?? 20);
 
-        $reports = OperationReport::query()
+        $reportsQuery = $this->scopeReports(OperationReport::query(), $context['user']);
+        $reports = $reportsQuery
             ->when($status !== '', fn ($query) => $query->where('status', $status))
             ->when(!empty($filters['date_from']), fn ($query) => $query->whereDate('report_date', '>=', $filters['date_from']))
             ->when(!empty($filters['date_to']), fn ($query) => $query->whereDate('report_date', '<=', $filters['date_to']))
@@ -54,7 +59,8 @@ class OperationReportReviewController extends Controller
             'portal' => $context['portal']->load('menus'),
             'user' => $context['user'],
             'reports' => $reports,
-            'pendingCount' => OperationReport::query()->where('status', OperationReport::STATUS_PENDING)->count(),
+            'pendingCount' => $this->scopeReports(OperationReport::query(), $context['user'])
+                ->where('status', OperationReport::STATUS_PENDING)->count(),
             'filters' => [
                 'status' => $status,
                 'date_from' => (string) ($filters['date_from'] ?? ''),
@@ -69,6 +75,7 @@ class OperationReportReviewController extends Controller
     {
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
+        abort_unless($this->canAccessReport($report, $context['user']), 403);
         $rows = $report->metric_rows ?: [];
 
         return view('portals.operation.reports.show', [
@@ -88,6 +95,7 @@ class OperationReportReviewController extends Controller
     {
         $context = $this->context($request);
         if ($context instanceof Response) abort($context->getStatusCode());
+        abort_unless($this->canAccessReport($report, $context['user']), 403);
         abort_unless($report->status === OperationReport::STATUS_PENDING, 422, '该报表已经审核，请勿重复操作。');
         $report->update([
             'status' => OperationReport::STATUS_APPROVED,
@@ -103,8 +111,15 @@ class OperationReportReviewController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
         $validated = $request->validate([
+            'report_id' => ['required', 'integer'],
             'path' => ['required', 'string', 'max:500', 'regex:/^operation-reports\/ads\/[A-Za-z0-9._-]+$/'],
         ]);
+        $report = OperationReport::query()->findOrFail((int) $validated['report_id']);
+        abort_unless($this->canAccessReport($report, $context['user']), 403);
+        $belongsToReport = collect($report->advertising_rows ?: [])->contains(
+            static fn (array $row): bool => (string) ($row['screenshot'] ?? '') === $validated['path'],
+        );
+        abort_unless($belongsToReport, 404);
         abort_unless(Storage::disk('public')->exists($validated['path']), 404);
 
         return Storage::disk('public')->response($validated['path']);
@@ -117,6 +132,26 @@ class OperationReportReviewController extends Controller
         $this->authorization->assertAssistantPortal($context['portal']);
         abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
         return $context;
+    }
+
+    /** @param Builder<OperationReport> $query
+     *  @return Builder<OperationReport>
+     */
+    private function scopeReports(Builder $query, AdminUser $user): Builder
+    {
+        if ($user->isAdministrator()) return $query;
+
+        $departmentIds = $this->assistantStoreOwners->visibleOperationDepartmentIds($user);
+
+        return $departmentIds === []
+            ? $query->whereRaw('1 = 0')
+            : $query->whereIn('operation_department_id', $departmentIds);
+    }
+
+    private function canAccessReport(OperationReport $report, AdminUser $user): bool
+    {
+        return $user->isAdministrator()
+            || in_array((int) $report->operation_department_id, $this->assistantStoreOwners->visibleOperationDepartmentIds($user), true);
     }
 
     private function sumRows(array $rows): array

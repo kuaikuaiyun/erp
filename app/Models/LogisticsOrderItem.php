@@ -36,4 +36,31 @@ class LogisticsOrderItem extends Model
     {
         return $this->belongsTo(LogisticsOrder::class, 'logistics_order_id');
     }
+
+    public function skuMapping(): BelongsTo
+    {
+        return $this->belongsTo(LogisticsTongtuSkuMapping::class, 'tongtu_sku_mapping_id');
+    }
+
+    public function getSkuDatabaseWeightGramAttribute(): ?float
+    {
+        foreach ([
+            $this->skuMapping?->goods_weight_gram,
+            $this->sale_weight_gram,
+            $this->tongtu_goods_weight_gram,
+        ] as $weight) {
+            if ($weight !== null && (float) $weight > 0) {
+                return (float) $weight;
+            }
+        }
+
+        return null;
+    }
+
+    public function getSkuDatabaseGuideCostCnyAttribute(): ?float
+    {
+        $guideCost = $this->skuMapping?->product_guide_cost_cny;
+
+        return $guideCost !== null && (float) $guideCost > 0 ? (float) $guideCost : null;
+    }
 }

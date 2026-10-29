@@ -24,6 +24,10 @@ class TongtuSkuMappingService
     /** @var list<string> */
     private const PRODUCT_TYPES = ['0', '1', '2', '3'];
 
+    public function __construct(private readonly SkuDatabaseLookupService $skuDatabase)
+    {
+    }
+
     /**
      * Schedule direct SKU matching without querying Tongtu orders.
      */
@@ -46,6 +50,10 @@ class TongtuSkuMappingService
                 $this->applyMappingToOrderItems($mapping, $order);
             }
         }
+
+        $this->queueRefresh($mappings
+            ->where('status', LogisticsTongtuSkuMapping::STATUS_QUEUED)
+            ->pluck('id')->map(static fn ($id): int => (int) $id)->all());
     }
 
     /** @param list<string> $skus
@@ -97,7 +105,10 @@ class TongtuSkuMappingService
     {
         $now = now();
         $ids = LogisticsTongtuSkuMapping::query()
-            ->where('status', LogisticsTongtuSkuMapping::STATUS_QUEUED)
+            ->whereIn('status', [
+                LogisticsTongtuSkuMapping::STATUS_QUEUED,
+                LogisticsTongtuSkuMapping::STATUS_MATCHED,
+            ])
             ->where(function ($due) use ($now): void {
                 $due->whereNull('next_retry_at')->orWhere('next_retry_at', '<=', $now);
             })
@@ -125,6 +136,31 @@ class TongtuSkuMappingService
         $mappings = $this->claimMappings($mappingIds, $warehouseWeightRefresh);
         if ($mappings->isEmpty()) {
             return;
+        }
+
+        // Product matching now uses the private SKU database. It already
+        // contains the normalized Tongtu product data and supports batches of
+        // up to 100 SKUs, avoiding the old multi-product-type goodsQuery loop.
+        try {
+            $rows = $this->skuDatabase->lookup($mappings->pluck('shopify_sku')->all(), true);
+            if ($rows === []) {
+                throw new RuntimeException('The private SKU database returned no data.');
+            }
+
+            foreach ($mappings as $mapping) {
+                $key = LogisticsTongtuSkuMapping::normalizedSku((string) $mapping->shopify_sku);
+                $fresh = LogisticsTongtuSkuMapping::query()->find($mapping->getKey());
+                if (isset($rows[$key]) && $fresh?->status === LogisticsTongtuSkuMapping::STATUS_MATCHED) {
+                    $this->applyMappingToOrderItems($fresh);
+                } else {
+                    $this->markNotReturned($mapping);
+                }
+            }
+
+            return;
+        } catch (Throwable $exception) {
+            $this->releaseAfterTechnicalFailure($mappings, $exception->getMessage());
+            throw $exception;
         }
 
         try {
@@ -328,7 +364,7 @@ class TongtuSkuMappingService
         }
 
         $mappings = LogisticsTongtuSkuMapping::query()
-            ->whereIn('shopify_sku', $skus)
+            ->whereIn(DB::raw('LOWER(TRIM(shopify_sku))'), $skus)
             ->orWhereIn(DB::raw('LOWER(TRIM(tongtu_sku))'), $skus)
             ->get();
 
@@ -345,7 +381,7 @@ class TongtuSkuMappingService
         }
 
         $mappings = LogisticsTongtuSkuMapping::query()
-            ->whereIn('shopify_sku', $skus)
+            ->whereIn(DB::raw('LOWER(TRIM(shopify_sku))'), $skus)
             ->orWhereIn(DB::raw('LOWER(TRIM(tongtu_sku))'), $skus)
             ->get();
 
@@ -364,14 +400,22 @@ class TongtuSkuMappingService
             $key = LogisticsTongtuSkuMapping::normalizedSku((string) ($mapping->tongtu_sku ?: $mapping->shopify_sku));
             if ($mapping->status === LogisticsTongtuSkuMapping::STATUS_MATCHED) {
                 $weight = (float) ($mapping->goods_weight_gram ?? 0);
+                if ($weight <= 0) {
+                    $failed++;
+                    continue;
+                }
                 LogisticsOrderItem::query()
                     ->where(function ($query) use ($mapping): void {
-                        $query->whereRaw('LOWER(TRIM(shopify_sku)) = ?', [$mapping->shopify_sku]);
+                        $query->whereRaw('LOWER(TRIM(shopify_sku)) = ?', [LogisticsTongtuSkuMapping::normalizedSku((string) $mapping->shopify_sku)]);
                         if (filled($mapping->tongtu_sku)) {
                             $query->orWhereRaw('LOWER(TRIM(tongtu_sku)) = ?', [LogisticsTongtuSkuMapping::normalizedSku((string) $mapping->tongtu_sku)]);
                         }
                     })
-                    ->update(['sale_weight_gram' => $weight]);
+                    ->update([
+                        'tongtu_sku_mapping_id' => $mapping->getKey(),
+                        'tongtu_goods_weight_gram' => $weight,
+                        'sale_weight_gram' => $weight,
+                    ]);
                 if (filled($mapping->tongtu_primary_image_url)) {
                     $images[$key] = (string) $mapping->tongtu_primary_image_url;
                 }
@@ -589,22 +633,24 @@ class TongtuSkuMappingService
 
     private function applyMappingToOrderItems(LogisticsTongtuSkuMapping $mapping, ?LogisticsOrder $onlyOrder = null): void
     {
-        if (!$onlyOrder) {
-            return;
-        }
-
-        LogisticsOrderItem::query()
-            ->where('logistics_order_id', $onlyOrder->getKey())
+        $query = LogisticsOrderItem::query()
+            ->when($onlyOrder, fn ($items) => $items->where('logistics_order_id', $onlyOrder->getKey()))
             ->whereRaw("LOWER(TRIM(shopify_sku)) = ?", [$mapping->shopify_sku])
-            ->update([
-                'tongtu_sku_mapping_id' => $mapping->getKey(),
-                'tongtu_product_id' => $mapping->tongtu_product_id,
-                'tongtu_goods_detail_id' => $mapping->tongtu_goods_detail_id,
-                'tongtu_sku' => $mapping->tongtu_sku,
-                'tongtu_product_code' => $mapping->tongtu_product_code,
-                'tongtu_product_name' => $mapping->tongtu_product_packing_name ?: $mapping->tongtu_product_name,
-                'tongtu_product_type' => $mapping->tongtu_product_type,
-            ]);
+            ;
+        $values = [
+            'tongtu_sku_mapping_id' => $mapping->getKey(),
+            'tongtu_product_id' => $mapping->tongtu_product_id,
+            'tongtu_goods_detail_id' => $mapping->tongtu_goods_detail_id,
+            'tongtu_sku' => $mapping->tongtu_sku,
+            'tongtu_product_code' => $mapping->tongtu_product_code,
+            'tongtu_product_name' => $mapping->tongtu_product_packing_name ?: $mapping->tongtu_product_name,
+            'tongtu_product_type' => $mapping->tongtu_product_type,
+        ];
+        if ((float) $mapping->goods_weight_gram > 0) {
+            $values['tongtu_goods_weight_gram'] = $mapping->goods_weight_gram;
+            $values['sale_weight_gram'] = $mapping->goods_weight_gram;
+        }
+        $query->update($values);
     }
 
     /** @param array<string,mixed> $product

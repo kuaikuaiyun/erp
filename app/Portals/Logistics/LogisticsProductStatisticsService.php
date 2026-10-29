@@ -234,14 +234,17 @@ class LogisticsProductStatisticsService
             ->whereNotNull('goods_weight_gram')
             ->where(function ($query) use ($skus, $codes): void {
                 if ($skus !== []) {
-                    $query->whereIn(DB::raw('LOWER(TRIM(tongtu_sku))'), array_values($skus));
+                    $query->where(function ($skuQuery) use ($skus): void {
+                        $skuQuery->whereIn(DB::raw('LOWER(TRIM(tongtu_sku))'), array_values($skus))
+                            ->orWhereIn(DB::raw('LOWER(TRIM(shopify_sku))'), array_values($skus));
+                    });
                 }
                 if ($codes !== []) {
                     $method = $skus === [] ? 'whereIn' : 'orWhereIn';
                     $query->{$method}(DB::raw('LOWER(TRIM(tongtu_product_code))'), array_values($codes));
                 }
             })
-            ->get(['tongtu_sku', 'tongtu_product_code', 'goods_weight_gram']);
+            ->get(['shopify_sku', 'tongtu_sku', 'tongtu_product_code', 'goods_weight_gram']);
 
         $bySku = [];
         $byCode = [];
@@ -251,9 +254,13 @@ class LogisticsProductStatisticsService
                 continue;
             }
             $sku = mb_strtolower(trim((string) $mapping->tongtu_sku));
+            $shopifySku = mb_strtolower(trim((string) $mapping->shopify_sku));
             $code = mb_strtolower(trim((string) $mapping->tongtu_product_code));
             if ($sku !== '' && !isset($bySku[$sku])) {
                 $bySku[$sku] = $weight;
+            }
+            if ($shopifySku !== '' && !isset($bySku[$shopifySku])) {
+                $bySku[$shopifySku] = $weight;
             }
             if ($code !== '' && !isset($byCode[$code])) {
                 $byCode[$code] = $weight;
@@ -296,7 +303,7 @@ class LogisticsProductStatisticsService
             if ($sku === '') {
                 continue;
             }
-            if (!isset($weightBySku[$sku]) || $weightBySku[$sku] > $weight) {
+            if (!isset($weightBySku[$sku]) || $weightBySku[$sku] < $weight) {
                 $weightBySku[$sku] = $weight;
             }
         }
@@ -439,15 +446,25 @@ class LogisticsProductStatisticsService
     /** @param array<string,mixed> $filters */
     private function statisticsCacheKey(string $segment, array $filters): string
     {
-        $keyFilters = ['schema_version' => 2];
+        $keyFilters = [
+            'schema_version' => 5,
+            'data_version' => Cache::get('logistics.product-statistics.data-version', 1),
+        ];
         foreach (['date_from', 'date_to', 'name', 'keyword', 'store', 'match_status'] as $key) {
             $keyFilters[$key] = (string) ($filters[$key] ?? '');
         }
         $keyFilters['require_tongtu_match'] = (bool) ($filters['require_tongtu_match'] ?? false);
+        $keyFilters['exclude_tipping'] = (bool) ($filters['exclude_tipping'] ?? false);
         $keyFilters['include_product_codes'] = array_values($filters['include_product_codes'] ?? []);
         $keyFilters['exclude_product_codes'] = array_values($filters['exclude_product_codes'] ?? []);
 
         return 'logistics.product-statistics.'.$segment.'.'.sha1(json_encode($keyFilters));
+    }
+
+    /** Invalidate every filtered product-statistics cache after live SKU data changes. */
+    public function invalidateAllPageCaches(): void
+    {
+        Cache::forever('logistics.product-statistics.data-version', (string) microtime(true));
     }
 
     /** @param array<string,mixed> $filters @return array<string,mixed> */
@@ -1789,8 +1806,8 @@ class LogisticsProductStatisticsService
             ->selectRaw("MIN(CASE WHEN NULLIF(TRIM(items.product_image_url), '') IS NOT NULL THEN items.id END) as image_item_id")
             ->selectRaw("GROUP_CONCAT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__') ORDER BY COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__') SEPARATOR 0x1F) as store_names")
             ->selectRaw("COUNT(DISTINCT COALESCE(NULLIF(TRIM(orders.store_name), ''), '__unassigned__')) as shop_count")
-            ->selectRaw("GROUP_CONCAT(DISTINCT CONCAT(NULLIF(TRIM(sku_mappings.tongtu_sku), ''), '|', CAST(ROUND(COALESCE(items.sale_weight_gram, 0), 2) AS CHAR)) ORDER BY NULLIF(TRIM(sku_mappings.tongtu_sku), '') SEPARATOR 0x1F) as tongtu_skus")
-            ->selectRaw("COUNT(DISTINCT NULLIF(TRIM(sku_mappings.tongtu_sku), '')) as tongtu_variant_count")
+            ->selectRaw("GROUP_CONCAT(DISTINCT CONCAT(COALESCE(NULLIF(TRIM(sku_mappings.tongtu_sku), ''), NULLIF(TRIM(items.tongtu_sku), ''), NULLIF(TRIM(items.shopify_sku), ''), '未填写 SKU'), '|', CAST(ROUND(COALESCE(items.sale_weight_gram, 0), 2) AS CHAR)) ORDER BY COALESCE(NULLIF(TRIM(sku_mappings.tongtu_sku), ''), NULLIF(TRIM(items.tongtu_sku), ''), NULLIF(TRIM(items.shopify_sku), ''), '未填写 SKU') SEPARATOR 0x1F) as tongtu_skus")
+            ->selectRaw("COUNT(DISTINCT COALESCE(NULLIF(TRIM(sku_mappings.tongtu_sku), ''), NULLIF(TRIM(items.tongtu_sku), ''), NULLIF(TRIM(items.shopify_sku), ''), '未填写 SKU')) as tongtu_variant_count")
             ->selectRaw('SUM(COALESCE(items.quantity, 0)) as sales')
             ->selectRaw('SUM(COALESCE(items.line_revenue_usd, 0)) as revenue')
             ->groupByRaw($key);
@@ -2159,10 +2176,20 @@ class LogisticsProductStatisticsService
         $query = $this->database()->table('logistics_order_items as items')
             ->join('logistics_orders as orders', 'orders.id', '=', 'items.logistics_order_id')
             ->leftJoin('logistics_tongtu_sku_mappings as sku_mappings', DB::raw('LOWER(TRIM(items.shopify_sku))'), '=', 'sku_mappings.shopify_sku')
-            ->whereNotNull('items.line_revenue_usd');
+            ->whereNotNull('items.line_revenue_usd')
+            ->whereRaw('NOT ('.$this->shippingInsuranceExpression('items').')');
         $this->applyBaseFilters($query, $filters, 'items', 'orders', 'sku_mappings');
 
         return $query;
+    }
+
+    private function shippingInsuranceExpression(string $alias): string
+    {
+        $productTitle = "LOWER(TRIM(COALESCE({$alias}.product_title, '')))";
+        $tongtuName = "LOWER(TRIM(COALESCE({$alias}.tongtu_product_name, '')))";
+        $productCode = "LOWER(TRIM(COALESCE({$alias}.tongtu_product_code, '')))";
+
+        return "({$productTitle} LIKE '%shipping protection%' OR {$productTitle} LIKE '%shipping insurance%' OR {$productTitle} LIKE '%freight insurance%' OR {$productTitle} LIKE '%运费险%' OR {$tongtuName} LIKE '%运费险%' OR {$productCode} = 'arc-2yu9u1i-aa')";
     }
 
     /** @param array<string,mixed> $filters */
@@ -3192,6 +3219,11 @@ class LogisticsProductStatisticsService
         $excludedCodes = array_values(array_filter((array) ($filters['exclude_product_codes'] ?? [])));
         if ($excludedCodes !== []) {
             $query->whereNotIn(DB::raw("LOWER(TRIM({$itemTable}.tongtu_product_code))"), $excludedCodes);
+        }
+
+        if (!empty($filters['exclude_tipping'])) {
+            $query->whereRaw("LOWER(TRIM(COALESCE({$itemTable}.product_title, ''))) <> 'tipping'")
+                ->whereRaw("LOWER(TRIM(COALESCE({$itemTable}.tongtu_product_name, ''))) <> 'tipping'");
         }
 
         $name = trim((string) ($filters['name'] ?? ''));
