@@ -151,8 +151,14 @@ class OperationReportMetricsService
     /** @return array{rows:list<array<string,mixed>>,totals:array<string,float|int>,warnings:list<string>} */
     public function build(string $date, int $operatorUserId): array
     {
-        $start = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 00:00:00', self::REPORT_TIMEZONE)->utc();
-        $end = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 23:59:59', self::REPORT_TIMEZONE)->utc();
+        return $this->buildRange($date, $date, $operatorUserId);
+    }
+
+    /** @return array{rows:list<array<string,mixed>>,totals:array<string,float|int>,warnings:list<string>} */
+    public function buildRange(string $dateFrom, string $dateTo, int $operatorUserId): array
+    {
+        $start = Carbon::createFromFormat('Y-m-d H:i:s', $dateFrom.' 00:00:00', self::REPORT_TIMEZONE)->utc();
+        $end = Carbon::createFromFormat('Y-m-d H:i:s', $dateTo.' 23:59:59', self::REPORT_TIMEZONE)->utc();
         $orders = LogisticsOrder::query()
             ->with(['items', 'store'])
             ->whereBetween('order_created_at', [$start, $end])
@@ -193,8 +199,9 @@ class OperationReportMetricsService
             // “域名与店铺信息管理”是店铺域名的权威数据源；订单字段仅作为未关联店铺时的兜底。
             $domain = trim((string) ($order->store?->domain ?: $order->source_shop_domain ?: $order->store_name ?: '未知店铺'));
             $media = trim((string) ($order->media_source ?: LogisticsOrder::MEDIA_SOURCE_OTHER));
-            $key = $domain."\x1F".$media;
-            $groups[$key] ??= $this->emptyRow($date, $operatorName, $domain, $media);
+            $rowDate = Carbon::parse($order->getRawOriginal('order_created_at'), 'UTC')->timezone(self::REPORT_TIMEZONE)->format('Y-m-d');
+            $key = $rowDate."\x1F".$domain."\x1F".$media;
+            $groups[$key] ??= $this->emptyRow($rowDate, $operatorName, $domain, $media);
             $row = &$groups[$key];
             $amount = (float) ($order->paid_amount_usd ?? 0);
             $isSubscriptionFirst = $order->subscription_type === '订阅首次购买';
@@ -259,7 +266,7 @@ class OperationReportMetricsService
             }
             return $row;
         }, $groups));
-        usort($rows, fn (array $a, array $b) => [$a['shop_domain'], $a['media_source']] <=> [$b['shop_domain'], $b['media_source']]);
+        usort($rows, fn (array $a, array $b) => [$a['date'], $a['shop_domain'], $a['media_source']] <=> [$b['date'], $b['shop_domain'], $b['media_source']]);
 
         $numericFields = ['first_subscription_orders','first_subscription_revenue','first_normal_orders','first_normal_revenue','first_total_orders','first_total_revenue','first_purchase_cost','first_shipping_cost','first_return_fee','renewal_orders','renewal_revenue','renewal_cost','total_orders','total_revenue'];
         $totals = array_fill_keys($numericFields, 0.0);

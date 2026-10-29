@@ -14,6 +14,7 @@ use App\Portals\Logistics\StreamedXlsxWriter;
 use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Operation\OperationReportMetricsService;
 use App\Portals\ProductRequests\ProductRequestAccessService;
+use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -39,6 +40,48 @@ class OperationReportController extends Controller
         if ($context instanceof Response) return $context;
         $user = $context['user'];
         $isBoss = $this->isBoss($user);
+        $validated = $request->validate([
+            'date' => ['nullable', 'date_format:Y-m-d'],
+            'operator_user_id' => ['nullable', 'integer'],
+        ]);
+        $defaultDate = Carbon::now('Asia/Shanghai')->subDay()->format('Y-m-d');
+        $dateFrom = (string) ($validated['date'] ?? $defaultDate);
+        $dateTo = $dateFrom;
+        abort_if($dateFrom > $dateTo, 422, '开始日期不能晚于结束日期。');
+        $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
+        $operatorId = $isBoss
+            ? (int) ($validated['operator_user_id'] ?? $operatorOptions->first()?->getKey() ?? $user->getKey())
+            : (int) $user->getKey();
+        if ($isBoss) $this->assertAssignableOperator($operatorId);
+        $operator = AdminUser::query()->findOrFail($operatorId);
+        $calculated = $this->metrics->buildRange($dateFrom, $dateTo, $operatorId);
+        $submittedReports = OperationReport::query()
+            ->where('operator_user_id', $operatorId)
+            ->whereBetween('report_date', [$dateFrom, $dateTo])
+            ->orderByDesc('report_date')->orderByDesc('id')->get();
+
+        return view('portals.operation.reports.monthly', [
+            'portal' => $context['portal']->loadMissing('menus'),
+            'user' => $user,
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
+            'selectedOperator' => $operator,
+            'operatorOptions' => $operatorOptions,
+            'isBoss' => $isBoss,
+            'metricRows' => $calculated['rows'],
+            'metricTotals' => $this->sumRows($calculated['rows']),
+            'metricRowspans' => $this->identityRowspans($calculated['rows']),
+            'warnings' => $calculated['warnings'],
+            'submittedReports' => $submittedReports,
+        ]);
+    }
+
+    public function advertising(Request $request): Response|View
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+        $user = $context['user'];
+        $isBoss = $this->isBoss($user);
         $canReview = $this->canReview($user);
         $validated = $request->validate([
             'report_date' => ['nullable', 'date_format:Y-m-d'],
@@ -47,11 +90,11 @@ class OperationReportController extends Controller
         ]);
         $editingReport = ! empty($validated['edit_report']) ? OperationReport::query()->findOrFail((int) $validated['edit_report']) : null;
         if ($editingReport) {
-            abort_unless($editingReport->status === OperationReport::STATUS_PENDING, 422, '只有待审核报表可以重新编辑。');
+            abort_unless(in_array($editingReport->status, [OperationReport::STATUS_PENDING, OperationReport::STATUS_REJECTED], true), 422, '只有待审核或审核不通过的提报可以编辑。');
             abort_unless($isBoss || (int) $editingReport->operator_user_id === (int) $user->getKey(), 403);
         }
         $date = $editingReport?->report_date?->format('Y-m-d')
-            ?: (string) ($validated['report_date'] ?? now(OperationReportMetricsService::REPORT_TIMEZONE)->format('Y-m-d'));
+            ?: ($validated['report_date'] ?? null);
         $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
         $operatorId = $editingReport ? (int) $editingReport->operator_user_id : ($isBoss
             ? (int) ($validated['operator_user_id'] ?? $operatorOptions->first()?->getKey() ?? $user->getKey())
@@ -63,8 +106,11 @@ class OperationReportController extends Controller
             ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $operationDepartment->getKey())
             : [];
 
-        $calculated = $this->metrics->build($date, $operatorId);
-        $report = OperationReport::query()->whereDate('report_date', $date)->where('operator_user_id', $operatorId)->first();
+        // 广告费提报页只负责填写广告数据；业绩在提交时重新计算并保存快照。
+        $calculated = ['rows' => [], 'totals' => $this->sumRows([]), 'warnings' => []];
+        $report = $date !== null
+            ? OperationReport::query()->whereDate('report_date', $date)->where('operator_user_id', $operatorId)->first()
+            : null;
         $metricRows = $calculated['rows'];
         $advertisingRows = $editingReport?->advertising_rows ?: [];
         $submittedMetricRows = $report?->metric_rows ?: [];
@@ -89,9 +135,9 @@ class OperationReportController extends Controller
             'advertisingAgencyGroups' => $this->advertisingAgencyGroups($advertisingAssistantDepartmentIds),
             'isBoss' => $isBoss, 'canReview' => $canReview,
             'canEditReport' => true, 'history' => $history,
-            'canViewMissingGuideSkus' => $this->canViewMissingGuideSkus($user),
-            'missingGuideSkus' => $this->canViewMissingGuideSkus($user) ? $this->metrics->missingGuideSkuSummary() : [],
-            'missingOriginalSkuItems' => $isBoss ? $this->metrics->missingOriginalSkuSummary($date) : [],
+            'canViewMissingGuideSkus' => false,
+            'missingGuideSkus' => [],
+            'missingOriginalSkuItems' => [],
         ]);
     }
 
@@ -113,8 +159,25 @@ class OperationReportController extends Controller
             'advertisingRows' => $report->advertising_rows ?: [],
             'mediaRoiRows' => $this->metrics->mediaRoiSummary($rows, $report->advertising_rows ?: []),
             'canReview' => false,
-            'canEdit' => $report->status === OperationReport::STATUS_PENDING
+            'canEdit' => in_array($report->status, [OperationReport::STATUS_PENDING, OperationReport::STATUS_REJECTED], true)
                 && ($this->isBoss($user) || (int) $report->operator_user_id === (int) $user->getKey()),
+        ]);
+    }
+
+    public function advertisingShow(Request $request, OperationReport $report): Response|View
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+        $user = $context['user'];
+        abort_unless($this->isBoss($user) || (int) $report->operator_user_id === (int) $user->getKey(), 403);
+
+        return view('portals.operation.reports.advertising-show', [
+            'portal' => $context['portal']->loadMissing('menus'),
+            'user' => $user,
+            'report' => $report,
+            'advertisingRows' => $report->advertising_rows ?: [],
+            'canEdit' => in_array($report->status, [OperationReport::STATUS_PENDING, OperationReport::STATUS_REJECTED], true),
+            'canDelete' => $report->status === OperationReport::STATUS_REJECTED,
         ]);
     }
 
@@ -164,7 +227,7 @@ class OperationReportController extends Controller
             ? (int) $validated['operator_user_id'] : (int) $user->getKey();
         $editingReport = ! empty($validated['report_id']) ? OperationReport::query()->findOrFail((int) $validated['report_id']) : null;
         if ($editingReport) {
-            abort_unless($editingReport->status === OperationReport::STATUS_PENDING, 422, '只有待审核报表可以重新编辑。');
+            abort_unless(in_array($editingReport->status, [OperationReport::STATUS_PENDING, OperationReport::STATUS_REJECTED], true), 422, '只有待审核或审核不通过的提报可以编辑。');
             abort_unless($isBoss || (int) $editingReport->operator_user_id === (int) $user->getKey(), 403);
             abort_unless((int) $editingReport->operator_user_id === $operatorId && $editingReport->report_date->format('Y-m-d') === $validated['report_date'], 422);
         }
@@ -227,12 +290,26 @@ class OperationReportController extends Controller
                 'first_profit' => $firstProfit, 'renewal_net_revenue' => $renewalNet,
                 'overall_profit' => $firstProfit + $renewalNet,
                 'status' => OperationReport::STATUS_PENDING, 'submitted_by' => $user->getKey(),
-                'submitted_at' => now(), 'reviewed_by' => null, 'reviewed_at' => null,
+                'submitted_at' => now(), 'reviewed_by' => null, 'reviewed_at' => null, 'review_reason' => null,
             ];
         if ($editingReport) $editingReport->update($values);
         else OperationReport::query()->create($values);
 
-        return redirect()->route('operation.reports.index', ['report_date' => $validated['report_date'], 'operator_user_id' => $isBoss ? $operatorId : null])->with('success', $editingReport ? '运营报表已重新提交，状态仍为待审核。' : '运营报表已提交，当前状态为待审核。');
+        return redirect()->route('operation.advertising-reports.index', ['report_date' => $validated['report_date'], 'operator_user_id' => $isBoss ? $operatorId : null])->with('success', $editingReport ? '运营报表已重新提交，状态仍为待审核。' : '运营报表已提交，当前状态为待审核。');
+    }
+
+    public function destroy(Request $request, OperationReport $report): RedirectResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        $user = $context['user'];
+        abort_unless($this->isBoss($user) || (int) $report->operator_user_id === (int) $user->getKey(), 403);
+        abort_unless($report->status === OperationReport::STATUS_REJECTED, 422, '只有审核不通过的提报可以删除。');
+        $screenshots = collect($report->advertising_rows ?: [])->pluck('screenshot')->filter()->all();
+        $report->delete();
+        if ($screenshots !== []) Storage::disk('public')->delete($screenshots);
+
+        return redirect()->route('operation.advertising-reports.index')->with('success', '审核不通过的广告费提报已删除。');
     }
 
     public function screenshot(Request $request): Response
@@ -258,7 +335,7 @@ class OperationReportController extends Controller
 
     public function export(Request $request): Response
     {
-        $view = $this->index($request);
+        $view = $this->advertising($request);
         if ($view instanceof Response) return $view;
         $data = $view->getData();
         $metrics = collect($data['metricRows'])->values();

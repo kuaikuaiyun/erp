@@ -9,13 +9,14 @@ class OperationReport extends Model
 {
     public const STATUS_PENDING = 'pending';
     public const STATUS_APPROVED = 'approved';
+    public const STATUS_REJECTED = 'rejected';
 
     protected $fillable = [
         'report_date', 'operator_user_id', 'operator_name', 'operation_department_id',
         'operation_department_name', 'metric_rows', 'advertising_rows',
         'first_purchase_cost', 'first_shipping_cost', 'first_return_fee', 'actual_ad_spend',
         'first_profit', 'renewal_net_revenue', 'overall_profit', 'status', 'submitted_by',
-        'submitted_at', 'reviewed_by', 'reviewed_at',
+        'submitted_at', 'reviewed_by', 'reviewed_at', 'review_reason',
     ];
 
     public function __construct(array $attributes = [])
@@ -43,5 +44,14 @@ class OperationReport extends Model
     public function operationDepartment(): BelongsTo
     {
         return $this->belongsTo(Department::class, 'operation_department_id');
+    }
+
+    public function statusLabel(): string
+    {
+        return match ($this->status) {
+            self::STATUS_APPROVED => '已审核',
+            self::STATUS_REJECTED => '审核不通过',
+            default => '待审核',
+        };
     }
 }
