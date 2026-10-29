@@ -22,8 +22,6 @@
         </form>
     </div></div>
 
-    @foreach($warnings as $warning)<div class="alert alert-warning monthly-warning"><i class="fa fa-warning"></i> {{ $warning }}</div>@endforeach
-
     <div class="monthly-kpis">
         <div class="monthly-kpi"><span>首单合计</span><strong>{{ (int)$metricTotals['first_total_orders'] }} 单</strong></div>
         <div class="monthly-kpi"><span>首单营业额</span><strong>${{ number_format($metricTotals['first_total_revenue'],2) }}</strong></div>
