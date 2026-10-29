@@ -44,7 +44,7 @@ class AiProductController extends Controller
             ->withQueryString();
 
         return view('portals.ai-products.operation.index', [
-            'portal' => $context['portal']->load('menus'),
+            'portal' => $context['portal']->loadMissing('menus'),
             'user' => $context['user'],
             'submissions' => $submissions,
             'filters' => $filters,
@@ -183,7 +183,7 @@ class AiProductController extends Controller
             ->withQueryString();
 
         return view('portals.ai-products.review.index', [
-            'portal' => $context['portal']->load('menus'),
+            'portal' => $context['portal']->loadMissing('menus'),
             'user' => $context['user'],
             'submissions' => $submissions,
             'filters' => $filters,

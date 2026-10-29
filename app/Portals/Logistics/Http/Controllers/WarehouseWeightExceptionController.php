@@ -83,6 +83,80 @@ class WarehouseWeightExceptionController extends Controller
         ]);
     }
 
+    /** 查看该异常 SKU 曾在哪些店铺、由哪些运营人员出单。 */
+    public function salesDetail(Request $request, int $id): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $exception = WarehouseSkuWeightException::query()->findOrFail($id);
+        $skuValues = collect([$exception->tongtu_sku, $exception->shopify_sku])
+            ->map(static fn ($sku): string => mb_strtolower(trim((string) $sku)))
+            ->filter()
+            ->unique()
+            ->values();
+
+        $rows = collect();
+        if ($skuValues->isNotEmpty()) {
+            $itemsTable = (new \App\Models\LogisticsOrderItem())->getTable();
+            $ordersTable = (new \App\Models\LogisticsOrder())->getTable();
+            $storesTable = (new \App\Models\AssistantDomainStore())->getTable();
+            $placeholders = implode(',', array_fill(0, $skuValues->count(), '?'));
+            $productExpression = "COALESCE(NULLIF(TRIM({$itemsTable}.tongtu_product_name), ''), NULLIF(TRIM({$itemsTable}.product_title), ''))";
+            // 与运营报表保持一致：“域名与店铺信息管理”的 domain 是权威域名，订单字段仅作为未关联店铺时的兜底。
+            $domainExpression = "COALESCE(NULLIF(TRIM({$storesTable}.domain), ''), NULLIF(TRIM({$ordersTable}.source_shop_domain), ''), NULLIF(TRIM({$ordersTable}.store_name), ''), '未知店铺')";
+            $storeExpression = "COALESCE(NULLIF(TRIM({$storesTable}.shop_name), ''), NULLIF(TRIM({$ordersTable}.store_name), ''), {$domainExpression})";
+            $operatorExpression = "COALESCE(NULLIF(TRIM({$ordersTable}.operator_name), ''), '未分配运营')";
+            $teamExpression = "COALESCE(NULLIF(TRIM({$storesTable}.team), ''), NULLIF(TRIM({$ordersTable}.group_names), ''), NULLIF(TRIM({$ordersTable}.department_name), ''), '未填写团队')";
+
+            $rows = \App\Models\LogisticsOrderItem::query()
+                ->join($ordersTable, "{$ordersTable}.id", '=', "{$itemsTable}.logistics_order_id")
+                ->leftJoin($storesTable, "{$storesTable}.id", '=', "{$ordersTable}.assistant_domain_store_id")
+                ->where(function ($query) use ($itemsTable, $skuValues, $placeholders): void {
+                    $query->whereRaw("LOWER(TRIM({$itemsTable}.tongtu_sku)) IN ({$placeholders})", $skuValues->all())
+                        ->orWhereRaw("LOWER(TRIM({$itemsTable}.shopify_sku)) IN ({$placeholders})", $skuValues->all());
+                })
+                ->selectRaw("{$productExpression} as product_name")
+                ->selectRaw("{$storeExpression} as store_name")
+                ->selectRaw("{$domainExpression} as shop_domain")
+                ->selectRaw("{$operatorExpression} as operator_name")
+                ->selectRaw("{$teamExpression} as team_name")
+                ->selectRaw("COUNT(DISTINCT {$ordersTable}.id) as order_count")
+                ->selectRaw("COALESCE(SUM({$itemsTable}.quantity), 0) as product_quantity")
+                ->selectRaw("MAX({$ordersTable}.order_created_at) as latest_order_at")
+                ->groupByRaw("{$productExpression}, {$storeExpression}, {$domainExpression}, {$operatorExpression}, {$teamExpression}")
+                ->orderByDesc('latest_order_at')
+                ->get();
+        }
+
+        return response()->json([
+            'sku' => $exception->tongtu_sku ?: $exception->shopify_sku,
+            'product_name' => $exception->tongtu_product_name ?: $rows->pluck('product_name')->first() ?: '未填写产品名',
+            'product_image_url' => trim((string) $exception->product_image_url),
+            'status' => (string) $exception->status,
+            'status_label' => $exception->status === 'pending' ? '待整改' : '已整改',
+            'reject_reason' => WarehouseSkuWeightException::rejectReasonLabel($exception->reject_reason) ?: '未填写',
+            'remark' => trim((string) $exception->remark),
+            'resolution_remark' => trim((string) $exception->resolution_remark),
+            'reporter_name' => trim((string) $exception->reporter_name) ?: '未填写',
+            'original_weight_gram' => (float) $exception->original_weight_gram,
+            'corrected_weight_gram' => (float) $exception->corrected_weight_gram,
+            'total' => $rows->count(),
+            'rows' => $rows->map(static fn ($row): array => [
+                'product_name' => trim((string) $row->product_name) ?: ($exception->tongtu_product_name ?: '未填写产品名'),
+                'store_name' => (string) $row->store_name,
+                'shop_domain' => trim((string) $row->shop_domain),
+                'operator_name' => (string) $row->operator_name,
+                'team_name' => \App\Models\AssistantDomainStore::displayMultiValue($row->team_name) ?: '未填写团队',
+                'order_count' => (int) $row->order_count,
+                'product_quantity' => (float) $row->product_quantity,
+                'latest_order_at' => $row->latest_order_at ? (string) $row->latest_order_at : null,
+            ])->values(),
+        ]);
+    }
+
     /** 将异常标记为已处理（入录审核手动关闭队列） */
     public function resolve(Request $request, int $id): Response
     {
@@ -247,7 +321,7 @@ class WarehouseWeightExceptionController extends Controller
     /** @param array{portal: \App\Models\Portal, user: \App\Models\AdminUser} $context */
     private function viewContext(array $context): array
     {
-        $context['portal']->load('menus');
+        $context['portal']->loadMissing('menus');
 
         return $context;
     }

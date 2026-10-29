@@ -2665,7 +2665,7 @@ class ProductRequestController extends Controller
      */
     private function viewContext(array $context): array
     {
-        $context['portal']->load('menus');
+        $context['portal']->loadMissing('menus');
 
         return $context;
     }

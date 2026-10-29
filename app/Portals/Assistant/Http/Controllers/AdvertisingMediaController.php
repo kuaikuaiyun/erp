@@ -29,7 +29,7 @@ class AdvertisingMediaController extends Controller
         $department = $this->advertisingScope->selectedDepartment($context['user'], $request->input('assistant_department_id'));
 
         return view('portals.assistant.advertising-media.index', [
-            'portal' => $context['portal']->load('menus'),
+            'portal' => $context['portal']->loadMissing('menus'),
             'user' => $context['user'],
             'media' => AssistantAdvertisingMedia::query()->where('assistant_department_id', $department->id)->orderBy('sort')->orderBy('id')->get(),
             'assistantDepartments' => $this->advertisingScope->departmentsFor($context['user']),

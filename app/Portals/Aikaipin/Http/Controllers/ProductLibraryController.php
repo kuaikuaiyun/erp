@@ -1182,7 +1182,7 @@ class ProductLibraryController extends Controller
         }
 
         $this->authorization->assertPortal($context['portal']);
-        $context['portal']->load('menus');
+        $context['portal']->loadMissing('menus');
 
         return $context;
     }

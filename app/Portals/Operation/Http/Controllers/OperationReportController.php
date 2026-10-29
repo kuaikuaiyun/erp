@@ -51,7 +51,7 @@ class OperationReportController extends Controller
             abort_unless($isBoss || (int) $editingReport->operator_user_id === (int) $user->getKey(), 403);
         }
         $date = $editingReport?->report_date?->format('Y-m-d')
-            ?: (string) ($validated['report_date'] ?? now('Asia/Shanghai')->format('Y-m-d'));
+            ?: (string) ($validated['report_date'] ?? now(OperationReportMetricsService::REPORT_TIMEZONE)->format('Y-m-d'));
         $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
         $operatorId = $editingReport ? (int) $editingReport->operator_user_id : ($isBoss
             ? (int) ($validated['operator_user_id'] ?? $operatorOptions->first()?->getKey() ?? $user->getKey())
@@ -74,7 +74,7 @@ class OperationReportController extends Controller
             ->orderByDesc('report_date')->orderByDesc('id')->limit(60)->get();
 
         return view('portals.operation.reports.index', [
-            'portal' => $context['portal']->load('menus'), 'user' => $user,
+            'portal' => $context['portal']->loadMissing('menus'), 'user' => $user,
             'reportDate' => $date, 'selectedOperator' => $operator, 'report' => $report,
             'editingReport' => $editingReport,
             'metricRows' => $metricRows, 'metricTotals' => $this->sumRows($metricRows),
@@ -107,7 +107,7 @@ class OperationReportController extends Controller
         $rows = $report->metric_rows ?: [];
 
         return view('portals.operation.reports.show', [
-            'portal' => $context['portal']->load('menus'), 'user' => $user, 'report' => $report,
+            'portal' => $context['portal']->loadMissing('menus'), 'user' => $user, 'report' => $report,
             'metricRows' => $rows, 'metricTotals' => $this->sumRows($rows),
             'metricRowspans' => $this->identityRowspans($rows),
             'advertisingRows' => $report->advertising_rows ?: [],

@@ -69,7 +69,7 @@ class OperationDomainStoreController extends Controller
         $this->attachSyncStates($stores, $context['user']);
 
         return view('portals.operation.domain-stores.index', [
-            'portal' => $context['portal']->load('menus'),
+            'portal' => $context['portal']->loadMissing('menus'),
             'user' => $context['user'],
             'stores' => $stores,
             'filters' => $filters,
