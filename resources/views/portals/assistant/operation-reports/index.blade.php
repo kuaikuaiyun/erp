@@ -22,6 +22,7 @@
             <div class="form-group period-day" @if($periodType !== 'day') style="display:none" @endif><label>报表日期</label><input class="form-control" type="date" name="report_date" value="{{ $reportDate }}"></div>
             <div class="form-group period-month" @if($periodType !== 'month') style="display:none" @endif><label>报表月份</label><input class="form-control" type="month" name="report_month" value="{{ $reportMonth }}"></div>
             <div class="form-group"><label>运营部门</label><select class="form-control" name="operation_department_id"><option value="">全部绑定部门</option>@foreach($departments as $department)<option value="{{ $department->id }}" @selected($selectedDepartmentId === (int)$department->id)>{{ $department->name }}</option>@endforeach</select></div>
+            <div class="form-group"><label>运营人员</label><select class="form-control" name="operator_user_id"><option value="">全部运营人员</option>@foreach($operatorOptions as $operator)<option value="{{ $operator->id }}" @selected($selectedOperatorId === (int)$operator->id)>{{ $operator->name ?: $operator->username }}</option>@endforeach</select></div>
             <button class="btn btn-primary" style="height:38px"><i class="fa fa-search"></i> 查询报表</button>
             <span class="report-range">{{ $dateFrom === $dateTo ? $dateFrom : $dateFrom.' 至 '.$dateTo }}</span>
         </form>

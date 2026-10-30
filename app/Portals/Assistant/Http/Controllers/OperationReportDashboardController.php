@@ -38,6 +38,7 @@ class OperationReportDashboardController extends Controller
             'report_date' => ['nullable', 'date_format:Y-m-d'],
             'report_month' => ['nullable', 'date_format:Y-m'],
             'operation_department_id' => ['nullable', 'integer'],
+            'operator_user_id' => ['nullable', 'integer'],
         ]);
         $periodType = (string) ($validated['period_type'] ?? 'month');
         $beijingNow = Carbon::now('Asia/Shanghai');
@@ -79,6 +80,16 @@ class OperationReportDashboardController extends Controller
             ->orderBy('name')->orderBy('username')
             ->get()
             ->unique('id')->values();
+        $selectedOperatorId = isset($validated['operator_user_id'])
+            ? (int) $validated['operator_user_id']
+            : null;
+        if ($selectedOperatorId !== null) {
+            abort_unless($operators->contains(fn (AdminUser $operator) => (int) $operator->getKey() === $selectedOperatorId), 403);
+        }
+        $operatorOptions = $operators;
+        if ($selectedOperatorId !== null) {
+            $operators = $operators->where('id', $selectedOperatorId)->values();
+        }
         $operatorIds = $operators->pluck('id')->map(fn ($id) => (int) $id)->values();
         $cacheKey = 'assistant-operation-report:'.$dateFrom.':'.$dateTo.':'.sha1($operatorIds->implode(','));
         $calculatedByOperator = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($operatorIds, $dateFrom, $dateTo): array {
@@ -153,6 +164,8 @@ class OperationReportDashboardController extends Controller
             'dateTo' => $dateTo,
             'departments' => $departments,
             'selectedDepartmentId' => $selectedDepartmentId,
+            'operatorOptions' => $operatorOptions,
+            'selectedOperatorId' => $selectedOperatorId,
             'rows' => $rows,
             'totals' => $totals,
             'identityRowspans' => $this->identityRowspans($rows),
