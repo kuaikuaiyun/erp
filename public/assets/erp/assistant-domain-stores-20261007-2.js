@@ -277,7 +277,7 @@
         var title = $('#assistant-history-title');
         var shopName = button.data('shop-name');
 
-        title.text(translate('historyModalTitle', { name: shopName }));
+        title.text(button.data('history-title') || translate('historyModalTitle', { name: shopName }));
         content.html('<p class="text-muted">' + escapeHtml(translate('historyLoading')) + '</p>');
 
         $.get(button.data('history-url')).done(function (response) {

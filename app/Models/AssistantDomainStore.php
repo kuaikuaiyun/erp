@@ -164,6 +164,11 @@ class AssistantDomainStore extends Model
         return $this->belongsTo(AdminUser::class, 'owner_user_id');
     }
 
+    public function ownerHistories(): HasMany
+    {
+        return $this->hasMany(AssistantDomainStoreOwnerHistory::class, 'assistant_domain_store_id');
+    }
+
     public function shopifyConnection(): HasOne
     {
         return $this->hasOne(LogisticsShopifyConnection::class, 'assistant_domain_store_id');
@@ -340,7 +345,6 @@ class AssistantDomainStore extends Model
             'email_purchased' => self::fieldLabel('email_purchased'),
             'team' => self::fieldLabel('team'),
             'project' => self::fieldLabel('project'),
-            'user_name' => self::fieldLabel('user_name'),
             'erp' => self::fieldLabel('erp'),
             'credit_card' => self::fieldLabel('credit_card'),
             'wallet' => self::fieldLabel('wallet'),
@@ -403,7 +407,6 @@ class AssistantDomainStore extends Model
             'email_purchased' => $this->email_purchased ? '1' : '0',
             'team' => $this->team,
             'project' => $this->project,
-            'user_name' => $this->user_name,
             'erp' => $this->erp,
             'credit_card' => $this->credit_card,
             'wallet' => $this->wallet,

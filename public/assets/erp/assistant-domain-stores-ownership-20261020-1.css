@@ -108,3 +108,31 @@
 .assistant-domain-stores-page .assistant-advanced-filter-field .help-block {
     margin: 4px 0 0;
 }
+
+.assistant-domain-stores-page .assistant-owner-history-value {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    max-width: 100%;
+    white-space: nowrap;
+}
+
+.assistant-domain-stores-page .assistant-owner-history-value .assistant-field-value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.assistant-domain-stores-page .assistant-owner-history-trigger {
+    flex: 0 0 auto;
+    padding: 0 2px;
+    color: #337ab7;
+    line-height: 1;
+    vertical-align: middle;
+}
+
+.assistant-domain-stores-page .assistant-owner-history-trigger:hover,
+.assistant-domain-stores-page .assistant-owner-history-trigger:focus {
+    color: #23527c;
+    text-decoration: none;
+}

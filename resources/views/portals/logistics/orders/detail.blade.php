@@ -391,7 +391,8 @@
             <section class="logistics-order-detail-card logistics-order-detail-source">
                 <div class="logistics-order-detail-card-title"><h4>归属信息</h4></div>
                 <dl><dt>来源域名</dt><dd>{{ $display($order->source_shop_domain) }}</dd></dl>
-                <dl><dt>运营人员</dt><dd>{{ $display($order->operator_name) }}</dd></dl>
+                <dl><dt>真实归属人</dt><dd>{{ $display($order->assigned_owner_name ?: '未分配') }}</dd></dl>
+                <dl><dt>使用人</dt><dd>{{ $display($order->operator_name) }}</dd></dl>
                 <dl><dt>所属组</dt><dd>{{ $display($order->group_names) }}</dd></dl>
                 <dl><dt>创建时间</dt><dd>{{ $date($order->created_at) }}</dd></dl>
                 <dl><dt>最后更新</dt><dd>{{ $date($order->updated_at) }}</dd></dl>

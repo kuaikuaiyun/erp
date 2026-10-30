@@ -112,7 +112,6 @@
             'fields' => [
                 ['key' => 'team', 'label' => $t('fields.team')],
                 ['key' => 'project', 'label' => $t('fields.project')],
-                ['key' => 'user_name', 'label' => $t('fields.user_name')],
             ],
         ],
         [
@@ -155,7 +154,7 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-field-select-20261010-1.css">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-expanded-20261010-1.css?v=20261010-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-modal-20261009-1.css">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-1.css?v=20261023-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-1.css?v=20261030-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-form-20261021-1.css?v=20261021-3">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-team-picker-20261023-1.css?v=20261023-1">
 @endpush
@@ -276,7 +275,6 @@
                                 </div>
                             </div>
                             <div class="assistant-advanced-filter-field"><label for="filter-project">{{ $t('fields.project') }}</label><input id="filter-project" class="form-control" name="project" value="{{ $filters['project'] }}"></div>
-                            <div class="assistant-advanced-filter-field"><label for="filter-user-name">{{ $t('fields.user_short') }}</label><input id="filter-user-name" class="form-control" name="user_name" value="{{ $filters['user_name'] }}"></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-owner-assignment">{{ $t('filters.owner_assignment') }}</label><select id="filter-owner-assignment" class="form-control" name="owner_assignment"><option value="">{{ $t('common.all') }}</option><option value="assigned" @selected($filters['owner_assignment'] === 'assigned')>{{ $t('filters.owner_assigned') }}</option><option value="unassigned" @selected($filters['owner_assignment'] === 'unassigned')>{{ $t('filters.owner_unassigned') }}</option></select></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-erp">{{ $t('fields.erp') }}</label><input id="filter-erp" class="form-control" name="erp" value="{{ $filters['erp'] }}"></div>
                             <div class="assistant-advanced-filter-field"><label for="filter-credit-card">{{ $t('fields.credit_card') }}</label><input id="filter-credit-card" class="form-control" name="credit_card" value="{{ $filters['credit_card'] }}" list="filter-credit-card-options"><datalist id="filter-credit-card-options">@foreach ($quickOptions['credit_card'] ?? [] as $value)<option value="{{ $value }}">{{ $creditCardOptions[$value] ?? $value }}</option>@endforeach</datalist></div>
@@ -360,8 +358,8 @@
                         <col class="assistant-boolean-column" data-column-key="email_purchased">
                         <col class="assistant-team-column" data-column-key="team">
                         <col class="assistant-project-column" data-column-key="project">
-                        <col class="assistant-user-column" data-column-key="user_name">
                         <col class="assistant-owner-user-column" data-column-key="owner_user">
+                        <col class="assistant-owner-user-column" data-column-key="legacy_user_name">
                         <col class="assistant-erp-column" data-column-key="erp">
                         <col class="assistant-payment-column" data-column-key="credit_card">
                         <col class="assistant-payment-column" data-column-key="wallet">
@@ -393,8 +391,8 @@
                         <th class="assistant-boolean-column" data-column-key="email_purchased">{{ $t('fields.email_purchase') }}</th>
                         <th class="assistant-team-column" data-column-key="team">{{ $t('fields.team') }}</th>
                         <th class="assistant-project-column" data-column-key="project">{{ $t('fields.project') }}</th>
-                        <th class="assistant-user-column" data-column-key="user_name">{{ $t('fields.user_short') }}</th>
                         <th class="assistant-owner-user-column" data-column-key="owner_user">{{ $t('fields.owner_user') }}</th>
+                        <th class="assistant-owner-user-column" data-column-key="legacy_user_name">使用人</th>
                         <th class="assistant-erp-column" data-column-key="erp">{{ $t('fields.erp') }}</th>
                         <th class="assistant-payment-column" data-column-key="credit_card">{{ $t('fields.credit_card') }}</th>
                         <th class="assistant-payment-column" data-column-key="wallet">{{ $t('fields.wallet') }}</th>
@@ -429,12 +427,13 @@
                             <td><span class="assistant-field-value"><span class="label {{ $emailPurchaseStatus === 'current' ? 'label-info' : ($emailPurchaseStatus === 'missing' ? 'label-warning' : 'label-default') }}">{{ $t('email_purchase_status.'.$emailPurchaseStatus) }}</span></span></td>
                             <td><span class="assistant-field-value">{{ \App\Models\AssistantDomainStore::displayMultiValue($store->team) ?: $t('common.empty') }}</span></td>
                             <td><span class="assistant-field-value">{{ $store->project ?: $t('common.empty') }}</span></td>
-                            <td><span class="assistant-field-value">{{ $store->user_name ?: $t('common.empty') }}</span></td>
                             <td>
-                                <span class="assistant-field-value">
-                                    {{ $store->ownerUser?->name ?: $store->ownerUser?->username ?: $t('common.empty') }}
+                                <span class="assistant-owner-history-value">
+                                    <span class="assistant-field-value">{{ $store->ownerUser?->name ?: $store->ownerUser?->username ?: $t('common.empty') }}</span>
+                                    <button type="button" class="btn btn-link btn-xs assistant-history-trigger assistant-owner-history-trigger" data-toggle="modal" data-target="#assistant-history-modal" data-history-url="{{ route('assistant.domain-stores.history', ['domainStore' => $store, 'scope' => 'owner']) }}" data-history-title="真实归属人历史 · {{ $store->shop_name }}" title="查看真实归属人历史" aria-label="查看 {{ $store->shop_name }} 的真实归属人历史"><i class="fa fa-history" aria-hidden="true"></i></button>
                                 </span>
                             </td>
+                            <td><span class="assistant-field-value">{{ $store->user_name ?: $t('common.empty') }}</span></td>
                             <td><span class="assistant-field-value">{{ \App\Models\AssistantDomainStore::displayMultiValue($store->erp) ?: $t('common.empty') }}</span></td>
                             <td><span class="assistant-field-value">{{ $store->credit_card ? ($creditCardOptions[$store->credit_card] ?? $store->credit_card) : $t('common.empty') }}</span></td>
                             <td><span class="assistant-field-value">{{ $store->wallet ? ($walletOptions[$store->wallet] ?? $store->wallet) : $t('common.empty') }}</span></td>
@@ -657,6 +656,11 @@
                                     </select>
                                 </div>
                             </div>
+                            <div class="form-group">
+                                <label for="assistant-owner-effective-at">归属生效时间</label>
+                                <input id="assistant-owner-effective-at" name="owner_effective_at" type="datetime-local" class="form-control" max="{{ now('Asia/Shanghai')->format('Y-m-d\\TH:i') }}">
+                                <span class="help-block">留空即以当前上海时间生效；取消归属同样按该时间生效。</span>
+                            </div>
                             <p class="text-muted assistant-owner-help">{{ $t('selection.owner_assignment_only_notice') }}</p>
                             <span data-owner-selected-inputs></span>
                         </div>
@@ -723,17 +727,17 @@
         window.ErpAssistantDomainStoreBatchUpdateFieldGroups = @json($batchUpdateFieldGroups);
         window.ErpAssistantDomainStoreOwnership = @json($ownershipJavascriptConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-20261007-2.js"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-20261007-2.js?v=20261030-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-access-20261020-2.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-batch-editor-20261010-2.js?v=20261021-2"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-check-20261007-3.js"></script>
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-resize-20261008-1.js"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-resize-20261008-1.js?v=20261030-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-access-guide-20261009-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-quick-options-20261008-2.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-team-project-options-20261009-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-owner-form-20261020-1.js?v=20261021-2"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-modal-20261009-1.js?v=20261011-2"></script>
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-3.js?v=20261020-6"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-3.js?v=20261030-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-team-picker-20261023-1.js?v=20261023-1"></script>
     @if (session('success'))
         <script>
