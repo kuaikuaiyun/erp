@@ -44,6 +44,9 @@ class ProductRequestController extends Controller
         }
 
         $filters = $this->filters($request);
+        // “自己开品提报”不再按仓库结果或仓库问题整改状态筛选，这两个字段仅供后续仓库流程使用。
+        $filters['warehouse_status'] = '';
+        $filters['operation_rectification_status'] = '';
         $requests = $this->applyFilters(
             $this->access->applyOperationVisibility(ProductRequest::query(), $context['user']),
             $filters,
@@ -975,6 +978,12 @@ class ProductRequestController extends Controller
                     [$request->file('product_image')],
                     $context['user'],
                 );
+            } else {
+                $this->workflow->deleteStageAttachments(
+                    $locked,
+                    ProductRequestAttachment::STAGE_OPERATION,
+                    $this->attachmentIds($data['product_image_removed'] ?? ''),
+                );
             }
             if ($request->hasFile('purchase_item_images')) {
                 $this->workflow->replaceStageAttachments(
@@ -982,6 +991,12 @@ class ProductRequestController extends Controller
                     ProductRequestAttachment::STAGE_PURCHASE_ITEM,
                     $request->file('purchase_item_images', []),
                     $context['user'],
+                );
+            } else {
+                $this->workflow->deleteStageAttachments(
+                    $locked,
+                    ProductRequestAttachment::STAGE_PURCHASE_ITEM,
+                    $this->attachmentIds($data['purchase_item_images_removed'] ?? ''),
                 );
             }
             $this->workflow->log($locked, 'operation_resubmitted', $context['user']);
@@ -2749,8 +2764,12 @@ class ProductRequestController extends Controller
         $hasPurchaseImages = false;
         if ($productRequest) {
             $productRequest->loadMissing('attachments');
-            $hasProductImage = $productRequest->attachmentsFor(ProductRequestAttachment::STAGE_OPERATION)->isNotEmpty();
-            $hasPurchaseImages = $productRequest->attachmentsFor(ProductRequestAttachment::STAGE_PURCHASE_ITEM)->isNotEmpty();
+            $removedProductImageIds = $this->attachmentIds($request->input('product_image_removed'));
+            $removedPurchaseImageIds = $this->attachmentIds($request->input('purchase_item_images_removed'));
+            $hasProductImage = $productRequest->attachmentsFor(ProductRequestAttachment::STAGE_OPERATION)
+                ->whereNotIn('id', $removedProductImageIds)->isNotEmpty();
+            $hasPurchaseImages = $productRequest->attachmentsFor(ProductRequestAttachment::STAGE_PURCHASE_ITEM)
+                ->whereNotIn('id', $removedPurchaseImageIds)->isNotEmpty();
         } elseif ($draft) {
             // 草稿已保存的图片同样视为已上传，提交时无需重复选择
             $hasProductImage = $this->draftItems($draft, 'images') !== [];
@@ -2791,10 +2810,23 @@ class ProductRequestController extends Controller
             'product_image' => [$hasProductImage ? 'nullable' : 'required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
             'purchase_item_images' => [$hasPurchaseImages ? 'nullable' : 'required', 'array', 'min:1', 'max:6'],
             'purchase_item_images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'product_image_removed' => ['nullable', 'string', 'max:500'],
+            'purchase_item_images_removed' => ['nullable', 'string', 'max:500'],
             'operation_remark' => ['nullable', 'string', 'max:2000'],
         ], [
             'operation_supplier_url.regex' => __('product_requests.operation.link_prefix_error'),
         ]);
+    }
+
+    /** @return array<int, int> */
+    private function attachmentIds(mixed $value): array
+    {
+        return collect(explode(',', (string) $value))
+            ->map(fn (string $id): int => (int) trim($id))
+            ->filter(fn (int $id): bool => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /** 将换行/逗号/分号分隔的 SKU 规范化为英文逗号分隔 */

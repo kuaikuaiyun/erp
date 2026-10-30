@@ -33,7 +33,7 @@ class OperationReportReviewController extends Controller
         if ($context instanceof Response) return $context;
 
         $filters = $request->validate([
-            'status' => ['nullable', Rule::in(['', OperationReport::STATUS_PENDING, OperationReport::STATUS_APPROVED])],
+            'status' => ['nullable', Rule::in(['', OperationReport::STATUS_PENDING, OperationReport::STATUS_APPROVED, OperationReport::STATUS_REJECTED])],
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
             'operator' => ['nullable', 'string', 'max:100'],
@@ -87,6 +87,7 @@ class OperationReportReviewController extends Controller
             'canReview' => true, 'canEdit' => false,
             'backUrl' => route('assistant.operation-report-reviews.index'),
             'approveUrl' => route('assistant.operation-report-reviews.approve', $report),
+            'rejectUrl' => route('assistant.operation-report-reviews.reject', $report),
             'screenshotRouteName' => 'assistant.operation-report-reviews.screenshot',
         ]);
     }
@@ -101,9 +102,29 @@ class OperationReportReviewController extends Controller
             'status' => OperationReport::STATUS_APPROVED,
             'reviewed_by' => $context['user']->getKey(),
             'reviewed_at' => now(),
+            'review_reason' => null,
         ]);
 
         return redirect()->route('assistant.operation-report-reviews.index')->with('success', '运营报表已审核通过。');
+    }
+
+    public function reject(Request $request, OperationReport $report): RedirectResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        abort_unless($this->canAccessReport($report, $context['user']), 403);
+        abort_unless($report->status === OperationReport::STATUS_PENDING, 422, '只有待审核报表可以审核不通过。');
+        $validated = $request->validate([
+            'review_reason' => ['required', 'string', 'max:1000'],
+        ]);
+        $report->update([
+            'status' => OperationReport::STATUS_REJECTED,
+            'reviewed_by' => $context['user']->getKey(),
+            'reviewed_at' => now(),
+            'review_reason' => trim($validated['review_reason']),
+        ]);
+
+        return redirect()->route('assistant.operation-report-reviews.index')->with('success', '运营报表已审核不通过。');
     }
 
     public function screenshot(Request $request): Response

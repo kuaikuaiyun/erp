@@ -117,6 +117,9 @@ class SkuDatabaseLookupService
                     $itemValues['tongtu_goods_weight_gram'] = $row['weight_gram'];
                     $itemValues['sale_weight_gram'] = $row['weight_gram'];
                 }
+                if (filled($row['image_url'] ?? null)) {
+                    $itemValues['product_image_url'] = trim((string) $row['image_url']);
+                }
                 LogisticsOrderItem::query()
                     ->where(function ($query) use ($normalizedSku): void {
                         $query->whereRaw('LOWER(TRIM(shopify_sku)) = ?', [$normalizedSku])

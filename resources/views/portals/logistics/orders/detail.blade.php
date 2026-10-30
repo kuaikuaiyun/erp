@@ -158,7 +158,7 @@
                     @forelse($order->items as $item)
                         <article class="logistics-order-detail-item">
                             <div class="logistics-order-detail-item-image">
-                                @if($item->product_image_url)<img src="{{ $item->product_image_url }}" alt="">@else<i class="fa fa-cube"></i>@endif
+                                @if($item->display_product_image_url)<img src="{{ $item->display_product_image_url }}" alt="">@else<i class="fa fa-cube"></i>@endif
                             </div>
                             <div class="logistics-order-detail-item-copy">
                                 <strong>{{ $display($item->product_title) }}</strong>

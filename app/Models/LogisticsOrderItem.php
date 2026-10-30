@@ -63,4 +63,14 @@ class LogisticsOrderItem extends Model
 
         return $guideCost !== null && (float) $guideCost > 0 ? (float) $guideCost : null;
     }
+
+    public function getDisplayProductImageUrlAttribute(): ?string
+    {
+        foreach ([$this->product_image_url, $this->skuMapping?->tongtu_primary_image_url] as $url) {
+            $url = trim((string) $url);
+            if ($url !== '') return $url;
+        }
+
+        return null;
+    }
 }
