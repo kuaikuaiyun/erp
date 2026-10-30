@@ -44,6 +44,9 @@ class ProductRequestController extends Controller
         }
 
         $filters = $this->filters($request);
+        // “自己开品提报”不再按仓库结果或仓库问题整改状态筛选，这两个字段仅供后续仓库流程使用。
+        $filters['warehouse_status'] = '';
+        $filters['operation_rectification_status'] = '';
         $requests = $this->applyFilters(
             $this->access->applyOperationVisibility(ProductRequest::query(), $context['user']),
             $filters,
