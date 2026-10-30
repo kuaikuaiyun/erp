@@ -12,6 +12,8 @@ use Symfony\Component\HttpFoundation\Response;
 
 class AbnormalSkuController extends Controller
 {
+    private const EXCLUDED_STORE_NAMES = ['290-9mrvj0-zr'];
+
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly OperationReportMetricsService $metrics,
@@ -35,12 +37,12 @@ class AbnormalSkuController extends Controller
         $perPage = (int) ($validated['per_page'] ?? 20);
 
         $missing = $this->paginate(
-            $this->metrics->missingGuideSkuSummary(),
+            $this->metrics->missingGuideSkuSummary(self::EXCLUDED_STORE_NAMES),
             (int) ($validated['missing_page'] ?? 1),
             $perPage,
         );
         $original = $this->paginate(
-            $this->metrics->missingOriginalSkuSummary(),
+            $this->metrics->missingOriginalSkuSummary(null, self::EXCLUDED_STORE_NAMES),
             (int) ($validated['original_page'] ?? 1),
             $perPage,
         );

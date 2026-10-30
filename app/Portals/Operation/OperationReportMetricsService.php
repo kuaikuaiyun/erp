@@ -7,6 +7,7 @@ use App\Models\LogisticsOrder;
 use App\Models\LogisticsOrderItem;
 use App\Models\LogisticsTongtuSkuMapping;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class OperationReportMetricsService
 {
@@ -16,7 +17,7 @@ class OperationReportMetricsService
     public const REPORT_TIMEZONE = '-04:00';
 
     /** @return list<array{sku:string,product_name:string,missing_fields:list<string>,item_count:int,quantity:float,latest_order_at:?string}> */
-    public function missingGuideSkuSummary(): array
+    public function missingGuideSkuSummary(array $excludedStoreNames = []): array
     {
         $mappedValues = [];
         LogisticsTongtuSkuMapping::query()
@@ -33,6 +34,10 @@ class OperationReportMetricsService
 
         return LogisticsOrderItem::query()
             ->join('logistics_orders', 'logistics_orders.id', '=', 'logistics_order_items.logistics_order_id')
+            ->when($excludedStoreNames !== [], fn ($query) => $query->whereNotIn(
+                DB::raw("LOWER(TRIM(COALESCE(logistics_orders.store_name, '')))"),
+                collect($excludedStoreNames)->map(fn ($name) => mb_strtolower(trim((string) $name)))->filter()->values()->all(),
+            ))
             ->whereIn('logistics_orders.subscription_type', ['订阅首次购买', '无订阅'])
             ->where(function ($query): void {
                 $query->whereRaw("TRIM(COALESCE(logistics_order_items.shopify_sku, '')) <> ''")
@@ -87,7 +92,7 @@ class OperationReportMetricsService
     }
 
     /** @return list<array{item_id:int,order_id:int,product_name:string,shop_domain:string,quantity:float,ordered_at:string}> */
-    public function missingOriginalSkuSummary(?string $date = null): array
+    public function missingOriginalSkuSummary(?string $date = null, array $excludedStoreNames = []): array
     {
         $start = $date !== null
             ? Carbon::createFromFormat('Y-m-d H:i:s', $date.' 00:00:00', self::REPORT_TIMEZONE)->utc()
@@ -99,6 +104,10 @@ class OperationReportMetricsService
         $items = LogisticsOrderItem::query()
             ->join('logistics_orders', 'logistics_orders.id', '=', 'logistics_order_items.logistics_order_id')
             ->leftJoin('assistant_domain_stores', 'assistant_domain_stores.id', '=', 'logistics_orders.assistant_domain_store_id')
+            ->when($excludedStoreNames !== [], fn ($query) => $query->whereNotIn(
+                DB::raw("LOWER(TRIM(COALESCE(logistics_orders.store_name, '')))"),
+                collect($excludedStoreNames)->map(fn ($name) => mb_strtolower(trim((string) $name)))->filter()->values()->all(),
+            ))
             ->when(
                 $start !== null,
                 fn ($query) => $query->whereBetween('logistics_orders.order_created_at', [$start, $end]),
