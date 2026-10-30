@@ -12,6 +12,7 @@
 .missing-guide-wrap{max-height:410px;overflow:auto}.missing-guide-table{margin:0}.missing-guide-table th{position:sticky;top:0;z-index:1;background:#fff4dc!important;color:#76551e}.missing-guide-table td,.missing-guide-table th{vertical-align:middle!important}.missing-guide-sku{font-family:Consolas,monospace;color:#b34d24}.missing-guide-empty{text-align:center;color:#80909d;padding:32px!important}
 .media-roi-table th{background:#eef5fa!important;color:#36536b}.media-roi-table td,.media-roi-table th{text-align:center;vertical-align:middle!important}.media-roi-value{font-size:16px;font-weight:700;color:#237daf}
 #ad-modal-file{display:none!important}
+.ad-import-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.ad-import-tools .btn{border-radius:5px}.ad-import-modal .modal-content{border:0;border-radius:12px;overflow:hidden;box-shadow:0 18px 55px rgba(24,49,70,.25)}.ad-import-modal .modal-header{padding:18px 22px;border-bottom:1px solid #e8eef3;background:linear-gradient(135deg,#f8fbfe,#edf6fc)}.ad-import-modal .modal-title{font-weight:700;color:#24445e}.ad-import-modal .modal-body{padding:22px}.ad-import-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}.ad-import-step{padding:12px;border:1px solid #dce8f1;border-radius:8px;background:#f8fbfd;color:#60798e}.ad-import-step strong{display:block;color:#2c638c;margin-bottom:3px}.ad-import-step span{display:inline-flex;width:22px;height:22px;align-items:center;justify-content:center;border-radius:50%;background:#2f8fc5;color:#fff;margin-right:6px}.ad-import-drop{display:block;padding:24px;border:2px dashed #b9d1e3;border-radius:9px;background:#fbfdff;text-align:center;cursor:pointer;transition:.15s}.ad-import-drop:hover{border-color:#3498db;background:#f0f8fd}.ad-import-drop .fa-file-excel-o{display:block;font-size:34px;color:#25935d;margin-bottom:10px}.ad-import-drop input{display:block;margin:12px auto 0;max-width:360px}.ad-import-tip{margin-top:14px;padding:10px 12px;border-left:3px solid #efa53b;background:#fff8e9;color:#7a633d;font-size:12px}.ad-import-modal .modal-footer{padding:14px 22px;background:#f8fafc;border-top:1px solid #e8eef3}@media(max-width:700px){.ad-import-steps{grid-template-columns:1fr}}
 </style>
 @endpush
 
@@ -67,7 +68,7 @@
     @php($adRows = old('ads', count($advertisingRows) ? $advertisingRows : [[]]))
     <form method="post" enctype="multipart/form-data" action="{{ route('operation.advertising-reports.store') }}" id="operation-report-form">
         @csrf @if($editingReport)<input type="hidden" name="report_id" value="{{ $editingReport->id }}">@endif @if($isBoss)<input type="hidden" name="operator_user_id" value="{{ $selectedOperator->id }}">@endif
-        <div class="box"><div class="box-header with-border"><h3 class="box-title op-section-title">广告信息填写</h3></div>
+        <div class="box"><div class="box-header with-border"><h3 class="box-title op-section-title">广告信息填写</h3>@if($isBoss)<div class="pull-right ad-import-tools"><a class="btn btn-default btn-sm" href="{{ route('operation.advertising-reports.import-template',['operator_user_id'=>$selectedOperator->id]) }}"><i class="fa fa-download"></i> 下载导入模板</a><button class="btn btn-success btn-sm" type="button" data-toggle="modal" data-target="#advertising-import-modal"><i class="fa fa-upload"></i> 批量导入</button></div>@endif</div>
             <div class="box-body" style="border-bottom:1px solid #edf1f4"><div class="form-group" style="max-width:260px;margin-bottom:0"><label>提报日期 <span class="text-red">*</span></label><input class="form-control" type="date" name="report_date" value="{{ old('report_date', $reportDate) }}" required @readonly($editingReport)></div></div>
             <div class="box-body">@if(!$canEditReport)<div class="alert alert-info"><i class="fa fa-eye"></i> 当前正在查看 {{ $selectedOperator->name ?: $selectedOperator->username }} 已提交的内容，仅可查看和审核。</div>@endif<fieldset @disabled(!$canEditReport)><div class="table-responsive"><table class="table table-bordered ad-table"><thead><tr><th>广告代理 <span class="text-red">*</span></th><th>广告社媒 <span class="text-red">*</span></th><th>广告账户名称 <span class="text-red">*</span></th><th>广告账户编号 <span class="text-red">*</span></th><th>账面广告费($) <span class="text-red">*</span></th><th>结算系数 <span class="text-red">*</span></th><th>手续费($)</th><th>实际广告费($)</th><th>广告消耗截图 <span class="text-red">*</span></th><th></th></tr></thead><tbody id="ad-rows">
                 @foreach($adRows as $i=>$ad)@php($adScreenshot = $ad['screenshot'] ?? $ad['existing_screenshot'] ?? null)@php($rawAgency = $ad['agency'] ?? '')@php($selectedAgencyId = isset($advertisingAgencyNames[$rawAgency]) ? $rawAgency : collect($advertisingAgencyNames)->search(fn($name,$id) => $name === $rawAgency && ($advertisingAgencyMedia[$id] ?? '') === ($ad['media_source'] ?? '')))@php($selectedAgencyName = $advertisingAgencyNames[$selectedAgencyId] ?? $rawAgency)@php($selectedMedia = $ad['media_source'] ?? ($advertisingAgencyMedia[$selectedAgencyId] ?? ''))<tr data-ad-row>
@@ -85,10 +86,29 @@
             </tbody></table></div>
             <div class="op-actions"><button type="button" class="btn btn-default btn-sm" id="add-ad"><i class="fa fa-plus"></i> 添加广告账户</button></div></fieldset>
             <div class="op-actions" style="margin-top:10px">
-                @if($editingReport)<button class="btn btn-primary" type="submit"><i class="fa fa-save"></i> 保存并重新提交</button><a class="btn btn-default" href="{{ route('operation.reports.show',$editingReport) }}">取消编辑</a>@elseif(!$report)<button class="btn btn-primary" type="submit"><i class="fa fa-paper-plane"></i> 提交报表</button>@else<a class="btn btn-info" href="{{ route('operation.reports.show',$report) }}"><i class="fa fa-eye"></i> 查看已提交报表</a><span class="text-muted">当天报表已提交，填报内容不会在当前页面回填。</span>@endif
+                @if($editingReport)<button class="btn btn-primary" type="submit"><i class="fa fa-save"></i> 保存并重新提交助理审核</button><a class="btn btn-default" href="{{ route('operation.reports.show',$editingReport) }}">取消编辑</a>@elseif(!$report)<button class="btn btn-primary" type="submit"><i class="fa fa-paper-plane"></i> 提交助理审核</button>@else<a class="btn btn-info" href="{{ route('operation.reports.show',$report) }}"><i class="fa fa-eye"></i> 查看已提交报表</a><span class="text-muted">当天报表已提交，填报内容不会在当前页面回填。</span>@endif
             </div></div>
         </div>
     </form>
+
+    @if($isBoss)
+    <div class="modal fade ad-import-modal" id="advertising-import-modal" tabindex="-1" role="dialog"><div class="modal-dialog" role="document"><div class="modal-content">
+        <form id="advertising-import-form" method="post" enctype="multipart/form-data" action="{{ route('operation.advertising-reports.import') }}">
+            @csrf<input type="hidden" name="operator_user_id" value="{{ $selectedOperator->id }}"><input type="hidden" name="report_date" id="advertising-import-date" value="{{ $reportDate }}">@if($editingReport)<input type="hidden" name="edit_report" value="{{ $editingReport->id }}">@endif
+            <div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title"><i class="fa fa-file-excel-o text-green"></i> 批量导入广告信息</h4></div>
+            <div class="modal-body">
+                <div class="ad-import-steps">
+                    <div class="ad-import-step"><strong><span>1</span>填写模板</strong>填写账户并把截图粘贴到对应行</div>
+                    <div class="ad-import-step"><strong><span>2</span>导入数据</strong>自动读取数据、图片和结算系数</div>
+                    <div class="ad-import-step"><strong><span>3</span>提交审核</strong>确认导入内容后提交助理审核</div>
+                </div>
+                <label class="ad-import-drop"><i class="fa fa-file-excel-o"></i><strong>选择填写完成的 Excel 文件</strong><div class="text-muted">支持 XLSX、XLS、CSV，单次最多 100 条</div><input type="file" name="import_file" accept=".xlsx,.xls,.csv" required></label>
+                <div class="ad-import-tip"><i class="fa fa-info-circle"></i> 每条数据必须在 Excel 的“广告消耗截图”列放置一张图片。导入后图片会自动绑定到对应广告记录。</div>
+            </div>
+            <div class="modal-footer"><a class="btn btn-default pull-left" href="{{ route('operation.advertising-reports.import-template',['operator_user_id'=>$selectedOperator->id]) }}"><i class="fa fa-download"></i> 下载模板</a><button type="button" class="btn btn-default" data-dismiss="modal">取消</button><button type="submit" class="btn btn-success"><i class="fa fa-upload"></i> 导入并生成填写列表</button></div>
+        </form>
+    </div></div></div>
+    @endif
 
     <div class="modal fade" id="ad-image-modal" tabindex="-1" role="dialog"><div class="modal-dialog" role="document"><div class="modal-content">
         <div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title">上传广告消耗截图</h4></div>
@@ -110,6 +130,7 @@
 
 @push('scripts')
 <script>
+(function(){var form=document.getElementById('advertising-import-form'),target=document.getElementById('advertising-import-date'),source=document.querySelector('#operation-report-form input[name="report_date"]');if(!form||!target)return;form.addEventListener('submit',function(){if(source)target.value=source.value})})();
 (function(){
 var body=document.getElementById('ad-rows'),add=document.getElementById('add-ad'),agencyGroups=@json($advertisingAgencyGroups);if(!body||!add)return;
 function esc(v){return String(v).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]})}

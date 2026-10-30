@@ -13,11 +13,13 @@ use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Logistics\StreamedXlsxWriter;
 use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Operation\OperationReportMetricsService;
+use App\Portals\Operation\AdvertisingReportSpreadsheetService;
 use App\Portals\ProductRequests\ProductRequestAccessService;
 use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
@@ -31,6 +33,7 @@ class OperationReportController extends Controller
         private readonly OperationReportMetricsService $metrics,
         private readonly StreamedXlsxWriter $xlsxWriter,
         private readonly AssistantStoreOwnerService $assistantStoreOwners,
+        private readonly AdvertisingReportSpreadsheetService $advertisingSpreadsheets,
     ) {
     }
 
@@ -136,7 +139,7 @@ class OperationReportController extends Controller
             ? OperationReport::query()->whereDate('report_date', $date)->where('operator_user_id', $operatorId)->first()
             : null;
         $metricRows = $calculated['rows'];
-        $advertisingRows = $editingReport?->advertising_rows ?: [];
+        $advertisingRows = $request->session()->pull('advertising_import_rows', $editingReport?->advertising_rows ?: []);
         $submittedMetricRows = $report?->metric_rows ?: [];
         $submittedAdvertisingRows = $report?->advertising_rows ?: [];
         $history = OperationReport::query()
@@ -163,6 +166,97 @@ class OperationReportController extends Controller
             'missingGuideSkus' => [],
             'missingOriginalSkuItems' => [],
         ]);
+    }
+
+    public function advertisingImportTemplate(Request $request): Response
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+        abort_unless($this->isBoss($context['user']), 403);
+        $validated = $request->validate(['operator_user_id' => ['nullable', 'integer']]);
+        $operatorId = (int) ($validated['operator_user_id'] ?? $context['user']->getKey());
+        $this->assertAssignableOperator($operatorId);
+        $operator = AdminUser::query()->findOrFail($operatorId);
+        $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($operator);
+        $assistantDepartmentIds = $operationDepartment
+            ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $operationDepartment->getKey())
+            : [];
+
+        return $this->advertisingSpreadsheets->templateResponse($this->advertisingAgencyGroups($assistantDepartmentIds));
+    }
+
+    public function advertisingImport(Request $request): RedirectResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        abort_unless($this->isBoss($context['user']), 403);
+        $validated = $request->validate([
+            'import_file' => ['required', 'file', 'max:10240'],
+            'operator_user_id' => ['required', 'integer'],
+            'report_date' => ['nullable', 'date_format:Y-m-d'],
+            'edit_report' => ['nullable', 'integer'],
+        ]);
+        $operatorId = (int) $validated['operator_user_id'];
+        $this->assertAssignableOperator($operatorId);
+        $operator = AdminUser::query()->findOrFail($operatorId);
+        $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($operator);
+        $assistantDepartmentIds = $operationDepartment
+            ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $operationDepartment->getKey())
+            : [];
+        $groups = $this->advertisingAgencyGroups($assistantDepartmentIds);
+
+        $storedImagePaths = [];
+        try {
+            $rows = $this->advertisingSpreadsheets->read($request->file('import_file'));
+            $imported = [];
+            foreach ($rows as $row) {
+                $matched = collect($groups)->flatMap(function (array $items, string $agencyName) use ($row): array {
+                    if ($this->normalizeAdvertisingText($agencyName) !== $this->normalizeAdvertisingText($row['agency_name'])) return [];
+
+                    return $items;
+                })->first(
+                    fn (array $item): bool => $this->normalizeAdvertisingText($item['media']) === $this->normalizeAdvertisingText($row['media_source'])
+                );
+                if (! $matched) {
+                    throw new \InvalidArgumentException("第 {$row['row']} 行的广告代理与广告社媒组合不存在，或不属于该运营绑定的助理部门。");
+                }
+                $bookSpend = (float) $row['book_spend'];
+                $coefficient = (float) $matched['coefficient'];
+                $imported[] = [
+                    'agency' => (string) $matched['key'],
+                    'media_source' => (string) $matched['media'],
+                    'account_name' => $row['account_name'],
+                    'account_number' => $row['account_number'],
+                    'book_spend' => $bookSpend,
+                    'settlement_coefficient' => $coefficient,
+                    'handling_fee' => round($bookSpend * $coefficient, 4),
+                    'actual_spend' => round($bookSpend * (1 + $coefficient), 4),
+                    '_image_bytes' => $row['image_bytes'],
+                    '_image_extension' => $row['image_extension'],
+                ];
+            }
+            foreach ($imported as &$ad) {
+                $path = 'operation-reports/ads/'.Str::uuid().'.'.$ad['_image_extension'];
+                if (! Storage::disk('public')->put($path, $ad['_image_bytes'])) {
+                    throw new \InvalidArgumentException('广告消耗截图保存失败，请稍后重新导入。');
+                }
+                $storedImagePaths[] = $path;
+                $ad['existing_screenshot'] = $path;
+                unset($ad['_image_bytes'], $ad['_image_extension']);
+            }
+            unset($ad);
+        } catch (\InvalidArgumentException $exception) {
+            foreach ($storedImagePaths as $storedImagePath) Storage::disk('public')->delete($storedImagePath);
+            throw ValidationException::withMessages(['import_file' => $exception->getMessage()]);
+        }
+
+        $query = ['operator_user_id' => $operatorId];
+        if (! empty($validated['report_date'])) $query['report_date'] = $validated['report_date'];
+        if (! empty($validated['edit_report'])) $query['edit_report'] = $validated['edit_report'];
+
+        return redirect()->route('operation.advertising-reports.index', $query)
+            ->with('advertising_import_rows', $imported)
+            ->with('success', '成功导入 '.count($imported).' 条广告数据和对应截图，请确认后提交助理审核。');
     }
 
     public function show(Request $request, OperationReport $report): Response|View
@@ -443,6 +537,11 @@ class OperationReportController extends Controller
     private function advertisingMedia(array $assistantDepartmentIds): array
     {
         return AssistantAdvertisingMedia::enabledNames($assistantDepartmentIds);
+    }
+
+    private function normalizeAdvertisingText(string $value): string
+    {
+        return mb_strtolower((string) preg_replace('/\s+/u', '', trim($value)));
     }
 
     /** @return array<string, list<array{key:string,media:string,coefficient:float}>> */

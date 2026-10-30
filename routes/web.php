@@ -73,6 +73,8 @@ Route::get('/operation/domain-stores', [OperationDomainStoreController::class, '
 Route::get('/operation/ai-product-library', [OperationAiProductLibraryController::class, 'index'])->name('operation.ai-product-library.index');
 Route::get('/operation/reports', [OperationReportController::class, 'index'])->name('operation.reports.index');
 Route::get('/operation/advertising-reports', [OperationReportController::class, 'advertising'])->name('operation.advertising-reports.index');
+Route::get('/operation/advertising-reports/import-template', [OperationReportController::class, 'advertisingImportTemplate'])->name('operation.advertising-reports.import-template');
+Route::post('/operation/advertising-reports/import', [OperationReportController::class, 'advertisingImport'])->name('operation.advertising-reports.import');
 Route::get('/operation/advertising-reports/{report}', [OperationReportController::class, 'advertisingShow'])->whereNumber('report')->name('operation.advertising-reports.show');
 Route::get('/operation/reports/export', [OperationReportController::class, 'export'])->name('operation.reports.export');
 Route::get('/operation/reports/missing-guide-skus.txt', [OperationReportController::class, 'exportMissingGuideSkus'])->name('operation.reports.missing-guide-skus.export');
