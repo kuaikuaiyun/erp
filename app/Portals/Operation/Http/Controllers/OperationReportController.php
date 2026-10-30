@@ -90,6 +90,28 @@ class OperationReportController extends Controller
             mb_strtolower(trim((string) $right['media_source'])),
             mb_strtolower(trim((string) $right['shop_domain'])),
         ]);
+        $dailySummaries = collect($metricRows)->groupBy('date')->map(function ($dateRows, string $date) use ($submittedReportsByDate, $submittedMediaRoiByDate): array {
+            $firstRevenue = (float) $dateRows->sum('first_total_revenue');
+            $firstCost = (float) $dateRows->sum('first_total_cost');
+            $actualAdSpend = (float) ($submittedReportsByDate->get($date)?->actual_ad_spend ?? 0);
+            $firstProfit = $firstRevenue - $actualAdSpend - $firstCost;
+            $mediaNames = $dateRows->pluck('media_source')->map(fn ($media) => trim((string) $media) ?: '其他')->unique()->values();
+
+            return [
+                'first_total_orders' => (int) $dateRows->sum('first_total_orders'),
+                'first_total_revenue' => $firstRevenue,
+                'first_total_cost' => $firstCost,
+                'first_loss_rate' => $firstCost > 0 ? $firstProfit / $firstCost : null,
+                'media_names' => $mediaNames->all(),
+                'media_rois' => $mediaNames->map(function (string $media) use ($date, $submittedMediaRoiByDate): ?float {
+                    $metric = $submittedMediaRoiByDate[$date][mb_strtolower($media)] ?? null;
+                    return isset($metric['first_roi']) ? (float) $metric['first_roi'] : null;
+                })->all(),
+                'first_roi' => $actualAdSpend > 0 ? $firstRevenue / $actualAdSpend : null,
+                'renewal_orders' => (int) $dateRows->sum('renewal_orders'),
+                'renewal_revenue' => (float) $dateRows->sum('renewal_revenue'),
+            ];
+        })->all();
         $metricTotals = $this->sumRows($metricRows);
         $metricTotals['first_total_cost'] = (float) $metricTotals['first_purchase_cost']
             + (float) $metricTotals['first_shipping_cost']
@@ -116,6 +138,7 @@ class OperationReportController extends Controller
             'metricMediaRowspans' => $this->mediaRowspans($metricRows),
             'metricDateRowspans' => $this->dateRowspans($metricRows),
             'metricDateBands' => $this->dateBands($metricRows),
+            'dailySummaries' => $dailySummaries,
             'warnings' => $calculated['warnings'],
             'submittedReports' => $submittedReports,
             'submittedReportsByDate' => $submittedReportsByDate,

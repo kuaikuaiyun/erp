@@ -147,6 +147,29 @@ class OperationReportDashboardController extends Controller
                 $revenueByMedia = $dateRows->groupBy(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? '其他'))))
                     ->map(fn ($items) => (float) $items->sum('first_total_revenue'));
                 $reportFirstRevenue = (float) $dateRows->sum('first_total_revenue');
+                $reportFirstCost = (float) $dateRows->sum(fn (array $row) =>
+                    (float) ($row['first_purchase_cost'] ?? 0)
+                    + (float) ($row['first_shipping_cost'] ?? 0)
+                    + (float) ($row['first_return_fee'] ?? 0)
+                );
+                $reportActualAdSpend = (float) ($approvedReport?->actual_ad_spend ?? 0);
+                $reportFirstProfit = $reportFirstRevenue - $reportActualAdSpend - $reportFirstCost;
+                $dailyMediaNames = $dateRows->pluck('media_source')
+                    ->map(fn ($media) => trim((string) $media) ?: '其他')->unique()->values();
+                $dailySummary = [
+                    'daily_first_total_orders' => (int) $dateRows->sum('first_total_orders'),
+                    'daily_first_total_revenue' => $reportFirstRevenue,
+                    'daily_first_total_cost' => $reportFirstCost,
+                    'daily_first_loss_rate' => $reportFirstCost > 0 ? $reportFirstProfit / $reportFirstCost : null,
+                    'daily_media_names' => $dailyMediaNames->all(),
+                    'daily_media_rois' => $dailyMediaNames->map(function (string $media) use ($mediaMetrics): ?float {
+                        $metric = $mediaMetrics->get(mb_strtolower($media));
+                        return isset($metric['first_roi']) ? (float) $metric['first_roi'] : null;
+                    })->all(),
+                    'daily_first_roi' => $reportActualAdSpend > 0 ? $reportFirstRevenue / $reportActualAdSpend : null,
+                    'daily_renewal_orders' => (int) $dateRows->sum('renewal_orders'),
+                    'daily_renewal_revenue' => (float) $dateRows->sum('renewal_revenue'),
+                ];
 
                 foreach ($dateRows as $row) {
                 $mediaKey = mb_strtolower(trim((string) ($row['media_source'] ?? '其他')));
@@ -159,7 +182,7 @@ class OperationReportDashboardController extends Controller
                     + (float) ($row['first_shipping_cost'] ?? 0)
                     + (float) ($row['first_return_fee'] ?? 0);
                 $profit = (float) ($row['first_total_revenue'] ?? 0) - $allocatedSpend - $totalCost;
-                $rows[] = array_merge($row, [
+                $rows[] = array_merge($row, $dailySummary, [
                     '_report_id' => $operator->getKey().'|'.$rowDate,
                     'operator_user_id' => (int) $operator->getKey(),
                     'date' => (string) $rowDate,
