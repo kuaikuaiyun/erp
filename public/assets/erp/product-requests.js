@@ -116,7 +116,13 @@
         var preview = container.querySelector('[data-product-request-preview]');
         if (!preview) { return; }
         preview.querySelectorAll('[data-new-upload-preview]').forEach(function (node) { node.remove(); });
-        if (inputFiles(input).length > 0) {
+        var hasNewFiles = inputFiles(input).length > 0;
+        if (container.getAttribute('data-replace-existing') === '1') {
+            preview.querySelectorAll('[data-existing-preview]').forEach(function (node) {
+                node.hidden = hasNewFiles;
+            });
+        }
+        if (hasNewFiles) {
             preview.querySelectorAll('[data-reused-preview]').forEach(function (node) { node.remove(); });
         }
         inputFiles(input).forEach(function (file, index) {
@@ -146,7 +152,10 @@
     function addFiles(container, input, maxFiles, incoming) {
         var current = inputFiles(input);
         // 新上传数量上限需扣除仍保留的已保存附件
-        var limit = Math.max(0, maxFiles - container.querySelectorAll('[data-existing-preview]').length);
+        var replaceExisting = container.getAttribute('data-replace-existing') === '1';
+        var limit = replaceExisting
+            ? maxFiles
+            : Math.max(0, maxFiles - container.querySelectorAll('[data-existing-preview]').length);
         Array.prototype.slice.call(incoming || []).forEach(function (file) {
             if (!isSupported(file)) {
                 notify('warning', config.invalidFile);

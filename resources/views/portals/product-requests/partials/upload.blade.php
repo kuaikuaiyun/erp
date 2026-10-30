@@ -5,8 +5,9 @@
     $multiple = $maxFiles > 1;
     $inputErrorKey = $inputErrorKey ?? $inputName;
     $removableName = $removableName ?? '';
+    $replaceExisting = $replaceExisting ?? false;
 @endphp
-<div class="product-request-upload" data-product-request-upload data-max-files="{{ $maxFiles }}" data-required="{{ $required ? '1' : '0' }}" data-required-message="{{ __('product_requests.uploads.required') }}" tabindex="0">
+<div class="product-request-upload" data-product-request-upload data-max-files="{{ $maxFiles }}" data-replace-existing="{{ $replaceExisting ? '1' : '0' }}" data-required="{{ $required ? '1' : '0' }}" data-required-message="{{ __('product_requests.uploads.required') }}" tabindex="0">
     <input
         id="{{ $inputId }}"
         class="product-request-upload-input"
