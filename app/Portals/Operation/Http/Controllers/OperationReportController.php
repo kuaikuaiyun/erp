@@ -80,6 +80,17 @@ class OperationReportController extends Controller
 
             return [$report->report_date->format('Y-m-d') => $rows];
         })->all();
+        $metricRows = $this->withFirstOrderProfitability($calculated['rows'], $submittedMediaRoiByDate);
+        $metricTotals = $this->sumRows($metricRows);
+        $metricTotals['first_total_cost'] = (float) $metricTotals['first_purchase_cost']
+            + (float) $metricTotals['first_shipping_cost']
+            + (float) $metricTotals['first_return_fee'];
+        $metricTotals['first_profit'] = (float) $metricTotals['first_total_revenue']
+            - $submittedAdSpendTotal
+            - $metricTotals['first_total_cost'];
+        $metricTotals['first_loss_rate'] = $metricTotals['first_total_cost'] > 0
+            ? $metricTotals['first_profit'] / $metricTotals['first_total_cost']
+            : null;
 
         return view('portals.operation.reports.monthly', [
             'portal' => $context['portal']->loadMissing('menus'),
@@ -89,11 +100,11 @@ class OperationReportController extends Controller
             'selectedOperator' => $operator,
             'operatorOptions' => $operatorOptions,
             'isBoss' => $isBoss,
-            'metricRows' => $calculated['rows'],
-            'metricTotals' => $this->sumRows($calculated['rows']),
-            'metricRowspans' => $this->identityRowspans($calculated['rows']),
-            'metricDateRowspans' => $this->dateRowspans($calculated['rows']),
-            'metricDateBands' => $this->dateBands($calculated['rows']),
+            'metricRows' => $metricRows,
+            'metricTotals' => $metricTotals,
+            'metricRowspans' => $this->identityRowspans($metricRows),
+            'metricDateRowspans' => $this->dateRowspans($metricRows),
+            'metricDateBands' => $this->dateBands($metricRows),
             'warnings' => $calculated['warnings'],
             'submittedReports' => $submittedReports,
             'submittedReportsByDate' => $submittedReportsByDate,
@@ -656,6 +667,36 @@ class OperationReportController extends Controller
     {
         $fields = ['first_subscription_orders','first_subscription_revenue','first_normal_orders','first_normal_revenue','first_total_orders','first_total_revenue','first_purchase_cost','first_shipping_cost','first_return_fee','renewal_orders','renewal_revenue','renewal_cost','total_orders','total_revenue'];
         return collect($fields)->mapWithKeys(fn ($field) => [$field => collect($rows)->sum($field)])->all();
+    }
+
+    private function withFirstOrderProfitability(array $rows, array $mediaRoiByDate): array
+    {
+        $revenueByMedia = [];
+        foreach ($rows as $row) {
+            $key = $row['date']."\x1F".mb_strtolower(trim((string) $row['media_source']));
+            $revenueByMedia[$key] = ($revenueByMedia[$key] ?? 0.0) + (float) $row['first_total_revenue'];
+        }
+
+        return array_map(function (array $row) use ($mediaRoiByDate, $revenueByMedia): array {
+            $mediaKey = mb_strtolower(trim((string) $row['media_source']));
+            $groupKey = $row['date']."\x1F".$mediaKey;
+            $mediaSpend = (float) ($mediaRoiByDate[$row['date']][$mediaKey]['actual_ad_spend'] ?? 0);
+            $groupRevenue = (float) ($revenueByMedia[$groupKey] ?? 0);
+            $row['allocated_actual_ad_spend'] = $groupRevenue > 0
+                ? $mediaSpend * (float) $row['first_total_revenue'] / $groupRevenue
+                : 0.0;
+            $row['first_total_cost'] = (float) $row['first_purchase_cost']
+                + (float) $row['first_shipping_cost']
+                + (float) $row['first_return_fee'];
+            $row['first_profit'] = (float) $row['first_total_revenue']
+                - $row['allocated_actual_ad_spend']
+                - $row['first_total_cost'];
+            $row['first_loss_rate'] = $row['first_total_cost'] > 0
+                ? $row['first_profit'] / $row['first_total_cost']
+                : null;
+
+            return $row;
+        }, $rows);
     }
 
     private function identityRowspans(array $rows): array
