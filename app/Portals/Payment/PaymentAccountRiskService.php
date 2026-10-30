@@ -4,6 +4,7 @@ namespace App\Portals\Payment;
 
 use App\Models\LogisticsPayPalAccount;
 use App\Models\LogisticsPayPalBalanceSnapshot;
+use App\Models\LogisticsOrder;
 use App\Models\PaymentPayPalAccountRiskSnapshot;
 use App\Portals\Logistics\PayPalRiskAnalyticsService;
 use Carbon\Carbon;
@@ -44,9 +45,9 @@ class PaymentAccountRiskService
             ],
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
-        return Cache::remember(
+        return Cache::flexible(
             $cacheKey,
-            now()->addSeconds(30),
+            [60, 300],
             fn (): array => $this->buildDashboard($filters),
         );
     }
@@ -87,16 +88,16 @@ class PaymentAccountRiskService
                 'event_date_to' => $dateMode === 'event' ? $filters['period_end'] : '',
                 'date_mode' => $dateMode,
             ];
-        $summaries = $accounts
-            ->map(fn (LogisticsPayPalAccount $account): array => $this->cachedCurrentSummary($account, $summaryFilters));
-
-        $portfolio = $this->portfolio($summaries);
         $cutoff = $accounts->pluck('last_imported_at')->filter()->sortDesc()->first();
-        $total = $summaries->count();
+        $total = $accounts->count();
         $perPage = (int) $filters['per_page'];
         $lastPage = max(1, (int) ceil($total / $perPage));
         $page = min(max(1, (int) $filters['page']), $lastPage);
-        $merchants = $summaries->forPage($page, $perPage);
+        $pageAccounts = $accounts->forPage($page, $perPage)->values();
+        $merchants = $this->cachedCurrentSummaries($pageAccounts, $summaryFilters);
+        $portfolio = $pageAccounts->count() === $accounts->count()
+            ? $this->portfolioFromSummaries($accounts, $merchants)
+            : $this->cachedPortfolio($accounts, $summaryFilters);
         $merchantIds = $merchants->pluck('id')->map(static fn ($id): int => (int) $id)->all();
         $accountModels = $accounts->keyBy('id');
         $weeklyRiskSnapshots = $this->riskSnapshots->currentForAccounts($merchantIds);
@@ -159,9 +160,9 @@ class PaymentAccountRiskService
             'tab_filters' => $tabFilters,
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
-        return Cache::remember(
+        return Cache::flexible(
             $cacheKey,
-            now()->addSeconds(30),
+            [60, 300],
             fn (): array => $this->buildDetail($account, $filters, $tab, $page, $perPage, $tabFilters),
         );
     }
@@ -224,11 +225,204 @@ class PaymentAccountRiskService
             ],
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
-        return Cache::remember(
+        return Cache::flexible(
             $cacheKey,
-            now()->addMinutes(5),
+            [300, 900],
             fn (): array => $this->analytics->currentSummary($account, $filters),
         );
+    }
+
+    /**
+     * Build every account card on the current page with one set of aggregate
+     * queries. Detail tabs continue to use the canonical logistics analytics
+     * service, while the board avoids repeating the same table scans once per
+     * account.
+     *
+     * @param Collection<int,LogisticsPayPalAccount> $accounts
+     * @return Collection<int,array<string,mixed>>
+     */
+    private function cachedCurrentSummaries(Collection $accounts, array $filters): Collection
+    {
+        if ($accounts->isEmpty()) {
+            return collect();
+        }
+
+        $cacheKey = 'payment:account-risk-page-summaries:v1:'.sha1((string) json_encode([
+            'accounts' => $accounts->map(static fn (LogisticsPayPalAccount $account): array => [
+                'id' => (int) $account->getKey(),
+                'updated_at' => optional($account->updated_at)->format('Y-m-d H:i:s.u'),
+                'last_imported_at' => optional($account->last_imported_at)->format('Y-m-d H:i:s.u'),
+            ])->values()->all(),
+            'filters' => $filters,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+        $summaries = Cache::flexible(
+            $cacheKey,
+            [300, 900],
+            fn (): array => $this->buildCurrentSummaries($accounts, $filters),
+        );
+
+        return collect($summaries);
+    }
+
+    /**
+     * @param Collection<int,LogisticsPayPalAccount> $accounts
+     * @return list<array<string,mixed>>
+     */
+    private function buildCurrentSummaries(Collection $accounts, array $filters): array
+    {
+        $accountIds = $accounts->pluck('id')->map(static fn ($id): int => (int) $id)->values()->all();
+        $database = DB::connection(config('admin.database.connection') ?: config('database.default'));
+
+        $payments = $database->table('logistics_paypal_transactions as payments')
+            ->whereIn('payments.logistics_paypal_account_id', $accountIds)
+            ->where('payments.event_code', 'like', 'T00%')
+            ->where('payments.status', 'S');
+        $this->applyPortfolioRange($payments, 'payments.paid_at', $filters);
+
+        $paymentGroups = (clone $payments)
+            ->selectRaw('payments.logistics_paypal_account_id as account_id')
+            ->selectRaw("COALESCE(payments.payment_transaction_id, '') as payment_key")
+            ->selectRaw('SUM(COALESCE(payments.payment_amount_usd, 0)) as paid_amount')
+            ->selectRaw('MAX(CASE WHEN payments.logistics_order_id IS NOT NULL THEN 1 ELSE 0 END) as is_matched')
+            ->selectRaw('MIN(CASE WHEN payments.logistics_order_id IS NOT NULL THEN payments.logistics_order_id END) as matched_order_id')
+            ->groupByRaw("payments.logistics_paypal_account_id, COALESCE(payments.payment_transaction_id, '')");
+
+        $paymentStats = $database->query()->fromSub(clone $paymentGroups, 'payment_groups')
+            ->selectRaw('payment_groups.account_id')
+            ->selectRaw('COUNT(*) as order_count')
+            ->selectRaw('COALESCE(SUM(payment_groups.paid_amount), 0) as paid_amount')
+            ->selectRaw('COALESCE(SUM(payment_groups.is_matched), 0) as matched_group_count')
+            ->selectRaw('COALESCE(SUM(CASE WHEN payment_groups.is_matched = 0 THEN 1 ELSE 0 END), 0) as unmatched_payments')
+            ->groupBy('payment_groups.account_id')
+            ->get()->keyBy('account_id');
+
+        $orderStats = $database->query()->fromSub(
+            (clone $paymentGroups)->whereNotNull('payments.logistics_order_id'),
+            'payment_groups',
+        )->join('logistics_orders as orders', 'orders.id', '=', 'payment_groups.matched_order_id')
+            ->selectRaw('payment_groups.account_id')
+            ->selectRaw("COUNT(DISTINCT NULLIF(TRIM(COALESCE(orders.store_name, '')), '')) as store_count")
+            ->selectRaw('COUNT(DISTINCT CASE WHEN orders.logistics_status IN (?, ?, ?) THEN orders.id END) as shipped_order_count', [
+                LogisticsOrder::LOGISTICS_IN_TRANSIT,
+                LogisticsOrder::LOGISTICS_EXCEPTION,
+                LogisticsOrder::LOGISTICS_DELIVERED,
+            ])
+            ->selectRaw('COUNT(DISTINCT CASE WHEN orders.logistics_status = ? THEN orders.id END) as delivered_order_count', [
+                LogisticsOrder::LOGISTICS_DELIVERED,
+            ])
+            ->groupBy('payment_groups.account_id')
+            ->get()->keyBy('account_id');
+
+        $eventPaymentKeys = (clone $payments)
+            ->whereNotNull('payments.payment_transaction_id')
+            ->whereRaw("TRIM(payments.payment_transaction_id) <> ''")
+            ->selectRaw('payments.logistics_paypal_account_id as account_id')
+            ->selectRaw('payments.payment_transaction_id as payment_key')
+            ->distinct();
+
+        $refunds = $database->table('logistics_paypal_refunds as refunds')
+            ->whereIn('refunds.logistics_paypal_account_id', $accountIds);
+        if (($filters['date_mode'] ?? 'order') === 'event') {
+            $this->applyPortfolioRange($refunds, 'refunds.refunded_at', $filters);
+        } else {
+            $refunds->joinSub(clone $eventPaymentKeys, 'event_payments', function ($join): void {
+                $join->on('event_payments.account_id', '=', 'refunds.logistics_paypal_account_id')
+                    ->on('event_payments.payment_key', '=', 'refunds.original_transaction_id');
+            });
+        }
+        $refundStats = $refunds
+            ->selectRaw('refunds.logistics_paypal_account_id as account_id')
+            ->selectRaw("COUNT(DISTINCT NULLIF(CASE WHEN COALESCE(refunds.original_transaction_id, '') <> '' THEN TRIM(refunds.original_transaction_id) ELSE TRIM(COALESCE(refunds.refund_transaction_id, '')) END, '')) as refund_order_count")
+            ->selectRaw('COALESCE(SUM(COALESCE(refunds.refund_amount_usd, refunds.original_amount, 0)), 0) as refund_amount')
+            ->selectRaw('COALESCE(SUM(CASE WHEN refunds.logistics_order_id IS NULL THEN 1 ELSE 0 END), 0) as unmatched_refunds')
+            ->groupBy('refunds.logistics_paypal_account_id')
+            ->get()->keyBy('account_id');
+
+        $allDisputes = $database->table('logistics_paypal_disputes as disputes')
+            ->whereIn('disputes.logistics_paypal_account_id', $accountIds);
+        if (($filters['date_mode'] ?? 'order') === 'event') {
+            $this->applyPortfolioRange($allDisputes, 'disputes.dispute_created_at', $filters);
+        } else {
+            $allDisputes->joinSub(clone $eventPaymentKeys, 'event_payments', function ($join): void {
+                $join->on('event_payments.account_id', '=', 'disputes.logistics_paypal_account_id')
+                    ->on('event_payments.payment_key', '=', 'disputes.disputed_transaction_id');
+            });
+        }
+
+        $overallDisputeStats = (clone $allDisputes)
+            ->selectRaw('disputes.logistics_paypal_account_id as account_id')
+            ->selectRaw("COUNT(DISTINCT NULLIF(CASE WHEN COALESCE(disputes.disputed_transaction_id, '') <> '' THEN TRIM(disputes.disputed_transaction_id) ELSE TRIM(COALESCE(disputes.dispute_id, '')) END, '')) as overall_dispute_order_count")
+            ->selectRaw('COALESCE(SUM(CASE WHEN disputes.logistics_order_id IS NULL THEN 1 ELSE 0 END), 0) as unmatched_disputes')
+            ->groupBy('disputes.logistics_paypal_account_id')
+            ->get()->keyBy('account_id');
+
+        $disputeStats = (clone $allDisputes)
+            ->whereIn('disputes.reason', self::QUALIFYING_DISPUTE_REASONS)
+            ->whereIn('disputes.life_cycle_stage', self::QUALIFYING_DISPUTE_TYPES)
+            ->selectRaw('disputes.logistics_paypal_account_id as account_id')
+            ->selectRaw("COUNT(DISTINCT NULLIF(CASE WHEN COALESCE(disputes.disputed_transaction_id, '') <> '' THEN TRIM(disputes.disputed_transaction_id) ELSE TRIM(COALESCE(disputes.dispute_id, '')) END, '')) as dispute_order_count")
+            ->selectRaw('COALESCE(SUM(COALESCE(disputes.dispute_amount_usd, disputes.original_amount, 0)), 0) as dispute_amount')
+            ->groupBy('disputes.logistics_paypal_account_id')
+            ->get()->keyBy('account_id');
+
+        return $accounts->map(function (LogisticsPayPalAccount $account) use (
+            $paymentStats,
+            $orderStats,
+            $refundStats,
+            $overallDisputeStats,
+            $disputeStats,
+        ): array {
+            $accountId = (int) $account->getKey();
+            $payment = $paymentStats->get($accountId);
+            $order = $orderStats->get($accountId);
+            $refund = $refundStats->get($accountId);
+            $overallDispute = $overallDisputeStats->get($accountId);
+            $dispute = $disputeStats->get($accountId);
+            $orders = (int) ($payment->order_count ?? 0);
+            $paidAmount = round((float) ($payment->paid_amount ?? 0), 2);
+            $matchedGroups = (int) ($payment->matched_group_count ?? 0);
+            $refundOrders = (int) ($refund->refund_order_count ?? 0);
+            $refundAmount = round((float) ($refund->refund_amount ?? 0), 2);
+            $disputeOrders = (int) ($dispute->dispute_order_count ?? 0);
+            $overallDisputeOrders = (int) ($overallDispute->overall_dispute_order_count ?? 0);
+            $disputeAmount = round((float) ($dispute->dispute_amount ?? 0), 2);
+            $shippedOrders = (int) ($order->shipped_order_count ?? 0);
+            $deliveredOrders = (int) ($order->delivered_order_count ?? 0);
+
+            return [
+                'id' => $accountId,
+                'account_name' => (string) $account->account_name,
+                'merchant_id' => (string) ($account->merchant_id ?: '-'),
+                'account_email' => (string) ($account->account_email ?: '-'),
+                'masked_email' => $this->maskEmail($account->account_email),
+                'environment' => (string) $account->environment,
+                'is_enabled' => (bool) $account->is_enabled,
+                'order_count' => $orders,
+                'paid_amount' => $paidAmount,
+                'refund_order_count' => $refundOrders,
+                'dispute_order_count' => $disputeOrders,
+                'overall_dispute_order_count' => $overallDisputeOrders,
+                'refund_rate' => $orders === 0 ? 0.0 : round($refundOrders / $orders * 100, 2),
+                'dispute_rate' => $orders === 0 ? 0.0 : round($disputeOrders / $orders * 100, 2),
+                'overall_dispute_rate' => $orders === 0 ? 0.0 : round($overallDisputeOrders / $orders * 100, 2),
+                'refund_amount' => $refundAmount,
+                'refund_amount_rate' => $paidAmount <= 0 ? 0.0 : round($refundAmount / $paidAmount * 100, 2),
+                'dispute_amount' => $disputeAmount,
+                'dispute_amount_rate' => $paidAmount <= 0 ? 0.0 : round($disputeAmount / $paidAmount * 100, 2),
+                'store_count' => (int) ($order->store_count ?? 0),
+                'shipped_order_count' => $shippedOrders,
+                'delivered_order_count' => $deliveredOrders,
+                'shipping_rate' => $matchedGroups === 0 ? 0.0 : round($shippedOrders / $matchedGroups * 100, 2),
+                'delivery_rate' => $matchedGroups === 0 ? 0.0 : round($deliveredOrders / $matchedGroups * 100, 2),
+                'unmatched_count' => (int) ($payment->unmatched_payments ?? 0)
+                    + (int) ($refund->unmatched_refunds ?? 0)
+                    + (int) ($overallDispute->unmatched_disputes ?? 0),
+                'last_imported_at' => $this->analyticsDateTime($account->last_imported_at),
+                'last_import_status' => (string) ($account->last_import_status ?: 'never'),
+                'last_import_message' => (string) ($account->last_import_message ?: __('logistics.paypal_risk.messages.no_import_yet')),
+            ];
+        })->values()->all();
     }
 
     /** @param list<array<string,mixed>> $exceptions @return list<array<string,mixed>> */
@@ -421,27 +615,185 @@ class PaymentAccountRiskService
         return $account->refresh();
     }
 
-    /** @param Collection<int,array<string,mixed>> $summaries
+    /** @param Collection<int,LogisticsPayPalAccount> $accounts
      *  @return array<string,int|float>
      */
-    private function portfolio(Collection $summaries): array
+    private function cachedPortfolio(Collection $accounts, array $filters): array
+    {
+        $cacheKey = 'payment:account-risk-portfolio:v1:'.sha1((string) json_encode([
+            'accounts' => $accounts->map(static fn (LogisticsPayPalAccount $account): array => [
+                'id' => (int) $account->getKey(),
+                'enabled' => (bool) $account->is_enabled,
+                'status' => (string) $account->last_import_status,
+                'updated_at' => optional($account->updated_at)->format('Y-m-d H:i:s.u'),
+                'last_imported_at' => optional($account->last_imported_at)->format('Y-m-d H:i:s.u'),
+            ])->values()->all(),
+            'filters' => $filters,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+        return Cache::flexible(
+            $cacheKey,
+            [300, 900],
+            fn (): array => $this->buildPortfolio($accounts, $filters),
+        );
+    }
+
+    /**
+     * Reuse the already-built page aggregates when the page contains every
+     * account. This is the common case and avoids immediately repeating the
+     * same financial scans for the KPI row.
+     *
+     * @param Collection<int,LogisticsPayPalAccount> $accounts
+     * @param Collection<int,array<string,mixed>> $summaries
+     * @return array<string,int|float>
+     */
+    private function portfolioFromSummaries(Collection $accounts, Collection $summaries): array
     {
         $orders = (int) $summaries->sum('order_count');
-        $refunds = (int) $summaries->sum('refund_order_count');
-        $disputes = (int) $summaries->sum('dispute_order_count');
         $paidAmount = round((float) $summaries->sum('paid_amount'), 2);
         $refundAmount = round((float) $summaries->sum('refund_amount'), 2);
+        $disputeOrders = (int) $summaries->sum('dispute_order_count');
 
         return [
             'orders' => $orders,
             'paid_amount' => $paidAmount,
             'refund_amount' => $refundAmount,
             'refund_amount_rate' => $paidAmount <= 0 ? 0.0 : round($refundAmount / $paidAmount * 100, 2),
-            'dispute_orders' => $disputes,
-            'dispute_rate' => $orders === 0 ? 0.0 : round($disputes / $orders * 100, 2),
+            'dispute_orders' => $disputeOrders,
+            'dispute_rate' => $orders === 0 ? 0.0 : round($disputeOrders / $orders * 100, 2),
             'unmatched_count' => (int) $summaries->sum('unmatched_count'),
-            'attention_accounts' => $summaries->filter(fn (array $summary): bool => $this->status($summary) === 'attention')->count(),
+            'attention_accounts' => $accounts->filter(
+                fn (LogisticsPayPalAccount $account): bool => (bool) $account->is_enabled
+                    && (string) $account->last_import_status !== 'success',
+            )->count(),
         ];
+    }
+
+    /** @param Collection<int,LogisticsPayPalAccount> $accounts
+     *  @return array<string,int|float>
+     */
+    private function buildPortfolio(Collection $accounts, array $filters): array
+    {
+        $accountIds = $accounts->pluck('id')->map(static fn ($id): int => (int) $id)->filter()->values()->all();
+        $empty = [
+            'orders' => 0,
+            'paid_amount' => 0.0,
+            'refund_amount' => 0.0,
+            'refund_amount_rate' => 0.0,
+            'dispute_orders' => 0,
+            'dispute_rate' => 0.0,
+            'unmatched_count' => 0,
+            'attention_accounts' => $accounts->filter(
+                fn (LogisticsPayPalAccount $account): bool => (bool) $account->is_enabled
+                    && (string) $account->last_import_status !== 'success',
+            )->count(),
+        ];
+        if ($accountIds === []) {
+            return $empty;
+        }
+
+        $database = DB::connection(config('admin.database.connection') ?: config('database.default'));
+        $payments = $database->table('logistics_paypal_transactions as payments')
+            ->whereIn('payments.logistics_paypal_account_id', $accountIds)
+            ->where('payments.event_code', 'like', 'T00%')
+            ->where('payments.status', 'S');
+        $this->applyPortfolioRange($payments, 'payments.paid_at', $filters);
+
+        $paymentGroups = (clone $payments)
+            ->selectRaw('payments.logistics_paypal_account_id as account_id')
+            ->selectRaw("COALESCE(payments.payment_transaction_id, '') as payment_key")
+            ->selectRaw('SUM(COALESCE(payments.payment_amount_usd, 0)) as paid_amount')
+            ->selectRaw('MAX(CASE WHEN payments.logistics_order_id IS NOT NULL THEN 1 ELSE 0 END) as is_matched')
+            ->groupByRaw("payments.logistics_paypal_account_id, COALESCE(payments.payment_transaction_id, '')");
+        $paymentStats = $database->query()->fromSub($paymentGroups, 'payment_groups')
+            ->selectRaw('COUNT(*) as order_count')
+            ->selectRaw('COALESCE(SUM(payment_groups.paid_amount), 0) as paid_amount')
+            ->selectRaw('COALESCE(SUM(CASE WHEN payment_groups.is_matched = 0 THEN 1 ELSE 0 END), 0) as unmatched_count')
+            ->first();
+
+        $eventPaymentKeys = (clone $payments)
+            ->whereNotNull('payments.payment_transaction_id')
+            ->whereRaw("TRIM(payments.payment_transaction_id) <> ''")
+            ->selectRaw('payments.logistics_paypal_account_id as account_id')
+            ->selectRaw('payments.payment_transaction_id as payment_key')
+            ->distinct();
+
+        $refunds = $database->table('logistics_paypal_refunds as refunds')
+            ->whereIn('refunds.logistics_paypal_account_id', $accountIds);
+        if (($filters['date_mode'] ?? 'order') === 'event') {
+            $this->applyPortfolioRange($refunds, 'refunds.refunded_at', $filters);
+        } else {
+            $refunds->joinSub(clone $eventPaymentKeys, 'event_payments', function ($join): void {
+                $join->on('event_payments.account_id', '=', 'refunds.logistics_paypal_account_id')
+                    ->on('event_payments.payment_key', '=', 'refunds.original_transaction_id');
+            });
+        }
+        $refundStats = $refunds
+            ->selectRaw("COUNT(DISTINCT NULLIF(CONCAT(refunds.logistics_paypal_account_id, ':', CASE WHEN COALESCE(refunds.original_transaction_id, '') <> '' THEN TRIM(refunds.original_transaction_id) ELSE TRIM(COALESCE(refunds.refund_transaction_id, '')) END), CONCAT(refunds.logistics_paypal_account_id, ':'))) as refund_orders")
+            ->selectRaw('COALESCE(SUM(COALESCE(refunds.refund_amount_usd, refunds.original_amount, 0)), 0) as refund_amount')
+            ->selectRaw('COALESCE(SUM(CASE WHEN refunds.logistics_order_id IS NULL THEN 1 ELSE 0 END), 0) as unmatched_refunds')
+            ->first();
+
+        $disputes = $database->table('logistics_paypal_disputes as disputes')
+            ->whereIn('disputes.logistics_paypal_account_id', $accountIds)
+            ->whereIn('disputes.reason', self::QUALIFYING_DISPUTE_REASONS)
+            ->whereIn('disputes.life_cycle_stage', self::QUALIFYING_DISPUTE_TYPES);
+        if (($filters['date_mode'] ?? 'order') === 'event') {
+            $this->applyPortfolioRange($disputes, 'disputes.dispute_created_at', $filters);
+        } else {
+            $disputes->joinSub(clone $eventPaymentKeys, 'event_payments', function ($join): void {
+                $join->on('event_payments.account_id', '=', 'disputes.logistics_paypal_account_id')
+                    ->on('event_payments.payment_key', '=', 'disputes.disputed_transaction_id');
+            });
+        }
+        $disputeStats = $disputes
+            ->selectRaw("COUNT(DISTINCT NULLIF(CONCAT(disputes.logistics_paypal_account_id, ':', CASE WHEN COALESCE(disputes.disputed_transaction_id, '') <> '' THEN TRIM(disputes.disputed_transaction_id) ELSE TRIM(COALESCE(disputes.dispute_id, '')) END), CONCAT(disputes.logistics_paypal_account_id, ':'))) as dispute_orders")
+            ->first();
+
+        $allDisputes = $database->table('logistics_paypal_disputes as disputes')
+            ->whereIn('disputes.logistics_paypal_account_id', $accountIds);
+        if (($filters['date_mode'] ?? 'order') === 'event') {
+            $this->applyPortfolioRange($allDisputes, 'disputes.dispute_created_at', $filters);
+        } else {
+            $allDisputes->joinSub(clone $eventPaymentKeys, 'event_payments', function ($join): void {
+                $join->on('event_payments.account_id', '=', 'disputes.logistics_paypal_account_id')
+                    ->on('event_payments.payment_key', '=', 'disputes.disputed_transaction_id');
+            });
+        }
+        $unmatchedDisputes = (int) $allDisputes
+            ->whereNull('disputes.logistics_order_id')
+            ->count('disputes.id');
+
+        $orders = (int) ($paymentStats->order_count ?? 0);
+        $paidAmount = round((float) ($paymentStats->paid_amount ?? 0), 2);
+        $refundAmount = round((float) ($refundStats->refund_amount ?? 0), 2);
+        $disputeOrders = (int) ($disputeStats->dispute_orders ?? 0);
+
+        return [
+            'orders' => $orders,
+            'paid_amount' => $paidAmount,
+            'refund_amount' => $refundAmount,
+            'refund_amount_rate' => $paidAmount <= 0 ? 0.0 : round($refundAmount / $paidAmount * 100, 2),
+            'dispute_orders' => $disputeOrders,
+            'dispute_rate' => $orders === 0 ? 0.0 : round($disputeOrders / $orders * 100, 2),
+            'unmatched_count' => (int) ($paymentStats->unmatched_count ?? 0)
+                + (int) ($refundStats->unmatched_refunds ?? 0)
+                + $unmatchedDisputes,
+            'attention_accounts' => $empty['attention_accounts'],
+        ];
+    }
+
+    private function applyPortfolioRange(object $query, string $column, array $filters): void
+    {
+        $usesEventDates = ($filters['date_mode'] ?? 'order') === 'event';
+        $from = trim((string) ($usesEventDates ? ($filters['event_date_from'] ?? '') : ($filters['date_from'] ?? '')));
+        $to = trim((string) ($usesEventDates ? ($filters['event_date_to'] ?? '') : ($filters['date_to'] ?? '')));
+        if ($from !== '') {
+            $query->where($column, '>=', Carbon::parse($from, self::REPORT_TIMEZONE)->startOfDay()->utc()->toDateTimeString());
+        }
+        if ($to !== '') {
+            $query->where($column, '<', Carbon::parse($to, self::REPORT_TIMEZONE)->addDay()->startOfDay()->utc()->toDateTimeString());
+        }
     }
 
     /** @param array<string,mixed> $summary
@@ -562,6 +914,29 @@ class PaymentAccountRiskService
         }
 
         return Carbon::parse($value, 'UTC')->timezone('Asia/Shanghai')->format('Y-m-d H:i');
+    }
+
+    private function analyticsDateTime(mixed $value): string
+    {
+        if (!$value) {
+            return '-';
+        }
+        try {
+            return Carbon::parse($value)->timezone(self::REPORT_TIMEZONE)->format('Y-m-d H:i:s');
+        } catch (\Throwable) {
+            return '-';
+        }
+    }
+
+    private function maskEmail(mixed $email): string
+    {
+        $email = trim((string) ($email ?? ''));
+        if (!str_contains($email, '@')) {
+            return $email ?: '-';
+        }
+        [$local, $domain] = explode('@', $email, 2);
+
+        return mb_substr($local, 0, min(2, mb_strlen($local))).'***@'.$domain;
     }
 
     private function usageDays(mixed $firstOrderAt, mixed $lastOrderAt): ?int

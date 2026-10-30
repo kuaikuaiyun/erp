@@ -3,6 +3,7 @@
 namespace App\Portals\Payment;
 
 use App\Models\LogisticsOrder;
+use App\Models\LogisticsTongtuSkuMapping;
 use App\Portals\Logistics\LogisticsProductStatisticsService;
 use App\Portals\Logistics\LogisticsCreditCardRefundReason;
 use Illuminate\Support\Carbon;
@@ -26,9 +27,9 @@ class PaymentProductRiskService
             JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
         ));
 
-        return Cache::remember(
+        return Cache::flexible(
             $cacheKey,
-            now()->addSeconds(30),
+            [120, 600],
             fn (): array => $this->buildDashboard($filters),
         );
     }
@@ -57,9 +58,9 @@ class PaymentProductRiskService
             'tab' => $tab,
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
-        return Cache::remember(
+        return Cache::flexible(
             $cacheKey,
-            now()->addSeconds(30),
+            [120, 600],
             fn (): array => $this->buildTab($filters, $tab),
         );
     }
@@ -74,8 +75,7 @@ class PaymentProductRiskService
             ];
         }
 
-        $source = $this->statistics->page([...$filters, 'page' => 1, 'per_page' => 1]);
-        $report = $source['refund_reason_report'] ?? [];
+        $report = $this->statistics->refundReasonReportForFilters($filters);
         $rows = [];
         foreach (['source_reason', 'manual_reason'] as $type) {
             foreach (($report[$type] ?? []) as $row) {
@@ -89,6 +89,7 @@ class PaymentProductRiskService
         $offset = ($page - 1) * $perPage;
 
         return [
+            'refund_reason_report' => $report,
             'refund_reason_rows' => array_slice($rows, $offset, $perPage),
             'filters' => $filters,
             'pagination' => [
@@ -137,8 +138,7 @@ class PaymentProductRiskService
             ->whereIn(DB::raw($keyExpression), array_values($keys))
             ->whereNotNull('orders.paid_at');
         $activeFilters = (array) ($data['filters'] ?? []);
-        if (($activeFilters['date_from'] ?? '') !== '') $latestPaidQuery->whereDate('orders.paid_at', '>=', $activeFilters['date_from']);
-        if (($activeFilters['date_to'] ?? '') !== '') $latestPaidQuery->whereDate('orders.paid_at', '<=', $activeFilters['date_to']);
+        $this->applyPaidAtRange($latestPaidQuery, $activeFilters);
         if (($activeFilters['store'] ?? '') !== '') $latestPaidQuery->where('orders.store_name', $activeFilters['store']);
         $orderFacts = $latestPaidQuery
             ->selectRaw("{$keyExpression} as product_key")
@@ -204,9 +204,9 @@ class PaymentProductRiskService
             'options' => $options,
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
-        return Cache::remember(
+        return Cache::flexible(
             $cacheKey,
-            now()->addSeconds(30),
+            [60, 300],
             fn (): ?array => $this->buildDetail($filters, $productId, $options),
         );
     }
@@ -236,12 +236,119 @@ class PaymentProductRiskService
             $detail['channel_risk'] = $this->alerts->metricsByProductKey([$key])[$key] ?? [];
             $context = $this->productOrderContext($filters, $key);
             $detail['product'] = [...($detail['product'] ?? []), ...$context];
+            if (($options['tab'] ?? '') === 'overview') {
+                $detail['product']['refund_reason_report'] = $this->refundReasonReport($filters, $key);
+            }
             if (($options['tab'] ?? '') === 'first_renewal' && isset($detail['detail'])) {
                 $detail['detail']['channel_groups'] = $this->channelLifecycleGroups($filters, $key);
             }
         }
 
         return $detail;
+    }
+
+    /** @param array<string,mixed> $filters @return array<string,mixed> */
+    private function refundReasonReport(array $filters, ?string $productKey = null): array
+    {
+        $database = DB::connection(config('admin.database.connection') ?: config('database.default'));
+        $expression = $this->productKeyExpression('items', 'sku_mappings');
+        $orders = $database->table('logistics_order_items as items')
+            ->join('logistics_orders as orders', 'orders.id', '=', 'items.logistics_order_id')
+            ->leftJoin('logistics_tongtu_sku_mappings as sku_mappings', DB::raw('LOWER(TRIM(items.shopify_sku))'), '=', 'sku_mappings.shopify_sku')
+            ->whereNotNull('items.line_revenue_usd')
+            ->whereRaw('NOT ('.$this->shippingInsuranceExpression('items').')')
+            ->where(function ($query): void {
+                $query->whereNull('orders.operator_name')->orWhere('orders.operator_name', 'not like', '%刷单%');
+            });
+        if (($filters['date_from'] ?? '') !== '') $orders->where('orders.paid_at', '>=', Carbon::parse($filters['date_from'], 'Asia/Shanghai')->startOfDay()->utc()->toDateTimeString());
+        if (($filters['date_to'] ?? '') !== '') $orders->where('orders.paid_at', '<=', Carbon::parse($filters['date_to'], 'Asia/Shanghai')->endOfDay()->utc()->toDateTimeString());
+        if (($filters['store'] ?? '') !== '') $orders->where('orders.store_name', $filters['store']);
+        if ($productKey !== null) {
+            $orders->whereRaw("{$expression} = ?", [$productKey]);
+        } elseif (($filters['keyword'] ?? '') !== '') {
+            $keyword = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], trim((string) $filters['keyword'])).'%';
+            $orders->where(function ($query) use ($keyword): void {
+                $query->where('items.product_title', 'like', $keyword)
+                    ->orWhere('items.tongtu_product_name', 'like', $keyword)
+                    ->orWhere('items.tongtu_product_code', 'like', $keyword)
+                    ->orWhere('items.tongtu_sku', 'like', $keyword)
+                    ->orWhere('items.shopify_sku', 'like', $keyword)
+                    ->orWhere('items.variant_title', 'like', $keyword)
+                    ->orWhere('sku_mappings.tongtu_product_code', 'like', $keyword)
+                    ->orWhere('sku_mappings.tongtu_sku', 'like', $keyword)
+                    ->orWhere('sku_mappings.tongtu_product_name', 'like', $keyword)
+                    ->orWhere('sku_mappings.tongtu_product_packing_name', 'like', $keyword);
+            });
+        }
+        if (($filters['name'] ?? '') !== '') {
+            $name = '%'.trim((string) $filters['name']).'%';
+            $orders->where(function ($query) use ($name): void {
+                $query->where('items.product_title', 'like', $name)->orWhere('items.tongtu_product_name', 'like', $name);
+            });
+        }
+        $selectedOrderIds = $orders->select('orders.id')->distinct();
+
+        $paypal = $database->table('logistics_paypal_refunds as refund')
+            ->whereIn('refund.logistics_order_id', clone $selectedOrderIds)
+            ->selectRaw('refund.logistics_order_id as order_id')
+            ->selectRaw('refund.refund_reason as source_reason')
+            ->selectRaw('refund.manual_reason as manual_reason')
+            ->selectRaw("COALESCE(refund.refund_amount_usd, CASE WHEN UPPER(refund.currency_code) = 'USD' THEN refund.original_amount ELSE 0 END) as amount");
+        if (($filters['date_mode'] ?? 'order') === 'event') {
+            if (($filters['date_from'] ?? '') !== '') $paypal->where('refund.refunded_at', '>=', Carbon::parse($filters['date_from'], 'Asia/Shanghai')->startOfDay()->utc()->toDateTimeString());
+            if (($filters['date_to'] ?? '') !== '') $paypal->where('refund.refunded_at', '<=', Carbon::parse($filters['date_to'], 'Asia/Shanghai')->endOfDay()->utc()->toDateTimeString());
+        }
+        $creditCard = $database->table('logistics_credit_card_refunds as refund')
+            ->whereIn('refund.logistics_order_id', clone $selectedOrderIds)
+            ->selectRaw('refund.logistics_order_id as order_id')
+            ->selectRaw("'' as source_reason")
+            ->selectRaw('refund.refund_reason as manual_reason')
+            ->selectRaw('COALESCE(refund.refund_amount_usd, 0) as amount');
+        $rows = $database->query()->fromSub($paypal->unionAll($creditCard), 'payment_refund_reason_rows');
+        $totals = (clone $rows)->selectRaw('COUNT(DISTINCT order_id) as order_count')
+            ->selectRaw('COUNT(*) as record_count')->selectRaw('COALESCE(SUM(amount), 0) as amount')->first();
+        $recordCount = (int) ($totals->record_count ?? 0);
+        $amount = round((float) ($totals->amount ?? 0), 2);
+
+        return [
+            'order_count' => (int) ($totals->order_count ?? 0),
+            'record_count' => $recordCount,
+            'amount' => $amount,
+            'source_reason' => $this->refundReasonDistribution(clone $rows, 'source_reason', $recordCount, $amount),
+            'manual_reason' => $this->refundReasonDistribution(clone $rows, 'manual_reason', $recordCount, $amount),
+        ];
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function refundReasonDistribution($query, string $column, int $totalCount, float $totalAmount): array
+    {
+        $rows = $query->selectRaw("COALESCE(NULLIF(TRIM({$column}), ''), '__empty__') as reason")
+            ->selectRaw('COUNT(*) as record_count')->selectRaw('COALESCE(SUM(amount), 0) as amount')
+            ->groupBy('reason')->orderByDesc('record_count')->orderByDesc('amount')->get()
+            ->map(static function (object $row) use ($totalCount, $totalAmount): array {
+                $count = (int) $row->record_count;
+                $amount = round((float) $row->amount, 2);
+                return [
+                    'reason' => (string) $row->reason,
+                    'record_count' => $count,
+                    'amount' => $amount,
+                    'count_ratio' => $totalCount > 0 ? round($count / $totalCount * 100, 2) : 0.0,
+                    'amount_ratio' => $totalAmount > 0 ? round($amount / $totalAmount * 100, 2) : 0.0,
+                    'is_other' => false,
+                ];
+            })->all();
+        if (count($rows) <= 8) return $rows;
+        $visible = array_slice($rows, 0, 8);
+        $remaining = array_slice($rows, 8);
+        $otherCount = array_sum(array_column($remaining, 'record_count'));
+        $otherAmount = round(array_sum(array_column($remaining, 'amount')), 2);
+        $visible[] = [
+            'reason' => '__other__', 'record_count' => $otherCount, 'amount' => $otherAmount,
+            'count_ratio' => $totalCount > 0 ? round($otherCount / $totalCount * 100, 2) : 0.0,
+            'amount_ratio' => $totalAmount > 0 ? round($otherAmount / $totalAmount * 100, 2) : 0.0,
+            'is_other' => true,
+        ];
+        return $visible;
     }
 
     /** @param array<string,mixed> $filters @return array<string,mixed> */
@@ -252,8 +359,7 @@ class PaymentProductRiskService
         $query = $database->table('logistics_order_items as items')
             ->join('logistics_orders as orders', 'orders.id', '=', 'items.logistics_order_id')
             ->whereRaw("{$expression} = ?", [$productKey]);
-        if (($filters['date_from'] ?? '') !== '') $query->whereDate('orders.paid_at', '>=', $filters['date_from']);
-        if (($filters['date_to'] ?? '') !== '') $query->whereDate('orders.paid_at', '<=', $filters['date_to']);
+        $this->applyPaidAtRange($query, $filters);
         if (($filters['store'] ?? '') !== '') $query->where('orders.store_name', $filters['store']);
 
         $timeline = (clone $query)->selectRaw('MIN(orders.paid_at) as first_order_at, MAX(orders.paid_at) as last_order_at')->first();
@@ -345,13 +451,23 @@ class PaymentProductRiskService
         }
 
         $orderIds = $orderRows->pluck('id')->map(static fn ($id): int => (int) $id)->unique()->values()->all();
-        $paypalRefunds = $orderIds === [] ? collect() : $database->table('logistics_paypal_refunds')
-            ->whereIn('logistics_order_id', $orderIds)
-            ->selectRaw("logistics_order_id, SUM(COALESCE(refund_amount_usd, CASE WHEN UPPER(currency_code) = 'USD' THEN original_amount ELSE 0 END)) as amount")
-            ->groupBy('logistics_order_id')->pluck('amount', 'logistics_order_id');
-        $paypalDisputes = $orderIds === [] ? collect() : $database->table('logistics_paypal_disputes')
-            ->whereIn('logistics_order_id', $orderIds)->selectRaw('logistics_order_id, COUNT(DISTINCT id) as total')
-            ->groupBy('logistics_order_id')->pluck('total', 'logistics_order_id');
+        $paypalRefunds = collect();
+        if ($orderIds !== []) {
+            $paypalRefundQuery = $database->table('logistics_paypal_refunds')
+                ->whereIn('logistics_order_id', $orderIds);
+            $this->applyPayPalEventDateFilters($paypalRefundQuery, $filters, 'refunded_at');
+            $paypalRefunds = $paypalRefundQuery
+                ->selectRaw("logistics_order_id, SUM(COALESCE(refund_amount_usd, CASE WHEN UPPER(currency_code) = 'USD' THEN original_amount ELSE 0 END)) as amount")
+                ->groupBy('logistics_order_id')->pluck('amount', 'logistics_order_id');
+        }
+        $paypalDisputes = collect();
+        if ($orderIds !== []) {
+            $paypalDisputeQuery = $database->table('logistics_paypal_disputes')
+                ->whereIn('logistics_order_id', $orderIds);
+            $this->applyPayPalEventDateFilters($paypalDisputeQuery, $filters, 'dispute_created_at');
+            $paypalDisputes = $paypalDisputeQuery->selectRaw('logistics_order_id, COUNT(DISTINCT id) as total')
+                ->groupBy('logistics_order_id')->pluck('total', 'logistics_order_id');
+        }
         $creditCardRows = $orderIds === [] ? collect() : $database->table('logistics_credit_card_refunds')
             ->whereIn('logistics_order_id', $orderIds)->get(['logistics_order_id', 'refund_amount_usd', 'refund_reason'])->groupBy('logistics_order_id');
         $statusByOrder = $orderRows->keyBy('id');
@@ -406,14 +522,31 @@ class PaymentProductRiskService
         ];
     }
 
-    private function productKeyExpression(string $alias): string
+    private function productKeyExpression(string $alias, ?string $mappingAlias = null): string
     {
+        if ($mappingAlias !== null) {
+            return "CASE WHEN {$mappingAlias}.status = '".LogisticsTongtuSkuMapping::STATUS_MATCHED."' AND NULLIF(TRIM({$mappingAlias}.tongtu_product_code), '') IS NOT NULL THEN CONCAT('tongtu-product-code:', LOWER(TRIM({$mappingAlias}.tongtu_product_code))) "
+                ."WHEN NULLIF(TRIM({$alias}.shopify_sku), '') IS NOT NULL THEN CONCAT('shopify-sku:', LOWER(TRIM({$alias}.shopify_sku))) "
+                ."WHEN NULLIF(TRIM({$alias}.tongtu_sku), '') IS NOT NULL THEN CONCAT('tongtu-sku:', LOWER(TRIM({$alias}.tongtu_sku))) "
+                ."WHEN NULLIF(TRIM({$alias}.shopify_product_id), '') IS NOT NULL THEN CONCAT('shopify-product:', LOWER(TRIM({$alias}.shopify_product_id))) "
+                ."ELSE CONCAT('item:', {$alias}.id) END";
+        }
+
         return "CASE WHEN NULLIF(TRIM({$alias}.tongtu_product_code), '') IS NOT NULL THEN CONCAT('tongtu-product-code:', LOWER(TRIM({$alias}.tongtu_product_code))) "
             ."WHEN NULLIF(TRIM({$alias}.shopify_sku), '') IS NOT NULL THEN CONCAT('shopify-sku:', LOWER(TRIM({$alias}.shopify_sku))) "
             ."WHEN NULLIF(TRIM({$alias}.tongtu_sku), '') IS NOT NULL THEN CONCAT('tongtu-sku:', LOWER(TRIM({$alias}.tongtu_sku))) "
             ."WHEN NULLIF(TRIM({$alias}.shopify_product_id), '') IS NOT NULL THEN CONCAT('shopify-product:', LOWER(TRIM({$alias}.shopify_product_id))) "
             ."WHEN NULLIF(TRIM(COALESCE({$alias}.tongtu_product_name, {$alias}.product_title)), '') IS NOT NULL THEN CONCAT('product-name:', LOWER(TRIM(COALESCE({$alias}.tongtu_product_name, {$alias}.product_title)))) "
             ."ELSE CONCAT('sku:', COALESCE(NULLIF(LOWER(TRIM({$alias}.tongtu_product_code)), ''), NULLIF(LOWER(TRIM({$alias}.tongtu_sku)), ''), NULLIF(LOWER(TRIM({$alias}.shopify_sku)), ''), '__missing__')) END";
+    }
+
+    private function shippingInsuranceExpression(string $alias): string
+    {
+        $productTitle = "LOWER(TRIM(COALESCE({$alias}.product_title, '')))";
+        $tongtuName = "LOWER(TRIM(COALESCE({$alias}.tongtu_product_name, '')))";
+        $productCode = "LOWER(TRIM(COALESCE({$alias}.tongtu_product_code, '')))";
+
+        return "({$productTitle} LIKE '%shipping protection%' OR {$productTitle} LIKE '%shipping insurance%' OR {$productTitle} LIKE '%freight insurance%' OR {$productTitle} LIKE '%运费险%' OR {$tongtuName} LIKE '%运费险%' OR {$productCode} = 'arc-2yu9u1i-aa')";
     }
 
     private function variantKeyExpression(string $alias): string
@@ -426,8 +559,7 @@ class PaymentProductRiskService
     /** @param array<string,mixed> $filters @param array<string,mixed> $options */
     private function applyVariantFilters(object $query, array $filters, array $options): void
     {
-        if (($filters['date_from'] ?? '') !== '') $query->whereDate('orders.paid_at', '>=', $filters['date_from']);
-        if (($filters['date_to'] ?? '') !== '') $query->whereDate('orders.paid_at', '<=', $filters['date_to']);
+        $this->applyPaidAtRange($query, $filters);
         if (($filters['store'] ?? '') !== '') $query->where('orders.store_name', $filters['store']);
         $keyword = trim((string) ($options['keyword'] ?? ''));
         if ($keyword !== '') {
@@ -473,8 +605,7 @@ class PaymentProductRiskService
             ->where(function ($query): void {
                 $query->whereNotNull('orders.paid_at')->orWhere('orders.paid_amount_usd', '>', 0);
             });
-        if (($filters['date_from'] ?? '') !== '') $ordersQuery->whereDate('orders.paid_at', '>=', $filters['date_from']);
-        if (($filters['date_to'] ?? '') !== '') $ordersQuery->whereDate('orders.paid_at', '<=', $filters['date_to']);
+        $this->applyPaidAtRange($ordersQuery, $filters);
         if (($filters['store'] ?? '') !== '') $ordersQuery->where('orders.store_name', $filters['store']);
         $orders = $ordersQuery->select([
             'orders.id', 'orders.paid_amount_usd', 'orders.subscription_type', 'orders.subscription_origin_order_id',
@@ -482,12 +613,21 @@ class PaymentProductRiskService
         ])->distinct()->orderBy('orders.paid_at')->orderBy('orders.id')->get();
         $orderIds = $orders->pluck('id')->map(fn ($id): int => (int) $id)->all();
 
-        $paypalRefunds = $orderIds === [] ? collect() : $database->table('logistics_paypal_refunds')
-            ->whereIn('logistics_order_id', $orderIds)->selectRaw('logistics_order_id, SUM(COALESCE(refund_amount_usd, CASE WHEN UPPER(currency_code) = \'USD\' THEN original_amount ELSE 0 END)) amount')
-            ->groupBy('logistics_order_id')->pluck('amount', 'logistics_order_id');
-        $paypalDisputes = $orderIds === [] ? collect() : $database->table('logistics_paypal_disputes')
-            ->whereIn('logistics_order_id', $orderIds)->selectRaw('logistics_order_id, COUNT(DISTINCT id) count')
-            ->groupBy('logistics_order_id')->pluck('count', 'logistics_order_id');
+        $paypalRefunds = collect();
+        if ($orderIds !== []) {
+            $paypalRefundQuery = $database->table('logistics_paypal_refunds')->whereIn('logistics_order_id', $orderIds);
+            $this->applyPayPalEventDateFilters($paypalRefundQuery, $filters, 'refunded_at');
+            $paypalRefunds = $paypalRefundQuery
+                ->selectRaw('logistics_order_id, SUM(COALESCE(refund_amount_usd, CASE WHEN UPPER(currency_code) = \'USD\' THEN original_amount ELSE 0 END)) amount')
+                ->groupBy('logistics_order_id')->pluck('amount', 'logistics_order_id');
+        }
+        $paypalDisputes = collect();
+        if ($orderIds !== []) {
+            $paypalDisputeQuery = $database->table('logistics_paypal_disputes')->whereIn('logistics_order_id', $orderIds);
+            $this->applyPayPalEventDateFilters($paypalDisputeQuery, $filters, 'dispute_created_at');
+            $paypalDisputes = $paypalDisputeQuery->selectRaw('logistics_order_id, COUNT(DISTINCT id) count')
+                ->groupBy('logistics_order_id')->pluck('count', 'logistics_order_id');
+        }
         $cardRows = $orderIds === [] ? collect() : $database->table('logistics_credit_card_refunds')
             ->whereIn('logistics_order_id', $orderIds)->get(['logistics_order_id', 'refund_amount_usd', 'refund_reason'])->groupBy('logistics_order_id');
 
@@ -537,5 +677,31 @@ class PaymentProductRiskService
         }
         unset($channelGroups, $group);
         return $groups;
+    }
+
+    /** @param array<string,mixed> $filters */
+    private function applyPayPalEventDateFilters(object $query, array $filters, string $column): void
+    {
+        if (($filters['date_mode'] ?? 'order') !== 'event') return;
+
+        if (($filters['date_from'] ?? '') !== '') {
+            $query->where($column, '>=', Carbon::parse((string) $filters['date_from'], 'Asia/Shanghai')->startOfDay()->utc()->toDateTimeString());
+        }
+        if (($filters['date_to'] ?? '') !== '') {
+            $query->where($column, '<=', Carbon::parse((string) $filters['date_to'], 'Asia/Shanghai')->endOfDay()->utc()->toDateTimeString());
+        }
+    }
+
+    /** @param array<string,mixed> $filters */
+    private function applyPaidAtRange(object $query, array $filters, string $column = 'orders.paid_at'): void
+    {
+        $from = trim((string) ($filters['date_from'] ?? ''));
+        $to = trim((string) ($filters['date_to'] ?? ''));
+        if ($from !== '') {
+            $query->where($column, '>=', Carbon::parse($from)->startOfDay()->toDateTimeString());
+        }
+        if ($to !== '') {
+            $query->where($column, '<', Carbon::parse($to)->addDay()->startOfDay()->toDateTimeString());
+        }
     }
 }

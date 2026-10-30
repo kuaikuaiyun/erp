@@ -5,6 +5,7 @@ namespace App\Portals\Payment;
 use App\Models\AdminUser;
 use App\Models\LogisticsPayPalAccount;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 
 class PaymentWorkbenchService
 {
@@ -20,6 +21,17 @@ class PaymentWorkbenchService
         $today = now('Asia/Shanghai');
         $dateFrom = $today->copy()->subDays(29)->format('Y-m-d');
         $dateTo = $today->format('Y-m-d');
+
+        return Cache::flexible(
+            'payment:workbench:v2:'.$dateFrom.':'.$dateTo,
+            [120, 600],
+            fn (): array => $this->buildDashboard($dateFrom, $dateTo),
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function buildDashboard(string $dateFrom, string $dateTo): array
+    {
         $paymentSummary = $this->paymentOrders->summary([
             'keyword' => '', 'account' => '', 'channel' => '', 'deduction_type' => '',
             'date_from' => $dateFrom, 'date_to' => $dateTo, 'sort' => 'paid_at',

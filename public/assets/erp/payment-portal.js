@@ -35,6 +35,47 @@
 
         initFormulaTooltips(page);
 
+        page.on('click', '[data-payment-product-filter] [data-payment-account-date-mode]', function () {
+            var button = $(this);
+            var form = button.closest('form');
+            form.find('[data-payment-account-date-mode-input]').val(String(button.data('paymentAccountDateMode') || 'order'));
+            form.find('[data-payment-account-date-mode]').removeClass('active').attr('aria-pressed', 'false');
+            button.addClass('active').attr('aria-pressed', 'true');
+        });
+
+        page.on('click', '[data-payment-refund-report-toggle]', function () {
+            var button = $(this);
+            var panel = button.closest('[data-payment-refund-report-panel]');
+            var lazyPanel = button.closest('[data-payment-refund-report]');
+            if (lazyPanel.length && String(lazyPanel.attr('data-loaded')) !== 'true') {
+                var text = config.refundReport || {};
+                var originalHtml = button.html();
+                var refundReportQuery = page.find('[data-payment-product-filter]').serializeArray().filter(function (field) { return field.name !== 'page'; });
+                refundReportQuery.push({ name: 'tab', value: 'refund_reason' });
+                button.prop('disabled', true).attr('aria-busy', 'true').html('<i class="fa fa-spinner fa-spin"></i> <span>' + escapeHtml(text.loading || '') + '</span>');
+                $.ajax({
+                    url: String(lazyPanel.data('url') || ''),
+                    data: refundReportQuery,
+                    dataType: 'html',
+                    timeout: 45000,
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                }).done(function (html) {
+                    var loadedPanel = $(html);
+                    loadedPanel.removeClass('is-collapsed').attr('data-loaded', 'true');
+                    loadedPanel.find('[data-payment-refund-report-toggle] i').removeClass('fa-angle-down').addClass('fa-angle-up');
+                    loadedPanel.find('[data-payment-refund-report-toggle] span').text(String(button.data('collapseText') || ''));
+                    lazyPanel.replaceWith(loadedPanel);
+                }).fail(function () {
+                    button.prop('disabled', false).attr('aria-busy', 'false').html(originalHtml);
+                    notify('error', '', text.load_failed || '');
+                });
+                return;
+            }
+            var collapsed = panel.toggleClass('is-collapsed').hasClass('is-collapsed');
+            button.find('i').toggleClass('fa-angle-up', !collapsed).toggleClass('fa-angle-down', collapsed);
+            button.find('span').text(collapsed ? String(button.data('expandText') || '') : String(button.data('collapseText') || ''));
+        });
+
         page.on('click', '[data-payment-product-export]', function () {
             var button = $(this);
             if (button.prop('disabled')) return;
@@ -138,6 +179,7 @@
             var currentStatus = String(trigger.data('currentStatus') || 'pending');
             form.find('[name="status"][value="' + currentStatus + '"]').prop('checked', true);
             form.attr('action', String(trigger.data('action') || ''));
+            modal.data('paymentAlertStatusTrigger', trigger);
             modal.find('[data-payment-alert-status-summary]').text(String(trigger.data('product') || '') + ' · ' + $.trim(trigger.text()));
             modal.modal('show');
         });
@@ -146,6 +188,8 @@
             event.preventDefault();
             var form = $(this);
             var submit = form.find('[type="submit"]');
+            var modal = $('#payment-alert-status-modal');
+            var trigger = modal.data('paymentAlertStatusTrigger');
             if (submit.prop('disabled')) return;
             submit.prop('disabled', true);
             $.ajax({
@@ -153,12 +197,28 @@
                 method: 'POST',
                 data: form.serialize(),
                 dataType: 'json',
+                timeout: 15000,
                 headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
-            }).done(function () {
-                $('#payment-alert-status-modal').modal('hide');
-                window.location.reload();
-            }).fail(function (xhr) {
-                var message = xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : (config.actionMessage || '');
+            }).done(function (response) {
+                if (trigger && trigger.length) {
+                    var row = trigger.closest('tr');
+                    var workflowStatus = String(response.workflow_status || 'processing');
+                    var status = String(response.status || form.find('[name="status"]:checked').val() || 'other');
+                    var statusBadge = row.find('[data-payment-alert-workflow-status]');
+                    statusBadge.removeClass('payment-table-status-pending payment-table-status-processing payment-table-status-completed')
+                        .addClass('payment-table-status-' + workflowStatus)
+                        .text(String(response.workflow_status_label || ''));
+                    var history = row.find('[data-payment-alert-status-history]');
+                    history.find('[data-payment-alert-history-empty]').remove();
+                    $('<div class="payment-alert-history-line"></div>').text(String(response.history_line || '')).prependTo(history);
+                    trigger.attr('data-current-status', status).data('currentStatus', status);
+                }
+                modal.modal('hide');
+                notify('success', config.actionTitle || '', String(response.message || ''));
+            }).fail(function (xhr, status) {
+                var message = status === 'timeout'
+                    ? ((config.productAlerts || {}).submit_timeout || config.actionMessage || '')
+                    : (xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : (config.actionMessage || ''));
                 notify('error', config.actionTitle || '', message);
             }).always(function () {
                 submit.prop('disabled', false);
@@ -1133,6 +1193,22 @@
                     }).join('') + '</ul><small class="payment-product-risk-formula">' + pEscape(labels.reason_formula) + '</small>' : '<small class="payment-product-risk-empty">' + pEscape(labels.no_risk_record) + '</small>';
                     return '<section class="payment-product-risk-box is-' + tone + '"><h5>' + pEscape(title) + '</h5><strong>' + pEscape(totals) + '</strong>' + reasonRows + '</section>';
                 }
+                function refundReasonReport(report) {
+                    report = report || {};
+                    var text = config.refundReport || {};
+                    function reasonName(row) {
+                        if (row.is_other || row.reason === '__other__') return text.other || '-';
+                        if (row.reason === '__empty__') return text.empty_reason || '-';
+                        return row.reason || '-';
+                    }
+                    function column(key, title) {
+                        var rows = report[key] || [];
+                        return '<article><h4>' + pEscape(title) + '</h4>' + (rows.length ? rows.map(function (row) {
+                            return '<div class="payment-refund-reason-row"><div><strong title="' + pEscape(reasonName(row)) + '">' + pEscape(reasonName(row)) + '</strong><small>' + pNumber(row.record_count) + ' ' + pEscape(productText.record_unit || '') + ' · ' + pMoney(row.amount) + '</small></div><span>' + pRate(row.count_ratio) + '<small>' + pEscape(text.amount_ratio || '') + ' ' + pRate(row.amount_ratio) + '</small></span></div>';
+                        }).join('') : '<p class="payment-refund-report-empty">' + pEscape(text.empty || '') + '</p>') + '</article>';
+                    }
+                    return '<section class="payment-refund-reason-report is-product-detail is-collapsed" data-payment-refund-report-panel><header><div><h3><i class="fa fa-pie-chart"></i> ' + pEscape(text.title || '') + '</h3><p>' + pEscape(text.hint || '') + '</p></div><div class="payment-refund-report-actions"><div class="payment-refund-report-total"><span>' + pEscape(String(text.orders || '').replace(':count', pNumber(report.order_count))) + '</span><span>' + pEscape(String(text.records || '').replace(':count', pNumber(report.record_count))) + '</span><strong>' + pMoney(report.amount) + '</strong></div><button type="button" class="btn btn-default btn-sm" data-payment-refund-report-toggle data-expand-text="' + pEscape(text.expand || '') + '" data-collapse-text="' + pEscape(text.collapse || '') + '"><i class="fa fa-angle-down"></i> <span>' + pEscape(text.expand || '') + '</span></button></div></header><div class="payment-refund-reason-columns">' + column('source_reason', text.source || '') + column('manual_reason', text.manual || '') + '</div></section>';
+                }
                 return '<div class="payment-product-detail-identity">' + (product.image_url ? '<img src="' + pEscape(product.image_url) + '" alt="">' : '<span><i class="fa fa-cube"></i></span>') + '<div class="payment-product-identity-fields"><div class="payment-product-identity-field"><b>' + pEscape(labels.product_name) + '：</b><strong>' + pEscape(product.name) + '</strong></div><div class="payment-product-identity-field"><b>' + pEscape(labels.product_pcl) + '：</b><span>' + pEscape(product.product_code || product.sku) + '</span></div><div class="payment-product-identity-field payment-product-identity-stores"><b>' + pEscape(labels.related_stores) + '：</b><span class="payment-product-store-tags">' + storeTags + '</span></div></div></div><div class="payment-product-module-grid">' + ['overall', 'paypal', 'credit_card'].map(function (key) {
                     var module = modules[key] || {};
                     var metrics = metric(labels.unit_count, pNumber(module.unit_count)) + metric(labels.order_count, pNumber(module.order_count)) + metric(labels.received_amount, pMoney(module.received_amount)) + metric(labels.refund_amount, pMoney(module.refund_amount));
@@ -1148,7 +1224,7 @@
                     metrics += metric(labels.delivery_rate, pRate(module.delivery_rate), replaceProductTokens(labels.delivery_formula, { count: pNumber(module.delivery_count), shipped: pNumber(module.shipping_count) }));
                     var summaries = key === 'credit_card' ? riskSummary(labels.warning_summary, module.alert_record_summary, 'warning') + riskSummary(labels.card_dispute_summary, module.dispute_record_summary, 'danger') : riskSummary(labels.paypal_summary, { order_count: module.dispute_order_count, record_count: module.dispute_count, amount: module.dispute_amount, reason_breakdown: module.dispute_reason_breakdown }, 'danger');
                     return '<article class="payment-product-channel-panel payment-product-channel-' + key + '"><h4>' + pEscape(labels[key]) + '</h4><dl>' + metrics + '</dl><div class="payment-product-risk-boxes">' + summaries + '</div></article>';
-                }).join('') + '</div><section class="payment-product-store-distribution"><h4>' + pEscape(labels.store_distribution) + '</h4><p class="payment-product-order-range"><span><b>' + pEscape(labels.first_order_at) + '</b>' + pEscape(product.first_order_at) + '</span><span><b>' + pEscape(labels.last_order_at) + '</b>' + pEscape(product.last_order_at) + '</span></p><div class="table-responsive"><table class="payment-product-store-table"><thead><tr><th>' + pEscape(labels.store) + '</th><th>' + pEscape(labels.operator) + '</th><th>' + pEscape(labels.order_count) + '</th><th>' + pEscape(labels.first_order_at) + '</th><th>' + pEscape(labels.last_order_at) + '</th></tr></thead><tbody>' + ((product.store_order_distribution || []).length ? (product.store_order_distribution || []).map(function (store) { return '<tr><td><strong>' + pEscape(store.name) + '</strong></td><td>' + pEscape(store.operator_name) + '</td><td><b>' + pEscape(pNumber(store.order_count)) + '</b></td><td>' + pEscape(store.first_order_at) + '</td><td>' + pEscape(store.last_order_at) + '</td></tr>'; }).join('') : '<tr><td colspan="5" class="payment-product-store-empty">' + pEscape(labels.no_store_record) + '</td></tr>') + '</tbody></table></div></section>';
+                }).join('') + '</div>' + refundReasonReport(product.refund_reason_report) + '<section class="payment-product-store-distribution"><h4>' + pEscape(labels.store_distribution) + '</h4><p class="payment-product-order-range"><span><b>' + pEscape(labels.first_order_at) + '</b>' + pEscape(product.first_order_at) + '</span><span><b>' + pEscape(labels.last_order_at) + '</b>' + pEscape(product.last_order_at) + '</span></p><div class="table-responsive"><table class="payment-product-store-table"><thead><tr><th>' + pEscape(labels.store) + '</th><th>' + pEscape(labels.operator) + '</th><th>' + pEscape(labels.order_count) + '</th><th>' + pEscape(labels.first_order_at) + '</th><th>' + pEscape(labels.last_order_at) + '</th></tr></thead><tbody>' + ((product.store_order_distribution || []).length ? (product.store_order_distribution || []).map(function (store) { return '<tr><td><strong>' + pEscape(store.name) + '</strong></td><td>' + pEscape(store.operator_name) + '</td><td><b>' + pEscape(pNumber(store.order_count)) + '</b></td><td>' + pEscape(store.first_order_at) + '</td><td>' + pEscape(store.last_order_at) + '</td></tr>'; }).join('') : '<tr><td colspan="5" class="payment-product-store-empty">' + pEscape(labels.no_store_record) + '</td></tr>') + '</tbody></table></div></section>';
             }
 
             function renderFirstRenewal(detail, channelRisk) {
@@ -1329,6 +1405,7 @@
                     detail_type: productModal.find('[name="detail_type"]').val(),
                     detail_outcome: productModal.find('[name="detail_outcome"]').val(),
                     date_from: page.find('[name="date_from"]').val(), date_to: page.find('[name="date_to"]').val(),
+                    date_mode: page.find('[name="date_mode"]').val(),
                     store: page.find('[name="store"]').val(), keyword: page.find('[name="keyword"]').val()
                 };
                 var cacheKey = String(config.productDetailUrl) + '?' + $.param(query);

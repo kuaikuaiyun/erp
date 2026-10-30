@@ -29,6 +29,7 @@
         <form class="payment-operation-filter-form" method="get" action="{{ route('payment.product-risk-profit.index') }}" data-payment-product-filter>
             <input type="hidden" name="per_page" value="{{ $pagination['per_page'] }}">
             <input type="hidden" name="sort" value="{{ $filters['sort'] }}"><input type="hidden" name="direction" value="{{ $filters['direction'] }}">
+            <div class="payment-account-filter-field payment-account-date-mode-field"><span>{{ __('payment.account_risk.filters.date_mode') }}</span><input type="hidden" name="date_mode" value="{{ $filters['date_mode'] }}" data-payment-account-date-mode-input><div class="payment-account-date-mode" role="group" aria-label="{{ __('payment.account_risk.filters.date_mode') }}"><button type="button" class="{{ $filters['date_mode'] === 'order' ? 'active' : '' }}" data-payment-account-date-mode="order">{{ __('payment.account_risk.filters.payment_date') }}</button><button type="button" class="{{ $filters['date_mode'] === 'event' ? 'active' : '' }}" data-payment-account-date-mode="event">{{ __('payment.account_risk.filters.event_date') }}</button></div></div>
             <label class="payment-operation-filter-field"><span>{{ __('payment.common.period') }}</span><span class="payment-operation-date-range"><input class="form-control" type="date" name="date_from" value="{{ $filters['date_from'] }}"><b>{{ __('payment.common.range_to') }}</b><input class="form-control" type="date" name="date_to" value="{{ $filters['date_to'] }}"></span></label>
             <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.store') }}</span><select class="form-control" name="store"><option value="">{{ __($translationPrefix.'.filters.all_stores') }}</option>@foreach($dashboard['stores'] as $store)<option value="{{ $store }}" @selected($filters['store'] === $store)>{{ $store }}</option>@endforeach</select></label>
             <label class="payment-operation-filter-field"><span>{{ __($translationPrefix.'.filters.product') }}</span><input class="form-control" type="search" name="keyword" value="{{ $filters['keyword'] }}" placeholder="{{ __($translationPrefix.'.filters.product_placeholder') }}"></label>
@@ -42,6 +43,10 @@
         <article class="payment-kpi-card"><span class="payment-kpi-icon payment-kpi-icon-cyan"><i class="fa fa-usd"></i></span><div><p>{{ __($translationPrefix.'.kpis.receipts') }}</p><strong>{{ $money($summary['revenue']) }}</strong><small>{{ __($translationPrefix.'.kpis.receipts_real_note') }}</small></div></article>
         <article class="payment-kpi-card payment-tone-warning"><span class="payment-kpi-icon payment-kpi-icon-orange"><i class="fa fa-reply"></i></span><div><p>{{ __($translationPrefix.'.kpis.refund') }} <i class="fa fa-info-circle payment-formula-icon" tabindex="0" data-payment-formula-tooltip data-toggle="tooltip" data-container="body" title="{{ __($translationPrefix.'.formulas.refund_amount_rate') }}"></i></p><strong>{{ $money($summary['actual_refunds']) }} / {{ $rate($dashboard['refund_rate']) }}</strong><small>{{ __($translationPrefix.'.kpis.refund_real_note') }}</small></div></article>
     </div>
+
+    <section class="payment-refund-reason-report is-collapsed" data-payment-refund-report data-url="{{ route('payment.product-risk-profit.tab') }}" data-loaded="false">
+        <header><div><h3><i class="fa fa-pie-chart"></i> {{ __($translationPrefix.'.refund_report.title') }}</h3><p>{{ __($translationPrefix.'.refund_report.hint') }}</p></div><div class="payment-refund-report-actions"><button type="button" class="btn btn-default btn-sm" data-payment-refund-report-toggle data-expand-text="{{ __($translationPrefix.'.refund_report.expand') }}" data-collapse-text="{{ __($translationPrefix.'.refund_report.collapse') }}"><i class="fa fa-angle-down"></i> <span>{{ __($translationPrefix.'.refund_report.expand') }}</span></button></div></header>
+    </section>
 
     <div class="payment-tab-panel payment-product-risk-primary-panel">@include('portals.payment.partials.product-risk-tab', ['tab' => 'risk_metrics', 'dashboard' => $dashboard])</div>
 
@@ -57,7 +62,7 @@
 @endsection
 
 @push('scripts')
-<script>window.PaymentPortal = { productDetailUrl: @json(route('payment.product-risk-profit.detail')), productDetail: @json(__($translationPrefix.'.detail')), productExport: @json(__($translationPrefix.'.export')), pagination: @json(__('payment.common.pagination')) };</script>
+<script>window.PaymentPortal = { productDetailUrl: @json(route('payment.product-risk-profit.detail')), productDetail: @json(__($translationPrefix.'.detail')), productExport: @json(__($translationPrefix.'.export')), refundReport: @json(__($translationPrefix.'.refund_report')), pagination: @json(__('payment.common.pagination')) };</script>
 <script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261026-6"></script>
 <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261015-2"></script>
 @endpush

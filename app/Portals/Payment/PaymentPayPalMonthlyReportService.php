@@ -43,7 +43,7 @@ class PaymentPayPalMonthlyReportService
             'detail_month' => $detailMonth,
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
-        return Cache::remember($cacheKey, now()->addSeconds(45), function () use ($account, $year, $dimension, $detailMonth): array {
+        return Cache::flexible($cacheKey, [300, 1800], function () use ($account, $year, $dimension, $detailMonth): array {
             $result = $this->aggregate($account, $year, $dimension, $detailMonth, false);
 
             return [
