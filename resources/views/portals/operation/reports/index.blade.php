@@ -68,7 +68,7 @@
     @php($adRows = old('ads', count($advertisingRows) ? $advertisingRows : [[]]))
     <form method="post" enctype="multipart/form-data" action="{{ route('operation.advertising-reports.store') }}" id="operation-report-form">
         @csrf @if($editingReport)<input type="hidden" name="report_id" value="{{ $editingReport->id }}">@endif @if($isBoss)<input type="hidden" name="operator_user_id" value="{{ $selectedOperator->id }}">@endif
-        <div class="box"><div class="box-header with-border"><h3 class="box-title op-section-title">广告信息填写</h3>@if($isBoss)<div class="pull-right ad-import-tools"><a class="btn btn-default btn-sm" href="{{ route('operation.advertising-reports.import-template',['operator_user_id'=>$selectedOperator->id]) }}"><i class="fa fa-download"></i> 下载导入模板</a><button class="btn btn-success btn-sm" type="button" data-toggle="modal" data-target="#advertising-import-modal"><i class="fa fa-upload"></i> 批量导入</button></div>@endif</div>
+        <div class="box"><div class="box-header with-border"><h3 class="box-title op-section-title">广告信息填写</h3>@if($isBoss)<div class="pull-right ad-import-tools"><a class="btn btn-default btn-sm" href="{{ route('operation.advertising-reports.import-template') }}"><i class="fa fa-download"></i> 下载模版</a><button class="btn btn-success btn-sm" type="button" data-toggle="modal" data-target="#advertising-import-modal"><i class="fa fa-upload"></i> 批量导入并提审</button></div>@endif</div>
             <div class="box-body" style="border-bottom:1px solid #edf1f4"><div class="form-group" style="max-width:260px;margin-bottom:0"><label>提报日期 <span class="text-red">*</span></label><input class="form-control" type="date" name="report_date" value="{{ old('report_date', $reportDate) }}" required @readonly($editingReport)></div></div>
             <div class="box-body">@if(!$canEditReport)<div class="alert alert-info"><i class="fa fa-eye"></i> 当前正在查看 {{ $selectedOperator->name ?: $selectedOperator->username }} 已提交的内容，仅可查看和审核。</div>@endif<fieldset @disabled(!$canEditReport)><div class="table-responsive"><table class="table table-bordered ad-table"><thead><tr><th>广告代理 <span class="text-red">*</span></th><th>广告社媒 <span class="text-red">*</span></th><th>广告账户名称 <span class="text-red">*</span></th><th>广告账户编号 <span class="text-red">*</span></th><th>账面广告费($) <span class="text-red">*</span></th><th>结算系数 <span class="text-red">*</span></th><th>手续费($)</th><th>实际广告费($)</th><th>广告消耗截图 <span class="text-red">*</span></th><th></th></tr></thead><tbody id="ad-rows">
                 @foreach($adRows as $i=>$ad)@php($adScreenshot = $ad['screenshot'] ?? $ad['existing_screenshot'] ?? null)@php($rawAgency = $ad['agency'] ?? '')@php($selectedAgencyId = isset($advertisingAgencyNames[$rawAgency]) ? $rawAgency : collect($advertisingAgencyNames)->search(fn($name,$id) => $name === $rawAgency && ($advertisingAgencyMedia[$id] ?? '') === ($ad['media_source'] ?? '')))@php($selectedAgencyName = $advertisingAgencyNames[$selectedAgencyId] ?? $rawAgency)@php($selectedMedia = $ad['media_source'] ?? ($advertisingAgencyMedia[$selectedAgencyId] ?? ''))<tr data-ad-row>
@@ -94,18 +94,18 @@
     @if($isBoss)
     <div class="modal fade ad-import-modal" id="advertising-import-modal" tabindex="-1" role="dialog"><div class="modal-dialog" role="document"><div class="modal-content">
         <form id="advertising-import-form" method="post" enctype="multipart/form-data" action="{{ route('operation.advertising-reports.import') }}">
-            @csrf<input type="hidden" name="operator_user_id" value="{{ $selectedOperator->id }}"><input type="hidden" name="report_date" id="advertising-import-date" value="{{ $reportDate }}">@if($editingReport)<input type="hidden" name="edit_report" value="{{ $editingReport->id }}">@endif
+            @csrf
             <div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title"><i class="fa fa-file-excel-o text-green"></i> 批量导入广告信息</h4></div>
             <div class="modal-body">
                 <div class="ad-import-steps">
-                    <div class="ad-import-step"><strong><span>1</span>填写模板</strong>填写账户并把截图粘贴到对应行</div>
-                    <div class="ad-import-step"><strong><span>2</span>导入数据</strong>自动读取数据、图片和结算系数</div>
-                    <div class="ad-import-step"><strong><span>3</span>提交审核</strong>确认导入内容后提交助理审核</div>
+                    <div class="ad-import-step"><strong><span>1</span>填写模板</strong>每行填写日期、运营人员和广告数据</div>
+                    <div class="ad-import-step"><strong><span>2</span>放入截图</strong>把截图粘贴到同一行最后一列</div>
+                    <div class="ad-import-step"><strong><span>3</span>导入提审</strong>按人员和日期分组提交助理审核</div>
                 </div>
                 <label class="ad-import-drop"><i class="fa fa-file-excel-o"></i><strong>选择填写完成的 Excel 文件</strong><div class="text-muted">支持 XLSX、XLS、CSV，单次最多 100 条</div><input type="file" name="import_file" accept=".xlsx,.xls,.csv" required></label>
-                <div class="ad-import-tip"><i class="fa fa-info-circle"></i> 每条数据必须在 Excel 的“广告消耗截图”列放置一张图片。导入后图片会自动绑定到对应广告记录。</div>
+                <div class="ad-import-tip"><i class="fa fa-info-circle"></i> 一个文件可以同时导入不同运营人员、不同提报日期的数据。每行必须填写日期和运营人员，并在最后一列放置一张截图。</div>
             </div>
-            <div class="modal-footer"><a class="btn btn-default pull-left" href="{{ route('operation.advertising-reports.import-template',['operator_user_id'=>$selectedOperator->id]) }}"><i class="fa fa-download"></i> 下载模板</a><button type="button" class="btn btn-default" data-dismiss="modal">取消</button><button type="submit" class="btn btn-success"><i class="fa fa-upload"></i> 导入并生成填写列表</button></div>
+            <div class="modal-footer"><a class="btn btn-default pull-left" href="{{ route('operation.advertising-reports.import-template') }}"><i class="fa fa-download"></i> 下载模版</a><button type="button" class="btn btn-default" data-dismiss="modal">取消</button><button type="submit" class="btn btn-success" onclick="return confirm('导入后将按提报日期和运营人员直接生成待审核记录，确认继续？')"><i class="fa fa-upload"></i> 导入并提交审核</button></div>
         </form>
     </div></div></div>
     @endif
@@ -130,7 +130,6 @@
 
 @push('scripts')
 <script>
-(function(){var form=document.getElementById('advertising-import-form'),target=document.getElementById('advertising-import-date'),source=document.querySelector('#operation-report-form input[name="report_date"]');if(!form||!target)return;form.addEventListener('submit',function(){if(source)target.value=source.value})})();
 (function(){
 var body=document.getElementById('ad-rows'),add=document.getElementById('add-ad'),agencyGroups=@json($advertisingAgencyGroups);if(!body||!add)return;
 function esc(v){return String(v).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]})}

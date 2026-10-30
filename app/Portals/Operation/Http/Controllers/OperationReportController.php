@@ -173,16 +173,16 @@ class OperationReportController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
         abort_unless($this->isBoss($context['user']), 403);
-        $validated = $request->validate(['operator_user_id' => ['nullable', 'integer']]);
-        $operatorId = (int) ($validated['operator_user_id'] ?? $context['user']->getKey());
-        $this->assertAssignableOperator($operatorId);
-        $operator = AdminUser::query()->findOrFail($operatorId);
-        $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($operator);
-        $assistantDepartmentIds = $operationDepartment
-            ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $operationDepartment->getKey())
-            : [];
+        $operatorAgencyGroups = [];
+        foreach ($this->operatorOptions() as $operator) {
+            $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($operator);
+            $assistantDepartmentIds = $operationDepartment
+                ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $operationDepartment->getKey())
+                : [];
+            $operatorAgencyGroups[$this->operatorImportLabel($operator)] = $this->advertisingAgencyGroups($assistantDepartmentIds);
+        }
 
-        return $this->advertisingSpreadsheets->templateResponse($this->advertisingAgencyGroups($assistantDepartmentIds));
+        return $this->advertisingSpreadsheets->templateResponse($operatorAgencyGroups);
     }
 
     public function advertisingImport(Request $request): RedirectResponse
@@ -192,25 +192,42 @@ class OperationReportController extends Controller
         abort_unless($this->isBoss($context['user']), 403);
         $validated = $request->validate([
             'import_file' => ['required', 'file', 'max:10240'],
-            'operator_user_id' => ['required', 'integer'],
-            'report_date' => ['nullable', 'date_format:Y-m-d'],
-            'edit_report' => ['nullable', 'integer'],
         ]);
-        $operatorId = (int) $validated['operator_user_id'];
-        $this->assertAssignableOperator($operatorId);
-        $operator = AdminUser::query()->findOrFail($operatorId);
-        $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($operator);
-        $assistantDepartmentIds = $operationDepartment
-            ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $operationDepartment->getKey())
-            : [];
-        $groups = $this->advertisingAgencyGroups($assistantDepartmentIds);
-
+        $operators = $this->operatorOptions();
+        $operatorConfigurations = [];
         $storedImagePaths = [];
         try {
             $rows = $this->advertisingSpreadsheets->read($request->file('import_file'));
-            $imported = [];
+            $reportGroups = [];
             foreach ($rows as $row) {
-                $matched = collect($groups)->flatMap(function (array $items, string $agencyName) use ($row): array {
+                $operatorMatches = $operators->filter(function (AdminUser $operator) use ($row): bool {
+                    $needle = $this->normalizeAdvertisingText($row['operator_name']);
+
+                    return in_array($needle, [
+                        $this->normalizeAdvertisingText($this->operatorImportLabel($operator)),
+                        $this->normalizeAdvertisingText((string) $operator->name),
+                        $this->normalizeAdvertisingText((string) $operator->username),
+                    ], true);
+                })->values();
+                if ($operatorMatches->count() !== 1) {
+                    $reason = $operatorMatches->isEmpty() ? '不存在或没有已分配店铺' : '存在同名人员，请使用模板参考页中的完整名称';
+                    throw new \InvalidArgumentException("第 {$row['row']} 行的运营人员「{$row['operator_name']}」{$reason}。");
+                }
+                /** @var AdminUser $operator */
+                $operator = $operatorMatches->first();
+                $operatorId = (int) $operator->getKey();
+                if (! isset($operatorConfigurations[$operatorId])) {
+                    $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($operator);
+                    if (! $operationDepartment) throw new \InvalidArgumentException("运营人员「{$row['operator_name']}」尚未归属运营部门。");
+                    $assistantDepartmentIds = $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $operationDepartment->getKey());
+                    $operatorConfigurations[$operatorId] = [
+                        'operator' => $operator,
+                        'department' => $operationDepartment,
+                        'agency_groups' => $this->advertisingAgencyGroups($assistantDepartmentIds),
+                    ];
+                }
+                $agencyGroups = $operatorConfigurations[$operatorId]['agency_groups'];
+                $matched = collect($agencyGroups)->flatMap(function (array $items, string $agencyName) use ($row): array {
                     if ($this->normalizeAdvertisingText($agencyName) !== $this->normalizeAdvertisingText($row['agency_name'])) return [];
 
                     return $items;
@@ -222,8 +239,10 @@ class OperationReportController extends Controller
                 }
                 $bookSpend = (float) $row['book_spend'];
                 $coefficient = (float) $matched['coefficient'];
-                $imported[] = [
-                    'agency' => (string) $matched['key'],
+                $groupKey = $operatorId.'|'.$row['report_date'];
+                $reportGroups[$groupKey] ??= ['operator_id' => $operatorId, 'report_date' => $row['report_date'], 'ads' => []];
+                $reportGroups[$groupKey]['ads'][] = [
+                    'agency' => $row['agency_name'],
                     'media_source' => (string) $matched['media'],
                     'account_name' => $row['account_name'],
                     'account_number' => $row['account_number'],
@@ -235,28 +254,53 @@ class OperationReportController extends Controller
                     '_image_extension' => $row['image_extension'],
                 ];
             }
-            foreach ($imported as &$ad) {
-                $path = 'operation-reports/ads/'.Str::uuid().'.'.$ad['_image_extension'];
-                if (! Storage::disk('public')->put($path, $ad['_image_bytes'])) {
-                    throw new \InvalidArgumentException('广告消耗截图保存失败，请稍后重新导入。');
+            foreach ($reportGroups as $group) {
+                if (OperationReport::query()->whereDate('report_date', $group['report_date'])->where('operator_user_id', $group['operator_id'])->exists()) {
+                    $operator = $operatorConfigurations[$group['operator_id']]['operator'];
+                    throw new \InvalidArgumentException($this->operatorImportLabel($operator).' 在 '.$group['report_date'].' 已有提报记录，请先删除或编辑原记录。');
                 }
+            }
+            foreach ($reportGroups as &$group) foreach ($group['ads'] as &$ad) {
+                $path = 'operation-reports/ads/'.Str::uuid().'.'.$ad['_image_extension'];
+                if (! Storage::disk('public')->put($path, $ad['_image_bytes'])) throw new \InvalidArgumentException('广告消耗截图保存失败，请稍后重新导入。');
                 $storedImagePaths[] = $path;
-                $ad['existing_screenshot'] = $path;
+                $ad['screenshot'] = $path;
                 unset($ad['_image_bytes'], $ad['_image_extension']);
             }
-            unset($ad);
-        } catch (\InvalidArgumentException $exception) {
+            unset($group, $ad);
+
+            (new OperationReport)->getConnection()->transaction(function () use ($reportGroups, $operatorConfigurations, $context): void {
+                foreach ($reportGroups as $group) {
+                    $operator = $operatorConfigurations[$group['operator_id']]['operator'];
+                    $department = $operatorConfigurations[$group['operator_id']]['department'];
+                    $calculated = $this->metrics->build($group['report_date'], $group['operator_id']);
+                    $totals = $calculated['totals'];
+                    $adSpend = collect($group['ads'])->sum('actual_spend');
+                    $firstProfit = $totals['first_total_revenue'] - $totals['first_purchase_cost'] - $totals['first_shipping_cost'] - $totals['first_return_fee'] - $adSpend;
+                    $renewalNet = $totals['renewal_revenue'] - $totals['renewal_cost'];
+                    OperationReport::query()->create([
+                        'report_date' => $group['report_date'], 'operator_user_id' => $group['operator_id'],
+                        'operator_name' => (string) ($operator->name ?: $operator->username),
+                        'operation_department_id' => (int) $department->getKey(), 'operation_department_name' => (string) $department->name,
+                        'metric_rows' => $calculated['rows'], 'advertising_rows' => $group['ads'],
+                        'first_purchase_cost' => $totals['first_purchase_cost'], 'first_shipping_cost' => $totals['first_shipping_cost'],
+                        'first_return_fee' => $totals['first_return_fee'], 'actual_ad_spend' => $adSpend,
+                        'first_profit' => $firstProfit, 'renewal_net_revenue' => $renewalNet, 'overall_profit' => $firstProfit + $renewalNet,
+                        'status' => OperationReport::STATUS_PENDING, 'submitted_by' => $context['user']->getKey(),
+                        'submitted_at' => now(), 'reviewed_by' => null, 'reviewed_at' => null, 'review_reason' => null,
+                    ]);
+                }
+            });
+        } catch (\Throwable $exception) {
             foreach ($storedImagePaths as $storedImagePath) Storage::disk('public')->delete($storedImagePath);
-            throw ValidationException::withMessages(['import_file' => $exception->getMessage()]);
+            if ($exception instanceof \InvalidArgumentException) {
+                throw ValidationException::withMessages(['import_file' => $exception->getMessage()]);
+            }
+            throw $exception;
         }
 
-        $query = ['operator_user_id' => $operatorId];
-        if (! empty($validated['report_date'])) $query['report_date'] = $validated['report_date'];
-        if (! empty($validated['edit_report'])) $query['edit_report'] = $validated['edit_report'];
-
-        return redirect()->route('operation.advertising-reports.index', $query)
-            ->with('advertising_import_rows', $imported)
-            ->with('success', '成功导入 '.count($imported).' 条广告数据和对应截图，请确认后提交助理审核。');
+        return redirect()->route('operation.advertising-reports.index')
+            ->with('success', '成功导入 '.count($rows).' 条广告数据，已按日期和运营人员生成 '.count($reportGroups).' 份待审核记录并提交到助理系统。');
     }
 
     public function show(Request $request, OperationReport $report): Response|View
@@ -542,6 +586,14 @@ class OperationReportController extends Controller
     private function normalizeAdvertisingText(string $value): string
     {
         return mb_strtolower((string) preg_replace('/\s+/u', '', trim($value)));
+    }
+
+    private function operatorImportLabel(AdminUser $operator): string
+    {
+        $name = trim((string) $operator->name);
+        $username = trim((string) $operator->username);
+
+        return $name !== '' && $username !== '' && $name !== $username ? $name.'（'.$username.'）' : ($name ?: $username);
     }
 
     /** @return array<string, list<array{key:string,media:string,coefficient:float}>> */

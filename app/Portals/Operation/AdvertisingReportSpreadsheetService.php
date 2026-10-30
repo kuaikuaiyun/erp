@@ -13,37 +13,38 @@ use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Shared\Date as SpreadsheetDate;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AdvertisingReportSpreadsheetService
 {
-    private const HEADERS = ['广告代理', '广告社媒', '广告账户名称', '广告账户编号', '账面广告费($)', '广告消耗截图'];
+    private const HEADERS = ['提报日期', '运营人员', '广告代理', '广告社媒', '广告账户名称', '广告账户编号', '账面广告费($)', '广告消耗截图'];
 
-    /** @param array<string, list<array{key:string,media:string,coefficient:float}>> $agencyGroups */
-    public function templateResponse(array $agencyGroups): StreamedResponse
+    /** @param array<string, array<string, list<array{key:string,media:string,coefficient:float}>>> $operatorAgencyGroups */
+    public function templateResponse(array $operatorAgencyGroups): StreamedResponse
     {
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('广告费导入');
         $sheet->setShowGridlines(false);
-        $sheet->mergeCells('A1:F1');
+        $sheet->mergeCells('A1:H1');
         $sheet->setCellValue('A1', '广告费批量导入模板');
-        $sheet->mergeCells('A2:F2');
-        $sheet->setCellValue('A2', '请按“可选代理社媒”填写；将广告截图直接粘贴到同一行的“广告消耗截图”单元格中，请勿删除或修改表头。');
+        $sheet->mergeCells('A2:H2');
+        $sheet->setCellValue('A2', '每行填写提报日期和运营人员；按“人员可选代理社媒”填写，并将截图粘贴到同一行最后一列。');
         $sheet->fromArray(self::HEADERS, null, 'A4');
         $sheet->freezePane('A5');
-        $sheet->setAutoFilter('A4:F4');
-        $sheet->getStyle('A1:F1')->applyFromArray([
+        $sheet->setAutoFilter('A4:H4');
+        $sheet->getStyle('A1:H1')->applyFromArray([
             'font' => ['bold' => true, 'size' => 16, 'color' => ['rgb' => '1F4665']],
             'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT, 'vertical' => Alignment::VERTICAL_CENTER],
         ]);
-        $sheet->getStyle('A2:F2')->applyFromArray([
+        $sheet->getStyle('A2:H2')->applyFromArray([
             'font' => ['size' => 10, 'color' => ['rgb' => '6D8293']],
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F3F8FC']],
             'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT, 'vertical' => Alignment::VERTICAL_CENTER],
         ]);
-        $sheet->getStyle('A4:F4')->applyFromArray([
+        $sheet->getStyle('A4:H4')->applyFromArray([
             'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '245B86']],
             'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
@@ -52,12 +53,13 @@ class AdvertisingReportSpreadsheetService
         $sheet->getRowDimension(1)->setRowHeight(34);
         $sheet->getRowDimension(2)->setRowHeight(25);
         $sheet->getRowDimension(4)->setRowHeight(28);
-        foreach (['A' => 22, 'B' => 18, 'C' => 26, 'D' => 24, 'E' => 20, 'F' => 24] as $column => $width) {
+        foreach (['A' => 16, 'B' => 18, 'C' => 22, 'D' => 18, 'E' => 26, 'F' => 24, 'G' => 20, 'H' => 24] as $column => $width) {
             $sheet->getColumnDimension($column)->setWidth($width);
         }
-        $sheet->getStyle('A5:D104')->getNumberFormat()->setFormatCode('@');
-        $sheet->getStyle('E5:E104')->getNumberFormat()->setFormatCode('0.00');
-        $sheet->getStyle('A5:F104')->applyFromArray([
+        $sheet->getStyle('A5:A104')->getNumberFormat()->setFormatCode('yyyy-mm-dd');
+        $sheet->getStyle('B5:F104')->getNumberFormat()->setFormatCode('@');
+        $sheet->getStyle('G5:G104')->getNumberFormat()->setFormatCode('0.00');
+        $sheet->getStyle('A5:H104')->applyFromArray([
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FBFDFE']],
             'alignment' => ['vertical' => Alignment::VERTICAL_CENTER],
             'borders' => ['bottom' => ['borderStyle' => Border::BORDER_HAIR, 'color' => ['rgb' => 'E3EBF1']]],
@@ -65,28 +67,31 @@ class AdvertisingReportSpreadsheetService
         for ($row = 5; $row <= 104; $row++) $sheet->getRowDimension($row)->setRowHeight(62);
 
         $options = $spreadsheet->createSheet();
-        $options->setTitle('可选代理社媒');
+        $options->setTitle('人员可选代理社媒');
         $options->setShowGridlines(false);
-        $options->fromArray(['广告代理', '广告社媒', '结算系数'], null, 'A1');
+        $options->fromArray(['运营人员', '广告代理', '广告社媒', '结算系数'], null, 'A1');
         $optionRows = [];
-        foreach ($agencyGroups as $agencyName => $items) {
-            foreach ($items as $item) {
-                $optionRows[] = [$agencyName, $item['media'], (float) $item['coefficient']];
+        foreach ($operatorAgencyGroups as $operatorName => $agencyGroups) {
+            foreach ($agencyGroups as $agencyName => $items) {
+                foreach ($items as $item) {
+                    $optionRows[] = [$operatorName, $agencyName, $item['media'], (float) $item['coefficient']];
+                }
             }
         }
         if ($optionRows !== []) $options->fromArray($optionRows, null, 'A2');
         $lastRow = max(1, count($optionRows) + 1);
-        $options->setAutoFilter('A1:C'.$lastRow);
+        $options->setAutoFilter('A1:D'.$lastRow);
         $options->freezePane('A2');
-        $options->getStyle('A1:C1')->applyFromArray([
+        $options->getStyle('A1:D1')->applyFromArray([
             'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'E58A2B']],
             'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
         ]);
-        $options->getColumnDimension('A')->setWidth(24);
-        $options->getColumnDimension('B')->setWidth(20);
-        $options->getColumnDimension('C')->setWidth(16);
-        $options->getStyle('C2:C'.$lastRow)->getNumberFormat()->setFormatCode('0.0000');
+        $options->getColumnDimension('A')->setWidth(20);
+        $options->getColumnDimension('B')->setWidth(24);
+        $options->getColumnDimension('C')->setWidth(20);
+        $options->getColumnDimension('D')->setWidth(16);
+        $options->getStyle('D2:D'.$lastRow)->getNumberFormat()->setFormatCode('0.0000');
 
         $spreadsheet->setActiveSheetIndex(0);
         $fileName = '广告费导入模板.xlsx';
@@ -97,7 +102,7 @@ class AdvertisingReportSpreadsheetService
         }, $fileName, ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
     }
 
-    /** @return list<array{row:int,agency_name:string,media_source:string,account_name:string,account_number:string,book_spend:float,image_bytes:string,image_extension:string}> */
+    /** @return list<array{row:int,report_date:string,operator_name:string,agency_name:string,media_source:string,account_name:string,account_number:string,book_spend:float,image_bytes:string,image_extension:string}> */
     public function read(UploadedFile $file): array
     {
         $extension = strtolower((string) $file->getClientOriginalExtension());
@@ -134,12 +139,13 @@ class AdvertisingReportSpreadsheetService
         $result = [];
         foreach ($rows as $index => $row) {
             $values = [];
-            foreach (array_slice(self::HEADERS, 0, 5) as $header) $values[$header] = trim((string) ($row[$columns[$header]] ?? ''));
+            foreach (array_slice(self::HEADERS, 0, 7) as $header) $values[$header] = $row[$columns[$header]] ?? '';
             if (collect($values)->every(fn ($value) => $value === '')) continue;
             $excelRow = $index + $headerOffset + 2;
-            foreach (array_slice(self::HEADERS, 0, 4) as $header) {
-                if ($values[$header] === '') throw new InvalidArgumentException("第 {$excelRow} 行的「{$header}」不能为空。");
+            foreach (array_slice(self::HEADERS, 0, 6) as $header) {
+                if (trim((string) $values[$header]) === '') throw new InvalidArgumentException("第 {$excelRow} 行的「{$header}」不能为空。");
             }
+            $reportDate = $this->parseDate($values['提报日期'], $excelRow);
             if ($values['账面广告费($)'] === '' || ! is_numeric($values['账面广告费($)']) || (float) $values['账面广告费($)'] < 0) {
                 throw new InvalidArgumentException("第 {$excelRow} 行的「账面广告费($)」必须是大于或等于 0 的数字。");
             }
@@ -148,10 +154,12 @@ class AdvertisingReportSpreadsheetService
             }
             $result[] = [
                 'row' => $excelRow,
-                'agency_name' => $values['广告代理'],
-                'media_source' => $values['广告社媒'],
-                'account_name' => $values['广告账户名称'],
-                'account_number' => $values['广告账户编号'],
+                'report_date' => $reportDate,
+                'operator_name' => trim((string) $values['运营人员']),
+                'agency_name' => trim((string) $values['广告代理']),
+                'media_source' => trim((string) $values['广告社媒']),
+                'account_name' => trim((string) $values['广告账户名称']),
+                'account_number' => trim((string) $values['广告账户编号']),
                 'book_spend' => round((float) $values['账面广告费($)'], 4),
                 'image_bytes' => $images[$excelRow]['bytes'],
                 'image_extension' => $images[$excelRow]['extension'],
@@ -169,7 +177,7 @@ class AdvertisingReportSpreadsheetService
         $images = [];
         foreach ($sheet->getDrawingCollection() as $drawing) {
             [$column, $row] = Coordinate::coordinateFromString($drawing->getCoordinates());
-            if (Coordinate::columnIndexFromString($column) !== 6) continue;
+            if (Coordinate::columnIndexFromString($column) !== 8) continue;
             if (isset($images[$row])) throw new InvalidArgumentException("第 {$row} 行只能放置一张广告消耗截图。");
 
             $bytes = null;
@@ -195,5 +203,18 @@ class AdvertisingReportSpreadsheetService
         }
 
         return $images;
+    }
+
+    private function parseDate(mixed $value, int $row): string
+    {
+        try {
+            if (is_numeric($value)) return SpreadsheetDate::excelToDateTimeObject((float) $value)->format('Y-m-d');
+            $text = str_replace('/', '-', trim((string) $value));
+            $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $text);
+            if ($date && $date->format('Y-m-d') === $text) return $text;
+        } catch (\Throwable) {
+        }
+
+        throw new InvalidArgumentException("第 {$row} 行的「提报日期」格式不正确，请填写为 YYYY-MM-DD。");
     }
 }
