@@ -127,6 +127,41 @@ class OperationReportReviewController extends Controller
         return redirect()->route('assistant.operation-report-reviews.index')->with('success', '运营报表已审核不通过。');
     }
 
+    public function bulkReview(Request $request): RedirectResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        $validated = $request->validate([
+            'report_ids' => ['required', 'array', 'min:1', 'max:100'],
+            'report_ids.*' => ['required', 'integer', 'distinct'],
+            'review_action' => ['required', Rule::in([OperationReport::STATUS_APPROVED, OperationReport::STATUS_REJECTED])],
+            'review_reason' => [Rule::requiredIf($request->input('review_action') === OperationReport::STATUS_REJECTED), 'nullable', 'string', 'max:1000'],
+        ], [
+            'report_ids.required' => '请至少选择一条待审核报表。',
+            'report_ids.min' => '请至少选择一条待审核报表。',
+            'review_reason.required' => '批量审核不通过时必须填写原因。',
+        ]);
+        $reportIds = collect($validated['report_ids'])->map(fn ($id) => (int) $id)->unique()->values();
+        $accessibleQuery = $this->scopeReports(OperationReport::query(), $context['user'])->whereIn('id', $reportIds);
+        abort_unless((clone $accessibleQuery)->count() === $reportIds->count(), 403, '选择的报表中包含当前助理部门无权审核的数据。');
+        abort_unless((clone $accessibleQuery)->where('status', OperationReport::STATUS_PENDING)->count() === $reportIds->count(), 422, '选择的报表中包含已审核记录，请刷新页面后重新选择。');
+
+        $action = $validated['review_action'];
+        $updated = $accessibleQuery->where('status', OperationReport::STATUS_PENDING)->update([
+            'status' => $action,
+            'reviewed_by' => $context['user']->getKey(),
+            'reviewed_at' => now(),
+            'review_reason' => $action === OperationReport::STATUS_REJECTED
+                ? trim((string) $validated['review_reason'])
+                : null,
+            'updated_at' => now(),
+        ]);
+
+        $label = $action === OperationReport::STATUS_APPROVED ? '审核通过' : '审核不通过';
+        return redirect()->route('assistant.operation-report-reviews.index')
+            ->with('success', '已批量将 '.$updated.' 份运营报表标记为'.$label.'。');
+    }
+
     public function screenshot(Request $request): Response
     {
         $context = $this->context($request);
