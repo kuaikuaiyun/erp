@@ -7,6 +7,7 @@
 .filter-box,.report-data-box{border:0;border-radius:10px;box-shadow:0 4px 16px rgba(31,67,98,.08);overflow:hidden}.filter-box .box-body{padding:16px 18px}.op-toolbar{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap}.op-toolbar .form-group{margin:0}.op-toolbar label{display:block;font-size:12px;color:#607789;margin-bottom:6px}.op-toolbar .form-control{height:38px;min-width:145px;border:1px solid #d8e3eb;border-radius:6px;background:#fff}.op-toolbar .btn{height:38px;border-radius:6px;padding:0 18px}.op-help{color:#7b8e9e;font-size:12px;margin:5px 0 0}
 .monthly-range{display:inline-flex;align-items:center;height:38px;padding:0 13px;color:#527087;background:#eef5fa;border-radius:6px}.monthly-warning{margin-bottom:12px}.monthly-table-wrap{overflow:auto;max-height:650px}.monthly-table{min-width:2350px;margin-bottom:0;border-color:#dfe8ef}.monthly-table thead th{position:sticky;top:0;z-index:2;background:#dbeaf5;color:#234d6d;text-align:center;vertical-align:middle!important;white-space:nowrap;padding:12px 8px;border-color:#c8dbe8}.monthly-table tbody tr.day-band-0>td{background:#f4f9fd}.monthly-table tbody tr.day-band-1>td{background:#fff8ef}.monthly-table tbody tr.day-band-0:hover>td{background:#e8f3fb}.monthly-table tbody tr.day-band-1:hover>td{background:#fff0df}.monthly-table td{vertical-align:middle!important;padding:10px 8px;border-color:#e1e9ef}.monthly-table .identity{font-weight:500;color:#315c7b}.monthly-table .date-cell{font-weight:700}.monthly-table tbody tr.day-band-0>.date-cell{border-left:4px solid #5c9dca}.monthly-table tbody tr.day-band-1>.date-cell{border-left:4px solid #e5a25b;color:#86511c}.monthly-table .money,.monthly-table .number{text-align:right}.monthly-table .media-roi{color:#245d84;font-weight:700;text-align:center}.monthly-table thead .media-roi{background:#c8deed;color:#1b4c6e}.monthly-table .ad-metric{color:#245d84;font-weight:700;text-align:center}.monthly-table tbody tr.day-band-0>.ad-metric{background:#e4f1fa!important}.monthly-table tbody tr.day-band-1>.ad-metric{background:#ffedd8!important;color:#89501a}.monthly-table thead .ad-metric{background:#bdd8ea!important;color:#1b4c6e}.monthly-table tfoot td{position:sticky;bottom:0;background:#dde9f1;font-weight:700;z-index:1;border-color:#c7d9e5}.monthly-table tfoot .ad-metric{background:#c4dceb!important}.monthly-kpis{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:12px;margin-bottom:16px}.monthly-kpi{background:linear-gradient(135deg,#fff 0%,#f8fbfd 100%);border-left:4px solid #3498db;border-radius:10px;padding:16px 18px;box-shadow:0 4px 14px rgba(36,59,83,.08)}.monthly-kpi span{display:block;color:#74879a}.monthly-kpi strong{display:block;margin-top:6px;font-size:23px;color:#173b5e}.report-data-box .box-header{padding:15px 18px}.report-data-box .box-title{font-weight:600;color:#173b5e}.formula-list{display:flex;flex-wrap:wrap;gap:7px 16px;margin-top:9px;color:#587087;font-size:12px;line-height:1.7}.formula-list span{position:relative;padding-left:10px}.formula-list span:before{content:'·';position:absolute;left:0;color:#2e75a7;font-weight:700}@media(max-width:1000px){.monthly-kpis{grid-template-columns:repeat(2,1fr)}}
 .order-count-link{border:0;background:transparent;color:#1677a8;font-weight:700;text-decoration:underline;padding:2px 5px}.order-count-link:hover{color:#0d4f72}.order-detail-modal .modal-dialog{width:min(1180px,94vw)}.order-detail-modal .modal-content{border:0;border-radius:12px;overflow:hidden}.order-detail-modal .modal-header{background:linear-gradient(135deg,#173b5e,#2f79a8);color:#fff}.order-detail-modal .modal-header .close{color:#fff;opacity:.85}.detail-summary{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px}.detail-summary>div{background:#f3f8fc;border-left:3px solid #3498db;border-radius:7px;padding:11px 13px}.detail-summary span{display:block;color:#708699;font-size:12px}.detail-summary strong{display:block;color:#173b5e;font-size:18px;margin-top:3px}.detail-order{border:1px solid #dce7ef;border-radius:9px;margin-bottom:14px;overflow:hidden}.detail-order-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;background:#edf5fa;padding:11px 14px;color:#315c7b}.detail-order-metrics{display:flex;gap:15px;flex-wrap:wrap}.detail-item-table{margin:0}.detail-item-table th{background:#f8fafc;color:#567086;white-space:nowrap}.detail-product{display:flex;align-items:center;gap:9px;min-width:220px}.detail-product img{width:42px;height:42px;object-fit:cover;border-radius:5px;border:1px solid #e0e7ed}.detail-formula{color:#788b9b;font-size:12px;margin-top:4px}@media(max-width:800px){.detail-summary{grid-template-columns:repeat(2,1fr)}}
+.detail-pagination{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:16px;padding:12px 14px;background:#f4f8fb;border-radius:8px}.detail-pagination-info{color:#657c8f}.detail-pagination-buttons{display:flex;gap:5px}.detail-pagination-buttons .btn{min-width:34px}.detail-pagination-buttons .btn.active{background:#2d78a7;color:#fff;border-color:#2d78a7}
 </style>
 @endpush
 
@@ -69,6 +70,7 @@
 (function ($) {
     var endpoint = @json(route('operation.reports.order-details'));
     var operatorId = @json((int) $selectedOperator->id);
+    var activeQuery = null;
     var typeLabels = {first_subscription:'首单订阅',first_normal:'首单普通',first_total:'首单合计',renewal:'续费单',total:'全部订单'};
     function esc(value){ return $('<div>').text(value == null ? '' : String(value)).html(); }
     function money(value){ return '$' + Number(value || 0).toFixed(2); }
@@ -86,15 +88,29 @@
             html+='</tbody></table></div><div class="detail-formula" style="padding:0 14px 12px">采购费＝采购价 × 数量 ÷ 6.5；运费＝（订单商品总重量 ÷ 1000 × 80 ＋ 20）÷ 6.5；首单交易退货费＝营业额 × 12%</div></div>';
         });
         if(!data.orders.length) html+='<div class="alert alert-info">没有找到符合条件的订单。</div>';
+        var p=data.pagination;
+        if(p && p.total>0){
+            html+='<div class="detail-pagination"><div class="detail-pagination-info">显示第 '+p.from+'-'+p.to+' 条，共 '+p.total+' 个订单</div><div class="detail-pagination-buttons">';
+            html+='<button type="button" class="btn btn-default btn-sm detail-page-btn" data-page="'+(p.current_page-1)+'" '+(p.current_page<=1?'disabled':'')+'><i class="fa fa-angle-left"></i></button>';
+            var start=Math.max(1,p.current_page-2), end=Math.min(p.last_page,start+4); start=Math.max(1,end-4);
+            for(var page=start;page<=end;page++) html+='<button type="button" class="btn btn-default btn-sm detail-page-btn '+(page===p.current_page?'active':'')+'" data-page="'+page+'">'+page+'</button>';
+            html+='<button type="button" class="btn btn-default btn-sm detail-page-btn" data-page="'+(p.current_page+1)+'" '+(p.current_page>=p.last_page?'disabled':'')+'><i class="fa fa-angle-right"></i></button></div></div>';
+        }
         return html;
+    }
+    function loadOrders(page){
+        var body=$('#orderDetailBody');
+        body.html('<div class="text-center text-muted" style="padding:50px"><i class="fa fa-spinner fa-spin"></i> 正在加载订单明细...</div>');
+        $.get(endpoint,$.extend({},activeQuery,{page:page,per_page:10}))
+            .done(function(data){body.html(render(data,activeQuery.type));})
+            .fail(function(xhr){body.html('<div class="alert alert-danger">订单明细加载失败：'+esc((xhr.responseJSON&&xhr.responseJSON.message)||'请稍后重试')+'</div>');});
     }
     $(document).on('click','.order-count-link',function(){
         var button=$(this), type=button.data('type'), modal=$('#orderDetailModal'), body=$('#orderDetailBody');
-        body.html('<div class="text-center text-muted" style="padding:50px"><i class="fa fa-spinner fa-spin"></i> 正在加载订单明细...</div>'); modal.modal('show');
-        $.get(endpoint,{date:button.data('date'),shop_domain:button.data('domain'),media_source:button.data('media'),type:type,operator_user_id:operatorId})
-            .done(function(data){body.html(render(data,type));})
-            .fail(function(xhr){body.html('<div class="alert alert-danger">订单明细加载失败：'+esc((xhr.responseJSON&&xhr.responseJSON.message)||'请稍后重试')+'</div>');});
+        activeQuery={date:button.data('date'),shop_domain:button.data('domain'),media_source:button.data('media'),type:type,operator_user_id:operatorId};
+        modal.modal('show'); loadOrders(1);
     });
+    $(document).on('click','.detail-page-btn:not([disabled])',function(){loadOrders(Number($(this).data('page')));});
 })(jQuery);
 </script>
 @endpush

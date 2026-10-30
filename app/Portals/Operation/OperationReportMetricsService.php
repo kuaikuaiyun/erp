@@ -295,8 +295,8 @@ class OperationReportMetricsService
         return ['rows' => $rows, 'totals' => $totals, 'warnings' => $warnings];
     }
 
-    /** @return array{summary:array<string,float|int|string>,orders:list<array<string,mixed>>} */
-    public function orderDetails(string $date, int $operatorUserId, string $shopDomain, string $mediaSource, string $type): array
+    /** @return array{summary:array<string,float|int|string>,orders:list<array<string,mixed>>,pagination:array<string,int>} */
+    public function orderDetails(string $date, int $operatorUserId, string $shopDomain, string $mediaSource, string $type, int $page = 1, int $perPage = 10): array
     {
         $start = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 00:00:00', self::REPORT_TIMEZONE)->utc();
         $end = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 23:59:59', self::REPORT_TIMEZONE)->utc();
@@ -397,6 +397,10 @@ class OperationReportMetricsService
             ];
         })->all();
 
+        $total = count($details);
+        $lastPage = max(1, (int) ceil($total / $perPage));
+        $page = min(max(1, $page), $lastPage);
+
         return [
             'summary' => [
                 'date' => $date,
@@ -408,7 +412,15 @@ class OperationReportMetricsService
                 'shipping_cost' => round((float) collect($details)->sum('shipping_cost'), 4),
                 'return_fee' => round((float) collect($details)->sum('return_fee'), 4),
             ],
-            'orders' => $details,
+            'orders' => array_values(array_slice($details, ($page - 1) * $perPage, $perPage)),
+            'pagination' => [
+                'current_page' => $page,
+                'last_page' => $lastPage,
+                'per_page' => $perPage,
+                'total' => $total,
+                'from' => $total > 0 ? (($page - 1) * $perPage) + 1 : 0,
+                'to' => min($page * $perPage, $total),
+            ],
         ];
     }
 

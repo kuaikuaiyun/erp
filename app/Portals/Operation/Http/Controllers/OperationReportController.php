@@ -117,6 +117,8 @@ class OperationReportController extends Controller
             'shop_domain' => ['required', 'string', 'max:255'],
             'media_source' => ['required', 'string', 'max:100'],
             'type' => ['required', Rule::in(['first_subscription', 'first_normal', 'first_total', 'renewal', 'total'])],
+            'page' => ['nullable', 'integer', 'min:1'],
+            'per_page' => ['nullable', 'integer', Rule::in([10, 20, 50])],
         ]);
         $operatorId = $isBoss
             ? (int) ($validated['operator_user_id'] ?? 0)
@@ -129,6 +131,8 @@ class OperationReportController extends Controller
             trim($validated['shop_domain']),
             trim($validated['media_source']),
             $validated['type'],
+            (int) ($validated['page'] ?? 1),
+            (int) ($validated['per_page'] ?? 10),
         ));
     }
 
