@@ -213,7 +213,9 @@ class AdvertisingReportSpreadsheetService
             if (! is_string($imageXml) || ! is_string($relationsXml)) return [];
 
             $relations = [];
-            if (preg_match_all('/<Relationship\b[^>]*\bId="([^"]+)"[^>]*\bTarget="([^"]+)"[^>]*\/?\s*>/i', $relationsXml, $matches, PREG_SET_ORDER)) {
+            // WPS/Excel may serialize package relationships with a namespace prefix
+            // (for example <ns0:Relationship ...>) instead of an unprefixed element.
+            if (preg_match_all('/<(?:[A-Za-z_][\w.-]*:)?Relationship\b[^>]*\bId="([^"]+)"[^>]*\bTarget="([^"]+)"[^>]*\/?\s*>/i', $relationsXml, $matches, PREG_SET_ORDER)) {
                 foreach ($matches as $match) if ($match[2] !== 'NULL') $relations[$match[1]] = 'xl/'.ltrim($match[2], '/');
             }
             $images = [];

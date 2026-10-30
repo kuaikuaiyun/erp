@@ -39,8 +39,10 @@
             <tbody>@forelse($metricRows as $row)<tr class="day-band-{{ $metricDateBands[$loop->index] ?? 0 }}">
                 @if(($metricPersonRowspans[$loop->index] ?? 0) > 0)<td class="identity date-cell" rowspan="{{ $metricPersonRowspans[$loop->index] }}">{{ $row['date'] }}</td><td class="identity" rowspan="{{ $metricPersonRowspans[$loop->index] }}">{{ $row['operator_name'] }}</td>@endif
                 @if(($metricRowspans[$loop->index] ?? 0) > 0)<td class="identity" rowspan="{{ $metricRowspans[$loop->index] }}">{{ $row['shop_domain'] }}</td>@endif
-                @php($mediaRoi = $submittedMediaRoiByDate[$row['date']][mb_strtolower(trim((string)$row['media_source']))] ?? null)
-                <td>{{ $row['media_source'] }}</td><td class="media-roi">{{ $mediaRoi && $mediaRoi['first_roi'] !== null ? number_format($mediaRoi['first_roi'],2) : '—' }}</td>
+                @if(($metricMediaRowspans[$loop->index] ?? 0) > 0)
+                    @php($mediaRoi = $submittedMediaRoiByDate[$row['date']][mb_strtolower(trim((string)$row['media_source']))] ?? null)
+                    <td rowspan="{{ $metricMediaRowspans[$loop->index] }}">{{ $row['media_source'] }}</td><td class="media-roi" rowspan="{{ $metricMediaRowspans[$loop->index] }}">{{ $mediaRoi && $mediaRoi['first_roi'] !== null ? number_format($mediaRoi['first_roi'],2) : '—' }}</td>
+                @endif
                 @foreach([['first_subscription_orders','first_subscription'],['first_normal_orders','first_normal'],['first_total_orders','first_total'],['renewal_orders','renewal'],['total_orders','total']] as [$countField,$detailType])
                     @if($countField === 'first_subscription_orders' || $countField === 'first_normal_orders' || $countField === 'first_total_orders' || $countField === 'renewal_orders' || $countField === 'total_orders')
                         <td class="number">@if((int)$row[$countField] > 0)<button type="button" class="order-count-link" data-date="{{ $row['date'] }}" data-domain="{{ $row['shop_domain'] }}" data-media="{{ $row['media_source'] }}" data-type="{{ $detailType }}">{{ (int)$row[$countField] }} 单 <i class="fa fa-angle-right"></i></button>@else 0 @endif</td>

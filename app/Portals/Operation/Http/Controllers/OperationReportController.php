@@ -81,6 +81,15 @@ class OperationReportController extends Controller
             return [$report->report_date->format('Y-m-d') => $rows];
         })->all();
         $metricRows = $this->withFirstOrderProfitability($calculated['rows'], $submittedMediaRoiByDate);
+        usort($metricRows, fn (array $left, array $right): int => [
+            $left['date'],
+            mb_strtolower(trim((string) $left['media_source'])),
+            mb_strtolower(trim((string) $left['shop_domain'])),
+        ] <=> [
+            $right['date'],
+            mb_strtolower(trim((string) $right['media_source'])),
+            mb_strtolower(trim((string) $right['shop_domain'])),
+        ]);
         $metricTotals = $this->sumRows($metricRows);
         $metricTotals['first_total_cost'] = (float) $metricTotals['first_purchase_cost']
             + (float) $metricTotals['first_shipping_cost']
@@ -104,6 +113,7 @@ class OperationReportController extends Controller
             'metricTotals' => $metricTotals,
             'metricRowspans' => $this->identityRowspans($metricRows),
             'metricPersonRowspans' => $this->personRowspans($metricRows),
+            'metricMediaRowspans' => $this->mediaRowspans($metricRows),
             'metricDateRowspans' => $this->dateRowspans($metricRows),
             'metricDateBands' => $this->dateBands($metricRows),
             'warnings' => $calculated['warnings'],
@@ -743,6 +753,38 @@ class OperationReportController extends Controller
 
             $span = 1;
             while ($index + $span < $count && $key === [$rows[$index + $span]['date'], $rows[$index + $span]['operator_name']]) $span++;
+            $spans[$index] = $span;
+        }
+
+        return $spans;
+    }
+
+    private function mediaRowspans(array $rows): array
+    {
+        $spans = [];
+        for ($index = 0, $count = count($rows); $index < $count; $index++) {
+            $key = [
+                $rows[$index]['date'],
+                $rows[$index]['operator_name'],
+                mb_strtolower(trim((string) $rows[$index]['media_source'])),
+            ];
+            $previousKey = $index > 0 ? [
+                $rows[$index - 1]['date'],
+                $rows[$index - 1]['operator_name'],
+                mb_strtolower(trim((string) $rows[$index - 1]['media_source'])),
+            ] : null;
+            if ($key === $previousKey) {
+                $spans[$index] = 0;
+                continue;
+            }
+
+            $span = 1;
+            while ($index + $span < $count) {
+                $next = $rows[$index + $span];
+                $nextKey = [$next['date'], $next['operator_name'], mb_strtolower(trim((string) $next['media_source']))];
+                if ($key !== $nextKey) break;
+                $span++;
+            }
             $spans[$index] = $span;
         }
 
