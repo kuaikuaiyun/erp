@@ -8,6 +8,7 @@ use App\Models\LogisticsPayPalDispute;
 use App\Models\LogisticsPayPalRefund;
 use App\Models\LogisticsPayPalTransaction;
 use Illuminate\Database\Query\Builder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
@@ -46,15 +47,22 @@ class PaymentOrderSearchService
     /** @param array<string,mixed> $filters @return array<string,int|float> */
     public function summary(array $filters): array
     {
+        $summaryFilters = $filters;
+        unset(
+            $summaryFilters['page'],
+            $summaryFilters['per_page'],
+            $summaryFilters['sort'],
+            $summaryFilters['direction'],
+        );
         $cacheKey = 'payment:order-search-summary:v2:'.sha1((string) json_encode(
-            $filters,
+            $summaryFilters,
             JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
         ));
 
-        return Cache::remember(
+        return Cache::flexible(
             $cacheKey,
-            now()->addSeconds(30),
-            fn (): array => $this->summarize($this->filteredQuery($filters)),
+            [120, 600],
+            fn (): array => $this->summarize($this->filteredQuery($summaryFilters)),
         );
     }
 
@@ -104,8 +112,12 @@ class PaymentOrderSearchService
     {
         $query = $this->database()->query()->fromSub($this->sourceQuery(), 'payments');
         $dateColumn = ($filters['date_mode'] ?? 'paid') === 'order' ? 'order_created_at' : 'paid_at';
-        if ($filters['date_from'] ?? '') $query->whereDate($dateColumn, '>=', $filters['date_from']);
-        if ($filters['date_to'] ?? '') $query->whereDate($dateColumn, '<=', $filters['date_to']);
+        if ($filters['date_from'] ?? '') {
+            $query->where($dateColumn, '>=', Carbon::parse((string) $filters['date_from'])->startOfDay()->toDateTimeString());
+        }
+        if ($filters['date_to'] ?? '') {
+            $query->where($dateColumn, '<', Carbon::parse((string) $filters['date_to'])->addDay()->startOfDay()->toDateTimeString());
+        }
         if ($filters['payment_gateway'] ?? '') {
             $query->where('payment_gateway', (string) $filters['payment_gateway']);
         }
@@ -128,9 +140,28 @@ class PaymentOrderSearchService
     private function sourceQuery(): Builder
     {
         $database = $this->database();
+        $paypalRefunds = $database->table('logistics_paypal_refunds as risk_refund')
+            ->whereNotNull('risk_refund.original_transaction_id')
+            ->selectRaw('risk_refund.logistics_paypal_account_id as account_id, risk_refund.original_transaction_id as transaction_id, COUNT(*) as risk_count')
+            ->groupBy('risk_refund.logistics_paypal_account_id', 'risk_refund.original_transaction_id');
+        $paypalDisputes = $database->table('logistics_paypal_disputes as risk_dispute')
+            ->whereNotNull('risk_dispute.disputed_transaction_id')
+            ->selectRaw('risk_dispute.logistics_paypal_account_id as account_id, risk_dispute.disputed_transaction_id as transaction_id, COUNT(*) as risk_count')
+            ->groupBy('risk_dispute.logistics_paypal_account_id', 'risk_dispute.disputed_transaction_id');
+        $cardRisks = $database->table('logistics_credit_card_refunds as card_risk')
+            ->selectRaw('card_risk.logistics_order_id as order_id, COUNT(*) as risk_count')
+            ->groupBy('card_risk.logistics_order_id');
         $paypal = $database->table('logistics_paypal_transactions as payment')
             ->leftJoin('logistics_paypal_accounts as account', 'account.id', '=', 'payment.logistics_paypal_account_id')
             ->leftJoin('logistics_orders as orders', 'orders.id', '=', 'payment.logistics_order_id')
+            ->leftJoinSub($paypalRefunds, 'paypal_risk_refunds', function ($join): void {
+                $join->on('paypal_risk_refunds.account_id', '=', 'payment.logistics_paypal_account_id')
+                    ->on('paypal_risk_refunds.transaction_id', '=', 'payment.payment_transaction_id');
+            })
+            ->leftJoinSub($paypalDisputes, 'paypal_risk_disputes', function ($join): void {
+                $join->on('paypal_risk_disputes.account_id', '=', 'payment.logistics_paypal_account_id')
+                    ->on('paypal_risk_disputes.transaction_id', '=', 'payment.payment_transaction_id');
+            })
             ->selectRaw("CONCAT('paypal:', payment.id) as record_key, 'paypal' as channel, payment.id as source_id")
             ->selectRaw("'PayPal' as payment_gateway")
             ->selectRaw('payment.payment_transaction_id as transaction_id, payment.invoice_id as invoice_id')
@@ -142,9 +173,12 @@ class PaymentOrderSearchService
             ->selectRaw("CASE WHEN orders.subscription_origin_order_id IS NOT NULL AND orders.subscription_origin_order_id <> '' THEN 'renewal' WHEN orders.subscription_type IS NOT NULL AND orders.subscription_type <> '' AND orders.subscription_type NOT LIKE '%无订阅%' THEN 'subscription' WHEN payment.logistics_order_id IS NULL THEN 'unmatched' ELSE 'one_time' END as deduction_type")
             ->selectRaw("COALESCE(orders.shopify_order_number, '') as shopify_order_number, COALESCE(orders.tongtu_order_number, '') as tongtu_order_number, COALESCE(orders.bill_number, '') as bill_number")
             ->selectRaw("COALESCE(orders.store_name, '') as store_name, COALESCE(orders.tongtu_product_name, orders.tongtu_product_code, orders.tongtu_sku, payment.payment_subject, '') as product_text")
-            ->selectRaw('(SELECT COUNT(*) FROM logistics_paypal_refunds pr WHERE pr.original_transaction_id = payment.payment_transaction_id) + (SELECT COUNT(*) FROM logistics_paypal_disputes pd WHERE pd.disputed_transaction_id = payment.payment_transaction_id) as risk_count');
+            ->selectRaw('COALESCE(paypal_risk_refunds.risk_count, 0) + COALESCE(paypal_risk_disputes.risk_count, 0) as risk_count');
 
         $card = $database->table('logistics_orders as orders')
+            ->leftJoinSub($cardRisks, 'credit_card_risks', function ($join): void {
+                $join->on('credit_card_risks.order_id', '=', 'orders.id');
+            })
             ->where(function (Builder $operator): void {
                 $operator->whereNull('orders.operator_name')
                     ->orWhere('orders.operator_name', 'not like', '%刷单%');
@@ -164,7 +198,7 @@ class PaymentOrderSearchService
             ->selectRaw("CASE WHEN orders.subscription_origin_order_id IS NOT NULL AND orders.subscription_origin_order_id <> '' THEN 'renewal' WHEN orders.subscription_type IS NOT NULL AND orders.subscription_type <> '' AND orders.subscription_type NOT LIKE '%无订阅%' THEN 'subscription' ELSE 'one_time' END as deduction_type")
             ->selectRaw("COALESCE(orders.shopify_order_number, '') as shopify_order_number, COALESCE(orders.tongtu_order_number, '') as tongtu_order_number, COALESCE(orders.bill_number, '') as bill_number")
             ->selectRaw("COALESCE(orders.store_name, '') as store_name, COALESCE(orders.tongtu_product_name, orders.tongtu_product_code, orders.tongtu_sku, '') as product_text")
-            ->selectRaw('(SELECT COUNT(*) FROM logistics_credit_card_refunds cr WHERE cr.logistics_order_id = orders.id) as risk_count');
+            ->selectRaw('COALESCE(credit_card_risks.risk_count, 0) as risk_count');
 
         return $paypal->unionAll($card);
     }
@@ -172,20 +206,22 @@ class PaymentOrderSearchService
     /** @return list<string> */
     private function paymentGatewayOptions(): array
     {
-        $gateways = LogisticsOrder::query()
-            ->where(function ($operator): void {
-                $operator->whereNull('operator_name')
-                    ->orWhere('operator_name', 'not like', '%刷单%');
-            })
-            ->whereNotNull('payment_gateway')
-            ->whereRaw("TRIM(payment_gateway) <> ''")
-            ->distinct()->orderBy('payment_gateway')->pluck('payment_gateway')
-            ->map(static fn ($gateway): string => trim((string) $gateway))
-            ->filter()->values();
+        return Cache::flexible('payment:order-search:payment-gateways:v1', [600, 3600], function (): array {
+            $gateways = LogisticsOrder::query()
+                ->where(function ($operator): void {
+                    $operator->whereNull('operator_name')
+                        ->orWhere('operator_name', 'not like', '%刷单%');
+                })
+                ->whereNotNull('payment_gateway')
+                ->whereRaw("TRIM(payment_gateway) <> ''")
+                ->distinct()->orderBy('payment_gateway')->pluck('payment_gateway')
+                ->map(static fn ($gateway): string => trim((string) $gateway))
+                ->filter()->values();
 
-        return $gateways->contains('PayPal')
-            ? $gateways->all()
-            : $gateways->push('PayPal')->sort()->values()->all();
+            return $gateways->contains('PayPal')
+                ? $gateways->all()
+                : $gateways->push('PayPal')->sort()->values()->all();
+        });
     }
 
     /** @return list<array<string,mixed>> */

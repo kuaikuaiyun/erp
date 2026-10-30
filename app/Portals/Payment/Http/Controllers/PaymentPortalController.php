@@ -236,6 +236,7 @@ class PaymentPortalController extends Controller
             'product_id' => ['required', 'string', 'max:512'],
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
+            'date_mode' => ['nullable', Rule::in(['order', 'event'])],
             'store' => ['nullable', 'string', 'max:191'],
             'name' => ['nullable', 'string', 'max:191'],
             'keyword' => ['nullable', 'string', 'max:191'],
@@ -334,8 +335,21 @@ class PaymentPortalController extends Controller
         $this->productAlerts->updateStatus($alert, $status, 'process', (string) $validated['remark'], $context['user']);
 
         if ($request->expectsJson()) {
+            $workflowStatus = $status === 'completed' ? 'completed' : 'processing';
+            $updatedAt = now('Asia/Shanghai')->format('Y-m-d H:i:s');
+
             return response()->json([
                 'message' => __('payment.product_alerts.status_update.success'),
+                'status' => $status,
+                'status_label' => __('payment.product_alerts.statuses.'.$status),
+                'workflow_status' => $workflowStatus,
+                'workflow_status_label' => __('payment.product_alerts.statuses.'.$workflowStatus),
+                'history_line' => __('payment.product_alerts.history.line', [
+                    'status' => __('payment.product_alerts.statuses.'.$status),
+                    'remark' => (string) $validated['remark'],
+                    'actor' => (string) $context['user']->name,
+                    'time' => $updatedAt,
+                ]),
             ]);
         }
 
@@ -518,6 +532,7 @@ class PaymentPortalController extends Controller
         $validated = $request->validate([
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
+            'date_mode' => ['nullable', Rule::in(['order', 'event'])],
             'store' => ['nullable', 'string', 'max:191'],
             'name' => ['nullable', 'string', 'max:191'],
             'keyword' => ['nullable', 'string', 'max:191'],
@@ -539,6 +554,7 @@ class PaymentPortalController extends Controller
         return [
             'date_from' => (string) ($input['date_from'] ?? $today->copy()->subDays(29)->format('Y-m-d')),
             'date_to' => (string) ($input['date_to'] ?? $today->format('Y-m-d')),
+            'date_mode' => (string) ($input['date_mode'] ?? 'order'),
             'store' => trim((string) ($input['store'] ?? '')),
             'name' => trim((string) ($input['name'] ?? '')),
             'keyword' => trim((string) ($input['keyword'] ?? '')),

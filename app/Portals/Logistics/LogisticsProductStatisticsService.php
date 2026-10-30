@@ -101,6 +101,18 @@ class LogisticsProductStatisticsService
     }
 
     /**
+     * Read-only entry point for portals that need the same cached refund-reason
+     * aggregation without rebuilding the complete product statistics page.
+     *
+     * @param array<string,mixed> $filters
+     * @return array<string,mixed>
+     */
+    public function refundReasonReportForFilters(array $filters): array
+    {
+        return $this->cachedRefundReasonReport($filters);
+    }
+
+    /**
      * @param array<string, mixed> $filters
      * @param list<string>|null $selectedIds
      * @return \Generator<int,array<string,mixed>>
@@ -450,7 +462,7 @@ class LogisticsProductStatisticsService
             'schema_version' => 5,
             'data_version' => Cache::get('logistics.product-statistics.data-version', 1),
         ];
-        foreach (['date_from', 'date_to', 'name', 'keyword', 'store', 'match_status'] as $key) {
+        foreach (['date_from', 'date_to', 'date_mode', 'name', 'keyword', 'store', 'match_status'] as $key) {
             $keyFilters[$key] = (string) ($filters[$key] ?? '');
         }
         $keyFilters['require_tongtu_match'] = (bool) ($filters['require_tongtu_match'] ?? false);
@@ -487,6 +499,7 @@ class LogisticsProductStatisticsService
             ->selectRaw('refund.refund_reason as source_reason')
             ->selectRaw('refund.manual_reason as manual_reason')
             ->selectRaw("COALESCE(refund.refund_amount_usd, CASE WHEN UPPER(refund.currency_code) = 'USD' THEN refund.original_amount ELSE 0 END) as amount");
+        $this->applyPayPalEventDateFilters($paypal, $filters, 'refund.refunded_at');
         $creditCard = $this->database()->table('logistics_credit_card_refunds as refund')
             ->whereIn('refund.logistics_order_id', clone $selectedOrders)
             ->selectRaw('refund.id as record_id')
@@ -817,7 +830,7 @@ class LogisticsProductStatisticsService
             ])
             ->groupBy('orders.id', 'orders.paypal_account_id');
 
-        $rows = $this->database()->table('logistics_paypal_disputes as dispute')
+        $rowsQuery = $this->database()->table('logistics_paypal_disputes as dispute')
             ->joinSub($productOrders, 'product_orders', function ($join): void {
                 $join->on('product_orders.order_id', '=', 'dispute.logistics_order_id')
                     ->on('product_orders.paypal_account_id', '=', 'dispute.logistics_paypal_account_id');
@@ -827,8 +840,9 @@ class LogisticsProductStatisticsService
             ->selectRaw("SUM(COALESCE(dispute.dispute_amount_usd, CASE WHEN UPPER(dispute.currency_code) = 'USD' THEN dispute.original_amount ELSE 0 END)) as dispute_amount")
             ->groupBy('reason_code')
             ->orderByDesc('dispute_count')
-            ->orderByDesc('dispute_amount')
-            ->get();
+            ->orderByDesc('dispute_amount');
+        $this->applyPayPalEventDateFilters($rowsQuery, $filters, 'dispute.dispute_created_at');
+        $rows = $rowsQuery->get();
 
         $total = (int) $rows->sum(static fn (object $row): int => (int) $row->dispute_count);
 
@@ -1157,6 +1171,7 @@ class LogisticsProductStatisticsService
             ->selectRaw('refund.manual_reason as manual_reason')
             ->selectRaw('COALESCE(refund.refund_amount_usd, CASE WHEN UPPER(refund.currency_code) = \'USD\' THEN refund.original_amount ELSE 0 END) as amount')
             ->selectRaw('COALESCE(refund.refunded_at, refund.created_at) as happened_at');
+        $this->applyPayPalEventDateFilters($paypal, $filters, 'refund.refunded_at');
         $creditCard = $this->database()->table('logistics_credit_card_refunds as refund')
             ->join('logistics_orders as orders', 'orders.id', '=', 'refund.logistics_order_id')
             ->whereIn('refund.logistics_order_id', $creditCardOrderIds)
@@ -1307,7 +1322,9 @@ class LogisticsProductStatisticsService
 
         $values = $this->database()->query()
             ->fromSub(
-                $this->database()->table('logistics_paypal_refunds as refund')->whereIn('refund.logistics_order_id', $paypalIds)->select('refund.status as value')
+                tap($this->database()->table('logistics_paypal_refunds as refund')->whereIn('refund.logistics_order_id', $paypalIds), function (Builder $query) use ($filters): void {
+                    $this->applyPayPalEventDateFilters($query, $filters, 'refund.refunded_at');
+                })->select('refund.status as value')
                     ->unionAll($this->database()->table('logistics_credit_card_refunds as refund')->whereIn('refund.logistics_order_id', $creditIds)->selectRaw("'credit_card' as value")),
                 'refund_status_options',
             )
@@ -1338,6 +1355,7 @@ class LogisticsProductStatisticsService
             ->whereIn('logistics_paypal_disputes.logistics_order_id', $orderIds)
             ->select('logistics_paypal_disputes.*')
             ->selectRaw($this->disputeTypeKeyExpression().' as display_type_key');
+        $this->applyPayPalEventDateFilters($query, $filters, 'logistics_paypal_disputes.dispute_created_at');
         $this->applyDetailTextFilter($query, $options, [
             'logistics_paypal_disputes.dispute_id', 'logistics_paypal_disputes.reason', 'orders.shopify_order_number', 'orders.store_name', 'orders.bill_number',
         ]);
@@ -1379,6 +1397,7 @@ class LogisticsProductStatisticsService
         $options = ['keyword' => '', 'logistics_status' => ''];
         $orderIds = $this->detailOrderIdsQuery($filters, $key, $options, 'paypal');
         $base = $this->database()->table('logistics_paypal_disputes as dispute')->whereIn('dispute.logistics_order_id', $orderIds);
+        $this->applyPayPalEventDateFilters($base, $filters, 'dispute.dispute_created_at');
         $values = static function (Builder $query, string $column): array {
             return $query->whereNotNull($column)->where($column, '<>', '')->distinct()->orderBy($column)->pluck($column)
                 ->map(static fn ($value): string => (string) $value)->all();
@@ -1969,8 +1988,8 @@ class LogisticsProductStatisticsService
     private function productOrderStatisticsQuery(array $filters, bool $withOverviewModules = true, ?array $productKeys = null): Builder
     {
         $orders = $this->productOrderQuery($filters, $withOverviewModules, $productKeys);
-        $paypalRefunds = $this->paypalRefundAggregateQuery();
-        $paypalDisputes = $this->paypalDisputeAggregateQuery($withOverviewModules);
+        $paypalRefunds = $this->paypalRefundAggregateQuery($filters);
+        $paypalDisputes = $this->paypalDisputeAggregateQuery($withOverviewModules, $filters);
         $creditCardRefunds = $this->creditCardRefundAggregateQuery();
         $paid = '(product_orders.paid_at IS NOT NULL OR COALESCE(product_orders.paid_amount_usd, 0) > 0)';
         $actualPaypal = "(product_orders.paypal_account_id IS NOT NULL AND product_orders.paypal_association_source = 'actual_transaction')";
@@ -2102,17 +2121,19 @@ class LogisticsProductStatisticsService
         return $query->groupByRaw("{$key}, orders.id");
     }
 
-    private function paypalRefundAggregateQuery(): Builder
+    private function paypalRefundAggregateQuery(array $filters = []): Builder
     {
-        return $this->database()->table('logistics_paypal_refunds as refund')
+        $query = $this->database()->table('logistics_paypal_refunds as refund')
             ->whereNotNull('refund.logistics_order_id')
             ->select(['refund.logistics_order_id', 'refund.logistics_paypal_account_id'])
             ->selectRaw("SUM(COALESCE(refund.refund_amount_usd, CASE WHEN UPPER(refund.currency_code) = 'USD' THEN refund.original_amount ELSE 0 END)) as refund_amount")
-            ->selectRaw('COUNT(*) as refund_count')
-            ->groupBy('refund.logistics_order_id', 'refund.logistics_paypal_account_id');
+            ->selectRaw('COUNT(*) as refund_count');
+        $this->applyPayPalEventDateFilters($query, $filters, 'refund.refunded_at');
+
+        return $query->groupBy('refund.logistics_order_id', 'refund.logistics_paypal_account_id');
     }
 
-    private function paypalDisputeAggregateQuery(bool $withOverviewModules = true): Builder
+    private function paypalDisputeAggregateQuery(bool $withOverviewModules = true, array $filters = []): Builder
     {
         $query = $this->database()->table('logistics_paypal_disputes as dispute')
             ->whereNotNull('dispute.logistics_order_id')
@@ -2122,6 +2143,8 @@ class LogisticsProductStatisticsService
         if ($withOverviewModules) {
             $query->selectRaw("SUM(COALESCE(dispute.dispute_amount_usd, CASE WHEN UPPER(dispute.currency_code) = 'USD' THEN dispute.original_amount ELSE 0 END)) as dispute_amount");
         }
+
+        $this->applyPayPalEventDateFilters($query, $filters, 'dispute.dispute_created_at');
 
         return $query->groupBy('dispute.logistics_order_id', 'dispute.logistics_paypal_account_id');
     }
@@ -2248,7 +2271,7 @@ class LogisticsProductStatisticsService
             ->selectRaw('MAX(product_orders.paypal_association_source) as paypal_association_source')
             ->groupBy('product_orders.order_id');
 
-        return $this->refundSummaryForOrders($selectedOrders);
+        return $this->refundSummaryForOrders($selectedOrders, $filters);
     }
 
     /**
@@ -2267,13 +2290,13 @@ class LogisticsProductStatisticsService
             ->selectRaw('MAX(product_orders.paypal_association_source) as paypal_association_source')
             ->groupBy('product_orders.order_id');
 
-        return $this->refundSummaryForOrders($selectedOrders);
+        return $this->refundSummaryForOrders($selectedOrders, $filters);
     }
 
     /** @return array{paypal:float,credit_card:float} */
-    private function refundSummaryForOrders(Builder $selectedOrders): array
+    private function refundSummaryForOrders(Builder $selectedOrders, array $filters = []): array
     {
-        $paypalRefunds = $this->paypalRefundAggregateQuery();
+        $paypalRefunds = $this->paypalRefundAggregateQuery($filters);
         $creditCardRefunds = $this->creditCardRefundAggregateQuery();
         $summary = $this->database()->query()
             ->fromSub($selectedOrders, 'selected_orders')
@@ -3290,6 +3313,20 @@ class LogisticsProductStatisticsService
         }
         if (trim((string) ($filters['date_to'] ?? '')) !== '') {
             $query->where($orderTable.'.paid_at', '<=', Carbon::parse($filters['date_to'], 'Asia/Shanghai')->endOfDay()->utc()->toDateTimeString());
+        }
+    }
+
+    /** PayPal switches to its real event timestamps only in event mode. */
+    private function applyPayPalEventDateFilters(object $query, array $filters, string $column): void
+    {
+        if (($filters['date_mode'] ?? 'order') !== 'event') {
+            return;
+        }
+        if (trim((string) ($filters['date_from'] ?? '')) !== '') {
+            $query->where($column, '>=', Carbon::parse($filters['date_from'], 'Asia/Shanghai')->startOfDay()->utc()->toDateTimeString());
+        }
+        if (trim((string) ($filters['date_to'] ?? '')) !== '') {
+            $query->where($column, '<=', Carbon::parse($filters['date_to'], 'Asia/Shanghai')->endOfDay()->utc()->toDateTimeString());
         }
     }
 

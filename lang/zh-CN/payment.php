@@ -71,6 +71,13 @@ $translations = [
         ],
     ],
     'product_risk_profit' => [
+        'refund_report' => [
+            'title' => '退款原因占比报表', 'hint' => '汇总当前筛选范围内的全部产品，不受当前分页影响；每类显示前 8 项，其余合并为其他原因。',
+            'source' => '接口原因分布', 'manual' => '人工原因分布', 'other' => '其他原因', 'empty_reason' => '未填写原因',
+            'orders' => '退款订单 :count 笔', 'records' => '退款记录 :count 条', 'amount_ratio' => '金额占比',
+            'empty' => '当前筛选范围暂无退款原因数据', 'loading' => '正在汇总全部退款原因…', 'load_failed' => '退款原因报表加载失败，请重试。',
+            'collapse' => '收起报表', 'expand' => '展开报表',
+        ],
         'page_title' => '产品风险与利润',
         'page_subtitle' => '产品收款、退款、争议与经营风险概览',
         'filters' => ['store' => '店铺', 'all_stores' => '全部店铺', 'product' => '产品', 'product_placeholder' => '搜索产品 / PCL / SKU', 'only_abnormal' => '仅看异常', 'abnormal' => '异常产品', 'stores' => ['store_a' => '店铺 A', 'store_b' => '店铺 B', 'store_c' => '店铺 C']],
@@ -126,7 +133,7 @@ $translations = [
         'statuses' => ['pending' => '待处理', 'stopped' => '停投', 'observing' => '待观察', 'backend_optimized' => '优化后端', 'other' => '其他', 'completed' => '完结'], 'progress' => ['real_metrics' => '有效订单 :orders 笔；纠纷记录 :disputes 笔；纠纷金额 $:amount', 'card_complaints' => '信用卡投诉 :count 笔'], 'actions' => ['process' => '查看', 'view' => '查看'],
         'operations' => ['process' => '进行处理', 'complete' => '完结', 'reopen' => '重新处理'],
         'history' => ['line' => '状态：:status　备注：:remark　操作人：:actor　时间：:time'],
-        'status_update' => ['success' => '产品预警状态已更新。'],
+        'status_update' => ['success' => '产品预警状态已更新。', 'timeout' => '提交超时，请检查网络或稍后重试。'],
         'status_modal' => ['title' => '更新产品预警状态', 'status' => '本次处理结果', 'remark' => '本次处理备注', 'remark_placeholder' => '请填写本次核查内容、处理动作和结论', 'note' => '每次提交都会永久追加一条独立的状态历史，不会覆盖之前的处理记录。', 'submit' => '确认提交'],
         'severity' => ['critical' => '严重', 'warning' => '预警', 'review' => '复查'],
         'follow' => ['title' => '跟进工作：不是仅把产品标红', 'description' => '主负责人查看销量变化、退款/争议与损失，组织客服总结客户反馈，组织运营核查页面、承诺和推广。每次沟通都为任务、结论、证据和下一次反馈。', 'note' => '同一产品多个规则会并列同一分组预警单，避免重复触发。'], 'rules' => ['title' => '配置与小样本', 'open' => '查看 / 修改产品预警规则', 'description' => '≤30 单：比例进入观察；取消后扣款、同期集中、数据缺失可进入人工核查。不是直接判定产品安全。'],

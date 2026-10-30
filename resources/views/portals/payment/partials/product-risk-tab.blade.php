@@ -9,6 +9,10 @@
     $activeDirection = (string) ($filters['direction'] ?? 'desc');
 @endphp
 
+@if(($tab ?? 'risk_metrics') === 'refund_reason')
+    @include('portals.payment.partials.refund-reason-report', ['report' => $dashboard['refund_reason_report'] ?? []])
+@else
+
 <div class="payment-real-product-table-wrap payment-product-scroll-table"><table class="table payment-real-product-table payment-product-compact-table"><thead><tr>
         <th><span>{{ __($translationPrefix.'.table.product_info') }}</span><span class="payment-product-sort-group"><button type="button" class="payment-product-metric-sort @if($activeSort === 'name') active @endif" data-payment-product-sort="name">{{ __($translationPrefix.'.sort.product_name') }} <i class="fa {{ $activeSort === 'name' ? ($activeDirection === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort' }}"></i></button><button type="button" class="payment-product-metric-sort @if($activeSort === 'product_code') active @endif" data-payment-product-sort="product_code">{{ __($translationPrefix.'.compact.pcl') }} <i class="fa {{ $activeSort === 'product_code' ? ($activeDirection === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort' }}"></i></button></span></th>
         <th><span>{{ __($translationPrefix.'.table.basic_info') }}</span><span class="payment-product-sort-group"><span>{{ __($translationPrefix.'.compact.order_count') }}</span><button type="button" class="payment-product-metric-sort @if($activeSort === 'revenue') active @endif" data-payment-product-sort="revenue">{{ __($translationPrefix.'.compact.sales_amount') }} <i class="fa {{ $activeSort === 'revenue' ? ($activeDirection === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort' }}"></i></button></span></th>
@@ -46,3 +50,4 @@
     </tbody></table></div>
 
 @include('portals.payment.partials.pagination', ['pagination' => $pagination, 'routeName' => 'payment.product-risk-profit.index'])
+@endif
