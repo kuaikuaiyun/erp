@@ -2,6 +2,7 @@
 
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portal\Http\Controllers\PortalMenuConfigurationController;
+use App\Portal\Http\Controllers\InternalMessageController;
 use App\Portals\AiProducts\Http\Controllers\AiProductController;
 use App\Portals\Assistant\Http\Controllers\DomainStoreController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingMediaController;
@@ -30,6 +31,11 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', [PortalEntryController::class, 'root'])->middleware(MonitorPaymentPerformance::class)->name('portal.root');
 Route::get('/management/menus', [PortalMenuConfigurationController::class, 'index'])->name('portal.menus.index');
 Route::post('/management/menus/order', [PortalMenuConfigurationController::class, 'saveOrder'])->name('portal.menus.order');
+Route::get('/internal-messages', [InternalMessageController::class, 'index'])->name('internal-messages.index');
+Route::post('/internal-messages', [InternalMessageController::class, 'store'])->name('internal-messages.store');
+Route::get('/internal-messages/unread', [InternalMessageController::class, 'unread'])->name('internal-messages.unread');
+Route::post('/internal-messages/{message}/read', [InternalMessageController::class, 'markRead'])->whereNumber('message')->name('internal-messages.read');
+Route::get('/internal-messages/{message}/images/{image}', [InternalMessageController::class, 'image'])->whereNumber(['message', 'image'])->name('internal-messages.images.show');
 Route::get('/domain-stores', [DomainStoreController::class, 'index'])->name('assistant.domain-stores.index');
 Route::get('/advertising-media', [AdvertisingMediaController::class, 'index'])->name('assistant.advertising-media.index');
 Route::post('/advertising-media', [AdvertisingMediaController::class, 'store'])->name('assistant.advertising-media.store');
