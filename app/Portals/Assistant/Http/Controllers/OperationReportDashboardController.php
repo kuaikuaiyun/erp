@@ -34,25 +34,15 @@ class OperationReportDashboardController extends Controller
         if ($context instanceof Response) return $context;
 
         $validated = $request->validate([
-            'period_type' => ['nullable', Rule::in(['day', 'month'])],
-            'report_date' => ['nullable', 'date_format:Y-m-d'],
-            'report_month' => ['nullable', 'date_format:Y-m'],
+            'date_from' => ['nullable', 'date_format:Y-m-d'],
+            'date_to' => ['nullable', 'date_format:Y-m-d'],
             'operation_department_id' => ['nullable', 'integer'],
             'operator_user_id' => ['nullable', 'integer'],
         ]);
-        $periodType = (string) ($validated['period_type'] ?? 'month');
         $beijingNow = Carbon::now('Asia/Shanghai');
-        if ($periodType === 'day') {
-            $reportDate = (string) ($validated['report_date'] ?? $beijingNow->format('Y-m-d'));
-            $dateFrom = $dateTo = $reportDate;
-            $reportMonth = $beijingNow->format('Y-m');
-        } else {
-            $reportMonth = (string) ($validated['report_month'] ?? $beijingNow->format('Y-m'));
-            $month = Carbon::createFromFormat('Y-m-d', $reportMonth.'-01', 'Asia/Shanghai');
-            $dateFrom = $month->copy()->startOfMonth()->format('Y-m-d');
-            $dateTo = $month->copy()->endOfMonth()->format('Y-m-d');
-            $reportDate = $beijingNow->format('Y-m-d');
-        }
+        $dateFrom = (string) ($validated['date_from'] ?? $beijingNow->copy()->startOfMonth()->format('Y-m-d'));
+        $dateTo = (string) ($validated['date_to'] ?? $beijingNow->copy()->endOfMonth()->format('Y-m-d'));
+        abort_if($dateFrom > $dateTo, 422, '开始日期不能晚于结束日期。');
 
         $visibleDepartmentIds = $this->assistantStoreOwners->visibleOperationDepartmentIds($context['user']);
         $departments = Department::business()->whereIn('id', $visibleDepartmentIds)
@@ -159,9 +149,6 @@ class OperationReportDashboardController extends Controller
         return view('portals.assistant.operation-reports.index', [
             'portal' => $context['portal']->loadMissing('menus'),
             'user' => $context['user'],
-            'periodType' => $periodType,
-            'reportDate' => $reportDate,
-            'reportMonth' => $reportMonth,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
             'departments' => $departments,
