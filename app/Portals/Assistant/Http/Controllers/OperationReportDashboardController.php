@@ -124,7 +124,23 @@ class OperationReportDashboardController extends Controller
         foreach ($operators as $operator) {
             $calculatedRows = collect($calculatedByOperator[(int) $operator->getKey()]['rows'] ?? []);
             $operationDepartment = $operatorDepartments->get((int) $operator->getKey());
-            foreach ($calculatedRows->groupBy('date') as $rowDate => $dateRows) {
+            $calculatedRowsByDate = $calculatedRows->groupBy('date');
+            if ($selectedOperatorId !== null) {
+                $cursor = Carbon::createFromFormat('Y-m-d', $dateFrom);
+                $lastDate = Carbon::createFromFormat('Y-m-d', $dateTo);
+                while ($cursor->lte($lastDate)) {
+                    $emptyDate = $cursor->format('Y-m-d');
+                    if (! $calculatedRowsByDate->has($emptyDate)) {
+                        $calculatedRowsByDate->put($emptyDate, collect([$this->emptyMetricRow(
+                            $emptyDate,
+                            (string) ($operator->name ?: $operator->username),
+                        )]));
+                    }
+                    $cursor->addDay();
+                }
+                $calculatedRowsByDate = $calculatedRowsByDate->sortKeys();
+            }
+            foreach ($calculatedRowsByDate as $rowDate => $dateRows) {
                 $report = $reportsByOperatorDate->get((int) $operator->getKey().'|'.$rowDate);
                 if (! $report && $operationDepartment) {
                     $fallbackKey = implode('|', [
@@ -221,6 +237,7 @@ class OperationReportDashboardController extends Controller
             'totals' => $totals,
             'identityRowspans' => $this->identityRowspans($rows),
             'reportRowspans' => $this->reportRowspans($rows),
+            'reportBands' => $this->reportBands($rows),
         ]);
     }
 
@@ -281,6 +298,30 @@ class OperationReportDashboardController extends Controller
         return mb_strtolower((string) preg_replace('/[\s　]+/u', '', trim($value)));
     }
 
+    private function emptyMetricRow(string $date, string $operatorName): array
+    {
+        return [
+            'date' => $date,
+            'operator_name' => $operatorName,
+            'shop_domain' => '—',
+            'media_source' => '—',
+            'first_subscription_orders' => 0,
+            'first_subscription_revenue' => 0.0,
+            'first_normal_orders' => 0,
+            'first_normal_revenue' => 0.0,
+            'first_total_orders' => 0,
+            'first_total_revenue' => 0.0,
+            'first_purchase_cost' => 0.0,
+            'first_shipping_cost' => 0.0,
+            'first_return_fee' => 0.0,
+            'renewal_orders' => 0,
+            'renewal_revenue' => 0.0,
+            'renewal_cost' => 0.0,
+            'total_orders' => 0,
+            'total_revenue' => 0.0,
+        ];
+    }
+
     private function identityRowspans(array $rows): array
     {
         return $this->rowspans($rows, fn (array $row) => implode("\x1F", [$row['_report_id'], $row['shop_domain']]));
@@ -289,6 +330,23 @@ class OperationReportDashboardController extends Controller
     private function reportRowspans(array $rows): array
     {
         return $this->rowspans($rows, fn (array $row) => (string) $row['_report_id']);
+    }
+
+    private function reportBands(array $rows): array
+    {
+        $bands = [];
+        $lastReport = null;
+        $band = 1;
+        foreach ($rows as $index => $row) {
+            $report = (string) $row['_report_id'];
+            if ($report !== $lastReport) {
+                $band = $band === 0 ? 1 : 0;
+                $lastReport = $report;
+            }
+            $bands[$index] = $band;
+        }
+
+        return $bands;
     }
 
     private function rowspans(array $rows, callable $keyFor): array
