@@ -102,7 +102,7 @@ $translations = [
                 'paypal_delivered_disputes' => '首次付款已签收纠纷笔数', 'paypal_delivered_orders' => '首次付款已签收订单数', 'paypal_delivered_rate' => '首次付款已签收纠纷率',
                 'paypal_initial_refunds' => '首次付款退款金额', 'paypal_initial_received' => '首次付款实收金额', 'paypal_initial_refund_rate' => '首次付款金额退款率',
                 'yunhui_complaints' => '信用卡有效订单数', 'yunhui_payments' => '信用卡投诉笔数', 'yunhui_rate' => '信用卡争议率',
-                'qianhai_complaints' => '信用卡争议笔数', 'qianhai_payments' => '信用卡争议率（复核）', 'qianhai_rate' => '信用卡争议率（导出）',
+                'qianhai_complaints' => '信用卡争议笔数',
                 'card_delivered_disputes' => '首次付款已签收争议笔数', 'card_delivered_orders' => '首次付款已签收订单数', 'card_delivered_rate' => '首次付款已签收争议率',
                 'card_initial_refunds' => '首次付款退款金额', 'card_initial_received' => '首次付款实收金额', 'card_initial_refund_rate' => '首次付款金额退款率',
                 'status' => '预警状态',
