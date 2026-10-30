@@ -120,6 +120,7 @@ class AdvertisingReportSpreadsheetService
         }
 
         $images = $this->extractImages($sheet);
+        $cellImages = $this->extractWpsCellImages($file->getRealPath());
         $rows = $sheet->toArray(null, false, false, false);
         if ($rows === []) throw new InvalidArgumentException('导入文件为空。');
         $headerOffset = collect(array_slice($rows, 0, 10))->search(function ($row): bool {
@@ -142,6 +143,11 @@ class AdvertisingReportSpreadsheetService
             foreach (array_slice(self::HEADERS, 0, 7) as $header) $values[$header] = $row[$columns[$header]] ?? '';
             if (collect($values)->every(fn ($value) => $value === '')) continue;
             $excelRow = $index + $headerOffset + 2;
+            $imageCellValue = (string) ($row[$columns['广告消耗截图']] ?? '');
+            if (! isset($images[$excelRow]) && preg_match('/DISPIMG\("([^"]+)"/i', $imageCellValue, $match)) {
+                $images[$excelRow] = $cellImages[$match[1]] ?? null;
+                if ($images[$excelRow] === null) unset($images[$excelRow]);
+            }
             foreach (array_slice(self::HEADERS, 0, 6) as $header) {
                 if (trim((string) $values[$header]) === '') throw new InvalidArgumentException("第 {$excelRow} 行的「{$header}」不能为空。");
             }
@@ -189,20 +195,61 @@ class AdvertisingReportSpreadsheetService
             } elseif ($drawing instanceof Drawing) {
                 $bytes = @file_get_contents($drawing->getPath());
             }
-            if (! is_string($bytes) || $bytes === '') throw new InvalidArgumentException("第 {$row} 行的广告消耗截图无法读取。");
-            if (strlen($bytes) > 5 * 1024 * 1024) throw new InvalidArgumentException("第 {$row} 行的广告消耗截图不能超过 5 MB。");
-            $mime = (new \finfo(FILEINFO_MIME_TYPE))->buffer($bytes);
-            $extension = match ($mime) {
-                'image/jpeg' => 'jpg',
-                'image/png' => 'png',
-                'image/webp' => 'webp',
-                default => null,
-            };
-            if ($extension === null) throw new InvalidArgumentException("第 {$row} 行的截图格式不支持，仅支持 JPG、PNG、WEBP。");
-            $images[$row] = ['bytes' => $bytes, 'extension' => $extension];
+            $images[$row] = $this->validatedImage($bytes, $row);
         }
 
         return $images;
+    }
+
+    /** @return array<string, array{bytes:string,extension:string}> */
+    private function extractWpsCellImages(string $path): array
+    {
+        if (! class_exists(\ZipArchive::class)) return [];
+        $zip = new \ZipArchive();
+        if ($zip->open($path) !== true) return [];
+        try {
+            $imageXml = $zip->getFromName('xl/cellimages.xml');
+            $relationsXml = $zip->getFromName('xl/_rels/cellimages.xml.rels');
+            if (! is_string($imageXml) || ! is_string($relationsXml)) return [];
+
+            $relations = [];
+            if (preg_match_all('/<Relationship\b[^>]*\bId="([^"]+)"[^>]*\bTarget="([^"]+)"[^>]*\/?\s*>/i', $relationsXml, $matches, PREG_SET_ORDER)) {
+                foreach ($matches as $match) if ($match[2] !== 'NULL') $relations[$match[1]] = 'xl/'.ltrim($match[2], '/');
+            }
+            $images = [];
+            if (preg_match_all('/<etc:cellImage\b[^>]*>(.*?)<\/etc:cellImage>/is', $imageXml, $blocks)) {
+                foreach ($blocks[1] as $block) {
+                    if (! preg_match('/<xdr:cNvPr\b[^>]*\bname="([^"]+)"/i', $block, $nameMatch)
+                        || ! preg_match('/<a:blip\b[^>]*\br:embed="([^"]+)"/i', $block, $relationMatch)) continue;
+                    $target = $relations[$relationMatch[1]] ?? null;
+                    $bytes = $target ? $zip->getFromName($target) : false;
+                    if (! is_string($bytes) || $bytes === '') continue;
+                    $images[$nameMatch[1]] = $this->validatedImage($bytes, 0);
+                }
+            }
+
+            return $images;
+        } finally {
+            $zip->close();
+        }
+    }
+
+    /** @return array{bytes:string,extension:string} */
+    private function validatedImage(mixed $bytes, int $row): array
+    {
+        $prefix = $row > 0 ? "第 {$row} 行的" : '';
+        if (! is_string($bytes) || $bytes === '') throw new InvalidArgumentException($prefix.'广告消耗截图无法读取。');
+        if (strlen($bytes) > 5 * 1024 * 1024) throw new InvalidArgumentException($prefix.'广告消耗截图不能超过 5 MB。');
+        $mime = (new \finfo(FILEINFO_MIME_TYPE))->buffer($bytes);
+        $extension = match ($mime) {
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
+            'image/webp' => 'webp',
+            default => null,
+        };
+        if ($extension === null) throw new InvalidArgumentException($prefix.'截图格式不支持，仅支持 JPG、PNG、WEBP。');
+
+        return ['bytes' => $bytes, 'extension' => $extension];
     }
 
     private function parseDate(mixed $value, int $row): string
