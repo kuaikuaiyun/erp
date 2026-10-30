@@ -13,6 +13,7 @@ use App\Portals\Assistant\AssistantDomainStoreHistoryService;
 use App\Portals\Assistant\AssistantEmailPurchaseSyncService;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
+use App\Portals\Assistant\AssistantStoreOwnerTimelineService;
 use App\Portals\Assistant\AssistantDomainStoreSpreadsheetService;
 use App\Portals\Logistics\ShopifyOrderSyncService;
 use Illuminate\Database\Eloquent\Builder;
@@ -22,6 +23,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
@@ -37,6 +39,7 @@ class DomainStoreController extends Controller
         private readonly AssistantDomainCheckService $domainChecks,
         private readonly AssistantEmailPurchaseSyncService $emailPurchases,
         private readonly AssistantStoreOwnerService $storeOwners,
+        private readonly AssistantStoreOwnerTimelineService $ownerTimeline,
         private readonly ShopifyOrderSyncService $shopify,
     ) {
     }
@@ -400,6 +403,7 @@ class DomainStoreController extends Controller
                 $store->owner_user_id = $ownerUserId;
                 $this->setLastOperator($store, $context['user']);
                 $store->save();
+                $this->ownerTimeline->ensureBaseline($store, $context['user']);
                 $this->syncDepartmentAccess($store, $departmentAccess['department_ids']);
                 $this->history->recordCreated($store, $context['user']);
 
@@ -463,9 +467,14 @@ class DomainStoreController extends Controller
         $data = $this->validatedData($request, $domainStore);
         $departmentAccess = $this->departmentAccessForRequest($request, $context['user'], $domainStore);
         $ownerUserId = $this->ownerAssignmentForRequest($request, $context['user'], $domainStore);
+        $ownerEffectiveAt = $this->ownerEffectiveAt($request);
 
-        DB::connection($domainStore->getConnectionName())->transaction(function () use ($domainStore, $data, $context, $departmentAccess, $ownerUserId): void {
+        DB::connection($domainStore->getConnectionName())->transaction(function () use ($domainStore, $data, $context, $departmentAccess, $ownerUserId, $ownerEffectiveAt): void {
             $before = $domainStore->historySnapshot();
+            $previousOwnerId = $domainStore->owner_user_id === null ? null : (int) $domainStore->owner_user_id;
+            if ($previousOwnerId !== $ownerUserId) {
+                $this->ownerTimeline->ensureBaseline($domainStore, $context['user']);
+            }
             $domainStore->fill($data);
             $domainStore->owner_department_id = $departmentAccess['owner_department_id'];
             $domainStore->owner_user_id = $ownerUserId;
@@ -474,6 +483,10 @@ class DomainStoreController extends Controller
             $domainStore->save();
             $this->syncDepartmentAccess($domainStore, $departmentAccess['department_ids']);
             $this->history->recordUpdated($domainStore, $before, $domainStore->historySnapshot(), $context['user']);
+            if ($previousOwnerId !== $ownerUserId) {
+                $newOwner = $ownerUserId === null ? null : AdminUser::query()->findOrFail($ownerUserId);
+                $this->ownerTimeline->assign($domainStore, $newOwner, $ownerEffectiveAt, $context['user']);
+            }
         });
 
         $webhook = $this->autoRegisterWebhook($domainStore, $context['user']);
@@ -877,9 +890,19 @@ class DomainStoreController extends Controller
             ->orderByDesc('created_at')
             ->orderByDesc('id')
             ->get();
+        $ownerHistories = $domainStore->ownerHistories()
+            ->orderByDesc('effective_from')
+            ->orderByDesc('id')
+            ->get();
+
+        if ($request->input('scope') === 'owner') {
+            return response()->json([
+                'html' => view('portals.assistant.domain-stores.partials.owner-history-cards', ['ownerHistories' => $ownerHistories])->render(),
+            ]);
+        }
 
         return response()->json([
-            'html' => view('portals.assistant.domain-stores.partials.history-cards', ['logs' => $logs])->render(),
+            'html' => view('portals.assistant.domain-stores.partials.history-cards', ['logs' => $logs, 'ownerHistories' => $ownerHistories])->render(),
         ]);
     }
 
@@ -1466,6 +1489,7 @@ class DomainStoreController extends Controller
             $rules['owner_user_id'] = ['required', 'integer'];
             $rules['operation_department_id'] = ['required', 'integer'];
         }
+        $rules['owner_effective_at'] = ['nullable', 'date'];
 
         $validated = $request->validate($rules);
         $selectedIds = collect($validated['selected_ids'])
@@ -1504,8 +1528,9 @@ class DomainStoreController extends Controller
             }
         }
 
+        $effectiveAt = $this->ownerEffectiveAt($request);
         $updated = DB::connection(config('admin.database.connection') ?: config('database.default'))
-            ->transaction(function () use ($stores, $ownerUserId, $context): int {
+            ->transaction(function () use ($stores, $ownerUserId, $context, $effectiveAt): int {
                 $count = 0;
 
                 foreach ($stores as $store) {
@@ -1516,8 +1541,9 @@ class DomainStoreController extends Controller
                     }
 
                     $before = $store->historySnapshot();
-                    $store->owner_user_id = $ownerUserId;
-                    $store->unsetRelation('ownerUser');
+                    $this->ownerTimeline->ensureBaseline($store, $context['user']);
+                    $newOwner = $ownerUserId === null ? null : AdminUser::query()->findOrFail($ownerUserId);
+                    $this->ownerTimeline->assign($store, $newOwner, $effectiveAt, $context['user']);
                     $this->setLastOperator($store, $context['user']);
                     $store->save();
                     $this->history->recordUpdated($store, $before, $store->historySnapshot(), $context['user']);
@@ -1543,6 +1569,19 @@ class DomainStoreController extends Controller
 
         return $this->domainStoresIndexRedirect($request)
             ->with($updated === 0 ? 'error' : 'success', $message);
+    }
+
+    private function ownerEffectiveAt(Request $request): Carbon
+    {
+        $value = trim((string) $request->input('owner_effective_at'));
+        if ($value === '') return now()->utc();
+
+        $effectiveAt = Carbon::parse($value, 'Asia/Shanghai')->utc();
+        if ($effectiveAt->greaterThan(now()->utc())) {
+            throw ValidationException::withMessages(['owner_effective_at' => '归属生效时间不能晚于当前时间。']);
+        }
+
+        return $effectiveAt;
     }
 
     /** @param list<int> $departmentIds */

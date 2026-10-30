@@ -198,11 +198,6 @@
                         </div>
                         @error('project')<span class="help-block">{{ $message }}</span>@enderror
                     </div>
-                    <div class="form-group col-md-4 @error('user_name') has-error @enderror">
-                        <label for="user_name">{{ $t('fields.user_name') }}</label>
-                        <input id="user_name" name="user_name" class="form-control" value="{{ $value('user_name') }}" maxlength="100">
-                        @error('user_name')<span class="help-block">{{ $message }}</span>@enderror
-                    </div>
                 </div>
             </div>
 
@@ -524,6 +519,19 @@
                             </select>
                             @error('owner_user_id')<span class="help-block">{{ $message }}</span>@enderror
                         </div>
+                        <div class="form-group assistant-owner-form-field @error('owner_effective_at') has-error @enderror">
+                            <label for="owner_effective_at">归属生效时间</label>
+                            <input id="owner_effective_at" name="owner_effective_at" type="datetime-local" class="form-control" value="{{ old('owner_effective_at') }}" max="{{ now('Asia/Shanghai')->format('Y-m-d\\TH:i') }}">
+                            <span class="help-block">留空即以当前上海时间生效；仅会影响该时间起的新订单归属。</span>
+                            @error('owner_effective_at')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+                        @if (! $isCreate)
+                            <div class="form-group assistant-owner-form-field">
+                                <label for="legacy_user_name">使用人</label>
+                                <input id="legacy_user_name" class="form-control" value="{{ $store->user_name ?: $t('common.empty') }}" readonly>
+                                <span class="help-block">仅用于与真实归属人核对，不参与权限或订单归属计算。</span>
+                            </div>
+                        @endif
                         <div class="assistant-owner-form-note">
                             <i class="fa fa-info-circle" aria-hidden="true"></i>
                             <span>{{ $t('form.owner_assignment_hint') }}</span>

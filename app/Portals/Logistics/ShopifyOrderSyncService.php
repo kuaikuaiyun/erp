@@ -7,6 +7,7 @@ use App\Models\AssistantDomainStore;
 use App\Models\LogisticsOrder;
 use App\Models\LogisticsShopifyConnection;
 use App\Models\LogisticsSyncLog;
+use App\Portals\Assistant\AssistantStoreOwnerTimelineService;
 use Carbon\Carbon;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Arr;
@@ -22,6 +23,7 @@ class ShopifyOrderSyncService
         private readonly LogisticsTrackingService $tracking,
         private readonly LogisticsOrderPaymentReferenceService $paymentReferences,
         private readonly PayPalOrderAssociationService $paypalAssociations,
+        private readonly AssistantStoreOwnerTimelineService $ownerTimeline,
     )
     {
     }
@@ -411,7 +413,7 @@ GRAPHQL, [
             'shopify_order_number' => $orderNumber,
             'tongtu_order_number' => $tongtuOrderNumber,
             'store_name' => $isAssigned ? $store->shop_name : '未匹配店铺',
-            'operator_name' => $isAssigned ? $store->user_name : null,
+            'operator_name' => $current->operator_name,
             'group_names' => $isAssigned ? AssistantDomainStore::displayMultiValue($store->team) : null,
             'staff_status' => $isAssigned ? '正常' : '—',
             'media_source' => LogisticsOrder::mediaSourceFromTags($payload['tags'] ?? []),
@@ -462,6 +464,7 @@ GRAPHQL, [
             'page_source' => $this->incoming($attributes['yx_page_source'] ?? null, $current->page_source),
             'shopify_payload' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         ]);
+        $this->ownerTimeline->applySnapshotIfMissing($current, $store);
         $trackingNumberChanged = $current->isDirty('tracking_number');
         $current->save();
         $this->paymentReferences->syncFromAttributes($current, $attributes);

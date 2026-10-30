@@ -55,7 +55,8 @@ class LogisticsOrder extends Model
 
     protected $fillable = [
         'assistant_domain_store_id', 'source_shop_domain', 'shopify_order_id', 'shopify_order_number', 'tongtu_order_number',
-        'store_name', 'department_name', 'operator_name', 'group_names', 'staff_status', 'media_source',
+        'store_name', 'department_name', 'operator_name', 'assigned_owner_user_id', 'assigned_owner_name',
+        'owner_assignment_effective_from', 'owner_assignment_resolved_at', 'group_names', 'staff_status', 'media_source',
         'buyer_name', 'buyer_email', 'buyer_phone', 'is_add_on', 'subscription_type',
         'subscription_origin_order_id', 'subscription_status', 'tongtu_sku', 'tongtu_product_code', 'tongtu_product_name',
         'sale_quantity', 'sale_product_weight', 'payment_status', 'payment_method', 'payment_gateway', 'paid_amount_usd',
@@ -133,6 +134,8 @@ class LogisticsOrder extends Model
                 'paid_at' => 'datetime',
                 'refunded_at' => 'datetime',
                 'order_created_at' => 'datetime',
+                'owner_assignment_effective_from' => 'datetime',
+                'owner_assignment_resolved_at' => 'datetime',
                 'first_fulfilled_at' => 'datetime',
                 'paypal_associated_at' => 'datetime',
                 'tracking_latest_checkpoint_at' => 'datetime',

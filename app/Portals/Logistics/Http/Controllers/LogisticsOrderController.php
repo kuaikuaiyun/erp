@@ -17,6 +17,7 @@ use App\Portals\Logistics\LogisticsRefundImportService;
 use App\Portals\Logistics\TongtuSkuMappingService;
 use App\Portals\Logistics\LogisticsTrackingService;
 use App\Portals\Logistics\PayPalOrderAssociationService;
+use App\Portals\Assistant\AssistantStoreOwnerTimelineService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -40,6 +41,7 @@ class LogisticsOrderController extends Controller
         private readonly LogisticsTrackingService $tracking,
         private readonly LogisticsOrderPaymentReferenceService $paymentReferences,
         private readonly PayPalOrderAssociationService $paypalAssociations,
+        private readonly AssistantStoreOwnerTimelineService $ownerTimeline,
     ) {
     }
 
@@ -470,7 +472,7 @@ class LogisticsOrderController extends Controller
             $order->fill([
                 'assistant_domain_store_id' => $store->getKey(),
                 'store_name' => $store->shop_name,
-                'operator_name' => $store->user_name,
+                'operator_name' => $order->operator_name,
                 'group_names' => AssistantDomainStore::displayMultiValue($store->team),
                 'staff_status' => '正常',
                 'tongtu_order_number' => $tongtuOrderNumber,
@@ -478,7 +480,9 @@ class LogisticsOrderController extends Controller
                     ? LogisticsOrder::STATUS_SKU_EXCEPTION
                     : LogisticsOrder::STATUS_NORMAL,
                 'sku_exception_reason' => $missingSku ? 'Shopify SKU 缺失' : null,
-            ])->save();
+            ]);
+            $this->ownerTimeline->applySnapshotIfMissing($order, $store);
+            $order->save();
             $this->skuMappings->scheduleForOrder($order);
             $assigned++;
         }
@@ -582,7 +586,7 @@ class LogisticsOrderController extends Controller
 
         $fields = [
             'id', 'shopify_order_id', 'shopify_order_number', 'tongtu_order_number', 'store_name',
-            'operator_name', 'group_names', 'staff_status', 'buyer_name', 'buyer_email',
+            'owner_assignment', 'group_names', 'staff_status', 'buyer_name', 'buyer_email',
             'buyer_phone', 'is_add_on', 'subscription_type', 'subscription_status', 'payment_method', 'payment_gateway',
             'collection_account_email', 'transaction_id', 'bill_number', 'logistics_status', 'refund_reason', 'data_status',
             'time_zone',
@@ -617,7 +621,7 @@ class LogisticsOrderController extends Controller
             });
         $textColumns = [
             'id', 'shopify_order_id', 'shopify_order_number', 'tongtu_order_number', 'store_name',
-            'operator_name', 'group_names', 'staff_status', 'buyer_name', 'buyer_email',
+            'group_names', 'staff_status', 'buyer_name', 'buyer_email',
             'buyer_phone', 'is_add_on', 'subscription_type', 'subscription_status', 'payment_method', 'payment_gateway',
             'collection_account_email', 'transaction_id', 'logistics_status', 'data_status',
             'time_zone', 'source_shop_domain',
@@ -626,6 +630,12 @@ class LogisticsOrderController extends Controller
             if ($filters[$column] !== '') {
                 $query->where($column, 'like', $this->contains((string) $filters[$column]));
             }
+        }
+
+        if ($filters['owner_assignment'] === 'unassigned') {
+            $query->whereNull('assigned_owner_user_id');
+        } elseif ($filters['owner_assignment'] !== '' && ctype_digit((string) $filters['owner_assignment'])) {
+            $query->where('assigned_owner_user_id', (int) $filters['owner_assignment']);
         }
 
         if ($filters['shopify_sku'] !== '') {
@@ -720,7 +730,7 @@ class LogisticsOrderController extends Controller
         return $query;
     }
 
-    /** @return array<string, array<int, string>> */
+    /** @return array<string, array<int, mixed>> */
     private function filterOptions(): array
     {
         $values = static function (string $column): array {
@@ -741,7 +751,17 @@ class LogisticsOrderController extends Controller
 
         return [
             'stores' => $values('store_name'),
-            'operators' => $values('operator_name'),
+            'owners' => LogisticsOrder::query()
+                ->whereNotNull('assigned_owner_user_id')
+                ->selectRaw('assigned_owner_user_id, MAX(assigned_owner_name) as assigned_owner_name')
+                ->groupBy('assigned_owner_user_id')
+                ->orderBy('assigned_owner_name')
+                ->get()
+                ->map(static fn ($owner): array => [
+                    'id' => (int) $owner->assigned_owner_user_id,
+                    'name' => trim((string) $owner->assigned_owner_name) ?: ('成员 #'.$owner->assigned_owner_user_id),
+                ])
+                ->all(),
             'groups' => $values('group_names'),
             'paymentMethods' => $values('payment_method'),
             'paymentGateways' => $values('payment_gateway'),

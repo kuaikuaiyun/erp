@@ -32,7 +32,6 @@
         'shop_login_url' => ['type' => 'text', 'maxlength' => 2048],
         'email' => ['type' => 'email', 'maxlength' => 191],
         'project' => ['type' => 'text', 'maxlength' => 100],
-        'user_name' => ['type' => 'text', 'maxlength' => 100],
         'payment_card' => ['type' => 'text', 'maxlength' => 255],
         'store_prefix' => ['type' => 'text', 'maxlength' => 100],
         'tongtu_prefix' => ['type' => 'text', 'maxlength' => 100],
