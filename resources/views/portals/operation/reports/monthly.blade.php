@@ -12,7 +12,7 @@
 @endpush
 
 @section('content')
-<section class="content-header"><h1>运营报表 <small>默认展示北京时间当前月份业绩</small></h1></section>
+<section class="content-header"><h1>运营报表 <small>默认展示 UTC-4 当前月份业绩</small></h1></section>
 <section class="content">
     <div class="box filter-box"><div class="box-body">
         <form class="op-toolbar" method="get" action="{{ route('operation.reports.index') }}">
@@ -37,7 +37,8 @@
         <div class="box-body no-padding monthly-table-wrap"><table class="table table-bordered table-hover monthly-table">
             <thead><tr><th>日期</th><th>人名</th><th>店铺域名</th><th>媒体</th><th class="media-roi">媒体 ROI</th><th>首单订阅单量</th><th>首单订阅营业额($)</th><th>首单普通单量</th><th>首单普通营业额($)</th><th>首单合计单量</th><th>首单合计营业额($)</th><th>首单总采购费($)</th><th>首单总运费($)</th><th>首单交易退货费($)</th><th>首单总成本($)</th><th>首单盈利($)</th><th>首单亏损率</th><th>续费单量</th><th>续费营业额($)</th><th>续费费用($)</th><th>总单量</th><th>总营业额($)</th><th class="ad-metric">实际广告费($)</th><th class="ad-metric">首单 ROI</th></tr></thead>
             <tbody>@forelse($metricRows as $row)<tr class="day-band-{{ $metricDateBands[$loop->index] ?? 0 }}">
-                @if(($metricRowspans[$loop->index] ?? 0) > 0)<td class="identity date-cell" rowspan="{{ $metricRowspans[$loop->index] }}">{{ $row['date'] }}</td><td class="identity" rowspan="{{ $metricRowspans[$loop->index] }}">{{ $row['operator_name'] }}</td><td class="identity" rowspan="{{ $metricRowspans[$loop->index] }}">{{ $row['shop_domain'] }}</td>@endif
+                @if(($metricPersonRowspans[$loop->index] ?? 0) > 0)<td class="identity date-cell" rowspan="{{ $metricPersonRowspans[$loop->index] }}">{{ $row['date'] }}</td><td class="identity" rowspan="{{ $metricPersonRowspans[$loop->index] }}">{{ $row['operator_name'] }}</td>@endif
+                @if(($metricRowspans[$loop->index] ?? 0) > 0)<td class="identity" rowspan="{{ $metricRowspans[$loop->index] }}">{{ $row['shop_domain'] }}</td>@endif
                 @php($mediaRoi = $submittedMediaRoiByDate[$row['date']][mb_strtolower(trim((string)$row['media_source']))] ?? null)
                 <td>{{ $row['media_source'] }}</td><td class="media-roi">{{ $mediaRoi && $mediaRoi['first_roi'] !== null ? number_format($mediaRoi['first_roi'],2) : '—' }}</td>
                 @foreach([['first_subscription_orders','first_subscription'],['first_normal_orders','first_normal'],['first_total_orders','first_total'],['renewal_orders','renewal'],['total_orders','total']] as [$countField,$detailType])

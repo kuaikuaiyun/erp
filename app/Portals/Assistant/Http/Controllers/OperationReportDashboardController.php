@@ -39,9 +39,9 @@ class OperationReportDashboardController extends Controller
             'operation_department_id' => ['nullable', 'integer'],
             'operator_user_id' => ['nullable', 'integer'],
         ]);
-        $beijingNow = Carbon::now('Asia/Shanghai');
-        $dateFrom = (string) ($validated['date_from'] ?? $beijingNow->copy()->startOfMonth()->format('Y-m-d'));
-        $dateTo = (string) ($validated['date_to'] ?? $beijingNow->copy()->endOfMonth()->format('Y-m-d'));
+        $reportNow = Carbon::now(OperationReportMetricsService::REPORT_TIMEZONE);
+        $dateFrom = (string) ($validated['date_from'] ?? $reportNow->copy()->startOfMonth()->format('Y-m-d'));
+        $dateTo = (string) ($validated['date_to'] ?? $reportNow->copy()->endOfMonth()->format('Y-m-d'));
         abort_if($dateFrom > $dateTo, 422, '开始日期不能晚于结束日期。');
 
         $visibleDepartmentIds = $this->assistantStoreOwners->visibleOperationDepartmentIds($context['user']);

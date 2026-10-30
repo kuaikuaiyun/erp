@@ -49,9 +49,9 @@ class OperationReportController extends Controller
             'date_to' => ['nullable', 'date_format:Y-m-d'],
             'operator_user_id' => ['nullable', 'integer'],
         ]);
-        $beijingNow = Carbon::now('Asia/Shanghai');
-        $dateFrom = (string) ($validated['date_from'] ?? $beijingNow->copy()->startOfMonth()->format('Y-m-d'));
-        $dateTo = (string) ($validated['date_to'] ?? $beijingNow->copy()->endOfMonth()->format('Y-m-d'));
+        $reportNow = Carbon::now(OperationReportMetricsService::REPORT_TIMEZONE);
+        $dateFrom = (string) ($validated['date_from'] ?? $reportNow->copy()->startOfMonth()->format('Y-m-d'));
+        $dateTo = (string) ($validated['date_to'] ?? $reportNow->copy()->endOfMonth()->format('Y-m-d'));
         abort_if($dateFrom > $dateTo, 422, '开始日期不能晚于结束日期。');
         $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
         $operatorId = $isBoss
@@ -103,6 +103,7 @@ class OperationReportController extends Controller
             'metricRows' => $metricRows,
             'metricTotals' => $metricTotals,
             'metricRowspans' => $this->identityRowspans($metricRows),
+            'metricPersonRowspans' => $this->personRowspans($metricRows),
             'metricDateRowspans' => $this->dateRowspans($metricRows),
             'metricDateBands' => $this->dateBands($metricRows),
             'warnings' => $calculated['warnings'],
@@ -727,6 +728,24 @@ class OperationReportController extends Controller
             while ($index + $span < $count && $key === [$rows[$index + $span]['date'], $rows[$index + $span]['operator_name'], $rows[$index + $span]['shop_domain']]) $span++;
             $spans[$index] = $span;
         }
+        return $spans;
+    }
+
+    private function personRowspans(array $rows): array
+    {
+        $spans = [];
+        for ($index = 0, $count = count($rows); $index < $count; $index++) {
+            $key = [$rows[$index]['date'], $rows[$index]['operator_name']];
+            if ($index > 0 && $key === [$rows[$index - 1]['date'], $rows[$index - 1]['operator_name']]) {
+                $spans[$index] = 0;
+                continue;
+            }
+
+            $span = 1;
+            while ($index + $span < $count && $key === [$rows[$index + $span]['date'], $rows[$index + $span]['operator_name']]) $span++;
+            $spans[$index] = $span;
+        }
+
         return $spans;
     }
 
