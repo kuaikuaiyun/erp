@@ -34,25 +34,15 @@ class OperationReportDashboardController extends Controller
         if ($context instanceof Response) return $context;
 
         $validated = $request->validate([
-            'period_type' => ['nullable', Rule::in(['day', 'month'])],
-            'report_date' => ['nullable', 'date_format:Y-m-d'],
-            'report_month' => ['nullable', 'date_format:Y-m'],
+            'date_from' => ['nullable', 'date_format:Y-m-d'],
+            'date_to' => ['nullable', 'date_format:Y-m-d'],
             'operation_department_id' => ['nullable', 'integer'],
             'operator_user_id' => ['nullable', 'integer'],
         ]);
-        $periodType = (string) ($validated['period_type'] ?? 'month');
         $beijingNow = Carbon::now('Asia/Shanghai');
-        if ($periodType === 'day') {
-            $reportDate = (string) ($validated['report_date'] ?? $beijingNow->format('Y-m-d'));
-            $dateFrom = $dateTo = $reportDate;
-            $reportMonth = $beijingNow->format('Y-m');
-        } else {
-            $reportMonth = (string) ($validated['report_month'] ?? $beijingNow->format('Y-m'));
-            $month = Carbon::createFromFormat('Y-m-d', $reportMonth.'-01', 'Asia/Shanghai');
-            $dateFrom = $month->copy()->startOfMonth()->format('Y-m-d');
-            $dateTo = $month->copy()->endOfMonth()->format('Y-m-d');
-            $reportDate = $beijingNow->format('Y-m-d');
-        }
+        $dateFrom = (string) ($validated['date_from'] ?? $beijingNow->copy()->startOfMonth()->format('Y-m-d'));
+        $dateTo = (string) ($validated['date_to'] ?? $beijingNow->copy()->endOfMonth()->format('Y-m-d'));
+        abort_if($dateFrom > $dateTo, 422, '开始日期不能晚于结束日期。');
 
         $visibleDepartmentIds = $this->assistantStoreOwners->visibleOperationDepartmentIds($context['user']);
         $departments = Department::business()->whereIn('id', $visibleDepartmentIds)
@@ -88,12 +78,38 @@ class OperationReportDashboardController extends Controller
             $operators = $operators->where('id', $selectedOperatorId)->values();
         }
         $operatorIds = $operators->pluck('id')->map(fn ($id) => (int) $id)->values();
+        $operatorDepartments = $operators->mapWithKeys(fn (AdminUser $operator) => [
+            (int) $operator->getKey() => $this->assistantStoreOwners->operationDepartmentForUser($operator),
+        ]);
+        $operatorFallbackNameCounts = $operators->groupBy(function (AdminUser $operator) use ($operatorDepartments): string {
+            $department = $operatorDepartments->get((int) $operator->getKey());
+            return implode('|', [
+                (int) ($department?->getKey() ?? 0),
+                $this->normalizeOperatorName((string) ($operator->name ?: $operator->username)),
+            ]);
+        })->map->count();
         // 广告费始终跟随当前运营筛选范围；待审核或驳回记录只用于显示状态，不参与任何金额和 ROI 计算。
         $allReports = $allReports->whereIn('operator_user_id', $operatorIds->all())->values();
-        $reportsByOperatorDate = $allReports->keyBy(
-            fn (OperationReport $report) => $report->operator_user_id.'|'.$report->report_date->format('Y-m-d')
-        );
-        $cacheKey = 'assistant-operation-report:'.$dateFrom.':'.$dateTo.':'.sha1($operatorIds->implode(','));
+        // 同一运营、同一日期可能保留过历史重提记录。展示时优先使用已审核记录，
+        // 避免旧的待审核/驳回记录覆盖已经审核通过的广告费。
+        $preferredReport = static function ($reports): ?OperationReport {
+            return $reports->sortByDesc(fn (OperationReport $report) => [
+                $report->status === OperationReport::STATUS_APPROVED ? 1 : 0,
+                (int) $report->getKey(),
+            ])->first();
+        };
+        $reportsByOperatorDate = $allReports
+            ->groupBy(fn (OperationReport $report) => (int) $report->operator_user_id.'|'.$report->report_date->format('Y-m-d'))
+            ->map($preferredReport);
+        // 兼容历史导入数据中运营用户 ID 发生变化的情况：仅在同部门、同日期、同姓名
+        // 只有一个明确匹配结果时兜底，避免同名运营之间串数据。
+        $reportsByDepartmentNameDate = $allReports
+            ->groupBy(fn (OperationReport $report) => implode('|', [
+                (int) $report->operation_department_id,
+                $report->report_date->format('Y-m-d'),
+                $this->normalizeOperatorName((string) $report->operator_name),
+            ]));
+        $cacheKey = 'assistant-operation-report:v2:'.$dateFrom.':'.$dateTo.':'.sha1($operatorIds->implode(','));
         $calculatedByOperator = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($operatorIds, $dateFrom, $dateTo): array {
             $calculated = [];
             // 分批读取，避免整月订单及商品明细一次载入导致 PHP 内存溢出。
@@ -107,9 +123,22 @@ class OperationReportDashboardController extends Controller
         $rows = [];
         foreach ($operators as $operator) {
             $calculatedRows = collect($calculatedByOperator[(int) $operator->getKey()]['rows'] ?? []);
-            $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($operator);
+            $operationDepartment = $operatorDepartments->get((int) $operator->getKey());
             foreach ($calculatedRows->groupBy('date') as $rowDate => $dateRows) {
-                $report = $reportsByOperatorDate->get($operator->getKey().'|'.$rowDate);
+                $report = $reportsByOperatorDate->get((int) $operator->getKey().'|'.$rowDate);
+                if (! $report && $operationDepartment) {
+                    $fallbackKey = implode('|', [
+                        (int) $operationDepartment->getKey(),
+                        (string) $rowDate,
+                        $this->normalizeOperatorName((string) ($operator->name ?: $operator->username)),
+                    ]);
+                    $fallbackReports = $reportsByDepartmentNameDate->get($fallbackKey, collect());
+                    $fallbackOperatorIds = $fallbackReports->pluck('operator_user_id')->map(fn ($id) => (int) $id)->unique();
+                    $operatorNameKey = (int) $operationDepartment->getKey().'|'.$this->normalizeOperatorName((string) ($operator->name ?: $operator->username));
+                    if ($fallbackOperatorIds->count() === 1 && (int) $operatorFallbackNameCounts->get($operatorNameKey, 0) === 1) {
+                        $report = $preferredReport($fallbackReports);
+                    }
+                }
                 $approvedReport = $report?->status === OperationReport::STATUS_APPROVED ? $report : null;
                 $mediaMetrics = collect($this->metrics->mediaRoiSummary(
                     $dateRows->values()->all(),
@@ -159,9 +188,6 @@ class OperationReportDashboardController extends Controller
         return view('portals.assistant.operation-reports.index', [
             'portal' => $context['portal']->loadMissing('menus'),
             'user' => $context['user'],
-            'periodType' => $periodType,
-            'reportDate' => $reportDate,
-            'reportMonth' => $reportMonth,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
             'departments' => $departments,
@@ -225,6 +251,11 @@ class OperationReportDashboardController extends Controller
         $totals['first_loss_rate'] = $totals['first_total_cost'] > 0 ? $totals['first_profit'] / $totals['first_total_cost'] : null;
         $totals['first_roi'] = $actualAdSpend > 0 ? $totals['first_total_revenue'] / $actualAdSpend : null;
         return $totals;
+    }
+
+    private function normalizeOperatorName(string $value): string
+    {
+        return mb_strtolower((string) preg_replace('/[\s　]+/u', '', trim($value)));
     }
 
     private function identityRowspans(array $rows): array

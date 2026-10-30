@@ -90,6 +90,22 @@
     </footer>
 </div>
 
+@if($portal->code === 'yunying')
+<div class="modal fade" id="internal-message-popup" tabindex="-1" role="dialog" aria-labelledby="internal-message-title">
+    <div class="modal-dialog" role="document" style="max-width:760px"><div class="modal-content" style="border:0;border-radius:12px;overflow:hidden;box-shadow:0 18px 60px rgba(0,0,0,.28)">
+        <div class="modal-header" style="background:linear-gradient(135deg,#173b5e,#2f7fae);color:#fff;padding:17px 20px"><h4 class="modal-title" id="internal-message-title"><i class="fa fa-bullhorn"></i> 站内消息</h4></div>
+        <div class="modal-body" style="padding:22px 24px">
+            <div id="internal-message-counter" style="font-size:12px;color:#7890a3;margin-bottom:7px"></div>
+            <h3 id="internal-message-subject" style="margin:0 0 8px;color:#173d5f;font-size:21px"></h3>
+            <div id="internal-message-meta" style="font-size:12px;color:#7a8d9d;margin-bottom:16px"></div>
+            <div id="internal-message-content" style="white-space:pre-wrap;line-height:1.8;color:#344f64;font-size:14px"></div>
+            <div id="internal-message-images" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px"></div>
+        </div>
+        <div class="modal-footer" style="background:#f6f9fb;padding:13px 20px"><span class="text-muted pull-left" style="font-size:12px;line-height:34px">未标记已读的消息会在下次进入系统时继续显示</span><button type="button" class="btn btn-primary" id="internal-message-read"><i class="fa fa-check"></i> 标记已读</button></div>
+    </div></div>
+</div>
+@endif
+
 <button id="totop" title="{{ __('admin.back') }}" style="display: none;"><i class="fa fa-chevron-up"></i></button>
 
 <script src="{{ $portalOrigin }}/vendor/laravel-admin/AdminLTE/bootstrap/js/bootstrap.min.js"></script>
@@ -101,6 +117,33 @@
 <script>$(function(){ $('[data-toggle="tooltip"]').tooltip({container:'body',placement:'top'}); });</script>
 @if(in_array($portal->code, ['yunying', 'caigou', 'cangku'], true))
 <script src="{{ $portalOrigin }}/assets/erp/procurement-pending-watcher.js?v=20261026-1"></script>
+@endif
+@if($portal->code === 'yunying')
+<script>
+(function($){
+    var messages=[],index=0,modal=$('#internal-message-popup'),readButton=$('#internal-message-read');
+    function show(){
+        if(index>=messages.length){modal.modal('hide');return;}
+        var item=messages[index];
+        $('#internal-message-counter').text('未读消息 '+(index+1)+' / '+messages.length);
+        $('#internal-message-subject').text(item.title||'站内消息');
+        $('#internal-message-meta').text((item.sender_portal_name||'')+' · '+(item.sender_name||'')+' · '+(item.published_at||''));
+        $('#internal-message-content').text(item.content||'');
+        var box=$('#internal-message-images').empty();
+        (item.images||[]).forEach(function(url){$('<img>',{src:url,alt:'消息图片','class':'erp-zoomable'}).css({width:'150px',height:'110px',objectFit:'cover',borderRadius:'7px',border:'1px solid #d9e4eb',cursor:'zoom-in'}).appendTo(box);});
+        readButton.prop('disabled',false).html('<i class="fa fa-check"></i> 标记已读');
+        modal.modal({backdrop:'static',keyboard:false,show:true});
+    }
+    readButton.on('click',function(){
+        var item=messages[index];if(!item)return;
+        readButton.prop('disabled',true).html('<i class="fa fa-spinner fa-spin"></i> 正在处理');
+        $.ajax({url:item.read_url,type:'POST',headers:{'X-CSRF-TOKEN':$('meta[name="csrf-token"]').attr('content')}})
+            .done(function(){index++;show();})
+            .fail(function(){readButton.prop('disabled',false).html('<i class="fa fa-check"></i> 重新标记已读');});
+    });
+    $.get(@json(route('internal-messages.unread'))).done(function(response){messages=response.messages||[];if(messages.length)show();});
+})(jQuery);
+</script>
 @endif
 @stack('scripts')
 @if ($watermarkScript !== null)

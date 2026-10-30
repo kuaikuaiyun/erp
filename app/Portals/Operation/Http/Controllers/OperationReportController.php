@@ -229,13 +229,18 @@ class OperationReportController extends Controller
         return $this->advertisingSpreadsheets->templateResponse($operatorAgencyGroups);
     }
 
-    public function advertisingImport(Request $request): RedirectResponse
+    public function advertisingImport(Request $request): RedirectResponse|JsonResponse
     {
         $context = $this->context($request);
         if ($context instanceof Response) abort($context->getStatusCode());
         abort_unless($this->isBoss($context['user']), 403);
         $validated = $request->validate([
             'import_file' => ['required', 'file', 'max:10240'],
+        ], [
+            'import_file.required' => '请选择需要导入的 Excel 文件。',
+            'import_file.uploaded' => '文件上传失败，文件可能超过服务器允许的上传大小。当前 PHP 上传限制为 '.ini_get('upload_max_filesize').'，请压缩文件中的图片后重试，或调整服务器上传限制。',
+            'import_file.file' => '上传的内容不是有效文件，请重新选择 Excel 文件。',
+            'import_file.max' => '导入文件不能超过 10MB，请压缩文件中的图片后重试。',
         ]);
         $operators = $this->operatorOptions();
         $operatorConfigurations = [];
@@ -343,8 +348,18 @@ class OperationReportController extends Controller
             throw $exception;
         }
 
-        return redirect()->route('operation.advertising-reports.index')
-            ->with('success', '成功导入 '.count($rows).' 条广告数据，已按日期和运营人员生成 '.count($reportGroups).' 份待审核记录并提交到助理系统。');
+        $message = '成功导入 '.count($rows).' 条广告数据，已按日期和运营人员生成 '.count($reportGroups).' 份待审核记录并提交到助理系统。';
+        if ($request->expectsJson()) {
+            return response()->json([
+                'ok' => true,
+                'imported_count' => count($rows),
+                'report_count' => count($reportGroups),
+                'message' => $message,
+                'redirect_url' => route('operation.advertising-reports.index'),
+            ]);
+        }
+
+        return redirect()->route('operation.advertising-reports.index')->with('success', $message);
     }
 
     public function show(Request $request, OperationReport $report): Response|View
