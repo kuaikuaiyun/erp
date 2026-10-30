@@ -122,6 +122,10 @@
 <script>
 (function($){
     var messages=[],index=0,modal=$('#internal-message-popup'),readButton=$('#internal-message-read');
+    function updatePendingBadge(){
+        var badge=$('#operation-internal-message-badge');if(!badge.length)return;
+        $.get(@json(route('operation.internal-messages.pending-count'))).done(function(response){badge.text(response.count||0);});
+    }
     function show(){
         if(index>=messages.length){modal.modal('hide');return;}
         var item=messages[index];
@@ -142,6 +146,7 @@
             .fail(function(){readButton.prop('disabled',false).html('<i class="fa fa-check"></i> 重新标记已读');});
     });
     $.get(@json(route('internal-messages.unread'))).done(function(response){messages=response.messages||[];if(messages.length)show();});
+    updatePendingBadge();setInterval(updatePendingBadge,60000);
 })(jQuery);
 </script>
 @endif

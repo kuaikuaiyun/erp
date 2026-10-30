@@ -14,6 +14,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -117,6 +118,71 @@ class InternalMessageController extends Controller
                 'read_url' => route('internal-messages.read', $message),
             ];
         })->values()->all()]);
+    }
+
+    public function receivedIndex(Request $request): Response|View
+    {
+        $context = $this->operationContext($request);
+        if ($context instanceof Response) return $context;
+        $filters = $request->validate([
+            'status' => ['nullable', Rule::in(['pending', 'processed', 'all'])],
+        ]);
+        $status = (string) ($filters['status'] ?? 'pending');
+        $recipients = InternalMessageRecipient::query()
+            ->where('recipient_user_id', $context['user']->getKey())
+            ->when($status === 'pending', fn ($query) => $query->whereNull('processed_at'))
+            ->when($status === 'processed', fn ($query) => $query->whereNotNull('processed_at'))
+            ->with(['message.images'])
+            ->orderByDesc('id')
+            ->paginate(20)
+            ->withQueryString();
+
+        return view('portal.internal-messages.received', [
+            'portal' => $context['portal']->loadMissing('menus'),
+            'user' => $context['user'],
+            'recipients' => $recipients,
+            'status' => $status,
+            'pendingCount' => InternalMessageRecipient::query()
+                ->where('recipient_user_id', $context['user']->getKey())
+                ->whereNull('processed_at')->count(),
+        ]);
+    }
+
+    public function markProcessed(Request $request, InternalMessage $message): RedirectResponse
+    {
+        $context = $this->operationContext($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        $recipient = InternalMessageRecipient::query()
+            ->where('internal_message_id', $message->getKey())
+            ->where('recipient_user_id', $context['user']->getKey())
+            ->firstOrFail();
+        if ($recipient->processed_at === null) {
+            $recipient->update([
+                'read_at' => $recipient->read_at ?: now(),
+                'processed_at' => now(),
+                'processed_by' => $context['user']->getKey(),
+            ]);
+        }
+
+        return back()->with('success', '站内消息已标记为已处理。');
+    }
+
+    public function pendingCount(Request $request): Response|JsonResponse
+    {
+        $context = $this->operationContext($request);
+        if ($context instanceof Response) return $context;
+        $query = InternalMessageRecipient::query()
+            ->where('recipient_user_id', $context['user']->getKey())
+            ->whereNull('processed_at');
+
+        return response()->json([
+            'count' => (clone $query)->count(),
+            'items' => $query->orderByDesc('id')->limit(10)->get(['id', 'internal_message_id'])
+                ->map(fn (InternalMessageRecipient $recipient) => [
+                    'id' => (int) $recipient->getKey(),
+                    'message_id' => (int) $recipient->internal_message_id,
+                ])->values()->all(),
+        ]);
     }
 
     public function markRead(Request $request, InternalMessage $message): JsonResponse

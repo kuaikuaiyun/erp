@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class InternalMessageRecipient extends Model
 {
-    protected $fillable = ['internal_message_id', 'recipient_user_id', 'read_at'];
+    protected $fillable = ['internal_message_id', 'recipient_user_id', 'read_at', 'processed_at', 'processed_by'];
 
     public function __construct(array $attributes = [])
     {
@@ -17,7 +17,7 @@ class InternalMessageRecipient extends Model
 
     protected function casts(): array
     {
-        return ['read_at' => 'datetime'];
+        return ['read_at' => 'datetime', 'processed_at' => 'datetime'];
     }
 
     public function message(): BelongsTo

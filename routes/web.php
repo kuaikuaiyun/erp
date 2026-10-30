@@ -36,6 +36,9 @@ Route::post('/internal-messages', [InternalMessageController::class, 'store'])->
 Route::get('/internal-messages/unread', [InternalMessageController::class, 'unread'])->name('internal-messages.unread');
 Route::post('/internal-messages/{message}/read', [InternalMessageController::class, 'markRead'])->whereNumber('message')->name('internal-messages.read');
 Route::get('/internal-messages/{message}/images/{image}', [InternalMessageController::class, 'image'])->whereNumber(['message', 'image'])->name('internal-messages.images.show');
+Route::get('/operation/internal-messages', [InternalMessageController::class, 'receivedIndex'])->name('operation.internal-messages.index');
+Route::post('/operation/internal-messages/{message}/process', [InternalMessageController::class, 'markProcessed'])->whereNumber('message')->name('operation.internal-messages.process');
+Route::get('/api/operation/internal-messages/pending-count', [InternalMessageController::class, 'pendingCount'])->name('operation.internal-messages.pending-count');
 Route::get('/domain-stores', [DomainStoreController::class, 'index'])->name('assistant.domain-stores.index');
 Route::get('/advertising-media', [AdvertisingMediaController::class, 'index'])->name('assistant.advertising-media.index');
 Route::post('/advertising-media', [AdvertisingMediaController::class, 'store'])->name('assistant.advertising-media.store');
