@@ -17,6 +17,7 @@ use App\Portals\Operation\AdvertisingReportSpreadsheetService;
 use App\Portals\ProductRequests\ProductRequestAccessService;
 use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -62,6 +63,7 @@ class OperationReportController extends Controller
         $submittedReports = OperationReport::query()
             ->where('operator_user_id', $operatorId)
             ->whereBetween('report_date', [$dateFrom, $dateTo])
+            ->where('status', OperationReport::STATUS_APPROVED)
             ->orderByDesc('report_date')->orderByDesc('id')->get();
         $submittedReportsByDate = $submittedReports->keyBy(
             fn (OperationReport $report) => $report->report_date->format('Y-m-d')
@@ -101,6 +103,33 @@ class OperationReportController extends Controller
                 ? $submittedFirstRevenueTotal / $submittedAdSpendTotal
                 : null,
         ]);
+    }
+
+    public function orderDetails(Request $request): Response|JsonResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+        $user = $context['user'];
+        $isBoss = $this->isBoss($user);
+        $validated = $request->validate([
+            'date' => ['required', 'date_format:Y-m-d'],
+            'operator_user_id' => ['nullable', 'integer'],
+            'shop_domain' => ['required', 'string', 'max:255'],
+            'media_source' => ['required', 'string', 'max:100'],
+            'type' => ['required', Rule::in(['first_subscription', 'first_normal', 'first_total', 'renewal', 'total'])],
+        ]);
+        $operatorId = $isBoss
+            ? (int) ($validated['operator_user_id'] ?? 0)
+            : (int) $user->getKey();
+        if ($isBoss) $this->assertAssignableOperator($operatorId);
+
+        return response()->json($this->metrics->orderDetails(
+            $validated['date'],
+            $operatorId,
+            trim($validated['shop_domain']),
+            trim($validated['media_source']),
+            $validated['type'],
+        ));
     }
 
     public function advertising(Request $request): Response|View

@@ -295,6 +295,123 @@ class OperationReportMetricsService
         return ['rows' => $rows, 'totals' => $totals, 'warnings' => $warnings];
     }
 
+    /** @return array{summary:array<string,float|int|string>,orders:list<array<string,mixed>>} */
+    public function orderDetails(string $date, int $operatorUserId, string $shopDomain, string $mediaSource, string $type): array
+    {
+        $start = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 00:00:00', self::REPORT_TIMEZONE)->utc();
+        $end = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 23:59:59', self::REPORT_TIMEZONE)->utc();
+        $orders = LogisticsOrder::query()
+            ->with(['items.skuMapping', 'store'])
+            ->whereBetween('order_created_at', [$start, $end])
+            ->whereHas('store', fn ($query) => $query->where('owner_user_id', $operatorUserId))
+            ->orderBy('order_created_at')
+            ->get()
+            ->filter(function (LogisticsOrder $order) use ($shopDomain, $mediaSource, $type): bool {
+                $domain = trim((string) ($order->store?->domain ?: $order->source_shop_domain ?: $order->store_name ?: '未知店铺'));
+                $media = trim((string) ($order->media_source ?: LogisticsOrder::MEDIA_SOURCE_OTHER));
+                if ($domain !== $shopDomain || $media !== $mediaSource) return false;
+
+                $subscriptionType = (string) $order->subscription_type;
+                return match ($type) {
+                    'first_subscription' => $subscriptionType === '订阅首次购买',
+                    'first_normal' => $subscriptionType === '无订阅',
+                    'first_total' => in_array($subscriptionType, ['订阅首次购买', '无订阅'], true),
+                    'renewal' => str_starts_with($subscriptionType, '订阅复购'),
+                    'total' => in_array($subscriptionType, ['订阅首次购买', '无订阅'], true) || str_starts_with($subscriptionType, '订阅复购'),
+                    default => false,
+                };
+            })->values();
+
+        $mappingIds = $orders->flatMap(fn ($order) => $order->items->pluck('tongtu_sku_mapping_id'))->filter()->unique();
+        $skuValues = $orders->flatMap(fn ($order) => $order->items->flatMap(fn ($item) => [
+            trim((string) $item->shopify_sku), trim((string) $item->tongtu_sku), trim((string) $item->tongtu_product_code),
+        ]))->filter()->unique()->values();
+        $mappingRows = LogisticsTongtuSkuMapping::query()->where(function ($query) use ($mappingIds, $skuValues): void {
+            if ($mappingIds->isNotEmpty()) $query->orWhereIn('id', $mappingIds);
+            if ($skuValues->isNotEmpty()) {
+                $query->orWhereIn('shopify_sku', $skuValues)
+                    ->orWhereIn('tongtu_sku', $skuValues)
+                    ->orWhereIn('tongtu_product_code', $skuValues);
+            }
+        })->get();
+        $mappings = $mappingRows->keyBy('id');
+        $mappingByValue = [];
+        foreach ($mappingRows as $mapping) {
+            foreach ([$mapping->shopify_sku, $mapping->tongtu_sku, $mapping->tongtu_product_code] as $value) {
+                $value = mb_strtolower(trim((string) $value));
+                if ($value !== '') $mappingByValue[$value] = $mapping;
+            }
+        }
+
+        $details = $orders->map(function (LogisticsOrder $order) use ($mappings, $mappingByValue): array {
+            $isFirst = in_array((string) $order->subscription_type, ['订阅首次购买', '无订阅'], true);
+            $purchaseCost = 0.0;
+            $totalWeight = 0.0;
+            $items = $order->items->map(function (LogisticsOrderItem $item) use ($isFirst, $mappings, $mappingByValue, &$purchaseCost, &$totalWeight): array {
+                $quantity = max(0.0, (float) $item->quantity);
+                $mapping = $item->tongtu_sku_mapping_id ? $mappings->get($item->tongtu_sku_mapping_id) : null;
+                if (! $mapping) {
+                    foreach ([$item->shopify_sku, $item->tongtu_sku, $item->tongtu_product_code] as $value) {
+                        $lookup = mb_strtolower(trim((string) $value));
+                        if ($lookup !== '' && isset($mappingByValue[$lookup])) {
+                            $mapping = $mappingByValue[$lookup];
+                            break;
+                        }
+                    }
+                }
+                $guideCost = $mapping?->product_guide_cost_cny;
+                $guideCost = $guideCost !== null && (float) $guideCost > 0 ? (float) $guideCost : null;
+                $unitWeight = $item->sale_weight_gram ?: $item->tongtu_goods_weight_gram ?: $mapping?->goods_weight_gram;
+                $unitWeight = $unitWeight !== null && (float) $unitWeight > 0 ? (float) $unitWeight : null;
+                $itemPurchaseCost = $isFirst && $guideCost !== null ? $guideCost * $quantity / self::CNY_PER_USD : 0.0;
+                $itemWeight = $isFirst && $unitWeight !== null ? $unitWeight * $quantity : 0.0;
+                $purchaseCost += $itemPurchaseCost;
+                $totalWeight += $itemWeight;
+
+                return [
+                    'product_name' => trim((string) ($item->product_title ?: $item->tongtu_product_name)) ?: '未填写商品名称',
+                    'sku' => $this->itemSku($item),
+                    'image_url' => $item->display_product_image_url,
+                    'quantity' => $quantity,
+                    'guide_cost_cny' => $guideCost,
+                    'purchase_cost_usd' => round($itemPurchaseCost, 4),
+                    'unit_weight_gram' => $unitWeight,
+                    'total_weight_gram' => round($itemWeight, 4),
+                ];
+            })->values()->all();
+            $revenue = (float) ($order->paid_amount_usd ?? 0);
+            $shippingCost = $isFirst ? ($totalWeight / 1000 * 80 + 20) / self::CNY_PER_USD : 0.0;
+
+            return [
+                'id' => (int) $order->getKey(),
+                'shopify_order_id' => trim((string) $order->shopify_order_id) ?: '—',
+                'order_number' => trim((string) ($order->shopify_order_number ?: $order->tongtu_order_number)) ?: '—',
+                'ordered_at' => Carbon::parse($order->getRawOriginal('order_created_at'), 'UTC')->timezone(self::REPORT_TIMEZONE)->format('Y-m-d H:i:s'),
+                'subscription_type' => (string) $order->subscription_type,
+                'revenue' => round($revenue, 4),
+                'purchase_cost' => round($purchaseCost, 4),
+                'total_weight_gram' => round($totalWeight, 4),
+                'shipping_cost' => round($shippingCost, 4),
+                'return_fee' => round($isFirst ? $revenue * 0.12 : 0.0, 4),
+                'items' => $items,
+            ];
+        })->all();
+
+        return [
+            'summary' => [
+                'date' => $date,
+                'shop_domain' => $shopDomain,
+                'media_source' => $mediaSource,
+                'order_count' => count($details),
+                'revenue' => round((float) collect($details)->sum('revenue'), 4),
+                'purchase_cost' => round((float) collect($details)->sum('purchase_cost'), 4),
+                'shipping_cost' => round((float) collect($details)->sum('shipping_cost'), 4),
+                'return_fee' => round((float) collect($details)->sum('return_fee'), 4),
+            ],
+            'orders' => $details,
+        ];
+    }
+
     /**
      * @return list<array{media_source:string,first_revenue:float,actual_ad_spend:float,first_roi:?float}>
      */
