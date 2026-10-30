@@ -39,9 +39,9 @@ class OperationReportDashboardController extends Controller
             'operation_department_id' => ['nullable', 'integer'],
             'operator_user_id' => ['nullable', 'integer'],
         ]);
-        $beijingNow = Carbon::now('Asia/Shanghai');
-        $dateFrom = (string) ($validated['date_from'] ?? $beijingNow->copy()->startOfMonth()->format('Y-m-d'));
-        $dateTo = (string) ($validated['date_to'] ?? $beijingNow->copy()->endOfMonth()->format('Y-m-d'));
+        $reportNow = Carbon::now(OperationReportMetricsService::REPORT_TIMEZONE);
+        $dateFrom = (string) ($validated['date_from'] ?? $reportNow->copy()->startOfMonth()->format('Y-m-d'));
+        $dateTo = (string) ($validated['date_to'] ?? $reportNow->copy()->endOfMonth()->format('Y-m-d'));
         abort_if($dateFrom > $dateTo, 422, '开始日期不能晚于结束日期。');
 
         $visibleDepartmentIds = $this->assistantStoreOwners->visibleOperationDepartmentIds($context['user']);
@@ -124,7 +124,53 @@ class OperationReportDashboardController extends Controller
         foreach ($operators as $operator) {
             $calculatedRows = collect($calculatedByOperator[(int) $operator->getKey()]['rows'] ?? []);
             $operationDepartment = $operatorDepartments->get((int) $operator->getKey());
-            foreach ($calculatedRows->groupBy('date') as $rowDate => $dateRows) {
+            $calculatedRowsByDate = $calculatedRows->groupBy('date');
+
+            // A report with approved advertising spend is itself a valid daily report row,
+            // even when the operator did not place any orders on that date.
+            $approvedReportDates = $allReports
+                ->where('status', OperationReport::STATUS_APPROVED)
+                ->where('operator_user_id', (int) $operator->getKey())
+                ->map(fn (OperationReport $report) => $report->report_date->format('Y-m-d'));
+            if ($operationDepartment) {
+                $operatorNameKey = (int) $operationDepartment->getKey().'|'.$this->normalizeOperatorName((string) ($operator->name ?: $operator->username));
+                if ((int) $operatorFallbackNameCounts->get($operatorNameKey, 0) === 1) {
+                    $approvedReportDates = $approvedReportDates->merge(
+                        $allReports
+                            ->where('status', OperationReport::STATUS_APPROVED)
+                            ->where('operation_department_id', (int) $operationDepartment->getKey())
+                            ->filter(fn (OperationReport $report) =>
+                                $this->normalizeOperatorName((string) $report->operator_name)
+                                    === $this->normalizeOperatorName((string) ($operator->name ?: $operator->username))
+                            )
+                            ->map(fn (OperationReport $report) => $report->report_date->format('Y-m-d'))
+                    );
+                }
+            }
+            foreach ($approvedReportDates->unique() as $approvedReportDate) {
+                if (! $calculatedRowsByDate->has($approvedReportDate)) {
+                    $calculatedRowsByDate->put($approvedReportDate, collect([$this->emptyMetricRow(
+                        $approvedReportDate,
+                        (string) ($operator->name ?: $operator->username),
+                    )]));
+                }
+            }
+            if ($selectedOperatorId !== null) {
+                $cursor = Carbon::createFromFormat('Y-m-d', $dateFrom);
+                $lastDate = Carbon::createFromFormat('Y-m-d', $dateTo);
+                while ($cursor->lte($lastDate)) {
+                    $emptyDate = $cursor->format('Y-m-d');
+                    if (! $calculatedRowsByDate->has($emptyDate)) {
+                        $calculatedRowsByDate->put($emptyDate, collect([$this->emptyMetricRow(
+                            $emptyDate,
+                            (string) ($operator->name ?: $operator->username),
+                        )]));
+                    }
+                    $cursor->addDay();
+                }
+            }
+            $calculatedRowsByDate = $calculatedRowsByDate->sortKeys();
+            foreach ($calculatedRowsByDate as $rowDate => $dateRows) {
                 $report = $reportsByOperatorDate->get((int) $operator->getKey().'|'.$rowDate);
                 if (! $report && $operationDepartment) {
                     $fallbackKey = implode('|', [
@@ -140,6 +186,21 @@ class OperationReportDashboardController extends Controller
                     }
                 }
                 $approvedReport = $report?->status === OperationReport::STATUS_APPROVED ? $report : null;
+                $isEmptyOrderDay = (int) $dateRows->sum('total_orders') === 0
+                    && $dateRows->every(fn (array $row) => ($row['shop_domain'] ?? '—') === '—');
+                if ($isEmptyOrderDay && $approvedReport) {
+                    $advertisingMedia = collect($approvedReport->advertising_rows ?: [])
+                        ->map(fn (array $row) => trim((string) ($row['media_source'] ?? '')) ?: '其他')
+                        ->unique(fn (string $media) => mb_strtolower($media))
+                        ->values();
+                    if ($advertisingMedia->isNotEmpty()) {
+                        $dateRows = $advertisingMedia->map(fn (string $media) => $this->emptyMetricRow(
+                            (string) $rowDate,
+                            (string) ($operator->name ?: $operator->username),
+                            $media,
+                        ));
+                    }
+                }
                 $mediaMetrics = collect($this->metrics->mediaRoiSummary(
                     $dateRows->values()->all(),
                     $approvedReport?->advertising_rows ?: [],
@@ -147,6 +208,29 @@ class OperationReportDashboardController extends Controller
                 $revenueByMedia = $dateRows->groupBy(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? '其他'))))
                     ->map(fn ($items) => (float) $items->sum('first_total_revenue'));
                 $reportFirstRevenue = (float) $dateRows->sum('first_total_revenue');
+                $reportFirstCost = (float) $dateRows->sum(fn (array $row) =>
+                    (float) ($row['first_purchase_cost'] ?? 0)
+                    + (float) ($row['first_shipping_cost'] ?? 0)
+                    + (float) ($row['first_return_fee'] ?? 0)
+                );
+                $reportActualAdSpend = (float) ($approvedReport?->actual_ad_spend ?? 0);
+                $reportFirstProfit = $reportFirstRevenue - $reportActualAdSpend - $reportFirstCost;
+                $dailyMediaNames = $dateRows->pluck('media_source')
+                    ->map(fn ($media) => trim((string) $media) ?: '其他')->unique()->values();
+                $dailySummary = [
+                    'daily_first_total_orders' => (int) $dateRows->sum('first_total_orders'),
+                    'daily_first_total_revenue' => $reportFirstRevenue,
+                    'daily_first_total_cost' => $reportFirstCost,
+                    'daily_first_loss_rate' => $reportFirstCost > 0 ? $reportFirstProfit / $reportFirstCost : null,
+                    'daily_media_names' => $dailyMediaNames->all(),
+                    'daily_media_rois' => $dailyMediaNames->map(function (string $media) use ($mediaMetrics): ?float {
+                        $metric = $mediaMetrics->get(mb_strtolower($media));
+                        return isset($metric['first_roi']) ? (float) $metric['first_roi'] : null;
+                    })->all(),
+                    'daily_first_roi' => $reportActualAdSpend > 0 ? $reportFirstRevenue / $reportActualAdSpend : null,
+                    'daily_renewal_orders' => (int) $dateRows->sum('renewal_orders'),
+                    'daily_renewal_revenue' => (float) $dateRows->sum('renewal_revenue'),
+                ];
 
                 foreach ($dateRows as $row) {
                 $mediaKey = mb_strtolower(trim((string) ($row['media_source'] ?? '其他')));
@@ -154,12 +238,12 @@ class OperationReportDashboardController extends Controller
                 $mediaRevenue = (float) ($revenueByMedia->get($mediaKey) ?? 0);
                 $allocatedSpend = $mediaRevenue > 0
                     ? $mediaSpend * (float) ($row['first_total_revenue'] ?? 0) / $mediaRevenue
-                    : 0.0;
+                    : ($isEmptyOrderDay ? $mediaSpend : 0.0);
                 $totalCost = (float) ($row['first_purchase_cost'] ?? 0)
                     + (float) ($row['first_shipping_cost'] ?? 0)
                     + (float) ($row['first_return_fee'] ?? 0);
                 $profit = (float) ($row['first_total_revenue'] ?? 0) - $allocatedSpend - $totalCost;
-                $rows[] = array_merge($row, [
+                $rows[] = array_merge($row, $dailySummary, [
                     '_report_id' => $operator->getKey().'|'.$rowDate,
                     'operator_user_id' => (int) $operator->getKey(),
                     'date' => (string) $rowDate,
@@ -180,7 +264,8 @@ class OperationReportDashboardController extends Controller
                 }
             }
         }
-        usort($rows, fn (array $a, array $b) => [$a['date'], $a['operation_department_name'], $a['operator_name'], $a['shop_domain'], $a['media_source']] <=> [$b['date'], $b['operation_department_name'], $b['operator_name'], $b['shop_domain'], $b['media_source']]);
+        $rows = $this->aggregateRangeRows($rows, $dateFrom, $dateTo);
+        usort($rows, fn (array $a, array $b) => [$a['operation_department_name'], $a['operator_name']] <=> [$b['operation_department_name'], $b['operator_name']]);
 
         $approvedAdSpend = (float) $allReports->where('status', OperationReport::STATUS_APPROVED)->sum('actual_ad_spend');
         $totals = $this->totals($rows, $approvedAdSpend);
@@ -198,6 +283,7 @@ class OperationReportDashboardController extends Controller
             'totals' => $totals,
             'identityRowspans' => $this->identityRowspans($rows),
             'reportRowspans' => $this->reportRowspans($rows),
+            'reportBands' => $this->reportBands($rows),
         ]);
     }
 
@@ -258,6 +344,100 @@ class OperationReportDashboardController extends Controller
         return mb_strtolower((string) preg_replace('/[\s　]+/u', '', trim($value)));
     }
 
+    private function emptyMetricRow(string $date, string $operatorName, string $mediaSource = '—'): array
+    {
+        return [
+            'date' => $date,
+            'operator_name' => $operatorName,
+            'shop_domain' => '—',
+            'media_source' => $mediaSource,
+            'first_subscription_orders' => 0,
+            'first_subscription_revenue' => 0.0,
+            'first_normal_orders' => 0,
+            'first_normal_revenue' => 0.0,
+            'first_total_orders' => 0,
+            'first_total_revenue' => 0.0,
+            'first_purchase_cost' => 0.0,
+            'first_shipping_cost' => 0.0,
+            'first_return_fee' => 0.0,
+            'renewal_orders' => 0,
+            'renewal_revenue' => 0.0,
+            'renewal_cost' => 0.0,
+            'total_orders' => 0,
+            'total_revenue' => 0.0,
+        ];
+    }
+
+    /** @param list<array<string,mixed>> $rows
+     *  @return list<array<string,mixed>>
+     */
+    private function aggregateRangeRows(array $rows, string $dateFrom, string $dateTo): array
+    {
+        $sumFields = [
+            'first_subscription_orders', 'first_subscription_revenue',
+            'first_normal_orders', 'first_normal_revenue',
+            'first_total_orders', 'first_total_revenue',
+            'first_purchase_cost', 'first_shipping_cost', 'first_return_fee',
+            'renewal_orders', 'renewal_revenue', 'renewal_cost',
+            'total_orders', 'total_revenue',
+        ];
+
+        return collect($rows)->groupBy('operator_user_id')->map(function ($operatorRows) use ($sumFields, $dateFrom, $dateTo): array {
+            $first = $operatorRows->first();
+            $row = collect($sumFields)->mapWithKeys(
+                fn (string $field) => [$field => (float) $operatorRows->sum($field)]
+            )->all();
+            $reportRows = $operatorRows->unique('_report_id');
+            $hasApprovedReport = $reportRows->contains(
+                fn (array $item) => ($item['report_actual_ad_spend'] ?? null) !== null
+            );
+            $actualAdSpend = (float) $reportRows->sum(fn (array $item) => (float) ($item['report_actual_ad_spend'] ?? 0));
+            $firstCost = (float) $row['first_purchase_cost']
+                + (float) $row['first_shipping_cost']
+                + (float) $row['first_return_fee'];
+            $firstProfit = (float) $row['first_total_revenue'] - $actualAdSpend - $firstCost;
+            $mediaRows = $operatorRows->groupBy(fn (array $item) => mb_strtolower(trim((string) ($item['media_source'] ?? '其他'))));
+            $mediaNames = [];
+            $mediaRois = [];
+            foreach ($mediaRows as $items) {
+                $mediaName = trim((string) ($items->first()['media_source'] ?? '')) ?: '其他';
+                if ($mediaName === '—') continue;
+                $mediaRevenue = (float) $items->sum('first_total_revenue');
+                $mediaSpend = (float) $items->sum('allocated_actual_ad_spend');
+                $mediaNames[] = $mediaName;
+                $mediaRois[] = $mediaSpend > 0 ? $mediaRevenue / $mediaSpend : null;
+            }
+
+            return array_merge($row, [
+                '_report_id' => (int) $first['operator_user_id'].'|'.$dateFrom.'|'.$dateTo,
+                'operator_user_id' => (int) $first['operator_user_id'],
+                'date' => $dateFrom === $dateTo ? $dateFrom : $dateFrom.' 至 '.$dateTo,
+                'operator_name' => (string) $first['operator_name'],
+                'operation_department_name' => (string) $first['operation_department_name'],
+                'shop_domain' => '—',
+                'media_source' => '汇总',
+                'media_roi' => null,
+                'allocated_actual_ad_spend' => $actualAdSpend,
+                'first_total_cost' => $firstCost,
+                'first_profit' => $firstProfit,
+                'first_loss_rate' => $firstCost > 0 ? $firstProfit / $firstCost : null,
+                'daily_first_total_orders' => (int) $row['first_total_orders'],
+                'daily_first_total_revenue' => (float) $row['first_total_revenue'],
+                'daily_first_total_cost' => $firstCost,
+                'daily_first_loss_rate' => $firstCost > 0 ? $firstProfit / $firstCost : null,
+                'daily_media_names' => $mediaNames,
+                'daily_media_rois' => $mediaRois,
+                'daily_first_roi' => $actualAdSpend > 0 ? (float) $row['first_total_revenue'] / $actualAdSpend : null,
+                'daily_renewal_orders' => (int) $row['renewal_orders'],
+                'daily_renewal_revenue' => (float) $row['renewal_revenue'],
+                'submission_status' => $hasApprovedReport ? OperationReport::STATUS_APPROVED : null,
+                'submission_status_label' => $hasApprovedReport ? '已提报' : '未提报',
+                'report_actual_ad_spend' => $actualAdSpend,
+                'report_first_roi' => $actualAdSpend > 0 ? (float) $row['first_total_revenue'] / $actualAdSpend : null,
+            ]);
+        })->values()->all();
+    }
+
     private function identityRowspans(array $rows): array
     {
         return $this->rowspans($rows, fn (array $row) => implode("\x1F", [$row['_report_id'], $row['shop_domain']]));
@@ -266,6 +446,23 @@ class OperationReportDashboardController extends Controller
     private function reportRowspans(array $rows): array
     {
         return $this->rowspans($rows, fn (array $row) => (string) $row['_report_id']);
+    }
+
+    private function reportBands(array $rows): array
+    {
+        $bands = [];
+        $lastReport = null;
+        $band = 1;
+        foreach ($rows as $index => $row) {
+            $report = (string) $row['_report_id'];
+            if ($report !== $lastReport) {
+                $band = $band === 0 ? 1 : 0;
+                $lastReport = $report;
+            }
+            $bands[$index] = $band;
+        }
+
+        return $bands;
     }
 
     private function rowspans(array $rows, callable $keyFor): array

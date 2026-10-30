@@ -49,9 +49,9 @@ class OperationReportController extends Controller
             'date_to' => ['nullable', 'date_format:Y-m-d'],
             'operator_user_id' => ['nullable', 'integer'],
         ]);
-        $beijingNow = Carbon::now('Asia/Shanghai');
-        $dateFrom = (string) ($validated['date_from'] ?? $beijingNow->copy()->startOfMonth()->format('Y-m-d'));
-        $dateTo = (string) ($validated['date_to'] ?? $beijingNow->copy()->endOfMonth()->format('Y-m-d'));
+        $reportNow = Carbon::now(OperationReportMetricsService::REPORT_TIMEZONE);
+        $dateFrom = (string) ($validated['date_from'] ?? $reportNow->copy()->startOfMonth()->format('Y-m-d'));
+        $dateTo = (string) ($validated['date_to'] ?? $reportNow->copy()->endOfMonth()->format('Y-m-d'));
         abort_if($dateFrom > $dateTo, 422, '开始日期不能晚于结束日期。');
         $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
         $operatorId = $isBoss
@@ -81,6 +81,38 @@ class OperationReportController extends Controller
             return [$report->report_date->format('Y-m-d') => $rows];
         })->all();
         $metricRows = $this->withFirstOrderProfitability($calculated['rows'], $submittedMediaRoiByDate);
+        usort($metricRows, fn (array $left, array $right): int => [
+            $left['date'],
+            mb_strtolower(trim((string) $left['media_source'])),
+            mb_strtolower(trim((string) $left['shop_domain'])),
+        ] <=> [
+            $right['date'],
+            mb_strtolower(trim((string) $right['media_source'])),
+            mb_strtolower(trim((string) $right['shop_domain'])),
+        ]);
+        $dailySummaries = collect($metricRows)->groupBy('date')->map(function ($dateRows, string $date) use ($submittedReportsByDate, $submittedMediaRoiByDate): array {
+            $firstRevenue = (float) $dateRows->sum('first_total_revenue');
+            $firstCost = (float) $dateRows->sum('first_total_cost');
+            $actualAdSpend = (float) ($submittedReportsByDate->get($date)?->actual_ad_spend ?? 0);
+            $firstProfit = $firstRevenue - $actualAdSpend - $firstCost;
+            $mediaNames = $dateRows->pluck('media_source')->map(fn ($media) => trim((string) $media) ?: '其他')->unique()->values();
+
+            return [
+                'first_total_orders' => (int) $dateRows->sum('first_total_orders'),
+                'first_total_revenue' => $firstRevenue,
+                'first_total_cost' => $firstCost,
+                'first_loss_rate' => $firstCost > 0 ? $firstProfit / $firstCost : null,
+                'media_names' => $mediaNames->all(),
+                'media_rois' => $mediaNames->map(function (string $media) use ($date, $submittedMediaRoiByDate): ?float {
+                    $metric = $submittedMediaRoiByDate[$date][mb_strtolower($media)] ?? null;
+                    return isset($metric['first_roi']) ? (float) $metric['first_roi'] : null;
+                })->all(),
+                'first_roi' => $actualAdSpend > 0 ? $firstRevenue / $actualAdSpend : null,
+                'actual_ad_spend' => $actualAdSpend,
+                'renewal_orders' => (int) $dateRows->sum('renewal_orders'),
+                'renewal_revenue' => (float) $dateRows->sum('renewal_revenue'),
+            ];
+        })->all();
         $metricTotals = $this->sumRows($metricRows);
         $metricTotals['first_total_cost'] = (float) $metricTotals['first_purchase_cost']
             + (float) $metricTotals['first_shipping_cost']
@@ -103,8 +135,11 @@ class OperationReportController extends Controller
             'metricRows' => $metricRows,
             'metricTotals' => $metricTotals,
             'metricRowspans' => $this->identityRowspans($metricRows),
+            'metricPersonRowspans' => $this->personRowspans($metricRows),
+            'metricMediaRowspans' => $this->mediaRowspans($metricRows),
             'metricDateRowspans' => $this->dateRowspans($metricRows),
             'metricDateBands' => $this->dateBands($metricRows),
+            'dailySummaries' => $dailySummaries,
             'warnings' => $calculated['warnings'],
             'submittedReports' => $submittedReports,
             'submittedReportsByDate' => $submittedReportsByDate,
@@ -727,6 +762,56 @@ class OperationReportController extends Controller
             while ($index + $span < $count && $key === [$rows[$index + $span]['date'], $rows[$index + $span]['operator_name'], $rows[$index + $span]['shop_domain']]) $span++;
             $spans[$index] = $span;
         }
+        return $spans;
+    }
+
+    private function personRowspans(array $rows): array
+    {
+        $spans = [];
+        for ($index = 0, $count = count($rows); $index < $count; $index++) {
+            $key = [$rows[$index]['date'], $rows[$index]['operator_name']];
+            if ($index > 0 && $key === [$rows[$index - 1]['date'], $rows[$index - 1]['operator_name']]) {
+                $spans[$index] = 0;
+                continue;
+            }
+
+            $span = 1;
+            while ($index + $span < $count && $key === [$rows[$index + $span]['date'], $rows[$index + $span]['operator_name']]) $span++;
+            $spans[$index] = $span;
+        }
+
+        return $spans;
+    }
+
+    private function mediaRowspans(array $rows): array
+    {
+        $spans = [];
+        for ($index = 0, $count = count($rows); $index < $count; $index++) {
+            $key = [
+                $rows[$index]['date'],
+                $rows[$index]['operator_name'],
+                mb_strtolower(trim((string) $rows[$index]['media_source'])),
+            ];
+            $previousKey = $index > 0 ? [
+                $rows[$index - 1]['date'],
+                $rows[$index - 1]['operator_name'],
+                mb_strtolower(trim((string) $rows[$index - 1]['media_source'])),
+            ] : null;
+            if ($key === $previousKey) {
+                $spans[$index] = 0;
+                continue;
+            }
+
+            $span = 1;
+            while ($index + $span < $count) {
+                $next = $rows[$index + $span];
+                $nextKey = [$next['date'], $next['operator_name'], mb_strtolower(trim((string) $next['media_source']))];
+                if ($key !== $nextKey) break;
+                $span++;
+            }
+            $spans[$index] = $span;
+        }
+
         return $spans;
     }
 
