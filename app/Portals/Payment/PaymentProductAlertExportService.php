@@ -127,11 +127,11 @@ class PaymentProductAlertExportService
 
         $sheet->mergeCells('A1:E1');
         $sheet->mergeCells('F1:S1');
-        $sheet->mergeCells('T1:AE1');
+        $sheet->mergeCells('T1:AC1');
         $sheet->setCellValue('A1', __('payment.product_risk_profit.export.groups.product'));
         $sheet->setCellValue('F1', __('payment.product_risk_profit.export.groups.paypal'));
         $sheet->setCellValue('T1', __('payment.product_risk_profit.export.groups.credit_card'));
-        $sheet->setCellValue('AF1', __('payment.product_risk_profit.export.groups.result'));
+        $sheet->setCellValue('AD1', __('payment.product_risk_profit.export.groups.result'));
 
         $headers = __('payment.product_risk_profit.export.columns');
         foreach (array_values($headers) as $index => $label) {
@@ -164,8 +164,6 @@ class PaymentProductAlertExportService
                 (int) ($row['card_complaint_count'] ?? 0),
                 (float) ($row['card_dispute_rate'] ?? 0) / 100,
                 (int) ($row['card_dispute_count'] ?? 0),
-                (float) ($row['card_dispute_rate'] ?? 0) / 100,
-                (float) ($row['card_dispute_rate'] ?? 0) / 100,
                 (int) ($row['credit_card_delivered_dispute_count'] ?? 0),
                 (int) ($row['credit_card_delivered_order_count'] ?? 0),
                 (float) ($row['credit_card_delivered_dispute_rate'] ?? 0) / 100,
@@ -180,7 +178,7 @@ class PaymentProductAlertExportService
             foreach ($values as $index => $value) {
                 $column = $index + 1;
                 $coordinate = Coordinate::stringFromColumnIndex($column).$rowNumber;
-                if ($column <= 2 || $column === 5 || $column === 32) {
+                if ($column <= 2 || $column === 5 || $column === 30) {
                     $sheet->setCellValueExplicit($coordinate, (string) $value, DataType::TYPE_STRING);
                 } else {
                     $sheet->setCellValue($coordinate, $value);
@@ -198,24 +196,31 @@ class PaymentProductAlertExportService
         }
 
         $lastRow = max(2, $rowNumber - 1);
-        $sheet->setAutoFilter("A2:AF{$lastRow}");
-        $sheet->getStyle("A1:AF2")->getFont()->setBold(true)->getColor()->setRGB('17365D');
-        $sheet->getStyle('A1:AF1')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('DCE6F1');
-        $sheet->getStyle('A2:AF2')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('EAF2F8');
-        $sheet->getStyle("A1:AF{$lastRow}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('D9E2F3');
-        $sheet->getStyle("A1:AF{$lastRow}")->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
-        $sheet->getStyle('A1:AF2')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setWrapText(true);
+        $sheet->setAutoFilter("A2:AD{$lastRow}");
+        $sheet->getStyle('A1:AD2')->getFont()->setBold(true)->getColor()->setRGB('17365D');
+        foreach ([
+            ['A1:E1', 'D9EAF7'], ['F1:S1', 'CFE8FF'], ['T1:AC1', 'E8DDF8'], ['AD1:AD1', 'FFF2CC'],
+            ['A2:E2', 'EAF3F8'], ['F2:S2', 'E7F3FF'], ['T2:AC2', 'F2ECFA'], ['AD2:AD2', 'FFF8E1'],
+        ] as [$range, $colour]) {
+            $sheet->getStyle($range)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB($colour);
+        }
+        $sheet->getStyle('F1:S1')->getFont()->getColor()->setRGB('1F4E78');
+        $sheet->getStyle('T1:AC1')->getFont()->getColor()->setRGB('7030A0');
+        $sheet->getStyle('AD1:AD2')->getFont()->getColor()->setRGB('9C6500');
+        $sheet->getStyle("A1:AD{$lastRow}")->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN)->getColor()->setRGB('D9E2F3');
+        $sheet->getStyle("A1:AD{$lastRow}")->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
+        $sheet->getStyle('A1:AD2')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setWrapText(true);
         if ($lastRow >= 3) {
             $sheet->getStyle("C3:D{$lastRow}")->getNumberFormat()->setFormatCode('#,##0');
-            foreach (['G', 'N', 'O', 'T', 'U', 'W', 'Z', 'AA'] as $column) $sheet->getStyle("{$column}3:{$column}{$lastRow}")->getNumberFormat()->setFormatCode('#,##0');
-            foreach (['F', 'H', 'K', 'Q', 'R', 'AC', 'AD'] as $column) $sheet->getStyle("{$column}3:{$column}{$lastRow}")->getNumberFormat()->setFormatCode('$#,##0.00');
-            foreach (['I', 'J', 'L', 'M', 'P', 'S', 'V', 'X', 'Y', 'AB', 'AE'] as $column) $sheet->getStyle("{$column}3:{$column}{$lastRow}")->getNumberFormat()->setFormatCode('0.00%');
-            $sheet->getStyle("A3:AF{$lastRow}")->getAlignment()->setWrapText(false);
+            foreach (['G', 'N', 'O', 'T', 'U', 'W', 'X', 'Y'] as $column) $sheet->getStyle("{$column}3:{$column}{$lastRow}")->getNumberFormat()->setFormatCode('#,##0');
+            foreach (['F', 'H', 'K', 'Q', 'R', 'AA', 'AB'] as $column) $sheet->getStyle("{$column}3:{$column}{$lastRow}")->getNumberFormat()->setFormatCode('$#,##0.00');
+            foreach (['I', 'J', 'L', 'M', 'P', 'S', 'V', 'Z', 'AC'] as $column) $sheet->getStyle("{$column}3:{$column}{$lastRow}")->getNumberFormat()->setFormatCode('0.00%');
+            $sheet->getStyle("A3:AD{$lastRow}")->getAlignment()->setWrapText(false);
         }
 
         foreach (range('A', 'Z') as $column) $sheet->getColumnDimension($column)->setWidth(16);
-        foreach (['AA', 'AB', 'AC', 'AD', 'AE', 'AF'] as $column) $sheet->getColumnDimension($column)->setWidth(16);
-        foreach (['A' => 24, 'B' => 34, 'E' => 18, 'AF' => 14] as $column => $width) {
+        foreach (['AA', 'AB', 'AC', 'AD'] as $column) $sheet->getColumnDimension($column)->setWidth(16);
+        foreach (['A' => 24, 'B' => 34, 'E' => 18, 'AD' => 14] as $column => $width) {
             $sheet->getColumnDimension($column)->setWidth($width);
         }
         $sheet->getRowDimension(1)->setRowHeight(24);
