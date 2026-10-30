@@ -12,6 +12,7 @@ use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Operation\OperationReportMetricsService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Illuminate\Support\Facades\Cache;
@@ -118,6 +119,7 @@ class OperationReportDashboardController extends Controller
                 $profit = (float) ($row['first_total_revenue'] ?? 0) - $allocatedSpend - $totalCost;
                 $rows[] = array_merge($row, [
                     '_report_id' => $operator->getKey().'|'.$rowDate,
+                    'operator_user_id' => (int) $operator->getKey(),
                     'date' => (string) $rowDate,
                     'operator_name' => (string) ($operator->name ?: $operator->username),
                     'operation_department_name' => (string) ($operationDepartment?->name ?: $report?->operation_department_name ?: '未填写部门'),
@@ -156,6 +158,37 @@ class OperationReportDashboardController extends Controller
             'identityRowspans' => $this->identityRowspans($rows),
             'reportRowspans' => $this->reportRowspans($rows),
         ]);
+    }
+
+    public function orderDetails(Request $request): Response|JsonResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+        $validated = $request->validate([
+            'date' => ['required', 'date_format:Y-m-d'],
+            'operator_user_id' => ['required', 'integer'],
+            'shop_domain' => ['required', 'string', 'max:255'],
+            'media_source' => ['required', 'string', 'max:100'],
+            'type' => ['required', Rule::in(['first_subscription', 'first_normal', 'first_total', 'renewal', 'total'])],
+            'page' => ['nullable', 'integer', 'min:1'],
+            'per_page' => ['nullable', 'integer', Rule::in([10, 20, 50])],
+        ]);
+        $visibleDepartmentIds = $this->assistantStoreOwners->visibleOperationDepartmentIds($context['user']);
+        $canViewOperator = AdminUser::query()
+            ->whereKey((int) $validated['operator_user_id'])
+            ->whereHas('departments', fn ($query) => $query->whereIn('admin_roles.id', $visibleDepartmentIds))
+            ->exists();
+        abort_unless($canViewOperator, 403);
+
+        return response()->json($this->metrics->orderDetails(
+            $validated['date'],
+            (int) $validated['operator_user_id'],
+            trim($validated['shop_domain']),
+            trim($validated['media_source']),
+            $validated['type'],
+            (int) ($validated['page'] ?? 1),
+            (int) ($validated['per_page'] ?? 10),
+        ));
     }
 
     private function context(Request $request): array|Response

@@ -87,6 +87,7 @@ Route::delete('/operation/advertising-reports/{report}', [OperationReportControl
 Route::get('/operation/reports/{report}', [OperationReportController::class, 'show'])->whereNumber('report')->name('operation.reports.show');
 Route::post('/operation/reports/{report}/approve', [OperationReportController::class, 'approve'])->name('operation.reports.approve');
 Route::get('/assistant/operation-reports', [OperationReportDashboardController::class, 'index'])->name('assistant.operation-reports.index');
+Route::get('/assistant/operation-reports/order-details', [OperationReportDashboardController::class, 'orderDetails'])->name('assistant.operation-reports.order-details');
 Route::get('/operation-report-reviews', [OperationReportReviewController::class, 'index'])->name('assistant.operation-report-reviews.index');
 Route::get('/operation-report-reviews/screenshot', [OperationReportReviewController::class, 'screenshot'])->name('assistant.operation-report-reviews.screenshot');
 Route::get('/operation-report-reviews/{report}', [OperationReportReviewController::class, 'show'])->whereNumber('report')->name('assistant.operation-report-reviews.show');
