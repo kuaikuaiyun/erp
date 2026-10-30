@@ -70,9 +70,6 @@ class OperationReportDashboardController extends Controller
             ->whereBetween('report_date', [$dateFrom, $dateTo])
             ->orderBy('id')
             ->get();
-        $reportsByOperatorDate = $allReports->keyBy(
-            fn (OperationReport $report) => $report->operator_user_id.'|'.$report->report_date->format('Y-m-d')
-        );
         $operatorDepartmentIds = $selectedDepartmentId !== null ? [$selectedDepartmentId] : $visibleDepartmentIds;
         $operators = AdminUser::query()
             ->where('status', AdminUser::STATUS_ACTIVE)
@@ -91,6 +88,11 @@ class OperationReportDashboardController extends Controller
             $operators = $operators->where('id', $selectedOperatorId)->values();
         }
         $operatorIds = $operators->pluck('id')->map(fn ($id) => (int) $id)->values();
+        // 广告费始终跟随当前运营筛选范围；待审核或驳回记录只用于显示状态，不参与任何金额和 ROI 计算。
+        $allReports = $allReports->whereIn('operator_user_id', $operatorIds->all())->values();
+        $reportsByOperatorDate = $allReports->keyBy(
+            fn (OperationReport $report) => $report->operator_user_id.'|'.$report->report_date->format('Y-m-d')
+        );
         $cacheKey = 'assistant-operation-report:'.$dateFrom.':'.$dateTo.':'.sha1($operatorIds->implode(','));
         $calculatedByOperator = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($operatorIds, $dateFrom, $dateTo): array {
             $calculated = [];
