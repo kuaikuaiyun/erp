@@ -402,8 +402,14 @@ class OperationReportMetricsService
     /** @return array{summary:array<string,float|int|string>,orders:list<array<string,mixed>>,pagination:array<string,int>} */
     public function orderDetails(string $date, int $operatorUserId, string $shopDomain, string $mediaSource, string $type, int $page = 1, int $perPage = 10): array
     {
-        $start = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 00:00:00', self::REPORT_TIMEZONE)->utc();
-        $end = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 23:59:59', self::REPORT_TIMEZONE)->utc();
+        return $this->orderDetailsRange($date, $date, $operatorUserId, $type, $page, $perPage, $shopDomain, $mediaSource);
+    }
+
+    /** @return array{summary:array<string,float|int|string>,orders:list<array<string,mixed>>,pagination:array<string,int>} */
+    public function orderDetailsRange(string $dateFrom, string $dateTo, int $operatorUserId, string $type, int $page = 1, int $perPage = 10, ?string $shopDomain = null, ?string $mediaSource = null): array
+    {
+        $start = Carbon::createFromFormat('Y-m-d H:i:s', $dateFrom.' 00:00:00', self::REPORT_TIMEZONE)->utc();
+        $end = Carbon::createFromFormat('Y-m-d H:i:s', $dateTo.' 23:59:59', self::REPORT_TIMEZONE)->utc();
         $operator = AdminUser::query()->find($operatorUserId);
         $operatorUsers = $operator ? collect([$operator]) : collect();
         $operatorIdentityMap = $this->operatorIdentityMap($operatorUsers);
@@ -421,7 +427,8 @@ class OperationReportMetricsService
                 if ($this->resolveOperatorId($order, $operatorIdentityMap, [$operatorUserId]) !== $operatorUserId) return false;
                 $domain = trim((string) ($order->store?->domain ?: $order->source_shop_domain ?: $order->store_name ?: '未知店铺'));
                 $media = trim((string) ($order->media_source ?: LogisticsOrder::MEDIA_SOURCE_OTHER));
-                if ($domain !== $shopDomain || $media !== $mediaSource) return false;
+                if ($shopDomain !== null && $domain !== $shopDomain) return false;
+                if ($mediaSource !== null && $media !== $mediaSource) return false;
 
                 $subscriptionType = (string) $order->subscription_type;
                 return match ($type) {
@@ -515,9 +522,9 @@ class OperationReportMetricsService
 
         return [
             'summary' => [
-                'date' => $date,
-                'shop_domain' => $shopDomain,
-                'media_source' => $mediaSource,
+                'date' => $dateFrom === $dateTo ? $dateFrom : $dateFrom.' 至 '.$dateTo,
+                'shop_domain' => $shopDomain ?? '全部店铺',
+                'media_source' => $mediaSource ?? '全部媒体',
                 'order_count' => count($details),
                 'revenue' => round((float) collect($details)->sum('revenue'), 4),
                 'purchase_cost' => round((float) collect($details)->sum('purchase_cost'), 4),

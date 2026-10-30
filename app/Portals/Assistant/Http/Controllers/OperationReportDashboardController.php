@@ -292,10 +292,9 @@ class OperationReportDashboardController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
         $validated = $request->validate([
-            'date' => ['required', 'date_format:Y-m-d'],
+            'date_from' => ['required', 'date_format:Y-m-d'],
+            'date_to' => ['required', 'date_format:Y-m-d', 'after_or_equal:date_from'],
             'operator_user_id' => ['required', 'integer'],
-            'shop_domain' => ['required', 'string', 'max:255'],
-            'media_source' => ['required', 'string', 'max:100'],
             'type' => ['required', Rule::in(['first_subscription', 'first_normal', 'first_total', 'renewal', 'total'])],
             'page' => ['nullable', 'integer', 'min:1'],
             'per_page' => ['nullable', 'integer', Rule::in([10, 20, 50])],
@@ -307,11 +306,10 @@ class OperationReportDashboardController extends Controller
             ->exists();
         abort_unless($canViewOperator, 403);
 
-        return response()->json($this->metrics->orderDetails(
-            $validated['date'],
+        return response()->json($this->metrics->orderDetailsRange(
+            $validated['date_from'],
+            $validated['date_to'],
             (int) $validated['operator_user_id'],
-            trim($validated['shop_domain']),
-            trim($validated['media_source']),
             $validated['type'],
             (int) ($validated['page'] ?? 1),
             (int) ($validated['per_page'] ?? 10),
@@ -412,6 +410,8 @@ class OperationReportDashboardController extends Controller
                 '_report_id' => (int) $first['operator_user_id'].'|'.$dateFrom.'|'.$dateTo,
                 'operator_user_id' => (int) $first['operator_user_id'],
                 'date' => $dateFrom === $dateTo ? $dateFrom : $dateFrom.' 至 '.$dateTo,
+                'date_from' => $dateFrom,
+                'date_to' => $dateTo,
                 'operator_name' => (string) $first['operator_name'],
                 'operation_department_name' => (string) $first['operation_department_name'],
                 'shop_domain' => '—',
