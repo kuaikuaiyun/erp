@@ -125,6 +125,36 @@ class OperationReportDashboardController extends Controller
             $calculatedRows = collect($calculatedByOperator[(int) $operator->getKey()]['rows'] ?? []);
             $operationDepartment = $operatorDepartments->get((int) $operator->getKey());
             $calculatedRowsByDate = $calculatedRows->groupBy('date');
+
+            // A report with approved advertising spend is itself a valid daily report row,
+            // even when the operator did not place any orders on that date.
+            $approvedReportDates = $allReports
+                ->where('status', OperationReport::STATUS_APPROVED)
+                ->where('operator_user_id', (int) $operator->getKey())
+                ->map(fn (OperationReport $report) => $report->report_date->format('Y-m-d'));
+            if ($operationDepartment) {
+                $operatorNameKey = (int) $operationDepartment->getKey().'|'.$this->normalizeOperatorName((string) ($operator->name ?: $operator->username));
+                if ((int) $operatorFallbackNameCounts->get($operatorNameKey, 0) === 1) {
+                    $approvedReportDates = $approvedReportDates->merge(
+                        $allReports
+                            ->where('status', OperationReport::STATUS_APPROVED)
+                            ->where('operation_department_id', (int) $operationDepartment->getKey())
+                            ->filter(fn (OperationReport $report) =>
+                                $this->normalizeOperatorName((string) $report->operator_name)
+                                    === $this->normalizeOperatorName((string) ($operator->name ?: $operator->username))
+                            )
+                            ->map(fn (OperationReport $report) => $report->report_date->format('Y-m-d'))
+                    );
+                }
+            }
+            foreach ($approvedReportDates->unique() as $approvedReportDate) {
+                if (! $calculatedRowsByDate->has($approvedReportDate)) {
+                    $calculatedRowsByDate->put($approvedReportDate, collect([$this->emptyMetricRow(
+                        $approvedReportDate,
+                        (string) ($operator->name ?: $operator->username),
+                    )]));
+                }
+            }
             if ($selectedOperatorId !== null) {
                 $cursor = Carbon::createFromFormat('Y-m-d', $dateFrom);
                 $lastDate = Carbon::createFromFormat('Y-m-d', $dateTo);
@@ -138,8 +168,8 @@ class OperationReportDashboardController extends Controller
                     }
                     $cursor->addDay();
                 }
-                $calculatedRowsByDate = $calculatedRowsByDate->sortKeys();
             }
+            $calculatedRowsByDate = $calculatedRowsByDate->sortKeys();
             foreach ($calculatedRowsByDate as $rowDate => $dateRows) {
                 $report = $reportsByOperatorDate->get((int) $operator->getKey().'|'.$rowDate);
                 if (! $report && $operationDepartment) {
@@ -156,6 +186,21 @@ class OperationReportDashboardController extends Controller
                     }
                 }
                 $approvedReport = $report?->status === OperationReport::STATUS_APPROVED ? $report : null;
+                $isEmptyOrderDay = (int) $dateRows->sum('total_orders') === 0
+                    && $dateRows->every(fn (array $row) => ($row['shop_domain'] ?? '—') === '—');
+                if ($isEmptyOrderDay && $approvedReport) {
+                    $advertisingMedia = collect($approvedReport->advertising_rows ?: [])
+                        ->map(fn (array $row) => trim((string) ($row['media_source'] ?? '')) ?: '其他')
+                        ->unique(fn (string $media) => mb_strtolower($media))
+                        ->values();
+                    if ($advertisingMedia->isNotEmpty()) {
+                        $dateRows = $advertisingMedia->map(fn (string $media) => $this->emptyMetricRow(
+                            (string) $rowDate,
+                            (string) ($operator->name ?: $operator->username),
+                            $media,
+                        ));
+                    }
+                }
                 $mediaMetrics = collect($this->metrics->mediaRoiSummary(
                     $dateRows->values()->all(),
                     $approvedReport?->advertising_rows ?: [],
@@ -193,7 +238,7 @@ class OperationReportDashboardController extends Controller
                 $mediaRevenue = (float) ($revenueByMedia->get($mediaKey) ?? 0);
                 $allocatedSpend = $mediaRevenue > 0
                     ? $mediaSpend * (float) ($row['first_total_revenue'] ?? 0) / $mediaRevenue
-                    : 0.0;
+                    : ($isEmptyOrderDay ? $mediaSpend : 0.0);
                 $totalCost = (float) ($row['first_purchase_cost'] ?? 0)
                     + (float) ($row['first_shipping_cost'] ?? 0)
                     + (float) ($row['first_return_fee'] ?? 0);
@@ -298,13 +343,13 @@ class OperationReportDashboardController extends Controller
         return mb_strtolower((string) preg_replace('/[\s　]+/u', '', trim($value)));
     }
 
-    private function emptyMetricRow(string $date, string $operatorName): array
+    private function emptyMetricRow(string $date, string $operatorName, string $mediaSource = '—'): array
     {
         return [
             'date' => $date,
             'operator_name' => $operatorName,
             'shop_domain' => '—',
-            'media_source' => '—',
+            'media_source' => $mediaSource,
             'first_subscription_orders' => 0,
             'first_subscription_revenue' => 0.0,
             'first_normal_orders' => 0,
