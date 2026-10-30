@@ -108,6 +108,7 @@ class OperationReportController extends Controller
                     return isset($metric['first_roi']) ? (float) $metric['first_roi'] : null;
                 })->all(),
                 'first_roi' => $actualAdSpend > 0 ? $firstRevenue / $actualAdSpend : null,
+                'actual_ad_spend' => $actualAdSpend,
                 'renewal_orders' => (int) $dateRows->sum('renewal_orders'),
                 'renewal_revenue' => (float) $dateRows->sum('renewal_revenue'),
             ];
