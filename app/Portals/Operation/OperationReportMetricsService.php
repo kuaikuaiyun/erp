@@ -168,14 +168,21 @@ class OperationReportMetricsService
     {
         $start = Carbon::createFromFormat('Y-m-d H:i:s', $dateFrom.' 00:00:00', self::REPORT_TIMEZONE)->utc();
         $end = Carbon::createFromFormat('Y-m-d H:i:s', $dateTo.' 23:59:59', self::REPORT_TIMEZONE)->utc();
+        $operator = AdminUser::query()->find($operatorUserId);
+        $operatorUsers = $operator ? collect([$operator]) : collect();
+        $operatorIdentityMap = $this->operatorIdentityMap($operatorUsers);
+        $operatorSearchValues = $this->operatorSearchValues($operatorUsers);
         $orders = LogisticsOrder::query()
             ->with(['items', 'store'])
             ->whereBetween('order_created_at', [$start, $end])
-            ->whereHas('store', fn ($query) => $query->where('owner_user_id', $operatorUserId))
+            ->where(function ($query) use ($operatorUserId, $operatorSearchValues): void {
+                $query->whereHas('store', fn ($store) => $store->where('owner_user_id', $operatorUserId));
+                if ($operatorSearchValues !== []) $query->orWhereIn('operator_name', $operatorSearchValues);
+            })
             ->orderBy('order_created_at')
-            ->get();
-
-        $operator = AdminUser::query()->find($operatorUserId);
+            ->get()
+            ->filter(fn (LogisticsOrder $order): bool => $this->resolveOperatorId($order, $operatorIdentityMap, [$operatorUserId]) === $operatorUserId)
+            ->values();
         $operatorName = (string) ($operator?->name ?: $operator?->username ?: '未分配');
 
         $mappingIds = $orders->flatMap(fn ($order) => $order->items->pluck('tongtu_sku_mapping_id'))->filter()->unique();
@@ -304,11 +311,17 @@ class OperationReportMetricsService
         if ($operatorUserIds === []) return [];
         $start = Carbon::createFromFormat('Y-m-d H:i:s', $dateFrom.' 00:00:00', self::REPORT_TIMEZONE)->utc();
         $end = Carbon::createFromFormat('Y-m-d H:i:s', $dateTo.' 23:59:59', self::REPORT_TIMEZONE)->utc();
+        $operatorUsers = AdminUser::query()->whereIn('id', $operatorUserIds)->get();
+        $operatorIdentityMap = $this->operatorIdentityMap($operatorUsers);
+        $operatorSearchValues = $this->operatorSearchValues($operatorUsers);
         $orders = LogisticsOrder::query()->with(['items', 'store'])
             ->whereBetween('order_created_at', [$start, $end])
-            ->whereHas('store', fn ($query) => $query->whereIn('owner_user_id', $operatorUserIds))
+            ->where(function ($query) use ($operatorUserIds, $operatorSearchValues): void {
+                $query->whereHas('store', fn ($store) => $store->whereIn('owner_user_id', $operatorUserIds));
+                if ($operatorSearchValues !== []) $query->orWhereIn('operator_name', $operatorSearchValues);
+            })
             ->orderBy('order_created_at')->get();
-        $operatorNames = AdminUser::query()->whereIn('id', $operatorUserIds)->get()->mapWithKeys(
+        $operatorNames = $operatorUsers->mapWithKeys(
             fn (AdminUser $user) => [$user->getKey() => (string) ($user->name ?: $user->username ?: '未分配')]
         );
         $mappingIds = $orders->flatMap(fn ($order) => $order->items->pluck('tongtu_sku_mapping_id'))->filter()->unique();
@@ -327,8 +340,8 @@ class OperationReportMetricsService
         }
         $groups = $missingGuide = $missingGuideSkus = $missingWeight = [];
         foreach ($orders as $order) {
-            $operatorId = (int) $order->store?->owner_user_id;
-            if (! in_array($operatorId, $operatorUserIds, true)) continue;
+            $operatorId = $this->resolveOperatorId($order, $operatorIdentityMap, $operatorUserIds);
+            if ($operatorId === null) continue;
             $domain = trim((string) ($order->store?->domain ?: $order->source_shop_domain ?: $order->store_name ?: '未知店铺'));
             $media = trim((string) ($order->media_source ?: LogisticsOrder::MEDIA_SOURCE_OTHER));
             $rowDate = Carbon::parse($order->getRawOriginal('order_created_at'), 'UTC')->timezone(self::REPORT_TIMEZONE)->format('Y-m-d');
@@ -391,13 +404,21 @@ class OperationReportMetricsService
     {
         $start = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 00:00:00', self::REPORT_TIMEZONE)->utc();
         $end = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 23:59:59', self::REPORT_TIMEZONE)->utc();
+        $operator = AdminUser::query()->find($operatorUserId);
+        $operatorUsers = $operator ? collect([$operator]) : collect();
+        $operatorIdentityMap = $this->operatorIdentityMap($operatorUsers);
+        $operatorSearchValues = $this->operatorSearchValues($operatorUsers);
         $orders = LogisticsOrder::query()
             ->with(['items.skuMapping', 'store'])
             ->whereBetween('order_created_at', [$start, $end])
-            ->whereHas('store', fn ($query) => $query->where('owner_user_id', $operatorUserId))
+            ->where(function ($query) use ($operatorUserId, $operatorSearchValues): void {
+                $query->whereHas('store', fn ($store) => $store->where('owner_user_id', $operatorUserId));
+                if ($operatorSearchValues !== []) $query->orWhereIn('operator_name', $operatorSearchValues);
+            })
             ->orderBy('order_created_at')
             ->get()
-            ->filter(function (LogisticsOrder $order) use ($shopDomain, $mediaSource, $type): bool {
+            ->filter(function (LogisticsOrder $order) use ($shopDomain, $mediaSource, $type, $operatorIdentityMap, $operatorUserId): bool {
+                if ($this->resolveOperatorId($order, $operatorIdentityMap, [$operatorUserId]) !== $operatorUserId) return false;
                 $domain = trim((string) ($order->store?->domain ?: $order->source_shop_domain ?: $order->store_name ?: '未知店铺'));
                 $media = trim((string) ($order->media_source ?: LogisticsOrder::MEDIA_SOURCE_OTHER));
                 if ($domain !== $shopDomain || $media !== $mediaSource) return false;
@@ -545,6 +566,65 @@ class OperationReportMetricsService
         usort($rows, fn (array $a, array $b) => strcasecmp($a['media_source'], $b['media_source']));
 
         return $rows;
+    }
+
+    /** @return array<string,int|null> 规范化姓名/账号到运营用户 ID；null 表示同名冲突。 */
+    private function operatorIdentityMap(iterable $users): array
+    {
+        $map = [];
+        foreach ($users as $user) {
+            foreach ([$user->name, $user->username] as $identity) {
+                $key = $this->normalizeOperatorIdentity((string) $identity);
+                if ($key === '') continue;
+                $userId = (int) $user->getKey();
+                if (array_key_exists($key, $map) && $map[$key] !== $userId) {
+                    $map[$key] = null;
+                } else {
+                    $map[$key] = $userId;
+                }
+            }
+        }
+        return $map;
+    }
+
+    /** @return list<string> */
+    private function operatorSearchValues(iterable $users): array
+    {
+        $values = [];
+        foreach ($users as $user) {
+            foreach ([$user->name, $user->username] as $identity) {
+                $identity = trim((string) $identity);
+                if ($identity !== '') $values[] = $identity;
+            }
+        }
+        return array_values(array_unique($values));
+    }
+
+    /**
+     * 订单同步时保存的运营人员是历史快照，应优先于店铺当前负责人；
+     * 只有快照为空或同名无法唯一识别时，才回退到当前店铺负责人。
+     *
+     * @param array<string,int|null> $identityMap
+     * @param list<int> $allowedOperatorIds
+     */
+    private function resolveOperatorId(LogisticsOrder $order, array $identityMap, array $allowedOperatorIds): ?int
+    {
+        $identity = $this->normalizeOperatorIdentity((string) $order->operator_name);
+        if ($identity !== '') {
+            if (array_key_exists($identity, $identityMap) && $identityMap[$identity] !== null) {
+                return in_array($identityMap[$identity], $allowedOperatorIds, true) ? $identityMap[$identity] : null;
+            }
+            // 非空快照明确属于其他运营时，不能按店铺现负责人重新归属历史订单。
+            if (! array_key_exists($identity, $identityMap)) return null;
+        }
+
+        $storeOwnerId = (int) ($order->store?->owner_user_id ?? 0);
+        return in_array($storeOwnerId, $allowedOperatorIds, true) ? $storeOwnerId : null;
+    }
+
+    private function normalizeOperatorIdentity(string $value): string
+    {
+        return mb_strtolower((string) preg_replace('/[\s　]+/u', '', trim($value)));
     }
 
     private function itemSku(object $item): string

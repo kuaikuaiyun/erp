@@ -109,7 +109,7 @@ class OperationReportDashboardController extends Controller
                 $report->report_date->format('Y-m-d'),
                 $this->normalizeOperatorName((string) $report->operator_name),
             ]));
-        $cacheKey = 'assistant-operation-report:'.$dateFrom.':'.$dateTo.':'.sha1($operatorIds->implode(','));
+        $cacheKey = 'assistant-operation-report:v2:'.$dateFrom.':'.$dateTo.':'.sha1($operatorIds->implode(','));
         $calculatedByOperator = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($operatorIds, $dateFrom, $dateTo): array {
             $calculated = [];
             // 分批读取，避免整月订单及商品明细一次载入导致 PHP 内存溢出。
