@@ -601,7 +601,10 @@ class PaymentProductAlertService
                 ])),
             ];
             return collect([$paypal, $card])->filter(fn (array $item): bool => !$onlyQualified || ($item['eligible_order_count'] > 0 && $item['is_alert']))->all();
-        })->sortByDesc('dispute_rate')->values();
+        })->sortBy([
+            ['dispute_amount', 'desc'],
+            ['dispute_rate', 'desc'],
+        ])->values();
     }
 
     /** @param \Illuminate\Database\Query\Builder $disputes */
