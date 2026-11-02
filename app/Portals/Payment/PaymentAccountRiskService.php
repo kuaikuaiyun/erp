@@ -473,31 +473,8 @@ class PaymentAccountRiskService
             ->whereBetween('payments.paid_at', [$from, $to])
             ->orderBy('payments.paid_at')->orderBy('payments.id')
             ->get($columns);
-        $cohortReferences = $basePayments
-            ->filter(function (object $payment): bool {
-                $type = trim((string) ($payment->subscription_type ?? ''));
-
-                return $payment->matched_order_id !== null
-                    && trim((string) ($payment->subscription_origin_order_id ?? '')) === ''
-                    && $type !== ''
-                    && ! str_contains($type, '无订阅');
-            })
-            ->flatMap(fn (object $payment): array => PaymentSubscriptionLifecycle::chainReferences(
-                $payment->subscription_chain_id,
-                $payment->shopify_order_id,
-                $payment->shopify_order_number,
-                $payment->payment_gateway_order_id,
-            ))
-            ->unique()->values()->all();
-        $renewalPayments = $cohortReferences === [] ? collect() : $paymentQuery()
-            ->whereIn('orders.subscription_origin_order_id', $cohortReferences)
-            ->where('payments.paid_at', '<=', now()->utc())
-            ->orderBy('payments.paid_at')->orderBy('payments.id')
-            ->get($columns);
-        // When the account view is filtered by the real dispute time, a
-        // dispute may belong to a payment made before the selected period.
-        // Bring that original payment into the analysis so the stage totals
-        // reconcile with the account-level dispute metric.
+        // Payment totals always use the selected payment period. Event-time
+        // filtering only chooses the dispute numerator for each stage.
         $eventDisputes = $usesEventDates
             ? $connection->table('logistics_paypal_disputes')
                 ->where('logistics_paypal_account_id', $account->getKey())
@@ -511,31 +488,36 @@ class PaymentAccountRiskService
             ->orderBy('payments.paid_at')->orderBy('payments.id')
             ->get($columns);
         $payments = $basePayments
-            ->reject(static fn (object $payment): bool => $payment->matched_order_id !== null
-                && trim((string) ($payment->subscription_origin_order_id ?? '')) !== '')
-            ->concat($renewalPayments)
-            ->concat($eventDisputePayments)
             ->sortBy(fn (object $payment): string => sprintf('%s-%020d', (string) $payment->paid_at, (int) $payment->payment_row_id))
             ->unique(fn (object $payment): string => trim((string) $payment->payment_transaction_id) !== ''
                 ? (string) $payment->payment_transaction_id
                 : 'row:'.$payment->payment_row_id)
             ->values();
         $paymentIds = $payments->pluck('payment_transaction_id')->map(static fn ($id): string => trim((string) $id))->filter()->values()->all();
+        $paymentKeys = collect($paymentIds)->flip();
+        $stagePayments = $payments->concat($eventDisputePayments)
+            ->sortBy(fn (object $payment): string => sprintf('%s-%020d', (string) $payment->paid_at, (int) $payment->payment_row_id))
+            ->unique(fn (object $payment): string => trim((string) $payment->payment_transaction_id) !== ''
+                ? (string) $payment->payment_transaction_id
+                : 'row:'.$payment->payment_row_id)
+            ->values();
 
         $refundAmounts = $paymentIds === [] ? collect() : $connection->table('logistics_paypal_refunds')
             ->where('logistics_paypal_account_id', $account->getKey())
             ->whereIn('original_transaction_id', $paymentIds)
             ->selectRaw('original_transaction_id, SUM(COALESCE(refund_amount_usd, original_amount, 0)) as refund_amount')
             ->groupBy('original_transaction_id')->pluck('refund_amount', 'original_transaction_id');
-        $disputedPayments = $paymentIds === [] ? collect() : $connection->table('logistics_paypal_disputes')
-            ->where('logistics_paypal_account_id', $account->getKey())
-            ->whereIn('disputed_transaction_id', $paymentIds)
-            ->when($usesEventDates, fn ($query) => $query->whereBetween('dispute_created_at', [$from, $to]))
-            ->distinct()->pluck('disputed_transaction_id')->flip();
+        $disputedPayments = $usesEventDates
+            ? collect($eventDisputePaymentIds)->flip()
+            : ($paymentIds === [] ? collect() : $connection->table('logistics_paypal_disputes')
+                ->where('logistics_paypal_account_id', $account->getKey())
+                ->whereIn('disputed_transaction_id', $paymentIds)
+                ->distinct()->pluck('disputed_transaction_id')->flip());
 
         $groups = [];
         $seenRenewals = [];
-        foreach ($payments as $payment) {
+        $stagesByPaymentId = [];
+        foreach ($stagePayments as $payment) {
             $transactionId = trim((string) $payment->payment_transaction_id);
             $origin = trim((string) ($payment->subscription_origin_order_id ?? ''));
             $type = trim((string) ($payment->subscription_type ?? ''));
@@ -551,6 +533,13 @@ class PaymentAccountRiskService
                 $sort = $stage['sort'];
             }
 
+            if ($transactionId !== '') {
+                $stagesByPaymentId[$transactionId] = ['key' => $key];
+            }
+            if (! $paymentKeys->has($transactionId)) {
+                continue;
+            }
+
             $groups[$key] ??= [
                 'key' => $key, 'renewal_number' => $renewalNumber, 'sort' => $sort,
                 'order_count' => 0, 'received_amount' => 0.0, 'refund_amount' => 0.0,
@@ -559,7 +548,14 @@ class PaymentAccountRiskService
             $groups[$key]['order_count']++;
             $groups[$key]['received_amount'] += (float) ($payment->payment_amount_usd ?? 0);
             $groups[$key]['refund_amount'] += (float) ($refundAmounts[$transactionId] ?? 0);
-            $groups[$key]['dispute_count'] += $disputedPayments->has($transactionId) ? 1 : 0;
+        }
+
+        foreach ($disputedPayments as $transactionId => $_) {
+            $stage = $stagesByPaymentId[$transactionId] ?? null;
+            if ($stage === null || ! isset($groups[$stage['key']])) {
+                continue;
+            }
+            $groups[$stage['key']]['dispute_count']++;
         }
 
         foreach ($groups as &$group) {
