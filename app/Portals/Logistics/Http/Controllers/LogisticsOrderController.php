@@ -24,6 +24,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -632,10 +633,12 @@ class LogisticsOrderController extends Controller
             }
         }
 
-        if ($filters['owner_assignment'] === 'unassigned') {
-            $query->whereNull('assigned_owner_user_id');
-        } elseif ($filters['owner_assignment'] !== '' && ctype_digit((string) $filters['owner_assignment'])) {
-            $query->where('assigned_owner_user_id', (int) $filters['owner_assignment']);
+        if ($this->ownerSnapshotColumnsExist()) {
+            if ($filters['owner_assignment'] === 'unassigned') {
+                $query->whereNull('assigned_owner_user_id');
+            } elseif ($filters['owner_assignment'] !== '' && ctype_digit((string) $filters['owner_assignment'])) {
+                $query->where('assigned_owner_user_id', (int) $filters['owner_assignment']);
+            }
         }
 
         if ($filters['shopify_sku'] !== '') {
@@ -751,17 +754,19 @@ class LogisticsOrderController extends Controller
 
         return [
             'stores' => $values('store_name'),
-            'owners' => LogisticsOrder::query()
-                ->whereNotNull('assigned_owner_user_id')
-                ->selectRaw('assigned_owner_user_id, MAX(assigned_owner_name) as assigned_owner_name')
-                ->groupBy('assigned_owner_user_id')
-                ->orderBy('assigned_owner_name')
-                ->get()
-                ->map(static fn ($owner): array => [
-                    'id' => (int) $owner->assigned_owner_user_id,
-                    'name' => trim((string) $owner->assigned_owner_name) ?: ('成员 #'.$owner->assigned_owner_user_id),
-                ])
-                ->all(),
+            'owners' => $this->ownerSnapshotColumnsExist()
+                ? LogisticsOrder::query()
+                    ->whereNotNull('assigned_owner_user_id')
+                    ->selectRaw('assigned_owner_user_id, MAX(assigned_owner_name) as assigned_owner_name')
+                    ->groupBy('assigned_owner_user_id')
+                    ->orderBy('assigned_owner_name')
+                    ->get()
+                    ->map(static fn ($owner): array => [
+                        'id' => (int) $owner->assigned_owner_user_id,
+                        'name' => trim((string) $owner->assigned_owner_name) ?: ('成员 #'.$owner->assigned_owner_user_id),
+                    ])
+                    ->all()
+                : [],
             'groups' => $values('group_names'),
             'paymentMethods' => $values('payment_method'),
             'paymentGateways' => $values('payment_gateway'),
@@ -769,6 +774,15 @@ class LogisticsOrderController extends Controller
             'subscriptionStatuses' => $values('subscription_status'),
             'sourceDomains' => $values('source_shop_domain'),
         ];
+    }
+
+    private function ownerSnapshotColumnsExist(): bool
+    {
+        $connection = config('admin.database.connection') ?: config('database.default');
+        $schema = Schema::connection($connection);
+
+        return $schema->hasColumn('logistics_orders', 'assigned_owner_user_id')
+            && $schema->hasColumn('logistics_orders', 'assigned_owner_name');
     }
 
     /** @return array<string, mixed> */

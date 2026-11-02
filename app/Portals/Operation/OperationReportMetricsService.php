@@ -176,8 +176,14 @@ class OperationReportMetricsService
             ->with(['items', 'store'])
             ->whereBetween('order_created_at', [$start, $end])
             ->where(function ($query) use ($operatorUserId, $operatorSearchValues): void {
-                $query->whereHas('store', fn ($store) => $store->where('owner_user_id', $operatorUserId));
-                if ($operatorSearchValues !== []) $query->orWhereIn('operator_name', $operatorSearchValues);
+                $query->where('assigned_owner_user_id', $operatorUserId)
+                    ->orWhere(function ($legacy) use ($operatorUserId, $operatorSearchValues): void {
+                        $legacy->whereNull('assigned_owner_user_id')
+                            ->where(function ($fallback) use ($operatorUserId, $operatorSearchValues): void {
+                                $fallback->whereHas('store', fn ($store) => $store->where('owner_user_id', $operatorUserId));
+                                if ($operatorSearchValues !== []) $fallback->orWhereIn('operator_name', $operatorSearchValues);
+                            });
+                    });
             })
             ->orderBy('order_created_at')
             ->get()
@@ -317,8 +323,14 @@ class OperationReportMetricsService
         $orders = LogisticsOrder::query()->with(['items', 'store'])
             ->whereBetween('order_created_at', [$start, $end])
             ->where(function ($query) use ($operatorUserIds, $operatorSearchValues): void {
-                $query->whereHas('store', fn ($store) => $store->whereIn('owner_user_id', $operatorUserIds));
-                if ($operatorSearchValues !== []) $query->orWhereIn('operator_name', $operatorSearchValues);
+                $query->whereIn('assigned_owner_user_id', $operatorUserIds)
+                    ->orWhere(function ($legacy) use ($operatorUserIds, $operatorSearchValues): void {
+                        $legacy->whereNull('assigned_owner_user_id')
+                            ->where(function ($fallback) use ($operatorUserIds, $operatorSearchValues): void {
+                                $fallback->whereHas('store', fn ($store) => $store->whereIn('owner_user_id', $operatorUserIds));
+                                if ($operatorSearchValues !== []) $fallback->orWhereIn('operator_name', $operatorSearchValues);
+                            });
+                    });
             })
             ->orderBy('order_created_at')->get();
         $operatorNames = $operatorUsers->mapWithKeys(
@@ -402,8 +414,14 @@ class OperationReportMetricsService
     /** @return array{summary:array<string,float|int|string>,orders:list<array<string,mixed>>,pagination:array<string,int>} */
     public function orderDetails(string $date, int $operatorUserId, string $shopDomain, string $mediaSource, string $type, int $page = 1, int $perPage = 10): array
     {
-        $start = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 00:00:00', self::REPORT_TIMEZONE)->utc();
-        $end = Carbon::createFromFormat('Y-m-d H:i:s', $date.' 23:59:59', self::REPORT_TIMEZONE)->utc();
+        return $this->orderDetailsRange($date, $date, $operatorUserId, $type, $page, $perPage, $shopDomain, $mediaSource);
+    }
+
+    /** @return array{summary:array<string,float|int|string>,orders:list<array<string,mixed>>,pagination:array<string,int>} */
+    public function orderDetailsRange(string $dateFrom, string $dateTo, int $operatorUserId, string $type, int $page = 1, int $perPage = 10, ?string $shopDomain = null, ?string $mediaSource = null): array
+    {
+        $start = Carbon::createFromFormat('Y-m-d H:i:s', $dateFrom.' 00:00:00', self::REPORT_TIMEZONE)->utc();
+        $end = Carbon::createFromFormat('Y-m-d H:i:s', $dateTo.' 23:59:59', self::REPORT_TIMEZONE)->utc();
         $operator = AdminUser::query()->find($operatorUserId);
         $operatorUsers = $operator ? collect([$operator]) : collect();
         $operatorIdentityMap = $this->operatorIdentityMap($operatorUsers);
@@ -412,8 +430,14 @@ class OperationReportMetricsService
             ->with(['items.skuMapping', 'store'])
             ->whereBetween('order_created_at', [$start, $end])
             ->where(function ($query) use ($operatorUserId, $operatorSearchValues): void {
-                $query->whereHas('store', fn ($store) => $store->where('owner_user_id', $operatorUserId));
-                if ($operatorSearchValues !== []) $query->orWhereIn('operator_name', $operatorSearchValues);
+                $query->where('assigned_owner_user_id', $operatorUserId)
+                    ->orWhere(function ($legacy) use ($operatorUserId, $operatorSearchValues): void {
+                        $legacy->whereNull('assigned_owner_user_id')
+                            ->where(function ($fallback) use ($operatorUserId, $operatorSearchValues): void {
+                                $fallback->whereHas('store', fn ($store) => $store->where('owner_user_id', $operatorUserId));
+                                if ($operatorSearchValues !== []) $fallback->orWhereIn('operator_name', $operatorSearchValues);
+                            });
+                    });
             })
             ->orderBy('order_created_at')
             ->get()
@@ -421,7 +445,8 @@ class OperationReportMetricsService
                 if ($this->resolveOperatorId($order, $operatorIdentityMap, [$operatorUserId]) !== $operatorUserId) return false;
                 $domain = trim((string) ($order->store?->domain ?: $order->source_shop_domain ?: $order->store_name ?: '未知店铺'));
                 $media = trim((string) ($order->media_source ?: LogisticsOrder::MEDIA_SOURCE_OTHER));
-                if ($domain !== $shopDomain || $media !== $mediaSource) return false;
+                if ($shopDomain !== null && $domain !== $shopDomain) return false;
+                if ($mediaSource !== null && $media !== $mediaSource) return false;
 
                 $subscriptionType = (string) $order->subscription_type;
                 return match ($type) {
@@ -515,9 +540,9 @@ class OperationReportMetricsService
 
         return [
             'summary' => [
-                'date' => $date,
-                'shop_domain' => $shopDomain,
-                'media_source' => $mediaSource,
+                'date' => $dateFrom === $dateTo ? $dateFrom : $dateFrom.' 至 '.$dateTo,
+                'shop_domain' => $shopDomain ?? '全部店铺',
+                'media_source' => $mediaSource ?? '全部媒体',
                 'order_count' => count($details),
                 'revenue' => round((float) collect($details)->sum('revenue'), 4),
                 'purchase_cost' => round((float) collect($details)->sum('purchase_cost'), 4),
@@ -601,14 +626,19 @@ class OperationReportMetricsService
     }
 
     /**
-     * 订单同步时保存的运营人员是历史快照，应优先于店铺当前负责人；
-     * 只有快照为空或同名无法唯一识别时，才回退到当前店铺负责人。
+     * 订单真实归属人快照是报表归属的权威数据源。
+     * 只有历史订单尚未生成真实归属人快照时，才回退到旧的运营姓名和店铺负责人逻辑。
      *
      * @param array<string,int|null> $identityMap
      * @param list<int> $allowedOperatorIds
      */
     private function resolveOperatorId(LogisticsOrder $order, array $identityMap, array $allowedOperatorIds): ?int
     {
+        $assignedOwnerId = (int) ($order->assigned_owner_user_id ?? 0);
+        if ($assignedOwnerId > 0) {
+            return in_array($assignedOwnerId, $allowedOperatorIds, true) ? $assignedOwnerId : null;
+        }
+
         $identity = $this->normalizeOperatorIdentity((string) $order->operator_name);
         if ($identity !== '') {
             if (array_key_exists($identity, $identityMap) && $identityMap[$identity] !== null) {

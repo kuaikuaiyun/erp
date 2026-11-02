@@ -628,6 +628,11 @@ class DepartmentOrganizationService
 
     public function pagePermissionTree(): array
     {
+        // Portal menus are frequently added by feature migrations. Keep their
+        // permission records in sync so a newly added page immediately appears
+        // in department/user page authorization without another migration.
+        $this->syncPortalMenuPermissions();
+
         $menuModel = config('admin.database.menu_model');
         $menus = $menuModel::query()->orderBy('order')->orderBy('id')->get();
         $permissionModel = config('admin.database.permissions_model');
@@ -1305,6 +1310,8 @@ class DepartmentOrganizationService
 
     private function assignablePermissionIds(): Collection
     {
+        $this->syncPortalMenuPermissions();
+
         $permissionIds = $this->assignableMenus()
             ->pluck('permission_id')
             ->filter()
@@ -1319,6 +1326,61 @@ class DepartmentOrganizationService
         }
 
         return $permissionIds->filter()->unique()->values();
+    }
+
+    private function syncPortalMenuPermissions(): void
+    {
+        $schema = Schema::connection($this->connectionName());
+        if (!$schema->hasTable('portal_menus') || !$schema->hasColumn('portal_menus', 'permission_slug')) {
+            return;
+        }
+
+        $connection = DB::connection($this->connectionName());
+        $permissionsTable = config('admin.database.permissions_table');
+        if (!$schema->hasTable($permissionsTable)) {
+            return;
+        }
+
+        $portals = $connection->table('portals')->get(['id', 'code', 'name'])->keyBy('id');
+        $menus = $connection->table('portal_menus')
+            ->whereNotIn('code', ['home', 'backend_management', 'menu_configuration'])
+            ->where('path', '!=', '#')
+            ->get(['id', 'portal_id', 'code', 'title', 'title_key', 'permission_slug']);
+        $timestamp = now();
+
+        foreach ($menus as $menu) {
+            $portal = $portals->get($menu->portal_id);
+            if (!$portal) {
+                continue;
+            }
+
+            $portalCode = preg_replace('/[^a-z0-9_\-]+/i', '-', (string) ($portal->code ?: 'portal'));
+            $menuCode = preg_replace('/[^a-z0-9_\-]+/i', '-', (string) $menu->code);
+            $slug = trim((string) $menu->permission_slug) ?: 'portal.'.$portalCode.'.'.$menuCode;
+
+            if ($menu->permission_slug !== $slug) {
+                $connection->table('portal_menus')->where('id', $menu->id)->update([
+                    'permission_slug' => $slug,
+                    'updated_at' => $timestamp,
+                ]);
+            }
+
+            if (!$connection->table($permissionsTable)->where('slug', $slug)->exists()) {
+                $permissionName = '['.(string) $portal->name.'] '.(string) ($menu->title ?: $menu->title_key ?: $menu->code);
+                if ($connection->table($permissionsTable)->where('name', $permissionName)->exists()) {
+                    $permissionName .= ' ('.$menu->code.')';
+                }
+
+                $connection->table($permissionsTable)->insert([
+                    'name' => $permissionName,
+                    'slug' => $slug,
+                    'http_method' => '',
+                    'http_path' => '',
+                    'created_at' => $timestamp,
+                    'updated_at' => $timestamp,
+                ]);
+            }
+        }
     }
 
     private function assignableMenus(): Collection

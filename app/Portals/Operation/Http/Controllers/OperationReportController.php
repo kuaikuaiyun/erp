@@ -99,6 +99,9 @@ class OperationReportController extends Controller
 
             return [
                 'first_total_orders' => (int) $dateRows->sum('first_total_orders'),
+                'first_subscription_rate' => (int) $dateRows->sum('first_total_orders') > 0
+                    ? (float) $dateRows->sum('first_subscription_orders') / (int) $dateRows->sum('first_total_orders')
+                    : null,
                 'first_total_revenue' => $firstRevenue,
                 'first_total_cost' => $firstCost,
                 'first_loss_rate' => $firstCost > 0 ? $firstProfit / $firstCost : null,

@@ -199,7 +199,6 @@ class AccountController extends Controller
                 'empty' => __('organization.accounts.department_filter_empty'),
             ],
         ])->render());
-
         $grid->filter(function (Filter $filter) use ($departmentOptions): void {
             $filter->disableIdFilter();
             $filter->column(0.5, function (Filter $filter): void {
