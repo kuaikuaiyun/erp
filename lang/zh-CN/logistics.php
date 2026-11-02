@@ -716,6 +716,13 @@ return [
             'download_error_report' => '下载错误明细（XLSX）',
         ],
     ],
+    'subscription_reference_backfill' => [
+        'completed' => '订阅关联回填完成：检查 :processed 笔，识别到明确原单号 :matched 笔，需要更新 :updated 笔；执行模式：:mode。',
+        'dry_run' => '仅检查，未写入',
+        'saved' => '已写入',
+        'source' => '支付订阅原单号',
+        'confirmed' => '已确认',
+    ],
     'payment_references' => [
         'upsell_count' => '+:count 个加购账单号',
         'detail_title' => '账单流水号',

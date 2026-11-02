@@ -168,7 +168,6 @@ class AccountController extends Controller
             });
         }
         $grid->disableExport();
-        $grid->expandFilter();
 
         $departmentTreeOptions = $this->organization->departmentOptionsFor($actor)->values();
         $availableDepartmentIds = $departmentTreeOptions->pluck('id')->map(static fn ($id): int => (int) $id);

@@ -16,12 +16,6 @@ use Illuminate\Support\Facades\DB;
 class PaymentAccountRiskService
 {
     private const REPORT_TIMEZONE = 'America/Los_Angeles';
-    private const QUALIFYING_DISPUTE_REASONS = [
-        'MERCHANDISE_OR_SERVICE_NOT_RECEIVED',
-        'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED',
-    ];
-    private const QUALIFYING_DISPUTE_TYPES = ['INQUIRY', 'CHARGEBACK'];
-
     public function __construct(
         private readonly PayPalRiskAnalyticsService $analytics,
         private readonly PaymentAccountRiskSnapshotService $riskSnapshots,
@@ -358,8 +352,6 @@ class PaymentAccountRiskService
             ->get()->keyBy('account_id');
 
         $disputeStats = (clone $allDisputes)
-            ->whereIn('disputes.reason', self::QUALIFYING_DISPUTE_REASONS)
-            ->whereIn('disputes.life_cycle_stage', self::QUALIFYING_DISPUTE_TYPES)
             ->selectRaw('disputes.logistics_paypal_account_id as account_id')
             ->selectRaw("COUNT(DISTINCT NULLIF(CASE WHEN COALESCE(disputes.disputed_transaction_id, '') <> '' THEN TRIM(disputes.disputed_transaction_id) ELSE TRIM(COALESCE(disputes.dispute_id, '')) END, '')) as dispute_order_count")
             ->selectRaw('COALESCE(SUM(COALESCE(disputes.dispute_amount_usd, disputes.original_amount, 0)), 0) as dispute_amount')
@@ -453,20 +445,77 @@ class PaymentAccountRiskService
     private function orderAnalysis(LogisticsPayPalAccount $account, array $filters, array $summary): array
     {
         $connection = DB::connection(config('admin.database.connection') ?: config('database.default'));
-        $from = Carbon::parse((string) $filters['date_from'], self::REPORT_TIMEZONE)->startOfDay()->utc();
-        $to = Carbon::parse((string) $filters['date_to'], self::REPORT_TIMEZONE)->endOfDay()->utc();
-        $payments = $connection->table('logistics_paypal_transactions as payments')
+        // This tab always analyses successful payments, but it must honour the
+        // selected period regardless of whether the surrounding detail view is
+        // currently using payment time or event time.  In event mode the old
+        // implementation parsed empty date_from/date_to as "now", producing
+        // an empty analysis while the summary still contained data.
+        $periodFrom = (string) (($filters['date_from'] ?? '') ?: ($filters['event_date_from'] ?? ''));
+        $periodTo = (string) (($filters['date_to'] ?? '') ?: ($filters['event_date_to'] ?? ''));
+        if ($periodFrom === '' || $periodTo === '') {
+            return ['groups' => [], 'total_orders' => 0, 'classified_orders' => 0, 'unmatched_orders' => 0];
+        }
+        $from = Carbon::parse($periodFrom, self::REPORT_TIMEZONE)->startOfDay()->utc();
+        $to = Carbon::parse($periodTo, self::REPORT_TIMEZONE)->endOfDay()->utc();
+        $usesEventDates = ($filters['date_mode'] ?? 'order') === 'event';
+        $paymentQuery = static fn () => $connection->table('logistics_paypal_transactions as payments')
             ->leftJoin('logistics_orders as orders', 'orders.id', '=', 'payments.logistics_order_id')
             ->where('payments.logistics_paypal_account_id', $account->getKey())
             ->where('payments.event_code', 'like', 'T00%')
-            ->where('payments.status', 'S')
+            ->where('payments.status', 'S');
+        $columns = [
+            'payments.id as payment_row_id', 'payments.payment_transaction_id', 'payments.payment_amount_usd', 'payments.paid_at',
+            'payments.logistics_order_id', 'orders.id as matched_order_id', 'orders.subscription_type',
+            'orders.subscription_origin_order_id', 'orders.transaction_id as subscription_chain_id',
+            'orders.shopify_order_id', 'orders.shopify_order_number', 'orders.payment_gateway_order_id',
+        ];
+        $basePayments = $paymentQuery()
             ->whereBetween('payments.paid_at', [$from, $to])
             ->orderBy('payments.paid_at')->orderBy('payments.id')
-            ->get([
-                'payments.id as payment_row_id', 'payments.payment_transaction_id', 'payments.payment_amount_usd', 'payments.paid_at',
-                'payments.logistics_order_id', 'orders.id as matched_order_id', 'orders.subscription_type',
-                'orders.subscription_origin_order_id',
-            ])
+            ->get($columns);
+        $cohortReferences = $basePayments
+            ->filter(function (object $payment): bool {
+                $type = trim((string) ($payment->subscription_type ?? ''));
+
+                return $payment->matched_order_id !== null
+                    && trim((string) ($payment->subscription_origin_order_id ?? '')) === ''
+                    && $type !== ''
+                    && ! str_contains($type, '无订阅');
+            })
+            ->flatMap(fn (object $payment): array => PaymentSubscriptionLifecycle::chainReferences(
+                $payment->subscription_chain_id,
+                $payment->shopify_order_id,
+                $payment->shopify_order_number,
+                $payment->payment_gateway_order_id,
+            ))
+            ->unique()->values()->all();
+        $renewalPayments = $cohortReferences === [] ? collect() : $paymentQuery()
+            ->whereIn('orders.subscription_origin_order_id', $cohortReferences)
+            ->where('payments.paid_at', '<=', now()->utc())
+            ->orderBy('payments.paid_at')->orderBy('payments.id')
+            ->get($columns);
+        // When the account view is filtered by the real dispute time, a
+        // dispute may belong to a payment made before the selected period.
+        // Bring that original payment into the analysis so the stage totals
+        // reconcile with the account-level dispute metric.
+        $eventDisputes = $usesEventDates
+            ? $connection->table('logistics_paypal_disputes')
+                ->where('logistics_paypal_account_id', $account->getKey())
+                ->whereBetween('dispute_created_at', [$from, $to])
+                ->get(['id', 'disputed_transaction_id', 'logistics_order_id'])
+            : collect();
+        $eventDisputePaymentIds = $eventDisputes
+            ->pluck('disputed_transaction_id')->map(static fn ($id): string => trim((string) $id))->filter()->unique()->values()->all();
+        $eventDisputePayments = $eventDisputePaymentIds === [] ? collect() : $paymentQuery()
+            ->whereIn('payments.payment_transaction_id', $eventDisputePaymentIds)
+            ->orderBy('payments.paid_at')->orderBy('payments.id')
+            ->get($columns);
+        $payments = $basePayments
+            ->reject(static fn (object $payment): bool => $payment->matched_order_id !== null
+                && trim((string) ($payment->subscription_origin_order_id ?? '')) !== '')
+            ->concat($renewalPayments)
+            ->concat($eventDisputePayments)
+            ->sortBy(fn (object $payment): string => sprintf('%s-%020d', (string) $payment->paid_at, (int) $payment->payment_row_id))
             ->unique(fn (object $payment): string => trim((string) $payment->payment_transaction_id) !== ''
                 ? (string) $payment->payment_transaction_id
                 : 'row:'.$payment->payment_row_id)
@@ -481,8 +530,7 @@ class PaymentAccountRiskService
         $disputedPayments = $paymentIds === [] ? collect() : $connection->table('logistics_paypal_disputes')
             ->where('logistics_paypal_account_id', $account->getKey())
             ->whereIn('disputed_transaction_id', $paymentIds)
-            ->whereIn('reason', self::QUALIFYING_DISPUTE_REASONS)
-            ->whereIn('life_cycle_stage', self::QUALIFYING_DISPUTE_TYPES)
+            ->when($usesEventDates, fn ($query) => $query->whereBetween('dispute_created_at', [$from, $to]))
             ->distinct()->pluck('disputed_transaction_id')->flip();
 
         $groups = [];
@@ -492,22 +540,15 @@ class PaymentAccountRiskService
             $origin = trim((string) ($payment->subscription_origin_order_id ?? ''));
             $type = trim((string) ($payment->subscription_type ?? ''));
             $unmatched = $payment->logistics_order_id === null || $payment->matched_order_id === null;
-            $renewalNumber = null;
             if ($unmatched) {
                 $key = 'unmatched';
+                $renewalNumber = null;
                 $sort = PHP_INT_MAX;
-            } elseif ($origin === '' && ($type === '' || str_contains($type, '无订阅'))) {
-                $key = 'one_time';
-                $sort = 0;
-            } elseif ($origin === '') {
-                $key = 'first_charge';
-                $sort = 1;
             } else {
-                $seenRenewals[$origin] = ($seenRenewals[$origin] ?? 0) + 1;
-                preg_match('/(\d+)/u', $type, $matches);
-                $renewalNumber = isset($matches[1]) && (int) $matches[1] > 0 ? (int) $matches[1] : $seenRenewals[$origin];
-                $key = 'renewal_'.$renewalNumber;
-                $sort = $renewalNumber + 1;
+                $stage = PaymentSubscriptionLifecycle::classify($type, $origin, $seenRenewals);
+                $key = $stage['key'];
+                $renewalNumber = $stage['renewal_number'];
+                $sort = $stage['sort'];
             }
 
             $groups[$key] ??= [
@@ -521,6 +562,48 @@ class PaymentAccountRiskService
             $groups[$key]['dispute_count'] += $disputedPayments->has($transactionId) ? 1 : 0;
         }
 
+        if ($usesEventDates) {
+            // A dispute can already be linked to an ERP order even when its
+            // original PayPal receipt is unavailable in the successful-payment
+            // ledger.  Those disputes must be classified from the dispute's
+            // own order link before falling back to an unmatched bucket.
+            $classifiedPaymentIds = $payments->pluck('payment_transaction_id')
+                ->map(static fn ($id): string => trim((string) $id))->filter()->flip();
+            $directDisputes = $eventDisputes->filter(function (object $dispute) use ($classifiedPaymentIds): bool {
+                $paymentId = trim((string) $dispute->disputed_transaction_id);
+                return $paymentId === '' || ! $classifiedPaymentIds->has($paymentId);
+            })->unique(static fn (object $dispute): string => trim((string) $dispute->disputed_transaction_id) ?: 'dispute:'.$dispute->id)->values();
+            $directOrders = LogisticsOrder::query()
+                ->whereIn('id', $directDisputes->pluck('logistics_order_id')->filter()->unique()->values()->all())
+                ->get(['id', 'subscription_type', 'subscription_origin_order_id']);
+            $directOrdersById = $directOrders->keyBy('id');
+
+            foreach ($directDisputes as $dispute) {
+                /** @var LogisticsOrder|null $order */
+                $order = $directOrdersById->get((int) $dispute->logistics_order_id);
+                if ($order === null) {
+                    $key = 'unmatched';
+                    $renewalNumber = null;
+                    $sort = PHP_INT_MAX;
+                } else {
+                    $stage = PaymentSubscriptionLifecycle::classify(
+                        (string) $order->subscription_type,
+                        (string) $order->subscription_origin_order_id,
+                        $seenRenewals,
+                    );
+                    $key = $stage['key'];
+                    $renewalNumber = $stage['renewal_number'];
+                    $sort = $stage['sort'];
+                }
+                $groups[$key] ??= [
+                    'key' => $key, 'renewal_number' => $renewalNumber, 'sort' => $sort,
+                    'order_count' => 0, 'received_amount' => 0.0, 'refund_amount' => 0.0,
+                    'dispute_count' => 0, 'unmatched' => $key === 'unmatched',
+                ];
+                $groups[$key]['dispute_count']++;
+            }
+        }
+
         foreach ($groups as &$group) {
             $group['received_amount'] = round($group['received_amount'], 2);
             $group['refund_amount'] = round($group['refund_amount'], 2);
@@ -530,29 +613,6 @@ class PaymentAccountRiskService
         }
         unset($group);
 
-        $expectedOrders = (int) ($summary['order_count'] ?? 0);
-        $missingOrders = max(0, $expectedOrders - $payments->count());
-        if ($missingOrders > 0) {
-            $groupedReceived = (float) collect($groups)->sum('received_amount');
-            $groupedRefund = (float) collect($groups)->sum('refund_amount');
-            $groupedDisputes = (int) collect($groups)->sum('dispute_count');
-            $groups['unmatched'] ??= [
-                'key' => 'unmatched', 'renewal_number' => null, 'sort' => PHP_INT_MAX,
-                'order_count' => 0, 'received_amount' => 0.0, 'refund_amount' => 0.0,
-                'dispute_count' => 0, 'unmatched' => true,
-            ];
-            $groups['unmatched']['order_count'] += $missingOrders;
-            $groups['unmatched']['received_amount'] += max(0, (float) ($summary['paid_amount'] ?? 0) - $groupedReceived);
-            $groups['unmatched']['refund_amount'] += max(0, (float) ($summary['refund_amount'] ?? 0) - $groupedRefund);
-            $groups['unmatched']['dispute_count'] += max(0, (int) ($summary['dispute_order_count'] ?? 0) - $groupedDisputes);
-            $groups['unmatched']['received_amount'] = round($groups['unmatched']['received_amount'], 2);
-            $groups['unmatched']['refund_amount'] = round($groups['unmatched']['refund_amount'], 2);
-            $groups['unmatched']['refund_rate'] = $groups['unmatched']['received_amount'] > 0
-                ? round($groups['unmatched']['refund_amount'] / $groups['unmatched']['received_amount'] * 100, 2) : 0.0;
-            $groups['unmatched']['dispute_rate'] = $groups['unmatched']['order_count'] > 0
-                ? round($groups['unmatched']['dispute_count'] / $groups['unmatched']['order_count'] * 100, 2) : 0.0;
-            $groups['unmatched']['realised_loss'] = $groups['unmatched']['refund_amount'];
-        }
         uasort($groups, static fn (array $left, array $right): int => $left['sort'] <=> $right['sort']);
 
         $previousSubscriptionCount = null;
@@ -582,11 +642,12 @@ class PaymentAccountRiskService
         unset($group);
 
         $unmatchedOrders = (int) ($groups['unmatched']['order_count'] ?? 0);
+        $totalOrders = $payments->count();
 
         return [
             'groups' => array_values($groups),
-            'total_orders' => $expectedOrders,
-            'classified_orders' => max(0, $expectedOrders - $unmatchedOrders),
+            'total_orders' => $totalOrders,
+            'classified_orders' => max(0, $totalOrders - $unmatchedOrders),
             'unmatched_orders' => $unmatchedOrders,
         ];
     }
@@ -735,9 +796,7 @@ class PaymentAccountRiskService
             ->first();
 
         $disputes = $database->table('logistics_paypal_disputes as disputes')
-            ->whereIn('disputes.logistics_paypal_account_id', $accountIds)
-            ->whereIn('disputes.reason', self::QUALIFYING_DISPUTE_REASONS)
-            ->whereIn('disputes.life_cycle_stage', self::QUALIFYING_DISPUTE_TYPES);
+            ->whereIn('disputes.logistics_paypal_account_id', $accountIds);
         if (($filters['date_mode'] ?? 'order') === 'event') {
             $this->applyPortfolioRange($disputes, 'disputes.dispute_created_at', $filters);
         } else {

@@ -1,7 +1,7 @@
 <?php
 
 $translations = [
-    'menus' => ['account_risk' => '收款账户风控', 'product_risk_profit' => '产品风险与利润', 'product_alerts' => '产品预警', 'payment_orders' => '支付订单检索'],
+    'menus' => ['account_risk' => '收款账户风控', 'product_risk_profit' => '产品风险与利润', 'renewal_analysis' => '续费订单分析', 'product_alerts' => '产品预警', 'payment_orders' => '支付订单检索'],
     'common' => [
         'scope' => '全局范围：', 'currency' => '基准币：', 'cutoff' => '数据截至：', 'period' => '付款批次：', 'search' => '搜索', 'separator' => ' · ', 'filter_title' => '筛选条件', 'range_to' => '至', 'query' => '查询', 'reset' => '重置',
         'channels' => ['paypal' => 'PayPal'],
@@ -636,7 +636,8 @@ return array_replace_recursive($translations, [
                 'reason_formula' => '原因占比 = 该原因记录数 ÷ 当前分类记录总数 × 100%',
             ],
             'first_renewal' => [
-                'groups' => ['one_time' => '一次性购买', 'first_charge' => '订阅首次扣款', 'first_renewal' => '第一次续费', 'later_renewal' => '第二次及以后'],
+                'groups' => ['one_time' => '一次性购买', 'first_charge' => '订阅首次扣款'],
+                'renewal_stage' => '第 :count 次续费',
                 'orders_amount' => '订单 / 实收金额', 'refund_rate' => '退款金额比', 'dispute_rate' => '纠纷笔数 / 率',
                 'paypal_initial' => 'PayPal 一次性和首次综合争议率', 'credit_card_initial' => '信用卡一次性和首次综合争议率', 'initial_dispute_note' => '争议记录数 ÷ 一次性购买与订阅首次扣款有效订单数', 'paypal_channel' => 'PayPal 订单分析', 'credit_card_channel' => '信用卡订单分析', 'record_unit' => '笔',
                 'realised_loss' => '已发生损失', 'expected_loss' => '预计追加损失', 'contribution' => '预计贡献利润',
@@ -656,7 +657,7 @@ return array_replace_recursive($translations, [
                     'renewal_success_rate' => '续费成功率＝第一次续费订单数 ÷ 订阅首次扣款订单数 × 100%',
                     'first_renewal_retention' => '首次续费留存＝第一次续费订单数 ÷ 订阅首次扣款订单数 × 100%',
                     'later_renewal_rate' => '后续续费率＝第二次及以后续费订单数 ÷ 第一次续费订单数 × 100%',
-                    'churn_rate' => '当前筛选周期阶段流失：(:previous - :current)＝:lost 笔；流失率＝:lost ÷ :previous × 100%。第二次及以后为汇总阶段。',
+                    'churn_rate' => '当前筛选周期阶段流失：(:previous - :current)＝:lost 笔；流失率＝:lost ÷ :previous × 100%。每次续费均按实际续费次数独立计算。',
                     'link_coverage_rate' => '付款链关联覆盖率＝已关联续费付款数 ÷（订阅首次扣款数＋已关联续费付款数）× 100%',
                 ],
             ],
@@ -778,5 +779,54 @@ return array_replace_recursive($translations, [
         'sort' => ['product_name' => '产品名称'],
         'formulas' => ['paypal_description_mismatch_rate' => '物品与描述不符争议金额 ÷ PayPal 总争议金额 × 100%'],
         'detail' => ['overview' => ['first_order_at' => '首次订单时间', 'last_order_at' => '最后订单时间', 'operator' => '运营名']],
+    ],
+    'renewal_analysis' => [
+        'page_title' => '续费订单分析',
+        'page_subtitle' => '按首扣队列观察续费转化、续费风险与明确关联的 Upsell 表现。',
+        'filters' => [
+            'cohort_period' => '首扣队列时间', 'risk_date_mode' => '风险时间口径',
+            'payment_mode' => '续费付款时间', 'event_mode' => '真实退款 / 纠纷时间',
+            'channel' => '首扣渠道', 'all_channels' => '全部渠道', 'stage' => '续费阶段', 'all_stages' => '全部阶段',
+            'store' => '店铺', 'all_stores' => '全部店铺', 'keyword' => '订单 / 流水 / 邮箱',
+            'keyword_placeholder' => '搜索首扣订单、续费订单、流水或客户邮箱',
+        ],
+        'channels' => ['paypal' => 'PayPal', 'credit_card' => '信用卡'],
+        'kpis' => [
+            'total_rate' => '总续费率', 'eligible' => '满足观察期的首扣链', 'renewed' => '已产生续费的订阅链',
+            'paypal_rate' => 'PayPal 首扣续费率', 'card_rate' => '信用卡首扣续费率',
+            'renewal_orders' => '续费订单', 'renewal_revenue' => '续费实收金额',
+        ],
+        'observation_note' => '续费率分母只纳入首扣完成满 :days 天的订阅链；渠道按首扣支付渠道归属。',
+        'funnel' => [
+            'title' => '动态续费漏斗', 'stage' => '续费阶段', 'eligible' => '可续费链', 'completed' => '完成续费链',
+            'renewal_rate' => '本阶段续费率', 'loss' => '阶段流失', 'orders_revenue' => '订单 / 实收',
+            'refund' => '退款', 'dispute' => '争议', 'stage_name' => '第 :number 次续费', 'empty' => '当前队列尚未产生续费订单。',
+        ],
+        'risk' => [
+            'title' => '续费风险（按实际续费支付渠道）', 'channel' => '实际渠道', 'orders' => '续费订单',
+            'revenue' => '续费实收', 'refunds' => '退款笔数 / 金额', 'disputes' => '争议笔数 / 金额',
+        ],
+        'upsell' => [
+            'title' => 'Upsell 关联概览', 'linked_orders' => '明确关联订单', 'references' => 'Upsell 引用',
+            'unmeasured' => '待补充交易金额的引用',
+            'measured' => '可核算订单 / 实收', 'refund' => '退款笔数 / 金额', 'dispute' => '争议笔数 / 金额',
+            'note' => '金额和风险只核算明确标记为“已加购”的独立订单；postupsell、yx_payment_upsell 仅有引用但无法安全拆分金额时单独列为待补充，不推测金额。',
+        ],
+        'detail' => [
+            'title' => '续费订单明细', 'stage' => '阶段', 'initial_channel' => '首扣渠道', 'actual_channel' => '实际支付渠道',
+            'initial_order' => '首扣订单', 'renewal_order' => '续费订单', 'store' => '店铺', 'transaction' => '支付流水',
+            'paid_at' => '付款时间', 'amount' => '实收金额', 'refund' => '退款', 'dispute' => '争议',
+            'empty' => '当前筛选条件下没有续费订单。',
+        ],
+        'export' => [
+            'button' => '导出 Excel', 'summary_sheet' => '续费概览', 'detail_sheet' => '续费明细',
+            'metric' => '指标', 'value' => '数值', 'filename' => '续费订单分析_:time.xlsx',
+            'columns' => [
+                'stage' => '续费次数', 'initial_channel' => '首扣渠道', 'actual_channel' => '实际支付渠道',
+                'initial_order' => '首扣订单', 'renewal_order' => '续费订单', 'store' => '店铺', 'transaction' => '支付流水',
+                'paid_at' => '付款时间', 'amount' => '实收金额', 'refund_count' => '退款笔数', 'refund_amount' => '退款金额',
+                'dispute_count' => '争议笔数', 'dispute_amount' => '争议金额',
+            ],
+        ],
     ],
 ]);
