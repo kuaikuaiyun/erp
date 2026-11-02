@@ -176,8 +176,14 @@ class OperationReportMetricsService
             ->with(['items', 'store'])
             ->whereBetween('order_created_at', [$start, $end])
             ->where(function ($query) use ($operatorUserId, $operatorSearchValues): void {
-                $query->whereHas('store', fn ($store) => $store->where('owner_user_id', $operatorUserId));
-                if ($operatorSearchValues !== []) $query->orWhereIn('operator_name', $operatorSearchValues);
+                $query->where('assigned_owner_user_id', $operatorUserId)
+                    ->orWhere(function ($legacy) use ($operatorUserId, $operatorSearchValues): void {
+                        $legacy->whereNull('assigned_owner_user_id')
+                            ->where(function ($fallback) use ($operatorUserId, $operatorSearchValues): void {
+                                $fallback->whereHas('store', fn ($store) => $store->where('owner_user_id', $operatorUserId));
+                                if ($operatorSearchValues !== []) $fallback->orWhereIn('operator_name', $operatorSearchValues);
+                            });
+                    });
             })
             ->orderBy('order_created_at')
             ->get()
@@ -317,8 +323,14 @@ class OperationReportMetricsService
         $orders = LogisticsOrder::query()->with(['items', 'store'])
             ->whereBetween('order_created_at', [$start, $end])
             ->where(function ($query) use ($operatorUserIds, $operatorSearchValues): void {
-                $query->whereHas('store', fn ($store) => $store->whereIn('owner_user_id', $operatorUserIds));
-                if ($operatorSearchValues !== []) $query->orWhereIn('operator_name', $operatorSearchValues);
+                $query->whereIn('assigned_owner_user_id', $operatorUserIds)
+                    ->orWhere(function ($legacy) use ($operatorUserIds, $operatorSearchValues): void {
+                        $legacy->whereNull('assigned_owner_user_id')
+                            ->where(function ($fallback) use ($operatorUserIds, $operatorSearchValues): void {
+                                $fallback->whereHas('store', fn ($store) => $store->whereIn('owner_user_id', $operatorUserIds));
+                                if ($operatorSearchValues !== []) $fallback->orWhereIn('operator_name', $operatorSearchValues);
+                            });
+                    });
             })
             ->orderBy('order_created_at')->get();
         $operatorNames = $operatorUsers->mapWithKeys(
@@ -418,8 +430,14 @@ class OperationReportMetricsService
             ->with(['items.skuMapping', 'store'])
             ->whereBetween('order_created_at', [$start, $end])
             ->where(function ($query) use ($operatorUserId, $operatorSearchValues): void {
-                $query->whereHas('store', fn ($store) => $store->where('owner_user_id', $operatorUserId));
-                if ($operatorSearchValues !== []) $query->orWhereIn('operator_name', $operatorSearchValues);
+                $query->where('assigned_owner_user_id', $operatorUserId)
+                    ->orWhere(function ($legacy) use ($operatorUserId, $operatorSearchValues): void {
+                        $legacy->whereNull('assigned_owner_user_id')
+                            ->where(function ($fallback) use ($operatorUserId, $operatorSearchValues): void {
+                                $fallback->whereHas('store', fn ($store) => $store->where('owner_user_id', $operatorUserId));
+                                if ($operatorSearchValues !== []) $fallback->orWhereIn('operator_name', $operatorSearchValues);
+                            });
+                    });
             })
             ->orderBy('order_created_at')
             ->get()
@@ -608,14 +626,19 @@ class OperationReportMetricsService
     }
 
     /**
-     * 订单同步时保存的运营人员是历史快照，应优先于店铺当前负责人；
-     * 只有快照为空或同名无法唯一识别时，才回退到当前店铺负责人。
+     * 订单真实归属人快照是报表归属的权威数据源。
+     * 只有历史订单尚未生成真实归属人快照时，才回退到旧的运营姓名和店铺负责人逻辑。
      *
      * @param array<string,int|null> $identityMap
      * @param list<int> $allowedOperatorIds
      */
     private function resolveOperatorId(LogisticsOrder $order, array $identityMap, array $allowedOperatorIds): ?int
     {
+        $assignedOwnerId = (int) ($order->assigned_owner_user_id ?? 0);
+        if ($assignedOwnerId > 0) {
+            return in_array($assignedOwnerId, $allowedOperatorIds, true) ? $assignedOwnerId : null;
+        }
+
         $identity = $this->normalizeOperatorIdentity((string) $order->operator_name);
         if ($identity !== '') {
             if (array_key_exists($identity, $identityMap) && $identityMap[$identity] !== null) {
