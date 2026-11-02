@@ -170,10 +170,35 @@ class AccountController extends Controller
         $grid->disableExport();
         $grid->expandFilter();
 
-        $departmentOptions = $this->organization->departmentOptionsFor($actor)
-            ->mapWithKeys(fn (array $option): array => [(int) $option['id'] => $option['label']])
+        $departmentTreeOptions = $this->organization->departmentOptionsFor($actor)->values();
+        $availableDepartmentIds = $departmentTreeOptions->pluck('id')->map(static fn ($id): int => (int) $id);
+        $departmentTreeOptions = $departmentTreeOptions->map(function (array $option) use ($availableDepartmentIds): array {
+            if ($option['parent_id'] !== null && !$availableDepartmentIds->contains((int) $option['parent_id'])) {
+                $option['parent_id'] = null;
+            }
+
+            return $option;
+        });
+        $departmentOptions = $departmentTreeOptions
+            ->mapWithKeys(static fn (array $option): array => [
+                (int) $option['id'] => (string) $option['label'],
+            ])
             ->all();
 
+        Admin::style(view('admin.organization.account-department-filter', [
+            'mode' => 'style',
+        ])->render());
+        Admin::script(view('admin.organization.account-department-filter', [
+            'mode' => 'script',
+            'departments' => $departmentTreeOptions->all(),
+            'texts' => [
+                'all' => __('organization.accounts.department_filter_all'),
+                'selected' => __('organization.accounts.department_filter_selected'),
+                'search' => __('organization.accounts.department_filter_search'),
+                'clear' => __('organization.accounts.department_filter_clear'),
+                'empty' => __('organization.accounts.department_filter_empty'),
+            ],
+        ])->render());
         $grid->filter(function (Filter $filter) use ($departmentOptions): void {
             $filter->disableIdFilter();
             $filter->column(0.5, function (Filter $filter): void {
@@ -182,13 +207,22 @@ class AccountController extends Controller
             });
             $filter->column(0.5, function (Filter $filter) use ($departmentOptions): void {
                 $filter->where(function ($query): void {
-                    $departmentId = (int) $this->input;
-                    if ($departmentId > 0) {
-                        $query->whereHas('departments', function ($departmentQuery) use ($departmentId): void {
-                            $departmentQuery->whereKey($departmentId);
-                        });
+                    $departmentIds = collect((array) $this->input)
+                        ->filter(static fn ($departmentId): bool => is_numeric($departmentId))
+                        ->map(static fn ($departmentId): int => (int) $departmentId)
+                        ->unique()
+                        ->values()
+                        ->all();
+
+                    if ($departmentIds === []) {
+                        return;
                     }
-                }, __('organization.accounts.department'), 'department_id')->select($departmentOptions);
+
+                    $departmentsTable = (new Department())->getTable();
+                    $query->whereHas('departments', function ($departmentQuery) use ($departmentIds, $departmentsTable): void {
+                        $departmentQuery->whereIn($departmentsTable.'.id', $departmentIds);
+                    });
+                }, __('organization.accounts.department_filter'), 'department_ids')->multipleSelect($departmentOptions);
             });
         });
 

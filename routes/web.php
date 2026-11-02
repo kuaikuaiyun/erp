@@ -73,6 +73,7 @@ Route::get('/domain-stores/{domainStore}/edit', [DomainStoreController::class, '
 Route::put('/domain-stores/{domainStore}', [DomainStoreController::class, 'update'])->name('assistant.domain-stores.update');
 Route::delete('/domain-stores/{domainStore}', [DomainStoreController::class, 'destroy'])->name('assistant.domain-stores.destroy');
 Route::get('/domain-stores/{domainStore}/history', [DomainStoreController::class, 'history'])->name('assistant.domain-stores.history');
+Route::patch('/domain-stores/{domainStore}/owner-histories/{ownerHistory}/effective-time', [DomainStoreController::class, 'updateOwnerHistoryEffectiveTime'])->name('assistant.domain-stores.owner-histories.effective-time');
 Route::get('/shopify-analytics', [ShopifyAnalyticsController::class, 'index'])->name('assistant.shopify-analytics.index');
 Route::get('/shopify-analytics/export-orders', [ShopifyAnalyticsController::class, 'exportOrders'])->name('assistant.shopify-analytics.export-orders');
 Route::post('/shopify-analytics/refresh-batch', [ShopifyAnalyticsController::class, 'refreshBatch'])->name('assistant.shopify-analytics.refresh-batch');
