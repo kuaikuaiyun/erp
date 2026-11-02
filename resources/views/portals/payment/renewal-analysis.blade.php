@@ -6,12 +6,14 @@
     $filters = $dashboard['filters'];
     $summary = $dashboard['summary'];
     $money = static fn ($value) => '$'.number_format((float) $value, 2);
+    $detailTabs = ['' => 'all', 'paypal' => 'paypal', 'credit_card' => 'credit_card'];
+    $detailTabQuery = request()->except(['page', 'per_page', 'detail_channel']);
 @endphp
 
 @section('page_title', __($t.'.page_title'))
 
 @push('styles')
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261102-1">
+<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261102-3">
 <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261026-1">
 @endpush
 
@@ -52,9 +54,28 @@
         <article class="payment-panel payment-renewal-upsell"><h2>{{ __($t.'.upsell.title') }}</h2><div><span>{{ __($t.'.upsell.linked_orders') }}<strong>{{ number_format($dashboard['upsell']['linked_orders']) }}</strong></span><span>{{ __($t.'.upsell.measured') }}<strong>{{ number_format($dashboard['upsell']['measured_orders']) }} / {{ $money($dashboard['upsell']['revenue']) }}</strong></span><span>{{ __($t.'.upsell.refund') }}<strong>{{ number_format($dashboard['upsell']['refund_count']) }} / {{ $money($dashboard['upsell']['refund_amount']) }}</strong></span><span>{{ __($t.'.upsell.dispute') }}<strong>{{ number_format($dashboard['upsell']['dispute_count']) }} / {{ $money($dashboard['upsell']['dispute_amount']) }}</strong></span><span>{{ __($t.'.upsell.references') }}<strong>{{ number_format($dashboard['upsell']['references']) }}</strong></span><span>{{ __($t.'.upsell.unmeasured') }}<strong>{{ number_format($dashboard['upsell']['unmeasured']) }}</strong></span></div><p>{{ __($t.'.upsell.note') }}</p></article>
     </div>
 
-    <article class="payment-panel payment-renewal-detail"><h2>{{ __($t.'.detail.title') }}</h2><div class="table-responsive payment-fixed-table"><table class="table payment-data-table"><thead><tr>@foreach(['stage','initial_channel','actual_channel','initial_order','renewal_order','store','transaction','paid_at','amount','refund','dispute'] as $column)<th>{{ __($t.'.detail.'.$column) }}</th>@endforeach</tr></thead><tbody>
-        @forelse($dashboard['rows'] as $row)<tr><td>{{ __($t.'.funnel.stage_name',['number'=>$row['stage_number']]) }}</td><td>{{ __($t.'.channels.'.$row['initial_channel']) }}</td><td>{{ __($t.'.channels.'.$row['actual_channel']) }}</td><td>{{ $row['initial_order'] }}</td><td><strong>{{ $row['renewal_order'] }}</strong></td><td>{{ $row['store_name'] ?: '-' }}</td><td>{{ $row['transaction_id'] ?: '-' }}</td><td>{{ $row['paid_at'] ?: '-' }}</td><td>{{ $money($row['amount']) }}</td><td>{{ $row['refund_count'] }} / {{ $money($row['refund_amount']) }}</td><td>{{ $row['dispute_count'] }} / {{ $money($row['dispute_amount']) }}</td></tr>
-        @empty<tr><td colspan="11" class="payment-product-empty">{{ __($t.'.detail.empty') }}</td></tr>@endforelse
+    <article class="payment-panel payment-renewal-detail"><h2>{{ __($t.'.detail.title') }}</h2><nav class="payment-tabs payment-renewal-detail-tabs" role="tablist">@foreach($detailTabs as $channel=>$tab)<a href="{{ route('payment.renewal-analysis.index', array_merge($detailTabQuery, $channel === '' ? [] : ['detail_channel' => $channel])) }}" class="{{ $filters['detail_channel'] === $channel ? 'active' : '' }}" role="tab" aria-selected="{{ $filters['detail_channel'] === $channel ? 'true' : 'false' }}">{{ __($t.'.detail.tabs.'.$tab) }}</a>@endforeach</nav><div class="table-responsive payment-fixed-table"><table class="table payment-data-table"><thead><tr>@foreach(['stage','initial_channel','actual_channel','initial_order','renewal_order','store','transaction','paid_at','amount','refund','dispute'] as $column)<th>{{ __($t.'.detail.'.$column) }}</th>@endforeach</tr></thead><tbody>
+        @forelse($dashboard['rows'] as $row)
+            <tr>
+                <td>{{ __($t.'.funnel.stage_name',['number'=>$row['stage_number']]) }}</td><td>{{ __($t.'.channels.'.$row['initial_channel']) }}</td><td>{{ __($t.'.channels.'.$row['actual_channel']) }}</td><td>{{ $row['initial_order'] }}</td><td><strong>{{ $row['renewal_order'] }}</strong></td><td>{{ $row['store_name'] ?: '-' }}</td><td>{{ $row['transaction_id'] ?: '-' }}</td><td>{{ $row['paid_at'] ?: '-' }}</td><td>{{ $money($row['amount']) }}</td>
+                <td class="payment-renewal-risk-detail"><strong>{{ $row['refund_count'] }} / {{ $money($row['refund_amount']) }}</strong>
+                    @if (!empty($row['refund_details']))
+                        @foreach ($row['refund_details'] as $detail)
+                            <div><b>{{ $money($detail['amount']) }}</b> {{ $detail['reason'] ?: '-' }}<small>{{ $detail['time'] }} / {{ $detail['status'] }}</small></div>
+                        @endforeach
+                    @endif
+                </td>
+                <td class="payment-renewal-risk-detail"><strong>{{ $row['dispute_count'] }} / {{ $money($row['dispute_amount']) }}</strong>
+                    @if (!empty($row['dispute_details']))
+                        @foreach ($row['dispute_details'] as $detail)
+                            <div><b>{{ $money($detail['amount']) }}</b> {{ $detail['reason'] ?: '-' }}<small>{{ $detail['time'] }} / {{ $detail['status'] }}</small></div>
+                        @endforeach
+                    @endif
+                </td>
+            </tr>
+        @empty
+            <tr><td colspan="11" class="payment-product-empty">{{ __($t.'.detail.empty') }}</td></tr>
+        @endforelse
     </tbody></table></div></article>
 
     @include('portals.payment.partials.pagination', ['pagination'=>$dashboard['pagination'], 'routeName'=>'payment.renewal-analysis.index'])

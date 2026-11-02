@@ -815,7 +815,8 @@ return array_replace_recursive($translations, [
         'detail' => [
             'title' => '续费订单明细', 'stage' => '阶段', 'initial_channel' => '首扣渠道', 'actual_channel' => '实际支付渠道',
             'initial_order' => '首扣订单', 'renewal_order' => '续费订单', 'store' => '店铺', 'transaction' => '支付流水',
-            'paid_at' => '付款时间', 'amount' => '实收金额', 'refund' => '退款', 'dispute' => '争议',
+            'paid_at' => '付款时间', 'amount' => '实收金额', 'refund' => '退款', 'refund_detail' => '退款原因 / 时间 / 状态', 'dispute' => '争议', 'dispute_detail' => '争议原因 / 时间 / 状态',
+            'tabs' => ['all' => '全部', 'paypal' => 'PayPal', 'credit_card' => '信用卡'],
             'empty' => '当前筛选条件下没有续费订单。',
         ],
         'export' => [

@@ -9,6 +9,7 @@ use App\Models\LogisticsPayPalDispute;
 use App\Models\LogisticsPayPalRefund;
 use App\Portals\Logistics\LogisticsCreditCardRefundReason;
 use Carbon\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 
 class PaymentRenewalAnalysisService
@@ -22,6 +23,10 @@ class PaymentRenewalAnalysisService
         if (($filters['stage'] ?? '') !== '') {
             $rows = $rows->where('stage_key', (string) $filters['stage'])->values();
         }
+        if (($filters['detail_channel'] ?? '') !== '') {
+            $rows = $rows->where('actual_channel', (string) $filters['detail_channel'])->values();
+        }
+        $rows = $this->prioritiseRiskRows($rows);
 
         $page = max(1, (int) ($filters['page'] ?? 1));
         $perPage = in_array((int) ($filters['per_page'] ?? 50), [50, 100], true) ? (int) $filters['per_page'] : 50;
@@ -50,6 +55,10 @@ class PaymentRenewalAnalysisService
         if (($filters['stage'] ?? '') !== '') {
             $dataset['rows'] = collect($dataset['rows'])->where('stage_key', (string) $filters['stage'])->values()->all();
         }
+        if (($filters['detail_channel'] ?? '') !== '') {
+            $dataset['rows'] = collect($dataset['rows'])->where('actual_channel', (string) $filters['detail_channel'])->values()->all();
+        }
+        $dataset['rows'] = $this->prioritiseRiskRows(collect($dataset['rows']))->all();
         return $dataset;
     }
 
@@ -57,8 +66,8 @@ class PaymentRenewalAnalysisService
     private function dataset(array $filters): array
     {
         $cacheFilters = $filters;
-        unset($cacheFilters['page'], $cacheFilters['per_page'], $cacheFilters['stage']);
-        $cacheKey = 'payment:renewal-analysis:'.sha1(json_encode($cacheFilters));
+        unset($cacheFilters['page'], $cacheFilters['per_page'], $cacheFilters['stage'], $cacheFilters['detail_channel']);
+        $cacheKey = 'payment:renewal-analysis:v2:'.sha1(json_encode($cacheFilters));
 
         return Cache::remember($cacheKey, now()->addMinutes(5), fn (): array => $this->buildDataset($cacheFilters));
     }
@@ -142,8 +151,8 @@ class PaymentRenewalAnalysisService
                 $number = $index + 1;
                 $key = 'renewal_'.$number;
                 $channel = $this->channelFor($renewal);
-                $refund = $risk['refunds'][(int) $renewal->id] ?? ['count' => 0, 'amount' => 0.0];
-                $dispute = $risk['disputes'][(int) $renewal->id] ?? ['count' => 0, 'amount' => 0.0];
+                $refund = $risk['refunds'][(int) $renewal->id] ?? ['count' => 0, 'amount' => 0.0, 'details' => []];
+                $dispute = $risk['disputes'][(int) $renewal->id] ?? ['count' => 0, 'amount' => 0.0, 'details' => []];
 
                 $stages[$key] ??= ['key' => $key, 'number' => $number, 'completed_chains' => [], 'orders' => 0, 'revenue' => 0.0, 'refund_count' => 0, 'refund_amount' => 0.0, 'dispute_count' => 0, 'dispute_amount' => 0.0];
                 $stages[$key]['completed_chains'][(int) $initial->id] = true;
@@ -174,8 +183,10 @@ class PaymentRenewalAnalysisService
                     'amount' => round((float) $renewal->paid_amount_usd, 2),
                     'refund_count' => $refund['count'],
                     'refund_amount' => round($refund['amount'], 2),
+                    'refund_details' => $refund['details'],
                     'dispute_count' => $dispute['count'],
                     'dispute_amount' => round($dispute['amount'], 2),
+                    'dispute_details' => $dispute['details'],
                 ];
             }
         }
@@ -225,7 +236,7 @@ class PaymentRenewalAnalysisService
         ];
     }
 
-    /** @return array<string,array<int,array{count:int,amount:float}>> */
+    /** @return array<string,array<int,array{count:int,amount:float,details:list<array<string,mixed>>}>> */
     private function riskMaps(array $orderIds, array $filters, Carbon $from, Carbon $to): array
     {
         $refunds = [];
@@ -241,9 +252,26 @@ class PaymentRenewalAnalysisService
             $cardQuery->whereBetween('last_imported_at', [$from, $to]);
         }
 
-        foreach ($paypalRefundQuery->get() as $record) $this->accumulate($refunds, (int) $record->logistics_order_id, (float) $record->refund_amount_usd);
+        foreach ($paypalRefundQuery->get() as $record) {
+            $orderId = (int) $record->logistics_order_id;
+            $this->accumulate($refunds, $orderId, (float) $record->refund_amount_usd);
+            $this->appendRiskDetail($refunds, $orderId, [
+                'amount' => (float) $record->refund_amount_usd,
+                'reason' => (string) ($record->manual_reason ?: $record->refund_reason ?: $record->eventLabel()),
+                'status' => $record->statusLabel(),
+                'time' => optional($record->refunded_at)->format('Y-m-d H:i:s') ?: '-',
+            ]);
+        }
         foreach ($paypalDisputeQuery->get()->groupBy('logistics_order_id') as $orderId => $records) {
             $this->accumulate($disputes, (int) $orderId, (float) $records->max(fn ($record): float => (float) ($record->dispute_amount_usd ?? $record->original_amount ?? 0)));
+            foreach ($records as $record) {
+                $this->appendRiskDetail($disputes, (int) $orderId, [
+                    'amount' => (float) ($record->dispute_amount_usd ?? $record->original_amount ?? 0),
+                    'reason' => $record->reasonLabel(),
+                    'status' => $record->statusLabel(),
+                    'time' => optional($record->dispute_created_at)->format('Y-m-d H:i:s') ?: '-',
+                ]);
+            }
         }
         $cardDisputes = [];
         foreach ($cardQuery->get() as $record) {
@@ -251,8 +279,21 @@ class PaymentRenewalAnalysisService
             if (in_array($reason, LogisticsCreditCardRefundReason::DISPUTE, true)) {
                 $orderId = (int) $record->logistics_order_id;
                 $cardDisputes[$orderId] = max($cardDisputes[$orderId] ?? 0.0, (float) $record->refund_amount_usd);
+                $this->appendRiskDetail($disputes, $orderId, [
+                    'amount' => (float) $record->refund_amount_usd,
+                    'reason' => (string) $record->refund_reason,
+                    'status' => '-',
+                    'time' => optional($record->last_imported_at)->format('Y-m-d H:i:s') ?: '-',
+                ]);
             } elseif (in_array($reason, LogisticsCreditCardRefundReason::CUSTOMER_SERVICE, true)) {
-                $this->accumulate($refunds, (int) $record->logistics_order_id, (float) $record->refund_amount_usd);
+                $orderId = (int) $record->logistics_order_id;
+                $this->accumulate($refunds, $orderId, (float) $record->refund_amount_usd);
+                $this->appendRiskDetail($refunds, $orderId, [
+                    'amount' => (float) $record->refund_amount_usd,
+                    'reason' => (string) $record->refund_reason,
+                    'status' => '-',
+                    'time' => optional($record->last_imported_at)->format('Y-m-d H:i:s') ?: '-',
+                ]);
             }
         }
         foreach ($cardDisputes as $orderId => $amount) $this->accumulate($disputes, (int) $orderId, (float) $amount);
@@ -261,9 +302,36 @@ class PaymentRenewalAnalysisService
 
     private function accumulate(array &$map, int $orderId, float $amount): void
     {
-        $map[$orderId] ??= ['count' => 0, 'amount' => 0.0];
+        $map[$orderId] ??= ['count' => 0, 'amount' => 0.0, 'details' => []];
         $map[$orderId]['count']++;
         $map[$orderId]['amount'] += $amount;
+    }
+
+    /** @param array<int,array{count:int,amount:float,details:list<array<string,mixed>>}> $map @param array<string,mixed> $detail */
+    private function appendRiskDetail(array &$map, int $orderId, array $detail): void
+    {
+        $map[$orderId] ??= ['count' => 0, 'amount' => 0.0, 'details' => []];
+        $map[$orderId]['details'][] = $detail;
+    }
+
+    /** @param Collection<int,array<string,mixed>> $rows @return Collection<int,array<string,mixed>> */
+    private function prioritiseRiskRows(Collection $rows): Collection
+    {
+        return $rows->sort(function (array $left, array $right): int {
+            $leftRisk = (int) ($left['refund_count'] ?? 0) + (int) ($left['dispute_count'] ?? 0);
+            $rightRisk = (int) ($right['refund_count'] ?? 0) + (int) ($right['dispute_count'] ?? 0);
+            if (($leftRisk > 0) !== ($rightRisk > 0)) {
+                return ($rightRisk > 0) <=> ($leftRisk > 0);
+            }
+
+            $leftAmount = (float) ($left['refund_amount'] ?? 0) + (float) ($left['dispute_amount'] ?? 0);
+            $rightAmount = (float) ($right['refund_amount'] ?? 0) + (float) ($right['dispute_amount'] ?? 0);
+            if ($leftAmount !== $rightAmount) {
+                return $rightAmount <=> $leftAmount;
+            }
+
+            return strcmp((string) ($right['paid_at'] ?? ''), (string) ($left['paid_at'] ?? ''));
+        })->values();
     }
 
     /** @return array<string,mixed> */
