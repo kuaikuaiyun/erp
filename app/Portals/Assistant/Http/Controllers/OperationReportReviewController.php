@@ -5,15 +5,19 @@ namespace App\Portals\Assistant\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\OperationReport;
 use App\Models\AdminUser;
+use App\Models\AssistantDomainStore;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Operation\OperationReportMetricsService;
+use App\Portals\Operation\AdvertisingReportBulkImportService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -24,7 +28,50 @@ class OperationReportReviewController extends Controller
         private readonly AssistantPortalAuthorizationService $authorization,
         private readonly OperationReportMetricsService $metrics,
         private readonly AssistantStoreOwnerService $assistantStoreOwners,
+        private readonly AdvertisingReportBulkImportService $bulkImporter,
     ) {
+    }
+
+    public function importTemplate(Request $request): Response
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+
+        return $this->bulkImporter->templateResponse($this->importableOperators($context['user']));
+    }
+
+    public function import(Request $request): RedirectResponse|JsonResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        $validated = $request->validate([
+            'import_file' => ['required', 'file', 'max:10240'],
+        ], [
+            'import_file.required' => '请选择需要导入的 Excel 文件。',
+            'import_file.uploaded' => '文件上传失败，文件可能超过服务器允许的上传大小。当前 PHP 上传限制为 '.ini_get('upload_max_filesize').'。',
+            'import_file.file' => '上传的内容不是有效文件，请重新选择 Excel 文件。',
+            'import_file.max' => '导入文件不能超过 10MB，请压缩文件中的图片后重试。',
+        ]);
+
+        try {
+            $result = $this->bulkImporter->import(
+                $request->file('import_file'),
+                $this->importableOperators($context['user']),
+                $context['user'],
+            );
+        } catch (\InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['import_file' => $exception->getMessage()]);
+        }
+
+        $message = '成功导入 '.$result['imported_count'].' 条广告数据，生成 '.$result['report_count'].' 份待审核记录。';
+        if ($request->expectsJson()) {
+            return response()->json($result + [
+                'ok' => true, 'message' => $message,
+                'redirect_url' => route('assistant.operation-report-reviews.index'),
+            ]);
+        }
+
+        return redirect()->route('assistant.operation-report-reviews.index')->with('success', $message);
     }
 
     public function index(Request $request): Response|View
@@ -208,6 +255,19 @@ class OperationReportReviewController extends Controller
     {
         return $user->isAdministrator()
             || in_array((int) $report->operation_department_id, $this->assistantStoreOwners->visibleOperationDepartmentIds($user), true);
+    }
+
+    private function importableOperators(AdminUser $user)
+    {
+        $ownerIds = AssistantDomainStore::query()->whereNotNull('owner_user_id')->distinct()->pluck('owner_user_id');
+        $query = AdminUser::query()->whereIn('id', $ownerIds);
+        if (!$user->isAdministrator()) {
+            $departmentIds = $this->assistantStoreOwners->visibleOperationDepartmentIds($user);
+            if ($departmentIds === []) return collect();
+            $query->whereHas('departments', fn ($departmentQuery) => $departmentQuery->whereIn('admin_roles.id', $departmentIds));
+        }
+
+        return $query->orderBy('name')->get(['id', 'name', 'username']);
     }
 
     private function sumRows(array $rows): array
