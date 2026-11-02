@@ -116,6 +116,9 @@ class PaymentRenewalAnalysisService
             : LogisticsOrder::query()
                 ->whereIn('subscription_origin_order_id', array_keys($referenceMap))
                 ->whereNotNull('paid_at')
+                ->where(function ($query): void {
+                    $query->whereNull('is_add_on')->orWhere('is_add_on', '<>', '已加购');
+                })
                 ->orderBy('paid_at')->orderBy('id')->get();
 
         $byInitial = [];
@@ -239,15 +242,20 @@ class PaymentRenewalAnalysisService
         }
 
         foreach ($paypalRefundQuery->get() as $record) $this->accumulate($refunds, (int) $record->logistics_order_id, (float) $record->refund_amount_usd);
-        foreach ($paypalDisputeQuery->get() as $record) $this->accumulate($disputes, (int) $record->logistics_order_id, (float) $record->dispute_amount_usd);
+        foreach ($paypalDisputeQuery->get()->groupBy('logistics_order_id') as $orderId => $records) {
+            $this->accumulate($disputes, (int) $orderId, (float) $records->max(fn ($record): float => (float) ($record->dispute_amount_usd ?? $record->original_amount ?? 0)));
+        }
+        $cardDisputes = [];
         foreach ($cardQuery->get() as $record) {
             $reason = LogisticsCreditCardRefundReason::normalize((string) $record->refund_reason);
             if (in_array($reason, LogisticsCreditCardRefundReason::DISPUTE, true)) {
-                $this->accumulate($disputes, (int) $record->logistics_order_id, (float) $record->refund_amount_usd);
+                $orderId = (int) $record->logistics_order_id;
+                $cardDisputes[$orderId] = max($cardDisputes[$orderId] ?? 0.0, (float) $record->refund_amount_usd);
             } elseif (in_array($reason, LogisticsCreditCardRefundReason::CUSTOMER_SERVICE, true)) {
                 $this->accumulate($refunds, (int) $record->logistics_order_id, (float) $record->refund_amount_usd);
             }
         }
+        foreach ($cardDisputes as $orderId => $amount) $this->accumulate($disputes, (int) $orderId, (float) $amount);
         return compact('refunds', 'disputes');
     }
 
