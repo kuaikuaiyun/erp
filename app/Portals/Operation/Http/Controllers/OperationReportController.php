@@ -226,7 +226,10 @@ class OperationReportController extends Controller
         $submittedAdvertisingRows = $report?->advertising_rows ?: [];
         $history = OperationReport::query()
             ->when(! $isBoss && ! $canReview, fn ($query) => $query->where('operator_user_id', $user->getKey()))
-            ->orderByDesc('report_date')->orderByDesc('id')->limit(60)->get();
+            ->orderByDesc('report_date')
+            ->orderByDesc('id')
+            ->paginate(20, ['*'], 'history_page')
+            ->withQueryString();
 
         return view('portals.operation.reports.index', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $user,
