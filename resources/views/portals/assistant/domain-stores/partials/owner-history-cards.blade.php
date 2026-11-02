@@ -5,6 +5,15 @@
                 <strong>{{ match ($ownerHistory->event) { 'baseline' => '初始归属', 'cleared' => '取消归属', 'assigned' => '设置归属', default => '转移归属' } }}</strong>
                 <span class="text-muted">{{ $ownerHistory->effective_from?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') }}</span>
             </div>
+            @if (($canManageOwnerHistoryTimes ?? false) && isset($domainStore))
+                <form method="post" action="{{ route('assistant.domain-stores.owner-histories.effective-time', ['domainStore' => $domainStore, 'ownerHistory' => $ownerHistory]) }}" class="assistant-owner-history-time-form" data-owner-history-time-form>
+                    @csrf
+                    @method('PATCH')
+                    <label class="sr-only" for="owner-history-time-{{ $ownerHistory->id }}">归属生效时间</label>
+                    <input id="owner-history-time-{{ $ownerHistory->id }}" name="effective_from" type="datetime-local" class="form-control input-sm" value="{{ $ownerHistory->effective_from?->timezone('Asia/Shanghai')->format('Y-m-d\\TH:i') }}" max="{{ now('Asia/Shanghai')->format('Y-m-d\\TH:i') }}" required>
+                    <button type="submit" class="btn btn-primary btn-xs">保存时间</button>
+                </form>
+            @endif
         </header>
         <div class="assistant-history-change-list">
             <div class="assistant-history-change">

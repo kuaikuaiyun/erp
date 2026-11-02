@@ -300,6 +300,33 @@
         button.html(expanded ? '<i class="fa fa-angle-down"></i> ' + escapeHtml(translate('expand')) : '<i class="fa fa-angle-up"></i> ' + escapeHtml(translate('collapse')));
     });
 
+    $(document).on('submit', '[data-owner-history-time-form]', function (event) {
+        event.preventDefault();
+
+        var form = $(this);
+        var button = form.find('button[type="submit"]');
+        var content = $('#assistant-history-content');
+        var originalText = button.text();
+
+        button.prop('disabled', true).text('保存中…');
+        $.ajax({
+            url: form.attr('action'),
+            method: 'POST',
+            data: form.serialize(),
+            headers: { Accept: 'application/json' }
+        }).done(function (response) {
+            content.html(response.html || '');
+        }).fail(function (xhr) {
+            var errors = xhr.responseJSON && xhr.responseJSON.errors ? xhr.responseJSON.errors : null;
+            var message = errors && errors.effective_from && errors.effective_from[0]
+                ? errors.effective_from[0]
+                : (xhr.responseJSON && xhr.responseJSON.message ? xhr.responseJSON.message : '保存失败，请稍后重试。');
+            window.alert(message);
+        }).always(function () {
+            button.prop('disabled', false).text(originalText);
+        });
+    });
+
     $(document).on('submit', '.assistant-delete-form', function (event) {
         var button = $(this).find('button[type="submit"]');
         var shopName = button.data('shop-name') || '';

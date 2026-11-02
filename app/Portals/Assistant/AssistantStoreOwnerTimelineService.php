@@ -57,7 +57,46 @@ class AssistantStoreOwnerTimelineService
         );
 
         if ($active === null) {
-            throw new \InvalidArgumentException('归属生效时间不能早于该店铺已有归属记录。');
+            // Historical ownership may be entered after a newer history range
+            // already exists. Insert a preceding, closed range in that case.
+            $newOwnerId = $newOwner?->getKey();
+            $next = $histories->first(static fn (AssistantDomainStoreOwnerHistory $history): bool => $history->effective_from->greaterThan($effectiveAt));
+
+            // An unassigned baseline is system-generated when a store had no
+            // owner. It must not split a subsequently backdated assignment.
+            if ($next !== null
+                && $next->event === AssistantDomainStoreOwnerHistory::EVENT_BASELINE
+                && $next->owner_user_id === null) {
+                $baseline = $next;
+                $next = $histories->first(static fn (AssistantDomainStoreOwnerHistory $history): bool => $history->effective_from->greaterThan($baseline->effective_from));
+                $baseline->delete();
+
+                if ($next !== null && (int) ($next->owner_user_id ?? 0) === (int) ($newOwnerId ?? 0)) {
+                    $next->update(['effective_from' => $effectiveAt]);
+                    $this->refreshSnapshots($store, $effectiveAt);
+
+                    return true;
+                }
+            }
+
+            AssistantDomainStoreOwnerHistory::query()->create([
+                'assistant_domain_store_id' => $store->getKey(),
+                'owner_user_id' => $newOwnerId,
+                'owner_name_snapshot' => $this->userName($newOwner),
+                'event' => $newOwner === null ? AssistantDomainStoreOwnerHistory::EVENT_CLEARED : AssistantDomainStoreOwnerHistory::EVENT_ASSIGNED,
+                'effective_from' => $effectiveAt,
+                'effective_to' => $next?->effective_from,
+                'actor_id' => $actor?->getKey(),
+                'actor_name_snapshot' => $this->userName($actor),
+            ]);
+
+            $this->refreshSnapshots($store, $effectiveAt);
+            $current = $this->resolveAt($store, now());
+            $store->owner_user_id = $current['owner_user_id'];
+            $store->unsetRelation('ownerUser');
+            $store->save();
+
+            return true;
         }
 
         $newOwnerId = $newOwner?->getKey();
@@ -93,6 +132,62 @@ class AssistantStoreOwnerTimelineService
         $store->save();
 
         return true;
+    }
+
+    /**
+     * Move one existing ownership-history boundary without changing its owner,
+     * event, or audit actor. Adjacent ranges are kept contiguous and every
+     * affected logistics-order snapshot is recalculated from the earliest
+     * changed boundary.
+     */
+    public function reschedule(AssistantDomainStore $store, AssistantDomainStoreOwnerHistory $history, CarbonInterface $effectiveAt): void
+    {
+        if ((int) $history->assistant_domain_store_id !== (int) $store->getKey()) {
+            throw new \InvalidArgumentException('该归属历史不属于当前店铺。');
+        }
+
+        $effectiveAt = Carbon::instance($effectiveAt)->utc();
+        $previousEffectiveAt = Carbon::instance($history->effective_from)->utc();
+        $exists = AssistantDomainStoreOwnerHistory::query()
+            ->where('assistant_domain_store_id', $store->getKey())
+            ->whereKey($history->getKey())
+            ->lockForUpdate()
+            ->exists();
+
+        if (!$exists) {
+            throw new \InvalidArgumentException('未找到该归属历史。');
+        }
+
+        // A historical effective time is intentionally free to move across
+        // earlier/later records. Re-sort every range afterwards instead of
+        // rejecting it because of its former neighbours.
+        $history->forceFill([
+            'effective_from' => $effectiveAt,
+            'effective_to' => null,
+        ])->save();
+
+        $histories = AssistantDomainStoreOwnerHistory::query()
+            ->where('assistant_domain_store_id', $store->getKey())
+            ->orderBy('effective_from')
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get()
+            ->values();
+
+        foreach ($histories as $index => $item) {
+            $next = $histories->get($index + 1);
+            $effectiveTo = $next?->effective_from;
+
+            if (($item->effective_to?->format('Y-m-d H:i:s.u') ?? null) !== ($effectiveTo?->format('Y-m-d H:i:s.u') ?? null)) {
+                $item->forceFill(['effective_to' => $effectiveTo])->save();
+            }
+        }
+
+        $this->refreshSnapshots($store, $previousEffectiveAt->lessThan($effectiveAt) ? $previousEffectiveAt : $effectiveAt);
+        $current = $this->resolveAt($store, now());
+        $store->forceFill(['owner_user_id' => $current['owner_user_id']]);
+        $store->unsetRelation('ownerUser');
+        $store->save();
     }
 
     /** @return array{owner_user_id:?int,owner_name:?string,effective_from:?CarbonInterface} */

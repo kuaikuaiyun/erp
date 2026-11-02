@@ -136,3 +136,21 @@
     color: #23527c;
     text-decoration: none;
 }
+
+.assistant-owner-history-time-form {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+}
+
+.assistant-owner-history-time-form .form-control {
+    min-width: 185px;
+}
+
+@media (max-width: 640px) {
+    .assistant-history-card-header,
+    .assistant-owner-history-time-form {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}

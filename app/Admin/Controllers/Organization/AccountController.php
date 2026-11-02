@@ -170,11 +170,37 @@ class AccountController extends Controller
         $grid->disableExport();
         $grid->expandFilter();
 
-        $grid->filter(function (Filter $filter): void {
+        $departmentOptions = $this->organization
+            ->departmentOptionsFor($actor)
+            ->mapWithKeys(static fn (array $option): array => [
+                (int) $option['id'] => (string) $option['label'],
+            ])
+            ->all();
+
+        $grid->filter(function (Filter $filter) use ($departmentOptions): void {
             $filter->disableIdFilter();
             $filter->column(0.5, function (Filter $filter): void {
                 $filter->like('username', __('organization.accounts.username'));
                 $filter->like('name', __('organization.accounts.name'));
+            });
+            $filter->column(0.5, function (Filter $filter) use ($departmentOptions): void {
+                $filter->where(function ($query): void {
+                    $departmentIds = collect((array) $this->input)
+                        ->filter(static fn ($departmentId): bool => is_numeric($departmentId))
+                        ->map(static fn ($departmentId): int => (int) $departmentId)
+                        ->unique()
+                        ->values()
+                        ->all();
+
+                    if ($departmentIds === []) {
+                        return;
+                    }
+
+                    $departmentsTable = (new Department())->getTable();
+                    $query->whereHas('departments', function ($departmentQuery) use ($departmentIds, $departmentsTable): void {
+                        $departmentQuery->whereIn($departmentsTable.'.id', $departmentIds);
+                    });
+                }, __('organization.accounts.department_filter'), 'department_ids')->multipleSelect($departmentOptions);
             });
         });
 
@@ -388,4 +414,3 @@ class AccountController extends Controller
         return config('admin.database.connection') ?: config('database.default');
     }
 }
-

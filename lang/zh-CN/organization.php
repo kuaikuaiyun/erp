@@ -172,6 +172,7 @@ return [
         'add_department' => '新增所属部门',
         'remove_department' => '移除部门',
         'department' => '所属部门',
+        'department_filter' => '所属部门（可多选）',
         'position' => '部门职位',
         'branch_position_only_manager' => '该一级部门已有二级部门，仅可设置主管。',
         'branch_manager_full' => '该一级部门已有二级部门，且主管名额已满，请选择其他部门。',
@@ -252,4 +253,3 @@ return [
         'password_confirmed' => '两次输入的密码不一致。',
     ],
 ];
-

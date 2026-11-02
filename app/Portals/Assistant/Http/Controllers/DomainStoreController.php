@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
 use App\Models\AssistantDomainStore;
 use App\Models\AssistantDomainStoreChangeLog;
+use App\Models\AssistantDomainStoreOwnerHistory;
 use App\Models\AssistantDomainStoreQuickOption;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantDomainCheckService;
@@ -395,15 +396,18 @@ class DomainStoreController extends Controller
         $data = $this->validatedData($request);
         $departmentAccess = $this->departmentAccessForRequest($request, $context['user']);
         $ownerUserId = $this->ownerAssignmentForRequest($request, $context['user']);
+        $ownerEffectiveAt = $this->ownerEffectiveAt($request);
 
         $store = DB::connection(config('admin.database.connection') ?: config('database.default'))
-            ->transaction(function () use ($data, $context, $departmentAccess, $ownerUserId): AssistantDomainStore {
+            ->transaction(function () use ($data, $context, $departmentAccess, $ownerUserId, $ownerEffectiveAt): AssistantDomainStore {
                 $store = new AssistantDomainStore($data);
                 $store->owner_department_id = $departmentAccess['owner_department_id'];
                 $store->owner_user_id = $ownerUserId;
                 $this->setLastOperator($store, $context['user']);
                 $store->save();
-                $this->ownerTimeline->ensureBaseline($store, $context['user']);
+                // New records do not have an existing ownership range. Use the
+                // submitted effective time for their initial range, not save time.
+                $this->ownerTimeline->ensureBaseline($store, $context['user'], $ownerEffectiveAt);
                 $this->syncDepartmentAccess($store, $departmentAccess['department_ids']);
                 $this->history->recordCreated($store, $context['user']);
 
@@ -468,11 +472,13 @@ class DomainStoreController extends Controller
         $departmentAccess = $this->departmentAccessForRequest($request, $context['user'], $domainStore);
         $ownerUserId = $this->ownerAssignmentForRequest($request, $context['user'], $domainStore);
         $ownerEffectiveAt = $this->ownerEffectiveAt($request);
+        $ownerEffectiveAtSubmitted = $this->hasOwnerEffectiveAt($request);
 
-        DB::connection($domainStore->getConnectionName())->transaction(function () use ($domainStore, $data, $context, $departmentAccess, $ownerUserId, $ownerEffectiveAt): void {
+        DB::connection($domainStore->getConnectionName())->transaction(function () use ($domainStore, $data, $context, $departmentAccess, $ownerUserId, $ownerEffectiveAt, $ownerEffectiveAtSubmitted): void {
             $before = $domainStore->historySnapshot();
             $previousOwnerId = $domainStore->owner_user_id === null ? null : (int) $domainStore->owner_user_id;
-            if ($previousOwnerId !== $ownerUserId) {
+            $ownerTimelineChangeRequested = $previousOwnerId !== $ownerUserId || $ownerEffectiveAtSubmitted;
+            if ($ownerTimelineChangeRequested) {
                 $this->ownerTimeline->ensureBaseline($domainStore, $context['user']);
             }
             $domainStore->fill($data);
@@ -483,7 +489,7 @@ class DomainStoreController extends Controller
             $domainStore->save();
             $this->syncDepartmentAccess($domainStore, $departmentAccess['department_ids']);
             $this->history->recordUpdated($domainStore, $before, $domainStore->historySnapshot(), $context['user']);
-            if ($previousOwnerId !== $ownerUserId) {
+            if ($ownerTimelineChangeRequested) {
                 $newOwner = $ownerUserId === null ? null : AdminUser::query()->findOrFail($ownerUserId);
                 $this->ownerTimeline->assign($domainStore, $newOwner, $ownerEffectiveAt, $context['user']);
             }
@@ -897,12 +903,66 @@ class DomainStoreController extends Controller
 
         if ($request->input('scope') === 'owner') {
             return response()->json([
-                'html' => view('portals.assistant.domain-stores.partials.owner-history-cards', ['ownerHistories' => $ownerHistories])->render(),
+                'html' => view('portals.assistant.domain-stores.partials.owner-history-cards', [
+                    'domainStore' => $domainStore,
+                    'ownerHistories' => $ownerHistories,
+                    'canManageOwnerHistoryTimes' => $this->authorization->canAssignStoreOwners($context['user']),
+                ])->render(),
             ]);
         }
 
         return response()->json([
             'html' => view('portals.assistant.domain-stores.partials.history-cards', ['logs' => $logs, 'ownerHistories' => $ownerHistories])->render(),
+        ]);
+    }
+
+    public function updateOwnerHistoryEffectiveTime(Request $request, AssistantDomainStore $domainStore, AssistantDomainStoreOwnerHistory $ownerHistory): JsonResponse
+    {
+        $context = $this->portalContext($request);
+
+        if ($context instanceof Response) {
+            abort(403);
+        }
+
+        abort_unless($this->authorization->canAssignStoreOwners($context['user']), 403);
+        $domainStore = $this->findAccessibleStoreOrFail($context['user'], $domainStore->getKey());
+        abort_unless((int) $ownerHistory->assistant_domain_store_id === (int) $domainStore->getKey(), 404);
+        $validated = $request->validate([
+            'effective_from' => ['required', 'date'],
+        ]);
+        $effectiveAt = Carbon::parse($validated['effective_from'], 'Asia/Shanghai')->utc();
+
+        if ($effectiveAt->greaterThan(now()->utc())) {
+            throw ValidationException::withMessages([
+                'effective_from' => '归属生效时间不能晚于当前时间。',
+            ]);
+        }
+
+        try {
+            DB::connection($domainStore->getConnectionName())->transaction(function () use ($domainStore, $ownerHistory, $effectiveAt): void {
+                $lockedHistory = AssistantDomainStoreOwnerHistory::query()
+                    ->lockForUpdate()
+                    ->findOrFail($ownerHistory->getKey());
+                $this->ownerTimeline->reschedule($domainStore, $lockedHistory, $effectiveAt);
+            });
+        } catch (\InvalidArgumentException $exception) {
+            throw ValidationException::withMessages([
+                'effective_from' => $exception->getMessage(),
+            ]);
+        }
+
+        $ownerHistories = $domainStore->ownerHistories()
+            ->orderByDesc('effective_from')
+            ->orderByDesc('id')
+            ->get();
+
+        return response()->json([
+            'message' => '归属生效时间已更新，受影响订单的真实归属人已重新计算。',
+            'html' => view('portals.assistant.domain-stores.partials.owner-history-cards', [
+                'domainStore' => $domainStore,
+                'ownerHistories' => $ownerHistories,
+                'canManageOwnerHistoryTimes' => true,
+            ])->render(),
         ]);
     }
 
@@ -1582,6 +1642,11 @@ class DomainStoreController extends Controller
         }
 
         return $effectiveAt;
+    }
+
+    private function hasOwnerEffectiveAt(Request $request): bool
+    {
+        return trim((string) $request->input('owner_effective_at')) !== '';
     }
 
     /** @param list<int> $departmentIds */
