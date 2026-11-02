@@ -773,21 +773,6 @@
                 var formulas = text.formulas || {};
                 var groups = analysis.groups || [];
                 summary = summary || {};
-                if (!groups.length && Number(summary.order_count || 0) > 0) {
-                    groups = [{
-                        key: 'unmatched', renewal_number: null, unmatched: true,
-                        order_count: Number(summary.order_count || 0),
-                        received_amount: Number(summary.paid_amount || 0),
-                        refund_amount: Number(summary.refund_amount || 0),
-                        refund_rate: Number(summary.refund_amount_rate || 0),
-                        dispute_count: Number(summary.dispute_order_count || 0),
-                        dispute_rate: Number(summary.dispute_rate || 0),
-                        realised_loss: Number(summary.refund_amount || 0)
-                    }];
-                    analysis.total_orders = Number(summary.order_count || 0);
-                    analysis.classified_orders = 0;
-                    analysis.unmatched_orders = Number(summary.order_count || 0);
-                }
                 if (!groups.length) {
                     return '<div class="payment-detail-empty">' + escapeHtml(text.empty || detailText.empty) + '</div>';
                 }

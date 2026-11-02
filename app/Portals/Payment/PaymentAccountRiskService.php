@@ -453,8 +453,18 @@ class PaymentAccountRiskService
     private function orderAnalysis(LogisticsPayPalAccount $account, array $filters, array $summary): array
     {
         $connection = DB::connection(config('admin.database.connection') ?: config('database.default'));
-        $from = Carbon::parse((string) $filters['date_from'], self::REPORT_TIMEZONE)->startOfDay()->utc();
-        $to = Carbon::parse((string) $filters['date_to'], self::REPORT_TIMEZONE)->endOfDay()->utc();
+        // This tab always analyses successful payments, but it must honour the
+        // selected period regardless of whether the surrounding detail view is
+        // currently using payment time or event time.  In event mode the old
+        // implementation parsed empty date_from/date_to as "now", producing
+        // an empty analysis while the summary still contained data.
+        $periodFrom = (string) (($filters['date_from'] ?? '') ?: ($filters['event_date_from'] ?? ''));
+        $periodTo = (string) (($filters['date_to'] ?? '') ?: ($filters['event_date_to'] ?? ''));
+        if ($periodFrom === '' || $periodTo === '') {
+            return ['groups' => [], 'total_orders' => 0, 'classified_orders' => 0, 'unmatched_orders' => 0];
+        }
+        $from = Carbon::parse($periodFrom, self::REPORT_TIMEZONE)->startOfDay()->utc();
+        $to = Carbon::parse($periodTo, self::REPORT_TIMEZONE)->endOfDay()->utc();
         $paymentQuery = static fn () => $connection->table('logistics_paypal_transactions as payments')
             ->leftJoin('logistics_orders as orders', 'orders.id', '=', 'payments.logistics_order_id')
             ->where('payments.logistics_paypal_account_id', $account->getKey())
