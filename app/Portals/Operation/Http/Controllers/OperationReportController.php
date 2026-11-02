@@ -83,12 +83,12 @@ class OperationReportController extends Controller
         $metricRows = $this->withFirstOrderProfitability($calculated['rows'], $submittedMediaRoiByDate);
         usort($metricRows, fn (array $left, array $right): int => [
             $left['date'],
-            mb_strtolower(trim((string) $left['media_source'])),
             mb_strtolower(trim((string) $left['shop_domain'])),
+            mb_strtolower(trim((string) $left['media_source'])),
         ] <=> [
             $right['date'],
-            mb_strtolower(trim((string) $right['media_source'])),
             mb_strtolower(trim((string) $right['shop_domain'])),
+            mb_strtolower(trim((string) $right['media_source'])),
         ]);
         $dailySummaries = collect($metricRows)->groupBy('date')->map(function ($dateRows, string $date) use ($submittedReportsByDate, $submittedMediaRoiByDate): array {
             $firstRevenue = (float) $dateRows->sum('first_total_revenue');
