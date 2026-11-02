@@ -100,6 +100,8 @@ Route::post('/operation/reports/{report}/approve', [OperationReportController::c
 Route::get('/assistant/operation-reports', [OperationReportDashboardController::class, 'index'])->name('assistant.operation-reports.index');
 Route::get('/assistant/operation-reports/order-details', [OperationReportDashboardController::class, 'orderDetails'])->name('assistant.operation-reports.order-details');
 Route::get('/operation-report-reviews', [OperationReportReviewController::class, 'index'])->name('assistant.operation-report-reviews.index');
+Route::get('/operation-report-reviews/import-template', [OperationReportReviewController::class, 'importTemplate'])->name('assistant.operation-report-reviews.import-template');
+Route::post('/operation-report-reviews/import', [OperationReportReviewController::class, 'import'])->name('assistant.operation-report-reviews.import');
 Route::get('/operation-report-reviews/screenshot', [OperationReportReviewController::class, 'screenshot'])->name('assistant.operation-report-reviews.screenshot');
 Route::post('/operation-report-reviews/bulk-review', [OperationReportReviewController::class, 'bulkReview'])->name('assistant.operation-report-reviews.bulk-review');
 Route::get('/operation-report-reviews/{report}', [OperationReportReviewController::class, 'show'])->whereNumber('report')->name('assistant.operation-report-reviews.show');
