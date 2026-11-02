@@ -14,6 +14,8 @@ use App\Portals\Payment\PaymentPortalService;
 use App\Portals\Payment\PaymentProductAlertExportService;
 use App\Portals\Payment\PaymentProductAlertService;
 use App\Portals\Payment\PaymentProductRiskService;
+use App\Portals\Payment\PaymentRenewalAnalysisExportService;
+use App\Portals\Payment\PaymentRenewalAnalysisService;
 use App\Portals\Payment\PaymentWorkbenchService;
 use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
@@ -34,6 +36,8 @@ class PaymentPortalController extends Controller
         private readonly PaymentWorkbenchService $workbench,
         private readonly PaymentPayPalMonthlyReportService $monthlyReports,
         private readonly PaymentPayPalMonthlyReportExportService $monthlyReportExport,
+        private readonly PaymentRenewalAnalysisService $renewalAnalysis,
+        private readonly PaymentRenewalAnalysisExportService $renewalAnalysisExport,
     ) {
     }
 
@@ -389,6 +393,29 @@ class PaymentPortalController extends Controller
         ]);
     }
 
+    public function renewalAnalysis(Request $request): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        return response()->view('portals.payment.renewal-analysis', [
+            ...$this->viewContext($context),
+            'dashboard' => $this->renewalAnalysis->dashboard($this->renewalAnalysisFilters($request)),
+        ]);
+    }
+
+    public function exportRenewalAnalysis(Request $request): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        return $this->renewalAnalysisExport->download($this->renewalAnalysisFilters($request));
+    }
+
     public function paymentOrderDetail(Request $request): Response
     {
         $context = $this->portalContext($request);
@@ -521,6 +548,35 @@ class PaymentPortalController extends Controller
             'date_to' => (string) ($validated['date_to'] ?? $today->format('Y-m-d')),
             'sort' => (string) ($validated['sort'] ?? 'paid_at'),
             'direction' => (string) ($validated['direction'] ?? 'desc'),
+            'page' => max(1, (int) ($validated['page'] ?? 1)),
+            'per_page' => (int) ($validated['per_page'] ?? 50),
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function renewalAnalysisFilters(Request $request): array
+    {
+        $validated = $request->validate([
+            'date_from' => ['nullable', 'date'],
+            'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
+            'risk_date_mode' => ['nullable', Rule::in(['payment', 'event'])],
+            'channel' => ['nullable', Rule::in(['', 'paypal', 'credit_card'])],
+            'stage' => ['nullable', 'regex:/^(renewal_\d+)?$/'],
+            'store' => ['nullable', 'string', 'max:191'],
+            'keyword' => ['nullable', 'string', 'max:191'],
+            'page' => ['nullable', 'integer', 'min:1'],
+            'per_page' => ['nullable', Rule::in([50, 100, '50', '100'])],
+        ]);
+        $today = now('Asia/Shanghai');
+
+        return [
+            'date_from' => (string) ($validated['date_from'] ?? $today->copy()->subDays(89)->format('Y-m-d')),
+            'date_to' => (string) ($validated['date_to'] ?? $today->format('Y-m-d')),
+            'risk_date_mode' => (string) ($validated['risk_date_mode'] ?? 'payment'),
+            'channel' => (string) ($validated['channel'] ?? ''),
+            'stage' => (string) ($validated['stage'] ?? ''),
+            'store' => trim((string) ($validated['store'] ?? '')),
+            'keyword' => trim((string) ($validated['keyword'] ?? '')),
             'page' => max(1, (int) ($validated['page'] ?? 1)),
             'per_page' => (int) ($validated['per_page'] ?? 50),
         ];

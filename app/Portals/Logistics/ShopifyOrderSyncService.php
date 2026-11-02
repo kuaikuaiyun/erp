@@ -777,9 +777,22 @@ GRAPHQL, [
             return [
                 'type' => '订阅',
                 'status' => '已订阅',
-                'origin_order_id' => $this->firstAttribute($attributes, ['subscription_origin_order_id', 'yx_subscription_origin_order_id']),
+                'origin_order_id' => SubscriptionOrderReference::originOrderId($attributes),
                 'source' => 'Shopify订阅计划',
                 'link_status' => null,
+            ];
+        }
+
+        $explicitOrigin = SubscriptionOrderReference::originOrderId($attributes);
+        if ($explicitOrigin !== null) {
+            $recurringNumber = SubscriptionOrderReference::recurringNumber($attributes) ?? 1;
+
+            return [
+                'type' => '订阅复购'.$recurringNumber.'次',
+                'status' => '已订阅',
+                'origin_order_id' => $explicitOrigin,
+                'source' => __('logistics.subscription_reference_backfill.source'),
+                'link_status' => __('logistics.subscription_reference_backfill.confirmed'),
             ];
         }
 

@@ -12,6 +12,7 @@ class PaymentPortalService
         'payment_account_risk',
         'payment_product_risk_profit',
         'payment_product_alerts',
+        'payment_renewal_analysis',
         'payment_orders',
     ];
 

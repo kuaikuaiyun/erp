@@ -599,18 +599,50 @@ class PaymentProductRiskService
             ."WHEN NULLIF(TRIM(items.shopify_product_id), '') IS NOT NULL THEN CONCAT('shopify-product:', LOWER(TRIM(items.shopify_product_id))) "
             ."WHEN NULLIF(TRIM(COALESCE(items.tongtu_product_name, items.product_title)), '') IS NOT NULL THEN CONCAT('product-name:', LOWER(TRIM(COALESCE(items.tongtu_product_name, items.product_title)))) "
             ."ELSE CONCAT('sku:', COALESCE(NULLIF(LOWER(TRIM(items.tongtu_product_code)), ''), NULLIF(LOWER(TRIM(items.tongtu_sku)), ''), NULLIF(LOWER(TRIM(items.shopify_sku)), ''), '__missing__')) END";
-        $ordersQuery = $database->table('logistics_order_items as items')
+        $ordersQuery = static fn () => $database->table('logistics_order_items as items')
             ->join('logistics_orders as orders', 'orders.id', '=', 'items.logistics_order_id')
             ->whereRaw("{$keyExpression} = ?", [$productKey])
             ->where(function ($query): void {
                 $query->whereNotNull('orders.paid_at')->orWhere('orders.paid_amount_usd', '>', 0);
             });
-        $this->applyPaidAtRange($ordersQuery, $filters);
-        if (($filters['store'] ?? '') !== '') $ordersQuery->where('orders.store_name', $filters['store']);
-        $orders = $ordersQuery->select([
+        $columns = [
             'orders.id', 'orders.paid_amount_usd', 'orders.subscription_type', 'orders.subscription_origin_order_id',
             'orders.paypal_account_id', 'orders.paypal_association_source', 'orders.shopify_payload', 'orders.paid_at',
-        ])->distinct()->orderBy('orders.paid_at')->orderBy('orders.id')->get();
+            'orders.transaction_id as subscription_chain_id', 'orders.shopify_order_id',
+            'orders.shopify_order_number', 'orders.payment_gateway_order_id',
+        ];
+        $baseOrdersQuery = $ordersQuery();
+        $this->applyPaidAtRange($baseOrdersQuery, $filters);
+        if (($filters['store'] ?? '') !== '') $baseOrdersQuery->where('orders.store_name', $filters['store']);
+        $baseOrders = $baseOrdersQuery->select($columns)->distinct()->orderBy('orders.paid_at')->orderBy('orders.id')->get();
+        $cohortReferences = $baseOrders
+            ->filter(function (object $order): bool {
+                $type = trim((string) $order->subscription_type);
+
+                return trim((string) $order->subscription_origin_order_id) === ''
+                    && $type !== ''
+                    && ! str_contains($type, '无订阅');
+            })
+            ->flatMap(fn (object $order): array => PaymentSubscriptionLifecycle::chainReferences(
+                $order->subscription_chain_id,
+                $order->shopify_order_id,
+                $order->shopify_order_number,
+                $order->payment_gateway_order_id,
+            ))
+            ->unique()->values()->all();
+        $renewalOrders = collect();
+        if ($cohortReferences !== []) {
+            $renewalOrdersQuery = $ordersQuery()
+                ->whereIn('orders.subscription_origin_order_id', $cohortReferences)
+                ->where('orders.paid_at', '<=', now()->utc());
+            if (($filters['store'] ?? '') !== '') $renewalOrdersQuery->where('orders.store_name', $filters['store']);
+            $renewalOrders = $renewalOrdersQuery->select($columns)->distinct()->orderBy('orders.paid_at')->orderBy('orders.id')->get();
+        }
+        $orders = $baseOrders
+            ->reject(static fn (object $order): bool => trim((string) $order->subscription_origin_order_id) !== '')
+            ->concat($renewalOrders)
+            ->sortBy(fn (object $order): string => sprintf('%s-%020d', (string) $order->paid_at, (int) $order->id))
+            ->unique('id')->values();
         $orderIds = $orders->pluck('id')->map(fn ($id): int => (int) $id)->all();
 
         $paypalRefunds = collect();
@@ -631,10 +663,18 @@ class PaymentProductRiskService
         $cardRows = $orderIds === [] ? collect() : $database->table('logistics_credit_card_refunds')
             ->whereIn('logistics_order_id', $orderIds)->get(['logistics_order_id', 'refund_amount_usd', 'refund_reason'])->groupBy('logistics_order_id');
 
-        $empty = static fn (): array => ['order_count' => 0, 'received_amount' => 0.0, 'refund_amount' => 0.0, 'refund_rate' => 0.0, 'dispute_count' => 0, 'dispute_rate' => 0.0, 'realised_loss' => 0.0];
+        $empty = static fn (string $key, ?int $renewalNumber, int $sort): array => [
+            'key' => $key, 'renewal_number' => $renewalNumber, 'sort' => $sort,
+            'order_count' => 0, 'received_amount' => 0.0, 'refund_amount' => 0.0,
+            'refund_rate' => 0.0, 'dispute_count' => 0, 'dispute_rate' => 0.0,
+            'realised_loss' => 0.0,
+        ];
         $groups = [];
-        foreach (['paypal', 'credit_card'] as $channel) foreach (['one_time', 'first_charge', 'first_renewal', 'later_renewal'] as $stage) $groups[$channel][$stage] = $empty();
-        $seenRecurring = [];
+        foreach (['paypal', 'credit_card'] as $channel) {
+            $groups[$channel]['one_time'] = $empty('one_time', null, 0);
+            $groups[$channel]['first_charge'] = $empty('first_charge', null, 1);
+        }
+        $seenRecurring = ['paypal' => [], 'credit_card' => []];
         foreach ($orders as $order) {
             $payload = strtolower((string) $order->shopify_payload);
             $channel = $order->paypal_account_id !== null && $order->paypal_association_source === 'actual_transaction'
@@ -642,14 +682,9 @@ class PaymentProductRiskService
             if ($channel === null) continue;
             $type = trim((string) $order->subscription_type);
             $origin = trim((string) $order->subscription_origin_order_id);
-            if ($origin === '' && ($type === '' || str_contains($type, '无订阅'))) $stage = 'one_time';
-            elseif ($origin === '') $stage = 'first_charge';
-            else {
-                $seenRecurring[$channel][$origin] = ($seenRecurring[$channel][$origin] ?? 0) + 1;
-                preg_match('/(\d+)/u', $type, $match);
-                $number = isset($match[1]) ? (int) $match[1] : $seenRecurring[$channel][$origin];
-                $stage = $number <= 1 ? 'first_renewal' : 'later_renewal';
-            }
+            $lifecycle = PaymentSubscriptionLifecycle::classify($type, $origin, $seenRecurring[$channel]);
+            $stage = $lifecycle['key'];
+            $groups[$channel][$stage] ??= $empty($stage, $lifecycle['renewal_number'], $lifecycle['sort']);
             $refundAmount = 0.0;
             $disputeCount = 0;
             if ($channel === 'paypal') {
@@ -676,6 +711,10 @@ class PaymentProductRiskService
             $group['dispute_rate'] = $group['order_count'] > 0 ? round($group['dispute_count'] / $group['order_count'] * 100, 2) : 0.0;
         }
         unset($channelGroups, $group);
+        foreach ($groups as &$channelGroups) {
+            uasort($channelGroups, static fn (array $left, array $right): int => $left['sort'] <=> $right['sort']);
+        }
+        unset($channelGroups);
         return $groups;
     }
 

@@ -1231,13 +1231,27 @@
                 var text = productText.first_renewal || {};
                 var formulas = text.formulas || {};
                 var groups = detail.groups || {};
-                var order = ['one_time', 'first_charge', 'first_renewal', 'later_renewal'];
+                function lifecycleOrder(source) {
+                    return ['one_time', 'first_charge'].filter(function (key) {
+                        return Object.prototype.hasOwnProperty.call(source, key);
+                    }).concat(Object.keys(source).filter(function (key) {
+                        return /^renewal_\d+$/.test(key) && Number((source[key] || {}).order_count || 0) > 0;
+                    }).sort(function (left, right) {
+                        return Number(left.replace('renewal_', '')) - Number(right.replace('renewal_', ''));
+                    }));
+                }
+                function lifecycleLabel(key, group) {
+                    if (key === 'one_time' || key === 'first_charge') return (text.groups || {})[key] || key;
+                    var renewalNumber = Number(group.renewal_number || key.replace('renewal_', ''));
+                    return replaceProductTokens(text.renewal_stage || '', { count: renewalNumber });
+                }
+                var order = lifecycleOrder(groups);
                 var previousSubscriptionCount = null;
                 var cards = order.map(function (key) {
                     var group = groups[key] || {};
                     var currentCount = Number(group.order_count || 0);
                     var connector = '';
-                    if ((key === 'first_renewal' || key === 'later_renewal') && previousSubscriptionCount !== null) {
+                    if (/^renewal_\d+$/.test(key) && previousSubscriptionCount !== null) {
                         var lostCount = Math.max(0, previousSubscriptionCount - currentCount);
                         var lostRate = previousSubscriptionCount > 0 ? lostCount / previousSubscriptionCount * 100 : 0;
                         var hasGrowth = currentCount > previousSubscriptionCount;
@@ -1245,8 +1259,8 @@
                         var churnValue = hasGrowth ? text.churn_growth : replaceProductTokens(text.churn_value, { count: pNumber(lostCount), rate: pRate(lostRate) });
                         connector = '<div class="payment-product-lifecycle-connector' + (hasGrowth ? ' has-growth' : (lostRate >= 50 ? ' is-high' : '')) + '"><i class="fa fa-long-arrow-down" aria-hidden="true"></i><span>' + pEscape(text.churn_label) + formulaIcon(churnFormula) + '</span><strong>' + pEscape(churnValue) + '</strong></div>';
                     }
-                    if (key === 'first_charge' || key === 'first_renewal' || key === 'later_renewal') previousSubscriptionCount = currentCount;
-                    return connector + '<article class="payment-lifecycle-card"><h4>' + pEscape((text.groups || {})[key]) + '</h4><strong>' + pEscape(pNumber(group.order_count)) + ' ' + pEscape((productText.overview || {}).record) + ' / ' + pEscape(pMoney(group.received_amount)) + '</strong><dl><div><dt>' + pEscape(text.refund_rate) + formulaIcon(replaceProductTokens(formulas.refund_rate, { refund: pMoney(group.refund_amount), received: pMoney(group.received_amount) })) + '</dt><dd>' + pEscape(pRate(group.refund_rate)) + '</dd></div><div><dt>' + pEscape(text.dispute_rate) + formulaIcon(replaceProductTokens(formulas.dispute_rate, { count: pNumber(group.dispute_count), orders: pNumber(group.order_count) })) + '</dt><dd>' + pEscape(pNumber(group.dispute_count)) + ' / ' + pEscape(pRate(group.dispute_rate)) + '</dd></div><div><dt>' + pEscape(text.realised_loss) + formulaIcon(formulas.realised_loss) + '</dt><dd>' + pEscape(pMoney(group.realised_loss)) + '</dd></div></dl></article>';
+                    if (key === 'first_charge' || /^renewal_\d+$/.test(key)) previousSubscriptionCount = currentCount;
+                    return connector + '<article class="payment-lifecycle-card"><h4>' + pEscape(lifecycleLabel(key, group)) + '</h4><strong>' + pEscape(pNumber(group.order_count)) + ' ' + pEscape((productText.overview || {}).record) + ' / ' + pEscape(pMoney(group.received_amount)) + '</strong><dl><div><dt>' + pEscape(text.refund_rate) + formulaIcon(replaceProductTokens(formulas.refund_rate, { refund: pMoney(group.refund_amount), received: pMoney(group.received_amount) })) + '</dt><dd>' + pEscape(pRate(group.refund_rate)) + '</dd></div><div><dt>' + pEscape(text.dispute_rate) + formulaIcon(replaceProductTokens(formulas.dispute_rate, { count: pNumber(group.dispute_count), orders: pNumber(group.order_count) })) + '</dt><dd>' + pEscape(pNumber(group.dispute_count)) + ' / ' + pEscape(pRate(group.dispute_rate)) + '</dd></div><div><dt>' + pEscape(text.realised_loss) + formulaIcon(formulas.realised_loss) + '</dt><dd>' + pEscape(pMoney(group.realised_loss)) + '</dd></div></dl></article>';
                 }).join('');
                 var chains = detail.chains || [];
                 var chainPanel = '<article class="payment-lifecycle-panel"><h4>' + pEscape(text.chain_title) + '</h4>' + (chains.length ? '<div class="payment-lifecycle-chains">' + chains.slice(0, 8).map(function (chain) { return '<div><b>' + pEscape(text.origin) + ' ' + pEscape(chain.origin) + '</b><span>' + (chain.orders || []).map(function (item) { return pEscape(((text.groups || {})[item.stage] || item.stage) + ' ' + item.order_number + ' · ' + pMoney(item.amount) + (Number(item.refund_amount) > 0 ? ' · ' + text.refund + ' ' + pMoney(item.refund_amount) : '')); }).join('<i class="fa fa-long-arrow-right"></i>') + '</span></div>'; }).join('') + '</div>' : '<p class="payment-detail-empty">' + pEscape(text.chain_empty) + '</p>') + '</article>';
@@ -1259,19 +1273,20 @@
                 var channelPanels = ['paypal', 'credit_card'].map(function (channel) {
                     var groupsForChannel = channelGroups[channel] || {};
                     if (!Object.keys(groupsForChannel).length) return '';
+                    var channelOrder = lifecycleOrder(groupsForChannel);
                     var previousSubscriptionCount = null;
-                    var rows = order.map(function (key) {
+                    var rows = channelOrder.map(function (key) {
                         var group = groupsForChannel[key] || {};
                         var currentCount = Number(group.order_count || 0);
                         var connector = '';
-                        if ((key === 'first_renewal' || key === 'later_renewal') && previousSubscriptionCount !== null) {
+                        if (/^renewal_\d+$/.test(key) && previousSubscriptionCount !== null) {
                             var lost = Math.max(0, previousSubscriptionCount - currentCount);
                             var lostRate = previousSubscriptionCount > 0 ? lost / previousSubscriptionCount * 100 : 0;
                             var churnFormula = replaceProductTokens(formulas.churn_rate, { previous: pNumber(previousSubscriptionCount), current: pNumber(currentCount), lost: pNumber(lost) });
                             connector = '<div class="payment-product-lifecycle-connector' + (lostRate >= 50 ? ' is-high' : ' is-moderate') + '"><i class="fa fa-long-arrow-down" aria-hidden="true"></i><span>' + pEscape(text.churn_label) + formulaIcon(churnFormula) + '</span><strong>' + pEscape(pNumber(lost) + ' ' + text.record_unit + ' / ' + pRate(lostRate)) + '</strong></div>';
                         }
-                        if (key === 'first_charge' || key === 'first_renewal' || key === 'later_renewal') previousSubscriptionCount = currentCount;
-                        return connector + '<article class="payment-lifecycle-card"><h4>' + pEscape((text.groups || {})[key]) + '</h4><strong>' + pEscape(pNumber(group.order_count)) + ' ' + pEscape(text.record_unit) + ' / ' + pEscape(pMoney(group.received_amount)) + '</strong><dl><div><dt>' + pEscape(text.refund_rate) + formulaIcon(replaceProductTokens(formulas.refund_rate, { refund: pMoney(group.refund_amount), received: pMoney(group.received_amount) })) + '</dt><dd>' + pEscape(pRate(group.refund_rate)) + '</dd></div><div><dt>' + pEscape(text.dispute_rate) + formulaIcon(replaceProductTokens(formulas.dispute_rate, { count: pNumber(group.dispute_count), orders: pNumber(group.order_count) })) + '</dt><dd>' + pEscape(pRate(group.dispute_rate)) + '<small>' + pEscape(pNumber(group.dispute_count) + text.record_unit + ' / ' + pNumber(group.order_count) + text.record_unit) + '</small></dd></div><div><dt>' + pEscape(text.realised_loss) + formulaIcon(formulas.realised_loss) + '</dt><dd>' + pEscape(pMoney(group.realised_loss)) + '</dd></div></dl></article>';
+                        if (key === 'first_charge' || /^renewal_\d+$/.test(key)) previousSubscriptionCount = currentCount;
+                        return connector + '<article class="payment-lifecycle-card"><h4>' + pEscape(lifecycleLabel(key, group)) + '</h4><strong>' + pEscape(pNumber(group.order_count)) + ' ' + pEscape(text.record_unit) + ' / ' + pEscape(pMoney(group.received_amount)) + '</strong><dl><div><dt>' + pEscape(text.refund_rate) + formulaIcon(replaceProductTokens(formulas.refund_rate, { refund: pMoney(group.refund_amount), received: pMoney(group.received_amount) })) + '</dt><dd>' + pEscape(pRate(group.refund_rate)) + '</dd></div><div><dt>' + pEscape(text.dispute_rate) + formulaIcon(replaceProductTokens(formulas.dispute_rate, { count: pNumber(group.dispute_count), orders: pNumber(group.order_count) })) + '</dt><dd>' + pEscape(pRate(group.dispute_rate)) + '<small>' + pEscape(pNumber(group.dispute_count) + text.record_unit + ' / ' + pNumber(group.order_count) + text.record_unit) + '</small></dd></div><div><dt>' + pEscape(text.realised_loss) + formulaIcon(formulas.realised_loss) + '</dt><dd>' + pEscape(pMoney(group.realised_loss)) + '</dd></div></dl></article>';
                     }).join('');
                     return '<section class="payment-channel-lifecycle"><h4>' + pEscape(channel === 'paypal' ? text.paypal_channel : text.credit_card_channel) + '</h4><div class="payment-lifecycle-grid">' + rows + '</div></section>';
                 }).join('');

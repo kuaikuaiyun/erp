@@ -219,6 +219,8 @@ Route::middleware(MonitorPaymentPerformance::class)->group(function (): void {
     Route::get('/product-alerts/{alert}', [PaymentPortalController::class, 'productAlertDetail'])->where('alert', 'PW-(?:[PC]-)?[0-9]+')->name('payment.product-alerts.show');
     Route::get('/payment-orders', [PaymentPortalController::class, 'paymentOrders'])->name('payment.orders.index');
     Route::get('/payment-orders/detail', [PaymentPortalController::class, 'paymentOrderDetail'])->name('payment.orders.detail');
+    Route::get('/renewal-analysis', [PaymentPortalController::class, 'renewalAnalysis'])->name('payment.renewal-analysis.index');
+    Route::get('/renewal-analysis/export', [PaymentPortalController::class, 'exportRenewalAnalysis'])->name('payment.renewal-analysis.export');
 });
 Route::post('/product-library', [ProductLibraryController::class, 'storeProduct'])->name('aikaipin.product-library.store');
 Route::get('/product-library/{product}/edit-data', [ProductLibraryController::class, 'editProduct'])->name('aikaipin.product-library.edit');
