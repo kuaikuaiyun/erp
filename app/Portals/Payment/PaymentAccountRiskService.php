@@ -457,6 +457,7 @@ class PaymentAccountRiskService
         }
         $from = Carbon::parse($periodFrom, self::REPORT_TIMEZONE)->startOfDay()->utc();
         $to = Carbon::parse($periodTo, self::REPORT_TIMEZONE)->endOfDay()->utc();
+        $usesEventDates = ($filters['date_mode'] ?? 'order') === 'event';
         $paymentQuery = static fn () => $connection->table('logistics_paypal_transactions as payments')
             ->leftJoin('logistics_orders as orders', 'orders.id', '=', 'payments.logistics_order_id')
             ->where('payments.logistics_paypal_account_id', $account->getKey())
@@ -493,10 +494,25 @@ class PaymentAccountRiskService
             ->where('payments.paid_at', '<=', now()->utc())
             ->orderBy('payments.paid_at')->orderBy('payments.id')
             ->get($columns);
+        // When the account view is filtered by the real dispute time, a
+        // dispute may belong to a payment made before the selected period.
+        // Bring that original payment into the analysis so the stage totals
+        // reconcile with the account-level dispute metric.
+        $eventDisputePaymentIds = $usesEventDates
+            ? $connection->table('logistics_paypal_disputes')
+                ->where('logistics_paypal_account_id', $account->getKey())
+                ->whereBetween('dispute_created_at', [$from, $to])
+                ->pluck('disputed_transaction_id')->map(static fn ($id): string => trim((string) $id))->filter()->unique()->values()->all()
+            : [];
+        $eventDisputePayments = $eventDisputePaymentIds === [] ? collect() : $paymentQuery()
+            ->whereIn('payments.payment_transaction_id', $eventDisputePaymentIds)
+            ->orderBy('payments.paid_at')->orderBy('payments.id')
+            ->get($columns);
         $payments = $basePayments
             ->reject(static fn (object $payment): bool => $payment->matched_order_id !== null
                 && trim((string) ($payment->subscription_origin_order_id ?? '')) !== '')
             ->concat($renewalPayments)
+            ->concat($eventDisputePayments)
             ->sortBy(fn (object $payment): string => sprintf('%s-%020d', (string) $payment->paid_at, (int) $payment->payment_row_id))
             ->unique(fn (object $payment): string => trim((string) $payment->payment_transaction_id) !== ''
                 ? (string) $payment->payment_transaction_id
@@ -512,6 +528,7 @@ class PaymentAccountRiskService
         $disputedPayments = $paymentIds === [] ? collect() : $connection->table('logistics_paypal_disputes')
             ->where('logistics_paypal_account_id', $account->getKey())
             ->whereIn('disputed_transaction_id', $paymentIds)
+            ->when($usesEventDates, fn ($query) => $query->whereBetween('dispute_created_at', [$from, $to]))
             ->distinct()->pluck('disputed_transaction_id')->flip();
 
         $groups = [];
