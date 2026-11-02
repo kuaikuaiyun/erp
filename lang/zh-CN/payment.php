@@ -782,9 +782,9 @@ return array_replace_recursive($translations, [
     ],
     'renewal_analysis' => [
         'page_title' => '续费订单分析',
-        'page_subtitle' => '按首扣队列观察续费转化、续费风险与明确关联的 Upsell 表现。',
+        'page_subtitle' => '按首次续费付款时间观察首次续费转化、风险与明确关联的 Upsell 表现。',
         'filters' => [
-            'cohort_period' => '首扣队列时间', 'risk_date_mode' => '风险时间口径',
+            'cohort_period' => '首次续费付款时间', 'risk_date_mode' => '风险时间口径',
             'payment_mode' => '续费付款时间', 'event_mode' => '真实退款 / 纠纷时间',
             'channel' => '首扣渠道', 'all_channels' => '全部渠道', 'stage' => '续费阶段', 'all_stages' => '全部阶段',
             'store' => '店铺', 'all_stores' => '全部店铺', 'keyword' => '订单 / 流水 / 邮箱',
@@ -792,14 +792,14 @@ return array_replace_recursive($translations, [
         ],
         'channels' => ['paypal' => 'PayPal', 'credit_card' => '信用卡'],
         'kpis' => [
-            'total_rate' => '总续费率', 'eligible' => '满足观察期的首扣链', 'renewed' => '已产生续费的订阅链',
-            'paypal_rate' => 'PayPal 首扣续费率', 'card_rate' => '信用卡首扣续费率',
-            'renewal_orders' => '续费订单', 'renewal_revenue' => '续费实收金额',
+            'total_rate' => '首次续费率', 'eligible' => '应首次续费的订阅链', 'renewed' => '已完成首次续费的订阅链',
+            'paypal_rate' => 'PayPal 首扣首次续费率', 'card_rate' => '信用卡首扣首次续费率',
+            'renewal_orders' => '首次续费订单', 'renewal_revenue' => '首次续费实收金额',
         ],
-        'observation_note' => '续费率分母只纳入首扣完成满 :days 天的订阅链；渠道按首扣支付渠道归属。',
+        'observation_note' => '筛选时间为首次续费付款时间；分母取该时间区间整体前推 :days 天的首次订阅单，渠道按首扣支付渠道归属。',
         'funnel' => [
-            'title' => '动态续费漏斗', 'stage' => '续费阶段', 'eligible' => '可续费链', 'completed' => '完成续费链',
-            'renewal_rate' => '本阶段续费率', 'loss' => '阶段流失', 'orders_revenue' => '订单 / 实收',
+            'title' => '首次续费漏斗', 'stage' => '续费阶段', 'eligible' => '应首次续费链', 'completed' => '完成首次续费链',
+            'renewal_rate' => '首次续费率', 'loss' => '阶段流失', 'orders_revenue' => '订单 / 实收',
             'refund' => '退款', 'dispute' => '争议', 'stage_name' => '第 :number 次续费', 'empty' => '当前队列尚未产生续费订单。',
         ],
         'risk' => [
@@ -813,7 +813,7 @@ return array_replace_recursive($translations, [
             'note' => '金额和风险只核算明确标记为“已加购”的独立订单；postupsell、yx_payment_upsell 仅有引用但无法安全拆分金额时单独列为待补充，不推测金额。',
         ],
         'detail' => [
-            'title' => '续费订单明细', 'stage' => '阶段', 'initial_channel' => '首扣渠道', 'actual_channel' => '实际支付渠道',
+            'title' => '首次续费订单明细', 'stage' => '阶段', 'initial_channel' => '首扣渠道', 'actual_channel' => '实际支付渠道',
             'initial_order' => '首扣订单', 'renewal_order' => '续费订单', 'store' => '店铺', 'transaction' => '支付流水',
             'paid_at' => '付款时间', 'amount' => '实收金额', 'refund' => '退款', 'refund_detail' => '退款原因 / 时间 / 状态', 'dispute' => '争议', 'dispute_detail' => '争议原因 / 时间 / 状态',
             'tabs' => ['all' => '全部', 'paypal' => 'PayPal', 'credit_card' => '信用卡'],
