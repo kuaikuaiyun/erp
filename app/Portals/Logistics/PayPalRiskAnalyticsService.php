@@ -32,19 +32,13 @@ class PayPalRiskAnalyticsService
 
     /**
      * 退款率与纠纷率的统计口径不同：纠纷风险仅纳入实际与商品/服务
-     * 履约相关的索偿、撤销付款，避免预仲裁等后续流程重复放大指标。
+     * 履约相关的原因。争议阶段只用于展示，不用于排除同一笔付款。
      *
      * @var list<string>
      */
     private const QUALIFYING_DISPUTE_REASONS = [
         'MERCHANDISE_OR_SERVICE_NOT_RECEIVED',
         'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED',
-    ];
-
-    /** @var list<string> */
-    private const QUALIFYING_DISPUTE_TYPES = [
-        'INQUIRY',
-        'CHARGEBACK',
     ];
 
     /** @return array<string,mixed> */
@@ -544,8 +538,7 @@ class PayPalRiskAnalyticsService
     private function qualifyingDisputeQueryForPayments(LogisticsPayPalAccount $account, array $filters, array $paymentIds, bool $applyRange = true): Builder
     {
         return $this->disputeQueryForPayments($account, $filters, $paymentIds, $applyRange)
-            ->whereIn('reason', self::QUALIFYING_DISPUTE_REASONS)
-            ->whereIn('life_cycle_stage', self::QUALIFYING_DISPUTE_TYPES);
+            ->whereIn('reason', self::QUALIFYING_DISPUTE_REASONS);
     }
 
     /** @return Collection<int,LogisticsOrder> */

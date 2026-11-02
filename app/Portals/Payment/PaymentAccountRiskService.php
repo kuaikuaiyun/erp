@@ -20,8 +20,6 @@ class PaymentAccountRiskService
         'MERCHANDISE_OR_SERVICE_NOT_RECEIVED',
         'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED',
     ];
-    private const QUALIFYING_DISPUTE_TYPES = ['INQUIRY', 'CHARGEBACK'];
-
     public function __construct(
         private readonly PayPalRiskAnalyticsService $analytics,
         private readonly PaymentAccountRiskSnapshotService $riskSnapshots,
@@ -359,7 +357,6 @@ class PaymentAccountRiskService
 
         $disputeStats = (clone $allDisputes)
             ->whereIn('disputes.reason', self::QUALIFYING_DISPUTE_REASONS)
-            ->whereIn('disputes.life_cycle_stage', self::QUALIFYING_DISPUTE_TYPES)
             ->selectRaw('disputes.logistics_paypal_account_id as account_id')
             ->selectRaw("COUNT(DISTINCT NULLIF(CASE WHEN COALESCE(disputes.disputed_transaction_id, '') <> '' THEN TRIM(disputes.disputed_transaction_id) ELSE TRIM(COALESCE(disputes.dispute_id, '')) END, '')) as dispute_order_count")
             ->selectRaw('COALESCE(SUM(COALESCE(disputes.dispute_amount_usd, disputes.original_amount, 0)), 0) as dispute_amount')
@@ -521,7 +518,6 @@ class PaymentAccountRiskService
             ->where('logistics_paypal_account_id', $account->getKey())
             ->whereIn('disputed_transaction_id', $paymentIds)
             ->whereIn('reason', self::QUALIFYING_DISPUTE_REASONS)
-            ->whereIn('life_cycle_stage', self::QUALIFYING_DISPUTE_TYPES)
             ->distinct()->pluck('disputed_transaction_id')->flip();
 
         $groups = [];
@@ -746,8 +742,7 @@ class PaymentAccountRiskService
 
         $disputes = $database->table('logistics_paypal_disputes as disputes')
             ->whereIn('disputes.logistics_paypal_account_id', $accountIds)
-            ->whereIn('disputes.reason', self::QUALIFYING_DISPUTE_REASONS)
-            ->whereIn('disputes.life_cycle_stage', self::QUALIFYING_DISPUTE_TYPES);
+            ->whereIn('disputes.reason', self::QUALIFYING_DISPUTE_REASONS);
         if (($filters['date_mode'] ?? 'order') === 'event') {
             $this->applyPortfolioRange($disputes, 'disputes.dispute_created_at', $filters);
         } else {

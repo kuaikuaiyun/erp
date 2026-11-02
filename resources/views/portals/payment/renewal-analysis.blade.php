@@ -11,19 +11,20 @@
 @section('page_title', __($t.'.page_title'))
 
 @push('styles')
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261026-1">
+<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261102-1">
 <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261026-1">
 @endpush
 
 @section('content')
 <section class="content payment-portal-page payment-renewal-page">
-    <header class="payment-page-heading">
+    <header class="payment-page-heading payment-renewal-heading">
         <div><h1>{{ __($t.'.page_title') }}</h1><p>{{ __($t.'.page_subtitle') }}</p></div>
+        <div class="payment-renewal-heading-summary"><i class="fa fa-refresh"></i><span>{{ number_format($summary['renewed']) }}</span> {{ __($t.'.kpis.renewal_orders') }}</div>
     </header>
 
     <form class="payment-renewal-filter" method="get" action="{{ route('payment.renewal-analysis.index') }}">
-        <label><span>{{ __($t.'.filters.cohort_period') }}</span><span class="payment-operation-date-range"><input class="form-control" type="date" name="date_from" value="{{ $filters['date_from'] }}"><b>{{ __('payment.common.range_to') }}</b><input class="form-control" type="date" name="date_to" value="{{ $filters['date_to'] }}"></span></label>
-        <label><span>{{ __($t.'.filters.risk_date_mode') }}</span><select class="form-control" name="risk_date_mode"><option value="payment" @selected($filters['risk_date_mode']==='payment')>{{ __($t.'.filters.payment_mode') }}</option><option value="event" @selected($filters['risk_date_mode']==='event')>{{ __($t.'.filters.event_mode') }}</option></select></label>
+        <label class="payment-renewal-cohort"><span>{{ __($t.'.filters.cohort_period') }}</span><span class="payment-operation-date-range"><input class="form-control" type="date" name="date_from" value="{{ $filters['date_from'] }}"><b>{{ __('payment.common.range_to') }}</b><input class="form-control" type="date" name="date_to" value="{{ $filters['date_to'] }}"></span></label>
+        <label class="payment-renewal-mode"><span>{{ __($t.'.filters.risk_date_mode') }}</span><select class="form-control" name="risk_date_mode"><option value="payment" @selected($filters['risk_date_mode']==='payment')>{{ __($t.'.filters.payment_mode') }}</option><option value="event" @selected($filters['risk_date_mode']==='event')>{{ __($t.'.filters.event_mode') }}</option></select></label>
         <label><span>{{ __($t.'.filters.channel') }}</span><select class="form-control" name="channel"><option value="">{{ __($t.'.filters.all_channels') }}</option>@foreach(['paypal','credit_card'] as $channel)<option value="{{ $channel }}" @selected($filters['channel']===$channel)>{{ __($t.'.channels.'.$channel) }}</option>@endforeach</select></label>
         <label><span>{{ __($t.'.filters.stage') }}</span><select class="form-control" name="stage"><option value="">{{ __($t.'.filters.all_stages') }}</option>@foreach($dashboard['stage_options'] as $stage)<option value="{{ $stage }}" @selected($filters['stage']===$stage)>{{ __($t.'.funnel.stage_name',['number'=>(int)str_replace('renewal_','',$stage)]) }}</option>@endforeach</select></label>
         <label><span>{{ __($t.'.filters.store') }}</span><select class="form-control" name="store"><option value="">{{ __($t.'.filters.all_stores') }}</option>@foreach($dashboard['stores'] as $store)<option value="{{ $store }}" @selected($filters['store']===$store)>{{ $store }}</option>@endforeach</select></label>
@@ -32,10 +33,10 @@
     </form>
 
     <div class="payment-kpi-grid payment-kpi-grid-four payment-renewal-kpis">
-        <article class="payment-kpi-card"><div><p>{{ __($t.'.kpis.total_rate') }}</p><strong>{{ number_format($summary['rate'],2) }}%</strong><small>{{ number_format($summary['renewed']) }} / {{ number_format($summary['eligible']) }}</small></div></article>
-        <article class="payment-kpi-card"><div><p>{{ __($t.'.kpis.paypal_rate') }}</p><strong>{{ number_format($summary['paypal']['rate'],2) }}%</strong><small>{{ number_format($summary['paypal']['renewed']) }} / {{ number_format($summary['paypal']['eligible']) }}</small></div></article>
-        <article class="payment-kpi-card"><div><p>{{ __($t.'.kpis.card_rate') }}</p><strong>{{ number_format($summary['credit_card']['rate'],2) }}%</strong><small>{{ number_format($summary['credit_card']['renewed']) }} / {{ number_format($summary['credit_card']['eligible']) }}</small></div></article>
-        <article class="payment-kpi-card"><div><p>{{ __($t.'.kpis.renewal_revenue') }}</p><strong>{{ $money($summary['renewal_revenue']) }}</strong><small>{{ number_format($summary['renewal_orders']) }} {{ __($t.'.kpis.renewal_orders') }}</small></div></article>
+        <article class="payment-kpi-card payment-renewal-kpi payment-renewal-kpi-primary"><i class="fa fa-refresh"></i><div><p>{{ __($t.'.kpis.total_rate') }}</p><strong>{{ number_format($summary['rate'],2) }}%</strong><small>{{ number_format($summary['renewed']) }} / {{ number_format($summary['eligible']) }}</small></div></article>
+        <article class="payment-kpi-card payment-renewal-kpi payment-renewal-kpi-paypal"><i class="fa fa-paypal"></i><div><p>{{ __($t.'.kpis.paypal_rate') }}</p><strong>{{ number_format($summary['paypal']['rate'],2) }}%</strong><small>{{ number_format($summary['paypal']['renewed']) }} / {{ number_format($summary['paypal']['eligible']) }}</small></div></article>
+        <article class="payment-kpi-card payment-renewal-kpi payment-renewal-kpi-card"><i class="fa fa-credit-card"></i><div><p>{{ __($t.'.kpis.card_rate') }}</p><strong>{{ number_format($summary['credit_card']['rate'],2) }}%</strong><small>{{ number_format($summary['credit_card']['renewed']) }} / {{ number_format($summary['credit_card']['eligible']) }}</small></div></article>
+        <article class="payment-kpi-card payment-renewal-kpi payment-renewal-kpi-revenue"><i class="fa fa-usd"></i><div><p>{{ __($t.'.kpis.renewal_revenue') }}</p><strong>{{ $money($summary['renewal_revenue']) }}</strong><small>{{ number_format($summary['renewal_orders']) }} {{ __($t.'.kpis.renewal_orders') }}</small></div></article>
     </div>
     <p class="payment-renewal-observation"><i class="fa fa-info-circle"></i> {{ __($t.'.observation_note',['days'=>$dashboard['observation_days']]) }}</p>
 

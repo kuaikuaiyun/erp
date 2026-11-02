@@ -13,6 +13,12 @@ use Illuminate\Support\Facades\Cache;
 
 class PaymentRenewalAnalysisService
 {
+    /** @var list<string> */
+    private const QUALIFYING_DISPUTE_REASONS = [
+        'MERCHANDISE_OR_SERVICE_NOT_RECEIVED',
+        'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED',
+    ];
+
     /** @param array<string,mixed> $filters @return array<string,mixed> */
     public function dashboard(array $filters): array
     {
@@ -230,7 +236,9 @@ class PaymentRenewalAnalysisService
         if ($orderIds === []) return compact('refunds', 'disputes');
 
         $paypalRefundQuery = LogisticsPayPalRefund::query()->whereIn('logistics_order_id', $orderIds);
-        $paypalDisputeQuery = LogisticsPayPalDispute::query()->whereIn('logistics_order_id', $orderIds);
+        $paypalDisputeQuery = LogisticsPayPalDispute::query()
+            ->whereIn('logistics_order_id', $orderIds)
+            ->whereIn('reason', self::QUALIFYING_DISPUTE_REASONS);
         $cardQuery = LogisticsCreditCardRefund::query()->whereIn('logistics_order_id', $orderIds);
         if (($filters['risk_date_mode'] ?? 'payment') === 'event') {
             $paypalRefundQuery->whereBetween('refunded_at', [$from, $to]);
