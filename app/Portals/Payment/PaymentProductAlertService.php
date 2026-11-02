@@ -805,7 +805,10 @@ class PaymentProductAlertService
             if ($sample === '50_500' && ($count < 50 || $count > 500)) return false;
             if ($sample === 'over_500' && $count <= 500) return false;
             return true;
-        })->values();
+        })->sortBy([
+            ['dispute_amount', 'desc'],
+            ['dispute_rate', 'desc'],
+        ])->values();
     }
 
     private function normaliseResultStatus(string $status): string
