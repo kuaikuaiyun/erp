@@ -104,7 +104,7 @@ class PaymentAccountRiskService
             ->join('logistics_orders as orders', 'orders.id', '=', 'payments.logistics_order_id')
             ->whereIn('payments.logistics_paypal_account_id', $merchantIds)
             ->where('payments.event_code', 'like', 'T00%')
-            ->where('payments.status', 'S')
+            ->whereIn('payments.status', ['S', 'V'])
             ->whereNotNull('orders.paid_at')
             ->selectRaw('payments.logistics_paypal_account_id as account_id, MIN(orders.paid_at) as first_order_at, MAX(orders.paid_at) as last_order_at')
             ->groupBy('payments.logistics_paypal_account_id')
@@ -271,7 +271,7 @@ class PaymentAccountRiskService
         $payments = $database->table('logistics_paypal_transactions as payments')
             ->whereIn('payments.logistics_paypal_account_id', $accountIds)
             ->where('payments.event_code', 'like', 'T00%')
-            ->where('payments.status', 'S');
+            ->whereIn('payments.status', ['S', 'V']);
         $this->applyPortfolioRange($payments, 'payments.paid_at', $filters);
 
         $paymentGroups = (clone $payments)
@@ -462,7 +462,7 @@ class PaymentAccountRiskService
             ->leftJoin('logistics_orders as orders', 'orders.id', '=', 'payments.logistics_order_id')
             ->where('payments.logistics_paypal_account_id', $account->getKey())
             ->where('payments.event_code', 'like', 'T00%')
-            ->where('payments.status', 'S');
+            ->whereIn('payments.status', ['S', 'V']);
         $columns = [
             'payments.id as payment_row_id', 'payments.payment_transaction_id', 'payments.payment_amount_usd', 'payments.paid_at',
             'payments.logistics_order_id', 'orders.id as matched_order_id', 'orders.subscription_type',
@@ -560,48 +560,6 @@ class PaymentAccountRiskService
             $groups[$key]['received_amount'] += (float) ($payment->payment_amount_usd ?? 0);
             $groups[$key]['refund_amount'] += (float) ($refundAmounts[$transactionId] ?? 0);
             $groups[$key]['dispute_count'] += $disputedPayments->has($transactionId) ? 1 : 0;
-        }
-
-        if ($usesEventDates) {
-            // A dispute can already be linked to an ERP order even when its
-            // original PayPal receipt is unavailable in the successful-payment
-            // ledger.  Those disputes must be classified from the dispute's
-            // own order link before falling back to an unmatched bucket.
-            $classifiedPaymentIds = $payments->pluck('payment_transaction_id')
-                ->map(static fn ($id): string => trim((string) $id))->filter()->flip();
-            $directDisputes = $eventDisputes->filter(function (object $dispute) use ($classifiedPaymentIds): bool {
-                $paymentId = trim((string) $dispute->disputed_transaction_id);
-                return $paymentId === '' || ! $classifiedPaymentIds->has($paymentId);
-            })->unique(static fn (object $dispute): string => trim((string) $dispute->disputed_transaction_id) ?: 'dispute:'.$dispute->id)->values();
-            $directOrders = LogisticsOrder::query()
-                ->whereIn('id', $directDisputes->pluck('logistics_order_id')->filter()->unique()->values()->all())
-                ->get(['id', 'subscription_type', 'subscription_origin_order_id']);
-            $directOrdersById = $directOrders->keyBy('id');
-
-            foreach ($directDisputes as $dispute) {
-                /** @var LogisticsOrder|null $order */
-                $order = $directOrdersById->get((int) $dispute->logistics_order_id);
-                if ($order === null) {
-                    $key = 'unmatched';
-                    $renewalNumber = null;
-                    $sort = PHP_INT_MAX;
-                } else {
-                    $stage = PaymentSubscriptionLifecycle::classify(
-                        (string) $order->subscription_type,
-                        (string) $order->subscription_origin_order_id,
-                        $seenRenewals,
-                    );
-                    $key = $stage['key'];
-                    $renewalNumber = $stage['renewal_number'];
-                    $sort = $stage['sort'];
-                }
-                $groups[$key] ??= [
-                    'key' => $key, 'renewal_number' => $renewalNumber, 'sort' => $sort,
-                    'order_count' => 0, 'received_amount' => 0.0, 'refund_amount' => 0.0,
-                    'dispute_count' => 0, 'unmatched' => $key === 'unmatched',
-                ];
-                $groups[$key]['dispute_count']++;
-            }
         }
 
         foreach ($groups as &$group) {
@@ -757,7 +715,7 @@ class PaymentAccountRiskService
         $payments = $database->table('logistics_paypal_transactions as payments')
             ->whereIn('payments.logistics_paypal_account_id', $accountIds)
             ->where('payments.event_code', 'like', 'T00%')
-            ->where('payments.status', 'S');
+            ->whereIn('payments.status', ['S', 'V']);
         $this->applyPortfolioRange($payments, 'payments.paid_at', $filters);
 
         $paymentGroups = (clone $payments)

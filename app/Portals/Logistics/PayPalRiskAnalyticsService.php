@@ -479,7 +479,7 @@ class PayPalRiskAnalyticsService
         $query = LogisticsPayPalTransaction::query()
             ->where('logistics_paypal_account_id', $account->getKey())
             ->where('event_code', 'like', 'T00%')
-            ->where('status', 'S');
+            ->whereIn('status', ['S', 'V']);
         if ($applyRange) {
             $this->applyRange($query, 'paid_at', $filters);
         }
