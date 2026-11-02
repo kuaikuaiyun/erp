@@ -170,11 +170,25 @@ class AccountController extends Controller
         $grid->disableExport();
         $grid->expandFilter();
 
-        $grid->filter(function (Filter $filter): void {
+        $departmentOptions = $this->organization->departmentOptionsFor($actor)
+            ->mapWithKeys(fn (array $option): array => [(int) $option['id'] => $option['label']])
+            ->all();
+
+        $grid->filter(function (Filter $filter) use ($departmentOptions): void {
             $filter->disableIdFilter();
             $filter->column(0.5, function (Filter $filter): void {
                 $filter->like('username', __('organization.accounts.username'));
                 $filter->like('name', __('organization.accounts.name'));
+            });
+            $filter->column(0.5, function (Filter $filter) use ($departmentOptions): void {
+                $filter->where(function ($query): void {
+                    $departmentId = (int) $this->input;
+                    if ($departmentId > 0) {
+                        $query->whereHas('departments', function ($departmentQuery) use ($departmentId): void {
+                            $departmentQuery->whereKey($departmentId);
+                        });
+                    }
+                }, __('organization.accounts.department'), 'department_id')->select($departmentOptions);
             });
         });
 
@@ -388,4 +402,3 @@ class AccountController extends Controller
         return config('admin.database.connection') ?: config('database.default');
     }
 }
-
