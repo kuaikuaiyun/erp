@@ -276,8 +276,14 @@ class PayPalRiskAnalyticsService
             ])
             ->orderByDesc('paid_at')->orderByDesc('id')->get();
         $transactionIds = $payments->pluck('payment_transaction_id')->filter()->all();
-        $refundIds = LogisticsPayPalRefund::query()->where('logistics_paypal_account_id', $account->getKey())->whereIn('original_transaction_id', $transactionIds)->pluck('original_transaction_id')->filter()->flip()->all();
-        $disputeIds = LogisticsPayPalDispute::query()->where('logistics_paypal_account_id', $account->getKey())->whereIn('disputed_transaction_id', $transactionIds)->pluck('disputed_transaction_id')->filter()->flip()->all();
+        $refundQuery = LogisticsPayPalRefund::query()->where('logistics_paypal_account_id', $account->getKey())->whereIn('original_transaction_id', $transactionIds);
+        $disputeQuery = LogisticsPayPalDispute::query()->where('logistics_paypal_account_id', $account->getKey())->whereIn('disputed_transaction_id', $transactionIds);
+        if ($this->usesEventDates($filters)) {
+            $this->applyRange($refundQuery, 'refunded_at', $filters);
+            $this->applyRange($disputeQuery, 'dispute_created_at', $filters);
+        }
+        $refundIds = $refundQuery->pluck('original_transaction_id')->filter()->flip()->all();
+        $disputeIds = $disputeQuery->pluck('disputed_transaction_id')->filter()->flip()->all();
 
         $rows = $payments->map(function (LogisticsPayPalTransaction $payment) use ($refundIds, $disputeIds): array {
             $order = $payment->order;
@@ -320,8 +326,14 @@ class PayPalRiskAnalyticsService
         if ($orderIds === []) {
             return $this->paginate([], $page, $perPage);
         }
-        $refundSet = LogisticsPayPalRefund::query()->where('logistics_paypal_account_id', $account->getKey())->whereIn('logistics_order_id', $orderIds)->pluck('logistics_order_id')->filter()->flip()->all();
-        $disputeSet = LogisticsPayPalDispute::query()->where('logistics_paypal_account_id', $account->getKey())->whereIn('logistics_order_id', $orderIds)->pluck('logistics_order_id')->filter()->flip()->all();
+        $refundQuery = LogisticsPayPalRefund::query()->where('logistics_paypal_account_id', $account->getKey())->whereIn('logistics_order_id', $orderIds);
+        $disputeQuery = LogisticsPayPalDispute::query()->where('logistics_paypal_account_id', $account->getKey())->whereIn('logistics_order_id', $orderIds);
+        if ($this->usesEventDates($filters)) {
+            $this->applyRange($refundQuery, 'refunded_at', $filters);
+            $this->applyRange($disputeQuery, 'dispute_created_at', $filters);
+        }
+        $refundSet = $refundQuery->pluck('logistics_order_id')->filter()->flip()->all();
+        $disputeSet = $disputeQuery->pluck('logistics_order_id')->filter()->flip()->all();
         $items = LogisticsOrderItem::query()->whereIn('logistics_order_id', $orderIds)->orderBy('id')->get();
         $groups = [];
         foreach ($items as $item) {

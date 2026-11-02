@@ -219,7 +219,7 @@ class PaymentPayPalMonthlyReportService
     {
         return $connection->table('logistics_paypal_transactions')
             ->where('logistics_paypal_account_id', $account->getKey())
-            ->where('event_code', 'like', 'T00%')->where('status', 'S')
+            ->where('event_code', 'like', 'T00%')->whereIn('status', ['S', 'V'])
             ->whereBetween('paid_at', [$from, $to])
             ->get([
                 'payment_transaction_id as transaction_id', 'event_code', 'status',
@@ -235,7 +235,7 @@ class PaymentPayPalMonthlyReportService
                     ->on('payments.logistics_paypal_account_id', '=', 'refunds.logistics_paypal_account_id');
             })
             ->where('payments.logistics_paypal_account_id', $account->getKey())
-            ->where('payments.status', 'S')->where('refunds.status', 'S')
+            ->whereIn('payments.status', ['S', 'V'])->where('refunds.status', 'S')
             ->whereBetween('payments.paid_at', [$from, $to])
             ->get([
                 'refunds.refund_transaction_id as transaction_id', 'refunds.original_transaction_id as origin_id',
@@ -262,7 +262,7 @@ class PaymentPayPalMonthlyReportService
                 $join->on('payments.payment_transaction_id', '=', 'disputes.disputed_transaction_id')
                     ->on('payments.logistics_paypal_account_id', '=', 'disputes.logistics_paypal_account_id');
             })
-            ->where('payments.logistics_paypal_account_id', $account->getKey())->where('payments.status', 'S')
+            ->where('payments.logistics_paypal_account_id', $account->getKey())->whereIn('payments.status', ['S', 'V'])
             ->whereBetween('payments.paid_at', [$from, $to])
             ->get([
                 'disputes.dispute_id', 'disputes.disputed_transaction_id as origin_id', 'disputes.status',
@@ -290,7 +290,7 @@ class PaymentPayPalMonthlyReportService
                     ->on('payments.logistics_paypal_account_id', '=', 'ledger.logistics_paypal_account_id');
             })
             ->where('payments.logistics_paypal_account_id', $account->getKey())
-            ->where('ledger.currency_code', 'USD')->where('payments.status', 'S')
+            ->where('ledger.currency_code', 'USD')->whereIn('payments.status', ['S', 'V'])
             ->where(function ($query): void { $query->whereNull('ledger.status')->orWhere('ledger.status', 'S'); })
             ->whereIn('ledger.event_code', $this->ledgerCodes())
             ->whereBetween('payments.paid_at', [$from, $to])
