@@ -57,6 +57,13 @@
             'empty' => $t('form.owner_candidates_empty'),
         ],
     ];
+    $legacyUserName = trim((string) old('user_name', $store->user_name));
+    $legacyUserCandidates = collect($ownerCandidatesByDepartment ?? [])
+        ->flatten(1)
+        ->filter(fn (array $candidate): bool => trim((string) ($candidate['name'] ?? '')) !== '')
+        ->unique(fn (array $candidate): string => mb_strtolower(trim((string) $candidate['name'])))
+        ->sortBy(fn (array $candidate): string => (string) $candidate['name'])
+        ->values();
 @endphp
 
 @push('styles')
@@ -526,10 +533,21 @@
                             @error('owner_effective_at')<span class="help-block">{{ $message }}</span>@enderror
                         </div>
                         @if (! $isCreate)
-                            <div class="form-group assistant-owner-form-field">
+                            <div class="form-group assistant-owner-form-field @error('user_name') has-error @enderror">
                                 <label for="legacy_user_name">使用人</label>
-                                <input id="legacy_user_name" class="form-control" value="{{ $store->user_name ?: $t('common.empty') }}" readonly>
+                                <select id="legacy_user_name" name="user_name" class="form-control">
+                                    <option value="">请选择使用人</option>
+                                    @if ($legacyUserName !== '' && ! $legacyUserCandidates->contains(fn (array $candidate): bool => (string) $candidate['name'] === $legacyUserName))
+                                        <option value="{{ $legacyUserName }}" selected>{{ $legacyUserName }}（当前记录）</option>
+                                    @endif
+                                    @foreach ($legacyUserCandidates as $candidate)
+                                        <option value="{{ $candidate['name'] }}" @selected($legacyUserName === (string) $candidate['name'])>
+                                            {{ $candidate['name'] }}@if ($candidate['username']) ({{ $candidate['username'] }})@endif @if ($candidate['departments']) - {{ $candidate['departments'] }}@endif
+                                        </option>
+                                    @endforeach
+                                </select>
                                 <span class="help-block">仅用于与真实归属人核对，不参与权限或订单归属计算。</span>
+                                @error('user_name')<span class="help-block">{{ $message }}</span>@enderror
                             </div>
                         @endif
                         <div class="assistant-owner-form-note">

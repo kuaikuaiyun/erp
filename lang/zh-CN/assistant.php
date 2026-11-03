@@ -66,7 +66,7 @@ return [
             'owner_operation_department_placeholder' => '暂不设置归属人',
             'owner_user_placeholder' => '请选择运营归属人',
             'owner_candidates_empty' => '该运营部门暂无可选的在职成员',
-            'owner_assignment_hint' => '运营部门和店铺实际使用人仅用于记录运营归属，不会改变店铺记录的查看、编辑或删除权限。',
+            'owner_assignment_hint' => '运营部门和店铺归属人仅用于记录运营归属，不会改变店铺记录的查看、编辑或删除权限。',
             'authorized_departments_hint' => '勾选后，该助理二级部门的成员可以查看、编辑和删除该店铺；未勾选的部门不能访问。二级部门成员新增记录时，系统会自动授权给其所在部门；一级主管和系统管理员可在此增加或回收访问权限。全部取消后，仅一级主管和系统管理员可见。',
             'no_child_departments' => '当前没有可用的助理二级部门。',
             'shopify_config_guide' => 'Shopify App 配置教程',
@@ -123,7 +123,7 @@ return [
             'payment_note' => '旧版支付备注',
             'owner_department' => '店铺所属助理部门',
             'owner_operation_department' => '运营归属部门',
-            'owner_user' => '店铺实际使用人',
+            'owner_user' => '店铺归属人',
             'authorized_departments' => '可访问该店铺的助理部门',
         ],
 
