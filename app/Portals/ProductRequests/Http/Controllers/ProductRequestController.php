@@ -2693,8 +2693,12 @@ class ProductRequestController extends Controller
             $perPage = 20;
         }
 
+        $reportedDate = trim((string) $request->input('reported_date', ''));
+        $reportedDate = Validator::make(['date' => $reportedDate], ['date' => ['nullable', 'date_format:Y-m-d']])->passes() ? $reportedDate : '';
+
         return [
             'keyword' => trim((string) $request->input('keyword', '')),
+            'reported_date' => $reportedDate,
             'status' => in_array($request->input('status'), array_keys($this->statusLabels()), true) ? (string) $request->input('status') : '',
             'review_status' => in_array($request->input('review_status'), array_keys($this->reviewStatusLabels()), true) ? (string) $request->input('review_status') : '',
             'warehouse_status' => in_array($request->input('warehouse_status'), array_keys($this->warehouseResultLabels()), true) ? (string) $request->input('warehouse_status') : '',
@@ -2723,6 +2727,9 @@ class ProductRequestController extends Controller
                     ->orWhere('supplier_url', 'like', $keyword)
                     ->orWhere('operation_supplier_url', 'like', $keyword);
             });
+        }
+        if (($filters['reported_date'] ?? '') !== '') {
+            $query->whereDate('reported_at', $filters['reported_date']);
         }
         if ($filters['status'] !== '') {
             if ($filters['status'] === 'inspection_rejected') {
