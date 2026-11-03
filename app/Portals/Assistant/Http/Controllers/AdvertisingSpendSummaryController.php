@@ -45,7 +45,7 @@ class AdvertisingSpendSummaryController extends Controller
             ->whereBetween('report_date', [$dateFrom, $dateTo])
             ->orderBy('report_date')
             ->orderBy('id')
-            ->get(['id', 'report_date', 'operator_user_id', 'advertising_rows']);
+            ->get(['id', 'report_date', 'operator_user_id', 'operator_name', 'advertising_rows']);
 
         $rows = $reports->flatMap(function (OperationReport $report): array {
             return collect($report->advertising_rows ?: [])->map(function (array $advertising) use ($report): array {
@@ -57,38 +57,46 @@ class AdvertisingSpendSummaryController extends Controller
                     'date' => $report->report_date->format('Y-m-d'),
                     'agency' => trim((string) ($advertising['agency'] ?? '')) ?: '未填写代理',
                     'media' => trim((string) ($advertising['media_source'] ?? '')) ?: '其他',
+                    'account_name' => trim((string) ($advertising['account_name'] ?? '')),
+                    'account_number' => trim((string) ($advertising['account_number'] ?? '')),
                     'book_spend' => $bookSpend,
+                    'settlement_coefficient' => $coefficient,
                     'handling_fee' => $handlingFee,
                     'actual_spend' => (float) ($advertising['actual_spend'] ?? ($bookSpend + $handlingFee)),
+                    'screenshot' => trim((string) ($advertising['screenshot'] ?? '')),
                     'report_id' => (int) $report->getKey(),
                     'operator_user_id' => (int) $report->operator_user_id,
+                    'operator_name' => trim((string) $report->operator_name) ?: '未填写运营',
                 ];
             })->all();
-        })->groupBy(fn (array $row): string => implode('|', [
-            $row['date'], mb_strtolower($row['agency']), mb_strtolower($row['media']),
-        ]))->map(function ($items): array {
-            $first = $items->first();
-
-            return [
-                'date' => $first['date'],
-                'agency' => $first['agency'],
-                'media' => $first['media'],
-                'book_spend' => (float) $items->sum('book_spend'),
-                'handling_fee' => (float) $items->sum('handling_fee'),
-                'actual_spend' => (float) $items->sum('actual_spend'),
-                'report_count' => $items->pluck('report_id')->unique()->count(),
-                'operator_count' => $items->pluck('operator_user_id')->unique()->count(),
-            ];
-        })->sortBy(fn (array $row): string => $row['date'].'|'.$row['agency'].'|'.$row['media'])->values();
+        })->sortBy(fn (array $row): string => implode('|', [
+            $row['date'], $row['operator_name'], $row['agency'], $row['media'], $row['account_name'], $row['account_number'],
+        ]))->values();
 
         $chartDays = $rows->groupBy('date')->map(function ($items, string $date): array {
+            $breakdown = $items->groupBy(fn (array $row): string => implode('|', [
+                mb_strtolower($row['agency']), mb_strtolower($row['media']),
+            ]))->map(function ($group): array {
+                $first = $group->first();
+
+                return [
+                    'agency' => $first['agency'],
+                    'media' => $first['media'],
+                    'book_spend' => (float) $group->sum('book_spend'),
+                    'actual_spend' => (float) $group->sum('actual_spend'),
+                    'operator_names' => $group->pluck('operator_name')->filter()->unique()->sort()->values()->all(),
+                ];
+            })->sortByDesc('actual_spend')->values();
+
             return [
                 'date' => $date,
                 'total' => (float) $items->sum('actual_spend'),
-                'items' => $items->sortByDesc('actual_spend')->values(),
+                'items' => $breakdown,
             ];
         })->sortKeys()->values();
-        $chartMax = max(1, (float) $rows->max('actual_spend'));
+        $chartMax = max(1, (float) $chartDays
+            ->flatMap(fn (array $day) => $day['items'])
+            ->max('actual_spend'));
 
         return view('portals.assistant.advertising-spend-summary.index', [
             'portal' => $context['portal']->loadMissing('menus'),

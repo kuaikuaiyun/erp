@@ -8,7 +8,9 @@
 .ad-summary-kpis{grid-template-columns:repeat(4,minmax(145px,1fr))}.ad-chart-box{border:0;border-radius:12px;box-shadow:0 4px 16px rgba(28,62,91,.09);overflow:hidden;margin-bottom:16px}.ad-chart-box .box-header{padding:15px 18px}.ad-chart-title{font-weight:600;color:#173f60}.ad-chart-legend{display:flex;gap:18px;margin-top:7px;color:#687f91;font-size:12px}.ad-chart-legend span:before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}.ad-chart-legend .book:before{background:#7eb9dd}.ad-chart-legend .actual:before{background:#237dac}.ad-chart-scroll{overflow-x:auto;padding:18px 18px 8px}.ad-chart{height:280px;display:flex;align-items:flex-end;gap:13px;min-width:max-content;border-bottom:1px solid #dce7ee;background:repeating-linear-gradient(to top,transparent 0,transparent 54px,#edf2f6 55px)}.ad-chart-group{width:72px;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center}.ad-chart-bars{height:232px;display:flex;align-items:flex-end;justify-content:center;gap:5px}.ad-chart-bar{width:24px;min-height:2px;border-radius:5px 5px 0 0;position:relative;transition:filter .15s}.ad-chart-bar:hover{filter:brightness(.9)}.ad-chart-bar.book{background:linear-gradient(180deg,#8fc9e9,#62a8d1)}.ad-chart-bar.actual{background:linear-gradient(180deg,#35a0d3,#176d9d)}.ad-chart-bar span{display:none;position:absolute;left:50%;bottom:calc(100% + 7px);transform:translateX(-50%);padding:4px 7px;border-radius:5px;background:#173f60;color:#fff;font-size:11px;white-space:nowrap;z-index:3}.ad-chart-bar:hover span{display:block}.ad-chart-date{height:38px;padding-top:7px;color:#577187;font-size:11px;white-space:nowrap}.ad-chart-empty{height:190px;display:flex;align-items:center;justify-content:center;color:#8496a4}
 </style>
 <style>
-.ad-breakdown-wrap{padding:16px;background:#f4f8fb}.ad-breakdown-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(390px,1fr));gap:14px}.ad-day-card{background:#fff;border:1px solid #dae6ee;border-radius:11px;overflow:hidden;box-shadow:0 2px 8px rgba(31,69,96,.06)}.ad-day-head{display:flex;align-items:center;justify-content:space-between;padding:12px 15px;background:linear-gradient(135deg,#e8f3fa,#f7fbfd);border-bottom:1px solid #dce8ef}.ad-day-date{font-size:15px;font-weight:700;color:#204f70}.ad-day-total{color:#607a8d;font-size:12px}.ad-day-total strong{margin-left:5px;color:#176d9d;font-size:17px}.ad-breakdown-list{padding:8px 15px 13px}.ad-breakdown-row{display:grid;grid-template-columns:minmax(125px,180px) minmax(110px,1fr) 90px;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed #e5edf2}.ad-breakdown-row:last-child{border-bottom:0}.ad-breakdown-name{min-width:0}.ad-breakdown-name b,.ad-breakdown-name span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ad-breakdown-name b{color:#2c5876;font-size:13px}.ad-breakdown-name span{color:#7b8f9f;font-size:11px;margin-top:2px}.ad-breakdown-track{height:13px;border-radius:8px;background:#eaf1f5;overflow:hidden}.ad-breakdown-fill{height:100%;min-width:3px;border-radius:8px;background:linear-gradient(90deg,#67b1d8,#1876a7)}.ad-breakdown-value{text-align:right;color:#174f73;font-weight:700;font-variant-numeric:tabular-nums}.ad-chart-help{margin:5px 0 0;color:#73899a;font-size:12px}@media(max-width:760px){.ad-breakdown-grid{grid-template-columns:1fr}.ad-breakdown-row{grid-template-columns:110px minmax(80px,1fr) 78px}.ad-breakdown-wrap{padding:10px}}
+.ad-breakdown-wrap{padding:16px;background:#f4f8fb}.ad-breakdown-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(390px,1fr));gap:14px}.ad-day-card{background:#fff;border:1px solid #dae6ee;border-radius:11px;overflow:hidden;box-shadow:0 2px 8px rgba(31,69,96,.06)}.ad-day-head{display:flex;align-items:center;justify-content:space-between;padding:12px 15px;background:linear-gradient(135deg,#e8f3fa,#f7fbfd);border-bottom:1px solid #dce8ef}.ad-day-date{font-size:15px;font-weight:700;color:#204f70}.ad-day-total{color:#607a8d;font-size:12px}.ad-day-total strong{margin-left:5px;color:#176d9d;font-size:17px}.ad-breakdown-list{padding:8px 15px 13px}.ad-breakdown-row{display:grid;grid-template-columns:minmax(145px,200px) minmax(110px,1fr) 90px;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed #e5edf2}.ad-breakdown-row:last-child{border-bottom:0}.ad-breakdown-name{min-width:0}.ad-breakdown-name b,.ad-breakdown-name span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ad-breakdown-name b{color:#2c5876;font-size:13px}.ad-breakdown-name span{color:#7b8f9f;font-size:11px;margin-top:2px}.ad-breakdown-name .ad-breakdown-operators{color:#39779d}.ad-breakdown-track{height:13px;border-radius:8px;background:#eaf1f5;overflow:hidden}.ad-breakdown-fill{height:100%;min-width:3px;border-radius:8px;background:linear-gradient(90deg,#67b1d8,#1876a7)}.ad-breakdown-value{text-align:right;color:#174f73;font-weight:700;font-variant-numeric:tabular-nums}.ad-chart-help{margin:5px 0 0;color:#73899a;font-size:12px}.operator-name-list{display:flex;flex-wrap:wrap;gap:4px}.operator-name-tag{display:inline-block;padding:3px 7px;border-radius:10px;background:#e6f1f8;color:#286487;font-size:12px;white-space:nowrap}@media(max-width:760px){.ad-breakdown-grid{grid-template-columns:1fr}.ad-breakdown-row{grid-template-columns:125px minmax(80px,1fr) 78px}.ad-breakdown-wrap{padding:10px}}
+.ad-screenshot{width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #d6e3eb;cursor:zoom-in}.ad-account{white-space:nowrap;color:#405f74}.ad-summary-table{min-width:1480px}
+.ad-summary-kpis{grid-template-columns:repeat(3,minmax(145px,1fr))}
 </style>
 @endpush
 
@@ -28,11 +30,10 @@
         <div class="ad-summary-kpi"><span>账面广告费</span><strong>${{ number_format($totals['book_spend'], 2) }}</strong></div>
         <div class="ad-summary-kpi"><span>实际总消耗</span><strong>${{ number_format($totals['actual_spend'], 2) }}</strong></div>
         <div class="ad-summary-kpi"><span>已审核提报</span><strong>{{ $totals['report_count'] }} 份</strong></div>
-        <div class="ad-summary-kpi"><span>提报运营人数</span><strong>{{ $totals['operator_count'] }} 人</strong></div>
     </div>
 
     <div class="box ad-chart-box">
-        <div class="box-header with-border"><div class="ad-chart-title">每日代理与渠道消耗分布</div><p class="ad-chart-help">每天按广告代理和广告渠道拆分实际总消耗，柱形越长表示消耗越高。</p></div>
+        <div class="box-header with-border"><div class="ad-chart-title">每日代理与渠道消耗分布</div><p class="ad-chart-help">汇总当前筛选范围内所有运营数据；同一天相同代理和渠道自动合并，柱形越长表示消耗越高。</p></div>
         <div class="box-body no-padding">
             @if($chartDays->isNotEmpty())
                 <div class="ad-breakdown-wrap"><div class="ad-breakdown-grid">
@@ -42,7 +43,7 @@
                             <div class="ad-breakdown-list">
                                 @foreach($chartDay['items'] as $chartItem)
                                     <div class="ad-breakdown-row">
-                                        <div class="ad-breakdown-name"><b title="{{ $chartItem['agency'] }}">{{ $chartItem['agency'] }}</b><span title="{{ $chartItem['media'] }}">{{ $chartItem['media'] }}</span></div>
+                                        <div class="ad-breakdown-name"><b title="{{ $chartItem['agency'] }}">{{ $chartItem['agency'] }}</b><span title="{{ $chartItem['media'] }}">{{ $chartItem['media'] }}</span><span class="ad-breakdown-operators" title="{{ implode('、', $chartItem['operator_names']) }}">运营：{{ implode('、', $chartItem['operator_names']) }}</span></div>
                                         <div class="ad-breakdown-track" title="{{ $chartItem['agency'] }} / {{ $chartItem['media'] }}：${{ number_format($chartItem['actual_spend'], 2) }}"><div class="ad-breakdown-fill" style="width:{{ max(1, ($chartItem['actual_spend'] / $chartMax) * 100) }}%"></div></div>
                                         <div class="ad-breakdown-value">${{ number_format($chartItem['actual_spend'], 2) }}</div>
                                     </div>
@@ -58,18 +59,18 @@
     </div>
 
     <div class="box ad-summary-box">
-        <div class="box-header with-border"><h3 class="box-title">每日代理与渠道消耗</h3><p class="ad-summary-note">同一天、同一广告代理、同一广告渠道的数据自动合并；待审核和审核不通过的数据不参与统计。</p></div>
+        <div class="box-header with-border"><h3 class="box-title">每日代理与渠道消耗</h3><p class="ad-summary-note">逐条显示每个运营提交的广告明细；待审核和审核不通过的数据不参与统计。</p></div>
         <div class="box-body no-padding table-responsive">
             <table class="table table-bordered table-hover ad-summary-table">
-                <thead><tr><th>日期</th><th>广告代理</th><th>广告渠道</th><th>账面广告费($)</th><th>实际总消耗($)</th><th>提报数</th><th>运营人数</th></tr></thead>
+                <thead><tr><th>日期</th><th>运营名称</th><th>广告代理</th><th>广告社媒</th><th>账户名称</th><th>账户编号</th><th>账面广告费($)</th><th>结算系数</th><th>手续费($)</th><th>实际广告费($)</th><th>广告消耗截图</th></tr></thead>
                 <tbody>
                 @forelse($rows as $row)
-                    <tr><td class="identity">{{ $row['date'] }}</td><td class="identity">{{ $row['agency'] }}</td><td>{{ $row['media'] }}</td><td class="money">{{ number_format($row['book_spend'], 2) }}</td><td class="money actual">{{ number_format($row['actual_spend'], 2) }}</td><td class="text-center">{{ $row['report_count'] }}</td><td class="text-center">{{ $row['operator_count'] }}</td></tr>
+                    <tr><td class="identity">{{ $row['date'] }}</td><td><span class="operator-name-tag">{{ $row['operator_name'] }}</span></td><td class="identity">{{ $row['agency'] }}</td><td>{{ $row['media'] }}</td><td class="ad-account">{{ $row['account_name'] ?: '—' }}</td><td class="ad-account">{{ $row['account_number'] ?: '—' }}</td><td class="money">{{ number_format($row['book_spend'], 2) }}</td><td class="money">{{ number_format($row['settlement_coefficient'], 4) }}</td><td class="money">{{ number_format($row['handling_fee'], 2) }}</td><td class="money actual">{{ number_format($row['actual_spend'], 2) }}</td><td class="text-center">@if($row['screenshot'])<img class="ad-screenshot" src="{{ route('assistant.operation-report-reviews.screenshot', ['report_id' => $row['report_id'], 'path' => $row['screenshot']]) }}" alt="广告消耗截图" onclick="window.erpZoomOpen&&window.erpZoomOpen(this.src)">@else<span class="text-muted">未上传</span>@endif</td></tr>
                 @empty
-                    <tr><td colspan="7" class="ad-empty">当前时间范围内暂无已审核的广告费数据</td></tr>
+                    <tr><td colspan="11" class="ad-empty">当前时间范围内暂无已审核的广告费数据</td></tr>
                 @endforelse
                 </tbody>
-                @if($rows->isNotEmpty())<tfoot><tr><td colspan="3">合计</td><td class="money">{{ number_format($totals['book_spend'], 2) }}</td><td class="money">{{ number_format($totals['actual_spend'], 2) }}</td><td class="text-center">{{ $totals['report_count'] }}</td><td class="text-center">{{ $totals['operator_count'] }}</td></tr></tfoot>@endif
+                @if($rows->isNotEmpty())<tfoot><tr><td colspan="6">合计</td><td class="money">{{ number_format($totals['book_spend'], 2) }}</td><td class="text-center">—</td><td class="money">{{ number_format($totals['handling_fee'], 2) }}</td><td class="money">{{ number_format($totals['actual_spend'], 2) }}</td><td>—</td></tr></tfoot>@endif
             </table>
         </div>
     </div>
