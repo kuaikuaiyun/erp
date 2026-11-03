@@ -220,9 +220,17 @@ class OperationReportDashboardController extends Controller
                 $dailySummary = [
                     'daily_first_total_orders' => (int) $dateRows->sum('first_total_orders'),
                     'daily_first_total_revenue' => $reportFirstRevenue,
+                    'daily_first_average_order_value' => (int) $dateRows->sum('first_total_orders') > 0
+                        ? $reportFirstRevenue / (int) $dateRows->sum('first_total_orders')
+                        : null,
                     'daily_first_total_cost' => $reportFirstCost,
                     'daily_first_loss_rate' => $reportFirstCost > 0 ? $reportFirstProfit / $reportFirstCost : null,
                     'daily_media_names' => $dailyMediaNames->all(),
+                    'daily_media_order_counts' => $dailyMediaNames->map(function (string $media) use ($dateRows): int {
+                        return (int) $dateRows
+                            ->filter(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? '其他'))) === mb_strtolower($media))
+                            ->sum('first_total_orders');
+                    })->all(),
                     'daily_media_rois' => $dailyMediaNames->map(function (string $media) use ($mediaMetrics): ?float {
                         $metric = $mediaMetrics->get(mb_strtolower($media));
                         return isset($metric['first_roi']) ? (float) $metric['first_roi'] : null;
@@ -334,6 +342,9 @@ class OperationReportDashboardController extends Controller
         $totals['first_profit'] = $totals['first_total_revenue'] - $actualAdSpend - $totals['first_total_cost'];
         $totals['first_loss_rate'] = $totals['first_total_cost'] > 0 ? $totals['first_profit'] / $totals['first_total_cost'] : null;
         $totals['first_roi'] = $actualAdSpend > 0 ? $totals['first_total_revenue'] / $actualAdSpend : null;
+        $totals['first_average_order_value'] = $totals['first_total_orders'] > 0
+            ? $totals['first_total_revenue'] / $totals['first_total_orders']
+            : null;
         return $totals;
     }
 
@@ -396,6 +407,7 @@ class OperationReportDashboardController extends Controller
             $firstProfit = (float) $row['first_total_revenue'] - $actualAdSpend - $firstCost;
             $mediaRows = $operatorRows->groupBy(fn (array $item) => mb_strtolower(trim((string) ($item['media_source'] ?? '其他'))));
             $mediaNames = [];
+            $mediaOrderCounts = [];
             $mediaRois = [];
             foreach ($mediaRows as $items) {
                 $mediaName = trim((string) ($items->first()['media_source'] ?? '')) ?: '其他';
@@ -403,6 +415,7 @@ class OperationReportDashboardController extends Controller
                 $mediaRevenue = (float) $items->sum('first_total_revenue');
                 $mediaSpend = (float) $items->sum('allocated_actual_ad_spend');
                 $mediaNames[] = $mediaName;
+                $mediaOrderCounts[] = (int) $items->sum('first_total_orders');
                 $mediaRois[] = $mediaSpend > 0 ? $mediaRevenue / $mediaSpend : null;
             }
 
@@ -423,9 +436,13 @@ class OperationReportDashboardController extends Controller
                 'first_loss_rate' => $firstCost > 0 ? $firstProfit / $firstCost : null,
                 'daily_first_total_orders' => (int) $row['first_total_orders'],
                 'daily_first_total_revenue' => (float) $row['first_total_revenue'],
+                'daily_first_average_order_value' => (int) $row['first_total_orders'] > 0
+                    ? (float) $row['first_total_revenue'] / (int) $row['first_total_orders']
+                    : null,
                 'daily_first_total_cost' => $firstCost,
                 'daily_first_loss_rate' => $firstCost > 0 ? $firstProfit / $firstCost : null,
                 'daily_media_names' => $mediaNames,
+                'daily_media_order_counts' => $mediaOrderCounts,
                 'daily_media_rois' => $mediaRois,
                 'daily_first_roi' => $actualAdSpend > 0 ? (float) $row['first_total_revenue'] / $actualAdSpend : null,
                 'daily_renewal_orders' => (int) $row['renewal_orders'],

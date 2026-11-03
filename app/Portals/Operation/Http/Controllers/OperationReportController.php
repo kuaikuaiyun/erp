@@ -106,6 +106,11 @@ class OperationReportController extends Controller
                 'first_total_cost' => $firstCost,
                 'first_loss_rate' => $firstCost > 0 ? $firstProfit / $firstCost : null,
                 'media_names' => $mediaNames->all(),
+                'media_order_counts' => $mediaNames->map(function (string $media) use ($dateRows): int {
+                    return (int) $dateRows
+                        ->filter(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? '其他'))) === mb_strtolower($media))
+                        ->sum('first_total_orders');
+                })->all(),
                 'media_rois' => $mediaNames->map(function (string $media) use ($date, $submittedMediaRoiByDate): ?float {
                     $metric = $submittedMediaRoiByDate[$date][mb_strtolower($media)] ?? null;
                     return isset($metric['first_roi']) ? (float) $metric['first_roi'] : null;
@@ -163,7 +168,7 @@ class OperationReportController extends Controller
         $validated = $request->validate([
             'date' => ['required', 'date_format:Y-m-d'],
             'operator_user_id' => ['nullable', 'integer'],
-            'shop_domain' => ['required', 'string', 'max:255'],
+            'shop_domain' => ['nullable', 'string', 'max:255'],
             'media_source' => ['required', 'string', 'max:100'],
             'type' => ['required', Rule::in(['first_subscription', 'first_normal', 'first_total', 'renewal', 'total'])],
             'page' => ['nullable', 'integer', 'min:1'],
@@ -174,14 +179,17 @@ class OperationReportController extends Controller
             : (int) $user->getKey();
         if ($isBoss) $this->assertAssignableOperator($operatorId);
 
-        return response()->json($this->metrics->orderDetails(
+        $shopDomain = trim((string) ($validated['shop_domain'] ?? ''));
+
+        return response()->json($this->metrics->orderDetailsRange(
+            $validated['date'],
             $validated['date'],
             $operatorId,
-            trim($validated['shop_domain']),
-            trim($validated['media_source']),
             $validated['type'],
             (int) ($validated['page'] ?? 1),
             (int) ($validated['per_page'] ?? 10),
+            $shopDomain !== '' ? $shopDomain : null,
+            trim($validated['media_source']),
         ));
     }
 
