@@ -21,42 +21,16 @@
         <form method="get" action="{{ route('assistant.advertising-spend-summary.index') }}" class="ad-summary-toolbar" id="ad-summary-filter">
             <div class="form-group"><label>开始日期</label><input class="form-control" type="date" name="date_from" value="{{ $dateFrom }}" required></div>
             <div class="form-group"><label>结束日期</label><input class="form-control" type="date" name="date_to" value="{{ $dateTo }}" required></div>
+            <div class="form-group"><label>广告代理</label><select class="form-control" name="agency"><option value="">全部代理</option>@foreach($agencyOptions as $agency)<option value="{{ $agency }}" @selected($filters['agency'] === $agency)>{{ $agency }}</option>@endforeach</select></div>
+            <div class="form-group"><label>广告媒体</label><select class="form-control" name="media"><option value="">全部媒体</option>@foreach($mediaOptions as $media)<option value="{{ $media }}" @selected($filters['media'] === $media)>{{ $media }}</option>@endforeach</select></div>
+            <div class="form-group"><label>运营</label><input class="form-control" type="text" name="operator" value="{{ $filters['operator'] }}" placeholder="输入运营姓名"></div>
+            <div class="form-group"><label>账户名称</label><input class="form-control" type="text" name="account_name" value="{{ $filters['account_name'] }}" placeholder="输入账户名称"></div>
+            <div class="form-group"><label>账户 ID</label><input class="form-control" type="text" name="account_number" value="{{ $filters['account_number'] }}" placeholder="输入账户ID"></div>
             <button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> 查询汇总</button>
+            <a class="btn btn-default" href="{{ route('assistant.advertising-spend-summary.index') }}"><i class="fa fa-refresh"></i> 重置</a>
             <div class="ad-range">{{ $dateFrom }} 至 {{ $dateTo }}</div>
         </form>
     </div></div>
-
-    <div class="ad-summary-kpis">
-        <div class="ad-summary-kpi"><span>账面广告费</span><strong>${{ number_format($totals['book_spend'], 2) }}</strong></div>
-        <div class="ad-summary-kpi"><span>实际总消耗</span><strong>${{ number_format($totals['actual_spend'], 2) }}</strong></div>
-        <div class="ad-summary-kpi"><span>已审核提报</span><strong>{{ $totals['report_count'] }} 份</strong></div>
-    </div>
-
-    <div class="box ad-chart-box">
-        <div class="box-header with-border"><div class="ad-chart-title">每日代理与渠道消耗分布</div><p class="ad-chart-help">汇总当前筛选范围内所有运营数据；同一天相同代理和渠道自动合并，柱形越长表示消耗越高。</p></div>
-        <div class="box-body no-padding">
-            @if($chartDays->isNotEmpty())
-                <div class="ad-breakdown-wrap"><div class="ad-breakdown-grid">
-                    @foreach($chartDays as $chartDay)
-                        <div class="ad-day-card">
-                            <div class="ad-day-head"><span class="ad-day-date">{{ $chartDay['date'] }}</span><span class="ad-day-total">当日合计 <strong>${{ number_format($chartDay['total'], 2) }}</strong></span></div>
-                            <div class="ad-breakdown-list">
-                                @foreach($chartDay['items'] as $chartItem)
-                                    <div class="ad-breakdown-row">
-                                        <div class="ad-breakdown-name"><b title="{{ $chartItem['agency'] }}">{{ $chartItem['agency'] }}</b><span title="{{ $chartItem['media'] }}">{{ $chartItem['media'] }}</span><span class="ad-breakdown-operators" title="{{ implode('、', $chartItem['operator_names']) }}">运营：{{ implode('、', $chartItem['operator_names']) }}</span></div>
-                                        <div class="ad-breakdown-track" title="{{ $chartItem['agency'] }} / {{ $chartItem['media'] }}：${{ number_format($chartItem['actual_spend'], 2) }}"><div class="ad-breakdown-fill" style="width:{{ max(1, ($chartItem['actual_spend'] / $chartMax) * 100) }}%"></div></div>
-                                        <div class="ad-breakdown-value">${{ number_format($chartItem['actual_spend'], 2) }}</div>
-                                    </div>
-                                @endforeach
-                            </div>
-                        </div>
-                    @endforeach
-                </div></div>
-            @else
-                <div class="ad-chart-empty">当前筛选范围暂无可展示的广告费数据</div>
-            @endif
-        </div>
-    </div>
 
     <div class="box ad-summary-box">
         <div class="box-header with-border"><h3 class="box-title">每日代理与渠道消耗</h3><p class="ad-summary-note">逐条显示每个运营提交的广告明细；待审核和审核不通过的数据不参与统计。</p></div>

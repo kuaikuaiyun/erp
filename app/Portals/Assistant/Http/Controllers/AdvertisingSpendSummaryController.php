@@ -32,6 +32,11 @@ class AdvertisingSpendSummaryController extends Controller
         $validated = $request->validate([
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
+            'agency' => ['nullable', 'string', 'max:100'],
+            'media' => ['nullable', 'string', 'max:100'],
+            'operator' => ['nullable', 'string', 'max:100'],
+            'account_name' => ['nullable', 'string', 'max:150'],
+            'account_number' => ['nullable', 'string', 'max:150'],
         ]);
         $now = Carbon::now(OperationReportMetricsService::REPORT_TIMEZONE);
         $dateFrom = (string) ($validated['date_from'] ?? $now->format('Y-m-d'));
@@ -47,7 +52,7 @@ class AdvertisingSpendSummaryController extends Controller
             ->orderBy('id')
             ->get(['id', 'report_date', 'operator_user_id', 'operator_name', 'advertising_rows']);
 
-        $rows = $reports->flatMap(function (OperationReport $report): array {
+        $allRows = $reports->flatMap(function (OperationReport $report): array {
             return collect($report->advertising_rows ?: [])->map(function (array $advertising) use ($report): array {
                 $bookSpend = (float) ($advertising['book_spend'] ?? 0);
                 $coefficient = (float) ($advertising['settlement_coefficient'] ?? 0);
@@ -73,30 +78,24 @@ class AdvertisingSpendSummaryController extends Controller
             $row['date'], $row['operator_name'], $row['agency'], $row['media'], $row['account_name'], $row['account_number'],
         ]))->values();
 
-        $chartDays = $rows->groupBy('date')->map(function ($items, string $date): array {
-            $breakdown = $items->groupBy(fn (array $row): string => implode('|', [
-                mb_strtolower($row['agency']), mb_strtolower($row['media']),
-            ]))->map(function ($group): array {
-                $first = $group->first();
+        $agencyOptions = $allRows->pluck('agency')->filter()->unique()->sort()->values();
+        $mediaOptions = $allRows->pluck('media')->filter()->unique()->sort()->values();
+        $filters = [
+            'agency' => trim((string) ($validated['agency'] ?? '')),
+            'media' => trim((string) ($validated['media'] ?? '')),
+            'operator' => trim((string) ($validated['operator'] ?? '')),
+            'account_name' => trim((string) ($validated['account_name'] ?? '')),
+            'account_number' => trim((string) ($validated['account_number'] ?? '')),
+        ];
+        $rows = $allRows->filter(function (array $row) use ($filters): bool {
+            if ($filters['agency'] !== '' && mb_strtolower($row['agency']) !== mb_strtolower($filters['agency'])) return false;
+            if ($filters['media'] !== '' && mb_strtolower($row['media']) !== mb_strtolower($filters['media'])) return false;
+            if ($filters['operator'] !== '' && mb_stripos($row['operator_name'], $filters['operator']) === false) return false;
+            if ($filters['account_name'] !== '' && mb_stripos($row['account_name'], $filters['account_name']) === false) return false;
+            if ($filters['account_number'] !== '' && mb_stripos($row['account_number'], $filters['account_number']) === false) return false;
 
-                return [
-                    'agency' => $first['agency'],
-                    'media' => $first['media'],
-                    'book_spend' => (float) $group->sum('book_spend'),
-                    'actual_spend' => (float) $group->sum('actual_spend'),
-                    'operator_names' => $group->pluck('operator_name')->filter()->unique()->sort()->values()->all(),
-                ];
-            })->sortByDesc('actual_spend')->values();
-
-            return [
-                'date' => $date,
-                'total' => (float) $items->sum('actual_spend'),
-                'items' => $breakdown,
-            ];
-        })->sortKeys()->values();
-        $chartMax = max(1, (float) $chartDays
-            ->flatMap(fn (array $day) => $day['items'])
-            ->max('actual_spend'));
+            return true;
+        })->values();
 
         return view('portals.assistant.advertising-spend-summary.index', [
             'portal' => $context['portal']->loadMissing('menus'),
@@ -104,14 +103,14 @@ class AdvertisingSpendSummaryController extends Controller
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
             'rows' => $rows,
-            'chartDays' => $chartDays,
-            'chartMax' => $chartMax,
+            'agencyOptions' => $agencyOptions,
+            'mediaOptions' => $mediaOptions,
+            'filters' => $filters,
             'totals' => [
                 'book_spend' => (float) $rows->sum('book_spend'),
                 'handling_fee' => (float) $rows->sum('handling_fee'),
                 'actual_spend' => (float) $rows->sum('actual_spend'),
-                'report_count' => $reports->count(),
-                'operator_count' => $reports->pluck('operator_user_id')->unique()->count(),
+                'report_count' => $rows->pluck('report_id')->unique()->count(),
             ],
         ]);
     }
