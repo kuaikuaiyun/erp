@@ -74,6 +74,37 @@ Artisan::command('logistics:backfill-order-items {--chunk=100 : '.__('logistics.
     return 0;
 })->purpose(__('logistics.sku_mapping_commands.order_item_backfill_purpose'));
 
+Artisan::command('logistics:media-sources:backfill {--order= : Shopify ID、Shopify 单号或通途订单号；留空修复全部订单} {--chunk=200}', function (): int {
+    $orderNumber = trim((string) $this->option('order'));
+    $chunk = max(1, min(1000, (int) $this->option('chunk')));
+    $processed = 0;
+    $updated = 0;
+
+    $query = LogisticsOrder::query()->whereNotNull('shopify_payload');
+    if ($orderNumber !== '') {
+        $query->where(function ($query) use ($orderNumber): void {
+            $query->where('shopify_order_id', $orderNumber)
+                ->orWhere('shopify_order_number', $orderNumber)
+                ->orWhere('tongtu_order_number', $orderNumber);
+        });
+    }
+
+    $query->orderBy('id')->chunkById($chunk, function ($orders) use (&$processed, &$updated): void {
+        foreach ($orders as $order) {
+            $payload = $order->getRawOriginal('shopify_payload');
+            if (is_string($payload)) $payload = json_decode($payload, true);
+            $source = LogisticsOrder::mediaSourceFromTags(is_array($payload) ? ($payload['tags'] ?? []) : []);
+            $processed++;
+            if ((string) $order->media_source === $source) continue;
+            $order->forceFill(['media_source' => $source])->saveQuietly();
+            $updated++;
+        }
+    });
+
+    $this->info("媒体来源重新匹配完成：检查 {$processed} 条，更新 {$updated} 条。");
+    return 0;
+})->purpose('按 Shopify tags 完整匹配并修复物流订单媒体来源');
+
 Artisan::command('logistics:tongtu-skus:refresh {--limit=200 : '.__('logistics.sku_mapping_commands.refresh_limit').' }', function (TongtuSkuMappingService $mappings): int {
     $count = $mappings->scheduleDueRefreshes((int) $this->option('limit'));
     $this->info(__('logistics.sku_mapping_commands.refresh_queued', ['count' => $count]));
