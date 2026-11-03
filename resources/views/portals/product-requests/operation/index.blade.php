@@ -31,7 +31,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261103-04">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/product-requests.css?v=20261103-05">
 @endpush
 @push('scripts')
     <script>window.ErpProductRequestConfig = @json($clientConfig);</script>
