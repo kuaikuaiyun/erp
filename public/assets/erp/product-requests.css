@@ -394,8 +394,8 @@ body.product-request-lightbox-open { overflow: hidden; }
 .product-request-table.product-request-operation-table th:nth-child(1) { width: 7%; }
 .product-request-table.product-request-operation-table th:nth-child(2) { width: 5%; }
 .product-request-table.product-request-operation-table th:nth-child(3) { width: 13%; }
-.product-request-table.product-request-operation-table th:nth-child(4) { width: 14%; }
-.product-request-table.product-request-operation-table th:nth-child(5) { width: 6%; }
+.product-request-table.product-request-operation-table th:nth-child(4) { width: 11%; }
+.product-request-table.product-request-operation-table th:nth-child(5) { width: 9%; }
 .product-request-table.product-request-operation-table th:nth-child(6) { width: 7%; }
 .product-request-table.product-request-operation-table th:nth-child(7) { width: 8%; }
 .product-request-table.product-request-operation-table th:nth-child(8) { width: 4%; }
