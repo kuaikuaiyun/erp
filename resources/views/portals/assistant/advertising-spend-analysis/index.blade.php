@@ -40,9 +40,9 @@
     </div>
 
     <div class="box analysis-panel"><div class="box-header with-border"><h3 class="box-title">代理与媒体费用明细</h3></div><div class="box-body no-padding table-responsive">
-        <table class="table table-bordered table-hover analysis-table"><thead><tr><th>广告代理</th><th>广告媒体</th><th>账面广告费($)</th><th>实际广告费($)</th><th>费用占比</th></tr></thead><tbody>
-        @forelse($detailRows as $row)<tr><td>{{ $row['agency'] }}</td><td>{{ $row['media'] }}</td><td class="money">{{ number_format($row['book_spend'],2) }}</td><td class="money actual">{{ number_format($row['actual_spend'],2) }}</td><td class="money">{{ $totalSpend > 0 ? number_format($row['actual_spend']/$totalSpend*100,2) : '0.00' }}%</td></tr>@empty<tr><td colspan="5" class="analysis-empty">当前筛选范围暂无已审核的广告费数据</td></tr>@endforelse
-        </tbody>@if($detailRows->isNotEmpty())<tfoot><tr><td colspan="2">合计</td><td class="money">{{ number_format($totalBookSpend,2) }}</td><td class="money">{{ number_format($totalSpend,2) }}</td><td class="money">100.00%</td></tr></tfoot>@endif</table>
+        <table class="table table-bordered table-hover analysis-table"><thead><tr><th>日期</th><th>广告代理</th><th>广告媒体</th><th>账面广告费($)</th><th>实际广告费($)</th><th>费用占比</th></tr></thead><tbody>
+        @forelse($detailRows as $row)<tr><td>{{ $row['date'] }}</td><td>{{ $row['agency'] }}</td><td>{{ $row['media'] }}</td><td class="money">{{ number_format($row['book_spend'],2) }}</td><td class="money actual">{{ number_format($row['actual_spend'],2) }}</td><td class="money">{{ $totalSpend > 0 ? number_format($row['actual_spend']/$totalSpend*100,2) : '0.00' }}%</td></tr>@empty<tr><td colspan="6" class="analysis-empty">当前筛选范围暂无已审核的广告费数据</td></tr>@endforelse
+        </tbody>@if($detailRows->isNotEmpty())<tfoot><tr><td colspan="3">合计</td><td class="money">{{ number_format($totalBookSpend,2) }}</td><td class="money">{{ number_format($totalSpend,2) }}</td><td class="money">100.00%</td></tr></tfoot>@endif</table>
     </div>@include('portals.assistant.partials.compact-pagination', ['paginator' => $detailRows])</div>
 </section>
 @endsection

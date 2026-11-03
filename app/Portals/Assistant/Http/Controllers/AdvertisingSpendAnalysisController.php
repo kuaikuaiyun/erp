@@ -88,16 +88,17 @@ class AdvertisingSpendAnalysisController extends Controller
         };
         $agencyRows = $summarize($rows, 'agency');
         $mediaRows = $summarize($rows, 'media');
-        $allDetailRows = $rows->groupBy(fn (array $row): string => mb_strtolower($row['agency']).'|'.mb_strtolower($row['media']))
+        $allDetailRows = $rows->groupBy(fn (array $row): string => $row['date'].'|'.mb_strtolower($row['agency']).'|'.mb_strtolower($row['media']))
             ->map(function ($group): array {
                 $first = $group->first();
                 return [
+                    'date' => $first['date'],
                     'agency' => $first['agency'],
                     'media' => $first['media'],
                     'book_spend' => (float) $group->sum('book_spend'),
                     'actual_spend' => (float) $group->sum('actual_spend'),
                 ];
-            })->sortByDesc('actual_spend')->values();
+            })->sortBy([['date', 'asc'], ['actual_spend', 'desc']])->values();
         $page = max(1, (int) $request->query('page', 1));
         $detailRows = new LengthAwarePaginator(
             $allDetailRows->forPage($page, 20)->values(),
