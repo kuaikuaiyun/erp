@@ -47,6 +47,7 @@
                 @if($rows->isNotEmpty())<tfoot><tr><td colspan="6">合计</td><td class="money">{{ number_format($totals['book_spend'], 2) }}</td><td class="text-center">—</td><td class="money">{{ number_format($totals['handling_fee'], 2) }}</td><td class="money">{{ number_format($totals['actual_spend'], 2) }}</td><td>—</td></tr></tfoot>@endif
             </table>
         </div>
+        @include('portals.assistant.partials.compact-pagination', ['paginator' => $rows])
     </div>
 </section>
 @endsection

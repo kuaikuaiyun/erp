@@ -10,6 +10,7 @@ use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Operation\OperationReportMetricsService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -87,7 +88,7 @@ class AdvertisingSpendSummaryController extends Controller
             'account_name' => trim((string) ($validated['account_name'] ?? '')),
             'account_number' => trim((string) ($validated['account_number'] ?? '')),
         ];
-        $rows = $allRows->filter(function (array $row) use ($filters): bool {
+        $filteredRows = $allRows->filter(function (array $row) use ($filters): bool {
             if ($filters['agency'] !== '' && mb_strtolower($row['agency']) !== mb_strtolower($filters['agency'])) return false;
             if ($filters['media'] !== '' && mb_strtolower($row['media']) !== mb_strtolower($filters['media'])) return false;
             if ($filters['operator'] !== '' && mb_stripos($row['operator_name'], $filters['operator']) === false) return false;
@@ -96,6 +97,14 @@ class AdvertisingSpendSummaryController extends Controller
 
             return true;
         })->values();
+        $page = max(1, (int) $request->query('page', 1));
+        $rows = new LengthAwarePaginator(
+            $filteredRows->forPage($page, 20)->values(),
+            $filteredRows->count(),
+            20,
+            $page,
+            ['path' => $request->url(), 'query' => $request->query()],
+        );
 
         return view('portals.assistant.advertising-spend-summary.index', [
             'portal' => $context['portal']->loadMissing('menus'),
@@ -107,10 +116,10 @@ class AdvertisingSpendSummaryController extends Controller
             'mediaOptions' => $mediaOptions,
             'filters' => $filters,
             'totals' => [
-                'book_spend' => (float) $rows->sum('book_spend'),
-                'handling_fee' => (float) $rows->sum('handling_fee'),
-                'actual_spend' => (float) $rows->sum('actual_spend'),
-                'report_count' => $rows->pluck('report_id')->unique()->count(),
+                'book_spend' => (float) $filteredRows->sum('book_spend'),
+                'handling_fee' => (float) $filteredRows->sum('handling_fee'),
+                'actual_spend' => (float) $filteredRows->sum('actual_spend'),
+                'report_count' => $filteredRows->pluck('report_id')->unique()->count(),
             ],
         ]);
     }

@@ -10,6 +10,7 @@ use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Operation\OperationReportMetricsService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -87,7 +88,7 @@ class AdvertisingSpendAnalysisController extends Controller
         };
         $agencyRows = $summarize($rows, 'agency');
         $mediaRows = $summarize($rows, 'media');
-        $detailRows = $rows->groupBy(fn (array $row): string => mb_strtolower($row['agency']).'|'.mb_strtolower($row['media']))
+        $allDetailRows = $rows->groupBy(fn (array $row): string => mb_strtolower($row['agency']).'|'.mb_strtolower($row['media']))
             ->map(function ($group): array {
                 $first = $group->first();
                 return [
@@ -97,6 +98,14 @@ class AdvertisingSpendAnalysisController extends Controller
                     'actual_spend' => (float) $group->sum('actual_spend'),
                 ];
             })->sortByDesc('actual_spend')->values();
+        $page = max(1, (int) $request->query('page', 1));
+        $detailRows = new LengthAwarePaginator(
+            $allDetailRows->forPage($page, 20)->values(),
+            $allDetailRows->count(),
+            20,
+            $page,
+            ['path' => $request->url(), 'query' => $request->query()],
+        );
 
         return view('portals.assistant.advertising-spend-analysis.index', [
             'portal' => $context['portal']->loadMissing('menus'),
