@@ -13,7 +13,7 @@ use Illuminate\Support\Str;
 class AbnormalOrderService
 {
     /** 异常订单仅统计该日期（含）之后产生的订单。 */
-    public const STATISTICS_START_AT = '2026-10-28 00:00:00';
+    public const STATISTICS_START_AT = '2026-10-20 00:00:00';
 
     /** @var array{skus:list<string>,product_codes:list<string>}|null */
     private ?array $cachedKeys = null;

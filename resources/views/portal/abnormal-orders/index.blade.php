@@ -6,7 +6,7 @@
 </style>
 @endpush
 @section('content')
-<section class="content-header"><h1>异常订单 <small>{{ $isReviewPortal ? '查看异常订单状态并通知对应运营' : '统计 2026-10-28 起首单或无订阅且包含不可跑商品的订单' }}</small></h1></section>
+<section class="content-header"><h1>异常订单 <small>{{ $isReviewPortal ? '查看异常订单状态并通知对应运营' : '统计 2026-10-20 起首单或无订阅且包含不可跑商品的订单' }}</small></h1></section>
 <section class="content abnormal-order-page">
     @if(session('success'))<div class="alert alert-success"><i class="fa fa-check-circle"></i> {{ session('success') }}</div>@endif
     @if(session('warning'))<div class="alert alert-warning"><i class="fa fa-exclamation-triangle"></i> {{ session('warning') }}</div>@endif
