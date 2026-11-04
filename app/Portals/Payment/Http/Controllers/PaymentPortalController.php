@@ -125,7 +125,8 @@ class PaymentPortalController extends Controller
             'report_year' => ['nullable', 'integer', 'min:2000', 'max:'.now('America/Los_Angeles')->year],
             'report_dimension' => ['nullable', Rule::in(['payment', 'event'])],
             'report_month' => ['nullable', 'integer', 'between:1,12'],
-            'overview_month' => ['nullable', 'date_format:Y-m'],
+            'overview_month_from' => ['nullable', 'date_format:Y-m'],
+            'overview_month_to' => ['nullable', 'date_format:Y-m'],
         ]);
         $today = now('Asia/Shanghai');
         $tab = (string) ($validated['tab'] ?? 'overview');
@@ -145,16 +146,27 @@ class PaymentPortalController extends Controller
 
         if ($tab === 'overview') {
             $now = now('America/Los_Angeles');
-            $month = isset($validated['overview_month'])
-                ? Carbon::createFromFormat('Y-m', (string) $validated['overview_month'], 'America/Los_Angeles')->startOfMonth()
+            $currentMonth = $now->copy()->startOfMonth();
+            $monthFrom = isset($validated['overview_month_from'])
+                ? Carbon::createFromFormat('Y-m', (string) $validated['overview_month_from'], 'America/Los_Angeles')->startOfMonth()
                 : $now->copy()->startOfMonth();
-            if ($month->greaterThan($now->copy()->startOfMonth())) {
-                $month = $now->copy()->startOfMonth();
+            $monthTo = isset($validated['overview_month_to'])
+                ? Carbon::createFromFormat('Y-m', (string) $validated['overview_month_to'], 'America/Los_Angeles')->startOfMonth()
+                : $monthFrom->copy();
+            if ($monthFrom->greaterThan($currentMonth)) {
+                $monthFrom = $currentMonth->copy();
+            }
+            if ($monthTo->greaterThan($currentMonth)) {
+                $monthTo = $currentMonth->copy();
+            }
+            if ($monthFrom->greaterThan($monthTo)) {
+                $monthFrom = $monthTo->copy();
             }
             $dateMode = 'event';
-            $periodStart = $month->format('Y-m-d');
-            $periodEnd = $month->isSameMonth($now) ? $now->format('Y-m-d') : $month->copy()->endOfMonth()->format('Y-m-d');
-            $validated['overview_month'] = $month->format('Y-m');
+            $periodStart = $monthFrom->format('Y-m-d');
+            $periodEnd = $monthTo->isSameMonth($now) ? $now->format('Y-m-d') : $monthTo->copy()->endOfMonth()->format('Y-m-d');
+            $validated['overview_month_from'] = $monthFrom->format('Y-m');
+            $validated['overview_month_to'] = $monthTo->format('Y-m');
         }
 
         return response()->json($this->accountRisk->detail(
@@ -165,7 +177,8 @@ class PaymentPortalController extends Controller
                 'event_date_from' => $dateMode === 'event' ? $periodStart : '',
                 'event_date_to' => $dateMode === 'event' ? $periodEnd : '',
                 'date_mode' => $dateMode,
-                'overview_month' => (string) ($validated['overview_month'] ?? ''),
+                'overview_month_from' => (string) ($validated['overview_month_from'] ?? ''),
+                'overview_month_to' => (string) ($validated['overview_month_to'] ?? ''),
             ],
             $tab,
             (int) ($validated['page'] ?? 1),

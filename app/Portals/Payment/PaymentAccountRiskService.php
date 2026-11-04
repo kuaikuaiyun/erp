@@ -187,7 +187,8 @@ class PaymentAccountRiskService
                 $detail['exceptions'] = $this->enrichOverviewExceptionReferences($account, $detail['exceptions']);
             }
             if ($tab === 'overview') {
-                $detail['overview_month'] = (string) ($filters['overview_month'] ?? '');
+                $detail['overview_month_from'] = (string) ($filters['overview_month_from'] ?? '');
+                $detail['overview_month_to'] = (string) ($filters['overview_month_to'] ?? '');
             }
         }
         $balance = LogisticsPayPalBalanceSnapshot::query()

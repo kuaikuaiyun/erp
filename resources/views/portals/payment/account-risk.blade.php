@@ -16,7 +16,7 @@
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261026-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261026-1">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-account-risk.css?v=20261026-7">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-account-risk.css?v=20261104-1">
 @endpush
 
 @section('content')
@@ -176,5 +176,5 @@
         pagination: @json(__('payment.common.pagination'))
     };</script>
     @if ($errors->any())<script>jQuery(function () { jQuery('#payment-account-create-modal').modal('show'); });</script>@endif
-    <script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261026-6"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261104-1"></script>
 @endpush

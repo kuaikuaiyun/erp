@@ -565,7 +565,7 @@
                 var now = new Date();
                 return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
             }
-            var detailState = { accountId: '', accountName: '', tab: 'overview', page: 1, perPage: 50, sort: '', direction: 'desc', request: null, cache: {}, disputeRows: [], reportYear: new Date().getFullYear(), reportDimension: 'payment', reportMonth: null, overviewMonth: currentMonthValue() };
+            var detailState = { accountId: '', accountName: '', tab: 'overview', page: 1, perPage: 50, sort: '', direction: 'desc', request: null, cache: {}, disputeRows: [], reportYear: new Date().getFullYear(), reportDimension: 'payment', reportMonth: null, overviewMonthFrom: currentMonthValue(), overviewMonthTo: currentMonthValue() };
             var paginationText = config.pagination || {};
             var detailColumns = {
                 overview: ['happened_at', 'type', 'order_number', 'store_name', 'amount', 'reason', 'status'],
@@ -697,9 +697,11 @@
             function renderOverview(payload) {
                 var summary = payload.summary || {};
                 var exceptions = payload.exceptions || [];
-                detailState.overviewMonth = String(payload.overview_month || detailState.overviewMonth || currentMonthValue());
+                detailState.overviewMonthFrom = String(payload.overview_month_from || detailState.overviewMonthFrom || currentMonthValue());
+                detailState.overviewMonthTo = String(payload.overview_month_to || detailState.overviewMonthTo || detailState.overviewMonthFrom);
                 var text = detailText.overview || {};
-                var toolbar = '<div class="payment-overview-toolbar"><label><span>' + escapeHtml((text.month_filter || {}).label) + '</span><input type="month" class="form-control" max="' + currentMonthValue() + '" value="' + escapeHtml(detailState.overviewMonth) + '" data-payment-overview-month></label><small>' + escapeHtml((text.month_filter || {}).note) + '</small></div>';
+                var monthFilter = text.month_filter || {};
+                var toolbar = '<div class="payment-overview-toolbar"><div class="payment-overview-month-range"><label><span>' + escapeHtml(monthFilter.label) + '</span><input type="month" class="form-control" max="' + currentMonthValue() + '" value="' + escapeHtml(detailState.overviewMonthFrom) + '" data-payment-overview-month-from></label><b>' + escapeHtml(monthFilter.range_to || '至') + '</b><label><span class="sr-only">' + escapeHtml(monthFilter.end_label || monthFilter.label) + '</span><input type="month" class="form-control" max="' + currentMonthValue() + '" value="' + escapeHtml(detailState.overviewMonthTo) + '" data-payment-overview-month-to></label></div><small>' + escapeHtml(monthFilter.note) + '</small></div>';
                 return toolbar + overviewKpis(summary) + '<div class="payment-detail-overview-two">' + overviewFunds(summary) + overviewRisk(summary, exceptions) + '</div>' + trendChart(payload.trend || []);
             }
 
@@ -986,7 +988,7 @@
                     query.report_dimension = detailState.reportDimension;
                     if (detailState.reportMonth) query.report_month = detailState.reportMonth;
                 }
-                if (detailState.tab === 'overview') query.overview_month = detailState.overviewMonth;
+                if (detailState.tab === 'overview') { query.overview_month_from = detailState.overviewMonthFrom; query.overview_month_to = detailState.overviewMonthTo; }
                 var url = String(config.accountDetailUrl).replace('__ACCOUNT__', encodeURIComponent(detailState.accountId));
                 var cacheKey = url + '?' + $.param(query);
                 var cached = detailState.cache[cacheKey];
@@ -1025,7 +1027,8 @@
                 detailState.sort = '';
                 detailState.direction = 'desc';
                 detailState.reportMonth = null;
-                detailState.overviewMonth = currentMonthValue();
+                detailState.overviewMonthFrom = currentMonthValue();
+                detailState.overviewMonthTo = currentMonthValue();
                 detailModal.find('[data-payment-detail-tab]').removeClass('active').attr('aria-selected', 'false').filter('[data-payment-detail-tab="overview"]').addClass('active').attr('aria-selected', 'true');
                 detailModal.find('[data-payment-detail-filter]').prop('hidden', true).get(0).reset();
                 renderDetailFilters();
@@ -1070,7 +1073,7 @@
             detailModal.on('change', '[data-payment-monthly-year]', function () { detailState.reportYear = Number($(this).val()) || new Date().getFullYear(); detailState.reportMonth = null; loadDetail(); });
             detailModal.on('click', '[data-payment-monthly-dimension]', function () { detailState.reportDimension = String($(this).data('paymentMonthlyDimension') || 'payment'); detailState.reportMonth = null; loadDetail(); });
             detailModal.on('click', '[data-payment-monthly-month]', function () { var month = Number($(this).data('paymentMonthlyMonth')) || null; detailState.reportMonth = detailState.reportMonth === month ? null : month; loadDetail(); });
-            detailModal.on('change', '[data-payment-overview-month]', function () { detailState.overviewMonth = String($(this).val() || currentMonthValue()); loadDetail(); });
+            detailModal.on('change', '[data-payment-overview-month-from], [data-payment-overview-month-to]', function () { var from = String(detailModal.find('[data-payment-overview-month-from]').val() || currentMonthValue()); var to = String(detailModal.find('[data-payment-overview-month-to]').val() || from); if (from > to) { if ($(this).is('[data-payment-overview-month-from]')) to = from; else from = to; } detailState.overviewMonthFrom = from; detailState.overviewMonthTo = to; loadDetail(); });
             detailModal.on('mouseenter focus', '[data-payment-trend-point]', function () {
                 var point = $(this);
                 var text = (detailText.overview || {}).trend || {};
