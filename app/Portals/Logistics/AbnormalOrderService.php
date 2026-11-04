@@ -3,6 +3,7 @@
 namespace App\Portals\Logistics;
 
 use App\Models\AdminUser;
+use App\Models\AbnormalOrderRecord;
 use App\Models\AssistantDomainStore;
 use App\Models\LogisticsOrder;
 use App\Models\ProductRequestLinkSku;
@@ -76,6 +77,15 @@ class AbnormalOrderService
                         ->whereHas('store', fn (Builder $store) => $store->whereIn('user_name', $identities));
                 });
             }
+        });
+    }
+
+    public function scopePending(Builder $query): Builder
+    {
+        return $query->where(function (Builder $pending): void {
+            $pending->whereDoesntHave('abnormalRecord')
+                ->orWhereHas('abnormalRecord', fn (Builder $record) => $record
+                    ->where('status', AbnormalOrderRecord::STATUS_PENDING));
         });
     }
 

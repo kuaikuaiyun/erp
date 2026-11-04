@@ -9,6 +9,7 @@ use App\Models\InternalMessageRecipient;
 use App\Models\LogisticsOrder;
 use App\Portals\Logistics\AbnormalOrderService;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -41,10 +42,7 @@ class AbnormalOrderController extends Controller
         if ($status === 'processed') {
             $query->whereHas('abnormalRecord', fn ($record) => $record->where('status', AbnormalOrderRecord::STATUS_PROCESSED));
         } elseif ($status === 'pending') {
-            $query->where(function ($pending): void {
-                $pending->whereDoesntHave('abnormalRecord')
-                    ->orWhereHas('abnormalRecord', fn ($record) => $record->where('status', AbnormalOrderRecord::STATUS_PENDING));
-            });
+            $this->abnormalOrders->scopePending($query);
         }
         if ($keyword !== '') {
             $query->where(function ($search) use ($keyword): void {
@@ -73,6 +71,21 @@ class AbnormalOrderController extends Controller
             'orders' => $orders, 'status' => $status, 'keyword' => $keyword,
             'isReviewPortal' => $context['portal']->code === 'caigou',
         ]);
+    }
+
+    public function pendingCount(Request $request): Response|JsonResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+        abort_unless($context['portal']->code === 'yunying', 404);
+
+        $query = $this->abnormalOrders->query();
+        $this->abnormalOrders->scopePending($query);
+        if (! $context['user']->isAdministrator()) {
+            $this->abnormalOrders->scopeForOwner($query, $context['user']);
+        }
+
+        return response()->json(['count' => $query->count()]);
     }
 
     public function updateStatus(Request $request, LogisticsOrder $order): RedirectResponse
