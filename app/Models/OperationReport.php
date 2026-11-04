@@ -41,6 +41,11 @@ class OperationReport extends Model
         return $this->belongsTo(AdminUser::class, 'operator_user_id');
     }
 
+    public function reviewer(): BelongsTo
+    {
+        return $this->belongsTo(AdminUser::class, 'reviewed_by');
+    }
+
     public function operationDepartment(): BelongsTo
     {
         return $this->belongsTo(Department::class, 'operation_department_id');

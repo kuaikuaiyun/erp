@@ -95,7 +95,12 @@ class LogisticsOrder extends Model
                 return;
             }
             if (is_scalar($value)) {
-                $values[] = (string) $value;
+                // Shopify 历史数据可能把多个 tag 保存为逗号分隔字符串；先还原 tag 边界，
+                // 避免把整串内容拼接后进行子串匹配。
+                foreach (preg_split('/[,，;；|]+/u', (string) $value) ?: [] as $tag) {
+                    $tag = trim($tag);
+                    if ($tag !== '') $values[] = $tag;
+                }
             }
         };
         $append($tags);
@@ -113,7 +118,9 @@ class LogisticsOrder extends Model
             if ($label === self::MEDIA_SOURCE_OTHER) continue;
             $needle = mb_strtolower((string) preg_replace('/[^\pL\pN]+/u', '', $label));
             foreach ($normalisedTags as $normalised) {
-                if ($normalised !== '' && str_contains($normalised, $needle)) {
+                // 忽略大小写、空格和标点，但必须是完整 tag，禁止 Google Pay
+                // 之类的标签仅因包含 "google" 而被识别为 Google。
+                if ($normalised !== '' && hash_equals($normalised, $needle)) {
                     return $label;
                 }
             }

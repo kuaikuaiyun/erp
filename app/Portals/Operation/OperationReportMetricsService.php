@@ -523,6 +523,8 @@ class OperationReportMetricsService
                 'id' => (int) $order->getKey(),
                 'shopify_order_id' => trim((string) $order->shopify_order_id) ?: '—',
                 'order_number' => trim((string) ($order->shopify_order_number ?: $order->tongtu_order_number)) ?: '—',
+                'shop_domain' => trim((string) ($order->store?->domain ?: $order->source_shop_domain ?: $order->store_name)) ?: '未知店铺',
+                'media_source' => trim((string) ($order->media_source ?: LogisticsOrder::MEDIA_SOURCE_OTHER)),
                 'ordered_at' => Carbon::parse($order->getRawOriginal('order_created_at'), 'UTC')->timezone(self::REPORT_TIMEZONE)->format('Y-m-d H:i:s'),
                 'subscription_type' => (string) $order->subscription_type,
                 'revenue' => round($revenue, 4),
@@ -537,6 +539,16 @@ class OperationReportMetricsService
         $total = count($details);
         $lastPage = max(1, (int) ceil($total / $perPage));
         $page = min(max(1, $page), $lastPage);
+        $mediaBreakdown = collect($details)
+            ->groupBy(fn (array $order) => (string) $order['media_source'])
+            ->map(fn ($mediaOrders, string $media) => [
+                'media_source' => $media,
+                'order_count' => $mediaOrders->count(),
+                'revenue' => round((float) $mediaOrders->sum('revenue'), 4),
+            ])
+            ->sortByDesc('order_count')
+            ->values()
+            ->all();
 
         return [
             'summary' => [
@@ -548,6 +560,7 @@ class OperationReportMetricsService
                 'purchase_cost' => round((float) collect($details)->sum('purchase_cost'), 4),
                 'shipping_cost' => round((float) collect($details)->sum('shipping_cost'), 4),
                 'return_fee' => round((float) collect($details)->sum('return_fee'), 4),
+                'media_breakdown' => $mediaBreakdown,
             ],
             'orders' => array_values(array_slice($details, ($page - 1) * $perPage, $perPage)),
             'pagination' => [

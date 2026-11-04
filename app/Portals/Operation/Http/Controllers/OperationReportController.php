@@ -15,6 +15,7 @@ use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Operation\OperationReportMetricsService;
 use App\Portals\Operation\AdvertisingReportSpreadsheetService;
 use App\Portals\ProductRequests\ProductRequestAccessService;
+use App\Services\DepartmentAuthorizationService;
 use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
@@ -35,6 +36,7 @@ class OperationReportController extends Controller
         private readonly StreamedXlsxWriter $xlsxWriter,
         private readonly AssistantStoreOwnerService $assistantStoreOwners,
         private readonly AdvertisingReportSpreadsheetService $advertisingSpreadsheets,
+        private readonly DepartmentAuthorizationService $departmentAuthorization,
     ) {
     }
 
@@ -47,26 +49,66 @@ class OperationReportController extends Controller
         $validated = $request->validate([
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
-            'operator_user_id' => ['nullable', 'integer'],
+            'operation_department_id' => ['nullable', 'integer'],
+            'operator_user_id' => ['nullable', 'string', 'max:20'],
         ]);
         $reportNow = Carbon::now(OperationReportMetricsService::REPORT_TIMEZONE);
         $dateFrom = (string) ($validated['date_from'] ?? $reportNow->copy()->startOfMonth()->format('Y-m-d'));
         $dateTo = (string) ($validated['date_to'] ?? $reportNow->copy()->endOfMonth()->format('Y-m-d'));
         abort_if($dateFrom > $dateTo, 422, '开始日期不能晚于结束日期。');
-        $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
-        $operatorId = $isBoss
-            ? (int) ($validated['operator_user_id'] ?? $operatorOptions->first()?->getKey() ?? $user->getKey())
-            : (int) $user->getKey();
-        if ($isBoss) $this->assertAssignableOperator($operatorId);
-        $operator = AdminUser::query()->findOrFail($operatorId);
-        $calculated = $this->metrics->buildRange($dateFrom, $dateTo, $operatorId);
+        $operationDepartmentIds = $this->assistantStoreOwners->operationDepartments()->pluck('id');
+        $operationDepartments = $isBoss
+            ? Department::business()->whereIn('id', $operationDepartmentIds->all())
+                ->orderBy('sort')->orderBy('name')->get(['id', 'name', 'sort'])
+            : collect();
+        $viewerOperationDepartment = $isBoss
+            ? null
+            : $this->assistantStoreOwners->operationDepartmentForUser($user);
+        $isReportDepartmentLeader = ! $isBoss
+            && $this->departmentAuthorization->managedDepartmentIds($user)->isNotEmpty();
+        $selectedDepartmentId = $isBoss && isset($validated['operation_department_id'])
+            ? (int) $validated['operation_department_id']
+            : null;
+        if ($selectedDepartmentId !== null) {
+            abort_unless($operationDepartments->contains(
+                fn (Department $department): bool => (int) $department->getKey() === $selectedDepartmentId
+            ), 403);
+        }
+        $operatorOptions = $isBoss
+            ? $this->bossReportOperatorOptions($operationDepartments, $selectedDepartmentId)
+            : $this->reportOperatorOptions($user);
+        $canSelectOperator = $isBoss || $operatorOptions->count() > 1;
+        $selectAllOperators = ($validated['operator_user_id'] ?? null) === 'all';
+        $defaultOperatorId = $operatorOptions->contains('id', $user->getKey())
+            ? (int) $user->getKey()
+            : (int) ($operatorOptions->first()?->getKey() ?? $user->getKey());
+        $operatorId = $canSelectOperator && ! $selectAllOperators
+            ? (int) ($validated['operator_user_id'] ?? $defaultOperatorId)
+            : $defaultOperatorId;
+        if (! $selectAllOperators) {
+            $this->assertReportOperatorAccess($user, $operatorId, $operatorOptions);
+        }
+        $operator = $selectAllOperators ? null : AdminUser::query()->findOrFail($operatorId);
+        $operatorIds = $selectAllOperators
+            ? $operatorOptions->pluck('id')->map(fn ($id) => (int) $id)->values()
+            : collect([$operatorId]);
+        $calculatedByOperator = $this->metrics->buildRangeForOperators($dateFrom, $dateTo, $operatorIds->all());
+        $calculated = [
+            'rows' => $operatorIds->flatMap(function (int $id) use ($calculatedByOperator) {
+                return collect($calculatedByOperator[$id]['rows'] ?? [])->map(function (array $row) use ($id): array {
+                    $row['operator_user_id'] = $id;
+                    return $row;
+                });
+            })->values()->all(),
+            'warnings' => $operatorIds->flatMap(fn (int $id) => $calculatedByOperator[$id]['warnings'] ?? [])->values()->all(),
+        ];
         $submittedReports = OperationReport::query()
-            ->where('operator_user_id', $operatorId)
+            ->whereIn('operator_user_id', $operatorIds->all())
             ->whereBetween('report_date', [$dateFrom, $dateTo])
             ->where('status', OperationReport::STATUS_APPROVED)
             ->orderByDesc('report_date')->orderByDesc('id')->get();
         $submittedReportsByDate = $submittedReports->keyBy(
-            fn (OperationReport $report) => $report->report_date->format('Y-m-d')
+            fn (OperationReport $report) => (int) $report->operator_user_id.'|'.$report->report_date->format('Y-m-d')
         );
         $submittedAdSpendTotal = (float) $submittedReports->sum('actual_ad_spend');
         $submittedFirstRevenueTotal = (float) $submittedReports->sum(
@@ -78,22 +120,27 @@ class OperationReportController extends Controller
                 $report->advertising_rows ?? []
             ))->keyBy(fn (array $row) => mb_strtolower(trim((string) $row['media_source'])))->all();
 
-            return [$report->report_date->format('Y-m-d') => $rows];
+            return [(int) $report->operator_user_id.'|'.$report->report_date->format('Y-m-d') => $rows];
         })->all();
         $metricRows = $this->withFirstOrderProfitability($calculated['rows'], $submittedMediaRoiByDate);
         usort($metricRows, fn (array $left, array $right): int => [
             $left['date'],
+            (int) $left['operator_user_id'],
             mb_strtolower(trim((string) $left['shop_domain'])),
             mb_strtolower(trim((string) $left['media_source'])),
         ] <=> [
             $right['date'],
+            (int) $right['operator_user_id'],
             mb_strtolower(trim((string) $right['shop_domain'])),
             mb_strtolower(trim((string) $right['media_source'])),
         ]);
-        $dailySummaries = collect($metricRows)->groupBy('date')->map(function ($dateRows, string $date) use ($submittedReportsByDate, $submittedMediaRoiByDate): array {
+        $dailySummaries = collect($metricRows)->groupBy(
+            fn (array $row) => (int) $row['operator_user_id'].'|'.$row['date']
+        )->map(function ($dateRows, string $identityKey) use ($submittedReportsByDate, $submittedMediaRoiByDate): array {
+            $date = (string) $dateRows->first()['date'];
             $firstRevenue = (float) $dateRows->sum('first_total_revenue');
             $firstCost = (float) $dateRows->sum('first_total_cost');
-            $actualAdSpend = (float) ($submittedReportsByDate->get($date)?->actual_ad_spend ?? 0);
+            $actualAdSpend = (float) ($submittedReportsByDate->get($identityKey)?->actual_ad_spend ?? 0);
             $firstProfit = $firstRevenue - $actualAdSpend - $firstCost;
             $mediaNames = $dateRows->pluck('media_source')->map(fn ($media) => trim((string) $media) ?: '其他')->unique()->values();
 
@@ -106,8 +153,13 @@ class OperationReportController extends Controller
                 'first_total_cost' => $firstCost,
                 'first_loss_rate' => $firstCost > 0 ? $firstProfit / $firstCost : null,
                 'media_names' => $mediaNames->all(),
-                'media_rois' => $mediaNames->map(function (string $media) use ($date, $submittedMediaRoiByDate): ?float {
-                    $metric = $submittedMediaRoiByDate[$date][mb_strtolower($media)] ?? null;
+                'media_order_counts' => $mediaNames->map(function (string $media) use ($dateRows): int {
+                    return (int) $dateRows
+                        ->filter(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? '其他'))) === mb_strtolower($media))
+                        ->sum('first_total_orders');
+                })->all(),
+                'media_rois' => $mediaNames->map(function (string $media) use ($identityKey, $submittedMediaRoiByDate): ?float {
+                    $metric = $submittedMediaRoiByDate[$identityKey][mb_strtolower($media)] ?? null;
                     return isset($metric['first_roi']) ? (float) $metric['first_roi'] : null;
                 })->all(),
                 'first_roi' => $actualAdSpend > 0 ? $firstRevenue / $actualAdSpend : null,
@@ -133,8 +185,14 @@ class OperationReportController extends Controller
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
             'selectedOperator' => $operator,
+            'selectAllOperators' => $selectAllOperators,
             'operatorOptions' => $operatorOptions,
+            'operationDepartments' => $operationDepartments,
+            'selectedDepartmentId' => $selectedDepartmentId,
+            'viewerOperationDepartment' => $viewerOperationDepartment,
+            'isReportDepartmentLeader' => $isReportDepartmentLeader,
             'isBoss' => $isBoss,
+            'canSelectOperator' => $canSelectOperator,
             'metricRows' => $metricRows,
             'metricTotals' => $metricTotals,
             'metricRowspans' => $this->identityRowspans($metricRows),
@@ -163,25 +221,32 @@ class OperationReportController extends Controller
         $validated = $request->validate([
             'date' => ['required', 'date_format:Y-m-d'],
             'operator_user_id' => ['nullable', 'integer'],
-            'shop_domain' => ['required', 'string', 'max:255'],
+            'shop_domain' => ['nullable', 'string', 'max:255'],
             'media_source' => ['required', 'string', 'max:100'],
             'type' => ['required', Rule::in(['first_subscription', 'first_normal', 'first_total', 'renewal', 'total'])],
             'page' => ['nullable', 'integer', 'min:1'],
             'per_page' => ['nullable', 'integer', Rule::in([10, 20, 50])],
         ]);
-        $operatorId = $isBoss
+        $operatorOptions = $isBoss
+            ? $this->bossReportOperatorOptions($this->assistantStoreOwners->operationDepartments(), null)
+            : $this->reportOperatorOptions($user);
+        $canSelectOperator = $isBoss || $operatorOptions->count() > 1;
+        $operatorId = $canSelectOperator
             ? (int) ($validated['operator_user_id'] ?? 0)
             : (int) $user->getKey();
-        if ($isBoss) $this->assertAssignableOperator($operatorId);
+        $this->assertReportOperatorAccess($user, $operatorId, $operatorOptions);
 
-        return response()->json($this->metrics->orderDetails(
+        $shopDomain = trim((string) ($validated['shop_domain'] ?? ''));
+
+        return response()->json($this->metrics->orderDetailsRange(
+            $validated['date'],
             $validated['date'],
             $operatorId,
-            trim($validated['shop_domain']),
-            trim($validated['media_source']),
             $validated['type'],
             (int) ($validated['page'] ?? 1),
             (int) ($validated['per_page'] ?? 10),
+            $shopDomain !== '' ? $shopDomain : null,
+            trim($validated['media_source']),
         ));
     }
 
@@ -672,6 +737,70 @@ class OperationReportController extends Controller
         return AdminUser::query()->whereIn('id', $ids)->orderBy('name')->get(['id','name','username']);
     }
 
+    /**
+     * Boss can select every assigned operator. Department managers and deputy
+     * managers can select active users within their existing management scope.
+     * Ordinary operators remain limited to their own data.
+     */
+    private function reportOperatorOptions(AdminUser $user)
+    {
+        if ($this->isBoss($user)) {
+            return $this->operatorOptions();
+        }
+
+        $departmentIds = $this->departmentAuthorization->managedDepartmentIds($user);
+        if ($departmentIds->isEmpty()) {
+            return collect([$user]);
+        }
+
+        $rolesTable = config('admin.database.roles_table');
+
+        return AdminUser::query()
+            ->where('status', AdminUser::STATUS_ACTIVE)
+            ->whereHas('departments', fn ($query) => $query->whereIn($rolesTable.'.id', $departmentIds->all()))
+            ->orderBy('name')
+            ->orderBy('username')
+            ->get(['id', 'name', 'username'])
+            ->unique('id')
+            ->values();
+    }
+
+    private function bossReportOperatorOptions($operationDepartments, ?int $selectedDepartmentId)
+    {
+        $departmentIds = $selectedDepartmentId !== null
+            ? AdminUser::query()
+                ->where('status', AdminUser::STATUS_ACTIVE)
+                ->whereHas('departments', fn ($query) => $query->where(
+                    config('admin.database.roles_table').'.id',
+                    $selectedDepartmentId
+                ))
+                ->pluck('id')
+            : AdminUser::query()
+                ->where('status', AdminUser::STATUS_ACTIVE)
+                ->whereHas('departments', fn ($query) => $query->whereIn(
+                    config('admin.database.roles_table').'.id',
+                    $operationDepartments->pluck('id')->all()
+                ))
+                ->pluck('id');
+
+        $operators = AdminUser::query()
+            ->whereIn('id', $departmentIds->all())
+            ->where('status', AdminUser::STATUS_ACTIVE)
+            ->orderBy('name')
+            ->orderBy('username')
+            ->get(['id', 'name', 'username']);
+
+        return $operators->isNotEmpty() ? $operators : $this->operatorOptions();
+    }
+
+    private function assertReportOperatorAccess(AdminUser $viewer, int $operatorId, $operatorOptions): void
+    {
+        abort_unless($operatorId > 0 && $operatorOptions->contains(
+            fn (AdminUser $operator): bool => (int) $operator->getKey() === $operatorId
+        ), 403, '无权查看该运营人员的报表数据。');
+
+    }
+
     private function assertAssignableOperator(int $operatorId): void
     {
         abort_unless(AssistantDomainStore::query()->where('owner_user_id', $operatorId)->exists(), 422, '该账号没有已分配店铺。');
@@ -729,14 +858,15 @@ class OperationReportController extends Controller
     {
         $revenueByMedia = [];
         foreach ($rows as $row) {
-            $key = $row['date']."\x1F".mb_strtolower(trim((string) $row['media_source']));
+            $key = (int) ($row['operator_user_id'] ?? 0)."\x1F".$row['date']."\x1F".mb_strtolower(trim((string) $row['media_source']));
             $revenueByMedia[$key] = ($revenueByMedia[$key] ?? 0.0) + (float) $row['first_total_revenue'];
         }
 
         return array_map(function (array $row) use ($mediaRoiByDate, $revenueByMedia): array {
             $mediaKey = mb_strtolower(trim((string) $row['media_source']));
-            $groupKey = $row['date']."\x1F".$mediaKey;
-            $mediaSpend = (float) ($mediaRoiByDate[$row['date']][$mediaKey]['actual_ad_spend'] ?? 0);
+            $identityKey = (int) ($row['operator_user_id'] ?? 0).'|'.$row['date'];
+            $groupKey = (int) ($row['operator_user_id'] ?? 0)."\x1F".$row['date']."\x1F".$mediaKey;
+            $mediaSpend = (float) ($mediaRoiByDate[$identityKey][$mediaKey]['actual_ad_spend'] ?? 0);
             $groupRevenue = (float) ($revenueByMedia[$groupKey] ?? 0);
             $row['allocated_actual_ad_spend'] = $groupRevenue > 0
                 ? $mediaSpend * (float) $row['first_total_revenue'] / $groupRevenue
@@ -825,14 +955,14 @@ class OperationReportController extends Controller
     {
         $spans = [];
         for ($index = 0, $count = count($rows); $index < $count; $index++) {
-            $date = $rows[$index]['date'];
-            if ($index > 0 && $date === $rows[$index - 1]['date']) {
+            $key = [$rows[$index]['date'], (int) ($rows[$index]['operator_user_id'] ?? 0)];
+            if ($index > 0 && $key === [$rows[$index - 1]['date'], (int) ($rows[$index - 1]['operator_user_id'] ?? 0)]) {
                 $spans[$index] = 0;
                 continue;
             }
 
             $span = 1;
-            while ($index + $span < $count && $date === $rows[$index + $span]['date']) $span++;
+            while ($index + $span < $count && $key === [$rows[$index + $span]['date'], (int) ($rows[$index + $span]['operator_user_id'] ?? 0)]) $span++;
             $spans[$index] = $span;
         }
 

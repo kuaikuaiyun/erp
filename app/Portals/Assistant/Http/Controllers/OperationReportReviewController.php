@@ -92,6 +92,7 @@ class OperationReportReviewController extends Controller
 
         $reportsQuery = $this->scopeReports(OperationReport::query(), $context['user']);
         $reports = $reportsQuery
+            ->with('reviewer:id,name,username')
             ->when($status !== '', fn ($query) => $query->where('status', $status))
             ->when(!empty($filters['date_from']), fn ($query) => $query->whereDate('report_date', '>=', $filters['date_from']))
             ->when(!empty($filters['date_to']), fn ($query) => $query->whereDate('report_date', '<=', $filters['date_to']))
