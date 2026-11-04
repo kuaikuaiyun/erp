@@ -69,6 +69,7 @@ class LogisticsOrderController extends Controller
             ->paginate($filters['per_page'])
             ->withQueryString();
         $trackingBatch = $this->currentTrackingBatch($request, (int) $context['user']->getKey());
+        $nonRunnableProductKeys = $this->nonRunnableProductKeys();
 
         return view('portals.logistics.orders.index', [
             ...$this->viewContext($context),
@@ -80,6 +81,7 @@ class LogisticsOrderController extends Controller
             'shopifyStores' => $this->shopifyStores(),
             'activeTrackingBatch' => $trackingBatch,
             'trackingFailureDetails' => $trackingBatch ? $this->trackingFailureDetails($trackingBatch) : [],
+            'nonRunnableProductKeys' => $nonRunnableProductKeys,
         ]);
     }
 

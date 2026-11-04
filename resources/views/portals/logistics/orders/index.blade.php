@@ -19,10 +19,21 @@
         if ($value === null || $value === '') return ['—'];
         return array_map($display, preg_split('/\r?\n/', (string) $value) ?: []);
     };
+    $nonRunnableSkuLookup = array_fill_keys($nonRunnableProductKeys['skus'] ?? [], true);
+    $nonRunnableProductCodeLookup = array_fill_keys($nonRunnableProductKeys['product_codes'] ?? [], true);
+    $isNonRunnableProduct = static function ($shopifySku, $tongtuSku, $productCode) use ($nonRunnableSkuLookup, $nonRunnableProductCodeLookup): bool {
+        $shopifySku = mb_strtolower(trim((string) $shopifySku));
+        $tongtuSku = mb_strtolower(trim((string) $tongtuSku));
+        $productCode = mb_strtolower(trim((string) $productCode));
+
+        return ($shopifySku !== '' && isset($nonRunnableSkuLookup[$shopifySku]))
+            || ($tongtuSku !== '' && isset($nonRunnableSkuLookup[$tongtuSku]))
+            || ($productCode !== '' && isset($nonRunnableProductCodeLookup[$productCode]));
+    };
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics.css?v=20261024-8">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics.css?v=20261104-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261018-1">
 @endpush
 
@@ -193,7 +204,7 @@
                             $collectionAccountEmail = $collectionAccountEmailMatched
                                 ? $order->collection_account_email
                                 : __('logistics.orders.payment_identifiers.unmatched');
-                            $saleProductDetails = $order->items->map(function ($item) use ($display, $weight): array {
+                            $saleProductDetails = $order->items->map(function ($item) use ($display, $weight, $isNonRunnableProduct): array {
                                 $hasTongtuName = filled($item->tongtu_product_name);
 
                                 return [
@@ -205,6 +216,7 @@
                                     'quantity' => $display($item->quantity),
                                     'goods_weight' => $weight($item->tongtu_goods_weight_gram),
                                     'package_weight' => $weight($item->tongtu_package_weight_gram),
+                                    'is_non_runnable' => $isNonRunnableProduct($item->shopify_sku, $item->tongtu_sku, $item->tongtu_product_code),
                                 ];
                             })->all();
                             if ($saleProductDetails === []) {
@@ -224,11 +236,13 @@
                                         'quantity' => $quantityLines[$detailIndex] ?? '—',
                                         'goods_weight' => $weight($weightLines[$detailIndex] ?? null),
                                         'package_weight' => '—',
+                                        'is_non_runnable' => false,
                                     ];
                                 }
                             }
+                            $hasNonRunnableProduct = collect($saleProductDetails)->contains('is_non_runnable', true);
                         @endphp
-                        <tr data-data-status="{{ trim((string) $order->data_status) }}"
+                        <tr class="{{ $hasNonRunnableProduct ? 'has-non-runnable-product' : '' }}" data-data-status="{{ trim((string) $order->data_status) }}"
                             data-logistics-status="{{ trim((string) $order->logistics_status) }}"
                             data-tracking-status="{{ trim((string) $order->tracking_sync_status) }}">
                             <td class="logistics-sticky-left"><input class="logistics-order-check" type="checkbox" value="{{ $order->id }}" data-unmatched="{{ $order->assistant_domain_store_id ? '0' : '1' }}" aria-label="选择订单 {{ $order->id }}"></td>

@@ -225,6 +225,58 @@
     margin-right: 4px;
 }
 
+/* Orders containing a SKU marked as non-runnable in PCL SKU management. */
+.logistics-orders-table tbody tr.has-non-runnable-product > td {
+    background: #fff8ef !important;
+    border-top-color: #f1d5ad !important;
+    border-bottom-color: #f1d5ad !important;
+}
+.logistics-orders-table tbody tr.has-non-runnable-product:hover > td {
+    background: #fff2df !important;
+}
+.logistics-orders-table tbody tr.has-non-runnable-product > td:first-child {
+    border-left: 4px solid #e78519 !important;
+}
+.logistics-orders-table tbody tr.has-non-runnable-product > td:nth-child(2)::after {
+    content: "含不可跑 SKU";
+    display: block;
+    width: max-content;
+    max-width: 88px;
+    margin-top: 6px;
+    padding: 3px 7px;
+    border: 1px solid #e59a3c;
+    border-radius: 10px;
+    background: #fff0d8;
+    color: #b85b0b;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.25;
+    white-space: nowrap;
+    box-shadow: 0 1px 3px rgba(184, 91, 11, .12);
+}
+.logistics-orders-table tbody tr.has-non-runnable-product .logistics-sale-product-details::before {
+    content: "⚠ 该订单包含 PCL SKU 管理中标记为不可跑的商品";
+    display: block;
+    margin-bottom: 7px;
+    padding: 5px 8px;
+    border-left: 3px solid #e78519;
+    border-radius: 3px;
+    background: #fff0d8;
+    color: #a94f08;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.45;
+    white-space: normal;
+}
+.logistics-orders-table tbody tr.has-non-runnable-product > td:last-child:not([colspan]),
+.logistics-orders-table tbody tr.has-non-runnable-product > .logistics-sticky-left {
+    background: #fff8ef !important;
+}
+.logistics-orders-table tbody tr.has-non-runnable-product:hover > td:last-child:not([colspan]),
+.logistics-orders-table tbody tr.has-non-runnable-product:hover > .logistics-sticky-left {
+    background: #fff2df !important;
+}
+
 .logistics-payment-reference-cell {
     min-width: 156px;
     max-width: 220px;
