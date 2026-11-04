@@ -7,6 +7,7 @@ use App\Models\LogisticsOrder;
 use App\Models\LogisticsOrderPaymentReference;
 use App\Models\LogisticsPayPalDispute;
 use App\Models\LogisticsPayPalRefund;
+use App\Models\LogisticsPayPalTransaction;
 use App\Portals\Logistics\LogisticsCreditCardRefundReason;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
@@ -67,7 +68,7 @@ class PaymentRenewalAnalysisService
     {
         $cacheFilters = $filters;
         unset($cacheFilters['page'], $cacheFilters['per_page'], $cacheFilters['stage'], $cacheFilters['detail_channel']);
-        $cacheKey = 'payment:renewal-analysis:v3:'.sha1(json_encode($cacheFilters));
+        $cacheKey = 'payment:renewal-analysis:v5:'.sha1(json_encode($cacheFilters));
 
         return Cache::remember($cacheKey, now()->addMinutes(5), fn (): array => $this->buildDataset($cacheFilters));
     }
@@ -81,6 +82,7 @@ class PaymentRenewalAnalysisService
         // corresponding first subscription cohort is exactly one cycle earlier.
         $cohortFrom = $from->copy()->subDays(30);
         $cohortTo = $to->copy()->subDays(30);
+        $subscriptionRate = $this->subscriptionRate($cohortFrom, $cohortTo, $filters);
 
         $initialQuery = LogisticsOrder::query()
             ->whereNotNull('paid_at')
@@ -236,6 +238,7 @@ class PaymentRenewalAnalysisService
                 'credit_card' => $channelSummary['credit_card'],
                 'renewal_orders' => count($rows),
                 'renewal_revenue' => round(array_sum(array_column($rows, 'amount')), 2),
+                'subscription_rate' => $subscriptionRate,
             ],
             'stages' => array_values($stages),
             'risk_by_channel' => $actualChannelTotals,
@@ -343,6 +346,81 @@ class PaymentRenewalAnalysisService
 
             return strcmp((string) ($right['paid_at'] ?? ''), (string) ($left['paid_at'] ?? ''));
         })->values();
+    }
+
+    /** @param array<string,mixed> $filters @return array{total:array{subscription_orders:int,total_orders:int,rate:float},paypal:array{subscription_orders:int,total_orders:int,rate:float},credit_card:array{subscription_orders:int,total_orders:int,rate:float}} */
+    private function subscriptionRate(Carbon $from, Carbon $to, array $filters): array
+    {
+        $query = LogisticsOrder::query()
+            ->whereNotNull('paid_at')
+            ->whereBetween('paid_at', [$from, $to])
+            ->whereIn('subscription_type', ['订阅首次购买', '无订阅'])
+            ->where(function ($query): void {
+                $query->whereNull('is_add_on')->orWhere('is_add_on', '<>', '已加购');
+            })
+            ->whereRaw("TRIM(COALESCE(tongtu_order_number, '')) <> ''")
+            ->where(function ($query): void {
+                $query->whereNull('operator_name')->orWhere('operator_name', 'not like', '%刷单%');
+            });
+
+        if (($filters['store'] ?? '') !== '') {
+            $query->where('store_name', (string) $filters['store']);
+        }
+        if (($filters['keyword'] ?? '') !== '') {
+            $keyword = '%'.trim((string) $filters['keyword']).'%';
+            $query->where(function ($query) use ($keyword): void {
+                $query->where('shopify_order_number', 'like', $keyword)
+                    ->orWhere('transaction_id', 'like', $keyword)
+                    ->orWhere('buyer_email', 'like', $keyword);
+            });
+        }
+
+        $orders = $query->get();
+        $paypalOrderIds = $orders->filter(fn (LogisticsOrder $order): bool => $this->channelFor($order) === 'paypal')
+            ->pluck('id')->map(fn ($id): int => (int) $id)->all();
+        $matchedPayPalOrders = $paypalOrderIds === [] ? [] : LogisticsPayPalTransaction::query()
+            ->whereIn('logistics_order_id', $paypalOrderIds)
+            ->where('event_code', 'like', 'T00%')
+            ->whereIn('status', ['S', 'V'])
+            ->pluck('logistics_order_id')->mapWithKeys(fn ($id): array => [(int) $id => true])->all();
+
+        $counts = [
+            'paypal' => ['subscription_orders' => 0, 'total_orders' => 0],
+            'credit_card' => ['subscription_orders' => 0, 'total_orders' => 0],
+        ];
+        foreach ($orders as $order) {
+            $channel = $this->channelFor($order);
+            if (($filters['channel'] ?? '') !== '' && $channel !== $filters['channel']) {
+                continue;
+            }
+            if ($channel === 'paypal' && (
+                $order->paypal_account_id === null
+                ||
+                $order->paypal_association_source !== 'actual_transaction'
+                || !isset($matchedPayPalOrders[(int) $order->id])
+            )) {
+                continue;
+            }
+
+            $counts[$channel]['total_orders']++;
+            if ($order->subscription_type === '订阅首次购买') {
+                $counts[$channel]['subscription_orders']++;
+            }
+        }
+
+        $totalSubscriptionOrders = $counts['paypal']['subscription_orders'] + $counts['credit_card']['subscription_orders'];
+        $totalOrders = $counts['paypal']['total_orders'] + $counts['credit_card']['total_orders'];
+        $format = fn (array $count): array => [
+            'subscription_orders' => $count['subscription_orders'],
+            'total_orders' => $count['total_orders'],
+            'rate' => $this->rate($count['subscription_orders'], $count['total_orders']),
+        ];
+
+        return [
+            'total' => $format(['subscription_orders' => $totalSubscriptionOrders, 'total_orders' => $totalOrders]),
+            'paypal' => $format($counts['paypal']),
+            'credit_card' => $format($counts['credit_card']),
+        ];
     }
 
     /** @return array<string,mixed> */
