@@ -9,6 +9,7 @@ use App\Models\LogisticsRefundDetail;
 use App\Models\LogisticsTongtuSkuMapping;
 use App\Models\LogisticsTrackingSyncBatch;
 use App\Models\LogisticsTrackingSyncTask;
+use App\Models\ProductRequestLinkSku;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Logistics\LogisticsOrderSpreadsheetService;
 use App\Portals\Logistics\LogisticsOrderPaymentReferenceService;
@@ -24,6 +25,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -592,6 +594,7 @@ class LogisticsOrderController extends Controller
             'collection_account_email', 'transaction_id', 'bill_number', 'logistics_status', 'refund_reason', 'data_status',
             'time_zone',
             'source_shop_domain', 'store_domain', 'product_name', 'store_assignment_status', 'refund_number', 'shopify_sku', 'shopify_sku_status',
+            'product_runnable_status',
         ];
         $filters = ['per_page' => $perPage];
         foreach ($fields as $field) {
@@ -669,6 +672,36 @@ class LogisticsOrderController extends Controller
                 ->whereNotNull('shopify_sku')->whereRaw("TRIM(shopify_sku) <> ''"));
         }
 
+        if (in_array($filters['product_runnable_status'], ['non_runnable', 'runnable'], true)) {
+            $nonRunnableKeys = $this->nonRunnableProductKeys();
+
+            if ($nonRunnableKeys['skus'] === [] && $nonRunnableKeys['product_codes'] === []) {
+                if ($filters['product_runnable_status'] === 'non_runnable') {
+                    $query->whereRaw('1 = 0');
+                }
+            } else {
+                $matchNonRunnableItem = static function (Builder $items) use ($nonRunnableKeys): void {
+                    $items->where(function (Builder $match) use ($nonRunnableKeys): void {
+                        if ($nonRunnableKeys['skus'] !== []) {
+                            $match->whereIn(DB::raw('LOWER(TRIM(shopify_sku))'), $nonRunnableKeys['skus'])
+                                ->orWhereIn(DB::raw('LOWER(TRIM(tongtu_sku))'), $nonRunnableKeys['skus']);
+                        }
+
+                        if ($nonRunnableKeys['product_codes'] !== []) {
+                            $method = $nonRunnableKeys['skus'] === [] ? 'whereIn' : 'orWhereIn';
+                            $match->{$method}(DB::raw('LOWER(TRIM(tongtu_product_code))'), $nonRunnableKeys['product_codes']);
+                        }
+                    });
+                };
+
+                if ($filters['product_runnable_status'] === 'non_runnable') {
+                    $query->whereHas('items', $matchNonRunnableItem);
+                } else {
+                    $query->whereDoesntHave('items', $matchNonRunnableItem);
+                }
+            }
+        }
+
         if ($filters['bill_number'] !== '') {
             $value = $this->contains((string) $filters['bill_number']);
             $query->where(function (Builder $billNumbers) use ($value): void {
@@ -731,6 +764,39 @@ class LogisticsOrderController extends Controller
         }
 
         return $query;
+    }
+
+    /** @return array{skus: list<string>, product_codes: list<string>} */
+    private function nonRunnableProductKeys(): array
+    {
+        $records = ProductRequestLinkSku::query()
+            ->where('is_runnable', false)
+            ->get(['sku_values', 'skus', 'pcl_product_no']);
+
+        $normalize = static fn (mixed $value): string => Str::lower(trim((string) $value));
+
+        $skus = $records
+            ->flatMap(static function (ProductRequestLinkSku $record): array {
+                $structuredSkus = array_keys((array) $record->sku_values);
+                $legacySkus = preg_split('/[\r\n,，;；]+/u', (string) $record->skus, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+                return array_merge($structuredSkus, $legacySkus);
+            })
+            ->map($normalize)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $productCodes = $records
+            ->pluck('pcl_product_no')
+            ->map($normalize)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        return ['skus' => $skus, 'product_codes' => $productCodes];
     }
 
     /** @return array<string, array<int, mixed>> */
