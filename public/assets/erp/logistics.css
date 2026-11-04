@@ -237,23 +237,6 @@
 .logistics-orders-table tbody tr.has-non-runnable-product > td:first-child {
     border-left: 4px solid #e78519 !important;
 }
-.logistics-orders-table tbody tr.has-non-runnable-product > td:nth-child(2)::after {
-    content: "含不可跑 SKU";
-    display: block;
-    width: max-content;
-    max-width: 88px;
-    margin-top: 6px;
-    padding: 3px 7px;
-    border: 1px solid #e59a3c;
-    border-radius: 10px;
-    background: #fff0d8;
-    color: #b85b0b;
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 1.25;
-    white-space: nowrap;
-    box-shadow: 0 1px 3px rgba(184, 91, 11, .12);
-}
 .logistics-orders-table tbody tr.has-non-runnable-product .logistics-sale-product-details::before {
     content: "⚠ 该订单包含 PCL SKU 管理中标记为不可跑的商品";
     display: block;
