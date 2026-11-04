@@ -111,6 +111,9 @@ Route::post('/operation-report-reviews/bulk-review', [OperationReportReviewContr
 Route::get('/operation-report-reviews/{report}', [OperationReportReviewController::class, 'show'])->whereNumber('report')->name('assistant.operation-report-reviews.show');
 Route::post('/operation-report-reviews/{report}/approve', [OperationReportReviewController::class, 'approve'])->whereNumber('report')->name('assistant.operation-report-reviews.approve');
 Route::post('/operation-report-reviews/{report}/reject', [OperationReportReviewController::class, 'reject'])->whereNumber('report')->name('assistant.operation-report-reviews.reject');
+Route::get('/operation/ai-product-library/{product}/publish', [OperationAiProductLibraryController::class, 'publishForm'])->name('operation.ai-product-library.publish.form');
+Route::post('/operation/ai-product-library/{product}/publish', [OperationAiProductLibraryController::class, 'publish'])->name('operation.ai-product-library.publish');
+Route::get('/operation/ai-product-library/{product}/shopify-images/{imageIndex}', [OperationAiProductLibraryController::class, 'shopifyImage'])->whereNumber('imageIndex')->name('operation.ai-product-library.shopify-image');
 Route::get('/operation/ai-product-library/{product}/detail', [OperationAiProductLibraryController::class, 'detail'])->name('operation.ai-product-library.detail');
 Route::get('/operation/ai-product-library/{product}/images/{imageIndex}', [OperationAiProductLibraryController::class, 'image'])->whereNumber('imageIndex')->name('operation.ai-product-library.images.show');
 Route::get('/operation/ai-product-library/{product}/package', [OperationAiProductLibraryController::class, 'downloadPackage'])->name('operation.ai-product-library.package.download');
