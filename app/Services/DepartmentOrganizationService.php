@@ -1357,6 +1357,9 @@ class DepartmentOrganizationService
             $portalCode = preg_replace('/[^a-z0-9_\-]+/i', '-', (string) ($portal->code ?: 'portal'));
             $menuCode = preg_replace('/[^a-z0-9_\-]+/i', '-', (string) $menu->code);
             $slug = trim((string) $menu->permission_slug) ?: 'portal.'.$portalCode.'.'.$menuCode;
+            if (strlen($slug) > 50) {
+                $slug = rtrim(substr($slug, 0, 37), '._-').'.'.substr(sha1($slug), 0, 12);
+            }
 
             if ($menu->permission_slug !== $slug) {
                 $connection->table('portal_menus')->where('id', $menu->id)->update([

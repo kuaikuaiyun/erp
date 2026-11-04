@@ -31,6 +31,9 @@ return new class extends Migration
             'is_enabled' => 1,
             'updated_at' => now(),
         ];
+        if ($schema->hasColumn('portal_menus', 'permission_slug')) {
+            $values['permission_slug'] = 'portal.yunying.non_runnable_products';
+        }
 
         if ($database->table('portal_menus')->where($key)->exists()) {
             $database->table('portal_menus')->where($key)->update($values);
