@@ -19,10 +19,21 @@
         if ($value === null || $value === '') return ['—'];
         return array_map($display, preg_split('/\r?\n/', (string) $value) ?: []);
     };
+    $nonRunnableSkuLookup = array_fill_keys($nonRunnableProductKeys['skus'] ?? [], true);
+    $nonRunnableProductCodeLookup = array_fill_keys($nonRunnableProductKeys['product_codes'] ?? [], true);
+    $isNonRunnableProduct = static function ($shopifySku, $tongtuSku, $productCode) use ($nonRunnableSkuLookup, $nonRunnableProductCodeLookup): bool {
+        $shopifySku = mb_strtolower(trim((string) $shopifySku));
+        $tongtuSku = mb_strtolower(trim((string) $tongtuSku));
+        $productCode = mb_strtolower(trim((string) $productCode));
+
+        return ($shopifySku !== '' && isset($nonRunnableSkuLookup[$shopifySku]))
+            || ($tongtuSku !== '' && isset($nonRunnableSkuLookup[$tongtuSku]))
+            || ($productCode !== '' && isset($nonRunnableProductCodeLookup[$productCode]));
+    };
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics.css?v=20261024-8">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics.css?v=20261104-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/logistics-order-detail.css?v=20261018-1">
 @endpush
 
@@ -65,6 +76,7 @@
                         <div class="logistics-filter-field"><label>商品名称</label><input class="form-control" name="product_name" value="{{ $filters['product_name'] }}" placeholder="请输入商品名称"></div>
                         <div class="logistics-filter-field"><label>店铺域名</label><input class="form-control" name="store_domain" value="{{ $filters['store_domain'] }}" placeholder="请输入绑定的店铺域名"></div>
                         <div class="logistics-filter-field"><label>原始SKU状态</label><select class="form-control" name="shopify_sku_status"><option value="">全部</option><option value="empty" @selected(($filters['shopify_sku_status'] ?? '') === 'empty')>为空</option><option value="filled" @selected(($filters['shopify_sku_status'] ?? '') === 'filled')>不为空</option></select></div>
+                        <div class="logistics-filter-field"><label>PCL SKU 可跑状态</label><select class="form-control" name="product_runnable_status"><option value="">全部</option><option value="non_runnable" @selected(($filters['product_runnable_status'] ?? '') === 'non_runnable')>包含不可跑商品</option><option value="runnable" @selected(($filters['product_runnable_status'] ?? '') === 'runnable')>不含不可跑商品</option></select></div>
                         <div class="logistics-filter-field"><label>店铺名称</label><select class="form-control" name="store_name"><option value="">请选择店铺</option>@foreach($filterOptions['stores'] as $value)<option value="{{ $value }}" @selected($filters['store_name'] === $value)>{{ $value }}</option>@endforeach</select></div>
                         <div class="logistics-filter-field"><label>归属人</label><select class="form-control" name="owner_assignment"><option value="">全部归属人</option><option value="unassigned" @selected(($filters['owner_assignment'] ?? '') === 'unassigned')>未归属</option>@foreach($filterOptions['owners'] as $owner)<option value="{{ $owner['id'] }}" @selected((string) ($filters['owner_assignment'] ?? '') === (string) $owner['id'])>{{ $owner['name'] }}</option>@endforeach</select></div>
                         <div class="logistics-filter-field"><label>所属组</label><select class="form-control" name="group_names"><option value="">请选择所属组</option>@foreach($filterOptions['groups'] as $value)<option value="{{ $value }}" @selected($filters['group_names'] === $value)>{{ $value }}</option>@endforeach</select></div>
@@ -192,7 +204,7 @@
                             $collectionAccountEmail = $collectionAccountEmailMatched
                                 ? $order->collection_account_email
                                 : __('logistics.orders.payment_identifiers.unmatched');
-                            $saleProductDetails = $order->items->map(function ($item) use ($display, $weight): array {
+                            $saleProductDetails = $order->items->map(function ($item) use ($display, $weight, $isNonRunnableProduct): array {
                                 $hasTongtuName = filled($item->tongtu_product_name);
 
                                 return [
@@ -204,6 +216,7 @@
                                     'quantity' => $display($item->quantity),
                                     'goods_weight' => $weight($item->tongtu_goods_weight_gram),
                                     'package_weight' => $weight($item->tongtu_package_weight_gram),
+                                    'is_non_runnable' => $isNonRunnableProduct($item->shopify_sku, $item->tongtu_sku, $item->tongtu_product_code),
                                 ];
                             })->all();
                             if ($saleProductDetails === []) {
@@ -223,11 +236,13 @@
                                         'quantity' => $quantityLines[$detailIndex] ?? '—',
                                         'goods_weight' => $weight($weightLines[$detailIndex] ?? null),
                                         'package_weight' => '—',
+                                        'is_non_runnable' => false,
                                     ];
                                 }
                             }
+                            $hasNonRunnableProduct = collect($saleProductDetails)->contains('is_non_runnable', true);
                         @endphp
-                        <tr data-data-status="{{ trim((string) $order->data_status) }}"
+                        <tr class="{{ $hasNonRunnableProduct ? 'has-non-runnable-product' : '' }}" data-data-status="{{ trim((string) $order->data_status) }}"
                             data-logistics-status="{{ trim((string) $order->logistics_status) }}"
                             data-tracking-status="{{ trim((string) $order->tracking_sync_status) }}">
                             <td class="logistics-sticky-left"><input class="logistics-order-check" type="checkbox" value="{{ $order->id }}" data-unmatched="{{ $order->assistant_domain_store_id ? '0' : '1' }}" aria-label="选择订单 {{ $order->id }}"></td>

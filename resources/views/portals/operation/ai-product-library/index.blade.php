@@ -5,7 +5,7 @@
 @push('styles')
     <link rel="stylesheet" href="{{ rtrim(request()->getSchemeAndHttpHost(), '/') }}/assets/erp/aikaipin-product-library.css?v=20261023-1">
     <style>
-        .operation-ai-product-page .aikaipin-operation-column { width:140px; }
+        .operation-ai-product-page .aikaipin-operation-column { width:210px; }
         .operation-ai-product-page .aikaipin-operation-cell { text-align:center; }
         .operation-ai-detail-dialog { width:880px; max-width:94vw; }
         .operation-ai-detail-modal .modal-header { padding:18px 22px; border-bottom:1px solid #e8edf3; }
@@ -40,12 +40,22 @@
         .operation-ai-product-page .pagination > .active > a:hover { border-color:#3c8dbc; background:#3c8dbc; color:#fff; box-shadow:0 2px 6px rgba(60,141,188,.25); }
         .operation-ai-product-page .pagination > .disabled > span,
         .operation-ai-product-page .pagination > .disabled > a { background:#f7f9fb; color:#b3bec9; }
+        .operation-ai-store-list { margin-bottom:18px; }
+        .operation-ai-store-list h5 { margin:0 0 10px; color:#34495e; font-weight:700; }
+        .operation-ai-store-card { display:flex; align-items:flex-start; gap:10px; margin:0 0 9px; padding:12px 14px; border:1px solid #dce6ef; border-radius:8px; background:#f8fbfd; cursor:pointer; }
+        .operation-ai-store-card:hover { border-color:#70acd0; background:#f2f9fd; }
+        .operation-ai-store-card input { margin-top:5px; }
+        .operation-ai-store-card span { display:grid; grid-template-columns:minmax(140px,1fr) minmax(180px,1.3fr); gap:4px 18px; width:100%; }
+        .operation-ai-store-card strong { color:#1f5270; }
+        .operation-ai-store-card small { color:#708294; }
         @media (max-width:767px) { .operation-ai-detail-grid { grid-template-columns:1fr; } .operation-ai-detail-item.is-wide { grid-column:auto; } }
     </style>
 @endpush
 
 @section('content')
 <section class="content aikaipin-product-library-page operation-ai-product-page">
+    @if(session('success'))<div class="alert alert-success"><i class="fa fa-check-circle"></i> {{ session('success') }}</div>@endif
+    @if($errors->any())<div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> {{ $errors->first() }}</div>@endif
     <div class="box box-solid aikaipin-filter-box">
         <div class="box-body">
             <form class="aikaipin-filter-form" method="get" action="{{ route('operation.ai-product-library.index') }}">
@@ -151,6 +161,12 @@
                                     data-detail-url="{{ route('operation.ai-product-library.detail', ['product' => $product]) }}">
                                     <i class="fa fa-eye"></i> {{ __('aikaipin.operation_library.detail') }}
                                 </button>
+                                @if($user->isAdministrator())
+                                    <button type="button" class="btn btn-success btn-sm" data-operation-ai-publish
+                                        data-publish-url="{{ route('operation.ai-product-library.publish.form', $product) }}">
+                                        <i class="fa fa-cloud-upload"></i> 上架
+                                    </button>
+                                @endif
                             </td>
                         </tr>
                     @empty
@@ -185,6 +201,13 @@
             <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">{{ __('aikaipin.operation_library.close') }}</button></div>
         </div>
     </div>
+</div>
+
+<div class="modal fade" id="operation-ai-product-publish-modal" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog" role="document"><div class="modal-content">
+        <div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title"><i class="fa fa-cloud-upload"></i> 上架到 Shopify</h4></div>
+        <div class="modal-body" data-operation-ai-publish-content><div class="text-center text-muted"><i class="fa fa-spinner fa-spin"></i> 正在加载店铺信息...</div></div>
+    </div></div>
 </div>
 @endsection
 
@@ -246,6 +269,21 @@
             .then(function (response) { return response.json().then(function (data) { if (!response.ok) throw new Error(data.message || labels.load_failed); return data; }); })
             .then(render)
             .catch(function (exception) { loading.hidden = true; error.textContent = exception.message || labels.load_failed; error.hidden = false; });
+    });
+})();
+(function () {
+    var modal = document.getElementById('operation-ai-product-publish-modal');
+    if (!modal) return;
+    var content = modal.querySelector('[data-operation-ai-publish-content]');
+    document.addEventListener('click', function (event) {
+        var button = event.target.closest('[data-operation-ai-publish]');
+        if (!button) return;
+        content.innerHTML = '<div class="text-center text-muted"><i class="fa fa-spinner fa-spin"></i> 正在加载店铺信息...</div>';
+        window.jQuery(modal).modal('show');
+        fetch(button.getAttribute('data-publish-url'), {headers:{'X-Requested-With':'XMLHttpRequest'}})
+            .then(function (response) { if (!response.ok) throw new Error('店铺信息加载失败'); return response.text(); })
+            .then(function (html) { content.innerHTML = html; })
+            .catch(function (error) { content.innerHTML = '<div class="alert alert-danger">' + error.message + '</div>'; });
     });
 })();
 </script>

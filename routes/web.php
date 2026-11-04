@@ -3,6 +3,7 @@
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portal\Http\Controllers\PortalMenuConfigurationController;
 use App\Portal\Http\Controllers\InternalMessageController;
+use App\Portal\Http\Controllers\AbnormalOrderController;
 use App\Portals\AiProducts\Http\Controllers\AiProductController;
 use App\Portals\Assistant\Http\Controllers\DomainStoreController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingMediaController;
@@ -34,6 +35,9 @@ Route::get('/', [PortalEntryController::class, 'root'])->middleware(MonitorPayme
 Route::get('/management/menus', [PortalMenuConfigurationController::class, 'index'])->name('portal.menus.index');
 Route::post('/management/menus/order', [PortalMenuConfigurationController::class, 'saveOrder'])->name('portal.menus.order');
 Route::get('/internal-messages', [InternalMessageController::class, 'index'])->name('internal-messages.index');
+Route::get('/abnormal-orders', [AbnormalOrderController::class, 'index'])->name('abnormal-orders.index');
+Route::patch('/abnormal-orders/{order}/status', [AbnormalOrderController::class, 'updateStatus'])->whereNumber('order')->name('abnormal-orders.status');
+Route::post('/abnormal-orders/{order}/notify', [AbnormalOrderController::class, 'notify'])->whereNumber('order')->name('abnormal-orders.notify');
 Route::post('/internal-messages', [InternalMessageController::class, 'store'])->name('internal-messages.store');
 Route::get('/internal-messages/unread', [InternalMessageController::class, 'unread'])->name('internal-messages.unread');
 Route::post('/internal-messages/{message}/read', [InternalMessageController::class, 'markRead'])->whereNumber('message')->name('internal-messages.read');
@@ -111,11 +115,15 @@ Route::post('/operation-report-reviews/bulk-review', [OperationReportReviewContr
 Route::get('/operation-report-reviews/{report}', [OperationReportReviewController::class, 'show'])->whereNumber('report')->name('assistant.operation-report-reviews.show');
 Route::post('/operation-report-reviews/{report}/approve', [OperationReportReviewController::class, 'approve'])->whereNumber('report')->name('assistant.operation-report-reviews.approve');
 Route::post('/operation-report-reviews/{report}/reject', [OperationReportReviewController::class, 'reject'])->whereNumber('report')->name('assistant.operation-report-reviews.reject');
+Route::get('/operation/ai-product-library/{product}/publish', [OperationAiProductLibraryController::class, 'publishForm'])->name('operation.ai-product-library.publish.form');
+Route::post('/operation/ai-product-library/{product}/publish', [OperationAiProductLibraryController::class, 'publish'])->name('operation.ai-product-library.publish');
+Route::get('/operation/ai-product-library/{product}/shopify-images/{imageIndex}', [OperationAiProductLibraryController::class, 'shopifyImage'])->whereNumber('imageIndex')->name('operation.ai-product-library.shopify-image');
 Route::get('/operation/ai-product-library/{product}/detail', [OperationAiProductLibraryController::class, 'detail'])->name('operation.ai-product-library.detail');
 Route::get('/operation/ai-product-library/{product}/images/{imageIndex}', [OperationAiProductLibraryController::class, 'image'])->whereNumber('imageIndex')->name('operation.ai-product-library.images.show');
 Route::get('/operation/ai-product-library/{product}/package', [OperationAiProductLibraryController::class, 'downloadPackage'])->name('operation.ai-product-library.package.download');
 Route::get('/operation/existing-product-library', [ProductRequestController::class, 'existingProductLibraryIndex'])->name('product-requests.operation.existing-product-library');
 Route::get('/operation/existing-product-library/{linkSku}', [ProductRequestController::class, 'existingProductLibraryDetail'])->name('product-requests.operation.existing-product-library.detail');
+Route::get('/operation/non-runnable-product-library', [ProductRequestController::class, 'nonRunnableProductLibraryIndex'])->name('product-requests.operation.non-runnable-product-library');
 Route::post('/operation/domain-stores/{domainStore}/refresh', [OperationDomainStoreController::class, 'refresh'])->name('operation.domain-stores.refresh');
 Route::get('/api/product-requests/operation-pending-count', [ProductRequestController::class, 'operationPendingCount'])->name('product-requests.operation.pending-count');
 Route::get('/api/procurement-inspections/pending-count', [ProductRequestController::class, 'procurementPendingCount'])->name('product-requests.procurement.pending-count');

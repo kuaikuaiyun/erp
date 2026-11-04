@@ -80,7 +80,7 @@
 .product-request-operation-table .product-request-actions .product-request-action-button { min-height: 24px; padding: 2px 5px; font-size: 11px; line-height: 17px; }
 .product-request-operation-table .product-request-actions .product-request-action-button + .product-request-action-button { margin-left: 2px; }
 .product-request-procurement-table { min-width: 1200px; }
-.product-request-review-table { min-width: 1300px; }
+.product-request-review-table { width: 100%; min-width: 1080px; }
 .product-request-warehouse-table { min-width: 1080px; }
 .product-request-table thead th { position: sticky; top: 0; z-index: 4; padding: 10px 12px !important; color: #314b68; background: #eaf0f7; border-bottom: 1px solid #cdd8e4; border-right: 1px solid #dce5ee; box-shadow: 0 1px 0 #cdd8e4, 0 3px 7px rgba(42, 67, 94, .09); font-weight: 700; vertical-align: middle; white-space: nowrap; }
 .product-request-table td { max-width: 260px; padding: 10px 12px !important; color: #384961; border-right: 1px solid #e5ebf2; vertical-align: middle !important; }
