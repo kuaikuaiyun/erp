@@ -2,6 +2,8 @@
 
 namespace App\Portals\Logistics;
 
+use App\Models\AdminUser;
+use App\Models\AssistantDomainStore;
 use App\Models\LogisticsOrder;
 use App\Models\ProductRequestLinkSku;
 use Illuminate\Database\Eloquent\Builder;
@@ -14,6 +16,9 @@ class AbnormalOrderService
 
     /** @var array{skus:list<string>,product_codes:list<string>}|null */
     private ?array $cachedKeys = null;
+
+    /** @var array<string, AdminUser|null> */
+    private array $userIdentityCache = [];
 
     /** @return array{skus:list<string>,product_codes:list<string>} */
     public function nonRunnableKeys(): array
@@ -54,6 +59,68 @@ class AbnormalOrderService
         return $query;
     }
 
+    public function scopeForOwner(Builder $query, AdminUser $user): Builder
+    {
+        $identities = collect([$user->name, $user->username])
+            ->map(static fn (mixed $value): string => trim((string) $value))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        return $query->where(function (Builder $owner) use ($user, $identities): void {
+            $owner->where('assigned_owner_user_id', (int) $user->getKey());
+            if ($identities !== []) {
+                $owner->orWhere(function (Builder $fallback) use ($identities): void {
+                    $fallback->whereNull('assigned_owner_user_id')
+                        ->whereHas('store', fn (Builder $store) => $store->whereIn('user_name', $identities));
+                });
+            }
+        });
+    }
+
+    /** @return array{user_id:?int,name:?string,source:string} */
+    public function effectiveOwner(LogisticsOrder $order): array
+    {
+        $assignedOwnerId = (int) ($order->assigned_owner_user_id ?? 0);
+        if ($assignedOwnerId > 0) {
+            return [
+                'user_id' => $assignedOwnerId,
+                'name' => trim((string) $order->assigned_owner_name) ?: null,
+                'source' => 'assigned_owner',
+            ];
+        }
+
+        $usageName = trim((string) $order->store?->user_name);
+        if ($usageName === '') {
+            return ['user_id' => null, 'name' => null, 'source' => 'unmatched'];
+        }
+
+        $identity = $this->normalizeIdentity($usageName);
+        if (!array_key_exists($identity, $this->userIdentityCache)) {
+            $this->userIdentityCache[$identity] = AdminUser::query()
+                ->where(function (Builder $user) use ($identity): void {
+                    $user->whereRaw('LOWER(REPLACE(REPLACE(TRIM(name), ?, ?), ?, ?)) = ?', [' ', '', '　', '', $identity])
+                        ->orWhereRaw('LOWER(REPLACE(REPLACE(TRIM(username), ?, ?), ?, ?)) = ?', [' ', '', '　', '', $identity]);
+                })
+                ->first();
+        }
+        $matchedUser = $this->userIdentityCache[$identity];
+
+        return [
+            'user_id' => $matchedUser?->getKey() === null ? null : (int) $matchedUser->getKey(),
+            'name' => $matchedUser?->name ?: $usageName,
+            'source' => 'store_user',
+        ];
+    }
+
+    public function effectiveTeam(LogisticsOrder $order): string
+    {
+        return AssistantDomainStore::displayMultiValue($order->store?->team)
+            ?: trim((string) $order->group_names)
+            ?: trim((string) $order->department_name);
+    }
+
     /** @return list<array{product_name:string,shopify_sku:string,tongtu_sku:string,product_code:string}> */
     public function details(LogisticsOrder $order): array
     {
@@ -88,5 +155,10 @@ class AbnormalOrderService
             $lines[] = '   原始 SKU：'.$detail['shopify_sku'].'；通途 SKU：'.$detail['tongtu_sku'].'；PCL：'.$detail['product_code'];
         }
         return implode("\n", $lines);
+    }
+
+    private function normalizeIdentity(string $value): string
+    {
+        return mb_strtolower((string) preg_replace('/[\s　]+/u', '', trim($value)));
     }
 }

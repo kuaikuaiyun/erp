@@ -36,7 +36,7 @@ class AbnormalOrderController extends Controller
         $keyword = trim((string) ($validated['keyword'] ?? ''));
         $query = $this->abnormalOrders->query()->with(['items', 'store', 'abnormalRecord']);
         if ($context['portal']->code === 'yunying' && ! $context['user']->isAdministrator()) {
-            $query->where('assigned_owner_user_id', (int) $context['user']->getKey());
+            $this->abnormalOrders->scopeForOwner($query, $context['user']);
         }
         if ($status === 'processed') {
             $query->whereHas('abnormalRecord', fn ($record) => $record->where('status', AbnormalOrderRecord::STATUS_PROCESSED));
@@ -52,6 +52,7 @@ class AbnormalOrderController extends Controller
                 $search->where('shopify_order_number', 'like', $like)->orWhere('shopify_order_id', 'like', $like)
                     ->orWhere('tongtu_order_number', 'like', $like)->orWhere('store_name', 'like', $like)
                     ->orWhere('source_shop_domain', 'like', $like)->orWhere('assigned_owner_name', 'like', $like)
+                    ->orWhereHas('store', fn ($store) => $store->where('user_name', 'like', $like)->orWhere('team', 'like', $like))
                     ->orWhereHas('items', fn ($items) => $items->where('shopify_sku', 'like', $like)
                         ->orWhere('tongtu_sku', 'like', $like)->orWhere('tongtu_product_code', 'like', $like));
             });
@@ -60,6 +61,11 @@ class AbnormalOrderController extends Controller
             ->paginate((int) ($validated['per_page'] ?? 20))->withQueryString();
         $orders->getCollection()->each(function (LogisticsOrder $order): void {
             $order->setAttribute('abnormal_items', $this->abnormalOrders->details($order));
+            $owner = $this->abnormalOrders->effectiveOwner($order);
+            $order->setAttribute('effective_owner_user_id', $owner['user_id']);
+            $order->setAttribute('effective_owner_name', $owner['name']);
+            $order->setAttribute('effective_owner_source', $owner['source']);
+            $order->setAttribute('effective_team_name', $this->abnormalOrders->effectiveTeam($order));
         });
 
         return view('portal.abnormal-orders.index', [
@@ -74,7 +80,9 @@ class AbnormalOrderController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) abort($context->getStatusCode());
         abort_unless($context['portal']->code === 'yunying', 403);
-        abort_unless($context['user']->isAdministrator() || (int) $order->assigned_owner_user_id === (int) $context['user']->getKey(), 403);
+        $order->loadMissing('store');
+        $owner = $this->abnormalOrders->effectiveOwner($order);
+        abort_unless($context['user']->isAdministrator() || (int) $owner['user_id'] === (int) $context['user']->getKey(), 403);
         abort_unless($this->abnormalOrders->query()->whereKey($order->getKey())->exists(), 404);
         $status = $request->validate(['status' => ['required', Rule::in(['pending', 'processed'])]])['status'];
         AbnormalOrderRecord::query()->updateOrCreate(['logistics_order_id' => $order->getKey()], [
@@ -94,7 +102,8 @@ class AbnormalOrderController extends Controller
         $order->load(['items', 'store', 'abnormalRecord']);
         abort_unless($this->abnormalOrders->query()->whereKey($order->getKey())->exists(), 404);
         abort_if($order->abnormalRecord?->status === AbnormalOrderRecord::STATUS_PROCESSED, 422, '已处理订单无需再次通知。');
-        $recipientId = (int) $order->assigned_owner_user_id;
+        $owner = $this->abnormalOrders->effectiveOwner($order);
+        $recipientId = (int) $owner['user_id'];
         abort_if($recipientId <= 0, 422, '该订单尚未匹配真实归属人，无法发送通知。');
         $details = $this->abnormalOrders->details($order);
         DB::connection(config('admin.database.connection') ?: config('database.default'))->transaction(function () use ($order, $details, $context, $recipientId): void {
@@ -115,7 +124,7 @@ class AbnormalOrderController extends Controller
                 'last_notified_at' => now(),
             ]);
         });
-        return back()->with('success', '异常订单已通知运营：'.($order->assigned_owner_name ?: ('用户 #'.$recipientId)).'。');
+        return back()->with('success', '异常订单已通知运营：'.($owner['name'] ?: ('用户 #'.$recipientId)).'。');
     }
 
     private function context(Request $request): array|Response
