@@ -239,6 +239,9 @@
 .payment-overview-toolbar label { display: grid; gap: 5px; margin: 0; color: #536f85; font-size: 10px; }
 .payment-overview-toolbar .form-control { width: 170px; height: 34px; }
 .payment-overview-toolbar small { padding-bottom: 7px; color: #7890a3; font-size: 9px; }
+.payment-overview-month-range { display: flex; align-items: flex-end; gap: 8px; }
+.payment-overview-month-range > b { padding: 0 1px 9px; color: #91a4b5; font-size: 12px; font-weight: 400; }
+@media (max-width: 680px) { .payment-overview-toolbar { align-items: flex-start; flex-direction: column; } .payment-overview-toolbar small { padding-bottom: 0; } .payment-overview-month-range { width: 100%; } .payment-overview-month-range label { flex: 1 1 0; } .payment-overview-toolbar .form-control { width: 100%; } }
 .payment-detail-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .payment-detail-kpi { min-width: 0; padding: 13px 14px; border: 1px solid #d8e5ee; border-radius: 8px; background: #fff; box-shadow: 0 2px 7px rgba(22, 63, 94, .04); }
 .payment-detail-kpi span,

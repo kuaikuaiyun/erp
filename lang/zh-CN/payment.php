@@ -447,7 +447,9 @@ return array_replace_recursive($translations, [
             'overview' => [
                 'month_filter' => [
                     'label' => '统计月份',
-                    'note' => '按所选自然月统计；当前月统计至今天，历史月份统计完整自然月。',
+                    'end_label' => '结束月份',
+                    'range_to' => '至',
+                    'note' => '按所选连续自然月区间统计；结束月为当前月时，统计至今天，历史月份统计完整自然月。',
                 ],
                 'kpis' => [
                     'disputes_recent' => '期间风险纠纷',

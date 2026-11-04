@@ -208,9 +208,6 @@ class PayPalRiskAnalyticsService
         $start = $from !== ''
             ? Carbon::parse($from, self::REPORT_TIMEZONE)->startOfDay()
             : $end->copy()->subDays(29)->startOfDay();
-        if ($start->diffInDays($end) > 30) {
-            $start = $end->copy()->subDays(30)->startOfDay();
-        }
         $trend = [];
         for ($cursor = $start->copy(); $cursor->lessThanOrEqualTo($end); $cursor->addDay()) {
             $trend[$cursor->format('Y-m-d')] = ['label' => $cursor->format('m-d'), 'orders' => 0, 'refunds' => 0, 'disputes' => 0];
