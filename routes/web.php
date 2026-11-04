@@ -3,6 +3,7 @@
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portal\Http\Controllers\PortalMenuConfigurationController;
 use App\Portal\Http\Controllers\InternalMessageController;
+use App\Portal\Http\Controllers\AbnormalOrderController;
 use App\Portals\AiProducts\Http\Controllers\AiProductController;
 use App\Portals\Assistant\Http\Controllers\DomainStoreController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingMediaController;
@@ -34,6 +35,9 @@ Route::get('/', [PortalEntryController::class, 'root'])->middleware(MonitorPayme
 Route::get('/management/menus', [PortalMenuConfigurationController::class, 'index'])->name('portal.menus.index');
 Route::post('/management/menus/order', [PortalMenuConfigurationController::class, 'saveOrder'])->name('portal.menus.order');
 Route::get('/internal-messages', [InternalMessageController::class, 'index'])->name('internal-messages.index');
+Route::get('/abnormal-orders', [AbnormalOrderController::class, 'index'])->name('abnormal-orders.index');
+Route::patch('/abnormal-orders/{order}/status', [AbnormalOrderController::class, 'updateStatus'])->whereNumber('order')->name('abnormal-orders.status');
+Route::post('/abnormal-orders/{order}/notify', [AbnormalOrderController::class, 'notify'])->whereNumber('order')->name('abnormal-orders.notify');
 Route::post('/internal-messages', [InternalMessageController::class, 'store'])->name('internal-messages.store');
 Route::get('/internal-messages/unread', [InternalMessageController::class, 'unread'])->name('internal-messages.unread');
 Route::post('/internal-messages/{message}/read', [InternalMessageController::class, 'markRead'])->whereNumber('message')->name('internal-messages.read');

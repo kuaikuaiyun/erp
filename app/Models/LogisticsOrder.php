@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class LogisticsOrder extends Model
 {
@@ -168,6 +169,11 @@ class LogisticsOrder extends Model
     public function items(): HasMany
     {
         return $this->hasMany(LogisticsOrderItem::class, 'logistics_order_id');
+    }
+
+    public function abnormalRecord(): HasOne
+    {
+        return $this->hasOne(AbnormalOrderRecord::class, 'logistics_order_id');
     }
 
     public function refundDetails(): HasMany
