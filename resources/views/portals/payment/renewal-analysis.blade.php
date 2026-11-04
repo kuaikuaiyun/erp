@@ -13,7 +13,7 @@
 @section('page_title', __($t.'.page_title'))
 
 @push('styles')
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261102-3">
+<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261104-2">
 <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261026-1">
 @endpush
 
@@ -34,12 +34,27 @@
         <div class="payment-renewal-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ __('payment.common.query') }}</button><a class="btn btn-default" href="{{ route('payment.renewal-analysis.index') }}">{{ __('payment.common.reset') }}</a><a class="btn btn-success" href="{{ route('payment.renewal-analysis.export', request()->except(['page','per_page'])) }}"><i class="fa fa-file-excel-o"></i> {{ __($t.'.export.button') }}</a></div>
     </form>
 
-    <div class="payment-kpi-grid payment-kpi-grid-four payment-renewal-kpis">
-        <article class="payment-kpi-card payment-renewal-kpi payment-renewal-kpi-primary"><i class="fa fa-refresh"></i><div><p>{{ __($t.'.kpis.total_rate') }}</p><strong>{{ number_format($summary['rate'],2) }}%</strong><small>{{ number_format($summary['renewed']) }} / {{ number_format($summary['eligible']) }}</small></div></article>
-        <article class="payment-kpi-card payment-renewal-kpi payment-renewal-kpi-paypal"><i class="fa fa-paypal"></i><div><p>{{ __($t.'.kpis.paypal_rate') }}</p><strong>{{ number_format($summary['paypal']['rate'],2) }}%</strong><small>{{ number_format($summary['paypal']['renewed']) }} / {{ number_format($summary['paypal']['eligible']) }}</small></div></article>
-        <article class="payment-kpi-card payment-renewal-kpi payment-renewal-kpi-card"><i class="fa fa-credit-card"></i><div><p>{{ __($t.'.kpis.card_rate') }}</p><strong>{{ number_format($summary['credit_card']['rate'],2) }}%</strong><small>{{ number_format($summary['credit_card']['renewed']) }} / {{ number_format($summary['credit_card']['eligible']) }}</small></div></article>
-        <article class="payment-kpi-card payment-renewal-kpi payment-renewal-kpi-revenue"><i class="fa fa-usd"></i><div><p>{{ __($t.'.kpis.renewal_revenue') }}</p><strong>{{ $money($summary['renewal_revenue']) }}</strong><small>{{ number_format($summary['renewal_orders']) }} {{ __($t.'.kpis.renewal_orders') }}</small></div></article>
-    </div>
+    <section class="payment-renewal-metric-section">
+        <header><h2>{{ __($t.'.sections.renewal_performance') }}</h2><p>{{ __($t.'.sections.renewal_performance_note') }}</p></header>
+        <div class="payment-kpi-grid payment-renewal-kpis">
+            <article class="payment-kpi-card payment-renewal-kpi payment-renewal-kpi-primary"><i class="fa fa-refresh"></i><div><p>{{ __($t.'.kpis.total_rate') }}</p><strong>{{ number_format($summary['rate'],2) }}%</strong><small>{{ __($t.'.kpis.completed_first_renewal') }} {{ number_format($summary['renewed']) }} / {{ __($t.'.kpis.expected_first_renewal') }} {{ number_format($summary['eligible']) }}</small></div></article>
+            <article class="payment-kpi-card payment-renewal-kpi payment-renewal-kpi-paypal"><i class="fa fa-paypal"></i><div><p>{{ __($t.'.kpis.paypal_rate') }}</p><strong>{{ number_format($summary['paypal']['rate'],2) }}%</strong><small>{{ __($t.'.kpis.completed_first_renewal') }} {{ number_format($summary['paypal']['renewed']) }} / {{ __($t.'.kpis.expected_first_renewal') }} {{ number_format($summary['paypal']['eligible']) }}</small></div></article>
+            <article class="payment-kpi-card payment-renewal-kpi payment-renewal-kpi-card"><i class="fa fa-credit-card"></i><div><p>{{ __($t.'.kpis.card_rate') }}</p><strong>{{ number_format($summary['credit_card']['rate'],2) }}%</strong><small>{{ __($t.'.kpis.completed_first_renewal') }} {{ number_format($summary['credit_card']['renewed']) }} / {{ __($t.'.kpis.expected_first_renewal') }} {{ number_format($summary['credit_card']['eligible']) }}</small></div></article>
+            <article class="payment-kpi-card payment-renewal-kpi payment-renewal-kpi-revenue"><i class="fa fa-usd"></i><div><p>{{ __($t.'.kpis.renewal_revenue') }}</p><strong>{{ $money($summary['renewal_revenue']) }}</strong><small>{{ number_format($summary['renewal_orders']) }} {{ __($t.'.kpis.renewal_orders') }}</small></div></article>
+        </div>
+        <p class="payment-renewal-metric-formula"><i class="fa fa-calculator"></i> {{ __($t.'.formulas.first_renewal_rate') }}</p>
+    </section>
+
+    <section class="payment-renewal-metric-section payment-renewal-subscription-section">
+        <header><h2>{{ __($t.'.sections.subscription_rate') }}</h2><p>{{ __($t.'.sections.subscription_rate_note') }}</p></header>
+        <div class="payment-kpi-grid payment-kpi-grid-three payment-renewal-kpis">
+            @foreach(['total' => 'total_subscription_rate', 'paypal' => 'paypal_subscription_rate', 'credit_card' => 'credit_card_subscription_rate'] as $channel => $label)
+                @php($subscriptionRate = $summary['subscription_rate'][$channel])
+                <article class="payment-kpi-card payment-renewal-kpi payment-renewal-kpi-subscription payment-renewal-kpi-subscription-{{ $channel }}"><i class="fa {{ $channel === 'paypal' ? 'fa-paypal' : ($channel === 'credit_card' ? 'fa-credit-card' : 'fa-repeat') }}"></i><div><p>{{ __($t.'.kpis.'.$label) }}</p><strong>{{ number_format($subscriptionRate['rate'],2) }}%</strong><small>{{ __($t.'.kpis.subscription_first_purchase') }} {{ number_format($subscriptionRate['subscription_orders']) }} / {{ __($t.'.kpis.qualified_first_orders') }} {{ number_format($subscriptionRate['total_orders']) }}</small></div></article>
+            @endforeach
+        </div>
+        <p class="payment-renewal-metric-formula"><i class="fa fa-calculator"></i> {{ __($t.'.formulas.subscription_rate') }}<span>{{ __($t.'.formulas.subscription_scope') }}</span></p>
+    </section>
     <p class="payment-renewal-observation"><i class="fa fa-info-circle"></i> {{ __($t.'.observation_note',['days'=>$dashboard['observation_days']]) }}</p>
 
     <article class="payment-panel payment-renewal-funnel"><h2>{{ __($t.'.funnel.title') }}</h2>

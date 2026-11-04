@@ -51,9 +51,9 @@ $translations = [
         'merchant' => ['merchant_a' => '商户 A', 'merchant_a_meta' => 'PayPal · 香港企业账户 · Merchant ID PP-DEMO-1', 'merchant_b' => '商户 B', 'merchant_b_meta' => 'PayPal · 香港企业账户 · Merchant ID PP-DEMO-2'],
         'status' => ['normal' => '正常 · 条件待处理', 'attention' => '资料待补 · 需关注'],
         'metrics' => ['orders' => '支付订单', 'orders_unit' => '笔', 'orders_note' => '成功付款交易', 'amount' => '实收金额', 'amount_note' => '退款前成功收款', 'stores' => '关联店铺', 'stores_unit' => '家', 'stores_note' => '产品与商店已匹配', 'attention_rate' => '关注 / 资金', 'attention_rate_note' => '签收比率 / 已收款订单'],
-        'rate_labels' => ['refund' => '退款率 · 笔数', 'chargeback' => '退款率 · 金额', 'risk' => '风险纠纷率 · 笔数', 'reserve' => '风险纠纷率 · 金额', 'full_refund' => '全额纠纷率 · 笔数'],
-        'rate_formulas' => ['refund' => '退款付款笔数 ÷ 支付订单笔数 × 100%', 'chargeback' => '成功退款金额 ÷ 成功收款金额 × 100%', 'risk' => '风险纠纷付款笔数 ÷ 支付订单笔数 × 100%', 'reserve' => '风险纠纷涉及金额 ÷ 成功收款金额 × 100%', 'full_refund' => '全部争议付款笔数 ÷ 支付订单笔数 × 100%'],
-        'rate_notes' => ['refund' => '30 笔有退款付款 / 1,600 笔付款', 'chargeback' => '成功退款 $3,000 / 收款 $100,000', 'risk' => '18 笔待合内部分发付款 / 1,600 笔', 'reserve' => '相关交易金额 $1,800 / 收款 $100,000', 'full_refund' => '35 笔 / 1,600 笔'],
+        'rate_labels' => ['refund' => '退款率 · 笔数', 'matched_refund' => '退款率 · 笔数（已排除未匹配）', 'chargeback' => '退款率 · 金额', 'matched_chargeback' => '退款金额率 · 已排除未匹配', 'risk' => '风险纠纷率 · 笔数', 'reserve' => '风险纠纷率 · 金额', 'full_refund' => '全额纠纷率 · 笔数'],
+        'rate_formulas' => ['refund' => '退款付款笔数 ÷ 支付订单笔数 × 100%', 'matched_refund' => '已关联 ERP 的退款付款笔数 ÷ 已关联 ERP 的成功付款笔数 × 100%', 'chargeback' => '成功退款金额 ÷ 成功收款金额 × 100%', 'matched_chargeback' => '已关联 ERP 的退款金额 ÷ 已关联 ERP 的成功付款金额 × 100%', 'risk' => '风险纠纷付款笔数 ÷ 支付订单笔数 × 100%', 'reserve' => '风险纠纷涉及金额 ÷ 成功收款金额 × 100%', 'full_refund' => '全部争议付款笔数 ÷ 支付订单笔数 × 100%'],
+        'rate_notes' => ['refund' => '30 笔有退款付款 / 1,600 笔付款', 'matched_refund' => '已关联 ERP 的退款付款 :refunds 笔 / 已关联 ERP 的成功付款 :orders 笔', 'chargeback' => '成功退款 $3,000 / 收款 $100,000', 'matched_chargeback' => '已关联 ERP 的退款 :refund_amount / 已关联 ERP 的收款 :paid_amount', 'risk' => '18 笔待合内部分发付款 / 1,600 笔', 'reserve' => '相关交易金额 $1,800 / 收款 $100,000', 'full_refund' => '35 笔 / 1,600 笔'],
         'available' => '可用', 'unavailable' => '暂不可用', 'reserve' => '准备金', 'recent_cases' => '官方争议率：待核对　近 7 天新增：:count 笔', 'view_detail' => '查看详情', 'add_account' => '新增 PP 账户',
         'order_times' => ['first' => '首次进单', 'last' => '最后进单', 'used' => '已使用', 'days' => ':count天'],
         'balance' => [
@@ -791,10 +791,22 @@ return array_replace_recursive($translations, [
             'keyword_placeholder' => '搜索首扣订单、续费订单、流水或客户邮箱',
         ],
         'channels' => ['paypal' => 'PayPal', 'credit_card' => '信用卡'],
+        'sections' => [
+            'renewal_performance' => '首次续费表现', 'renewal_performance_note' => '按首次续费付款时间计算',
+            'subscription_rate' => '首单订阅率', 'subscription_rate_note' => '按反推得到的首单付款时间计算',
+        ],
         'kpis' => [
             'total_rate' => '首次续费率', 'eligible' => '应首次续费的订阅链', 'renewed' => '已完成首次续费的订阅链',
             'paypal_rate' => 'PayPal 首扣首次续费率', 'card_rate' => '信用卡首扣首次续费率',
+            'completed_first_renewal' => '完成首次续费', 'expected_first_renewal' => '应首次续费订阅',
+            'total_subscription_rate' => '总首单订阅率', 'paypal_subscription_rate' => 'PayPal 首单订阅率', 'credit_card_subscription_rate' => '信用卡首单订阅率',
+            'subscription_first_purchase' => '订阅首次购买', 'qualified_first_orders' => '合格首单',
             'renewal_orders' => '首次续费订单', 'renewal_revenue' => '首次续费实收金额',
+        ],
+        'formulas' => [
+            'first_renewal_rate' => '首次续费率 = 完成首次续费订阅链 ÷ 应首次续费订阅链',
+            'subscription_rate' => '首单订阅率 = 订阅首次购买首单 ÷ 合格首单',
+            'subscription_scope' => 'PayPal 合格首单需已关联 ERP 且已匹配成功 PayPal 真实交易；信用卡合格首单需已关联 ERP。',
         ],
         'observation_note' => '筛选时间为首次续费付款时间；分母取该时间区间整体前推 :days 天的首次订阅单，渠道按首扣支付渠道归属。',
         'funnel' => [

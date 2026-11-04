@@ -30,7 +30,7 @@ class PaymentAccountRiskService
         $accountVersion = LogisticsPayPalAccount::query()
             ->selectRaw('MAX(updated_at) as updated_at, MAX(last_imported_at) as last_imported_at, COUNT(*) as total')
             ->first();
-        $cacheKey = 'payment:account-risk-dashboard:v2:'.sha1((string) json_encode([
+        $cacheKey = 'payment:account-risk-dashboard:v4:'.sha1((string) json_encode([
             'filters' => $filters,
             'accounts' => [
                 'updated_at' => (string) ($accountVersion->updated_at ?? ''),
@@ -241,7 +241,7 @@ class PaymentAccountRiskService
             return collect();
         }
 
-        $cacheKey = 'payment:account-risk-page-summaries:v1:'.sha1((string) json_encode([
+        $cacheKey = 'payment:account-risk-page-summaries:v3:'.sha1((string) json_encode([
             'accounts' => $accounts->map(static fn (LogisticsPayPalAccount $account): array => [
                 'id' => (int) $account->getKey(),
                 'updated_at' => optional($account->updated_at)->format('Y-m-d H:i:s.u'),
@@ -291,6 +291,14 @@ class PaymentAccountRiskService
             ->groupBy('payment_groups.account_id')
             ->get()->keyBy('account_id');
 
+        $matchedPaymentStats = $database->query()->fromSub(clone $paymentGroups, 'payment_groups')
+            ->where('payment_groups.is_matched', 1)
+            ->selectRaw('payment_groups.account_id')
+            ->selectRaw('COUNT(*) as matched_order_count')
+            ->selectRaw('COALESCE(SUM(payment_groups.paid_amount), 0) as matched_paid_amount')
+            ->groupBy('payment_groups.account_id')
+            ->get()->keyBy('account_id');
+
         $orderStats = $database->query()->fromSub(
             (clone $paymentGroups)->whereNotNull('payments.logistics_order_id'),
             'payment_groups',
@@ -325,6 +333,18 @@ class PaymentAccountRiskService
                     ->on('event_payments.payment_key', '=', 'refunds.original_transaction_id');
             });
         }
+        $matchedRefundStats = (clone $refunds)
+            ->joinSub(clone $paymentGroups, 'payment_groups', function ($join): void {
+                $join->on('payment_groups.account_id', '=', 'refunds.logistics_paypal_account_id')
+                    ->on('payment_groups.payment_key', '=', 'refunds.original_transaction_id');
+            })
+            ->where('payment_groups.is_matched', 1)
+            ->selectRaw('refunds.logistics_paypal_account_id as account_id')
+            ->selectRaw("COUNT(DISTINCT NULLIF(TRIM(COALESCE(refunds.original_transaction_id, '')), '')) as matched_refund_order_count")
+            ->selectRaw('COALESCE(SUM(COALESCE(refunds.refund_amount_usd, refunds.original_amount, 0)), 0) as matched_refund_amount')
+            ->groupBy('refunds.logistics_paypal_account_id')
+            ->get()->keyBy('account_id');
+
         $refundStats = $refunds
             ->selectRaw('refunds.logistics_paypal_account_id as account_id')
             ->selectRaw("COUNT(DISTINCT NULLIF(CASE WHEN COALESCE(refunds.original_transaction_id, '') <> '' THEN TRIM(refunds.original_transaction_id) ELSE TRIM(COALESCE(refunds.refund_transaction_id, '')) END, '')) as refund_order_count")
@@ -360,22 +380,30 @@ class PaymentAccountRiskService
 
         return $accounts->map(function (LogisticsPayPalAccount $account) use (
             $paymentStats,
+            $matchedPaymentStats,
             $orderStats,
             $refundStats,
+            $matchedRefundStats,
             $overallDisputeStats,
             $disputeStats,
         ): array {
             $accountId = (int) $account->getKey();
             $payment = $paymentStats->get($accountId);
+            $matchedPayment = $matchedPaymentStats->get($accountId);
             $order = $orderStats->get($accountId);
             $refund = $refundStats->get($accountId);
+            $matchedRefund = $matchedRefundStats->get($accountId);
             $overallDispute = $overallDisputeStats->get($accountId);
             $dispute = $disputeStats->get($accountId);
             $orders = (int) ($payment->order_count ?? 0);
             $paidAmount = round((float) ($payment->paid_amount ?? 0), 2);
+            $matchedOrders = (int) ($matchedPayment->matched_order_count ?? 0);
+            $matchedPaidAmount = round((float) ($matchedPayment->matched_paid_amount ?? 0), 2);
             $matchedGroups = (int) ($payment->matched_group_count ?? 0);
             $refundOrders = (int) ($refund->refund_order_count ?? 0);
             $refundAmount = round((float) ($refund->refund_amount ?? 0), 2);
+            $matchedRefundOrders = (int) ($matchedRefund->matched_refund_order_count ?? 0);
+            $matchedRefundAmount = round((float) ($matchedRefund->matched_refund_amount ?? 0), 2);
             $disputeOrders = (int) ($dispute->dispute_order_count ?? 0);
             $overallDisputeOrders = (int) ($overallDispute->overall_dispute_order_count ?? 0);
             $disputeAmount = round((float) ($dispute->dispute_amount ?? 0), 2);
@@ -400,6 +428,12 @@ class PaymentAccountRiskService
                 'overall_dispute_rate' => $orders === 0 ? 0.0 : round($overallDisputeOrders / $orders * 100, 2),
                 'refund_amount' => $refundAmount,
                 'refund_amount_rate' => $paidAmount <= 0 ? 0.0 : round($refundAmount / $paidAmount * 100, 2),
+                'matched_paid_amount' => $matchedPaidAmount,
+                'matched_order_count' => $matchedOrders,
+                'matched_refund_amount' => $matchedRefundAmount,
+                'matched_refund_order_count' => $matchedRefundOrders,
+                'matched_refund_rate' => $matchedOrders === 0 ? 0.0 : round($matchedRefundOrders / $matchedOrders * 100, 2),
+                'matched_refund_amount_rate' => $matchedPaidAmount <= 0 ? 0.0 : round($matchedRefundAmount / $matchedPaidAmount * 100, 2),
                 'dispute_amount' => $disputeAmount,
                 'dispute_amount_rate' => $paidAmount <= 0 ? 0.0 : round($disputeAmount / $paidAmount * 100, 2),
                 'store_count' => (int) ($order->store_count ?? 0),
@@ -824,6 +858,10 @@ class PaymentAccountRiskService
         $orders = (int) $summary['order_count'];
         $paidAmount = (float) $summary['paid_amount'];
         $refundAmount = (float) $summary['refund_amount'];
+        $matchedRefundAmount = (float) $summary['matched_refund_amount'];
+        $matchedPaidAmount = (float) $summary['matched_paid_amount'];
+        $matchedRefundOrders = (int) $summary['matched_refund_order_count'];
+        $matchedOrders = (int) $summary['matched_order_count'];
         $disputeAmount = (float) $summary['dispute_amount'];
         $disputeOrders = (int) $summary['dispute_order_count'];
         $overallDisputeOrders = (int) $summary['overall_dispute_order_count'];
@@ -862,7 +900,9 @@ class PaymentAccountRiskService
             ] : null,
             'rates' => [
                 $this->rate('refund', (float) $summary['refund_rate'], ['refunds' => $this->integer((int) $summary['refund_order_count']), 'orders' => $this->integer($orders)]),
+                $this->rate('matched_refund', (float) $summary['matched_refund_rate'], ['refunds' => $this->integer($matchedRefundOrders), 'orders' => $this->integer($matchedOrders)]),
                 $this->rate('chargeback', (float) $summary['refund_amount_rate'], ['refund_amount' => $this->currency($refundAmount), 'paid_amount' => $this->currency($paidAmount)]),
+                $this->rate('matched_chargeback', (float) $summary['matched_refund_amount_rate'], ['refund_amount' => $this->currency($matchedRefundAmount), 'paid_amount' => $this->currency($matchedPaidAmount)]),
                 $this->rate('risk', (float) $summary['dispute_rate'], ['disputes' => $this->integer($disputeOrders), 'orders' => $this->integer($orders)]),
                 $this->rate('reserve', (float) $summary['dispute_amount_rate'], ['dispute_amount' => $this->currency($disputeAmount), 'paid_amount' => $this->currency($paidAmount)]),
                 $this->rate('full_refund', (float) $summary['overall_dispute_rate'], ['disputes' => $this->integer($overallDisputeOrders), 'orders' => $this->integer($orders)]),
