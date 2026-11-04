@@ -84,13 +84,18 @@ GRAPHQL;
             ],
             'media' => $media,
         ];
-        $created = $this->shopify->graphqlForStore($store, $actor, $mutation, $variables);
-        $errors = Arr::get($created, 'data.productCreate.userErrors', []);
-        if ($errors !== []) {
-            throw new RuntimeException($this->errorMessage($errors));
+        // A previous attempt might have created the product and then failed while
+        // updating its default variant. Reuse that product to keep retries idempotent.
+        $shopifyProduct = $this->findExistingProduct($product, $store, $actor, $title);
+        $created = null;
+        if (!is_array($shopifyProduct)) {
+            $created = $this->shopify->graphqlForStore($store, $actor, $mutation, $variables);
+            $errors = Arr::get($created, 'data.productCreate.userErrors', []);
+            if ($errors !== []) {
+                throw new RuntimeException($this->errorMessage($errors));
+            }
+            $shopifyProduct = Arr::get($created, 'data.productCreate.product');
         }
-
-        $shopifyProduct = Arr::get($created, 'data.productCreate.product');
         $productId = (string) data_get($shopifyProduct, 'id');
         $variantId = (string) data_get($shopifyProduct, 'variants.nodes.0.id');
         if ($productId === '' || $variantId === '') {
@@ -109,7 +114,7 @@ GRAPHQL;
             'productId' => $productId,
             'variants' => [[
                 'id' => $variantId,
-                'sku' => $sku,
+                'inventoryItem' => ['sku' => $sku],
                 'price' => number_format($price, 2, '.', ''),
             ]],
         ]);
@@ -124,6 +129,41 @@ GRAPHQL;
             'request' => $variables,
             'responses' => ['create' => $created, 'variant' => $updated],
         ];
+    }
+
+    /** @return array<string, mixed>|null */
+    private function findExistingProduct(
+        AikaipinProduct $product,
+        AssistantDomainStore $store,
+        AdminUser $actor,
+        string $title,
+    ): ?array {
+        $productCode = trim((string) $product->product_code);
+        if ($productCode === '') {
+            return null;
+        }
+
+        $query = <<<'GRAPHQL'
+query FindAiProductForRetry($search: String!) {
+  products(first: 10, query: $search, sortKey: CREATED_AT, reverse: true) {
+    nodes {
+      id
+      title
+      tags
+      variants(first: 1) { nodes { id sku price } }
+    }
+  }
+}
+GRAPHQL;
+        $escapedCode = str_replace(['\\', '"'], ['\\\\', '\\"'], $productCode);
+        $response = $this->shopify->graphqlForStore($store, $actor, $query, [
+            'search' => 'tag:"'.$escapedCode.'"',
+        ]);
+
+        return collect(Arr::get($response, 'data.products.nodes', []))
+            ->first(static fn (mixed $candidate): bool => is_array($candidate)
+                && (string) ($candidate['title'] ?? '') === $title
+                && in_array($productCode, (array) ($candidate['tags'] ?? []), true));
     }
 
     private function errorMessage(array $errors): string
