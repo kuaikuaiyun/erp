@@ -2698,6 +2698,10 @@ class ProductRequestController extends Controller
 
         return [
             'keyword' => trim((string) $request->input('keyword', '')),
+            'placement_link' => trim((string) $request->input('placement_link', '')),
+            'placement_link_status' => in_array($request->input('placement_link_status'), ['filled', 'empty'], true)
+                ? (string) $request->input('placement_link_status')
+                : '',
             'reported_date' => $reportedDate,
             'status' => in_array($request->input('status'), array_keys($this->statusLabels()), true) ? (string) $request->input('status') : '',
             'review_status' => in_array($request->input('review_status'), array_keys($this->reviewStatusLabels()), true) ? (string) $request->input('review_status') : '',
@@ -2726,6 +2730,21 @@ class ProductRequestController extends Controller
                     ->orWhere('company_spu', 'like', $keyword)
                     ->orWhere('supplier_url', 'like', $keyword)
                     ->orWhere('operation_supplier_url', 'like', $keyword);
+            });
+        }
+        if (($filters['placement_link'] ?? '') !== '') {
+            $placementLink = '%'.str_replace(
+                ['\\', '%', '_'],
+                ['\\\\', '\\%', '\\_'],
+                $filters['placement_link'],
+            ).'%';
+            $query->where('placement_link', 'like', $placementLink);
+        }
+        if (($filters['placement_link_status'] ?? '') === 'filled') {
+            $query->whereNotNull('placement_link')->where('placement_link', '!=', '');
+        } elseif (($filters['placement_link_status'] ?? '') === 'empty') {
+            $query->where(function (Builder $placementLinkQuery): void {
+                $placementLinkQuery->whereNull('placement_link')->orWhere('placement_link', '');
             });
         }
         if (($filters['reported_date'] ?? '') !== '') {
