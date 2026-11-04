@@ -9,6 +9,9 @@ use Illuminate\Support\Str;
 
 class AbnormalOrderService
 {
+    /** 异常订单仅统计该日期（含）之后产生的订单。 */
+    public const STATISTICS_START_AT = '2026-10-28 00:00:00';
+
     /** @var array{skus:list<string>,product_codes:list<string>}|null */
     private ?array $cachedKeys = null;
 
@@ -33,6 +36,7 @@ class AbnormalOrderService
     {
         $keys = $this->nonRunnableKeys();
         $query = LogisticsOrder::query()
+            ->where('order_created_at', '>=', self::STATISTICS_START_AT)
             ->whereIn('subscription_type', ['订阅首次购买', '无订阅'])
             ->whereHas('items', function (Builder $items) use ($keys): void {
                 $items->where(function (Builder $match) use ($keys): void {

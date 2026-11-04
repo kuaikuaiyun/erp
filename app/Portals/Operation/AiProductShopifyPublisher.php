@@ -38,7 +38,7 @@ class AiProductShopifyPublisher
             $this->expireAccessToken($store, $grantedScopes->all());
 
             throw new RuntimeException(
-                '当前 Shopify 应用只有读取权限，缺少 write_products。请在 Shopify Dev Dashboard 为该应用开启“Products”的写入权限，保存后重新点击上架。'
+                'Shopify 应用版本已声明 write_products，但店铺“'.($store->shop_name ?: $store->domain).'”当前安装尚未批准该权限。请在该店铺的 Shopify 后台打开并更新应用授权，批准 Products 写入权限；若没有出现授权提示，请从 Shopify Dev Dashboard 重新安装该应用。仅重新点击上架不会生效。'
             );
         }
 
