@@ -22,7 +22,8 @@
         <form class="op-toolbar" method="get" action="{{ route('operation.reports.index') }}">
             <div class="form-group"><label>开始日期</label><input class="form-control input-sm" type="date" name="date_from" value="{{ $dateFrom }}"></div>
             <div class="form-group"><label>结束日期</label><input class="form-control input-sm" type="date" name="date_to" value="{{ $dateTo }}"></div>
-            @if($isBoss)<div class="form-group"><label>运营身份</label><select class="form-control input-sm" name="operator_user_id">@foreach($operatorOptions as $option)<option value="{{ $option->id }}" @selected($selectedOperator->id === $option->id)>{{ $option->name ?: $option->username }}</option>@endforeach</select></div>@endif
+            @if($isBoss)<div class="form-group"><label>运营部门</label><select class="form-control input-sm" name="operation_department_id" onchange="var person=this.form.querySelector('[name=operator_user_id]');if(person){person.disabled=true;}this.form.submit()"><option value="">全部运营部门</option>@foreach($operationDepartments as $department)<option value="{{ $department->id }}" @selected($selectedDepartmentId === (int)$department->id)>{{ $department->name }}</option>@endforeach</select></div>@elseif($isReportDepartmentLeader && $viewerOperationDepartment)<div class="form-group"><label>运营部门</label><select class="form-control input-sm" disabled><option>{{ $viewerOperationDepartment->name }}</option></select></div>@endif
+            @if($canSelectOperator)<div class="form-group"><label>运营人员</label><select class="form-control input-sm" name="operator_user_id"><option value="all" @selected($selectAllOperators)>全部运营人员</option>@foreach($operatorOptions as $option)<option value="{{ $option->id }}" @selected(!$selectAllOperators && $selectedOperator?->id === $option->id)>{{ $option->name ?: $option->username }}</option>@endforeach</select></div>@endif
             <button class="btn btn-primary btn-sm"><i class="fa fa-search"></i> 查询业绩</button>
             <span class="monthly-range">{{ $dateFrom }} 至 {{ $dateTo }}</span>
         </form>
@@ -45,16 +46,16 @@
                 @if(($metricRowspans[$loop->index] ?? 0) > 0)<td class="identity" rowspan="{{ $metricRowspans[$loop->index] }}">{{ $row['shop_domain'] }}</td>@endif
                 @foreach([['first_subscription_orders','first_subscription'],['first_normal_orders','first_normal'],['first_total_orders','first_total'],['renewal_orders','renewal']] as [$countField,$detailType])
                     @if($countField === 'first_subscription_orders' || $countField === 'first_normal_orders' || $countField === 'first_total_orders' || $countField === 'renewal_orders')
-                        <td class="number detail-metric-column">@if((int)$row[$countField] > 0)<button type="button" class="order-count-link" data-date="{{ $row['date'] }}" data-domain="{{ $row['shop_domain'] }}" data-media="{{ $row['media_source'] }}" data-type="{{ $detailType }}">{{ (int)$row[$countField] }} 单 <i class="fa fa-angle-right"></i></button>@else 0 @endif</td>
+                        <td class="number detail-metric-column">@if((int)$row[$countField] > 0)<button type="button" class="order-count-link" data-operator="{{ $row['operator_user_id'] }}" data-date="{{ $row['date'] }}" data-domain="{{ $row['shop_domain'] }}" data-media="{{ $row['media_source'] }}" data-type="{{ $detailType }}">{{ (int)$row[$countField] }} 单 <i class="fa fa-angle-right"></i></button>@else 0 @endif</td>
                         @if($countField === 'first_subscription_orders')<td class="money detail-metric-column">{{ number_format($row['first_subscription_revenue'],2) }}</td>@endif
                         @if($countField === 'first_normal_orders')<td class="money detail-metric-column">{{ number_format($row['first_normal_revenue'],2) }}</td>@endif
                         @if($countField === 'first_total_orders')<td class="money detail-metric-column">{{ number_format($row['first_total_revenue'],2) }}</td><td class="money detail-metric-column">{{ number_format($row['first_purchase_cost'],2) }}</td><td class="money detail-metric-column">{{ number_format($row['first_shipping_cost'],2) }}</td><td class="money detail-metric-column">{{ number_format($row['first_return_fee'],2) }}</td><td class="money detail-metric-column">{{ number_format($row['first_total_cost'],2) }}</td><td class="money detail-metric-column {{ $row['first_profit'] >= 0 ? 'profit-positive' : 'profit-negative' }}">{{ number_format($row['first_profit'],2) }}</td><td class="number detail-metric-column {{ ($row['first_loss_rate'] ?? 0) >= 0 ? 'profit-positive' : 'profit-negative' }}">{{ $row['first_loss_rate'] !== null ? number_format($row['first_loss_rate'] * 100,2).'%' : '—' }}</td>@endif
                         @if($countField === 'renewal_orders')<td class="money detail-metric-column">{{ number_format($row['renewal_revenue'],2) }}</td>@endif
                     @endif
                 @endforeach
-                @if(($metricDateRowspans[$loop->index] ?? 0) > 0)@php($daily = $dailySummaries[$row['date']])
+                @if(($metricDateRowspans[$loop->index] ?? 0) > 0)@php($daily = $dailySummaries[$row['operator_user_id'].'|'.$row['date']])
                     <td class="daily-summary-cell" rowspan="{{ $metricDateRowspans[$loop->index] }}">{{ $daily['first_total_orders'] }}</td><td class="daily-summary-cell" rowspan="{{ $metricDateRowspans[$loop->index] }}">{{ $daily['first_subscription_rate'] !== null ? number_format($daily['first_subscription_rate'] * 100,2).'%' : '—' }}</td><td class="daily-summary-cell" rowspan="{{ $metricDateRowspans[$loop->index] }}">{{ number_format($daily['first_total_revenue'],2) }}</td><td class="daily-summary-cell" rowspan="{{ $metricDateRowspans[$loop->index] }}">{{ number_format($daily['first_total_cost'],2) }}</td><td class="daily-summary-cell" rowspan="{{ $metricDateRowspans[$loop->index] }}">{{ $daily['first_loss_rate'] !== null ? number_format($daily['first_loss_rate']*100,2).'%' : '—' }}</td>
-                    <td class="daily-summary-cell daily-media-cell" rowspan="{{ $metricDateRowspans[$loop->index] }}"><div class="daily-media-list">@foreach($daily['media_names'] as $mediaIndex => $media)<span>{{ $media }}：<button type="button" class="order-count-link media-order-link" data-date="{{ $row['date'] }}" data-domain="" data-media="{{ $media }}" data-type="first_total">{{ (int)($daily['media_order_counts'][$mediaIndex] ?? 0) }} 单</button> / ROI {{ ($daily['media_rois'][$mediaIndex] ?? null) !== null ? number_format($daily['media_rois'][$mediaIndex],2) : '—' }}</span>@endforeach</div></td>
+                    <td class="daily-summary-cell daily-media-cell" rowspan="{{ $metricDateRowspans[$loop->index] }}"><div class="daily-media-list">@foreach($daily['media_names'] as $mediaIndex => $media)<span>{{ $media }}：<button type="button" class="order-count-link media-order-link" data-operator="{{ $row['operator_user_id'] }}" data-date="{{ $row['date'] }}" data-domain="" data-media="{{ $media }}" data-type="first_total">{{ (int)($daily['media_order_counts'][$mediaIndex] ?? 0) }} 单</button> / ROI {{ ($daily['media_rois'][$mediaIndex] ?? null) !== null ? number_format($daily['media_rois'][$mediaIndex],2) : '—' }}</span>@endforeach</div></td>
                     <td class="daily-summary-cell" rowspan="{{ $metricDateRowspans[$loop->index] }}">{{ $daily['first_roi'] !== null ? number_format($daily['first_roi'],2) : '—' }}</td><td class="daily-summary-cell" rowspan="{{ $metricDateRowspans[$loop->index] }}">{{ $daily['renewal_orders'] }}</td><td class="daily-summary-cell" rowspan="{{ $metricDateRowspans[$loop->index] }}">{{ number_format($daily['renewal_revenue'],2) }}</td><td class="daily-summary-cell ad-metric" rowspan="{{ $metricDateRowspans[$loop->index] }}">{{ number_format($daily['actual_ad_spend'],2) }}</td>
                 @endif
             </tr>@empty<tr><td colspan="27" class="text-center text-muted" style="padding:40px">该月份没有可统计的订单</td></tr>@endforelse</tbody>
@@ -76,7 +77,7 @@
 (function(){document.querySelectorAll('.detail-column-toggle').forEach(function(button){button.addEventListener('click',function(){var table=document.getElementById(button.getAttribute('data-table'));if(!table)return;var collapsed=table.classList.toggle('details-collapsed');button.querySelector('span').textContent=collapsed?'显示明细列':'隐藏明细列';});});})();
 (function ($) {
     var endpoint = @json(route('operation.reports.order-details'));
-    var operatorId = @json((int) $selectedOperator->id);
+    var operatorId = @json($selectedOperator ? (int) $selectedOperator->id : null);
     var activeQuery = null;
     var typeLabels = {first_subscription:'首单订阅',first_normal:'首单普通',first_total:'首单合计',renewal:'续费单',total:'全部订单'};
     function esc(value){ return $('<div>').text(value == null ? '' : String(value)).html(); }
@@ -115,7 +116,7 @@
     }
     $(document).on('click','.order-count-link',function(){
         var button=$(this), type=button.data('type'), modal=$('#orderDetailModal'), body=$('#orderDetailBody');
-        activeQuery={date:button.data('date'),shop_domain:button.data('domain'),media_source:button.data('media'),type:type,operator_user_id:operatorId};
+        activeQuery={date:button.data('date'),shop_domain:button.data('domain'),media_source:button.data('media'),type:type,operator_user_id:Number(button.data('operator')||operatorId)};
         modal.modal('show'); loadOrders(1);
     });
     $(document).on('click','.detail-page-btn:not([disabled])',function(){loadOrders(Number($(this).data('page')));});
