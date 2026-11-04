@@ -1800,6 +1800,13 @@ class ProductRequestController extends Controller
     }
 
     /** 已有产品库（运营系统只读版）：数据源与 PCL SKU 管理完全一致，仅查看与搜索 */
+    public function nonRunnableProductLibraryIndex(Request $request): Response|View
+    {
+        $request->attributes->set('non_runnable_product_library', true);
+
+        return $this->existingProductLibraryIndex($request);
+    }
+
     public function existingProductLibraryIndex(Request $request): Response|View
     {
         $context = $this->anyPortalContext($request);
@@ -1809,7 +1816,8 @@ class ProductRequestController extends Controller
         abort_unless($context['portal']->code === 'aikaipin' || $this->access->canViewExistingProductLibrary($context['user']), 403);
 
         $keyword = trim((string) $request->query('keyword', ''));
-        $runnableFilter = (string) $request->query('is_runnable', '');
+        $nonRunnableLibrary = (bool) $request->attributes->get('non_runnable_product_library', false);
+        $runnableFilter = $nonRunnableLibrary ? '0' : (string) $request->query('is_runnable', '');
         $reasonFilter = (string) $request->query('not_runnable_reason', '');
         $perPage = (int) $request->query('per_page', 10);
         if (!in_array($perPage, [10, 20], true)) {
@@ -1858,6 +1866,12 @@ class ProductRequestController extends Controller
                 'not_runnable_reason' => $reasonFilter,
                 'per_page' => $perPage,
             ],
+            'libraryTitle' => $nonRunnableLibrary ? '禁跑清单' : '已有产品库',
+            'libraryDescription' => $nonRunnableLibrary ? '查看已有产品库中已标记为不可跑的产品数据（只读）' : '查看和搜索已录入的 PCL SKU 产品数据（只读）',
+            'libraryRoute' => $nonRunnableLibrary
+                ? 'product-requests.operation.non-runnable-product-library'
+                : 'product-requests.operation.existing-product-library',
+            'showRunnableFilter' => !$nonRunnableLibrary,
         ]);
     }
 

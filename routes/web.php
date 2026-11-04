@@ -119,6 +119,7 @@ Route::get('/operation/ai-product-library/{product}/images/{imageIndex}', [Opera
 Route::get('/operation/ai-product-library/{product}/package', [OperationAiProductLibraryController::class, 'downloadPackage'])->name('operation.ai-product-library.package.download');
 Route::get('/operation/existing-product-library', [ProductRequestController::class, 'existingProductLibraryIndex'])->name('product-requests.operation.existing-product-library');
 Route::get('/operation/existing-product-library/{linkSku}', [ProductRequestController::class, 'existingProductLibraryDetail'])->name('product-requests.operation.existing-product-library.detail');
+Route::get('/operation/non-runnable-product-library', [ProductRequestController::class, 'nonRunnableProductLibraryIndex'])->name('product-requests.operation.non-runnable-product-library');
 Route::post('/operation/domain-stores/{domainStore}/refresh', [OperationDomainStoreController::class, 'refresh'])->name('operation.domain-stores.refresh');
 Route::get('/api/product-requests/operation-pending-count', [ProductRequestController::class, 'operationPendingCount'])->name('product-requests.operation.pending-count');
 Route::get('/api/procurement-inspections/pending-count', [ProductRequestController::class, 'procurementPendingCount'])->name('product-requests.procurement.pending-count');
