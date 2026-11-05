@@ -25,6 +25,14 @@
 @push('scripts')
 <script src="{{ asset('assets/erp/finance-export-selection.js') }}?v=1"></script>
 <script>
+document.addEventListener('change', function (event) {
+    var select = event.target;
+    if (!select.matches('select[data-finance-page-size]')) return;
+    var url = new window.URL(window.location.href);
+    url.searchParams.set('per_page', select.value);
+    url.searchParams.delete('page');
+    window.location.assign(url.toString());
+});
 document.addEventListener('click', function (event) {
     var button = event.target.closest('[data-finance-download]');
     if (!button) return;
