@@ -175,6 +175,28 @@ class OperationReportReviewController extends Controller
         return redirect()->route('assistant.operation-report-reviews.index')->with('success', '运营报表已审核不通过。');
     }
 
+    public function destroy(Request $request, OperationReport $report): RedirectResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        abort_unless($this->canAccessReport($report, $context['user']), 403);
+
+        $operatorName = $report->operator_name;
+        $reportDate = $report->report_date?->format('Y-m-d');
+        $screenshots = collect($report->advertising_rows ?: [])
+            ->pluck('screenshot')
+            ->filter(fn ($path): bool => is_string($path) && $path !== '')
+            ->unique()
+            ->values()
+            ->all();
+
+        $report->delete();
+        if ($screenshots !== []) Storage::disk('public')->delete($screenshots);
+
+        return redirect()->route('assistant.operation-report-reviews.index')
+            ->with('success', "已删除 {$operatorName} 在 {$reportDate} 的广告费提报，运营可以重新提交该日期的数据。");
+    }
+
     public function bulkReview(Request $request): RedirectResponse
     {
         $context = $this->context($request);
