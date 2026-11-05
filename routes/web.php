@@ -36,6 +36,7 @@ Route::get('/management/menus', [PortalMenuConfigurationController::class, 'inde
 Route::post('/management/menus/order', [PortalMenuConfigurationController::class, 'saveOrder'])->name('portal.menus.order');
 Route::get('/internal-messages', [InternalMessageController::class, 'index'])->name('internal-messages.index');
 Route::get('/abnormal-orders', [AbnormalOrderController::class, 'index'])->name('abnormal-orders.index');
+Route::get('/api/operation/abnormal-orders/pending-count', [AbnormalOrderController::class, 'pendingCount'])->name('operation.abnormal-orders.pending-count');
 Route::patch('/abnormal-orders/{order}/status', [AbnormalOrderController::class, 'updateStatus'])->whereNumber('order')->name('abnormal-orders.status');
 Route::post('/abnormal-orders/{order}/notify', [AbnormalOrderController::class, 'notify'])->whereNumber('order')->name('abnormal-orders.notify');
 Route::post('/internal-messages', [InternalMessageController::class, 'store'])->name('internal-messages.store');

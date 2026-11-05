@@ -64,6 +64,8 @@
             <span id="warehouse-weight-exception-badge" class="badge bg-yellow" style="margin-left:6px;">0</span>
             @elseif($menu->code === 'operation_internal_messages')
             <span id="operation-internal-message-badge" class="badge bg-yellow" style="margin-left:6px;">0</span>
+            @elseif($menu->code === 'operation_abnormal_orders')
+            <span id="operation-abnormal-order-badge" class="badge bg-yellow" style="margin-left:6px;">0</span>
             @endif
         </a>
     </li>

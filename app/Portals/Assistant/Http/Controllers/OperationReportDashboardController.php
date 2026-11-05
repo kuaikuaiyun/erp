@@ -336,12 +336,18 @@ class OperationReportDashboardController extends Controller
     private function totals(array $rows, float $actualAdSpend): array
     {
         $fields = ['first_subscription_orders','first_subscription_revenue','first_normal_orders','first_normal_revenue','first_total_orders','first_total_revenue','first_purchase_cost','first_shipping_cost','first_return_fee','renewal_orders','renewal_revenue','renewal_cost','total_orders','total_revenue'];
-        $totals = collect($fields)->mapWithKeys(fn ($field) => [$field => (float) collect($rows)->sum($field)])->all();
+        $rowCollection = collect($rows);
+        $totals = collect($fields)->mapWithKeys(fn ($field) => [$field => (float) $rowCollection->sum($field)])->all();
         $totals['first_total_cost'] = $totals['first_purchase_cost'] + $totals['first_shipping_cost'] + $totals['first_return_fee'];
         $totals['actual_ad_spend'] = $actualAdSpend;
         $totals['first_profit'] = $totals['first_total_revenue'] - $actualAdSpend - $totals['first_total_cost'];
         $totals['first_loss_rate'] = $totals['first_total_cost'] > 0 ? $totals['first_profit'] / $totals['first_total_cost'] : null;
-        $totals['first_roi'] = $actualAdSpend > 0 ? $totals['first_total_revenue'] / $actualAdSpend : null;
+        // ROI must use revenue and ad spend from the same submitted operators. Mixing revenue
+        // from operators without an approved ad report would inflate the combined ROI.
+        $reportedFirstRevenue = (float) $rowCollection
+            ->filter(fn (array $row): bool => (float) ($row['report_actual_ad_spend'] ?? 0) > 0)
+            ->sum('first_total_revenue');
+        $totals['first_roi'] = $actualAdSpend > 0 ? $reportedFirstRevenue / $actualAdSpend : null;
         $totals['first_average_order_value'] = $totals['first_total_orders'] > 0
             ? $totals['first_total_revenue'] / $totals['first_total_orders']
             : null;
