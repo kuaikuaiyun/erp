@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class FashionLogisticsSyncState extends Model
 {
@@ -23,5 +24,10 @@ class FashionLogisticsSyncState extends Model
     public function store(): BelongsTo
     {
         return $this->belongsTo(AssistantDomainStore::class, 'assistant_domain_store_id');
+    }
+
+    public function orders(): HasMany
+    {
+        return $this->hasMany(FashionLogisticsOrder::class, 'assistant_domain_store_id', 'assistant_domain_store_id');
     }
 }

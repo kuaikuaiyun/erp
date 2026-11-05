@@ -61,7 +61,11 @@ class FashionOrderController extends Controller
 
         $orders = $query->latest('order_created_at')->latest('id')->paginate((int) ($validated['per_page'] ?? 20))->withQueryString();
         $stores = AssistantDomainStore::query()->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy')")->orderBy('shop_name')->get(['id', 'shop_name', 'domain']);
-        $syncStates = FashionLogisticsSyncState::query()->with('store:id,shop_name,domain')->latest('last_started_at')->get();
+        $syncStates = FashionLogisticsSyncState::query()
+            ->with('store:id,shop_name,domain')
+            ->withCount(['orders as stored_orders_count'])
+            ->latest('last_started_at')
+            ->get();
         $statuses = FashionLogisticsOrder::query()->whereNotNull('status')->where('status', '!=', '')->distinct()->orderBy('status')->pluck('status');
 
         return view('portals.fashion-logistics.orders.index', [
