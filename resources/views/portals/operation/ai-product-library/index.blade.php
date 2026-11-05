@@ -147,6 +147,9 @@
                                         @if (count($skus) > 1)<span class="aikaipin-sku-more">+{{ count($skus) - 1 }}</span>@endif
                                     </span>
                                 @endif
+                                @if($product->hasShopifyData())
+                                    <span class="label label-success" style="display:inline-block;margin-top:5px;">Shopify 完整资料</span>
+                                @endif
                             </td>
                             <td class="aikaipin-category-cell">
                                 @foreach ($product->categoryValues() as $category)<span class="label label-default">{{ $category }}</span>@endforeach
@@ -209,6 +212,7 @@
         <div class="modal-body" data-operation-ai-publish-content><div class="text-center text-muted"><i class="fa fa-spinner fa-spin"></i> 正在加载店铺信息...</div></div>
     </div></div>
 </div>
+
 @endsection
 
 @push('scripts')
@@ -250,9 +254,14 @@
             ? '<a class="btn btn-primary btn-sm" href="' + escapeHtml(data.package_download_url) + '"><i class="fa fa-download"></i> ' + escapeHtml(labels.download_package) + '</a>' +
                 '<span class="text-muted" style="margin-left:8px;">' + escapeHtml(data.package_file_name) + '</span>'
             : escapeHtml(labels.empty);
+        var shopifyData = data.shopify_data
+            ? escapeHtml(data.shopify_data.title) + '<br><small>' +
+                escapeHtml(data.shopify_data.vendor + ' / ' + data.shopify_data.product_type + ' / ' + data.shopify_data.variant_count + ' 个规格 / ' + data.shopify_data.image_count + ' 张图片') + '</small>'
+            : escapeHtml(labels.empty);
         content.innerHTML =
             hero + item(labels.sku, value(data.skus), true) + item(labels.category, value(data.categories), true) +
             item(labels.source_type, value(data.source_label) + ' / ' + value(data.type_label)) + item(labels.landing_page, landing) +
+            item('Shopify 完整资料', shopifyData, true) +
             item(labels.images, images, true) + item(labels.reference_file, value(data.reference_file_name)) +
             item(labels.package_file, packageFile) + item(labels.creator, value(data.created_by_name)) +
             item(labels.updater, value(data.updated_by_name)) + item(labels.created_at, value(data.created_at)) +

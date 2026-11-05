@@ -269,6 +269,8 @@ Route::middleware(MonitorPaymentPerformance::class)->group(function (): void {
 Route::post('/product-library', [ProductLibraryController::class, 'storeProduct'])->name('aikaipin.product-library.store');
 Route::get('/product-library/{product}/edit-data', [ProductLibraryController::class, 'editProduct'])->name('aikaipin.product-library.edit');
 Route::put('/product-library/{product}', [ProductLibraryController::class, 'updateProduct'])->name('aikaipin.product-library.update');
+Route::post('/product-library/{product}/shopify-import/preview', [ProductLibraryController::class, 'previewShopifyImport'])->name('aikaipin.product-library.shopify-import.preview');
+Route::post('/product-library/{product}/shopify-import', [ProductLibraryController::class, 'importShopifyCsv'])->name('aikaipin.product-library.shopify-import.store');
 Route::delete('/product-library/{product}', [ProductLibraryController::class, 'destroyProduct'])->name('aikaipin.product-library.destroy');
 Route::post('/product-library/package-uploads', [ProductLibraryController::class, 'initializePackageUpload'])->name('aikaipin.product-library.package-uploads.initialize');
 Route::post('/product-library/package-uploads/{uploadToken}/parts/{chunkIndex}', [ProductLibraryController::class, 'storePackageUploadPart'])->whereNumber('chunkIndex')->name('aikaipin.product-library.package-uploads.parts.store');

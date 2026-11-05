@@ -3,13 +3,16 @@
 namespace App\Portals\Operation\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\AdminUser;
 use App\Models\AikaipinProduct;
 use App\Models\AiProductShopifyPublication;
 use App\Models\AssistantDomainStore;
+use App\Models\Portal;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Operation\AiProductShopifyPublisher;
 use App\Portals\ProductRequests\ProductRequestAccessService;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -25,8 +28,7 @@ class OperationAiProductLibraryController extends Controller
         private readonly PortalEntryController $portalEntries,
         private readonly ProductRequestAccessService $access,
         private readonly AiProductShopifyPublisher $shopifyPublisher,
-    ) {
-    }
+    ) {}
 
     public function index(Request $request): Response|View
     {
@@ -93,6 +95,13 @@ class OperationAiProductLibraryController extends Controller
                 : null,
             'created_by_name' => $product->created_by_name,
             'updated_by_name' => $product->updated_by_name,
+            'shopify_data' => $product->hasShopifyData() ? [
+                'title' => (string) data_get($product->shopifyData(), 'title'),
+                'vendor' => (string) data_get($product->shopifyData(), 'vendor'),
+                'product_type' => (string) data_get($product->shopifyData(), 'product_type'),
+                'variant_count' => count((array) data_get($product->shopifyData(), 'variants', [])),
+                'image_count' => count((array) data_get($product->shopifyData(), 'images', [])),
+            ] : null,
             'created_at' => $product->created_at?->timezone(config('app.timezone'))->format('Y-m-d H:i:s'),
             'updated_at' => $product->updated_at?->timezone(config('app.timezone'))->format('Y-m-d H:i:s'),
         ]);
@@ -110,6 +119,7 @@ class OperationAiProductLibraryController extends Controller
             'product' => $product,
             'stores' => $this->publishableStores($context['user']),
             'skus' => $product->skuValues(),
+            'shopifyData' => $product->shopifyData(),
         ]);
     }
 
@@ -215,7 +225,7 @@ class OperationAiProductLibraryController extends Controller
         ]);
     }
 
-    /** @return array{portal:\App\Models\Portal,user:\App\Models\AdminUser}|Response */
+    /** @return array{portal:Portal,user:AdminUser}|Response */
     private function portalContext(Request $request): array|Response
     {
         $context = $this->portalEntries->portalContext($request);
@@ -281,7 +291,7 @@ class OperationAiProductLibraryController extends Controller
             ->all();
     }
 
-    private function publishableStores(\App\Models\AdminUser $user): \Illuminate\Database\Eloquent\Collection
+    private function publishableStores(AdminUser $user): Collection
     {
         $query = AssistantDomainStore::query()
             ->with(['ownerUser:id,name,username', 'shopifyConnection'])
