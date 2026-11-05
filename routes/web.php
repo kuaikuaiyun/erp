@@ -120,6 +120,7 @@ Route::get('/product-request-dedupe', [ProductRequestController::class, 'operati
 Route::get('/operation/domain-stores', [OperationDomainStoreController::class, 'index'])->name('operation.domain-stores.index');
 Route::get('/operation/ai-product-library', [OperationAiProductLibraryController::class, 'index'])->name('operation.ai-product-library.index');
 Route::get('/operation/reports', [OperationReportController::class, 'index'])->name('operation.reports.index');
+Route::get('/operation/weekly-reports', [OperationReportController::class, 'weekly'])->name('operation.weekly-reports.index');
 Route::get('/operation/reports/order-details', [OperationReportController::class, 'orderDetails'])->name('operation.reports.order-details');
 Route::get('/operation/advertising-reports', [OperationReportController::class, 'advertising'])->name('operation.advertising-reports.index');
 Route::get('/operation/advertising-reports/import-template', [OperationReportController::class, 'advertisingImportTemplate'])->name('operation.advertising-reports.import-template');
