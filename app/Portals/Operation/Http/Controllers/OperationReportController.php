@@ -220,20 +220,21 @@ class OperationReportController extends Controller
         $user = $context['user'];
         $isBoss = $this->isBoss($user);
         $validated = $request->validate([
-            'week_date' => ['nullable', 'date_format:Y-m-d'],
+            'date_from' => ['nullable', 'date_format:Y-m-d'],
+            'date_to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:date_from'],
             'operation_department_id' => ['nullable', 'integer'],
             'operator_user_id' => ['nullable', 'string', 'max:20'],
         ]);
 
-        $weekDate = Carbon::createFromFormat(
-            'Y-m-d',
-            (string) ($validated['week_date'] ?? Carbon::now(OperationReportMetricsService::REPORT_TIMEZONE)->format('Y-m-d')),
-            OperationReportMetricsService::REPORT_TIMEZONE
-        );
-        $weekStart = $weekDate->copy()->startOfWeek(Carbon::MONDAY);
-        $weekEnd = $weekStart->copy()->endOfWeek(Carbon::SUNDAY);
-        $dateFrom = $weekStart->format('Y-m-d');
-        $dateTo = $weekEnd->format('Y-m-d');
+        $now = Carbon::now(OperationReportMetricsService::REPORT_TIMEZONE);
+        $requestedDateFrom = (string) ($validated['date_from'] ?? $now->copy()->startOfMonth()->format('Y-m-d'));
+        $requestedDateTo = (string) ($validated['date_to'] ?? $now->copy()->endOfMonth()->format('Y-m-d'));
+        $rangeStart = Carbon::createFromFormat('Y-m-d', $requestedDateFrom, OperationReportMetricsService::REPORT_TIMEZONE)
+            ->startOfWeek(Carbon::MONDAY)->startOfDay();
+        $rangeEnd = Carbon::createFromFormat('Y-m-d', $requestedDateTo, OperationReportMetricsService::REPORT_TIMEZONE)
+            ->endOfWeek(Carbon::SUNDAY)->startOfDay();
+        $dateFrom = $rangeStart->format('Y-m-d');
+        $dateTo = $rangeEnd->format('Y-m-d');
 
         $operationDepartmentIds = $this->assistantStoreOwners->operationDepartments()->pluck('id');
         $operationDepartments = $isBoss
@@ -275,63 +276,63 @@ class OperationReportController extends Controller
             ? $operatorOptions->pluck('id')->map(fn ($id) => (int) $id)->values()
             : collect([$operatorId]);
         $selectedOperator = $selectAllOperators ? null : $operatorOptions->firstWhere('id', $operatorId);
-        $calculatedByOperator = $this->metrics->buildRangeForOperators($dateFrom, $dateTo, $operatorIds->all());
-        $reportsByOperator = OperationReport::query()
-            ->whereIn('operator_user_id', $operatorIds->all())
-            ->whereBetween('report_date', [$dateFrom, $dateTo])
-            ->where('status', OperationReport::STATUS_APPROVED)
-            ->get()
-            ->groupBy(fn (OperationReport $report) => (int) $report->operator_user_id);
+        $periods = collect();
+        $cursor = $rangeStart->copy();
+        while ($cursor->lte($rangeEnd)) {
+            $periodStart = $cursor->copy();
+            $periodEnd = $cursor->copy()->endOfWeek(Carbon::SUNDAY);
+            if ($periodEnd->gt($rangeEnd)) $periodEnd = $rangeEnd->copy();
+            $periods->push([$periodStart->format('Y-m-d'), $periodEnd->format('Y-m-d')]);
+            $cursor = $periodEnd->copy()->addDay();
+        }
 
-        $weeklyRows = $operatorIds->map(function (int $id) use ($operatorOptions, $calculatedByOperator, $reportsByOperator): array {
-            $operator = $operatorOptions->firstWhere('id', $id) ?: AdminUser::query()->find($id);
-            $rows = $calculatedByOperator[$id]['rows'] ?? [];
-            $totals = $this->sumRows($rows);
-            $reports = $reportsByOperator->get($id, collect());
-            $adSpend = (float) $reports->sum('actual_ad_spend');
-            $firstCost = (float) $totals['first_purchase_cost']
-                + (float) $totals['first_shipping_cost']
-                + (float) $totals['first_return_fee'];
-            $firstRevenue = (float) $totals['first_total_revenue'];
-            $firstOrders = (int) $totals['first_total_orders'];
-            $firstProfit = $firstRevenue - $adSpend - $firstCost;
-            $department = $operator ? $this->assistantStoreOwners->operationDepartmentForUser($operator) : null;
-            $advertisingRows = $reports->flatMap(fn (OperationReport $report) => $report->advertising_rows ?? [])->values()->all();
-            $mediaOrderCounts = collect($rows)->groupBy(
-                fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? '其他')))
-            )->map(fn ($mediaRows) => (int) $mediaRows->sum('first_total_orders'));
-            $mediaSummary = collect($this->metrics->mediaRoiSummary($rows, $advertisingRows))
-                ->map(function (array $media) use ($mediaOrderCounts): array {
-                    $media['first_orders'] = (int) ($mediaOrderCounts[mb_strtolower(trim($media['media_source']))] ?? 0);
-                    return $media;
-                })->values()->all();
+        $weeklyRows = $periods->flatMap(function (array $period) use ($operatorIds, $operatorOptions) {
+            [$periodFrom, $periodTo] = $period;
+            $calculatedByOperator = $this->metrics->buildRangeForOperators($periodFrom, $periodTo, $operatorIds->all());
+            $reportsByOperator = OperationReport::query()
+                ->whereIn('operator_user_id', $operatorIds->all())
+                ->whereBetween('report_date', [$periodFrom, $periodTo])
+                ->where('status', OperationReport::STATUS_APPROVED)
+                ->get()->groupBy(fn (OperationReport $report) => (int) $report->operator_user_id);
 
-            return [
-                'operator_user_id' => $id,
-                'operator_name' => $operator?->name ?: $operator?->username ?: '—',
-                'department_name' => $department?->name ?: '—',
-                'shop_domains' => collect($rows)->pluck('shop_domain')->filter()->unique()->sort()->values()->all(),
-                'first_orders' => $firstOrders,
-                'subscription_orders' => (int) $totals['first_subscription_orders'],
-                'subscription_revenue' => (float) $totals['first_subscription_revenue'],
-                'normal_orders' => (int) $totals['first_normal_orders'],
-                'normal_revenue' => (float) $totals['first_normal_revenue'],
-                'subscription_rate' => $firstOrders > 0 ? (int) $totals['first_subscription_orders'] / $firstOrders : null,
-                'first_revenue' => $firstRevenue,
-                'average_order_value' => $firstOrders > 0 ? $firstRevenue / $firstOrders : null,
-                'purchase_cost' => (float) $totals['first_purchase_cost'],
-                'shipping_cost' => (float) $totals['first_shipping_cost'],
-                'return_fee' => (float) $totals['first_return_fee'],
-                'first_cost' => $firstCost,
-                'ad_spend' => $adSpend,
-                'first_profit' => $firstProfit,
-                'first_loss_rate' => $firstCost > 0 ? $firstProfit / $firstCost : null,
-                'first_roi' => $adSpend > 0 ? $firstRevenue / $adSpend : null,
-                'media_summary' => $mediaSummary,
-                'renewal_orders' => (int) $totals['renewal_orders'],
-                'renewal_revenue' => (float) $totals['renewal_revenue'],
-                'total_revenue' => $firstRevenue + (float) $totals['renewal_revenue'],
-            ];
+            return $operatorIds->map(function (int $id) use ($operatorOptions, $calculatedByOperator, $reportsByOperator, $periodFrom, $periodTo): array {
+                $operator = $operatorOptions->firstWhere('id', $id) ?: AdminUser::query()->find($id);
+                $rows = $calculatedByOperator[$id]['rows'] ?? [];
+                $totals = $this->sumRows($rows);
+                $reports = $reportsByOperator->get($id, collect());
+                $adSpend = (float) $reports->sum('actual_ad_spend');
+                $firstCost = (float) $totals['first_purchase_cost'] + (float) $totals['first_shipping_cost'] + (float) $totals['first_return_fee'];
+                $firstRevenue = (float) $totals['first_total_revenue'];
+                $firstOrders = (int) $totals['first_total_orders'];
+                $firstProfit = $firstRevenue - $adSpend - $firstCost;
+                $department = $operator ? $this->assistantStoreOwners->operationDepartmentForUser($operator) : null;
+                $advertisingRows = $reports->flatMap(fn (OperationReport $report) => $report->advertising_rows ?? [])->values()->all();
+                $mediaOrderCounts = collect($rows)->groupBy(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? '其他'))))
+                    ->map(fn ($mediaRows) => (int) $mediaRows->sum('first_total_orders'));
+                $mediaSummary = collect($this->metrics->mediaRoiSummary($rows, $advertisingRows))
+                    ->map(function (array $media) use ($mediaOrderCounts): array {
+                        $media['first_orders'] = (int) ($mediaOrderCounts[mb_strtolower(trim($media['media_source']))] ?? 0);
+                        return $media;
+                    })->values()->all();
+
+                return [
+                    'period_from' => $periodFrom, 'period_to' => $periodTo,
+                    'operator_user_id' => $id, 'operator_name' => $operator?->name ?: $operator?->username ?: '—',
+                    'department_name' => $department?->name ?: '—',
+                    'shop_domains' => collect($rows)->pluck('shop_domain')->filter()->unique()->sort()->values()->all(),
+                    'first_orders' => $firstOrders, 'subscription_orders' => (int) $totals['first_subscription_orders'],
+                    'subscription_revenue' => (float) $totals['first_subscription_revenue'],
+                    'normal_orders' => (int) $totals['first_normal_orders'], 'normal_revenue' => (float) $totals['first_normal_revenue'],
+                    'subscription_rate' => $firstOrders > 0 ? (int) $totals['first_subscription_orders'] / $firstOrders : null,
+                    'first_revenue' => $firstRevenue, 'average_order_value' => $firstOrders > 0 ? $firstRevenue / $firstOrders : null,
+                    'purchase_cost' => (float) $totals['first_purchase_cost'], 'shipping_cost' => (float) $totals['first_shipping_cost'],
+                    'return_fee' => (float) $totals['first_return_fee'], 'first_cost' => $firstCost, 'ad_spend' => $adSpend,
+                    'first_profit' => $firstProfit, 'first_loss_rate' => $firstCost > 0 ? $firstProfit / $firstCost : null,
+                    'first_roi' => $adSpend > 0 ? $firstRevenue / $adSpend : null, 'media_summary' => $mediaSummary,
+                    'renewal_orders' => (int) $totals['renewal_orders'], 'renewal_revenue' => (float) $totals['renewal_revenue'],
+                    'total_revenue' => $firstRevenue + (float) $totals['renewal_revenue'],
+                ];
+            });
         })->values();
 
         $summary = [
@@ -372,11 +373,8 @@ class OperationReportController extends Controller
             'canSelectOperator' => $canSelectOperator,
             'selectAllOperators' => $selectAllOperators,
             'selectedOperator' => $selectedOperator,
-            'weekDate' => $weekDate->format('Y-m-d'),
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
-            'previousWeek' => $weekStart->copy()->subWeek()->format('Y-m-d'),
-            'nextWeek' => $weekStart->copy()->addWeek()->format('Y-m-d'),
             'weeklyRows' => $weeklyRows,
             'summary' => $summary,
         ]);
