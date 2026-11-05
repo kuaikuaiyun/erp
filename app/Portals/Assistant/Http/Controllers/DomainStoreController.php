@@ -393,7 +393,7 @@ class DomainStoreController extends Controller
         }
 
         $this->authorization->ensureCanManageDomainStores($context['user']);
-        $data = $this->validatedData($request);
+        $data = $this->validatedData($request, null, $context['user']);
         $departmentAccess = $this->departmentAccessForRequest($request, $context['user']);
         $ownerUserId = $this->ownerAssignmentForRequest($request, $context['user']);
         $ownerEffectiveAt = $this->ownerEffectiveAt($request);
@@ -468,7 +468,7 @@ class DomainStoreController extends Controller
 
         $this->authorization->ensureCanManageDomainStores($context['user']);
         $domainStore = $this->findAccessibleStoreOrFail($context['user'], $domainStore->getKey());
-        $data = $this->validatedData($request, $domainStore);
+        $data = $this->validatedData($request, $domainStore, $context['user']);
         $departmentAccess = $this->departmentAccessForRequest($request, $context['user'], $domainStore);
         $ownerUserId = $this->ownerAssignmentForRequest($request, $context['user'], $domainStore);
         $ownerEffectiveAt = $this->ownerEffectiveAt($request);
@@ -623,6 +623,7 @@ class DomainStoreController extends Controller
 
         try {
             $payload = $this->batchUpdatePayload($request);
+            $this->ensureQuickOptionValuesAreAllowed($payload['values'], $context['user'], null, 'values.');
             $updatedCount = DB::connection(config('admin.database.connection') ?: config('database.default'))
                 ->transaction(function () use ($payload, $context): int {
                     $stores = $this->batchEditableStores($context['user'], $payload['selected_ids']);
@@ -1282,6 +1283,17 @@ class DomainStoreController extends Controller
             }
         }
 
+        $ownerEffectiveAt = old('owner_effective_at');
+        if (($ownerEffectiveAt === null || $ownerEffectiveAt === '') && $store?->exists) {
+            $ownerEffectiveAt = $store->ownerHistories()
+                ->where('effective_from', '<=', now()->utc())
+                ->orderByDesc('effective_from')
+                ->value('effective_from');
+            $ownerEffectiveAt = $ownerEffectiveAt === null
+                ? ''
+                : Carbon::parse($ownerEffectiveAt)->timezone('Asia/Shanghai')->format('Y-m-d\\TH:i');
+        }
+
         return [
             'canAssignStoreOwner' => $canAssignStoreOwner,
             'ownerOperationDepartments' => $departments,
@@ -1289,6 +1301,7 @@ class DomainStoreController extends Controller
             'ownerOperationDepartmentId' => $operationDepartmentId,
             'ownerUserId' => $ownerUserId,
             'currentOwnerOutsideScope' => $currentOwner,
+            'ownerEffectiveAt' => (string) ($ownerEffectiveAt ?? ''),
         ];
     }
 
@@ -1657,13 +1670,13 @@ class DomainStoreController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function validatedData(Request $request, ?AssistantDomainStore $ignoreStore = null): array
+    private function validatedData(Request $request, ?AssistantDomainStore $ignoreStore = null, ?AdminUser $user = null): array
     {
         foreach ([
             'site_builder', 'shop_name', 'domain', 'email', 'project', 'user_name',
             'credit_card', 'wallet', 'paypal', 'other_payment', 'shop_login_url', 'store_prefix',
             'tongtu_prefix',
-            'shopify_client_id', 'shopify_client_secret', 'payment_card', 'remark',
+            'shopify_client_id', 'shopify_client_secret', 'xshoppy_api_key', 'xshoppy_password', 'payment_card', 'remark',
         ] as $field) {
             if ($request->has($field)) {
                 $request->merge([$field => trim((string) $request->input($field))]);
@@ -1672,6 +1685,10 @@ class DomainStoreController extends Controller
 
         $data = $this->normalizeValidatedData($request->validate($this->storeRules()));
 
+        if ($user !== null) {
+            $this->ensureQuickOptionValuesAreAllowed($data, $user, $ignoreStore);
+        }
+
         if ($this->storeDomainPairExists($data, $ignoreStore)) {
             throw ValidationException::withMessages([
                 'shop_name' => __('assistant.domain_stores.validation.store_domain_exists'),
@@ -1679,6 +1696,52 @@ class DomainStoreController extends Controller
         }
 
         return $data;
+    }
+
+    /** @param array<string, mixed> $data */
+    private function ensureQuickOptionValuesAreAllowed(array $data, AdminUser $user, ?AssistantDomainStore $existingStore = null, string $fieldPrefix = ''): void
+    {
+        if ($this->authorization->canManageQuickOptions($user)) {
+            return;
+        }
+
+        $quickOptions = AssistantDomainStoreQuickOption::valuesByField();
+        $allowed = [
+            'site_builder' => [...array_keys(AssistantDomainStore::siteBuilderOptions()), ...($quickOptions['site_builder'] ?? [])],
+            'credit_card' => [...array_keys(AssistantDomainStore::creditCardOptions()), ...($quickOptions['credit_card'] ?? [])],
+            'wallet' => [...array_keys(AssistantDomainStore::walletOptions()), ...($quickOptions['wallet'] ?? [])],
+            'paypal' => [...array_keys(AssistantDomainStore::paypalOptions()), ...($quickOptions['paypal'] ?? [])],
+            'other_payment' => [...array_keys(AssistantDomainStore::otherPaymentOptions()), ...($quickOptions['other_payment'] ?? [])],
+            'project' => $quickOptions['project'] ?? [],
+            'team' => $quickOptions['team'] ?? [],
+        ];
+        $existingValues = [
+            'site_builder' => (string) ($existingStore?->site_builder ?? ''),
+            'credit_card' => (string) ($existingStore?->credit_card ?? ''),
+            'wallet' => (string) ($existingStore?->wallet ?? ''),
+            'paypal' => (string) ($existingStore?->paypal ?? ''),
+            'other_payment' => (string) ($existingStore?->other_payment ?? ''),
+            'project' => (string) ($existingStore?->project ?? ''),
+            'team' => AssistantDomainStore::normalizeMultiValue($existingStore?->team),
+        ];
+        $errors = [];
+
+        foreach (['site_builder', 'credit_card', 'wallet', 'paypal', 'other_payment', 'project'] as $field) {
+            $value = trim((string) ($data[$field] ?? ''));
+            if ($value !== '' && !in_array($value, [...$allowed[$field], $existingValues[$field]], true)) {
+                $errors[$fieldPrefix.$field] = '请从已有快捷选项中选择。';
+            }
+        }
+        foreach (AssistantDomainStore::normalizeMultiValue($data['team'] ?? null) as $value) {
+            if (!in_array($value, [...$allowed['team'], ...$existingValues['team']], true)) {
+                $errors[$fieldPrefix.'team'] = '请从已有快捷选项中选择。';
+                break;
+            }
+        }
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
     }
 
     /** @param array<string, mixed> $data
@@ -2032,6 +2095,8 @@ class DomainStoreController extends Controller
             'tongtu_prefix' => ['nullable', 'string', 'max:100'],
             'shopify_client_id' => ['nullable', 'string', 'max:255'],
             'shopify_client_secret' => ['nullable', 'string', 'max:255'],
+            'xshoppy_api_key' => ['nullable', 'string', 'max:255'],
+            'xshoppy_password' => ['nullable', 'string', 'max:255'],
             'shop_status' => ['required', 'in:'.implode(',', array_keys(AssistantDomainStore::shopStatusLabels()))],
             'plan_expires_at' => ['nullable', 'date'],
             'payment_card' => ['nullable', 'string', 'max:255'],

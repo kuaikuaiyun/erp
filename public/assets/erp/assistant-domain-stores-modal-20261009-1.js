@@ -289,12 +289,16 @@
     function initializeShopifyAndEmail(root) {
         var siteBuilder = root.find('#site_builder');
         var shopifySection = root.find('#assistant-shopify-app-section');
+        var xshoppySection = root.find('#assistant-xshoppy-app-section');
         var domain = root.find('#domain');
         var email = root.find('#email');
         var lastAutoValue = null;
 
         function syncShopify() {
-            shopifySection.prop('hidden', $.trim(String(siteBuilder.val() || '')).toLowerCase() !== 'shopify');
+            var value = $.trim(String(siteBuilder.val() || '')).toLowerCase();
+
+            shopifySection.prop('hidden', value !== 'shopify');
+            xshoppySection.prop('hidden', value !== 'xshoppy' && value !== 'xshopy');
         }
 
         function hostnameFromInput(rawValue) {

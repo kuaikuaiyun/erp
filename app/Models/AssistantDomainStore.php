@@ -28,6 +28,7 @@ class AssistantDomainStore extends Model
 
     private const SITE_BUILDER_OPTIONS = [
         'xshopy' => 'xshopy',
+        'xshoppy' => 'xshoppy',
         'nbc' => 'nbc',
         'shopyy' => 'shopyy',
         'shopline' => 'shopline',
@@ -107,6 +108,8 @@ class AssistantDomainStore extends Model
         'tongtu_prefix',
         'shopify_client_id',
         'shopify_client_secret',
+        'xshoppy_api_key',
+        'xshoppy_password',
         'shop_status',
         'plan_expires_at',
         'payment_card',

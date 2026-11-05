@@ -6,7 +6,7 @@
             initializeSingleOptionGroup($(this));
         });
 
-        initializeShopifyAppSection();
+        initializeSiteBuilderAppSections();
         initializeEmailSuggestion();
     });
 
@@ -33,16 +33,20 @@
         syncChoices();
     }
 
-    function initializeShopifyAppSection() {
+    function initializeSiteBuilderAppSections() {
         var siteBuilder = $('#site_builder');
-        var section = $('#assistant-shopify-app-section');
+        var shopifySection = $('#assistant-shopify-app-section');
+        var xshoppySection = $('#assistant-xshoppy-app-section');
 
-        if (!siteBuilder.length || !section.length) {
+        if (!siteBuilder.length) {
             return;
         }
 
         function syncVisibility() {
-            section.prop('hidden', $.trim(String(siteBuilder.val() || '')).toLowerCase() !== 'shopify');
+            var value = $.trim(String(siteBuilder.val() || '')).toLowerCase();
+
+            shopifySection.prop('hidden', value !== 'shopify');
+            xshoppySection.prop('hidden', value !== 'xshoppy' && value !== 'xshopy');
         }
 
         siteBuilder.on('input change', syncVisibility);

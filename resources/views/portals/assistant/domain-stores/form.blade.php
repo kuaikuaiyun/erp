@@ -163,7 +163,7 @@
                                             <button type="button" class="assistant-tag-remove" aria-label="{{ $t('javascript.remove_tag', ['name' => $tag]) }}" title="{{ $t('javascript.remove') }}"><i class="fa fa-times"></i></button>
                                         </span>
                                     @endforeach
-                                    <input id="team" type="text" class="assistant-tag-entry" maxlength="100" placeholder="{{ $t('form.team_placeholder') }}">
+                                    <input id="team" type="text" class="assistant-tag-entry" maxlength="100" placeholder="{{ $t('form.team_placeholder') }}" @readonly(! $canManageQuickOptions)>
                                 </div>
                                 @if ($canManageQuickOptions)
                                     <button type="button" class="btn btn-default assistant-add-team-project-quick-option"><i class="fa fa-plus"></i> {{ $t('form.add_quick_option') }}</button>
@@ -187,7 +187,7 @@
                         <label for="project">{{ $t('fields.project') }}</label>
                         <div class="assistant-quick-option-group assistant-project-option-group" data-project-quick-option-group data-quick-option-field="project">
                             <div class="assistant-quick-option-input-row">
-                                <input id="project" name="project" class="form-control" value="{{ $value('project') }}" maxlength="100">
+                                <input id="project" name="project" class="form-control" value="{{ $value('project') }}" maxlength="100" @readonly(! $canManageQuickOptions)>
                                 @if ($canManageQuickOptions)
                                     <button type="button" class="btn btn-default assistant-add-team-project-quick-option"><i class="fa fa-plus"></i> {{ $t('form.add_quick_option') }}</button>
                                 @endif
@@ -215,7 +215,7 @@
                         <label for="site_builder">{{ $t('fields.site_builder') }}</label>
                         <div class="assistant-single-option-input" data-single-option-group data-quick-option-field="site_builder">
                             <div class="assistant-quick-option-input-row">
-                                <input id="site_builder" name="site_builder" class="form-control" value="{{ $value('site_builder') }}" maxlength="100" placeholder="{{ $t('form.custom_option_placeholder') }}">
+                                <input id="site_builder" name="site_builder" class="form-control" value="{{ $value('site_builder') }}" maxlength="100" placeholder="{{ $t('form.custom_option_placeholder') }}" @readonly(! $canManageQuickOptions)>
                                 @if ($canManageQuickOptions)
                                     <button type="button" class="btn btn-default assistant-add-quick-option"><i class="fa fa-plus"></i> {{ $t('form.add_quick_option') }}</button>
                                 @endif
@@ -271,7 +271,7 @@
                         <label for="credit_card">{{ $t('fields.credit_card') }}</label>
                         <div class="assistant-single-option-input" data-single-option-group data-quick-option-field="credit_card">
                             <div class="assistant-quick-option-input-row">
-                                <input id="credit_card" name="credit_card" class="form-control" value="{{ $value('credit_card') }}" maxlength="100" placeholder="{{ $t('form.custom_option_placeholder') }}">
+                                <input id="credit_card" name="credit_card" class="form-control" value="{{ $value('credit_card') }}" maxlength="100" placeholder="{{ $t('form.custom_option_placeholder') }}" @readonly(! $canManageQuickOptions)>
                                 @if ($canManageQuickOptions)
                                     <button type="button" class="btn btn-default assistant-add-quick-option"><i class="fa fa-plus"></i> {{ $t('form.add_quick_option') }}</button>
                                 @endif
@@ -305,7 +305,7 @@
                         <label for="wallet">{{ $t('fields.wallet') }}</label>
                         <div class="assistant-single-option-input" data-single-option-group data-quick-option-field="wallet">
                             <div class="assistant-quick-option-input-row">
-                                <input id="wallet" name="wallet" class="form-control" value="{{ $value('wallet') }}" maxlength="100" placeholder="{{ $t('form.custom_option_placeholder') }}">
+                                <input id="wallet" name="wallet" class="form-control" value="{{ $value('wallet') }}" maxlength="100" placeholder="{{ $t('form.custom_option_placeholder') }}" @readonly(! $canManageQuickOptions)>
                                 @if ($canManageQuickOptions)
                                     <button type="button" class="btn btn-default assistant-add-quick-option"><i class="fa fa-plus"></i> {{ $t('form.add_quick_option') }}</button>
                                 @endif
@@ -339,7 +339,7 @@
                         <label for="paypal">{{ $t('fields.paypal') }}</label>
                         <div class="assistant-single-option-input" data-single-option-group data-quick-option-field="paypal">
                             <div class="assistant-quick-option-input-row">
-                                <input id="paypal" name="paypal" class="form-control" value="{{ $value('paypal') }}" maxlength="100" placeholder="{{ $t('form.custom_option_placeholder') }}">
+                                <input id="paypal" name="paypal" class="form-control" value="{{ $value('paypal') }}" maxlength="100" placeholder="{{ $t('form.custom_option_placeholder') }}" @readonly(! $canManageQuickOptions)>
                                 @if ($canManageQuickOptions)
                                     <button type="button" class="btn btn-default assistant-add-quick-option"><i class="fa fa-plus"></i> {{ $t('form.add_quick_option') }}</button>
                                 @endif
@@ -373,7 +373,7 @@
                         <label for="other_payment">{{ $t('fields.other_payment') }}</label>
                         <div class="assistant-single-option-input" data-single-option-group data-quick-option-field="other_payment">
                             <div class="assistant-quick-option-input-row">
-                                <input id="other_payment" name="other_payment" class="form-control" value="{{ $value('other_payment') }}" maxlength="100" placeholder="{{ $t('form.custom_option_placeholder') }}">
+                                <input id="other_payment" name="other_payment" class="form-control" value="{{ $value('other_payment') }}" maxlength="100" placeholder="{{ $t('form.custom_option_placeholder') }}" @readonly(! $canManageQuickOptions)>
                                 @if ($canManageQuickOptions)
                                     <button type="button" class="btn btn-default assistant-add-quick-option"><i class="fa fa-plus"></i> {{ $t('form.add_quick_option') }}</button>
                                 @endif
@@ -463,6 +463,22 @@
                 </div>
             </div>
 
+            <div id="assistant-xshoppy-app-section" class="box box-solid assistant-form-section assistant-form-shopify-section" @if (!in_array(strtolower((string) $value('site_builder')), ['xshoppy', 'xshopy'], true)) hidden @endif>
+                <div class="box-header with-border"><h3 class="box-title">Xshoppy App 应用</h3></div>
+                <div class="box-body row assistant-form-grid">
+                    <div class="form-group col-md-6 @error('xshoppy_api_key') has-error @enderror">
+                        <label for="xshoppy_api_key">API 密钥</label>
+                        <input id="xshoppy_api_key" name="xshoppy_api_key" class="form-control" value="{{ $value('xshoppy_api_key') }}" maxlength="255" autocomplete="off">
+                        @error('xshoppy_api_key')<span class="help-block">{{ $message }}</span>@enderror
+                    </div>
+                    <div class="form-group col-md-6 @error('xshoppy_password') has-error @enderror">
+                        <label for="xshoppy_password">密码</label>
+                        <input id="xshoppy_password" name="xshoppy_password" type="password" class="form-control" value="{{ $value('xshoppy_password') }}" maxlength="255" autocomplete="new-password">
+                        @error('xshoppy_password')<span class="help-block">{{ $message }}</span>@enderror
+                    </div>
+                </div>
+            </div>
+
             <div class="box box-solid assistant-form-section assistant-form-status-section">
                 <div class="box-header with-border"><h3 class="box-title">{{ $t('sections.status_expiry') }}</h3></div>
                 <div class="box-body row assistant-form-grid">
@@ -528,7 +544,7 @@
                         </div>
                         <div class="form-group assistant-owner-form-field @error('owner_effective_at') has-error @enderror">
                             <label for="owner_effective_at">归属生效时间</label>
-                            <input id="owner_effective_at" name="owner_effective_at" type="datetime-local" class="form-control" value="{{ old('owner_effective_at') }}" max="{{ now('Asia/Shanghai')->format('Y-m-d\\TH:i') }}">
+                            <input id="owner_effective_at" name="owner_effective_at" type="datetime-local" class="form-control" value="{{ $ownerEffectiveAt ?? old('owner_effective_at') }}" max="{{ now('Asia/Shanghai')->format('Y-m-d\\TH:i') }}">
                             <span class="help-block">留空即以当前上海时间生效；仅会影响该时间起的新订单归属。</span>
                             @error('owner_effective_at')<span class="help-block">{{ $message }}</span>@enderror
                         </div>
@@ -601,7 +617,7 @@
         window.ErpAssistantDomainStoreOwnerForm = @json($ownerAssignmentJavascriptConfig);
     </script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-tags-20261007-3.js"></script>
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-form-20261008-1.js"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-form-20261008-1.js?v=20261105-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-access-guide-20261009-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-quick-options-20261008-2.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-team-project-options-20261009-1.js"></script>
