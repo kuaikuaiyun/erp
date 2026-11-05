@@ -25,11 +25,19 @@ use App\Portals\Assistant\Http\Controllers\OperationReportReviewController;
 use App\Portals\Assistant\Http\Controllers\OperationReportDashboardController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingSpendSummaryController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingSpendAnalysisController;
+use App\Portals\Assistant\Http\Controllers\FashionAdvertisingReviewController;
 use App\Portals\ProductRequests\Http\Controllers\ProductRequestController;
 use App\Portals\Aikaipin\Http\Controllers\ProductLibraryController;
 use App\Portals\Payment\Http\Controllers\PaymentPortalController;
+use App\Portals\Fashion\Http\Controllers\AdvertisingExpenseController;
 use App\Http\Middleware\MonitorPaymentPerformance;
 use Illuminate\Support\Facades\Route;
+
+Route::get('/fashion/advertising-expenses', [AdvertisingExpenseController::class, 'index'])->name('fashion.advertising-expenses.index');
+Route::post('/fashion/advertising-expenses', [AdvertisingExpenseController::class, 'store'])->name('fashion.advertising-expenses.store');
+Route::put('/fashion/advertising-expenses/{report}', [AdvertisingExpenseController::class, 'update'])->name('fashion.advertising-expenses.update');
+Route::delete('/fashion/advertising-expenses/{report}', [AdvertisingExpenseController::class, 'destroy'])->name('fashion.advertising-expenses.destroy');
+Route::get('/fashion/advertising-expenses/screenshots/{type}/{entry}', [AdvertisingExpenseController::class, 'screenshot'])->whereIn('type', ['performance', 'advertising'])->whereNumber('entry')->name('fashion.advertising-expenses.screenshot');
 
 Route::prefix('finance')->name('finance.')->middleware(\App\Http\Middleware\RedirectFinanceDomain::class)->controller(\App\Portals\Finance\Http\Controllers\FinanceController::class)->group(function (): void {
     Route::get('/management/menus', [PortalMenuConfigurationController::class, 'index'])->name('menus.index');
@@ -138,6 +146,9 @@ Route::get('/assistant/operation-reports', [OperationReportDashboardController::
 Route::get('/assistant/operation-reports/order-details', [OperationReportDashboardController::class, 'orderDetails'])->name('assistant.operation-reports.order-details');
 Route::get('/assistant/advertising-spend-summary', [AdvertisingSpendSummaryController::class, 'index'])->name('assistant.advertising-spend-summary.index');
 Route::get('/assistant/advertising-spend-analysis', [AdvertisingSpendAnalysisController::class, 'index'])->name('assistant.advertising-spend-analysis.index');
+Route::get('/assistant/fashion-advertising-reviews', [FashionAdvertisingReviewController::class, 'index'])->name('assistant.fashion-advertising-reviews.index');
+Route::post('/assistant/fashion-advertising-reviews/{report}/review', [FashionAdvertisingReviewController::class, 'review'])->whereNumber('report')->name('assistant.fashion-advertising-reviews.review');
+Route::get('/assistant/fashion-advertising-reviews/screenshots/{type}/{entry}', [FashionAdvertisingReviewController::class, 'screenshot'])->whereIn('type', ['performance', 'advertising'])->whereNumber('entry')->name('assistant.fashion-advertising-reviews.screenshot');
 Route::get('/operation-report-reviews', [OperationReportReviewController::class, 'index'])->name('assistant.operation-report-reviews.index');
 Route::get('/operation-report-reviews/import-template', [OperationReportReviewController::class, 'importTemplate'])->name('assistant.operation-report-reviews.import-template');
 Route::post('/operation-report-reviews/import', [OperationReportReviewController::class, 'import'])->name('assistant.operation-report-reviews.import');
