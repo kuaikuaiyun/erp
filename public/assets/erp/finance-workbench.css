@@ -1,0 +1,59 @@
+.finance-balance-overview{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;margin-bottom:22px;color:#17324d}
+.finance-balance-overview>.paypal-summary{margin-bottom:0}
+.finance-balance-overview .paypal-summary-metric strong,.finance-balance-overview .payment-balance-metric strong{font-size:24px;overflow-wrap:anywhere}
+.finance-balance-overview .payment-balance-summary-header{min-height:31px;margin-bottom:13px}
+.finance-credit-overview-note{margin:0;padding:0 22px 14px;color:#7c8b9e;font-size:12px}
+.paypal-balance-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px}
+.finance-balance-tabs{display:flex;gap:6px;border-bottom:1px solid #d5e1ed;margin-bottom:20px}
+.finance-balance-tab{appearance:none;border:0;border-bottom:3px solid transparent;background:transparent;padding:13px 24px;color:#74869a;font-size:15px;font-weight:600;cursor:pointer;margin-bottom:-1px;transition:background .15s,color .15s}
+.finance-balance-tab .fa{margin-right:6px}
+.finance-balance-tab:hover{background:#e4edf8;color:#235c92}
+.finance-balance-tab.is-active{border-bottom-color:#2879bd;color:#2265a0;background:#e6f0fb;border-radius:7px 7px 0 0}
+.finance-balance-tab:focus-visible{outline:2px solid #2879bd;outline-offset:2px}
+#finance-workbench [role=tabpanel][hidden]{display:none!important}
+#finance-workbench .paypal-account-grid{grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+#finance-workbench .paypal-account-card{display:flex;flex-direction:column;border-radius:8px;min-width:0}
+#finance-workbench .paypal-account-header{padding:11px 12px;gap:8px}
+#finance-workbench .paypal-account-header h3{font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#finance-workbench .paypal-account-logo{height:25px;width:25px;font-size:15px;flex-shrink:0}
+#finance-workbench .paypal-account-tag{font-size:9px;flex-shrink:0;padding:3px 5px}
+#finance-workbench .paypal-connection-status{display:inline-flex;align-items:center;gap:4px;flex-shrink:0;padding:3px 6px;border-radius:10px;font-size:10px;line-height:16px;white-space:nowrap}
+#finance-workbench .paypal-connection-status[hidden]{display:none!important}
+#finance-workbench .paypal-connection-status[data-state=connected]{color:#23724e;background:#edf8f1}
+#finance-workbench .paypal-connection-status[data-state=error]{color:#b34336;background:#fff0ed}
+#finance-workbench .paypal-connection-status[data-state=closed],#finance-workbench .paypal-connection-status[data-state=disconnected]{color:#72808d;background:#eff2f5}
+.paypal-connection-dot{width:5px;height:5px;border-radius:50%;background:currentColor}
+#finance-workbench .paypal-card-refresh{margin:0 0 0 auto;flex-shrink:0}
+.paypal-card-refresh-button{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:5px;background:transparent;color:#4480ad;cursor:pointer}
+.paypal-card-refresh-button:hover:not(:disabled){background:#eaf3fc;color:#23659b}
+.paypal-card-refresh-button:focus-visible{outline:2px solid #2879bd;outline-offset:2px}
+.paypal-card-refresh-button:disabled{color:#aab8c3;cursor:not-allowed}
+.paypal-card-refresh-message{margin:0;padding:7px 12px;font-size:11px;line-height:1.6;overflow-wrap:anywhere;border-top:1px solid #edf2f7}
+.paypal-card-refresh-message[hidden]{display:none!important}
+.paypal-card-refresh-message[data-result=loading]{color:#547087;background:#f2f7fc}
+.paypal-card-refresh-message[data-result=success]{color:#23724e;background:#edf8f1}
+.paypal-card-refresh-message[data-result=error]{color:#b34336;background:#fff0ed}
+#finance-workbench .paypal-account-values{padding:11px 12px 10px}
+#finance-workbench .paypal-account-currency{margin-bottom:9px}
+#finance-workbench .paypal-account-metrics{gap:8px}
+#finance-workbench .paypal-account-metrics span{font-size:11px;margin-bottom:4px}
+#finance-workbench .paypal-account-metrics strong{font-size:18px}
+#finance-workbench .paypal-account-total{margin-top:11px;padding-top:9px;font-size:11px;flex-wrap:wrap}
+#finance-workbench .paypal-account-total strong{font-size:12px;overflow-wrap:anywhere}
+#finance-workbench .paypal-account-footer{padding:6px 12px;font-size:10px}
+.paypal-account-remark{padding:0 12px;margin:8px 0 0;color:#7a8c9f;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.paypal-account-actions{display:flex;border-top:1px solid #edf2f7;margin-top:auto;background:#fafcff}
+.paypal-account-action{flex:1;appearance:none;border:0;background:transparent;padding:9px 6px;color:#337ab7;text-align:center;font-size:12px;cursor:pointer}
+.paypal-account-action+.paypal-account-action{border-left:1px solid #edf2f7}
+.paypal-account-action:hover,.paypal-account-action:focus{background:#edf4fd;color:#225b94;text-decoration:none}
+.paypal-account-action .fa{margin-right:4px}
+.paypal-account-delete{display:flex;flex:1;margin:0;border-left:1px solid #edf2f7}
+.paypal-account-delete .paypal-account-action{color:#7c8b99}
+.paypal-account-delete .paypal-account-action:hover,.paypal-account-delete .paypal-account-action:focus{color:#b34336;background:#fff0ed}
+@media(max-width:1650px){#finance-workbench .paypal-account-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:1350px){#finance-workbench .paypal-account-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:1050px){#finance-workbench .paypal-account-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){#finance-workbench .paypal-account-grid{grid-template-columns:1fr}}
+@media(max-width:1500px){.finance-balance-overview .payment-balance-metrics{gap:10px}.finance-balance-overview .payment-balance-metric strong{font-size:20px}}
+@media(max-width:1250px){.finance-balance-overview{grid-template-columns:1fr}.finance-balance-overview .payment-balance-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:600px){.finance-balance-overview{gap:12px;margin-bottom:16px}.finance-balance-overview .payment-balance-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.finance-balance-tab{padding:12px 20px}}

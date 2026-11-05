@@ -6,6 +6,7 @@ return [
     'required_with' => ':attribute为必填项。',
     'string' => ':attribute必须为文本。',
     'integer' => ':attribute必须为整数。',
+    'unique' => ':attribute已存在，请使用其他名称或值。',
     'url' => ':attribute格式不正确。',
     'image' => ':attribute必须为图片文件。',
     'mimes' => ':attribute文件格式不正确。',

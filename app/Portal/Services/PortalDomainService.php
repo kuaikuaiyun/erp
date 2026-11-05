@@ -24,7 +24,18 @@ class PortalDomainService
 
     public function portalForRequest(Request $request): ?Portal
     {
-        if (!$this->isConfigured() || $this->isMainRequest($request)) {
+        if (!$this->isConfigured()) {
+            return null;
+        }
+
+        if ($this->isMainRequest($request)) {
+            foreach (config('portals.main_domain_paths', []) as $code => $prefix) {
+                $path = $this->normalizePath($prefix);
+                if ($request->getPathInfo() === $path || str_starts_with($request->getPathInfo(), $path.'/')) {
+                    return Portal::query()->where('code', $code)->first();
+                }
+            }
+
             return null;
         }
 
@@ -67,7 +78,23 @@ class PortalDomainService
     {
         $host = $this->portalDomain($portal);
 
-        return $host === null ? null : $this->urlForHost($host, $this->normalizePath($path));
+        $path = $this->normalizePath($path);
+
+        $portalPath = $path === '/' || str_starts_with($path, '/?') ? $path : $this->portalPath($portal, $path);
+
+        return $host === null ? null : $this->urlForHost($host, $portalPath);
+    }
+
+    public function portalPath(Portal|string $portal, string $path = '/'): string
+    {
+        $code = $portal instanceof Portal ? $portal->code : $portal;
+        $prefix = config('portals.main_domain_paths', [])[$code] ?? null;
+        $path = $this->normalizePath($path);
+        if ($prefix === null || $path === $prefix || str_starts_with($path, $prefix.'/') || str_starts_with($path, $prefix.'?')) {
+            return $path;
+        }
+
+        return $prefix.($path === '/' ? '' : $path);
     }
 
     public function mainUrl(string $path = '/'): string

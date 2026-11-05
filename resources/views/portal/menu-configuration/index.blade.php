@@ -17,7 +17,7 @@
             <small>{{ __('portal.menu_configuration.description', ['portal' => $portal->name]) }}</small>
         </h1>
         <ol class="breadcrumb" style="margin-right: 30px;">
-            <li><a href="/"><i class="fa fa-home"></i> {{ __('portal.menu.home') }}</a></li>
+            <li><a href="{{ app(\App\Portal\Services\PortalDomainService::class)->portalPath($portal) }}"><i class="fa fa-home"></i> {{ __('portal.menu.home') }}</a></li>
             <li>{{ __('portal.menu.backend_management') }}</li>
             <li class="active">{{ __('portal.menu.configuration') }}</li>
         </ol>
@@ -132,7 +132,7 @@
                 button.prop('disabled', true);
                 $.ajax({
                     method: 'POST',
-                    url: '/management/menus/order',
+                    url: @json(app(\App\Portal\Services\PortalDomainService::class)->portalPath($portal, '/management/menus/order')),
                     data: {
                         _token: $('meta[name="csrf-token"]').attr('content'),
                         _order: JSON.stringify(tree.nestable('serialize'))

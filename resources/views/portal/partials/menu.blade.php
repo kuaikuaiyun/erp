@@ -6,20 +6,24 @@
         ->where('is_enabled', true)
         ->filter(fn ($child) => $canManagePortalMenus || !in_array($child->code, $configurationCodes, true));
     $path = trim((string) $menu->path);
+    if (!\Illuminate\Support\Str::startsWith($path, ['http://', 'https://', '#'])) {
+        $path = app(\App\Portal\Services\PortalDomainService::class)->portalPath($portal, $path);
+    }
     $href = \Illuminate\Support\Str::startsWith($path, ['http://', 'https://'])
         ? $path
         : $portalOrigin.'/'.ltrim($path, '/');
     $icon = $menu->icon ?: 'fa-circle-o';
     $currentPath = '/'.trim(request()->path(), '/');
-    $matchesCurrentPath = static function (string $candidatePath) use ($currentPath): bool {
-        if (\Illuminate\Support\Str::startsWith($candidatePath, ['http://', 'https://'])) {
+    $matchesCurrentPath = static function (string $candidatePath) use ($currentPath, $portal): bool {
+        if (\Illuminate\Support\Str::startsWith($candidatePath, ['http://', 'https://', '#'])) {
             return false;
         }
 
+        $candidatePath = app(\App\Portal\Services\PortalDomainService::class)->portalPath($portal, $candidatePath);
         $menuPath = '/'.trim(parse_url($candidatePath, PHP_URL_PATH) ?: $candidatePath, '/');
 
-        if ($menuPath === '/') {
-            return $currentPath === '/';
+        if ($menuPath === '/' || $menuPath === app(\App\Portal\Services\PortalDomainService::class)->portalPath($portal)) {
+            return $currentPath === '/' || $currentPath === $menuPath;
         }
 
         return $menuPath === $currentPath

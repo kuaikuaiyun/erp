@@ -31,6 +31,35 @@ use App\Portals\Payment\Http\Controllers\PaymentPortalController;
 use App\Http\Middleware\MonitorPaymentPerformance;
 use Illuminate\Support\Facades\Route;
 
+Route::prefix('finance')->name('finance.')->middleware(\App\Http\Middleware\RedirectFinanceDomain::class)->controller(\App\Portals\Finance\Http\Controllers\FinanceController::class)->group(function (): void {
+    Route::get('/management/menus', [PortalMenuConfigurationController::class, 'index'])->name('menus.index');
+    Route::post('/management/menus/order', [PortalMenuConfigurationController::class, 'saveOrder'])->name('menus.order');
+    Route::get('/', 'index')->name('home');
+    Route::get('/balances', 'balances')->name('balances');
+    Route::post('/balances/xuzong2', 'savePaymentBalance')->name('balances.xuzong2.save');
+    Route::post('/exchange-rates', 'saveExchangeRates')->name('exchange-rates.save');
+    Route::post('/paypal-accounts/{accountKey}', 'savePayPalAccount')->where('accountKey', '[a-z0-9-]+')->name('paypal-accounts.update');
+    Route::post('/payment-accounts', 'storePaymentAccount')->name('payment-accounts.store');
+    Route::post('/payment-accounts/{accountKey}/refresh', 'refreshPayPalBalance')->where('accountKey', 'finance-[1-9][0-9]*')->name('payment-accounts.refresh');
+    Route::post('/payment-accounts/{accountKey}/transactions', 'syncPayPalTransactions')->where('accountKey', 'finance-[1-9][0-9]*')->name('payment-accounts.sync');
+    Route::delete('/payment-accounts/{accountKey}', 'deletePaymentAccount')->where('accountKey', 'finance-[1-9][0-9]*')->name('payment-accounts.delete');
+    Route::post('/payment-accounts/{accountKey}', 'updatePaymentAccount')->where('accountKey', '[a-z0-9-]+')->name('payment-accounts.update');
+    Route::get('/records/{dataset}', 'records')->name('records');
+    Route::get('/transactions/{transaction}/raw', 'rawPayPalTransaction')->whereNumber('transaction')->name('transactions.raw');
+    Route::post('/records/{dataset}/import', 'importRecords')->name('records.import');
+    Route::get('/records/{dataset}/export', 'exportRecords')->name('records.export');
+    Route::get('/settings/accounting', 'accounting')->name('accounting');
+    Route::post('/settings/accounting/{action}', 'saveAccounting')->whereIn('action', ['rate', 'rule', 'reapply', 'lock'])->name('accounting.save');
+    Route::get('/settings/{kind}', 'settings')->name('settings');
+    Route::post('/settings/{kind}', 'saveSetting')->name('settings.save');
+    Route::delete('/settings/types/{type}', 'deleteTypeSetting')->whereNumber('type')->name('settings.types.delete');
+    Route::post('/settings/{kind}/import', 'importSettings')->name('settings.import');
+    Route::get('/settings/{kind}/export', 'exportSettings')->name('settings.export');
+    Route::get('/reports/{report}', 'report')->name('report');
+    Route::post('/reports/{report}/save', 'saveSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement'])->name('settlement.save');
+    Route::post('/reports/{report}/import', 'importSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement'])->name('settlement.import');
+});
+
 Route::get('/', [PortalEntryController::class, 'root'])->middleware(MonitorPaymentPerformance::class)->name('portal.root');
 Route::get('/management/menus', [PortalMenuConfigurationController::class, 'index'])->name('portal.menus.index');
 Route::post('/management/menus/order', [PortalMenuConfigurationController::class, 'saveOrder'])->name('portal.menus.order');

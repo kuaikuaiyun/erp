@@ -1,0 +1,9 @@
+@php
+    $panelMonths = collect($comparison)->map(fn ($items) => collect($items)->first(fn ($item) => $item['name'] === $panel['name'] && $item['channel'] === $panel['channel']));
+    $panelKeys = $panelMonths->filter()->flatMap(fn ($item) => array_keys($item['ratios']))->unique();
+@endphp
+<div class="loss-month-scroll"><table class="table" style="min-width:{{ max(420, 200 + count($comparison) * 110) }}px"><colgroup><col style="width:36px"><col style="width:200px">@foreach($comparison as $period => $items)<col>@endforeach</colgroup><thead><tr><th class="finance-selection"><input type="checkbox" data-export-all aria-label="全选当前页"></th><th>{{ $panel['name'] }}</th>@foreach($comparison as $period => $items)<th>{{ $period }}</th>@endforeach</tr></thead><tbody>
+<tr><td class="finance-selection"><input type="checkbox" data-export-row value="{{ hash('sha256', \App\Portals\Finance\FinanceExportSelection::key($panel).'|success_count') }}" aria-label="选择此行"></td><td>成功订单数</td>@foreach($panelMonths as $item)<td>{{ number_format($item['success_count'] ?? 0) }}</td>@endforeach</tr>
+@foreach($panelKeys as $key)<tr><td class="finance-selection"><input type="checkbox" data-export-row value="{{ hash('sha256', \App\Portals\Finance\FinanceExportSelection::key($panel).'|'.$key) }}" aria-label="选择此行"></td><td>{{ $metrics[$key] }}</td>@foreach($panelMonths as $item)<td>{{ ($item['ratios'][$key] ?? null) === null ? '—' : number_format((float) $item['ratios'][$key], 2).'%' }}</td>@endforeach</tr>@endforeach
+<tr class="loss-total"><td class="finance-selection"><input type="checkbox" data-export-row value="{{ hash('sha256', \App\Portals\Finance\FinanceExportSelection::key($panel).'|total_ratio') }}" aria-label="选择此行"></td><td>合计</td>@foreach($panelMonths as $item)<td>{{ ($item['total_ratio'] ?? null) === null ? '—' : number_format((float) $item['total_ratio'], 2).'%' }}</td>@endforeach</tr>
+</tbody></table></div>
