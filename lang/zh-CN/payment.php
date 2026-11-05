@@ -44,6 +44,8 @@ $translations = [
     'account_risk' => [
         'page_title' => '收款账户风控',
         'title' => '收款账户风控',
+        'modules' => ['paypal' => 'PayPal 收款账户', 'credit_card' => '信用卡汇总'],
+        'credit_card' => ['title' => '信用卡收款与风险汇总', 'note' => '仅统计 ERP 已存在订单，支付渠道限定为 Fintrix、FintrixV2、manual。', 'risk_orders' => '退款与争议订单', 'risk_orders_note' => '仅展示当前付款时间范围内，存在信用卡退款或争议记录的 ERP 订单。', 'order' => '订单号', 'erp_order' => 'ERP 订单', 'store' => '店铺', 'gateway' => '支付渠道', 'paid_at' => '付款时间', 'amount' => '实收金额', 'risk_type' => '风险类型', 'risk_amount' => '退款 / 争议金额', 'reason' => '退款 / 争议原因', 'refund' => '退款', 'dispute' => '争议', 'empty' => '当前筛选范围没有退款或争议信用卡订单。', 'kpis' => ['paid_orders' => '信用卡付款 / 收款', 'refund' => '信用卡退款金额 / 金额比', 'full_refund' => '信用卡争议订单 / 比率', 'risk_cases' => '信用卡退款订单 / 比率'], 'notes' => ['paid_orders' => 'Fintrix、FintrixV2、manual 的 ERP 订单', 'refund' => '非争议原因的退款金额 / 成功收款', 'full_refund' => '争议原因的独立订单 / 成功付款订单', 'risk_cases' => '发生退款的独立订单 / 成功付款订单']],
         'subtitle' => '收款、退款与风险账户概览',
         'filters' => ['title' => '筛选条件', 'account' => '收款账户', 'all_accounts' => '全部账户', 'account_placeholder' => '输入或选择收款账户', 'account_clear' => '清空收款账户', 'range_to' => '至', 'date_mode' => '时间口径', 'payment_date' => 'PayPal 付款时间', 'event_date' => '真实退款/纠纷时间', 'deduction_type' => '扣款类型', 'all_deduction_types' => '全部扣款类型', 'renewal' => '续费', 'one_time' => '一次性付款', 'status' => '状态', 'all_statuses' => '全部状态', 'only_abnormal' => '仅看异常', 'query' => '查询', 'reset' => '重置'],
         'kpis' => ['paid_orders' => '支付订单 / 收款', 'paid_orders_note' => '成功付款交易，原币可追溯', 'refund' => '退款金额 / 金额比', 'refund_note' => '本期真实成功退款 + 同期收款', 'full_refund' => '全额纠纷交量', 'full_refund_note' => '本期新增去重纠纷付款 + 同期付款', 'risk_cases' => '风险案件 / 待办', 'risk_cases_note' => '2 项 24 小时内到期，1 项逾期'],

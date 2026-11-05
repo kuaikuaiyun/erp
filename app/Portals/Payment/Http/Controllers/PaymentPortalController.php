@@ -7,6 +7,7 @@ use App\Models\AdminUser;
 use App\Models\LogisticsPayPalAccount;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Payment\PaymentAccountRiskService;
+use App\Portals\Payment\PaymentCreditCardRiskService;
 use App\Portals\Payment\PaymentOrderSearchService;
 use App\Portals\Payment\PaymentPayPalMonthlyReportExportService;
 use App\Portals\Payment\PaymentPayPalMonthlyReportService;
@@ -29,6 +30,7 @@ class PaymentPortalController extends Controller
         private readonly PortalEntryController $portalEntries,
         private readonly PaymentPortalService $payment,
         private readonly PaymentAccountRiskService $accountRisk,
+        private readonly PaymentCreditCardRiskService $creditCardRisk,
         private readonly PaymentProductRiskService $productRisk,
         private readonly PaymentOrderSearchService $paymentOrders,
         private readonly PaymentProductAlertService $productAlerts,
@@ -61,7 +63,9 @@ class PaymentPortalController extends Controller
 
         return response()->view('portals.payment.account-risk', [
             ...$this->viewContext($context),
-            'dashboard' => $this->accountRisk->dashboard($filters),
+            'dashboard' => $filters['module'] === 'credit_card'
+                ? $this->creditCardRisk->dashboard($filters)
+                : $this->accountRisk->dashboard($filters),
         ]);
     }
 
@@ -478,11 +482,13 @@ class PaymentPortalController extends Controller
         return $context;
     }
 
-    /** @return array{account:string,period_start:string,period_end:string,date_mode:string,import_status:string,page:int,per_page:int} */
+    /** @return array{module:string,account:string,reason:string,period_start:string,period_end:string,date_mode:string,import_status:string,page:int,per_page:int} */
     private function accountRiskFilters(Request $request): array
     {
         $validated = $request->validate([
+            'module' => ['nullable', Rule::in(['paypal', 'credit_card'])],
             'account' => ['nullable', 'string', 'max:191'],
+            'reason' => ['nullable', 'string', 'max:191'],
             'period_start' => ['nullable', 'date'],
             'period_end' => ['nullable', 'date', 'after_or_equal:period_start'],
             'date_mode' => ['nullable', Rule::in(['order', 'event'])],
@@ -493,7 +499,9 @@ class PaymentPortalController extends Controller
         $today = now('Asia/Shanghai');
 
         return [
+            'module' => (string) ($validated['module'] ?? 'paypal'),
             'account' => trim((string) ($validated['account'] ?? '')),
+            'reason' => trim((string) ($validated['reason'] ?? '')),
             'period_start' => (string) ($validated['period_start'] ?? $today->copy()->subDays(29)->format('Y-m-d')),
             'period_end' => (string) ($validated['period_end'] ?? $today->format('Y-m-d')),
             'date_mode' => (string) ($validated['date_mode'] ?? 'order'),
