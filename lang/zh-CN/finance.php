@@ -115,8 +115,7 @@ return [
         'relay_operations_help' => '接入协议要求 HTTPS 证书指纹校验、请求 HMAC 签名及响应 HMAC 验签；只读操作为 balances 和 transaction_search。',
         'relay_save_help' => '保存仅维护连接资料；保存后可手动刷新余额或同步交易。保存成功不表示接口连通性已验证。',
         'delete' => '删除', 'deleted' => '账户已删除，历史余额和同步日志保留。',
-        'delete_history' => '该账户已有交易数据，请将状态改为停用，不能直接删除。',
-        'delete_confirm' => '确认删除此账户？存在历史交易的账户将阻止删除。',
+        'delete_confirm' => '确认删除此账户？删除后不再显示账户卡片，历史交易和余额快照仍会保留。',
         'invalid_relay_url' => '请输入HTTPS中转地址，路径必须为/relay/v1/paypal/read，且不包含登录信息、查询参数或锚点。',
         'attributes' => [
             'account_name' => '账户名称', 'account_code' => '账户标识', 'account_type' => '账户类型', 'main_currency' => '主币种',
