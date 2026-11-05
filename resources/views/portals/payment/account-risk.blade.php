@@ -9,6 +9,7 @@
         'full_refund' => ['icon' => 'fa-exchange', 'tone' => 'red'],
         'risk_cases' => ['icon' => 'fa-gavel', 'tone' => 'red'],
     ];
+    $isCreditCardModule = ($dashboard['module'] ?? 'paypal') === 'credit_card';
 @endphp
 
 @section('page_title', __($translationPrefix.'.page_title'))
@@ -16,7 +17,7 @@
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261026-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261026-1">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-account-risk.css?v=20261104-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-account-risk.css?v=20261105-3">
 @endpush
 
 @section('content')
@@ -24,6 +25,48 @@
         <h1>{{ __($translationPrefix.'.title') }} <small>{{ __($translationPrefix.'.subtitle') }}</small></h1>
     </section>
     <section class="content payment-portal-page payment-account-risk-page">
+        <nav class="payment-account-module-tabs" aria-label="{{ __($translationPrefix.'.title') }}">
+            <a href="{{ route('payment.account-risk.index', ['module' => 'paypal']) }}" class="{{ $isCreditCardModule ? '' : 'active' }}">
+                <span class="payment-account-module-icon payment-account-module-icon-paypal"><i class="fa fa-paypal"></i></span>
+                <span>{{ __($translationPrefix.'.modules.paypal') }}</span>
+                <small>账户维度风险概览</small>
+            </a>
+            <a href="{{ route('payment.account-risk.index', ['module' => 'credit_card']) }}" class="{{ $isCreditCardModule ? 'active' : '' }}">
+                <span class="payment-account-module-icon payment-account-module-icon-card"><i class="fa fa-credit-card"></i></span>
+                <span>{{ __($translationPrefix.'.modules.credit_card') }}</span>
+                <small>ERP 已关联订单的风险明细</small>
+            </a>
+        </nav>
+        @if ($isCreditCardModule)
+            <div class="box box-solid payment-account-filter-box">
+                <div class="box-body">
+                    <form class="payment-account-filter-form payment-credit-card-filter" method="get" action="{{ route('payment.account-risk.index') }}">
+                        <input type="hidden" name="module" value="credit_card">
+                        <input type="hidden" name="per_page" value="{{ $dashboard['pagination']['per_page'] }}">
+                        <label class="payment-account-filter-field payment-account-period-field">
+                            <span>{{ __('payment.common.period') }}</span>
+                            <span class="payment-account-date-range"><input class="form-control" type="date" name="period_start" value="{{ $dashboard['period_start'] }}"><b>{{ __($translationPrefix.'.filters.range_to') }}</b><input class="form-control" type="date" name="period_end" value="{{ $dashboard['period_end'] }}"></span>
+                        </label>
+                        <label class="payment-account-filter-field">
+                            <span>退款 / 争议原因</span>
+                            <select class="form-control" name="reason">
+                                <option value="">全部原因</option>
+                                @foreach ($dashboard['reason_options'] as $reason)
+                                    <option value="{{ $reason }}" @selected($dashboard['filters']['reason'] === $reason)>{{ $reason }}</option>
+                                @endforeach
+                            </select>
+                        </label>
+                        <div class="payment-account-filter-actions">
+                            <button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ __($translationPrefix.'.filters.query') }}</button>
+                            <a class="btn btn-default" href="{{ route('payment.account-risk.index', ['module' => 'credit_card']) }}">{{ __($translationPrefix.'.filters.reset') }}</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div class="payment-kpi-grid payment-kpi-grid-four">@foreach ($dashboard['kpis'] as $kpi)<article class="payment-kpi-card payment-tone-{{ $kpi['tone'] ?? 'primary' }}"><span class="payment-kpi-icon payment-kpi-icon-{{ $kpi['key'] === 'paid_orders' ? 'indigo' : ($kpi['key'] === 'refund' ? 'orange' : 'red') }}"><i class="fa {{ $kpi['key'] === 'paid_orders' ? 'fa-credit-card' : ($kpi['key'] === 'refund' ? 'fa-reply' : 'fa-gavel') }}"></i></span><div><p>{{ __($translationPrefix.'.credit_card.kpis.'.$kpi['key']) }}</p><strong>{{ $kpi['value'] }}</strong><small>{{ __($translationPrefix.'.credit_card.notes.'.$kpi['key']) }}</small></div></article>@endforeach</div>
+            <article class="payment-panel payment-credit-card-panel"><h2>{{ __($translationPrefix.'.credit_card.risk_orders') }}</h2><p>{{ __($translationPrefix.'.credit_card.risk_orders_note') }}</p><div class="table-responsive"><table class="table payment-data-table"><thead><tr>@foreach(['order','erp_order','store','gateway','paid_at','amount','risk_type','risk_amount','reason'] as $column)<th>{{ __($translationPrefix.'.credit_card.'.$column) }}</th>@endforeach</tr></thead><tbody>@forelse($dashboard['rows'] as $row)<tr><td>{{ $row['order_number'] }}</td><td>{{ $row['erp_order'] }}</td><td>{{ $row['store'] }}</td><td>{{ $row['gateway'] }}</td><td>{{ $row['paid_at'] }}</td><td>${{ number_format($row['paid_amount'], 2) }}</td><td><div class="payment-credit-card-risk-tags">@if($row['refund_amount'] > 0)<span class="refund">{{ __($translationPrefix.'.credit_card.refund') }}</span>@endif @if($row['dispute_amount'] > 0)<span class="dispute">{{ __($translationPrefix.'.credit_card.dispute') }}</span>@endif</div></td><td><div class="payment-credit-card-risk-money">@if($row['refund_amount'] > 0)<span>{{ __($translationPrefix.'.credit_card.refund') }} ${{ number_format($row['refund_amount'], 2) }}</span>@endif @if($row['dispute_amount'] > 0)<span>{{ __($translationPrefix.'.credit_card.dispute') }} ${{ number_format($row['dispute_amount'], 2) }}</span>@endif</div></td><td class="payment-credit-card-reasons">@foreach($row['refund_reasons'] as $reason)<span>{{ __($translationPrefix.'.credit_card.refund') }}：{{ $reason }}</span>@endforeach @foreach($row['dispute_reasons'] as $reason)<span>{{ __($translationPrefix.'.credit_card.dispute') }}：{{ $reason }}</span>@endforeach</td></tr>@empty<tr><td colspan="9" class="payment-product-empty">{{ __($translationPrefix.'.credit_card.empty') }}</td></tr>@endforelse</tbody></table></div></article>
+            @include('portals.payment.partials.pagination', ['pagination' => $dashboard['pagination'], 'routeName' => 'payment.account-risk.index'])
+        @else
         <div class="box box-solid payment-account-filter-box">
             <div class="box-body">
                 <form class="payment-account-filter-form" method="get" action="{{ route('payment.account-risk.index') }}" data-payment-filter-form data-payment-server-filter-form>
@@ -120,6 +163,7 @@
                 <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">{{ __($translationPrefix.'.detail.close') }}</button></div>
             </div></div>
         </div>
+        @endif
     </section>
 @endsection
 
