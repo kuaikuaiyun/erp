@@ -34,7 +34,7 @@ return new class extends Migration {
             'portal_id' => $yunyingId,
             'parent_id' => 0,
             'code' => 'operation_submission_group',
-            'title' => '提报',
+            'title' => '开品提报',
             'title_key' => 'product_requests.menus.submission_group',
             'icon' => 'fa-paper-plane',
             'sort' => 5,
