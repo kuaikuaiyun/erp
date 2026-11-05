@@ -263,7 +263,7 @@ class PaymentRenewalAnalysisService
         if (($filters['risk_date_mode'] ?? 'payment') === 'event') {
             $paypalRefundQuery->whereBetween('refunded_at', [$from, $to]);
             $paypalDisputeQuery->whereBetween('dispute_created_at', [$from, $to]);
-            $cardQuery->whereBetween('last_imported_at', [$from, $to]);
+            $cardQuery->whereBetween('occurred_at', [$from, $to]);
         }
 
         foreach ($paypalRefundQuery->get() as $record) {
@@ -297,7 +297,7 @@ class PaymentRenewalAnalysisService
                     'amount' => (float) $record->refund_amount_usd,
                     'reason' => (string) $record->refund_reason,
                     'status' => '-',
-                    'time' => optional($record->last_imported_at)->format('Y-m-d H:i:s') ?: '-',
+                    'time' => optional($record->occurred_at)->format('Y-m-d H:i:s') ?: '-',
                 ]);
             } elseif (in_array($reason, LogisticsCreditCardRefundReason::CUSTOMER_SERVICE, true)) {
                 $orderId = (int) $record->logistics_order_id;
@@ -306,7 +306,7 @@ class PaymentRenewalAnalysisService
                     'amount' => (float) $record->refund_amount_usd,
                     'reason' => (string) $record->refund_reason,
                     'status' => '-',
-                    'time' => optional($record->last_imported_at)->format('Y-m-d H:i:s') ?: '-',
+                    'time' => optional($record->occurred_at)->format('Y-m-d H:i:s') ?: '-',
                 ]);
             }
         }

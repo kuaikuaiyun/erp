@@ -6,6 +6,7 @@ use App\Models\AdminUser;
 use App\Models\LogisticsCreditCardRefund;
 use App\Models\LogisticsPayPalRefund;
 use App\Models\LogisticsPayPalTransaction;
+use Carbon\Carbon;
 use Illuminate\Http\UploadedFile;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use RuntimeException;
@@ -22,6 +23,7 @@ class LogisticsRefundImportService
         '退款流水号' => 'refund_reference',
         '原因' => 'refund_reason',
         '金额' => 'refund_amount_usd',
+        '发生时间' => 'occurred_at',
     ];
 
     /**
@@ -143,6 +145,7 @@ class LogisticsRefundImportService
             'bill_number' => $data['reference_number'],
             'refund_amount_usd' => $data['refund_amount_usd'],
             'refund_reason' => $data['refund_reason'],
+            'occurred_at' => $data['occurred_at'],
             'last_updated_by' => $actor->getKey(),
             'last_updated_by_name' => $actor->name,
             'last_imported_at' => now(),
@@ -189,7 +192,7 @@ class LogisticsRefundImportService
 
     /** @param array<string,mixed> $row
      * @param array<string,string> $columns
-     * @return array{payment_method:string,reference_number:string,refund_reference:?string,refund_reason:?string,refund_amount_usd:?string}
+     * @return array{payment_method:string,reference_number:string,refund_reference:?string,refund_reason:?string,refund_amount_usd:?string,occurred_at:?Carbon}
      */
     private function rowData(array $row, array $columns): array
     {
@@ -215,10 +218,16 @@ class LogisticsRefundImportService
         }
 
         $refundReason = $this->nullableText($row[$columns['refund_reason']] ?? null);
+        $occurredAt = $paymentMethod === 'credit_card'
+            ? $this->nullableOccurredAt($row[$columns['occurred_at']] ?? null)
+            : null;
         if ($paymentMethod === 'credit_card') {
             $refundReason = LogisticsCreditCardRefundReason::canonical($refundReason);
             if ($refundReason === null) {
                 throw new RefundImportRowException('refund_reason', 'credit_card_reason_invalid');
+            }
+            if ($occurredAt === null) {
+                throw new RefundImportRowException('occurred_at', 'credit_card_occurred_at_required');
             }
         }
 
@@ -228,6 +237,7 @@ class LogisticsRefundImportService
             'refund_reference' => $refundReference,
             'refund_reason' => $refundReason,
             'refund_amount_usd' => $amount,
+            'occurred_at' => $occurredAt,
         ];
     }
 
@@ -306,6 +316,20 @@ class LogisticsRefundImportService
         }
 
         return number_format((float) $value, 4, '.', '');
+    }
+
+    private function nullableOccurredAt(mixed $value): ?Carbon
+    {
+        $value = $this->text($value);
+        if ($value === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($value, 'Asia/Shanghai')->utc();
+        } catch (\Throwable) {
+            throw new RefundImportRowException('occurred_at', 'occurred_at_invalid');
+        }
     }
 
     private function text(mixed $value): string

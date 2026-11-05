@@ -307,13 +307,13 @@ class PaymentProductAlertService
         if (($alert['channel_type'] ?? 'paypal') === 'credit_card') {
             $paymentEvents = collect();
             $refundEvents = $database->table('logistics_credit_card_refunds')
-                ->whereIn('logistics_order_id', clone $orderIds)->orderByDesc('last_imported_at')->limit(100)->get()
+                ->whereIn('logistics_order_id', clone $orderIds)->orderByDesc('occurred_at')->limit(100)->get()
                 ->map(static fn (object $row): array => [
                     'type' => 'refund', 'reference' => (string) ($row->refund_reference ?: '-'),
                     'related_reference' => (string) ($row->bill_number ?: '-'), 'status' => '-',
                     'amount' => (float) ($row->refund_amount_usd ?? 0), 'reason' => (string) ($row->refund_reason ?: '-'),
-                    'time' => $row->last_imported_at ? date('Y-m-d H:i', strtotime((string) $row->last_imported_at)) : '-',
-                    'sort_time' => (string) ($row->last_imported_at ?: ''),
+                    'time' => $row->occurred_at ? date('Y-m-d H:i', strtotime((string) $row->occurred_at)) : '-',
+                    'sort_time' => (string) ($row->occurred_at ?: ''),
                 ]);
         }
 

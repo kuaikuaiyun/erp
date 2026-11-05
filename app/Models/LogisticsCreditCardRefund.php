@@ -10,7 +10,7 @@ class LogisticsCreditCardRefund extends Model
     protected $table = 'logistics_credit_card_refunds';
 
     protected $fillable = [
-        'logistics_order_id', 'bill_number', 'refund_reference', 'refund_amount_usd', 'refund_reason',
+        'logistics_order_id', 'bill_number', 'refund_reference', 'refund_amount_usd', 'refund_reason', 'occurred_at',
         'imported_by', 'imported_by_name', 'last_updated_by', 'last_updated_by_name', 'last_imported_at',
     ];
 
@@ -25,6 +25,7 @@ class LogisticsCreditCardRefund extends Model
     {
         return [
             'refund_amount_usd' => 'decimal:4',
+            'occurred_at' => 'datetime',
             'last_imported_at' => 'datetime',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',

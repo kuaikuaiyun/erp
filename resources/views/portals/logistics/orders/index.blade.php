@@ -174,7 +174,7 @@
                                     'reference' => $refund->refund_reference ?: __('logistics.common.not_available'),
                                     'amount' => $amount,
                                     'reason' => $reason,
-                                    'time' => $date($refund->last_imported_at ?: $refund->created_at),
+                                    'time' => $date($refund->occurred_at),
                                     ]),
                                 ];
                             });

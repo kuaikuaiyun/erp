@@ -1182,7 +1182,7 @@ class LogisticsProductStatisticsService
             ->selectRaw("'' as source_reason")
             ->selectRaw('refund.refund_reason as manual_reason')
             ->selectRaw('refund.refund_amount_usd as amount')
-            ->selectRaw('COALESCE(refund.last_imported_at, refund.updated_at, refund.created_at) as happened_at');
+            ->selectRaw('refund.occurred_at as happened_at');
 
         $baseQuery = $this->database()->query()->fromSub($paypal->unionAll($creditCard), 'refund_rows');
         $this->applyDetailTextFilter($baseQuery, $options, ['reference', 'source_reason', 'manual_reason']);
@@ -3047,8 +3047,8 @@ class LogisticsProductStatisticsService
             'manual_reason' => (string) ($refund->refund_reason ?: ''),
             'status' => __('logistics.product_statistics.credit_card_refund_status'),
             'linked_disputes' => [],
-            'imported_at' => $this->dateTime($refund->last_imported_at ?: $refund->updated_at ?: $refund->created_at),
-            'sort_time' => ($refund->last_imported_at ?: $refund->updated_at ?: $refund->created_at)?->timestamp ?? 0,
+            'imported_at' => $this->dateTime($refund->occurred_at),
+            'sort_time' => $refund->occurred_at?->timestamp ?? 0,
         ];
     }
 

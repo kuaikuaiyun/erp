@@ -138,8 +138,9 @@ class LogisticsOrderSpreadsheetService
                 __('logistics.refund_import.headers.refund_reference'),
                 __('logistics.refund_import.headers.refund_reason'),
                 __('logistics.refund_import.headers.refund_amount_usd'),
+                '发生时间',
             ];
-            $widths = [16, 28, 28, 36, 16];
+            $widths = [16, 28, 28, 36, 16, 22];
 
             foreach ($headers as $index => $header) {
                 $column = Coordinate::stringFromColumnIndex($index + 1);
@@ -179,6 +180,7 @@ class LogisticsOrderSpreadsheetService
                 [__('logistics.refund_import.headers.refund_reference'), __('logistics.refund_import.template.refund_reference')],
                 [__('logistics.refund_import.headers.refund_reason'), __('logistics.refund_import.template.refund_reason')],
                 [__('logistics.refund_import.headers.refund_amount_usd'), __('logistics.refund_import.template.refund_amount_usd')],
+                ['发生时间', __('logistics.refund_import.template.occurred_at')],
                 [__('logistics.refund_import.template.overwrite_rule'), __('logistics.refund_import.template.overwrite_rule_description')],
             ];
             foreach ($instructionRows as $rowIndex => $row) {
@@ -213,12 +215,13 @@ class LogisticsOrderSpreadsheetService
                 __('logistics.refund_import.headers.refund_reference'),
                 __('logistics.refund_import.headers.refund_reason'),
                 __('logistics.refund_import.headers.refund_amount_usd'),
+                '发生时间',
                 __('logistics.refund_import.error_report.row'),
                 __('logistics.refund_import.error_report.field'),
                 __('logistics.refund_import.error_report.reason'),
                 __('logistics.refund_import.error_report.hint'),
             ];
-            $widths = [16, 28, 28, 34, 16, 12, 18, 36, 54];
+            $widths = [16, 28, 28, 34, 16, 22, 12, 18, 36, 54];
             foreach ($headers as $index => $header) {
                 $column = Coordinate::stringFromColumnIndex($index + 1);
                 $sheet->setCellValueExplicit($column.'1', $header, DataType::TYPE_STRING);
@@ -227,7 +230,7 @@ class LogisticsOrderSpreadsheetService
             foreach ($errors as $index => $error) {
                 $values = [
                     $error['payment_method'] ?? '', $error['reference_number'] ?? '', $error['refund_reference'] ?? '',
-                    $error['refund_reason'] ?? '', $error['refund_amount_usd'] ?? '', $error['row'] ?? '',
+                    $error['refund_reason'] ?? '', $error['refund_amount_usd'] ?? '', $error['occurred_at'] ?? '', $error['row'] ?? '',
                     $error['field'] ?? '', $error['reason'] ?? '', $error['hint'] ?? '',
                 ];
                 foreach ($values as $columnIndex => $value) {
@@ -271,7 +274,7 @@ class LogisticsOrderSpreadsheetService
                     $refund->refund_reference,
                     'US$'.number_format((float) $refund->refund_amount_usd, 2),
                     $refund->refund_reason,
-                    $refund->last_imported_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s'),
+                    $refund->occurred_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s'),
                 ], static fn ($value): bool => filled($value)));
             })->implode("\n"),
             default => $order->getAttribute($field),
