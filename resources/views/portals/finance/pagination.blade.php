@@ -16,7 +16,7 @@
             @endphp
         @endforeach
         <li @class(['disabled' => !$paginator->hasMorePages()])>@if($paginator->hasMorePages())<a href="{{ $paginator->nextPageUrl() }}" aria-label="下一页">»</a>@else<span aria-disabled="true">»</span>@endif</li>
-    </ul><label class="finance-page-size">每页显示 <select aria-label="每页显示条数" onchange="var url=new URL(window.location.href);url.searchParams.set('per_page',this.value);url.searchParams.delete('page');window.location.assign(url.toString());">@foreach([10, 20, 50, 100] as $pageSize)<option value="{{ $pageSize }}" @selected($paginator->perPage() === $pageSize)>{{ $pageSize }}</option>@endforeach</select> 条</label></div>
+    </ul><label class="finance-page-size">每页显示 <select aria-label="每页显示条数" data-finance-page-size>@foreach([10, 20, 50, 100] as $pageSize)<option value="{{ $pageSize }}" @selected($paginator->perPage() === $pageSize)>{{ $pageSize }}</option>@endforeach</select> 条</label></div>
 </nav>
 @once
 @push('styles')
