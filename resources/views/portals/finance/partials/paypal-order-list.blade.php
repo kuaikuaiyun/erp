@@ -1,11 +1,27 @@
 <div class="box-header with-border logistics-list-toolbar paypal-order-toolbar">
-    <h3 class="box-title">订单列表</h3><button id="paypal-export-selected" type="button" class="btn btn-default btn-sm" disabled>导出所选</button>
+    <h3 class="box-title">订单列表</h3><button id="paypal-export-selected" type="button" class="btn btn-default btn-sm" hidden style="display:none" disabled>导出所选</button>
+    @if($dataset === 'paypal-orders')
+    <details class="finance-export-columns">
+        <summary class="btn btn-default btn-sm">选择导出列</summary>
+        <div class="finance-export-column-panel">
+            <div class="finance-export-column-actions"><strong>选择需要导出的字段</strong><button type="button" class="btn btn-default btn-xs" data-export-columns-all>全选</button><button type="button" class="btn btn-default btn-xs" data-export-columns-none>清空</button></div>
+            <input type="hidden" name="report_fields_customized" value="1" form="finance-filters">
+            <div class="finance-export-column-grid">
+            @foreach([...$definition['headers'], __('finance.fields.paypal_account'), __('finance.fields.category'), __('finance.fields.display_time'), __('finance.fields.timezone')] as $column)
+                <label><input type="checkbox" name="report_columns[]" value="{{ $loop->index }}" form="finance-filters" checked> {{ \App\Portals\Finance\FinanceCatalog::simplified($column) }}</label>
+            @endforeach
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;margin-top:12px"><p class="text-muted" style="flex:1;margin:0" data-export-columns-message>至少选择一列，保存后记住本浏览器的选择。</p><button type="button" class="btn btn-primary btn-sm" data-export-columns-save>保存</button></div>
+        </div>
+    </details>
+    @endif
     <select name="export_format" form="finance-filters" class="form-control" aria-label="{{ __('finance.records.export_format') }}">@foreach(__('finance.records.formats') as $format => $label)<option value="{{ $format }}" @selected(($filters['export_format'] ?? 'xlsx') === $format)>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($label)) }}</option>@endforeach</select>
     <a id="finance-export-filtered" class="btn btn-default btn-sm" href="{{ route('finance.records.export', ['dataset' => $dataset, ...$filters, 'export_scope' => 'filtered', 'export_format' => 'xlsx']) }}"><i class="fa fa-download" aria-hidden="true"></i> 导出</a>
     @include('portals.finance.pagination', ['paginator' => $records])
 </div>
-<div class="box-body table-responsive no-padding logistics-orders-scroll">
-<table class="table table-hover logistics-table logistics-orders-table paypal-order-table">
+<div id="finance-order-horizontal-scroll" style="overflow-x:auto;overflow-y:hidden;height:18px" aria-label="订单列表横向滚动" tabindex="0"><div style="height:1px"></div></div>
+<div class="box-body table-responsive no-padding logistics-orders-scroll" id="finance-order-table-scroll">
+<table class="table table-hover logistics-table logistics-orders-table paypal-order-table show-extra-columns">
     @php
         $columnStyles = ['', 'logistics-order-identifiers', 'logistics-store-information', 'logistics-subscription-information', '', 'logistics-sale-product-details', 'logistics-payment-information', ''];
     @endphp
@@ -52,7 +68,8 @@
                     '商品重量' => $order?->sale_product_weight ?? null, '商品' => $order?->tongtu_product_name ?? $fields[18]],
                 ['支付状态' => $fields[5], '交易类型' => $fields[4], '支付渠道' => $order?->payment_gateway ?? ($dataset === 'paypal-orders' ? 'PayPal' : ''),
                     '收款账号' => $account, '收款账号邮箱' => $fields[15], '币种' => $fields[6],
-                    '金额' => $fields[7], '手续费' => $fields[8], '净额' => $fields[9]],
+                    '金额' => $fields[7], '手续费' => $fields[8], '净额' => $fields[9],
+                    '实付金额' => $order?->paid_amount_usd, '运费' => $order?->total_shipping_usd],
             ];
         @endphp
         <tr>
@@ -162,3 +179,72 @@
     </tbody>
 </table>
 </div>
+@push('scripts')
+<script>
+(function () {
+    var bar = document.getElementById('finance-order-horizontal-scroll');
+    var viewport = document.getElementById('finance-order-table-scroll');
+    var table = viewport.querySelector('table');
+    var lastWidth = -1;
+    var expectedScroll = new WeakMap();
+    var scrollFrame = 0;
+    var scrollSource = null;
+    function sync(source) {
+        var expected = expectedScroll.get(source);
+        if (expected !== undefined && Math.abs(source.scrollLeft - expected) < 1) {
+            expectedScroll.delete(source);
+            return;
+        }
+        expectedScroll.delete(source);
+        scrollSource = source;
+        if (scrollFrame) return;
+        scrollFrame = requestAnimationFrame(function () {
+            scrollFrame = 0;
+            var destination = scrollSource === bar ? viewport : bar;
+            var position = scrollSource.scrollLeft;
+            if (Math.abs(destination.scrollLeft - position) >= 1) {
+                destination.scrollLeft = position;
+                expectedScroll.set(destination, destination.scrollLeft);
+            }
+        });
+    }
+    function resize() {
+        if (viewport.clientWidth === lastWidth) return;
+        lastWidth = viewport.clientWidth;
+        // Fit the primary columns precisely before the pinned action column.
+        // Keep secondary columns beyond that boundary instead of exposing a sliver.
+        var headers = Array.from(table.tHead.rows[0].cells);
+        var base = [38, 68, 220, 230, 160, 160, 340, 220];
+        var available = Math.max(1436, viewport.clientWidth - 100);
+        var used = 0;
+        var widths = headers.map(function (header, index) {
+            if (index < base.length) {
+                var width = index === base.length - 1 ? available - used : Math.round(base[index] * available / 1436);
+                used += width;
+                return width;
+            }
+            return index === headers.length - 1 ? 100 : (index === 8 ? 180 : 210);
+        });
+        Array.from(table.rows).forEach(function (row) {
+            if (row.cells.length !== headers.length) return;
+            Array.from(row.cells).forEach(function (cell, index) {
+                cell.style.width = widths[index] + 'px';
+                cell.style.minWidth = widths[index] + 'px';
+                cell.style.maxWidth = widths[index] + 'px';
+            });
+        });
+        table.style.width = widths.reduce(function (sum, width) { return sum + width; }, 0) + 'px';
+        table.style.minWidth = table.style.width;
+        // Both scrollbars need identical ranges, excluding the vertical scrollbar.
+        bar.style.width = viewport.clientWidth + 'px';
+        bar.firstElementChild.style.width = table.scrollWidth + 'px';
+        bar.scrollLeft = viewport.scrollLeft;
+        expectedScroll.set(bar, bar.scrollLeft);
+    }
+    bar.addEventListener('scroll', function () { sync(bar); }, { passive: true });
+    viewport.addEventListener('scroll', function () { sync(viewport); }, { passive: true });
+    new ResizeObserver(function () { requestAnimationFrame(resize); }).observe(viewport);
+    resize();
+})();
+</script>
+@endpush

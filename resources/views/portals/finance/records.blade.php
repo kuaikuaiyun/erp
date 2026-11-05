@@ -28,7 +28,9 @@
 .paypal-detail-wide{grid-column:1/-1}@media(max-width:650px){.paypal-detail-body{grid-template-columns:1fr}}
 .paypal-order-fields{display:grid;grid-template-columns:var(--paypal-label-width,68px) minmax(0,1fr);column-gap:6px;margin:0;font-size:12px;line-height:20px}
 .paypal-order-table .logistics-order-identifiers{--paypal-label-width:40px}
-.paypal-order-table .logistics-order-identifiers .paypal-order-fields{grid-template-columns:max-content minmax(0,1fr);column-gap:6px}
+.paypal-order-table .logistics-order-identifiers .paypal-order-fields{display:block}
+.paypal-order-table .logistics-order-identifiers .paypal-order-fields dt{float:left;clear:left;margin-right:3px}
+.paypal-order-table .logistics-order-identifiers .paypal-order-fields dd{display:flow-root;margin:0}
 .paypal-order-table .logistics-order-identifiers .paypal-order-fields dd{overflow:visible;text-overflow:clip;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
 .paypal-order-table .logistics-subscription-information{--paypal-label-width:62px}
 .paypal-order-table .logistics-payment-information{--paypal-label-width:80px}
@@ -45,12 +47,16 @@
 .paypal-filter-extra .finance-condition{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
 .paypal-filter-extra .finance-condition select,.paypal-filter-extra .finance-condition input{width:240px}
 
-.logistics-filter-box .logistics-filter-grid{gap:9px 18px}
-.logistics-filter-box .logistics-filter-field{grid-template-columns:106px minmax(0,1fr);gap:8px}
-.logistics-filter-box .form-control{height:32px;font-size:12px}
+.logistics-filter-box .logistics-filter-grid{grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:12px 24px;align-items:start}
+.logistics-filter-box .logistics-filter-field{grid-template-columns:132px minmax(0,1fr);gap:10px;align-items:center;min-width:0}
+.logistics-filter-box .logistics-filter-field>label{margin:0;text-align:right;line-height:20px;white-space:normal;overflow-wrap:anywhere}
+.logistics-filter-box .logistics-filter-field .form-control{width:100%;min-width:0;margin:0}
+.logistics-filter-box .form-control{height:34px;font-size:12px}
+@media(max-width:767px){.logistics-filter-box .logistics-filter-grid{grid-template-columns:minmax(0,1fr);gap:12px}.logistics-filter-box .logistics-filter-field{grid-template-columns:132px minmax(0,1fr)}}
+@media(max-width:420px){.logistics-filter-box .logistics-filter-field{grid-template-columns:minmax(0,1fr);gap:5px}.logistics-filter-box .logistics-filter-field>label{text-align:left}}
 .logistics-filter-box .box-body{padding:14px 20px}
 #finance-filters:not(.paypal-filters-expanded) .paypal-extra-filter{display:none}
-#finance-filters .paypal-date-filters{grid-template-columns:repeat(3,minmax(0,1fr));margin-top:12px;padding-top:12px;gap:10px 20px}
+#finance-filters .paypal-date-filters{display:flex;flex-wrap:nowrap;align-items:center;overflow-x:auto;margin-top:16px;padding:16px 0 4px;gap:20px;border-top:1px solid #edf1f5}
 #finance-filters:not(.paypal-filters-expanded) .paypal-date-filters .logistics-date-range{border-left:0;padding-left:0}
 #finance-filters .logistics-filter-actions{display:flex;align-items:center;gap:8px;padding-top:12px;margin-top:12px}
 #finance-filters .logistics-filter-actions .form-control{margin:0;width:155px}
@@ -61,14 +67,35 @@
 .logistics-orders-table.paypal-order-table th:nth-child(6),.logistics-orders-table.paypal-order-table td:nth-child(6){width:160px;min-width:160px;max-width:none}
 .logistics-orders-table.paypal-order-table th:nth-child(7),.logistics-orders-table.paypal-order-table td:nth-child(7){width:340px;min-width:280px;max-width:none}
 
-#finance-filters .paypal-date-filters .logistics-date-range{border-left:0;padding-left:0}
+#finance-filters .paypal-date-filters .logistics-date-range{display:grid;grid-template-columns:auto minmax(0,1fr);flex:1 0 355px;align-items:center;gap:10px;border:0;padding:0}
+#finance-filters .paypal-date-filters .logistics-date-range>label{margin:0;text-align:right;line-height:20px}
 #finance-filters .paypal-date-filters .logistics-date-range>div{display:grid;grid-template-columns:minmax(0,1fr) 14px minmax(0,1fr);gap:8px;align-items:center}
 #finance-filters .paypal-date-filters .logistics-date-range>div>span{text-align:center}
-.paypal-order-toolbar select[name=export_format]{width:155px;height:30px;flex:0 0 155px}
+@media(max-width:600px){#finance-filters .paypal-date-filters .logistics-date-range{flex-basis:355px}}
+.paypal-order-toolbar select[name=export_format]{width:155px;height:32px;flex:0 0 155px;margin:0}
+.finance-system .paypal-order-toolbar{align-items:center;gap:12px}
+.finance-system .paypal-order-toolbar .finance-numbered-pages{padding-top:0;margin:0;align-items:center}
+.paypal-order-toolbar>.btn,.paypal-order-toolbar .finance-export-columns>summary{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;height:32px;margin:0;padding:5px 12px;line-height:20px}
+.paypal-order-toolbar .finance-export-columns{align-self:center;margin:0}
+.finance-export-columns{position:relative}.finance-export-columns>summary{list-style:none}.finance-export-columns>summary::-webkit-details-marker{display:none}
+.finance-export-column-panel{position:absolute;right:0;top:38px;width:560px;max-width:calc(100vw - 40px);padding:16px;background:#fff;border:1px solid #dce6ef;border-radius:6px;box-shadow:0 8px 24px #17324d26;z-index:20}
+.finance-export-column-actions{display:flex;align-items:center;gap:8px;margin-bottom:12px}.finance-export-column-actions strong{margin-right:auto}
+.finance-export-column-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;max-height:320px;overflow-y:auto}.finance-export-column-grid label{font-size:12px;font-weight:400;margin:0;overflow-wrap:anywhere}.finance-export-column-panel p{margin:12px 0 0;font-size:12px}
 
 .logistics-orders-table.paypal-order-table{width:3350px;min-width:3350px}
 .logistics-orders-table.paypal-order-table th:nth-child(n+9),.logistics-orders-table.paypal-order-table td:nth-child(n+9){width:210px;min-width:160px;max-width:250px}
 .logistics-orders-table.paypal-order-table th:last-child,.logistics-orders-table.paypal-order-table td:last-child{width:100px;min-width:100px}
+.logistics-orders-table.paypal-order-table th:nth-child(9),.logistics-orders-table.paypal-order-table td:nth-child(9){width:180px;min-width:180px;max-width:180px}
+.logistics-orders-table.paypal-order-table th:last-child,.logistics-orders-table.paypal-order-table td:last-child:not([colspan]){position:sticky;right:0;width:100px;min-width:100px;max-width:100px;box-shadow:-2px 0 5px rgba(45,69,94,.08)}
+.logistics-orders-table.paypal-order-table td{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
+.logistics-orders-table.paypal-order-table .paypal-order-fields dd{overflow:visible;text-overflow:clip;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+.paypal-order-table .logistics-sale-product-detail-code>span,.paypal-order-table .logistics-sale-product-detail-sku>span{min-width:0;overflow:visible;text-overflow:clip;white-space:normal;overflow-wrap:anywhere}
+.logistics-orders-table.paypal-order-table:not(.show-extra-columns){width:100%;min-width:1476px;table-layout:fixed}
+.logistics-orders-table.paypal-order-table:not(.show-extra-columns) th:nth-child(n+9):not(:last-child),.logistics-orders-table.paypal-order-table:not(.show-extra-columns) td:nth-child(n+9):not(:last-child):not([colspan]){display:none}
+.logistics-orders-table.paypal-order-table:not(.show-extra-columns) th:nth-child(4),.logistics-orders-table.paypal-order-table:not(.show-extra-columns) td:nth-child(4){width:240px;min-width:240px;max-width:none}
+.logistics-orders-table.paypal-order-table:not(.show-extra-columns) th:nth-child(5),.logistics-orders-table.paypal-order-table:not(.show-extra-columns) td:nth-child(5){width:150px;min-width:150px;max-width:none}
+.logistics-orders-table.paypal-order-table:not(.show-extra-columns) th:nth-child(6),.logistics-orders-table.paypal-order-table:not(.show-extra-columns) td:nth-child(6){width:130px;min-width:130px;max-width:none}
+.logistics-orders-table.paypal-order-table:not(.show-extra-columns) th:nth-child(8),.logistics-orders-table.paypal-order-table:not(.show-extra-columns) td:nth-child(8){width:220px;min-width:220px;max-width:none}
 </style>
 @endif
 <style>
@@ -137,7 +164,7 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
                     $commonField = in_array($field, ['id','shopify_order_number','tongtu_order_number','store_name','subscription_type','column_18','domain','column_13','currency','status'], true);
                 @endphp
                 @continue(preg_match('/_(from|to)$/', $field))
-                <div class="logistics-filter-field {{ $commonField ? '' : 'paypal-extra-filter' }}">
+                <div class="logistics-filter-field {{ $commonField ? '' : 'paypal-extra-filter' }}" style="order:{{ $loop->index * 10 }}">
                     <label for="paypal-field-{{ $field }}">{{ $label }}</label>
                     @if(in_array($field, ['currency', 'status'], true) || isset($fixedFilterOptions[$field]))
                         <select id="paypal-field-{{ $field }}" class="form-control" name="order_fields[{{ $field }}]">
@@ -152,10 +179,10 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
                 </div>
             @endforeach
         @endif
-        <div class="{{ in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true) ? 'logistics-filter-field' : 'form-group' }}" ><label for="filter-account">{{ __($definition['channel'] === 'paypal' ? 'finance.fields.paypal_account' : 'finance.fields.account') }}</label><select id="filter-account" class="form-control" name="account"><option value="">{{ __('finance.records.all') }}</option>@foreach($accounts as $account)<option value="{{ $account }}" @selected(($filters['account'] ?? '') === $account)>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($accountLabels->get($account, $account))) }}</option>@endforeach</select></div>
-        <div class="{{ in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true) ? 'logistics-filter-field' : 'form-group' }}" ><label for="filter-timezone">{{ __('finance.fields.timezone') }}</label><select id="filter-timezone" name="timezone" class="form-control">@foreach($timezones as $timezone)<option value="{{ $timezone }}" @selected($filters['timezone'] === $timezone)>{{ \App\Portals\Finance\FinanceCatalog::timezoneLabel($timezone) }}</option>@endforeach</select></div>
-        <div class="{{ in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true) ? 'logistics-filter-field' : 'form-group' }}" ><label for="filter-reference">{{ __('finance.fields.reference') }}</label><input id="filter-reference" placeholder="请输入交易 / 平台单号" class="form-control" name="reference" value="{{ $filters['reference'] ?? '' }}" maxlength="191"></div>
-        @if($definition['channel'] === 'paypal')<div class="{{ in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true) ? 'logistics-filter-field' : 'form-group' }}" ><label for="filter-transaction-scope">{{ __('finance.fields.transaction_scope') }}</label><select id="filter-transaction-scope" class="form-control" name="transaction_scope">@foreach(__('finance.records.scopes') as $scope => $label)<option value="{{ $scope }}" @selected(($filters['transaction_scope'] ?? 'all') === $scope)>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($label)) }}</option>@endforeach</select></div>@endif
+        <div class="{{ in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true) ? 'logistics-filter-field' : 'form-group' }}"  style="order:195"><label for="filter-account">{{ __($definition['channel'] === 'paypal' ? 'finance.fields.paypal_account' : 'finance.fields.account') }}</label><select id="filter-account" class="form-control" name="account"><option value="">{{ __('finance.records.all') }}</option>@foreach($accounts as $account)<option value="{{ $account }}" @selected(($filters['account'] ?? '') === $account)>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($accountLabels->get($account, $account))) }}</option>@endforeach</select></div>
+        <div class="{{ in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true) ? 'logistics-filter-field' : 'form-group' }}"  style="order:1000"><label for="filter-timezone">{{ __('finance.fields.timezone') }}</label><select id="filter-timezone" name="timezone" class="form-control">@foreach($timezones as $timezone)<option value="{{ $timezone }}" @selected($filters['timezone'] === $timezone)>{{ \App\Portals\Finance\FinanceCatalog::timezoneLabel($timezone) }}</option>@endforeach</select></div>
+        <div class="{{ in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true) ? 'logistics-filter-field' : 'form-group' }}"  style="order:295"><label for="filter-reference">{{ __('finance.fields.reference') }}</label><input id="filter-reference" placeholder="请输入交易 / 平台单号" class="form-control" name="reference" value="{{ $filters['reference'] ?? '' }}" maxlength="191"></div>
+        @if($definition['channel'] === 'paypal')<div class="{{ in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true) ? 'logistics-filter-field' : 'form-group' }}"  style="order:1010"><label for="filter-transaction-scope">{{ __('finance.fields.transaction_scope') }}</label><select id="filter-transaction-scope" class="form-control" name="transaction_scope">@foreach(__('finance.records.scopes') as $scope => $label)<option value="{{ $scope }}" @selected(($filters['transaction_scope'] ?? 'all') === $scope)>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($label)) }}</option>@endforeach</select></div>@endif
         @if(! in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true))<div class="form-group finance-date-range"><label for="filter-from">日期区间</label><div class="finance-date-inputs"><input id="filter-from" type="date" class="form-control" name="from" value="{{ $filters['from'] ?? '' }}" aria-label="{{ __('finance.fields.from') }}"><span aria-hidden="true">—</span><input id="filter-to" type="date" class="form-control" name="to" value="{{ $filters['to'] ?? '' }}" aria-label="{{ __('finance.fields.to') }}"></div></div>@endif
     </div>
     @if(in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true))
@@ -258,10 +285,12 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
             allOrders.indeterminate=count>0 && count<checks.length;
             selectedExport.disabled=count===0;
             selectedExport.textContent=count?'导出所选（'+count+'）':'导出所选';
+            document.getElementById('finance-export-filtered').title=count?'导出勾选的 '+count+' 条订单':'导出当前筛选结果';
         }
         allOrders.addEventListener('change',function(){checks.forEach(function(input){input.checked=allOrders.checked;});refreshSelection();});
         checks.forEach(function(input){input.addEventListener('change',refreshSelection);});
         selectedExport.addEventListener('click',function(){
+            if(!document.getElementById('finance-filters').reportValidity())return;
             var query=new URLSearchParams(new FormData(document.getElementById('finance-filters')));
             query.set('export_scope','records');query.set('export_format',document.querySelector('[name="export_format"]').value);
             checks.filter(function(input){return input.checked;}).forEach(function(input){query.append('selected_ids[]',input.value);});
@@ -292,11 +321,39 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
 })();
 </script>
 <script>
+document.querySelectorAll('.finance-export-columns').forEach(function(panel){
+    var checks=Array.from(panel.querySelectorAll('[name="report_columns[]"]'));
+    var storageKey='finance:paypal:export-columns:v1';
+    try {
+        var saved=JSON.parse(localStorage.getItem(storageKey));
+        if(Array.isArray(saved)&&saved.some(function(value){return checks.some(function(input){return input.value===value;});})){
+            checks.forEach(function(input){input.checked=saved.includes(input.value);});
+        }
+    }catch(error){}
+    function validate(){checks[0].setCustomValidity(checks.some(function(input){return input.checked;})?'':'请至少选择一个导出字段。');}
+    panel.querySelector('[data-export-columns-all]').addEventListener('click',function(){checks.forEach(function(input){input.checked=true;});validate();});
+    panel.querySelector('[data-export-columns-none]').addEventListener('click',function(){checks.forEach(function(input){input.checked=false;});validate();});
+    checks.forEach(function(input){input.addEventListener('change',validate);});
+    panel.querySelector('[data-export-columns-save]').addEventListener('click',function(){
+        validate();
+        if(!checks[0].reportValidity())return;
+        try{
+            localStorage.setItem(storageKey,JSON.stringify(checks.filter(function(input){return input.checked;}).map(function(input){return input.value;})));
+            panel.open=false;
+        }catch(error){panel.querySelector('[data-export-columns-message]').textContent='浏览器未允许保存设置，本次导出仍可使用所选字段。';}
+    });
+    document.getElementById('finance-filters').addEventListener('invalid',function(){panel.open=true;},true);
+});
 document.getElementById('finance-export-filtered').addEventListener('click',function(event){
     var form=document.getElementById('finance-filters');
     if(!form.reportValidity()){event.preventDefault();return;}
     var query=new URLSearchParams(new FormData(form));
     query.set('export_scope','filtered');
+    var selected=Array.from(document.querySelectorAll('.paypal-order-check:checked'));
+    if(selected.length){
+        query.set('export_scope','records');
+        selected.forEach(function(input){query.append('selected_ids[]',input.value);});
+    }
     query.set('export_format',document.querySelector('[name="export_format"]').value);
     this.href=@json(route('finance.records.export', $dataset))+'?'+query.toString();
 });

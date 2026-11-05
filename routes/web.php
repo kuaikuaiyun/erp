@@ -53,6 +53,7 @@ Route::prefix('finance')->name('finance.')->middleware(\App\Http\Middleware\Redi
     Route::post('/payment-accounts/{accountKey}/refresh', 'refreshPayPalBalance')->where('accountKey', 'finance-[1-9][0-9]*')->name('payment-accounts.refresh');
     Route::post('/payment-accounts/{accountKey}/transactions', 'syncPayPalTransactions')->where('accountKey', 'finance-[1-9][0-9]*')->name('payment-accounts.sync');
     Route::delete('/payment-accounts/{accountKey}', 'deletePaymentAccount')->where('accountKey', 'finance-[1-9][0-9]*')->name('payment-accounts.delete');
+    Route::post('/payment-accounts/{accountKey}/disable', 'disablePaymentAccount')->where('accountKey', 'finance-[1-9][0-9]*')->name('payment-accounts.disable');
     Route::post('/payment-accounts/{accountKey}', 'updatePaymentAccount')->where('accountKey', '[a-z0-9-]+')->name('payment-accounts.update');
     Route::get('/records/{dataset}', 'records')->name('records');
     Route::get('/transactions/{transaction}/raw', 'rawPayPalTransaction')->whereNumber('transaction')->name('transactions.raw');

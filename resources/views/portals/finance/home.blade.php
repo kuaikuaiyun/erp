@@ -1,6 +1,6 @@
 @extends('portals.finance.layout', ['title' => __('finance.menus.home')])
 @push('styles')
-<link rel="stylesheet" href="{{ request()->getSchemeAndHttpHost() }}/assets/erp/finance-workbench.css?v=20261104-4">
+<link rel="stylesheet" href="{{ request()->getSchemeAndHttpHost() }}/assets/erp/finance-workbench.css?v=20261105-1">
 @endpush
 @section('finance_content')
 <div id="finance-workbench">

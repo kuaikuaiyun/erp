@@ -92,17 +92,20 @@ class FinanceCatalog
     }
 
     public const PAYPAL_ORDER_FILTERS = [
-        'shopify_order_number' => 'Shopify订单号', 'tongtu_order_number' => '通途订单号', 'shopify_order_id' => '订单ID',
-        'store_name' => '店铺名称', 'subscription_type' => '订阅类型',
-        'id' => '编号', 'shopify_sku' => '原始SKU', 'shopify_sku_status' => '原始SKU状态', 'pcl_runnable' => 'PCL SKU 可跑状态',
+        'id' => '编号',
+        'shopify_order_number' => 'Shopify订单号', 'shopify_order_id' => '订单ID', 'tongtu_order_number' => '通途订单号',
+        'store_name' => '店铺名称', 'domain' => '店铺域名', 'source_shop_domain' => '来源Shopify域名',
         'assigned_owner_name' => '归属人', 'group_names' => '所属组', 'staff_status' => '人员状态',
-        'source_shop_domain' => '来源Shopify域名', 'store_assignment_status' => '店铺归属状态', 'is_add_on' => '是否加购',
-        'payment_method' => '支付方式', 'logistics_status' => '物流状态', 'refund_reason' => '实际退款原因', 'data_status' => '数据状态',
-        'refund_number' => '实际退款编号', 'refunded_from' => '实际退款时间起', 'refunded_to' => '实际退款时间止',
+        'store_assignment_status' => '店铺归属状态', 'is_add_on' => '是否加购', 'subscription_type' => '订阅类型',
+        'shopify_sku' => '原始SKU', 'shopify_sku_status' => '原始SKU状态', 'pcl_runnable' => 'PCL SKU 可跑状态',
+        'column_19' => '物品 ID', 'column_18' => '商品名称',
+        'status' => '支付状态', 'payment_method' => '支付方式', 'column_15' => '收款账号邮箱', 'currency' => '币种',
         'ordered_from' => '下单时间起', 'ordered_to' => '下单时间止', 'paid_from' => '付款时间起', 'paid_to' => '付款时间止',
-        'column_13' => '账单号', 'column_19' => '物品 ID', 'column_18' => '商品名称', 'domain' => '店铺域名',
-        'column_3' => '买家名称', 'sender_email' => '付款方邮箱', 'column_37' => '电话', 'column_15' => '收款账号邮箱',
-        'currency' => '币种', 'status' => '支付状态',
+        'refund_reason' => '实际退款原因',
+        'refund_number' => '实际退款编号', 'refunded_from' => '实际退款时间起', 'refunded_to' => '实际退款时间止',
+        'column_13' => '账单号',
+        'column_3' => '买家名称', 'sender_email' => '付款方邮箱', 'column_37' => '电话',
+        'logistics_status' => '物流状态', 'data_status' => '数据状态',
     ];
 
     public const PAYPAL_LOGISTICS_FILTERS = ['shopify_order_number', 'tongtu_order_number', 'shopify_order_id', 'store_name', 'subscription_type',

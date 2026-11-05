@@ -37,6 +37,7 @@ class FinancePayPalBalanceService
                 'account_code' => $account->account_code, 'main_currency' => $account->main_currency,
                 'status' => $account->status, 'remark' => $account->remark ?? '',
                 'relay_configured' => $relayConfigured,
+                'fetched_at' => $this->time($snapshots->get($account->id)?->created_at),
                 'connection_status' => $account->status === 'disabled' ? 'closed' : $connectionStatus,
             ];
             $snapshot = $snapshots->get($account->id);
