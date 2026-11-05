@@ -15,7 +15,7 @@ use RuntimeException;
 class XShoppyOrderSyncService
 {
     /** @return array{stores:int,success:int,failed:int,created:int,updated:int,errors:list<string>} */
-    public function syncAll(?int $storeId = null, int $initialDays = 60, bool $full = false): array
+    public function syncAll(?int $storeId = null, int $initialDays = 60, bool $full = false, bool $allHistory = false): array
     {
         $stores = AssistantDomainStore::query()
             ->when($storeId, fn ($query) => $query->whereKey($storeId))
@@ -27,7 +27,7 @@ class XShoppyOrderSyncService
 
         foreach ($stores as $store) {
             try {
-                $result = $this->syncStore($store, $initialDays, $full);
+                $result = $this->syncStore($store, $initialDays, $full, $allHistory);
                 $summary['success']++;
                 $summary['created'] += $result['created'];
                 $summary['updated'] += $result['updated'];
@@ -41,14 +41,16 @@ class XShoppyOrderSyncService
     }
 
     /** @return array{created:int,updated:int,pages:int} */
-    public function syncStore(AssistantDomainStore $store, int $initialDays = 60, bool $full = false): array
+    public function syncStore(AssistantDomainStore $store, int $initialDays = 60, bool $full = false, bool $allHistory = false): array
     {
         $this->assertStore($store);
         $state = FashionLogisticsSyncState::query()->firstOrCreate(['assistant_domain_store_id' => $store->getKey()]);
         $state->forceFill(['status' => 'syncing', 'last_started_at' => now(), 'last_error' => null])->save();
-        $after = ! $full && $state->last_cursor_at
-            ? $state->last_cursor_at->copy()->subMinutes(10)
-            : now()->subDays(max(1, $initialDays));
+        $after = $allHistory
+            ? Carbon::create(2000, 1, 1, 0, 0, 0, 'UTC')
+            : (! $full && $state->last_cursor_at
+                ? $state->last_cursor_at->copy()->subMinutes(10)
+                : now()->subDays(max(1, $initialDays)));
         $before = now()->addMinute();
         $created = 0;
         $updated = 0;
