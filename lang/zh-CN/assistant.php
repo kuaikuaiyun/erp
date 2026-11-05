@@ -144,6 +144,7 @@ return [
             ],
             'site_builder' => [
                 'xshopy' => 'xshopy',
+                'xshoppy' => 'xshoppy',
                 'nbc' => 'nbc',
                 'shopyy' => 'shopyy',
                 'shopline' => 'shopline',
