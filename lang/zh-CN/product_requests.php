@@ -3,14 +3,14 @@
 return [
     'menus' => [
         'product_dedupe_checker' => '查重工具',
-        'operation_requests' => '自己开品提报',
+        'operation_requests' => '开品提报',
         'procurement_inspections' => '商品信息检验',
         'placement_reviews' => '投放链接审核',
         'warehouse_acceptances' => '仓库验收',
         'link_review_issues' => '审核链接问题',
         'warehouse_issues' => '仓库问题',
         'link_sku_manager' => 'PCL SKU 管理',
-        'submission_group' => '提报',
+        'submission_group' => '开品提报',
     ],
     'link_skus' => [
         'title' => 'PCL SKU 管理',

@@ -25,7 +25,7 @@
     @stack('styles')
     <script src="{{ $portalOrigin }}/vendor/laravel-admin/AdminLTE/plugins/jQuery/jQuery-2.1.4.min.js"></script>
 </head>
-<body class="hold-transition {{ config('admin.skin', 'skin-blue-light') }} {{ implode(' ', config('admin.layout', [])) }} portal-admin-shell">
+<body class="hold-transition {{ config('admin.skin', 'skin-blue-light') }} {{ implode(' ', config('admin.layout', [])) }} portal-admin-shell @yield('body_class')">
 @php
     $greetingHour = now('Asia/Shanghai')->hour;
     $greetingKey = $greetingHour < 12
@@ -36,7 +36,7 @@
 @endphp
 <div class="wrapper">
     <header class="main-header">
-        <a href="{{ $portalOrigin }}/" class="logo">
+        <a href="{{ $portalOrigin }}{{ app(\App\Portal\Services\PortalDomainService::class)->portalPath($portal) }}" class="logo">
             <span class="logo-mini"><i class="fa fa-cube"></i></span>
             <span class="logo-lg"><i class="fa fa-cube"></i> {{ $portal->name }}</span>
         </a>

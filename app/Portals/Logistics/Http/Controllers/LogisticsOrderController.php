@@ -593,7 +593,7 @@ class LogisticsOrderController extends Controller
             'id', 'shopify_order_id', 'shopify_order_number', 'tongtu_order_number', 'store_name',
             'owner_assignment', 'group_names', 'staff_status', 'buyer_name', 'buyer_email',
             'buyer_phone', 'is_add_on', 'subscription_type', 'subscription_status', 'payment_method', 'payment_gateway',
-            'collection_account_email', 'transaction_id', 'bill_number', 'logistics_status', 'refund_reason', 'data_status',
+            'collection_account', 'collection_account_email', 'transaction_id', 'bill_number', 'logistics_status', 'refund_reason', 'data_status',
             'time_zone',
             'source_shop_domain', 'store_domain', 'product_name', 'store_assignment_status', 'refund_number', 'shopify_sku', 'shopify_sku_status',
             'product_runnable_status',
@@ -636,6 +636,10 @@ class LogisticsOrderController extends Controller
             if ($filters[$column] !== '') {
                 $query->where($column, 'like', $this->contains((string) $filters[$column]));
             }
+        }
+
+        if ($filters['collection_account'] !== '') {
+            $query->where('collection_account', $filters['collection_account']);
         }
 
         if ($this->ownerSnapshotColumnsExist()) {
@@ -838,6 +842,7 @@ class LogisticsOrderController extends Controller
             'groups' => $values('group_names'),
             'paymentMethods' => $values('payment_method'),
             'paymentGateways' => $values('payment_gateway'),
+            'collectionAccounts' => $values('collection_account'),
             'subscriptionTypes' => $values('subscription_type'),
             'subscriptionStatuses' => $values('subscription_status'),
             'sourceDomains' => $values('source_shop_domain'),

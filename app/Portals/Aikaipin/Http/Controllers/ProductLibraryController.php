@@ -3,22 +3,24 @@
 namespace App\Portals\Aikaipin\Http\Controllers;
 
 use App\Http\Controllers\Controller;
-use App\Models\AikaipinProduct;
-use App\Models\AikaipinProductUploadSession;
+use App\Models\AdminUser;
 use App\Models\AikaipinPlacementEvaluation;
 use App\Models\AikaipinPlacementEvaluationRecord;
+use App\Models\AikaipinProduct;
+use App\Models\AikaipinProductUploadSession;
 use App\Models\AikaipinSelectionProposal;
 use App\Models\AikaipinSelectionProposalImage;
 use App\Models\AikaipinSelectionProposalTag;
-use App\Models\AdminUser;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Aikaipin\AikaipinPortalAuthorizationService;
 use App\Portals\Aikaipin\AikaipinProductLibraryStorageService;
 use App\Portals\Aikaipin\AikaipinSelectionProposalStorageService;
+use App\Portals\Operation\ShopifyProductCsvImporter;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -33,8 +35,8 @@ class ProductLibraryController extends Controller
         private readonly AikaipinPortalAuthorizationService $authorization,
         private readonly AikaipinProductLibraryStorageService $storage,
         private readonly AikaipinSelectionProposalStorageService $selectionProposalStorage,
-    ) {
-    }
+        private readonly ShopifyProductCsvImporter $shopifyCsvImporter,
+    ) {}
 
     public function index(Request $request): Response|View
     {
@@ -248,8 +250,8 @@ class ProductLibraryController extends Controller
             $product = DB::connection($connection)->transaction(function () use ($context, $data, $categories, $departmentIds, $skuValues, &$createdPaths): AikaipinProduct {
                 $session = $this->uploadSessionForUser($context['user'], (string) $data['package_upload_token'], true);
                 if ($session->status !== AikaipinProductUploadSession::STATUS_COMPLETED
-                    || !$session->assembled_path
-                    || !Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($session->assembled_path)) {
+                    || ! $session->assembled_path
+                    || ! Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($session->assembled_path)) {
                     throw ValidationException::withMessages([
                         'package_upload_token' => __('aikaipin.messages.package_upload_incomplete_message'),
                     ]);
@@ -349,6 +351,86 @@ class ProductLibraryController extends Controller
         return response()->json($this->productEditPayload($product));
     }
 
+    public function previewShopifyImport(Request $request, AikaipinProduct $product): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
+
+        $data = $request->validate([
+            'shopify_csv' => ['required', 'file', 'mimes:csv,txt', 'max:20480'],
+        ], [
+            'shopify_csv.required' => '请选择 Shopify 导出的 CSV 商品文件。',
+            'shopify_csv.mimes' => '只支持 CSV 文件。',
+            'shopify_csv.max' => 'CSV 文件不能超过 20 MB。',
+        ]);
+        /** @var UploadedFile $file */
+        $file = $data['shopify_csv'];
+
+        try {
+            $payload = $this->shopifyCsvImporter->parse($file->getRealPath());
+        } catch (\Throwable $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        $existingSkus = collect($product->skuValues())->map(fn (string $sku): string => mb_strtolower($sku))->flip();
+        $matchedSkus = collect($payload['variants'] ?? [])->pluck('sku')
+            ->filter(fn (mixed $sku): bool => $existingSkus->has(mb_strtolower(trim((string) $sku))))
+            ->values()->all();
+        if ($matchedSkus === []) {
+            return response()->json([
+                'message' => 'CSV 中没有任何 SKU 与当前产品匹配，请确认选择了正确的产品和文件。',
+            ], 422);
+        }
+
+        $token = (string) Str::uuid();
+        Cache::put($this->shopifyImportCacheKey($token), [
+            'user_id' => (int) $context['user']->getKey(),
+            'product_id' => (int) $product->getKey(),
+            'file_name' => $file->getClientOriginalName(),
+            'payload' => $payload,
+        ], now()->addMinutes(20));
+
+        return response()->json([
+            'preview_token' => $token,
+            'product' => ['id' => (int) $product->getKey(), 'code' => $product->product_code, 'name' => $product->name],
+            'shopify' => $this->shopifyImportPayload($payload),
+            'matched_skus' => $matchedSkus,
+        ]);
+    }
+
+    public function importShopifyCsv(Request $request, AikaipinProduct $product): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
+        $data = $request->validate(['preview_token' => ['required', 'uuid']]);
+        $preview = Cache::pull($this->shopifyImportCacheKey($data['preview_token']));
+        if (! is_array($preview)
+            || (int) ($preview['user_id'] ?? 0) !== (int) $context['user']->getKey()
+            || (int) ($preview['product_id'] ?? 0) !== (int) $product->getKey()) {
+            return response()->json(['message' => '预览已过期，请重新选择 CSV 文件。'], 422);
+        }
+
+        $updated = $this->shopifyCsvImporter->supplement(
+            $product,
+            (array) ($preview['payload'] ?? []),
+            (string) ($preview['file_name'] ?? 'products.csv'),
+            (string) ($preview['file_name'] ?? 'products.csv'),
+        );
+        $shopify = $this->shopifyImportPayload($updated->shopifyData());
+
+        return response()->json([
+            'message' => "Shopify 商品资料导入成功，已补充 {$shopify['variant_count']} 个规格、{$shopify['image_count']} 张图片。",
+            'redirect_url' => route('aikaipin.product-library.index'),
+            'shopify_data' => $shopify,
+        ]);
+    }
+
     public function updateProduct(Request $request, AikaipinProduct $product): JsonResponse|Response
     {
         $context = $this->pageContext($request);
@@ -389,7 +471,7 @@ class ProductLibraryController extends Controller
         }
 
         $existingImages = $product->imageFiles();
-        if (collect($removedImageIndexes)->contains(static fn (int $index): bool => !array_key_exists($index, $existingImages))) {
+        if (collect($removedImageIndexes)->contains(static fn (int $index): bool => ! array_key_exists($index, $existingImages))) {
             throw ValidationException::withMessages([
                 'remove_image_indexes' => __('aikaipin.messages.product_image_invalid_message'),
             ]);
@@ -403,7 +485,7 @@ class ProductLibraryController extends Controller
             ]);
         }
 
-        if (!($data['package_upload_token'] ?? null) && $product->packageFilePayload() === null) {
+        if (! ($data['package_upload_token'] ?? null) && $product->packageFilePayload() === null) {
             throw ValidationException::withMessages([
                 'package_upload_token' => __('aikaipin.messages.archive_required_message'),
             ]);
@@ -449,8 +531,8 @@ class ProductLibraryController extends Controller
                 if ($data['package_upload_token'] ?? null) {
                     $session = $this->uploadSessionForUser($context['user'], (string) $data['package_upload_token'], true);
                     if ($session->status !== AikaipinProductUploadSession::STATUS_COMPLETED
-                        || !$session->assembled_path
-                        || !Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($session->assembled_path)) {
+                        || ! $session->assembled_path
+                        || ! Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($session->assembled_path)) {
                         throw ValidationException::withMessages([
                             'package_upload_token' => __('aikaipin.messages.package_upload_incomplete_message'),
                         ]);
@@ -536,7 +618,7 @@ class ProductLibraryController extends Controller
             ->orderBy('id')
             ->get(['id', 'evaluation_code']);
 
-        if ($linkedEvaluations->isNotEmpty() && !($data['confirm_linked_evaluations'] ?? false)) {
+        if ($linkedEvaluations->isNotEmpty() && ! ($data['confirm_linked_evaluations'] ?? false)) {
             return response()->json([
                 'code' => 'product_has_linked_placement_evaluations',
                 'message' => __('aikaipin.messages.product_delete_linked_message', [
@@ -733,7 +815,7 @@ class ProductLibraryController extends Controller
         abort_unless(
             $disk === AikaipinProductLibraryStorageService::DISK
                 && $path !== ''
-                && !in_array('..', explode('/', $path), true)
+                && ! in_array('..', explode('/', $path), true)
                 && in_array($extension, ['html', 'htm'], true),
             404,
         );
@@ -1261,7 +1343,42 @@ class ProductLibraryController extends Controller
             }, $imageFiles, array_keys($imageFiles)),
             'reference_file' => $filePayload($product->referenceFilePayload(), 'reference'),
             'package_file' => $filePayload($product->packageFilePayload(), 'package'),
+            'shopify_data' => $product->hasShopifyData() ? $this->shopifyImportPayload($product->shopifyData()) : null,
         ];
+    }
+
+    /** @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    private function shopifyImportPayload(array $payload): array
+    {
+        $variants = collect($payload['variants'] ?? [])->map(static fn (array $variant): array => [
+            'sku' => (string) ($variant['sku'] ?? ''),
+            'price' => number_format((float) ($variant['price'] ?? 0), 2, '.', ''),
+            'inventory_quantity' => (int) ($variant['inventory_quantity'] ?? 0),
+            'options' => collect($variant['options'] ?? [])->map(static fn (array $option): string => trim((string) ($option['name'] ?? '')).': '.trim((string) ($option['value'] ?? ''))
+            )->values()->all(),
+        ])->values();
+
+        return [
+            'title' => (string) ($payload['title'] ?? ''),
+            'handle' => (string) ($payload['handle'] ?? ''),
+            'vendor' => (string) ($payload['vendor'] ?? ''),
+            'product_type' => (string) ($payload['product_type'] ?? ''),
+            'status' => (string) ($payload['status'] ?? ''),
+            'published' => (bool) ($payload['published'] ?? false),
+            'source_file' => (string) ($payload['source_file'] ?? ''),
+            'imported_at' => (string) ($payload['imported_at'] ?? ''),
+            'description_length' => mb_strlen((string) ($payload['description_html'] ?? '')),
+            'variant_count' => $variants->count(),
+            'image_count' => count((array) ($payload['images'] ?? [])),
+            'variants' => $variants->all(),
+        ];
+    }
+
+    private function shopifyImportCacheKey(string $token): string
+    {
+        return 'aikaipin:product-library:shopify-import:'.$token;
     }
 
     private function deleteUploadSession(AikaipinProductUploadSession $session): void
@@ -1308,7 +1425,7 @@ class ProductLibraryController extends Controller
     }
 
     /** @param list<array{platform:string,currency:string,actual_spend:string|int|float,orders:string|int}> $records
-     *  @return list<array{platform:string,currency:string,actual_spend:string,orders:int}>
+     * @return list<array{platform:string,currency:string,actual_spend:string,orders:int}>
      */
     private function placementEvaluationRecords(array $records): array
     {
@@ -1326,7 +1443,7 @@ class ProductLibraryController extends Controller
     private function placementEvaluationProduct(AdminUser $user, int $productId): AikaipinProduct
     {
         $product = AikaipinProduct::query()->find($productId);
-        if ($product === null || !$this->canViewProduct($user, $product)) {
+        if ($product === null || ! $this->canViewProduct($user, $product)) {
             throw ValidationException::withMessages([
                 'product_id' => __('aikaipin.placement_evaluation.messages.related_product_invalid_message'),
             ]);
@@ -1343,7 +1460,7 @@ class ProductLibraryController extends Controller
             ->latest('updated_at')
             ->latest('id');
 
-        if (!$canReviewAll) {
+        if (! $canReviewAll) {
             $query->where('created_by', $user->getKey());
         }
         if ($filters['keyword'] !== '') {
@@ -1436,7 +1553,7 @@ class ProductLibraryController extends Controller
     }
 
     /** @param list<mixed> $values
-     *  @return list<string>
+     * @return list<string>
      */
     private function selectionProposalTagValues(array $values): array
     {
@@ -1449,7 +1566,7 @@ class ProductLibraryController extends Controller
     }
 
     /** @param list<string> $specifications
-     *  @param list<string> $attributes
+     * @param  list<string>  $attributes
      */
     private function syncSelectionProposalTags(AikaipinSelectionProposal $proposal, array $specifications, array $attributes): void
     {
@@ -1478,7 +1595,7 @@ class ProductLibraryController extends Controller
             ->latest('updated_at')
             ->latest('id');
 
-        if (!$canReviewAll) {
+        if (! $canReviewAll) {
             $query->where('created_by', $user->getKey());
         }
         if ($filters['keyword'] !== '') {
@@ -1572,7 +1689,7 @@ class ProductLibraryController extends Controller
     }
 
     /**
-     * @param array{keyword:string,category:string,source:string,type:string} $filters
+     * @param  array{keyword:string,category:string,source:string,type:string}  $filters
      */
     private function productQuery(AdminUser $user, bool $canManageProductLibrary, array $filters): Builder
     {
@@ -1580,7 +1697,7 @@ class ProductLibraryController extends Controller
             ->latest('created_at')
             ->latest('id');
 
-        if (!$canManageProductLibrary) {
+        if (! $canManageProductLibrary) {
             $departmentIds = $this->authorization->operationDepartmentIdsForUser($user);
 
             if ($departmentIds === []) {
@@ -1636,7 +1753,7 @@ class ProductLibraryController extends Controller
     }
 
     /** @param iterable<mixed> $values
-     *  @return list<string>
+     * @return list<string>
      */
     private function normalizeProductValues(iterable $values): array
     {
@@ -1667,7 +1784,7 @@ class ProductLibraryController extends Controller
     }
 
     /** @param array{path:string,original_name:string,mime_type:?string,size:int,sha256:string} $payload
-     *  @return array{disk:string,path:string,original_name:string,mime_type:?string,size:int,sha256:?string}
+     * @return array{disk:string,path:string,original_name:string,mime_type:?string,size:int,sha256:?string}
      */
     private function productFilePayload(array $payload): array
     {

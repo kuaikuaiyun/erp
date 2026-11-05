@@ -25,16 +25,41 @@
     <div class="row">
         <div class="col-sm-8 form-group">
             <label>Shopify 商品标题 <span class="text-red">*</span></label>
-            <input class="form-control" name="title" value="{{ $product->name }}" maxlength="255" required>
+            <input class="form-control" name="title" value="{{ $shopifyData['title'] ?? $product->name }}" maxlength="255" required>
         </div>
         <div class="col-sm-4 form-group">
             <label>商品状态 <span class="text-red">*</span></label>
             <select class="form-control" name="status" required>
-                <option value="DRAFT">草稿</option>
-                <option value="ACTIVE">启用</option>
+                <option value="DRAFT" @selected(($shopifyData['status'] ?? 'DRAFT') !== 'ACTIVE')>草稿</option>
+                <option value="ACTIVE" @selected(($shopifyData['status'] ?? '') === 'ACTIVE')>启用</option>
             </select>
         </div>
     </div>
+    @if(!empty($shopifyData['variants']))
+        @php($firstVariant = $shopifyData['variants'][0])
+        <input type="hidden" name="sku" value="{{ $firstVariant['sku'] }}">
+        <input type="hidden" name="price" value="{{ $firstVariant['price'] }}">
+        <div class="alert alert-success">
+            <i class="fa fa-check-circle"></i>
+            已补充 Shopify 完整数据：将同步 <strong>{{ count($shopifyData['variants']) }} 个规格</strong>、
+            <strong>{{ count($shopifyData['images'] ?? []) }} 张商品图</strong>、英文图文详情、品牌、商品类型、售价和库存。
+        </div>
+        <div class="table-responsive operation-ai-variant-preview">
+            <table class="table table-bordered table-condensed">
+                <thead><tr><th>款式</th><th>SKU</th><th>售价（USD）</th><th>库存</th></tr></thead>
+                <tbody>
+                @foreach($shopifyData['variants'] as $variant)
+                    <tr>
+                        <td>{{ collect($variant['options'] ?? [])->pluck('value')->filter()->implode(' / ') ?: '默认款式' }}</td>
+                        <td><code>{{ $variant['sku'] }}</code></td>
+                        <td>${{ number_format((float) $variant['price'], 2) }}</td>
+                        <td>{{ (int) ($variant['inventory_quantity'] ?? 0) }}</td>
+                    </tr>
+                @endforeach
+                </tbody>
+            </table>
+        </div>
+    @else
     <div class="row">
         <div class="col-sm-8 form-group">
             <label>上架 SKU <span class="text-red">*</span></label>
@@ -47,7 +72,8 @@
             <input class="form-control" type="number" name="price" value="0.00" min="0" max="99999999" step="0.01" required>
         </div>
     </div>
-    <p class="help-block">将同步商品标题、所选 SKU、售价、分类标签和产品图片。建议首次测试选择“草稿”。</p>
+    <p class="help-block">当前产品没有导入 Shopify 完整数据，将按基础单规格方式上架。</p>
+    @endif
     <div class="text-right">
         <button type="button" class="btn btn-default" data-dismiss="modal">取消</button>
         <button type="submit" class="btn btn-success" @disabled($stores->isEmpty() || $skus === [])>

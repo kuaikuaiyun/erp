@@ -1520,3 +1520,43 @@
         right: 10px;
     }
 }
+.aikaipin-shopify-data-badge{display:inline-block;margin-top:6px;padding:4px 8px;border-radius:10px;font-weight:500}
+.aikaipin-shopify-import-product{margin-bottom:14px;padding:13px 15px;border:1px solid #d9e8f2;border-radius:8px;background:#f4faff;color:#294e68}.aikaipin-shopify-import-product strong,.aikaipin-shopify-import-product span{display:block}.aikaipin-shopify-import-product span{margin-top:3px;color:#748897;font-family:Consolas,monospace;font-size:12px}
+.aikaipin-shopify-import-dropzone{display:flex;min-height:160px;margin:0;flex-direction:column;align-items:center;justify-content:center;border:2px dashed #9fc7df;border-radius:9px;background:#f8fcff;color:#4e7189;cursor:pointer;transition:.18s ease}.aikaipin-shopify-import-dropzone:hover{border-color:#3c8dbc;background:#eff8fd}.aikaipin-shopify-import-dropzone input{position:absolute;width:1px;height:1px;opacity:0}.aikaipin-shopify-import-dropzone>.fa{margin-bottom:9px;color:#3c8dbc;font-size:32px}.aikaipin-shopify-import-dropzone strong{font-size:15px}.aikaipin-shopify-import-dropzone small{margin-top:6px;color:#8799a7}
+.aikaipin-shopify-import-file-name{margin-top:10px;padding:9px 12px;border-radius:6px;background:#eef6fb;color:#39799e}.aikaipin-shopify-import-preview{margin-top:14px}.aikaipin-shopify-preview-card{padding:15px;border:1px solid #bde2cc;border-radius:8px;background:#f5fcf8}.aikaipin-shopify-preview-title{margin-bottom:12px;color:#228b50;font-size:16px;font-weight:700}.aikaipin-shopify-summary-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.aikaipin-shopify-summary-grid>div{min-width:0;padding:9px 11px;border-radius:6px;background:#fff}.aikaipin-shopify-summary-grid span,.aikaipin-shopify-summary-grid strong{display:block}.aikaipin-shopify-summary-grid span{color:#81909c;font-size:11px}.aikaipin-shopify-summary-grid strong{margin-top:3px;color:#30485a;word-break:break-word}.aikaipin-shopify-variant-table{max-height:260px;margin-top:12px;overflow:auto;border:1px solid #deebe3;border-radius:6px;background:#fff}.aikaipin-shopify-variant-table table{margin:0}
+.aikaipin-shopify-edit-section{border-color:#cfe3ef}.aikaipin-shopify-edit-empty{color:#8998a5}.aikaipin-shopify-edit-meta{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}.aikaipin-shopify-edit-meta>div{min-width:0;padding:10px 11px;border:1px solid #e1eaf0;border-radius:7px;background:#f8fbfd}.aikaipin-shopify-edit-meta span,.aikaipin-shopify-edit-meta strong{display:block}.aikaipin-shopify-edit-meta span{color:#8493a0;font-size:11px}.aikaipin-shopify-edit-meta strong{margin-top:3px;color:#30485a;word-break:break-word}.aikaipin-shopify-edit-variants{max-height:220px;margin-top:11px;overflow:auto;border:1px solid #e1eaf0;border-radius:6px}.aikaipin-shopify-edit-variants table{margin:0}
+@media(max-width:767px){.aikaipin-shopify-summary-grid,.aikaipin-shopify-edit-meta{grid-template-columns:1fr 1fr}}
+
+/* Product library desktop column balance: keep product name/SKU compact. */
+@media (min-width: 992px) {
+    .aikaipin-product-library-page .aikaipin-product-table {
+        min-width: 1120px;
+        width: 100%;
+    }
+
+    .aikaipin-product-library-page .aikaipin-select-column,
+    .aikaipin-product-library-page .aikaipin-select-cell { width: 3%; }
+    .aikaipin-product-library-page .aikaipin-image-column { width: 5%; }
+    .aikaipin-product-library-page .aikaipin-product-code-column,
+    .aikaipin-product-library-page .aikaipin-product-code-cell { width: 8%; }
+    .aikaipin-product-library-page .aikaipin-name-column,
+    .aikaipin-product-library-page .aikaipin-name-cell { width: 30%; }
+    .aikaipin-product-library-page .aikaipin-category-column,
+    .aikaipin-product-library-page .aikaipin-category-cell { width: 13%; }
+    .aikaipin-product-library-page .aikaipin-source-column,
+    .aikaipin-product-library-page .aikaipin-source-cell { width: 10%; }
+    .aikaipin-product-library-page .aikaipin-updated-column,
+    .aikaipin-product-library-page .aikaipin-updated-cell { width: 12%; }
+    .aikaipin-product-library-page .aikaipin-operation-column,
+    .aikaipin-product-library-page .aikaipin-operation-cell { width: 19%; }
+
+    .aikaipin-product-library-page .aikaipin-name-cell strong {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .aikaipin-product-library-page .aikaipin-sku-line {
+        max-width: 100%;
+    }
+}

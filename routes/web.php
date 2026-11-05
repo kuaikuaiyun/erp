@@ -25,11 +25,48 @@ use App\Portals\Assistant\Http\Controllers\OperationReportReviewController;
 use App\Portals\Assistant\Http\Controllers\OperationReportDashboardController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingSpendSummaryController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingSpendAnalysisController;
+use App\Portals\Assistant\Http\Controllers\FashionAdvertisingReviewController;
 use App\Portals\ProductRequests\Http\Controllers\ProductRequestController;
 use App\Portals\Aikaipin\Http\Controllers\ProductLibraryController;
 use App\Portals\Payment\Http\Controllers\PaymentPortalController;
+use App\Portals\Fashion\Http\Controllers\AdvertisingExpenseController;
 use App\Http\Middleware\MonitorPaymentPerformance;
 use Illuminate\Support\Facades\Route;
+
+Route::get('/fashion/advertising-expenses', [AdvertisingExpenseController::class, 'index'])->name('fashion.advertising-expenses.index');
+Route::post('/fashion/advertising-expenses', [AdvertisingExpenseController::class, 'store'])->name('fashion.advertising-expenses.store');
+Route::put('/fashion/advertising-expenses/{report}', [AdvertisingExpenseController::class, 'update'])->name('fashion.advertising-expenses.update');
+Route::delete('/fashion/advertising-expenses/{report}', [AdvertisingExpenseController::class, 'destroy'])->name('fashion.advertising-expenses.destroy');
+Route::get('/fashion/advertising-expenses/screenshots/{type}/{entry}', [AdvertisingExpenseController::class, 'screenshot'])->whereIn('type', ['performance', 'advertising'])->whereNumber('entry')->name('fashion.advertising-expenses.screenshot');
+
+Route::prefix('finance')->name('finance.')->middleware(\App\Http\Middleware\RedirectFinanceDomain::class)->controller(\App\Portals\Finance\Http\Controllers\FinanceController::class)->group(function (): void {
+    Route::get('/management/menus', [PortalMenuConfigurationController::class, 'index'])->name('menus.index');
+    Route::post('/management/menus/order', [PortalMenuConfigurationController::class, 'saveOrder'])->name('menus.order');
+    Route::get('/', 'index')->name('home');
+    Route::get('/balances', 'balances')->name('balances');
+    Route::post('/balances/xuzong2', 'savePaymentBalance')->name('balances.xuzong2.save');
+    Route::post('/exchange-rates', 'saveExchangeRates')->name('exchange-rates.save');
+    Route::post('/paypal-accounts/{accountKey}', 'savePayPalAccount')->where('accountKey', '[a-z0-9-]+')->name('paypal-accounts.update');
+    Route::post('/payment-accounts', 'storePaymentAccount')->name('payment-accounts.store');
+    Route::post('/payment-accounts/{accountKey}/refresh', 'refreshPayPalBalance')->where('accountKey', 'finance-[1-9][0-9]*')->name('payment-accounts.refresh');
+    Route::post('/payment-accounts/{accountKey}/transactions', 'syncPayPalTransactions')->where('accountKey', 'finance-[1-9][0-9]*')->name('payment-accounts.sync');
+    Route::delete('/payment-accounts/{accountKey}', 'deletePaymentAccount')->where('accountKey', 'finance-[1-9][0-9]*')->name('payment-accounts.delete');
+    Route::post('/payment-accounts/{accountKey}', 'updatePaymentAccount')->where('accountKey', '[a-z0-9-]+')->name('payment-accounts.update');
+    Route::get('/records/{dataset}', 'records')->name('records');
+    Route::get('/transactions/{transaction}/raw', 'rawPayPalTransaction')->whereNumber('transaction')->name('transactions.raw');
+    Route::post('/records/{dataset}/import', 'importRecords')->name('records.import');
+    Route::get('/records/{dataset}/export', 'exportRecords')->name('records.export');
+    Route::get('/settings/accounting', 'accounting')->name('accounting');
+    Route::post('/settings/accounting/{action}', 'saveAccounting')->whereIn('action', ['rate', 'rule', 'reapply', 'lock'])->name('accounting.save');
+    Route::get('/settings/{kind}', 'settings')->name('settings');
+    Route::post('/settings/{kind}', 'saveSetting')->name('settings.save');
+    Route::delete('/settings/types/{type}', 'deleteTypeSetting')->whereNumber('type')->name('settings.types.delete');
+    Route::post('/settings/{kind}/import', 'importSettings')->name('settings.import');
+    Route::get('/settings/{kind}/export', 'exportSettings')->name('settings.export');
+    Route::get('/reports/{report}', 'report')->name('report');
+    Route::post('/reports/{report}/save', 'saveSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement'])->name('settlement.save');
+    Route::post('/reports/{report}/import', 'importSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement'])->name('settlement.import');
+});
 
 Route::get('/', [PortalEntryController::class, 'root'])->middleware(MonitorPaymentPerformance::class)->name('portal.root');
 Route::get('/management/menus', [PortalMenuConfigurationController::class, 'index'])->name('portal.menus.index');
@@ -91,6 +128,7 @@ Route::get('/product-request-dedupe', [ProductRequestController::class, 'operati
 Route::get('/operation/domain-stores', [OperationDomainStoreController::class, 'index'])->name('operation.domain-stores.index');
 Route::get('/operation/ai-product-library', [OperationAiProductLibraryController::class, 'index'])->name('operation.ai-product-library.index');
 Route::get('/operation/reports', [OperationReportController::class, 'index'])->name('operation.reports.index');
+Route::get('/operation/weekly-reports', [OperationReportController::class, 'weekly'])->name('operation.weekly-reports.index');
 Route::get('/operation/reports/order-details', [OperationReportController::class, 'orderDetails'])->name('operation.reports.order-details');
 Route::get('/operation/advertising-reports', [OperationReportController::class, 'advertising'])->name('operation.advertising-reports.index');
 Route::get('/operation/advertising-reports/import-template', [OperationReportController::class, 'advertisingImportTemplate'])->name('operation.advertising-reports.import-template');
@@ -108,6 +146,9 @@ Route::get('/assistant/operation-reports', [OperationReportDashboardController::
 Route::get('/assistant/operation-reports/order-details', [OperationReportDashboardController::class, 'orderDetails'])->name('assistant.operation-reports.order-details');
 Route::get('/assistant/advertising-spend-summary', [AdvertisingSpendSummaryController::class, 'index'])->name('assistant.advertising-spend-summary.index');
 Route::get('/assistant/advertising-spend-analysis', [AdvertisingSpendAnalysisController::class, 'index'])->name('assistant.advertising-spend-analysis.index');
+Route::get('/assistant/fashion-advertising-reviews', [FashionAdvertisingReviewController::class, 'index'])->name('assistant.fashion-advertising-reviews.index');
+Route::post('/assistant/fashion-advertising-reviews/{report}/review', [FashionAdvertisingReviewController::class, 'review'])->whereNumber('report')->name('assistant.fashion-advertising-reviews.review');
+Route::get('/assistant/fashion-advertising-reviews/screenshots/{type}/{entry}', [FashionAdvertisingReviewController::class, 'screenshot'])->whereIn('type', ['performance', 'advertising'])->whereNumber('entry')->name('assistant.fashion-advertising-reviews.screenshot');
 Route::get('/operation-report-reviews', [OperationReportReviewController::class, 'index'])->name('assistant.operation-report-reviews.index');
 Route::get('/operation-report-reviews/import-template', [OperationReportReviewController::class, 'importTemplate'])->name('assistant.operation-report-reviews.import-template');
 Route::post('/operation-report-reviews/import', [OperationReportReviewController::class, 'import'])->name('assistant.operation-report-reviews.import');
@@ -240,6 +281,8 @@ Route::middleware(MonitorPaymentPerformance::class)->group(function (): void {
 Route::post('/product-library', [ProductLibraryController::class, 'storeProduct'])->name('aikaipin.product-library.store');
 Route::get('/product-library/{product}/edit-data', [ProductLibraryController::class, 'editProduct'])->name('aikaipin.product-library.edit');
 Route::put('/product-library/{product}', [ProductLibraryController::class, 'updateProduct'])->name('aikaipin.product-library.update');
+Route::post('/product-library/{product}/shopify-import/preview', [ProductLibraryController::class, 'previewShopifyImport'])->name('aikaipin.product-library.shopify-import.preview');
+Route::post('/product-library/{product}/shopify-import', [ProductLibraryController::class, 'importShopifyCsv'])->name('aikaipin.product-library.shopify-import.store');
 Route::delete('/product-library/{product}', [ProductLibraryController::class, 'destroyProduct'])->name('aikaipin.product-library.destroy');
 Route::post('/product-library/package-uploads', [ProductLibraryController::class, 'initializePackageUpload'])->name('aikaipin.product-library.package-uploads.initialize');
 Route::post('/product-library/package-uploads/{uploadToken}/parts/{chunkIndex}', [ProductLibraryController::class, 'storePackageUploadPart'])->whereNumber('chunkIndex')->name('aikaipin.product-library.package-uploads.parts.store');

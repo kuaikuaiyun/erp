@@ -1,0 +1,55 @@
+@extends('portals.finance.layout', ['title' => __('finance.menus.accounting')])
+@push('styles')
+<style>
+.finance-accounting-fold{margin-bottom:20px;border:1px solid #dbe5ec;border-radius:6px;background:#fff}.finance-accounting-fold>summary{padding:15px 18px;color:#3b5870;font-size:15px;cursor:pointer}.finance-accounting-fold>summary small{margin-left:8px;color:#718398;font-size:12px}.finance-accounting-fold>.box-body{padding:0 18px 18px}.finance-accounting-fold .finance-rule{padding:12px 0;border-top:1px solid #e5edf3}.finance-accounting-fold .finance-rule>summary{cursor:pointer;margin-bottom:12px}.finance-accounting-fold .finance-filter{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}.finance-accounting-fold .finance-filter .form-group{margin:0}.finance-accounting-fold .finance-filter .form-control{width:100%}.finance-close-actions{display:flex;gap:8px;flex-wrap:wrap}.finance-accounting-table{overflow-x:auto}.finance-accounting-help{margin:0 0 16px;color:#718398;font-size:13px}
+</style>
+@endpush
+@section('finance_content')
+<div class="box"><div class="box-header with-border"><h3 class="box-title">月度人民币汇率</h3></div><div class="box-body">
+<p class="finance-accounting-help">填写 1 单位原币折合的人民币金额，用于当月报表。已结账月份不可修改。</p>
+<form method="post" action="{{ route('finance.accounting.save', 'rate') }}" class="finance-filter">@csrf
+    <div class="form-group"><label>会计月份</label><input type="month" name="month" class="form-control" value="{{ old('month', now('Asia/Shanghai')->format('Y-m')) }}" required></div>
+    <div class="form-group"><label>原币种</label><input name="currency" class="form-control" maxlength="3" pattern="[A-Z]{3}" value="{{ old('currency', 'USD') }}" required></div>
+    <div class="form-group"><label>人民币汇率</label><input name="cny_rate" class="form-control" inputmode="decimal" value="{{ old('cny_rate') }}" required></div>
+    <div class="form-group"><label>来源说明（选填）</label><input name="source" class="form-control" maxlength="255" value="{{ old('source') }}" placeholder="如：财务确认汇率"></div>
+    <div class="form-group"><button class="btn btn-primary">保存汇率</button></div>
+</form>
+<div class="finance-accounting-table">
+<table class="table finance-table"><thead><tr><th>月份</th><th>币种</th><th>人民币汇率</th><th>来源</th><th>更新人 / 更新时间</th></tr></thead><tbody>@forelse($rates as $rate)<tr><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($rate->month)) }}</td><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($rate->currency)) }}</td><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($rate->cny_rate)) }}</td><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($rate->source)) }}</td><td>{{ $rate->updated_by }} / {{ $rate->updated_at }}</td></tr>@empty<tr><td colspan="5">尚未配置月度汇率</td></tr>@endforelse</tbody></table>
+</div></div></div>
+<div class="box"><div class="box-header with-border"><h3 class="box-title">月度结账</h3></div><div class="box-body">
+<p class="finance-accounting-help">更新本月数据会重新应用分类与汇率。确认结账将锁定该月，之后不可修改或补录交易。</p>
+<form method="post" action="{{ route('finance.accounting.save', 'reapply') }}" class="finance-filter" id="finance-close-period">@csrf
+    <div class="form-group"><label for="finance-close-month">会计月份</label><input id="finance-close-month" type="month" name="month" class="form-control" required value="{{ old('month', now('Asia/Shanghai')->subMonthNoOverflow()->format('Y-m')) }}"></div>
+    <div class="form-group finance-close-actions"><button class="btn btn-primary">更新本月数据</button><button class="btn btn-default" formaction="{{ route('finance.accounting.save', 'lock') }}" data-lock-period>确认结账</button></div>
+</form>
+<p class="finance-accounting-help">仅可结账已结束的月份；未分类交易或缺少汇率时，系统会提示补齐。</p>
+</div></div>
+<details class="finance-accounting-fold" id="finance-advanced-rules"><summary>高级分类规则 <small>特殊分类时使用</small></summary><div class="box-body">
+<p class="finance-accounting-help">日常分类请在 <a href="{{ route('finance.settings', 'types') }}">PayPal类型分类</a> 维护。这里的规则优先匹配，数字越小越优先；修改后请更新对应月份的数据。</p>
+@foreach($rules->prepend(null) as $rule)
+<details class="finance-rule" @if(!$rule) open @endif><summary>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($rule ? $rule->name : '添加规则')) }}</summary>
+<form method="post" action="{{ route('finance.accounting.save', 'rule') }}" class="finance-filter">@csrf
+    @if($rule)<input type="hidden" name="id" value="{{ $rule->id }}">@endif
+    <div class="form-group"><label>规则名称</label><input name="name" class="form-control" maxlength="100" required value="{{ $rule->name ?? '' }}"></div>
+    <div class="form-group"><label>来源字段</label><select name="source_field" class="form-control">@foreach(\App\Portals\Finance\FinanceAccountingService::SOURCES as $source)<option value="{{ $source }}" @selected(($rule->source_field ?? '') === $source)>{{ __('finance.accounting.sources.'.$source) }}</option>@endforeach</select></div>
+    <div class="form-group"><label>匹配方式</label><select name="match_type" class="form-control">@foreach(['equals' => '等于', 'contains' => '包含', 'prefix' => '前缀'] as $type => $label)<option value="{{ $type }}" @selected(($rule->match_type ?? '') === $type)>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($label)) }}</option>@endforeach</select></div>
+    <div class="form-group"><label>原始值</label><input name="match_value" class="form-control" maxlength="191" required value="{{ $rule->match_value ?? '' }}"></div>
+    <div class="form-group"><label>财务分类</label><input name="category" class="form-control" maxlength="100" required value="{{ $rule->category ?? '' }}"></div>
+    <div class="form-group"><label>收支方向</label><select name="direction" class="form-control">@foreach(['income' => '收入', 'expense' => '支出', 'neutral' => '不影响余额'] as $type => $label)<option value="{{ $type }}" @selected(($rule->direction ?? '') === $type)>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($label)) }}</option>@endforeach</select></div>
+    <div class="form-group"><label>损耗科目</label><select name="loss_subject" class="form-control"><option value="">不归入损耗</option>@foreach(\App\Portals\Finance\FinanceAccountingService::SUBJECTS as $subject)<option value="{{ $subject }}" @selected(($rule->loss_subject ?? '') === $subject)>{{ __('finance.accounting.subjects.'.$subject) }}</option>@endforeach</select></div>
+    <div class="form-group"><label>优先级</label><input name="priority" type="number" min="0" max="100000" class="form-control" required value="{{ $rule->priority ?? 100 }}"></div>
+    <div class="form-group"><label>状态</label><select name="is_enabled" class="form-control"><option value="1" @selected($rule->is_enabled ?? true)>启用</option><option value="0" @selected($rule && !$rule->is_enabled)>停用</option></select></div>
+    <div class="form-group"><button class="btn btn-primary">{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($rule ? '保存修改' : '添加规则')) }}</button></div>
+</form></details>
+@endforeach
+</div></details>
+<details class="finance-accounting-fold"><summary>已结账记录 <small>{{ $locks->count() }} 个月</small></summary><div class="box-body finance-accounting-table">
+<table class="table finance-table"><thead><tr><th>已结账月份</th><th>操作人</th><th>结账时间</th></tr></thead><tbody>@forelse($locks as $lock)<tr><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($lock->month)) }}</td><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($lock->locked_by)) }}</td><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($lock->updated_at)) }}</td></tr>@empty<tr><td colspan="3">暂无已结账月份</td></tr>@endforelse</tbody></table>
+</div></details>
+@endsection
+@push('scripts')<script>
+document.getElementById('finance-close-period').addEventListener('submit',function(event){
+    if(event.submitter&&event.submitter.hasAttribute('data-lock-period')&&!confirm('确认结账并锁定 '+this.elements.month.value+'？结账后不能修改汇率、分类或补录交易。'))event.preventDefault();
+});
+</script>@endpush

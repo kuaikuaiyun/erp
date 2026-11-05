@@ -45,6 +45,15 @@
     var uploadProgressBar = document.querySelector('[data-aikaipin-upload-progress-bar]');
     var uploadSubmit = document.querySelector('[data-aikaipin-upload-submit]');
     var uploadTitle = document.querySelector('[data-aikaipin-upload-title]');
+    var shopifyEditSection = document.querySelector('[data-aikaipin-shopify-edit-section]');
+    var shopifyEditContent = document.querySelector('[data-aikaipin-shopify-edit-content]');
+    var shopifyImportModal = document.getElementById('aikaipin-shopify-import-modal');
+    var shopifyImportProduct = document.querySelector('[data-aikaipin-shopify-import-product]');
+    var shopifyImportFile = document.querySelector('[data-aikaipin-shopify-import-file]');
+    var shopifyImportFileName = document.querySelector('[data-aikaipin-shopify-import-file-name]');
+    var shopifyImportPreview = document.querySelector('[data-aikaipin-shopify-import-preview]');
+    var shopifyImportPreviewButton = document.querySelector('[data-aikaipin-shopify-import-preview-button]');
+    var shopifyImportConfirm = document.querySelector('[data-aikaipin-shopify-import-confirm]');
     var uploadSkus = [];
     var uploadImageFiles = [];
     var existingImageFiles = [];
@@ -61,6 +70,8 @@
     var previewImageIndex = 0;
     var previewProductTitle = '';
     var pendingProductDeletion = null;
+    var importingProductId = null;
+    var shopifyImportToken = '';
     var filters = {
         keyword: document.querySelector('[data-aikaipin-filter="keyword"]'),
         category: document.querySelector('[data-aikaipin-filter="category"]'),
@@ -76,6 +87,16 @@
                 message: message
             });
         }
+    }
+
+    function escapeHtml(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, function (character) {
+            return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'}[character];
+        });
+    }
+
+    function templateUrl(template, productId) {
+        return String(template || '').replace('__product__', encodeURIComponent(productId));
     }
 
     function filterValue(name) {
@@ -796,6 +817,7 @@
         renderImagePreviews();
         updateFileName(referenceFileName, null);
         updateFileName(packageFileName, null);
+        renderShopifyEditData(null);
 
         if (uploadProgress) {
             uploadProgress.hidden = true;
@@ -806,6 +828,96 @@
         }
         syncChoiceButtons();
         setUploadMode(null);
+    }
+
+    function shopifySummaryGrid(data) {
+        var items = [
+            ['Shopify 标题', data.title || '—'], ['Handle', data.handle || '—'],
+            ['供应商', data.vendor || '—'], ['商品类型', data.product_type || '—'],
+            ['状态', data.status || '—'], ['来源文件', data.source_file || '—'],
+            ['导入时间', data.imported_at || '—'], ['商品描述', String(data.description_length || 0) + ' 字'],
+            ['规格数量', String(data.variant_count || 0) + ' 个'], ['图片数量', String(data.image_count || 0) + ' 张']
+        ];
+        return '<div class="aikaipin-shopify-edit-meta">' + items.map(function (item) {
+            return '<div><span>' + escapeHtml(item[0]) + '</span><strong>' + escapeHtml(item[1]) + '</strong></div>';
+        }).join('') + '</div>';
+    }
+
+    function shopifyVariantsTable(data, limit) {
+        var variants = Array.isArray(data.variants) ? data.variants.slice(0, limit || data.variants.length) : [];
+        if (!variants.length) return '';
+        return '<div class="aikaipin-shopify-edit-variants"><table class="table table-condensed"><thead><tr><th>SKU</th><th>选项</th><th>价格</th><th>库存</th></tr></thead><tbody>' +
+            variants.map(function (variant) {
+                return '<tr><td>' + escapeHtml(variant.sku) + '</td><td>' + escapeHtml((variant.options || []).join(' / ') || '—') +
+                    '</td><td>$' + escapeHtml(variant.price) + '</td><td>' + escapeHtml(variant.inventory_quantity) + '</td></tr>';
+            }).join('') + '</tbody></table></div>';
+    }
+
+    function renderShopifyEditData(data) {
+        if (!shopifyEditSection || !shopifyEditContent) return;
+        shopifyEditSection.hidden = !data;
+        shopifyEditContent.innerHTML = data ? shopifySummaryGrid(data) + shopifyVariantsTable(data) : '';
+    }
+
+    function resetShopifyImport() {
+        importingProductId = null;
+        shopifyImportToken = '';
+        if (shopifyImportFile) shopifyImportFile.value = '';
+        if (shopifyImportFileName) { shopifyImportFileName.hidden = true; shopifyImportFileName.textContent = ''; }
+        if (shopifyImportPreview) shopifyImportPreview.innerHTML = '';
+        if (shopifyImportPreviewButton) { shopifyImportPreviewButton.hidden = false; shopifyImportPreviewButton.disabled = false; shopifyImportPreviewButton.innerHTML = '<i class="fa fa-search"></i> 校验并预览'; }
+        if (shopifyImportConfirm) { shopifyImportConfirm.hidden = true; shopifyImportConfirm.disabled = false; shopifyImportConfirm.innerHTML = '<i class="fa fa-check"></i> 确认补充数据'; }
+    }
+
+    function openShopifyImport(button) {
+        resetShopifyImport();
+        importingProductId = Number(button.getAttribute('data-aikaipin-product-id'));
+        if (shopifyImportProduct) {
+            shopifyImportProduct.innerHTML = '<strong>' + escapeHtml(button.getAttribute('data-aikaipin-product-name')) + '</strong><span>' +
+                escapeHtml(button.getAttribute('data-aikaipin-product-code')) + '</span>';
+        }
+        if (shopifyImportModal && window.jQuery) window.jQuery(shopifyImportModal).modal('show');
+    }
+
+    function previewShopifyImport() {
+        var file = shopifyImportFile && shopifyImportFile.files && shopifyImportFile.files[0];
+        if (!importingProductId || !file) {
+            notify('warning', '请选择文件', '请选择 Shopify 导出的 CSV 商品文件。');
+            return;
+        }
+        var data = new FormData();
+        data.append('shopify_csv', file, file.name);
+        shopifyImportPreviewButton.disabled = true;
+        shopifyImportPreviewButton.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 正在校验...';
+        formDataRequest(templateUrl(config.shopifyImportPreviewUrlTemplate, importingProductId), data).then(function (payload) {
+            shopifyImportToken = payload.preview_token;
+            var shopify = payload.shopify || {};
+            shopifyImportPreview.innerHTML = '<div class="aikaipin-shopify-preview-card"><div class="aikaipin-shopify-preview-title"><i class="fa fa-check-circle"></i> 文件校验通过，匹配 ' +
+                escapeHtml((payload.matched_skus || []).length) + ' 个 SKU</div>' + shopifySummaryGrid(shopify) + shopifyVariantsTable(shopify, 8) + '</div>';
+            shopifyImportConfirm.hidden = false;
+        }).catch(function (error) {
+            shopifyImportToken = '';
+            shopifyImportConfirm.hidden = true;
+            shopifyImportPreview.innerHTML = '<div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> ' + escapeHtml(error.message) + '</div>';
+        }).then(function () {
+            shopifyImportPreviewButton.disabled = false;
+            shopifyImportPreviewButton.innerHTML = '<i class="fa fa-search"></i> 校验并预览';
+        });
+    }
+
+    function confirmShopifyImport() {
+        if (!shopifyImportToken || !importingProductId) return;
+        shopifyImportConfirm.disabled = true;
+        shopifyImportConfirm.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 正在导入...';
+        jsonRequest(templateUrl(config.shopifyImportStoreUrlTemplate, importingProductId), 'POST', {preview_token: shopifyImportToken}).then(function (payload) {
+            notify('success', '导入成功', payload.message || 'Shopify 商品资料已补充。');
+            if (shopifyImportModal && window.jQuery) window.jQuery(shopifyImportModal).modal('hide');
+            window.setTimeout(function () { window.location.assign(payload.redirect_url || window.location.href); }, 350);
+        }).catch(function (error) {
+            notify('error', '导入失败', error.message || 'Shopify 商品资料导入失败。');
+            shopifyImportConfirm.disabled = false;
+            shopifyImportConfirm.innerHTML = '<i class="fa fa-check"></i> 确认补充数据';
+        });
     }
 
     function setUploadSubmitState(isBusy, label) {
@@ -1045,6 +1157,7 @@
             updateExistingFileName(referenceFileName, existingReferenceFile);
             updateExistingFileName(packageFileName, existingPackageFile);
             setAuthorizedDepartments(product.authorized_department_ids);
+            renderShopifyEditData(product.shopify_data || null);
             syncChoiceButtons();
 
             if (uploadModal && window.jQuery) {
@@ -1132,6 +1245,20 @@
             updateExistingFileName(packageFileName, existingPackageFile);
         });
     }
+
+    if (shopifyImportFile) {
+        shopifyImportFile.addEventListener('change', function () {
+            var file = shopifyImportFile.files && shopifyImportFile.files[0];
+            shopifyImportToken = '';
+            shopifyImportConfirm.hidden = true;
+            shopifyImportPreview.innerHTML = '';
+            shopifyImportFileName.textContent = file ? '已选择：' + file.name : '';
+            shopifyImportFileName.hidden = !file;
+        });
+    }
+    if (shopifyImportPreviewButton) shopifyImportPreviewButton.addEventListener('click', previewShopifyImport);
+    if (shopifyImportConfirm) shopifyImportConfirm.addEventListener('click', confirmShopifyImport);
+    if (shopifyImportModal && window.jQuery) window.jQuery(shopifyImportModal).on('hidden.bs.modal', resetShopifyImport);
 
     if (uploadForm) {
         uploadForm.addEventListener('submit', function (event) {
@@ -1304,6 +1431,10 @@
             }
             if (actionButton.getAttribute('data-aikaipin-action') === 'edit') {
                 openEditModal(Number(actionButton.getAttribute('data-aikaipin-product-id')));
+                return;
+            }
+            if (actionButton.getAttribute('data-aikaipin-action') === 'shopify-import') {
+                openShopifyImport(actionButton);
                 return;
             }
             if (actionButton.getAttribute('data-aikaipin-action') === 'delete') {

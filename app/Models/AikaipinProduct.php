@@ -19,6 +19,7 @@ class AikaipinProduct extends Model
         'reference_file',
         'package_file',
         'visible_department_ids',
+        'shopify_data',
         'created_by',
         'created_by_name',
         'updated_by',
@@ -40,6 +41,7 @@ class AikaipinProduct extends Model
             'reference_file' => 'array',
             'package_file' => 'array',
             'visible_department_ids' => 'array',
+            'shopify_data' => 'array',
         ];
     }
 
@@ -87,6 +89,17 @@ class AikaipinProduct extends Model
             ->all();
     }
 
+    /** @return array<string, mixed> */
+    public function shopifyData(): array
+    {
+        return is_array($this->shopify_data) ? $this->shopify_data : [];
+    }
+
+    public function hasShopifyData(): bool
+    {
+        return $this->shopifyData() !== [];
+    }
+
     public function creator(): BelongsTo
     {
         return $this->belongsTo(AdminUser::class, 'created_by');
@@ -98,7 +111,7 @@ class AikaipinProduct extends Model
     }
 
     /** @param iterable<mixed> $values
-     *  @return list<string>
+     * @return list<string>
      */
     private function normalizeStrings(iterable $values): array
     {
@@ -123,7 +136,7 @@ class AikaipinProduct extends Model
     /** @return array{disk:string,path:string,original_name:string,mime_type:?string,size:int,sha256:?string}|null */
     private function normalizedFilePayload(mixed $value): ?array
     {
-        if (!is_array($value)) {
+        if (! is_array($value)) {
             return null;
         }
 

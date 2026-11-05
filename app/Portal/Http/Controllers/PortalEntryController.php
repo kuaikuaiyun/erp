@@ -138,6 +138,10 @@ class PortalEntryController extends Controller
         $portal = $context['portal'];
         $user = $context['user'];
 
+        if ($isHome && $portal->code === \App\Portals\Finance\FinanceCatalog::PORTAL_CODE) {
+            return app(\App\Portals\Finance\Http\Controllers\FinanceController::class)->index($request);
+        }
+
         if ($isHome && app(PaymentPortalService::class)->isPaymentPortal($portal)) {
             return app(PaymentPortalController::class)->workbenchFromContext($context);
         }
