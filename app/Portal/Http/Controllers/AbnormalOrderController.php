@@ -30,15 +30,18 @@ class AbnormalOrderController extends Controller
         if ($context instanceof Response) return $context;
         $validated = $request->validate([
             'status' => ['nullable', Rule::in(['pending', 'processed'])],
+            'abnormal_type' => ['nullable', Rule::in(['non_runnable', 'missing_sku'])],
             'keyword' => ['nullable', 'string', 'max:100'],
             'per_page' => ['nullable', 'integer', Rule::in([20, 50, 100])],
         ]);
         $status = (string) ($validated['status'] ?? '');
+        $abnormalType = (string) ($validated['abnormal_type'] ?? '');
         $keyword = trim((string) ($validated['keyword'] ?? ''));
         $query = $this->abnormalOrders->query()->with(['items', 'store', 'abnormalRecord']);
         if ($context['portal']->code === 'yunying' && ! $context['user']->isAdministrator()) {
             $this->abnormalOrders->scopeForOwner($query, $context['user']);
         }
+        $this->abnormalOrders->scopeType($query, $abnormalType);
         if ($status === 'processed') {
             $query->whereHas('abnormalRecord', fn ($record) => $record->where('status', AbnormalOrderRecord::STATUS_PROCESSED));
         } elseif ($status === 'pending') {
@@ -58,7 +61,9 @@ class AbnormalOrderController extends Controller
         $orders = $query->orderByDesc('order_created_at')->orderByDesc('id')
             ->paginate((int) ($validated['per_page'] ?? 20))->withQueryString();
         $orders->getCollection()->each(function (LogisticsOrder $order): void {
-            $order->setAttribute('abnormal_items', $this->abnormalOrders->details($order));
+            $details = $this->abnormalOrders->details($order);
+            $order->setAttribute('abnormal_items', $details);
+            $order->setAttribute('abnormal_types', collect($details)->pluck('types')->flatten()->unique()->values()->all());
             $owner = $this->abnormalOrders->effectiveOwner($order);
             $order->setAttribute('effective_owner_user_id', $owner['user_id']);
             $order->setAttribute('effective_owner_name', $owner['name']);
@@ -68,7 +73,7 @@ class AbnormalOrderController extends Controller
 
         return view('portal.abnormal-orders.index', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
-            'orders' => $orders, 'status' => $status, 'keyword' => $keyword,
+            'orders' => $orders, 'status' => $status, 'abnormalType' => $abnormalType, 'keyword' => $keyword,
             'isReviewPortal' => $context['portal']->code === 'caigou',
         ]);
     }
