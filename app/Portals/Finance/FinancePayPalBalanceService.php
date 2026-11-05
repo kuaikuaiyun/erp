@@ -21,13 +21,6 @@ class FinancePayPalBalanceService
             ->whereIn('status', ['success', 'failed'])->groupBy('payment_account_id');
         $balanceLogs = $db->table('finance_sync_logs')->whereIn('id', $latestBalanceLogIds)
             ->get(['payment_account_id', 'status'])->keyBy('payment_account_id');
-        $systemBalances = collect();
-        if ($db->getSchemaBuilder()->hasTable('logistics_paypal_balance_snapshots')) {
-            $systemBalances = $db->table('logistics_paypal_balance_snapshots')
-                ->whereIn('logistics_paypal_account_id', $accounts->pluck('system_paypal_account_id')->filter())
-                ->orderByDesc('as_of_time')->orderByDesc('id')->get()->groupBy('logistics_paypal_account_id')
-                ->map(fn ($rows) => $rows->unique('currency_code'));
-        }
         $cards = [];
         foreach ($accounts as $account) {
             $key = 'finance-'.$account->id;
@@ -46,20 +39,8 @@ class FinancePayPalBalanceService
                 'relay_configured' => $relayConfigured,
                 'connection_status' => $account->status === 'disabled' ? 'closed' : $connectionStatus,
             ];
-            $existingBalances = $systemBalances->get($account->system_paypal_account_id, collect());
             $snapshot = $snapshots->get($account->id);
-            $systemTime = $existingBalances->max('as_of_time');
-            $useSystem = $existingBalances->isNotEmpty() && (! $snapshot || $this->time($snapshot->as_of)->lessThanOrEqualTo($this->time($systemTime)));
-            if ($useSystem) {
-                $cards[$key]['connection_status'] = $account->status === 'disabled' ? 'closed'
-                    : ($lastBalanceLog?->status === 'failed' ? 'error' : 'connected');
-                foreach ($existingBalances as $balance) {
-                    $cards[$key]['currencies'][$balance->currency_code][] = [
-                        'available' => $balance->available_balance, 'withheld' => $balance->withheld_balance,
-                        'total' => $balance->total_balance, 'as_of' => $this->time($balance->as_of_time), 'source' => 'system',
-                    ];
-                }
-            } elseif ($snapshot) {
+            if ($snapshot) {
                 $payload = json_decode($snapshot->payload, true, 512, JSON_THROW_ON_ERROR);
                 foreach ($payload['balances'] as $balance) {
                     $cards[$key]['currencies'][$balance['currency']][] = [

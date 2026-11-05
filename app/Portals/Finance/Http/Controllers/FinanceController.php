@@ -14,6 +14,7 @@ use App\Portals\Finance\FinanceWorkbookService;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Str;
@@ -39,7 +40,6 @@ class FinanceController extends Controller
             'balance_account' => 'nullable|string|max:100', 'paypal_currency' => ['nullable', 'regex:/^[A-Z]{3}$/'],
             'balance_tab' => ['nullable', Rule::in(['paypal', 'credit-card'])],
         ]);
-        app(\App\Portals\Finance\FinanceSystemPayPalService::class)->sync();
         $paypalBalance = $this->paypalBalances->dashboard($filters['paypal_currency'] ?? 'USD');
         $paymentBalance = $this->paymentBalances->dashboard($filters['balance_account'] ?? null);
         $hasPaymentAccount = $request->filled('balance_account');
@@ -162,7 +162,7 @@ class FinanceController extends Controller
         return response()->json(json_decode($row->raw_payload, true, 512, JSON_THROW_ON_ERROR))->header('Cache-Control', 'private, no-store');
     }
 
-    public function deletePaymentAccount(Request $request, string $accountKey): Response
+    public function deletePaymentAccount(Request $request, string $accountKey): Response|JsonResponse
     {
         $context = $this->context($request, true);
         if ($context instanceof Response) {
@@ -170,15 +170,14 @@ class FinanceController extends Controller
         }
         $account = FinancePaymentAccount::query()->findOrFail(substr($accountKey, 8));
         $db = $this->workbooks->database();
-        $db->transaction(function () use ($db, $account): void {
+        $db->transaction(function () use ($account): void {
             $account = FinancePaymentAccount::query()->lockForUpdate()->findOrFail($account->id);
-            $hasHistory = $db->table('finance_payment_transactions')->where('payment_account_id', $account->id)->exists()
-                || FinanceRecord::query()->where('account', $account->activity_account)->exists();
-            if ($hasHistory) {
-                throw ValidationException::withMessages(['account' => __('finance.payment_accounts.delete_history')]);
-            }
             $account->delete();
         });
+
+        if ($request->expectsJson()) {
+            return response()->json(['ok' => true, 'redirect' => route('finance.home')]);
+        }
 
         return redirect()->route('finance.home')->with('success', __('finance.payment_accounts.deleted'));
     }
@@ -500,9 +499,6 @@ class FinanceController extends Controller
             return response(preg_replace('/\sdata-edit-url="[^"]*"/', '', $html, 1));
         }
         $filters = $this->filters($request, $dataset);
-        if ($dataset === 'paypal-orders') {
-            app(\App\Portals\Finance\FinanceSystemPayPalService::class)->sync();
-        }
         if ($request->has('suggestion_field')) {
             $suggestion = $request->validate([
                 'suggestion_field' => ['required', Rule::in(FinanceCatalog::filterFields($dataset))],
@@ -635,9 +631,6 @@ class FinanceController extends Controller
             return $this->workbooks->download($definition['headers'], [], $dataset.'-template.xlsx');
         }
         $filters = $this->filters($request, $dataset);
-        if ($dataset === 'paypal-orders') {
-            app(\App\Portals\Finance\FinanceSystemPayPalService::class)->sync();
-        }
         $selection = $request->validate([
             'export_scope' => ['required', Rule::in(['accounts', 'records', 'filtered'])],
             'selected_accounts' => 'nullable|array|max:100',
@@ -1615,21 +1608,19 @@ class FinanceController extends Controller
             }
             if ($linked !== []) {
                 $schema = $this->workbooks->database()->getSchemaBuilder();
-                if (! $schema->hasTable('logistics_orders') || ($dataset === 'paypal-orders'
-                    && (! $schema->hasTable('logistics_paypal_transactions')
-                        || ! $schema->hasColumn('finance_payment_accounts', 'system_paypal_account_id')))) {
+                if (! $schema->hasTable('logistics_orders')) {
                     $query->whereRaw('1 = 0');
                 } else {
+                    if ($dataset === 'paypal-orders') {
+                        $uniqueMatch = app(\App\Portals\Finance\FinanceSettlementService::class)->paypalOrderMatches()->selectRaw('COUNT(*)');
+                        $query->whereRaw('('.$uniqueMatch->toSql().') = 1', $uniqueMatch->getBindings());
+                    }
                     $query->whereExists(function ($orders) use ($linked, $dataset): void {
                         if ($dataset === 'xuzong2-orders') {
                             $orders->selectRaw('1')->from('logistics_orders as logistics')->whereColumn('logistics.id', 'finance_records.id');
                         } else {
-                        $orders->selectRaw('1')->from('logistics_paypal_transactions as link')
-                            ->join('finance_payment_accounts as account', 'account.system_paypal_account_id', '=', 'link.logistics_paypal_account_id')
-                            ->join('logistics_orders as logistics', 'logistics.id', '=', 'link.logistics_order_id')
-                            ->whereColumn('account.activity_account', 'finance_records.account')
-                            ->whereColumn('link.payment_transaction_id', 'finance_records.reference')
-                            ->whereColumn('link.event_code', 'finance_records.raw_type');
+                            $matches = app(\App\Portals\Finance\FinanceSettlementService::class)->paypalOrderMatches();
+                            $orders->selectRaw('1')->from('logistics_orders as logistics')->mergeWheres($matches->wheres, $matches->getBindings());
                         }
                         foreach ($linked as $field => $value) {
                             if ($dataset === 'xuzong2-orders' && $field === 'sender_email') { $field = 'buyer_email'; }

@@ -52,7 +52,7 @@ return new class extends Migration
 
         $db->transaction(function () use ($db): void {
             $now = now();
-            foreach (['types' => 'finance_transaction_types', 'domains' => 'finance_domain_groups'] as $source => $table) {
+            foreach (['types' => 'finance_transaction_types'] as $source => $table) {
                 foreach (FinanceCatalog::source()[$source] as $row) {
                     $key = $source === 'types' ? 'raw_type' : 'domain';
                     if (! $db->table($table)->where($key, $row[$key])->exists()) {

@@ -10,49 +10,7 @@ class FinanceSystemPayPalService
 {
     public function sync(): void
     {
-        $workbooks = app(FinanceWorkbookService::class);
-        $db = $workbooks->database();
-        if (! $db->getSchemaBuilder()->hasColumn('finance_payment_accounts', 'system_paypal_account_id')
-            || ! $db->getSchemaBuilder()->hasTable('logistics_paypal_transactions')) {
-            return;
-        }
-        $locked = $db->table('finance_period_locks')->whereNotNull('report_snapshot')->pluck('month')->all();
-        foreach (FinancePaymentAccount::query()->whereNotNull('system_paypal_account_id')->get() as $account) {
-            $started = now('UTC');
-            $query = $db->table('logistics_paypal_transactions')->where('logistics_paypal_account_id', $account->system_paypal_account_id);
-            if ($account->system_paypal_synced_at) {
-                $query->where('updated_at', '>=', CarbonImmutable::parse($account->system_paypal_synced_at, 'UTC')->subSeconds(2));
-            }
-            $query->orderBy('id')->chunkById(200, function ($rows) use ($account, $workbooks, $db, $locked): void {
-                $db->transaction(function () use ($rows, $account, $workbooks, $db, $locked): void {
-                    foreach ($rows as $row) {
-                        $raw = json_decode($row->raw_payload, true, 512, JSON_THROW_ON_ERROR);
-                        $entry = app(FinancePayPalSyncService::class)->transaction($account, $raw, 0);
-                        $accounting = app(FinanceAccountingService::class);
-                        if (in_array($accounting->month($entry['record']['occurred_at']), $locked, true)) {
-                            continue;
-                        }
-                        $workbooks->registerType($entry['event']);
-                        $record = FinanceRecord::query()->firstOrNew(['fingerprint' => $entry['record']['fingerprint']]);
-                        $domain = $record->domain;
-                        $previous = $record->payload ?? [];
-                        $record->fill($entry['record']);
-                        $record->domain = $domain;
-                        $record->payload = [...$previous, ...$record->payload];
-                        $record->save();
-                        $db->table('finance_payment_transactions')->updateOrInsert([
-                            'payment_account_id' => $account->id, 'transaction_id' => $entry['id'], 'event_code' => $entry['event'],
-                        ], [
-                            'finance_record_id' => $record->id, 'raw_payload' => json_encode($raw, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
-                            ...$accounting->attributes($raw, $entry['record']['occurred_at']),
-                            'created_at' => $record->created_at, 'updated_at' => now(),
-                        ]);
-                    }
-                });
-            });
-            $account->forceFill(['system_paypal_synced_at' => $started])->save();
-        }
-        $this->matchOrders();
+        // Legacy entry point: PayPal transactions are obtained only through the finance relay API.
     }
 
     public function matchOrders(): int

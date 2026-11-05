@@ -229,7 +229,7 @@ class FinanceSettlementService
             $channel === 'paypal' ? ['bill_number', 'transaction_id', 'payment_gateway_order_id'] : ['bill_number', 'transaction_id', 'payment_gateway_order_id', 'shopify_order_number'],
             $columns
         ));
-        if ($referenceFields === []) {
+        if ($referenceFields === [] && ! ($channel === 'paypal' && $db->getSchemaBuilder()->hasTable('logistics_order_payment_references'))) {
             return [];
         }
         $selected = array_values(array_intersect(['id', ...$referenceFields, 'assistant_domain_store_id', 'source_shop_domain', 'subscription_type', 'is_add_on', 'tongtu_order_number',
@@ -238,19 +238,10 @@ class FinanceSettlementService
         $referenceValues = fn ($record) => $channel === 'paypal' ? [$record->reference, trim((string) ($record->payload['帳單號碼'] ?? ''))]
             : [$record->reference, $record->payload['商户订单号'] ?? '', $record->payload['Shopify订单号'] ?? ''];
         $references = $records->flatMap($referenceValues)->filter()->unique()->all();
-        $links = collect();
-        if ($channel === 'paypal' && $db->getSchemaBuilder()->hasTable('logistics_paypal_transactions')
-            && $db->getSchemaBuilder()->hasColumn('finance_payment_accounts', 'system_paypal_account_id')) {
-            $links = $db->table('logistics_paypal_transactions as t')
-                ->join('finance_payment_accounts as a', 'a.system_paypal_account_id', '=', 't.logistics_paypal_account_id')
-                ->whereIn('t.payment_transaction_id', $references)->whereNotNull('t.logistics_order_id')
-                ->get(['a.activity_account', 't.payment_transaction_id', 't.event_code', 't.logistics_order_id'])
-                ->groupBy(fn ($row) => json_encode([$row->activity_account, $row->payment_transaction_id, $row->event_code]));
-        }
         $paymentReferences = $channel === 'paypal' && $db->getSchemaBuilder()->hasTable('logistics_order_payment_references')
             ? $db->table('logistics_order_payment_references')->whereIn('reference_number', $references)
                 ->get(['reference_number', 'logistics_order_id']) : collect();
-        $linkedIds = $links->collapse()->pluck('logistics_order_id')->concat($paymentReferences->pluck('logistics_order_id'))->unique();
+        $linkedIds = $paymentReferences->pluck('logistics_order_id')->unique();
         $orders = $db->table('logistics_orders')->where(function ($query) use ($referenceFields, $references, $linkedIds): void {
             $query->whereIntegerInRaw('id', $linkedIds->all());
             foreach ($referenceFields as $field) {
@@ -275,14 +266,9 @@ class FinanceSettlementService
         $result = [];
         foreach ($records as $record) {
             $candidates = [];
-            $linked = $links->get(json_encode([$record->account, $record->reference, $record->raw_type]), collect());
-            if ($linked->isNotEmpty()) {
-                $candidates = $orders->only($linked->pluck('logistics_order_id')->all())->all();
-            } else {
-                foreach ($referenceValues($record) as $reference) {
-                    foreach ($index[(string) $reference] ?? [] as $id => $order) {
-                        $candidates[$id] = $order;
-                    }
+            foreach (array_filter($referenceValues($record), fn ($value) => trim((string) $value) !== '') as $reference) {
+                foreach ($index[(string) $reference] ?? [] as $id => $order) {
+                    $candidates[$id] = $order;
                 }
             }
             if (count($candidates) !== 1) {
@@ -298,6 +284,37 @@ class FinanceSettlementService
         }
 
         return $result;
+    }
+
+    /** Match API transaction/invoice references without any legacy account binding. */
+    public function paypalOrderMatches(): \Illuminate\Database\Query\Builder
+    {
+        $db = $this->workbooks->database();
+        $schema = $db->getSchemaBuilder();
+        $fields = array_intersect(['bill_number', 'transaction_id', 'payment_gateway_order_id'], $schema->getColumnListing('logistics_orders'));
+        $hasReferences = $schema->hasTable('logistics_order_payment_references');
+        return $db->table('logistics_orders as logistics')->where(function ($match) use ($fields, $hasReferences): void {
+            $match->whereRaw('1 = 0');
+            foreach ($fields as $field) {
+                $match->orWhere(function ($reference) use ($field): void {
+                    $reference->where('logistics.'.$field, '!=', '')->where(function ($values) use ($field): void {
+                        $values->whereColumn('logistics.'.$field, 'finance_records.reference')
+                            ->orWhereColumn('logistics.'.$field, 'finance_records.payload->帳單號碼');
+                    });
+                });
+            }
+            if ($hasReferences) {
+                $match->orWhereExists(function ($references): void {
+                    $references->selectRaw('1')->from('logistics_order_payment_references as payment_reference')
+                        ->whereColumn('payment_reference.logistics_order_id', 'logistics.id')
+                        ->where('payment_reference.reference_number', '!=', '')
+                        ->where(function ($values): void {
+                            $values->whereColumn('payment_reference.reference_number', 'finance_records.reference')
+                                ->orWhereColumn('payment_reference.reference_number', 'finance_records.payload->帳單號碼');
+                        });
+                });
+            }
+        });
     }
 
     public static function subscriptionLabel(mixed $value): string

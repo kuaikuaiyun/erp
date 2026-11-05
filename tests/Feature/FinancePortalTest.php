@@ -434,6 +434,7 @@ class FinancePortalTest extends TestCase
 
     public function test_settlement_reports_extract_checkout_and_save_without_changing_orders(): void
     {
+        DB::table('finance_domain_groups')->insert(['domain' => 'shopyayashi.com', 'owner' => 'Test owner', 'team' => '厦门']);
         $account = $this->financePayPalAccount('结算账户');
         $this->workbooks->importRecords('paypal-orders', [2 => [...$this->recordRow(), '日期' => '2026-11-02', '費用' => '-0.50'],
             3 => [...$this->recordRow(), '日期' => '2026-11-02', '交易 ID' => 'REFUND-ROW', '類型' => '付款退款']], $account->activity_account, 'UTC', 1);
@@ -638,7 +639,7 @@ class FinancePortalTest extends TestCase
         DB::table('logistics_orders')->insert(['id' => 1, 'transaction_id' => FinanceRecord::first()->reference]);
         DB::table('logistics_tongtu_sku_mappings')->insert(['id' => 1, 'product_guide_cost_cny' => 12, 'goods_weight_gram' => 250]);
         DB::table('logistics_order_items')->insert(['logistics_order_id' => 1, 'tongtu_sku_mapping_id' => 1, 'quantity' => 2]);
-        (require database_path('migrations/2026_11_04_000016_import_supplied_finance_monthly_rates.php'))->up();
+        DB::table('finance_monthly_exchange_rates')->insertOrIgnore(['month' => '2026-10', 'currency' => 'USD', 'cny_rate' => '6.7628']);
 
         $this->get('/finance/reports/losses?month=2026-10&channel=combined')->assertOk()
             ->assertViewHas('groups', fn ($groups) => count($groups) === 1
@@ -755,7 +756,7 @@ class FinancePortalTest extends TestCase
             2 => [...$this->recordRow(), '日期' => '2026-10-01', '費用' => '-0.5', '订阅类型' => '订阅'],
             3 => [...$this->recordRow(), '日期' => '2026-10-02', '交易 ID' => 'SECOND', '費用' => '-0.2', '订阅类型' => '无订阅'],
         ], 'A', 'UTC', 1);
-        (require database_path('migrations/2026_11_04_000016_import_supplied_finance_monthly_rates.php'))->up();
+        DB::table('finance_monthly_exchange_rates')->insertOrIgnore(['month' => '2026-10', 'currency' => 'USD', 'cny_rate' => '6.7628']);
         $this->get('/finance/reports/losses?month=2026-10&layer=project')->assertOk()
             ->assertViewHas('groups', fn ($groups) => count($groups) === 1 && $groups[0]['success_count'] === 2
                 && $groups[0]['refund'] === '0' && $groups[0]['ratios']['fee'] === '3.50000000'
@@ -981,13 +982,13 @@ class FinancePortalTest extends TestCase
 
     public function test_installation_is_idempotent_and_preserves_administrator_changes(): void
     {
-        DB::table('finance_domain_groups')->where('domain', 'shopyayashi.com')->update(['owner' => 'Changed']);
+        DB::table('finance_domain_groups')->insert(['domain' => 'shopyayashi.com', 'owner' => 'Changed', 'team' => 'Test']);
         DB::table('portal_menus')->where('code', 'finance_orders')->update(['sort' => 777]);
         (require database_path('migrations/2026_11_03_000002_install_finance_portal.php'))->up();
         $this->assertDatabaseCount('portals', 1);
         $this->assertDatabaseCount('portal_menus', 18);
         $this->assertDatabaseCount('finance_transaction_types', 22);
-        $this->assertDatabaseCount('finance_domain_groups', 71);
+        $this->assertDatabaseCount('finance_domain_groups', 1);
         $this->assertDatabaseCount('finance_records', 0);
         $this->assertDatabaseHas('finance_domain_groups', ['domain' => 'shopyayashi.com', 'owner' => 'Changed']);
         $this->assertDatabaseHas('portal_menus', ['code' => 'finance_orders', 'sort' => 777]);
@@ -1489,7 +1490,7 @@ class FinancePortalTest extends TestCase
         }
         $this->post('/finance/records/paypal-details/import', ['file' => $this->upload($book), 'account' => 'A', 'source_timezone' => '-08:00'])->assertRedirect();
         $this->assertDatabaseCount('finance_records', 1);
-        DB::table('finance_domain_groups')->where('domain', 'shopyayashi.com')->update(['owner' => 'Latest owner']);
+        DB::table('finance_domain_groups')->insert(['domain' => 'shopyayashi.com', 'owner' => 'Latest owner', 'team' => 'Test']);
         $this->get('/finance/records/paypal-details')->assertOk()->assertSee('Latest owner');
         $response = $this->get('/finance/records/paypal-details/export?'.http_build_query(['export_scope' => 'accounts', 'selected_accounts' => ['A']]))->assertOk();
         $export = $this->readDownload($response->streamedContent());
@@ -1832,6 +1833,38 @@ class FinancePortalTest extends TestCase
         $this->financePayPalAccount('可复用名称');
     }
 
+    public function test_api_paypal_order_filters_and_metadata_match_without_legacy_accounts(): void
+    {
+        Schema::create('logistics_orders', function (Blueprint $table): void {
+            $table->id(); $table->string('transaction_id'); $table->string('tongtu_order_number');
+            $table->string('source_shop_domain');
+        });
+        Schema::create('logistics_order_payment_references', function (Blueprint $table): void {
+            $table->id(); $table->integer('logistics_order_id'); $table->string('reference_number');
+        });
+        $this->workbooks->importRecords('paypal-orders', [2 => $this->recordRow()], 'API account', 'UTC', 1);
+        $record = FinanceRecord::sole();
+        DB::table('logistics_orders')->insert(['id' => 1, 'transaction_id' => $record->reference, 'tongtu_order_number' => 'ERP-API', 'source_shop_domain' => 'api.example.test']);
+        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $this->assertSame('ERP-API', $service->logisticsMetadata(collect([$record]), 'paypal')[$record->id]['erp_order']);
+        $url = '/finance/records/paypal-orders?'.http_build_query(['order_fields' => ['tongtu_order_number' => 'ERP-API']]);
+        $this->get($url)->assertOk()->assertViewHas('records', fn ($rows) => $rows->total() === 1);
+        DB::table('logistics_orders')->where('id', 1)->update(['transaction_id' => 'unrelated']);
+        DB::table('logistics_order_payment_references')->insert(['logistics_order_id' => 1, 'reference_number' => $record->reference]);
+        $this->get($url)->assertOk()->assertViewHas('records', fn ($rows) => $rows->total() === 1);
+        $payload = $record->payload;
+        $payload['帳單號碼'] = $record->reference;
+        $record->update(['reference' => 'API-different-transaction', 'payload' => $payload]);
+        $this->get($url)->assertOk()->assertViewHas('records', fn ($rows) => $rows->total() === 1);
+        $this->assertSame('ERP-API', $service->logisticsMetadata(collect([$record->fresh()]), 'paypal')[$record->id]['erp_order']);
+        DB::table('logistics_orders')->insert(['id' => 2, 'transaction_id' => $payload['帳單號碼'], 'tongtu_order_number' => 'OTHER', 'source_shop_domain' => 'other.example.test']);
+        $this->assertSame([], $service->logisticsMetadata(collect([$record]), 'paypal'));
+        $this->get($url)->assertOk()->assertViewHas('records', fn ($rows) => $rows->total() === 0);
+        $this->artisan('finance:audit-data')->assertExitCode(0);
+        $this->assertDatabaseCount('finance_records', 1);
+        $this->assertDatabaseCount('logistics_orders', 2);
+    }
+
     public function test_paypal_matches_domain_from_the_same_account_and_transaction_order(): void
     {
         Schema::table('finance_payment_accounts', fn (Blueprint $table) => $table->unsignedBigInteger('system_paypal_account_id')->nullable());
@@ -1866,10 +1899,11 @@ class FinancePortalTest extends TestCase
         $this->assertSame('ERP-1', $rows->first()['erp_order']);
     }
 
-    public function test_system_paypal_balances_are_used_only_after_account_linking(): void
+    public function test_system_paypal_balances_are_never_used_even_with_legacy_linking(): void
     {
         $this->createPayPalBalanceTables();
         DB::table('logistics_paypal_accounts')->insert(['id' => 1, 'account_name' => '尚云', 'is_enabled' => true]);
+        DB::table('logistics_paypal_accounts')->insert(['id' => 2, 'account_name' => 'Current environment account', 'is_enabled' => false]);
         DB::table('logistics_paypal_balance_snapshots')->insert([
             'logistics_paypal_account_id' => 1, 'currency_code' => 'USD', 'available_balance' => '100',
             'withheld_balance' => '10', 'as_of_time' => '2026-11-03 01:00:00',
@@ -1893,18 +1927,29 @@ class FinancePortalTest extends TestCase
         $this->assertNull($balance['summary']['total']);
         $this->assertSame(['尚云'], $balance['missing']->all());
         (require database_path('migrations/2026_11_04_000015_connect_existing_system_paypal.php'))->up();
-        $this->assertSame(1, (int) $account->fresh()->system_paypal_account_id);
+        $this->assertNull($account->fresh()->system_paypal_account_id);
+        $this->assertDatabaseCount('finance_payment_accounts', 1);
+        $account->forceFill(['system_paypal_account_id' => 1])->save();
         $balance = app(FinancePayPalBalanceService::class)->dashboard();
-        $this->assertSame('100.0000000000000000', $balance['summary']['available']);
-        $this->assertSame('10.0000000000000000', $balance['summary']['withheld']);
+        $this->assertNull($balance['summary']['available']);
+        $this->assertNull($balance['summary']['withheld']);
         $this->assertNull($balance['summary']['total']);
-        $this->assertSame('system', $balance['cards']['finance-'.$account->id]['currencies']->first()['source']);
+        $this->assertSame('disconnected', $balance['cards']['finance-'.$account->id]['connection_status']);
+        $this->assertDatabaseCount('finance_balance_snapshots', 0);
+        Schema::create('logistics_paypal_transactions', function (Blueprint $table): void {
+            $table->id(); $table->integer('logistics_paypal_account_id'); $table->text('raw_payload');
+        });
+        DB::table('logistics_paypal_transactions')->insert(['logistics_paypal_account_id' => 1, 'raw_payload' => '{}']);
+        app(\App\Portals\Finance\FinanceSystemPayPalService::class)->sync();
+        $this->get('/finance')->assertOk();
+        $this->get('/finance/records/paypal-orders')->assertOk();
+        $this->assertDatabaseCount('finance_records', 0);
         $this->assertDatabaseHas('logistics_paypal_accounts', ['id' => 1, 'account_name' => '尚云']);
         $this->assertDatabaseHas('logistics_paypal_balance_snapshots', ['logistics_paypal_account_id' => 1, 'available_balance' => '100']);
         Http::assertNothingSent();
     }
 
-    public function test_linked_system_account_can_fetch_new_balances_and_show_the_newer_source(): void
+    public function test_legacy_linked_account_uses_only_relay_balances_even_when_system_balance_is_newer(): void
     {
         $this->createPayPalBalanceTables();
         Schema::table('finance_payment_accounts', fn (Blueprint $table) => $table->unsignedBigInteger('system_paypal_account_id')->nullable());
@@ -1933,6 +1978,8 @@ class FinancePortalTest extends TestCase
         $card = $service->dashboard()['cards']['finance-'.$account->id];
         $this->assertSame('200.0000000000000000', $card['display']['available']);
         $this->assertSame('relay', $card['currencies']->first()['source']);
+        DB::table('logistics_paypal_balance_snapshots')->update(['as_of_time' => now('UTC')->addDay()->format('Y-m-d H:i:s'), 'available_balance' => '999']);
+        $this->assertSame('200.0000000000000000', $service->dashboard()['cards']['finance-'.$account->id]['display']['available']);
         Http::assertSent(fn ($request) => $request['operation'] === 'balances');
         Http::assertSent(fn ($request) => $request['operation'] === 'transaction_search');
     }
@@ -2251,42 +2298,25 @@ class FinancePortalTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_default_cards_are_restored_as_independent_finance_accounts_without_replacing_existing_data(): void
+    public function test_installation_does_not_seed_private_finance_business_data(): void
     {
-        $existing = $this->financePayPalAccount('嘉匯自定义名称', ['activity_account' => 'JIAHUI']);
-        $encryptedSecret = $existing->getRawOriginal('relay_hmac_secret');
-        $closed = $this->financePayPalAccount('啟盛', ['status' => 'disabled']);
-        $this->financeBalanceSnapshot($existing, ['USD' => ['100', '10']]);
-        $migration = require database_path('migrations/2026_11_04_000004_restore_finance_paypal_account_cards.php');
-        $migration->up();
-        $migration->up();
-        $this->assertDatabaseCount('finance_payment_accounts', 6);
-        $this->assertSame($encryptedSecret, $existing->fresh()->getRawOriginal('relay_hmac_secret'));
-        $this->assertSame('嘉匯自定义名称', $existing->fresh()->account_name);
-        $this->assertSame('disabled', $closed->fresh()->status);
-        $balance = app(FinancePayPalBalanceService::class)->dashboard();
-        $this->assertCount(6, $balance['cards']);
-        $this->assertSame('110.0000000000000000', $balance['summary']['total']);
-        foreach (['尚云', '立鉑', '晟達', '維馳'] as $name) {
-            $account = FinancePaymentAccount::query()->where('account_name', $name)->sole();
-            $card = $balance['cards']['finance-'.$account->id];
-            $this->assertSame('disconnected', $card['connection_status']);
-            $this->assertFalse($card['relay_configured']);
-            $this->assertNull($card['display']['total']);
-            $this->assertNull($account->relay_hmac_secret);
-            $this->assertSame('erp-main', $account->relay_hmac_key_id);
-        }
-        $response = $this->get('/finance')->assertOk();
-        $document = new \DOMDocument();
-        @$document->loadHTML($response->getContent());
-        $xpath = new \DOMXPath($document);
-        $this->assertSame(6, $xpath->query('//*[@data-paypal-account]')->length);
-        $this->assertSame(4, $xpath->query('//*[@data-paypal-account]//*[@data-connection-status and @data-state="disconnected" and not(@hidden)]')->length);
-        $this->assertSame(5, $xpath->query('//*[@data-paypal-account]//form[@data-refresh-account]//button[@disabled]')->length);
-        FinancePaymentAccount::query()->where('account_name', '維馳')->sole()->delete();
-        $migration->up();
-        $this->assertDatabaseCount('finance_payment_accounts', 6);
-        $this->assertSame(5, FinancePaymentAccount::query()->count());
+        $this->assertDatabaseCount('finance_domain_groups', 0);
+        $this->assertDatabaseCount('finance_payment_accounts', 0);
+        $this->assertDatabaseCount('finance_records', 0);
+        $this->assertDatabaseCount('finance_monthly_exchange_rates', 0);
+        $accounts = require database_path('migrations/2026_11_04_000004_restore_finance_paypal_account_cards.php');
+        $rates = require database_path('migrations/2026_11_04_000016_import_supplied_finance_monthly_rates.php');
+        $accounts->up();
+        $rates->up();
+        $this->assertDatabaseCount('finance_payment_accounts', 0);
+        $this->assertDatabaseCount('finance_monthly_exchange_rates', 0);
+        $existing = $this->financePayPalAccount('User account');
+        DB::table('finance_monthly_exchange_rates')->insert(['month' => '2026-10', 'currency' => 'USD', 'cny_rate' => '7']);
+        $accounts->up();
+        $rates->up();
+        $this->assertDatabaseCount('finance_payment_accounts', 1);
+        $this->assertSame('User account', $existing->fresh()->account_name);
+        $this->assertDatabaseHas('finance_monthly_exchange_rates', ['cny_rate' => '7']);
         Http::assertNothingSent();
     }
 
@@ -2501,8 +2531,20 @@ class FinancePortalTest extends TestCase
         $this->assertSame('9.00000000', $record->payload[FinanceCatalog::dataset('paypal-orders')['headers'][9]]);
         $transaction = DB::table('finance_payment_transactions')->first();
         $this->get('/finance/transactions/'.$transaction->id.'/raw')->assertOk()->assertJsonPath('payer_info.email_address', 'test@example.test');
-        $this->delete('/finance/payment-accounts/finance-'.$account->id)->assertSessionHasErrors('account');
+        $this->financeBalanceSnapshot($account, ['USD' => ['100', '10']]);
+        $this->user->manage = false;
+        $this->delete('/finance/payment-accounts/finance-'.$account->id)->assertForbidden();
         $this->assertFalse($account->fresh()->trashed());
+        $this->user->manage = true;
+        $this->deleteJson('/finance/payment-accounts/finance-'.$account->id)->assertOk()->assertJsonPath('ok', true)->assertJsonPath('redirect', route('finance.home'));
+        $this->assertSoftDeleted('finance_payment_accounts', ['id' => $account->id]);
+        $this->assertDatabaseCount('finance_payment_transactions', 2);
+        $this->assertDatabaseCount('finance_records', 2);
+        $this->assertDatabaseCount('finance_balance_snapshots', 1);
+        $balance = app(FinancePayPalBalanceService::class)->dashboard();
+        $this->assertCount(0, $balance['cards']);
+        $this->assertNull($balance['summary']['total']);
+        $this->postJson('/finance/payment-accounts/finance-'.$account->id.'/refresh')->assertNotFound();
     }
 
     public function test_relay_rejects_legacy_or_short_secrets_before_sending_credentials(): void

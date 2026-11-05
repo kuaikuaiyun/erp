@@ -39,7 +39,7 @@
             <div class="paypal-account-actions">
                 @if($canManage)<button type="button" class="paypal-account-action" data-edit-payment-account="{{ $card['key'] }}" aria-label="{{ __('finance.paypal_profile.edit_account', ['account' => $card['name']]) }}"><i class="fa fa-pencil-square-o" aria-hidden="true"></i> {{ __('finance.settings.edit') }}</button>@endif
                 <a class="paypal-account-action" href="{{ route('finance.records', ['dataset' => 'paypal-orders', 'account' => $card['activity_account']]) }}" aria-label="{{ __('finance.paypal_profile.account_activity', ['account' => $card['name']]) }}"><i class="fa fa-history" aria-hidden="true"></i> {{ __('finance.paypal_profile.activity') }}</a>
-                @if($canManage)<form method="post" action="{{ route('finance.payment-accounts.delete', $card['key']) }}" class="paypal-account-delete" data-delete-account>@csrf @method('DELETE')<button type="submit" class="paypal-account-action"><i class="fa fa-trash-o" aria-hidden="true"></i> {{ __('finance.payment_accounts.delete') }}</button></form>@endif
+                @if($canManage)<form method="post" action="{{ route('finance.payment-accounts.delete', $card['key']) }}" class="paypal-account-delete" data-loading="off" data-delete-account>@csrf @method('DELETE')<button type="submit" class="paypal-account-action"><i class="fa fa-trash-o" aria-hidden="true"></i> {{ __('finance.payment_accounts.delete') }}</button></form>@endif
             </div>
         </article>
     @empty
@@ -55,8 +55,53 @@
 (function () {
     'use strict';
     document.querySelectorAll('[data-delete-account]').forEach(function (form) {
+        var pending = false;
         form.addEventListener('submit', function (event) {
-            if (!confirm(@json(__('finance.payment_accounts.delete_confirm')))) event.preventDefault();
+            event.preventDefault();
+            if (pending) return;
+            pending = true;
+            var deleting = false;
+            var dialog = document.createElement('dialog');
+            dialog.style.cssText = 'border:0;border-radius:8px;padding:24px;max-width:440px;width:calc(100% - 32px)';
+            var text = document.createElement('p');
+            text.textContent = @json(__('finance.payment_accounts.delete_confirm'));
+            var cancel = document.createElement('button');
+            cancel.type = 'button'; cancel.className = 'btn btn-default'; cancel.textContent = '取消';
+            var proceed = document.createElement('button');
+            proceed.type = 'button'; proceed.className = 'btn btn-danger'; proceed.textContent = '确认删除';
+            proceed.style.marginLeft = '12px';
+            dialog.append(text, cancel, proceed);
+            document.body.appendChild(dialog);
+            dialog.addEventListener('close', function () { dialog.remove(); if (!deleting) pending = false; });
+            cancel.addEventListener('click', function () { dialog.close(); });
+            proceed.addEventListener('click', async function () {
+                if (deleting) return;
+                deleting = true;
+                dialog.close();
+                pending = true;
+                var submit = form.querySelector('[type="submit"]');
+                submit.disabled = true;
+                var notice = form.closest('[data-paypal-account]').querySelector('[data-refresh-message]');
+                try {
+                    var response = await fetch(form.action, {
+                        method: 'POST', body: new FormData(form), credentials: 'same-origin',
+                        headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                        signal: AbortSignal.timeout(30000)
+                    });
+                    var result = await response.json();
+                    if (!response.ok || !result.ok) throw new Error(result.message || '删除失败，请重试。');
+                    window.location.assign(result.redirect);
+                } catch (error) {
+                    notice.dataset.result = 'failed';
+                    notice.textContent = error.name === 'TimeoutError' ? '请求超时，请刷新核对账户是否已删除。' : (error.message || '删除失败，请重试。');
+                    notice.hidden = false;
+                } finally {
+                    pending = false;
+                    submit.disabled = false;
+                }
+            });
+            dialog.showModal();
+            cancel.focus();
         });
     });
     var button = document.getElementById('finance-refresh-all');
