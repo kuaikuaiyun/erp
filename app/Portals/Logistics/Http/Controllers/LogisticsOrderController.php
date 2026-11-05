@@ -61,7 +61,7 @@ class LogisticsOrderController extends Controller
                 'items' => fn ($query) => $query->orderBy('id'),
                 'store:id,domain',
                 'paypalRefunds' => fn ($query) => $query->orderByDesc('refunded_at')->orderByDesc('id'),
-                'creditCardRefunds' => fn ($query) => $query->orderByDesc('last_imported_at')->orderByDesc('id'),
+                'creditCardRefunds' => fn ($query) => $query->orderByDesc('occurred_at')->orderByDesc('id'),
                 'paymentReferences' => fn ($query) => $query->orderByRaw("CASE reference_type WHEN 'primary' THEN 0 ELSE 1 END")->orderBy('id'),
             ])
             ->orderByDesc('order_created_at')
@@ -116,7 +116,7 @@ class LogisticsOrderController extends Controller
             'paypalRefunds' => fn ($query) => $query->orderByDesc('refunded_at')->orderByDesc('id'),
             'paypalDisputes' => fn ($query) => $query->orderByDesc('dispute_created_at')->orderByDesc('id'),
             'paymentReferences' => fn ($query) => $query->orderByRaw("CASE reference_type WHEN 'primary' THEN 0 ELSE 1 END")->orderBy('id'),
-            'creditCardRefunds' => fn ($query) => $query->orderByDesc('last_imported_at')->orderByDesc('id'),
+                'creditCardRefunds' => fn ($query) => $query->orderByDesc('occurred_at')->orderByDesc('id'),
             'logs' => fn ($query) => $query->latest('id')->limit(20),
         ]);
 
@@ -187,7 +187,7 @@ class LogisticsOrderController extends Controller
             ->select($this->spreadsheets->requiredOrderColumns())
             ->with([
                 'paypalRefunds' => fn ($refunds) => $refunds->orderByDesc('refunded_at')->orderByDesc('id'),
-                'creditCardRefunds' => fn ($refunds) => $refunds->orderByDesc('last_imported_at')->orderByDesc('id'),
+                'creditCardRefunds' => fn ($refunds) => $refunds->orderByDesc('occurred_at')->orderByDesc('id'),
             ])
             ->orderByDesc('order_created_at')
             ->orderByDesc('id');
@@ -765,7 +765,7 @@ class LogisticsOrderController extends Controller
             $query->where(function (Builder $refundDate) use ($applyDateRange): void {
                 $refundDate
                     ->whereHas('paypalRefunds', fn (Builder $refunds) => $applyDateRange($refunds, 'refunded_at'))
-                    ->orWhereHas('creditCardRefunds', fn (Builder $refunds) => $applyDateRange($refunds, 'last_imported_at'));
+                    ->orWhereHas('creditCardRefunds', fn (Builder $refunds) => $applyDateRange($refunds, 'occurred_at'));
             });
         }
 

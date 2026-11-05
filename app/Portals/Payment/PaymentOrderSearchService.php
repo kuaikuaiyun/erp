@@ -286,7 +286,7 @@ class PaymentOrderSearchService
         $disputes = [];
         if ($order) {
             foreach ($order->paypalRefunds as $refund) $refunds[] = $this->paypalRefundRow($refund);
-            foreach ($order->creditCardRefunds as $refund) $refunds[] = ['id' => (string) $refund->refund_reference, 'channel' => 'card', 'amount' => (float) $refund->refund_amount_usd, 'status' => __('payment.payment_orders.detail.refunded'), 'reason' => (string) $refund->refund_reason, 'happened_at' => $refund->last_imported_at?->format('Y-m-d H:i:s') ?: ''];
+            foreach ($order->creditCardRefunds as $refund) $refunds[] = ['id' => (string) $refund->refund_reference, 'channel' => 'card', 'amount' => (float) $refund->refund_amount_usd, 'status' => __('payment.payment_orders.detail.refunded'), 'reason' => (string) $refund->refund_reason, 'happened_at' => $refund->occurred_at?->format('Y-m-d H:i:s') ?: ''];
             foreach ($order->paypalDisputes as $dispute) $disputes[] = $this->paypalDisputeRow($dispute);
         }
         $deductionType = !$order ? 'unmatched' : (filled($order->subscription_origin_order_id) ? 'renewal' : (filled($order->subscription_type) && !str_contains((string) $order->subscription_type, '无订阅') ? 'subscription' : 'one_time'));
