@@ -11,13 +11,20 @@ class SyncFashionLogisticsOrders extends Command
         {--store= : 仅同步指定店铺 ID}
         {--days=60 : 首次同步或全量回填的回溯天数}
         {--full : 忽略增量游标，重新回填指定时间范围内的历史订单}
-        {--all : 从历史起点分页同步接口中的全部订单}';
+        {--all : 从历史起点分页同步接口中的全部订单}
+        {--clear : 同步前清空服装订单数据}';
 
-    protected $description = '从 XShoppy 店铺接口同步服装订单到独立订单表';
+    protected $description = '从 XShoppy 店铺接口同步已支付订单到独立服装订单表';
 
     public function handle(XShoppyOrderSyncService $sync): int
     {
         $storeId = $this->option('store') !== null ? (int) $this->option('store') : null;
+
+        if ((bool) $this->option('clear')) {
+            $deleted = $sync->clearOrders($storeId ?: null);
+            $this->warn("已清空 {$deleted} 条服装订单，开始重新同步已支付订单。");
+        }
+
         $result = $sync->syncAll(
             $storeId ?: null,
             max(1, (int) $this->option('days')),

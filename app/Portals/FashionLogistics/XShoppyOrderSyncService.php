@@ -14,6 +14,34 @@ use RuntimeException;
 
 class XShoppyOrderSyncService
 {
+    public function clearOrders(?int $storeId = null): int
+    {
+        $connection = config('admin.database.connection') ?: config('database.default');
+
+        return DB::connection($connection)->transaction(function () use ($connection, $storeId): int {
+            $orders = DB::connection($connection)->table('fashion_logistics_orders')
+                ->when($storeId, fn ($query) => $query->where('assistant_domain_store_id', $storeId));
+            $orderIds = (clone $orders)->pluck('id');
+
+            if ($orderIds->isNotEmpty()) {
+                DB::connection($connection)->table('fashion_logistics_order_items')
+                    ->whereIn('fashion_logistics_order_id', $orderIds)
+                    ->delete();
+            }
+
+            $deleted = $orders->delete();
+            FashionLogisticsSyncState::query()
+                ->when($storeId, fn ($query) => $query->where('assistant_domain_store_id', $storeId))
+                ->update([
+                    'last_cursor_at' => null,
+                    'last_created_count' => 0,
+                    'last_updated_count' => 0,
+                ]);
+
+            return $deleted;
+        });
+    }
+
     /** @return array{stores:int,success:int,failed:int,created:int,updated:int,errors:list<string>} */
     public function syncAll(?int $storeId = null, int $initialDays = 60, bool $full = false, bool $allHistory = false): array
     {
@@ -63,10 +91,16 @@ class XShoppyOrderSyncService
                 $pages++;
                 foreach ($orders as $payload) {
                     if (! is_array($payload) || blank($payload['id'] ?? null)) continue;
-                    $result = $this->persist($store, $payload);
-                    $result['created'] ? $created++ : $updated++;
                     $modified = $this->date($payload['date_modified_gmt'] ?? $payload['date_modified'] ?? null);
                     if ($modified && $modified->gt($latestModified)) $latestModified = $modified;
+
+                    if (! $this->isPaid($payload)) {
+                        $this->deleteExistingOrder($store, (string) $payload['id']);
+                        continue;
+                    }
+
+                    $result = $this->persist($store, $payload);
+                    $result['created'] ? $created++ : $updated++;
                 }
                 if (count($orders) < 100) break;
             }
@@ -169,6 +203,30 @@ class XShoppyOrderSyncService
         abort_unless(in_array(strtolower(trim((string) $store->site_builder)), ['xshoppy', 'xshopy'], true), 422, '该店铺不是 XShoppy 建站系统。');
         if (blank($store->xshoppy_api_key) || blank($store->xshoppy_password)) throw new RuntimeException('店铺未填写 XShoppy API 密钥或密码。');
         if ($this->domain($store) === '') throw new RuntimeException('店铺未填写有效域名。');
+    }
+
+    private function isPaid(array $payload): bool
+    {
+        if (! blank($payload['date_paid_gmt'] ?? null) || ! blank($payload['date_paid'] ?? null)) {
+            return true;
+        }
+
+        return in_array(strtolower(trim((string) ($payload['status'] ?? ''))), ['processing', 'completed'], true);
+    }
+
+    private function deleteExistingOrder(AssistantDomainStore $store, string $externalId): void
+    {
+        $order = FashionLogisticsOrder::query()
+            ->where('assistant_domain_store_id', $store->getKey())
+            ->where('external_order_id', $externalId)
+            ->first();
+
+        if (! $order) return;
+
+        DB::connection($order->getConnectionName())->transaction(function () use ($order): void {
+            $order->items()->delete();
+            $order->delete();
+        });
     }
 
     private function endpoint(AssistantDomainStore $store): string
