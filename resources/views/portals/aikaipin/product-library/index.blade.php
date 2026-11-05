@@ -47,6 +47,8 @@
         'productEditUrlTemplate' => route('aikaipin.product-library.edit', ['product' => '__product__']),
         'productUpdateUrlTemplate' => route('aikaipin.product-library.update', ['product' => '__product__']),
         'productDeleteUrlTemplate' => route('aikaipin.product-library.destroy', ['product' => '__product__']),
+        'shopifyImportPreviewUrlTemplate' => route('aikaipin.product-library.shopify-import.preview', ['product' => '__product__']),
+        'shopifyImportStoreUrlTemplate' => route('aikaipin.product-library.shopify-import.store', ['product' => '__product__']),
         'packageUploadInitializeUrl' => route('aikaipin.product-library.package-uploads.initialize'),
         'packageUploadPartUrlTemplate' => route('aikaipin.product-library.package-uploads.parts.store', ['uploadToken' => '__token__', 'chunkIndex' => '__chunk__']),
         'packageUploadCompleteUrlTemplate' => route('aikaipin.product-library.package-uploads.complete', ['uploadToken' => '__token__']),
@@ -92,12 +94,12 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261023-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261105-2">
 @endpush
 
 @push('scripts')
     <script>window.ErpAikaipinProductLibraryConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261023-2"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261105-1"></script>
 @endpush
 
 @section('content')
@@ -255,6 +257,9 @@
                                         @endif
                                     </span>
                                 @endif
+                                @if($product->hasShopifyData())
+                                    <span class="label label-success aikaipin-shopify-data-badge"><i class="fa fa-check-circle"></i> Shopify 完整资料</span>
+                                @endif
                             </td>
                             <td class="aikaipin-category-cell">
                                 @foreach ($product->categoryValues() as $category)
@@ -308,6 +313,12 @@
                                         </button>
                                     @endif
                                     @if ($canManageProductLibrary)
+                                        <button class="btn btn-info aikaipin-row-action-icon" type="button" data-aikaipin-action="shopify-import"
+                                            data-aikaipin-product-id="{{ $product->getKey() }}" data-aikaipin-product-code="{{ $product->product_code }}"
+                                            data-aikaipin-product-name="{{ $productName }}" title="导入 Shopify 商品文件" aria-label="导入 Shopify 商品文件">
+                                            <i class="fa fa-file-excel-o" aria-hidden="true"></i>
+                                            <span class="sr-only">导入 Shopify 商品文件</span>
+                                        </button>
                                         <button class="btn btn-primary aikaipin-row-action-icon" type="button" data-aikaipin-action="edit" data-aikaipin-product-id="{{ $product->getKey() }}"
                                             title="{{ $t('actions.edit') }}" aria-label="{{ $t('actions.edit') }}">
                                             <i class="fa fa-pencil" aria-hidden="true"></i>
@@ -448,6 +459,13 @@
                 </div>
                 <div class="modal-body">
                     <p class="aikaipin-upload-demo-note"><i class="fa fa-info-circle" aria-hidden="true"></i> {{ $t('upload.demo_notice') }}</p>
+                    <section class="aikaipin-upload-section aikaipin-shopify-edit-section" hidden data-aikaipin-shopify-edit-section>
+                        <header class="aikaipin-upload-section-heading">
+                            <span class="aikaipin-upload-section-number"><i class="fa fa-shopping-bag"></i></span>
+                            <h5>已导入的 Shopify 商品资料</h5>
+                        </header>
+                        <div class="aikaipin-upload-section-body" data-aikaipin-shopify-edit-content></div>
+                    </section>
                     <section class="aikaipin-upload-section">
                         <header class="aikaipin-upload-section-heading">
                             <span class="aikaipin-upload-section-number">1</span>
@@ -606,6 +624,35 @@
                     </button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <div id="aikaipin-shopify-import-modal" class="modal fade" tabindex="-1" role="dialog" aria-hidden="true">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal"><span aria-hidden="true">&times;</span></button>
+                    <h4 class="modal-title"><i class="fa fa-file-excel-o"></i> 导入 Shopify 商品文件</h4>
+                </div>
+                <div class="modal-body">
+                    <div class="aikaipin-shopify-import-product" data-aikaipin-shopify-import-product></div>
+                    <form data-aikaipin-shopify-import-form>
+                        <label class="aikaipin-shopify-import-dropzone">
+                            <input type="file" accept=".csv,text/csv" data-aikaipin-shopify-import-file>
+                            <i class="fa fa-cloud-upload"></i>
+                            <strong>点击选择 Shopify 商品 CSV</strong>
+                            <small>系统会先校验并预览，确认后才补充产品数据；文件不超过 20 MB</small>
+                        </label>
+                        <div class="aikaipin-shopify-import-file-name" hidden data-aikaipin-shopify-import-file-name></div>
+                        <div class="aikaipin-shopify-import-preview" data-aikaipin-shopify-import-preview></div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-default" data-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" data-aikaipin-shopify-import-preview-button><i class="fa fa-search"></i> 校验并预览</button>
+                    <button type="button" class="btn btn-success" hidden data-aikaipin-shopify-import-confirm><i class="fa fa-check"></i> 确认补充数据</button>
+                </div>
+            </div>
         </div>
     </div>
 @endif
