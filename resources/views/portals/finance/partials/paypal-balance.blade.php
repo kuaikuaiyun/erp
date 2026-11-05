@@ -11,6 +11,7 @@
     <div class="paypal-balance-heading">
         <h2 id="paypal-balance-title">{{ __('finance.paypal.title') }}</h2>
         @if($canManage)<div class="paypal-balance-actions">
+            <span class="text-muted" style="font-size:12px">每小时自动更新</span>
             <button type="button" class="btn btn-default btn-sm" id="finance-refresh-all">{{ __('finance.sync.refresh_all') }}</button>
             <button type="button" class="btn btn-primary btn-sm" data-add-payment-account="paypal"><i class="fa fa-plus" aria-hidden="true"></i> {{ __('finance.payment_accounts.add') }}</button>
         </div>@endif
@@ -62,44 +63,77 @@
             pending = true;
             var deleting = false;
             var dialog = document.createElement('dialog');
-            dialog.style.cssText = 'border:0;border-radius:8px;padding:24px;max-width:440px;width:calc(100% - 32px)';
+            dialog.className = 'finance-delete-dialog';
+            dialog.setAttribute('aria-labelledby', 'finance-delete-title');
+            dialog.setAttribute('aria-describedby', 'finance-delete-description');
+            var heading = document.createElement('div');
+            heading.className = 'finance-delete-heading';
+            heading.innerHTML = '<span class="finance-delete-icon" aria-hidden="true"><i class="fa fa-trash-o"></i></span><div><h3 id="finance-delete-title">确认删除账户？</h3><p>删除后无法恢复，请确认后继续</p></div>';
             var text = document.createElement('p');
-            text.textContent = @json(__('finance.payment_accounts.delete_confirm'));
+            text.id = 'finance-delete-description';
+            text.className = 'finance-delete-description';
+            text.textContent = '将永久删除此账户，以及该账户在本财务系统内的以下数据：';
+            var scope = document.createElement('div');
+            scope.className = 'finance-delete-scope';
+            scope.innerHTML = '<span>历史交易与结算补充数据</span><span>余额与余额快照</span><span>报表关联数据与同步日志</span>';
+            var hint = document.createElement('p');
+            hint.className = 'finance-delete-hint';
+            hint.textContent = '其他系统的原始数据不受影响。';
+            var advice = document.createElement('p');
+            advice.className = 'finance-delete-description';
+            advice.textContent = '建议先停用账户：停止自动刷新并保留历史数据，之后可在编辑中重新启用。';
+            var actions = document.createElement('div');
+            actions.className = 'finance-delete-actions';
             var cancel = document.createElement('button');
             cancel.type = 'button'; cancel.className = 'btn btn-default'; cancel.textContent = '取消';
             var proceed = document.createElement('button');
             proceed.type = 'button'; proceed.className = 'btn btn-danger'; proceed.textContent = '确认删除';
-            proceed.style.marginLeft = '12px';
-            dialog.append(text, cancel, proceed);
+            var disable = document.createElement('button');
+            disable.type = 'button'; disable.className = 'btn btn-primary'; disable.textContent = '快捷停用';
+            actions.append(cancel, disable, proceed);
+            dialog.append(heading, advice, text, scope, hint, actions);
             document.body.appendChild(dialog);
             dialog.addEventListener('close', function () { dialog.remove(); if (!deleting) pending = false; });
             cancel.addEventListener('click', function () { dialog.close(); });
-            proceed.addEventListener('click', async function () {
+            async function submitAction(event) {
+                var stopping = event.currentTarget === disable;
                 if (deleting) return;
                 deleting = true;
                 dialog.close();
                 pending = true;
-                var submit = form.querySelector('[type="submit"]');
+                var submit = form.querySelector('button:not([type]), [type="submit"]');
                 submit.disabled = true;
-                var notice = form.closest('[data-paypal-account]').querySelector('[data-refresh-message]');
+                var card = form.closest('[data-paypal-account]');
+                var notice = card ? card.querySelector('[data-refresh-message]') : form.querySelector('[data-delete-message]');
+                if (!notice) {
+                    notice = document.createElement('span');
+                    notice.setAttribute('data-delete-message', '');
+                    notice.setAttribute('role', 'alert');
+                    form.appendChild(notice);
+                }
+                notice.hidden = true;
                 try {
-                    var response = await fetch(form.action, {
-                        method: 'POST', body: new FormData(form), credentials: 'same-origin',
+                    var body = new FormData(form);
+                    if (stopping) body.delete('_method');
+                    var response = await fetch(form.action + (stopping ? '/disable' : ''), {
+                        method: 'POST', body: body, credentials: 'same-origin',
                         headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                         signal: AbortSignal.timeout(30000)
                     });
                     var result = await response.json();
-                    if (!response.ok || !result.ok) throw new Error(result.message || '删除失败，请重试。');
+                    if (!response.ok || !result.ok) throw new Error(result.message || (stopping ? '停用失败，请重试。' : '删除失败，请重试。'));
                     window.location.assign(result.redirect);
                 } catch (error) {
                     notice.dataset.result = 'failed';
-                    notice.textContent = error.name === 'TimeoutError' ? '请求超时，请刷新核对账户是否已删除。' : (error.message || '删除失败，请重试。');
+                    notice.textContent = error.name === 'TimeoutError' ? '请求超时，请刷新核对账户状态。' : (error.message || '操作失败，请重试。');
                     notice.hidden = false;
                 } finally {
                     pending = false;
                     submit.disabled = false;
                 }
-            });
+            }
+            proceed.addEventListener('click', submitAction);
+            disable.addEventListener('click', submitAction);
             dialog.showModal();
             cancel.focus();
         });
@@ -205,6 +239,28 @@
         run(forms.filter(function (form) { return form.dataset.refreshAllowed === 'true'; }));
     });
     unlock();
+    var nextAutoRefresh = Date.now() + 60 * 60 * 1000;
+    async function autoRefresh() {
+        if (busy || Date.now() < nextAutoRefresh) return;
+        nextAutoRefresh = Date.now() + 60 * 60 * 1000;
+        await run(forms.filter(function (form) {
+            var card = form.closest('[data-paypal-account]');
+            return form.dataset.refreshAllowed === 'true'
+                && card.querySelector('[data-connection-status]').dataset.state === 'connected';
+        }));
+    }
+    // Recheck the deadline after browser sleep or a background-tab timer delay.
+    var autoRefreshTimer = window.setInterval(autoRefresh, 60000);
+    document.addEventListener('visibilitychange', function () {
+        if (!document.hidden) autoRefresh();
+    });
+    window.addEventListener('pagehide', function () { window.clearInterval(autoRefreshTimer); });
+    window.addEventListener('pageshow', function (event) {
+        if (event.persisted) {
+            autoRefreshTimer = window.setInterval(autoRefresh, 60000);
+            autoRefresh();
+        }
+    });
     var connectedKey = @json(session('refreshConnectedAccount'));
     if (connectedKey) {
         var connectedForm = forms.find(function (form) { return form.closest('[data-paypal-account]').dataset.paypalAccount === connectedKey; });

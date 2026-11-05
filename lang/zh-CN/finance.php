@@ -75,7 +75,7 @@ return [
         'note' => 'PayPal展示系统已采集的最新余额快照，按账户、币种分别列出。采集时间代表数据时点，刷新页面不会向支付平台请求新余额。',
         'total' => '已采集账户合计（按币种）', 'missing' => '暂无余额快照', 'no_accounts' => '暂无已启用的PayPal账户',
         'incomplete' => '以下合计只包含已采集的账户，缺少快照的账户未计入。',
-        'xuzong2' => '信用卡2余额', 'pending' => '待接入余额接口',
+        'xuzong2' => '信用卡余额', 'pending' => '待接入余额接口',
         'xuzong_note' => '将分别展示平台两处余额及各自合计；需要补充接口或余额导入格式。',
     ],
     'paypal' => [
@@ -95,7 +95,8 @@ return [
         'missing' => ':accounts 暂无 :currency 余额数据，未计入该币种合计。',
         'incomplete' => '部分余额字段缺失，对应合计暂不可用。',
         'empty_summary' => '接入余额数据后自动计算合计',
-        'timestamp' => '余额时间', 'time_unknown' => '余额时间未提供',
+        'timestamp' => '余额数据时间', 'time_unknown' => '余额时间未提供',
+        'fetched_at' => '接口刷新时间',
         'hold_hint' => '目前尚未可用余额主要在尚云账户展示。',
     ],
     'payment_accounts' => [
@@ -114,8 +115,8 @@ return [
         'relay_security_help' => 'PayPal Client ID、Client Secret 仅保存在 VPS，不在此填写。HMAC 密钥加密保存且不回显；证书指纹及连接密钥不得写入操作日志。',
         'relay_operations_help' => '接入协议要求 HTTPS 证书指纹校验、请求 HMAC 签名及响应 HMAC 验签；只读操作为 balances 和 transaction_search。',
         'relay_save_help' => '保存仅维护连接资料；保存后可手动刷新余额或同步交易。保存成功不表示接口连通性已验证。',
-        'delete' => '删除', 'deleted' => '账户已删除，历史余额和同步日志保留。',
-        'delete_confirm' => '确认删除此账户？删除后不再显示账户卡片，历史交易和余额快照仍会保留。',
+        'delete' => '删除', 'deleted' => '账户及其在财务系统内的交易、余额、报表关联数据和日志已删除，其他系统数据不受影响。',
+        'delete_confirm' => '确认删除此账户？将同时永久删除该账户在本财务系统内的历史交易、余额快照、报表关联数据和同步日志，此操作无法撤销。其他系统的原始数据不受影响。',
         'invalid_relay_url' => '请输入HTTPS中转地址，路径必须为/relay/v1/paypal/read，且不包含登录信息、查询参数或锚点。',
         'attributes' => [
             'account_name' => '账户名称', 'account_code' => '账户标识', 'account_type' => '账户类型', 'main_currency' => '主币种',

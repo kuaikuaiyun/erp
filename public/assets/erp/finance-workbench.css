@@ -57,3 +57,18 @@
 @media(max-width:1500px){.finance-balance-overview .payment-balance-metrics{gap:10px}.finance-balance-overview .payment-balance-metric strong{font-size:20px}}
 @media(max-width:1250px){.finance-balance-overview{grid-template-columns:1fr}.finance-balance-overview .payment-balance-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(max-width:600px){.finance-balance-overview{gap:12px;margin-bottom:16px}.finance-balance-overview .payment-balance-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.finance-balance-tab{padding:12px 20px}}
+.finance-delete-dialog{box-sizing:border-box;width:calc(100% - 32px);max-width:460px;max-height:calc(100vh - 32px);overflow:auto;padding:26px;border:1px solid #e4eaf0;border-radius:14px;background:#fff;color:#273849;box-shadow:0 20px 64px rgba(18,39,57,.22);font-family:inherit;font-size:14px;line-height:1.7}
+.finance-delete-dialog::backdrop{background:rgba(17,35,51,.42)}
+.finance-delete-heading{display:flex;align-items:center;gap:14px;margin-bottom:22px}
+.finance-delete-icon{display:flex;align-items:center;justify-content:center;flex-shrink:0;width:46px;height:46px;border-radius:12px;background:#fff0ee;color:#cc493c;font-size:22px}
+.finance-delete-heading h3{margin:0 0 3px;font-size:19px;font-weight:600;color:#223647;line-height:1.5}
+.finance-delete-heading p{margin:0;color:#b8493e;font-size:12px}
+.finance-delete-description{margin:0 0 12px;color:#536576}
+.finance-delete-scope{display:grid;gap:7px;padding:14px 16px;border:1px solid #e9eef3;border-radius:8px;background:#f7f9fc;color:#42576a;font-size:13px}
+.finance-delete-scope span::before{content:'•';margin-right:9px;color:#8fa0b1}
+.finance-delete-hint{margin:12px 0 22px;color:#788897;font-size:12px}
+.finance-delete-actions{display:flex;justify-content:flex-end;gap:10px;padding-top:18px;border-top:1px solid #edf1f5}
+.finance-delete-actions .btn{min-width:88px;padding:8px 16px;border-radius:6px;font-size:13px}
+.finance-delete-actions .btn-danger{background:#d64c40;border-color:#d64c40}
+.finance-delete-actions .btn-danger:hover{background:#bd3d32;border-color:#bd3d32}
+.finance-delete-actions .btn:focus-visible{outline:3px solid #98bce4;outline-offset:3px}

@@ -25,7 +25,11 @@ class FinanceLogisticsCreditOrders
         if ($hasStores) {
             $source->leftJoin('assistant_domain_stores as s', 's.id', '=', 'o.assistant_domain_store_id');
         }
-        $source->whereRaw("LOWER(TRIM(COALESCE(o.payment_gateway, ''))) <> ?", ['paypal']);
+        if ($db->getSchemaBuilder()->hasColumn('logistics_orders', 'finance_is_non_paypal')) {
+            $source->where('o.finance_is_non_paypal', 1);
+        } else {
+            $source->whereRaw("LOWER(TRIM(COALESCE(o.payment_gateway, ''))) <> ?", ['paypal']);
+        }
         $occurredAt = $indexed ? 'o.finance_credit_occurred_at' : 'COALESCE(o.order_created_at, o.paid_at)';
         $values = [
             'o.store_name', $account, 'o.shopify_order_number', $reference,
