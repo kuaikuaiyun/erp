@@ -36,7 +36,9 @@ class FashionOrderController extends Controller
         ]);
 
         $keyword = trim((string) ($validated['keyword'] ?? ''));
-        $selectedStatus = (string) ($validated['status'] ?? 'effective');
+        // Keep the default list consistent with the sync summary, which counts
+        // every status returned by XShoppy.
+        $selectedStatus = (string) ($validated['status'] ?? 'all');
         $query = FashionLogisticsOrder::query()->with(['items', 'store']);
         if ($keyword !== '') {
             $query->where(function ($query) use ($keyword): void {
