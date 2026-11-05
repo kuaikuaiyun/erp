@@ -373,6 +373,8 @@ class OperationReportController extends Controller
             'canSelectOperator' => $canSelectOperator,
             'selectAllOperators' => $selectAllOperators,
             'selectedOperator' => $selectedOperator,
+            'inputDateFrom' => $requestedDateFrom,
+            'inputDateTo' => $requestedDateTo,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
             'weeklyRows' => $weeklyRows,

@@ -21,8 +21,8 @@
             @if($canSelectOperator)
                 <div class="form-group"><label>运营人员</label><select class="form-control input-sm" name="operator_user_id"><option value="all" @selected($selectAllOperators)>全部运营人员</option>@foreach($operatorOptions as $option)<option value="{{ $option->id }}" @selected(!$selectAllOperators && $selectedOperator?->id === $option->id)>{{ $option->name ?: $option->username }}</option>@endforeach</select></div>
             @endif
-            <div class="form-group"><label>开始日期</label><input type="date" class="form-control input-sm" name="date_from" value="{{ $dateFrom }}" required></div>
-            <div class="form-group"><label>结束日期</label><input type="date" class="form-control input-sm" name="date_to" value="{{ $dateTo }}" required></div>
+            <div class="form-group"><label>开始日期</label><input type="date" class="form-control input-sm" name="date_from" value="{{ $inputDateFrom }}" required></div>
+            <div class="form-group"><label>结束日期</label><input type="date" class="form-control input-sm" name="date_to" value="{{ $inputDateTo }}" required></div>
             <button class="btn btn-primary"><i class="fa fa-search"></i> 查询周报</button>
             <span class="weekly-range">{{ $dateFrom }} 至 {{ $dateTo }}</span>
         </form>
