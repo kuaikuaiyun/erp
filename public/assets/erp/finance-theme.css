@@ -1,0 +1,37 @@
+/* Match the existing payment portal and assistant form theme. */
+.finance-system .content-wrapper{background:#edf1f5;color:#274a66}
+.finance-system .content-header h1{color:#173f61}
+.finance-system .btn{border-radius:4px;box-shadow:none;font-size:13px}
+.finance-system .btn.btn-primary{background:#338dc7;border-color:#338dc7;color:#fff}
+.finance-system .btn.btn-primary:hover,.finance-system .btn.btn-primary:focus{background:#287caf;border-color:#287caf}
+.finance-system .btn.btn-default{background:#fff;border-color:#ced9e2;color:#3b5870}
+.finance-system .btn.btn-default:hover,.finance-system .btn.btn-default:focus{background:#edf4f9;border-color:#b5cadb}
+.finance-system .form-group label{color:#3b5870;font-size:13px;font-weight:600;line-height:18px;margin-bottom:6px}
+.finance-system .form-control{min-height:34px;border:1px solid #ced9e2;border-radius:4px;background-color:#fff;color:#3b5870;box-shadow:none;font-size:13px}
+.finance-system .form-control:focus{border-color:#66afe9;box-shadow:0 0 0 2px rgba(60,141,188,.1)}
+.finance-system .form-control[readonly],.finance-system .form-control:disabled{background:#edf1f5;color:#71899e}
+.finance-system .help-block{font-size:12px;line-height:1.7;color:#71899e}
+.finance-system .finance-relay-instructions{margin:0 0 15px;padding:10px 12px;border:1px solid #d7e4ee;border-radius:4px;background:#f5f9fc;color:#547087;font-size:12px;line-height:1.8}
+.finance-system .finance-relay-instructions summary{cursor:pointer;color:#3473a2}
+.finance-system .finance-relay-instructions ul{margin:8px 0 0;padding-left:18px}
+.finance-system .finance-account-maintenance{display:flex;justify-content:space-between;gap:8px;padding:7px 12px;border-top:1px solid #edf2f7}
+.finance-system .finance-account-maintenance form{margin:0}
+.finance-system .modal .modal-dialog{width:min(720px,calc(100vw - 30px));margin:28px auto}
+.finance-system .modal .modal-content{overflow:hidden;border:0;border-radius:9px;background:#f5f9fc;box-shadow:0 18px 55px rgba(14,41,65,.3)}
+.finance-system .modal .modal-header{padding:14px 18px;border-bottom:1px solid #d8e5ee;background:#fff}
+.finance-system .modal .modal-title{font-size:17px;font-weight:700;color:#173f61}
+.finance-system .modal .modal-body{padding:18px;max-height:calc(100vh - 190px);overflow:auto}
+.finance-system .modal .modal-footer{padding:12px 18px;border-top:1px solid #d8e5ee;background:#fff}
+.finance-system .modal fieldset{padding:14px 15px 0;border:1px solid #d7e1e8;border-radius:6px;background:#fff}
+.finance-system .modal legend{width:auto;padding:0 6px;margin-bottom:6px;border:0;font-size:14px;font-weight:600;color:#274a66}
+.finance-system .finance-table th{background:#eaf2f8;color:#476780;border-color:#d7e4ee;font-size:12px;font-weight:600}
+.finance-system .finance-table td{color:#3b5870;border-color:#e2ebf2;font-size:13px}
+.finance-system .box{border-color:#d7e1e8;border-radius:7px;box-shadow:0 1px 2px rgba(32,58,78,.04)}
+.finance-system .box-primary{border-top-color:#338dc7}
+.finance-system .box-header.with-border{background:#fbfcfd;border-bottom-color:#e9eef2;color:#274a66}
+.finance-system .payment-currency-badge,.finance-system .paypal-currency{background:#eaf2f8;color:#3473a2}
+.finance-system .payment-balance-update,.finance-system .payment-balance-link,.finance-system .payment-balance-more,.finance-system .paypal-rate-edit{color:#338dc7}
+.finance-system .payment-balance-update{border-color:#ced9e2;background:#fff}
+.finance-system .finance-balance-tab.is-active{color:#28648e;background:#eaf2f8;border-bottom-color:#338dc7}
+.finance-system .paypal-summary,.finance-system .paypal-account-card,.finance-system .payment-balance-card{border-color:#d7e4ee;box-shadow:0 1px 3px rgba(32,58,78,.05)}
+@media(max-width:600px){.finance-system .modal .modal-dialog{margin:15px auto}.finance-system .modal .modal-body{padding:15px}}
