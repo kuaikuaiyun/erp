@@ -30,11 +30,13 @@ use App\Portals\ProductRequests\Http\Controllers\ProductRequestController;
 use App\Portals\Aikaipin\Http\Controllers\ProductLibraryController;
 use App\Portals\Payment\Http\Controllers\PaymentPortalController;
 use App\Portals\Fashion\Http\Controllers\AdvertisingExpenseController;
+use App\Portals\Fashion\Http\Controllers\PerformanceReportController;
 use App\Portals\FashionLogistics\Http\Controllers\FashionOrderController;
 use App\Http\Middleware\MonitorPaymentPerformance;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/fashion/advertising-expenses', [AdvertisingExpenseController::class, 'index'])->name('fashion.advertising-expenses.index');
+Route::get('/fashion/performance-report', [PerformanceReportController::class, 'index'])->name('fashion.performance-report.index');
 Route::get('/fashion-logistics/orders', [FashionOrderController::class, 'index'])->name('fashion-logistics.orders.index');
 Route::post('/fashion/advertising-expenses', [AdvertisingExpenseController::class, 'store'])->name('fashion.advertising-expenses.store');
 Route::put('/fashion/advertising-expenses/{report}', [AdvertisingExpenseController::class, 'update'])->name('fashion.advertising-expenses.update');

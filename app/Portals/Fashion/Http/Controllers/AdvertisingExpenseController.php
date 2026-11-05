@@ -4,9 +4,10 @@ namespace App\Portals\Fashion\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\FashionAdvertisingReport;
+use App\Models\FashionLogisticsOrder;
+use App\Models\AdminUser;
 use App\Models\AssistantAdvertisingAgency;
 use App\Models\AssistantAdvertisingMedia;
-use App\Models\AssistantDomainStore;
 use App\Portal\Http\Controllers\PortalEntryController;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -46,14 +47,12 @@ class AdvertisingExpenseController extends Controller
         }
 
         $context['portal']->loadMissing('menus');
-        $storeOptions = $this->storeOptions($context['user']);
         $advertisingOptions = $this->advertisingOptions();
         return view('portals.fashion.advertising-expenses.index', [
             ...$context,
             'reports' => $reports,
             'editing' => $editing,
             'filters' => ['from' => $from ?? '', 'to' => $to ?? ''],
-            'storeOptions' => $storeOptions,
             'agencyOptions' => $advertisingOptions['agencies'],
             'mediaOptions' => $advertisingOptions['media'],
         ]);
@@ -72,7 +71,7 @@ class AdvertisingExpenseController extends Controller
         if ($duplicate) return back()->withInput()->withErrors(['report_date' => '该日期已经填写过报表，可在下方记录中点击编辑。']);
 
         $this->persist($request, $data, $context['user']);
-        return redirect()->route('fashion.advertising-expenses.index')->with('success', '广告费用及营业额数据保存成功。');
+        return redirect()->route('fashion.advertising-expenses.index')->with('success', '广告费用保存成功，营业额数据已由系统自动统计。');
     }
 
     public function update(Request $request, FashionAdvertisingReport $report): RedirectResponse
@@ -126,14 +125,6 @@ class AdvertisingExpenseController extends Controller
     {
         return $request->validate([
             'report_date' => ['required', 'date'],
-            'performance' => ['required', 'array', 'min:1', 'max:30'],
-            'performance.*.store_name' => ['required', 'string', 'max:191'],
-            'performance.*.domain' => ['nullable', 'string', 'max:255'],
-            'performance.*.revenue_usd' => ['required', 'numeric', 'min:0'],
-            'performance.*.order_count' => ['required', 'integer', 'min:0'],
-            'performance.*.remark' => ['nullable', 'string', 'max:1000'],
-            'performance.*.existing_screenshot' => ['nullable', 'string', 'max:500'],
-            'performance.*.screenshot' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
             'advertising' => ['required', 'array', 'min:1', 'max:50'],
             'advertising.*.agency' => ['required', 'string', 'max:100'],
             'advertising.*.media' => ['required', 'string', 'max:100'],
@@ -145,7 +136,6 @@ class AdvertisingExpenseController extends Controller
             'advertising.*.existing_screenshot' => ['nullable', 'string', 'max:500'],
             'advertising.*.screenshot' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
         ], [
-            'performance.*.store_name.required' => '请填写店铺名称。',
             'advertising.*.agency.required' => '请填写广告代理。',
             'advertising.*.account_name.required' => '请填写广告账户。',
             'advertising.*.account_number.required' => '请填写广告账户编号。',
@@ -161,7 +151,8 @@ class AdvertisingExpenseController extends Controller
             $oldPaths = $report->performanceEntries->pluck('screenshot_path')->merge($report->adSpendEntries->pluck('screenshot_path'))->filter()->all();
         }
 
-        $performance = $this->prepareRows($request, $data['performance'], 'performance');
+        $performanceOwnerId = $report?->submitter_id ?: $user->getKey();
+        $performance = $this->calculatedPerformanceRows($data['report_date'], (int) $performanceOwnerId);
         $advertising = $this->prepareRows($request, $data['advertising'], 'advertising');
         $revenue = round(collect($performance)->sum('revenue_usd'), 2);
         $orders = (int) collect($performance)->sum('order_count');
@@ -211,6 +202,42 @@ class AdvertisingExpenseController extends Controller
         })->values()->all();
     }
 
+    /** @return list<array{store_name:string,domain:string,revenue_usd:float,order_count:int,screenshot_path:null,remark:string}> */
+    private function calculatedPerformanceRows(string $reportDate, int $ownerUserId): array
+    {
+        $connection = config('admin.database.connection') ?: config('database.default');
+        $orderTable = (new FashionLogisticsOrder())->getTable();
+        $owner = AdminUser::query()->find($ownerUserId);
+        $ownerNames = collect([$owner?->name, $owner?->username])
+            ->filter()->map(fn ($name): string => trim((string) $name))->unique()->values()->all();
+
+        return DB::connection($connection)->table($orderTable.' as orders')
+            ->join('assistant_domain_stores as stores', 'stores.id', '=', 'orders.assistant_domain_store_id')
+            ->where(function ($binding) use ($ownerUserId, $ownerNames): void {
+                $binding->where('stores.owner_user_id', $ownerUserId);
+                if ($ownerNames !== []) $binding->orWhereIn('stores.user_name', $ownerNames);
+            })
+            ->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy')")
+            ->whereBetween('orders.order_created_at', [$reportDate.' 00:00:00', $reportDate.' 23:59:59'])
+            ->where(function ($paid): void {
+                $paid->whereNotNull('orders.paid_at')
+                    ->orWhereIn('orders.status', ['processing', 'completed']);
+            })
+            ->select(['stores.id', 'stores.shop_name', 'stores.domain'])
+            ->selectRaw('COUNT(*) as order_count, COALESCE(SUM(orders.total_amount), 0) as revenue_usd')
+            ->groupBy('stores.id', 'stores.shop_name', 'stores.domain')
+            ->orderBy('stores.shop_name')
+            ->get()
+            ->map(static fn (object $row): array => [
+                'store_name' => trim((string) $row->shop_name) ?: trim((string) $row->domain),
+                'domain' => trim((string) $row->domain),
+                'revenue_usd' => round((float) $row->revenue_usd, 2),
+                'order_count' => (int) $row->order_count,
+                'screenshot_path' => null,
+                'remark' => '系统根据 XShoppy 已支付订单自动统计',
+            ])->values()->all();
+    }
+
     private function context(Request $request): array|Response
     {
         $context = $this->portalEntries->portalContext($request);
@@ -227,32 +254,6 @@ class AdvertisingExpenseController extends Controller
     private function dateFilter(mixed $value): ?string
     {
         return is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) ? $value : null;
-    }
-
-    private function storeOptions($user): array
-    {
-        $query = AssistantDomainStore::query()
-            ->where(function ($stores): void {
-                $stores->whereNotNull('shop_name')->where('shop_name', '!=', '')
-                    ->orWhere(function ($domain): void {
-                        $domain->whereNotNull('domain')->where('domain', '!=', '');
-                    });
-            });
-
-        if (!$user->isAdministrator()) {
-            $names = collect([$user->name, $user->username])->filter()->map(fn ($name) => trim((string) $name))->unique()->all();
-            $query->where(function ($scope) use ($user, $names): void {
-                $scope->where('owner_user_id', $user->getKey());
-                if ($names !== []) $scope->orWhereIn('user_name', $names);
-            });
-        }
-
-        return $query->orderBy('shop_name')->orderBy('domain')->get(['id', 'shop_name', 'domain', 'user_name', 'owner_user_id'])
-            ->map(fn (AssistantDomainStore $store): array => [
-                'id' => (int) $store->id,
-                'store_name' => trim((string) $store->shop_name) ?: trim((string) $store->domain),
-                'domain' => trim((string) $store->domain),
-            ])->unique(fn (array $store): string => mb_strtolower($store['store_name'].'|'.$store['domain']))->values()->all();
     }
 
     private function advertisingOptions(): array
