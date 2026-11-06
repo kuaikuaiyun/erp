@@ -77,6 +77,7 @@ Route::prefix('finance')->name('finance.')->middleware(\App\Http\Middleware\Redi
     Route::get('/settings/{kind}/export', 'exportSettings')->name('settings.export');
     Route::get('/reports/{report}', 'report')->name('report');
     Route::post('/reports/{report}/save', 'saveSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement'])->name('settlement.save');
+    Route::delete('/reports/{report}/records', 'deleteSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement'])->name('settlement.delete');
     Route::post('/reports/{report}/import', 'importSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement'])->name('settlement.import');
 });
 

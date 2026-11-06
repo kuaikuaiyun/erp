@@ -26,20 +26,29 @@ class FinanceSettlementService
 
     public function __construct(private readonly FinanceWorkbookService $workbooks) {}
 
+    public function textFields(string $channel): array
+    {
+        return $channel === 'paypal'
+            ? [...self::TEXT, 'owner' => '使用人', 'team' => '团队', 'paypal_12' => '偏好设定 Txn ID']
+            : [...self::TEXT, 'owner' => '使用人', 'team' => '团队'];
+    }
+
     public function importFields(string $channel): array
     {
         if ($channel === 'paypal') {
             return ['reference' => '交易 ID', 'erp_order' => '通途订单', 'converted_usd' => '转换美元', 'usd_rate' => '汇率', 'hold' => '冻结金额', 'dispute_hold' => '争议冻结金额',
                 'refund' => '退款金额', 'refund_fee' => '退款费用', 'dispute_refund' => '争议退款', 'dispute_fee' => '争议费',
                 'fee_return' => '返还手续费', 'dispute_release' => '返还争议冻结', 'release' => '返还冻结',
-                'logistics' => '物流-元', 'purchase' => '采购成本-元'];
+                'logistics' => '物流-元', 'purchase' => '采购成本-元',
+                ...$this->textFields($channel)];
         }
 
         return ['merchant_order' => '商户订单号', 'reference' => '平台订单号', 'erp_order' => '通途订单',
             'settlement' => '结算金额', 'hold' => '保证金', 'fee' => '交易手续费', 'per_order_fee' => '单笔费用',
             'refund' => '退款金额', 'refund_fee' => '退款费用', 'chargeback' => '拒付金额', 'chargeback_fee' => '拒付费用',
             'ethoca_refund' => 'ethoca预警退款', 'ethoca_fee' => '拒付预警ethoca', 'rdr_refund' => '拒付RDR金额',
-            'rdr_fee' => '拒付RDR+CDRN费用', 'release' => '保证金返还', 'logistics' => '物流-元', 'purchase' => '采购成本-元'];
+            'rdr_fee' => '拒付RDR+CDRN费用', 'release' => '保证金返还', 'logistics' => '物流-元', 'purchase' => '采购成本-元',
+            'usd_rate' => '汇率', ...$this->textFields($channel)];
     }
 
     public function columns(string $channel): array
@@ -62,6 +71,11 @@ class FinanceSettlementService
     public function query(string $channel, array $filters)
     {
         $query = FinanceRecord::query()->whereIn('dataset', $channel === 'paypal' ? ['paypal-orders'] : ['xuzong2-orders', 'xuzong2-details', 'xuzong1-details']);
+        $query->whereNotExists(function ($deleted): void {
+            $deleted->selectRaw('1')->from('finance_settlement_supplements as removed_settlement')
+                ->whereColumn('removed_settlement.finance_record_id', 'finance_records.id')
+                ->whereNotNull('removed_settlement.payload->_deleted_at');
+        });
         $this->filterAccountHistory($query, $channel);
         if ($channel === 'paypal') {
             $types = $this->workbooks->database()->table('finance_transaction_types')->where('category', '结账付款')->pluck('raw_type');
@@ -184,7 +198,9 @@ class FinanceSettlementService
             $row['usd_rate'] = $record->currency === 'USD' ? '1' : $row['usd_rate'];
             if ($channel === 'paypal') {
                 foreach (array_slice($headers, 0, 15) as $index => $header) {
-                    $row['paypal_'.$index] = $index === 4 ? FinancePayPalEventTypes::label((string) ($p[$header] ?? '')) : ($p[$header] ?? '');
+                    $row['paypal_'.$index] = $index === 12 && filled($saved['paypal_12'] ?? null)
+                        ? $saved['paypal_12']
+                        : ($index === 4 ? FinancePayPalEventTypes::label((string) ($p[$header] ?? '')) : ($p[$header] ?? ''));
                 }
                 $net = $this->number($p[$headers[9]] ?? null);
                 if ($row['converted_usd'] === null && $net !== null && $row['usd_rate'] !== null) {
@@ -220,8 +236,8 @@ class FinanceSettlementService
                 $row['fee'] = $row['usd_rate'] === null ? null : bcmul($row['fee'], $row['usd_rate'], 8);
             }
             $group = $domains->get(strtolower((string) $row['domain']));
-            $row['owner'] = $group?->owner ?? '';
-            $row['team'] = $group?->team ?? '';
+            $row['owner'] = filled($saved['owner'] ?? null) ? $saved['owner'] : ($group?->owner ?? ($p['使用人'] ?? ''));
+            $row['team'] = filled($saved['team'] ?? null) ? $saved['team'] : ($group?->team ?? ($p['团队'] ?? ''));
 
             return $row;
         })->filter(fn ($row) => (! filled($filters['team'] ?? null) || $row['team'] === $filters['team'])
