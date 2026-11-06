@@ -167,6 +167,8 @@ Route::get('/operation/ai-product-library/{product}/publish', [OperationAiProduc
 Route::post('/operation/ai-product-library/{product}/publish', [OperationAiProductLibraryController::class, 'publish'])->name('operation.ai-product-library.publish');
 Route::get('/operation/ai-product-library/{product}/shopify-images/{imageIndex}', [OperationAiProductLibraryController::class, 'shopifyImage'])->whereNumber('imageIndex')->name('operation.ai-product-library.shopify-image');
 Route::get('/operation/ai-product-library/{product}/detail', [OperationAiProductLibraryController::class, 'detail'])->name('operation.ai-product-library.detail');
+Route::get('/operation/ai-product-library/{product}/reference-preview', [OperationAiProductLibraryController::class, 'referencePreview'])->name('operation.ai-product-library.reference-preview');
+Route::get('/operation/ai-product-library/{product}/reference-preview/content', [OperationAiProductLibraryController::class, 'referencePreviewContent'])->name('operation.ai-product-library.reference-preview.content');
 Route::get('/operation/ai-product-library/{product}/images/{imageIndex}', [OperationAiProductLibraryController::class, 'image'])->whereNumber('imageIndex')->name('operation.ai-product-library.images.show');
 Route::get('/operation/ai-product-library/{product}/package', [OperationAiProductLibraryController::class, 'downloadPackage'])->name('operation.ai-product-library.package.download');
 Route::get('/operation/existing-product-library', [ProductRequestController::class, 'existingProductLibraryIndex'])->name('product-requests.operation.existing-product-library');

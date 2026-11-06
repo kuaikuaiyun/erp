@@ -9,6 +9,7 @@ use App\Models\AiProductShopifyPublication;
 use App\Models\AssistantDomainStore;
 use App\Models\Portal;
 use App\Portal\Http\Controllers\PortalEntryController;
+use App\Portals\Aikaipin\AikaipinProductLibraryStorageService;
 use App\Portals\Operation\AiProductShopifyPublisher;
 use App\Portals\ProductRequests\ProductRequestAccessService;
 use Illuminate\Database\Eloquent\Builder;
@@ -104,6 +105,43 @@ class OperationAiProductLibraryController extends Controller
             ] : null,
             'created_at' => $product->created_at?->timezone(config('app.timezone'))->format('Y-m-d H:i:s'),
             'updated_at' => $product->updated_at?->timezone(config('app.timezone'))->format('Y-m-d H:i:s'),
+        ]);
+    }
+
+    public function referencePreview(Request $request, AikaipinProduct $product): Response|View
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        $this->referencePreviewFile($product);
+
+        return view('portals.aikaipin.product-library.reference-preview', [
+            'product' => $product,
+            'contentUrl' => route('operation.ai-product-library.reference-preview.content', ['product' => $product]),
+            'libraryUrl' => route('operation.ai-product-library.index'),
+        ]);
+    }
+
+    public function referencePreviewContent(Request $request, AikaipinProduct $product): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        $file = $this->referencePreviewFile($product);
+        $content = Storage::disk($file['disk'])->get($file['path']);
+
+        return response($content, 200, [
+            'Content-Type' => 'text/html; charset=UTF-8',
+            'Content-Disposition' => 'inline; filename="preview.html"',
+            'Cache-Control' => 'private, no-store, max-age=0',
+            'Pragma' => 'no-cache',
+            'X-Content-Type-Options' => 'nosniff',
+            'Referrer-Policy' => 'no-referrer',
+            'Permissions-Policy' => 'camera=(), geolocation=(), microphone=(), payment=(), usb=()',
+            'X-Robots-Tag' => 'noindex, nofollow, noarchive',
+            'Content-Security-Policy' => "sandbox allow-scripts allow-modals; default-src 'none'; base-uri 'none'; object-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https:; style-src 'unsafe-inline' https:; img-src data: blob: https:; font-src data: https:; media-src data: blob: https:; connect-src https:; frame-src https:; worker-src blob:; form-action 'none'; frame-ancestors 'self'",
         ]);
     }
 
@@ -223,6 +261,30 @@ class OperationAiProductLibraryController extends Controller
         return Storage::disk($disk)->download($path, (string) $file['original_name'], [
             'X-Content-Type-Options' => 'nosniff',
         ]);
+    }
+
+    /** @return array{disk:string,path:string,original_name:string,mime_type:?string,size:int,sha256:?string} */
+    private function referencePreviewFile(AikaipinProduct $product): array
+    {
+        $file = $product->referenceFilePayload();
+        abort_unless($file !== null, 404);
+
+        $disk = (string) $file['disk'];
+        $path = ltrim(str_replace('\\', '/', trim((string) $file['path'])), '/');
+        $extension = strtolower((string) pathinfo($path, PATHINFO_EXTENSION));
+
+        abort_unless(
+            $disk === AikaipinProductLibraryStorageService::DISK
+                && $path !== ''
+                && ! in_array('..', explode('/', $path), true)
+                && in_array($extension, ['html', 'htm'], true),
+            404,
+        );
+        abort_unless(Storage::disk($disk)->exists($path), 404);
+
+        $file['path'] = $path;
+
+        return $file;
     }
 
     /** @return array{portal:Portal,user:AdminUser}|Response */
