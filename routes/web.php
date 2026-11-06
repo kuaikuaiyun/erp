@@ -21,6 +21,8 @@ use App\Portals\Logistics\Http\Controllers\ShopifyWebhookController;
 use App\Portals\Operation\Http\Controllers\OperationDomainStoreController;
 use App\Portals\Operation\Http\Controllers\OperationAiProductLibraryController;
 use App\Portals\Operation\Http\Controllers\OperationReportController;
+use App\Portals\Operation\Http\Controllers\DailySubmissionController;
+use App\Portals\Assistant\Http\Controllers\AdvertisingRechargeReviewController;
 use App\Portals\Assistant\Http\Controllers\OperationReportReviewController;
 use App\Portals\Assistant\Http\Controllers\OperationReportDashboardController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingSpendSummaryController;
@@ -137,6 +139,15 @@ Route::get('/operation/domain-stores', [OperationDomainStoreController::class, '
 Route::get('/operation/ai-product-library', [OperationAiProductLibraryController::class, 'index'])->name('operation.ai-product-library.index');
 Route::get('/operation/reports', [OperationReportController::class, 'index'])->name('operation.reports.index');
 Route::get('/operation/weekly-reports', [OperationReportController::class, 'weekly'])->name('operation.weekly-reports.index');
+Route::get('/operation/daily-submissions/{type}', [DailySubmissionController::class, 'index'])
+    ->whereIn('type', ['advertising-recharge', 'account-opening', 'store-launch', 'advertising-account-authorization', 'account-store-transfer'])
+    ->name('operation.daily-submissions.index');
+Route::post('/operation/daily-submissions/advertising-recharge', [DailySubmissionController::class, 'storeAdvertisingRecharge'])
+    ->name('operation.daily-submissions.advertising-recharge.store');
+Route::get('/assistant/daily-submissions/advertising-recharges', [AdvertisingRechargeReviewController::class, 'index'])
+    ->name('assistant.daily-submissions.advertising-recharges.index');
+Route::patch('/assistant/daily-submissions/advertising-recharges/{submission}/process', [AdvertisingRechargeReviewController::class, 'process'])
+    ->whereNumber('submission')->name('assistant.daily-submissions.advertising-recharges.process');
 Route::get('/operation/reports/order-details', [OperationReportController::class, 'orderDetails'])->name('operation.reports.order-details');
 Route::get('/operation/advertising-reports', [OperationReportController::class, 'advertising'])->name('operation.advertising-reports.index');
 Route::get('/operation/advertising-reports/import-template', [OperationReportController::class, 'advertisingImportTemplate'])->name('operation.advertising-reports.import-template');

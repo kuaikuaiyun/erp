@@ -15,6 +15,10 @@ class PortalReturnUrlService
 
     public function remember(Request $request, Portal $portal): void
     {
+        if (!$this->canBeRemembered($request)) {
+            return;
+        }
+
         $request->session()->put(self::SESSION_KEY, [
             'portal_id' => (int) $portal->getKey(),
             'path' => $this->domains->currentPortalPath($request),
@@ -30,7 +34,8 @@ class PortalReturnUrlService
             || !is_numeric($stored['portal_id'])
             || !is_string($stored['path'] ?? null)
             || !str_starts_with($stored['path'], '/')
-            || str_starts_with($stored['path'], '//')) {
+            || str_starts_with($stored['path'], '//')
+            || $this->isApiPath($stored['path'])) {
             return null;
         }
 
@@ -38,6 +43,19 @@ class PortalReturnUrlService
 
         return $portal ? $this->domains->portalUrl($portal, $stored['path']) : null;
     }
-}
 
+    private function canBeRemembered(Request $request): bool
+    {
+        if (!$request->isMethod('GET') || $request->ajax() || $request->expectsJson()) {
+            return false;
+        }
+
+        return !$this->isApiPath($this->domains->currentPortalPath($request));
+    }
+
+    private function isApiPath(string $path): bool
+    {
+        return $path === '/api' || str_starts_with($path, '/api/');
+    }
+}
 
