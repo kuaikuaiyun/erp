@@ -42,8 +42,9 @@ class PaymentCreditCardRiskService
             ->map(static fn ($reason): string => (string) $reason)
             ->all();
         $refunds = clone $allRefunds;
-        if (($filters['reason'] ?? '') !== '') {
-            $refunds->where('refunds.refund_reason', (string) $filters['reason']);
+        $selectedReasons = $filters['reasons'] ?? [];
+        if ($selectedReasons !== []) {
+            $refunds->whereIn('refunds.refund_reason', $selectedReasons);
         }
         $disputeReasons = array_map(fn (string $reason): string => mb_strtolower(trim($reason)), LogisticsCreditCardRefundReason::DISPUTE);
         $refundRows = (clone $refunds)->select('refunds.refund_reason')
@@ -70,8 +71,8 @@ class PaymentCreditCardRiskService
             ->select(['risk_orders.id', 'risk_orders.shopify_order_number', 'risk_orders.tongtu_order_number', 'risk_orders.store_name', 'risk_orders.payment_gateway', 'risk_orders.paid_at', 'risk_orders.paid_amount_usd'])
             ->groupBy('risk_orders.id', 'risk_orders.shopify_order_number', 'risk_orders.tongtu_order_number', 'risk_orders.store_name', 'risk_orders.payment_gateway', 'risk_orders.paid_at', 'risk_orders.paid_amount_usd')
             ->orderByDesc('risk_orders.paid_at')->orderByDesc('risk_orders.id');
-        if (($filters['reason'] ?? '') !== '') {
-            $riskPageQuery->where('refunds.refund_reason', (string) $filters['reason']);
+        if ($selectedReasons !== []) {
+            $riskPageQuery->whereIn('refunds.refund_reason', $selectedReasons);
         }
         $riskPage = $riskPageQuery->paginate((int) $filters['per_page'], ['*'], 'page', (int) $filters['page']);
         $pageOrderIds = collect($riskPage->items())->pluck('id')->map(static fn ($id): int => (int) $id)->all();

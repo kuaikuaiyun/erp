@@ -482,13 +482,18 @@ class PaymentPortalController extends Controller
         return $context;
     }
 
-    /** @return array{module:string,account:string,reason:string,period_start:string,period_end:string,date_mode:string,import_status:string,page:int,per_page:int} */
+    /** @return array{module:string,account:string,reasons:list<string>,period_start:string,period_end:string,date_mode:string,import_status:string,page:int,per_page:int} */
     private function accountRiskFilters(Request $request): array
     {
+        if ($request->has('reason') && ! is_array($request->input('reason'))) {
+            $request->merge(['reason' => [$request->input('reason')]]);
+        }
+
         $validated = $request->validate([
             'module' => ['nullable', Rule::in(['paypal', 'credit_card'])],
             'account' => ['nullable', 'string', 'max:191'],
-            'reason' => ['nullable', 'string', 'max:191'],
+            'reason' => ['nullable', 'array', 'max:50'],
+            'reason.*' => ['string', 'max:191'],
             'period_start' => ['nullable', 'date'],
             'period_end' => ['nullable', 'date', 'after_or_equal:period_start'],
             'date_mode' => ['nullable', Rule::in(['order', 'event'])],
@@ -501,7 +506,12 @@ class PaymentPortalController extends Controller
         return [
             'module' => (string) ($validated['module'] ?? 'paypal'),
             'account' => trim((string) ($validated['account'] ?? '')),
-            'reason' => trim((string) ($validated['reason'] ?? '')),
+            'reasons' => collect($validated['reason'] ?? [])
+                ->map(static fn ($reason): string => trim((string) $reason))
+                ->filter()
+                ->unique()
+                ->values()
+                ->all(),
             'period_start' => (string) ($validated['period_start'] ?? $today->copy()->subDays(29)->format('Y-m-d')),
             'period_end' => (string) ($validated['period_end'] ?? $today->format('Y-m-d')),
             'date_mode' => (string) ($validated['date_mode'] ?? 'order'),
