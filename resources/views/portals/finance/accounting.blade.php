@@ -7,13 +7,19 @@
 @section('finance_content')
 <div class="box"><div class="box-header with-border"><h3 class="box-title">月度人民币汇率</h3></div><div class="box-body">
 <p class="finance-accounting-help">填写 1 单位原币折合的人民币金额，用于当月报表。已结账月份不可修改。</p>
-<form method="post" action="{{ route('finance.accounting.save', 'rate') }}" class="finance-filter">@csrf
+@php
+    $rateCurrencies = collect(['USD','HKD','EUR','GBP','AUD','CAD','JPY','SGD','CNY'])
+        ->merge($rateCurrencies)->merge($rates->pluck('currency'))->push(old('currency', 'USD'))->unique()->sort()->values();
+    $rateData = $rates->map(fn($rate) => \Illuminate\Support\Arr::only((array)$rate, ['month','currency','cny_rate','source']))->values();
+@endphp
+<form method="post" action="{{ route('finance.accounting.save', 'rate') }}" class="finance-filter" id="finance-monthly-rate">@csrf
     <div class="form-group"><label>会计月份</label><input type="month" name="month" class="form-control" value="{{ old('month', now('Asia/Shanghai')->format('Y-m')) }}" required></div>
-    <div class="form-group"><label>原币种</label><input name="currency" class="form-control" maxlength="3" pattern="[A-Z]{3}" value="{{ old('currency', 'USD') }}" required></div>
-    <div class="form-group"><label>人民币汇率</label><input name="cny_rate" class="form-control" inputmode="decimal" value="{{ old('cny_rate') }}" required></div>
+    <div class="form-group"><label for="monthly-rate-currency">原币币种</label><select id="monthly-rate-currency" name="currency" class="form-control" required>@foreach($rateCurrencies as $currency)<option value="{{ $currency }}" @selected(old('currency', 'USD') === $currency)>{{ $currency }}</option>@endforeach</select></div>
+    <div class="form-group"><label for="monthly-rate-value">1 <span id="monthly-rate-unit">{{ old('currency', 'USD') }}</span> 折合人民币（CNY）</label><input id="monthly-rate-value" name="cny_rate" class="form-control" type="number" step="0.00000001" min="0.00000001" value="{{ old('cny_rate') }}" required></div>
     <div class="form-group"><label>来源说明（选填）</label><input name="source" class="form-control" maxlength="255" value="{{ old('source') }}" placeholder="如：财务确认汇率"></div>
-    <div class="form-group"><button class="btn btn-primary">保存汇率</button></div>
+    <div class="form-group"><button class="btn btn-primary" id="monthly-rate-save">保存汇率</button></div>
 </form>
+<p class="finance-accounting-help" id="monthly-rate-status" aria-live="polite"></p>
 <div class="finance-accounting-table">
 <table class="table finance-table"><thead><tr><th>月份</th><th>币种</th><th>人民币汇率</th><th>来源</th><th>更新人 / 更新时间</th></tr></thead><tbody>@forelse($rates as $rate)<tr><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($rate->month)) }}</td><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($rate->currency)) }}</td><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($rate->cny_rate)) }}</td><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($rate->source)) }}</td><td>{{ $rate->updated_by }} / {{ $rate->updated_at }}</td></tr>@empty<tr><td colspan="5">尚未配置月度汇率</td></tr>@endforelse</tbody></table>
 </div></div></div>
@@ -49,6 +55,28 @@
 </div></details>
 @endsection
 @push('scripts')<script>
+(function(){
+    var form=document.getElementById('finance-monthly-rate');
+    var rates=@json($rateData);
+    var locks=@json($locks->pluck('month')->values());
+    function fillRate(preserve){
+        var currency=form.elements.currency.value,month=form.elements.month.value;
+        var rate=rates.find(function(item){return item.month===month&&item.currency===currency;});
+        var locked=locks.indexOf(month)!==-1;
+        document.getElementById('monthly-rate-unit').textContent=currency;
+        if(!preserve){form.elements.cny_rate.value=rate?rate.cny_rate:(currency==='CNY'?'1':'');form.elements.source.value=rate?(rate.source||''):'';}
+        if(currency==='CNY')form.elements.cny_rate.value='1';
+        form.elements.cny_rate.readOnly=currency==='CNY'||locked;
+        form.elements.source.readOnly=locked;
+        var button=document.getElementById('monthly-rate-save');
+        button.textContent=locked?'该月已结账':(rate?'更新汇率':'保存汇率');
+        button.disabled=locked;
+        document.getElementById('monthly-rate-status').textContent=locked?'该月份已结账，不能修改汇率。':(rate?'已加载该月份和币种的汇率，修改后点击“更新汇率”。':'该月份和币种尚未配置汇率。');
+    }
+    form.elements.month.addEventListener('change',function(){fillRate(false);});
+    form.elements.currency.addEventListener('change',function(){fillRate(false);});
+    fillRate(@json(session()->hasOldInput('cny_rate')));
+})();
 document.getElementById('finance-close-period').addEventListener('submit',function(event){
     if(event.submitter&&event.submitter.hasAttribute('data-lock-period')&&!confirm('确认结账并锁定 '+this.elements.month.value+'？结账后不能修改汇率、分类或补录交易。'))event.preventDefault();
 });

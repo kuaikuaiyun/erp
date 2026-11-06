@@ -154,6 +154,24 @@ class FinanceWorkbookService
             }
             $date = $value('date');
             $time = $value('time');
+            $rowTimezone = $timezone;
+            $point = trim((string) ($payload['时间点'] ?? $payload['（-8）时间点'] ?? ''));
+            if ($point !== '') {
+                $zone = trim((string) ($payload['导出时区'] ?? ''));
+                if ($zone === '' && filled($payload['（-8）时间点'] ?? null)) {
+                    $zone = '-08:00';
+                }
+                if (preg_match('/^([+-]?)(\d{1,2})$/D', $zone, $parts)) {
+                    $zone = ($parts[1] === '-' ? '-' : '+').str_pad($parts[2], 2, '0', STR_PAD_LEFT).':00';
+                }
+                $rowTimezone = $zone === '' ? $timezone : $zone;
+                if (! in_array($rowTimezone, self::TIMEZONES, true)) {
+                    throw ValidationException::withMessages(['file' => '第'.$row.'行导出时区无效。']);
+                }
+                $date = $point;
+                $time = '';
+                $payload['_report_timezone'] = $rowTimezone;
+            }
             if (is_numeric($date)) {
                 $date = Date::excelToDateTimeObject((float) $date)->format('Y-m-d H:i:s');
                 if ($time !== '') {
@@ -171,7 +189,7 @@ class FinanceWorkbookService
                     throw new \InvalidArgumentException;
                 }
                 $input = trim($date.' '.$time);
-                $occurred = CarbonImmutable::parse($input, $timezone)->utc();
+                $occurred = CarbonImmutable::parse($input, $rowTimezone)->utc();
                 $errors = CarbonImmutable::getLastErrors();
                 if ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0)) {
                     throw new \InvalidArgumentException;
@@ -192,7 +210,7 @@ class FinanceWorkbookService
             }
             $records[] = [
                 'dataset' => $dataset, 'account' => $account, 'reference' => $reference,
-                'occurred_at' => $occurred->format('Y-m-d H:i:s'), 'source_timezone' => $timezone,
+                'occurred_at' => $occurred->format('Y-m-d H:i:s'), 'source_timezone' => $rowTimezone,
                 'domain' => $domain ?: null, 'raw_type' => $rawType ?: null,
                 'currency' => $currency, 'status' => $status ?: null,
                 // Distinguish currency conversion, refund and failed-attempt rows sharing a reference.
@@ -261,6 +279,9 @@ class FinanceWorkbookService
 
     public function download(array $headers, iterable $rows, string $filename, string $format = 'xlsx'): StreamedResponse
     {
+        if ($format === 'xlsx') {
+            return $this->downloadStreamingXlsx($headers, $rows, $filename);
+        }
         return response()->streamDownload(function () use ($headers, $rows, $format): void {
             // Spreadsheet cells and ZIP compression coexist during export.
             // Keep the higher budget local to this download, not the whole PHP service.
@@ -334,10 +355,46 @@ class FinanceWorkbookService
                 unset($writer, $sheet, $book);
                 gc_collect_cycles();
                 if ($raisedLimit) {
-                    ini_set('memory_limit', $previousLimit);
+                    // PHP may retain freed pages; lowering below current usage emits an export-breaking warning.
+                    if ($bytes >= memory_get_usage(true)) ini_set('memory_limit', $previousLimit);
                 }
             }
         }, $filename, ['Content-Type' => $format === 'xls' ? 'application/vnd.ms-excel' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
+    }
+
+    private function downloadStreamingXlsx(array $headers, iterable $rows, string $filename): StreamedResponse
+    {
+        $headers = array_map(FinanceCatalog::simplified(...), $headers);
+        $numeric = [];
+        $columns = [];
+        foreach ($headers as $index => $header) {
+            $numeric[$index] = ! preg_match('/ID|编号|号码|账号|单号|影响|名称|类型|状态|日期|时间|时区|地址/iu', $header)
+                && preg_match('/金额|总额|净额|费用|手续费|余额|汇率|数量|条数|订单数|人民币|结算|应收|退款|冻结|解冻|保证金|成本|货款|运费|税额|保险|拒付|物流|采购|损耗/u', $header);
+            $width = match (true) {
+                (bool) preg_match('/地址|标题|物品|商品|备注/u', $header) => 44,
+                (bool) preg_match('/ID|编号|号码|单号/iu', $header) => 30,
+                (bool) preg_match('/类型|姓名|名称/u', $header) => 28,
+                (bool) preg_match('/日期|时间|时区/u', $header) => 15,
+                (bool) preg_match('/货币|币种|数量|条数|状态/u', $header) => 12,
+                default => 22,
+            };
+            $columns[] = ['label' => $header, 'width' => $width];
+        }
+        return app(\App\Portals\Logistics\StreamedXlsxWriter::class)->response($filename, 'Sheet1', $columns,
+            function () use ($headers, $numeric, $rows): iterable {
+                foreach ($rows as $row) {
+                    $cells = [];
+                    foreach (array_values($row) as $column => $raw) {
+                        $value = FinanceCatalog::simplified((string) ($raw ?? ''));
+                        $number = str_replace(',', '', $value);
+                        $isNumeric = ($numeric[$column] ?? false) && preg_match('/^-?\d+(?:\.\d+)?$/D', $number)
+                            && strlen(ltrim(str_replace(['-', '.'], '', $number), '0')) <= 15;
+                        $cells[] = ['value' => $isNumeric ? (float) $number : $value,
+                            'type' => $isNumeric ? (preg_match('/数量|条数/u', $headers[$column]) ? 'quantity' : 'decimal') : 'text', 'wrap' => true];
+                    }
+                    yield ['height' => 36, 'cells' => $cells];
+                }
+            });
     }
 
     public function downloadDelimited(array $headers, iterable $rows, string $filename, string $delimiter = ','): StreamedResponse

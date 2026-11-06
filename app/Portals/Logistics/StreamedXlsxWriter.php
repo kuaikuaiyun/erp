@@ -124,7 +124,7 @@ class StreamedXlsxWriter
                     (bool) ($cell['wrap'] ?? false),
                 );
                 $value = $cell['value'] ?? null;
-                if (in_array($type, ['money', 'rate', 'number'], true) && $value !== null && $value !== '' && is_numeric($value)) {
+                if (in_array($type, ['money', 'rate', 'number', 'decimal', 'quantity'], true) && $value !== null && $value !== '' && is_numeric($value)) {
                     $rowXml .= '<c r="'.$reference.'" s="'.$style.'" t="n"><v>'.(string) ((float) $value).'</v></c>';
                 } else {
                     $rowXml .= $this->stringCell($reference, $this->displayValue($value), $style);
@@ -175,6 +175,12 @@ class StreamedXlsxWriter
 
     private function styleIndex(string $kind, string $type, string $align, bool $wrap): int
     {
+        if ($type === 'decimal') {
+            return 16;
+        }
+        if ($type === 'quantity') {
+            return 17;
+        }
         if ($kind === 'parent') {
             return match (true) {
                 $type === 'money' || $type === 'number' => 8,
@@ -306,7 +312,7 @@ class StreamedXlsxWriter
 
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             .'<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-            .'<numFmts count="2"><numFmt numFmtId="164" formatCode="&quot;$&quot;#,##0.00;[Red]-&quot;$&quot;#,##0.00"/><numFmt numFmtId="165" formatCode="0.00&quot;%&quot;"/></numFmts>'
+            .'<numFmts count="4"><numFmt numFmtId="164" formatCode="&quot;$&quot;#,##0.00;[Red]-&quot;$&quot;#,##0.00"/><numFmt numFmtId="165" formatCode="0.00&quot;%&quot;"/><numFmt numFmtId="166" formatCode="#,##0.00########"/><numFmt numFmtId="167" formatCode="#,##0.########"/></numFmts>'
             .'<fonts count="4">'
             .'<font><sz val="11"/><name val="Calibri"/><family val="2"/></font>'
             .'<font><b/><color rgb="FF2D4F73"/><sz val="11"/><name val="Calibri"/></font>'
@@ -320,7 +326,7 @@ class StreamedXlsxWriter
             .'<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>'
             .'<border><left/><right/><top style="thin"><color rgb="FFBDD8F1"/></top><bottom/><diagonal/></border></borders>'
             .'<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-            .'<cellXfs count="16">'
+            .'<cellXfs count="18">'
             .$this->xf(0, 0, 0, 0, $alignLeft).$this->xf(0, 1, 2, 0, $alignCenter)
             .$this->xf(164, 0, 0, 0, $alignRight).$this->xf(165, 0, 0, 0, $alignRight)
             .$this->xf(0, 0, 0, 0, $alignWrap).$this->xf(0, 0, 0, 0, $alignCenter)
@@ -328,6 +334,7 @@ class StreamedXlsxWriter
             .$this->xf(164, 2, 3, 1, $alignRight).$this->xf(165, 2, 3, 1, $alignRight).$this->xf(0, 2, 3, 1, $alignWrap)
             .$this->xf(0, 3, 4, 0, $alignLeft).$this->xf(0, 3, 4, 0, $alignCenter)
             .$this->xf(164, 3, 4, 0, $alignRight).$this->xf(165, 3, 4, 0, $alignRight).$this->xf(0, 3, 4, 0, $alignWrap)
+            .$this->xf(166, 0, 0, 0, $alignRight).$this->xf(167, 0, 0, 0, $alignRight)
             .'</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
             .'</styleSheet>';
     }

@@ -752,7 +752,7 @@ class FinanceController extends Controller
             'source_timezone' => ['required', Rule::in(FinanceWorkbookService::TIMEZONES)],
         ]);
         $sheetName = str_ends_with($dataset, '-details') ? trans('finance.sheets.'.$dataset) : null;
-        $rows = $this->workbooks->read($data['file'], $definition['headers'], $sheetName);
+        $rows = $this->workbooks->read($data['file'], $definition['headers'], $sheetName, FinanceCatalog::optionalImportHeaders($dataset));
         $count = $this->workbooks->importRecords($dataset, $rows, trim($data['account']), $data['source_timezone'], (int) $context['user']->getKey());
 
         return redirect('/finance/records/'.$dataset)->with('success', __('finance.imported', ['count' => $count]));
@@ -1034,6 +1034,7 @@ class FinanceController extends Controller
 
         return response()->view('portals.finance.accounting', [
             ...$context, 'rates' => $db->table('finance_monthly_exchange_rates')->orderByDesc('month')->orderBy('currency')->get(),
+            'rateCurrencies' => FinanceRecord::query()->whereNotNull('currency')->distinct()->pluck('currency'),
             'rules' => $db->table('finance_transaction_type_mappings')->orderBy('priority')->orderBy('id')->get(),
             'locks' => $db->table('finance_period_locks')->whereNotNull('report_snapshot')->orderByDesc('month')->get(),
         ]);
@@ -1324,7 +1325,7 @@ class FinanceController extends Controller
                 'account' => 'required|string|max:191', 'timezone' => ['required', Rule::in(FinanceWorkbookService::TIMEZONES)]]);
             abort_unless(FinancePaymentAccount::query()->where('account_type', 'credit_card')->where('activity_account', $data['account'])->exists(), 422);
             $definition = FinanceCatalog::dataset($data['source']);
-            $rows = $this->workbooks->read($request->file('file'), $definition['headers']);
+            $rows = $this->workbooks->read($request->file('file'), $definition['headers'], null, FinanceCatalog::optionalImportHeaders($data['source']));
             try {
                 $count = $this->workbooks->database()->transaction(function () use ($rows, $data, $context): int {
                     $count = $this->workbooks->importRecords($data['source'], $rows, $data['account'], $data['timezone'], (int) $context['user']->getKey());
@@ -1346,9 +1347,29 @@ class FinanceController extends Controller
         $legacyFields = [...$service::TEXT, ...$service->moneyFields($channel)];
         $fields = $service->importFields($channel);
         $sourceHeaders = $channel === 'credit_card' ? ['交易单号', '交易时间', '处理时间', '商户名称', 'Source（域名）', '交易币种', '交易金额', '支付状态', '发行国', '拒绝原因', '邮箱', '年月', '（-8）时间点', '订阅类型', '结算-美元'] : [];
-        $importHeaders = array_values(array_unique(['记录ID', '支付账户', ...array_values($fields), ...array_values($legacyFields), ...$sourceHeaders]));
+        $importHeaders = array_values(array_unique(['记录ID', '支付账户', ...array_values($fields), ...array_values($legacyFields), ...$sourceHeaders,
+            ...($channel === 'credit_card' ? FinanceCatalog::dataset('xuzong2-details')['headers'] : [])]));
         $rows = $this->workbooks->read($request->file('file'), $importHeaders, $channel === 'paypal' ? '贝宝导入模版' : '徐总支付导入模版', $importHeaders);
         $scope = $request->validate(['account' => 'nullable|string|max:191', 'import_month' => 'nullable|date_format:Y-m']);
+        if ($channel === 'credit_card' && collect($rows)->contains(fn ($row) => filled($row['创建时间'] ?? null))) {
+            $account = FinancePaymentAccount::query()->where('account_type', 'credit_card')
+                ->where('activity_account', $scope['account'] ?? '')->first();
+            if (! $account) {
+                throw ValidationException::withMessages(['account' => '请选择信用卡支付账户。']);
+            }
+            $count = $this->workbooks->database()->transaction(function () use ($rows, $account, $context): int {
+                $count = $this->workbooks->importRecords('xuzong2-details', $rows, $account->activity_account, 'Asia/Shanghai', (int) $context['user']->getKey());
+                $records = FinanceRecord::query()->where('dataset', 'xuzong2-details')->where('account', $account->activity_account)
+                    ->whereIn('reference', array_column($rows, '平台订单号'))->get();
+                foreach ($records as $record) {
+                    app(\App\Portals\Finance\FinanceAccountingService::class)->guardUnlocked($record->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'));
+                }
+
+                return $count;
+            });
+
+            return redirect()->route('finance.report', $report)->with('success', '已处理 '.$count.' 条信用卡明细。');
+        }
         foreach ($rows as &$row) {
             if ($channel === 'credit_card' && $row['平台订单号'] === '') {
                 $row['平台订单号'] = $row['交易单号'] ?? '';

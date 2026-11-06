@@ -98,6 +98,19 @@ class FinanceCatalog
         return in_array($key, ['paypal-details', 'xuzong2-details', 'xuzong1-details'], true);
     }
 
+    public static function optionalImportHeaders(string $key): array
+    {
+        $headers = self::dataset($key)['headers'];
+        $sourceCount = match ($key) {
+            'paypal-details' => 15,
+            'xuzong2-details' => 16,
+            'xuzong1-details' => 12,
+            default => count($headers),
+        };
+
+        return array_slice($headers, $sourceCount);
+    }
+
     public const PAYPAL_ORDER_FILTERS = [
         'id' => '编号',
         'shopify_order_number' => 'Shopify订单号', 'shopify_order_id' => '订单ID', 'tongtu_order_number' => '通途订单号',

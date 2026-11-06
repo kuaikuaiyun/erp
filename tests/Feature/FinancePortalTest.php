@@ -284,6 +284,33 @@ class FinancePortalTest extends TestCase
         }
     }
 
+    public function test_shared_finance_xlsx_export_writes_all_rows_from_a_large_generator(): void
+    {
+        $rows = (function () {
+            for ($index = 1; $index <= 15000; $index++) {
+                yield ['0000'.$index, '123.45', '0.12345678', '=SUM(1,2)'];
+            }
+        })();
+        $response = $this->workbooks->download(['交易ID', '金额', '汇率', '备注'], $rows, 'bulk.xlsx');
+        ob_start();
+        $response->sendContent();
+        $path = tempnam(sys_get_temp_dir(), 'finance-stream-');
+        $this->temporaryFiles[] = $path;
+        file_put_contents($path, ob_get_clean());
+        $zip = new \ZipArchive();
+        $this->assertTrue($zip->open($path));
+        $xml = $zip->getFromName('xl/worksheets/sheet1.xml');
+        $styles = $zip->getFromName('xl/styles.xml');
+        $zip->close();
+        $this->assertSame(15001, substr_count($xml, '<row '));
+        $this->assertStringContainsString('000015000', $xml);
+        $this->assertStringContainsString('<v>123.45</v>', $xml);
+        $this->assertStringContainsString('<v>0.12345678</v>', $xml);
+        $this->assertStringContainsString('=SUM(1,2)', $xml);
+        $this->assertStringNotContainsString('<f>', $xml);
+        $this->assertStringContainsString('formatCode="#,##0.00########"', $styles);
+    }
+
     public function test_reversed_search_dates_show_empty_results_without_validation_banner(): void
     {
         $this->get('/finance/records/xuzong2-orders?from=2026-11-04&to=2026-11-01')
@@ -610,7 +637,7 @@ class FinancePortalTest extends TestCase
         $actual = array_values($service->columns('paypal'));
         $this->assertSame(['记录ID', '支付账户', ...$expected], $actual);
         $template = $this->readDownload($this->get('/finance/reports/paypal-settlement?template=1')->assertOk()->streamedContent());
-        $this->assertSame(array_values($service->importFields('paypal')), $template->rangeToArray('A1:M1')[0]);
+        $this->assertSame(array_values($service->importFields('paypal')), $template->rangeToArray('A1:O1')[0]);
         $sheet = $this->readDownload($this->get('/finance/reports/paypal-settlement?download=1')->assertOk()->streamedContent());
         $this->assertSame($actual, $sheet->rangeToArray('A1:AP1')[0]);
         $refundColumn = array_search('退款金额', $actual, true) + 1;
@@ -641,7 +668,7 @@ class FinancePortalTest extends TestCase
         $paypal->fromArray([array_values($paypalRow)], null, 'A2');
         $card = $book->createSheet()->setTitle('徐总支付导入模版');
         $cardHeaders = array_values($service->importFields('credit_card'));
-        $this->assertCount(13, $paypalHeaders); $this->assertCount(18, $cardHeaders);
+        $this->assertCount(15, $paypalHeaders); $this->assertCount(18, $cardHeaders);
         $card->fromArray($cardHeaders, null, 'A1');
         $cardRow = array_fill_keys($cardHeaders, '');
         $cardRow['商户订单号'] = 'MERCHANT-1'; $cardRow['平台订单号'] = 'PLATFORM-1'; $cardRow['结算金额'] = '9.5'; $cardRow['交易手续费'] = '0.5';
@@ -683,6 +710,52 @@ class FinancePortalTest extends TestCase
             $this->assertSame($fee, $rows->firstWhere('id', $record->id)['fee']);
         }
         $this->assertDatabaseCount('finance_records', 2);
+    }
+
+    public function test_credit_settlement_accepts_raw_template_and_keeps_failed_rows_and_export_timezone(): void
+    {
+        $account = $this->financePayPalAccount('模板账户', ['account_type' => 'credit_card']);
+        $headers = array_slice(\App\Portals\Finance\FinanceCatalog::dataset('xuzong2-details')['headers'], 0, 16);
+        $headers = [...$headers, '时间点', '导出时区', '结算金额'];
+        $book = new Spreadsheet;
+        $book->getActiveSheet()->fromArray($headers, null, 'A1');
+        foreach (['SUCCESS', 'FAILED'] as $index => $status) {
+            $row = array_fill_keys($headers, '');
+            $row = [...$row, '平台订单号' => 'TEMPLATE-'.$index, '商户订单号' => 'ORDER-'.$index,
+                '交易币种' => 'HKD', '交易金额' => '80', '支付状态' => $status,
+                '创建时间' => '2026-11-01 08:30:00', '时间点' => '2026-10-31 16:30:00', '导出时区' => '-8',
+                '结算金额' => $index === 0 ? '10' : ''];
+            $book->getActiveSheet()->fromArray([array_values($row)], null, 'A'.($index + 2));
+        }
+        foreach ([1, 2] as $pass) {
+            $this->post('/finance/reports/credit-settlement/import', ['file' => $this->upload($book),
+                'account' => $account->activity_account])->assertRedirect()->assertSessionHasNoErrors();
+        }
+        $this->assertDatabaseCount('finance_records', 2);
+        $rows = app(\App\Portals\Finance\FinanceSettlementService::class)->rows('credit_card', [])->keyBy('reference');
+        $success = $rows['TEMPLATE-0'];
+        $this->assertSame('2026-10', $success['month']);
+        $this->assertSame('-08:00', $success['timezone']);
+        $this->assertEquals(80, $success['source_settlement_usd']);
+        $this->assertEquals(10, $success['settlement']);
+        $this->assertStringContainsString('HKD', $success['currency_warning']);
+        $this->assertNull($rows['TEMPLATE-1']['source_settlement_usd']);
+        $this->assertNull($rows['TEMPLATE-1']['settlement']);
+    }
+
+    public function test_paypal_settlement_import_reads_conversion_and_rate_columns(): void
+    {
+        $this->workbooks->importRecords('paypal-orders', [2 => [...$this->recordRow(), '貨幣' => 'HKD',
+            '總額' => '80', '費用' => '-8', '淨額' => '72']], 'A', 'UTC', 1);
+        $record = FinanceRecord::firstOrFail();
+        $book = new Spreadsheet;
+        $book->getActiveSheet()->fromArray([['记录ID', '转换美元', '汇率'], [(string) $record->id, '9', '0.125']], null, 'A1');
+        $this->post('/finance/reports/paypal-settlement/import', ['file' => $this->upload($book)])
+            ->assertRedirect()->assertSessionHasNoErrors();
+        $row = app(\App\Portals\Finance\FinanceSettlementService::class)->rows('paypal', [], FinanceRecord::query()->whereKey($record->id)->get())->first();
+        $this->assertEquals(9, $row['converted_usd']);
+        $this->assertEquals(0.125, $row['usd_rate']);
+        $this->assertEquals(10, $row['settlement']);
     }
 
     public function test_actual_credit_source_file_can_be_imported_twice_without_duplicate_records(): void
@@ -3504,6 +3577,16 @@ class FinancePortalTest extends TestCase
         $this->temporaryFiles[] = $path;
         file_put_contents($path, $content);
 
-        return IOFactory::load($path)->getActiveSheet();
+        $sheet = IOFactory::load($path)->getActiveSheet();
+        // Streaming XLSX uses inline strings; normalize their reader representation
+        // so the same value/type assertions cover both XLS and XLSX exports.
+        foreach ($sheet->getCellCollection()->getCoordinates() as $coordinate) {
+            $cell = $sheet->getCell($coordinate);
+            if ($cell->getDataType() === DataType::TYPE_INLINE) {
+                $cell->setValueExplicit((string) $cell->getValue(), DataType::TYPE_STRING);
+            }
+        }
+
+        return $sheet;
     }
 }
