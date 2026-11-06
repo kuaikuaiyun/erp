@@ -23,6 +23,7 @@ use App\Portals\Operation\Http\Controllers\OperationAiProductLibraryController;
 use App\Portals\Operation\Http\Controllers\OperationReportController;
 use App\Portals\Operation\Http\Controllers\DailySubmissionController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingRechargeReviewController;
+use App\Portals\Assistant\Http\Controllers\AccountOpeningReviewController;
 use App\Portals\Assistant\Http\Controllers\AppLovinSpendReviewController;
 use App\Portals\Operation\Http\Controllers\AppLovinSpendController;
 use App\Portals\Assistant\Http\Controllers\OperationReportReviewController;
@@ -77,6 +78,7 @@ Route::prefix('finance')->name('finance.')->middleware(\App\Http\Middleware\Redi
     Route::get('/settings/{kind}/export', 'exportSettings')->name('settings.export');
     Route::get('/reports/{report}', 'report')->name('report');
     Route::post('/reports/{report}/save', 'saveSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement'])->name('settlement.save');
+    Route::delete('/reports/{report}/records', 'deleteSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement'])->name('settlement.delete');
     Route::post('/reports/{report}/import', 'importSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement'])->name('settlement.import');
 });
 
@@ -146,10 +148,16 @@ Route::get('/operation/daily-submissions/{type}', [DailySubmissionController::cl
     ->name('operation.daily-submissions.index');
 Route::post('/operation/daily-submissions/advertising-recharge', [DailySubmissionController::class, 'storeAdvertisingRecharge'])
     ->name('operation.daily-submissions.advertising-recharge.store');
+Route::post('/operation/daily-submissions/account-opening', [DailySubmissionController::class, 'storeAccountOpening'])
+    ->name('operation.daily-submissions.account-opening.store');
 Route::get('/assistant/daily-submissions/advertising-recharges', [AdvertisingRechargeReviewController::class, 'index'])
     ->name('assistant.daily-submissions.advertising-recharges.index');
 Route::patch('/assistant/daily-submissions/advertising-recharges/{submission}/process', [AdvertisingRechargeReviewController::class, 'process'])
     ->whereNumber('submission')->name('assistant.daily-submissions.advertising-recharges.process');
+Route::get('/assistant/daily-submissions/account-openings', [AccountOpeningReviewController::class, 'index'])
+    ->name('assistant.daily-submissions.account-openings.index');
+Route::patch('/assistant/daily-submissions/account-openings/{submission}/process', [AccountOpeningReviewController::class, 'process'])
+    ->whereNumber('submission')->name('assistant.daily-submissions.account-openings.process');
 Route::get('/operation/daily-submissions/applovin-spends', [AppLovinSpendController::class, 'index'])
     ->name('operation.applovin-spends.index');
 Route::post('/operation/daily-submissions/applovin-spends/screenshot', [AppLovinSpendController::class, 'uploadScreenshot'])

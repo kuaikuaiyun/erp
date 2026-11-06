@@ -138,7 +138,7 @@ class FinanceWorkbookService
         }
     }
 
-    public function importRecords(string $dataset, array $rows, string $account, string $timezone, int $actor): int
+    public function importRecords(string $dataset, array $rows, string $account, string $timezone, int $actor, bool $createOnly = false): int
     {
         if (! in_array($timezone, self::TIMEZONES, true)) {
             throw ValidationException::withMessages(['source_timezone' => __('finance.errors.timezone')]);
@@ -219,15 +219,19 @@ class FinanceWorkbookService
             ];
         }
 
-        return $this->database()->transaction(function () use ($records): int {
+        return $this->database()->transaction(function () use ($records, $createOnly): int {
+            $created = 0;
             foreach ($records as $record) {
-                FinanceRecord::query()->updateOrCreate(['fingerprint' => $record['fingerprint']], $record);
+                $model = $createOnly
+                    ? FinanceRecord::query()->firstOrCreate(['fingerprint' => $record['fingerprint']], $record)
+                    : FinanceRecord::query()->updateOrCreate(['fingerprint' => $record['fingerprint']], $record);
+                $created += (int) $model->wasRecentlyCreated;
                 if ($record['raw_type']) {
                     $this->registerType($record['raw_type']);
                 }
             }
 
-            return count($records);
+            return $createOnly ? $created : count($records);
         });
     }
 

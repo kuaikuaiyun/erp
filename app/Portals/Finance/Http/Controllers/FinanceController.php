@@ -1225,7 +1225,8 @@ class FinanceController extends Controller
         }
         $columns = $service->columns($channel);
         if ($request->boolean('template')) {
-            $templateHeaders = array_values($service->importFields($channel));
+            $templateHeaders = array_values($channel === 'paypal'
+                ? $service->columns($channel) : ['account' => '支付账户', ...array_combine(FinanceCatalog::dataset('xuzong2-details')['headers'], FinanceCatalog::dataset('xuzong2-details')['headers']), 'usd_rate' => '汇率']);
             return $this->workbooks->download($templateHeaders, [], $report.'-template.xlsx');
         }
         $paginator = null;
@@ -1266,7 +1267,8 @@ class FinanceController extends Controller
         $paginator ??= new \Illuminate\Pagination\LengthAwarePaginator($rows->forPage($page, $perPage)->values(), $rows->count(), $perPage, $page, ['path' => $request->url(), 'query' => $request->query()]);
 
         return response()->view('portals.finance.settlement', [...$context, 'report' => $report, 'channel' => $channel, 'filters' => $filters,
-            'rows' => $paginator, 'columns' => $columns, 'moneyFields' => $service->moneyFields($channel), 'textFields' => $service::TEXT,
+            'rows' => $paginator, 'columns' => $columns, 'moneyFields' => $service->moneyFields($channel), 'textFields' => $service->textFields($channel),
+            'readonlyFields' => array_diff_key($columns, $service->textFields($channel), $service->moneyFields($channel)),
             'conditionFields' => $service::CONDITION_FIELDS,
             'subscriptionOptions' => $service->subscriptionOptions($rows),
             'accounts' => FinancePaymentAccount::query()->where('account_type', $channel)->orderBy('id')->get(),
@@ -1282,7 +1284,7 @@ class FinanceController extends Controller
         if ($channel === 'credit_card') {
             $rules['settlement'] = ['nullable', 'numeric', 'regex:/^\d{1,18}(?:\.\d{1,8})?$/', 'gte:0'];
         }
-        foreach ($service::TEXT as $field => $label) {
+        foreach ($service->textFields($channel) as $field => $label) {
             $rules[$field] = 'nullable|string|max:'.($field === 'note' ? 2000 : 191);
         }
 
@@ -1310,6 +1312,32 @@ class FinanceController extends Controller
         return redirect()->route('finance.report', ['report' => $report, ...$returnFilters])->with('success', '结算明细已保存。');
     }
 
+    public function deleteSettlement(Request $request, string $report): Response
+    {
+        $context = $this->context($request, true);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        $data = $request->validate(['ids' => 'required|array|min:1|max:100', 'ids.*' => 'required|integer|min:1|distinct']);
+        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $channel = $report === 'paypal-settlement' ? 'paypal' : 'credit_card';
+        try {
+            $this->workbooks->database()->transaction(function () use ($data, $service, $channel, $context): void {
+                $records = $service->query($channel, [])->whereIn('id', $data['ids'])->lockForUpdate()->get();
+                if ($records->count() !== count($data['ids'])) {
+                    throw ValidationException::withMessages(['ids' => '部分记录不存在、已删除或不属于当前结算明细，请刷新后重试。']);
+                }
+                foreach ($records as $record) {
+                    $service->save($record, ['_deleted_at' => now()->toIso8601String(), '_deleted_by' => (int) $context['user']->getKey()], (int) $context['user']->getKey());
+                }
+            });
+        } catch (\App\Portals\Finance\FinanceRelayException $e) {
+            throw ValidationException::withMessages(['ids' => $e->getMessage()]);
+        }
+
+        return redirect()->route('finance.report', $report)->with('success', '已删除 '.count($data['ids']).' 条结算明细，原始订单已保留。');
+    }
+
     public function importSettlement(Request $request, string $report): Response
     {
         $context = $this->context($request, true);
@@ -1319,6 +1347,9 @@ class FinanceController extends Controller
         $request->validate(['file' => 'required|file|mimes:xlsx,csv,txt|max:10240']);
         $channel = $report === 'paypal-settlement' ? 'paypal' : 'credit_card';
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        if ($channel === 'paypal') {
+            return $this->importNewPayPalSettlements($request, $service, (int) $context['user']->getKey());
+        }
         if ($request->input('import_kind') === 'source') {
             abort_unless($channel === 'credit_card', 422);
             $data = $request->validate(['source' => ['required', Rule::in(['xuzong2-details', 'xuzong1-details'])],
@@ -1328,12 +1359,15 @@ class FinanceController extends Controller
             $rows = $this->workbooks->read($request->file('file'), $definition['headers'], null, FinanceCatalog::optionalImportHeaders($data['source']));
             try {
                 $count = $this->workbooks->database()->transaction(function () use ($rows, $data, $context): int {
-                    $count = $this->workbooks->importRecords($data['source'], $rows, $data['account'], $data['timezone'], (int) $context['user']->getKey());
-                    $months = FinanceRecord::query()->where('dataset', $data['source'])->where('account', $data['account'])
-                        ->whereIn('reference', array_column($rows, FinanceCatalog::dataset($data['source'])['headers'][FinanceCatalog::dataset($data['source'])['reference']]))
-                        ->get()->map(fn ($record) => $record->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'))->unique();
-                    foreach ($months as $month) {
-                        app(\App\Portals\Finance\FinanceAccountingService::class)->guardUnlocked($month);
+                    FinancePaymentAccount::query()->where('activity_account', $data['account'])->where('account_type', 'credit_card')->lockForUpdate()->firstOrFail();
+                    $count = 0;
+                    foreach ($rows as $index => $row) {
+                        $added = $this->workbooks->importRecords($data['source'], [$index => $row], $data['account'], $data['timezone'], (int) $context['user']->getKey(), true);
+                        if ($added) {
+                            $record = FinanceRecord::query()->where('dataset', $data['source'])->where('account', $data['account'])->orderByDesc('id')->firstOrFail();
+                            app(\App\Portals\Finance\FinanceAccountingService::class)->guardUnlocked($record->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'));
+                            $count++;
+                        }
                     }
 
                     return $count;
@@ -1342,33 +1376,63 @@ class FinanceController extends Controller
                 throw ValidationException::withMessages(['file' => $e->getMessage()]);
             }
 
-            return redirect()->route('finance.report', $report)->with('success', '已处理 '.$count.' 条信用卡明细。');
+            return redirect()->route('finance.report', $report)->with('success', '已新增 '.$count.' 条信用卡明细，跳过重复 '.(count($rows) - $count).' 条。');
         }
-        $legacyFields = [...$service::TEXT, ...$service->moneyFields($channel)];
+        $legacyFields = [...$service->textFields($channel), ...$service->moneyFields($channel)];
         $fields = $service->importFields($channel);
         $sourceHeaders = $channel === 'credit_card' ? ['交易单号', '交易时间', '处理时间', '商户名称', 'Source（域名）', '交易币种', '交易金额', '支付状态', '发行国', '拒绝原因', '邮箱', '年月', '（-8）时间点', '订阅类型', '结算-美元'] : [];
         $importHeaders = array_values(array_unique(['记录ID', '支付账户', ...array_values($fields), ...array_values($legacyFields), ...$sourceHeaders,
-            ...($channel === 'credit_card' ? FinanceCatalog::dataset('xuzong2-details')['headers'] : [])]));
+            ...($channel === 'credit_card' ? [...FinanceCatalog::dataset('xuzong2-details')['headers'], ...array_values($service->columns($channel))] : [])]));
         $rows = $this->workbooks->read($request->file('file'), $importHeaders, $channel === 'paypal' ? '贝宝导入模版' : '徐总支付导入模版', $importHeaders);
         $scope = $request->validate(['account' => 'nullable|string|max:191', 'import_month' => 'nullable|date_format:Y-m']);
+        foreach ($rows as &$row) {
+            foreach (['平台订单号' => '交易单号', '创建时间' => '交易时间', '交易币种' => '原币币种', '交易金额' => '原币总额', '导出时区' => '时区', '结算金额' => '结算金额（美元）',
+                '域名' => 'Source（域名）', '完成时间' => '处理时间', '发卡国家' => '发行国', '消费者邮箱' => '邮箱'] as $target => $source) {
+                if (($row[$target] ?? '') === '' && filled($row[$source] ?? null)) {
+                    $row[$target] = $row[$source];
+                }
+            }
+            foreach ($fields as $field => $label) {
+                $alias = $service->columns($channel)[$field] ?? null;
+                if (($row[$label] ?? '') === '' && $alias && filled($row[$alias] ?? null)) {
+                    $row[$label] = $row[$alias];
+                }
+            }
+        }
+        unset($row);
         if ($channel === 'credit_card' && collect($rows)->contains(fn ($row) => filled($row['创建时间'] ?? null))) {
             $account = FinancePaymentAccount::query()->where('account_type', 'credit_card')
                 ->where('activity_account', $scope['account'] ?? '')->first();
             if (! $account) {
                 throw ValidationException::withMessages(['account' => '请选择信用卡支付账户。']);
             }
-            $count = $this->workbooks->database()->transaction(function () use ($rows, $account, $context): int {
-                $count = $this->workbooks->importRecords('xuzong2-details', $rows, $account->activity_account, 'Asia/Shanghai', (int) $context['user']->getKey());
-                $records = FinanceRecord::query()->where('dataset', 'xuzong2-details')->where('account', $account->activity_account)
-                    ->whereIn('reference', array_column($rows, '平台订单号'))->get();
-                foreach ($records as $record) {
-                    app(\App\Portals\Finance\FinanceAccountingService::class)->guardUnlocked($record->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'));
-                }
+            try {
+                $count = $this->workbooks->database()->transaction(function () use ($rows, $account, $context, $service, $fields): int {
+                    FinancePaymentAccount::query()->whereKey($account->id)->lockForUpdate()->firstOrFail();
+                    $count = 0;
+                    foreach ($rows as $index => $row) {
+                        $added = $this->workbooks->importRecords('xuzong2-details', [$index => $row], $account->activity_account, 'Asia/Shanghai', (int) $context['user']->getKey(), true);
+                        if (! $added) {
+                            continue;
+                        }
+                        $record = FinanceRecord::query()->where('dataset', 'xuzong2-details')->where('account', $account->activity_account)->orderByDesc('id')->firstOrFail();
+                        $values = [];
+                        foreach ($fields as $field => $label) {
+                            if (($row[$label] ?? '') !== '') {
+                                $values[$field] = $row[$label];
+                            }
+                        }
+                        $service->save($record, $this->settlementValues($values, 'credit_card'), (int) $context['user']->getKey());
+                        $count++;
+                    }
 
-                return $count;
-            });
+                    return $count;
+                });
+            } catch (\App\Portals\Finance\FinanceRelayException $e) {
+                throw ValidationException::withMessages(['file' => $e->getMessage()]);
+            }
 
-            return redirect()->route('finance.report', $report)->with('success', '已处理 '.$count.' 条信用卡明细。');
+            return redirect()->route('finance.report', $report)->with('success', '已新增 '.$count.' 条信用卡明细，跳过重复 '.(count($rows) - $count).' 条。');
         }
         foreach ($rows as &$row) {
             if ($channel === 'credit_card' && $row['平台订单号'] === '') {
@@ -1385,15 +1449,18 @@ class FinanceController extends Controller
         }
         unset($row);
         $db = $this->workbooks->database();
+        $imported = [];
+        $duplicates = 0;
         try {
-            $db->transaction(function () use ($rows, $fields, $service, $channel, $context, $scope): void {
+            $db->transaction(function () use ($rows, $fields, $service, $channel, $context, $scope, &$imported, &$duplicates): void {
                 $seen = [];
                 foreach ($rows as $index => $row) {
-                    $id = $row['记录ID'];
+                    // File record IDs never select an existing row for an import update.
+                    $id = '';
                     if ($id === '') {
                         $reference = $row[$channel === 'paypal' ? '交易 ID' : '平台订单号'] ?? '';
                         $merchant = $channel === 'credit_card' ? ($row['商户订单号'] ?? '') : '';
-                        $matches = $service->query($channel, []);
+                        $matches = FinanceRecord::query()->whereIn('dataset', ['xuzong2-orders', 'xuzong2-details', 'xuzong1-details']);
                         if ($reference !== '') {
                             $matches->where('reference', $reference);
                         }
@@ -1420,6 +1487,10 @@ class FinanceController extends Controller
                             $matches->whereIn('account', $accounts);
                         }
                         $candidates = $matches->limit(2)->get();
+                        if ($candidates->isNotEmpty()) {
+                            $duplicates++;
+                            continue;
+                        }
                         if ($candidates->isEmpty() && $channel === 'credit_card' && $reference !== '' && $merchant !== '') {
                             $account = FinancePaymentAccount::query()->where('account_type', 'credit_card')
                                 ->where('activity_account', $scope['account'] ?? '')->first();
@@ -1437,7 +1508,7 @@ class FinanceController extends Controller
                                 throw ValidationException::withMessages(['file' => '第'.$index.'行交易时间无效。']);
                             }
                             app(\App\Portals\Finance\FinanceAccountingService::class)->guardUnlocked($occurred->format('Y-m'));
-                            $payload = array_fill_keys(FinanceCatalog::dataset('xuzong2-details')['headers'], '');
+                            $payload = array_intersect_key($row, array_flip(FinanceCatalog::dataset('xuzong2-details')['headers']));
                             $payload = [...$payload, '商户订单号' => $merchant, '平台订单号' => $reference,
                                 '交易币种' => $row['交易币种'] ?: 'USD', '商户名称' => $row['商户名称'] ?? '',
                                 '交易金额' => $row['交易金额'] ?? '', '支付状态' => $row['支付状态'] ?? '',
@@ -1466,6 +1537,10 @@ class FinanceController extends Controller
                     }
                     $record = $service->query($channel, [])->find($id);
                     if (! $record) {
+                        $removed = $this->workbooks->database();
+                        if ($removed->table('finance_settlement_supplements')->where('finance_record_id', $id)->whereNotNull('payload->_deleted_at')->exists()) {
+                            throw ValidationException::withMessages(['file' => '第'.$index.'行记录 ID '.$id.' 已从结算明细删除，无法导入补充数据。请使用当前列表中的有效记录ID；补充导入不会新增或恢复已删除记录。']);
+                        }
                         throw ValidationException::withMessages(['file' => '第'.$index.'行记录不属于当前结算明细。']);
                     }
                     $seen[$id] = true;
@@ -1476,13 +1551,97 @@ class FinanceController extends Controller
                         }
                     }
                     $service->save($record, $this->settlementValues($values, $channel), (int) $context['user']->getKey());
+                    $imported[$record->id] = $record;
                 }
             });
         } catch (\App\Portals\Finance\FinanceRelayException $e) {
             throw ValidationException::withMessages(['file' => $e->getMessage()]);
         }
 
-        return redirect()->route('finance.report', $report)->with('success', '已处理 '.count($rows).' 条结算明细。');
+        $route = ['report' => $report];
+        $message = '已新增 '.count($imported).' 条结算明细，跳过重复 '.$duplicates.' 条。';
+        if (count($imported) === 1) {
+            $record = reset($imported);
+            $route += ['reference' => $record->reference, 'account' => $record->account];
+            $message .= '已定位记录 ID '.$record->id.'（原交易号：'.$record->reference.'）。';
+        }
+
+        return redirect()->route('finance.report', $route)->with('success', $message);
+    }
+
+    private function importNewPayPalSettlements(Request $request, \App\Portals\Finance\FinanceSettlementService $service, int $actor): Response
+    {
+        $columns = $service->columns('paypal');
+        $headers = array_values($columns);
+        $rows = $this->workbooks->read($request->file('file'), $headers, '贝宝导入模版', $headers);
+        $created = [];
+        $duplicates = 0;
+        try {
+            $this->workbooks->database()->transaction(function () use ($rows, $columns, $service, $actor, &$created, &$duplicates): void {
+                foreach ($rows as $index => $row) {
+                    $accountName = $row['支付账户'];
+                    $accounts = FinancePaymentAccount::query()->where('account_type', 'paypal')
+                        ->where(fn ($q) => $q->where('activity_account', $accountName)->orWhere('account_name', $accountName))->lockForUpdate()->limit(2)->get();
+                    if ($accountName === '' || $accounts->count() !== 1) {
+                        throw ValidationException::withMessages(['file' => '第'.$index.'行支付账户不存在或不唯一，请填写现有PayPal支付账户。']);
+                    }
+                    $account = $accounts->sole();
+                    $reference = $row['交易 ID'];
+                    if ($reference === '') {
+                        throw ValidationException::withMessages(['file' => '第'.$index.'行交易ID不能为空。']);
+                    }
+                    if (FinanceRecord::query()->where('dataset', 'paypal-orders')->where('account', $account->activity_account)->where('reference', $reference)->exists()) {
+                        $duplicates++;
+                        continue;
+                    }
+                    $payload = array_fill_keys(FinanceCatalog::dataset('paypal-orders')['headers'], '');
+                    foreach (array_slice(array_keys($payload), 0, 15) as $offset => $header) {
+                        $key = $offset === 11 ? 'reference' : 'paypal_'.$offset;
+                        $payload[$header] = $row[$columns[$key]];
+                    }
+                    $type = \App\Portals\Finance\FinancePayPalEventTypes::label($payload['類型']);
+                    $code = collect(\App\Portals\Finance\FinancePayPalEventTypes::TYPES)->search(fn ($definition) => $definition[0] === $type && $definition[1] === '结账付款');
+                    if ($code === false) {
+                        throw ValidationException::withMessages(['file' => '第'.$index.'行类型必须为PayPal结账付款类型。']);
+                    }
+                    $payload['類型'] = $code;
+                    $this->workbooks->database()->table('finance_transaction_types')->insertOrIgnore([
+                        'raw_type' => $code, 'category' => '结账付款', 'created_at' => now(), 'updated_at' => now(),
+                    ]);
+                    if ($this->workbooks->database()->table('finance_transaction_types')->where('raw_type', $code)->value('category') !== '结账付款') {
+                        throw ValidationException::withMessages(['file' => '第'.$index.'行交易类型当前未归类为结账付款，请先核对类型分类。']);
+                    }
+                    foreach (['總額', '費用', '淨額'] as $field) {
+                        if ($service->number($payload[$field]) === null) {
+                            throw ValidationException::withMessages(['file' => '第'.$index.'行'.FinanceCatalog::simplified($field).'必须填写有效金额。']);
+                        }
+                    }
+                    $zone = $payload['時區'] ?: 'UTC';
+                    $count = $this->workbooks->importRecords('paypal-orders', [$index => $payload], $account->activity_account, $zone, $actor, true);
+                    if ($count === 0) {
+                        $duplicates++;
+                        continue;
+                    }
+                    $record = FinanceRecord::query()->where('dataset', 'paypal-orders')->where('account', $account->activity_account)->where('reference', $reference)->sole();
+                    $values = [];
+                    foreach ([...$service->importFields('paypal'), 'fee' => '手续费'] as $field => $label) {
+                        if (($row[$label] ?? '') !== '') {
+                            $values[$field] = $row[$label];
+                        }
+                    }
+                    $service->save($record, $this->settlementValues($values, 'paypal'), $actor);
+                    $created[] = $record;
+                }
+            });
+        } catch (\App\Portals\Finance\FinanceRelayException $e) {
+            throw ValidationException::withMessages(['file' => $e->getMessage()]);
+        }
+        $route = ['report' => 'paypal-settlement'];
+        if (count($created) === 1) {
+            $route += ['reference' => $created[0]->reference, 'account' => $created[0]->account];
+        }
+
+        return redirect()->route('finance.report', $route)->with('success', '已新增 '.count($created).' 条结算明细，跳过重复 '.$duplicates.' 条。新记录ID由系统生成。');
     }
 
     private function creditImportMonths(?int $accountId = null, ?string $account = null): array
