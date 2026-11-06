@@ -7,7 +7,13 @@
     <span>{{ __('payment.common.pagination.summary', ['from' => $pagination['from'], 'to' => $pagination['to'], 'total' => $pagination['total']]) }}</span>
     <form method="get" action="{{ route($pageRoute) }}" class="payment-pagination-form">
         @foreach($query as $key => $value)
-            @if(is_scalar($value))<input type="hidden" name="{{ $key }}" value="{{ $value }}">@endif
+            @if(is_scalar($value))
+                <input type="hidden" name="{{ $key }}" value="{{ $value }}">
+            @elseif(is_array($value))
+                @foreach($value as $item)
+                    @if(is_scalar($item))<input type="hidden" name="{{ $key }}[]" value="{{ $item }}">@endif
+                @endforeach
+            @endif
         @endforeach
         <label><span>{{ __('payment.common.pagination.per_page') }}</span><select class="form-control input-sm" name="per_page" data-payment-per-page>@foreach([50,100] as $size)<option value="{{ $size }}" @selected((int)$pagination['per_page'] === $size)>{{ $size }}</option>@endforeach</select></label>
         <a class="btn btn-default btn-sm {{ $pagination['current_page'] <= 1 ? 'disabled' : '' }}" href="{{ $pageUrl(max(1, $pagination['current_page'] - 1)) }}">{{ __('payment.common.pagination.previous') }}</a>

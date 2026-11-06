@@ -17,7 +17,7 @@
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261026-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261026-1">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-account-risk.css?v=20261105-3">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-account-risk.css?v=20261106-1">
 @endpush
 
 @section('content')
@@ -47,15 +47,26 @@
                             <span>{{ __('payment.common.period') }}</span>
                             <span class="payment-account-date-range"><input class="form-control" type="date" name="period_start" value="{{ $dashboard['period_start'] }}"><b>{{ __($translationPrefix.'.filters.range_to') }}</b><input class="form-control" type="date" name="period_end" value="{{ $dashboard['period_end'] }}"></span>
                         </label>
-                        <label class="payment-account-filter-field">
+                        <div class="payment-account-filter-field payment-credit-card-reason-filter">
                             <span>退款 / 争议原因</span>
-                            <select class="form-control" name="reason">
+                            <select class="form-control payment-reason-legacy-select" name="reason" disabled aria-hidden="true">
                                 <option value="">全部原因</option>
                                 @foreach ($dashboard['reason_options'] as $reason)
-                                    <option value="{{ $reason }}" @selected($dashboard['filters']['reason'] === $reason)>{{ $reason }}</option>
+                                    <option value="{{ $reason }}" @selected(in_array($reason, $dashboard['filters']['reasons'] ?? [], true))>{{ $reason }}</option>
                                 @endforeach
                             </select>
-                        </label>
+                            <details class="payment-reason-multiselect">
+                                <summary><span>{{ count($dashboard['filters']['reasons'] ?? []) ? '已选 '.count($dashboard['filters']['reasons']).' 个原因' : '全部原因' }}</span><i class="fa fa-angle-down" aria-hidden="true"></i></summary>
+                                <div class="payment-reason-multiselect-menu">
+                                    <div class="payment-reason-multiselect-head"><strong>筛选原因</strong><button type="button" data-payment-reason-clear>清空</button></div>
+                                    <div class="payment-reason-multiselect-options">
+                                        @foreach ($dashboard['reason_options'] as $reason)
+                                            <label><input type="checkbox" name="reason[]" value="{{ $reason }}" @checked(in_array($reason, $dashboard['filters']['reasons'] ?? [], true))><span>{{ $reason }}</span></label>
+                                        @endforeach
+                                    </div>
+                                </div>
+                            </details>
+                        </div>
                         <div class="payment-account-filter-actions">
                             <button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ __($translationPrefix.'.filters.query') }}</button>
                             <a class="btn btn-default" href="{{ route('payment.account-risk.index', ['module' => 'credit_card']) }}">{{ __($translationPrefix.'.filters.reset') }}</a>
@@ -221,4 +232,5 @@
     };</script>
     @if ($errors->any())<script>jQuery(function () { jQuery('#payment-account-create-modal').modal('show'); });</script>@endif
     <script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261104-1"></script>
+    <script>document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('.payment-reason-multiselect').forEach(function(menu){var summary=menu.querySelector('summary span'),boxes=menu.querySelectorAll('input[type="checkbox"]'),fallback=menu.closest('.payment-credit-card-reason-filter').querySelector('.payment-reason-legacy-select option').textContent;var refresh=function(){var labels=Array.prototype.map.call(boxes,function(box){return box.checked?box.parentNode.querySelector('span').textContent.trim():'';}).filter(Boolean);summary.textContent=labels.length?labels.join('、'):fallback;summary.title=labels.join('、');};boxes.forEach(function(box){box.addEventListener('change',refresh);});var clear=menu.querySelector('[data-payment-reason-clear]');clear.addEventListener('click',function(event){event.preventDefault();boxes.forEach(function(box){box.checked=false;});refresh();});refresh();});});</script>
 @endpush
