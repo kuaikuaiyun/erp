@@ -240,7 +240,7 @@
                                     data-aikaipin-preview-title="{{ $productName }}"
                                     data-aikaipin-preview-images='@json($previewImages)'>
                                     @if ($imageCount > 0)
-                                        <img src="{{ $previewImages[0]['url'] }}" alt="{{ $productName }}">
+                                        <img src="{{ $previewImages[0]['url'] }}" alt="{{ $productName }}" loading="lazy" decoding="async">
                                     @else
                                         <i class="fa fa-picture-o" aria-hidden="true"></i>
                                     @endif

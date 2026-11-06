@@ -30,6 +30,8 @@ use Symfony\Component\HttpFoundation\Response;
 
 class ProductLibraryController extends Controller
 {
+    private const PRODUCT_CATEGORY_OPTIONS_CACHE_KEY = 'aikaipin:product-library:category-options:v1';
+
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly AikaipinPortalAuthorizationService $authorization,
@@ -363,6 +365,7 @@ class ProductLibraryController extends Controller
                 report($exception);
             }
         }
+        Cache::forget(self::PRODUCT_CATEGORY_OPTIONS_CACHE_KEY);
 
         return response()->json([
             'message' => __('aikaipin.messages.product_created_message'),
@@ -619,6 +622,7 @@ class ProductLibraryController extends Controller
                 report($exception);
             }
         }
+        Cache::forget(self::PRODUCT_CATEGORY_OPTIONS_CACHE_KEY);
 
         return response()->json([
             'message' => __('aikaipin.messages.product_updated_message'),
@@ -694,6 +698,7 @@ class ProductLibraryController extends Controller
                 report($exception);
             }
         }
+        Cache::forget(self::PRODUCT_CATEGORY_OPTIONS_CACHE_KEY);
 
         return response()->json([
             'message' => __('aikaipin.messages.product_deleted_message'),
@@ -1729,6 +1734,12 @@ class ProductLibraryController extends Controller
     private function productQuery(AdminUser $user, bool $canManageProductLibrary, array $filters): Builder
     {
         $query = AikaipinProduct::query()
+            ->select([
+                'id', 'product_code', 'name', 'sku', 'categories', 'source_platform', 'product_type',
+                'landing_page_url', 'images', 'reference_file', 'package_file', 'visible_department_ids',
+                'created_at', 'updated_at',
+            ])
+            ->selectRaw('shopify_data IS NOT NULL AS has_shopify_data')
             ->latest('created_at')
             ->latest('id');
 
@@ -1774,17 +1785,21 @@ class ProductLibraryController extends Controller
     /** @return list<array{value:string,label:string}> */
     private function productCategoryOptions(): array
     {
-        return AikaipinProduct::query()
-            ->whereNotNull('categories')
-            ->get(['categories'])
-            ->flatMap(static fn (AikaipinProduct $product): array => $product->categoryValues())
-            ->map(static fn (string $category): string => trim($category))
-            ->filter()
-            ->unique(static fn (string $category): string => mb_strtolower($category))
-            ->sort(static fn (string $left, string $right): int => strnatcasecmp($left, $right))
-            ->values()
-            ->map(static fn (string $category): array => ['value' => $category, 'label' => $category])
-            ->all();
+        return Cache::remember(self::PRODUCT_CATEGORY_OPTIONS_CACHE_KEY, now()->addMinutes(30), function (): array {
+            return AikaipinProduct::query()
+                ->whereNotNull('categories')
+                ->select('categories')
+                ->distinct()
+                ->get()
+                ->flatMap(static fn (AikaipinProduct $product): array => $product->categoryValues())
+                ->map(static fn (string $category): string => trim($category))
+                ->filter()
+                ->unique(static fn (string $category): string => mb_strtolower($category))
+                ->sort(static fn (string $left, string $right): int => strnatcasecmp($left, $right))
+                ->values()
+                ->map(static fn (string $category): array => ['value' => $category, 'label' => $category])
+                ->all();
+        });
     }
 
     /** @param iterable<mixed> $values
