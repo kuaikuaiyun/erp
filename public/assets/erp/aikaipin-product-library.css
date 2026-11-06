@@ -919,6 +919,28 @@
     font-size: 12px;
 }
 
+.aikaipin-pagination-meta,
+.aikaipin-per-page {
+    align-items: center;
+    display: flex;
+    gap: 10px;
+}
+
+.aikaipin-per-page {
+    color: #6d7f92;
+    font-size: 12px;
+    font-weight: 400;
+    margin: 0;
+}
+
+.aikaipin-per-page .form-control {
+    border-color: #d6e2ec;
+    border-radius: 6px;
+    height: 30px;
+    padding: 4px 24px 4px 9px;
+    width: 78px;
+}
+
 .aikaipin-pagination-control .pagination {
     margin: 0;
 }
@@ -1001,6 +1023,11 @@
     }
 
     .aikaipin-pagination-control {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .aikaipin-pagination-meta {
         align-items: flex-start;
         flex-direction: column;
     }

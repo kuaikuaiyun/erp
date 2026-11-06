@@ -10,7 +10,17 @@
 @endphp
 
 <div class="aikaipin-pagination-control">
-    <span class="aikaipin-pagination-summary">{{ __('aikaipin.product_library.pagination.summary', ['from' => $products->firstItem() ?? 0, 'to' => $products->lastItem() ?? 0, 'total' => $products->total()]) }}</span>
+    <div class="aikaipin-pagination-meta">
+        <span class="aikaipin-pagination-summary">{{ __('aikaipin.product_library.pagination.summary', ['from' => $products->firstItem() ?? 0, 'to' => $products->lastItem() ?? 0, 'total' => $products->total()]) }}</span>
+        <label class="aikaipin-per-page">
+            <span>每页显示</span>
+            <select class="form-control input-sm" aria-label="每页显示条数" onchange="window.location.href=this.options[this.selectedIndex].dataset.url">
+                @foreach ([15, 30, 50, 100] as $size)
+                    <option value="{{ $size }}" data-url="{{ request()->fullUrlWithQuery(['per_page' => $size, 'page' => 1]) }}" @selected(($perPage ?? 15) === $size)>{{ $size }} 条</option>
+                @endforeach
+            </select>
+        </label>
+    </div>
     @if ($lastPage > 1)
         <nav aria-label="{{ __('aikaipin.product_library.pagination.navigation') }}">
             <ul class="pagination pagination-sm no-margin">
