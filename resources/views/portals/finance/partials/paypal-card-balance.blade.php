@@ -1,5 +1,5 @@
-            @if($card['display']['has_balance'])
-            @php($row = $card['display'])
+            @if($card['display_rows']->isNotEmpty())
+            @foreach($card['display_rows'] as $row)
             <div class="paypal-account-values">
                 <div class="paypal-account-currency"><span class="paypal-currency">{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($row['currency'])) }}</span></div>
                 <div class="paypal-account-metrics">
@@ -8,6 +8,7 @@
                 </div>
                 <div class="paypal-account-total"><span>{{ __('finance.paypal.account_total') }}</span><strong>{{ $balanceFormatter->format($row['total']) }} {{ $row['currency'] }}</strong></div>
             </div>
+            @endforeach
             <p class="paypal-account-footer">
                 {{ __('finance.paypal.timestamp') }}
                 @if($card['as_of'])

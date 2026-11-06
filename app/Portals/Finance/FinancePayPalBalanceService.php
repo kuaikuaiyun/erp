@@ -92,6 +92,15 @@ class FinancePayPalBalanceService
         $summary = $this->nativeBalance($totals->get($displayCurrency), $displayCurrency);
         $cards = $cards->map(function ($card) use ($displayCurrency): array {
             $card['display'] = $this->nativeBalance($card['currencies']->firstWhere('currency', $displayCurrency), $displayCurrency);
+            // Account cards show native wallet balances independently of the summary selector.
+            $nativeRows = $card['currencies']->filter(function ($row): bool {
+                foreach (['available', 'withheld', 'total'] as $field) {
+                    if ($row[$field] === null || bccomp((string) $row[$field], '0', 16) !== 0) return true;
+                }
+                return false;
+            });
+            if ($nativeRows->isEmpty()) $nativeRows = $card['currencies'];
+            $card['display_rows'] = $nativeRows->map(fn ($row) => $this->nativeBalance($row, $row['currency']))->values();
             $card['as_of'] = $card['currencies']->pluck('as_of')->filter()->min();
             $card['latest_as_of'] = $card['currencies']->pluck('latest_as_of')->filter()->max();
 

@@ -1885,6 +1885,28 @@ class FinancePortalTest extends TestCase
         $this->get('/finance?paypal_currency=CNY')->assertOk()->assertDontSee('id="paypal-exchange-rates-form"', false);
     }
 
+    public function test_balance_cards_show_returned_native_currency_instead_of_global_usd_selection(): void
+    {
+        $usd=$this->financePayPalAccount('USD native');
+        $hkd=$this->financePayPalAccount('HKD native');
+        $this->financeBalanceSnapshot($usd,['USD'=>['100','0']]);
+        $this->financeBalanceSnapshot($hkd,['USD'=>['0','0'],'HKD'=>['1234.56','10']]);
+        $balance=app(FinancePayPalBalanceService::class)->dashboard('USD');
+        $this->assertSame('USD',$balance['cards']['finance-'.$usd->id]['display_rows'][0]['currency']);
+        $this->assertSame('HKD',$balance['cards']['finance-'.$hkd->id]['display_rows'][0]['currency']);
+        $this->assertSame('1234.5600000000000000',$balance['cards']['finance-'.$hkd->id]['display_rows'][0]['available']);
+        $this->assertSame('100.0000000000000000',$balance['summary']['total']);
+        $view=$this->get('/finance?paypal_currency=USD')->assertOk();
+        $doc=new \DOMDocument();
+        @$doc->loadHTML($view->getContent());
+        $xpath=new \DOMXPath($doc);
+        $card=$xpath->query('//*[@data-paypal-account="finance-'.$hkd->id.'"]')->item(0);
+        $this->assertNotNull($card);
+        $this->assertStringContainsString('HKD',$card->textContent);
+        $this->assertStringContainsString('1,234.56',$card->textContent);
+        $this->assertStringNotContainsString('USD',$card->textContent);
+    }
+
     public function test_currency_categories_use_actual_balances_and_keep_accounts_without_the_selected_currency(): void
     {
         $usd = $this->financePayPalAccount('美元账户');
