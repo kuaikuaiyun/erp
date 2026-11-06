@@ -169,12 +169,10 @@
                                     data-detail-url="{{ route('operation.ai-product-library.detail', ['product' => $product]) }}">
                                     <i class="fa fa-eye"></i> {{ __('aikaipin.operation_library.detail') }}
                                 </button>
-                                @if($user->isAdministrator())
-                                    <button type="button" class="btn btn-success btn-sm" data-operation-ai-publish
-                                        data-publish-url="{{ route('operation.ai-product-library.publish.form', $product) }}">
-                                        <i class="fa fa-cloud-upload"></i> 上架
-                                    </button>
-                                @endif
+                                <button type="button" class="btn btn-success btn-sm" data-operation-ai-publish
+                                    data-publish-url="{{ route('operation.ai-product-library.publish.form', $product) }}">
+                                    <i class="fa fa-cloud-upload"></i> 上架
+                                </button>
                             </td>
                         </tr>
                     @empty

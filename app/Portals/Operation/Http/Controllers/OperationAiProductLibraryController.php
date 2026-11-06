@@ -151,8 +151,6 @@ class OperationAiProductLibraryController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
-        abort_unless($context['user']->isAdministrator(), 403);
-
         return view('portals.operation.ai-product-library.publish-form', [
             'product' => $product,
             'stores' => $this->publishableStores($context['user']),
@@ -168,7 +166,6 @@ class OperationAiProductLibraryController extends Controller
             return $context;
         }
         $user = $context['user'];
-        abort_unless($user->isAdministrator(), 403);
 
         $data = $request->validate([
             'store_id' => ['required', 'integer'],
@@ -361,9 +358,24 @@ class OperationAiProductLibraryController extends Controller
             ->where('shop_status', AssistantDomainStore::SHOP_STATUS_IN_USE);
 
         if ($user->isAdministrator()) {
-            return $query->where('shop_name', '161-sysya8-6t')->orderBy('shop_name')->get();
+            return $query->orderBy('shop_name')->get();
         }
 
-        return $query->where('owner_user_id', $user->getKey())->orderBy('shop_name')->get();
+        $userNames = collect([$user->name, $user->username])
+            ->map(static fn (mixed $value): string => trim((string) $value))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        return $query
+            ->where(static function (Builder $stores) use ($user, $userNames): void {
+                $stores->where('owner_user_id', $user->getKey());
+                if ($userNames !== []) {
+                    $stores->orWhereIn('user_name', $userNames);
+                }
+            })
+            ->orderBy('shop_name')
+            ->get();
     }
 }

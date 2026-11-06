@@ -80,24 +80,35 @@ class OperationReportReviewController extends Controller
         if ($context instanceof Response) return $context;
 
         $filters = $request->validate([
-            'status' => ['nullable', Rule::in(['', OperationReport::STATUS_PENDING, OperationReport::STATUS_APPROVED, OperationReport::STATUS_REJECTED])],
+            'status' => ['nullable', Rule::in(['', OperationReport::STATUS_PENDING, OperationReport::STATUS_APPROVED, OperationReport::STATUS_REJECTED, 'deleted'])],
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
+            'team_id' => ['nullable', 'integer', 'min:1'],
             'operator' => ['nullable', 'string', 'max:100'],
             'per_page' => ['nullable', 'integer', Rule::in([20, 50, 100])],
         ]);
         $status = trim((string) ($filters['status'] ?? ''));
         $operator = trim((string) ($filters['operator'] ?? ''));
+        $teamId = (int) ($filters['team_id'] ?? 0);
         $perPage = (int) ($filters['per_page'] ?? 20);
 
-        $reportsQuery = $this->scopeReports(OperationReport::query(), $context['user']);
+        $teamOptions = $this->scopeReports(OperationReport::withTrashed(), $context['user'])
+            ->whereNotNull('operation_department_id')
+            ->selectRaw('operation_department_id, MAX(operation_department_name) AS operation_department_name')
+            ->groupBy('operation_department_id')
+            ->orderBy('operation_department_name')
+            ->get();
+
+        $reportsQuery = $this->scopeReports(OperationReport::withTrashed(), $context['user']);
         $reports = $reportsQuery
-            ->with('reviewer:id,name,username')
-            ->when($status !== '', fn ($query) => $query->where('status', $status))
+            ->with(['reviewer:id,name,username', 'operationDepartment:id,name'])
+            ->when($status === 'deleted', fn ($query) => $query->onlyTrashed())
+            ->when($status !== '' && $status !== 'deleted', fn ($query) => $query->whereNull('deleted_at')->where('status', $status))
             ->when(!empty($filters['date_from']), fn ($query) => $query->whereDate('report_date', '>=', $filters['date_from']))
             ->when(!empty($filters['date_to']), fn ($query) => $query->whereDate('report_date', '<=', $filters['date_to']))
+            ->when($teamId > 0, fn ($query) => $query->where('operation_department_id', $teamId))
             ->when($operator !== '', fn ($query) => $query->where('operator_name', 'like', '%'.$operator.'%'))
-            ->orderByRaw("CASE WHEN status = 'pending' THEN 0 ELSE 1 END")
+            ->orderByRaw("CASE WHEN deleted_at IS NOT NULL THEN 2 WHEN status = 'pending' THEN 0 ELSE 1 END")
             ->orderByDesc('report_date')
             ->orderByDesc('id')
             ->paginate($perPage)
@@ -107,12 +118,14 @@ class OperationReportReviewController extends Controller
             'portal' => $context['portal']->loadMissing('menus'),
             'user' => $context['user'],
             'reports' => $reports,
+            'teamOptions' => $teamOptions,
             'pendingCount' => $this->scopeReports(OperationReport::query(), $context['user'])
                 ->where('status', OperationReport::STATUS_PENDING)->count(),
             'filters' => [
                 'status' => $status,
                 'date_from' => (string) ($filters['date_from'] ?? ''),
                 'date_to' => (string) ($filters['date_to'] ?? ''),
+                'team_id' => $teamId,
                 'operator' => $operator,
                 'per_page' => $perPage,
             ],
@@ -132,7 +145,7 @@ class OperationReportReviewController extends Controller
             'metricRowspans' => $this->identityRowspans($rows),
             'advertisingRows' => $report->advertising_rows ?: [],
             'mediaRoiRows' => $this->metrics->mediaRoiSummary($rows, $report->advertising_rows ?: []),
-            'canReview' => true, 'canEdit' => false,
+            'canReview' => ! $report->trashed(), 'canEdit' => false,
             'backUrl' => route('assistant.operation-report-reviews.index'),
             'approveUrl' => route('assistant.operation-report-reviews.approve', $report),
             'rejectUrl' => route('assistant.operation-report-reviews.reject', $report),
@@ -183,15 +196,8 @@ class OperationReportReviewController extends Controller
 
         $operatorName = $report->operator_name;
         $reportDate = $report->report_date?->format('Y-m-d');
-        $screenshots = collect($report->advertising_rows ?: [])
-            ->pluck('screenshot')
-            ->filter(fn ($path): bool => is_string($path) && $path !== '')
-            ->unique()
-            ->values()
-            ->all();
-
+        $report->forceFill(['deletion_key' => (int) $report->getKey()])->save();
         $report->delete();
-        if ($screenshots !== []) Storage::disk('public')->delete($screenshots);
 
         return redirect()->route('assistant.operation-report-reviews.index')
             ->with('success', "已删除 {$operatorName} 在 {$reportDate} 的广告费提报，运营可以重新提交该日期的数据。");
@@ -240,7 +246,7 @@ class OperationReportReviewController extends Controller
             'report_id' => ['required', 'integer'],
             'path' => ['required', 'string', 'max:500', 'regex:/^operation-reports\/ads\/[A-Za-z0-9._-]+$/'],
         ]);
-        $report = OperationReport::query()->findOrFail((int) $validated['report_id']);
+        $report = OperationReport::withTrashed()->findOrFail((int) $validated['report_id']);
         abort_unless($this->canAccessReport($report, $context['user']), 403);
         $belongsToReport = collect($report->advertising_rows ?: [])->contains(
             static fn (array $row): bool => (string) ($row['screenshot'] ?? '') === $validated['path'],
