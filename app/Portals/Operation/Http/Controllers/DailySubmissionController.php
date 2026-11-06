@@ -4,6 +4,8 @@ namespace App\Portals\Operation\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\AssistantAdvertisingAgency;
+use App\Models\AssistantDomainStore;
+use App\Models\AdminUser;
 use App\Models\DailyAdvertisingRecharge;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantStoreOwnerService;
@@ -43,7 +45,7 @@ class DailySubmissionController extends Controller
         $this->access->assertPortal($context['portal'], ProductRequestAccessService::OPERATION_PORTAL_CODE);
 
         if ($type === 'advertising-recharge') {
-            return $this->advertisingRecharge($context);
+            return $this->advertisingRecharge($request, $context);
         }
 
         return view('portals.operation.daily-submissions.index', [
@@ -58,7 +60,15 @@ class DailySubmissionController extends Controller
     {
         $context = $this->operationContext($request);
         $user = $context['user'];
-        $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($user);
+        $isBoss = $this->isBoss($user);
+        $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
+        $operatorId = $isBoss ? $request->integer('operator_user_id') : (int) $user->getKey();
+        if ($isBoss) {
+            abort_unless($operatorId > 0 && $operatorOptions->contains('id', $operatorId), 422, '请选择有效的运营账号。');
+        }
+        /** @var AdminUser $operator */
+        $operator = $operatorOptions->firstWhere('id', $operatorId) ?: $user;
+        $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($operator);
         abort_unless($operationDepartment !== null || $user->isAdministrator(), 422, '当前账号未配置运营部门，无法提交广告充值。');
 
         $assistantDepartmentIds = $operationDepartment
@@ -72,14 +82,12 @@ class DailySubmissionController extends Controller
             ->keyBy(fn (AssistantAdvertisingAgency $agency): string => (string) $agency->getKey());
 
         $validated = $request->validate([
-            'report_date' => ['required', 'date_format:Y-m-d'],
             'entries' => ['required', 'array', 'min:1', 'max:50'],
             'entries.*.agency_id' => ['required', 'integer', Rule::in($agencies->keys()->all())],
             'entries.*.account_name' => ['required', 'string', 'max:191'],
             'entries.*.account_number' => ['required', 'string', 'max:191'],
             'entries.*.amount' => ['required', 'numeric', 'min:0.01', 'max:999999999.99'],
         ], [
-            'report_date.required' => '请选择提报日期。',
             'entries.required' => '请至少填写一条广告充值信息。',
             'entries.*.agency_id.required' => '请选择广告代理。',
             'entries.*.account_name.required' => '请填写广告账户名称。',
@@ -105,9 +113,9 @@ class DailySubmissionController extends Controller
         })->values()->all();
 
         DailyAdvertisingRecharge::query()->create([
-            'report_date' => $validated['report_date'],
-            'operator_user_id' => (int) $user->getKey(),
-            'operator_name' => (string) ($user->name ?: $user->username),
+            'report_date' => now()->toDateString(),
+            'operator_user_id' => (int) $operator->getKey(),
+            'operator_name' => (string) ($operator->name ?: $operator->username),
             'operation_department_id' => $operationDepartment?->getKey(),
             'operation_department_name' => $operationDepartment?->name,
             'entries' => $entries,
@@ -115,32 +123,52 @@ class DailySubmissionController extends Controller
             'status' => DailyAdvertisingRecharge::STATUS_PENDING,
         ]);
 
-        return redirect()->route('operation.daily-submissions.index', ['type' => 'advertising-recharge'])
+        return redirect()->route('operation.daily-submissions.index', [
+            'type' => 'advertising-recharge',
+            'operator_user_id' => $isBoss ? $operator->getKey() : null,
+        ])
             ->with('success', '广告充值提报已提交。');
     }
 
     /** @param array{portal:mixed,user:\App\Models\AdminUser} $context */
-    private function advertisingRecharge(array $context): View
+    private function advertisingRecharge(Request $request, array $context): View
     {
         $user = $context['user'];
-        $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($user);
+        $isBoss = $this->isBoss($user);
+        $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
+        $operatorId = $isBoss
+            ? (int) ($request->integer('operator_user_id') ?: $operatorOptions->first()?->getKey())
+            : (int) $user->getKey();
+        $operator = $operatorOptions->firstWhere('id', $operatorId) ?: $user;
+        $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($operator);
         $assistantDepartmentIds = $operationDepartment
             ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $operationDepartment->getKey())
             : ($user->isAdministrator() ? null : []);
-        $agencies = AssistantAdvertisingAgency::query()
-            ->where('is_enabled', true)
-            ->when($assistantDepartmentIds !== null, fn ($query) => $query->whereIn('assistant_department_id', $assistantDepartmentIds))
-            ->with('advertisingMedia')
-            ->orderBy('sort')->orderBy('id')->get();
+        $advertisingAgencyGroups = AssistantAdvertisingAgency::enabledGroups($assistantDepartmentIds);
 
         return view('portals.operation.daily-submissions.advertising-recharge', [
             'portal' => $context['portal']->loadMissing('menus'),
             'user' => $user,
-            'agencies' => $agencies,
+            'isBoss' => $isBoss,
+            'operatorOptions' => $operatorOptions,
+            'selectedOperator' => $operator,
+            'advertisingAgencyGroups' => $advertisingAgencyGroups,
             'history' => DailyAdvertisingRecharge::query()
-                ->where('operator_user_id', $user->getKey())
+                ->where('operator_user_id', $operator->getKey())
                 ->latest('report_date')->latest('id')->paginate(15)->withQueryString(),
         ]);
+    }
+
+    private function isBoss(AdminUser $user): bool
+    {
+        return $user->isAdministrator() || strcasecmp((string) $user->username, 'kky_boss') === 0;
+    }
+
+    private function operatorOptions()
+    {
+        $ids = AssistantDomainStore::query()->whereNotNull('owner_user_id')->distinct()->pluck('owner_user_id');
+
+        return AdminUser::query()->whereIn('id', $ids)->orderBy('name')->orderBy('username')->get(['id', 'name', 'username']);
     }
 
     /** @return array{portal:mixed,user:\App\Models\AdminUser} */

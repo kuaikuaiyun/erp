@@ -25,6 +25,7 @@ class AdvertisingRechargeReviewController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
         $filters = $request->validate([
+            'operation_department_id' => ['nullable', 'integer'],
             'status' => ['nullable', 'in:pending,processed'],
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
@@ -32,11 +33,18 @@ class AdvertisingRechargeReviewController extends Controller
         ]);
 
         $query = DailyAdvertisingRecharge::query();
+        $allDepartments = $this->assistantStoreOwners->operationDepartments();
+        $departmentIds = null;
         if (! $context['user']->isAdministrator()) {
             $departmentIds = $this->assistantStoreOwners->visibleOperationDepartmentIds($context['user']);
             $departmentIds === [] ? $query->whereRaw('1 = 0') : $query->whereIn('operation_department_id', $departmentIds);
         }
-        $query->when($filters['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
+        $departmentOptions = $departmentIds === null
+            ? $allDepartments
+            : $allDepartments->whereIn('id', $departmentIds)->values();
+
+        $query->when($filters['operation_department_id'] ?? null, fn ($q, $id) => $q->where('operation_department_id', $id))
+            ->when($filters['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
             ->when($filters['date_from'] ?? null, fn ($q, $date) => $q->whereDate('report_date', '>=', $date))
             ->when($filters['date_to'] ?? null, fn ($q, $date) => $q->whereDate('report_date', '<=', $date))
             ->when($filters['operator'] ?? null, fn ($q, $name) => $q->where('operator_name', 'like', '%'.$name.'%'));
@@ -45,6 +53,7 @@ class AdvertisingRechargeReviewController extends Controller
             'portal' => $context['portal']->loadMissing('menus'),
             'user' => $context['user'],
             'filters' => $filters,
+            'departmentOptions' => $departmentOptions,
             'submissions' => $query->orderByRaw("CASE WHEN status = 'pending' THEN 0 ELSE 1 END")
                 ->latest('report_date')->latest('id')->paginate(20)->withQueryString(),
         ]);
