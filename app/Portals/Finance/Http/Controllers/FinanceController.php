@@ -835,15 +835,16 @@ class FinanceController extends Controller
                 }
             }
             return $batch->map(function ($record) use ($dataset, $definition, $filters, $types, $groups, $accountingRows, $accountLabels, $accountNamesById, $metadata, $items, $pageLayout, $refunds) {
-            $values = array_map(fn ($index, $header) => in_array('column_'.$index, FinanceCatalog::numericFilterFields($dataset), true) || in_array(FinanceCatalog::simplified($header), ['数量', '物品标题', '主旨', '团队'], true) || ($definition['channel'] === 'paypal' && in_array($index, [14, $definition['status']], true))
-                ? FinanceCatalog::displayValue($dataset, $index, $record->payload[$header] ?? '')
-                : ($record->payload[$header] ?? ''), array_keys($definition['headers']), $definition['headers']);
-            if ($definition['channel'] === 'paypal' && isset($definition['type'])) {
+            $payload = $record->payload;
+            $values = $pageLayout ? [] : array_map(fn ($index, $header) => in_array('column_'.$index, FinanceCatalog::numericFilterFields($dataset), true) || in_array(FinanceCatalog::simplified($header), ['数量', '物品标题', '主旨', '团队'], true) || ($definition['channel'] === 'paypal' && in_array($index, [14, $definition['status']], true))
+                ? FinanceCatalog::displayValue($dataset, $index, $payload[$header] ?? '')
+                : ($payload[$header] ?? ''), array_keys($definition['headers']), $definition['headers']);
+            if (! $pageLayout && $definition['channel'] === 'paypal' && isset($definition['type'])) {
                 $values[$definition['type']] = \App\Portals\Finance\FinancePayPalEventTypes::label((string) $values[$definition['type']]);
             }
             $linked = $metadata[$record->id] ?? [];
             $group = $groups->get(($linked['domain'] ?? '') ?: $record->domain);
-            if ($group && isset($definition['owner'])) {
+            if (! $pageLayout && $group && isset($definition['owner'])) {
                 $values[$definition['owner']] = $group->owner;
                 $values[$definition['team']] = $group->team;
             }

@@ -14,11 +14,12 @@ class FinancePayPalOrderExport
     public static function pageValues($record, array $metadata, $group, string $account, string $category, string $timezone, iterable $items = [], array $refunds = [], string $dataset = 'paypal-orders'): array
     {
         $definition = FinanceCatalog::dataset('paypal-orders');
+        $payload = $record->payload;
         $fields = [];
         foreach ($definition['headers'] as $index => $header) {
             $fields[$index] = $index === $definition['type']
-                ? FinancePayPalEventTypes::label((string) ($record->payload[$header] ?? ''))
-                : FinanceCatalog::displayValue('paypal-orders', $index, $record->payload[$header] ?? '');
+                ? FinancePayPalEventTypes::label((string) ($payload[$header] ?? ''))
+                : FinanceCatalog::displayValue('paypal-orders', $index, $payload[$header] ?? '');
         }
         $order = $metadata['order'] ?? null;
         if ($dataset === 'xuzong2-orders') {
@@ -33,17 +34,17 @@ class FinancePayPalOrderExport
         }
         $get = static fn ($key, $fallback = '') => $order->{$key} ?? $fallback;
         $date = static fn ($value) => $value ? \Carbon\CarbonImmutable::parse($value, 'UTC')->setTimezone($timezone)->format('Y-m-d H:i:s') : '';
-        $upsell = $metadata['upsell'] ?? ($record->payload['是否加购'] ?? '');
+        $upsell = $metadata['upsell'] ?? ($payload['是否加购'] ?? '');
         $products = self::productItems($items, $fields[18], $dataset === 'paypal-orders'
-            ? (string) ($record->payload[$definition['headers'][28]] ?? '') : (string) $fields[28]);
+            ? (string) ($payload[$definition['headers'][28]] ?? '') : (string) $fields[28]);
         $productColumns = self::productColumns($products);
 
         return [$get('id', $record->id), $get('shopify_order_number'), $get('shopify_order_id'),
-            $metadata['erp_order'] ?? ($record->payload['通途订单'] ?? ''), $record->reference, $get('bill_number', $fields[13]),
+            $metadata['erp_order'] ?? ($payload['通途订单'] ?? ''), $record->reference, $get('bill_number', $fields[13]),
             $order ? '' : '未匹配物流订单', $get('store_name'), ($metadata['domain'] ?? '') ?: ($record->domain ?? ''),
             $get('source_shop_domain'), $group->owner ?? '', $group->team ?? '',
             $upsell === '' || $upsell === null ? '' : (in_array(strtolower((string) $upsell), ['1', 'true', 'yes', '是', '加购'], true) ? '加购' : '未加购'),
-            $metadata['subscription'] ?? ($record->payload['订阅类型'] ?? ''), $get('subscription_status'), $get('subscription_origin_order_id'),
+            $metadata['subscription'] ?? ($payload['订阅类型'] ?? ''), $get('subscription_status'), $get('subscription_origin_order_id'),
             ...$productColumns, $fields[5], $fields[4], $get('payment_gateway', $dataset === 'paypal-orders' ? 'PayPal' : ''),
             $account, $fields[15], $fields[6], $fields[7], $fields[8], $fields[9], $get('paid_amount_usd', $fields[7]),
             $get('total_shipping_usd'), $date($get('created_at')), $date($get('order_created_at')), $date($get('paid_at')),

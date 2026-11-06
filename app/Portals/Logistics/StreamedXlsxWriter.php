@@ -112,7 +112,7 @@ class StreamedXlsxWriter
                 $endColumn = $this->columnName($columnIndex + $span);
                 $mergedRanges[] = $startColumn.$rowNumber.':'.$endColumn.$rowNumber;
             }
-            fwrite($handle, '<row'.$attributes.'>');
+            $rowXml = '<row'.$attributes.'>';
             foreach ($columns as $index => $_column) {
                 $cell = $row['cells'][$index] ?? ['value' => ''];
                 $reference = $this->columnName($index + 1).$rowNumber;
@@ -125,12 +125,12 @@ class StreamedXlsxWriter
                 );
                 $value = $cell['value'] ?? null;
                 if (in_array($type, ['money', 'rate', 'number'], true) && $value !== null && $value !== '' && is_numeric($value)) {
-                    fwrite($handle, '<c r="'.$reference.'" s="'.$style.'" t="n"><v>'.(string) ((float) $value).'</v></c>');
+                    $rowXml .= '<c r="'.$reference.'" s="'.$style.'" t="n"><v>'.(string) ((float) $value).'</v></c>';
                 } else {
-                    fwrite($handle, $this->stringCell($reference, $this->displayValue($value), $style));
+                    $rowXml .= $this->stringCell($reference, $this->displayValue($value), $style);
                 }
             }
-            fwrite($handle, '</row>');
+            fwrite($handle, $rowXml.'</row>');
             $rowNumber++;
         }
 

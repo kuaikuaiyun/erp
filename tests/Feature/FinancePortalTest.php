@@ -1856,7 +1856,7 @@ class FinancePortalTest extends TestCase
         $this->assertNull($exchange->convert(collect(), 'USD', $rates)['total']);
     }
 
-    public function test_workbench_has_one_summary_and_one_currency_row_per_account_and_keeps_filters(): void
+    public function test_workbench_has_one_summary_and_native_currency_rows_and_keeps_filters(): void
     {
         $account = $this->financePayPalAccount('尚云');
         $key = 'finance-'.$account->id;
@@ -1873,7 +1873,7 @@ class FinancePortalTest extends TestCase
         @$document->loadHTML($response->getContent());
         $xpath = new \DOMXPath($document);
         $this->assertSame(1, $xpath->query('//*[@data-paypal-summary="EUR"]')->length);
-        $this->assertSame(1, $xpath->query('//*[@data-paypal-account="'.$key.'"]//div[@class="paypal-account-values"]')->length);
+        $this->assertSame(2, $xpath->query('//*[@data-paypal-account="'.$key.'"]//div[@class="paypal-account-values"]')->length);
         $this->assertSame(1, $xpath->query('//select[@name="paypal_currency"]/option[@selected and @value="EUR"]')->length);
         $this->assertSame(['USD', 'EUR'], array_map(fn ($node) => $node->getAttribute('value'), iterator_to_array($xpath->query('//select[@name="paypal_currency"]/option'))));
         $this->assertSame(0, $xpath->query('//*[@data-target="#paypal-exchange-rates" or @id="paypal-exchange-rates"]')->length);
@@ -2102,6 +2102,44 @@ class FinancePortalTest extends TestCase
         $this->assertArrayNotHasKey('active_account_name', $active->fresh()->toArray());
         $this->expectException(\Illuminate\Database\UniqueConstraintViolationException::class);
         $this->financePayPalAccount('可复用名称');
+    }
+
+    public function test_page_xlsx_export_includes_all_fourteen_thousand_rows_across_batches(): void
+    {
+        $this->financePayPalAccount('Bulk export');
+        $payload=$this->recordRow();
+        for($start=1;$start<=14000;$start+=500) {
+            $records=[];
+            for($id=$start;$id<min($start+500,14001);$id++) {
+                $records[]=['id'=>$id,'dataset'=>'paypal-orders','account'=>'Bulk export','reference'=>'BULK-'.$id,
+                    'occurred_at'=>'2026-11-06 00:00:00','source_timezone'=>'UTC','currency'=>'USD','status'=>'S','raw_type'=>'T0006',
+                    'fingerprint'=>hash('sha256','bulk-export-'.$id),'payload'=>json_encode([...$payload,'交易 ID'=>'BULK-'.$id],JSON_UNESCAPED_UNICODE),
+                    'created_at'=>now(),'updated_at'=>now()];
+            }
+            DB::table('finance_records')->insert($records);
+        }
+        $binary=$this->get('/finance/records/paypal-orders/export?export_scope=filtered&export_layout=page&export_format=xlsx')->assertOk()->streamedContent();
+        $file=tempnam(sys_get_temp_dir(),'finance-bulk-');
+        $this->temporaryFiles[]=$file;
+        file_put_contents($file,$binary);
+        unset($binary);
+        $zip=new \ZipArchive();
+        $this->assertTrue($zip->open($file)===true);
+        $this->assertNotFalse($zip->locateName('xl/worksheets/sheet1.xml'));
+        $zip->close();
+        $reader=new \XMLReader();
+        $this->assertTrue($reader->open('zip://'.$file.'#xl/worksheets/sheet1.xml'));
+        $rows=0;$expected=1;
+        while($reader->read()) {
+            if($reader->nodeType!==\XMLReader::ELEMENT || $reader->localName!=='row')continue;
+            $rows++;
+            if($rows===1)continue;
+            $xml=$reader->readOuterXml();
+            preg_match('/<c[^>]*>.*?<t[^>]*>([0-9]+)<\/t>/s',$xml,$match);
+            $this->assertSame((string)$expected++,$match[1]??null);
+        }
+        $reader->close();
+        $this->assertSame(14001,$rows);
     }
 
     public function test_product_export_splits_fields_and_keeps_unmatched_paypal_items(): void

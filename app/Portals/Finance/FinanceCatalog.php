@@ -37,10 +37,15 @@ class FinanceCatalog
     /** Convert visible text without changing stored field keys or filter values. */
     public static function simplified(?string $text): string
     {
+        $text ??= '';
+        // The dictionary contains no ASCII keys; IDs, dates and amounts need no conversion.
+        if ($text === '' || ! preg_match('/[\x80-\xFF]/', $text)) return $text;
         static $characters;
+        static $cache = [];
+        if (isset($cache[$text])) return $cache[$text];
         $characters ??= json_decode(file_get_contents(database_path('data/finance-simplified-characters.json')), true, 512, JSON_THROW_ON_ERROR);
-
-        return strtr($text ?? '', $characters);
+        if (count($cache) >= 2048) $cache = [];
+        return $cache[$text] = strtr($text, $characters);
     }
 
     public static function teamLabel(mixed $value): string
@@ -68,9 +73,11 @@ class FinanceCatalog
 
     public static function datasets(): array
     {
+        static $datasets;
+        if ($datasets !== null) return $datasets;
         $headers = array_values(self::source()['headers']);
 
-        return [
+        return $datasets = [
             'paypal-orders' => ['channel' => 'paypal', 'headers' => [...array_slice($headers[0], 0, 15), ...FinancePayPalDetails::HEADERS], 'reference' => 11, 'date' => 0, 'time' => 1, 'currency' => 6, 'status' => 5, 'type' => 4],
             'xuzong2-orders' => ['channel' => 'xuzong2', 'headers' => ['店铺名称', '收款账户', 'Shopify订单号', '交易单号', '店铺币种', '店铺订单金额', '交易币种', '交易金额', '支付状态', '支付方式', '域名', '通途订单', '订阅类型', '是否加购', '创建时间', '支付时间', '使用人', '团队'], 'reference' => 3, 'date' => 14, 'currency' => 6, 'status' => 8, 'domain' => 10, 'owner' => 16, 'team' => 17],
             'paypal-details' => ['channel' => 'paypal', 'headers' => $headers[0], 'reference' => 11, 'date' => 0, 'time' => 1, 'currency' => 6, 'status' => 5, 'type' => 4, 'domain' => 36, 'owner' => 37, 'team' => 38],
