@@ -426,6 +426,16 @@ class OperationReportDashboardController extends Controller
                 $mediaRois[] = $mediaSpend > 0 ? $mediaRevenue / $mediaSpend : null;
             }
 
+            $calculationDays = null;
+            if (! empty($first['hired_at'])) {
+                $calculationStart = Carbon::parse($first['hired_at'])->startOfDay()
+                    ->max(Carbon::parse($dateFrom)->startOfDay());
+                $calculationEnd = Carbon::parse($dateTo)->startOfDay()->min(today());
+                $calculationDays = $calculationStart->lte($calculationEnd)
+                    ? $calculationStart->diffInDays($calculationEnd) + 1
+                    : 0;
+            }
+
             return array_merge($row, [
                 '_report_id' => (int) $first['operator_user_id'].'|'.$dateFrom.'|'.$dateTo,
                 'operator_user_id' => (int) $first['operator_user_id'],
@@ -434,6 +444,7 @@ class OperationReportDashboardController extends Controller
                 'date_to' => $dateTo,
                 'operator_name' => (string) $first['operator_name'],
                 'hired_at' => $first['hired_at'] ?? null,
+                'calculation_days' => $calculationDays,
                 'operation_department_name' => (string) $first['operation_department_name'],
                 'shop_domain' => '—',
                 'media_source' => '汇总',
