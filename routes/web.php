@@ -297,6 +297,7 @@ Route::middleware(MonitorPaymentPerformance::class)->group(function (): void {
     Route::get('/account-risk', [PaymentPortalController::class, 'accountRisk'])->name('payment.account-risk.index');
     Route::post('/account-risk/accounts', [PaymentPortalController::class, 'storeAccountRiskAccount'])->name('payment.account-risk.accounts.store');
     Route::put('/account-risk/accounts/{account}', [PaymentPortalController::class, 'updateAccountRiskAccount'])->name('payment.account-risk.accounts.update');
+    Route::post('/account-risk/accounts/{account}/balance/refresh', [PaymentPortalController::class, 'refreshAccountRiskBalance'])->name('payment.account-risk.accounts.balance.refresh');
     Route::get('/account-risk/accounts/{account}/detail', [PaymentPortalController::class, 'accountRiskDetail'])->name('payment.account-risk.accounts.detail');
     Route::get('/account-risk/accounts/{account}/monthly-report/export', [PaymentPortalController::class, 'exportAccountMonthlyReport'])->name('payment.account-risk.accounts.monthly-report.export');
     Route::get('/product-risk-profit', [PaymentPortalController::class, 'productRiskProfit'])->name('payment.product-risk-profit.index');

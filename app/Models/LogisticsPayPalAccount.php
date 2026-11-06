@@ -14,6 +14,7 @@ class LogisticsPayPalAccount extends Model
 
     protected $fillable = [
         'account_name', 'merchant_id', 'account_email', 'environment', 'is_enabled',
+        'relay_url', 'relay_certificate_thumbprint_sha1', 'relay_hmac_key_id', 'relay_hmac_secret',
         'last_imported_at', 'last_import_from', 'last_import_to',
         'last_import_status', 'last_import_message', 'created_by', 'created_by_name',
         'updated_by', 'updated_by_name',
@@ -29,6 +30,7 @@ class LogisticsPayPalAccount extends Model
     {
         return [
             'is_enabled' => 'boolean',
+            'relay_hmac_secret' => 'encrypted',
             'last_imported_at' => 'datetime',
             'last_import_from' => 'datetime',
             'last_import_to' => 'datetime',

@@ -110,6 +110,7 @@ class AssistantDomainStore extends Model
         'shopify_client_secret',
         'xshoppy_api_key',
         'xshoppy_password',
+        'shopline_app_token',
         'shop_status',
         'plan_expires_at',
         'payment_card',
