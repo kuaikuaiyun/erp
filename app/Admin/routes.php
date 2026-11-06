@@ -53,6 +53,10 @@ Route::group([
     $router->get('auth/tencent-captcha/options', [AuthController::class, 'tencentCaptchaOptions'])->middleware('throttle:30,1')->name('auth.tencent-captcha.options');
 
     $router->get('/', [HomeController::class, 'index'])->name('home');
+    $router->post('portal/home-folders', [HomeController::class, 'storeFolder'])->middleware(RequireSystemAdministrator::class)->name('portal.home-folders.store');
+    $router->patch('portal/home-folders/{folder}', [HomeController::class, 'updateFolder'])->whereNumber('folder')->middleware(RequireSystemAdministrator::class)->name('portal.home-folders.update');
+    $router->delete('portal/home-folders/{folder}', [HomeController::class, 'destroyFolder'])->whereNumber('folder')->middleware(RequireSystemAdministrator::class)->name('portal.home-folders.destroy');
+    $router->put('portal/home-folders/layout', [HomeController::class, 'saveFolderLayout'])->middleware(RequireSystemAdministrator::class)->name('portal.home-folders.layout');
 
     $router->resource('portal/portals', PortalController::class)->except(['show', 'destroy'])->middleware(['admin.permission:check,portal.management', RequireSystemAdministrator::class])->names('portal.portals');
     $router->get('portal/portals/{portal}/authorization-history', [PortalController::class, 'authorizationHistory'])->whereNumber('portal')->middleware(['admin.permission:check,portal.management', RequireSystemAdministrator::class])->name('portal.portals.authorization-history');

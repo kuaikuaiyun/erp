@@ -319,6 +319,7 @@
         var accountFormText = config.accountForm || {};
         var accountEnabled = accountForm.find('[data-payment-account-enabled]');
         var accountEnabledValue = accountForm.find('[data-payment-account-enabled-value]');
+        var accountRelaySecret = accountForm.find('[name="relay_hmac_secret"]');
         function syncAccountEnabled() {
             accountEnabledValue.val(accountEnabled.prop('checked') ? '1' : '0');
         }
@@ -338,6 +339,12 @@
                 accountForm.find('[name="account_email"]').val(String(trigger.data('accountEmail') || ''));
                 accountForm.find('[name="environment"]').val(String(trigger.data('accountEnvironment') || 'live'));
                 accountEnabled.prop('checked', String(trigger.data('accountEnabled')) === '1');
+                accountForm.find('[name="relay_url"]').val(String(trigger.data('accountRelayUrl') || ''));
+                accountForm.find('[name="relay_certificate_thumbprint_sha1"]').val(String(trigger.data('accountRelayCertificateThumbprint') || ''));
+                var secretConfigured = String(trigger.data('accountRelaySecretConfigured')) === '1';
+                accountRelaySecret.prop('required', !secretConfigured).attr('placeholder', secretConfigured ? '••••••••（已配置；留空不修改）' : '请输入 HMAC Base64 密钥');
+            } else {
+                accountRelaySecret.prop('required', true).attr('placeholder', '请输入 HMAC Base64 密钥');
             }
             syncAccountEnabled();
             accountModal.modal('show');
@@ -346,6 +353,48 @@
         page.on('click', '[data-payment-account-edit]', function (event) { event.preventDefault(); prepareAccountForm('edit', $(this)); });
         accountForm.on('change', '[data-payment-account-enabled]', syncAccountEnabled);
         accountForm.on('submit', syncAccountEnabled);
+
+        page.on('click', '[data-payment-account-balance-refresh]', function () {
+            var button = $(this);
+            if (button.prop('disabled')) return;
+            var accountId = String(button.data('accountId') || '');
+            var url = String(config.accountBalanceRefreshUrl || '').replace('__ACCOUNT__', encodeURIComponent(accountId));
+            if (!accountId || !url) return;
+            var originalHtml = button.html();
+            button.prop('disabled', true).attr('aria-busy', 'true').html('<i class="fa fa-spinner fa-spin" aria-hidden="true"></i> 刷新中');
+            $.ajax({
+                url: url,
+                method: 'POST',
+                dataType: 'json',
+                timeout: 45000,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': String($('meta[name="csrf-token"]').attr('content') || '')
+                }
+            }).done(function (result) {
+                if (!result || !result.ok || !result.balance_html) {
+                    notify('error', '', String((result && result.message) || '刷新余额失败，请稍后重试。'));
+                    return;
+                }
+                page.find('[data-payment-account-balance="' + accountId.replace(/"/g, '\\"') + '"]').html(String(result.balance_html));
+            }).fail(function (xhr) {
+                var response = xhr && xhr.responseJSON ? xhr.responseJSON : null;
+                notify('error', '', String((response && response.message) || '刷新余额失败，请检查 VPS 配置和网络。'));
+            }).always(function () {
+                button.prop('disabled', false).attr('aria-busy', 'false').html(originalHtml);
+            });
+        });
+
+        page.on('click', '[data-payment-account-balance-toggle]', function () {
+            var button = $(this);
+            var summary = button.closest('.payment-account-balance-summary');
+            var rows = summary.find('[data-payment-account-zero-balance]');
+            var expanded = String(button.attr('data-expanded') || 'false') === 'true';
+            var count = String(button.data('hiddenCount') || rows.length || '');
+            rows.prop('hidden', expanded);
+            button.attr('data-expanded', expanded ? 'false' : 'true')
+                .html('<i class="fa ' + (expanded ? 'fa-angle-down' : 'fa-angle-up') + '" aria-hidden="true"></i> ' + (expanded ? '展开 ' + count + ' 个零余额币种' : '收起零余额币种'));
+        });
 
         page.find('[data-payment-filter-form]').each(function () {
             var form = $(this);

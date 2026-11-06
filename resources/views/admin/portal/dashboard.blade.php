@@ -23,48 +23,36 @@
 
     <section class="portal-home-systems">
         <div class="portal-home-section-heading">
-            <h3>{{ __('portal.home.systems') }}</h3>
+            <div><h3>{{ __('portal.home.systems') }}</h3>
             <p>{{ __('portal.home.systems_intro') }}</p>
+            </div>
+            @if($canManageFolders)<button type="button" class="btn btn-primary btn-sm portal-home-folder-create" data-portal-home-folder-create><i class="fa fa-folder-o"></i> 新增文件夹</button>@endif
         </div>
 
-        @if ($systems->isEmpty())
+        @if ($systems->isEmpty() && $folderGroups->isEmpty())
             <div class="portal-home-empty">
                 <i class="fa fa-th-large"></i>
                 <h4>{{ __('portal.home.empty_title') }}</h4>
                 <p>{{ __('portal.home.empty_message') }}</p>
             </div>
         @else
-            <div class="portal-home-grid">
-                @foreach ($systems as $system)
-                    <article class="portal-home-card {{ $system['status'] === \App\Models\Portal::STATUS_MAINTENANCE ? 'is-maintenance' : '' }}">
-                        <div class="portal-home-card-heading">
-                            <div class="portal-home-card-icon"><i class="fa fa-cubes"></i></div>
-                            <span class="portal-home-card-status {{ $system['status'] === \App\Models\Portal::STATUS_MAINTENANCE ? 'is-maintenance' : '' }}">
-                                {{ __('portal.status.' . $system['status']) }}
-                            </span>
-                        </div>
-                        <div class="portal-home-card-content">
-                            <h4>{{ $system['name'] }}</h4>
-                            <p>{{ $system['remark'] ?: __('portal.public.home_ready_message') }}</p>
-                        </div>
-                        <div class="portal-home-card-footer">
-                            @if ($system['can_enter'] && $system['url'])
-                                <a href="{{ $system['url'] }}" target="_blank" rel="noopener noreferrer" class="portal-home-enter btn btn-primary btn-sm">
-                                    {{ __('portal.home.enter') }} <i class="fa fa-arrow-right"></i>
-                                </a>
-                            @else
-                                <span class="portal-home-enter is-disabled btn btn-default btn-sm"
-                                      aria-disabled="true"
-                                      title="{{ $system['status'] === \App\Models\Portal::STATUS_MAINTENANCE ? __('portal.home.maintenance') : __('portal.home.domain_unavailable') }}">
-                                    {{ __('portal.home.enter') }} <i class="fa fa-arrow-right"></i>
-                                </span>
-                            @endif
-                        </div>
-                    </article>
+            <div class="portal-home-folders" data-portal-home-folders>
+                @foreach($folderGroups as $group)
+                    <section class="portal-home-folder" data-portal-home-folder data-folder-id="{{ $group['folder']->id }}">
+                        <header class="portal-home-folder-heading"><span><i class="fa fa-folder-open-o"></i><strong>{{ $group['folder']->name }}</strong><small>{{ $group['systems']->count() }} 个系统</small></span>@if($canManageFolders)<span class="portal-home-folder-actions"><button type="button" class="btn btn-default btn-xs" data-portal-home-folder-edit data-folder-id="{{ $group['folder']->id }}" data-folder-name="{{ $group['folder']->name }}"><i class="fa fa-pencil"></i></button><button type="button" class="btn btn-default btn-xs text-danger" data-portal-home-folder-delete data-folder-id="{{ $group['folder']->id }}" data-folder-name="{{ $group['folder']->name }}"><i class="fa fa-trash"></i></button></span>@endif</header>
+                        <div class="portal-home-grid portal-home-dropzone" data-portal-home-dropzone data-folder-id="{{ $group['folder']->id }}">@foreach($group['systems'] as $system)@include('admin.portal.partials.home-card', ['system' => $system, 'canManageFolders' => $canManageFolders])@endforeach</div>
+                    </section>
                 @endforeach
+                <section @class(['portal-home-folder', 'portal-home-folder-ungrouped', 'is-empty' => $ungroupedSystems->isEmpty()]) data-portal-home-folder data-folder-id="">
+                    <header class="portal-home-folder-heading"><span><i class="fa fa-folder-o"></i><strong>未分组系统</strong><small>{{ $ungroupedSystems->count() }} 个系统</small></span></header>
+                    <div class="portal-home-grid portal-home-dropzone" data-portal-home-dropzone data-folder-id="">@foreach($ungroupedSystems as $system)@include('admin.portal.partials.home-card', ['system' => $system, 'canManageFolders' => $canManageFolders])@endforeach</div>
+                </section>
             </div>
         @endif
     </section>
 </div>
 
-
+@if($canManageFolders)
+<div class="modal fade" id="portal-home-folder-modal" tabindex="-1" role="dialog"><div class="modal-dialog modal-sm" role="document"><form class="modal-content" data-portal-home-folder-form><div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title">新增文件夹</h4></div><div class="modal-body"><div class="form-group"><label for="portal-home-folder-name">文件夹名称</label><input id="portal-home-folder-name" class="form-control" name="name" maxlength="100" required autocomplete="off"></div></div><div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">取消</button><button type="submit" class="btn btn-primary">保存</button></div></form></div></div>
+<script>window.PortalHomeFolders={storeUrl:@json(route(config('admin.route.prefix').'.portal.home-folders.store')),layoutUrl:@json(route(config('admin.route.prefix').'.portal.home-folders.layout')),updateUrl:@json(route(config('admin.route.prefix').'.portal.home-folders.update',['folder'=>'__FOLDER__'])),deleteUrl:@json(route(config('admin.route.prefix').'.portal.home-folders.destroy',['folder'=>'__FOLDER__']))};</script>
+@endif

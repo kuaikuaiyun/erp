@@ -7,6 +7,8 @@ use App\Models\AdminUser;
 use App\Models\LogisticsPayPalAccount;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Payment\PaymentAccountRiskService;
+use App\Portals\Payment\PaymentPayPalBalanceRefreshException;
+use App\Portals\Payment\PaymentPayPalBalanceRefreshService;
 use App\Portals\Payment\PaymentCreditCardRiskService;
 use App\Portals\Payment\PaymentOrderSearchService;
 use App\Portals\Payment\PaymentPayPalMonthlyReportExportService;
@@ -30,6 +32,7 @@ class PaymentPortalController extends Controller
         private readonly PortalEntryController $portalEntries,
         private readonly PaymentPortalService $payment,
         private readonly PaymentAccountRiskService $accountRisk,
+        private readonly PaymentPayPalBalanceRefreshService $balanceRefresh,
         private readonly PaymentCreditCardRiskService $creditCardRisk,
         private readonly PaymentProductRiskService $productRisk,
         private readonly PaymentOrderSearchService $paymentOrders,
@@ -103,6 +106,27 @@ class PaymentPortalController extends Controller
 
         return redirect()->route('payment.account-risk.index')
             ->with('success', __('payment.account_risk.edit_modal.success_message'));
+    }
+
+    public function refreshAccountRiskBalance(Request $request, LogisticsPayPalAccount $account): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        try {
+            $this->balanceRefresh->refresh($account);
+        } catch (PaymentPayPalBalanceRefreshException $exception) {
+            return response()->json(['ok' => false, 'message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json([
+            'ok' => true,
+            'balance_html' => view('portals.payment.partials.account-risk-balance', [
+                'balance' => $this->accountRisk->balanceForAccount($account),
+            ])->render(),
+        ]);
     }
 
     public function accountRiskDetail(Request $request, LogisticsPayPalAccount $account): Response
@@ -521,10 +545,10 @@ class PaymentPortalController extends Controller
         ];
     }
 
-    /** @return array{account_name:string,merchant_id:string,account_email:?string,environment:string,is_enabled:bool} */
+    /** @return array<string,mixed> */
     private function validatedAccount(Request $request, ?LogisticsPayPalAccount $account = null): array
     {
-        foreach (['account_name', 'merchant_id', 'account_email'] as $field) {
+        foreach (['account_name', 'merchant_id', 'account_email', 'relay_url', 'relay_certificate_thumbprint_sha1', 'relay_hmac_secret'] as $field) {
             if ($request->has($field)) {
                 $request->merge([$field => trim((string) $request->input($field))]);
             }
@@ -537,20 +561,43 @@ class PaymentPortalController extends Controller
             $emailUnique->ignore($account->getKey());
         }
 
+        $secretRequired = ! $account || blank($account->relay_hmac_secret);
         $data = $request->validate([
             'account_name' => ['required', 'string', 'max:191'],
             'merchant_id' => ['required', 'string', 'max:100', $merchantUnique],
             'account_email' => ['nullable', 'email', 'max:191', $emailUnique],
             'environment' => ['required', Rule::in([LogisticsPayPalAccount::ENVIRONMENT_LIVE, LogisticsPayPalAccount::ENVIRONMENT_SANDBOX])],
             'is_enabled' => ['required', 'boolean'],
+            'relay_url' => ['required', 'string', 'max:500', 'url', 'regex:/^https:\/\//i'],
+            'relay_certificate_thumbprint_sha1' => ['required', 'regex:/^[A-Fa-f0-9]{40}$/'],
+            'relay_hmac_secret' => [
+                $secretRequired ? 'required' : 'nullable',
+                'string',
+                'max:512',
+                static function (string $attribute, mixed $value, \Closure $fail): void {
+                    if (blank($value)) {
+                        return;
+                    }
+                    $decoded = base64_decode((string) $value, true);
+                    if ($decoded === false || strlen($decoded) !== 32) {
+                        $fail('中转 HMAC 密钥必须是有效的 32 字节 Base64 值。');
+                    }
+                },
+            ],
         ]);
 
-        return [
+        $result = [
             ...$data,
             'merchant_id' => mb_strtoupper((string) $data['merchant_id']),
             'account_email' => blank($data['account_email'] ?? null) ? null : mb_strtolower((string) $data['account_email']),
             'is_enabled' => (bool) $data['is_enabled'],
+            'relay_certificate_thumbprint_sha1' => mb_strtoupper((string) $data['relay_certificate_thumbprint_sha1']),
         ];
+        if (blank($result['relay_hmac_secret'] ?? null)) {
+            unset($result['relay_hmac_secret']);
+        }
+
+        return $result;
     }
 
     /** @return array<string,mixed> */

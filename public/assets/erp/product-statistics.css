@@ -263,6 +263,7 @@
 .product-statistics-detail-sort:hover, .product-statistics-detail-sort:focus, .product-statistics-detail-sort.is-active { color: #1677bd; }
 .product-statistics-detail-sort.is-active .fa { color: #1677bd; }
 .product-statistics-modal-footnote { color: #92a4b4; font-size: 12px; }
+.payment-product-rate-card { flex-wrap: wrap; justify-content: flex-start; gap: 2px 4px; }.payment-product-rate-card small { flex-basis: 100%; color: currentColor; font-size: 9px; font-weight: 400; line-height: 1.35; white-space: nowrap; opacity: .8; }
 @keyframes product-statistics-row-in { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 1320px) { .product-statistics-filters { grid-template-columns: repeat(3, minmax(230px, 1fr)); } .product-statistics-overview-modules { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 900px) { .product-statistics-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .product-statistics-summary-item:nth-child(3)::before { display: none; } .product-statistics-reason-panels { grid-template-columns: 1fr; } .product-statistics-reason-panel + .product-statistics-reason-panel { border-top: 1px solid #e8eef4; border-left: 0; } .product-statistics-refund-selection > div { grid-template-columns: repeat(2, minmax(0, 1fr)); } .product-statistics-refund-selection article:nth-child(3)::before { display: none; } .product-statistics-pagination { flex-wrap: wrap; padding-right: 20px; padding-left: 20px; gap: 12px 16px; } }
