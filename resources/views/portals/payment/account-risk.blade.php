@@ -17,7 +17,7 @@
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261026-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261026-1">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-account-risk.css?v=20261106-6">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-account-risk.css?v=20261106-7">
 @endpush
 
 @section('content')
@@ -40,9 +40,10 @@
         @if ($isCreditCardModule)
             <div class="box box-solid payment-account-filter-box">
                 <div class="box-body">
-                    <form class="payment-account-filter-form payment-credit-card-filter" method="get" action="{{ route('payment.account-risk.index') }}">
+                    <form class="payment-account-filter-form payment-credit-card-filter" method="get" action="{{ route('payment.account-risk.index') }}" data-payment-filter-form data-payment-server-filter-form>
                         <input type="hidden" name="module" value="credit_card">
                         <input type="hidden" name="per_page" value="{{ $dashboard['pagination']['per_page'] }}">
+                        <div class="payment-account-filter-field payment-account-date-mode-field"><span>{{ __($translationPrefix.'.filters.date_mode') }}</span><input type="hidden" name="date_mode" value="{{ $dashboard['filters']['date_mode'] ?? 'order' }}" data-payment-account-date-mode-input><div class="payment-account-date-mode" role="group" aria-label="{{ __($translationPrefix.'.filters.date_mode') }}"><button type="button" class="{{ ($dashboard['filters']['date_mode'] ?? 'order') === 'order' ? 'active' : '' }}" data-payment-account-date-mode="order">付款时间</button><button type="button" class="{{ ($dashboard['filters']['date_mode'] ?? 'order') === 'event' ? 'active' : '' }}" data-payment-account-date-mode="event">真实退款/纠纷时间</button></div></div>
                         <label class="payment-account-filter-field payment-account-period-field">
                             <span>{{ __('payment.common.period') }}</span>
                             <span class="payment-account-date-range"><input class="form-control" type="date" name="period_start" value="{{ $dashboard['period_start'] }}"><b>{{ __($translationPrefix.'.filters.range_to') }}</b><input class="form-control" type="date" name="period_end" value="{{ $dashboard['period_end'] }}"></span>

@@ -599,7 +599,7 @@ class FinancePortalTest extends TestCase
         $record = FinanceRecord::where('reference', '0000123')->sole();
         $original = $record->payload;
         $this->get('/finance/reports/paypal-settlement')->assertOk()->assertViewHas('rows', fn ($rows) => $rows->total() === 1)
-            ->assertSee('导入补充数据')->assertSee('添加筛选条件');
+            ->assertSee('导入数据')->assertSee('添加筛选条件');
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
         $values = array_fill_keys(array_keys($service->moneyFields('paypal')), '0');
         $values = [...$values, 'usd_rate' => '1', 'fee' => '0.50', 'refund' => '2', 'fee_return' => '0.10', 'logistics' => '6.7628', 'purchase' => '13.5256', 'domain' => 'shopyayashi.com', 'subscription' => '订阅'];
@@ -628,26 +628,206 @@ class FinancePortalTest extends TestCase
         $this->post('/finance/reports/paypal-settlement/save', ['id' => $record->id, ...$values])->assertSessionHasErrors('month');
     }
 
-    public function test_paypal_detail_columns_match_workbook_and_export_can_be_reimported(): void
+    public function test_paypal_new_import_creates_records_and_skips_only_duplicate_rows(): void
+    {
+        $account = $this->financePayPalAccount('新增测试账户');
+        $this->workbooks->importRecords('paypal-orders', [2 => $this->recordRow()], $account->activity_account, 'UTC', 1);
+        $original = FinanceRecord::sole();
+        $originalPayload = $original->payload;
+        $headers = ['记录ID', '支付账户', '交易 ID', '日期', '时间', '时区', '姓名', '类型', '状态', '货币', '总额', '费用', '净额',
+            '寄件人电邮地址', '偏好设定 Txn ID', '帐单号码', '余额影响', '订阅类型', '是否加购', '域名', '使用人', '团队', '通途订单', '备注', '物流-元'];
+        $base = ['自动生成', $account->account_name, 'NEW-PAYPAL-1', '2026-11-06', '04:00:00', 'UTC', '新增买家', 'PayPal Checkout付款', 'S', 'USD', '21', '-0.81', '20.19',
+            'new@example.test', 'NEW-RELATED', 'NEW-INVOICE', 'Credit', '订阅', '否', 'new.example.test', '新增使用人', '新增团队', 'NEW-ERP', '新记录备注', '11'];
+        $existing = $base; $existing[2] = $original->reference; $existing[10] = '999';
+        $second = $base; $second[2] = 'NEW-PAYPAL-2';
+        $book = new Spreadsheet;
+        $book->getActiveSheet()->setTitle('贝宝导入模版')->fromArray([$headers, $existing, $base, $base, $second], null, 'A1');
+        $this->post('/finance/reports/paypal-settlement/import', ['import_mode' => 'create', 'file' => $this->upload($book)])
+            ->assertSessionHasNoErrors()->assertSessionHas('success', fn ($text) => str_contains($text, '已新增 2 条') && str_contains($text, '跳过重复 2 条'));
+        $this->assertDatabaseCount('finance_records', 3);
+        $this->assertSame($originalPayload, $original->fresh()->payload);
+        $record = FinanceRecord::where('reference', 'NEW-PAYPAL-1')->sole();
+        $this->assertNotSame($original->id, $record->id);
+        $row = app(\App\Portals\Finance\FinanceSettlementService::class)->rows('paypal', ['reference' => $record->reference])->sole();
+        foreach (['owner' => '新增使用人', 'team' => '新增团队', 'domain' => 'new.example.test', 'subscription' => '订阅', 'upsell' => '否', 'erp_order' => 'NEW-ERP', 'note' => '新记录备注', 'paypal_12' => 'NEW-RELATED'] as $key => $value) {
+            $this->assertSame($value, $row[$key], $key);
+        }
+        $this->assertSame('21', $row['gross']);
+        // Reimporting the entire file is a successful no-op rather than an error.
+        $this->post('/finance/reports/paypal-settlement/import', ['import_mode' => 'create', 'file' => $this->upload($book)])
+            ->assertSessionHasNoErrors()->assertSessionHas('success', fn ($text) => str_contains($text, '已新增 0 条') && str_contains($text, '跳过重复 4 条'));
+        $this->assertDatabaseCount('finance_records', 3);
+        $locked = $base; $locked[2] = 'LOCKED-NEW-PAYPAL';
+        $lockedBook = new Spreadsheet;
+        $lockedBook->getActiveSheet()->fromArray([$headers, $locked], null, 'A1');
+        DB::table('finance_period_locks')->updateOrInsert(['month' => '2026-11'], ['report_snapshot' => '[]']);
+        $this->post('/finance/reports/paypal-settlement/import', ['import_mode' => 'create', 'file' => $this->upload($lockedBook)])
+            ->assertSessionHasErrors('file');
+        $this->assertDatabaseCount('finance_records', 3);
+        $this->assertDatabaseMissing('finance_records', ['reference' => 'LOCKED-NEW-PAYPAL']);
+    }
+
+    public function test_paypal_editor_updates_all_visible_business_fields_and_rejects_duplicate_transaction_ids(): void
+    {
+        $account = $this->financePayPalAccount('编辑原账户');
+        $target = $this->financePayPalAccount('编辑新账户');
+        $this->workbooks->importRecords('paypal-orders', [2 => $this->recordRow(), 3 => [...$this->recordRow(), '交易 ID' => 'EXISTING-ID']], $account->activity_account, 'UTC', 1);
+        $record = FinanceRecord::where('reference', '0000123')->sole();
+        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $current = $service->rows('paypal', ['reference' => $record->reference])->sole();
+        $values = array_intersect_key($current, array_diff_key($service->columns('paypal'), ['id' => true]));
+        $values = [...$values, 'id' => $record->id, 'account' => $target->account_name, 'reference' => 'EDITED-ID',
+            'paypal_0' => '2026-11-07', 'paypal_1' => '02:00:00', 'paypal_2' => 'UTC', 'paypal_3' => '编辑姓名', 'paypal_4' => 'T0006', 'paypal_5' => 'S',
+            'paypal_6' => 'EUR', 'paypal_7' => '30', 'paypal_8' => '-1', 'paypal_9' => '29', 'paypal_10' => 'edited@example.test',
+            'paypal_12' => 'EDITED-RELATED', 'paypal_13' => 'EDITED-INVOICE', 'paypal_14' => 'Credit',
+            'month' => '2026-11', 'date' => '2026-11-07 10:00:00', 'timezone' => 'Asia/Shanghai',
+            'subscription' => '订阅', 'upsell' => '否', 'converted_usd' => '34.8', 'usd_rate' => '1.2', 'settlement' => '36', 'fee' => '1.2',
+            'domain' => 'edited.example.test', 'owner' => '编辑使用人', 'team' => '编辑团队', 'erp_order' => 'EDITED-ERP', 'note' => '编辑备注'];
+        $page = $this->get('/finance/reports/paypal-settlement')->assertOk();
+        foreach (array_diff_key($service->columns('paypal'), ['id' => true]) as $field => $label) {
+            $page->assertSee('id="edit-'.$field.'"', false);
+        }
+        $page->assertDontSee('原始交易与计算结果（只读）');
+        DB::table('finance_payment_transactions')->insert(['payment_account_id' => $account->id, 'finance_record_id' => $record->id, 'transaction_id' => $record->reference, 'event_code' => 'T0006', 'raw_payload' => '{}']);
+        $this->post('/finance/reports/paypal-settlement/save', $values)->assertSessionHasNoErrors();
+        $updated = $record->fresh();
+        $this->assertSame('EDITED-ID', $updated->reference);
+        $this->assertSame($target->activity_account, $updated->account);
+        $this->assertSame('2026-11-07 02:00:00', $updated->occurred_at->format('Y-m-d H:i:s'));
+        $row = $service->rows('paypal', ['reference' => 'EDITED-ID'])->sole();
+        foreach (array_diff_key($values, ['id' => true, 'paypal_4' => true]) as $field => $value) {
+            $this->assertEquals($value ?? '', $row[$field] ?? '', $field);
+        }
+        $this->assertDatabaseHas('finance_payment_transactions', ['finance_record_id' => $record->id, 'payment_account_id' => $target->id, 'transaction_id' => 'EDITED-ID']);
+        $payload = $updated->payload;
+        $this->post('/finance/reports/paypal-settlement/save', ['id' => $record->id, 'reference' => 'EXISTING-ID', 'paypal_7' => '999'])->assertSessionHasErrors('reference');
+        $this->assertSame($payload, $record->fresh()->payload);
+        $this->assertSame('EDITED-ID', $record->fresh()->reference);
+        $this->post('/finance/reports/paypal-settlement/save', ['id' => $record->id, 'date' => '2026-02-30 01:00:00'])->assertSessionHasErrors('date');
+        // Non-unique business text may repeat and explicit blanks must stay blank.
+        $this->post('/finance/reports/paypal-settlement/save', ['id' => $record->id, 'owner' => '', 'domain' => ''])->assertSessionHasNoErrors();
+        $this->assertSame('', $service->rows('paypal', ['reference' => 'EDITED-ID'])->sole()['owner']);
+        DB::table('finance_period_locks')->updateOrInsert(['month' => '2026-12'], ['report_snapshot' => '[]']);
+        $this->post('/finance/reports/paypal-settlement/save', ['id' => $record->id, 'date' => '2026-12-01 10:00:00'])->assertSessionHasErrors('month');
+        $this->assertSame('2026-11-07 02:00:00', $record->fresh()->occurred_at->format('Y-m-d H:i:s'));
+    }
+
+    public function test_credit_editor_updates_transaction_fields_and_calculated_amounts(): void
+    {
+        $account = $this->financePayPalAccount('信用卡编辑', ['account_type' => 'credit_card']);
+        $payload = [...array_fill_keys(FinanceCatalog::dataset('xuzong2-details')['headers'], ''), '平台订单号' => 'CARD-EDIT', '商户订单号' => 'MERCHANT-EDIT',
+            '创建时间' => '2026-11-06 02:00:00', '交易币种' => 'USD', '交易金额' => '10', '支付状态' => 'SUCCESS'];
+        $this->workbooks->importRecords('xuzong2-details', [2 => $payload, 3 => [...$payload, '平台订单号' => 'CARD-DUPLICATE']], $account->activity_account, 'UTC', 1);
+        $record = FinanceRecord::where('reference', 'CARD-EDIT')->sole();
+        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $page = $this->get('/finance/reports/credit-settlement')->assertOk();
+        foreach (array_diff_key($service->columns('credit_card'), ['id' => true]) as $field => $label) {
+            $page->assertSee('id="edit-'.$field.'"', false);
+        }
+        $this->post('/finance/reports/credit-settlement/save', ['id' => $record->id, 'reference' => 'CARD-DUPLICATE', 'gross' => '999'])->assertSessionHasErrors('reference');
+        $this->assertSame('10', $record->fresh()->payload['交易金额']);
+        $values = ['id' => $record->id, 'reference' => 'CARD-NEW-ID', 'date' => '2026-11-08 10:00:00', 'timezone' => 'Asia/Shanghai',
+            'currency' => 'EUR', 'gross' => '25', 'status' => '成功', 'settlement' => '28', 'source_settlement_usd' => '27', 'currency_warning' => '已人工核对',
+            'owner' => '财务使用人', 'team' => '财务团队', 'usd_rate' => '1.1'];
+        $this->post('/finance/reports/credit-settlement/save', $values)->assertSessionHasNoErrors();
+        $row = $service->rows('credit_card', ['reference' => 'CARD-NEW-ID'])->sole();
+        foreach (array_diff_key($values, ['id' => true, 'status' => true]) as $field => $value) {
+            $this->assertEquals($value, $row[$field], $field);
+        }
+        $this->assertSame('SUCCESS', $record->fresh()->status);
+        $this->assertSame('已完成', $row['status']);
+        $export = $this->readDownload($this->get('/finance/reports/credit-settlement?reference=CARD-NEW-ID&download=1')->assertOk()->streamedContent())->toArray();
+        $this->assertEquals(28, $export[1][array_search('结算金额（美元）', $export[0], true)]);
+    }
+
+    public function test_settlement_editor_saves_all_supplement_text_fields(): void
     {
         $this->workbooks->importRecords('paypal-orders', [2 => $this->recordRow()], 'A', 'UTC', 1);
+        $record = FinanceRecord::sole();
+        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $page = $this->get('/finance/reports/paypal-settlement')->assertOk();
+        foreach ($service->textFields('paypal') as $field => $label) {
+            $page->assertSee('id="edit-'.$field.'"', false);
+        }
+        $page->assertSee('id="edit-reference"', false)->assertSee('删除所选');
+        $values = ['id' => $record->id, 'owner' => '手动使用人', 'team' => '手动团队', 'paypal_12' => 'MANUAL-TXN',
+            'domain' => 'manual.example.test', 'subscription' => '订阅', 'upsell' => '否', 'erp_order' => 'MANUAL-ERP', 'note' => '手动备注'];
+        $this->post('/finance/reports/paypal-settlement/save', $values)->assertSessionHasNoErrors();
+        $row = $service->rows('paypal', [])->sole();
+        foreach (array_diff_key($values, ['id' => true]) as $field => $value) {
+            $this->assertSame($value, $row[$field], $field);
+        }
+        $this->post('/finance/reports/paypal-settlement/save', ['id' => $record->id, 'owner' => str_repeat('a', 192)])->assertSessionHasErrors('owner');
+        $this->assertSame('手动使用人', $service->rows('paypal', [])->sole()['owner']);
+    }
+
+    public function test_settlement_delete_removes_reports_but_preserves_orders_and_checks_locks_and_permissions(): void
+    {
+        $this->workbooks->importRecords('paypal-orders', [2 => $this->recordRow(),
+            3 => [...$this->recordRow(), '交易 ID' => 'DELETE-SECOND']], 'A', 'UTC', 1);
+        $ids = FinanceRecord::pluck('id')->all();
+        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $this->user->manage = false;
+        $this->delete('/finance/reports/paypal-settlement/records', ['ids' => $ids])->assertForbidden();
+        $this->user->manage = true;
+        $this->delete('/finance/reports/credit-settlement/records', ['ids' => $ids])->assertSessionHasErrors('ids');
+        $this->assertCount(2, $service->rows('paypal', []));
+        $month = FinanceRecord::first()->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m');
+        $this->workbooks->database()->table('finance_period_locks')->insert(['month' => $month, 'report_snapshot' => '[]']);
+        $this->delete('/finance/reports/paypal-settlement/records', ['ids' => $ids])->assertSessionHasErrors('ids');
+        $this->assertCount(2, $service->rows('paypal', []));
+        $this->workbooks->database()->table('finance_period_locks')->where('month', $month)->delete();
+        $this->delete('/finance/reports/paypal-settlement/records', ['ids' => $ids])->assertRedirect(route('finance.report', 'paypal-settlement'))->assertSessionHasNoErrors();
+        $this->assertCount(0, $service->rows('paypal', []));
+        $this->get('/finance/reports/paypal-settlement')->assertViewHas('rows', fn ($rows) => $rows->total() === 0);
+        $this->assertDatabaseCount('finance_records', 2);
+        $this->assertSame(2, $this->workbooks->database()->table('finance_settlement_supplements')->whereNotNull('payload->_deleted_at')->count());
+        $this->delete('/finance/reports/paypal-settlement/records', ['ids' => [$ids[0]]])->assertSessionHasErrors('ids');
+        $book = new Spreadsheet;
+        $book->getActiveSheet()->fromArray([['记录ID', '备注'], [(string) $ids[0], '重新导入']], null, 'A1');
+        $this->post('/finance/reports/paypal-settlement/import', ['file' => $this->upload($book)])
+            ->assertSessionHasErrors('file');
+    }
+
+    public function test_paypal_import_cannot_update_existing_records_even_with_legacy_mode(): void
+    {
+        $account = $this->financePayPalAccount('导入只新增');
+        $this->workbooks->importRecords('paypal-orders', [2 => $this->recordRow()], $account->activity_account, 'UTC', 1);
+        $record = FinanceRecord::sole();
+        $original = $record->payload;
+        $book = new Spreadsheet;
+        $book->getActiveSheet()->fromArray([['记录ID', '支付账户', '交易 ID', '备注'], [(string) $record->id, $account->account_name, $record->reference, '不能覆盖']], null, 'A1');
+        foreach ([[], ['import_mode' => 'supplement']] as $input) {
+            $this->post('/finance/reports/paypal-settlement/import', [...$input, 'file' => $this->upload($book)])
+                ->assertSessionHasNoErrors()->assertSessionHas('success', fn ($text) => str_contains($text, '已新增 0 条') && str_contains($text, '跳过重复 1 条'));
+        }
+        $this->assertSame($original, $record->fresh()->payload);
+        $this->assertDatabaseCount('finance_settlement_supplements', 0);
+        $this->assertDatabaseCount('finance_records', 1);
+        $this->get('/finance/reports/paypal-settlement')->assertDontSee('id="paypal-import-mode"', false)->assertDontSee('补充已有记录');
+    }
+
+    public function test_paypal_detail_columns_match_workbook_and_export_can_be_reimported(): void
+    {
+        $account = $this->financePayPalAccount('A');
+        $this->workbooks->importRecords('paypal-orders', [2 => $this->recordRow()], $account->activity_account, 'UTC', 1);
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
         $expected = array_map(FinanceCatalog::simplified(...), array_values(FinanceCatalog::source()['headers'])[0]);
         $expected = array_values(array_filter($expected, fn ($header) => $header !== '应结算'));
         $actual = array_values($service->columns('paypal'));
         $this->assertSame(['记录ID', '支付账户', ...$expected], $actual);
         $template = $this->readDownload($this->get('/finance/reports/paypal-settlement?template=1')->assertOk()->streamedContent());
-        $this->assertSame(array_values($service->importFields('paypal')), $template->rangeToArray('A1:O1')[0]);
+        $this->assertSame(array_values($service->columns('paypal')), $template->toArray()[0]);
         $sheet = $this->readDownload($this->get('/finance/reports/paypal-settlement?download=1')->assertOk()->streamedContent());
         $this->assertSame($actual, $sheet->rangeToArray('A1:AP1')[0]);
         $refundColumn = array_search('退款金额', $actual, true) + 1;
         $sheet->setCellValue([$refundColumn, 2], '2.50');
         $this->post('/finance/reports/paypal-settlement/import', ['file' => $this->upload($sheet->getParent())])->assertRedirect()->assertSessionHasNoErrors();
-        $this->assertSame('2.5', $service->rows('paypal', [])->first()['refund']);
+        $this->assertNull($service->rows('paypal', [])->first()['refund']);
         $book = new Spreadsheet;
-        $book->getActiveSheet()->fromArray([['交易 ID', '退款金额'], ['0000123', '3.50']]);
+        $book->getActiveSheet()->fromArray([['支付账户', '交易 ID', '退款金额'], ['A', '0000123', '3.50']]);
         $this->post('/finance/reports/paypal-settlement/import', ['file' => $this->upload($book)])->assertRedirect()->assertSessionHasNoErrors();
-        $this->assertSame('3.5', $service->rows('paypal', [])->first()['refund']);
+        $this->assertNull($service->rows('paypal', [])->first()['refund']);
         $this->assertDatabaseCount('finance_records', 1);
     }
 
@@ -668,18 +848,67 @@ class FinancePortalTest extends TestCase
         $paypal->fromArray([array_values($paypalRow)], null, 'A2');
         $card = $book->createSheet()->setTitle('徐总支付导入模版');
         $cardHeaders = array_values($service->importFields('credit_card'));
-        $this->assertCount(15, $paypalHeaders); $this->assertCount(18, $cardHeaders);
+        $this->assertCount(22, $paypalHeaders); $this->assertCount(25, $cardHeaders);
         $card->fromArray($cardHeaders, null, 'A1');
         $cardRow = array_fill_keys($cardHeaders, '');
         $cardRow['商户订单号'] = 'MERCHANT-1'; $cardRow['平台订单号'] = 'PLATFORM-1'; $cardRow['结算金额'] = '9.5'; $cardRow['交易手续费'] = '0.5';
         $card->fromArray([array_values($cardRow)], null, 'A2');
-        foreach (['paypal-settlement', 'credit-settlement'] as $report) {
+        foreach (['credit-settlement'] as $report) {
             $this->post('/finance/reports/'.$report.'/import', ['file' => $this->upload($book)])->assertRedirect()->assertSessionHasNoErrors();
         }
-        $this->assertSame('2.5', $service->rows('paypal', [])->first()['refund']);
-        $this->assertSame('9.5', $service->rows('credit_card', [])->first()['settlement']);
-        $this->assertSame('0.5', $service->rows('credit_card', [])->first()['fee']);
+        $this->assertNull($service->rows('paypal', [])->first()['refund']);
+        $this->assertSame('10.00000000', $service->rows('credit_card', [])->first()['settlement']);
+        $this->assertNull($service->rows('credit_card', [])->first()['fee']);
         $this->assertDatabaseCount('finance_records', 2);
+    }
+
+    public function test_credit_full_field_import_keeps_business_fields_costs_and_skips_duplicates_without_updating(): void
+    {
+        $account = $this->financePayPalAccount('信用卡全字段账户', ['account_type' => 'credit_card']);
+        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $headers = array_values(array_unique(['支付账户', ...FinanceCatalog::dataset('xuzong2-details')['headers'], '汇率', '手续费']));
+        $base = array_fill_keys($headers, '模拟值');
+        foreach ($service->importFields('credit_card') as $field => $label) {
+            if (isset($service->moneyFields('credit_card')[$field]) || $field === 'settlement') {
+                $base[$label] = $field === 'usd_rate' ? '1' : '0.5';
+            }
+        }
+        $base = [...$base, '支付账户' => $account->account_name, '商户订单号' => 'CARD-FULL-MERCHANT', '平台订单号' => 'CARD-FULL-TXN',
+            '创建时间' => '2026-11-06 12:00:00', '完成时间' => '2026-11-06 12:01:00', '年月' => '2026-11',
+            '时间点' => '2026-11-06 12:00:00', '导出时区' => 'Asia/Shanghai', '交易币种' => 'USD', '交易金额' => '50',
+            '订单币种' => 'USD', '订单金额' => '50', '支付状态' => 'SUCCESS', '订阅类型' => '订阅', '是否加购' => '否',
+            '域名' => 'card-full.example.test', '使用人' => '信用卡使用人', '团队' => '信用卡团队', '通途订单' => 'CARD-FULL-ERP', '备注' => '信用卡全字段',
+            '交易手续费' => '', '手续费' => '1.25'];
+        $book = new Spreadsheet;
+        $book->getActiveSheet()->fromArray([$headers, array_values($base), array_values($base)], null, 'A1');
+        $request = ['account' => $account->activity_account, 'import_month' => '2026-11'];
+        $this->post('/finance/reports/credit-settlement/import', [...$request, 'file' => $this->upload($book)])
+            ->assertSessionHasNoErrors()->assertSessionHas('success', fn ($text) => str_contains($text, '已新增 1 条') && str_contains($text, '跳过重复 1 条'));
+        $row = $service->rows('credit_card', [])->sole();
+        foreach ($service->textFields('credit_card') as $field => $label) {
+            $this->assertSame($base[$label], $row[$field], $field);
+        }
+        foreach ($service->importFields('credit_card') as $field => $label) {
+            if (isset($service->moneyFields('credit_card')[$field]) || $field === 'settlement') {
+                $this->assertEquals($field === 'fee' ? 1.25 : (float) $base[$label], (float) $row[$field], $field);
+            }
+        }
+        $record = FinanceRecord::sole();
+        $this->assertSame('模拟值', $record->payload['消费者邮箱']);
+        $originalPayload = $record->payload;
+        $originalSupplement = DB::table('finance_settlement_supplements')->value('payload');
+        $base['使用人'] = '不能覆盖'; $base['交易金额'] = '999'; $base['交易手续费'] = '999';
+        $fresh = $base; $fresh['平台订单号'] = 'CARD-FULL-NEW'; $fresh['商户订单号'] = 'CARD-FULL-NEW-MERCHANT';
+        $book->getActiveSheet()->fromArray([array_values($base), array_values($fresh)], null, 'A2');
+        $this->post('/finance/reports/credit-settlement/import', [...$request, 'file' => $this->upload($book)])
+            ->assertSessionHasNoErrors()->assertSessionHas('success', fn ($text) => str_contains($text, '已新增 1 条') && str_contains($text, '跳过重复 1 条'));
+        $this->assertSame($originalPayload, $record->fresh()->payload);
+        $this->assertSame($originalSupplement, DB::table('finance_settlement_supplements')->where('finance_record_id', $record->id)->value('payload'));
+        $this->assertDatabaseCount('finance_records', 2);
+        $page = $this->get('/finance/reports/credit-settlement')->assertOk();
+        foreach (['owner', 'team', 'subscription', 'upsell', 'erp_order', 'note', 'domain'] as $field) {
+            $page->assertSee('id="edit-'.$field.'"', false);
+        }
     }
 
     public function test_credit_import_allows_shared_platform_number_with_different_merchant_orders(): void
@@ -707,7 +936,7 @@ class FinancePortalTest extends TestCase
         $rows = $service->rows('credit_card', []);
         foreach (['MERCHANT-A' => '1.25', 'MERCHANT-B' => '2.5'] as $merchant => $fee) {
             $record = FinanceRecord::where('payload->商户订单号', $merchant)->sole();
-            $this->assertSame($fee, $rows->firstWhere('id', $record->id)['fee']);
+            $this->assertNull($rows->firstWhere('id', $record->id)['fee']);
         }
         $this->assertDatabaseCount('finance_records', 2);
     }
@@ -743,19 +972,20 @@ class FinancePortalTest extends TestCase
         $this->assertNull($rows['TEMPLATE-1']['settlement']);
     }
 
-    public function test_paypal_settlement_import_reads_conversion_and_rate_columns(): void
+    public function test_paypal_new_import_reads_conversion_and_rate_columns(): void
     {
-        $this->workbooks->importRecords('paypal-orders', [2 => [...$this->recordRow(), '貨幣' => 'HKD',
-            '總額' => '80', '費用' => '-8', '淨額' => '72']], 'A', 'UTC', 1);
-        $record = FinanceRecord::firstOrFail();
+        $account = $this->financePayPalAccount('换汇账户');
         $book = new Spreadsheet;
-        $book->getActiveSheet()->fromArray([['记录ID', '转换美元', '汇率'], [(string) $record->id, '9', '0.125']], null, 'A1');
-        $this->post('/finance/reports/paypal-settlement/import', ['file' => $this->upload($book)])
-            ->assertRedirect()->assertSessionHasNoErrors();
-        $row = app(\App\Portals\Finance\FinanceSettlementService::class)->rows('paypal', [], FinanceRecord::query()->whereKey($record->id)->get())->first();
+        $book->getActiveSheet()->fromArray([
+            ['支付账户', '交易 ID', '日期', '时间', '时区', '类型', '状态', '货币', '总额', '费用', '净额', '转换美元', '汇率'],
+            [$account->account_name, 'NEW-HKD', '2026-11-06', '04:00:00', 'UTC', 'PayPal Checkout付款', 'S', 'HKD', '80', '-8', '72', '9', '0.125'],
+        ], null, 'A1');
+        $this->post('/finance/reports/paypal-settlement/import', ['file' => $this->upload($book)])->assertSessionHasNoErrors();
+        $row = app(\App\Portals\Finance\FinanceSettlementService::class)->rows('paypal', [])->sole();
         $this->assertEquals(9, $row['converted_usd']);
         $this->assertEquals(0.125, $row['usd_rate']);
         $this->assertEquals(10, $row['settlement']);
+        $this->assertDatabaseCount('finance_records', 1);
     }
 
     public function test_actual_credit_source_file_can_be_imported_twice_without_duplicate_records(): void
@@ -1142,29 +1372,18 @@ class FinancePortalTest extends TestCase
             ->assertViewHas('filters', fn ($filters) => $filters['layer'] === 'project_classification');
     }
 
-    public function test_settlement_import_is_atomic_and_does_not_create_orders(): void
+    public function test_paypal_new_import_rolls_back_invalid_new_rows(): void
     {
-        $this->workbooks->importRecords('paypal-orders', [2 => [...$this->recordRow(), '日期' => '2026-11-02']], 'A', 'UTC', 1);
-        $record = FinanceRecord::sole();
-        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
-        $headers = ['记录ID', ...array_values($service::TEXT), ...array_values($service->moneyFields('paypal'))];
+        $account = $this->financePayPalAccount('事务验证');
         $book = new Spreadsheet;
-        $book->getActiveSheet()->fromArray($headers, null, 'A1');
-        $row = array_fill(0, count($headers), '');
-        $row[0] = (string) $record->id;
-        $row[array_search('退款金额', $headers)] = '2';
-        $book->getActiveSheet()->fromArray([$row], null, 'A2');
-        $this->post('/finance/reports/paypal-settlement/import', ['file' => $this->upload($book)])->assertRedirect()->assertSessionHasNoErrors();
-        $this->assertDatabaseCount('finance_records', 1);
-        $this->assertSame('2', $service->rows('paypal', [])[0]['refund']);
-        $row[array_search('退款金额', $headers)] = '5';
-        $book->getActiveSheet()->fromArray([$row], null, 'A2');
-        $row[0] = '999999';
-        $book->getActiveSheet()->fromArray([$row], null, 'A3');
+        $book->getActiveSheet()->fromArray([
+            ['支付账户', '交易 ID', '日期', '时间', '时区', '类型', '状态', '货币', '总额', '费用', '净额', '备注'],
+            [$account->account_name, 'ATOMIC-VALID', '2026-11-06', '04:00:00', 'UTC', 'T0006', 'S', 'USD', '21', '-1', '20', '有效'],
+            [$account->account_name, 'ATOMIC-INVALID', 'bad-date', '04:00:00', 'UTC', 'T0006', 'S', 'USD', '21', '-1', '20', '无效'],
+        ], null, 'A1');
         $this->post('/finance/reports/paypal-settlement/import', ['file' => $this->upload($book)])->assertSessionHasErrors('file');
-        $this->assertSame('2', $service->rows('paypal', [])[0]['refund']);
-        $this->get('/finance/reports/credit-settlement')->assertOk()->assertDontSee('导入信用卡账单')->assertSee('导入补充数据');
-        $this->post('/finance/reports/credit-settlement/save', ['id' => $record->id])->assertNotFound();
+        $this->assertDatabaseCount('finance_records', 0);
+        $this->assertDatabaseCount('finance_settlement_supplements', 0);
     }
 
     public function test_credit_settlement_keeps_failed_attempt_fees_and_excludes_failed_sales(): void
@@ -1275,7 +1494,7 @@ class FinancePortalTest extends TestCase
         $db->table('finance_period_locks')->where('month', '2026-11')->update(['report_snapshot' => '[]']);
         $row['单笔费用'] = '9';
         $book->getActiveSheet()->fromArray([array_values($row)], null, 'A2');
-        $this->post('/finance/reports/credit-settlement/import', [...$data, 'file' => $this->upload($book)])->assertSessionHasErrors('file');
+        $this->post('/finance/reports/credit-settlement/import', [...$data, 'file' => $this->upload($book)])->assertSessionHasNoErrors()->assertSessionHas('success', fn ($text) => str_contains($text, '跳过重复 1 条'));
         $this->assertSame('0.3', FinanceRecord::sole()->payload['单笔费用']);
     }
 
