@@ -83,14 +83,8 @@
                     <td class="logistics-sale-product-details">
                         @php
                             $productItems = $paypalOrderItems->get($order?->id, collect());
-                            if ($productItems->isEmpty()) {
-                                $names = preg_split('/\r?\n/', (string) $fields[18]) ?: [];
-                                $quantities = preg_split('/\r?\n/', (string) $fields[28]) ?: [];
-                                $productItems = collect($names)->filter(fn ($name) => trim($name) !== '')->map(fn ($name, $index) => new \App\Models\LogisticsOrderItem([
-                                    'product_title' => $name,
-                                    'quantity' => is_numeric($quantities[$index] ?? null) ? $quantities[$index] : null,
-                                ]));
-                            }
+                            $productItems = \App\Portals\Finance\FinancePayPalOrderExport::productItems($productItems, (string) $fields[18],
+                                $dataset === 'paypal-orders' ? (string) ($record->payload[$definition['headers'][28]] ?? '') : (string) $fields[28]);
                         @endphp
                         @include('portals.finance.partials.paypal-order-products', ['items' => $productItems])
                     </td>

@@ -1189,10 +1189,10 @@ class FinancePortalTest extends TestCase
         foreach (['交易号' => 'LIVE-CARD-1', 'Shopify订单号' => '#1001', '通途订单号' => 'ERP-CARD',
             '账单号' => 'BILL-CARD', '店铺名称' => '物流店铺', '店铺域名' => 'example.com',
             '订阅类型' => '订阅', '加购' => '加购', '收款账号' => '物流信用卡账户',
-            '入库时间' => null, '下单时间' => '2026-11-04 01:00:00', '付款时间' => '2026-11-04 01:01:00'] as $header => $expected) {
+            '入库时间' => '', '下单时间' => '2026-11-04 01:00:00', '付款时间' => '2026-11-04 01:01:00'] as $header => $expected) {
             $this->assertSame($expected, $pageExport[1][array_search($header, $pageExport[0], true)], $header);
         }
-        $this->assertEquals(15, $pageExport[1][array_search('实付金额', $pageExport[0], true)]);
+        $this->assertEquals(15, (float) preg_replace('/[^0-9.]/', '', (string) $pageExport[1][array_search('实付金额', $pageExport[0], true)]));
         $this->get('/finance/records/xuzong2-orders')->assertOk()->assertSee('name="export_layout" value="page"', false);
 
         $this->assertDatabaseCount('finance_records', 0);
@@ -1950,6 +1950,31 @@ class FinancePortalTest extends TestCase
         $this->assertArrayNotHasKey('active_account_name', $active->fresh()->toArray());
         $this->expectException(\Illuminate\Database\UniqueConstraintViolationException::class);
         $this->financePayPalAccount('可复用名称');
+    }
+
+    public function test_product_export_splits_fields_and_keeps_unmatched_paypal_items(): void
+    {
+        $this->workbooks->importRecords('paypal-orders', [2 => [
+            ...$this->recordRow(), '物品标题' => "30ml / Buy 1\n60ml / Buy 2", '数量' => "1\n2",
+        ]], 'Unmatched products', 'UTC', 1);
+        $this->get('/finance/records/paypal-orders')->assertOk()->assertSee('30ml / Buy 1')->assertSee('60ml / Buy 2');
+        $sheet = $this->readDownload($this->get('/finance/records/paypal-orders/export?export_scope=filtered&export_layout=page')->assertOk()->streamedContent())->toArray();
+        $this->assertNotContains('出单产品明细', $sheet[0]);
+        $this->assertSame("30ml / Buy 1\n60ml / Buy 2", $sheet[1][array_search('配货名称', $sheet[0], true)]);
+        $this->assertSame("1\n2", $sheet[1][array_search('数量', $sheet[0], true)]);
+        $this->assertContains('PCL', $sheet[0]);
+        $this->assertContains('原始SKU', $sheet[0]);
+        $this->assertContains('包裹重量（克）', $sheet[0]);
+        $items = collect([
+            (object) ['tongtu_product_code' => 'PCL-A', 'shopify_sku' => 'SKU-A', 'quantity' => 1,
+                'sale_weight_gram' => 12, 'tongtu_package_weight_gram' => 18, 'tongtu_product_name' => 'Product A'],
+            (object) ['tongtu_product_code' => 'PCL-B', 'tongtu_sku' => 'ERP-B', 'quantity' => 2,
+                'tongtu_goods_weight_gram' => 20, 'product_title' => 'Product B'],
+        ]);
+        $columns = \App\Portals\Finance\FinancePayPalOrderExport::productColumns($items);
+        $this->assertSame(["PCL-A\nPCL-B", "SKU-A\n", "\nERP-B", "1\n2", "12\n20", "18\n", "Product A\nProduct B"], $columns);
+        $fallback = \App\Portals\Finance\FinancePayPalOrderExport::productItems([], "A\nB", '3');
+        $this->assertSame([null, null], $fallback->pluck('quantity')->all());
     }
 
     public function test_page_order_export_and_settlement_export_include_linked_business_fields(): void

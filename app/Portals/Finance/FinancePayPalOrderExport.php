@@ -6,7 +6,7 @@ class FinancePayPalOrderExport
 {
     public const PAGE_HEADERS = ['编号', 'Shopify订单号', 'Shopify订单ID', '通途订单号', '交易号', '账单号',
         '关联状态', '店铺名称', '店铺域名', '登录地址', '使用人', '所属团队', '加购', '订阅类型', '订阅状态',
-        '订阅复购原订单ID', '出单产品明细', '通途SKU', '数量', '商品重量', '商品',
+        '订阅复购原订单ID', 'PCL', '原始SKU', '通途SKU', '数量', '商品重量（克）', '包裹重量（克）', '配货名称',
         '支付状态', '交易类型', '支付渠道', '收款账号', '收款账号邮箱', '币种', '金额', '手续费', '净额',
         '实付金额', '运费', '入库时间', '下单时间', '付款时间', 'PayPal实际退款', '信用卡实际退款',
         '买家名称', 'Email', '国家/地区', '物流公司', '物流单号', '物流状态', '数据状态', '交易分类', '交易时间', '查看时区'];
@@ -34,7 +34,9 @@ class FinancePayPalOrderExport
         $get = static fn ($key, $fallback = '') => $order->{$key} ?? $fallback;
         $date = static fn ($value) => $value ? \Carbon\CarbonImmutable::parse($value, 'UTC')->setTimezone($timezone)->format('Y-m-d H:i:s') : '';
         $upsell = $metadata['upsell'] ?? ($record->payload['是否加购'] ?? '');
-        $products = self::values($order, $timezone, $items);
+        $products = self::productItems($items, $fields[18], $dataset === 'paypal-orders'
+            ? (string) ($record->payload[$definition['headers'][28]] ?? '') : (string) $fields[28]);
+        $productColumns = self::productColumns($products);
 
         return [$get('id', $record->id), $get('shopify_order_number'), $get('shopify_order_id'),
             $metadata['erp_order'] ?? ($record->payload['通途订单'] ?? ''), $record->reference, $get('bill_number', $fields[13]),
@@ -42,13 +44,62 @@ class FinancePayPalOrderExport
             $get('source_shop_domain'), $group->owner ?? '', $group->team ?? '',
             $upsell === '' || $upsell === null ? '' : (in_array(strtolower((string) $upsell), ['1', 'true', 'yes', '是', '加购'], true) ? '加购' : '未加购'),
             $metadata['subscription'] ?? ($record->payload['订阅类型'] ?? ''), $get('subscription_status'), $get('subscription_origin_order_id'),
-            $products[array_search('__products', array_keys(self::COLUMNS), true)], $get('tongtu_sku'), $get('sale_quantity', $fields[28]),
-            $get('sale_product_weight'), $get('tongtu_product_name', $fields[18]), $fields[5], $fields[4], $get('payment_gateway', $dataset === 'paypal-orders' ? 'PayPal' : ''),
+            ...$productColumns, $fields[5], $fields[4], $get('payment_gateway', $dataset === 'paypal-orders' ? 'PayPal' : ''),
             $account, $fields[15], $fields[6], $fields[7], $fields[8], $fields[9], $get('paid_amount_usd', $fields[7]),
             $get('total_shipping_usd'), $date($get('created_at')), $date($get('order_created_at')), $date($get('paid_at')),
             $refunds['paypal'] ?? '', $refunds['credit_card'] ?? '', $get('buyer_name', $fields[3]), $get('buyer_email', $fields[10]),
             $get('destination', $fields[36]), $get('shipping_company'), $get('tracking_number'), $get('logistics_status'),
             $get('data_status'), $category, $record->occurred_at->setTimezone($timezone)->format('Y-m-d H:i:s'), FinanceCatalog::timezoneLabel($timezone)];
+    }
+
+    /** Same product rows and fallback rules as the order list. */
+    public static function productItems(iterable $items, string $names, string $quantities): \Illuminate\Support\Collection
+    {
+        $items = collect($items)->values();
+        if ($items->isNotEmpty()) return $items;
+        $names = collect(preg_split('/\r?\n/', $names) ?: [])->filter(fn ($name) => trim($name) !== '')->values();
+        $quantities = preg_split('/\r?\n/', $quantities) ?: [];
+        return $names->map(fn ($name, $index) => new \App\Models\LogisticsOrderItem([
+            'product_title' => $name,
+            'quantity' => count($quantities) === $names->count() && is_numeric($quantities[$index] ?? null) ? $quantities[$index] : null,
+        ]));
+    }
+
+    /** Each line position identifies the same item across all seven columns. */
+    public static function productColumns(\Illuminate\Support\Collection $items): array
+    {
+        $getters = [
+            fn ($item) => $item->tongtu_product_code ?? '', fn ($item) => $item->shopify_sku ?? '',
+            fn ($item) => $item->tongtu_sku ?? '', fn ($item) => $item->quantity ?? '',
+            fn ($item) => ($item->sale_weight_gram ?? null) ?: ($item->tongtu_goods_weight_gram ?? ''),
+            fn ($item) => $item->tongtu_package_weight_gram ?? '',
+            fn ($item) => ($item->tongtu_product_name ?? null) ?: ($item->product_title ?? ''),
+        ];
+        return array_map(fn ($get, $index) => $items->map(function ($item) use ($get, $index) {
+            $value = $get($item);
+            return $index >= 3 && $index <= 5 && is_numeric($value) ? (string) (float) $value : (string) $value;
+        })->implode("\n"), $getters, array_keys($getters));
+    }
+
+    public static function download(array $headers, iterable $rows, string $filename): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        // Use the same streaming XLSX engine and multi-line row layout as logistics.
+        return app(\App\Portals\Logistics\StreamedXlsxWriter::class)->response($filename, '订单数据',
+            array_map(fn ($header) => ['label' => FinanceCatalog::simplified($header), 'width' => str_contains($header, '配货') ? 44 : 24], $headers),
+            function () use ($headers, $rows): iterable {
+                foreach ($rows as $row) {
+                    $lines = 1;
+                    $cells = [];
+                    foreach (array_values($row) as $index => $value) {
+                        $text = FinanceCatalog::simplified((string) ($value ?? ''));
+                        $lines = max($lines, substr_count($text, "\n") + 1);
+                        $numeric = preg_match('/金额|运费|净额|手续费/u', $headers[$index])
+                            && is_numeric($text) && strlen(str_replace(['-', '.'], '', $text)) <= 15;
+                        $cells[] = ['value' => $numeric ? (float) $text : $text, 'type' => $numeric ? 'money' : 'text', 'wrap' => true];
+                    }
+                    yield ['height' => min(120, max(36, $lines * 18)), 'cells' => $cells];
+                }
+            });
     }
 
     public const COLUMNS = [

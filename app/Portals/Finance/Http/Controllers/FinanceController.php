@@ -803,7 +803,9 @@ class FinanceController extends Controller
             'xls' => $this->workbooks->download($headers, $rows, $filename.'.xls', 'xls'),
             'csv' => $this->workbooks->downloadDelimited($headers, $rows, $filename.'.csv'),
             'tsv' => $this->workbooks->downloadDelimited($headers, $rows, $filename.'.tsv', "\t"),
-            default => $this->workbooks->download($headers, $rows, $filename.'.xlsx'),
+            default => $pageLayout
+                ? \App\Portals\Finance\FinancePayPalOrderExport::download($headers, $rows, $filename.'.xlsx')
+                : $this->workbooks->download($headers, $rows, $filename.'.xlsx'),
         };
     }
 

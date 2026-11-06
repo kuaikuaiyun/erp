@@ -323,7 +323,7 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
 <script>
 document.querySelectorAll('.finance-export-columns').forEach(function(panel){
     var checks=Array.from(panel.querySelectorAll('[name="report_columns[]"]'));
-    var storageKey='finance:'+@json($dataset)+':page-export-columns:v1';
+    var storageKey='finance:'+@json($dataset)+':page-export-columns:v2';
     try {
         var saved=JSON.parse(localStorage.getItem(storageKey));
         if(Array.isArray(saved)&&saved.some(function(value){return checks.some(function(input){return input.value===value;});})){
