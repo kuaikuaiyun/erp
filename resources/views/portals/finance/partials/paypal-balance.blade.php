@@ -196,11 +196,10 @@
             if (typeof data.refresh_allowed === 'boolean') form.dataset.refreshAllowed = String(data.refresh_allowed);
             connectionResult(form, Object.prototype.hasOwnProperty.call(data, 'connection_status') ? data.connection_status : (ok ? 'connected' : failedConnectionState(form)));
             message(form, ok ? 'success' : 'error', ok ? @json(__('finance.sync.refreshed')) : (typeof data.error === 'string' ? data.error : @json(__('finance.sync.errors.transport'))));
-            if (ok && data.orders) {
-                message(form, data.orders.ok ? 'success' : 'error', data.orders.ok
-                    ? '余额和订单已更新，本次处理 '+data.orders.count+' 条交易。'
-                    : '余额已更新，订单同步失败：'+data.orders.error);
-                if (data.orders.ok) document.dispatchEvent(new CustomEvent('finance:transactions-synced', {detail: {key: card.dataset.paypalAccount}}));
+            if (ok && data.orders_queued === true) {
+                message(form, 'success', '余额已更新，订单已排队，将在后台补齐。');
+            } else if (ok && typeof data.orders_queue_error === 'string') {
+                message(form, 'error', data.orders_queue_error);
             }
             if (ok) document.dispatchEvent(new CustomEvent('finance:balance-refreshed', {detail: {key: card.dataset.paypalAccount}}));
         } catch (error) {

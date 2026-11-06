@@ -48,6 +48,9 @@ Route::prefix('finance')->name('finance.')->middleware(\App\Http\Middleware\Redi
     Route::post('/management/menus/order', [PortalMenuConfigurationController::class, 'saveOrder'])->name('menus.order');
     Route::get('/', 'index')->name('home');
     Route::get('/balances', 'balances')->name('balances');
+    Route::get('/orders/paypal/refresh', 'latestPayPalOrderRefresh')->name('orders.paypal.latest');
+    Route::post('/orders/paypal/refresh', 'queuePayPalOrderRefresh')->name('orders.paypal.refresh');
+    Route::get('/orders/paypal/refresh/{batch}', 'payPalOrderRefreshStatus')->whereUuid('batch')->name('orders.paypal.status');
     Route::post('/balances/xuzong2', 'savePaymentBalance')->name('balances.xuzong2.save');
     Route::post('/exchange-rates', 'saveExchangeRates')->name('exchange-rates.save');
     Route::post('/paypal-accounts/{accountKey}', 'savePayPalAccount')->where('accountKey', '[a-z0-9-]+')->name('paypal-accounts.update');

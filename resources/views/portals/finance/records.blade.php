@@ -74,6 +74,8 @@
 @media(max-width:600px){#finance-filters .paypal-date-filters .logistics-date-range{flex-basis:355px}}
 .paypal-order-toolbar select[name=export_format]{width:155px;height:32px;flex:0 0 155px;margin:0}
 .finance-system .paypal-order-toolbar{align-items:center;gap:12px}
+.finance-system .paypal-order-toolbar.has-order-refresh .box-title{margin-right:0}
+.finance-system .paypal-order-toolbar #finance-order-refresh-open{margin-right:auto}
 .finance-system .paypal-order-toolbar .finance-numbered-pages{padding-top:0;margin:0;align-items:center}
 .paypal-order-toolbar>.btn,.paypal-order-toolbar .finance-export-columns>summary{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;height:32px;margin:0;padding:5px 12px;line-height:20px}
 .paypal-order-toolbar .finance-export-columns{align-self:center;margin:0}
@@ -268,6 +270,7 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
 <template id="finance-condition-template"><div class="finance-condition"><select required class="form-control" data-filter-field aria-label="{{ __('finance.records.condition') }}"><option value="">{{ __('finance.records.choose_field') }}</option>@foreach($filterFields as $field => $fieldLabel)<option value="{{ $field }}">{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($fieldLabel)) }}</option>@endforeach</select><input type="hidden" data-filter-operator value="equals"><input class="form-control" data-filter-value maxlength="191" aria-label="{{ __('finance.records.filter_value') }}"><button type="button" class="btn btn-default" data-remove-filter>{{ __('finance.records.remove_filter') }}</button></div></template>
 @endsection
 @push('scripts')
+<script src="{{ asset('assets/erp/finance-download.js') }}?v=2"></script>
 <script>
 (function(){
     var toggle=document.getElementById('paypal-toggle-filters'), filterForm=document.getElementById('finance-filters');
@@ -295,7 +298,7 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
             query.set('export_scope','records');query.set('export_format',document.querySelector('[name="export_format"]').value);
             checks.filter(function(input){return input.checked;}).forEach(function(input){query.append('selected_ids[]',input.value);});
             var url=new URL(document.getElementById('finance-export-filtered').href);
-            url.search=query.toString();window.location.assign(url.toString());
+            url.search=query.toString();window.financeDownload(url.toString(),selectedExport);
         });
         refreshSelection();
     }
@@ -356,6 +359,8 @@ document.getElementById('finance-export-filtered').addEventListener('click',func
     }
     query.set('export_format',document.querySelector('[name="export_format"]').value);
     this.href=@json(route('finance.records.export', $dataset))+'?'+query.toString();
+    event.preventDefault();
+    window.financeDownload(this.href,this);
 });
 </script>
 <script>

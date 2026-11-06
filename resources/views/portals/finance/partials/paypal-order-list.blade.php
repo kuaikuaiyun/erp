@@ -1,5 +1,8 @@
-<div class="box-header with-border logistics-list-toolbar paypal-order-toolbar">
+<div class="box-header with-border logistics-list-toolbar paypal-order-toolbar {{ $dataset === 'paypal-orders' && $canManage ? 'has-order-refresh' : '' }}">
     <h3 class="box-title">订单列表</h3><button id="paypal-export-selected" type="button" class="btn btn-default btn-sm" hidden style="display:none" disabled>导出所选</button>
+    @if($dataset === 'paypal-orders' && $canManage)
+    <button type="button" id="finance-order-refresh-open" class="btn btn-primary btn-sm" @disabled($refreshablePayPalAccounts->isEmpty())><i class="fa fa-refresh" aria-hidden="true"></i> 刷新订单</button>
+    @endif
     @if(in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true))
     <details class="finance-export-columns">
         <summary class="btn btn-default btn-sm">选择导出列</summary>
@@ -243,3 +246,27 @@
 })();
 </script>
 @endpush
+
+@if($dataset === 'paypal-orders' && $canManage)
+<dialog id="finance-order-refresh-dialog" style="width:720px;max-width:calc(100vw - 32px);border:1px solid #dce6ef;border-radius:8px;padding:22px;color:#31516b">
+    <form method="post" action="{{ route('finance.orders.paypal.refresh') }}" data-loading="off">
+        @csrf
+        <h3 style="font-size:18px;margin:0 0 18px">刷新 PayPal 订单</h3>
+        <fieldset data-order-refresh-accounts style="border:0;padding:0;margin:0">
+            <legend style="font-size:14px;border:0;margin:0 0 8px">选择更新账户（可多选）</legend>
+            <label style="display:block"><input type="checkbox" data-order-refresh-all checked> 全选账户</label>
+            <div style="max-height:150px;overflow:auto;border:1px solid #dce6ef;border-radius:5px;padding:10px">
+                @foreach($refreshablePayPalAccounts as $refreshAccount)<label style="display:block;font-weight:400"><input type="checkbox" name="accounts[]" value="{{ $refreshAccount->id }}" checked> {{ \App\Portals\Finance\FinanceCatalog::simplified($refreshAccount->account_name) }}</label>@endforeach
+            </div>
+        </fieldset>
+        <p class="text-muted" style="margin-top:12px">订单将在后台按顺序更新，不影响当前页面。停用或未配置接口的账户不参与刷新。</p>
+        <p data-order-refresh-message role="status" aria-live="polite"></p>
+        <div data-order-refresh-results hidden data-status-url="{{ route('finance.orders.paypal.status', ['batch' => '__batch__']) }}" style="max-height:340px;overflow:auto;margin-top:12px">
+            <table class="table table-bordered" style="width:100%;font-size:13px"><thead><tr><th>PayPal账户</th><th>更新状态</th><th>已处理交易数</th><th>说明 / 失败原因</th></tr></thead><tbody></tbody></table>
+            <p class="text-muted">条数包含新增和重新核对的交易；失败时已保存的数据保留。订单同步完成后点击“查询”更新列表。</p>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px"><button type="button" class="btn btn-default" data-order-refresh-close>关闭</button><button type="submit" class="btn btn-primary">加入更新队列</button></div>
+    </form>
+</dialog>
+<script src="{{ asset('assets/erp/finance-order-refresh.js') }}?v=5"></script>
+@endif

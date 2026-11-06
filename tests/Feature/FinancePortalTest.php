@@ -46,6 +46,7 @@ class FinancePortalTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        \Illuminate\Support\Facades\Queue::fake();
         config(['app.url' => 'http://caiwu.kky.com']);
         config(['finance.relay.ca_bundle' => null]);
         $this->app['url']->forceRootUrl('http://caiwu.kky.com');
@@ -370,8 +371,119 @@ class FinancePortalTest extends TestCase
         $this->assertDatabaseHas('finance_records', ['account' => 'A', 'raw_type' => 'PayPal Checkout付款']);
     }
 
-    public function test_account_refresh_syncs_orders_and_resumes_with_overlap(): void
+    public function test_legacy_queue_job_without_progress_property_can_still_execute(): void
     {
+        $account = $this->financePayPalAccount('Legacy queued account');
+        $job = (new \ReflectionClass(\App\Jobs\SyncFinancePayPalOrders::class))->newInstanceWithoutConstructor();
+        $job->accountId = $account->id;
+        $job->actorId = 1;
+        $this->assertNull($job->progressId);
+        $sync = \Mockery::mock(\App\Portals\Finance\FinancePayPalSyncService::class);
+        $sync->shouldReceive('refreshOrders')->once()->andReturn(['ok'=>true,'count'=>0,'error'=>null]);
+        $job->handle($sync);
+        $id = app(\App\Portals\Finance\FinanceOrderRefreshProgress::class)->enqueue($account, 1);
+        $task = app(\App\Portals\Finance\FinanceOrderRefreshProgress::class)->get($id);
+        app(\App\Portals\Finance\FinanceOrderRefreshProgress::class)->update($id, ['queued_at'=>time()-180]);
+        $this->assertSame('queued', $task['status']);
+        $this->assertNotEmpty(app(\App\Portals\Finance\FinanceOrderRefreshProgress::class)->get($id)['warning']);
+    }
+
+    public function test_refresh_progress_survives_navigation_and_accepts_more_accounts_while_running(): void
+    {
+        $a=$this->financePayPalAccount('Append A',['relay_certificate_sha1'=>str_repeat('AB',20)]);
+        $b=$this->financePayPalAccount('Append B');
+        $c=$this->financePayPalAccount('Append C');
+        $url='/finance/orders/paypal/refresh';
+        $first=$this->postJson($url,['accounts'=>[$a->id]])->assertStatus(202);
+        $batch=$first->json('batch');
+        $this->postJson($url,['accounts'=>[$b->id,$c->id]])->assertStatus(202)->assertJsonPath('batch',$batch);
+        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\SyncFinancePayPalOrders::class,3);
+        $this->postJson($url,['accounts'=>[$a->id,$b->id]])->assertStatus(202);
+        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\SyncFinancePayPalOrders::class,3);
+        $this->get('/finance')->assertOk();
+        $latest=$this->getJson($url)->assertOk()->assertJsonPath('batch',$batch)->assertJsonPath('done',false);
+        $this->assertCount(3,$latest->json('results'));
+        $task=$latest->json('results.0.id');
+        app(\App\Portals\Finance\FinanceOrderRefreshProgress::class)->update($task,['status'=>'success','count'=>12]);
+        $this->get('/finance/records/paypal-orders')->assertOk();
+        $this->getJson($url)->assertOk()->assertJsonPath('results.0.count',12)->assertJsonPath('results.0.status','success');
+        Http::fake(fn($request)=>$this->signedRelayResponse($request,$a,['balances'=>[],'as_of_time'=>now('UTC')->format('Y-m-d\TH:i:s\Z')]));
+        $this->postJson('/finance/payment-accounts/finance-'.$a->id.'/refresh')->assertOk()->assertJsonPath('orders_batch',$batch);
+        $this->getJson($url)->assertOk()->assertJsonPath('results.0.status','queued');
+        $this->postJson($url,['accounts'=>[]])->assertUnprocessable();
+        $this->postJson($url,['accounts'=>[$a->id,999999]])->assertUnprocessable();
+    }
+
+    public function test_order_refresh_progress_reports_each_account_counts_and_failures(): void
+    {
+        $first = $this->financePayPalAccount('Progress success');
+        $second = $this->financePayPalAccount('Progress failure');
+        $response = $this->postJson('/finance/orders/paypal/refresh', ['account' => 'all'])->assertStatus(202);
+        $batch = $response->json('batch');
+        $url = '/finance/orders/paypal/refresh/'.$batch;
+        $status = $this->getJson($url)->assertOk()->assertJsonPath('done', false);
+        $this->assertSame(['queued', 'queued'], array_column($status->json('results'), 'status'));
+        $jobs = \Illuminate\Support\Facades\Queue::pushed(\App\Jobs\SyncFinancePayPalOrders::class)->values();
+        $this->assertCount(2, $jobs);
+        $progress = app(\App\Portals\Finance\FinanceOrderRefreshProgress::class);
+        $progress->update($jobs[0]->progressId, ['status' => 'running', 'baseline' => 0, 'started_at' => time()]);
+        DB::table('finance_sync_logs')->insert(['payment_account_id' => $first->id, 'operation' => 'transaction_search',
+            'status' => 'running', 'page_count' => 1, 'record_count' => 4, 'actor_id' => 1, 'created_at' => now(), 'updated_at' => now()]);
+        $this->getJson($url)->assertOk()->assertJsonPath('results.0.status', 'running')->assertJsonPath('results.0.count', 4);
+        $sync = \Mockery::mock(\App\Portals\Finance\FinancePayPalSyncService::class);
+        $sync->shouldReceive('refreshOrders')->once()->withArgs(fn ($a, $actor) => $a->id === $first->id)
+            ->andReturn(['ok' => true, 'count' => 7, 'error' => null]);
+        $sync->shouldReceive('refreshOrders')->once()->withArgs(fn ($a, $actor) => $a->id === $second->id)
+            ->andReturn(['ok' => false, 'count' => 3, 'error' => '分页数量不一致']);
+        foreach ($jobs as $job) $job->handle($sync);
+        $this->getJson($url)->assertOk()->assertJsonPath('done', true)
+            ->assertJsonPath('results.0.account', 'Progress success')->assertJsonPath('results.0.status', 'success')->assertJsonPath('results.0.count', 7)
+            ->assertJsonPath('results.1.account', 'Progress failure')->assertJsonPath('results.1.status', 'failed')
+            ->assertJsonPath('results.1.count', 3)->assertJsonPath('results.1.error', '分页数量不一致');
+        $progress->update($jobs[0]->progressId, ['status' => 'running', 'baseline' => 0, 'started_at' => time() - 1000]);
+        $this->getJson($url)->assertOk()->assertJsonPath('results.0.status', 'failed')->assertJsonPath('results.0.count', 4);
+        $second->update(['status' => 'disabled']);
+        $jobs[1]->handle($sync);
+        $this->getJson($url)->assertOk()->assertJsonPath('results.1.status', 'skipped');
+        $this->getJson('/finance/orders/paypal/refresh/00000000-0000-0000-0000-000000000000')->assertNotFound();
+        $this->user->manage = false;
+        $this->getJson($url)->assertForbidden();
+    }
+
+    public function test_order_list_can_queue_one_or_all_enabled_paypal_accounts_without_balance_calls(): void
+    {
+        Http::fake();
+        $first = $this->financePayPalAccount('Order refresh A');
+        $second = $this->financePayPalAccount('Order refresh B');
+        $disabled = $this->financePayPalAccount('Disabled refresh', ['status' => 'disabled']);
+        $deleted = $this->financePayPalAccount('Deleted refresh');
+        $deleted->delete();
+        $this->financePayPalAccount('Card refresh', ['account_type' => 'credit_card']);
+        $this->financePayPalAccount('Unconfigured refresh', ['relay_url' => null]);
+        $this->get('/finance/records/paypal-orders')->assertOk()->assertSee('id="finance-order-refresh-open"', false)
+            ->assertViewHas('refreshablePayPalAccounts', fn ($accounts) => $accounts->modelKeys() === [$first->id, $second->id]);
+        $url = '/finance/orders/paypal/refresh';
+        $this->postJson($url, ['account' => (string) $second->id])->assertStatus(202)->assertJsonPath('queued', ['Order refresh B']);
+        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\SyncFinancePayPalOrders::class, fn ($job) => $job->accountId === $second->id);
+        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\SyncFinancePayPalOrders::class, 1);
+        \Illuminate\Support\Facades\Queue::fake();
+        $this->postJson($url, ['account' => 'all'])->assertStatus(202)->assertJsonPath('queued', ['Order refresh A', 'Order refresh B']);
+        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\SyncFinancePayPalOrders::class, 1);
+        $this->postJson($url, ['account' => (string) $disabled->id])->assertUnprocessable();
+        $this->postJson($url, ['account' => (string) $deleted->id])->assertUnprocessable();
+        $this->postJson($url, ['account' => 'invalid'])->assertUnprocessable();
+        Http::assertNothingSent();
+        $this->user->manage = false;
+        $this->get('/finance/records/paypal-orders')->assertOk()->assertDontSee('id="finance-order-refresh-open"', false);
+        $this->postJson($url, ['account' => 'all'])->assertForbidden();
+        $this->user->manage = true;
+        DB::table('portal_menus')->where('code', 'finance_paypal-orders')->update(['is_enabled' => false]);
+        $this->postJson($url, ['account' => 'all'])->assertForbidden();
+    }
+
+    public function test_account_refresh_returns_balance_before_background_orders_and_resumes_with_overlap(): void
+    {
+        \Illuminate\Support\Facades\Queue::fake();
         $this->travelTo(\Carbon\Carbon::parse('2026-11-04 08:00:00', 'UTC'));
         $account = $this->financePayPalAccount('联动刷新', ['relay_certificate_sha1' => str_repeat('AB', 20)]);
         $starts = [];
@@ -383,13 +495,31 @@ class FinancePortalTest extends TestCase
             return $this->signedRelayResponse($request, $account, ['page' => 1, 'total_pages' => 0, 'total_items' => 0, 'transaction_details' => []]);
         });
         $url = '/finance/payment-accounts/finance-'.$account->id.'/refresh';
-        $this->postJson($url)->assertOk()->assertJsonPath('orders.ok', true);
-        $this->assertSame('2026-10-05T08:00:00Z', $starts[0]);
+        $this->postJson($url)->assertOk()->assertJsonPath('orders_queued', true)->assertJsonMissingPath('orders');
+        $this->assertSame([], $starts);
+        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\SyncFinancePayPalOrders::class, fn ($job) =>
+            $job->accountId === $account->id && $job->connection === 'finance_orders' && $job->queue === 'finance-orders');
+        (new \App\Jobs\SyncFinancePayPalOrders($account->id, 1))->handle(app(\App\Portals\Finance\FinancePayPalSyncService::class));
+        $this->assertSame('2026-05-04T08:00:00Z', $starts[0]);
         $starts = [];
         $this->travelTo(\Carbon\Carbon::parse('2026-11-05 08:00:00', 'UTC'));
-        $this->postJson($url)->assertOk()->assertJsonPath('orders.ok', true);
-        $this->assertSame('2026-11-01T08:00:00Z', $starts[0]);
+        $this->postJson($url)->assertOk()->assertJsonPath('orders_queued', true);
+        $this->assertSame([], $starts);
+        (new \App\Jobs\SyncFinancePayPalOrders($account->id, 1))->handle(app(\App\Portals\Finance\FinancePayPalSyncService::class));
+        $this->assertSame('2026-11-04T08:00:00Z', $starts[0]);
         $this->travelBack();
+    }
+
+    public function test_balance_failure_does_not_queue_orders_and_disabled_jobs_do_not_call_relay(): void
+    {
+        $account = $this->financePayPalAccount('Background guard', ['relay_certificate_sha1' => str_repeat('AB', 20)]);
+        Http::fake(fn () => Http::response('', 503));
+        $this->postJson('/finance/payment-accounts/finance-'.$account->id.'/refresh')->assertStatus(422);
+        \Illuminate\Support\Facades\Queue::assertNotPushed(\App\Jobs\SyncFinancePayPalOrders::class);
+        Http::fake();
+        $account->update(['status' => 'disabled']);
+        (new \App\Jobs\SyncFinancePayPalOrders($account->id, 1))->handle(app(\App\Portals\Finance\FinancePayPalSyncService::class));
+        Http::assertNothingSent();
     }
 
     public function test_paypal_details_map_multiple_items_and_unavailable_values(): void
@@ -2159,14 +2289,14 @@ class FinancePortalTest extends TestCase
         $response = $this->postJson('/finance/payment-accounts/finance-'.$account->id.'/refresh');
         $this->assertSame(200, $response->status(), (string) $response->json('error'));
         $response->assertOk()
-            ->assertJsonPath('ok', true)->assertJsonPath('refresh_allowed', true)->assertJsonPath('orders.ok', true);
+            ->assertJsonPath('ok', true)->assertJsonPath('refresh_allowed', true)->assertJsonPath('orders_queued', true);
         $card = $service->dashboard()['cards']['finance-'.$account->id];
         $this->assertSame('200.0000000000000000', $card['display']['available']);
         $this->assertSame('relay', $card['currencies']->first()['source']);
         DB::table('logistics_paypal_balance_snapshots')->update(['as_of_time' => now('UTC')->addDay()->format('Y-m-d H:i:s'), 'available_balance' => '999']);
         $this->assertSame('200.0000000000000000', $service->dashboard()['cards']['finance-'.$account->id]['display']['available']);
         Http::assertSent(fn ($request) => $request['operation'] === 'balances');
-        Http::assertSent(fn ($request) => $request['operation'] === 'transaction_search');
+        Http::assertNotSent(fn ($request) => $request['operation'] === 'transaction_search');
     }
 
     public function test_account_editor_shares_add_form_and_prefills_saved_settings_without_secret(): void
@@ -2964,6 +3094,205 @@ class FinancePortalTest extends TestCase
         $this->assertSame(1, $xpath->query('//*[@data-paypal-account="finance-'.$account->id.'"]//*[@data-refresh-message and @data-result="success" and not(@hidden)]')->length);
         $this->assertSame(0, $xpath->query('//*[@id="finance-refresh-results" or @id="finance-refresh-progress"]')->length);
         $this->assertSame('connected', app(FinancePayPalBalanceService::class)->dashboard()['cards']['finance-'.$account->id]['connection_status']);
+    }
+
+    public function test_unverified_locked_history_is_not_reported_as_complete(): void
+    {
+        $this->travelTo(\Carbon\Carbon::parse('2026-11-06T08:00:00Z'));
+        $this->post('/finance/payment-accounts',$this->newPaymentAccountData())->assertRedirect();
+        $account=FinancePaymentAccount::query()->sole();
+        DB::table('finance_period_locks')->insert(['month'=>'2026-05','report_snapshot'=>'[]']);
+        DB::table('finance_period_locks')->insert(['month'=>'2026-10','report_snapshot'=>'[]']);
+        DB::table('finance_sync_logs')->insert(['payment_account_id'=>$account->id,'operation'=>'transaction_search',
+            'status'=>'success','range_from'=>'2026-09-30 16:00:00','range_to'=>'2026-10-31 15:59:59',
+            'page_count'=>0,'record_count'=>0,'actor_id'=>1,'created_at'=>now(),'updated_at'=>now()]);
+        Http::fake(fn($request)=>$this->signedRelayResponse($request,$account,['page'=>1,'total_pages'=>0,'total_items'=>0]));
+        $sync=app(\App\Portals\Finance\FinancePayPalSyncService::class);
+        $result=$sync->refreshOrders($account,1);
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('2026-05',$result['error']);
+        $this->assertStringNotContainsString('2026-10',$result['error']);
+        DB::table('finance_period_locks')->where('month','2026-05')->delete();
+        $result=$sync->refreshOrders($account,1);
+        $this->assertTrue($result['ok']);
+        $this->assertTrue($result['history_complete']);
+        $this->travelBack();
+    }
+
+    public function test_existing_account_backfills_six_months_before_five_hour_incremental_sync(): void
+    {
+        $this->travelTo(\Carbon\Carbon::parse('2026-11-06T08:00:00Z'));
+        $this->post('/finance/payment-accounts',$this->newPaymentAccountData())->assertRedirect();
+        $account=FinancePaymentAccount::query()->sole();
+        DB::table('finance_sync_logs')->insert(['payment_account_id'=>$account->id,'operation'=>'transaction_search',
+            'status'=>'success','range_from'=>'2026-11-01 00:00:00','range_to'=>'2026-11-06 07:00:00',
+            'page_count'=>1,'record_count'=>4,'actor_id'=>1,'created_at'=>now(),'updated_at'=>now()]);
+        $windows=[];
+        Http::fake(function($request)use($account,&$windows){
+            $windows[]=$request['query'];
+            return $this->signedRelayResponse($request,$account,['page'=>1,'total_pages'=>0,'total_items'=>0]);
+        });
+        $sync=app(\App\Portals\Finance\FinancePayPalSyncService::class);
+        $result=$sync->refreshOrders($account,1);
+        $this->assertTrue($result['ok']);
+        $this->assertTrue($result['history_complete']);
+        $this->assertSame('2026-05-06T08:00:00Z',$windows[0]['start_date']);
+        $this->assertSame('2026-11-06T08:00:00Z',end($windows)['end_date']);
+        $windows=[];
+        $this->assertTrue($sync->refreshOrders($account,1)['ok']);
+        $this->assertSame('2026-11-06T03:00:00Z',$windows[0]['start_date']);
+        $this->travelBack();
+    }
+
+    public function test_hourly_paypal_order_sync_uses_five_hour_overlap_and_updates_unique_transactions(): void
+    {
+        $this->travelTo(\Carbon\Carbon::parse('2026-11-06T08:00:00Z'));
+        $this->post('/finance/payment-accounts',$this->newPaymentAccountData())->assertRedirect();
+        $account=FinancePaymentAccount::query()->sole();
+        DB::table('finance_sync_logs')->insert(['payment_account_id'=>$account->id,'operation'=>'transaction_search',
+            'status'=>'success','range_from'=>'2026-05-06 08:00:00','range_to'=>'2026-11-06 07:00:00',
+            'page_count'=>0,'record_count'=>0,'actor_id'=>0,'created_at'=>now(),'updated_at'=>now()]);
+        $requests=[];
+        $amount='10';
+        Http::fake(function($request) use($account,&$requests,&$amount) {
+            $requests[]=$request['query'];
+            return $this->signedRelayResponse($request,$account,['page'=>1,'total_pages'=>1,'total_items'=>1,
+                'transaction_details'=>[['transaction_info'=>['transaction_id'=>'HOURLY-UNIQUE',
+                    'transaction_event_code'=>'T0006','transaction_initiation_date'=>'2026-11-06T04:00:00Z',
+                    'transaction_amount'=>['value'=>$amount,'currency_code'=>'USD']]]]]);
+        });
+        $service=app(\App\Portals\Finance\FinancePayPalSyncService::class);
+        $this->assertTrue($service->refreshOrders($account,0)['ok']);
+        $this->assertSame('2026-11-06T03:00:00Z',$requests[0]['start_date']);
+        $this->assertSame('2026-11-06T08:00:00Z',$requests[0]['end_date']);
+        $this->travelTo(\Carbon\Carbon::parse('2026-11-06T09:00:00Z'));
+        $amount='12';
+        $this->assertTrue($service->refreshOrders($account,0)['ok']);
+        $this->assertSame('2026-11-06T04:00:00Z',$requests[1]['start_date']);
+        $this->assertDatabaseCount('finance_records',1);
+        $this->assertDatabaseCount('finance_payment_transactions',1);
+        $headers=FinanceCatalog::dataset('paypal-orders')['headers'];
+        $this->assertSame('12',FinanceRecord::query()->sole()->payload[$headers[7]]);
+        $this->travelBack();
+    }
+
+    public function test_hourly_scheduler_queues_configured_accounts_once_without_requesting_balances(): void
+    {
+        Http::fake();
+        $account=$this->financePayPalAccount('Hourly queue');
+        $this->financePayPalAccount('Disabled hourly',['status'=>'disabled']);
+        $this->financePayPalAccount('Unconfigured hourly',['relay_url'=>null]);
+        $this->financePayPalAccount('Card hourly',['account_type'=>'credit_card']);
+        $this->artisan('finance:paypal-orders:enqueue')->assertSuccessful();
+        $this->artisan('finance:paypal-orders:enqueue')->assertSuccessful();
+        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\SyncFinancePayPalOrders::class,1);
+        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\SyncFinancePayPalOrders::class,fn($job)=>$job->accountId===$account->id && $job->actorId===0);
+        Http::assertNothingSent();
+    }
+
+    public function test_order_refresh_fills_earlier_gaps_despite_later_success_and_has_contiguous_windows(): void
+    {
+        $this->travelTo(\Carbon\Carbon::parse('2026-11-06T08:00:00Z'));
+        $this->post('/finance/payment-accounts', $this->newPaymentAccountData())->assertRedirect();
+        $account = FinancePaymentAccount::query()->sole();
+        foreach ([['failed','2026-07-01 00:00:00','2026-07-31 23:59:59'],
+            ['success','2026-05-06 08:00:00','2026-07-14 23:59:59'],
+            ['success','2026-11-01 00:00:00','2026-11-05 08:00:00']] as [$status,$from,$to]) {
+            DB::table('finance_sync_logs')->insert(['payment_account_id'=>$account->id,'operation'=>'transaction_search',
+                'status'=>$status,'range_from'=>$from,'range_to'=>$to,'page_count'=>0,'record_count'=>0,'actor_id'=>1,
+                'created_at'=>now(),'updated_at'=>now()]);
+        }
+        $windows = [];
+        Http::fake(function ($request) use ($account, &$windows) {
+            $windows[] = $request['query'];
+            return $this->signedRelayResponse($request,$account,['page'=>1,'total_pages'=>0,'total_items'=>0]);
+        });
+        $service = app(\App\Portals\Finance\FinancePayPalSyncService::class);
+        $this->assertTrue($service->refreshOrders($account,1)['ok']);
+        $this->assertSame('2026-07-15T00:00:00Z',$windows[0]['start_date']);
+        foreach ($windows as $index=>$window) {
+            $start=\Carbon\CarbonImmutable::parse($window['start_date']);
+            $end=\Carbon\CarbonImmutable::parse($window['end_date']);
+            $this->assertLessThanOrEqual(7*86400, $start->diffInSeconds($end)+1);
+            if ($index) $this->assertSame(\Carbon\CarbonImmutable::parse($windows[$index-1]['end_date'])->addSecond()->format('Y-m-d\TH:i:s\Z'),$window['start_date']);
+        }
+        $this->assertSame('2026-11-06T08:00:00Z',end($windows)['end_date']);
+        $windows=[];
+        $this->assertTrue($service->refreshOrders($account,1)['ok']);
+        $this->assertSame('2026-11-06T03:00:00Z',$windows[0]['start_date']);
+        $this->travelBack();
+    }
+
+    public function test_duplicate_transaction_across_pages_does_not_falsely_complete_sync(): void
+    {
+        $this->post('/finance/payment-accounts',$this->newPaymentAccountData())->assertRedirect();
+        $account=FinancePaymentAccount::query()->sole();
+        Http::fake(fn ($request)=>$this->signedRelayResponse($request,$account,[
+            'page'=>(int)$request['query']['page'],'total_pages'=>2,'total_items'=>2,'transaction_details'=>[[
+                'transaction_info'=>['transaction_id'=>'DUPLICATED-PAGE','transaction_event_code'=>'T0006',
+                    'transaction_initiation_date'=>'2026-11-01T01:00:00Z','transaction_amount'=>['value'=>'10','currency_code'=>'USD']],
+            ]],
+        ]));
+        $result=app(\App\Portals\Finance\FinancePayPalSyncService::class)->transactions($account,
+            \Carbon\CarbonImmutable::parse('2026-11-01T00:00:00Z'),\Carbon\CarbonImmutable::parse('2026-11-01T23:59:59Z'),1);
+        $this->assertFalse($result['ok']);
+        Http::assertSentCount(6);
+        $this->assertDatabaseCount('finance_payment_transactions',1);
+        $this->assertDatabaseHas('finance_sync_logs',['status'=>'failed','error_code'=>'pagination']);
+    }
+
+    public function test_transaction_sync_fetches_every_time_segment_and_every_short_page(): void
+    {
+        config(['finance.relay.segment_days' => 1]);
+        $this->post('/finance/payment-accounts', $this->newPaymentAccountData())->assertRedirect();
+        $account = FinancePaymentAccount::query()->sole();
+        $requests = [];
+        Http::fake(function ($request) use ($account, &$requests) {
+            $query = $request['query'];
+            $page = (int) $query['page'];
+            $this->assertSame('500', $query['page_size']);
+            $this->assertSame(substr($query['start_date'], 0, 10).'T23:59:59Z', $query['end_date']);
+            $requests[] = [$query['start_date'], $page];
+            // Simulate a relay returning only 100 rows even when 500 were requested.
+            $count = $page === 3 ? 5 : 100;
+            $rows = [];
+            for ($index = 0; $index < $count; $index++) {
+                $rows[] = ['transaction_info' => [
+                    'transaction_id' => $query['start_date'].'-'.$page.'-'.$index, 'transaction_event_code' => 'T0006',
+                    'transaction_initiation_date' => $query['start_date'],
+                    'transaction_amount' => ['value' => '10', 'currency_code' => 'USD'],
+                ]];
+            }
+            return $this->signedRelayResponse($request, $account, ['page' => $page, 'total_pages' => 3,
+                'total_items' => 205, 'transaction_details' => $rows]);
+        });
+        $result = app(\App\Portals\Finance\FinancePayPalSyncService::class)->transactions($account,
+            \Carbon\CarbonImmutable::parse('2026-11-01T00:00:00Z'), \Carbon\CarbonImmutable::parse('2026-11-03T23:59:59Z'), 1);
+        $this->assertTrue($result['ok']);
+        $this->assertSame(615, $result['count']);
+        $this->assertSame([1,2,3,1,2,3,1,2,3], array_column($requests, 1));
+        $this->assertSame(['2026-11-01T00:00:00Z','2026-11-02T00:00:00Z','2026-11-03T00:00:00Z'], array_values(array_unique(array_column($requests, 0))));
+        $this->assertDatabaseCount('finance_payment_transactions', 615);
+        $this->assertDatabaseHas('finance_sync_logs', ['status' => 'success', 'page_count' => 9, 'record_count' => 615]);
+    }
+
+    public function test_relay_accepts_omitted_transactions_only_for_explicitly_empty_results(): void
+    {
+        $this->post('/finance/payment-accounts', $this->newPaymentAccountData())->assertRedirect();
+        $account = FinancePaymentAccount::query()->sole();
+        $total = 0;
+        Http::fake(function ($request) use ($account, &$total) {
+            return $this->signedRelayResponse($request, $account, [
+                'page' => 1, 'total_pages' => $total, 'total_items' => $total,
+            ]);
+        });
+        foreach ([0 => true, 1 => false] as $total => $expected) {
+            $result = app(\App\Portals\Finance\FinancePayPalSyncService::class)->transactions($account,
+                \Carbon\CarbonImmutable::parse('2026-11-01T00:00:00Z'), \Carbon\CarbonImmutable::parse('2026-11-01T23:59:59Z'), 1);
+            $this->assertSame($expected, $result['ok'], json_encode($result));
+            $this->assertSame(0, $result['count']);
+        }
+        $this->assertDatabaseCount('finance_records', 0);
     }
 
     public function test_relay_retries_changed_totals_without_duplicate_transactions(): void

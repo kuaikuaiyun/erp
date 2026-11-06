@@ -30,6 +30,15 @@ return [
     */
 
     'connections' => [
+        'finance_orders' => [
+            'driver' => 'database',
+            'connection' => env('DB_QUEUE_CONNECTION'),
+            'table' => env('DB_QUEUE_TABLE', 'jobs'),
+            'queue' => 'finance-orders',
+            'retry_after' => 960,
+            'after_commit' => true,
+        ],
+
 
         'sync' => [
             'driver' => 'sync',

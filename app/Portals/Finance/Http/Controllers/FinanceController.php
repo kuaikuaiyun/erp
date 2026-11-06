@@ -87,7 +87,17 @@ class FinanceController extends Controller
         $account = FinancePaymentAccount::query()->findOrFail(substr($accountKey, 8));
         $result = app(\App\Portals\Finance\FinancePayPalSyncService::class)->balances($account, (int) $context['user']->getKey());
         if ($result['ok']) {
-            $result['orders'] = app(\App\Portals\Finance\FinancePayPalSyncService::class)->refreshOrders($account, (int) $context['user']->getKey());
+            try {
+                $progress = app(\App\Portals\Finance\FinanceOrderRefreshProgress::class);
+                $task = $progress->enqueue($account, (int) $context['user']->getKey());
+                $batch = $progress->attachBatch((int) $context['user']->getKey(), [$task], [], [FinanceCatalog::simplified($account->account_name)]);
+                $result['orders_batch'] = $batch['batch'];
+                $result['orders_queued'] = true;
+            } catch (\Throwable $e) {
+                report($e);
+                $result['orders_queued'] = false;
+                $result['orders_queue_error'] = '余额已更新，订单后台任务暂未排入，请稍后重试。';
+            }
         }
         if ($request->expectsJson()) {
             $paypalBalance = $this->paypalBalances->dashboard($filters['paypal_currency'] ?? 'USD');
@@ -112,6 +122,78 @@ class FinanceController extends Controller
         }
 
         return redirect()->route('finance.home', $request->only('paypal_currency', 'balance_account'))->with('balanceRefreshResults', [$account->id => $result]);
+    }
+
+    private function refreshablePayPalAccounts(): \Illuminate\Database\Eloquent\Builder
+    {
+        return FinancePaymentAccount::query()->where('account_type', 'paypal')->where('status', 'enabled')
+            ->whereNotNull('relay_url')->where('relay_url', '!=', '')
+            ->whereNotNull('relay_certificate_sha1')->where('relay_certificate_sha1', '!=', '')
+            ->whereNotNull('relay_hmac_key_id')->where('relay_hmac_key_id', '!=', '')
+            ->whereNotNull('relay_hmac_secret')->where('relay_hmac_secret', '!=', '');
+    }
+
+    public function queuePayPalOrderRefresh(Request $request): Response
+    {
+        $context = $this->context($request, true);
+        if ($context instanceof Response) return $context;
+        $data = $request->validate([
+            'account' => ['nullable', 'string', 'regex:/^(all|[1-9][0-9]*)$/'],
+            'accounts' => 'nullable|array|min:1|max:100', 'accounts.*' => 'required|integer|min:1|distinct',
+        ]);
+        $ids = $data['accounts'] ?? (isset($data['account']) && $data['account'] !== 'all' ? [(int) $data['account']] : []);
+        $all = ($data['account'] ?? '') === 'all';
+        if (! $all && ! $ids) throw ValidationException::withMessages(['accounts' => '请至少选择一个 PayPal 账户。']);
+        $query = $this->refreshablePayPalAccounts();
+        if (! $all) $query->whereIn('id', $ids);
+        $accounts = $query->orderBy('id')->get(['id', 'account_name']);
+        if ($accounts->isEmpty() || (! $all && $accounts->count() !== count($ids))) {
+            throw ValidationException::withMessages(['account' => '没有可刷新的账户，请选择已启用且已配置接口的 PayPal 账户。']);
+        }
+        $queued = [];
+        $taskIds = [];
+        $failed = [];
+        foreach ($accounts as $account) {
+            try {
+                $taskIds[] = app(\App\Portals\Finance\FinanceOrderRefreshProgress::class)->enqueue($account, (int) $context['user']->getKey());
+                $queued[] = FinanceCatalog::simplified($account->account_name);
+            } catch (\Throwable $e) {
+                report($e);
+                $failed[] = FinanceCatalog::simplified($account->account_name);
+            }
+        }
+        $state = app(\App\Portals\Finance\FinanceOrderRefreshProgress::class)->attachBatch((int) $context['user']->getKey(), $taskIds, $failed, $queued);
+        $batch = $state['batch'];
+        $taskIds = $state['tasks'];
+        return response()->json(['batch' => $batch, 'results' => array_values(array_filter(array_map(fn ($id) => app(\App\Portals\Finance\FinanceOrderRefreshProgress::class)->get($id), $taskIds))), 'ok' => $failed === [], 'queued' => $queued, 'failed' => $failed,
+            'message' => ($queued ? '已提交订单刷新：'.implode('、', $queued).'。后台按顺序补齐，完成后点击查询查看最新数据。' : '')
+                .($failed ? '以下账户暂未提交，请稍后重试：'.implode('、', $failed).'。' : '')], $failed === [] ? 202 : 503);
+    }
+
+    public function latestPayPalOrderRefresh(Request $request): Response
+    {
+        $context = $this->context($request, true);
+        if ($context instanceof Response) return $context;
+        $batch = \Illuminate\Support\Facades\Cache::get('finance:orders:latest:'.$context['user']->getKey());
+        if (! $batch || ! \Illuminate\Support\Facades\Cache::has('finance:orders:batch:'.$batch)) {
+            return response()->json(['batch' => null, 'results' => [], 'done' => true])->header('Cache-Control', 'no-store');
+        }
+        return $this->payPalOrderRefreshStatus($request, $batch);
+    }
+
+    public function payPalOrderRefreshStatus(Request $request, string $batch): Response
+    {
+        $context = $this->context($request, true);
+        if ($context instanceof Response) return $context;
+        $state = \Illuminate\Support\Facades\Cache::get('finance:orders:batch:'.$batch);
+        abort_unless($state && $state['actor'] === (int) $context['user']->getKey(), 404);
+        $results = array_map(fn ($id) => app(\App\Portals\Finance\FinanceOrderRefreshProgress::class)->get($id)
+            ?? ['account' => '账户状态已过期', 'status' => 'failed', 'count' => 0, 'error' => '刷新记录已过期，请重新提交。'], $state['tasks']);
+        foreach ($state['failed'] ?? [] as $name) {
+            $results[] = ['account' => $name, 'status' => 'failed', 'count' => 0, 'error' => '后台任务提交失败，请稍后重试。'];
+        }
+        return response()->json(['batch' => $batch, 'results' => $results, 'done' => !collect($results)->contains(fn ($row) => in_array($row['status'], ['queued', 'running'], true))])
+            ->header('Cache-Control', 'no-store');
     }
 
     public function syncPayPalTransactions(Request $request, string $accountKey): Response
@@ -639,6 +721,8 @@ class FinanceController extends Controller
             ...$context, ...compact('dataset', 'definition', 'filters', 'records', 'types', 'groups'),
             'accounts' => $accounts,
             'accountLabels' => $accountLabels,
+            'refreshablePayPalAccounts' => $dataset === 'paypal-orders' && $context['canManage']
+                ? $this->refreshablePayPalAccounts()->orderBy('id')->get(['id', 'account_name']) : collect(),
             'paypalOrderMetadata' => $paypalOrderMetadata,
             'paypalOrderItems' => $paypalOrderItems,
             'fixedFilterOptions' => $fixedFilterOptions,
@@ -1564,7 +1648,7 @@ class FinanceController extends Controller
         if ($request->is('finance', 'finance/*') || $request->getPathInfo() === '/') {
             $currentPath = $request->getPathInfo() === '/' || $request->routeIs('finance.balances', 'finance.balances.xuzong2.save', 'finance.exchange-rates.save', 'finance.paypal-accounts.update', 'finance.payment-accounts.*')
                 ? '/finance' : rtrim($request->getPathInfo(), '/');
-            if ($request->routeIs('finance.transactions.raw', 'finance.payment-accounts.sync')) {
+            if ($request->routeIs('finance.transactions.raw', 'finance.payment-accounts.sync', 'finance.orders.paypal.refresh', 'finance.orders.paypal.status', 'finance.orders.paypal.latest')) {
                 $currentPath = '/finance/records/paypal-orders';
             }
             $domains = app(\App\Portal\Services\PortalDomainService::class);
