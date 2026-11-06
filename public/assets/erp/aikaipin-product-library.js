@@ -922,7 +922,7 @@
         jsonRequest(templateUrl(config.shopifyImportStoreUrlTemplate, importingProductId), 'POST', {preview_token: shopifyImportToken}).then(function (payload) {
             notify('success', '导入成功', payload.message || 'Shopify 商品资料已补充。');
             if (shopifyImportModal && window.jQuery) window.jQuery(shopifyImportModal).modal('hide');
-            window.setTimeout(function () { window.location.assign(payload.redirect_url || window.location.href); }, 350);
+            window.setTimeout(function () { window.location.assign(window.location.href); }, 350);
         }).catch(function (error) {
             notify('error', '导入失败', error.message || 'Shopify 商品资料导入失败。');
             shopifyImportConfirm.disabled = false;
@@ -1102,7 +1102,7 @@
                 window.jQuery(uploadModal).modal('hide');
             }
             window.setTimeout(function () {
-                window.location.assign(payload.redirect_url || window.location.href);
+                window.location.assign(isEditing ? window.location.href : (payload.redirect_url || window.location.href));
             }, 400);
         }).catch(function (error) {
             notify('error', config.productSaveFailedTitle, error.message || config.productSaveFailedMessage);

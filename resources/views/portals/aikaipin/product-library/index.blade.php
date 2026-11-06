@@ -99,7 +99,7 @@
 
 @push('scripts')
     <script>window.ErpAikaipinProductLibraryConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261106-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261106-2"></script>
 @endpush
 
 @section('content')
