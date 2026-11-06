@@ -1,13 +1,14 @@
 <div class="box-header with-border logistics-list-toolbar paypal-order-toolbar">
     <h3 class="box-title">订单列表</h3><button id="paypal-export-selected" type="button" class="btn btn-default btn-sm" hidden style="display:none" disabled>导出所选</button>
-    @if($dataset === 'paypal-orders')
+    @if(in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true))
     <details class="finance-export-columns">
         <summary class="btn btn-default btn-sm">选择导出列</summary>
         <div class="finance-export-column-panel">
             <div class="finance-export-column-actions"><strong>选择需要导出的字段</strong><button type="button" class="btn btn-default btn-xs" data-export-columns-all>全选</button><button type="button" class="btn btn-default btn-xs" data-export-columns-none>清空</button></div>
+            <input type="hidden" name="export_layout" value="page" form="finance-filters">
             <input type="hidden" name="report_fields_customized" value="1" form="finance-filters">
             <div class="finance-export-column-grid">
-            @foreach([...$definition['headers'], __('finance.fields.paypal_account'), __('finance.fields.category'), __('finance.fields.display_time'), __('finance.fields.timezone')] as $column)
+            @foreach(\App\Portals\Finance\FinancePayPalOrderExport::PAGE_HEADERS as $column)
                 <label><input type="checkbox" name="report_columns[]" value="{{ $loop->index }}" form="finance-filters" checked> {{ \App\Portals\Finance\FinanceCatalog::simplified($column) }}</label>
             @endforeach
             </div>
@@ -16,7 +17,7 @@
     </details>
     @endif
     <select name="export_format" form="finance-filters" class="form-control" aria-label="{{ __('finance.records.export_format') }}">@foreach(__('finance.records.formats') as $format => $label)<option value="{{ $format }}" @selected(($filters['export_format'] ?? 'xlsx') === $format)>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($label)) }}</option>@endforeach</select>
-    <a id="finance-export-filtered" class="btn btn-default btn-sm" href="{{ route('finance.records.export', ['dataset' => $dataset, ...$filters, 'export_scope' => 'filtered', 'export_format' => 'xlsx']) }}"><i class="fa fa-download" aria-hidden="true"></i> 导出</a>
+    <a id="finance-export-filtered" class="btn btn-default btn-sm" href="{{ route('finance.records.export', ['dataset' => $dataset, ...$filters, 'export_scope' => 'filtered', 'export_format' => 'xlsx', ...(['export_layout' => 'page'])]) }}"><i class="fa fa-download" aria-hidden="true"></i> 导出</a>
     @include('portals.finance.pagination', ['paginator' => $records])
 </div>
 <div id="finance-order-horizontal-scroll" style="overflow-x:auto;overflow-y:hidden;height:18px" aria-label="订单列表横向滚动" tabindex="0"><div style="height:1px"></div></div>
@@ -82,14 +83,8 @@
                     <td class="logistics-sale-product-details">
                         @php
                             $productItems = $paypalOrderItems->get($order?->id, collect());
-                            if ($productItems->isEmpty()) {
-                                $names = preg_split('/\r?\n/', (string) $fields[18]) ?: [];
-                                $quantities = preg_split('/\r?\n/', (string) $fields[28]) ?: [];
-                                $productItems = collect($names)->filter(fn ($name) => trim($name) !== '')->map(fn ($name, $index) => new \App\Models\LogisticsOrderItem([
-                                    'product_title' => $name,
-                                    'quantity' => is_numeric($quantities[$index] ?? null) ? $quantities[$index] : null,
-                                ]));
-                            }
+                            $productItems = \App\Portals\Finance\FinancePayPalOrderExport::productItems($productItems, (string) $fields[18],
+                                $dataset === 'paypal-orders' ? (string) ($record->payload[$definition['headers'][28]] ?? '') : (string) $fields[28]);
                         @endphp
                         @include('portals.finance.partials.paypal-order-products', ['items' => $productItems])
                     </td>
