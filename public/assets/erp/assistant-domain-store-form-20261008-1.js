@@ -37,6 +37,7 @@
         var siteBuilder = $('#site_builder');
         var shopifySection = $('#assistant-shopify-app-section');
         var xshoppySection = $('#assistant-xshoppy-app-section');
+        var shoplineSection = $('#assistant-shopline-app-section');
 
         if (!siteBuilder.length) {
             return;
@@ -47,6 +48,7 @@
 
             shopifySection.prop('hidden', value !== 'shopify');
             xshoppySection.prop('hidden', value !== 'xshoppy' && value !== 'xshopy');
+            shoplineSection.prop('hidden', value !== 'shopline');
         }
 
         siteBuilder.on('input change', syncVisibility);

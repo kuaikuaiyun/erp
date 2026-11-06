@@ -23,6 +23,7 @@ use App\Portals\Operation\Http\Controllers\OperationAiProductLibraryController;
 use App\Portals\Operation\Http\Controllers\OperationReportController;
 use App\Portals\Operation\Http\Controllers\DailySubmissionController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingRechargeReviewController;
+use App\Portals\Assistant\Http\Controllers\AccountOpeningReviewController;
 use App\Portals\Assistant\Http\Controllers\AppLovinSpendReviewController;
 use App\Portals\Operation\Http\Controllers\AppLovinSpendController;
 use App\Portals\Assistant\Http\Controllers\OperationReportReviewController;
@@ -147,10 +148,16 @@ Route::get('/operation/daily-submissions/{type}', [DailySubmissionController::cl
     ->name('operation.daily-submissions.index');
 Route::post('/operation/daily-submissions/advertising-recharge', [DailySubmissionController::class, 'storeAdvertisingRecharge'])
     ->name('operation.daily-submissions.advertising-recharge.store');
+Route::post('/operation/daily-submissions/account-opening', [DailySubmissionController::class, 'storeAccountOpening'])
+    ->name('operation.daily-submissions.account-opening.store');
 Route::get('/assistant/daily-submissions/advertising-recharges', [AdvertisingRechargeReviewController::class, 'index'])
     ->name('assistant.daily-submissions.advertising-recharges.index');
 Route::patch('/assistant/daily-submissions/advertising-recharges/{submission}/process', [AdvertisingRechargeReviewController::class, 'process'])
     ->whereNumber('submission')->name('assistant.daily-submissions.advertising-recharges.process');
+Route::get('/assistant/daily-submissions/account-openings', [AccountOpeningReviewController::class, 'index'])
+    ->name('assistant.daily-submissions.account-openings.index');
+Route::patch('/assistant/daily-submissions/account-openings/{submission}/process', [AccountOpeningReviewController::class, 'process'])
+    ->whereNumber('submission')->name('assistant.daily-submissions.account-openings.process');
 Route::get('/operation/daily-submissions/applovin-spends', [AppLovinSpendController::class, 'index'])
     ->name('operation.applovin-spends.index');
 Route::post('/operation/daily-submissions/applovin-spends/screenshot', [AppLovinSpendController::class, 'uploadScreenshot'])
@@ -298,6 +305,7 @@ Route::middleware(MonitorPaymentPerformance::class)->group(function (): void {
     Route::get('/account-risk', [PaymentPortalController::class, 'accountRisk'])->name('payment.account-risk.index');
     Route::post('/account-risk/accounts', [PaymentPortalController::class, 'storeAccountRiskAccount'])->name('payment.account-risk.accounts.store');
     Route::put('/account-risk/accounts/{account}', [PaymentPortalController::class, 'updateAccountRiskAccount'])->name('payment.account-risk.accounts.update');
+    Route::post('/account-risk/accounts/{account}/balance/refresh', [PaymentPortalController::class, 'refreshAccountRiskBalance'])->name('payment.account-risk.accounts.balance.refresh');
     Route::get('/account-risk/accounts/{account}/detail', [PaymentPortalController::class, 'accountRiskDetail'])->name('payment.account-risk.accounts.detail');
     Route::get('/account-risk/accounts/{account}/monthly-report/export', [PaymentPortalController::class, 'exportAccountMonthlyReport'])->name('payment.account-risk.accounts.monthly-report.export');
     Route::get('/product-risk-profit', [PaymentPortalController::class, 'productRiskProfit'])->name('payment.product-risk-profit.index');

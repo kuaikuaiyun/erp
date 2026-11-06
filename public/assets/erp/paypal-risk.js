@@ -35,6 +35,7 @@
         if (!form) return;
         var method = one('#paypal-account-method');
         var title = one('#paypal-account-modal-title');
+        var relaySecret = one('#paypal-account-relay-secret');
         all('[data-paypal-account-create]').forEach(function (button) {
             button.addEventListener('click', function () {
                 form.reset();
@@ -43,6 +44,8 @@
                 method.value = 'POST';
                 title.innerHTML = '<i class="fa fa-paypal"></i> 新增PayPal账号';
                 one('#paypal-account-enabled').checked = true;
+                relaySecret.required = true;
+                relaySecret.placeholder = '请输入 HMAC Base64 密钥';
                 showModal('#paypal-account-modal');
             });
         });
@@ -59,6 +62,11 @@
                 one('#paypal-account-email').value = button.dataset.email || '';
                 one('#paypal-account-environment').value = button.dataset.environment || 'live';
                 one('#paypal-account-enabled').checked = button.dataset.enabled === '1';
+                one('#paypal-account-relay-url').value = button.dataset.relayUrl || '';
+                one('#paypal-account-relay-certificate').value = button.dataset.relayCertificateThumbprint || '';
+                var secretConfigured = button.dataset.relaySecretConfigured === '1';
+                relaySecret.required = !secretConfigured;
+                relaySecret.placeholder = secretConfigured ? '••••••••（已配置；留空不修改）' : '请输入 HMAC Base64 密钥';
                 showModal('#paypal-account-modal');
             });
         });

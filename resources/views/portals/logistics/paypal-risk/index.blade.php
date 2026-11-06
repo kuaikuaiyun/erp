@@ -247,7 +247,10 @@
                                     data-merchant="{{ $model?->merchant_id }}"
                                     data-email="{{ $model?->account_email }}"
                                     data-environment="{{ $model?->environment }}"
-                                    data-enabled="{{ $model?->is_enabled ? '1' : '0' }}"><i class="fa fa-pencil"></i> 编辑</button>
+                                    data-enabled="{{ $model?->is_enabled ? '1' : '0' }}"
+                                    data-relay-url="{{ $model?->relay_url }}"
+                                    data-relay-certificate-thumbprint="{{ $model?->relay_certificate_thumbprint_sha1 }}"
+                                    data-relay-secret-configured="{{ filled($model?->relay_hmac_secret) ? '1' : '0' }}"><i class="fa fa-pencil"></i> 编辑</button>
                             </div>
                         </footer>
                         @if($account['unmatched_count'] > 0)<div class="paypal-risk-unmatched"><i class="fa fa-unlink"></i> 有 {{ $account['unmatched_count'] }} 条 PayPal 记录尚未匹配本地订单</div>@endif
@@ -294,6 +297,9 @@
                     <div class="form-group col-sm-6"><label for="paypal-account-environment">接口环境 <span class="text-red">*</span></label><select id="paypal-account-environment" class="form-control" name="environment" required><option value="live">Live 正式环境</option><option value="sandbox">Sandbox 测试环境</option></select></div>
                     <div class="form-group col-sm-6"><label for="paypal-account-merchant">{{ __('logistics.paypal_risk.ui.merchant_id') }} <span class="text-red">*</span></label><input id="paypal-account-merchant" class="form-control" name="merchant_id" maxlength="100" required placeholder="PayPal商户ID"></div>
                     <div class="form-group col-sm-6"><label for="paypal-account-email">PayPal账号邮箱</label><input id="paypal-account-email" class="form-control" name="account_email" type="email" maxlength="191" placeholder="merchant@example.com"></div>
+                    <div class="form-group col-sm-12"><label for="paypal-account-relay-url">VPS 中转 API 地址 <span class="text-red">*</span></label><input id="paypal-account-relay-url" class="form-control" name="relay_url" type="url" maxlength="500" required placeholder="https://VPS_IP:8443/relay/v1/paypal/read"></div>
+                    <div class="form-group col-sm-6"><label for="paypal-account-relay-certificate">证书 SHA-1 指纹 <span class="text-red">*</span></label><input id="paypal-account-relay-certificate" class="form-control" name="relay_certificate_thumbprint_sha1" maxlength="40" required autocomplete="off" spellcheck="false" placeholder="40 位十六进制字符"></div>
+                    <div class="form-group col-sm-6"><label for="paypal-account-relay-secret">HMAC 密钥 <span class="text-red">*</span></label><input id="paypal-account-relay-secret" class="form-control" name="relay_hmac_secret" type="password" maxlength="512" required autocomplete="new-password" spellcheck="false" placeholder="请输入 HMAC Base64 密钥"></div>
                     <div class="form-group col-sm-12 paypal-risk-enabled-control"><input type="hidden" name="is_enabled" value="0"><label><input id="paypal-account-enabled" type="checkbox" name="is_enabled" value="1" checked> 启用账号（停用后保留历史数据，但拒绝接收新文件）</label></div>
                 </div>
             </div>
@@ -330,6 +336,6 @@
     <script>
         window.ErpPayPalRisk = @json($riskClientConfig);
     </script>
-    <script src="{{ $portalOrigin }}/assets/erp/paypal-risk.js?v=20261016-2"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/paypal-risk.js?v=20261106-2"></script>
     <script src="{{ $portalOrigin }}/assets/erp/logistics-order-detail.js?v=20261014-1"></script>
 @endpush

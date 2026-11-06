@@ -290,6 +290,7 @@
         var siteBuilder = root.find('#site_builder');
         var shopifySection = root.find('#assistant-shopify-app-section');
         var xshoppySection = root.find('#assistant-xshoppy-app-section');
+        var shoplineSection = root.find('#assistant-shopline-app-section');
         var domain = root.find('#domain');
         var email = root.find('#email');
         var lastAutoValue = null;
@@ -299,6 +300,7 @@
 
             shopifySection.prop('hidden', value !== 'shopify');
             xshoppySection.prop('hidden', value !== 'xshoppy' && value !== 'xshopy');
+            shoplineSection.prop('hidden', value !== 'shopline');
         }
 
         function hostnameFromInput(rawValue) {

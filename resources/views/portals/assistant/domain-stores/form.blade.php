@@ -479,6 +479,17 @@
                 </div>
             </div>
 
+            <div id="assistant-shopline-app-section" class="box box-solid assistant-form-section assistant-form-shopify-section" @if (strtolower((string) $value('site_builder')) !== 'shopline') hidden @endif>
+                <div class="box-header with-border"><h3 class="box-title">Shopline App 应用</h3></div>
+                <div class="box-body row assistant-form-grid">
+                    <div class="form-group col-md-6 @error('shopline_app_token') has-error @enderror">
+                        <label for="shopline_app_token">应用令牌</label>
+                        <input id="shopline_app_token" name="shopline_app_token" type="password" class="form-control" value="{{ $value('shopline_app_token') }}" maxlength="255" autocomplete="new-password">
+                        @error('shopline_app_token')<span class="help-block">{{ $message }}</span>@enderror
+                    </div>
+                </div>
+            </div>
+
             <div class="box box-solid assistant-form-section assistant-form-status-section">
                 <div class="box-header with-border"><h3 class="box-title">{{ $t('sections.status_expiry') }}</h3></div>
                 <div class="box-body row assistant-form-grid">
@@ -617,7 +628,7 @@
         window.ErpAssistantDomainStoreOwnerForm = @json($ownerAssignmentJavascriptConfig);
     </script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-tags-20261007-3.js"></script>
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-form-20261008-1.js?v=20261105-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-form-20261008-1.js?v=20261106-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-access-guide-20261009-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-quick-options-20261008-2.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-team-project-options-20261009-1.js"></script>

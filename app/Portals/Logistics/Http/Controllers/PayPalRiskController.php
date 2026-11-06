@@ -190,7 +190,7 @@ class PayPalRiskController extends Controller
     /** @return array<string,mixed> */
     private function validatedAccount(Request $request, ?LogisticsPayPalAccount $account = null): array
     {
-        foreach (['account_name', 'merchant_id', 'account_email'] as $field) {
+        foreach (['account_name', 'merchant_id', 'account_email', 'relay_url', 'relay_certificate_thumbprint_sha1', 'relay_hmac_secret'] as $field) {
             if ($request->has($field)) {
                 $request->merge([$field => trim((string) $request->input($field))]);
             }
@@ -201,16 +201,37 @@ class PayPalRiskController extends Controller
             $merchantUnique->ignore($account->getKey());
             $emailUnique->ignore($account->getKey());
         }
+        $secretRequired = ! $account || blank($account->relay_hmac_secret);
         $rules = [
             'account_name' => ['required', 'string', 'max:191'],
             'merchant_id' => ['required', 'string', 'max:100', $merchantUnique],
             'account_email' => ['nullable', 'email', 'max:191', $emailUnique],
             'environment' => ['required', Rule::in(['live', 'sandbox'])],
             'is_enabled' => ['required', 'boolean'],
+            'relay_url' => ['required', 'string', 'max:500', 'url', 'regex:/^https:\/\//i'],
+            'relay_certificate_thumbprint_sha1' => ['required', 'regex:/^[A-Fa-f0-9]{40}$/'],
+            'relay_hmac_secret' => [
+                $secretRequired ? 'required' : 'nullable',
+                'string',
+                'max:512',
+                static function (string $attribute, mixed $value, \Closure $fail): void {
+                    if (blank($value)) {
+                        return;
+                    }
+                    $decoded = base64_decode((string) $value, true);
+                    if ($decoded === false || strlen($decoded) !== 32) {
+                        $fail('中转 HMAC 密钥必须是有效的 32 字节 Base64 值。');
+                    }
+                },
+            ],
         ];
         $data = $request->validate($rules);
         $data['merchant_id'] = blank($data['merchant_id'] ?? null) ? null : mb_strtoupper((string) $data['merchant_id']);
         $data['account_email'] = blank($data['account_email'] ?? null) ? null : mb_strtolower((string) $data['account_email']);
+        $data['relay_certificate_thumbprint_sha1'] = mb_strtoupper((string) $data['relay_certificate_thumbprint_sha1']);
+        if (blank($data['relay_hmac_secret'] ?? null)) {
+            unset($data['relay_hmac_secret']);
+        }
 
         return $data;
     }

@@ -30,7 +30,7 @@ class PaymentAccountRiskService
         $accountVersion = LogisticsPayPalAccount::query()
             ->selectRaw('MAX(updated_at) as updated_at, MAX(last_imported_at) as last_imported_at, COUNT(*) as total')
             ->first();
-        $cacheKey = 'payment:account-risk-dashboard:v4:'.sha1((string) json_encode([
+        $cacheKey = 'payment:account-risk-dashboard:v5:'.sha1((string) json_encode([
             'filters' => $filters,
             'accounts' => [
                 'updated_at' => (string) ($accountVersion->updated_at ?? ''),
@@ -97,8 +97,9 @@ class PaymentAccountRiskService
         $weeklyRiskSnapshots = $this->riskSnapshots->currentForAccounts($merchantIds);
         $balanceSnapshots = LogisticsPayPalBalanceSnapshot::query()
             ->whereIn('logistics_paypal_account_id', $merchantIds)
-            ->where('currency_code', 'USD')->orderByDesc('as_of_time')->orderByDesc('id')->get()
-            ->unique('logistics_paypal_account_id')->keyBy('logistics_paypal_account_id');
+            ->orderBy('currency_code')
+            ->get()
+            ->groupBy('logistics_paypal_account_id');
         $orderTimes = DB::connection(config('admin.database.connection') ?: config('database.default'))
             ->table('logistics_paypal_transactions as payments')
             ->join('logistics_orders as orders', 'orders.id', '=', 'payments.logistics_order_id')
@@ -128,7 +129,7 @@ class PaymentAccountRiskService
             ],
             'merchants' => $merchants->map(fn (array $summary): array => $this->merchant(
                 $summary,
-                $balanceSnapshots->get((int) $summary['id']),
+                $balanceSnapshots->get((int) $summary['id'], collect()),
                 $orderTimes->get((int) $summary['id']),
                 $accountModels->get((int) $summary['id']),
                 $weeklyRiskSnapshots->get((int) $summary['id']),
@@ -641,7 +642,7 @@ class PaymentAccountRiskService
         ];
     }
 
-    /** @param array{account_name:string,merchant_id:string,account_email:?string,environment:string,is_enabled:bool} $data */
+    /** @param array<string,mixed> $data */
     public function createAccount(array $data, int|string|null $userId, ?string $userName): LogisticsPayPalAccount
     {
         return LogisticsPayPalAccount::query()->create([
@@ -653,7 +654,7 @@ class PaymentAccountRiskService
         ]);
     }
 
-    /** @param array{account_name:string,merchant_id:string,account_email:?string,environment:string,is_enabled:bool} $data */
+    /** @param array<string,mixed> $data */
     public function updateAccount(LogisticsPayPalAccount $account, array $data, int|string|null $userId, ?string $userName): LogisticsPayPalAccount
     {
         $account->fill([
@@ -849,13 +850,12 @@ class PaymentAccountRiskService
      */
     private function merchant(
         array $summary,
-        ?LogisticsPayPalBalanceSnapshot $balance = null,
+        Collection $balances,
         ?object $orderTimes = null,
         ?LogisticsPayPalAccount $account = null,
         ?PaymentPayPalAccountRiskSnapshot $riskSnapshot = null,
     ): array
     {
-        $balanceTime = $balance?->as_of_time ?: $balance?->last_refresh_time;
         $orders = (int) $summary['order_count'];
         $paidAmount = (float) $summary['paid_amount'];
         $refundAmount = (float) $summary['refund_amount'];
@@ -881,6 +881,9 @@ class PaymentAccountRiskService
                 'account_email' => (string) ($account?->account_email ?? ''),
                 'environment' => (string) ($account?->environment ?? LogisticsPayPalAccount::ENVIRONMENT_LIVE),
                 'is_enabled' => (bool) ($account?->is_enabled ?? false),
+                'relay_url' => (string) ($account?->relay_url ?? ''),
+                'relay_certificate_thumbprint_sha1' => (string) ($account?->relay_certificate_thumbprint_sha1 ?? ''),
+                'relay_hmac_secret_configured' => filled($account?->relay_hmac_secret),
             ],
             'orders' => $this->integer($orders),
             'amount' => $this->currency($paidAmount),
@@ -892,13 +895,8 @@ class PaymentAccountRiskService
             'first_order_at' => $this->formatDateTime($orderTimes?->first_order_at),
             'last_order_at' => $this->formatDateTime($orderTimes?->last_order_at),
             'usage_days' => $this->usageDays($orderTimes?->first_order_at, $orderTimes?->last_order_at),
-            'balance' => $balance ? [
-                'available' => $this->currency((float) $balance->available_balance),
-                'withheld' => $this->currency((float) $balance->withheld_balance),
-                'as_of_time' => $this->formatDateTime($balanceTime),
-                'relative_time' => $this->relativeTime($balanceTime),
-                'is_stale' => !$balanceTime || $balanceTime->lt(now()->subHours(12)),
-            ] : null,
+            'balance' => $this->balanceCard($balances),
+            'can_refresh_balance' => $this->canRefreshBalance($account),
             'rates' => [
                 $this->rate('refund', (float) $summary['refund_rate'], ['refunds' => $this->integer((int) $summary['refund_order_count']), 'orders' => $this->integer($orders)]),
                 $this->rate('matched_refund', (float) $summary['matched_refund_rate'], ['refunds' => $this->integer($matchedRefundOrders), 'orders' => $this->integer($matchedOrders)]),
@@ -909,6 +907,74 @@ class PaymentAccountRiskService
                 $this->rate('full_refund', (float) $summary['overall_dispute_rate'], ['disputes' => $this->integer($overallDisputeOrders), 'orders' => $this->integer($orders)]),
             ],
         ];
+    }
+
+    /** @return array<string,mixed>|null */
+    public function balanceForAccount(LogisticsPayPalAccount $account): ?array
+    {
+        return $this->balanceCard(LogisticsPayPalBalanceSnapshot::query()
+            ->where('logistics_paypal_account_id', $account->getKey())
+            ->orderBy('currency_code')
+            ->get());
+    }
+
+    /** @param Collection<int, LogisticsPayPalBalanceSnapshot> $balances
+     *  @return array<string,mixed>|null
+     */
+    private function balanceCard(Collection $balances): ?array
+    {
+        if ($balances->isEmpty()) {
+            return null;
+        }
+
+        $items = $balances->map(function (LogisticsPayPalBalanceSnapshot $balance): array {
+            $raw = is_array($balance->raw_payload) ? $balance->raw_payload : [];
+            $available = (float) $balance->available_balance;
+            $withheld = (float) $balance->withheld_balance;
+            $total = (float) $balance->total_balance;
+
+            return [
+                'currency' => (string) $balance->currency_code,
+                'available' => $this->balanceAmount($balance->currency_code, $available),
+                'withheld' => $this->balanceAmount($balance->currency_code, $withheld),
+                'total' => $this->balanceAmount($balance->currency_code, $total),
+                'primary' => (bool) ($raw['primary'] ?? false),
+                'zero' => abs($available) < 0.00000001 && abs($withheld) < 0.00000001 && abs($total) < 0.00000001,
+            ];
+        })->sortBy([
+            ['primary', 'desc'],
+            ['currency', 'asc'],
+        ])->values();
+        if (! $items->contains('primary', true)) {
+            $items = $items->map(static function (array $item, int $index): array {
+                return $index === 0 ? [...$item, 'primary' => true] : $item;
+            })->values();
+        }
+        $visible = $items->filter(static fn (array $item): bool => $item['primary'] || ! $item['zero'])->values();
+        $refreshedAt = $balances->map(fn (LogisticsPayPalBalanceSnapshot $balance) => $balance->last_refresh_time ?: $balance->as_of_time)
+            ->filter()
+            ->sortDesc()
+            ->first();
+
+        return [
+            'items' => $items->all(),
+            'visible_count' => $visible->count(),
+            'hidden_zero_count' => $items->count() - $visible->count(),
+            'refreshed_at' => $this->formatDateTime($refreshedAt),
+        ];
+    }
+
+    private function canRefreshBalance(?LogisticsPayPalAccount $account): bool
+    {
+        return (bool) ($account?->is_enabled ?? false)
+            && filter_var($account?->relay_url, FILTER_VALIDATE_URL)
+            && preg_match('/^[A-Fa-f0-9]{40}$/', (string) ($account?->relay_certificate_thumbprint_sha1 ?? '')) === 1
+            && filled($account?->relay_hmac_secret);
+    }
+
+    private function balanceAmount(string $currency, float $amount): string
+    {
+        return strtoupper($currency).' '.number_format($amount, 2, '.', ',');
     }
 
     private function formatRiskWindow(PaymentPayPalAccountRiskSnapshot $snapshot): string

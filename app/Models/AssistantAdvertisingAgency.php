@@ -69,6 +69,31 @@ class AssistantAdvertisingAgency extends Model
             ->all();
     }
 
+    /** @return array<string, list<array{key:string,media:string,coefficient:float}>> */
+    public static function enabledGroups(?array $assistantDepartmentIds = null): array
+    {
+        $options = static::enabledOptions($assistantDepartmentIds);
+        $mediaNames = static::enabledMediaNames($assistantDepartmentIds);
+        $agencyNames = static::enabledNames($assistantDepartmentIds);
+        $groups = [];
+
+        foreach ($options as $key => $coefficient) {
+            $agencyName = trim((string) ($agencyNames[$key] ?? ''));
+            $mediaName = trim((string) ($mediaNames[$key] ?? ''));
+            if ($agencyName === '' || $mediaName === '') {
+                continue;
+            }
+
+            $groups[$agencyName][] = [
+                'key' => (string) $key,
+                'media' => $mediaName,
+                'coefficient' => (float) $coefficient,
+            ];
+        }
+
+        return $groups;
+    }
+
     private function optionKey(): string
     {
         return (string) $this->getKey();

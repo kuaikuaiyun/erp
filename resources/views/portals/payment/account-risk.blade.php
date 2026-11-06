@@ -17,7 +17,7 @@
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261026-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261026-1">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-account-risk.css?v=20261106-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-account-risk.css?v=20261106-6">
 @endpush
 
 @section('content')
@@ -125,16 +125,9 @@
                             <div class="payment-rate-item payment-rate-{{ $rate['tone'] }}"><div class="payment-rate-heading"><span>{{ __($translationPrefix.'.rate_labels.'.$rate['key']) }}</span><strong>{{ $rate['value'] }}</strong></div><p class="payment-rate-formula">{{ __($translationPrefix.'.rate_formulas.'.$rate['key']) }}</p><div class="payment-rate-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ $rate['progress'] }}"><span style="width: {{ $rate['progress'] }}%"></span></div><small>{{ __($translationPrefix.'.rate_notes.'.$rate['key'], $rate['note_params']) }}</small></div>
                         @endforeach
                     </div>
-                    <footer class="payment-account-compact-footer {{ ($merchant['balance']['is_stale'] ?? false) ? 'is-stale' : '' }}">
-                        @if($merchant['balance'])
-                            <div class="payment-account-compact-balance">
-                                <div class="payment-account-compact-values"><p><span>{{ __($translationPrefix.'.balance.available') }}：</span><strong>{{ $merchant['balance']['available'] }}</strong></p><p><span>{{ __($translationPrefix.'.balance.withheld') }}：</span><strong>{{ $merchant['balance']['withheld'] }}</strong></p></div>
-                                <small><i class="fa fa-clock-o" aria-hidden="true"></i> {{ __($translationPrefix.'.balance.updated_ago', ['time' => __($translationPrefix.'.balance.relative.'.$merchant['balance']['relative_time']['key'], ['count' => $merchant['balance']['relative_time']['count']])]) }}@if($merchant['balance']['is_stale']) · {{ __($translationPrefix.'.balance.stale') }}@endif</small>
-                            </div>
-                        @else
-                            <p class="payment-account-balance-pending"><i class="fa fa-info-circle" aria-hidden="true"></i> {{ __($translationPrefix.'.balance.pending') }}</p>
-                        @endif
-                        <div class="payment-account-card-actions"><button type="button" class="btn btn-default btn-sm payment-account-detail-button" data-payment-account-detail data-account-id="{{ $merchant['id'] }}" data-account-name="{{ $merchant['name'] }}">{{ __($translationPrefix.'.view_detail') }}</button><button type="button" class="btn btn-default btn-sm payment-account-edit-button" data-payment-account-edit data-account-id="{{ $merchant['id'] }}" data-account-name="{{ $merchant['edit']['account_name'] }}" data-account-merchant="{{ $merchant['edit']['merchant_id'] }}" data-account-email="{{ $merchant['edit']['account_email'] }}" data-account-environment="{{ $merchant['edit']['environment'] }}" data-account-enabled="{{ $merchant['edit']['is_enabled'] ? '1' : '0' }}"><i class="fa fa-pencil" aria-hidden="true"></i> {{ __($translationPrefix.'.edit_modal.button') }}</button></div>
+                    <footer class="payment-account-compact-footer">
+                        <div data-payment-account-balance="{{ $merchant['id'] }}">@include('portals.payment.partials.account-risk-balance', ['balance' => $merchant['balance']])</div>
+                        <div class="payment-account-card-actions"><button type="button" class="btn btn-default btn-sm payment-account-refresh-button" data-payment-account-balance-refresh data-account-id="{{ $merchant['id'] }}" @disabled(! $merchant['can_refresh_balance'])><i class="fa fa-refresh" aria-hidden="true"></i> 刷新余额</button><button type="button" class="btn btn-default btn-sm payment-account-detail-button" data-payment-account-detail data-account-id="{{ $merchant['id'] }}" data-account-name="{{ $merchant['name'] }}">{{ __($translationPrefix.'.view_detail') }}</button><button type="button" class="btn btn-default btn-sm payment-account-edit-button" data-payment-account-edit data-account-id="{{ $merchant['id'] }}" data-account-name="{{ $merchant['edit']['account_name'] }}" data-account-merchant="{{ $merchant['edit']['merchant_id'] }}" data-account-email="{{ $merchant['edit']['account_email'] }}" data-account-environment="{{ $merchant['edit']['environment'] }}" data-account-enabled="{{ $merchant['edit']['is_enabled'] ? '1' : '0' }}" data-account-relay-url="{{ $merchant['edit']['relay_url'] }}" data-account-relay-certificate-thumbprint="{{ $merchant['edit']['relay_certificate_thumbprint_sha1'] }}" data-account-relay-secret-configured="{{ $merchant['edit']['relay_hmac_secret_configured'] ? '1' : '0' }}"><i class="fa fa-pencil" aria-hidden="true"></i> {{ __($translationPrefix.'.edit_modal.button') }}</button></div>
                     </footer>
                 </article>
             @endforeach
@@ -153,6 +146,9 @@
                         <div class="form-group col-sm-6"><label for="payment-account-create-environment">{{ __($translationPrefix.'.create_modal.environment') }} <span class="text-red">*</span></label><select id="payment-account-create-environment" class="form-control" name="environment" required><option value="live" @selected(old('environment', 'live') === 'live')>{{ __($translationPrefix.'.create_modal.environment_live') }}</option><option value="sandbox" @selected(old('environment') === 'sandbox')>{{ __($translationPrefix.'.create_modal.environment_sandbox') }}</option></select></div>
                         <div class="form-group col-sm-6"><label for="payment-account-create-merchant">{{ __($translationPrefix.'.create_modal.merchant_id') }} <span class="text-red">*</span></label><input id="payment-account-create-merchant" class="form-control" type="text" name="merchant_id" maxlength="100" required value="{{ old('merchant_id') }}" placeholder="{{ __($translationPrefix.'.create_modal.merchant_id_placeholder') }}"></div>
                         <div class="form-group col-sm-6"><label for="payment-account-create-email">{{ __($translationPrefix.'.create_modal.account_email') }}</label><input id="payment-account-create-email" class="form-control" type="email" name="account_email" maxlength="191" value="{{ old('account_email') }}" placeholder="{{ __($translationPrefix.'.create_modal.account_email_placeholder') }}"></div>
+                        <div class="form-group col-sm-12"><label for="payment-account-relay-url">VPS 中转 API 地址 <span class="text-red">*</span></label><input id="payment-account-relay-url" class="form-control" type="url" name="relay_url" maxlength="500" required value="{{ old('relay_url') }}" placeholder="https://VPS_IP:8443/relay/v1/paypal/read"></div>
+                        <div class="form-group col-sm-6"><label for="payment-account-relay-certificate">证书 SHA-1 指纹 <span class="text-red">*</span></label><input id="payment-account-relay-certificate" class="form-control" type="text" name="relay_certificate_thumbprint_sha1" maxlength="40" required value="{{ old('relay_certificate_thumbprint_sha1') }}" autocomplete="off" spellcheck="false" placeholder="40 位十六进制字符"></div>
+                        <div class="form-group col-sm-6"><label for="payment-account-relay-secret">HMAC 密钥 <span class="text-red">*</span></label><input id="payment-account-relay-secret" class="form-control" type="password" name="relay_hmac_secret" maxlength="512" required autocomplete="new-password" spellcheck="false" placeholder="请输入 HMAC Base64 密钥"></div>
                         <div class="form-group col-sm-12 payment-account-create-enabled"><input type="hidden" name="is_enabled" value="{{ (bool) old('is_enabled', true) ? '1' : '0' }}" data-payment-account-enabled-value><label><input id="payment-account-create-enabled" type="checkbox" data-payment-account-enabled @checked((bool) old('is_enabled', true))> {{ __($translationPrefix.'.create_modal.enabled') }}</label></div>
                     </div>
                 </div>
@@ -226,11 +222,12 @@
         accountMonthlyExportUrl: @json(route('payment.account-risk.accounts.monthly-report.export', ['account' => '__ACCOUNT__'])),
         accountStoreUrl: @json(route('payment.account-risk.accounts.store')),
         accountUpdateUrl: @json(route('payment.account-risk.accounts.update', ['account' => '__ACCOUNT__'])),
+        accountBalanceRefreshUrl: @json(route('payment.account-risk.accounts.balance.refresh', ['account' => '__ACCOUNT__'])),
         accountForm: @json($accountFormConfig),
         accountDetail: @json($accountDetailConfig),
         pagination: @json(__('payment.common.pagination'))
     };</script>
     @if ($errors->any())<script>jQuery(function () { jQuery('#payment-account-create-modal').modal('show'); });</script>@endif
-    <script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261104-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261106-3"></script>
     <script>document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('.payment-reason-multiselect').forEach(function(menu){var summary=menu.querySelector('summary span'),boxes=menu.querySelectorAll('input[type="checkbox"]'),fallback=menu.closest('.payment-credit-card-reason-filter').querySelector('.payment-reason-legacy-select option').textContent;var refresh=function(){var labels=Array.prototype.map.call(boxes,function(box){return box.checked?box.parentNode.querySelector('span').textContent.trim():'';}).filter(Boolean);summary.textContent=labels.length?labels.join('、'):fallback;summary.title=labels.join('、');};boxes.forEach(function(box){box.addEventListener('change',refresh);});var clear=menu.querySelector('[data-payment-reason-clear]');clear.addEventListener('click',function(event){event.preventDefault();boxes.forEach(function(box){box.checked=false;});refresh();});refresh();});});</script>
 @endpush
