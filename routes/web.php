@@ -30,10 +30,12 @@ use App\Portals\ProductRequests\Http\Controllers\ProductRequestController;
 use App\Portals\Aikaipin\Http\Controllers\ProductLibraryController;
 use App\Portals\Payment\Http\Controllers\PaymentPortalController;
 use App\Portals\Fashion\Http\Controllers\AdvertisingExpenseController;
+use App\Portals\FashionLogistics\Http\Controllers\FashionOrderController;
 use App\Http\Middleware\MonitorPaymentPerformance;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/fashion/advertising-expenses', [AdvertisingExpenseController::class, 'index'])->name('fashion.advertising-expenses.index');
+Route::get('/fashion-logistics/orders', [FashionOrderController::class, 'index'])->name('fashion-logistics.orders.index');
 Route::post('/fashion/advertising-expenses', [AdvertisingExpenseController::class, 'store'])->name('fashion.advertising-expenses.store');
 Route::put('/fashion/advertising-expenses/{report}', [AdvertisingExpenseController::class, 'update'])->name('fashion.advertising-expenses.update');
 Route::delete('/fashion/advertising-expenses/{report}', [AdvertisingExpenseController::class, 'destroy'])->name('fashion.advertising-expenses.destroy');
@@ -51,6 +53,7 @@ Route::prefix('finance')->name('finance.')->middleware(\App\Http\Middleware\Redi
     Route::post('/payment-accounts/{accountKey}/refresh', 'refreshPayPalBalance')->where('accountKey', 'finance-[1-9][0-9]*')->name('payment-accounts.refresh');
     Route::post('/payment-accounts/{accountKey}/transactions', 'syncPayPalTransactions')->where('accountKey', 'finance-[1-9][0-9]*')->name('payment-accounts.sync');
     Route::delete('/payment-accounts/{accountKey}', 'deletePaymentAccount')->where('accountKey', 'finance-[1-9][0-9]*')->name('payment-accounts.delete');
+    Route::post('/payment-accounts/{accountKey}/disable', 'disablePaymentAccount')->where('accountKey', 'finance-[1-9][0-9]*')->name('payment-accounts.disable');
     Route::post('/payment-accounts/{accountKey}', 'updatePaymentAccount')->where('accountKey', '[a-z0-9-]+')->name('payment-accounts.update');
     Route::get('/records/{dataset}', 'records')->name('records');
     Route::get('/transactions/{transaction}/raw', 'rawPayPalTransaction')->whereNumber('transaction')->name('transactions.raw');
@@ -157,6 +160,7 @@ Route::post('/operation-report-reviews/bulk-review', [OperationReportReviewContr
 Route::get('/operation-report-reviews/{report}', [OperationReportReviewController::class, 'show'])->whereNumber('report')->name('assistant.operation-report-reviews.show');
 Route::post('/operation-report-reviews/{report}/approve', [OperationReportReviewController::class, 'approve'])->whereNumber('report')->name('assistant.operation-report-reviews.approve');
 Route::post('/operation-report-reviews/{report}/reject', [OperationReportReviewController::class, 'reject'])->whereNumber('report')->name('assistant.operation-report-reviews.reject');
+Route::delete('/operation-report-reviews/{report}', [OperationReportReviewController::class, 'destroy'])->whereNumber('report')->name('assistant.operation-report-reviews.destroy');
 Route::get('/operation/ai-product-library/{product}/publish', [OperationAiProductLibraryController::class, 'publishForm'])->name('operation.ai-product-library.publish.form');
 Route::post('/operation/ai-product-library/{product}/publish', [OperationAiProductLibraryController::class, 'publish'])->name('operation.ai-product-library.publish');
 Route::get('/operation/ai-product-library/{product}/shopify-images/{imageIndex}', [OperationAiProductLibraryController::class, 'shopifyImage'])->whereNumber('imageIndex')->name('operation.ai-product-library.shopify-image');

@@ -29,6 +29,11 @@ Schedule::command('logistics:sku-database:backfill-guide-costs --batch=100')
     ->withoutOverlapping(10)
     ->runInBackground();
 
+Schedule::command('fashion-logistics:sync-orders --days=60')
+    ->everyFiveMinutes()
+    ->withoutOverlapping(10)
+    ->runInBackground();
+
 Schedule::command('payment:paypal-risk:refresh-weekly')
     ->mondays()
     ->at('00:10')

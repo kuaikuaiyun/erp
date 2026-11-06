@@ -18,6 +18,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Cache;
 use Symfony\Component\HttpFoundation\Response;
 
 class FinanceController extends Controller
@@ -162,6 +163,23 @@ class FinanceController extends Controller
         return response()->json(json_decode($row->raw_payload, true, 512, JSON_THROW_ON_ERROR))->header('Cache-Control', 'private, no-store');
     }
 
+    public function disablePaymentAccount(Request $request, string $accountKey): Response|JsonResponse
+    {
+        $context = $this->context($request, true);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        $this->workbooks->database()->transaction(function () use ($accountKey, $context): void {
+            $account = FinancePaymentAccount::query()->lockForUpdate()->findOrFail(substr($accountKey, 8));
+            $account->update(['status' => 'disabled', 'updated_by' => (int) $context['user']->getKey()]);
+        });
+        if ($request->expectsJson()) {
+            return response()->json(['ok' => true, 'redirect' => route('finance.home')]);
+        }
+
+        return redirect()->route('finance.home')->with('success', '账户已停用，历史数据已保留。');
+    }
+
     public function deletePaymentAccount(Request $request, string $accountKey): Response|JsonResponse
     {
         $context = $this->context($request, true);
@@ -170,8 +188,35 @@ class FinanceController extends Controller
         }
         $account = FinancePaymentAccount::query()->findOrFail(substr($accountKey, 8));
         $db = $this->workbooks->database();
-        $db->transaction(function () use ($account): void {
+        $db->transaction(function () use ($account, $db): void {
             $account = FinancePaymentAccount::query()->lockForUpdate()->findOrFail($account->id);
+            // Only finance-owned tables are cleared; logistics and payment sources are untouched.
+            $records = $db->table('finance_records')->where(function ($query) use ($account, $db): void {
+                $query->whereIn('id', $db->table('finance_payment_transactions')
+                    ->where('payment_account_id', $account->id)->select('finance_record_id'))
+                    ->orWhere(function ($query) use ($account): void {
+                        $query->where('dataset', $account->account_type === 'paypal' ? 'paypal-orders' : 'xuzong2-details')
+                            ->where('account', $account->activity_account);
+                    });
+            });
+            $db->table('finance_settlement_supplements')->whereIn('finance_record_id', (clone $records)->select('id'))->delete();
+            $records->delete();
+            $db->table('finance_payment_transactions')->where('payment_account_id', $account->id)->delete();
+            $db->table('finance_balance_snapshots')->where('payment_account_id', $account->id)->delete();
+            $db->table('finance_sync_pages')->whereIn('sync_log_id', $db->table('finance_sync_logs')
+                ->where('payment_account_id', $account->id)->select('id'))->delete();
+            $db->table('finance_sync_logs')->where('payment_account_id', $account->id)->delete();
+            $db->table('finance_payment_balances')->where('channel', $account->account_type === 'paypal' ? 'paypal' : 'xuzong2')
+                ->where('account', $account->activity_account)->delete();
+            foreach ($db->table('finance_period_locks')->whereNotNull('report_snapshot')->orderBy('month')->lockForUpdate()->get() as $period) {
+                $rows = json_decode($period->report_snapshot, true, 512, JSON_THROW_ON_ERROR);
+                $remaining = array_values(array_filter($rows, fn ($row) => (int) $row['account_id'] !== (int) $account->id));
+                if (count($rows) !== count($remaining)) {
+                    $db->table('finance_period_locks')->where('month', $period->month)->update([
+                        'report_snapshot' => json_encode($remaining, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR), 'updated_at' => now(),
+                    ]);
+                }
+            }
             $account->delete();
         });
 
@@ -245,7 +290,7 @@ class FinanceController extends Controller
         $isPayPal = $request->input('account_type') === 'paypal';
         $relayRule = [Rule::excludeIf(! $isPayPal), 'bail', 'required', 'string'];
         $data = $request->validateWithBag('paymentAccount', [
-            'account_name' => ['required', 'string', 'max:100', Rule::unique($db->getName().'.finance_payment_accounts', 'account_name')->whereNull('deleted_at')->ignore($account?->id)],
+            'account_name' => ['required', 'string', 'max:100', Rule::unique($db->getName().'.finance_payment_accounts', 'account_name')->where('account_type', $request->input('account_type'))->whereNull('deleted_at')->ignore($account?->id)],
             'account_type' => ['required', Rule::in(['paypal', 'credit_card'])],
             'main_currency' => ['required', 'regex:/^[A-Z]{3}$/'],
             'status' => ['required', Rule::in(['enabled', 'disabled'])],
@@ -271,7 +316,7 @@ class FinanceController extends Controller
         ], [], trans('finance.payment_accounts.attributes'));
         $cards = $this->paypalBalances->dashboard()['cards'];
         $currentKey = $account ? 'finance-'.$account->id : null;
-        if ($cards->contains(fn ($card) => $card['key'] !== $currentKey && (mb_strtolower($card['name']) === mb_strtolower($data['account_name']) || mb_strtolower($card['activity_account']) === mb_strtolower($data['account_name'])))) {
+        if ($isPayPal && $cards->contains(fn ($card) => $card['key'] !== $currentKey && (mb_strtolower($card['name']) === mb_strtolower($data['account_name']) || mb_strtolower($card['activity_account']) === mb_strtolower($data['account_name'])))) {
             throw ValidationException::withMessages(['account_name' => __('finance.paypal_profile.duplicate_name')])->errorBag('paymentAccount');
         }
         if (! $isPayPal) {
@@ -516,7 +561,13 @@ class FinanceController extends Controller
         }
         $query = $this->recordsQuery($dataset, $filters);
         $exportAccounts = (clone $query)->selectRaw('account, count(*) as total')->groupBy('account')->orderBy('account')->get();
-        $records = $query->orderByDesc('occurred_at')->orderByDesc('id')->paginate((int) ($filters['per_page'] ?? 10))->withQueryString();
+        $perPage = (int) ($filters['per_page'] ?? 10);
+        $page = \Illuminate\Pagination\LengthAwarePaginator::resolveCurrentPage();
+        $records = new \Illuminate\Pagination\LengthAwarePaginator(
+            $query->orderByDesc('occurred_at')->orderByDesc('id')->forPage($page, $perPage)->get(),
+            (int) $exportAccounts->sum('total'), $perPage, $page,
+            ['path' => $request->url(), 'query' => $request->query()]
+        );
         $types = $this->workbooks->database()->table('finance_transaction_types')->pluck('category', 'raw_type');
         $groups = $this->workbooks->domainGroups()->keyBy('domain');
         $paymentAccounts = FinancePaymentAccount::query()
@@ -524,9 +575,9 @@ class FinanceController extends Controller
             ->orderBy('id')->get(['activity_account', 'account_name']);
         $accounts = $paymentAccounts->pluck('activity_account')->unique()->values();
         $accountLabels = $paymentAccounts->pluck('account_name', 'activity_account');
+        $conditionChoices = $this->conditionChoices($dataset);
         if ($dataset === 'xuzong2-orders') {
-            $accounts = app(\App\Portals\Finance\FinanceLogisticsCreditOrders::class)->query()
-                ->select('account')->distinct()->orderBy('account')->pluck('account')->filter()->values();
+            $accounts = collect($conditionChoices['account'])->pluck('value');
         }
 
         $paypalOrderMetadata = $dataset === 'paypal-orders'
@@ -569,15 +620,19 @@ class FinanceController extends Controller
                 $fixedFilterOptions[$field] = collect($options)->map(fn ($label, $value) => ['value' => $value, 'label' => $label])->values();
             }
             $db = $this->workbooks->database();
-            if ($db->getSchemaBuilder()->hasTable('logistics_orders')) {
+            $logisticsChoices = Cache::remember($this->filterCacheKey('logistics'), 60, function () use ($db): array {
+                $result = [];
+                if (! $db->getSchemaBuilder()->hasTable('logistics_orders')) return $result;
                 $available = $db->getSchemaBuilder()->getColumnListing('logistics_orders');
                 foreach (['store_name', 'assigned_owner_name', 'group_names', 'staff_status', 'source_shop_domain', 'subscription_type', 'payment_method', 'logistics_status', 'data_status'] as $field) {
                     if (in_array($field, $available, true)) {
-                        $fixedFilterOptions[$field] = $db->table('logistics_orders')->whereNotNull($field)->where($field, '!=', '')
+                        $result[$field] = $db->table('logistics_orders')->whereNotNull($field)->where($field, '!=', '')
                             ->distinct()->orderBy($field)->pluck($field)->map(fn ($value) => ['value' => (string) $value, 'label' => FinanceCatalog::simplified((string) $value)]);
                     }
                 }
-            }
+                return $result;
+            });
+            $fixedFilterOptions = array_merge($fixedFilterOptions, $logisticsChoices);
         }
 
         return response()->view('portals.finance.records', [
@@ -587,15 +642,15 @@ class FinanceController extends Controller
             'paypalOrderMetadata' => $paypalOrderMetadata,
             'paypalOrderItems' => $paypalOrderItems,
             'fixedFilterOptions' => $fixedFilterOptions,
-            'conditionChoices' => $this->conditionChoices($dataset),
-            'numericFilterFields' => FinanceCatalog::numericFilterFields($dataset),
+            'conditionChoices' => $conditionChoices,
             'exportAccounts' => $exportAccounts,
+            'numericFilterFields' => FinanceCatalog::numericFilterFields($dataset),
             'canImport' => FinanceCatalog::supportsImport($dataset),
             'accountingTransactions' => $dataset === 'paypal-orders' ? $this->workbooks->database()->table('finance_payment_transactions')->whereIn('finance_record_id', $records->pluck('id'))->get(['finance_record_id', 'category', 'direction', 'monthly_rate', 'cny_amount'])->keyBy('finance_record_id') : collect(),
             'timezones' => FinanceWorkbookService::TIMEZONES,
             'filterFields' => FinanceCatalog::filterFieldLabels($dataset),
             'filterOperators' => ['equals', 'contains', 'not_equals', 'empty', 'not_empty', 'gt', 'gte', 'lt', 'lte'],
-            'categories' => $types->merge($this->workbooks->database()->table('finance_payment_transactions')->whereNotNull('category')->pluck('category'))->filter()->unique()->sort()->values(),
+            'categories' => $types->merge($this->workbooks->database()->table('finance_payment_transactions')->whereNotNull('category')->distinct()->pluck('category'))->filter()->unique()->sort()->values(),
         ]);
     }
 
@@ -690,7 +745,7 @@ class FinanceController extends Controller
         if (isset($selection['report_columns'])) {
             $columns = array_map('intval', $selection['report_columns']);
             $headers = array_map(fn ($index) => $headers[$index], $columns);
-            $rows = $rows->map(fn ($values) => array_map(fn ($index) => $values[$index], $columns));
+            $rows = $rows->map(fn ($values) => array_map(fn ($index) => $values[$index] ?? '', $columns));
         }
         $filename = $dataset.'-'.now()->format('Ymd-His');
 
@@ -1035,7 +1090,19 @@ class FinanceController extends Controller
             $templateHeaders = array_values($service->importFields($channel));
             return $this->workbooks->download($templateHeaders, [], $report.'-template.xlsx');
         }
-        $rows = $service->rows($channel, $filters);
+        $paginator = null;
+        // Computed fields still need the complete matching set before filtering.
+        $canPaginate = ! $request->boolean('download') && ! $request->has('suggestion_field')
+            && ! filled($filters['team'] ?? null) && ! filled($filters['subscription'] ?? null)
+            && ! filled($filters['domain'] ?? null) && empty($filters['conditions']);
+        if ($canPaginate) {
+            $paginator = $service->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id')
+                ->paginate((int) ($filters['per_page'] ?? 10))->withQueryString();
+            $rows = $service->rows($channel, $filters, $paginator->getCollection());
+            $paginator->setCollection($rows);
+        } else {
+            $rows = $service->rows($channel, $filters);
+        }
         if ($request->has('suggestion_field')) {
             $suggestion = $request->validate([
                 'suggestion_field' => ['required', Rule::in(['account','reference','team','owner','domain','subscription','gross','settlement','fee','refund','note'])],
@@ -1058,7 +1125,7 @@ class FinanceController extends Controller
         }
         $perPage = (int) ($filters['per_page'] ?? 10);
         $page = max(1, (int) $request->query('page', 1));
-        $paginator = new \Illuminate\Pagination\LengthAwarePaginator($rows->forPage($page, $perPage)->values(), $rows->count(), $perPage, $page, ['path' => $request->url(), 'query' => $request->query()]);
+        $paginator ??= new \Illuminate\Pagination\LengthAwarePaginator($rows->forPage($page, $perPage)->values(), $rows->count(), $perPage, $page, ['path' => $request->url(), 'query' => $request->query()]);
 
         return response()->view('portals.finance.settlement', [...$context, 'report' => $report, 'channel' => $channel, 'filters' => $filters,
             'rows' => $paginator, 'columns' => $columns, 'moneyFields' => $service->moneyFields($channel), 'textFields' => $service::TEXT,
@@ -1466,6 +1533,13 @@ class FinanceController extends Controller
         return array_values(trans('finance.import_headers.'.$kind));
     }
 
+    private function filterCacheKey(string $scope): string
+    {
+        $db = $this->workbooks->database();
+
+        return 'finance:filter-options:v1:'.hash('sha256', $db->getName().'|'.$db->getDatabaseName()).':'.$scope;
+    }
+
     private function conditionChoices(string $dataset): array
     {
         $definition = FinanceCatalog::dataset($dataset);
@@ -1476,23 +1550,27 @@ class FinanceController extends Controller
                 'value' => $account->activity_account, 'label' => FinanceCatalog::simplified($account->account_name),
             ])->all();
         if ($dataset === 'xuzong2-orders') {
-            $choices['account'] = $this->recordsQuery($dataset, [])->select('account')->distinct()->orderBy('account')
-                ->pluck('account')->filter()->map(fn ($value) => ['value' => $value, 'label' => FinanceCatalog::simplified($value)])->values()->all();
+            $choices['account'] = Cache::remember($this->filterCacheKey($dataset.':accounts'), 60, function () use ($dataset): array {
+                return $this->recordsQuery($dataset, [])->select('account')->distinct()->orderBy('account')
+                    ->pluck('account')->filter()->map(fn ($value) => ['value' => $value, 'label' => FinanceCatalog::simplified($value)])->values()->all();
+            });
         }
         $fields = ['currency', 'status'];
         if ($definition['channel'] === 'paypal') {
             $fields = [...$fields, 'raw_type', 'balance_impact'];
             $choices['category'] = $this->workbooks->database()->table('finance_transaction_types')
                 ->whereNotNull('category')->where('category', '!=', '')->pluck('category')
-                ->merge($this->workbooks->database()->table('finance_payment_transactions')->whereNotNull('category')->pluck('category'))
+                ->merge($this->workbooks->database()->table('finance_payment_transactions')->whereNotNull('category')->distinct()->pluck('category'))
                 ->unique()->sort()->values()->map(fn ($value) => ['value' => $value, 'label' => FinanceCatalog::simplified($value)])->all();
             $choices['direction'] = collect(__('finance.accounting.directions'))
                 ->map(fn ($label, $value) => compact('value', 'label'))->values()->all();
         }
         foreach ($fields as $field) {
             $column = FinanceCatalog::filterColumn($dataset, $field);
-            $values = $this->recordsQuery($dataset, [])->whereNotNull($column)
-                ->select($column.' as choice')->distinct()->orderBy('choice')->pluck('choice')->filter(fn ($value) => $value !== '');
+            $values = collect(Cache::remember($this->filterCacheKey($dataset.':'.$field), 60, function () use ($dataset, $column): array {
+                return $this->recordsQuery($dataset, [])->whereNotNull($column)
+                    ->select($column.' as choice')->distinct()->orderBy('choice')->pluck('choice')->filter(fn ($value) => $value !== '')->all();
+            }));
             if ($field === 'raw_type') {
                 $values = $values->merge($this->workbooks->database()->table('finance_transaction_types')->pluck('raw_type'))->unique();
             }
@@ -1528,10 +1606,10 @@ class FinanceController extends Controller
             ] : []),
             'account' => 'nullable|string|max:191', 'reference' => 'nullable|string|max:191',
             'per_page' => ['nullable', 'integer', Rule::in([10, 20, 50, 100])],
-            'from' => [$request->boolean('report_fields_customized') ? 'required' : 'nullable', 'date_format:Y-m-d'],
-            'to' => [$request->boolean('report_fields_customized') ? 'required' : 'nullable', 'date_format:Y-m-d'],
+            'from' => ['nullable', 'date_format:Y-m-d'],
+            'to' => ['nullable', 'date_format:Y-m-d'],
             'timezone' => ['nullable', Rule::in(FinanceWorkbookService::TIMEZONES)],
-            'export_format' => ['nullable', Rule::in($request->boolean('report_fields_customized') ? ['xls', 'xlsx'] : ['xls', 'xlsx', 'csv', 'tsv'])],
+            'export_format' => ['nullable', Rule::in(['xls', 'xlsx', 'csv', 'tsv'])],
             'type_category' => 'nullable|string|max:100',
             'transaction_scope' => ['nullable', Rule::in(FinanceCatalog::dataset($dataset)['channel'] === 'paypal' ? ['all', 'balance_affecting', 'non_balance_affecting'] : ['all'])],
             'conditions' => 'nullable|array|max:10',
@@ -1611,16 +1689,14 @@ class FinanceController extends Controller
                 if (! $schema->hasTable('logistics_orders')) {
                     $query->whereRaw('1 = 0');
                 } else {
-                    if ($dataset === 'paypal-orders') {
-                        $uniqueMatch = app(\App\Portals\Finance\FinanceSettlementService::class)->paypalOrderMatches()->selectRaw('COUNT(*)');
-                        $query->whereRaw('('.$uniqueMatch->toSql().') = 1', $uniqueMatch->getBindings());
-                    }
                     $query->whereExists(function ($orders) use ($linked, $dataset): void {
                         if ($dataset === 'xuzong2-orders') {
                             $orders->selectRaw('1')->from('logistics_orders as logistics')->whereColumn('logistics.id', 'finance_records.id');
                         } else {
-                            $matches = app(\App\Portals\Finance\FinanceSettlementService::class)->paypalOrderMatches();
-                            $orders->selectRaw('1')->from('logistics_orders as logistics')->mergeWheres($matches->wheres, $matches->getBindings());
+                            $matches = app(\App\Portals\Finance\FinanceSettlementService::class)->paypalOrderMatchIndex();
+                            $orders->selectRaw('1')->fromSub($matches, 'matched_order')
+                                ->join('logistics_orders as logistics', 'logistics.id', '=', 'matched_order.order_id')
+                                ->whereColumn('matched_order.record_id', 'finance_records.id');
                         }
                         foreach ($linked as $field => $value) {
                             if ($dataset === 'xuzong2-orders' && $field === 'sender_email') { $field = 'buyer_email'; }

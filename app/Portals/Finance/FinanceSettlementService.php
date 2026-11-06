@@ -98,14 +98,14 @@ class FinanceSettlementService
         return $query;
     }
 
-    public function rows(string $channel, array $filters): Collection
+    public function rows(string $channel, array $filters, ?Collection $records = null): Collection
     {
         $db = $this->workbooks->database();
-        $supplements = $db->table('finance_settlement_supplements')->get()->keyBy('finance_record_id');
-        $accounts = FinancePaymentAccount::withTrashed()->get()->pluck('account_name', 'activity_account');
+        $records ??= $this->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id')->get();
+        $supplements = $db->table('finance_settlement_supplements')->whereIn('finance_record_id', $records->modelKeys())->get()->keyBy('finance_record_id');
+        $accounts = FinancePaymentAccount::withTrashed()->where('account_type', $channel)->get()->pluck('account_name', 'activity_account');
         $domains = $this->workbooks->domainGroups()->keyBy('domain');
         $locks = $db->table('finance_period_locks')->whereNotNull('report_snapshot')->pluck('month')->all();
-        $records = $this->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id')->get();
         $metadata = $channel === 'credit_card' || ! empty($filters['logistics_costs'])
             ? $this->logisticsMetadata($records, $channel) : [];
         return $records->map(function ($record) use ($channel, $filters, $supplements, $accounts, $domains, $locks, $metadata): array {
@@ -287,6 +287,36 @@ class FinanceSettlementService
     }
 
     /** Match API transaction/invoice references without any legacy account binding. */
+    public function paypalOrderMatchIndex(): \Illuminate\Database\Query\Builder
+    {
+        $db = $this->workbooks->database();
+        $schema = $db->getSchemaBuilder();
+        $references = $db->table('finance_records')->where('dataset', 'paypal-orders')
+            ->whereNotNull('reference')->where('reference', '!=', '')
+            ->selectRaw('id as record_id, reference as match_reference');
+        $references->union($db->table('finance_records')->where('dataset', 'paypal-orders')
+            ->whereNotNull('payload->帳單號碼')->where('payload->帳單號碼', '!=', '')
+            ->select('id as record_id', 'payload->帳單號碼 as match_reference'));
+        $matches = null;
+        foreach (array_intersect(['bill_number', 'transaction_id', 'payment_gateway_order_id'], $schema->getColumnListing('logistics_orders')) as $field) {
+            $branch = $db->query()->fromSub(clone $references, 'refs')
+                ->join('logistics_orders as source_order', 'source_order.'.$field, '=', 'refs.match_reference')
+                ->select('refs.record_id', 'source_order.id as order_id');
+            $matches = $matches ? $matches->unionAll($branch) : $branch;
+        }
+        if ($schema->hasTable('logistics_order_payment_references')) {
+            $branch = $db->query()->fromSub(clone $references, 'refs')
+                ->join('logistics_order_payment_references as source_ref', 'source_ref.reference_number', '=', 'refs.match_reference')
+                ->join('logistics_orders as source_order', 'source_order.id', '=', 'source_ref.logistics_order_id')
+                ->select('refs.record_id', 'source_order.id as order_id');
+            $matches = $matches ? $matches->unionAll($branch) : $branch;
+        }
+        $matches ??= $db->table('finance_records')->selectRaw('id as record_id, 0 as order_id')->whereRaw('1 = 0');
+
+        return $db->query()->fromSub($matches, 'matches')->select('record_id')
+            ->selectRaw('MIN(order_id) as order_id')->groupBy('record_id')->havingRaw('COUNT(DISTINCT order_id) = 1');
+    }
+
     public function paypalOrderMatches(): \Illuminate\Database\Query\Builder
     {
         $db = $this->workbooks->database();
