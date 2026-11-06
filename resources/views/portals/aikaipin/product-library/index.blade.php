@@ -207,7 +207,11 @@
                             $imageCount = count($imageFiles);
                             $previewImages = array_map(
                                 static fn (array $image, int $index): array => [
-                                    'url' => route('aikaipin.product-library.images.show', ['product' => $product, 'imageIndex' => $index]),
+                                    'url' => route('aikaipin.product-library.images.show', [
+                                        'product' => $product,
+                                        'imageIndex' => $index,
+                                        'v' => $product->updated_at?->getTimestamp() ?? time(),
+                                    ]),
                                 ],
                                 $imageFiles,
                                 array_keys($imageFiles),

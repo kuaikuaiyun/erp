@@ -764,7 +764,12 @@ class ProductLibraryController extends Controller
         $file = $product->imageFiles()[$imageIndex] ?? null;
         abort_unless($file !== null, 404);
 
-        return $this->serveProductFile($file, false);
+        $response = $this->serveProductFile($file, false);
+        $response->headers->set('Cache-Control', 'private, no-store, no-cache, must-revalidate, max-age=0');
+        $response->headers->set('Pragma', 'no-cache');
+        $response->headers->set('Expires', '0');
+
+        return $response;
     }
 
     public function showProductReferencePreview(Request $request, AikaipinProduct $product): Response|View
@@ -1364,7 +1369,11 @@ class ProductLibraryController extends Controller
                 return [
                     'index' => $index,
                     'name' => (string) $file['original_name'],
-                    'url' => route('aikaipin.product-library.images.show', ['product' => $product, 'imageIndex' => $index]),
+                    'url' => route('aikaipin.product-library.images.show', [
+                        'product' => $product,
+                        'imageIndex' => $index,
+                        'v' => $product->updated_at?->getTimestamp() ?? time(),
+                    ]),
                 ];
             }, $imageFiles, array_keys($imageFiles)),
             'reference_file' => $filePayload($product->referenceFilePayload(), 'reference'),
