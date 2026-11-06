@@ -36,7 +36,8 @@ class OperationReportDashboardController extends Controller
         $validated = $request->validate([
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
-            'operation_department_id' => ['nullable', 'integer'],
+            'operation_department_ids' => ['nullable', 'array'],
+            'operation_department_ids.*' => ['integer', 'distinct'],
             'operator_user_id' => ['nullable', 'integer'],
         ]);
         $reportNow = Carbon::now(OperationReportMetricsService::REPORT_TIMEZONE);
@@ -47,20 +48,17 @@ class OperationReportDashboardController extends Controller
         $visibleDepartmentIds = $this->assistantStoreOwners->visibleOperationDepartmentIds($context['user']);
         $departments = Department::business()->whereIn('id', $visibleDepartmentIds)
             ->orderBy('sort')->orderBy('name')->get();
-        $selectedDepartmentId = isset($validated['operation_department_id'])
-            ? (int) $validated['operation_department_id']
-            : null;
-        if ($selectedDepartmentId !== null) {
-            abort_unless(in_array($selectedDepartmentId, $visibleDepartmentIds, true), 403);
-        }
+        $selectedDepartmentIds = collect($validated['operation_department_ids'] ?? [])
+            ->map(fn ($id) => (int) $id)->unique()->values();
+        abort_unless($selectedDepartmentIds->diff($visibleDepartmentIds)->isEmpty(), 403);
 
         $allReports = OperationReport::query()
             ->whereIn('operation_department_id', $visibleDepartmentIds)
-            ->when($selectedDepartmentId !== null, fn ($query) => $query->where('operation_department_id', $selectedDepartmentId))
+            ->when($selectedDepartmentIds->isNotEmpty(), fn ($query) => $query->whereIn('operation_department_id', $selectedDepartmentIds->all()))
             ->whereBetween('report_date', [$dateFrom, $dateTo])
             ->orderBy('id')
             ->get();
-        $operatorDepartmentIds = $selectedDepartmentId !== null ? [$selectedDepartmentId] : $visibleDepartmentIds;
+        $operatorDepartmentIds = $selectedDepartmentIds->isNotEmpty() ? $selectedDepartmentIds->all() : $visibleDepartmentIds;
         $operators = AdminUser::query()
             ->where('status', AdminUser::STATUS_ACTIVE)
             ->whereHas('departments', fn ($query) => $query->whereIn('admin_roles.id', $operatorDepartmentIds))
@@ -285,7 +283,7 @@ class OperationReportDashboardController extends Controller
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
             'departments' => $departments,
-            'selectedDepartmentId' => $selectedDepartmentId,
+            'selectedDepartmentIds' => $selectedDepartmentIds->all(),
             'operatorOptions' => $operatorOptions,
             'selectedOperatorId' => $selectedOperatorId,
             'rows' => $rows,
