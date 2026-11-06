@@ -8,6 +8,7 @@ use App\Models\AssistantDomainStore;
 use App\Portals\Logistics\ShopifyOrderSyncService;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\URL;
 use RuntimeException;
 
@@ -216,9 +217,14 @@ GRAPHQL;
             return $input;
         })->all();
 
+        $existing = $this->findExistingProduct($product, $store, $actor, $title, false);
+        $handle = filled(data_get($existing, 'handle'))
+            ? (string) data_get($existing, 'handle')
+            : $this->uniqueProductHandle($product, (string) ($data['handle'] ?? ''), $title);
+
         $input = array_filter([
             'title' => $title,
-            'handle' => trim((string) ($data['handle'] ?? '')) ?: null,
+            'handle' => $handle,
             'descriptionHtml' => (string) ($data['description_html'] ?? ''),
             'vendor' => trim((string) ($data['vendor'] ?? '')) ?: 'AI产品库',
             'productType' => trim((string) ($data['product_type'] ?? '')) ?: ($product->categoryValues()[0] ?? ''),
@@ -233,7 +239,6 @@ GRAPHQL;
             'files' => $allImages->all(),
         ], static fn ($value): bool => $value !== null && $value !== '');
 
-        $existing = $this->findExistingProduct($product, $store, $actor, $title, false);
         $identifier = filled(data_get($existing, 'id')) ? ['id' => (string) data_get($existing, 'id')] : null;
         $mutation = <<<'GRAPHQL'
 mutation SetAiProduct($input: ProductSetInput!, $identifier: ProductSetIdentifiers) {
@@ -287,6 +292,14 @@ GRAPHQL;
         }
     }
 
+    private function uniqueProductHandle(AikaipinProduct $product, string $importedHandle, string $title): string
+    {
+        $base = Str::slug(trim($importedHandle)) ?: Str::slug($title) ?: 'ai-product';
+        $suffix = '-ai-'.$product->getKey();
+
+        return Str::limit($base, 255 - strlen($suffix), '').$suffix;
+    }
+
     /** @return array<string, mixed>|null */
     private function findExistingProduct(
         AikaipinProduct $product,
@@ -306,6 +319,7 @@ query FindAiProductForRetry($search: String!) {
     nodes {
       id
       title
+      handle
       tags
       variants(first: 100) { nodes { id sku price } }
     }
