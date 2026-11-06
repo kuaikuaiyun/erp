@@ -9,6 +9,7 @@ use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\ProductRequests\ProductRequestAccessService;
 use Illuminate\Http\Request;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -62,6 +63,29 @@ class AppLovinSpendController extends Controller
             'account_name'=>$account['account_name'],'account_number'=>$account['account_number'],'screenshot_path'=>$path,'uploaded_by'=>$user->getKey(),
         ]);
         return back()->with('success', '账户消耗图片已上传。');
+    }
+
+    public function pendingCount(Request $request): JsonResponse
+    {
+        $context = $this->portalEntries->portalContext($request);
+        if ($context instanceof Response) {
+            abort($context->getStatusCode());
+        }
+
+        $this->access->assertPortal($context['portal'], ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        $user = $context['user'];
+        $canSeeAll = $user->isAdministrator() || strcasecmp((string) $user->username, 'kky_boss') === 0;
+        $reports = OperationReport::query()
+            ->when(! $canSeeAll, fn ($query) => $query->where('operator_user_id', $user->getKey()))
+            ->get();
+        $accounts = $this->summarize($reports)->where('total', '>=', 5000)->values();
+        $uploadedKeys = AppLovinSpendScreenshot::query()
+            ->whereIn('account_key', $accounts->pluck('account_key'))
+            ->pluck('account_key');
+
+        return response()->json([
+            'count' => $accounts->whereNotIn('account_key', $uploadedKeys)->count(),
+        ]);
     }
 
     public function screenshot(Request $request, AppLovinSpendScreenshot $screenshot): BinaryFileResponse

@@ -172,6 +172,8 @@ Route::patch('/assistant/daily-submissions/account-openings/{submission}/process
     ->whereNumber('submission')->name('assistant.daily-submissions.account-openings.process');
 Route::get('/operation/daily-submissions/applovin-spends', [AppLovinSpendController::class, 'index'])
     ->name('operation.applovin-spends.index');
+Route::get('/operation/daily-submissions/applovin-spends/pending-count', [AppLovinSpendController::class, 'pendingCount'])
+    ->name('operation.applovin-spends.pending-count');
 Route::post('/operation/daily-submissions/applovin-spends/screenshot', [AppLovinSpendController::class, 'uploadScreenshot'])
     ->name('operation.applovin-spends.screenshot.upload');
 Route::get('/operation/daily-submissions/applovin-spends/screenshots/{screenshot}', [AppLovinSpendController::class, 'screenshot'])
