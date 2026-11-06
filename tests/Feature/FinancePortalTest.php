@@ -667,6 +667,79 @@ class FinancePortalTest extends TestCase
         $this->assertDatabaseMissing('finance_records', ['reference' => 'LOCKED-NEW-PAYPAL']);
     }
 
+    public function test_paypal_editor_updates_all_visible_business_fields_and_rejects_duplicate_transaction_ids(): void
+    {
+        $account = $this->financePayPalAccount('编辑原账户');
+        $target = $this->financePayPalAccount('编辑新账户');
+        $this->workbooks->importRecords('paypal-orders', [2 => $this->recordRow(), 3 => [...$this->recordRow(), '交易 ID' => 'EXISTING-ID']], $account->activity_account, 'UTC', 1);
+        $record = FinanceRecord::where('reference', '0000123')->sole();
+        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $current = $service->rows('paypal', ['reference' => $record->reference])->sole();
+        $values = array_intersect_key($current, array_diff_key($service->columns('paypal'), ['id' => true]));
+        $values = [...$values, 'id' => $record->id, 'account' => $target->account_name, 'reference' => 'EDITED-ID',
+            'paypal_0' => '2026-11-07', 'paypal_1' => '02:00:00', 'paypal_2' => 'UTC', 'paypal_3' => '编辑姓名', 'paypal_4' => 'T0006', 'paypal_5' => 'S',
+            'paypal_6' => 'EUR', 'paypal_7' => '30', 'paypal_8' => '-1', 'paypal_9' => '29', 'paypal_10' => 'edited@example.test',
+            'paypal_12' => 'EDITED-RELATED', 'paypal_13' => 'EDITED-INVOICE', 'paypal_14' => 'Credit',
+            'month' => '2026-11', 'date' => '2026-11-07 10:00:00', 'timezone' => 'Asia/Shanghai',
+            'subscription' => '订阅', 'upsell' => '否', 'converted_usd' => '34.8', 'usd_rate' => '1.2', 'settlement' => '36', 'fee' => '1.2',
+            'domain' => 'edited.example.test', 'owner' => '编辑使用人', 'team' => '编辑团队', 'erp_order' => 'EDITED-ERP', 'note' => '编辑备注'];
+        $page = $this->get('/finance/reports/paypal-settlement')->assertOk();
+        foreach (array_diff_key($service->columns('paypal'), ['id' => true]) as $field => $label) {
+            $page->assertSee('id="edit-'.$field.'"', false);
+        }
+        $page->assertDontSee('原始交易与计算结果（只读）');
+        DB::table('finance_payment_transactions')->insert(['payment_account_id' => $account->id, 'finance_record_id' => $record->id, 'transaction_id' => $record->reference, 'event_code' => 'T0006', 'raw_payload' => '{}']);
+        $this->post('/finance/reports/paypal-settlement/save', $values)->assertSessionHasNoErrors();
+        $updated = $record->fresh();
+        $this->assertSame('EDITED-ID', $updated->reference);
+        $this->assertSame($target->activity_account, $updated->account);
+        $this->assertSame('2026-11-07 02:00:00', $updated->occurred_at->format('Y-m-d H:i:s'));
+        $row = $service->rows('paypal', ['reference' => 'EDITED-ID'])->sole();
+        foreach (array_diff_key($values, ['id' => true, 'paypal_4' => true]) as $field => $value) {
+            $this->assertEquals($value ?? '', $row[$field] ?? '', $field);
+        }
+        $this->assertDatabaseHas('finance_payment_transactions', ['finance_record_id' => $record->id, 'payment_account_id' => $target->id, 'transaction_id' => 'EDITED-ID']);
+        $payload = $updated->payload;
+        $this->post('/finance/reports/paypal-settlement/save', ['id' => $record->id, 'reference' => 'EXISTING-ID', 'paypal_7' => '999'])->assertSessionHasErrors('reference');
+        $this->assertSame($payload, $record->fresh()->payload);
+        $this->assertSame('EDITED-ID', $record->fresh()->reference);
+        $this->post('/finance/reports/paypal-settlement/save', ['id' => $record->id, 'date' => '2026-02-30 01:00:00'])->assertSessionHasErrors('date');
+        // Non-unique business text may repeat and explicit blanks must stay blank.
+        $this->post('/finance/reports/paypal-settlement/save', ['id' => $record->id, 'owner' => '', 'domain' => ''])->assertSessionHasNoErrors();
+        $this->assertSame('', $service->rows('paypal', ['reference' => 'EDITED-ID'])->sole()['owner']);
+        DB::table('finance_period_locks')->updateOrInsert(['month' => '2026-12'], ['report_snapshot' => '[]']);
+        $this->post('/finance/reports/paypal-settlement/save', ['id' => $record->id, 'date' => '2026-12-01 10:00:00'])->assertSessionHasErrors('month');
+        $this->assertSame('2026-11-07 02:00:00', $record->fresh()->occurred_at->format('Y-m-d H:i:s'));
+    }
+
+    public function test_credit_editor_updates_transaction_fields_and_calculated_amounts(): void
+    {
+        $account = $this->financePayPalAccount('信用卡编辑', ['account_type' => 'credit_card']);
+        $payload = [...array_fill_keys(FinanceCatalog::dataset('xuzong2-details')['headers'], ''), '平台订单号' => 'CARD-EDIT', '商户订单号' => 'MERCHANT-EDIT',
+            '创建时间' => '2026-11-06 02:00:00', '交易币种' => 'USD', '交易金额' => '10', '支付状态' => 'SUCCESS'];
+        $this->workbooks->importRecords('xuzong2-details', [2 => $payload, 3 => [...$payload, '平台订单号' => 'CARD-DUPLICATE']], $account->activity_account, 'UTC', 1);
+        $record = FinanceRecord::where('reference', 'CARD-EDIT')->sole();
+        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $page = $this->get('/finance/reports/credit-settlement')->assertOk();
+        foreach (array_diff_key($service->columns('credit_card'), ['id' => true]) as $field => $label) {
+            $page->assertSee('id="edit-'.$field.'"', false);
+        }
+        $this->post('/finance/reports/credit-settlement/save', ['id' => $record->id, 'reference' => 'CARD-DUPLICATE', 'gross' => '999'])->assertSessionHasErrors('reference');
+        $this->assertSame('10', $record->fresh()->payload['交易金额']);
+        $values = ['id' => $record->id, 'reference' => 'CARD-NEW-ID', 'date' => '2026-11-08 10:00:00', 'timezone' => 'Asia/Shanghai',
+            'currency' => 'EUR', 'gross' => '25', 'status' => '成功', 'settlement' => '28', 'source_settlement_usd' => '27', 'currency_warning' => '已人工核对',
+            'owner' => '财务使用人', 'team' => '财务团队', 'usd_rate' => '1.1'];
+        $this->post('/finance/reports/credit-settlement/save', $values)->assertSessionHasNoErrors();
+        $row = $service->rows('credit_card', ['reference' => 'CARD-NEW-ID'])->sole();
+        foreach (array_diff_key($values, ['id' => true, 'status' => true]) as $field => $value) {
+            $this->assertEquals($value, $row[$field], $field);
+        }
+        $this->assertSame('SUCCESS', $record->fresh()->status);
+        $this->assertSame('已完成', $row['status']);
+        $export = $this->readDownload($this->get('/finance/reports/credit-settlement?reference=CARD-NEW-ID&download=1')->assertOk()->streamedContent())->toArray();
+        $this->assertEquals(28, $export[1][array_search('结算金额（美元）', $export[0], true)]);
+    }
+
     public function test_settlement_editor_saves_all_supplement_text_fields(): void
     {
         $this->workbooks->importRecords('paypal-orders', [2 => $this->recordRow()], 'A', 'UTC', 1);
@@ -676,7 +749,7 @@ class FinancePortalTest extends TestCase
         foreach ($service->textFields('paypal') as $field => $label) {
             $page->assertSee('id="edit-'.$field.'"', false);
         }
-        $page->assertSee('data-settlement-readonly="reference"', false)->assertSee('删除所选');
+        $page->assertSee('id="edit-reference"', false)->assertSee('删除所选');
         $values = ['id' => $record->id, 'owner' => '手动使用人', 'team' => '手动团队', 'paypal_12' => 'MANUAL-TXN',
             'domain' => 'manual.example.test', 'subscription' => '订阅', 'upsell' => '否', 'erp_order' => 'MANUAL-ERP', 'note' => '手动备注'];
         $this->post('/finance/reports/paypal-settlement/save', $values)->assertSessionHasNoErrors();

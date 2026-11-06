@@ -1268,7 +1268,8 @@ class FinanceController extends Controller
 
         return response()->view('portals.finance.settlement', [...$context, 'report' => $report, 'channel' => $channel, 'filters' => $filters,
             'rows' => $paginator, 'columns' => $columns, 'moneyFields' => $service->moneyFields($channel), 'textFields' => $service->textFields($channel),
-            'readonlyFields' => array_diff_key($columns, $service->textFields($channel), $service->moneyFields($channel)),
+            'editorFields' => array_diff_key($columns, ['id' => true]),
+            'editorNumericFields' => app(\App\Portals\Finance\FinanceSettlementEditor::class)->numericFields($channel),
             'conditionFields' => $service::CONDITION_FIELDS,
             'subscriptionOptions' => $service->subscriptionOptions($rows),
             'accounts' => FinancePaymentAccount::query()->where('account_type', $channel)->orderBy('id')->get(),
@@ -1302,12 +1303,18 @@ class FinanceController extends Controller
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
         $record = $service->query($channel, [])->findOrFail($request->input('id'));
         try {
-            $service->save($record, $this->settlementValues($request->all(), $channel), (int) $context['user']->getKey());
+            app(\App\Portals\Finance\FinanceSettlementEditor::class)->save($record, $request->all(), $channel, (int) $context['user']->getKey());
+        } catch (\Illuminate\Database\UniqueConstraintViolationException $e) {
+            throw ValidationException::withMessages(['reference' => '交易ID或对应支付记录已存在，不能重复。']);
         } catch (\App\Portals\Finance\FinanceRelayException $e) {
             throw ValidationException::withMessages(['month' => $e->getMessage()]);
         }
 
         $returnFilters = $this->settlementFilters(Request::create('/', 'GET', $request->query()));
+        if ($request->hasAny(['reference', 'account', 'date', 'timezone', 'paypal_0', 'paypal_1', 'paypal_2'])) {
+            $record->refresh();
+            $returnFilters = ['reference' => $record->reference, 'account' => $record->account, 'timezone' => $request->input('timezone', 'Asia/Shanghai')];
+        }
 
         return redirect()->route('finance.report', ['report' => $report, ...$returnFilters])->with('success', '结算明细已保存。');
     }
@@ -1590,7 +1597,7 @@ class FinanceController extends Controller
                     if ($reference === '') {
                         throw ValidationException::withMessages(['file' => '第'.$index.'行交易ID不能为空。']);
                     }
-                    if (FinanceRecord::query()->where('dataset', 'paypal-orders')->where('account', $account->activity_account)->where('reference', $reference)->exists()) {
+                    if (FinanceRecord::query()->where('dataset', 'paypal-orders')->where('reference', $reference)->exists()) {
                         $duplicates++;
                         continue;
                     }
