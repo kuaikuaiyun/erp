@@ -197,6 +197,11 @@ Route::get('/operation/reports/{report}', [OperationReportController::class, 'sh
 Route::post('/operation/reports/{report}/approve', [OperationReportController::class, 'approve'])->name('operation.reports.approve');
 Route::get('/assistant/operation-reports', [OperationReportDashboardController::class, 'index'])->name('assistant.operation-reports.index');
 Route::get('/assistant/operation-reports/order-details', [OperationReportDashboardController::class, 'orderDetails'])->name('assistant.operation-reports.order-details');
+Route::get('/operation-dashboard/operation-reports', [OperationReportDashboardController::class, 'index'])->name('operation-dashboard.operation-reports.index');
+Route::get('/operation-dashboard/operation-reports/order-details', [OperationReportDashboardController::class, 'orderDetails'])->name('operation-dashboard.operation-reports.order-details');
+Route::get('/operation-dashboard/applovin-spends', [AppLovinSpendReviewController::class, 'index'])->name('operation-dashboard.applovin-spends.index');
+Route::get('/operation-dashboard/applovin-spends/screenshots/{screenshot}', [AppLovinSpendReviewController::class, 'screenshot'])
+    ->whereNumber('screenshot')->name('operation-dashboard.applovin-spends.screenshot');
 Route::get('/assistant/advertising-spend-summary', [AdvertisingSpendSummaryController::class, 'index'])->name('assistant.advertising-spend-summary.index');
 Route::get('/assistant/advertising-spend-analysis', [AdvertisingSpendAnalysisController::class, 'index'])->name('assistant.advertising-spend-analysis.index');
 Route::get('/assistant/fashion-advertising-reviews', [FashionAdvertisingReviewController::class, 'index'])->name('assistant.fashion-advertising-reviews.index');

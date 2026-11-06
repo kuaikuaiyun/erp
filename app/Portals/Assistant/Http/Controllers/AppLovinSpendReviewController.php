@@ -18,6 +18,8 @@ use Symfony\Component\HttpFoundation\Response;
 
 class AppLovinSpendReviewController extends Controller
 {
+    private const DASHBOARD_PORTAL_CODE = 'yunying-kanban';
+
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
@@ -28,12 +30,17 @@ class AppLovinSpendReviewController extends Controller
     {
         $context = $this->portalEntries->portalContext($request);
         if ($context instanceof Response) return $context;
-        $this->authorization->assertAssistantPortal($context['portal']);
-        abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
-        $visibleIds = $this->storeOwners->visibleOperationDepartmentIds($context['user']);
+        $isDashboard = (string) $context['portal']->code === self::DASHBOARD_PORTAL_CODE;
+        if (! $isDashboard) {
+            $this->authorization->assertAssistantPortal($context['portal']);
+            abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
+        }
+        $visibleIds = $isDashboard
+            ? $this->storeOwners->operationDepartments()->pluck('id')->map(fn ($id) => (int) $id)->all()
+            : $this->storeOwners->visibleOperationDepartmentIds($context['user']);
         $filters = $request->validate(['operator' => ['nullable', 'string', 'max:100'], 'department_id' => ['nullable', 'integer', Rule::in($visibleIds)], 'over_threshold' => ['nullable', 'in:1']]);
         $query = OperationReport::query()->where('status', OperationReport::STATUS_APPROVED);
-        if (! $context['user']->isAdministrator()) {
+        if (! $isDashboard && ! $context['user']->isAdministrator()) {
             $visibleIds === [] ? $query->whereRaw('1=0') : $query->whereIn('operation_department_id', $visibleIds);
         }
         $query->when($filters['department_id'] ?? null, fn ($q,$id) => $q->where('operation_department_id',$id));
@@ -53,6 +60,8 @@ class AppLovinSpendReviewController extends Controller
         return view('portals.assistant.daily-submissions.applovin-spend', [
             'portal'=>$context['portal']->loadMissing('menus'),'user'=>$context['user'],
             'operator'=>$filters['operator']??'','selectedDepartmentId'=>$filters['department_id']??null,'overThreshold'=>$filters['over_threshold']??'','departmentOptions'=>$departmentOptions,'accounts'=>$accounts,'threshold'=>5000,
+            'appLovinIndexUrl'=>$isDashboard ? route('operation-dashboard.applovin-spends.index') : route('assistant.applovin-spends.index'),
+            'appLovinScreenshotRoute'=>$isDashboard ? 'operation-dashboard.applovin-spends.screenshot' : 'assistant.applovin-spends.screenshot',
         ]);
     }
 
@@ -60,9 +69,12 @@ class AppLovinSpendReviewController extends Controller
     {
         $context = $this->portalEntries->portalContext($request);
         if ($context instanceof Response) abort($context->getStatusCode());
-        $this->authorization->assertAssistantPortal($context['portal']);
-        abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
-        if (! $context['user']->isAdministrator()) abort_unless(in_array((int)$screenshot->operation_department_id, $this->storeOwners->visibleOperationDepartmentIds($context['user']), true), 403);
+        $isDashboard = (string) $context['portal']->code === self::DASHBOARD_PORTAL_CODE;
+        if (! $isDashboard) {
+            $this->authorization->assertAssistantPortal($context['portal']);
+            abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
+            if (! $context['user']->isAdministrator()) abort_unless(in_array((int)$screenshot->operation_department_id, $this->storeOwners->visibleOperationDepartmentIds($context['user']), true), 403);
+        }
         abort_unless(Storage::disk('local')->exists($screenshot->screenshot_path), 404);
         return response()->file(Storage::disk('local')->path($screenshot->screenshot_path));
     }
