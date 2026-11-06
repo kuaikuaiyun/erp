@@ -40,7 +40,7 @@
         'fileUnselected' => $t('upload.file_unselected'),
         'fileExisting' => $t('upload.file_existing', ['name' => ':name']),
         'serverFilters' => true,
-        'filterResetUrl' => route('aikaipin.product-library.index', ['per_page' => $perPage]),
+        'filterResetUrl' => route('aikaipin.product-library.index'),
         'initialCategories' => $categories,
         'csrfToken' => csrf_token(),
         'productStoreUrl' => route('aikaipin.product-library.store'),
@@ -94,7 +94,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261106-3">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261106-4">
 @endpush
 
 @push('scripts')
@@ -107,7 +107,6 @@
     <div class="box box-solid aikaipin-filter-box">
         <div class="box-body">
             <form class="aikaipin-filter-form" method="get" action="{{ route('aikaipin.product-library.index') }}" data-aikaipin-filter-form>
-                <input type="hidden" name="per_page" value="{{ $perPage }}">
                 <div class="aikaipin-filter-grid">
                     <div class="aikaipin-filter-field aikaipin-filter-keyword">
                         <label for="aikaipin-keyword">{{ $t('filters.keyword') }}</label>
@@ -145,7 +144,7 @@
                         <button class="btn btn-primary" type="submit">
                             <i class="fa fa-search" aria-hidden="true"></i> {{ $t('filters.search') }}
                         </button>
-                        <a class="btn btn-default" href="{{ route('aikaipin.product-library.index', ['per_page' => $perPage]) }}">
+                        <a class="btn btn-default" href="{{ route('aikaipin.product-library.index') }}">
                             <i class="fa fa-undo" aria-hidden="true"></i> {{ $t('filters.reset') }}
                         </a>
                     </div>
@@ -348,7 +347,7 @@
                             <div class="aikaipin-empty-state">
                                 <i class="fa fa-search" aria-hidden="true"></i>
                                 <p data-aikaipin-empty-message>{{ $t('messages.no_records') }}</p>
-                                <a class="btn btn-default btn-sm" href="{{ route('aikaipin.product-library.index', ['per_page' => $perPage]) }}">{{ $t('filters.reset') }}</a>
+                                <a class="btn btn-default btn-sm" href="{{ route('aikaipin.product-library.index') }}">{{ $t('filters.reset') }}</a>
                             </div>
                         </td>
                     </tr>

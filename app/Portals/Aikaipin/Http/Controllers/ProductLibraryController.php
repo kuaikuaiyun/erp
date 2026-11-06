@@ -47,16 +47,12 @@ class ProductLibraryController extends Controller
 
         $canManageProductLibrary = $this->authorization->canManageProductLibrary($context['user']);
         $filters = $this->productFilters($request);
-        $perPage = in_array($request->integer('per_page'), [15, 30, 50, 100], true)
-            ? $request->integer('per_page')
-            : 15;
 
         return view('portals.aikaipin.product-library.index', [
             ...$context,
             'products' => $this->productQuery($context['user'], $canManageProductLibrary, $filters)
-                ->paginate($perPage)
+                ->paginate(15)
                 ->withQueryString(),
-            'perPage' => $perPage,
             'filters' => $filters,
             'categories' => $this->productCategoryOptions(),
             'canManageProductLibrary' => $canManageProductLibrary,
