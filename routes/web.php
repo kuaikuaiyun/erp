@@ -21,6 +21,10 @@ use App\Portals\Logistics\Http\Controllers\ShopifyWebhookController;
 use App\Portals\Operation\Http\Controllers\OperationDomainStoreController;
 use App\Portals\Operation\Http\Controllers\OperationAiProductLibraryController;
 use App\Portals\Operation\Http\Controllers\OperationReportController;
+use App\Portals\Operation\Http\Controllers\DailySubmissionController;
+use App\Portals\Assistant\Http\Controllers\AdvertisingRechargeReviewController;
+use App\Portals\Assistant\Http\Controllers\AppLovinSpendReviewController;
+use App\Portals\Operation\Http\Controllers\AppLovinSpendController;
 use App\Portals\Assistant\Http\Controllers\OperationReportReviewController;
 use App\Portals\Assistant\Http\Controllers\OperationReportDashboardController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingSpendSummaryController;
@@ -30,11 +34,13 @@ use App\Portals\ProductRequests\Http\Controllers\ProductRequestController;
 use App\Portals\Aikaipin\Http\Controllers\ProductLibraryController;
 use App\Portals\Payment\Http\Controllers\PaymentPortalController;
 use App\Portals\Fashion\Http\Controllers\AdvertisingExpenseController;
+use App\Portals\Fashion\Http\Controllers\PerformanceReportController;
 use App\Portals\FashionLogistics\Http\Controllers\FashionOrderController;
 use App\Http\Middleware\MonitorPaymentPerformance;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/fashion/advertising-expenses', [AdvertisingExpenseController::class, 'index'])->name('fashion.advertising-expenses.index');
+Route::get('/fashion/performance-report', [PerformanceReportController::class, 'index'])->name('fashion.performance-report.index');
 Route::get('/fashion-logistics/orders', [FashionOrderController::class, 'index'])->name('fashion-logistics.orders.index');
 Route::post('/fashion/advertising-expenses', [AdvertisingExpenseController::class, 'store'])->name('fashion.advertising-expenses.store');
 Route::put('/fashion/advertising-expenses/{report}', [AdvertisingExpenseController::class, 'update'])->name('fashion.advertising-expenses.update');
@@ -46,6 +52,9 @@ Route::prefix('finance')->name('finance.')->middleware(\App\Http\Middleware\Redi
     Route::post('/management/menus/order', [PortalMenuConfigurationController::class, 'saveOrder'])->name('menus.order');
     Route::get('/', 'index')->name('home');
     Route::get('/balances', 'balances')->name('balances');
+    Route::get('/orders/paypal/refresh', 'latestPayPalOrderRefresh')->name('orders.paypal.latest');
+    Route::post('/orders/paypal/refresh', 'queuePayPalOrderRefresh')->name('orders.paypal.refresh');
+    Route::get('/orders/paypal/refresh/{batch}', 'payPalOrderRefreshStatus')->whereUuid('batch')->name('orders.paypal.status');
     Route::post('/balances/xuzong2', 'savePaymentBalance')->name('balances.xuzong2.save');
     Route::post('/exchange-rates', 'saveExchangeRates')->name('exchange-rates.save');
     Route::post('/paypal-accounts/{accountKey}', 'savePayPalAccount')->where('accountKey', '[a-z0-9-]+')->name('paypal-accounts.update');
@@ -132,6 +141,25 @@ Route::get('/operation/domain-stores', [OperationDomainStoreController::class, '
 Route::get('/operation/ai-product-library', [OperationAiProductLibraryController::class, 'index'])->name('operation.ai-product-library.index');
 Route::get('/operation/reports', [OperationReportController::class, 'index'])->name('operation.reports.index');
 Route::get('/operation/weekly-reports', [OperationReportController::class, 'weekly'])->name('operation.weekly-reports.index');
+Route::get('/operation/daily-submissions/{type}', [DailySubmissionController::class, 'index'])
+    ->whereIn('type', ['advertising-recharge', 'account-opening', 'store-launch', 'advertising-account-authorization', 'account-store-transfer'])
+    ->name('operation.daily-submissions.index');
+Route::post('/operation/daily-submissions/advertising-recharge', [DailySubmissionController::class, 'storeAdvertisingRecharge'])
+    ->name('operation.daily-submissions.advertising-recharge.store');
+Route::get('/assistant/daily-submissions/advertising-recharges', [AdvertisingRechargeReviewController::class, 'index'])
+    ->name('assistant.daily-submissions.advertising-recharges.index');
+Route::patch('/assistant/daily-submissions/advertising-recharges/{submission}/process', [AdvertisingRechargeReviewController::class, 'process'])
+    ->whereNumber('submission')->name('assistant.daily-submissions.advertising-recharges.process');
+Route::get('/operation/daily-submissions/applovin-spends', [AppLovinSpendController::class, 'index'])
+    ->name('operation.applovin-spends.index');
+Route::post('/operation/daily-submissions/applovin-spends/screenshot', [AppLovinSpendController::class, 'uploadScreenshot'])
+    ->name('operation.applovin-spends.screenshot.upload');
+Route::get('/operation/daily-submissions/applovin-spends/screenshots/{screenshot}', [AppLovinSpendController::class, 'screenshot'])
+    ->whereNumber('screenshot')->name('operation.applovin-spends.screenshot');
+Route::get('/assistant/daily-submissions/applovin-spends', [AppLovinSpendReviewController::class, 'index'])
+    ->name('assistant.applovin-spends.index');
+Route::get('/assistant/daily-submissions/applovin-spends/screenshots/{screenshot}', [AppLovinSpendReviewController::class, 'screenshot'])
+    ->whereNumber('screenshot')->name('assistant.applovin-spends.screenshot');
 Route::get('/operation/reports/order-details', [OperationReportController::class, 'orderDetails'])->name('operation.reports.order-details');
 Route::get('/operation/advertising-reports', [OperationReportController::class, 'advertising'])->name('operation.advertising-reports.index');
 Route::get('/operation/advertising-reports/import-template', [OperationReportController::class, 'advertisingImportTemplate'])->name('operation.advertising-reports.import-template');
@@ -157,7 +185,7 @@ Route::get('/operation-report-reviews/import-template', [OperationReportReviewCo
 Route::post('/operation-report-reviews/import', [OperationReportReviewController::class, 'import'])->name('assistant.operation-report-reviews.import');
 Route::get('/operation-report-reviews/screenshot', [OperationReportReviewController::class, 'screenshot'])->name('assistant.operation-report-reviews.screenshot');
 Route::post('/operation-report-reviews/bulk-review', [OperationReportReviewController::class, 'bulkReview'])->name('assistant.operation-report-reviews.bulk-review');
-Route::get('/operation-report-reviews/{report}', [OperationReportReviewController::class, 'show'])->whereNumber('report')->name('assistant.operation-report-reviews.show');
+Route::get('/operation-report-reviews/{report}', [OperationReportReviewController::class, 'show'])->withTrashed()->whereNumber('report')->name('assistant.operation-report-reviews.show');
 Route::post('/operation-report-reviews/{report}/approve', [OperationReportReviewController::class, 'approve'])->whereNumber('report')->name('assistant.operation-report-reviews.approve');
 Route::post('/operation-report-reviews/{report}/reject', [OperationReportReviewController::class, 'reject'])->whereNumber('report')->name('assistant.operation-report-reviews.reject');
 Route::delete('/operation-report-reviews/{report}', [OperationReportReviewController::class, 'destroy'])->whereNumber('report')->name('assistant.operation-report-reviews.destroy');
@@ -165,6 +193,8 @@ Route::get('/operation/ai-product-library/{product}/publish', [OperationAiProduc
 Route::post('/operation/ai-product-library/{product}/publish', [OperationAiProductLibraryController::class, 'publish'])->name('operation.ai-product-library.publish');
 Route::get('/operation/ai-product-library/{product}/shopify-images/{imageIndex}', [OperationAiProductLibraryController::class, 'shopifyImage'])->whereNumber('imageIndex')->name('operation.ai-product-library.shopify-image');
 Route::get('/operation/ai-product-library/{product}/detail', [OperationAiProductLibraryController::class, 'detail'])->name('operation.ai-product-library.detail');
+Route::get('/operation/ai-product-library/{product}/reference-preview', [OperationAiProductLibraryController::class, 'referencePreview'])->name('operation.ai-product-library.reference-preview');
+Route::get('/operation/ai-product-library/{product}/reference-preview/content', [OperationAiProductLibraryController::class, 'referencePreviewContent'])->name('operation.ai-product-library.reference-preview.content');
 Route::get('/operation/ai-product-library/{product}/images/{imageIndex}', [OperationAiProductLibraryController::class, 'image'])->whereNumber('imageIndex')->name('operation.ai-product-library.images.show');
 Route::get('/operation/ai-product-library/{product}/package', [OperationAiProductLibraryController::class, 'downloadPackage'])->name('operation.ai-product-library.package.download');
 Route::get('/operation/existing-product-library', [ProductRequestController::class, 'existingProductLibraryIndex'])->name('product-requests.operation.existing-product-library');

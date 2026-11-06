@@ -94,12 +94,12 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261105-2">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261106-4">
 @endpush
 
 @push('scripts')
     <script>window.ErpAikaipinProductLibraryConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261105-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261106-2"></script>
 @endpush
 
 @section('content')
@@ -207,7 +207,11 @@
                             $imageCount = count($imageFiles);
                             $previewImages = array_map(
                                 static fn (array $image, int $index): array => [
-                                    'url' => route('aikaipin.product-library.images.show', ['product' => $product, 'imageIndex' => $index]),
+                                    'url' => route('aikaipin.product-library.images.show', [
+                                        'product' => $product,
+                                        'imageIndex' => $index,
+                                        'v' => $product->updated_at?->getTimestamp() ?? time(),
+                                    ]),
                                 ],
                                 $imageFiles,
                                 array_keys($imageFiles),
@@ -236,7 +240,7 @@
                                     data-aikaipin-preview-title="{{ $productName }}"
                                     data-aikaipin-preview-images='@json($previewImages)'>
                                     @if ($imageCount > 0)
-                                        <img src="{{ $previewImages[0]['url'] }}" alt="{{ $productName }}">
+                                        <img src="{{ $previewImages[0]['url'] }}" alt="{{ $productName }}" loading="lazy" decoding="async">
                                     @else
                                         <i class="fa fa-picture-o" aria-hidden="true"></i>
                                     @endif
@@ -580,11 +584,23 @@
                             <h5>{{ $t('upload.sections.package') }}</h5>
                         </header>
                         <div class="aikaipin-upload-section-body">
+                            <div data-aikaipin-create-shopify-csv>
+                                <input id="aikaipin-upload-shopify-csv" class="aikaipin-visually-hidden" type="file" name="shopify_csv" accept=".csv,text/csv" data-aikaipin-upload-shopify-csv>
+                                <label class="aikaipin-package-file-card" for="aikaipin-upload-shopify-csv">
+                                    <span class="aikaipin-package-file-icon"><i class="fa fa-file-excel-o" aria-hidden="true"></i></span>
+                                    <span class="aikaipin-upload-file-content">
+                                        <strong>上传 Shopify 商品 CSV 文件（必填）</strong>
+                                        <small>系统会校验并将商品描述、规格、价格、图片等资料一并补充到新产品</small>
+                                        <small class="aikaipin-selected-file-name" data-aikaipin-upload-shopify-csv-name>未选择文件</small>
+                                    </span>
+                                    <span class="aikaipin-package-file-action">选择文件</span>
+                                </label>
+                            </div>
                             <input id="aikaipin-upload-archive" class="aikaipin-visually-hidden" type="file" accept=".zip,.rar,.7z,.tar,.gz,.tgz,.bz2,.xz" data-aikaipin-package-file>
                             <label class="aikaipin-package-file-card" for="aikaipin-upload-archive">
                                 <span class="aikaipin-package-file-icon"><i class="fa fa-file-archive-o" aria-hidden="true"></i></span>
                                 <span class="aikaipin-upload-file-content">
-                                    <strong>{{ $t('upload.select_package_archive') }}</strong>
+                                    <strong>{{ $t('upload.select_package_archive') }}（选填）</strong>
                                     <small>{{ $t('upload.package_hint') }}</small>
                                     <small class="aikaipin-selected-file-name" data-aikaipin-package-file-name>{{ $t('upload.file_unselected') }}</small>
                                 </span>

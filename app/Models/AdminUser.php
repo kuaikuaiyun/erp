@@ -13,6 +13,10 @@ class AdminUser extends Administrator
 
     public const STATUS_ACTIVE = 1;
 
+    protected $casts = [
+        'hired_at' => 'date',
+    ];
+
     public function roles(): BelongsToMany
     {
         return parent::roles()->withPivot(['position', 'position_slot', 'is_primary'])->withTimestamps();

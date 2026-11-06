@@ -5,7 +5,7 @@
 @push('styles')
     <link rel="stylesheet" href="{{ rtrim(request()->getSchemeAndHttpHost(), '/') }}/assets/erp/aikaipin-product-library.css?v=20261023-1">
     <style>
-        .operation-ai-product-page .aikaipin-operation-column { width:210px; }
+        .operation-ai-product-page .aikaipin-operation-column { width:290px; }
         .operation-ai-product-page .aikaipin-operation-cell { text-align:center; }
         .operation-ai-detail-dialog { width:880px; max-width:94vw; }
         .operation-ai-detail-modal .modal-header { padding:18px 22px; border-bottom:1px solid #e8edf3; }
@@ -160,16 +160,19 @@
                             </td>
                             <td class="aikaipin-updated-cell"><time datetime="{{ $product->updated_at?->toAtomString() }}">{{ $product->updated_at?->timezone(config('app.timezone'))->format('Y-m-d H:i') }}</time></td>
                             <td class="aikaipin-operation-cell">
+                                @if($product->referenceFilePayload())
+                                    <a class="btn btn-primary btn-sm" href="{{ route('operation.ai-product-library.reference-preview', ['product' => $product]) }}" target="_blank" rel="noopener noreferrer">
+                                        <i class="fa fa-external-link"></i> 参考页
+                                    </a>
+                                @endif
                                 <button type="button" class="btn btn-default btn-sm" data-operation-ai-detail
                                     data-detail-url="{{ route('operation.ai-product-library.detail', ['product' => $product]) }}">
                                     <i class="fa fa-eye"></i> {{ __('aikaipin.operation_library.detail') }}
                                 </button>
-                                @if($user->isAdministrator())
-                                    <button type="button" class="btn btn-success btn-sm" data-operation-ai-publish
-                                        data-publish-url="{{ route('operation.ai-product-library.publish.form', $product) }}">
-                                        <i class="fa fa-cloud-upload"></i> 上架
-                                    </button>
-                                @endif
+                                <button type="button" class="btn btn-success btn-sm" data-operation-ai-publish
+                                    data-publish-url="{{ route('operation.ai-product-library.publish.form', $product) }}">
+                                    <i class="fa fa-cloud-upload"></i> 上架
+                                </button>
                             </td>
                         </tr>
                     @empty

@@ -159,6 +159,8 @@ return [
         'edit' => '编辑账号',
         'username' => '登录账号',
         'name' => '姓名',
+        'hired_at' => '入职时间',
+        'hired_at_help' => '用于记录员工正式入职日期，可留空。',
         'account_type' => '账号类型',
         'normal_account' => '普通账号',
         'password' => '密码',

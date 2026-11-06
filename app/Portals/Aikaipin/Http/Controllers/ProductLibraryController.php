@@ -30,6 +30,8 @@ use Symfony\Component\HttpFoundation\Response;
 
 class ProductLibraryController extends Controller
 {
+    private const PRODUCT_CATEGORY_OPTIONS_CACHE_KEY = 'aikaipin:product-library:category-options:v1';
+
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly AikaipinPortalAuthorizationService $authorization,
@@ -227,13 +229,28 @@ class ProductLibraryController extends Controller
             'images' => ['nullable', 'array', 'max:3'],
             'images.*' => ['file', 'image', 'max:20480'],
             'reference_file' => ['nullable', 'file', 'extensions:html,htm', 'max:20480'],
-            'package_upload_token' => ['required', 'uuid'],
+            'shopify_csv' => ['required', 'file', 'mimes:csv,txt', 'max:20480'],
+            'package_upload_token' => ['nullable', 'uuid'],
             'authorized_department_ids' => ['nullable', 'array'],
             'authorized_department_ids.*' => ['integer', 'distinct'],
+        ], [
+            'shopify_csv.required' => '请选择 Shopify 导出的 CSV 商品文件。',
+            'shopify_csv.mimes' => 'Shopify 商品文件只支持 CSV 格式。',
+            'shopify_csv.max' => 'Shopify 商品 CSV 文件不能超过 20 MB。',
         ]);
         $departmentIds = collect($data['authorized_department_ids'] ?? [])->map(static fn ($id): int => (int) $id)->unique()->values()->all();
         $skuValues = $this->normalizeProductValues($data['skus'] ?? []);
         $categories = $this->normalizeProductValues($data['categories'] ?? []);
+        $shopifyPayload = null;
+        $shopifySourceName = null;
+        if (($data['shopify_csv'] ?? null) instanceof UploadedFile) {
+            try {
+                $shopifyPayload = $this->shopifyCsvImporter->parse($data['shopify_csv']->getRealPath());
+                $shopifySourceName = $data['shopify_csv']->getClientOriginalName();
+            } catch (\Throwable $exception) {
+                throw ValidationException::withMessages(['shopify_csv' => $exception->getMessage()]);
+            }
+        }
 
         $availableDepartments = collect($this->authorization->quickAuthorizationDepartments())->keyBy('id');
         if (collect($departmentIds)->diff($availableDepartments->keys())->isNotEmpty()) {
@@ -247,14 +264,17 @@ class ProductLibraryController extends Controller
 
         try {
             $connection = config('admin.database.connection') ?: config('database.default');
-            $product = DB::connection($connection)->transaction(function () use ($context, $data, $categories, $departmentIds, $skuValues, &$createdPaths): AikaipinProduct {
-                $session = $this->uploadSessionForUser($context['user'], (string) $data['package_upload_token'], true);
-                if ($session->status !== AikaipinProductUploadSession::STATUS_COMPLETED
-                    || ! $session->assembled_path
-                    || ! Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($session->assembled_path)) {
-                    throw ValidationException::withMessages([
-                        'package_upload_token' => __('aikaipin.messages.package_upload_incomplete_message'),
-                    ]);
+            $product = DB::connection($connection)->transaction(function () use ($context, $data, $categories, $departmentIds, $skuValues, $shopifyPayload, $shopifySourceName, &$createdPaths): AikaipinProduct {
+                $session = null;
+                if (filled($data['package_upload_token'] ?? null)) {
+                    $session = $this->uploadSessionForUser($context['user'], (string) $data['package_upload_token'], true);
+                    if ($session->status !== AikaipinProductUploadSession::STATUS_COMPLETED
+                        || ! $session->assembled_path
+                        || ! Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($session->assembled_path)) {
+                        throw ValidationException::withMessages([
+                            'package_upload_token' => __('aikaipin.messages.package_upload_incomplete_message'),
+                        ]);
+                    }
                 }
 
                 $product = AikaipinProduct::create([
@@ -290,9 +310,12 @@ class ProductLibraryController extends Controller
                     $referenceFile = $this->productFilePayload($referencePayload);
                 }
 
-                $packagePayload = $this->storage->copyStoredFile($session->assembled_path, 'packages', $session->original_name, $session->mime_type);
-                $createdPaths[] = $packagePayload['path'];
-                $packageFile = $this->productFilePayload($packagePayload);
+                $packageFile = null;
+                if ($session !== null) {
+                    $packagePayload = $this->storage->copyStoredFile($session->assembled_path, 'packages', $session->original_name, $session->mime_type);
+                    $createdPaths[] = $packagePayload['path'];
+                    $packageFile = $this->productFilePayload($packagePayload);
+                }
 
                 $product->forceFill([
                     'product_code' => $this->productCodeForId((int) $product->getKey()),
@@ -301,10 +324,21 @@ class ProductLibraryController extends Controller
                     'package_file' => $packageFile,
                 ])->save();
 
-                $session->forceFill([
-                    'status' => AikaipinProductUploadSession::STATUS_CONSUMED,
-                    'expires_at' => now()->addHour(),
-                ])->save();
+                if (is_array($shopifyPayload) && $shopifySourceName !== null) {
+                    $product = $this->shopifyCsvImporter->supplement(
+                        $product,
+                        $shopifyPayload,
+                        $shopifySourceName,
+                        $shopifySourceName,
+                    );
+                }
+
+                if ($session !== null) {
+                    $session->forceFill([
+                        'status' => AikaipinProductUploadSession::STATUS_CONSUMED,
+                        'expires_at' => now()->addHour(),
+                    ])->save();
+                }
 
                 return $product;
             });
@@ -321,9 +355,9 @@ class ProductLibraryController extends Controller
             ], 500);
         }
 
-        $completedSession = AikaipinProductUploadSession::query()
-            ->where('upload_token', $data['package_upload_token'])
-            ->first();
+        $completedSession = filled($data['package_upload_token'] ?? null)
+            ? AikaipinProductUploadSession::query()->where('upload_token', $data['package_upload_token'])->first()
+            : null;
         if ($completedSession !== null) {
             try {
                 $this->deleteUploadSession($completedSession);
@@ -331,6 +365,7 @@ class ProductLibraryController extends Controller
                 report($exception);
             }
         }
+        Cache::forget(self::PRODUCT_CATEGORY_OPTIONS_CACHE_KEY);
 
         return response()->json([
             'message' => __('aikaipin.messages.product_created_message'),
@@ -485,12 +520,6 @@ class ProductLibraryController extends Controller
             ]);
         }
 
-        if (! ($data['package_upload_token'] ?? null) && $product->packageFilePayload() === null) {
-            throw ValidationException::withMessages([
-                'package_upload_token' => __('aikaipin.messages.archive_required_message'),
-            ]);
-        }
-
         $createdPaths = [];
         $obsoletePaths = [];
         $completedSession = null;
@@ -593,6 +622,7 @@ class ProductLibraryController extends Controller
                 report($exception);
             }
         }
+        Cache::forget(self::PRODUCT_CATEGORY_OPTIONS_CACHE_KEY);
 
         return response()->json([
             'message' => __('aikaipin.messages.product_updated_message'),
@@ -668,6 +698,7 @@ class ProductLibraryController extends Controller
                 report($exception);
             }
         }
+        Cache::forget(self::PRODUCT_CATEGORY_OPTIONS_CACHE_KEY);
 
         return response()->json([
             'message' => __('aikaipin.messages.product_deleted_message'),
@@ -738,7 +769,12 @@ class ProductLibraryController extends Controller
         $file = $product->imageFiles()[$imageIndex] ?? null;
         abort_unless($file !== null, 404);
 
-        return $this->serveProductFile($file, false);
+        $response = $this->serveProductFile($file, false);
+        $response->headers->set('Cache-Control', 'private, no-store, no-cache, must-revalidate, max-age=0');
+        $response->headers->set('Pragma', 'no-cache');
+        $response->headers->set('Expires', '0');
+
+        return $response;
     }
 
     public function showProductReferencePreview(Request $request, AikaipinProduct $product): Response|View
@@ -1338,7 +1374,11 @@ class ProductLibraryController extends Controller
                 return [
                     'index' => $index,
                     'name' => (string) $file['original_name'],
-                    'url' => route('aikaipin.product-library.images.show', ['product' => $product, 'imageIndex' => $index]),
+                    'url' => route('aikaipin.product-library.images.show', [
+                        'product' => $product,
+                        'imageIndex' => $index,
+                        'v' => $product->updated_at?->getTimestamp() ?? time(),
+                    ]),
                 ];
             }, $imageFiles, array_keys($imageFiles)),
             'reference_file' => $filePayload($product->referenceFilePayload(), 'reference'),
@@ -1694,6 +1734,12 @@ class ProductLibraryController extends Controller
     private function productQuery(AdminUser $user, bool $canManageProductLibrary, array $filters): Builder
     {
         $query = AikaipinProduct::query()
+            ->select([
+                'id', 'product_code', 'name', 'sku', 'categories', 'source_platform', 'product_type',
+                'landing_page_url', 'images', 'reference_file', 'package_file', 'visible_department_ids',
+                'created_at', 'updated_at',
+            ])
+            ->selectRaw('shopify_data IS NOT NULL AS has_shopify_data')
             ->latest('created_at')
             ->latest('id');
 
@@ -1739,17 +1785,21 @@ class ProductLibraryController extends Controller
     /** @return list<array{value:string,label:string}> */
     private function productCategoryOptions(): array
     {
-        return AikaipinProduct::query()
-            ->whereNotNull('categories')
-            ->get(['categories'])
-            ->flatMap(static fn (AikaipinProduct $product): array => $product->categoryValues())
-            ->map(static fn (string $category): string => trim($category))
-            ->filter()
-            ->unique(static fn (string $category): string => mb_strtolower($category))
-            ->sort(static fn (string $left, string $right): int => strnatcasecmp($left, $right))
-            ->values()
-            ->map(static fn (string $category): array => ['value' => $category, 'label' => $category])
-            ->all();
+        return Cache::remember(self::PRODUCT_CATEGORY_OPTIONS_CACHE_KEY, now()->addMinutes(30), function (): array {
+            return AikaipinProduct::query()
+                ->whereNotNull('categories')
+                ->select('categories')
+                ->distinct()
+                ->get()
+                ->flatMap(static fn (AikaipinProduct $product): array => $product->categoryValues())
+                ->map(static fn (string $category): string => trim($category))
+                ->filter()
+                ->unique(static fn (string $category): string => mb_strtolower($category))
+                ->sort(static fn (string $left, string $right): int => strnatcasecmp($left, $right))
+                ->values()
+                ->map(static fn (string $category): array => ['value' => $category, 'label' => $category])
+                ->all();
+        });
     }
 
     /** @param iterable<mixed> $values

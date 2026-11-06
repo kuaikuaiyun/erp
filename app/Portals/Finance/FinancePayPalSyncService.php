@@ -58,14 +58,61 @@ class FinancePayPalSyncService
         $to = CarbonImmutable::now('UTC')->startOfSecond();
         $last = $db->table('finance_sync_logs')->where('payment_account_id', $account->id)
             ->where('operation', 'transaction_search')->where('status', 'success')->max('range_to');
-        $from = $last ? CarbonImmutable::parse($last, 'UTC')->subDays(3) : $to->subDays(30);
+        $initialMonths = max(1, min(12, (int) config('finance.relay.initial_months', 6)));
+        $lookbackHours = max(1, min(168, (int) config('finance.relay.incremental_hours', 5)));
+        $from = $last ? CarbonImmutable::parse($last, 'UTC')->min($to->subHours($lookbackHours))
+            : $to->subMonthsNoOverflow($initialMonths);
+        // A later manual sync must not hide an earlier failed or interrupted window.
+        $logs = $db->table('finance_sync_logs')->where('payment_account_id', $account->id)
+            ->where('operation', 'transaction_search')->whereNotNull('range_from')->whereNotNull('range_to')
+            ->orderBy('range_from')->get(['status', 'range_from', 'range_to']);
+        $coverage = [];
+        foreach ($logs->where('status', 'success') as $covered) {
+            $coveredFrom = CarbonImmutable::parse($covered->range_from, 'UTC');
+            $coveredTo = CarbonImmutable::parse($covered->range_to, 'UTC');
+            $index = count($coverage) - 1;
+            if ($index >= 0 && $coveredFrom->lessThanOrEqualTo($coverage[$index][1]->addSecond())) {
+                $coverage[$index][1] = $coverage[$index][1]->max($coveredTo);
+            } else {
+                $coverage[] = [$coveredFrom, $coveredTo];
+            }
+        }
+        // A recent success alone does not prove the initial history is complete.
+        $historyCursor = $to->subMonthsNoOverflow($initialMonths);
+        foreach ($coverage as [$coveredFrom, $coveredTo]) {
+            if ($coveredTo->lessThan($historyCursor)) continue;
+            if ($coveredFrom->greaterThan($historyCursor)) break;
+            $historyCursor = $coveredTo->addSecond();
+            if ($historyCursor->greaterThan($to)) break;
+        }
+        if ($historyCursor->lessThanOrEqualTo($to)) $from = $from->min($historyCursor);
+        foreach ($logs->whereIn('status', ['failed', 'running']) as $unfinished) {
+            $cursor = CarbonImmutable::parse($unfinished->range_from, 'UTC');
+            $until = CarbonImmutable::parse($unfinished->range_to, 'UTC');
+            foreach ($coverage as [$coveredFrom, $coveredTo]) {
+                if ($coveredTo->lessThan($cursor)) continue;
+                if ($coveredFrom->greaterThan($cursor)) break;
+                $cursor = $coveredTo->addSecond();
+                if ($cursor->greaterThan($until)) break;
+            }
+            if ($cursor->lessThanOrEqualTo($until)) $from = $from->min($cursor);
+        }
         $from = $from->min($to);
         $count = 0;
+        $lockedGaps = [];
         // Closed accounting months retain their saved transactions.
         for ($start = $from; $start->lessThanOrEqualTo($to); $start = $end->addSecond()) {
             $month = $start->setTimezone('Asia/Shanghai')->format('Y-m');
             $end = $start->setTimezone('Asia/Shanghai')->endOfMonth()->utc()->startOfSecond()->min($to);
             if ($db->table('finance_period_locks')->where('month', $month)->whereNotNull('report_snapshot')->exists()) {
+                $lockedCursor = $start;
+                foreach ($coverage as [$coveredFrom, $coveredTo]) {
+                    if ($coveredTo->lessThan($lockedCursor)) continue;
+                    if ($coveredFrom->greaterThan($lockedCursor)) break;
+                    $lockedCursor = $coveredTo->addSecond();
+                    if ($lockedCursor->greaterThan($end)) break;
+                }
+                if ($lockedCursor->lessThanOrEqualTo($end)) $lockedGaps[] = $month;
                 continue;
             }
             $result = $this->transactions($account, $start, $end, $actor);
@@ -75,7 +122,8 @@ class FinancePayPalSyncService
             }
         }
 
-        return ['ok' => true, 'count' => $count, 'error' => null];
+        if ($lockedGaps) return ['ok' => false, 'count' => $count, 'error' => '历史回补未完成：'.implode('、', array_unique($lockedGaps)).'已锁定，需核对历史完整性后处理。'];
+        return ['ok' => true, 'count' => $count, 'error' => null, 'history_complete' => true];
     }
 
     public function transactions(FinancePaymentAccount $account, CarbonImmutable $from, CarbonImmutable $to, int $actor): array
@@ -86,69 +134,97 @@ class FinancePayPalSyncService
 
         return $this->run($account, 'transaction_search', $actor, $from, $to, function (int $logId) use ($account, $from, $to, $actor): array {
             $counts = ['pages' => 0, 'records' => 0];
+            $requests = 0;
+            $pageSize = max(1, min(500, (int) config('finance.relay.page_size', 500)));
             $segmentDays = max(1, min(30, (int) config('finance.relay.segment_days', 7)));
             for ($start = $from; $start->lessThanOrEqualTo($to); $start = $end->addSecond()) {
                 $end = $start->addDays($segmentDays)->subSecond()->min($to);
-                $totalPages = null;
-                $expectedItems = null;
-                $segmentItems = 0;
-                for ($page = 1; $totalPages === null || $page <= $totalPages; $page++) {
-                    if ($counts['pages'] >= (int) config('finance.relay.max_pages', 1000)) {
-                        throw new FinanceRelayException('pagination');
-                    }
-                    $query = ['start_date' => $start->utc()->format('Y-m-d\TH:i:s\Z'), 'end_date' => $end->utc()->format('Y-m-d\TH:i:s\Z'),
-                        'fields' => 'all', 'page_size' => '100', 'page' => (string) $page, 'balance_affecting_records_only' => 'Y'];
-                    $response = $this->relay->read($account, 'transaction_search', $query);
-                    $payload = $response['payload'];
-                    $rows = $payload['transaction_details'] ?? null;
-                    $pages = filter_var($payload['total_pages'] ?? null, FILTER_VALIDATE_INT);
-                    $returnedPage = filter_var($payload['page'] ?? null, FILTER_VALIDATE_INT);
-                    $totalItems = filter_var($payload['total_items'] ?? null, FILTER_VALIDATE_INT);
-                    if (! is_array($rows) || ! array_is_list($rows) || count($rows) > 100
-                        || $pages === false || $returnedPage !== $page || $pages < 0
-                        || $totalItems === false || $totalItems < 0
-                        || ($expectedItems !== null && $expectedItems !== $totalItems)
-                        || $pages > config('finance.relay.max_pages', 1000)
-                        || ($pages === 0 && ($rows !== [] || $totalItems !== 0))
-                        || ($pages > 0 && $page > $pages) || ($page < $pages && $rows === [])
-                        || ($totalPages !== null && $totalPages !== max(1, $pages))) {
-                        throw new FinanceRelayException('pagination');
-                    }
-                    $totalPages = max(1, $pages);
-                    $expectedItems = $totalItems;
-                    $segmentItems += count($rows);
-                    if ($segmentItems > $expectedItems || ($page === $totalPages && $segmentItems !== $expectedItems)) {
-                        throw new FinanceRelayException('pagination');
-                    }
-                    $prepared = array_map(fn ($row) => $this->transaction($account, $row, $actor), $rows);
-                    $db = $this->workbooks->database();
-                    $db->transaction(function () use ($db, $prepared, $account, $response, $query, $logId): void {
-                        $this->guardAccount($account->id);
-                        $accounting = app(FinanceAccountingService::class);
-                        $months = collect($prepared)->map(fn ($entry) => $accounting->month($entry['record']['occurred_at']))->unique()->sort();
-                        foreach ($months as $month) {
-                            $accounting->guardUnlocked($month);
-                        }
-                        $this->page($logId, $query, $response);
-                        foreach ($prepared as $entry) {
-                            $record = FinanceRecord::query()->updateOrCreate(['fingerprint' => $entry['record']['fingerprint']], $entry['record']);
-                            $db->table('finance_payment_transactions')->updateOrInsert([
-                                'payment_account_id' => $account->id, 'transaction_id' => $entry['id'], 'event_code' => $entry['event'],
-                            ], [
-                                'finance_record_id' => $record->id, 'raw_payload' => json_encode($entry['raw'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
-                                ...$accounting->attributes($entry['raw'], $entry['record']['occurred_at']),
-                                'created_at' => $record->created_at, 'updated_at' => now(),
-                            ]);
-                            if ($record->raw_type) {
-                                app(FinanceWorkbookService::class)->registerType($record->raw_type);
+                $segmentCounts = $counts;
+                // Restart the segment if pagination changes; unique keys prevent duplicate transactions.
+                for ($attempt = 1; ; $attempt++) {
+                    $counts = $segmentCounts;
+                    try {
+                        $totalPages = null;
+                        $expectedItems = null;
+                        $segmentItems = 0;
+                        $seenTransactions = [];
+                        for ($page = 1; $totalPages === null || $page <= $totalPages; $page++) {
+                            if ($requests >= (int) config('finance.relay.max_pages', 1000)) {
+                                throw new FinanceRelayException('pagination');
                             }
+                            $query = ['start_date' => $start->utc()->format('Y-m-d\TH:i:s\Z'), 'end_date' => $end->utc()->format('Y-m-d\TH:i:s\Z'),
+                                'fields' => 'all', 'page_size' => (string) $pageSize, 'page' => (string) $page, 'balance_affecting_records_only' => 'Y'];
+                            $requests++;
+                            $response = $this->relay->read($account, 'transaction_search', $query);
+                            $payload = $response['payload'];
+                            $rows = $payload['transaction_details'] ?? null;
+                            $pages = filter_var($payload['total_pages'] ?? null, FILTER_VALIDATE_INT);
+                            $returnedPage = filter_var($payload['page'] ?? null, FILTER_VALIDATE_INT);
+                            $totalItems = filter_var($payload['total_items'] ?? null, FILTER_VALIDATE_INT);
+                            // PayPal may omit transaction_details for an explicitly empty result.
+                            if (! array_key_exists('transaction_details', $payload) && $pages === 0 && $totalItems === 0) {
+                                $rows = [];
+                            }
+                            if (! is_array($rows) || ! array_is_list($rows) || count($rows) > $pageSize
+                                || $pages === false || $returnedPage !== $page || $pages < 0
+                                || $totalItems === false || $totalItems < 0
+                                || ($expectedItems !== null && $expectedItems !== $totalItems)
+                                || $pages > config('finance.relay.max_pages', 1000)
+                                || ($pages === 0 && ($rows !== [] || $totalItems !== 0))
+                                || ($pages > 0 && $page > $pages) || ($page < $pages && $rows === [])
+                                || ($totalPages !== null && $totalPages !== max(1, $pages))) {
+                                throw new FinanceRelayException('pagination');
+                            }
+                            $totalPages = max(1, $pages);
+                            $expectedItems = $totalItems;
+                            $segmentItems += count($rows);
+                            if ($segmentItems > $expectedItems || ($page === $totalPages && $segmentItems !== $expectedItems)) {
+                                throw new FinanceRelayException('pagination');
+                            }
+                            $prepared = array_map(fn ($row) => $this->transaction($account, $row, $actor), $rows);
+                            foreach ($prepared as $entry) {
+                                $identity = $entry['record']['fingerprint'];
+                                if (isset($seenTransactions[$identity])) {
+                                    throw new FinanceRelayException('pagination');
+                                }
+                                $seenTransactions[$identity] = true;
+                            }
+                            $db = $this->workbooks->database();
+                            $db->transaction(function () use ($db, $prepared, $account, $response, $query, $logId): void {
+                                $this->guardAccount($account->id);
+                                $accounting = app(FinanceAccountingService::class);
+                                $months = collect($prepared)->map(fn ($entry) => $accounting->month($entry['record']['occurred_at']))->unique()->sort();
+                                foreach ($months as $month) {
+                                    $accounting->guardUnlocked($month);
+                                }
+                                $this->page($logId, $query, $response);
+                                foreach ($prepared as $entry) {
+                                    $record = FinanceRecord::query()->updateOrCreate(['fingerprint' => $entry['record']['fingerprint']], $entry['record']);
+                                    $db->table('finance_payment_transactions')->updateOrInsert([
+                                        'payment_account_id' => $account->id, 'transaction_id' => $entry['id'], 'event_code' => $entry['event'],
+                                    ], [
+                                        'finance_record_id' => $record->id, 'raw_payload' => json_encode($entry['raw'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+                                        ...$accounting->attributes($entry['raw'], $entry['record']['occurred_at']),
+                                        'created_at' => $record->created_at, 'updated_at' => now(),
+                                    ]);
+                                    if ($record->raw_type) {
+                                        app(FinanceWorkbookService::class)->registerType($record->raw_type);
+                                    }
+                                }
+                            });
+                            $counts['pages']++;
+                            $counts['records'] += count($prepared);
+                            $db->table('finance_sync_logs')->where('id', $logId)->update([
+                                'page_count' => $counts['pages'], 'record_count' => $counts['records'], 'updated_at' => now(),
+                            ]);
                         }
-                    });
-                    $counts['pages']++;
-                    $counts['records'] += count($prepared);
-                    $db->table('finance_sync_logs')->where('id', $logId)->update([
-                        'page_count' => $counts['pages'], 'record_count' => $counts['records'], 'updated_at' => now(),
-                    ]);
+                        break;
+                    } catch (FinanceRelayException $e) {
+                        if ($e->reason !== 'pagination' || $attempt >= 3
+                            || $requests >= (int) config('finance.relay.max_pages', 1000)) {
+                            throw $e;
+                        }
+                    }
                 }
             }
 

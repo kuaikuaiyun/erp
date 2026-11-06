@@ -97,6 +97,10 @@ class AikaipinProduct extends Model
 
     public function hasShopifyData(): bool
     {
+        if (array_key_exists('has_shopify_data', $this->attributes)) {
+            return (bool) $this->attributes['has_shopify_data'];
+        }
+
         return $this->shopifyData() !== [];
     }
 

@@ -3,6 +3,7 @@
 namespace App\Portals\FashionLogistics\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\AdminUser;
 use App\Models\AssistantDomainStore;
 use App\Models\FashionLogisticsOrder;
 use App\Models\FashionLogisticsSyncState;
@@ -29,16 +30,17 @@ class FashionOrderController extends Controller
         $validated = $request->validate([
             'keyword' => ['nullable', 'string', 'max:191'],
             'store_id' => ['nullable', 'integer'],
-            'status' => ['nullable', 'string', 'max:50'],
+            'store_keyword' => ['nullable', 'string', 'max:191'],
+            'operator_id' => ['nullable', 'integer'],
+            'status' => ['nullable', 'string', 'in:completed,processing'],
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
             'per_page' => ['nullable', 'integer', 'in:20,50,100'],
         ]);
 
         $keyword = trim((string) ($validated['keyword'] ?? ''));
-        // Keep the default list consistent with the sync summary, which counts
-        // every status returned by XShoppy.
-        $selectedStatus = (string) ($validated['status'] ?? 'all');
+        $storeKeyword = trim((string) ($validated['store_keyword'] ?? ''));
+        $selectedStatus = (string) ($validated['status'] ?? 'completed');
         $query = FashionLogisticsOrder::query()->with(['items', 'store']);
         if ($keyword !== '') {
             $query->where(function ($query) use ($keyword): void {
@@ -51,29 +53,58 @@ class FashionOrderController extends Controller
             });
         }
         $query->when($validated['store_id'] ?? null, fn ($query, $id) => $query->where('assistant_domain_store_id', $id));
-        if ($selectedStatus === 'effective') {
-            $query->whereIn('status', ['processing', 'completed']);
-        } elseif ($selectedStatus !== '' && $selectedStatus !== 'all') {
-            $query->where('status', $selectedStatus);
+        if ($storeKeyword !== '') {
+            $query->where(function ($stores) use ($storeKeyword): void {
+                $stores->where('store_name', 'like', "%{$storeKeyword}%")
+                    ->orWhere('source_domain', 'like', "%{$storeKeyword}%")
+                    ->orWhereHas('store', function ($store) use ($storeKeyword): void {
+                        $store->where('shop_name', 'like', "%{$storeKeyword}%")
+                            ->orWhere('domain', 'like', "%{$storeKeyword}%");
+                    });
+            });
         }
+        $selectedOperator = isset($validated['operator_id'])
+            ? AdminUser::query()->find((int) $validated['operator_id'])
+            : null;
+        if ($selectedOperator) {
+            $operatorNames = collect([$selectedOperator->name, $selectedOperator->username])
+                ->filter()->map(fn ($name): string => trim((string) $name))->unique()->values()->all();
+            $query->whereHas('store', function ($stores) use ($selectedOperator, $operatorNames): void {
+                $stores->where(function ($owner) use ($selectedOperator, $operatorNames): void {
+                    $owner->where('owner_user_id', $selectedOperator->getKey());
+                    if ($operatorNames !== []) $owner->orWhereIn('user_name', $operatorNames);
+                });
+            });
+        }
+        $query->where('status', $selectedStatus);
         $query->when($validated['date_from'] ?? null, fn ($query, $date) => $query->where('order_created_at', '>=', $date.' 00:00:00'));
         $query->when($validated['date_to'] ?? null, fn ($query, $date) => $query->where('order_created_at', '<=', $date.' 23:59:59'));
 
         $orders = $query->latest('order_created_at')->latest('id')->paginate((int) ($validated['per_page'] ?? 20))->withQueryString();
-        $stores = AssistantDomainStore::query()->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy')")->orderBy('shop_name')->get(['id', 'shop_name', 'domain']);
+        $stores = AssistantDomainStore::query()->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy')")->orderBy('shop_name')->get(['id', 'shop_name', 'domain', 'owner_user_id', 'user_name']);
+        $ownerIds = $stores->pluck('owner_user_id')->filter()->map(fn ($id): int => (int) $id)->unique()->values();
+        $ownerNames = $stores->pluck('user_name')->filter()->map(fn ($name): string => trim((string) $name))->unique()->values();
+        $operators = AdminUser::query()
+            ->where(function ($users) use ($ownerIds, $ownerNames): void {
+                if ($ownerIds->isNotEmpty()) $users->whereIn('id', $ownerIds);
+                if ($ownerNames->isNotEmpty()) {
+                    $method = $ownerIds->isNotEmpty() ? 'orWhereIn' : 'whereIn';
+                    $users->{$method}('name', $ownerNames)->orWhereIn('username', $ownerNames);
+                }
+                if ($ownerIds->isEmpty() && $ownerNames->isEmpty()) $users->whereRaw('1 = 0');
+            })
+            ->orderBy('name')->orderBy('username')->get(['id', 'name', 'username']);
         $syncStates = FashionLogisticsSyncState::query()
             ->with('store:id,shop_name,domain')
             ->withCount(['orders as stored_orders_count'])
             ->latest('last_started_at')
             ->get();
-        $statuses = FashionLogisticsOrder::query()->whereNotNull('status')->where('status', '!=', '')->distinct()->orderBy('status')->pluck('status');
-
         return view('portals.fashion-logistics.orders.index', [
             ...$context,
             'orders' => $orders,
             'stores' => $stores,
+            'operators' => $operators,
             'syncStates' => $syncStates,
-            'statuses' => $statuses,
             'filters' => [...$validated, 'status' => $selectedStatus],
         ]);
     }

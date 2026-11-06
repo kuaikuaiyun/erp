@@ -4,9 +4,12 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class OperationReport extends Model
 {
+    use SoftDeletes;
+
     public const STATUS_PENDING = 'pending';
     public const STATUS_APPROVED = 'approved';
     public const STATUS_REJECTED = 'rejected';
@@ -17,6 +20,7 @@ class OperationReport extends Model
         'first_purchase_cost', 'first_shipping_cost', 'first_return_fee', 'actual_ad_spend',
         'first_profit', 'renewal_net_revenue', 'overall_profit', 'status', 'submitted_by',
         'submitted_at', 'reviewed_by', 'reviewed_at', 'review_reason',
+        'deletion_key',
     ];
 
     public function __construct(array $attributes = [])
@@ -33,6 +37,7 @@ class OperationReport extends Model
             'advertising_rows' => 'array',
             'submitted_at' => 'datetime',
             'reviewed_at' => 'datetime',
+            'deleted_at' => 'datetime',
         ];
     }
 

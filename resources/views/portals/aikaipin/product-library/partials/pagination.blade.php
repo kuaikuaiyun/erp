@@ -12,7 +12,7 @@
 <div class="aikaipin-pagination-control">
     <span class="aikaipin-pagination-summary">{{ __('aikaipin.product_library.pagination.summary', ['from' => $products->firstItem() ?? 0, 'to' => $products->lastItem() ?? 0, 'total' => $products->total()]) }}</span>
     @if ($lastPage > 1)
-        <nav aria-label="{{ __('aikaipin.product_library.pagination.navigation') }}">
+        <div class="aikaipin-pagination-actions"><nav aria-label="{{ __('aikaipin.product_library.pagination.navigation') }}">
             <ul class="pagination pagination-sm no-margin">
                 <li class="{{ $products->onFirstPage() ? 'disabled' : '' }}"><a href="{{ $products->previousPageUrl() ?: '#' }}" aria-label="{{ __('aikaipin.product_library.pagination.previous') }}">&laquo;</a></li>
                 @foreach ($visiblePages as $page)
@@ -24,6 +24,6 @@
                 @endforeach
                 <li class="{{ $products->hasMorePages() ? '' : 'disabled' }}"><a href="{{ $products->nextPageUrl() ?: '#' }}" aria-label="{{ __('aikaipin.product_library.pagination.next') }}">&raquo;</a></li>
             </ul>
-        </nav>
+        </nav><label class="aikaipin-page-jump"><span>跳转到</span><select class="form-control input-sm" aria-label="跳转到指定页" onchange="window.location.href=this.options[this.selectedIndex].dataset.url">@for ($page = 1; $page <= $lastPage; $page++)<option value="{{ $page }}" data-url="{{ $products->url($page) }}" @selected($currentPage === $page)>第 {{ $page }} 页</option>@endfor</select></label></div>
     @endif
 </div>

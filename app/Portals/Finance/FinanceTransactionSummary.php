@@ -36,7 +36,7 @@ class FinanceTransactionSummary
             $key = json_encode($dimensions, JSON_THROW_ON_ERROR);
             $group = &$groups[$key];
             $group ??= [...$dimensions, 'channel' => match ($tab) {
-                'paypal' => '贝宝', 'credit_card' => '徐总支付', 'combined' => 'Shopify',
+                'paypal' => 'PayPal', 'credit_card' => '徐总支付', 'combined' => 'Shopify',
             }, 'orders' => 0];
             $group['orders'] += (int) $row['success'];
             $paypal = $row['channel'] === 'paypal';

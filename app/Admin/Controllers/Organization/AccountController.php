@@ -64,6 +64,7 @@ class AccountController extends Controller
                 'name' => $payload['name'],
                 'password' => Hash::make($payload['password']),
                 'status' => (int) ($payload['status'] ?? 1),
+                'hired_at' => $payload['hired_at'] ?? null,
             ]);
             $account->save();
             $this->organization->syncAccountMemberships($account, $memberships, $this->administrator());
@@ -91,6 +92,7 @@ class AccountController extends Controller
 
         DB::connection($this->connectionName())->transaction(function () use ($request, $payload, $account): void {
             $account->name = $payload['name'];
+            $account->hired_at = $payload['hired_at'] ?? null;
 
             if (!$account->isAdministrator()) {
                 $account->username = $payload['username'];
@@ -228,6 +230,11 @@ class AccountController extends Controller
         $grid->column('id', __('organization.common.id'))->sortable();
         $grid->column('username', __('organization.accounts.username'));
         $grid->column('name', __('organization.accounts.name'));
+        $grid->column('hired_at', __('organization.accounts.hired_at'))->display(function ($hiredAt): string {
+            if (!$hiredAt) return '<span class="text-muted">—</span>';
+
+            return e($hiredAt instanceof \DateTimeInterface ? $hiredAt->format('Y-m-d') : substr((string) $hiredAt, 0, 10));
+        })->sortable();
         $grid->column('account_type', __('organization.accounts.account_type'))->display(function (): string {
             if ($this->isAdministrator()) {
                 return '<span class="label label-warning">'.e(__('organization.common.system_account')).'</span>';
@@ -328,6 +335,9 @@ class AccountController extends Controller
         $form->text('name', __('organization.accounts.name'))
             ->rules('required|max:255')
             ->attribute('maxlength', 255);
+        $form->date('hired_at', __('organization.accounts.hired_at'))
+            ->rules('nullable|date')
+            ->help(__('organization.accounts.hired_at_help'));
         $form->password('password', __('organization.accounts.password'))
             ->rules($account ? 'nullable|min:8|confirmed' : 'required|min:8|confirmed')
             ->help($account ? __('organization.accounts.password_hint_update') : __('organization.accounts.password_hint_create'))
@@ -379,6 +389,7 @@ class AccountController extends Controller
         return [
             'username' => [$account?->isAdministrator() ? 'nullable' : 'required', 'string', 'max:190', $usernameRule],
             'name' => ['required', 'string', 'max:255'],
+            'hired_at' => ['nullable', 'date'],
             'password' => [$account ? 'nullable' : 'required', 'string', 'min:8', 'confirmed'],
             'status' => ['nullable', 'boolean'],
             'memberships' => $account?->isAdministrator()

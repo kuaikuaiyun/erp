@@ -998,24 +998,7 @@ class OperationReportController extends Controller
     /** @return array<string, list<array{key:string,media:string,coefficient:float}>> */
     private function advertisingAgencyGroups(array $assistantDepartmentIds): array
     {
-        $options = AssistantAdvertisingAgency::enabledOptions($assistantDepartmentIds);
-        $mediaNames = AssistantAdvertisingAgency::enabledMediaNames($assistantDepartmentIds);
-        $agencyNames = AssistantAdvertisingAgency::enabledNames($assistantDepartmentIds);
-        $groups = [];
-
-        foreach ($options as $key => $coefficient) {
-            $agencyName = trim((string) ($agencyNames[$key] ?? ''));
-            $mediaName = trim((string) ($mediaNames[$key] ?? ''));
-            if ($agencyName === '' || $mediaName === '') continue;
-
-            $groups[$agencyName][] = [
-                'key' => (string) $key,
-                'media' => $mediaName,
-                'coefficient' => (float) $coefficient,
-            ];
-        }
-
-        return $groups;
+        return AssistantAdvertisingAgency::enabledGroups($assistantDepartmentIds);
     }
 
     private function sumRows(array $rows): array

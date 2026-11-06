@@ -1,10 +1,5 @@
 <form method="post" action="{{ route('operation.ai-product-library.publish', $product) }}" class="operation-ai-publish-form">
     @csrf
-    <div class="alert alert-info">
-        <i class="fa fa-info-circle"></i>
-        上架前请确认当前账号归属的 Shopify 店铺。测试阶段管理员仅开放 <strong>161-sysya8-6t</strong>。
-    </div>
-
     <div class="operation-ai-store-list">
         <h5><i class="fa fa-shopping-bag"></i> 当前可上架店铺</h5>
         @forelse($stores as $store)
@@ -13,7 +8,8 @@
                 <span>
                     <strong>{{ $store->shop_name }}</strong>
                     <small>域名：{{ $store->domain ?: '未填写' }}</small>
-                    <small>归属人：{{ $store->ownerUser?->name ?: $store->ownerUser?->username ?: '管理员测试店铺' }}</small>
+                    <small>归属人：{{ $store->ownerUser?->name ?: $store->ownerUser?->username ?: '未设置' }}</small>
+                    <small>使用人：{{ $store->user_name ?: '未设置' }}</small>
                     <small>接口状态：{{ filled($store->shopify_client_id) && filled($store->shopify_client_secret) ? '已配置' : '未配置 Shopify 凭证' }}</small>
                 </span>
             </label>

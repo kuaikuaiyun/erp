@@ -87,7 +87,17 @@ class FinanceController extends Controller
         $account = FinancePaymentAccount::query()->findOrFail(substr($accountKey, 8));
         $result = app(\App\Portals\Finance\FinancePayPalSyncService::class)->balances($account, (int) $context['user']->getKey());
         if ($result['ok']) {
-            $result['orders'] = app(\App\Portals\Finance\FinancePayPalSyncService::class)->refreshOrders($account, (int) $context['user']->getKey());
+            try {
+                $progress = app(\App\Portals\Finance\FinanceOrderRefreshProgress::class);
+                $task = $progress->enqueue($account, (int) $context['user']->getKey());
+                $batch = $progress->attachBatch((int) $context['user']->getKey(), [$task], [], [FinanceCatalog::simplified($account->account_name)]);
+                $result['orders_batch'] = $batch['batch'];
+                $result['orders_queued'] = true;
+            } catch (\Throwable $e) {
+                report($e);
+                $result['orders_queued'] = false;
+                $result['orders_queue_error'] = '余额已更新，订单后台任务暂未排入，请稍后重试。';
+            }
         }
         if ($request->expectsJson()) {
             $paypalBalance = $this->paypalBalances->dashboard($filters['paypal_currency'] ?? 'USD');
@@ -112,6 +122,78 @@ class FinanceController extends Controller
         }
 
         return redirect()->route('finance.home', $request->only('paypal_currency', 'balance_account'))->with('balanceRefreshResults', [$account->id => $result]);
+    }
+
+    private function refreshablePayPalAccounts(): \Illuminate\Database\Eloquent\Builder
+    {
+        return FinancePaymentAccount::query()->where('account_type', 'paypal')->where('status', 'enabled')
+            ->whereNotNull('relay_url')->where('relay_url', '!=', '')
+            ->whereNotNull('relay_certificate_sha1')->where('relay_certificate_sha1', '!=', '')
+            ->whereNotNull('relay_hmac_key_id')->where('relay_hmac_key_id', '!=', '')
+            ->whereNotNull('relay_hmac_secret')->where('relay_hmac_secret', '!=', '');
+    }
+
+    public function queuePayPalOrderRefresh(Request $request): Response
+    {
+        $context = $this->context($request, true);
+        if ($context instanceof Response) return $context;
+        $data = $request->validate([
+            'account' => ['nullable', 'string', 'regex:/^(all|[1-9][0-9]*)$/'],
+            'accounts' => 'nullable|array|min:1|max:100', 'accounts.*' => 'required|integer|min:1|distinct',
+        ]);
+        $ids = $data['accounts'] ?? (isset($data['account']) && $data['account'] !== 'all' ? [(int) $data['account']] : []);
+        $all = ($data['account'] ?? '') === 'all';
+        if (! $all && ! $ids) throw ValidationException::withMessages(['accounts' => '请至少选择一个 PayPal 账户。']);
+        $query = $this->refreshablePayPalAccounts();
+        if (! $all) $query->whereIn('id', $ids);
+        $accounts = $query->orderBy('id')->get(['id', 'account_name']);
+        if ($accounts->isEmpty() || (! $all && $accounts->count() !== count($ids))) {
+            throw ValidationException::withMessages(['account' => '没有可刷新的账户，请选择已启用且已配置接口的 PayPal 账户。']);
+        }
+        $queued = [];
+        $taskIds = [];
+        $failed = [];
+        foreach ($accounts as $account) {
+            try {
+                $taskIds[] = app(\App\Portals\Finance\FinanceOrderRefreshProgress::class)->enqueue($account, (int) $context['user']->getKey());
+                $queued[] = FinanceCatalog::simplified($account->account_name);
+            } catch (\Throwable $e) {
+                report($e);
+                $failed[] = FinanceCatalog::simplified($account->account_name);
+            }
+        }
+        $state = app(\App\Portals\Finance\FinanceOrderRefreshProgress::class)->attachBatch((int) $context['user']->getKey(), $taskIds, $failed, $queued);
+        $batch = $state['batch'];
+        $taskIds = $state['tasks'];
+        return response()->json(['batch' => $batch, 'results' => array_values(array_filter(array_map(fn ($id) => app(\App\Portals\Finance\FinanceOrderRefreshProgress::class)->get($id), $taskIds))), 'ok' => $failed === [], 'queued' => $queued, 'failed' => $failed,
+            'message' => ($queued ? '已提交订单刷新：'.implode('、', $queued).'。后台按顺序补齐，完成后点击查询查看最新数据。' : '')
+                .($failed ? '以下账户暂未提交，请稍后重试：'.implode('、', $failed).'。' : '')], $failed === [] ? 202 : 503);
+    }
+
+    public function latestPayPalOrderRefresh(Request $request): Response
+    {
+        $context = $this->context($request, true);
+        if ($context instanceof Response) return $context;
+        $batch = \Illuminate\Support\Facades\Cache::get('finance:orders:latest:'.$context['user']->getKey());
+        if (! $batch || ! \Illuminate\Support\Facades\Cache::has('finance:orders:batch:'.$batch)) {
+            return response()->json(['batch' => null, 'results' => [], 'done' => true])->header('Cache-Control', 'no-store');
+        }
+        return $this->payPalOrderRefreshStatus($request, $batch);
+    }
+
+    public function payPalOrderRefreshStatus(Request $request, string $batch): Response
+    {
+        $context = $this->context($request, true);
+        if ($context instanceof Response) return $context;
+        $state = \Illuminate\Support\Facades\Cache::get('finance:orders:batch:'.$batch);
+        abort_unless($state && $state['actor'] === (int) $context['user']->getKey(), 404);
+        $results = array_map(fn ($id) => app(\App\Portals\Finance\FinanceOrderRefreshProgress::class)->get($id)
+            ?? ['account' => '账户状态已过期', 'status' => 'failed', 'count' => 0, 'error' => '刷新记录已过期，请重新提交。'], $state['tasks']);
+        foreach ($state['failed'] ?? [] as $name) {
+            $results[] = ['account' => $name, 'status' => 'failed', 'count' => 0, 'error' => '后台任务提交失败，请稍后重试。'];
+        }
+        return response()->json(['batch' => $batch, 'results' => $results, 'done' => !collect($results)->contains(fn ($row) => in_array($row['status'], ['queued', 'running'], true))])
+            ->header('Cache-Control', 'no-store');
     }
 
     public function syncPayPalTransactions(Request $request, string $accountKey): Response
@@ -639,6 +721,8 @@ class FinanceController extends Controller
             ...$context, ...compact('dataset', 'definition', 'filters', 'records', 'types', 'groups'),
             'accounts' => $accounts,
             'accountLabels' => $accountLabels,
+            'refreshablePayPalAccounts' => $dataset === 'paypal-orders' && $context['canManage']
+                ? $this->refreshablePayPalAccounts()->orderBy('id')->get(['id', 'account_name']) : collect(),
             'paypalOrderMetadata' => $paypalOrderMetadata,
             'paypalOrderItems' => $paypalOrderItems,
             'fixedFilterOptions' => $fixedFilterOptions,
@@ -668,7 +752,7 @@ class FinanceController extends Controller
             'source_timezone' => ['required', Rule::in(FinanceWorkbookService::TIMEZONES)],
         ]);
         $sheetName = str_ends_with($dataset, '-details') ? trans('finance.sheets.'.$dataset) : null;
-        $rows = $this->workbooks->read($data['file'], $definition['headers'], $sheetName);
+        $rows = $this->workbooks->read($data['file'], $definition['headers'], $sheetName, FinanceCatalog::optionalImportHeaders($dataset));
         $count = $this->workbooks->importRecords($dataset, $rows, trim($data['account']), $data['source_timezone'], (int) $context['user']->getKey());
 
         return redirect('/finance/records/'.$dataset)->with('success', __('finance.imported', ['count' => $count]));
@@ -686,14 +770,19 @@ class FinanceController extends Controller
             return $this->workbooks->download($definition['headers'], [], $dataset.'-template.xlsx');
         }
         $filters = $this->filters($request, $dataset);
+        $pageLayout = in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true) && $request->input('export_layout') === 'page';
+        $exportColumnCount = $pageLayout ? count(\App\Portals\Finance\FinancePayPalOrderExport::PAGE_HEADERS)
+            : count($definition['headers']) + ($dataset === 'xuzong2-orders' ? 3 : 4)
+                + ($dataset === 'paypal-orders' ? count(\App\Portals\Finance\FinancePayPalOrderExport::COLUMNS) : 0);
         $selection = $request->validate([
+            'export_layout' => 'nullable|in:page,source',
             'export_scope' => ['required', Rule::in(['accounts', 'records', 'filtered'])],
             'selected_accounts' => 'nullable|array|max:100',
             'selected_accounts.*' => 'required|string|max:191|distinct',
             'selected_ids' => 'nullable|array|max:100',
             'selected_ids.*' => 'required|integer|min:1|distinct',
-            'report_columns' => 'required_with:report_fields_customized|array|min:1|max:'.(count($definition['headers']) + ($dataset === 'xuzong2-orders' ? 3 : 4)),
-            'report_columns.*' => ['required', 'integer', 'distinct', Rule::in(range(0, count($definition['headers']) + ($dataset === 'xuzong2-orders' ? 2 : 3)))],
+            'report_columns' => 'required_with:report_fields_customized|array|min:1|max:'.$exportColumnCount,
+            'report_columns.*' => ['required', 'integer', 'distinct', Rule::in(range(0, $exportColumnCount - 1))],
         ], ['export_scope.required' => __('finance.records.selection_required')]);
         $selected = $selection['export_scope'] === 'accounts' ? 'selected_accounts' : 'selected_ids';
         if ($selection['export_scope'] !== 'filtered' && empty($selection[$selected])) {
@@ -703,6 +792,11 @@ class FinanceController extends Controller
         if ($selection['export_scope'] !== 'filtered') {
             $query->whereIn($selected === 'selected_accounts' ? 'account' : 'id', $selection[$selected]);
         }
+        if ($dataset === 'paypal-orders') {
+            // Resolve linked filters once; accounting lookup and export batches reuse the IDs.
+            $exportIds = (clone $query)->pluck('finance_records.id')->all();
+            $query = FinanceRecord::query()->whereIntegerInRaw('id', $exportIds);
+        }
         if (! (clone $query)->exists()) {
             throw ValidationException::withMessages([$selected => __('finance.records.selection_empty')]);
         }
@@ -711,19 +805,46 @@ class FinanceController extends Controller
         }
         $types = $this->workbooks->database()->table('finance_transaction_types')->pluck('category', 'raw_type');
         $groups = $this->workbooks->domainGroups()->keyBy('domain');
-        $accountingRows = $dataset === 'xuzong2-orders' ? collect() : $this->workbooks->database()->table('finance_payment_transactions')->whereIn('finance_record_id', (clone $query)->select('id'))->get(['finance_record_id', 'category', 'direction', 'monthly_rate', 'cny_amount'])->keyBy('finance_record_id');
+        $accountingRows = $dataset === 'xuzong2-orders' ? collect() : $this->workbooks->database()->table('finance_payment_transactions')->whereIn('finance_record_id', (clone $query)->select('id'))->get(['finance_record_id', 'payment_account_id', 'category', 'direction', 'monthly_rate', 'cny_amount'])->keyBy('finance_record_id');
         $accountLabels = FinancePaymentAccount::query()
             ->where('account_type', $definition['channel'] === 'paypal' ? 'paypal' : 'credit_card')
             ->pluck('account_name', 'activity_account');
-        $rows = $query->orderBy('id')->cursor()->map(function ($record) use ($dataset, $definition, $filters, $types, $groups, $accountingRows, $accountLabels) {
-            $values = array_map(fn ($index, $header) => in_array('column_'.$index, FinanceCatalog::numericFilterFields($dataset), true) || in_array(FinanceCatalog::simplified($header), ['数量', '物品标题', '主旨', '团队'], true) || ($definition['channel'] === 'paypal' && in_array($index, [14, $definition['status']], true))
-                ? FinanceCatalog::displayValue($dataset, $index, $record->payload[$header] ?? '')
-                : ($record->payload[$header] ?? ''), array_keys($definition['headers']), $definition['headers']);
-            if ($definition['channel'] === 'paypal' && isset($definition['type'])) {
+        $accountNamesById = FinancePaymentAccount::query()->pluck('account_name', 'id');
+        $rows = $query->reorder()->lazyById(300)->chunk(300)->flatMap(function ($batch) use ($dataset, $definition, $filters, $types, $groups, $accountingRows, $accountLabels, $accountNamesById, $pageLayout) {
+            $records = new \Illuminate\Database\Eloquent\Collection($batch->all());
+            $metadata = $dataset === 'paypal-orders'
+                ? app(\App\Portals\Finance\FinanceSettlementService::class)->logisticsMetadata($records, 'paypal') : [];
+            if ($dataset === 'xuzong2-orders' && $pageLayout) {
+                foreach ($this->workbooks->database()->table('logistics_orders')->whereIn('id', $batch->pluck('id')->all())->get() as $order) {
+                    $metadata[$order->id] = ['order' => $order, 'logistics_order_id' => $order->id,
+                        'domain' => $batch->firstWhere('id', $order->id)?->domain,
+                        'erp_order' => $order->tongtu_order_number ?? '', 'subscription' => $order->subscription_type ?? '',
+                        'upsell' => $order->is_add_on ?? ''];
+                }
+            }
+            $items = ($dataset === 'paypal-orders' || $pageLayout) && $this->workbooks->database()->getSchemaBuilder()->hasTable('logistics_order_items')
+                ? $this->workbooks->database()->table('logistics_order_items')->whereIn('logistics_order_id', array_column($metadata, 'logistics_order_id'))->orderBy('id')->get()->groupBy('logistics_order_id') : collect();
+            $refunds = [];
+            if ($pageLayout) {
+                $db = $this->workbooks->database();
+                foreach (['paypal' => 'logistics_paypal_refunds', 'credit_card' => 'logistics_credit_card_refunds'] as $channel => $table) {
+                    if (! $db->getSchemaBuilder()->hasTable($table)) continue;
+                    foreach ($db->table($table)->whereIn('logistics_order_id', array_column($metadata, 'logistics_order_id'))->orderBy('id')->get() as $refund) {
+                        $refunds[$refund->logistics_order_id][$channel][] = trim(($refund->reason ?? $refund->refund_reason ?? '').' '.($refund->refund_amount_usd ?? ''));
+                    }
+                }
+            }
+            return $batch->map(function ($record) use ($dataset, $definition, $filters, $types, $groups, $accountingRows, $accountLabels, $accountNamesById, $metadata, $items, $pageLayout, $refunds) {
+            $payload = $record->payload;
+            $values = $pageLayout ? [] : array_map(fn ($index, $header) => in_array('column_'.$index, FinanceCatalog::numericFilterFields($dataset), true) || in_array(FinanceCatalog::simplified($header), ['数量', '物品标题', '主旨', '团队'], true) || ($definition['channel'] === 'paypal' && in_array($index, [14, $definition['status']], true))
+                ? FinanceCatalog::displayValue($dataset, $index, $payload[$header] ?? '')
+                : ($payload[$header] ?? ''), array_keys($definition['headers']), $definition['headers']);
+            if (! $pageLayout && $definition['channel'] === 'paypal' && isset($definition['type'])) {
                 $values[$definition['type']] = \App\Portals\Finance\FinancePayPalEventTypes::label((string) $values[$definition['type']]);
             }
-            $group = $groups->get($record->domain);
-            if ($group && isset($definition['owner'])) {
+            $linked = $metadata[$record->id] ?? [];
+            $group = $groups->get(($linked['domain'] ?? '') ?: $record->domain);
+            if (! $pageLayout && $group && isset($definition['owner'])) {
                 $values[$definition['owner']] = $group->owner;
                 $values[$definition['team']] = $group->team;
             }
@@ -734,13 +855,27 @@ class FinanceController extends Controller
                 ? ($typeCategory !== '' ? $typeCategory : __('finance.records.unclassified'))
                 : ($accounting ? ($accounting->category ?: __('finance.records.unclassified')) : ($record->raw_type ? ($types->get($record->raw_type) ?: __('finance.records.unclassified')) : ''));
 
-            return [...$values, $accountLabels->get($record->account, $record->account), ...($dataset === 'xuzong2-orders' ? [] : [$category]), $record->occurred_at->setTimezone($filters['timezone'])->format('Y-m-d H:i:s'), $filters['timezone'],
+            if ($pageLayout) {
+                return \App\Portals\Finance\FinancePayPalOrderExport::pageValues($record, $linked, $group,
+                    $accountNamesById->get($accounting?->payment_account_id) ?? $accountLabels->get($record->account, $record->account),
+                    $category, $filters['timezone'], $items->get($linked['logistics_order_id'] ?? 0, []),
+                    array_map(fn ($lines) => implode("\n", $lines), $refunds[$linked['logistics_order_id'] ?? 0] ?? []), $dataset);
+            }
+            return [...$values, $accountNamesById->get($accounting?->payment_account_id) ?? $accountLabels->get($record->account, $record->account), ...($dataset === 'xuzong2-orders' ? [] : [$category]), $record->occurred_at->setTimezone($filters['timezone'])->format('Y-m-d H:i:s'), $filters['timezone'],
+                ...($dataset === 'paypal-orders' ? \App\Portals\Finance\FinancePayPalOrderExport::values($linked['order'] ?? null, $filters['timezone'], $items->get($linked['logistics_order_id'] ?? 0, [])) : []),
                 ...($accountingRows->isEmpty() ? [] : [$accounting?->direction ? __('finance.accounting.directions.'.$accounting->direction) : '', $accounting?->monthly_rate ?? '待配置', $accounting?->cny_amount ?? '待配置'])];
+            });
         });
 
         $headers = [...$definition['headers'], __($definition['channel'] === 'paypal' ? 'finance.fields.paypal_account' : 'finance.fields.account'), ...($dataset === 'xuzong2-orders' ? [] : [__('finance.fields.category')]), __('finance.fields.display_time'), __('finance.fields.timezone')];
+        if ($dataset === 'paypal-orders') {
+            $headers = [...$headers, ...array_values(\App\Portals\Finance\FinancePayPalOrderExport::COLUMNS)];
+        }
         if ($accountingRows->isNotEmpty()) {
             $headers = [...$headers, '收支方向', '月度人民币汇率', '折合人民币'];
+        }
+        if ($pageLayout) {
+            $headers = \App\Portals\Finance\FinancePayPalOrderExport::PAGE_HEADERS;
         }
         if (isset($selection['report_columns'])) {
             $columns = array_map('intval', $selection['report_columns']);
@@ -753,7 +888,9 @@ class FinanceController extends Controller
             'xls' => $this->workbooks->download($headers, $rows, $filename.'.xls', 'xls'),
             'csv' => $this->workbooks->downloadDelimited($headers, $rows, $filename.'.csv'),
             'tsv' => $this->workbooks->downloadDelimited($headers, $rows, $filename.'.tsv', "\t"),
-            default => $this->workbooks->download($headers, $rows, $filename.'.xlsx'),
+            default => $pageLayout
+                ? \App\Portals\Finance\FinancePayPalOrderExport::download($headers, $rows, $filename.'.xlsx')
+                : $this->workbooks->download($headers, $rows, $filename.'.xlsx'),
         };
     }
 
@@ -897,6 +1034,7 @@ class FinanceController extends Controller
 
         return response()->view('portals.finance.accounting', [
             ...$context, 'rates' => $db->table('finance_monthly_exchange_rates')->orderByDesc('month')->orderBy('currency')->get(),
+            'rateCurrencies' => FinanceRecord::query()->whereNotNull('currency')->distinct()->pluck('currency'),
             'rules' => $db->table('finance_transaction_type_mappings')->orderBy('priority')->orderBy('id')->get(),
             'locks' => $db->table('finance_period_locks')->whereNotNull('report_snapshot')->orderByDesc('month')->get(),
         ]);
@@ -1187,7 +1325,7 @@ class FinanceController extends Controller
                 'account' => 'required|string|max:191', 'timezone' => ['required', Rule::in(FinanceWorkbookService::TIMEZONES)]]);
             abort_unless(FinancePaymentAccount::query()->where('account_type', 'credit_card')->where('activity_account', $data['account'])->exists(), 422);
             $definition = FinanceCatalog::dataset($data['source']);
-            $rows = $this->workbooks->read($request->file('file'), $definition['headers']);
+            $rows = $this->workbooks->read($request->file('file'), $definition['headers'], null, FinanceCatalog::optionalImportHeaders($data['source']));
             try {
                 $count = $this->workbooks->database()->transaction(function () use ($rows, $data, $context): int {
                     $count = $this->workbooks->importRecords($data['source'], $rows, $data['account'], $data['timezone'], (int) $context['user']->getKey());
@@ -1209,9 +1347,29 @@ class FinanceController extends Controller
         $legacyFields = [...$service::TEXT, ...$service->moneyFields($channel)];
         $fields = $service->importFields($channel);
         $sourceHeaders = $channel === 'credit_card' ? ['交易单号', '交易时间', '处理时间', '商户名称', 'Source（域名）', '交易币种', '交易金额', '支付状态', '发行国', '拒绝原因', '邮箱', '年月', '（-8）时间点', '订阅类型', '结算-美元'] : [];
-        $importHeaders = array_values(array_unique(['记录ID', '支付账户', ...array_values($fields), ...array_values($legacyFields), ...$sourceHeaders]));
+        $importHeaders = array_values(array_unique(['记录ID', '支付账户', ...array_values($fields), ...array_values($legacyFields), ...$sourceHeaders,
+            ...($channel === 'credit_card' ? FinanceCatalog::dataset('xuzong2-details')['headers'] : [])]));
         $rows = $this->workbooks->read($request->file('file'), $importHeaders, $channel === 'paypal' ? '贝宝导入模版' : '徐总支付导入模版', $importHeaders);
         $scope = $request->validate(['account' => 'nullable|string|max:191', 'import_month' => 'nullable|date_format:Y-m']);
+        if ($channel === 'credit_card' && collect($rows)->contains(fn ($row) => filled($row['创建时间'] ?? null))) {
+            $account = FinancePaymentAccount::query()->where('account_type', 'credit_card')
+                ->where('activity_account', $scope['account'] ?? '')->first();
+            if (! $account) {
+                throw ValidationException::withMessages(['account' => '请选择信用卡支付账户。']);
+            }
+            $count = $this->workbooks->database()->transaction(function () use ($rows, $account, $context): int {
+                $count = $this->workbooks->importRecords('xuzong2-details', $rows, $account->activity_account, 'Asia/Shanghai', (int) $context['user']->getKey());
+                $records = FinanceRecord::query()->where('dataset', 'xuzong2-details')->where('account', $account->activity_account)
+                    ->whereIn('reference', array_column($rows, '平台订单号'))->get();
+                foreach ($records as $record) {
+                    app(\App\Portals\Finance\FinanceAccountingService::class)->guardUnlocked($record->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'));
+                }
+
+                return $count;
+            });
+
+            return redirect()->route('finance.report', $report)->with('success', '已处理 '.$count.' 条信用卡明细。');
+        }
         foreach ($rows as &$row) {
             if ($channel === 'credit_card' && $row['平台订单号'] === '') {
                 $row['平台订单号'] = $row['交易单号'] ?? '';
@@ -1348,6 +1506,11 @@ class FinanceController extends Controller
             'layer' => ['nullable', Rule::in(['project', 'account', 'channel', 'team', 'subscription', 'detail', 'business', 'classification', 'project_classification', 'payment_method'])],
             'account' => 'nullable|string|max:191', 'owner' => 'nullable|string|max:191',
             'team' => 'nullable|string|max:100', 'subscription' => 'nullable|string|max:100', 'payment_method' => 'nullable|string|max:100']);
+        // Older links used combined for all payment channels.
+        if ($report === 'summary' && ($data['channel'] ?? '') === 'combined') {
+            $data['channel'] = '';
+            $data['layer'] ??= $report === 'losses' ? 'project_classification' : 'project';
+        }
         $creditMonths = ($data['channel'] ?? null) === 'credit_card' ? $this->creditImportMonths(account: $data['account'] ?? null) : [];
         $month = $data['month_to'] ?? $data['month'] ?? $creditMonths[0] ?? now('Asia/Shanghai')->format('Y-m');
         if ($report === 'losses') {
@@ -1400,13 +1563,19 @@ class FinanceController extends Controller
 
             return true;
         });
-        if (($data['channel'] ?? null) === 'combined') {
-            $data['layer'] = $report === 'losses' && in_array($data['layer'] ?? '', ['business', 'classification', 'project_classification'], true)
+        if ($report === 'losses' && ($data['channel'] ?? null) === 'combined') {
+            $data['layer'] = in_array($data['layer'] ?? '', ['business', 'classification', 'project_classification'], true)
                 ? 'project_classification' : 'project';
-        } elseif (in_array($data['channel'] ?? null, ['paypal', 'credit_card'], true) && ($data['layer'] ?? null) === 'project') {
+        } elseif ($report === 'losses' && in_array($data['channel'] ?? null, ['paypal', 'credit_card'], true) && ($data['layer'] ?? null) === 'project') {
             $data['layer'] = 'channel';
         }
         $groups = $service->totals($report === 'losses' ? $service->withLogisticsCosts($rows) : $rows, $data['layer'] ?? 'account');
+        if ($report === 'summary' && ($data['layer'] ?? '') === 'project') {
+            foreach ($groups as &$group) {
+                $group['channel'] = filled($data['channel'] ?? null) ? $data['channel'] : 'combined';
+            }
+            unset($group);
+        }
         $rate = $this->workbooks->database()->table('finance_monthly_exchange_rates')->where('month', $comparisonMonth)->where('currency', 'USD')->value('cny_rate');
         $metrics = ['logistics' => '物流占比', 'purchase' => '采购占比', 'fee' => '手续费占比', 'refund' => '退款金额占比', 'refund_fee' => '退款费用占比', 'dispute_refund' => '争议冻结退款占比', 'dispute_fee' => '争议费用占比'];
         foreach ($groups as &$group) {
@@ -1501,7 +1670,7 @@ class FinanceController extends Controller
         if ($request->is('finance', 'finance/*') || $request->getPathInfo() === '/') {
             $currentPath = $request->getPathInfo() === '/' || $request->routeIs('finance.balances', 'finance.balances.xuzong2.save', 'finance.exchange-rates.save', 'finance.paypal-accounts.update', 'finance.payment-accounts.*')
                 ? '/finance' : rtrim($request->getPathInfo(), '/');
-            if ($request->routeIs('finance.transactions.raw', 'finance.payment-accounts.sync')) {
+            if ($request->routeIs('finance.transactions.raw', 'finance.payment-accounts.sync', 'finance.orders.paypal.refresh', 'finance.orders.paypal.status', 'finance.orders.paypal.latest')) {
                 $currentPath = '/finance/records/paypal-orders';
             }
             $domains = app(\App\Portal\Services\PortalDomainService::class);
@@ -1644,6 +1813,9 @@ class FinanceController extends Controller
         $query = $dataset === 'xuzong2-orders'
             ? app(\App\Portals\Finance\FinanceLogisticsCreditOrders::class)->query()
             : FinanceRecord::query()->where('dataset', $dataset);
+        if ($dataset === 'paypal-orders') {
+            app(\App\Portals\Finance\FinanceSettlementService::class)->filterAccountHistory($query, 'paypal');
+        }
         if (isset($filters['type_category']) && $filters['type_category'] !== '') {
             $query->where(function ($query) use ($filters): void {
                 $query->whereExists(fn ($types) => $types->selectRaw('1')->from('finance_transaction_types')
@@ -1689,14 +1861,15 @@ class FinanceController extends Controller
                 if (! $schema->hasTable('logistics_orders')) {
                     $query->whereRaw('1 = 0');
                 } else {
-                    $query->whereExists(function ($orders) use ($linked, $dataset): void {
+                    $method = $dataset === 'paypal-orders' ? 'whereIn' : 'whereExists';
+                    $arguments = $dataset === 'paypal-orders' ? ['finance_records.id'] : [];
+                    $arguments[] = function ($orders) use ($linked, $dataset): void {
                         if ($dataset === 'xuzong2-orders') {
                             $orders->selectRaw('1')->from('logistics_orders as logistics')->whereColumn('logistics.id', 'finance_records.id');
                         } else {
                             $matches = app(\App\Portals\Finance\FinanceSettlementService::class)->paypalOrderMatchIndex();
-                            $orders->selectRaw('1')->fromSub($matches, 'matched_order')
-                                ->join('logistics_orders as logistics', 'logistics.id', '=', 'matched_order.order_id')
-                                ->whereColumn('matched_order.record_id', 'finance_records.id');
+                            $orders->select('matched_order.record_id')->fromSub($matches, 'matched_order')
+                                ->join('logistics_orders as logistics', 'logistics.id', '=', 'matched_order.order_id');
                         }
                         foreach ($linked as $field => $value) {
                             if ($dataset === 'xuzong2-orders' && $field === 'sender_email') { $field = 'buyer_email'; }
@@ -1736,7 +1909,8 @@ class FinanceController extends Controller
                             }
                             $this->applyCondition($orders, 'logistics.'.$field, 'contains', $value);
                         }
-                    });
+                    };
+                    $query->$method(...$arguments);
                 }
             }
         }
