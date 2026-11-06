@@ -61,7 +61,7 @@ class XShoppyOrderSyncService
                 $summary['updated'] += $result['updated'];
             } catch (\Throwable $exception) {
                 $summary['failed']++;
-                $summary['errors'][] = ($store->shop_name ?: $store->domain ?: '#'.$store->id).'：'.$exception->getMessage();
+                $summary['errors'][] = ($store->shop_name ?: $store->shop_login_url ?: '#'.$store->id).'：'.$exception->getMessage();
             }
         }
 
@@ -202,7 +202,7 @@ class XShoppyOrderSyncService
     {
         abort_unless(in_array(strtolower(trim((string) $store->site_builder)), ['xshoppy', 'xshopy'], true), 422, '该店铺不是 XShoppy 建站系统。');
         if (blank($store->xshoppy_api_key) || blank($store->xshoppy_password)) throw new RuntimeException('店铺未填写 XShoppy API 密钥或密码。');
-        if ($this->domain($store) === '') throw new RuntimeException('店铺未填写有效域名。');
+        if ($this->domain($store) === '') throw new RuntimeException('店铺未填写有效的店铺登入网址。');
     }
 
     private function isPaid(array $payload): bool
@@ -236,7 +236,7 @@ class XShoppyOrderSyncService
 
     private function domain(AssistantDomainStore $store): string
     {
-        $value = trim((string) ($store->domain ?: $store->shop_login_url));
+        $value = trim((string) $store->shop_login_url);
         if ($value === '') return '';
         $host = parse_url(Str::startsWith($value, ['http://', 'https://']) ? $value : 'https://'.$value, PHP_URL_HOST);
         return strtolower(trim((string) $host, '.'));
