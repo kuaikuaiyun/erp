@@ -29,7 +29,7 @@ class FinanceSettlementService
     public function importFields(string $channel): array
     {
         if ($channel === 'paypal') {
-            return ['reference' => '交易 ID', 'erp_order' => '通途订单', 'hold' => '冻结金额', 'dispute_hold' => '争议冻结金额',
+            return ['reference' => '交易 ID', 'erp_order' => '通途订单', 'converted_usd' => '转换美元', 'usd_rate' => '汇率', 'hold' => '冻结金额', 'dispute_hold' => '争议冻结金额',
                 'refund' => '退款金额', 'refund_fee' => '退款费用', 'dispute_refund' => '争议退款', 'dispute_fee' => '争议费',
                 'fee_return' => '返还手续费', 'dispute_release' => '返还争议冻结', 'release' => '返还冻结',
                 'logistics' => '物流-元', 'purchase' => '采购成本-元'];
@@ -45,7 +45,7 @@ class FinanceSettlementService
     public function columns(string $channel): array
     {
         if ($channel !== 'paypal') {
-            return [...self::EXPORT, ...$this->moneyFields($channel)];
+            return [...self::EXPORT, 'source_settlement_usd' => '结算-美元', ...$this->moneyFields($channel), 'currency_warning' => '币种核对'];
         }
         $source = [];
         foreach (array_slice(FinanceCatalog::dataset('paypal-orders')['headers'], 0, 15) as $index => $header) {
@@ -140,11 +140,12 @@ class FinanceSettlementService
             $definition = FinanceCatalog::dataset($record->dataset);
             $headers = $definition['headers'];
             $value = static fn ($key) => $p[$headers[$definition[$key]]] ?? '';
-            $date = $record->occurred_at->setTimezone($filters['timezone'] ?? 'Asia/Shanghai');
+            $reportTimezone = $p['_report_timezone'] ?? ($filters['timezone'] ?? 'Asia/Shanghai');
+            $date = $record->occurred_at->setTimezone($reportTimezone);
             $row = ['id' => $record->id, 'channel' => $channel, 'source' => $record->dataset,
                 'account_key' => $owner?->activity_account ?? $record->account,
                 'account' => $owner?->account_name ?? $accounts->get($record->account, $record->account),
-                'reference' => $record->reference, 'date' => isset($p['_manual_import_month']) ? '' : $date->format('Y-m-d H:i:s'), 'timezone' => $filters['timezone'] ?? 'Asia/Shanghai',
+                'reference' => $record->reference, 'date' => isset($p['_manual_import_month']) ? '' : $date->format('Y-m-d H:i:s'), 'timezone' => $reportTimezone,
                 'month' => $p['_manual_import_month'] ?? $date->format('Y-m'), 'status' => $record->status, 'currency' => $record->currency,
                 'payment_method' => $p['支付方式'] ?? '',
                 'gross' => $this->number($channel === 'paypal' ? ($p[$headers[7]] ?? null) : ($p['交易金额'] ?? null)),
@@ -163,12 +164,12 @@ class FinanceSettlementService
                     $row[$field] = $value;
                 }
             }
-            $aliases = ['fee' => $channel === 'paypal' ? '手续费' : '交易手续费', 'logistics' => '物流-元', 'purchase' => '采购成本-元',
+            $aliases = ['usd_rate' => '汇率', 'fee' => $channel === 'paypal' ? '手续费' : '交易手续费', 'logistics' => '物流-元', 'purchase' => '采购成本-元',
                 'per_order_fee' => '单笔费用', 'hold' => $channel === 'paypal' ? '冻结金额' : '保证金',
                 'release' => $channel === 'paypal' ? '返还冻结' : '保证金返还', 'ethoca_refund' => 'ethoca预警退款',
                 'ethoca_fee' => '拒付预警ethoca', 'rdr_refund' => '拒付RDR金额', 'rdr_fee' => '拒付RDR+CDRN费用'];
             foreach (self::MONEY as $field => $label) {
-                $row[$field] = $this->number($p[$aliases[$field] ?? $label] ?? null);
+                $row[$field] = $this->number(filled($p[$aliases[$field] ?? $label] ?? null) ? $p[$aliases[$field] ?? $label] : ($p[$label] ?? null));
             }
             if ($channel === 'paypal' && $row['fee'] === null) {
                 $fee = $this->number($p[$headers[8]] ?? null);
@@ -186,10 +187,10 @@ class FinanceSettlementService
                     $row['paypal_'.$index] = $index === 4 ? FinancePayPalEventTypes::label((string) ($p[$header] ?? '')) : ($p[$header] ?? '');
                 }
                 $net = $this->number($p[$headers[9]] ?? null);
-                if (! array_key_exists('converted_usd', $saved) && $net !== null && $row['usd_rate'] !== null) {
+                if ($row['converted_usd'] === null && $net !== null && $row['usd_rate'] !== null) {
                     $row['converted_usd'] = bcmul($net, $row['usd_rate'], 8);
                 }
-                if (array_key_exists('converted_usd', $saved) && $net !== null && bccomp($net, '0', 8) !== 0 && $record->currency !== 'USD') {
+                if ($row['converted_usd'] !== null && $net !== null && bccomp($net, '0', 8) !== 0 && $record->currency !== 'USD') {
                     $row['usd_rate'] = bcdiv($row['converted_usd'], $net, 8);
                 }
             }
@@ -197,12 +198,21 @@ class FinanceSettlementService
             $failed = in_array(strtoupper((string) $record->status), ['D', 'FAIL', 'FAILED', 'FAILURE', 'DECLINED', '已拒绝', '失败'], true);
             $row['success'] = $success;
             $row['failed'] = $failed;
+            // The source-dollar column is distinct from the manually reconciled settlement.
+            $row['source_settlement_usd'] = $channel === 'credit_card' && strtoupper(trim((string) $record->status)) === 'SUCCESS'
+                ? $row['gross'] : null;
             $row['status'] = match (strtoupper((string) $record->status)) {
                 'S', 'SUCCESS', 'COMPLETED' => '已完成', 'P', 'PENDING' => '待处理',
                 'D', 'FAIL', 'FAILED', 'FAILURE', 'DECLINED' => '已失败', 'V', 'VOIDED' => '已撤销',
                 default => FinanceCatalog::simplified((string) $record->status),
             };
             $row['settlement'] = $success && $row['gross'] !== null && $row['usd_rate'] !== null ? bcmul($row['gross'], $row['usd_rate'], 8) : null;
+            $importedSettlement = $this->number($p[$channel === 'paypal' ? '结算金额-美元' : '结算金额'] ?? null);
+            if ($success && $importedSettlement !== null) {
+                $row['settlement'] = $importedSettlement;
+            }
+            $row['currency_warning'] = $channel === 'credit_card' && $record->currency !== 'USD'
+                ? '交易币种为 '.$record->currency.'，请核对美元结算金额。' : '';
             if ($channel === 'credit_card' && array_key_exists('settlement', $saved)) {
                 $row['settlement'] = $saved['settlement'];
             }
