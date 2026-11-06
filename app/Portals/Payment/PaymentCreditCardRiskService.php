@@ -15,7 +15,7 @@ class PaymentCreditCardRiskService
     /** @return array<string,mixed> */
     public function dashboard(array $filters): array
     {
-        $cacheKey = 'payment:credit-card-risk:v1:'.sha1(json_encode($filters));
+        $cacheKey = 'payment:credit-card-risk:v2:'.sha1(json_encode($filters));
 
         return Cache::flexible($cacheKey, [60, 300], fn (): array => $this->buildDashboard($filters));
     }
@@ -24,15 +24,21 @@ class PaymentCreditCardRiskService
     private function buildDashboard(array $filters): array
     {
         $connection = DB::connection(config('admin.database.connection') ?: config('database.default'));
-        $orders = $connection->table('logistics_orders as orders')
+        $eligibleOrders = $connection->table('logistics_orders as orders')
             ->whereIn('orders.payment_gateway', self::GATEWAYS)
             ->whereNotNull('orders.paid_at');
+        $orders = clone $eligibleOrders;
         $this->applyRange($orders, 'orders.paid_at', $filters);
 
         $summary = (clone $orders)->selectRaw('COUNT(*) as orders')
             ->selectRaw('COALESCE(SUM(orders.paid_amount_usd), 0) as paid_amount')->first();
+        $usesEventDates = ($filters['date_mode'] ?? 'order') === 'event';
+        $riskOrders = $usesEventDates ? $eligibleOrders : $orders;
         $allRefunds = $connection->table('logistics_credit_card_refunds as refunds')
-            ->joinSub((clone $orders)->select('orders.id'), 'selected_orders', fn ($join) => $join->on('selected_orders.id', '=', 'refunds.logistics_order_id'));
+            ->joinSub((clone $riskOrders)->select('orders.id'), 'selected_orders', fn ($join) => $join->on('selected_orders.id', '=', 'refunds.logistics_order_id'));
+        if ($usesEventDates) {
+            $this->applyRange($allRefunds, 'refunds.occurred_at', $filters);
+        }
         $reasonOptions = (clone $allRefunds)
             ->whereNotNull('refunds.refund_reason')
             ->where('refunds.refund_reason', '<>', '')
@@ -67,10 +73,13 @@ class PaymentCreditCardRiskService
         $orderCount = (int) ($summary->orders ?? 0);
         $paidAmount = round((float) ($summary->paid_amount ?? 0), 2);
         $riskPageQuery = $connection->table('logistics_credit_card_refunds as refunds')
-            ->joinSub((clone $orders)->select(['orders.id', 'orders.shopify_order_number', 'orders.tongtu_order_number', 'orders.store_name', 'orders.payment_gateway', 'orders.paid_at', 'orders.paid_amount_usd']), 'risk_orders', fn ($join) => $join->on('risk_orders.id', '=', 'refunds.logistics_order_id'))
+            ->joinSub((clone $riskOrders)->select(['orders.id', 'orders.shopify_order_number', 'orders.tongtu_order_number', 'orders.store_name', 'orders.payment_gateway', 'orders.paid_at', 'orders.paid_amount_usd']), 'risk_orders', fn ($join) => $join->on('risk_orders.id', '=', 'refunds.logistics_order_id'))
             ->select(['risk_orders.id', 'risk_orders.shopify_order_number', 'risk_orders.tongtu_order_number', 'risk_orders.store_name', 'risk_orders.payment_gateway', 'risk_orders.paid_at', 'risk_orders.paid_amount_usd'])
             ->groupBy('risk_orders.id', 'risk_orders.shopify_order_number', 'risk_orders.tongtu_order_number', 'risk_orders.store_name', 'risk_orders.payment_gateway', 'risk_orders.paid_at', 'risk_orders.paid_amount_usd')
             ->orderByDesc('risk_orders.paid_at')->orderByDesc('risk_orders.id');
+        if ($usesEventDates) {
+            $this->applyRange($riskPageQuery, 'refunds.occurred_at', $filters);
+        }
         if ($selectedReasons !== []) {
             $riskPageQuery->whereIn('refunds.refund_reason', $selectedReasons);
         }
