@@ -9,6 +9,9 @@ use App\Models\AssistantDomainStore;
 use App\Models\AdminUser;
 use App\Models\DailyAdvertisingRecharge;
 use App\Models\DailyAccountOpening;
+use App\Models\DailyStoreLaunch;
+use App\Models\AssistantProject;
+use App\Models\AssistantWebsiteSystem;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\ProductRequests\ProductRequestAccessService;
@@ -51,6 +54,9 @@ class DailySubmissionController extends Controller
         }
         if ($type === 'account-opening') {
             return $this->accountOpening($request, $context);
+        }
+        if ($type === 'store-launch') {
+            return $this->storeLaunch($request, $context);
         }
 
         return view('portals.operation.daily-submissions.index', [
@@ -186,6 +192,50 @@ class DailySubmissionController extends Controller
         ])->with('success', '开户需求已提交。');
     }
 
+    public function storeStoreLaunch(Request $request): RedirectResponse
+    {
+        $context = $this->operationContext($request);
+        $user = $context['user'];
+        $isBoss = $this->isBoss($user);
+        $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
+        $operatorId = $isBoss ? $request->integer('operator_user_id') : (int) $user->getKey();
+        if ($isBoss) abort_unless($operatorId > 0 && $operatorOptions->contains('id', $operatorId), 422, '请选择有效的运营账号。');
+        $operator = $operatorOptions->firstWhere('id', $operatorId) ?: $user;
+        $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($operator);
+        abort_unless($operationDepartment !== null || $user->isAdministrator(), 422, '该运营账号未配置运营部门，无法提交下店需求。');
+        $assistantDepartmentIds = $operationDepartment
+            ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $operationDepartment->getKey())
+            : null;
+        $projects = AssistantProject::query()->where('is_enabled', true)
+            ->when($assistantDepartmentIds !== null, fn ($q) => $q->whereIn('assistant_department_id', $assistantDepartmentIds))
+            ->with(['websiteSystems' => fn ($q) => $q->where('is_enabled', true)])
+            ->get()->keyBy('id');
+        $systems = AssistantWebsiteSystem::query()->where('is_enabled', true)
+            ->when($assistantDepartmentIds !== null, fn ($q) => $q->whereIn('assistant_department_id', $assistantDepartmentIds))
+            ->get()->keyBy('id');
+        $system = $systems->get($request->integer('website_system_id'));
+        $requiresEmail = $system && str_contains(mb_strtolower(trim($system->name)), 'shopline');
+        $validated = $request->validate([
+            'project_id' => ['required', 'integer', Rule::in($projects->keys()->all())],
+            'website_system_id' => ['required', 'integer', Rule::in($systems->keys()->all())],
+            'email' => [Rule::requiredIf($requiresEmail), 'nullable', 'string', 'max:191'],
+            'remark' => ['nullable', 'string', 'max:2000'],
+        ], ['email.required' => '选择 Shopline 建站系统时必须填写邮箱。']);
+        $project = $projects->get((int) $validated['project_id']);
+        $system = $systems->get((int) $validated['website_system_id']);
+        abort_unless($project && $system && (int) $system->project_id === (int) $project->id, 422, '建站系统与所选项目不匹配。');
+        DailyStoreLaunch::query()->create([
+            'operator_user_id' => $operator->id, 'operator_name' => $operator->name ?: $operator->username,
+            'operation_department_id' => $operationDepartment?->id, 'operation_department_name' => $operationDepartment?->name,
+            'assistant_department_id' => $project->assistant_department_id,
+            'project_id' => $project->id, 'project_name' => $project->name,
+            'website_system_id' => $system->id, 'website_system_name' => $system->name,
+            'email' => $requiresEmail ? trim((string) $validated['email']) : null,
+            'remark' => trim((string) ($validated['remark'] ?? '')), 'status' => DailyStoreLaunch::STATUS_PENDING,
+        ]);
+        return redirect()->route('operation.daily-submissions.index', ['type' => 'store-launch', 'operator_user_id' => $isBoss ? $operator->id : null])->with('success', '下店需求已提交。');
+    }
+
     /** @param array{portal:mixed,user:\App\Models\AdminUser} $context */
     private function advertisingRecharge(Request $request, array $context): View
     {
@@ -236,6 +286,25 @@ class DailySubmissionController extends Controller
             'selectedOperator' => $operator,
             'mediaOptions' => $this->accountOpeningMediaOptions($assistantDepartmentIds),
             'history' => DailyAccountOpening::query()->where('operator_user_id', $operator->getKey())->latest('id')->paginate(15)->withQueryString(),
+        ]);
+    }
+
+    private function storeLaunch(Request $request, array $context): View
+    {
+        $user = $context['user']; $isBoss = $this->isBoss($user);
+        $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
+        $operatorId = $isBoss ? (int) ($request->integer('operator_user_id') ?: $operatorOptions->first()?->id) : (int) $user->id;
+        $operator = $operatorOptions->firstWhere('id', $operatorId) ?: $user;
+        $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($operator);
+        $assistantDepartmentIds = $operationDepartment ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $operationDepartment->id) : ($user->isAdministrator() ? null : []);
+        $projects = AssistantProject::query()->where('is_enabled', true)
+            ->when($assistantDepartmentIds !== null, fn ($q) => $q->whereIn('assistant_department_id', $assistantDepartmentIds))
+            ->with(['websiteSystems' => fn ($q) => $q->where('is_enabled', true)->orderBy('sort')->orderBy('id')])
+            ->orderBy('sort')->orderBy('id')->get();
+        return view('portals.operation.daily-submissions.store-launch', [
+            'portal'=>$context['portal']->loadMissing('menus'),'user'=>$user,'isBoss'=>$isBoss,
+            'operatorOptions'=>$operatorOptions,'selectedOperator'=>$operator,'projects'=>$projects,
+            'history'=>DailyStoreLaunch::query()->where('operator_user_id',$operator->id)->latest('id')->paginate(15)->withQueryString(),
         ]);
     }
 

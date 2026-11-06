@@ -27,6 +27,7 @@ use App\Portals\Assistant\Http\Controllers\AccountOpeningReviewController;
 use App\Portals\Assistant\Http\Controllers\AssistantProjectController;
 use App\Portals\Assistant\Http\Controllers\AssistantWebsiteSystemController;
 use App\Portals\Assistant\Http\Controllers\AppLovinSpendReviewController;
+use App\Portals\Assistant\Http\Controllers\StoreLaunchReviewController;
 use App\Portals\Operation\Http\Controllers\AppLovinSpendController;
 use App\Portals\Assistant\Http\Controllers\OperationReportReviewController;
 use App\Portals\Assistant\Http\Controllers\OperationReportDashboardController;
@@ -162,6 +163,8 @@ Route::post('/operation/daily-submissions/advertising-recharge', [DailySubmissio
     ->name('operation.daily-submissions.advertising-recharge.store');
 Route::post('/operation/daily-submissions/account-opening', [DailySubmissionController::class, 'storeAccountOpening'])
     ->name('operation.daily-submissions.account-opening.store');
+Route::post('/operation/daily-submissions/store-launch', [DailySubmissionController::class, 'storeStoreLaunch'])
+    ->name('operation.daily-submissions.store-launch.store');
 Route::get('/assistant/daily-submissions/advertising-recharges', [AdvertisingRechargeReviewController::class, 'index'])
     ->name('assistant.daily-submissions.advertising-recharges.index');
 Route::patch('/assistant/daily-submissions/advertising-recharges/{submission}/process', [AdvertisingRechargeReviewController::class, 'process'])
@@ -170,6 +173,10 @@ Route::get('/assistant/daily-submissions/account-openings', [AccountOpeningRevie
     ->name('assistant.daily-submissions.account-openings.index');
 Route::patch('/assistant/daily-submissions/account-openings/{submission}/process', [AccountOpeningReviewController::class, 'process'])
     ->whereNumber('submission')->name('assistant.daily-submissions.account-openings.process');
+Route::get('/assistant/daily-submissions/store-launches', [StoreLaunchReviewController::class, 'index'])
+    ->name('assistant.daily-submissions.store-launches.index');
+Route::patch('/assistant/daily-submissions/store-launches/{submission}/process', [StoreLaunchReviewController::class, 'process'])
+    ->whereNumber('submission')->name('assistant.daily-submissions.store-launches.process');
 Route::get('/operation/daily-submissions/applovin-spends', [AppLovinSpendController::class, 'index'])
     ->name('operation.applovin-spends.index');
 Route::get('/operation/daily-submissions/applovin-spends/pending-count', [AppLovinSpendController::class, 'pendingCount'])
