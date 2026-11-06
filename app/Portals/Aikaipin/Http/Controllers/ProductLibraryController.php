@@ -227,13 +227,28 @@ class ProductLibraryController extends Controller
             'images' => ['nullable', 'array', 'max:3'],
             'images.*' => ['file', 'image', 'max:20480'],
             'reference_file' => ['nullable', 'file', 'extensions:html,htm', 'max:20480'],
-            'package_upload_token' => ['required', 'uuid'],
+            'shopify_csv' => ['required', 'file', 'mimes:csv,txt', 'max:20480'],
+            'package_upload_token' => ['nullable', 'uuid'],
             'authorized_department_ids' => ['nullable', 'array'],
             'authorized_department_ids.*' => ['integer', 'distinct'],
+        ], [
+            'shopify_csv.required' => '请选择 Shopify 导出的 CSV 商品文件。',
+            'shopify_csv.mimes' => 'Shopify 商品文件只支持 CSV 格式。',
+            'shopify_csv.max' => 'Shopify 商品 CSV 文件不能超过 20 MB。',
         ]);
         $departmentIds = collect($data['authorized_department_ids'] ?? [])->map(static fn ($id): int => (int) $id)->unique()->values()->all();
         $skuValues = $this->normalizeProductValues($data['skus'] ?? []);
         $categories = $this->normalizeProductValues($data['categories'] ?? []);
+        $shopifyPayload = null;
+        $shopifySourceName = null;
+        if (($data['shopify_csv'] ?? null) instanceof UploadedFile) {
+            try {
+                $shopifyPayload = $this->shopifyCsvImporter->parse($data['shopify_csv']->getRealPath());
+                $shopifySourceName = $data['shopify_csv']->getClientOriginalName();
+            } catch (\Throwable $exception) {
+                throw ValidationException::withMessages(['shopify_csv' => $exception->getMessage()]);
+            }
+        }
 
         $availableDepartments = collect($this->authorization->quickAuthorizationDepartments())->keyBy('id');
         if (collect($departmentIds)->diff($availableDepartments->keys())->isNotEmpty()) {
@@ -247,14 +262,17 @@ class ProductLibraryController extends Controller
 
         try {
             $connection = config('admin.database.connection') ?: config('database.default');
-            $product = DB::connection($connection)->transaction(function () use ($context, $data, $categories, $departmentIds, $skuValues, &$createdPaths): AikaipinProduct {
-                $session = $this->uploadSessionForUser($context['user'], (string) $data['package_upload_token'], true);
-                if ($session->status !== AikaipinProductUploadSession::STATUS_COMPLETED
-                    || ! $session->assembled_path
-                    || ! Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($session->assembled_path)) {
-                    throw ValidationException::withMessages([
-                        'package_upload_token' => __('aikaipin.messages.package_upload_incomplete_message'),
-                    ]);
+            $product = DB::connection($connection)->transaction(function () use ($context, $data, $categories, $departmentIds, $skuValues, $shopifyPayload, $shopifySourceName, &$createdPaths): AikaipinProduct {
+                $session = null;
+                if (filled($data['package_upload_token'] ?? null)) {
+                    $session = $this->uploadSessionForUser($context['user'], (string) $data['package_upload_token'], true);
+                    if ($session->status !== AikaipinProductUploadSession::STATUS_COMPLETED
+                        || ! $session->assembled_path
+                        || ! Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($session->assembled_path)) {
+                        throw ValidationException::withMessages([
+                            'package_upload_token' => __('aikaipin.messages.package_upload_incomplete_message'),
+                        ]);
+                    }
                 }
 
                 $product = AikaipinProduct::create([
@@ -290,9 +308,12 @@ class ProductLibraryController extends Controller
                     $referenceFile = $this->productFilePayload($referencePayload);
                 }
 
-                $packagePayload = $this->storage->copyStoredFile($session->assembled_path, 'packages', $session->original_name, $session->mime_type);
-                $createdPaths[] = $packagePayload['path'];
-                $packageFile = $this->productFilePayload($packagePayload);
+                $packageFile = null;
+                if ($session !== null) {
+                    $packagePayload = $this->storage->copyStoredFile($session->assembled_path, 'packages', $session->original_name, $session->mime_type);
+                    $createdPaths[] = $packagePayload['path'];
+                    $packageFile = $this->productFilePayload($packagePayload);
+                }
 
                 $product->forceFill([
                     'product_code' => $this->productCodeForId((int) $product->getKey()),
@@ -301,10 +322,21 @@ class ProductLibraryController extends Controller
                     'package_file' => $packageFile,
                 ])->save();
 
-                $session->forceFill([
-                    'status' => AikaipinProductUploadSession::STATUS_CONSUMED,
-                    'expires_at' => now()->addHour(),
-                ])->save();
+                if (is_array($shopifyPayload) && $shopifySourceName !== null) {
+                    $product = $this->shopifyCsvImporter->supplement(
+                        $product,
+                        $shopifyPayload,
+                        $shopifySourceName,
+                        $shopifySourceName,
+                    );
+                }
+
+                if ($session !== null) {
+                    $session->forceFill([
+                        'status' => AikaipinProductUploadSession::STATUS_CONSUMED,
+                        'expires_at' => now()->addHour(),
+                    ])->save();
+                }
 
                 return $product;
             });
@@ -321,9 +353,9 @@ class ProductLibraryController extends Controller
             ], 500);
         }
 
-        $completedSession = AikaipinProductUploadSession::query()
-            ->where('upload_token', $data['package_upload_token'])
-            ->first();
+        $completedSession = filled($data['package_upload_token'] ?? null)
+            ? AikaipinProductUploadSession::query()->where('upload_token', $data['package_upload_token'])->first()
+            : null;
         if ($completedSession !== null) {
             try {
                 $this->deleteUploadSession($completedSession);
@@ -482,12 +514,6 @@ class ProductLibraryController extends Controller
         if ($remainingImageCount + count($newImages) > 3) {
             throw ValidationException::withMessages([
                 'images' => __('aikaipin.messages.image_limit_message'),
-            ]);
-        }
-
-        if (! ($data['package_upload_token'] ?? null) && $product->packageFilePayload() === null) {
-            throw ValidationException::withMessages([
-                'package_upload_token' => __('aikaipin.messages.archive_required_message'),
             ]);
         }
 

@@ -41,6 +41,9 @@
     var referenceFileName = document.querySelector('[data-aikaipin-reference-file-name]');
     var packageFile = document.querySelector('[data-aikaipin-package-file]');
     var packageFileName = document.querySelector('[data-aikaipin-package-file-name]');
+    var uploadShopifyCsv = document.querySelector('[data-aikaipin-upload-shopify-csv]');
+    var uploadShopifyCsvName = document.querySelector('[data-aikaipin-upload-shopify-csv-name]');
+    var createShopifyCsvSection = document.querySelector('[data-aikaipin-create-shopify-csv]');
     var uploadProgress = document.querySelector('[data-aikaipin-upload-progress]');
     var uploadProgressBar = document.querySelector('[data-aikaipin-upload-progress-bar]');
     var uploadSubmit = document.querySelector('[data-aikaipin-upload-submit]');
@@ -789,6 +792,12 @@
         if (uploadTitle) {
             uploadTitle.textContent = editingProductId ? config.editTitle : config.uploadTitle;
         }
+        if (createShopifyCsvSection) {
+            createShopifyCsvSection.hidden = Boolean(editingProductId);
+        }
+        if (uploadShopifyCsv) {
+            uploadShopifyCsv.disabled = Boolean(editingProductId);
+        }
         setUploadSubmitState(false);
     }
 
@@ -817,6 +826,7 @@
         renderImagePreviews();
         updateFileName(referenceFileName, null);
         updateFileName(packageFileName, null);
+        updateFileName(uploadShopifyCsvName, null);
         renderShopifyEditData(null);
 
         if (uploadProgress) {
@@ -1023,6 +1033,7 @@
 
     function submitProduct() {
         var packageFileToUpload = packageFile && packageFile.files && packageFile.files[0];
+        var shopifyCsvToUpload = uploadShopifyCsv && uploadShopifyCsv.files && uploadShopifyCsv.files[0];
         var isEditing = editingProductId !== null;
         var packageRequest;
 
@@ -1037,9 +1048,9 @@
             return;
         }
 
-        if (!packageFileToUpload && !existingPackageFile) {
-            notify('warning', config.archiveRequiredTitle, config.archiveRequiredMessage);
-            packageFile.focus();
+        if (!isEditing && !shopifyCsvToUpload) {
+            notify('warning', '请选择 Shopify 商品 CSV', '上传 Shopify 商品 CSV 文件为必填项，请选择文件后再保存。');
+            uploadShopifyCsv.focus();
             setUploadSubmitState(false);
             return;
         }
@@ -1243,6 +1254,13 @@
                 return;
             }
             updateExistingFileName(packageFileName, existingPackageFile);
+        });
+    }
+
+    if (uploadShopifyCsv) {
+        uploadShopifyCsv.addEventListener('change', function () {
+            var file = uploadShopifyCsv.files && uploadShopifyCsv.files[0];
+            updateFileName(uploadShopifyCsvName, file);
         });
     }
 

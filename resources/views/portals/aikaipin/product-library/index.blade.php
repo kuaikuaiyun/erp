@@ -99,7 +99,7 @@
 
 @push('scripts')
     <script>window.ErpAikaipinProductLibraryConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261105-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261106-1"></script>
 @endpush
 
 @section('content')
@@ -580,11 +580,23 @@
                             <h5>{{ $t('upload.sections.package') }}</h5>
                         </header>
                         <div class="aikaipin-upload-section-body">
+                            <div data-aikaipin-create-shopify-csv>
+                                <input id="aikaipin-upload-shopify-csv" class="aikaipin-visually-hidden" type="file" name="shopify_csv" accept=".csv,text/csv" data-aikaipin-upload-shopify-csv>
+                                <label class="aikaipin-package-file-card" for="aikaipin-upload-shopify-csv">
+                                    <span class="aikaipin-package-file-icon"><i class="fa fa-file-excel-o" aria-hidden="true"></i></span>
+                                    <span class="aikaipin-upload-file-content">
+                                        <strong>上传 Shopify 商品 CSV 文件（必填）</strong>
+                                        <small>系统会校验并将商品描述、规格、价格、图片等资料一并补充到新产品</small>
+                                        <small class="aikaipin-selected-file-name" data-aikaipin-upload-shopify-csv-name>未选择文件</small>
+                                    </span>
+                                    <span class="aikaipin-package-file-action">选择文件</span>
+                                </label>
+                            </div>
                             <input id="aikaipin-upload-archive" class="aikaipin-visually-hidden" type="file" accept=".zip,.rar,.7z,.tar,.gz,.tgz,.bz2,.xz" data-aikaipin-package-file>
                             <label class="aikaipin-package-file-card" for="aikaipin-upload-archive">
                                 <span class="aikaipin-package-file-icon"><i class="fa fa-file-archive-o" aria-hidden="true"></i></span>
                                 <span class="aikaipin-upload-file-content">
-                                    <strong>{{ $t('upload.select_package_archive') }}</strong>
+                                    <strong>{{ $t('upload.select_package_archive') }}（选填）</strong>
                                     <small>{{ $t('upload.package_hint') }}</small>
                                     <small class="aikaipin-selected-file-name" data-aikaipin-package-file-name>{{ $t('upload.file_unselected') }}</small>
                                 </span>
