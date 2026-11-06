@@ -62,6 +62,7 @@ class FinanceSettlementService
     public function query(string $channel, array $filters)
     {
         $query = FinanceRecord::query()->whereIn('dataset', $channel === 'paypal' ? ['paypal-orders'] : ['xuzong2-orders', 'xuzong2-details', 'xuzong1-details']);
+        $this->filterAccountHistory($query, $channel);
         if ($channel === 'paypal') {
             $types = $this->workbooks->database()->table('finance_transaction_types')->where('category', '结账付款')->pluck('raw_type');
             $query->whereIn('raw_type', $types);
@@ -98,24 +99,51 @@ class FinanceSettlementService
         return $query;
     }
 
+    public function filterAccountHistory($query, string $channel): void
+    {
+        // Materialize the small account list instead of correlated account subqueries.
+        $accounts = FinancePaymentAccount::withTrashed()->where('account_type', $channel)
+            ->get(['id', 'activity_account', 'deleted_at']);
+        $deleted = $accounts->whereNotNull('deleted_at');
+        $liveNames = $accounts->whereNull('deleted_at')->pluck('activity_account');
+        $deletedNames = $deleted->pluck('activity_account')->diff($liveNames)->unique()->values();
+        if ($deleted->isNotEmpty()) {
+            $db = $this->workbooks->database();
+            $query->whereNotIn('finance_records.id', $db->table('finance_payment_transactions')
+                ->select('finance_record_id')->whereIn('payment_account_id', $deleted->pluck('id')));
+            if ($deletedNames->isNotEmpty()) {
+                $query->where(function ($scope) use ($deletedNames, $db): void {
+                    $scope->whereNotIn('finance_records.account', $deletedNames)
+                        ->orWhereIn('finance_records.id', $db->table('finance_payment_transactions')
+                            ->select('finance_record_id'));
+                });
+            }
+        }
+    }
+
     public function rows(string $channel, array $filters, ?Collection $records = null): Collection
     {
         $db = $this->workbooks->database();
         $records ??= $this->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id')->get();
         $supplements = $db->table('finance_settlement_supplements')->whereIn('finance_record_id', $records->modelKeys())->get()->keyBy('finance_record_id');
-        $accounts = FinancePaymentAccount::withTrashed()->where('account_type', $channel)->get()->pluck('account_name', 'activity_account');
+        $accountModels = FinancePaymentAccount::query()->where('account_type', $channel)->get();
+        $accounts = $accountModels->pluck('account_name', 'activity_account');
+        $owners = $db->table('finance_payment_transactions')->whereIn('finance_record_id', $records->modelKeys())
+            ->pluck('payment_account_id', 'finance_record_id');
+        $accountsById = $accountModels->keyBy('id');
         $domains = $this->workbooks->domainGroups()->keyBy('domain');
         $locks = $db->table('finance_period_locks')->whereNotNull('report_snapshot')->pluck('month')->all();
-        $metadata = $channel === 'credit_card' || ! empty($filters['logistics_costs'])
-            ? $this->logisticsMetadata($records, $channel) : [];
-        return $records->map(function ($record) use ($channel, $filters, $supplements, $accounts, $domains, $locks, $metadata): array {
+        $metadata = $this->logisticsMetadata($records, $channel);
+        return $records->map(function ($record) use ($channel, $filters, $supplements, $accounts, $owners, $accountsById, $domains, $locks, $metadata): array {
+            $owner = $accountsById->get($owners->get($record->id));
             $p = $record->payload;
             $definition = FinanceCatalog::dataset($record->dataset);
             $headers = $definition['headers'];
             $value = static fn ($key) => $p[$headers[$definition[$key]]] ?? '';
             $date = $record->occurred_at->setTimezone($filters['timezone'] ?? 'Asia/Shanghai');
             $row = ['id' => $record->id, 'channel' => $channel, 'source' => $record->dataset,
-                'account_key' => $record->account, 'account' => $accounts->get($record->account, $record->account),
+                'account_key' => $owner?->activity_account ?? $record->account,
+                'account' => $owner?->account_name ?? $accounts->get($record->account, $record->account),
                 'reference' => $record->reference, 'date' => isset($p['_manual_import_month']) ? '' : $date->format('Y-m-d H:i:s'), 'timezone' => $filters['timezone'] ?? 'Asia/Shanghai',
                 'month' => $p['_manual_import_month'] ?? $date->format('Y-m'), 'status' => $record->status, 'currency' => $record->currency,
                 'payment_method' => $p['支付方式'] ?? '',
@@ -232,9 +260,10 @@ class FinanceSettlementService
         if ($referenceFields === [] && ! ($channel === 'paypal' && $db->getSchemaBuilder()->hasTable('logistics_order_payment_references'))) {
             return [];
         }
-        $selected = array_values(array_intersect(['id', ...$referenceFields, 'assistant_domain_store_id', 'source_shop_domain', 'subscription_type', 'is_add_on', 'tongtu_order_number',
+        $selected = array_values(array_unique(array_intersect(['id', ...$referenceFields, 'assistant_domain_store_id', 'source_shop_domain', 'subscription_type', 'is_add_on', 'tongtu_order_number',
             'shopify_order_number', 'shopify_order_id', 'store_name', 'subscription_status', 'subscription_origin_order_id',
-            'tongtu_sku', 'tongtu_product_name', 'sale_quantity', 'sale_product_weight', 'payment_gateway', 'payment_method'], $columns));
+            'tongtu_sku', 'tongtu_product_name', 'sale_quantity', 'sale_product_weight', 'payment_gateway', 'payment_method',
+            ...array_keys(FinancePayPalOrderExport::COLUMNS), 'created_at', 'buyer_name', 'buyer_email', 'destination'], $columns)));
         $referenceValues = fn ($record) => $channel === 'paypal' ? [$record->reference, trim((string) ($record->payload['帳單號碼'] ?? ''))]
             : [$record->reference, $record->payload['商户订单号'] ?? '', $record->payload['Shopify订单号'] ?? ''];
         $references = $records->flatMap($referenceValues)->filter()->unique()->all();

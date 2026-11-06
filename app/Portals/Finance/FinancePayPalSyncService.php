@@ -86,69 +86,84 @@ class FinancePayPalSyncService
 
         return $this->run($account, 'transaction_search', $actor, $from, $to, function (int $logId) use ($account, $from, $to, $actor): array {
             $counts = ['pages' => 0, 'records' => 0];
+            $requests = 0;
             $segmentDays = max(1, min(30, (int) config('finance.relay.segment_days', 7)));
             for ($start = $from; $start->lessThanOrEqualTo($to); $start = $end->addSecond()) {
                 $end = $start->addDays($segmentDays)->subSecond()->min($to);
-                $totalPages = null;
-                $expectedItems = null;
-                $segmentItems = 0;
-                for ($page = 1; $totalPages === null || $page <= $totalPages; $page++) {
-                    if ($counts['pages'] >= (int) config('finance.relay.max_pages', 1000)) {
-                        throw new FinanceRelayException('pagination');
-                    }
-                    $query = ['start_date' => $start->utc()->format('Y-m-d\TH:i:s\Z'), 'end_date' => $end->utc()->format('Y-m-d\TH:i:s\Z'),
-                        'fields' => 'all', 'page_size' => '100', 'page' => (string) $page, 'balance_affecting_records_only' => 'Y'];
-                    $response = $this->relay->read($account, 'transaction_search', $query);
-                    $payload = $response['payload'];
-                    $rows = $payload['transaction_details'] ?? null;
-                    $pages = filter_var($payload['total_pages'] ?? null, FILTER_VALIDATE_INT);
-                    $returnedPage = filter_var($payload['page'] ?? null, FILTER_VALIDATE_INT);
-                    $totalItems = filter_var($payload['total_items'] ?? null, FILTER_VALIDATE_INT);
-                    if (! is_array($rows) || ! array_is_list($rows) || count($rows) > 100
-                        || $pages === false || $returnedPage !== $page || $pages < 0
-                        || $totalItems === false || $totalItems < 0
-                        || ($expectedItems !== null && $expectedItems !== $totalItems)
-                        || $pages > config('finance.relay.max_pages', 1000)
-                        || ($pages === 0 && ($rows !== [] || $totalItems !== 0))
-                        || ($pages > 0 && $page > $pages) || ($page < $pages && $rows === [])
-                        || ($totalPages !== null && $totalPages !== max(1, $pages))) {
-                        throw new FinanceRelayException('pagination');
-                    }
-                    $totalPages = max(1, $pages);
-                    $expectedItems = $totalItems;
-                    $segmentItems += count($rows);
-                    if ($segmentItems > $expectedItems || ($page === $totalPages && $segmentItems !== $expectedItems)) {
-                        throw new FinanceRelayException('pagination');
-                    }
-                    $prepared = array_map(fn ($row) => $this->transaction($account, $row, $actor), $rows);
-                    $db = $this->workbooks->database();
-                    $db->transaction(function () use ($db, $prepared, $account, $response, $query, $logId): void {
-                        $this->guardAccount($account->id);
-                        $accounting = app(FinanceAccountingService::class);
-                        $months = collect($prepared)->map(fn ($entry) => $accounting->month($entry['record']['occurred_at']))->unique()->sort();
-                        foreach ($months as $month) {
-                            $accounting->guardUnlocked($month);
-                        }
-                        $this->page($logId, $query, $response);
-                        foreach ($prepared as $entry) {
-                            $record = FinanceRecord::query()->updateOrCreate(['fingerprint' => $entry['record']['fingerprint']], $entry['record']);
-                            $db->table('finance_payment_transactions')->updateOrInsert([
-                                'payment_account_id' => $account->id, 'transaction_id' => $entry['id'], 'event_code' => $entry['event'],
-                            ], [
-                                'finance_record_id' => $record->id, 'raw_payload' => json_encode($entry['raw'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
-                                ...$accounting->attributes($entry['raw'], $entry['record']['occurred_at']),
-                                'created_at' => $record->created_at, 'updated_at' => now(),
-                            ]);
-                            if ($record->raw_type) {
-                                app(FinanceWorkbookService::class)->registerType($record->raw_type);
+                $segmentCounts = $counts;
+                // Restart the segment if pagination changes; unique keys prevent duplicate transactions.
+                for ($attempt = 1; ; $attempt++) {
+                    $counts = $segmentCounts;
+                    try {
+                        $totalPages = null;
+                        $expectedItems = null;
+                        $segmentItems = 0;
+                        for ($page = 1; $totalPages === null || $page <= $totalPages; $page++) {
+                            if ($requests >= (int) config('finance.relay.max_pages', 1000)) {
+                                throw new FinanceRelayException('pagination');
                             }
+                            $query = ['start_date' => $start->utc()->format('Y-m-d\TH:i:s\Z'), 'end_date' => $end->utc()->format('Y-m-d\TH:i:s\Z'),
+                                'fields' => 'all', 'page_size' => '500', 'page' => (string) $page, 'balance_affecting_records_only' => 'Y'];
+                            $requests++;
+                            $response = $this->relay->read($account, 'transaction_search', $query);
+                            $payload = $response['payload'];
+                            $rows = $payload['transaction_details'] ?? null;
+                            $pages = filter_var($payload['total_pages'] ?? null, FILTER_VALIDATE_INT);
+                            $returnedPage = filter_var($payload['page'] ?? null, FILTER_VALIDATE_INT);
+                            $totalItems = filter_var($payload['total_items'] ?? null, FILTER_VALIDATE_INT);
+                            if (! is_array($rows) || ! array_is_list($rows) || count($rows) > 500
+                                || $pages === false || $returnedPage !== $page || $pages < 0
+                                || $totalItems === false || $totalItems < 0
+                                || ($expectedItems !== null && $expectedItems !== $totalItems)
+                                || $pages > config('finance.relay.max_pages', 1000)
+                                || ($pages === 0 && ($rows !== [] || $totalItems !== 0))
+                                || ($pages > 0 && $page > $pages) || ($page < $pages && $rows === [])
+                                || ($totalPages !== null && $totalPages !== max(1, $pages))) {
+                                throw new FinanceRelayException('pagination');
+                            }
+                            $totalPages = max(1, $pages);
+                            $expectedItems = $totalItems;
+                            $segmentItems += count($rows);
+                            if ($segmentItems > $expectedItems || ($page === $totalPages && $segmentItems !== $expectedItems)) {
+                                throw new FinanceRelayException('pagination');
+                            }
+                            $prepared = array_map(fn ($row) => $this->transaction($account, $row, $actor), $rows);
+                            $db = $this->workbooks->database();
+                            $db->transaction(function () use ($db, $prepared, $account, $response, $query, $logId): void {
+                                $this->guardAccount($account->id);
+                                $accounting = app(FinanceAccountingService::class);
+                                $months = collect($prepared)->map(fn ($entry) => $accounting->month($entry['record']['occurred_at']))->unique()->sort();
+                                foreach ($months as $month) {
+                                    $accounting->guardUnlocked($month);
+                                }
+                                $this->page($logId, $query, $response);
+                                foreach ($prepared as $entry) {
+                                    $record = FinanceRecord::query()->updateOrCreate(['fingerprint' => $entry['record']['fingerprint']], $entry['record']);
+                                    $db->table('finance_payment_transactions')->updateOrInsert([
+                                        'payment_account_id' => $account->id, 'transaction_id' => $entry['id'], 'event_code' => $entry['event'],
+                                    ], [
+                                        'finance_record_id' => $record->id, 'raw_payload' => json_encode($entry['raw'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+                                        ...$accounting->attributes($entry['raw'], $entry['record']['occurred_at']),
+                                        'created_at' => $record->created_at, 'updated_at' => now(),
+                                    ]);
+                                    if ($record->raw_type) {
+                                        app(FinanceWorkbookService::class)->registerType($record->raw_type);
+                                    }
+                                }
+                            });
+                            $counts['pages']++;
+                            $counts['records'] += count($prepared);
+                            $db->table('finance_sync_logs')->where('id', $logId)->update([
+                                'page_count' => $counts['pages'], 'record_count' => $counts['records'], 'updated_at' => now(),
+                            ]);
                         }
-                    });
-                    $counts['pages']++;
-                    $counts['records'] += count($prepared);
-                    $db->table('finance_sync_logs')->where('id', $logId)->update([
-                        'page_count' => $counts['pages'], 'record_count' => $counts['records'], 'updated_at' => now(),
-                    ]);
+                        break;
+                    } catch (FinanceRelayException $e) {
+                        if ($e->reason !== 'pagination' || $attempt >= 3
+                            || $requests >= (int) config('finance.relay.max_pages', 1000)) {
+                            throw $e;
+                        }
+                    }
                 }
             }
 

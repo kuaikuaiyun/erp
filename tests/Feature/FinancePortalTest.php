@@ -726,6 +726,101 @@ class FinancePortalTest extends TestCase
         $this->get($url.'&page=0')->assertSessionHasErrors('page');
     }
 
+    public function test_settlement_uses_explicit_account_ownership_after_legacy_name_changes(): void
+    {
+        $account = $this->financePayPalAccount('Current account', ['status' => 'disabled']);
+        foreach (['Old short name', 'Old full name'] as $index => $name) {
+            $this->workbooks->importRecords('paypal-orders', [
+                2 => [...$this->recordRow(), '日期' => '2026-11-02', '交易 ID' => 'ALIAS-'.$index],
+            ], $name, 'UTC', 1);
+            $record = FinanceRecord::query()->where('account', $name)->sole();
+            DB::table('finance_payment_transactions')->insert([
+                'payment_account_id' => $account->id, 'finance_record_id' => $record->id,
+                'transaction_id' => $record->reference, 'event_code' => 'T0006', 'raw_payload' => '{}',
+            ]);
+        }
+        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $rows = $service->rows('paypal', ['from' => '2026-11-01', 'to' => '2026-11-30']);
+        $this->assertCount(2, $rows);
+        $this->assertSame(['Current account'], $rows->pluck('account')->unique()->values()->all());
+        $this->assertSame(['Current account'], $rows->pluck('account_key')->unique()->values()->all());
+        $response = $this->get('/finance/reports/summary?view=settlement&month=2026-11&channel=paypal&layer=account')->assertOk();
+        $this->assertCount(1, $response->viewData('groups'));
+        $this->assertSame(2, $response->viewData('groups')[0]['success_count']);
+        $sheet = $this->readDownload($this->get('/finance/records/paypal-orders/export?export_scope=filtered&export_format=xlsx')->assertOk()->streamedContent());
+        $exported = $sheet->toArray();
+        $column = array_search(__('finance.fields.paypal_account'), $exported[0], true);
+        $this->assertNotFalse($column);
+        $this->assertSame('Current account', $exported[1][$column]);
+        $this->assertSame('Current account', $exported[2][$column]);
+        $this->artisan('finance:audit-account-history')->assertSuccessful();
+    }
+
+    public function test_reports_exclude_deleted_account_history_but_keep_disabled_and_reused_accounts(): void
+    {
+        $deleted = $this->financePayPalAccount('Deleted legacy');
+        $disabled = $this->financePayPalAccount('Disabled history', ['status' => 'disabled']);
+        foreach ([$deleted, $disabled] as $account) {
+            $this->workbooks->importRecords('paypal-orders', [
+                2 => [...$this->recordRow(), '日期' => '2026-11-02', '交易 ID' => 'LEGACY-'.$account->id],
+            ], $account->activity_account, 'UTC', 1);
+        }
+        $deleted->delete(); // Reproduce the old soft-delete-only behavior.
+        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $filters = ['from' => '2026-11-01', 'to' => '2026-11-30'];
+        $this->assertSame(['Disabled history'], $service->rows('paypal', $filters)->pluck('account')->all());
+        $url = '/finance/reports/summary?view=settlement&month=2026-11&channel=paypal&layer=account';
+        $response = $this->get($url)->assertOk();
+        $this->assertSame(['Disabled history'], collect($response->viewData('groups'))->pluck('name')->all());
+        $sheet = $this->readDownload($this->get($url.'&download=1')->assertOk()->streamedContent());
+        $this->assertStringNotContainsString('Deleted legacy', json_encode($sheet->toArray()));
+        $export = $this->get('/finance/records/paypal-orders/export?export_scope=filtered&export_format=csv')->assertOk()->streamedContent();
+        $this->assertStringNotContainsString('Deleted legacy', $export);
+        $this->assertStringContainsString('Disabled history', $export);
+        $this->assertDatabaseCount('finance_records', 2);
+
+        // Explicitly linked deleted history must stay excluded after the name is reused.
+        $old = FinanceRecord::query()->where('account', $deleted->activity_account)->sole();
+        DB::table('finance_payment_transactions')->insert([
+            'payment_account_id' => $deleted->id, 'finance_record_id' => $old->id,
+            'transaction_id' => $old->reference, 'event_code' => 'T0006', 'raw_payload' => '{}',
+        ]);
+        $replacement = $this->financePayPalAccount('Deleted legacy');
+        $this->workbooks->importRecords('paypal-orders', [
+            2 => [...$this->recordRow(), '日期' => '2026-11-02', '交易 ID' => 'REPLACEMENT'],
+        ], $replacement->activity_account, 'UTC', 1);
+        $rows = $service->rows('paypal', $filters);
+        $this->assertCount(2, $rows);
+        $this->assertFalse($rows->contains('reference', $old->reference));
+        $this->assertTrue($rows->contains('reference', 'REPLACEMENT'));
+    }
+
+    public function test_settlement_channel_labels_and_grouping_match_selected_filters(): void
+    {
+        $this->workbooks->importRecords('paypal-orders', [
+            2 => [...$this->recordRow(), '日期' => '2026-11-02', '交易 ID' => 'CHANNEL-TEST'],
+        ], 'Account A', 'UTC', 1);
+        $base = '/finance/reports/summary?view=settlement&month=2026-11';
+        $all = $this->get($base.'&layer=project')->assertOk();
+        $this->assertSame('Shopify', $all->viewData('groups')[0]['name']);
+        $this->assertSame('combined', $all->viewData('groups')[0]['channel']);
+        $combined = $this->get($base.'&channel=combined&layer=account')->assertOk();
+        $this->assertSame('Account A', $combined->viewData('groups')[0]['name']);
+        $this->assertSame('account', $combined->viewData('filters')['layer']);
+        $combined->assertDontSee('value="combined"', false);
+        foreach (['paypal', 'credit_card'] as $channel) {
+            $project = $this->get($base.'&channel='.$channel.'&layer=project')->assertOk();
+            $this->assertSame('project', $project->viewData('filters')['layer']);
+            if ($channel === 'paypal') {
+                $this->assertSame('Shopify', $project->viewData('groups')[0]['name']);
+                $this->assertSame('paypal', $project->viewData('groups')[0]['channel']);
+            }
+        }
+        $this->get($base.'&channel=credit_card&layer=account')->assertOk()->assertViewHas('groups', []);
+        $sheet = $this->readDownload($this->get($base.'&layer=project&download=1')->assertOk()->streamedContent());
+        $this->assertSame('Shopify', $sheet->toArray()[1][0]);
+    }
+
     public function test_settlement_project_filter_preserves_channel_and_month_in_results_and_export(): void
     {
         $this->workbooks->importRecords('paypal-orders', [
@@ -740,12 +835,12 @@ class FinancePortalTest extends TestCase
         $response = $this->get($url)->assertOk();
         $group = $response->viewData('groups')[0];
         $this->assertCount(1, $response->viewData('groups'));
-        $this->assertSame('PayPal', $group['name']);
+        $this->assertSame('Shopify', $group['name']);
         $this->assertSame('paypal', $group['channel']);
         $this->assertSame(1, $group['success_count']);
         $this->assertSame('10.00000000', $group['settlement']);
         $sheet = $this->readDownload($this->get($url.'&download=1')->assertOk()->streamedContent());
-        $this->assertEquals(['PayPal', 'PayPal', 1, 0, 10], $sheet->toArray()[1]);
+        $this->assertEquals(['Shopify', 'PayPal', 1, 0, 10], $sheet->toArray()[1]);
         $combined = $this->get('/finance/reports/summary?view=settlement&month=2026-11&channel=combined&layer=project')->assertOk();
         $this->assertSame(2, $combined->viewData('groups')[0]['success_count']);
         $this->assertSame('45.00000000', $combined->viewData('groups')[0]['settlement']);
@@ -1082,6 +1177,24 @@ class FinancePortalTest extends TestCase
         ]))->assertOk()->streamedContent());
         $this->assertSame('LIVE-CARD-1', $sheet->getCell('D2')->getValue());
         $this->assertEquals(15, $sheet->getCell('H2')->getValue());
+        DB::table('logistics_orders')->where('id', $id)->update([
+            'tongtu_order_number' => 'ERP-CARD', 'subscription_type' => '订阅', 'is_add_on' => '1',
+            'bill_number' => 'BILL-CARD',
+        ]);
+        $pageExport = $this->readDownload($this->get('/finance/records/xuzong2-orders/export?'.http_build_query([
+            ...$query, 'export_scope' => 'records', 'selected_ids' => [$id], 'export_layout' => 'page',
+        ]))->assertOk()->streamedContent())->toArray();
+        $this->assertSame(\App\Portals\Finance\FinancePayPalOrderExport::PAGE_HEADERS, $pageExport[0]);
+        $this->assertCount(count($pageExport[0]), $pageExport[1]);
+        foreach (['交易号' => 'LIVE-CARD-1', 'Shopify订单号' => '#1001', '通途订单号' => 'ERP-CARD',
+            '账单号' => 'BILL-CARD', '店铺名称' => '物流店铺', '店铺域名' => 'example.com',
+            '订阅类型' => '订阅', '加购' => '加购', '收款账号' => '物流信用卡账户',
+            '入库时间' => null, '下单时间' => '2026-11-04 01:00:00', '付款时间' => '2026-11-04 01:01:00'] as $header => $expected) {
+            $this->assertSame($expected, $pageExport[1][array_search($header, $pageExport[0], true)], $header);
+        }
+        $this->assertEquals(15, $pageExport[1][array_search('实付金额', $pageExport[0], true)]);
+        $this->get('/finance/records/xuzong2-orders')->assertOk()->assertSee('name="export_layout" value="page"', false);
+
         $this->assertDatabaseCount('finance_records', 0);
         DB::table('logistics_orders')->where('id', $id)->delete();
         $this->get('/finance/records/xuzong2-orders')->assertOk()->assertViewHas('records', fn ($rows) => $rows->total() === 0);
@@ -1839,6 +1952,40 @@ class FinancePortalTest extends TestCase
         $this->financePayPalAccount('可复用名称');
     }
 
+    public function test_page_order_export_and_settlement_export_include_linked_business_fields(): void
+    {
+        Schema::create('logistics_orders', function (Blueprint $table): void {
+            $table->id();
+            foreach (['transaction_id', 'tongtu_order_number', 'source_shop_domain', 'subscription_type',
+                'is_add_on', 'bill_number', 'buyer_name', 'buyer_email', 'tracking_number', 'store_name'] as $column) {
+                $table->string($column)->nullable();
+            }
+        });
+        $this->workbooks->importRecords('paypal-orders', [2 => $this->recordRow()], 'Page export account', 'UTC', 1);
+        $record = FinanceRecord::sole();
+        DB::table('finance_domain_groups')->insert(['domain' => 'linked.example.test', 'owner' => 'Linked owner', 'team' => 'Linked team']);
+        DB::table('logistics_orders')->insert(['id' => 1, 'transaction_id' => $record->reference,
+            'tongtu_order_number' => 'ERP-LINKED', 'source_shop_domain' => 'linked.example.test',
+            'subscription_type' => '订阅', 'is_add_on' => '1', 'bill_number' => 'LINKED-BILL',
+            'buyer_name' => 'Linked buyer', 'buyer_email' => 'linked@example.test',
+            'tracking_number' => 'TRACK-LINKED', 'store_name' => 'Linked store']);
+        $response = $this->get('/finance/records/paypal-orders')->assertOk();
+        $response->assertSee('ERP-LINKED')->assertSee('Linked buyer');
+        $sheet = $this->readDownload($this->get('/finance/records/paypal-orders/export?export_scope=filtered&export_layout=page')->assertOk()->streamedContent())->toArray();
+        $this->assertSame(\App\Portals\Finance\FinancePayPalOrderExport::PAGE_HEADERS, $sheet[0]);
+        foreach (['通途订单号' => 'ERP-LINKED', '账单号' => 'LINKED-BILL', '买家名称' => 'Linked buyer',
+            'Email' => 'linked@example.test', '使用人' => 'Linked owner', '所属团队' => 'Linked team',
+            '订阅类型' => '订阅', '加购' => '加购', '物流单号' => 'TRACK-LINKED'] as $header => $expected) {
+            $this->assertSame($expected, $sheet[1][array_search($header, $sheet[0], true)], $header);
+        }
+        $settlement = $this->readDownload($this->get('/finance/reports/paypal-settlement?download=1')->assertOk()->streamedContent())->toArray();
+        foreach (['通途订单' => 'ERP-LINKED', '域名' => 'linked.example.test', '使用人' => 'Linked owner',
+            '团队' => 'Linked team', '订阅类型' => '加购'] as $header => $expected) {
+            $this->assertSame($expected, $settlement[1][array_search($header, $settlement[0], true)], $header);
+        }
+        $this->getJson('/finance/records/paypal-orders/export?export_scope=filtered&export_layout=page&report_columns[]=999')->assertUnprocessable();
+    }
+
     public function test_api_paypal_order_filters_and_metadata_match_without_legacy_accounts(): void
     {
         Schema::create('logistics_orders', function (Blueprint $table): void {
@@ -1855,6 +2002,13 @@ class FinancePortalTest extends TestCase
         $this->assertSame('ERP-API', $service->logisticsMetadata(collect([$record]), 'paypal')[$record->id]['erp_order']);
         $url = '/finance/records/paypal-orders?'.http_build_query(['order_fields' => ['tongtu_order_number' => 'ERP-API']]);
         $this->get($url)->assertOk()->assertViewHas('records', fn ($rows) => $rows->total() === 1);
+        $exportUrl = '/finance/records/paypal-orders/export?'.http_build_query([
+            'order_fields' => ['tongtu_order_number' => 'ERP-API'], 'export_scope' => 'filtered', 'export_format' => 'xlsx',
+        ]);
+        $exported = $this->readDownload($this->get($exportUrl)->assertOk()->streamedContent())->toArray();
+        $this->assertCount(2, $exported);
+        $this->assertSame('ERP-API', $exported[1][array_search('通途订单号', $exported[0], true)]);
+        $this->assertSame('api.example.test', $exported[1][array_search('店铺域名', $exported[0], true)]);
         DB::table('logistics_orders')->where('id', 1)->update(['transaction_id' => 'unrelated']);
         DB::table('logistics_order_payment_references')->insert(['logistics_order_id' => 1, 'reference_number' => $record->reference]);
         $this->get($url)->assertOk()->assertViewHas('records', fn ($rows) => $rows->total() === 1);
@@ -2704,7 +2858,7 @@ class FinancePortalTest extends TestCase
         $export = $this->get('/finance/records/paypal-orders/export?'.http_build_query(['export_scope' => 'filtered', 'export_format' => 'xlsx']))->assertOk();
         $sheet = $this->readDownload($export->streamedContent());
         $this->assertSame('销售收入', $sheet->getCell('AQ2')->getValue());
-        $this->assertSame('折合人民币', $sheet->getCell('AV1')->getValue());
+        $this->assertSame('折合人民币', $sheet->getCell($sheet->getHighestColumn().'1')->getValue());
         $this->get('/finance/reports/summary?view=transactions&month=2026-10')->assertOk()->assertSee('应结算')->assertSee('Shopify');
         $this->get('/finance/reports/summary?view=transactions&month=2026-10&download=1')->assertOk();
         $this->post('/finance/settings/accounting/lock', ['month' => '2026-10'])->assertRedirect()->assertSessionHasNoErrors();
@@ -2785,6 +2939,65 @@ class FinancePortalTest extends TestCase
         $this->assertSame(1, $xpath->query('//*[@data-paypal-account="finance-'.$account->id.'"]//*[@data-refresh-message and @data-result="success" and not(@hidden)]')->length);
         $this->assertSame(0, $xpath->query('//*[@id="finance-refresh-results" or @id="finance-refresh-progress"]')->length);
         $this->assertSame('connected', app(FinancePayPalBalanceService::class)->dashboard()['cards']['finance-'.$account->id]['connection_status']);
+    }
+
+    public function test_relay_retries_changed_totals_without_duplicate_transactions(): void
+    {
+        $this->assertPaginationRetry('changed', true);
+    }
+
+    public function test_relay_retries_incomplete_transaction_counts(): void
+    {
+        $this->assertPaginationRetry('short', true);
+    }
+
+    public function test_relay_stops_after_three_inconsistent_attempts(): void
+    {
+        $this->assertPaginationRetry('changed', false);
+    }
+
+    private function assertPaginationRetry(string $failure, bool $recover): void
+    {
+        $this->post('/finance/payment-accounts', $this->newPaymentAccountData())->assertRedirect();
+        $account = FinancePaymentAccount::query()->sole();
+        $attempt = 0;
+        $pages = [];
+        Http::fake(function ($request) use ($account, $failure, $recover, &$attempt, &$pages) {
+            $query = json_decode($request->body(), true)['query'];
+            $this->assertSame('500', $query['page_size']);
+            $page = (int) $query['page'];
+            $pages[] = $page;
+            if ($page === 1) {
+                $attempt++;
+            }
+            $invalid = $page === 2 && (!$recover || $attempt === 1);
+            $ids = $page === 1 ? range(1, 101) : [102];
+            $rows = array_map(static fn ($id) => ['transaction_info' => [
+                'transaction_id' => 'RETRY-'.$id, 'transaction_event_code' => 'T0006',
+                'transaction_initiation_date' => '2026-11-01T01:00:00Z',
+                'transaction_amount' => ['value' => '10', 'currency_code' => 'USD'],
+            ]], $ids);
+
+            return $this->signedRelayResponse($request, $account, [
+                'page' => $page, 'total_pages' => 2,
+                'total_items' => $invalid && $failure === 'changed' ? 103 : 102,
+                'transaction_details' => $invalid && $failure === 'short' ? [] : $rows,
+            ]);
+        });
+        $result = app(\App\Portals\Finance\FinancePayPalSyncService::class)->transactions(
+            $account, \Carbon\CarbonImmutable::parse('2026-11-01T00:00:00Z'),
+            \Carbon\CarbonImmutable::parse('2026-11-01T23:59:59Z'), 1,
+        );
+        $this->assertSame($recover, $result['ok']);
+        $this->assertSame($recover ? [1, 2, 1, 2] : [1, 2, 1, 2, 1, 2], $pages);
+        $this->assertSame($recover ? 102 : 101, $result['count']);
+        $this->assertDatabaseCount('finance_payment_transactions', $recover ? 102 : 101);
+        $this->assertDatabaseCount('finance_records', $recover ? 102 : 101);
+        $this->assertDatabaseHas('finance_sync_logs', [
+            'status' => $recover ? 'success' : 'failed',
+            'error_code' => $recover ? null : 'pagination',
+            'page_count' => $recover ? 2 : 1, 'record_count' => $recover ? 102 : 101,
+        ]);
     }
 
     public function test_failed_second_page_keeps_only_the_verified_page_and_marks_incomplete_sync(): void
