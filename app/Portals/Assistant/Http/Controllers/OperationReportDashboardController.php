@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Department;
 use App\Models\AdminUser;
 use App\Models\OperationReport;
+use App\Models\OperationDashboardDepartmentScope;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
@@ -16,6 +17,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Http\RedirectResponse;
 use Symfony\Component\HttpFoundation\Response;
 
 class OperationReportDashboardController extends Controller
@@ -42,6 +45,7 @@ class OperationReportDashboardController extends Controller
             'operation_department_ids' => ['nullable', 'array'],
             'operation_department_ids.*' => ['integer', 'distinct'],
             'operator_user_id' => ['nullable', 'integer'],
+            'scope_user_id' => ['nullable', 'integer'],
         ]);
         $timezone = (string) ($validated['timezone'] ?? OperationReportMetricsService::REPORT_TIMEZONE);
         $reportNow = Carbon::now($timezone);
@@ -281,6 +285,26 @@ class OperationReportDashboardController extends Controller
         $approvedAdSpend = (float) $allReports->where('status', OperationReport::STATUS_APPROVED)->sum('actual_ad_spend');
         $totals = $this->totals($rows, $approvedAdSpend);
 
+        $canManageDashboardScope = $this->isDashboard($context) && $this->isBoss($context['user']);
+        $dashboardScopeUsers = collect();
+        $scopeSelectedUserId = null;
+        $scopeSelectedDepartmentIds = [];
+        if ($canManageDashboardScope) {
+            $dashboardScopeUsers = AdminUser::query()
+                ->where('status', AdminUser::STATUS_ACTIVE)
+                ->where('id', '!=', $context['user']->getKey())
+                ->orderBy('name')->orderBy('username')->get()
+                ->reject(fn (AdminUser $user) => $this->isBoss($user))->values();
+            $scopeSelectedUserId = isset($validated['scope_user_id'])
+                ? (int) $validated['scope_user_id']
+                : (int) ($dashboardScopeUsers->first()?->getKey() ?? 0);
+            abort_if($scopeSelectedUserId > 0 && ! $dashboardScopeUsers->contains('id', $scopeSelectedUserId), 403);
+            $scopeSelectedDepartmentIds = $scopeSelectedUserId > 0
+                ? OperationDashboardDepartmentScope::query()->where('user_id', $scopeSelectedUserId)
+                    ->pluck('department_id')->map(fn ($id) => (int) $id)->all()
+                : [];
+        }
+
         return view('portals.assistant.operation-reports.index', [
             'portal' => $context['portal']->loadMissing('menus'),
             'user' => $context['user'],
@@ -303,7 +327,53 @@ class OperationReportDashboardController extends Controller
             'orderDetailsUrl' => $this->isDashboard($context)
                 ? route('operation-dashboard.operation-reports.order-details')
                 : route('assistant.operation-reports.order-details'),
+            'canManageDashboardScope' => $canManageDashboardScope,
+            'dashboardScopeUsers' => $dashboardScopeUsers,
+            'scopeSelectedUserId' => $scopeSelectedUserId,
+            'scopeSelectedDepartmentIds' => $scopeSelectedDepartmentIds,
+            'dashboardScopeUpdateUrl' => $canManageDashboardScope
+                ? route('operation-dashboard.operation-reports.department-scope.update')
+                : null,
         ]);
+    }
+
+    public function updateDepartmentScope(Request $request): RedirectResponse|Response
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+        abort_unless($this->isDashboard($context) && $this->isBoss($context['user']), 403);
+
+        $validated = $request->validate([
+            'user_id' => ['required', 'integer'],
+            'department_ids' => ['nullable', 'array'],
+            'department_ids.*' => ['integer', 'distinct'],
+        ]);
+        $targetUser = AdminUser::query()->where('status', AdminUser::STATUS_ACTIVE)
+            ->whereKey((int) $validated['user_id'])->firstOrFail();
+        abort_if($this->isBoss($targetUser), 422, 'Boss 账号始终拥有全部部门权限。');
+
+        $allDepartmentIds = $this->assistantStoreOwners->operationDepartments()
+            ->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $departmentIds = collect($validated['department_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values();
+        abort_unless($departmentIds->diff($allDepartmentIds)->isEmpty(), 422, '选择的部门不在可配置范围内。');
+
+        DB::connection(config('admin.database.connection') ?: config('database.default'))
+            ->transaction(function () use ($targetUser, $departmentIds, $context): void {
+                OperationDashboardDepartmentScope::query()->where('user_id', $targetUser->getKey())->delete();
+                $now = now();
+                foreach ($departmentIds as $departmentId) {
+                    OperationDashboardDepartmentScope::query()->create([
+                        'user_id' => $targetUser->getKey(),
+                        'department_id' => $departmentId,
+                        'created_by' => $context['user']->getKey(),
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ]);
+                }
+            });
+
+        return redirect()->route('operation-dashboard.operation-reports.index', ['scope_user_id' => $targetUser->getKey()])
+            ->with('success', $departmentIds->isEmpty() ? '已设置为可查看全部运营部门。' : '账号可查看部门已保存。');
     }
 
     public function orderDetails(Request $request): Response|JsonResponse
@@ -371,9 +441,24 @@ class OperationReportDashboardController extends Controller
     /** @return list<int> */
     private function visibleDepartmentIds(array $context): array
     {
-        return $this->isDashboard($context)
-            ? $this->assistantStoreOwners->operationDepartments()->pluck('id')->map(fn ($id) => (int) $id)->all()
-            : $this->assistantStoreOwners->visibleOperationDepartmentIds($context['user']);
+        if (! $this->isDashboard($context)) {
+            return $this->assistantStoreOwners->visibleOperationDepartmentIds($context['user']);
+        }
+
+        $allDepartmentIds = $this->assistantStoreOwners->operationDepartments()
+            ->pluck('id')->map(fn ($id) => (int) $id)->all();
+        if ($this->isBoss($context['user'])) return $allDepartmentIds;
+
+        $configuredIds = OperationDashboardDepartmentScope::query()
+            ->where('user_id', $context['user']->getKey())
+            ->pluck('department_id')->map(fn ($id) => (int) $id)->all();
+
+        return $configuredIds === [] ? $allDepartmentIds : array_values(array_intersect($allDepartmentIds, $configuredIds));
+    }
+
+    private function isBoss(AdminUser $user): bool
+    {
+        return $user->isAdministrator() || strcasecmp((string) $user->username, 'kky_boss') === 0;
     }
 
     private function totals(array $rows, float $actualAdSpend): array
