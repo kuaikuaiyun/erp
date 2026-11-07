@@ -72,6 +72,7 @@
     var isProductSubmitting = false;
     var uploadTimer = null;
     var packageUploadToken = '';
+    var productSaveStartedAt = 0;
     var uploadSubmitHtml = uploadSubmit ? uploadSubmit.innerHTML : '';
     var uploadCategories = loadCategories();
     var previewImages = [];
@@ -635,6 +636,7 @@
             var request = new window.XMLHttpRequest();
 
             request.open('POST', url, true);
+            request.timeout = 15 * 60 * 1000;
             request.setRequestHeader('Accept', 'application/json');
             request.setRequestHeader('X-CSRF-TOKEN', config.csrfToken || '');
             request.upload.addEventListener('progress', function (event) {
@@ -656,6 +658,11 @@
                     return;
                 }
 
+                if (request.status === 413) {
+                    reject(new Error('上传内容超过服务器允许的大小，请调整 PHP 和 Web 服务器上传限制后重试。'));
+                    return;
+                }
+
                 var fieldErrors = payload.errors || {};
                 var firstField = Object.keys(fieldErrors)[0];
                 var firstMessage = firstField && fieldErrors[firstField] && fieldErrors[firstField][0];
@@ -669,6 +676,9 @@
             });
             request.addEventListener('abort', function () {
                 reject(new Error('上传已取消'));
+            });
+            request.addEventListener('timeout', function () {
+                reject(new Error('服务器保存超时，请检查服务器执行时间限制后重试。'));
             });
             request.send(formData);
         });
@@ -1061,6 +1071,19 @@
         }
     }
 
+    function showProductSavingState(isEditing) {
+        productSaveStartedAt = Date.now();
+        updateProductSaveProgress(0, 0);
+        if (productSaveProgressLabel) {
+            productSaveProgressLabel.textContent = isEditing
+                ? '正在保存产品修改，请勿关闭页面'
+                : '正在保存产品，请勿关闭页面';
+        }
+        if (productSaveProgressDetail) {
+            productSaveProgressDetail.textContent = '正在准备并提交数据...';
+        }
+    }
+
     function packageFingerprint(file) {
         var value = [file.name, file.size, file.lastModified, 5 * 1024 * 1024].join('|');
         var hash = 2166136261;
@@ -1164,6 +1187,7 @@
         }
 
         isProductSubmitting = true;
+        showProductSavingState(isEditing);
         if (packageFileToUpload) {
             setUploadSubmitState(true, config.uploadingProductPackage);
             packageRequest = uploadPackage(packageFileToUpload);
@@ -1197,9 +1221,17 @@
                 formData.append('_method', 'PUT');
             }
             setUploadSubmitState(true, config.savingProduct);
-            updateProductSaveProgress(0, 0);
+            showProductSavingState(isEditing);
 
             return formDataRequest(requestUrl, formData, updateProductSaveProgress);
+        }).then(function (payload) {
+            var remaining = Math.max(0, 900 - (Date.now() - productSaveStartedAt));
+
+            return new Promise(function (resolve) {
+                window.setTimeout(function () {
+                    resolve(payload);
+                }, remaining);
+            });
         }).then(function (payload) {
             notify(
                 'success',
