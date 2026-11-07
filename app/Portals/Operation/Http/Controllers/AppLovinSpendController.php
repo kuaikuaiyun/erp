@@ -125,4 +125,5 @@ class AppLovinSpendController extends Controller
         $page=max(1,(int)$request->query('page',1));
         return new LengthAwarePaginator($items->forPage($page,20)->values(),$items->count(),20,$page,['path'=>$request->url(),'query'=>$request->query()]);
     }
+
 }

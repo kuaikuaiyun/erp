@@ -10,6 +10,7 @@ use App\Models\AdminUser;
 use App\Models\DailyAdvertisingRecharge;
 use App\Models\DailyAccountOpening;
 use App\Models\DailyStoreLaunch;
+use App\Models\OperationReport;
 use App\Models\AssistantProject;
 use App\Models\AssistantWebsiteSystem;
 use App\Portal\Http\Controllers\PortalEntryController;
@@ -24,6 +25,8 @@ use Symfony\Component\HttpFoundation\Response;
 
 class DailySubmissionController extends Controller
 {
+    private const DAILY_REPORT_PORTAL_CODE = 'daily-report';
+
     private const TYPES = [
         'advertising-recharge' => ['title' => '广告充值', 'icon' => 'fa-credit-card'],
         'account-opening' => ['title' => '开户需求', 'icon' => 'fa-user-plus'],
@@ -47,7 +50,7 @@ class DailySubmissionController extends Controller
             return $context;
         }
 
-        $this->access->assertPortal($context['portal'], ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        $this->assertDailyReportPortal($context['portal']);
 
         if ($type === 'advertising-recharge') {
             return $this->advertisingRecharge($request, $context);
@@ -105,6 +108,18 @@ class DailySubmissionController extends Controller
             'entries.*.account_number.required' => '请填写广告账户编号。',
             'entries.*.amount.required' => '请填写充值金额。',
         ]);
+
+        $accountMatches = $this->advertisingRechargeAccountMatches($agencies->keys()->map(fn ($id) => (int) $id)->all());
+        foreach ($validated['entries'] as $index => $entry) {
+            $agencyId = (string) (int) $entry['agency_id'];
+            $name = mb_strtolower(trim((string) $entry['account_name']));
+            $number = mb_strtolower(trim((string) $entry['account_number']));
+            $match = $accountMatches[$agencyId] ?? ['by_number' => []];
+            $expectedNames = $match['by_number'][$number] ?? [];
+            if ($expectedNames !== [] && ! collect($expectedNames)->contains(fn ($value) => mb_strtolower($value) === $name)) {
+                throw ValidationException::withMessages(['entries.'.$index.'.account_name' => '广告账户编号“'.$entry['account_number'].'”对应的历史账户名称是“'.implode('、', $expectedNames).'”，当前填写的“'.$entry['account_name'].'”不一致。']);
+            }
+        }
 
         $entries = collect($validated['entries'])->map(function (array $entry) use ($agencies): array {
             /** @var AssistantAdvertisingAgency|null $agency */
@@ -259,6 +274,9 @@ class DailySubmissionController extends Controller
             'operatorOptions' => $operatorOptions,
             'selectedOperator' => $operator,
             'advertisingAgencyGroups' => $advertisingAgencyGroups,
+            'accountHistoryMatches' => $this->advertisingRechargeAccountMatches(
+                collect($advertisingAgencyGroups)->flatten(1)->pluck('key')->map(fn ($id) => (int) $id)->all()
+            ),
             'history' => DailyAdvertisingRecharge::query()
                 ->where('operator_user_id', $operator->getKey())
                 ->latest('report_date')->latest('id')->paginate(15)->withQueryString(),
@@ -325,6 +343,48 @@ class DailySubmissionController extends Controller
         return 'other';
     }
 
+    /** @return array<string, array{by_number: array<string, list<string>>}> */
+    private function advertisingRechargeAccountMatches(array $agencyIds): array
+    {
+        $allowed = array_fill_keys(array_map(fn ($id) => (string) (int) $id, $agencyIds), true);
+        $matches = [];
+        $agencyIdsByName = AssistantAdvertisingAgency::query()
+            ->whereIn('id', $agencyIds)
+            ->get(['id', 'name'])
+            ->mapWithKeys(fn (AssistantAdvertisingAgency $agency) => [mb_strtolower(trim($agency->name)) => (string) $agency->id]);
+
+        // The advertising rows in operation reports are the authoritative account source.
+        // They take precedence over recharge history, which may itself contain a typo.
+        OperationReport::query()->orderBy('id')->get(['advertising_rows'])->each(function (OperationReport $report) use (&$matches, $agencyIdsByName): void {
+            foreach ($report->advertising_rows ?? [] as $entry) {
+                $agencyId = $agencyIdsByName->get(mb_strtolower(trim((string) ($entry['agency'] ?? ''))));
+                $name = trim((string) ($entry['account_name'] ?? ''));
+                $number = trim((string) ($entry['account_number'] ?? ''));
+                if (! $agencyId || $name === '' || $number === '') continue;
+                $matches[$agencyId]['by_number'][mb_strtolower($number)][] = $name;
+            }
+        });
+
+        DailyAdvertisingRecharge::query()->orderBy('id')->get(['entries'])->each(function (DailyAdvertisingRecharge $submission) use (&$matches, $allowed): void {
+            foreach ($submission->entries ?? [] as $entry) {
+                $agencyId = (string) (int) ($entry['agency_id'] ?? 0);
+                $name = trim((string) ($entry['account_name'] ?? ''));
+                $number = trim((string) ($entry['account_number'] ?? ''));
+                if (! isset($allowed[$agencyId]) || $name === '' || $number === '') continue;
+                $numberKey = mb_strtolower($number);
+                if (! isset($matches[$agencyId]['by_number'][$numberKey])) {
+                    $matches[$agencyId]['by_number'][$numberKey][] = $name;
+                }
+            }
+        });
+        foreach ($matches as &$match) {
+            foreach ($match['by_number'] as &$values) $values = array_values(array_unique($values));
+            unset($values);
+        }
+        unset($match);
+        return $matches;
+    }
+
     private function isBoss(AdminUser $user): bool
     {
         return $user->isAdministrator() || strcasecmp((string) $user->username, 'kky_boss') === 0;
@@ -344,8 +404,13 @@ class DailySubmissionController extends Controller
         if ($context instanceof Response) {
             abort($context->getStatusCode());
         }
-        $this->access->assertPortal($context['portal'], ProductRequestAccessService::OPERATION_PORTAL_CODE);
+        $this->assertDailyReportPortal($context['portal']);
 
         return $context;
+    }
+
+    private function assertDailyReportPortal($portal): void
+    {
+        abort_unless((string) $portal->code === self::DAILY_REPORT_PORTAL_CODE, 403);
     }
 }
