@@ -480,7 +480,7 @@ class OperationReportMetricsService
             }
         }
 
-        $details = $orders->map(function (LogisticsOrder $order) use ($mappings, $mappingByValue): array {
+        $details = $orders->map(function (LogisticsOrder $order) use ($mappings, $mappingByValue, $timezone): array {
             $isFirst = in_array((string) $order->subscription_type, ['订阅首次购买', '无订阅'], true);
             $purchaseCost = 0.0;
             $totalWeight = 0.0;
@@ -549,6 +549,13 @@ class OperationReportMetricsService
             ->sortByDesc('order_count')
             ->values()
             ->all();
+        $shopDomains = collect($details)
+            ->pluck('shop_domain')
+            ->filter()
+            ->unique(fn (string $domain) => mb_strtolower($domain))
+            ->sort()
+            ->values()
+            ->all();
 
         return [
             'summary' => [
@@ -561,6 +568,7 @@ class OperationReportMetricsService
                 'shipping_cost' => round((float) collect($details)->sum('shipping_cost'), 4),
                 'return_fee' => round((float) collect($details)->sum('return_fee'), 4),
                 'media_breakdown' => $mediaBreakdown,
+                'shop_domains' => $shopDomains,
             ],
             'orders' => array_values(array_slice($details, ($page - 1) * $perPage, $perPage)),
             'pagination' => [

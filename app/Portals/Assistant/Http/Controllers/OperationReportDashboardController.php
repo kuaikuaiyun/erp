@@ -552,6 +552,11 @@ class OperationReportDashboardController extends Controller
                 $mediaOrderCounts[] = (int) $items->sum('first_total_orders');
                 $mediaRois[] = $mediaSpend > 0 ? $mediaRevenue / $mediaSpend : null;
             }
+            $shopDomains = $operatorRows->pluck('shop_domain')
+                ->map(fn ($domain) => trim((string) $domain))
+                ->filter(fn (string $domain) => $domain !== '' && $domain !== '—')
+                ->unique(fn (string $domain) => mb_strtolower($domain))
+                ->sort()->values()->all();
 
             $calculationDays = null;
             if (! empty($first['hired_at'])) {
@@ -572,7 +577,8 @@ class OperationReportDashboardController extends Controller
                 'hired_at' => $first['hired_at'] ?? null,
                 'calculation_days' => $calculationDays,
                 'operation_department_name' => (string) $first['operation_department_name'],
-                'shop_domain' => '—',
+                'shop_domain' => $shopDomains[0] ?? '—',
+                'shop_domains' => $shopDomains,
                 'media_source' => '汇总',
                 'media_roi' => null,
                 'allocated_actual_ad_spend' => $actualAdSpend,
