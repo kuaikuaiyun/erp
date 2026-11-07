@@ -20,6 +20,7 @@ class XShoppyOrderSyncService
 
         return DB::connection($connection)->transaction(function () use ($connection, $storeId): int {
             $orders = DB::connection($connection)->table('fashion_logistics_orders')
+                ->where('source_platform', 'xshoppy')
                 ->when($storeId, fn ($query) => $query->where('assistant_domain_store_id', $storeId));
             $orderIds = (clone $orders)->pluck('id');
 
@@ -155,6 +156,7 @@ class XShoppyOrderSyncService
         return DB::connection($connection)->transaction(function () use ($store, $payload, $billing, $shipping, $externalId): array {
             $order = FashionLogisticsOrder::query()->firstOrNew([
                 'assistant_domain_store_id' => $store->getKey(),
+                'source_platform' => 'xshoppy',
                 'external_order_id' => $externalId,
             ]);
             $created = ! $order->exists;
@@ -218,6 +220,7 @@ class XShoppyOrderSyncService
     {
         $order = FashionLogisticsOrder::query()
             ->where('assistant_domain_store_id', $store->getKey())
+            ->where('source_platform', 'xshoppy')
             ->where('external_order_id', $externalId)
             ->first();
 

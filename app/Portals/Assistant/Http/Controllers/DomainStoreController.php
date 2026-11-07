@@ -91,7 +91,7 @@ class DomainStoreController extends Controller
                 ? $this->assignableOperationDepartments($context['user'])
                 : collect(),
             'operationDepartments' => $canConfigureStoreOwnership
-                ? $this->storeOwners->operationDepartments()
+                ? $this->storeOwners->storeOwnershipOperationDepartments()
                 : collect(),
             'operationScopeMap' => $operationScopeMap,
             'domainCheckLabels' => AssistantDomainStore::domainCheckLabels(),
@@ -778,7 +778,7 @@ class DomainStoreController extends Controller
         $assistantDepartmentIds = $this->authorization->assistantChildDepartments()
             ->pluck('id')
             ->map(static fn (mixed $id): int => (int) $id);
-        $operationDepartmentIds = $this->storeOwners->operationDepartments()
+        $operationDepartmentIds = $this->storeOwners->storeOwnershipOperationDepartments()
             ->filter(static fn ($department): bool => (int) ($department->tree_depth ?? 0) > 0)
             ->pluck('id')
             ->map(static fn (mixed $id): int => (int) $id);
@@ -1536,8 +1536,8 @@ class DomainStoreController extends Controller
             ->unique()
             ->values();
 
-        return $this->storeOwners->operationDepartments()
-            // The Operations root is a visual select-all group, not an
+        return $this->storeOwners->storeOwnershipOperationDepartments()
+            // Each configured root is a visual select-all group, not an
             // assignable department. This also hides legacy root mappings.
             ->filter(static fn ($department): bool => (int) ($department->tree_depth ?? 0) > 0)
             ->whereIn('id', $operationDepartmentIds->all())
@@ -2097,7 +2097,7 @@ class DomainStoreController extends Controller
             'shopify_client_secret' => ['nullable', 'string', 'max:255'],
             'xshoppy_api_key' => ['nullable', 'string', 'max:255'],
             'xshoppy_password' => ['nullable', 'string', 'max:255'],
-            'shopline_app_token' => ['nullable', 'string', 'max:255'],
+            'shopline_app_token' => ['nullable', 'string', 'max:65535'],
             'shop_status' => ['required', 'in:'.implode(',', array_keys(AssistantDomainStore::shopStatusLabels()))],
             'plan_expires_at' => ['nullable', 'date'],
             'payment_card' => ['nullable', 'string', 'max:255'],

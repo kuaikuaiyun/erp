@@ -484,7 +484,7 @@
                 <div class="box-body row assistant-form-grid">
                     <div class="form-group col-md-6 @error('shopline_app_token') has-error @enderror">
                         <label for="shopline_app_token">应用令牌</label>
-                        <input id="shopline_app_token" name="shopline_app_token" type="password" class="form-control" value="{{ $value('shopline_app_token') }}" maxlength="255" autocomplete="new-password">
+                        <input id="shopline_app_token" name="shopline_app_token" type="password" class="form-control" value="{{ $value('shopline_app_token') }}" maxlength="65535" autocomplete="new-password">
                         @error('shopline_app_token')<span class="help-block">{{ $message }}</span>@enderror
                     </div>
                 </div>
@@ -530,7 +530,7 @@
                             <select id="operation_department_id" name="operation_department_id" class="form-control" data-owner-operation-department>
                                 <option value="">{{ $t('form.owner_operation_department_placeholder') }}</option>
                                 @foreach ($ownerOperationDepartments as $department)
-                                    <option value="{{ $department->getKey() }}" @selected((int) $ownerOperationDepartmentId === (int) $department->getKey())>{{ $department->name }}</option>
+                                    <option value="{{ $department->getKey() }}" @selected((int) $ownerOperationDepartmentId === (int) $department->getKey())>{{ str_repeat('-- ', (int) ($department->tree_depth ?? 0)) }}{{ $department->name }}</option>
                                 @endforeach
                             </select>
                             @error('operation_department_id')<span class="help-block">{{ $message }}</span>@enderror
