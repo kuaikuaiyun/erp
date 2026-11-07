@@ -33,7 +33,7 @@ class AdvertisingRechargeReviewController extends Controller
         ]);
 
         $query = DailyAdvertisingRecharge::query();
-        $allDepartments = $this->assistantStoreOwners->operationDepartments();
+        $allDepartments = $this->assistantStoreOwners->boundBusinessDepartments();
         $departmentIds = null;
         if (! $context['user']->isAdministrator()) {
             $departmentIds = $this->assistantStoreOwners->visibleOperationDepartmentIds($context['user']);

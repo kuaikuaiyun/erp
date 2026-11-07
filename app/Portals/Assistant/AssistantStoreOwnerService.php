@@ -46,6 +46,41 @@ class AssistantStoreOwnerService
             ?: $departments->sortBy('id')->first();
     }
 
+    /** @return Collection<int, Department> */
+    public function boundBusinessDepartments(): Collection
+    {
+        $configuredIds = AssistantDepartmentOperationScope::query()
+            ->pluck('operation_department_id')->map(static fn ($id): int => (int) $id)->unique()->values();
+        if ($configuredIds->isEmpty()) return collect();
+
+        return Department::business()
+            ->whereIn('id', $this->departmentIdsIncludingDescendants($configuredIds->all()))
+            ->with('parent:id,name')->orderBy('sort')->orderBy('name')->get();
+    }
+
+    public function boundBusinessDepartmentForUser(AdminUser $user): ?Department
+    {
+        $departmentIds = $this->boundBusinessDepartments()->pluck('id');
+        if ($departmentIds->isEmpty()) return null;
+        $rolesTable = config('admin.database.roles_table');
+        $departments = $user->departments()->whereIn($rolesTable.'.id', $departmentIds->all())
+            ->get([$rolesTable.'.id', $rolesTable.'.name', $rolesTable.'.parent_id']);
+
+        return $departments->first(static fn (Department $department): bool => (bool) ($department->pivot->is_primary ?? false))
+            ?: $departments->sortBy('id')->first();
+    }
+
+    /** @return Collection<int, AdminUser> */
+    public function usersInBoundBusinessDepartments(): Collection
+    {
+        $departmentIds = $this->boundBusinessDepartments()->pluck('id');
+        if ($departmentIds->isEmpty()) return collect();
+
+        return AdminUser::query()->where('status', AdminUser::STATUS_ACTIVE)
+            ->whereHas('departments', fn ($query) => $query->whereIn('admin_roles.id', $departmentIds->all()))
+            ->orderBy('name')->orderBy('username')->get(['id', 'name', 'username'])->unique('id')->values();
+    }
+
     /** @return list<int> */
     public function visibleOperationDepartmentIds(AdminUser $assistantUser): array
     {

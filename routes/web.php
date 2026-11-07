@@ -28,6 +28,8 @@ use App\Portals\Assistant\Http\Controllers\AssistantProjectController;
 use App\Portals\Assistant\Http\Controllers\AssistantWebsiteSystemController;
 use App\Portals\Assistant\Http\Controllers\AppLovinSpendReviewController;
 use App\Portals\Assistant\Http\Controllers\StoreLaunchReviewController;
+use App\Portals\Assistant\Http\Controllers\AdvertisingAccountAuthorizationReviewController;
+use App\Portals\Assistant\Http\Controllers\AccountStoreTransferReviewController;
 use App\Portals\Operation\Http\Controllers\AppLovinSpendController;
 use App\Portals\Assistant\Http\Controllers\OperationReportReviewController;
 use App\Portals\Assistant\Http\Controllers\OperationReportDashboardController;
@@ -165,6 +167,10 @@ Route::post('/operation/daily-submissions/account-opening', [DailySubmissionCont
     ->name('operation.daily-submissions.account-opening.store');
 Route::post('/operation/daily-submissions/store-launch', [DailySubmissionController::class, 'storeStoreLaunch'])
     ->name('operation.daily-submissions.store-launch.store');
+Route::post('/operation/daily-submissions/advertising-account-authorization', [DailySubmissionController::class, 'storeAdvertisingAccountAuthorization'])
+    ->name('operation.daily-submissions.advertising-account-authorization.store');
+Route::post('/operation/daily-submissions/account-store-transfer', [DailySubmissionController::class, 'storeAccountStoreTransfer'])
+    ->name('operation.daily-submissions.account-store-transfer.store');
 Route::get('/assistant/daily-submissions/advertising-recharges', [AdvertisingRechargeReviewController::class, 'index'])
     ->name('assistant.daily-submissions.advertising-recharges.index');
 Route::patch('/assistant/daily-submissions/advertising-recharges/{submission}/process', [AdvertisingRechargeReviewController::class, 'process'])
@@ -177,6 +183,14 @@ Route::get('/assistant/daily-submissions/store-launches', [StoreLaunchReviewCont
     ->name('assistant.daily-submissions.store-launches.index');
 Route::patch('/assistant/daily-submissions/store-launches/{submission}/process', [StoreLaunchReviewController::class, 'process'])
     ->whereNumber('submission')->name('assistant.daily-submissions.store-launches.process');
+Route::get('/assistant/daily-submissions/advertising-account-authorizations', [AdvertisingAccountAuthorizationReviewController::class, 'index'])
+    ->name('assistant.daily-submissions.advertising-account-authorizations.index');
+Route::patch('/assistant/daily-submissions/advertising-account-authorizations/{submission}/process', [AdvertisingAccountAuthorizationReviewController::class, 'process'])
+    ->whereNumber('submission')->name('assistant.daily-submissions.advertising-account-authorizations.process');
+Route::get('/assistant/daily-submissions/account-store-transfers', [AccountStoreTransferReviewController::class, 'index'])
+    ->name('assistant.daily-submissions.account-store-transfers.index');
+Route::patch('/assistant/daily-submissions/account-store-transfers/{submission}/process', [AccountStoreTransferReviewController::class, 'process'])
+    ->whereNumber('submission')->name('assistant.daily-submissions.account-store-transfers.process');
 Route::get('/operation/daily-submissions/applovin-spends', [AppLovinSpendController::class, 'index'])
     ->name('operation.applovin-spends.index');
 Route::get('/operation/daily-submissions/applovin-spends/pending-count', [AppLovinSpendController::class, 'pendingCount'])

@@ -20,7 +20,7 @@ class StoreLaunchReviewController extends Controller
     {
         $context=$this->context($request); if($context instanceof Response)return $context;
         $filters=$request->validate(['operation_department_id'=>['nullable','integer'],'status'=>['nullable','in:pending,processed'],'operator'=>['nullable','string','max:100']]);
-        $query=DailyStoreLaunch::query(); $all=$this->storeOwners->operationDepartments(); $visible=null;
+        $query=DailyStoreLaunch::query(); $all=$this->storeOwners->boundBusinessDepartments(); $visible=null;
         if(!$context['user']->isAdministrator()){$visible=$this->storeOwners->visibleOperationDepartmentIds($context['user']);$visible===[]?$query->whereRaw('1=0'):$query->whereIn('operation_department_id',$visible);}
         $departments=$visible===null?$all:$all->whereIn('id',$visible)->values();
         $query->when($filters['operation_department_id']??null,fn($q,$id)=>$q->where('operation_department_id',$id))->when($filters['status']??null,fn($q,$v)=>$q->where('status',$v))->when($filters['operator']??null,fn($q,$v)=>$q->where('operator_name','like','%'.$v.'%'));

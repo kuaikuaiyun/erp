@@ -5,11 +5,12 @@ namespace App\Portals\Operation\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\AssistantAdvertisingAgency;
 use App\Models\AssistantAdvertisingMedia;
-use App\Models\AssistantDomainStore;
 use App\Models\AdminUser;
 use App\Models\DailyAdvertisingRecharge;
 use App\Models\DailyAccountOpening;
 use App\Models\DailyStoreLaunch;
+use App\Models\DailyAdvertisingAccountAuthorization;
+use App\Models\DailyAccountStoreTransfer;
 use App\Models\OperationReport;
 use App\Models\AssistantProject;
 use App\Models\AssistantWebsiteSystem;
@@ -61,6 +62,12 @@ class DailySubmissionController extends Controller
         if ($type === 'store-launch') {
             return $this->storeLaunch($request, $context);
         }
+        if ($type === 'advertising-account-authorization') {
+            return $this->advertisingAccountAuthorization($request, $context);
+        }
+        if ($type === 'account-store-transfer') {
+            return $this->accountStoreTransfer($request, $context);
+        }
 
         return view('portals.operation.daily-submissions.index', [
             'portal' => $context['portal']->loadMissing('menus'),
@@ -82,7 +89,7 @@ class DailySubmissionController extends Controller
         }
         /** @var AdminUser $operator */
         $operator = $operatorOptions->firstWhere('id', $operatorId) ?: $user;
-        $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($operator);
+        $operationDepartment = $this->assistantStoreOwners->boundBusinessDepartmentForUser($operator);
         abort_unless($operationDepartment !== null || $user->isAdministrator(), 422, '当前账号未配置运营部门，无法提交广告充值。');
 
         $assistantDepartmentIds = $operationDepartment
@@ -166,7 +173,7 @@ class DailySubmissionController extends Controller
         if ($isBoss) abort_unless($operatorId > 0 && $operatorOptions->contains('id', $operatorId), 422, '请选择有效的运营账号。');
         /** @var AdminUser $operator */
         $operator = $operatorOptions->firstWhere('id', $operatorId) ?: $user;
-        $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($operator);
+        $operationDepartment = $this->assistantStoreOwners->boundBusinessDepartmentForUser($operator);
         abort_unless($operationDepartment !== null || $user->isAdministrator(), 422, '该运营账号未配置运营部门，无法提交开户需求。');
         $assistantDepartmentIds = $operationDepartment
             ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $operationDepartment->getKey())
@@ -216,7 +223,7 @@ class DailySubmissionController extends Controller
         $operatorId = $isBoss ? $request->integer('operator_user_id') : (int) $user->getKey();
         if ($isBoss) abort_unless($operatorId > 0 && $operatorOptions->contains('id', $operatorId), 422, '请选择有效的运营账号。');
         $operator = $operatorOptions->firstWhere('id', $operatorId) ?: $user;
-        $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($operator);
+        $operationDepartment = $this->assistantStoreOwners->boundBusinessDepartmentForUser($operator);
         abort_unless($operationDepartment !== null || $user->isAdministrator(), 422, '该运营账号未配置运营部门，无法提交下店需求。');
         $assistantDepartmentIds = $operationDepartment
             ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $operationDepartment->getKey())
@@ -251,6 +258,65 @@ class DailySubmissionController extends Controller
         return redirect()->route('operation.daily-submissions.index', ['type' => 'store-launch', 'operator_user_id' => $isBoss ? $operator->id : null])->with('success', '下店需求已提交。');
     }
 
+    public function storeAdvertisingAccountAuthorization(Request $request): RedirectResponse
+    {
+        $context=$this->operationContext($request);$user=$context['user'];$isBoss=$this->isBoss($user);
+        $operatorOptions=$isBoss?$this->operatorOptions():collect([$user]);$operatorId=$isBoss?$request->integer('operator_user_id'):(int)$user->id;
+        if($isBoss)abort_unless($operatorId>0&&$operatorOptions->contains('id',$operatorId),422,'请选择有效的运营账号。');
+        $operator=$operatorOptions->firstWhere('id',$operatorId)?:$user;$department=$this->assistantStoreOwners->boundBusinessDepartmentForUser($operator);
+        abort_unless($department!==null||$user->isAdministrator(),422,'该账号未配置可提报的业务部门。');
+        $assistantIds=$department?$this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int)$department->id):null;
+        $agencies=AssistantAdvertisingAgency::query()->where('is_enabled',true)->when($assistantIds!==null,fn($q)=>$q->whereIn('assistant_department_id',$assistantIds))->with('advertisingMedia')->get()->keyBy('id');
+        $data=$request->validate(['agency_id'=>['required','integer',Rule::in($agencies->keys()->all())],'account_name'=>['required','string','max:191'],'account_number'=>['required','string','max:191'],'new_email'=>['required','string','max:191'],'old_email'=>['required','string','max:191'],'old_email_abandoned'=>['nullable','boolean']],['agency_id.required'=>'请选择广告代理和社媒。','old_email.required'=>'请填写旧邮箱。']);
+        $agency=$agencies->get((int)$data['agency_id']);
+        DailyAdvertisingAccountAuthorization::query()->create(['operator_user_id'=>$operator->id,'operator_name'=>$operator->name?:$operator->username,'operation_department_id'=>$department?->id,'operation_department_name'=>$department?->name,'assistant_department_id'=>$agency->assistant_department_id,'agency_id'=>$agency->id,'agency_name'=>$agency->name,'media_name'=>$agency->advertisingMedia?->name,'account_name'=>trim($data['account_name']),'account_number'=>trim($data['account_number']),'new_email'=>trim($data['new_email']),'old_email'=>trim((string)($data['old_email']??''))?:null,'old_email_abandoned'=>(bool)($data['old_email_abandoned']??false),'status'=>DailyAdvertisingAccountAuthorization::STATUS_PENDING]);
+        return redirect()->route('operation.daily-submissions.index',['type'=>'advertising-account-authorization','operator_user_id'=>$isBoss?$operator->id:null])->with('success','广告账号授权需求已提交。');
+    }
+
+    public function storeAccountStoreTransfer(Request $request): RedirectResponse
+    {
+        $context = $this->operationContext($request); $user = $context['user']; $isBoss = $this->isBoss($user);
+        $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
+        $operatorId = $isBoss ? $request->integer('operator_user_id') : (int) $user->id;
+        if ($isBoss) abort_unless($operatorId > 0 && $operatorOptions->contains('id', $operatorId), 422, '请选择有效的运营账号。');
+        $operator = $operatorOptions->firstWhere('id', $operatorId) ?: $user;
+        $department = $this->assistantStoreOwners->boundBusinessDepartmentForUser($operator);
+        abort_unless($department !== null || $user->isAdministrator(), 422, '该账号未配置可提报的业务部门。');
+        $assistantIds = $department ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $department->id) : null;
+        $agencies = AssistantAdvertisingAgency::query()->where('is_enabled', true)->when($assistantIds !== null, fn ($q) => $q->whereIn('assistant_department_id', $assistantIds))->with('advertisingMedia')->get()->keyBy('id');
+        $projects = AssistantProject::query()->where('is_enabled', true)->when($assistantIds !== null, fn ($q) => $q->whereIn('assistant_department_id', $assistantIds))->get()->keyBy('id');
+        $systems = AssistantWebsiteSystem::query()->where('is_enabled', true)->when($assistantIds !== null, fn ($q) => $q->whereIn('assistant_department_id', $assistantIds))->get()->keyBy('id');
+        $targetType = (string) $request->input('target_type');
+        $actionType = (string) $request->input('action_type');
+        $data = $request->validate([
+            'target_type' => ['required', Rule::in(['account', 'store'])], 'action_type' => ['required', Rule::in(['discard', 'transfer'])],
+            'reason' => ['required', 'string', 'max:2000'],
+            'agency_id' => [Rule::requiredIf($targetType === 'account'), 'nullable', 'integer', Rule::in($agencies->keys()->all())],
+            'account_name' => [Rule::requiredIf($targetType === 'account'), 'nullable', 'string', 'max:191'],
+            'account_number' => [Rule::requiredIf($targetType === 'account'), 'nullable', 'string', 'max:191'],
+            'project_id' => [Rule::requiredIf($targetType === 'store'), 'nullable', 'integer', Rule::in($projects->keys()->all())],
+            'website_system_id' => [Rule::requiredIf($targetType === 'store'), 'nullable', 'integer', Rule::in($systems->keys()->all())],
+            'store_domain' => [Rule::requiredIf($targetType === 'store'), 'nullable', 'string', 'max:255'],
+        ], ['reason.required' => $actionType === 'transfer' ? '请填写转让理由。' : '请填写弃用理由。']);
+        $agency = $targetType === 'account' ? $agencies->get((int) $data['agency_id']) : null;
+        $project = $targetType === 'store' ? $projects->get((int) $data['project_id']) : null;
+        $system = $targetType === 'store' ? $systems->get((int) $data['website_system_id']) : null;
+        if ($targetType === 'store') abort_unless($project && $system && (int) $system->project_id === (int) $project->id, 422, '建站系统与所选项目不匹配。');
+        DailyAccountStoreTransfer::query()->create([
+            'operator_user_id' => $operator->id, 'operator_name' => $operator->name ?: $operator->username,
+            'operation_department_id' => $department?->id, 'operation_department_name' => $department?->name,
+            'assistant_department_id' => $agency?->assistant_department_id ?: $project?->assistant_department_id,
+            'target_type' => $targetType, 'action_type' => $actionType, 'reason' => trim($data['reason']),
+            'agency_id' => $agency?->id, 'agency_name' => $agency?->name, 'media_name' => $agency?->advertisingMedia?->name,
+            'account_name' => isset($data['account_name']) ? trim((string) $data['account_name']) : null,
+            'account_number' => isset($data['account_number']) ? trim((string) $data['account_number']) : null,
+            'project_id' => $project?->id, 'project_name' => $project?->name, 'website_system_id' => $system?->id,
+            'website_system_name' => $system?->name, 'store_domain' => isset($data['store_domain']) ? trim((string) $data['store_domain']) : null,
+            'status' => DailyAccountStoreTransfer::STATUS_PENDING,
+        ]);
+        return redirect()->route('operation.daily-submissions.index', ['type' => 'account-store-transfer', 'operator_user_id' => $isBoss ? $operator->id : null])->with('success', '账号/店铺弃用转让需求已提交。');
+    }
+
     /** @param array{portal:mixed,user:\App\Models\AdminUser} $context */
     private function advertisingRecharge(Request $request, array $context): View
     {
@@ -261,7 +327,7 @@ class DailySubmissionController extends Controller
             ? (int) ($request->integer('operator_user_id') ?: $operatorOptions->first()?->getKey())
             : (int) $user->getKey();
         $operator = $operatorOptions->firstWhere('id', $operatorId) ?: $user;
-        $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($operator);
+        $operationDepartment = $this->assistantStoreOwners->boundBusinessDepartmentForUser($operator);
         $assistantDepartmentIds = $operationDepartment
             ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $operationDepartment->getKey())
             : ($user->isAdministrator() ? null : []);
@@ -291,7 +357,7 @@ class DailySubmissionController extends Controller
         $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
         $operatorId = $isBoss ? (int) ($request->integer('operator_user_id') ?: $operatorOptions->first()?->getKey()) : (int) $user->getKey();
         $operator = $operatorOptions->firstWhere('id', $operatorId) ?: $user;
-        $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($operator);
+        $operationDepartment = $this->assistantStoreOwners->boundBusinessDepartmentForUser($operator);
         $assistantDepartmentIds = $operationDepartment
             ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $operationDepartment->getKey())
             : ($user->isAdministrator() ? null : []);
@@ -313,7 +379,7 @@ class DailySubmissionController extends Controller
         $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
         $operatorId = $isBoss ? (int) ($request->integer('operator_user_id') ?: $operatorOptions->first()?->id) : (int) $user->id;
         $operator = $operatorOptions->firstWhere('id', $operatorId) ?: $user;
-        $operationDepartment = $this->assistantStoreOwners->operationDepartmentForUser($operator);
+        $operationDepartment = $this->assistantStoreOwners->boundBusinessDepartmentForUser($operator);
         $assistantDepartmentIds = $operationDepartment ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $operationDepartment->id) : ($user->isAdministrator() ? null : []);
         $projects = AssistantProject::query()->where('is_enabled', true)
             ->when($assistantDepartmentIds !== null, fn ($q) => $q->whereIn('assistant_department_id', $assistantDepartmentIds))
@@ -323,6 +389,29 @@ class DailySubmissionController extends Controller
             'portal'=>$context['portal']->loadMissing('menus'),'user'=>$user,'isBoss'=>$isBoss,
             'operatorOptions'=>$operatorOptions,'selectedOperator'=>$operator,'projects'=>$projects,
             'history'=>DailyStoreLaunch::query()->where('operator_user_id',$operator->id)->latest('id')->paginate(15)->withQueryString(),
+        ]);
+    }
+
+    private function advertisingAccountAuthorization(Request $request, array $context): View
+    {
+        $user=$context['user'];$isBoss=$this->isBoss($user);$operatorOptions=$isBoss?$this->operatorOptions():collect([$user]);$operatorId=$isBoss?(int)($request->integer('operator_user_id')?:$operatorOptions->first()?->id):(int)$user->id;$operator=$operatorOptions->firstWhere('id',$operatorId)?:$user;
+        $department=$this->assistantStoreOwners->boundBusinessDepartmentForUser($operator);$assistantIds=$department?$this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int)$department->id):($user->isAdministrator()?null:[]);
+        return view('portals.operation.daily-submissions.advertising-account-authorization',['portal'=>$context['portal']->loadMissing('menus'),'user'=>$user,'isBoss'=>$isBoss,'operatorOptions'=>$operatorOptions,'selectedOperator'=>$operator,'advertisingAgencyGroups'=>AssistantAdvertisingAgency::enabledGroups($assistantIds),'history'=>DailyAdvertisingAccountAuthorization::query()->where('operator_user_id',$operator->id)->latest('id')->paginate(15)->withQueryString()]);
+    }
+
+    private function accountStoreTransfer(Request $request, array $context): View
+    {
+        $user = $context['user']; $isBoss = $this->isBoss($user); $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
+        $operatorId = $isBoss ? (int) ($request->integer('operator_user_id') ?: $operatorOptions->first()?->id) : (int) $user->id;
+        $operator = $operatorOptions->firstWhere('id', $operatorId) ?: $user;
+        $department = $this->assistantStoreOwners->boundBusinessDepartmentForUser($operator);
+        $assistantIds = $department ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $department->id) : ($user->isAdministrator() ? null : []);
+        $projects = AssistantProject::query()->where('is_enabled', true)->when($assistantIds !== null, fn ($q) => $q->whereIn('assistant_department_id', $assistantIds))->with(['websiteSystems' => fn ($q) => $q->where('is_enabled', true)->orderBy('sort')->orderBy('id')])->orderBy('sort')->orderBy('id')->get();
+        return view('portals.operation.daily-submissions.account-store-transfer', [
+            'portal' => $context['portal']->loadMissing('menus'), 'user' => $user, 'isBoss' => $isBoss,
+            'operatorOptions' => $operatorOptions, 'selectedOperator' => $operator,
+            'advertisingAgencyGroups' => AssistantAdvertisingAgency::enabledGroups($assistantIds), 'projects' => $projects,
+            'history' => DailyAccountStoreTransfer::query()->where('operator_user_id', $operator->id)->latest('id')->paginate(15)->withQueryString(),
         ]);
     }
 
@@ -392,9 +481,7 @@ class DailySubmissionController extends Controller
 
     private function operatorOptions()
     {
-        $ids = AssistantDomainStore::query()->whereNotNull('owner_user_id')->distinct()->pluck('owner_user_id');
-
-        return AdminUser::query()->whereIn('id', $ids)->orderBy('name')->orderBy('username')->get(['id', 'name', 'username']);
+        return $this->assistantStoreOwners->usersInBoundBusinessDepartments();
     }
 
     /** @return array{portal:mixed,user:\App\Models\AdminUser} */
