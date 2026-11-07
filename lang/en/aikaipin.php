@@ -408,6 +408,7 @@ return [
         'select_file' => 'Select File',
         'images_hint' => 'Up to 3 images, with a maximum of 20MB each.',
         'reference_file' => 'Reference Page File',
+        'reference_file_hint' => 'HTML or HTM only, maximum 256 MB.',
         'package_archive' => 'Product Package Archive',
         'package_hint' => 'Supports ZIP, RAR, 7Z, TAR, GZ, TGZ, BZ2, XZ, and related archive files up to 150MB. After real integration, files are only stored and downloaded without extraction, with resumable upload support.',
         'quick_authorization' => 'Quick Authorization Companies',

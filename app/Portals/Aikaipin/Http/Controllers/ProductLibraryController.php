@@ -31,6 +31,7 @@ use Symfony\Component\HttpFoundation\Response;
 class ProductLibraryController extends Controller
 {
     private const PRODUCT_CATEGORY_OPTIONS_CACHE_KEY = 'aikaipin:product-library:category-options:v1';
+    private const REFERENCE_FILE_MAX_KILOBYTES = 262144;
 
     public function __construct(
         private readonly PortalEntryController $portalEntries,
@@ -228,7 +229,7 @@ class ProductLibraryController extends Controller
             'categories.*' => ['nullable', 'string', 'max:80', 'distinct'],
             'images' => ['nullable', 'array', 'max:3'],
             'images.*' => ['file', 'image', 'max:20480'],
-            'reference_file' => ['nullable', 'file', 'extensions:html,htm', 'max:20480'],
+            'reference_file' => ['nullable', 'file', 'extensions:html,htm', 'max:'.self::REFERENCE_FILE_MAX_KILOBYTES],
             'shopify_csv' => ['required', 'file', 'mimes:csv,txt', 'max:20480'],
             'package_upload_token' => ['nullable', 'uuid'],
             'authorized_department_ids' => ['nullable', 'array'],
@@ -237,6 +238,7 @@ class ProductLibraryController extends Controller
             'shopify_csv.required' => '请选择 Shopify 导出的 CSV 商品文件。',
             'shopify_csv.mimes' => 'Shopify 商品文件只支持 CSV 格式。',
             'shopify_csv.max' => 'Shopify 商品 CSV 文件不能超过 20 MB。',
+            'reference_file.max' => '参考页面文件不能超过 256 MB。',
         ]);
         $departmentIds = collect($data['authorized_department_ids'] ?? [])->map(static fn ($id): int => (int) $id)->unique()->values()->all();
         $skuValues = $this->normalizeProductValues($data['skus'] ?? []);
@@ -488,10 +490,12 @@ class ProductLibraryController extends Controller
             'images.*' => ['file', 'image', 'max:20480'],
             'remove_image_indexes' => ['nullable', 'array'],
             'remove_image_indexes.*' => ['integer', 'min:0', 'distinct'],
-            'reference_file' => ['nullable', 'file', 'extensions:html,htm', 'max:20480'],
+            'reference_file' => ['nullable', 'file', 'extensions:html,htm', 'max:'.self::REFERENCE_FILE_MAX_KILOBYTES],
             'package_upload_token' => ['nullable', 'uuid'],
             'authorized_department_ids' => ['nullable', 'array'],
             'authorized_department_ids.*' => ['integer', 'distinct'],
+        ], [
+            'reference_file.max' => '参考页面文件不能超过 256 MB。',
         ]);
         $departmentIds = collect($data['authorized_department_ids'] ?? [])->map(static fn ($id): int => (int) $id)->unique()->values()->all();
         $skuValues = $this->normalizeProductValues($data['skus'] ?? []);

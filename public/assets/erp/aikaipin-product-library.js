@@ -46,6 +46,11 @@
     var createShopifyCsvSection = document.querySelector('[data-aikaipin-create-shopify-csv]');
     var uploadProgress = document.querySelector('[data-aikaipin-upload-progress]');
     var uploadProgressBar = document.querySelector('[data-aikaipin-upload-progress-bar]');
+    var productSaveProgress = document.querySelector('[data-aikaipin-product-save-progress]');
+    var productSaveProgressBar = document.querySelector('[data-aikaipin-product-save-progress-bar]');
+    var productSaveProgressPercent = document.querySelector('[data-aikaipin-product-save-progress-percent]');
+    var productSaveProgressLabel = document.querySelector('[data-aikaipin-product-save-progress-label]');
+    var productSaveProgressDetail = document.querySelector('[data-aikaipin-product-save-progress-detail]');
     var uploadSubmit = document.querySelector('[data-aikaipin-upload-submit]');
     var uploadTitle = document.querySelector('[data-aikaipin-upload-title]');
     var shopifyEditSection = document.querySelector('[data-aikaipin-shopify-edit-section]');
@@ -613,16 +618,60 @@
         }).then(responsePayload);
     }
 
-    function formDataRequest(url, formData) {
-        return window.fetch(url, {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: {
-                'Accept': 'application/json',
-                'X-CSRF-TOKEN': config.csrfToken || ''
-            },
-            body: formData
-        }).then(responsePayload);
+    function formDataRequest(url, formData, onUploadProgress) {
+        if (typeof onUploadProgress !== 'function') {
+            return window.fetch(url, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': config.csrfToken || ''
+                },
+                body: formData
+            }).then(responsePayload);
+        }
+
+        return new Promise(function (resolve, reject) {
+            var request = new window.XMLHttpRequest();
+
+            request.open('POST', url, true);
+            request.setRequestHeader('Accept', 'application/json');
+            request.setRequestHeader('X-CSRF-TOKEN', config.csrfToken || '');
+            request.upload.addEventListener('progress', function (event) {
+                if (event.lengthComputable) {
+                    onUploadProgress(event.loaded, event.total);
+                }
+            });
+            request.addEventListener('load', function () {
+                var payload = {};
+
+                try {
+                    payload = request.responseText ? JSON.parse(request.responseText) : {};
+                } catch (ignore) {
+                    payload = {};
+                }
+
+                if (request.status >= 200 && request.status < 300) {
+                    resolve(payload);
+                    return;
+                }
+
+                var fieldErrors = payload.errors || {};
+                var firstField = Object.keys(fieldErrors)[0];
+                var firstMessage = firstField && fieldErrors[firstField] && fieldErrors[firstField][0];
+                var error = new Error(firstMessage || payload.message || config.productSaveFailedMessage);
+                error.code = payload.code || '';
+                error.payload = payload;
+                reject(error);
+            });
+            request.addEventListener('error', function () {
+                reject(new Error(config.productSaveFailedMessage));
+            });
+            request.addEventListener('abort', function () {
+                reject(new Error('上传已取消'));
+            });
+            request.send(formData);
+        });
     }
 
     function addCategory() {
@@ -836,6 +885,7 @@
             uploadProgressBar.style.width = '0%';
             uploadProgressBar.setAttribute('aria-valuenow', '0');
         }
+        resetProductSaveProgress();
         syncChoiceButtons();
         setUploadMode(null);
     }
@@ -950,6 +1000,64 @@
         if (uploadProgressBar) {
             uploadProgressBar.style.width = percentage + '%';
             uploadProgressBar.setAttribute('aria-valuenow', String(percentage));
+        }
+    }
+
+    function formatUploadSize(bytes) {
+        var value = Number(bytes || 0);
+
+        if (value >= 1024 * 1024 * 1024) {
+            return (value / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+        }
+        if (value >= 1024 * 1024) {
+            return (value / (1024 * 1024)).toFixed(2) + ' MB';
+        }
+        if (value >= 1024) {
+            return (value / 1024).toFixed(1) + ' KB';
+        }
+
+        return value + ' B';
+    }
+
+    function resetProductSaveProgress() {
+        if (productSaveProgress) {
+            productSaveProgress.hidden = true;
+        }
+        if (productSaveProgressBar) {
+            productSaveProgressBar.style.width = '0%';
+            productSaveProgressBar.setAttribute('aria-valuenow', '0');
+        }
+        if (productSaveProgressPercent) {
+            productSaveProgressPercent.textContent = '0%';
+        }
+        if (productSaveProgressLabel) {
+            productSaveProgressLabel.textContent = '正在上传文件，请勿关闭页面';
+        }
+        if (productSaveProgressDetail) {
+            productSaveProgressDetail.textContent = '准备上传...';
+        }
+    }
+
+    function updateProductSaveProgress(received, total) {
+        var percentage = total > 0 ? Math.min(100, Math.round((received / total) * 100)) : 0;
+
+        if (productSaveProgress) {
+            productSaveProgress.hidden = false;
+        }
+        if (productSaveProgressBar) {
+            productSaveProgressBar.style.width = percentage + '%';
+            productSaveProgressBar.setAttribute('aria-valuenow', String(percentage));
+        }
+        if (productSaveProgressPercent) {
+            productSaveProgressPercent.textContent = percentage + '%';
+        }
+        if (productSaveProgressLabel) {
+            productSaveProgressLabel.textContent = percentage >= 100
+                ? '文件上传完成，正在保存产品数据...'
+                : '正在上传文件，请勿关闭页面';
+        }
+        if (productSaveProgressDetail) {
+            productSaveProgressDetail.textContent = formatUploadSize(received) + ' / ' + formatUploadSize(total);
         }
     }
 
@@ -1089,8 +1197,9 @@
                 formData.append('_method', 'PUT');
             }
             setUploadSubmitState(true, config.savingProduct);
+            updateProductSaveProgress(0, 0);
 
-            return formDataRequest(requestUrl, formData);
+            return formDataRequest(requestUrl, formData, updateProductSaveProgress);
         }).then(function (payload) {
             notify(
                 'success',
@@ -1108,6 +1217,9 @@
             notify('error', config.productSaveFailedTitle, error.message || config.productSaveFailedMessage);
             isProductSubmitting = false;
             setUploadSubmitState(false);
+            if (productSaveProgressLabel) {
+                productSaveProgressLabel.textContent = '上传失败，请检查文件或网络后重试';
+            }
         });
     }
 

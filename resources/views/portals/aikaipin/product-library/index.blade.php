@@ -571,6 +571,7 @@
                                         <span class="aikaipin-upload-file-content">
                                             <strong>{{ $t('upload.select_reference_file') }}</strong>
                                             <small data-aikaipin-reference-file-name>{{ $t('upload.file_unselected') }}</small>
+                                            <small>{{ $t('upload.reference_file_hint') }}</small>
                                         </span>
                                         <i class="fa fa-angle-right" aria-hidden="true"></i>
                                     </label>
@@ -632,6 +633,16 @@
                             @endif
                         </div>
                     </section>
+                </div>
+                <div class="aikaipin-product-save-progress" hidden data-aikaipin-product-save-progress>
+                    <div class="aikaipin-product-save-progress-heading">
+                        <span data-aikaipin-product-save-progress-label>正在上传文件，请勿关闭页面</span>
+                        <strong data-aikaipin-product-save-progress-percent>0%</strong>
+                    </div>
+                    <div class="progress active">
+                        <div class="progress-bar progress-bar-info progress-bar-striped" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" style="width: 0%" data-aikaipin-product-save-progress-bar></div>
+                    </div>
+                    <small data-aikaipin-product-save-progress-detail>准备上传...</small>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-default" type="button" data-dismiss="modal">{{ $t('upload.cancel') }}</button>

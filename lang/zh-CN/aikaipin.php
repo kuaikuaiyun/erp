@@ -433,6 +433,7 @@ return [
         'select_file' => '选择文件',
         'images_hint' => '最多 3 张，单张最大 20MB。',
         'reference_file' => '参考页面文件',
+        'reference_file_hint' => '仅支持 HTML、HTM，最大 256 MB。',
         'package_archive' => '产品包压缩文件',
         'package_hint' => '支持 ZIP、RAR、7Z、TAR、GZ、TGZ、BZ2、XZ 等压缩文件，最大 150MB。真实接入后仅保存和下载，不解压，并支持断点续传。',
         'quick_authorization' => '快捷授权公司',

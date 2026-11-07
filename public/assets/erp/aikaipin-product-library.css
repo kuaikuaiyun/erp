@@ -906,6 +906,42 @@
     min-width: 2px;
 }
 
+.aikaipin-product-save-progress {
+    background: #f5fbff;
+    border-top: 1px solid #d9ebf7;
+    padding: 14px 20px 12px;
+}
+
+.aikaipin-product-save-progress-heading {
+    align-items: center;
+    color: #3d6177;
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 7px;
+}
+
+.aikaipin-product-save-progress-heading strong {
+    color: #238bc1;
+    font-size: 16px;
+}
+
+.aikaipin-product-save-progress .progress {
+    background: #dcecf5;
+    border-radius: 10px;
+    height: 12px;
+    margin: 0 0 6px;
+    overflow: hidden;
+}
+
+.aikaipin-product-save-progress .progress-bar {
+    min-width: 2px;
+    transition: width .2s ease;
+}
+
+.aikaipin-product-save-progress small {
+    color: #7890a0;
+}
+
 .aikaipin-pagination-control {
     align-items: center;
     display: flex;
