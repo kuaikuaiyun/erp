@@ -23,6 +23,7 @@
             @endif
             <div class="form-group"><label>开始日期</label><input type="date" class="form-control input-sm" name="date_from" value="{{ $inputDateFrom }}" required></div>
             <div class="form-group"><label>结束日期</label><input type="date" class="form-control input-sm" name="date_to" value="{{ $inputDateTo }}" required></div>
+            <div class="form-group"><label>统计时区</label><select class="form-control input-sm" name="timezone">@foreach($timezoneOptions as $value=>$label)<option value="{{$value}}" @selected($timezone===$value)>{{$label}}</option>@endforeach</select></div>
             <button class="btn btn-primary"><i class="fa fa-search"></i> 查询周报</button>
             <span class="weekly-range">{{ $dateFrom }} 至 {{ $dateTo }}</span>
         </form>

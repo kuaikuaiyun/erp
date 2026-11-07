@@ -16,12 +16,13 @@
 @endpush
 
 @section('content')
-<section class="content-header"><h1>运营报表 <small>默认展示 UTC-4 当前月份业绩</small></h1></section>
+<section class="content-header"><h1>运营报表 <small>按所选时区统计订单业绩</small></h1></section>
 <section class="content">
     <div class="box filter-box"><div class="box-body">
         <form class="op-toolbar" method="get" action="{{ route('operation.reports.index') }}">
             <div class="form-group"><label>开始日期</label><input class="form-control input-sm" type="date" name="date_from" value="{{ $dateFrom }}"></div>
             <div class="form-group"><label>结束日期</label><input class="form-control input-sm" type="date" name="date_to" value="{{ $dateTo }}"></div>
+            <div class="form-group"><label>统计时区</label><select class="form-control input-sm" name="timezone">@foreach($timezoneOptions as $value=>$label)<option value="{{$value}}" @selected($timezone===$value)>{{$label}}</option>@endforeach</select></div>
             @if($isBoss)<div class="form-group"><label>运营部门</label><select class="form-control input-sm" name="operation_department_id" onchange="var person=this.form.querySelector('[name=operator_user_id]');if(person){person.disabled=true;}this.form.submit()"><option value="">全部运营部门</option>@foreach($operationDepartments as $department)<option value="{{ $department->id }}" @selected($selectedDepartmentId === (int)$department->id)>{{ $department->name }}</option>@endforeach</select></div>@elseif($isReportDepartmentLeader && $viewerOperationDepartment)<div class="form-group"><label>运营部门</label><select class="form-control input-sm" disabled><option>{{ $viewerOperationDepartment->name }}</option></select></div>@endif
             @if($canSelectOperator)<div class="form-group"><label>运营人员</label><select class="form-control input-sm" name="operator_user_id"><option value="all" @selected($selectAllOperators)>全部运营人员</option>@foreach($operatorOptions as $option)<option value="{{ $option->id }}" @selected(!$selectAllOperators && $selectedOperator?->id === $option->id)>{{ $option->name ?: $option->username }}</option>@endforeach</select></div>@endif
             <button class="btn btn-primary btn-sm"><i class="fa fa-search"></i> 查询业绩</button>
@@ -117,7 +118,7 @@
     }
     $(document).on('click','.order-count-link',function(){
         var button=$(this), type=button.data('type'), modal=$('#orderDetailModal'), body=$('#orderDetailBody');
-        activeQuery={date:button.data('date'),shop_domain:button.data('domain'),media_source:button.data('media'),type:type,operator_user_id:Number(button.data('operator')||operatorId)};
+        activeQuery={date:button.data('date'),timezone:@json($timezone),shop_domain:button.data('domain'),media_source:button.data('media'),type:type,operator_user_id:Number(button.data('operator')||operatorId)};
         modal.modal('show'); loadOrders(1);
     });
     $(document).on('click','.detail-page-btn:not([disabled])',function(){loadOrders(Number($(this).data('page')));});
