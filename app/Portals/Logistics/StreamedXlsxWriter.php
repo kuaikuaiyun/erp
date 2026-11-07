@@ -18,8 +18,9 @@ class StreamedXlsxWriter
         array $columns,
         callable $rows,
         bool $showGridlines = true,
+        bool $plain = false,
     ): StreamedResponse {
-        return response()->streamDownload(function () use ($sheetName, $columns, $rows, $showGridlines): void {
+        return response()->streamDownload(function () use ($sheetName, $columns, $rows, $showGridlines, $plain): void {
             if (function_exists('set_time_limit')) {
                 @set_time_limit(0);
             }
@@ -31,7 +32,7 @@ class StreamedXlsxWriter
             }
 
             try {
-                $this->writeSheet($sheetPath, $columns, $rows, $showGridlines);
+                $this->writeSheet($sheetPath, $columns, $rows, $showGridlines, $plain);
                 $this->writeWorkbook($xlsxPath, $sheetPath, $sheetName);
 
                 $handle = fopen($xlsxPath, 'rb');
@@ -54,7 +55,7 @@ class StreamedXlsxWriter
      * @param list<array{label:string,width:float|int}> $columns
      * @param callable():iterable<array{kind?:string,height?:float|int,outline?:int,mergeDown?:array<int,int>,mergeAcross?:array<int,int>,cells:list<array{value:mixed,type?:string,align?:string,wrap?:bool}>}> $rows
      */
-    private function writeSheet(string $path, array $columns, callable $rows, bool $showGridlines): int
+    private function writeSheet(string $path, array $columns, callable $rows, bool $showGridlines, bool $plain): int
     {
         $handle = fopen($path, 'wb');
         if ($handle === false) {
@@ -63,20 +64,22 @@ class StreamedXlsxWriter
 
         fwrite($handle, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>');
         fwrite($handle, '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">');
-        fwrite($handle, '<sheetViews><sheetView workbookViewId="0" showGridLines="'.($showGridlines ? '1' : '0').'">');
-        fwrite($handle, '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>');
-        fwrite($handle, '</sheetView></sheetViews>');
+        if (! $plain) {
+            fwrite($handle, '<sheetViews><sheetView workbookViewId="0" showGridLines="'.($showGridlines ? '1' : '0').'">');
+            fwrite($handle, '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>');
+            fwrite($handle, '</sheetView></sheetViews>');
+        }
         fwrite($handle, '<cols>');
         foreach ($columns as $index => $column) {
             $number = $index + 1;
             $width = max(1, (float) $column['width']);
             fwrite($handle, '<col min="'.$number.'" max="'.$number.'" width="'.$width.'" customWidth="1"/>');
         }
-        fwrite($handle, '</cols><sheetData>');
+        fwrite($handle, '</cols>');
 
-        fwrite($handle, '<row r="1" ht="26" customHeight="1">');
+        fwrite($handle, $plain ? '<sheetData><row r="1">' : '<sheetData><row r="1" ht="26" customHeight="1">');
         foreach ($columns as $index => $column) {
-            fwrite($handle, $this->stringCell($this->columnName($index + 1).'1', (string) $column['label'], 1));
+            fwrite($handle, $this->stringCell($this->columnName($index + 1).'1', (string) $column['label'], $plain ? 0 : 1));
         }
         fwrite($handle, '</row>');
 
@@ -87,7 +90,7 @@ class StreamedXlsxWriter
                 ? (string) ($row['kind'] ?? 'normal')
                 : 'normal';
             $attributes = ' r="'.$rowNumber.'"';
-            if (isset($row['height'])) {
+            if (! $plain && isset($row['height'])) {
                 $attributes .= ' ht="'.max(1, (float) $row['height']).'" customHeight="1"';
             }
             if (($row['outline'] ?? 0) > 0) {
@@ -117,7 +120,7 @@ class StreamedXlsxWriter
                 $cell = $row['cells'][$index] ?? ['value' => ''];
                 $reference = $this->columnName($index + 1).$rowNumber;
                 $type = (string) ($cell['type'] ?? 'text');
-                $style = $this->styleIndex(
+                $style = $plain ? 0 : $this->styleIndex(
                     $kind,
                     $type,
                     (string) ($cell['align'] ?? 'left'),

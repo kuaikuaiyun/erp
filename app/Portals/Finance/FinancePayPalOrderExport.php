@@ -6,7 +6,7 @@ class FinancePayPalOrderExport
 {
     public const PAGE_HEADERS = ['编号', 'Shopify订单号', 'Shopify订单ID', '通途订单号', '交易号', '账单号',
         '关联状态', '店铺名称', '店铺域名', '登录地址', '使用人', '所属团队', '加购', '订阅类型', '订阅状态',
-        '订阅复购原订单ID', 'PCL', '原始SKU', '通途SKU', '数量', '商品重量（克）', '包裹重量（克）', '配货名称',
+        '订阅复购原订单ID', 'PCL', '原始SKU', '通途SKU', '数量', '商品重量（克）', '包裹重量（克）', '商品大类',
         '支付状态', '交易类型', '支付渠道', '收款账号', '收款账号邮箱', '币种', '金额', '手续费', '净额',
         '实付金额', '运费', '入库时间', '下单时间', '付款时间', 'PayPal实际退款', '信用卡实际退款',
         '买家名称', 'Email', '国家/地区', '物流公司', '物流单号', '物流状态', '数据状态', '交易分类', '交易时间', '查看时区'];
@@ -35,7 +35,7 @@ class FinancePayPalOrderExport
         $get = static fn ($key, $fallback = '') => $order->{$key} ?? $fallback;
         $date = static fn ($value) => $value ? \Carbon\CarbonImmutable::parse($value, 'UTC')->setTimezone($timezone)->format('Y-m-d H:i:s') : '';
         $upsell = $metadata['upsell'] ?? ($payload['是否加购'] ?? '');
-        $products = self::productItems($items, $fields[18], $dataset === 'paypal-orders'
+        $products = self::productItems($items, $fields[18] ?: ($order->tongtu_product_name ?? ''), $dataset === 'paypal-orders'
             ? (string) ($payload[$definition['headers'][28]] ?? '') : (string) $fields[28]);
         $productColumns = self::productColumns($products);
 
@@ -74,7 +74,7 @@ class FinancePayPalOrderExport
             fn ($item) => $item->tongtu_sku ?? '', fn ($item) => $item->quantity ?? '',
             fn ($item) => ($item->sale_weight_gram ?? null) ?: ($item->tongtu_goods_weight_gram ?? ''),
             fn ($item) => $item->tongtu_package_weight_gram ?? '',
-            fn ($item) => ($item->tongtu_product_name ?? null) ?: ($item->product_title ?? ''),
+            fn ($item) => FinanceProductNames::categories(FinanceProductNames::item($item)),
         ];
         return array_map(fn ($get, $index) => $items->map(function ($item) use ($get, $index) {
             $value = $get($item);
@@ -108,7 +108,7 @@ class FinancePayPalOrderExport
         'tongtu_order_number' => '通途订单号', 'store_name' => '店铺名称', 'source_shop_domain' => '店铺域名',
         'subscription_type' => '订阅类型（关联订单）', 'subscription_status' => '订阅状态',
         'subscription_origin_order_id' => '订阅复购原订单ID', 'is_add_on' => '是否加购（关联订单）',
-        'tongtu_sku' => '通途SKU', 'tongtu_product_name' => '出单产品名称',
+        'tongtu_sku' => '通途SKU', 'tongtu_product_name' => '出单商品大类',
         'sale_quantity' => '出单数量', 'sale_product_weight' => '商品重量',
         'payment_gateway' => '支付渠道', 'paid_amount_usd' => '实付金额（美元）',
         'total_shipping_usd' => '运费（美元）', 'order_created_at' => '订单创建时间', 'paid_at' => '支付时间',
@@ -127,12 +127,15 @@ class FinancePayPalOrderExport
                         '通途SKU: '.($item->tongtu_sku ?? ''), '数量: '.($item->quantity ?? ''),
                         '商品重量: '.(($item->sale_weight_gram ?? null) ?: ($item->tongtu_goods_weight_gram ?? '')),
                         '包裹重量: '.($item->tongtu_package_weight_gram ?? ''),
-                        '配货: '.(($item->tongtu_product_name ?? null) ?: ($item->product_title ?? '')),
+                        '商品大类: '.FinanceProductNames::categories(FinanceProductNames::item($item)),
                     ]);
                 }
                 return implode("\n", $lines);
             }
             $value = $order->{$field} ?? null;
+            if ($field === 'tongtu_product_name') {
+                return FinanceProductNames::categories((string) $value);
+            }
             if ($field === 'is_add_on' && $value !== null && $value !== '') {
                 return in_array(strtolower((string) $value), ['1', 'true', 'yes', '是', '加购'], true) ? '加购' : '未加购';
             }

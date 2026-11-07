@@ -18,7 +18,7 @@
                     <div class="form-group finance-activity-account"><label>{{ __('finance.fields.account') }}</label><p data-activity-account-name></p></div>
                     <div class="form-group"><label for="activity-sync-from">{{ __('finance.fields.from') }}</label><input id="activity-sync-from" type="date" name="from" class="form-control" value="{{ $filters['from'] }}" required></div>
                     <div class="form-group"><label for="activity-sync-to">{{ __('finance.fields.to') }}</label><input id="activity-sync-to" type="date" name="to" class="form-control" value="{{ $filters['to'] }}" required></div>
-                    <div class="form-group"><label for="activity-sync-timezone">{{ __('finance.fields.source_timezone') }}</label><select id="activity-sync-timezone" name="timezone" class="form-control">@foreach(\App\Portals\Finance\FinanceWorkbookService::TIMEZONES as $timezone)<option @selected($timezone === $filters['timezone'])>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($timezone)) }}</option>@endforeach</select></div>
+                    <div class="form-group"><label for="activity-sync-timezone">{{ __('finance.fields.source_timezone') }}</label><select id="activity-sync-timezone" name="timezone" class="form-control">@include('portals.finance.partials.timezone-options', ['selectedTimezone' => $filters['timezone']])</select></div>
                     <div class="form-group"><label><input type="checkbox" name="export_after_sync" value="1"> {{ __('finance.activity.export_after_sync') }}</label><button class="btn btn-primary" data-activity-sync-submit disabled>{{ __('finance.sync.sync') }}</button></div>
                 </form>
             </div></div>

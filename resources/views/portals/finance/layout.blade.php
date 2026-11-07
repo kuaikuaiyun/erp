@@ -23,7 +23,7 @@
 @endsection
 
 @push('scripts')
-<script src="{{ asset('assets/erp/finance-export-selection.js') }}?v=1"></script>
+<script src="{{ asset('assets/erp/finance-export-selection.js') }}?v=2"></script>
 <script>
 document.addEventListener('change', function (event) {
     var select = event.target;
@@ -41,6 +41,7 @@ document.addEventListener('click', function (event) {
     var url = new URL(form.action || window.location.href, window.location.href);
     url.search = new URLSearchParams(new FormData(form)).toString();
     url.searchParams.set('download', '1');
+    form.dispatchEvent(new CustomEvent('finance:prepare-export', {detail: url.searchParams}));
     window.location.assign(url.toString());
 });
 document.querySelectorAll('[data-finance-notice]').forEach(function (notice) {

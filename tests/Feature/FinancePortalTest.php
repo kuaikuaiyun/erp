@@ -619,7 +619,9 @@ class FinancePortalTest extends TestCase
         foreach (['xls', 'xlsx'] as $format) {
             $sheet = $this->readDownload($this->get('/finance/reports/paypal-settlement?download=1&format='.$format)->assertOk()->streamedContent());
             $this->assertSame(2, $sheet->getHighestDataRow());
-            $this->assertSame('记录ID', $sheet->getCell('A1')->getValue());
+            $this->assertSame('Shopify订单号', $sheet->getCell('A1')->getValue());
+            $this->assertSame('应结算（USD）', $sheet->getCell('E1')->getValue());
+            $this->assertSame('日期', $sheet->getCell('K1')->getValue());
         }
         $this->user->manage = false;
         $this->post('/finance/reports/paypal-settlement/save', ['id' => $record->id, ...$values])->assertForbidden();
@@ -689,7 +691,10 @@ class FinancePortalTest extends TestCase
         }
         $page->assertDontSee('原始交易与计算结果（只读）');
         DB::table('finance_payment_transactions')->insert(['payment_account_id' => $account->id, 'finance_record_id' => $record->id, 'transaction_id' => $record->reference, 'event_code' => 'T0006', 'raw_payload' => '{}']);
-        $this->post('/finance/reports/paypal-settlement/save', $values)->assertSessionHasNoErrors();
+        $listFilters = ['from' => '2026-11-01', 'timezone' => 'UTC', 'per_page' => 20, 'page' => 2];
+        $this->post(route('finance.settlement.save', ['report' => 'paypal-settlement', ...$listFilters]), $values)
+            ->assertSessionHasNoErrors()
+            ->assertRedirect(route('finance.report', ['report' => 'paypal-settlement', ...$listFilters]));
         $updated = $record->fresh();
         $this->assertSame('EDITED-ID', $updated->reference);
         $this->assertSame($target->activity_account, $updated->account);
@@ -742,7 +747,10 @@ class FinancePortalTest extends TestCase
 
     public function test_settlement_editor_saves_all_supplement_text_fields(): void
     {
-        $this->workbooks->importRecords('paypal-orders', [2 => $this->recordRow()], 'A', 'UTC', 1);
+        $this->workbooks->importRecords('paypal-orders', [2 => [
+            ...$this->recordRow(), '收件人電郵地址' => 'recipient@example.test', '收據 ID' => 'RECEIPT-123',
+            '選項 1 名稱' => '颜色', '選項 1 的值' => '蓝色', '新增日期' => '2026-09-09',
+        ]], 'A', 'UTC', 1);
         $record = FinanceRecord::sole();
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
         $page = $this->get('/finance/reports/paypal-settlement')->assertOk();
@@ -759,6 +767,10 @@ class FinancePortalTest extends TestCase
         }
         $this->post('/finance/reports/paypal-settlement/save', ['id' => $record->id, 'owner' => str_repeat('a', 192)])->assertSessionHasErrors('owner');
         $this->assertSame('手动使用人', $service->rows('paypal', [])->sole()['owner']);
+        $this->get('/finance/reports/paypal-settlement/records/'.$record->id)->assertOk()
+            ->assertSeeText(['0000123', 'MANUAL-TXN', '10.00', '财务记录', '查看全部流水字段（43 项）',
+                '收件人电邮地址', 'recipient@example.test', '收据 ID', 'RECEIPT-123', '选项 1 名称', '颜色', '蓝色', '2026-09-09'])
+            ->assertDontSeeText(['收件人電郵地址', '收據 ID', '選項 1 名稱']);
     }
 
     public function test_settlement_delete_removes_reports_but_preserves_orders_and_checks_locks_and_permissions(): void
@@ -819,8 +831,33 @@ class FinancePortalTest extends TestCase
         $template = $this->readDownload($this->get('/finance/reports/paypal-settlement?template=1')->assertOk()->streamedContent());
         $this->assertSame(array_values($service->columns('paypal')), $template->toArray()[0]);
         $sheet = $this->readDownload($this->get('/finance/reports/paypal-settlement?download=1')->assertOk()->streamedContent());
-        $this->assertSame($actual, $sheet->rangeToArray('A1:AP1')[0]);
-        $refundColumn = array_search('退款金额', $actual, true) + 1;
+        $headers = $sheet->toArray()[0];
+        $page = $this->get('/finance/reports/paypal-settlement')->assertOk()->assertSee('按当前列表导出');
+        $this->assertSame(array_values($page->viewData('columns')), $headers);
+        $this->assertSame(['Shopify订单号', '交易 ID', '支付账户', '当前订单状态', '应结算（USD）',
+            '未解除冻结（USD）', '核对说明', '偏好设定 Txn ID', '关联号类型', '记录ID', '日期'],
+            array_slice($headers, 0, 11));
+        $this->assertNotContains('商品大类', $headers);
+        $this->assertSame('0000123', $sheet->getCell('B2')->getValue());
+        $this->assertEquals(FinanceRecord::sole()->id, $sheet->getCell('J2')->getValue());
+        $this->assertSame('2026-09-08', $sheet->getCell('K2')->getValue());
+        $this->assertSame(1, $sheet->getParent()->getSheetCount());
+        $legacyContent = $this->get('/finance/reports/paypal-settlement?download=1&format=xls')->assertOk()->streamedContent();
+        $legacy = $this->readDownload($legacyContent);
+        $this->assertSame($headers, $legacy->toArray()[0]);
+        $this->assertSame($sheet->calculateWorksheetDimension(), $sheet->getAutoFilter()->getRange());
+        // The XLS reader does not expose AutoFilter. Check the BIFF record written for all columns.
+        $this->assertStringContainsString(pack('vvv', 0x009D, 2, count($headers)), $legacyContent);
+        foreach ([$sheet, $legacy] as $export) {
+            $this->assertEmpty($export->getFreezePane());
+            $statusColumn = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex(array_search('当前订单状态', $headers, true) + 1);
+            $this->assertGreaterThanOrEqual(44, $export->getColumnDimension($statusColumn)->getWidth());
+            $this->assertGreaterThanOrEqual(38, $export->getColumnDimension('B')->getWidth());
+            $this->assertFalse($export->getStyle('A1')->getFont()->getBold());
+            $this->assertSame('none', $export->getStyle('A1')->getFill()->getFillType());
+            $this->assertSame('none', $export->getStyle('A1')->getBorders()->getBottom()->getBorderStyle());
+        }
+        $refundColumn = array_search('退款金额', $headers, true) + 1;
         $sheet->setCellValue([$refundColumn, 2], '2.50');
         $this->post('/finance/reports/paypal-settlement/import', ['file' => $this->upload($sheet->getParent())])->assertRedirect()->assertSessionHasNoErrors();
         $this->assertNull($service->rows('paypal', [])->first()['refund']);
@@ -829,6 +866,198 @@ class FinancePortalTest extends TestCase
         $this->post('/finance/reports/paypal-settlement/import', ['file' => $this->upload($book)])->assertRedirect()->assertSessionHasNoErrors();
         $this->assertNull($service->rows('paypal', [])->first()['refund']);
         $this->assertDatabaseCount('finance_records', 1);
+    }
+
+    public function test_paypal_settlement_groups_payments_and_exports_current_state_with_event_exchange_rates(): void
+    {
+        Schema::create('logistics_orders', function (Blueprint $table): void {
+            $table->id();
+            $table->string('transaction_id');
+            $table->string('shopify_order_number')->nullable();
+            $table->string('bill_number')->nullable();
+        });
+        DB::table('logistics_orders')->insert(['transaction_id' => 'PAY-CAD', 'bill_number' => 'BILL-CAD']);
+        $account = $this->financePayPalAccount('PayPal结算测试');
+        DB::table('finance_transaction_types')->updateOrInsert(['raw_type' => 'T0006'], ['category' => '结账付款']);
+        $sync = app(\App\Portals\Finance\FinancePayPalSyncService::class);
+        $add = function ($id, $code, $day, $currency, $amount, $status = 'S', $parent = '', $fee = null, $invoice = '', $referenceType = 'TXN', $paymentAccount = null) use ($account, $sync): void {
+            $paymentAccount ??= $account;
+            $info = [
+                'transaction_id' => $id, 'transaction_event_code' => $code,
+                'transaction_initiation_date' => $day.'T12:00:00Z', 'transaction_status' => $status,
+                'transaction_amount' => ['value' => $amount, 'currency_code' => $currency], 'invoice_id' => $invoice,
+                'paypal_reference_id' => $parent, 'paypal_reference_id_type' => $referenceType,
+            ];
+            if ($fee !== null) {
+                $info['fee_amount'] = ['value' => $fee, 'currency_code' => $currency];
+            }
+            if ($id === 'PAY-CAD') {
+                $info['transaction_updated_date'] = '2026-09-18T12:05:00Z';
+                $info['transaction_note'] = '核对样本附注';
+                $info['ending_balance'] = ['value' => '100.20', 'currency_code' => 'CAD'];
+            }
+            $raw = ['transaction_info' => $info];
+            if ($id === 'PAY-CAD') {
+                $raw['shipping_info']['address'] = ['line1' => '42 Sample Street', 'country_code' => 'CA'];
+                $raw['cart_info']['item_details'] = [['item_name' => '样本商品', 'item_code' => 'ITEM-123', 'item_quantity' => '2']];
+            }
+            $entry = $sync->transaction($paymentAccount, $raw, 1);
+            $record = FinanceRecord::create($entry['record']);
+            DB::table('finance_payment_transactions')->insert([
+                'payment_account_id' => $paymentAccount->id, 'finance_record_id' => $record->id,
+                'transaction_id' => $id, 'event_code' => $code, 'raw_payload' => json_encode($entry['raw']),
+            ]);
+        };
+        $add('PAY-CAD', 'T0006', '2026-09-18', 'CAD', '59.25', parent: 'ORIGINAL-TXN', fee: '-2.91');
+        $add('PAY-USD', 'T0006', '2026-09-19', 'USD', '10', parent: 'APPROVAL-ID', invoice: 'BILL-CAD', referenceType: 'PAP');
+        $add('PAY-OTHER', 'T0006', '2026-09-20', 'CAD', '15');
+        $add('FX-PAY-CAD', 'T0200', '2026-09-18', 'CAD', '-56.34', parent: 'PAY-CAD');
+        $add('FX-PAY-USD', 'T0200', '2026-09-18', 'USD', '38.99', parent: 'PAY-CAD');
+        $add('DISPUTE', 'T1110', '2026-10-06', 'CAD', '-56.34', 'P', 'PAY-CAD');
+        $add('DISPUTE', 'T1111', '2026-10-06', 'CAD', '56.34', 'D', 'PAY-CAD');
+        $add('FX-HOLD-USD', 'T0200', '2026-10-06', 'USD', '-39.67', parent: 'DISPUTE');
+        $add('FX-HOLD-CAD', 'T0200', '2026-10-06', 'CAD', '56.34', parent: 'DISPUTE');
+        $add('FX-RELEASE-CAD', 'T0200', '2026-10-15', 'CAD', '-56.34', parent: 'DISPUTE');
+        $add('FX-RELEASE-USD', 'T0200', '2026-10-15', 'USD', '39.67', parent: 'DISPUTE');
+        $add('REFUND', 'T1201', '2026-10-15', 'CAD', '-59.25', parent: 'PAY-CAD');
+        $add('FX-REFUND-USD', 'T0200', '2026-10-15', 'USD', '-41.58', parent: 'REFUND');
+        $add('FX-REFUND-CAD', 'T0200', '2026-10-15', 'CAD', '59.25', parent: 'REFUND');
+        $add('DISPUTE-FEE', 'T0114', '2026-10-16', 'CAD', '-10', parent: 'PAY-CAD');
+        $add('FX-FEE-USD', 'T0200', '2026-10-16', 'USD', '-7.26', parent: 'PAY-CAD');
+        $add('FX-FEE-CAD', 'T0200', '2026-10-16', 'CAD', '10', parent: 'PAY-CAD');
+        $add('UNLINKED-REFUND', 'T1201', '2026-10-17', 'USD', '-10', parent: 'MISSING-PAYMENT');
+        $add('RELATED-OTHER-EVENT', 'T0403', '2026-10-18', 'USD', '-20', parent: 'PAY-CAD');
+        $add('UNRELATED-OTHER-EVENT', 'T0403', '2026-10-18', 'USD', '-20', parent: 'MISSING-PAYMENT');
+
+        $url = '/finance/reports/paypal-settlement?from=2026-09-01&to=2026-09-30';
+        $page = $this->get($url)->assertOk()->assertSee('data-view-settlement')
+            ->assertDontSee('FX-RELEASE-USD')->assertDontSee('金额依据')->assertDontSee('amount_source');
+        $rows = $page->viewData('rows');
+        $this->assertSame(2, $rows->total());
+        $order = $rows->getCollection()->firstWhere('reference', 'PAY-USD、PAY-CAD');
+        $this->assertSame('', $order['shopify_order_number']);
+        $this->assertSame('APPROVAL-ID、ORIGINAL-TXN', $order['paypal_12']);
+        $this->assertSame('PAP、TXN', $order['paypal_reference_type']);
+        $this->assertArrayNotHasKey('events', $order);
+        $this->assertCount(2, $order['payments']);
+        $this->assertSame('已付款 · 部分退款 · 冻结已解除', $order['order_status']);
+        $this->assertSame('39.67000000', $order['dispute_hold']);
+        $this->assertSame('41.58000000', $order['refund']);
+        $this->assertSame('0.15000000', $order['payable']);
+        $other = $rows->getCollection()->firstWhere('reference', 'PAY-OTHER');
+        $this->assertNull($other['payable']);
+        $this->assertSame('', $other['paypal_12']);
+        $this->assertSame('', $other['paypal_reference_type']);
+
+        $detailUrl = '/finance/reports/paypal-settlement/records/'.$order['id'].'?timezone=Asia/Shanghai';
+        $detail = $this->get($detailUrl)->assertOk()
+            ->assertSee('FX-RELEASE-USD')->assertSee('REFUND')->assertSee('APPROVAL-ID')
+            ->assertSee('PAY-USD')->assertSee('PAY-CAD')->assertSee('data-edit-settlement')
+            ->assertSeeText(['原交易号', '关联交易号', '关联号类型', '原币', '原币金额', '原币手续费', '美元金额', '美元汇率', '美元来源', '-2.91'])
+            ->assertSeeText(['原币净额', '56.34', '美元净额', '账单号', 'BILL-CAD', 'Asia/Shanghai', 'T0403', '仅供核对'])
+            ->assertSeeText(['查看全部流水字段（43 项）', '2026-09-18 20:05:00', '核对样本附注', 'CAD 100.20',
+                '物品标题', '样本商品', 'ITEM-123', '42 Sample Street'])
+            ->assertSee('RELATED-OTHER-EVENT')->assertDontSee('UNRELATED-OTHER-EVENT')
+            ->assertSee('0.15')->assertDontSee('PAY-OTHER');
+        foreach ($detail->viewData('row')['events'] as $event) {
+            $this->assertCount(43, array_merge(...array_values($event['fields'])));
+            $this->assertSame('—', $event['fields']['联系人与配送']['收件人电邮地址']);
+        }
+        $this->get(str_replace('Asia/Shanghai', '-04:00', $detailUrl))->assertOk()
+            ->assertSeeText(['2026-09-18 08:00:00', '2026-09-18 08:05:00']);
+        $this->user->manage = false;
+        $this->get($url)->assertOk()->assertSee('data-view-settlement=');
+        $this->get($detailUrl)->assertOk()->assertDontSee('data-edit-settlement');
+        $this->user->manage = true;
+        $unlinkedId = DB::table('finance_payment_transactions')->where('transaction_id', 'UNLINKED-REFUND')->value('finance_record_id');
+        $this->get('/finance/reports/paypal-settlement/records/'.$unlinkedId)->assertOk()
+            ->assertSee('UNLINKED-REFUND')->assertSee('待关联交易')->assertSee('待核对');
+        $this->get('/finance/reports/paypal-settlement/records/999999')->assertNotFound();
+
+        $this->get($url.'&reference=REFUND')->assertOk()->assertViewHas('rows', fn ($rows) => $rows->total() === 1);
+        $sheet = $this->readDownload($this->get($url.'&download=1&reference=REFUND')->assertOk()->streamedContent())->toArray();
+        $this->assertCount(2, $sheet);
+        $this->assertNotContains('金额依据', $sheet[0]);
+        $this->assertSame(0.15, (float) $sheet[1][array_search('应结算（USD）', $sheet[0], true)]);
+        $this->assertSame($order['order_status'], $sheet[1][array_search('当前订单状态', $sheet[0], true)]);
+        $this->assertSame($order['paypal_12'], $sheet[1][array_search('偏好设定 Txn ID', $sheet[0], true)]);
+        $this->assertSame($order['paypal_reference_type'], $sheet[1][array_search('关联号类型', $sheet[0], true)]);
+
+        $release = DB::table('finance_payment_transactions')->where('transaction_id', 'FX-RELEASE-USD');
+        $payload = json_decode($release->value('raw_payload'), true);
+        $payload['transaction_info']['transaction_amount']['value'] = '40.00';
+        $release->update(['raw_payload' => json_encode($payload)]);
+        $after = $this->get($url.'&reference=REFUND')->assertOk()->viewData('rows')->first();
+        $this->assertSame('39.67000000', $after['dispute_hold']);
+        $this->assertSame('40.00000000', $after['dispute_release']);
+        $this->assertSame('0.00000000', $after['open_hold']);
+        $this->assertSame('0.48000000', $after['payable']);
+        $this->get($detailUrl)->assertOk()->assertViewHas('row', fn ($row) => $row['payable'] === $after['payable']);
+
+        $otherAccount = $this->financePayPalAccount('另一 PayPal 账户');
+        $add('PAY-USD', 'T0006', '2026-09-19', 'USD', '10', paymentAccount: $otherAccount);
+        $this->get($detailUrl)->assertOk()->assertViewHas('row', fn ($row) => $row['payable'] === null);
+    }
+
+    public function test_settlement_custom_export_order_applies_to_selected_rows_and_blank_templates(): void
+    {
+        $this->workbooks->importRecords('paypal-orders', [
+            2 => $this->recordRow(),
+            3 => [...$this->recordRow(), '交易 ID' => 'SECOND-TRANSACTION'],
+        ], 'A', 'UTC', 1);
+        $url = '/finance/reports/paypal-settlement';
+        $selectedId = FinanceRecord::where('reference', '0000123')->sole()->id;
+        $page = $this->get($url)->assertOk()->assertSee('列与导出设置')->assertSee('下载空白模板')->assertSee('比较方式')
+            ->assertDontSee('name="product_name_mode"', false);
+        $parameters = ['download' => 1, 'export_columns' => ['order_status', 'reference', 'paypal_18']];
+        $selection = [\App\Portals\Finance\FinanceExportSelection::key(['id' => $selectedId])];
+        $defaultSelected = $this->readDownload($this->get($url.'?'.http_build_query(['download' => 1, 'selected_rows' => $selection]))
+            ->assertOk()->streamedContent())->toArray();
+        $this->assertSame(array_values($page->viewData('columns')), $defaultSelected[0]);
+        $this->assertCount(2, $defaultSelected);
+        $this->assertSame('0000123', $defaultSelected[1][1]);
+        $filtered = $this->readDownload($this->get($url.'?'.http_build_query($parameters))->assertOk()->streamedContent())->toArray();
+        $selected = $this->readDownload($this->get($url.'?'.http_build_query([...$parameters, 'selected_rows' => $selection]))
+            ->assertOk()->streamedContent())->toArray();
+        $this->assertSame(['当前订单状态', '交易 ID', '商品大类'], $filtered[0]);
+        $this->assertCount(3, $filtered);
+        $this->assertCount(2, $selected);
+        $this->assertSame($filtered[0], $selected[0]);
+        $this->assertSame('0000123', $selected[1][1]);
+        $template = $this->readDownload($this->get($url.'?'.http_build_query([...$parameters, 'export_template' => 1]))
+            ->assertOk()->streamedContent())->toArray();
+        $this->assertSame([['当前订单状态', '交易 ID', '商品大类']], $template);
+        $withoutProduct = $this->readDownload($this->get($url.'?'.http_build_query([...$parameters, 'export_columns' => ['reference']]))
+            ->assertOk()->streamedContent())->toArray();
+        $this->assertSame(['交易 ID'], $withoutProduct[0]);
+        foreach ([['reference', 'reference'], ['unknown_field']] as $invalid) {
+            $this->getJson($url.'?'.http_build_query([...$parameters, 'export_columns' => $invalid]))->assertUnprocessable();
+        }
+    }
+
+    public function test_settlement_imports_only_template_headers_in_their_original_order(): void
+    {
+        $workbook = new Spreadsheet;
+        $workbook->getActiveSheet()->fromArray([
+            ['财务对账专用模板'],
+            ['應結算', '交易號', '物品標題', '自定义字段', '交易 ID', '當前訂單狀態'],
+            ['=1+1', '不应导入的交易', '不应导入的商品'],
+        ]);
+        $url = '/finance/reports/paypal-settlement/export-template/preview';
+        $this->user->manage = false;
+        $result = $this->post($url, ['file' => $this->upload($workbook), 'header_row' => 2], ['Accept' => 'application/json'])
+            ->assertOk()->assertExactJson([
+                'fields' => ['payable', 'reference', 'paypal_18', 'order_status'],
+                'unmatched' => ['自定义字段'],
+                'duplicates' => ['交易 ID'],
+            ])->json();
+        $csv = UploadedFile::fake()->createWithContent('columns.csv', "\xEF\xBB\xBF支付账户,交易 ID,商品名称\r\n");
+        $this->post($url, ['file' => $csv, 'header_row' => 1], ['Accept' => 'application/json'])->assertOk()
+            ->assertExactJson(['fields' => ['account', 'reference', 'paypal_18'], 'unmatched' => [], 'duplicates' => []]);
+        $this->assertDatabaseCount('finance_records', 0);
+        $query = http_build_query(['download' => 1, 'export_template' => 1, 'export_columns' => $result['fields']]);
+        $sheet = $this->readDownload($this->get('/finance/reports/paypal-settlement?'.$query)->assertOk()->streamedContent());
+        $this->assertSame([['应结算（USD）', '交易 ID', '商品大类', '当前订单状态']], $sheet->toArray());
     }
 
     public function test_both_supplied_supplement_templates_match_by_transaction_and_order_numbers(): void
@@ -945,7 +1174,7 @@ class FinancePortalTest extends TestCase
     {
         $account = $this->financePayPalAccount('模板账户', ['account_type' => 'credit_card']);
         $headers = array_slice(\App\Portals\Finance\FinanceCatalog::dataset('xuzong2-details')['headers'], 0, 16);
-        $headers = [...$headers, '时间点', '导出时区', '结算金额'];
+        $headers = [...$headers, '时间点', '导出时区', '结算金额', '应结算'];
         $book = new Spreadsheet;
         $book->getActiveSheet()->fromArray($headers, null, 'A1');
         foreach (['SUCCESS', 'FAILED'] as $index => $status) {
@@ -953,7 +1182,7 @@ class FinancePortalTest extends TestCase
             $row = [...$row, '平台订单号' => 'TEMPLATE-'.$index, '商户订单号' => 'ORDER-'.$index,
                 '交易币种' => 'HKD', '交易金额' => '80', '支付状态' => $status,
                 '创建时间' => '2026-11-01 08:30:00', '时间点' => '2026-10-31 16:30:00', '导出时区' => '-8',
-                '结算金额' => $index === 0 ? '10' : ''];
+                '结算金额' => $index === 0 ? '10' : '', '应结算' => '=1+2'];
             $book->getActiveSheet()->fromArray([array_values($row)], null, 'A'.($index + 2));
         }
         foreach ([1, 2] as $pass) {
@@ -999,7 +1228,7 @@ class FinancePortalTest extends TestCase
         foreach ([1, 2] as $pass) {
             $file = new UploadedFile($path, 'statement.xlsx', null, null, true);
             $this->post('/finance/reports/credit-settlement/import', ['file' => $file,
-                'account' => $account->activity_account, 'import_month' => '2026-08'])
+                'account' => $account->activity_account])
                 ->assertRedirect()->assertSessionHasNoErrors();
             $actual = FinanceRecord::count();
             $this->assertGreaterThan(0, $actual);
@@ -1011,28 +1240,36 @@ class FinancePortalTest extends TestCase
         fwrite(STDERR, 'Verified statement: '.$count.' distinct records; repeat import is idempotent.'.PHP_EOL);
     }
 
-    public function test_manual_credit_template_creates_and_updates_order_pairs_in_selected_month(): void
+    public function test_manual_credit_template_derives_month_from_order_time(): void
     {
         $account = $this->financePayPalAccount('手动账户', ['account_type' => 'credit_card']);
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
-        $headers = array_values($service->importFields('credit_card'));
+        $headers = [...array_values($service->importFields('credit_card')), '交易时间', '交易币种', '支付状态', '年月'];
         $book = new Spreadsheet;
         $sheet = $book->getActiveSheet()->setTitle('徐总支付导入模版');
         $sheet->fromArray($headers, null, 'A1');
         foreach (['A' => '9.5', 'B' => '19.5'] as $merchant => $amount) {
             $row = array_fill_keys($headers, '');
             $row['商户订单号'] = $merchant; $row['平台订单号'] = 'SHARED'; $row['结算金额'] = $amount;
+            $row['交易币种'] = 'USD'; $row['支付状态'] = 'SUCCESS'; $row['年月'] = '2026-12';
             $sheet->fromArray([array_values($row)], null, $merchant === 'A' ? 'A2' : 'A3');
         }
+        $this->post('/finance/reports/credit-settlement/import', ['file' => $this->upload($book),
+            'account' => $account->activity_account, 'import_month' => '2026-12'])
+            ->assertSessionHasErrors(['file' => '第2行缺少订单时间，请填写交易时间或创建时间后再导入。']);
+        $this->assertDatabaseCount('finance_records', 0);
+        $dateColumn = array_search('交易时间', $headers, true) + 1;
+        $sheet->setCellValue([$dateColumn, 2], '2026-11-04 12:00:00');
+        $sheet->setCellValue([$dateColumn, 3], '2026-11-05 12:00:00');
         foreach ([1, 2] as $attempt) {
             $this->post('/finance/reports/credit-settlement/import', ['file' => $this->upload($book),
-                'account' => $account->activity_account, 'import_month' => '2026-11'])
+                'account' => $account->activity_account])
                 ->assertRedirect()->assertSessionHasNoErrors();
             $this->assertDatabaseCount('finance_records', 2);
         }
         $rows = $service->rows('credit_card', []);
         $this->assertCount(2, $rows);
-        $this->assertTrue($rows->every(fn ($row) => $row['date'] === '' && $row['month'] === '2026-11'));
+        $this->assertTrue($rows->every(fn ($row) => $row['date'] !== '' && $row['month'] === '2026-11'));
         $this->assertEqualsCanonicalizing(['9.5', '19.5'], $rows->pluck('settlement')->all());
         $url = '/finance/reports/summary?view=transactions&channel=credit_card';
         $this->get($url)->assertOk()->assertViewHas('creditMonths', ['2026-11'])
@@ -1714,15 +1951,28 @@ class FinancePortalTest extends TestCase
         $second['交易 ID'] = 'boundary';
         $second['日期'] = '2026-09-09';
         $second['時間'] = '00:00:00';
-        $this->workbooks->importRecords('paypal-orders', [2 => $first, 3 => $second], 'A', '-08:00', 1);
-        $query = http_build_query(['from' => '2026-09-08', 'to' => '2026-09-08', 'timezone' => '-08:00']);
-        $this->get('/finance/records/paypal-orders?'.$query)->assertOk()->assertViewHas('records', fn ($rows) => $rows->total() === 1);
+        $this->workbooks->importRecords('paypal-orders', [2 => $first, 3 => $second], 'A', '-04:00', 1);
+        $query = http_build_query(['from' => '2026-09-08', 'to' => '2026-09-08', 'timezone' => '-04:00']);
+        $this->get('/finance/records/paypal-orders?'.$query)->assertOk()
+            ->assertViewHas('records', fn ($rows) => $rows->total() === 1)
+            ->assertSee('value="-04:00" selected', false)->assertSeeText(['UTC-04:00', '美国东部时间', 'UTC+05:45']);
+        $record = FinanceRecord::where('reference', '0000123')->sole();
+        $this->get('/finance/records/paypal-orders?order_detail='.$record->id.'&timezone=-04:00')
+            ->assertOk()->assertSeeText('UTC-04:00');
+        foreach (['paypal-settlement', 'credit-settlement'] as $report) {
+            $this->get('/finance/reports/'.$report.'?'.$query)->assertOk()
+                ->assertSee('value="-04:00" selected', false)->assertSeeText('UTC+05:45');
+        }
         $this->get('/finance/records/paypal-orders?to=2026-09-08')->assertOk();
         $response = $this->get('/finance/records/paypal-orders/export?'.$query.'&'.http_build_query(['export_scope' => 'accounts', 'selected_accounts' => ['A']]))->assertOk();
         $sheet = $this->readDownload($response->streamedContent());
         $this->assertSame(2, $sheet->getHighestDataRow());
         $this->assertSame('0000123', $sheet->getCell('L2')->getValue());
         $this->assertSame('结账付款', $sheet->getCell('AQ2')->getValue());
+        $pageExport = $this->get('/finance/records/paypal-orders/export?'.$query.'&export_scope=filtered&export_layout=page')->assertOk();
+        [$headers, $values] = $this->readDownload($pageExport->streamedContent())->toArray();
+        $this->assertSame('2026-09-08 23:59:59', $values[array_search('交易时间', $headers, true)]);
+        $this->assertSame('UTC-04:00', $values[array_search('查看时区', $headers, true)]);
     }
 
     public function test_paypal_report_scope_category_and_extra_filters_are_applied_to_query_and_export(): void
@@ -2436,14 +2686,23 @@ class FinancePortalTest extends TestCase
 
     public function test_product_export_splits_fields_and_keeps_unmatched_paypal_items(): void
     {
+        $foodCover = '200PCS Disposable Stretch Food Covers for Bowls & Plates';
         $this->workbooks->importRecords('paypal-orders', [2 => [
-            ...$this->recordRow(), '物品标题' => "30ml / Buy 1\n60ml / Buy 2", '数量' => "1\n2",
+            ...$this->recordRow(), '帳單號碼' => 'UNMATCHED-PAYPAL-BILL',
+            '物品标题' => $foodCover."\n60ml / Buy 2", '数量' => "1\n2",
         ]], 'Unmatched products', 'UTC', 1);
-        $this->get('/finance/records/paypal-orders')->assertOk()->assertSee('30ml / Buy 1')->assertSee('60ml / Buy 2');
+        $this->get('/finance/records/paypal-orders')->assertOk()->assertSee('一次性弹力碗盘保鲜罩')->assertSee($foodCover)->assertSee('60ml / 买2件')
+            ->assertDontSee('name="product_name_mode"', false);
+        $this->get('/finance/records/paypal-orders?order_detail='.FinanceRecord::sole()->id)->assertOk()
+            ->assertSee('一次性弹力碗盘保鲜罩')->assertSee($foodCover)->assertSee('UNMATCHED-PAYPAL-BILL');
         $sheet = $this->readDownload($this->get('/finance/records/paypal-orders/export?export_scope=filtered&export_layout=page')->assertOk()->streamedContent())->toArray();
         $this->assertNotContains('出单产品明细', $sheet[0]);
-        $this->assertSame("30ml / Buy 1\n60ml / Buy 2", $sheet[1][array_search('配货名称', $sheet[0], true)]);
+        $this->assertSame("家居厨具\n未分类", $sheet[1][array_search('商品大类', $sheet[0], true)]);
         $this->assertSame("1\n2", $sheet[1][array_search('数量', $sheet[0], true)]);
+        $settlement = $this->readDownload($this->get('/finance/reports/paypal-settlement?download=1&export_columns[]=paypal_18')
+            ->assertOk()->streamedContent());
+        $this->assertSame('商品大类', $settlement->getCell('A1')->getValue());
+        $this->assertSame("家居厨具\n未分类", $settlement->getCell('A2')->getValue());
         $this->assertContains('PCL', $sheet[0]);
         $this->assertContains('原始SKU', $sheet[0]);
         $this->assertContains('包裹重量（克）', $sheet[0]);
@@ -2454,7 +2713,7 @@ class FinancePortalTest extends TestCase
                 'tongtu_goods_weight_gram' => 20, 'product_title' => 'Product B'],
         ]);
         $columns = \App\Portals\Finance\FinancePayPalOrderExport::productColumns($items);
-        $this->assertSame(["PCL-A\nPCL-B", "SKU-A\n", "\nERP-B", "1\n2", "12\n20", "18\n", "Product A\nProduct B"], $columns);
+        $this->assertSame(["PCL-A\nPCL-B", "SKU-A\n", "\nERP-B", "1\n2", "12\n20", "18\n", "未分类\n未分类"], $columns);
         $fallback = \App\Portals\Finance\FinancePayPalOrderExport::productItems([], "A\nB", '3');
         $this->assertSame([null, null], $fallback->pluck('quantity')->all());
     }

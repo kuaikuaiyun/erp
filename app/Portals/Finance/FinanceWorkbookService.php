@@ -11,7 +11,9 @@ use Illuminate\Validation\ValidationException;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Reader\Csv;
 use PhpOffice\PhpSpreadsheet\Reader\Exception;
+use PhpOffice\PhpSpreadsheet\Reader\IReadFilter;
 use PhpOffice\PhpSpreadsheet\Shared\Date;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xls;
@@ -20,7 +22,15 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class FinanceWorkbookService
 {
-    public const TIMEZONES = ['UTC', 'Asia/Shanghai', 'America/Los_Angeles', '-08:00', '-07:00', '+08:00'];
+    public const NAMED_TIMEZONES = ['UTC', 'Asia/Shanghai', 'America/Los_Angeles', 'America/New_York'];
+    public const FIXED_TIMEZONES = [
+        '-12:00', '-11:00', '-10:00', '-09:30', '-09:00', '-08:00', '-07:00', '-06:00',
+        '-05:00', '-04:00', '-03:30', '-03:00', '-02:30', '-02:00', '-01:00', '+00:00',
+        '+01:00', '+02:00', '+03:00', '+03:30', '+04:00', '+04:30', '+05:00', '+05:30',
+        '+05:45', '+06:00', '+06:30', '+07:00', '+08:00', '+08:45', '+09:00', '+09:30',
+        '+10:00', '+10:30', '+11:00', '+12:00', '+12:45', '+13:00', '+13:45', '+14:00',
+    ];
+    public const TIMEZONES = [...self::NAMED_TIMEZONES, ...self::FIXED_TIMEZONES];
 
     public function database(): Connection
     {
@@ -138,6 +148,80 @@ class FinanceWorkbookService
         }
     }
 
+    public function readExportTemplate(UploadedFile $file, int $headerRow, array $columns): array
+    {
+        $path = $file->getRealPath();
+        try {
+            $reader = IOFactory::createReaderForFile($path, [IOFactory::READER_XLSX, IOFactory::READER_XLS, IOFactory::READER_CSV]);
+            if ($reader instanceof Csv) {
+                $reader->setInputEncoding(Csv::guessEncoding($path, 'GB18030'));
+            } else {
+                $sheetName = $reader->listWorksheetNames($path)[0] ?? null;
+                if ($sheetName === null) {
+                    throw new Exception('Empty workbook');
+                }
+                $reader->setLoadSheetsOnly($sheetName);
+            }
+            $reader->setReadDataOnly(true);
+            $reader->setReadFilter(new class($headerRow) implements IReadFilter {
+                public function __construct(private readonly int $headerRow) {}
+
+                public function readCell(string $columnAddress, int $row, string $worksheetName = ''): bool
+                {
+                    return $row === $this->headerRow && Coordinate::columnIndexFromString($columnAddress) <= 129;
+                }
+            });
+            $book = $reader->load($path);
+        } catch (Exception | \ValueError) {
+            throw ValidationException::withMessages(['file' => '无法读取模板，请确认文件是有效的 XLSX、XLS 或 CSV。']);
+        }
+
+        try {
+            $sheet = $book->getActiveSheet();
+            $width = Coordinate::columnIndexFromString($sheet->getHighestDataColumn($headerRow));
+            if ($width > 128) {
+                throw ValidationException::withMessages(['file' => '模板表头最多支持 128 列。']);
+            }
+            $normalize = static fn (string $name): string => mb_strtolower(preg_replace(
+                '/[\s\x{FEFF}()（）_\-－]+/u', '', FinanceCatalog::simplified($name),
+            ) ?? '');
+            $known = [];
+            foreach ($columns as $field => $label) {
+                $known[$normalize($label)] = $field;
+            }
+            foreach ([
+                '交易号' => 'reference', '交易单号' => 'reference', '订单状态' => 'order_status',
+                '商品名称' => 'paypal_18', '物品标题' => 'paypal_18', '配货名称' => 'paypal_18',
+                '账单号码' => 'paypal_13', '账单号' => 'paypal_13', '应结算' => 'payable',
+                '结算金额-美元' => 'settlement', '自定义编号' => 'paypal_27', '联系电话号码' => 'paypal_37',
+            ] as $alias => $field) {
+                if (isset($columns[$field])) {
+                    $known[$normalize($alias)] ??= $field;
+                }
+            }
+            $selected = $unmatched = $duplicates = [];
+            for ($column = 1; $column <= $width; $column++) {
+                $cell = $sheet->getCell([$column, $headerRow]);
+                $value = $cell->getValue();
+                $label = is_scalar($value) ? mb_substr(trim((string) $value), 0, 120) : '';
+                if ($label === '') {
+                    continue;
+                }
+                $field = $cell->isFormula() ? null : ($known[$normalize($label)] ?? null);
+                if ($field === null) {
+                    $unmatched[] = $label;
+                } elseif (isset($selected[$field])) {
+                    $duplicates[] = $label;
+                } else {
+                    $selected[$field] = true;
+                }
+            }
+            return ['fields' => array_keys($selected), 'unmatched' => $unmatched, 'duplicates' => $duplicates];
+        } finally {
+            $book->disconnectWorksheets();
+        }
+    }
+
     public function importRecords(string $dataset, array $rows, string $account, string $timezone, int $actor, bool $createOnly = false): int
     {
         if (! in_array($timezone, self::TIMEZONES, true)) {
@@ -155,12 +239,16 @@ class FinanceWorkbookService
             $date = $value('date');
             $time = $value('time');
             $rowTimezone = $timezone;
-            $point = trim((string) ($payload['时间点'] ?? $payload['（-8）时间点'] ?? ''));
+            $point = trim((string) ($payload['时间点'] ?? ''));
+            if ($point === '') {
+                $point = trim((string) ($payload['（-8）时间点'] ?? ''));
+            }
             if ($point !== '') {
                 $zone = trim((string) ($payload['导出时区'] ?? ''));
                 if ($zone === '' && filled($payload['（-8）时间点'] ?? null)) {
                     $zone = '-08:00';
                 }
+                $zone = preg_replace('/^UTC(?=[+-])/', '', $zone);
                 if (preg_match('/^([+-]?)(\d{1,2})$/D', $zone, $parts)) {
                     $zone = ($parts[1] === '-' ? '-' : '+').str_pad($parts[2], 2, '0', STR_PAD_LEFT).':00';
                 }
@@ -281,12 +369,12 @@ class FinanceWorkbookService
         });
     }
 
-    public function download(array $headers, iterable $rows, string $filename, string $format = 'xlsx'): StreamedResponse
+    public function download(array $headers, iterable $rows, string $filename, string $format = 'xlsx', bool $plain = false): StreamedResponse
     {
         if ($format === 'xlsx') {
-            return $this->downloadStreamingXlsx($headers, $rows, $filename);
+            return $this->downloadStreamingXlsx($headers, $rows, $filename, $plain);
         }
-        return response()->streamDownload(function () use ($headers, $rows, $format): void {
+        return response()->streamDownload(function () use ($headers, $rows, $format, $plain): void {
             // Spreadsheet cells and ZIP compression coexist during export.
             // Keep the higher budget local to this download, not the whole PHP service.
             $previousLimit = ini_get('memory_limit');
@@ -298,14 +386,16 @@ class FinanceWorkbookService
                 ini_set('memory_limit', '512M');
             }
             $book = new Spreadsheet;
-            $book->getDefaultStyle()->getFont()->setName('Microsoft YaHei')->setSize(10);
+            if (! $plain) {
+                $book->getDefaultStyle()->getFont()->setName('Microsoft YaHei')->setSize(10);
+            }
             $sheet = $book->getActiveSheet();
             $headers = array_map(FinanceCatalog::simplified(...), $headers);
             $sheet->fromArray($headers, null, 'A1');
             $numericColumns = [];
             foreach ($headers as $index => $header) {
                 $numericColumns[$index] = ! preg_match('/ID|编号|号码|账号|单号|影响|名称|类型|状态|日期|时间|时区|地址/iu', $header)
-                    && preg_match('/金额|总额|净额|费用|手续费|余额|汇率|数量|条数|订单数|人民币|结算|应收|退款|冻结|解冻|保证金|成本|货款|运费|税额|保险|拒付|物流|采购|损耗/u', $header);
+                    && preg_match('/金额|总额|净额|费用|手续费|余额|汇率|数量|条数|订单数|人民币|结算|应收|退款|冻结|解冻|保证金|成本|货款|运费|税额|保险|拒付|物流|采购|损耗|转换美元|争议费/u', $header);
             }
             $rowIndex = 2;
             foreach ($rows as $row) {
@@ -319,31 +409,28 @@ class FinanceWorkbookService
                     $sheet->setCellValueExplicit([$column + 1, $rowIndex], $numeric ? (float) $number : $value, $numeric ? DataType::TYPE_NUMERIC : DataType::TYPE_STRING);
                 }
                 // Long item descriptions must not expand every order to hundreds of pixels.
-                $sheet->getRowDimension($rowIndex)->setRowHeight(36);
+                if (! $plain) {
+                    $sheet->getRowDimension($rowIndex)->setRowHeight(36);
+                }
                 $rowIndex++;
             }
-            $sheet->freezePane('A2');
-            $sheet->getStyle($sheet->calculateWorksheetDimension())->getAlignment()->setWrapText(true);
-            $sheet->getStyle($sheet->calculateWorksheetDimension())->getAlignment()->setVertical('center');
-            $sheet->getStyle($sheet->calculateWorksheetDimension())->getBorders()->getAllBorders()->setBorderStyle('thin')->getColor()->setARGB('FFDCE6EF');
-            $sheet->setAutoFilter($sheet->calculateWorksheetDimension());
-            $sheet->getStyle('1:1')->getFont()->setBold(true);
-            $lastColumn = Coordinate::stringFromColumnIndex(count($headers));
-            $sheet->getRowDimension(1)->setRowHeight(30);
-            $sheet->getStyle('A1:'.$lastColumn.'1')->getFill()->setFillType('solid')->getStartColor()->setARGB('FFE8F1F8');
-            $sheet->getStyle('A1:'.$lastColumn.'1')->getAlignment()->setHorizontal('center');
+            $dimension = $sheet->calculateWorksheetDimension();
+            $sheet->setAutoFilter($dimension);
+            if (! $plain) {
+                $sheet->freezePane('A2');
+                $sheet->getStyle($dimension)->getAlignment()->setWrapText(true);
+                $sheet->getStyle($dimension)->getAlignment()->setVertical('center');
+                $sheet->getStyle($dimension)->getBorders()->getAllBorders()->setBorderStyle('thin')->getColor()->setARGB('FFDCE6EF');
+                $sheet->getStyle('1:1')->getFont()->setBold(true);
+                $lastColumn = Coordinate::stringFromColumnIndex(count($headers));
+                $sheet->getRowDimension(1)->setRowHeight(30);
+                $sheet->getStyle('A1:'.$lastColumn.'1')->getFill()->setFillType('solid')->getStartColor()->setARGB('FFE8F1F8');
+                $sheet->getStyle('A1:'.$lastColumn.'1')->getAlignment()->setHorizontal('center');
+            }
             foreach ($headers as $index => $header) {
                 $column = Coordinate::stringFromColumnIndex($index + 1);
-                $width = match (true) {
-                    (bool) preg_match('/地址|标题|物品|商品|备注/u', $header) => 44,
-                    (bool) preg_match('/ID|编号|号码|单号/iu', $header) => 30,
-                    (bool) preg_match('/类型|姓名|名称/u', $header) => 28,
-                    (bool) preg_match('/日期|时间|时区/u', $header) => 15,
-                    (bool) preg_match('/货币|币种|数量|条数|状态/u', $header) => 12,
-                    default => 22,
-                };
-                $sheet->getColumnDimension($column)->setWidth($width);
-                if ($numericColumns[$index] && $rowIndex > 2) {
+                $sheet->getColumnDimension($column)->setWidth($this->downloadColumnWidth($header, $plain));
+                if (! $plain && $numericColumns[$index] && $rowIndex > 2) {
                     $range = $column.'2:'.$column.($rowIndex - 1);
                     $sheet->getStyle($range)->getNumberFormat()->setFormatCode(preg_match('/数量|条数/u', $header) ? '#,##0.########' : '#,##0.00########');
                     $sheet->getStyle($range)->getAlignment()->setHorizontal('right');
@@ -366,23 +453,15 @@ class FinanceWorkbookService
         }, $filename, ['Content-Type' => $format === 'xls' ? 'application/vnd.ms-excel' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
     }
 
-    private function downloadStreamingXlsx(array $headers, iterable $rows, string $filename): StreamedResponse
+    private function downloadStreamingXlsx(array $headers, iterable $rows, string $filename, bool $plain): StreamedResponse
     {
         $headers = array_map(FinanceCatalog::simplified(...), $headers);
         $numeric = [];
         $columns = [];
         foreach ($headers as $index => $header) {
             $numeric[$index] = ! preg_match('/ID|编号|号码|账号|单号|影响|名称|类型|状态|日期|时间|时区|地址/iu', $header)
-                && preg_match('/金额|总额|净额|费用|手续费|余额|汇率|数量|条数|订单数|人民币|结算|应收|退款|冻结|解冻|保证金|成本|货款|运费|税额|保险|拒付|物流|采购|损耗/u', $header);
-            $width = match (true) {
-                (bool) preg_match('/地址|标题|物品|商品|备注/u', $header) => 44,
-                (bool) preg_match('/ID|编号|号码|单号/iu', $header) => 30,
-                (bool) preg_match('/类型|姓名|名称/u', $header) => 28,
-                (bool) preg_match('/日期|时间|时区/u', $header) => 15,
-                (bool) preg_match('/货币|币种|数量|条数|状态/u', $header) => 12,
-                default => 22,
-            };
-            $columns[] = ['label' => $header, 'width' => $width];
+                && preg_match('/金额|总额|净额|费用|手续费|余额|汇率|数量|条数|订单数|人民币|结算|应收|退款|冻结|解冻|保证金|成本|货款|运费|税额|保险|拒付|物流|采购|损耗|转换美元|争议费/u', $header);
+            $columns[] = ['label' => $header, 'width' => $this->downloadColumnWidth($header, $plain)];
         }
         return app(\App\Portals\Logistics\StreamedXlsxWriter::class)->response($filename, 'Sheet1', $columns,
             function () use ($headers, $numeric, $rows): iterable {
@@ -398,7 +477,30 @@ class FinanceWorkbookService
                     }
                     yield ['height' => 36, 'cells' => $cells];
                 }
-            });
+            }, plain: $plain);
+    }
+
+    private function downloadColumnWidth(string $header, bool $plain): int
+    {
+        $width = match (true) {
+            (bool) preg_match('/地址|标题|物品|商品|备注/u', $header) => 44,
+            (bool) preg_match('/ID|编号|号码|单号/iu', $header) => 30,
+            (bool) preg_match('/类型|姓名|名称/u', $header) => 28,
+            (bool) preg_match('/日期|时间|时区/u', $header) => 15,
+            (bool) preg_match('/货币|币种|数量|条数|状态/u', $header) => 12,
+            default => 22,
+        };
+        if (! $plain) {
+            return $width;
+        }
+        return max(mb_strwidth($header) + 4, match ($header) {
+            '当前订单状态' => 46,
+            '核对说明' => 55,
+            '交易 ID', '偏好设定 Txn ID', '通途订单' => 40,
+            '支付账户', '域名' => 28,
+            '时间点', '导出时区' => 23,
+            default => $width,
+        });
     }
 
     public function downloadDelimited(array $headers, iterable $rows, string $filename, string $delimiter = ','): StreamedResponse

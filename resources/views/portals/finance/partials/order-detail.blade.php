@@ -1,9 +1,9 @@
 @php
     $display = static fn ($value): string => $value === null || $value === '' ? '' : (string) $value;
     $money = static fn ($value): string => $value === null || $value === '' ? '' : '$'.number_format((float) $value, 2);
-    $date = static function ($value): string {
+    $date = static function ($value) use ($timezone): string {
         if (!$value) return '';
-        try { return \Carbon\Carbon::parse($value)->timezone('Asia/Shanghai')->format('Y-m-d H:i:s'); } catch (\Throwable) { return ''; }
+        try { return \Carbon\Carbon::parse($value)->timezone($timezone)->format('Y-m-d H:i:s'); } catch (\Throwable) { return ''; }
     };
     $pretty = static function ($value): string {
         if ($value === null || $value === '' || $value === []) return '';
@@ -138,7 +138,7 @@
         <div>
             <span class="logistics-order-detail-eyebrow">{{ $display($order->store_name) }} · Shopify #{{ $display($order->shopify_order_number) }}</span>
             <h3>{{ $display($order->tongtu_order_number) }}</h3>
-            <p><i class="fa fa-clock-o"></i> 下单时间 {{ $date($order->order_created_at) }}　·　系统编号 {{ $order->getKey() }}</p>
+            <p><i class="fa fa-clock-o"></i> 下单时间 {{ $date($order->order_created_at) }}　·　{{ \App\Portals\Finance\FinanceCatalog::timezoneLabel($timezone) }}　·　系统编号 {{ $order->getKey() }}</p>
         </div>
         <div class="logistics-order-detail-tags">
             <span class="label {{ $order->statusClass() }}">{{ $display($order->data_status) }}</span>
@@ -161,14 +161,20 @@
                                 @if($item->display_product_image_url)<img src="{{ $item->display_product_image_url }}" alt="">@else<i class="fa fa-cube"></i>@endif
                             </div>
                             <div class="logistics-order-detail-item-copy">
-                                <strong>{{ $display($item->product_title) }}</strong>
-                                <span>{{ $display($item->variant_title) }}</span>
+                                @php
+                                    $productName = \App\Portals\Finance\FinanceProductNames::item($item);
+                                @endphp
+                                <strong>{{ $productName }}</strong>
+                                @if(filled($item->product_title) && $item->product_title !== $productName)
+                                    <small>原名：{{ $item->product_title }}</small>
+                                @endif
+                                <span>{{ \App\Portals\Finance\FinanceProductNames::display($display($item->variant_title)) }}</span>
                                 <div>
                                     <code>{{ $display($item->shopify_sku) }}</code>
                                     <em>{{ __('logistics.product_statistics.headers.product_code') }}：{{ $display($item->tongtu_product_code) }}</em>
                                     <em>{{ __('logistics.product_statistics.headers.tongtu_sku') }}：{{ $display($item->tongtu_sku) }}</em>
                                 </div>
-                                <small>配货名称：{{ $display($item->tongtu_product_name) }} @if($item->tongtu_product_type)（类型 {{ $item->tongtu_product_type }}）@endif</small>
+                                <small>配货名称：{{ \App\Portals\Finance\FinanceProductNames::display($display($item->tongtu_product_name)) }} @if($item->tongtu_product_type)（类型 {{ $item->tongtu_product_type }}）@endif</small>
                             </div>
                             <dl class="logistics-order-detail-item-metrics">
                                 <div><dt>数量</dt><dd>{{ $display($item->quantity) }}</dd></div>
@@ -347,7 +353,7 @@
                     <dl><dt>通途订单号</dt><dd>{{ $display($order->tongtu_order_number) }}</dd></dl>
                     <dl><dt>{{ __('logistics.product_statistics.headers.product_code') }}</dt><dd class="is-wrap">{{ $display($order->tongtu_product_code) }}</dd></dl>
                     <dl><dt>{{ __('logistics.product_statistics.headers.tongtu_sku') }}</dt><dd class="is-wrap">{{ $display($order->tongtu_sku) }}</dd></dl>
-                    <dl><dt>通途配货名称</dt><dd class="is-wrap">{{ $display($order->tongtu_product_name) }}</dd></dl>
+                    <dl><dt>通途配货名称</dt><dd class="is-wrap">{{ \App\Portals\Finance\FinanceProductNames::display($display($order->tongtu_product_name)) }}</dd></dl>
                     <dl><dt>出单产品重量</dt><dd class="is-wrap">{{ $display($order->sale_product_weight) }}</dd></dl>
                 </div>
                 @if($order->logs->isNotEmpty())

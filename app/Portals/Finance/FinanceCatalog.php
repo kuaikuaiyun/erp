@@ -12,10 +12,8 @@ class FinanceCatalog
             'UTC' => 'UTC',
             'Asia/Shanghai' => '北京时间',
             'America/Los_Angeles' => '美国太平洋时间',
-            '-08:00' => 'UTC-08:00',
-            '-07:00' => 'UTC-07:00',
-            '+08:00' => 'UTC+08:00',
-            default => $timezone,
+            'America/New_York' => '美国东部时间',
+            default => preg_match('/^[+-]\d{2}:\d{2}$/D', $timezone) ? 'UTC'.$timezone : $timezone,
         };
     }
 
@@ -183,7 +181,10 @@ class FinanceCatalog
         if (self::simplified($definition['headers'][$index]) === '团队') {
             return self::teamLabel($value);
         }
-        if (in_array(self::simplified($definition['headers'][$index]), ['物品标题', '主旨'], true)) {
+        if (self::simplified($definition['headers'][$index]) === '物品标题') {
+            return FinanceProductNames::display($text);
+        }
+        if (self::simplified($definition['headers'][$index]) === '主旨') {
             $clean = trim(preg_replace('/\x{FFFD}+/u', '', $text));
 
             return self::simplified($clean === '' && $text !== '' ? '内容编码异常' : $clean);
