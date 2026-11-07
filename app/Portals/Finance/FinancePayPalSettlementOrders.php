@@ -165,22 +165,9 @@ class FinancePayPalSettlementOrders
         if ($recordId !== null) {
             $target = (clone $paymentQuery)->find($recordId);
             if ($target) {
-                $matched = $this->settlements->logisticsMetadata(collect([$target]), 'paypal')[$recordId] ?? null;
-                $records = collect([$target]);
-                if ($matched) {
-                    // Only recheck payments that can match this logistics order, including via an invoice.
-                    $references = $this->settlements->logisticsPaymentReferences($matched['order']);
-                    $candidates = (clone $paymentQuery)->select('id', 'reference', 'payload')->cursor()
-                        ->filter(fn ($record) => isset($references[$record->reference])
-                            || isset($references[trim((string) ($record->payload['帳單號碼'] ?? ''))]))->collect();
-                    $metadata = $this->settlements->logisticsMetadata($candidates, 'paypal', matchOnly: true);
-                    $records = $records->merge($candidates->filter(fn ($record) =>
-                        ($metadata[$record->id]['logistics_order_id'] ?? null) === $matched['logistics_order_id']))->unique('id');
-                }
-                $orders['detail'] = ['ids' => $records->pluck('id')->all(), 'time' => 0];
+                $orders['detail'] = ['id' => $recordId, 'time' => 0];
             }
-            $detailIds = $orders['detail']['ids'] ?? [$recordId];
-            $detailTransactions = $db->table('finance_payment_transactions')->whereIntegerInRaw('finance_record_id', $detailIds)
+            $detailTransactions = $db->table('finance_payment_transactions')->where('finance_record_id', $recordId)
                 ->get(['payment_account_id', 'transaction_id']);
             $detailAccountIds = $detailTransactions->pluck('payment_account_id')->unique()->all();
             if ($detailAccountIds === [] && ! $target) {
@@ -191,19 +178,15 @@ class FinancePayPalSettlementOrders
             }
         } else {
             $paymentQuery->when($mysql, fn ($query) => $query->forceIndex('PRIMARY'))
-                ->select('id', 'reference', 'payload', 'occurred_at')
+                ->select('id', 'occurred_at')
                 ->chunkById(700, function ($records) use (&$orders, &$byId): void {
-                    $metadata = $this->settlements->logisticsMetadata($records, 'paypal', matchOnly: true);
                     foreach ($records as $record) {
-                        $businessId = $metadata[$record->id]['logistics_order_id'] ?? null;
-                        $key = $businessId === null ? 'payment:'.$record->id : 'order:'.$businessId;
-                        $orders[$key]['ids'][] = $record->id;
-                        $orders[$key]['time'] = max($orders[$key]['time'] ?? 0, $record->occurred_at->getTimestamp());
+                        $orders['payment:'.$record->id] = ['id' => $record->id, 'time' => $record->occurred_at->getTimestamp()];
                         $byId[$record->id] = true;
                     }
                 });
         }
-        $index = $events = $extraEvents = $crossAccount = [];
+        $index = $invoiceRoots = $events = $extraEvents = $crossAccount = [];
         $removed = $db->table('finance_settlement_supplements')->whereNotNull('payload->_deleted_at')
             ->pluck('finance_record_id')->flip()->all();
         $transactions = $db->table('finance_payment_transactions as txn')
@@ -264,6 +247,7 @@ class FinancePayPalSettlementOrders
                 'account' => $txn->account_name, 'account_key' => $txn->activity_account,
                 'code' => $txn->event_code, 'reference' => $txn->transaction_id,
                 'related_id' => $relatedId, 'related_type' => $relatedType,
+                'invoice' => trim((string) ($info['invoice_id'] ?? '')),
                 'parent' => $relatedType === 'TXN' ? $relatedId : '',
                 'time' => CarbonImmutable::parse($txn->occurred_at, 'UTC')->getTimestamp(),
                 'amount' => $this->settlements->number($info['transaction_amount']['value'] ?? null),
@@ -283,7 +267,10 @@ class FinancePayPalSettlementOrders
             }
             $events[$txn->id] = $event;
             $index[$event['account_id']][$event['reference']][] = $txn->id;
-            if (isset($byId[$event['id']])) {
+            if ($event['invoice'] !== '' && ($payment || ($deleted && ! $settlementEvent))) {
+                $invoiceRoots[$event['account_id']][$event['invoice']][$event['id']] = true;
+            }
+            if ($payment) {
                 $crossAccount[$event['reference']][$event['account_id']] = true;
             }
         }
@@ -298,7 +285,7 @@ class FinancePayPalSettlementOrders
             if (isset($removed[$event['id']])) {
                 continue;
             }
-            $candidates = $this->paymentRoots($event, $events, $index, $paymentIds);
+            $candidates = $this->paymentRoots($event, $events, $index, $paymentIds, $invoiceRoots);
             if (count($candidates) === 1) {
                 $rootId = array_key_first($candidates);
                 if (! isset($removed[$rootId])) {
@@ -321,23 +308,21 @@ class FinancePayPalSettlementOrders
                 $index[$event['account_id']][$event['reference']][] = $id;
             }
             $events += $extraEvents;
-            $detailPaymentIds = array_flip($detailIds);
             foreach ($extraEvents as $event) {
                 $candidates = $this->paymentRoots($event, $events, $index, $paymentIds);
                 $rootId = array_key_first($candidates);
-                if (count($candidates) === 1 && isset($detailPaymentIds[$rootId])) {
+                if (count($candidates) === 1 && $rootId === $recordId) {
                     $children[$rootId][] = $event;
                 }
             }
         }
-        unset($events, $index, $byId, $paymentIds);
+        unset($events, $index, $byId, $paymentIds, $invoiceRoots);
 
         foreach ($unlinked as $event) {
-            $orders['event:'.$event['id']] = ['ids' => [], 'time' => $event['time'], 'event' => $event];
+            $orders['event:'.$event['id']] = ['id' => $event['id'], 'time' => $event['time'], 'event' => $event];
         }
         if ($recordId === null) {
-            uasort($orders, fn ($a, $b) => [$b['time'], max($b['ids'] ?: [$b['event']['id']])]
-                <=> [$a['time'], max($a['ids'] ?: [$a['event']['id']])]);
+            uasort($orders, fn ($a, $b) => [$b['time'], $b['id']] <=> [$a['time'], $a['id']]);
         }
         $total = null;
         $scope = array_intersect_key($filters, array_flip(['account', 'from', 'to', 'reference', 'team', 'domain', 'subscription', 'order_status', 'conditions']));
@@ -347,8 +332,9 @@ class FinancePayPalSettlementOrders
         }
         $rows = collect($total === null ? [] : array_fill(0, min($total, $pageOffset), []));
         $exportFields = $this->settlements->exportColumns('paypal') + ['gross' => '原币总额'];
+        $numericConditionFields = $this->settlements->numericConditionFields('paypal');
         foreach (array_chunk($orders, 250) as $batch) {
-            $ids = array_merge(...array_column($batch, 'ids'));
+            $ids = array_column(array_filter($batch, fn ($row) => ! isset($row['event'])), 'id');
             $records = $this->settlements->query('paypal', [])->whereIntegerInRaw('id', $ids)
                 ->orderByDesc('occurred_at')->orderByDesc('id')->get();
             $payments = $this->settlements->rows('paypal', ['timezone' => $filters['timezone'], 'order_view' => true], $records)->keyBy('id');
@@ -356,13 +342,13 @@ class FinancePayPalSettlementOrders
                 if (isset($order['event'])) {
                     $row = $this->unlinkedRow($order['event'], $filters['timezone'], $recordId !== null);
                 } else {
-                    $members = $payments->only($order['ids'])->sortByDesc(fn ($payment) => [$payment['source_date']->getTimestamp(), $payment['id']])->values();
-                    if ($members->isEmpty()) {
+                    $payment = $payments->get($order['id']);
+                    if ($payment === null) {
                         continue;
                     }
-                    $row = $this->summarize($members, $roots, $children, $conversions, $crossAccount, $ambiguous, $filters['timezone'], $recordId !== null);
+                    $row = $this->paymentRow($payment, $roots, $children, $conversions, $crossAccount, $ambiguous, $filters['timezone'], $recordId !== null);
                 }
-                if ($this->matches($row, $filters, $children)) {
+                if ($this->matches($row, $filters, $children, $numericConditionFields)) {
                     if ($recordId === null && $pageOffset === null) {
                         $row = array_intersect_key($row, $exportFields);
                         $row = array_combine(array_keys($row), array_values($row));
@@ -380,71 +366,28 @@ class FinancePayPalSettlementOrders
         return $rows;
     }
 
-    private function summarize(Collection $members, array $roots, array $children, array $conversions, array $crossAccount, array $ambiguous, string $zone, bool $includeDetails): array
+    private function paymentRow(array $payment, array $roots, array $children, array $conversions, array $crossAccount, array $ambiguous, string $zone, bool $includeDetails): array
     {
-        $fields = [...self::COSTS, ...self::RETURNS, 'converted_usd', 'settlement', 'payable', 'open_hold'];
-        $calculated = $members->map(function ($payment) use ($roots, $children, $conversions, $crossAccount, $zone, $includeDetails) {
-            $root = $roots[$payment['id']] ?? null;
-            return $this->calculate($payment, $root, $children[$payment['id']] ?? [],
-                $conversions[$payment['id']] ?? [],
-                $root && count($crossAccount[$root['reference']] ?? []) > 1, $zone, $includeDetails);
-        });
-        $result = $calculated->first();
-        unset($result['manual_values'], $result['source_date']);
-        foreach ($fields as $field) {
-            $result[$field] = $calculated->contains(fn ($item) => ($item[$field] ?? null) === null)
-                ? null : $calculated->reduce(fn ($sum, $item) => bcadd($sum, $item[$field], self::SCALE), '0');
-        }
-        $references = $calculated->pluck('reference')->filter();
-        $result['reference'] = $references->unique()->implode('、');
-        $result['account'] = $members->pluck('account')->unique()->implode('、');
-        $result['review'] = $calculated->pluck('review')->filter()->unique()->implode('；');
-        $result['order_status'] = $this->orderStatus($calculated);
-        if ($members->contains(fn ($member) => isset($ambiguous[$member['id']]))) {
+        $id = $payment['id'];
+        $root = $roots[$id] ?? null;
+        $result = $this->calculate($payment, $root, $children[$id] ?? [], $conversions[$id] ?? [],
+            $root && count($crossAccount[$root['reference']] ?? []) > 1, $zone, $includeDetails);
+        $result['order_status'] = $this->paymentStatus($result);
+        if (isset($ambiguous[$id])) {
             $result['payable'] = $result['open_hold'] = null;
             $result['review'] = trim($result['review'].'；存在无法唯一归属的资金流水', '；');
             $result['order_status'] .= ' · 资金待核对';
         }
         if ($includeDetails) {
-            $result['events'] = $calculated->pluck('events')->collapse()->sortBy('timestamp')->values()->all();
+            $result['events'] = collect($result['events'])->sortBy('timestamp')->values()->all();
         }
-        $result['payments'] = $members->map(function ($member) {
-            $member['filter_date'] = $member['source_date'];
-            unset($member['manual_values'], $member['source_date']);
-            return $member;
-        })->values()->all();
-        $result['locked'] = $members->contains('locked', true);
+        $payment['filter_date'] = $payment['source_date'];
+        unset($payment['manual_values'], $payment['source_date'], $result['manual_values'], $result['source_date']);
+        $result['payments'] = [$payment];
         $result['source_category'] = '结账付款';
-        if ($members->count() > 1) {
-            // Per-payment values are available in the details dialog.
-            foreach (range(0, 14) as $position) {
-                $result['paypal_'.$position] = null;
-            }
-            foreach (range(15, 40) as $position) {
-                unset($result['paypal_'.$position]);
-            }
-            $result['paypal_18'] = $members->pluck('paypal_18')->filter()->uniqueStrict()->implode("\n");
-            unset($result['source_added_date']);
-            $result['usd_rate'] = null;
-            $result['gross'] = $members->pluck('currency')->unique()->count() === 1
-                && ! $members->contains(fn ($member) => $member['gross'] === null)
-                ? $members->reduce(fn ($sum, $member) => bcadd($sum, $member['gross'], self::SCALE), '0') : null;
-            $result['paypal_7'] = $result['gross'];
-            $result['paypal_6'] = $members->pluck('currency')->unique()->implode('、');
-            if ($references->count() !== $references->unique()->count()) {
-                foreach ([...$fields, 'gross', 'paypal_7'] as $field) {
-                    $result[$field] = null;
-                }
-            }
-        }
-        $related = $members->map(fn ($member) => $roots[$member['id']] ?? null)
-            ->filter(fn ($event) => ($event['related_id'] ?? '') !== '')
-            ->map(fn ($event) => [$event['related_id'], $event['related_type']])
-            ->uniqueStrict();
-        $relatedTypes = $related->pluck(1);
-        $result['paypal_12'] = $related->pluck(0)->implode('、');
-        $result['paypal_reference_type'] = $relatedTypes->contains(fn ($type) => $type !== '')
-            ? $relatedTypes->implode('、') : '';
+        $result['paypal_12'] = $root['related_id'] ?? $payment['paypal_12'];
+        $result['paypal_reference_type'] = $root['related_type'] ?? '';
+
         return $result;
     }
 
@@ -463,10 +406,10 @@ class FinancePayPalSettlementOrders
         ];
     }
 
-    private function paymentRoots(array $event, array $events, array $index, array $payments): array
+    private function paymentRoots(array $event, array $events, array $index, array $payments, array $invoiceRoots = []): array
     {
         $pending = [$event];
-        $seen = $roots = [];
+        $seen = $roots = $invoiceMatches = [];
         while ($pending !== []) {
             $current = array_pop($pending);
             if (isset($seen[$current['id']])) {
@@ -477,14 +420,18 @@ class FinancePayPalSettlementOrders
                 $roots[$current['id']] = true;
                 continue;
             }
+            if (isset(self::EVENTS[$current['code']]) && $current['invoice'] !== '') {
+                $invoiceMatches += $invoiceRoots[$current['account_id']][$current['invoice']] ?? [];
+            }
             foreach ($index[$current['account_id']][$current['parent']] ?? [] as $id) {
                 $pending[] = $events[$id];
             }
         }
-        return $roots;
+        // Use the invoice only when the transaction links did not identify a payment.
+        return $roots ?: $invoiceMatches;
     }
 
-    private function matches(array $row, array $filters, array $children): bool
+    private function matches(array $row, array $filters, array $children, array $numericConditionFields): bool
     {
         $zone = $filters['timezone'];
         $matchesScope = static function ($account, $date) use ($filters, $zone): bool {
@@ -502,7 +449,7 @@ class FinancePayPalSettlementOrders
         }
         if (filled($filters['reference'] ?? null)) {
             $reference = $filters['reference'];
-            $matched = in_array($reference, explode('、', $row['reference']), true)
+            $matched = $reference === $row['reference']
                 || collect($payments)->contains(fn ($payment) => $payment['reference'] === $reference
                     || in_array($reference, array_column($children[$payment['id']] ?? [], 'reference'), true));
             if (! $matched) {
@@ -513,7 +460,7 @@ class FinancePayPalSettlementOrders
             && (! filled($filters['team'] ?? null) || ($row['team'] ?? '') === $filters['team'])
             && (! filled($filters['subscription'] ?? null) || ($row['subscription'] ?? '') === FinanceSettlementService::subscriptionLabel($filters['subscription']))
             && (! filled($filters['domain'] ?? null) || str_contains($row['domain'] ?? '', $filters['domain']))
-            && $this->settlements->matches($row, $filters['conditions'] ?? []);
+            && $this->settlements->matches($row, $filters['conditions'] ?? [], $numericConditionFields);
     }
 
     private function calculate(array $payment, ?array $root, array $events, array $conversions, bool $duplicate, string $zone, bool $includeDetails): array
@@ -562,6 +509,7 @@ class FinancePayPalSettlementOrders
                     'rate' => $rate, 'category' => '结账付款', 'usd_label' => '美元净额'];
             }
 
+            $disputeHolds = collect($events)->where('code', 'T1110')->keyBy('reference');
             foreach ($events as $event) {
                 if ($event['code'] === 'T0200') {
                     if ($includeDetails) {
@@ -586,8 +534,9 @@ class FinancePayPalSettlementOrders
                 $amount = $effective || $rejectedRelease
                     ? $this->exchange($event, $event['amount'], $conversions, $usedExchanges, $rejectedRelease) : null;
                 if ($rejectedRelease) {
-                    // For a rejected dispute release, only a separate completed exchange proves a USD return.
-                    $effective = $event['currency'] !== 'USD' && $amount !== null;
+                    $effective = $event['currency'] === 'USD'
+                        ? $this->matchesDisputeHold($event, $disputeHolds->get($event['reference']))
+                        : $amount !== null;
                     if (! $effective) {
                         $money[$field] = null;
                         $review[$field] = '争议返还待核对';
@@ -600,7 +549,11 @@ class FinancePayPalSettlementOrders
                     continue;
                 }
                 $amount = $event['currency'] === 'USD' ? $event['amount'] : $amount;
-                $source = $event['currency'] === 'USD' ? '接口USD' : ($amount !== null ? '实际换汇' : '待折算');
+                $source = match (true) {
+                    $event['currency'] !== 'USD' => $amount !== null ? '实际换汇' : '待折算',
+                    $rejectedRelease => '同交易号争议冻结返还',
+                    default => '接口USD',
+                };
                 if ($includeDetails) {
                     $details[] = $this->detail($event, $zone, $amount, $source);
                 }
@@ -701,6 +654,16 @@ class FinancePayPalSettlementOrders
         return $result;
     }
 
+    private function matchesDisputeHold(array $release, ?array $hold): bool
+    {
+        // PayPal can use the same transaction ID for a pending hold and its cancellation.
+        return $hold !== null && $hold['currency'] === $release['currency']
+            && in_array($hold['status'], ['P', 'S'], true) && $hold['time'] <= $release['time']
+            && $hold['amount'] !== null && $release['amount'] !== null
+            && bccomp($release['amount'], '0', self::SCALE) > 0
+            && bccomp(bcadd($hold['amount'], $release['amount'], self::SCALE), '0', self::SCALE) === 0;
+    }
+
     private function addMoney(array &$money, array &$review, string $field, ?string $value, int $sign): void
     {
         if ($value === null) {
@@ -793,25 +756,23 @@ class FinancePayPalSettlementOrders
         return $matches[$id];
     }
 
-    private function orderStatus(Collection $payments): string
+    private function paymentStatus(array $payment): string
     {
-        $paid = $payments->where('success', true);
-        $status = [$paid->isNotEmpty() ? '已付款' : ($payments->contains('failed', true) ? '付款失败' : '付款待确认')];
-        if ($paid->isNotEmpty() && $paid->every(fn ($row) => $row['refund_state'] === 'full')) {
-            $status[] = '全额退款';
-        } elseif ($payments->contains(fn ($row) => $row['refund_state'] !== 'none')) {
-            $status[] = '部分退款';
+        $status = [$payment['success'] ? '已付款' : ($payment['failed'] ? '付款失败' : '付款待确认')];
+        if ($payment['refund_state'] !== 'none') {
+            $status[] = $payment['refund_state'] === 'full' ? '全额退款' : '部分退款';
         }
-        if ($payments->contains('refund_pending', true)) {
+        if ($payment['refund_pending']) {
             $status[] = '退款待确认';
         }
-        if ($payments->contains(fn ($row) => $row['open_hold'] === null && $row['had_hold'])) {
+        if ($payment['open_hold'] === null && $payment['had_hold']) {
             $status[] = '返还待核对';
-        } elseif ($payments->contains(fn ($row) => bccomp($row['open_hold'] ?? '0', '0', self::SCALE) > 0)) {
+        } elseif (bccomp($payment['open_hold'] ?? '0', '0', self::SCALE) > 0) {
             $status[] = '仍有冻结';
-        } elseif ($payments->contains('had_hold', true)) {
+        } elseif ($payment['had_hold']) {
             $status[] = '冻结已解除';
         }
+
         return implode(' · ', $status);
     }
 

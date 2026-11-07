@@ -78,6 +78,8 @@ Route::prefix('finance')->name('finance.')->middleware(\App\Http\Middleware\Redi
     Route::get('/transactions/{transaction}/raw', 'rawPayPalTransaction')->whereNumber('transaction')->name('transactions.raw');
     Route::post('/records/{dataset}/import', 'importRecords')->name('records.import');
     Route::get('/records/{dataset}/export', 'exportRecords')->name('records.export');
+    Route::post('/records/{report}/export-template/preview', 'previewExportTemplate')
+        ->where('report', 'paypal-orders')->name('records.export-template.preview');
     Route::get('/settings/accounting', 'accounting')->name('accounting');
     Route::post('/settings/accounting/{action}', 'saveAccounting')->whereIn('action', ['rate', 'rule', 'reapply', 'lock'])->name('accounting.save');
     Route::get('/settings/{kind}', 'settings')->name('settings');
@@ -87,7 +89,7 @@ Route::prefix('finance')->name('finance.')->middleware(\App\Http\Middleware\Redi
     Route::get('/settings/{kind}/export', 'exportSettings')->name('settings.export');
     Route::get('/reports/{report}', 'report')->name('report');
     Route::get('/reports/paypal-settlement/records/{record}', 'paypalSettlementDetail')->whereNumber('record')->name('settlement.paypal.detail');
-    Route::post('/reports/{report}/export-template/preview', 'previewSettlementExportTemplate')
+    Route::post('/reports/{report}/export-template/preview', 'previewExportTemplate')
         ->whereIn('report', ['paypal-settlement', 'credit-settlement'])->name('settlement.export-template.preview');
     Route::post('/reports/{report}/save', 'saveSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement'])->name('settlement.save');
     Route::delete('/reports/{report}/records', 'deleteSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement'])->name('settlement.delete');

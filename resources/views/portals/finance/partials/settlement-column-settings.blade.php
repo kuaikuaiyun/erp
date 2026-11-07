@@ -4,7 +4,14 @@
 <dialog id="settlement-column-settings" class="settlement-dialog" aria-labelledby="settlement-column-title"
     data-preference-key="finance-settlement-columns:{{ $report }}:{{ $user->getAuthIdentifier() }}"
     @if($orderView) data-export-visible-columns @endif
-    data-template-preview-url="{{ route('finance.settlement.export-template.preview', $report) }}"
+    @if($report === 'paypal-orders')
+    data-filter-form="finance-filters"
+    data-export-column-param="report_columns[]"
+    data-template-format-param="export_format"
+    data-template-url="{{ route('finance.records.export', ['dataset' => $report, 'export_layout' => 'page', 'export_scope' => 'filtered']) }}"
+    data-legacy-preference-key="finance:paypal-orders:page-export-columns:v2"
+    @endif
+    data-template-preview-url="{{ route($report === 'paypal-orders' ? 'finance.records.export-template.preview' : 'finance.settlement.export-template.preview', $report) }}"
     data-csrf-token="{{ csrf_token() }}">
     <header>
         <h3 id="settlement-column-title">列与导出设置</h3>
@@ -16,7 +23,7 @@
             <button type="button" class="btn btn-default" data-column-tab="display" aria-pressed="false">列表显示</button>
         </div>
         <section data-column-panel="display" hidden>
-            <p>{{ $orderView ? '默认按列表可见列和顺序导出。' : '选择要在结算列表显示的列。' }}</p>
+            <p>{{ $orderView ? '默认按列表可见列和顺序导出。' : '选择要在列表显示的列。' }}</p>
             <button type="button" class="btn btn-default btn-xs" data-display-all>显示全部</button>
             <div class="settlement-display-fields">
                 @foreach($columns as $field => $label)
@@ -27,9 +34,9 @@
         <section data-column-panel="export">
             <div class="settlement-template-import">
                 <strong><i class="fa fa-upload" aria-hidden="true"></i> 从表格导入模板</strong>
-                <p>读取首个工作表指定行的表头和顺序。支持 XLSX、XLS、CSV，不导入表里的业务数据。</p>
+                <p>仅读取首个工作表指定行的表头和顺序。支持 XLSX、XLS、CSV{{ $report === 'paypal-orders' ? '、TSV' : '' }}。</p>
                 <div class="settlement-template-file">
-                    <input type="file" data-import-template-file accept=".xlsx,.xls,.csv" aria-label="导出模板文件">
+                    <input type="file" data-import-template-file accept=".xlsx,.xls,.csv{{ $report === 'paypal-orders' ? ',.tsv' : '' }}" aria-label="导出模板文件">
                     <label>表头行 <input class="form-control" type="number" data-import-template-row min="1" max="1000" step="1" value="1"></label>
                     <button type="button" class="btn btn-default" data-import-export-template>读取表头</button>
                 </div>
@@ -76,9 +83,14 @@
 @push('styles')
 <style>
 .settlement-column-settings-trigger{margin-left:auto}
-#settlement-column-settings{width:900px;margin:auto;position:fixed;inset:0;border-radius:10px}
+#settlement-column-settings{width:900px;max-width:calc(100vw - 32px);max-height:85vh;margin:auto;position:fixed;inset:0;border:0;border-radius:10px;padding:0;color:#3b5870}
+#settlement-column-settings::backdrop{background:#102c4866}
 #settlement-column-settings[open]{display:flex;flex-direction:column}
-#settlement-column-settings>header,#settlement-column-settings>footer{flex-shrink:0}
+#settlement-column-settings>header,#settlement-column-settings>footer{flex-shrink:0;display:flex;align-items:center;padding:16px 20px}
+#settlement-column-settings>header{justify-content:space-between;border-bottom:1px solid #e2eaf2}
+#settlement-column-settings>header h3{font-size:17px;margin:0}
+#settlement-column-settings>header button{border:0;background:none;font-size:24px}
+#settlement-column-settings>footer{justify-content:flex-end;gap:8px;border-top:1px solid #e2eaf2}
 .settlement-column-body{padding:16px 20px;overflow:auto}
 .settlement-column-tabs{display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid #dfe8f0}
 .settlement-column-tabs .btn{border:0;border-radius:0;background:transparent;padding:9px 16px}
@@ -112,5 +124,5 @@
 </style>
 @endpush
 @push('scripts')
-<script src="{{ asset('assets/erp/finance-settlement-columns.js') }}?v=4"></script>
+<script src="{{ asset('assets/erp/finance-settlement-columns.js') }}?v=6"></script>
 @endpush

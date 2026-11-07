@@ -44,7 +44,6 @@
     var conditions = document.getElementById('settlement-conditions');
     var add = document.getElementById('settlement-add-condition');
     var headings = conditions.parentElement.querySelector('[data-condition-headings]');
-    var money = ['gross', 'settlement', 'fee', 'refund', 'payable'];
     var comparisons = ['gt', 'gte', 'lt', 'lte'];
     var timers = new WeakMap();
 
@@ -54,7 +53,7 @@
             var op = row.querySelector('[data-condition-operator]');
             var value = row.querySelector('[data-condition-value]');
             var changed = row.dataset.field !== undefined && row.dataset.field !== field.value;
-            var numeric = money.includes(field.value);
+            var numeric = field.selectedOptions[0]?.hasAttribute('data-condition-numeric');
             if (changed) value.value = '';
             row.dataset.field = field.value;
             if (op.options) {

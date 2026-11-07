@@ -1,17 +1,26 @@
+@php
+    $orderColumns = ['编号','订单信息','店铺信息','订阅信息','订阅复购原订单ID','出单产品明细','支付信息','金额信息','订单时间','PayPal实际退款','信用卡实际退款','交易号','账单号','买家信息','物流信息','数据状态'];
+@endphp
 <div class="box-header with-border logistics-list-toolbar paypal-order-toolbar {{ $dataset === 'paypal-orders' && $canManage ? 'has-order-refresh' : '' }}">
     <h3 class="box-title">订单列表</h3><button id="paypal-export-selected" type="button" class="btn btn-default btn-sm" hidden style="display:none" disabled>导出所选</button>
     @if($dataset === 'paypal-orders' && $canManage)
     <button type="button" id="finance-order-refresh-open" class="btn btn-primary btn-sm" @disabled($refreshablePayPalAccounts->isEmpty())><i class="fa fa-refresh" aria-hidden="true"></i> 刷新订单</button>
     @endif
-    @if(in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true))
+    <input type="hidden" name="export_layout" value="page" form="finance-filters">
+    @if($dataset === 'paypal-orders')
+        <select class="form-control" data-active-export-template aria-label="本次使用的导出模板"><option value="">默认字段设置</option></select>
+        @include('portals.finance.partials.settlement-column-settings', [
+            'report' => $dataset, 'orderView' => false, 'columns' => $orderColumns,
+            'exportColumns' => \App\Portals\Finance\FinancePayPalOrderExport::pageHeaders($dataset),
+        ])
+    @else
     <details class="finance-export-columns">
         <summary class="btn btn-default btn-sm">选择导出列</summary>
         <div class="finance-export-column-panel">
             <div class="finance-export-column-actions"><strong>选择需要导出的字段</strong><button type="button" class="btn btn-default btn-xs" data-export-columns-all>全选</button><button type="button" class="btn btn-default btn-xs" data-export-columns-none>清空</button></div>
-            <input type="hidden" name="export_layout" value="page" form="finance-filters">
             <input type="hidden" name="report_fields_customized" value="1" form="finance-filters">
             <div class="finance-export-column-grid">
-            @foreach(\App\Portals\Finance\FinancePayPalOrderExport::PAGE_HEADERS as $column)
+            @foreach(\App\Portals\Finance\FinancePayPalOrderExport::pageHeaders($dataset) as $column)
                 <label><input type="checkbox" name="report_columns[]" value="{{ $loop->index }}" form="finance-filters" checked> {{ \App\Portals\Finance\FinanceCatalog::simplified($column) }}</label>
             @endforeach
             </div>
@@ -29,7 +38,7 @@
     @php
         $columnStyles = ['', 'logistics-order-identifiers', 'logistics-store-information', 'logistics-subscription-information', '', 'logistics-sale-product-details', 'logistics-payment-information', ''];
     @endphp
-    <thead><tr><th scope="col" class="paypal-order-selection"><input type="checkbox" id="paypal-order-check-all" aria-label="全选当前页"></th>@foreach(['编号','订单信息','店铺信息','订阅信息','订阅复购原订单ID','出单产品明细','支付信息','金额信息','订单时间','PayPal实际退款','信用卡实际退款','交易号','账单号','买家信息','物流信息','数据状态','操作'] as $label)<th scope="col" class="{{ ($columnStyles[$loop->index] ?? '') ? $columnStyles[$loop->index].'-heading' : '' }}">{{ $label }}</th>@endforeach</tr></thead>
+    <thead><tr><th scope="col" class="paypal-order-selection"><input type="checkbox" id="paypal-order-check-all" aria-label="全选当前页"></th>@foreach($orderColumns as $index => $label)<th scope="col" data-settlement-column="{{ $index }}" class="{{ ($columnStyles[$index] ?? '') ? $columnStyles[$index].'-heading' : '' }}">{{ $label }}</th>@endforeach<th scope="col">操作</th></tr></thead>
     <tbody>
     @forelse($records as $record)
         @php
@@ -78,12 +87,12 @@
         @endphp
         <tr>
             <td class="paypal-order-selection"><input type="checkbox" class="paypal-order-check" value="{{ $record->id }}" aria-label="选择记录 {{ $record->id }}"></td>
-            <td class="paypal-order-number" title="{{ $order ? '物流订单编号' : '财务记录编号' }}">{{ $order?->id ?? $record->id }}</td>
+            <td data-settlement-column="0" class="paypal-order-number" title="{{ $order ? '物流订单编号' : '财务记录编号' }}">{{ $order?->id ?? $record->id }}</td>
             @foreach($blocks as $block)
                 @if($loop->iteration === 4)
-                    <td class="paypal-order-origin" title="{{ $block['原订单ID'] }}">{{ $block['原订单ID'] ?: '—' }}</td>
+                    <td data-settlement-column="{{ $loop->iteration }}" class="paypal-order-origin" title="{{ $block['原订单ID'] }}">{{ $block['原订单ID'] ?: '—' }}</td>
                 @elseif($loop->iteration === 5)
-                    <td class="logistics-sale-product-details">
+                    <td data-settlement-column="{{ $loop->iteration }}" class="logistics-sale-product-details">
                         @php
                             $productItems = $paypalOrderItems->get($order?->id, collect());
                             $sourceTitle = $dataset === 'paypal-orders' ? ($record->payload[$definition['headers'][18]] ?? '') : $fields[18];
@@ -93,7 +102,7 @@
                         @include('portals.finance.partials.paypal-order-products', ['items' => $productItems])
                     </td>
                 @else
-                <td class="{{ $columnStyles[$loop->iteration] }}"><dl class="paypal-order-fields">
+                <td data-settlement-column="{{ $loop->iteration }}" class="{{ $columnStyles[$loop->iteration] }}"><dl class="paypal-order-fields">
                     @forelse(array_filter($block, fn ($value) => filled($value)) as $label => $value)
                         <dt>{{ $label }}：</dt><dd @class(['is-positive' => ($label === '支付状态' && in_array($value, ['已付款', '已完成', '成功'], true)) || ($label === '订阅状态' && $value === '已订阅'), 'is-subscription' => $label === '订阅类型']) title="{{ $value }}">{{ $value }}</dd>
                     @empty
@@ -110,10 +119,10 @@
                 ];
             @endphp
             @foreach($extraBlocks as $extra)
-                <td><dl class="paypal-order-fields">@foreach($extra as $label => $value)<dt>{{ $label }}：</dt><dd title="{{ $value }}">{{ $value }}</dd>@endforeach</dl></td>
+                <td data-settlement-column="{{ 7 + $loop->index }}"><dl class="paypal-order-fields">@foreach($extra as $label => $value)<dt>{{ $label }}：</dt><dd title="{{ $value }}">{{ $value }}</dd>@endforeach</dl></td>
             @endforeach
             @foreach(['paypalRefunds', 'creditCardRefunds'] as $relation)
-                <td>
+                <td data-settlement-column="{{ 9 + $loop->index }}">
                     @if($order && $order->relationLoaded($relation))
                         @foreach($order->getRelation($relation) as $refund)
                             <div class="logistics-refund-item">
@@ -124,8 +133,8 @@
                     @endif
                 </td>
             @endforeach
-            <td style="overflow-wrap:anywhere">{{ $record->reference }}</td>
-            <td style="overflow-wrap:anywhere">{{ $order?->bill_number ?? $fields[13] }}</td>
+            <td data-settlement-column="11" style="overflow-wrap:anywhere">{{ $record->reference }}</td>
+            <td data-settlement-column="12" style="overflow-wrap:anywhere">{{ $order?->bill_number ?? $fields[13] }}</td>
             @php
                 $contactBlocks = [
                     ['买家名称' => $order?->buyer_name ?? $fields[3], 'Email' => $order?->buyer_email ?? $fields[10], '国家/地区' => $order?->destination ?? $fields[36]],
@@ -133,9 +142,9 @@
                 ];
             @endphp
             @foreach($contactBlocks as $extra)
-                <td><dl class="paypal-order-fields">@foreach($extra as $label => $value)<dt>{{ $label }}：</dt><dd title="{{ $value }}">{{ $value }}</dd>@endforeach</dl></td>
+                <td data-settlement-column="{{ 13 + $loop->index }}"><dl class="paypal-order-fields">@foreach($extra as $label => $value)<dt>{{ $label }}：</dt><dd title="{{ $value }}">{{ $value }}</dd>@endforeach</dl></td>
             @endforeach
-            <td>{{ $order?->data_status }}</td>
+            <td data-settlement-column="15">{{ $order?->data_status }}</td>
             <td>
                 <button type="button" class="btn btn-info btn-xs js-logistics-order-detail" data-paypal-detail="paypal-detail-{{ $record->id }}" data-order-detail-url="{{ route('finance.records', ['dataset' => $dataset, 'order_detail' => $record->id, 'timezone' => $filters['timezone']]) }}" aria-haspopup="dialog"><i class="fa fa-eye" aria-hidden="true"></i> 查看</button>
                 <template id="paypal-detail-{{ $record->id }}">
@@ -173,7 +182,7 @@
             </td>
         </tr>
     @empty
-        <tr><td colspan="18">{{ __('finance.records.empty') }}</td></tr>
+        <tr><td data-settlement-colspan="2" colspan="{{ count($orderColumns) + 2 }}">{{ __('finance.records.empty') }}</td></tr>
     @endforelse
     </tbody>
 </table>
@@ -207,8 +216,8 @@
             }
         });
     }
-    function resize() {
-        if (viewport.clientWidth === lastWidth) return;
+    function resize(force) {
+        if (!force && viewport.clientWidth === lastWidth) return;
         lastWidth = viewport.clientWidth;
         // Fit the primary columns precisely before the pinned action column.
         // Keep secondary columns beyond that boundary instead of exposing a sliver.
@@ -232,7 +241,9 @@
                 cell.style.maxWidth = widths[index] + 'px';
             });
         });
-        table.style.width = widths.reduce(function (sum, width) { return sum + width; }, 0) + 'px';
+        table.style.width = Math.max(viewport.clientWidth, widths.reduce(function (sum, width, index) {
+            return sum + (headers[index].hidden ? 0 : width);
+        }, 0)) + 'px';
         table.style.minWidth = table.style.width;
         // Both scrollbars need identical ranges, excluding the vertical scrollbar.
         bar.style.width = viewport.clientWidth + 'px';
@@ -242,7 +253,8 @@
     }
     bar.addEventListener('scroll', function () { sync(bar); }, { passive: true });
     viewport.addEventListener('scroll', function () { sync(viewport); }, { passive: true });
-    new ResizeObserver(function () { requestAnimationFrame(resize); }).observe(viewport);
+    new ResizeObserver(function () { requestAnimationFrame(function () { resize(); }); }).observe(viewport);
+    document.addEventListener('finance:columns-changed', function () { resize(true); });
     resize();
 })();
 </script>

@@ -2,7 +2,7 @@
     <select class="form-control" data-condition-field required aria-label="筛选字段">
         <option value="">请选择筛选字段</option>
         @foreach($conditionFields as $field => $label)
-            <option value="{{ $field }}" @selected(($condition['field'] ?? '') === $field)>{{ $label }}</option>
+            <option value="{{ $field }}" @if(in_array($field, $numericConditionFields ?? [], true)) data-condition-numeric @endif @selected(($condition['field'] ?? '') === $field)>{{ $label }}</option>
         @endforeach
     </select>
     @if($enhancedConditions)

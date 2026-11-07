@@ -79,6 +79,8 @@
 .finance-system .paypal-order-toolbar .finance-numbered-pages{padding-top:0;margin:0;align-items:center}
 .paypal-order-toolbar>.btn,.paypal-order-toolbar .finance-export-columns>summary{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;height:32px;margin:0;padding:5px 12px;line-height:20px}
 .paypal-order-toolbar .finance-export-columns{align-self:center;margin:0}
+.paypal-order-toolbar [data-active-export-template]{width:auto;max-width:180px}
+.logistics-orders-table.paypal-order-table [data-settlement-column][hidden]{display:none}
 .finance-export-columns{position:relative}.finance-export-columns>summary{list-style:none}.finance-export-columns>summary::-webkit-details-marker{display:none}
 .finance-export-column-panel{position:absolute;right:0;top:38px;width:560px;max-width:calc(100vw - 40px);padding:16px;background:#fff;border:1px solid #dce6ef;border-radius:6px;box-shadow:0 8px 24px #17324d26;z-index:20}
 .finance-export-column-actions{display:flex;align-items:center;gap:8px;margin-bottom:12px}.finance-export-column-actions strong{margin-right:auto}
@@ -294,9 +296,10 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
         checks.forEach(function(input){input.addEventListener('change',refreshSelection);});
         selectedExport.addEventListener('click',function(){
             if(!document.getElementById('finance-filters').reportValidity())return;
-            var query=new URLSearchParams(new FormData(document.getElementById('finance-filters')));
+            var query=new URLSearchParams(new FormData(filterForm));
             query.set('export_scope','records');query.set('export_format',document.querySelector('[name="export_format"]').value);
             checks.filter(function(input){return input.checked;}).forEach(function(input){query.append('selected_ids[]',input.value);});
+            filterForm.dispatchEvent(new CustomEvent('finance:prepare-export',{detail:query}));
             var url=new URL(document.getElementById('finance-export-filtered').href);
             url.search=query.toString();window.financeDownload(url.toString(),selectedExport);
         });
@@ -358,6 +361,7 @@ document.getElementById('finance-export-filtered').addEventListener('click',func
         selected.forEach(function(input){query.append('selected_ids[]',input.value);});
     }
     query.set('export_format',document.querySelector('[name="export_format"]').value);
+    form.dispatchEvent(new CustomEvent('finance:prepare-export',{detail:query}));
     this.href=@json(route('finance.records.export', $dataset))+'?'+query.toString();
     event.preventDefault();
     window.financeDownload(this.href,this);
