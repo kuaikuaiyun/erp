@@ -470,8 +470,7 @@ class OperationReportDashboardController extends Controller
 
             $calculationDays = null;
             if (! empty($first['hired_at'])) {
-                $calculationStart = Carbon::parse($first['hired_at'])->startOfDay()
-                    ->max(Carbon::parse($dateFrom)->startOfDay());
+                $calculationStart = Carbon::parse($first['hired_at'])->startOfDay();
                 $calculationEnd = Carbon::parse($dateTo)->startOfDay()->min(today());
                 $calculationDays = $calculationStart->lte($calculationEnd)
                     ? $calculationStart->diffInDays($calculationEnd) + 1
