@@ -35,6 +35,7 @@ class ShoplineOrderController extends Controller
         $validated = $request->validate([
             'keyword' => ['nullable', 'string', 'max:191'],
             'store_id' => ['nullable', 'integer'],
+            'store_handle' => ['nullable', 'string', 'max:191'],
             'operator_id' => ['nullable', 'integer'],
             'status' => ['nullable', 'in:open,cancelled,any'],
             'payment_status' => ['nullable', 'in:unpaid,authorized,pending,partially_paid,paid,partially_refunded,refunded'],
@@ -50,6 +51,10 @@ class ShoplineOrderController extends Controller
             ->where('shop_status', AssistantDomainStore::SHOP_STATUS_IN_USE)
             ->orderBy('shop_name')
             ->get(['id', 'shop_name', 'shopline_app_token', 'owner_user_id', 'user_name']);
+        $storeHandles = $stores
+            ->filter(fn (AssistantDomainStore $store): bool => filled($store->shop_name))
+            ->unique(fn (AssistantDomainStore $store): string => strtolower(trim((string) $store->shop_name)))
+            ->values();
         $query = FashionLogisticsOrder::query()
             ->with(['items', 'store.ownerUser:id,name,username'])
             ->where('source_platform', self::PLATFORM)
@@ -68,6 +73,11 @@ class ShoplineOrderController extends Controller
             });
         }
         $query->when($validated['store_id'] ?? null, fn ($orders, $storeId) => $orders->where('assistant_domain_store_id', $storeId));
+        $storeHandle = strtolower(trim((string) ($validated['store_handle'] ?? '')));
+        if ($storeHandle !== '') {
+            $query->whereHas('store', static fn ($stores) => $stores
+                ->whereRaw('LOWER(TRIM(shop_name)) = ?', [$storeHandle]));
+        }
         $query->when(($validated['status'] ?? '') !== '' && ($validated['status'] ?? '') !== 'any', fn ($orders) => $orders->where('status', $validated['status']));
         $query->when($validated['payment_status'] ?? null, fn ($orders, $status) => $orders->where('payment_status', $status));
         $query->when($validated['fulfillment_status'] ?? null, fn ($orders, $status) => $orders->where('fulfillment_status', $status));
@@ -111,6 +121,7 @@ class ShoplineOrderController extends Controller
             ...$context,
             'orders' => $orders,
             'stores' => $stores,
+            'storeHandles' => $storeHandles,
             'operators' => $operators,
             'filters' => $validated,
         ]);
