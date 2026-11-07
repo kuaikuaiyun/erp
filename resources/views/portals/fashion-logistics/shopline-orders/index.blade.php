@@ -68,21 +68,18 @@
 </style>
 <style>
 /* 顶部筛选条对齐“产品风险与利润”页：标签在上、控件在下、操作按钮同一行。 */
-.shopline-orders-page .sl-filter{flex-wrap:nowrap!important;gap:8px!important;padding:14px 19px!important;background:#fff!important}
-.shopline-orders-page .sl-filter .form-group{flex:0 0 auto!important;min-width:0!important}
-.shopline-orders-page .sl-filter .form-control{width:115px!important;min-width:0!important;height:36px!important;border-radius:6px!important;color:#31536b!important}
-.shopline-orders-page .sl-filter .sl-keyword{width:240px!important}
-.shopline-orders-page .sl-filter .form-group:nth-child(2) .form-control{width:150px!important}
-.shopline-orders-page .sl-filter .form-group:nth-child(3) .form-control{width:130px!important}
-.shopline-orders-page .sl-filter .form-group:nth-child(7) .form-control,.shopline-orders-page .sl-filter .form-group:nth-child(8) .form-control{width:125px!important}
-.shopline-orders-page .sl-filter .form-group:nth-child(9) .form-control{width:100px!important}
+.shopline-orders-page .sl-filter{display:grid!important;grid-template-columns:repeat(3,minmax(160px,1fr)) minmax(210px,1.2fr);align-items:end;gap:13px 14px!important;padding:17px 19px!important;background:#fff!important}
+.shopline-orders-page .sl-filter .form-group{min-width:0!important;margin:0!important}
+.shopline-orders-page .sl-filter .form-control{width:100%!important;min-width:0!important;height:36px!important;border-radius:6px!important;color:#31536b!important}
+.shopline-orders-page .sl-filter .sl-keyword{width:100%!important}
 .shopline-orders-page .sl-filter label{height:16px;margin-bottom:5px!important;color:#597891!important;font-weight:700!important;line-height:16px!important;white-space:nowrap}
-.shopline-orders-page .sl-filter .btn{display:inline-flex!important;align-items:center!important;justify-content:center!important;height:36px!important;margin:21px 0 0!important;padding:0 13px!important;border-radius:5px!important;line-height:1!important;white-space:nowrap}
+.shopline-orders-page .sl-filter-actions{display:flex;align-items:center;gap:8px;height:36px;grid-column:span 2;justify-content:flex-end}
+.shopline-orders-page .sl-filter .btn{display:inline-flex!important;align-items:center!important;justify-content:center!important;height:36px!important;margin:0!important;padding:0 13px!important;border-radius:5px!important;line-height:1!important;white-space:nowrap}
 .shopline-orders-page .sl-filter .sl-query{background:#278bc0!important;border-color:#278bc0!important}
 .shopline-orders-page .sl-filter .sl-reset{border-color:#d5e0e8!important;color:#49677c!important;background:#fff!important}
 .shopline-orders-page .sl-filter .sl-reset:hover{border-color:#a9c6d8!important;background:#f5fafc!important;color:#2776a1!important}
-@media(max-width:1480px){.shopline-orders-page .sl-filter{flex-wrap:wrap!important}.shopline-orders-page .sl-filter .btn{margin-top:21px!important}}
-@media(max-width:760px){.shopline-orders-page .sl-filter .form-group,.shopline-orders-page .sl-filter .form-control,.shopline-orders-page .sl-filter .sl-keyword{width:100%!important}.shopline-orders-page .sl-filter .form-group{flex-basis:100%!important}.shopline-orders-page .sl-filter .btn{margin-top:0!important}}
+@media(max-width:1050px){.shopline-orders-page .sl-filter{grid-template-columns:repeat(3,minmax(150px,1fr))!important}.shopline-orders-page .sl-filter .form-group:first-child{grid-column:span 3}.shopline-orders-page .sl-filter-actions{grid-column:span 3;justify-content:flex-start}}
+@media(max-width:760px){.shopline-orders-page .sl-filter{grid-template-columns:1fr!important}.shopline-orders-page .sl-filter .form-group:first-child,.shopline-orders-page .sl-filter-actions{grid-column:auto}.shopline-orders-page .sl-filter-actions{justify-content:flex-start}}
 </style>
 @endpush
 
@@ -91,6 +88,7 @@
     $orderLabels = ['open' => '处理中', 'cancelled' => '已取消'];
     $paymentLabels = ['unpaid' => '未支付', 'authorized' => '已授权', 'pending' => '支付中', 'partially_paid' => '部分支付', 'paid' => '已支付', 'partially_refunded' => '部分退款', 'refunded' => '已退款'];
     $fulfillmentLabels = ['unshipped' => '未发货', 'unfulfilled' => '未发货', 'partial' => '部分发货', 'partially_fulfilled' => '部分发货', 'shipped' => '已发货', 'fulfilled' => '已发货'];
+    $fulfillmentFilterLabels = ['unshipped' => '未发货', 'partial' => '部分发货', 'shipped' => '已发货'];
     $marketingSourceLabels = ['google_ads' => 'Google Ads', 'tiktok' => 'TikTok', 'meta' => 'Meta', 'other_utm' => '其他 UTM', 'external_referral' => '外部引荐', 'direct_or_unknown' => '自然 / 未识别'];
     $syncLabels = ['pending' => '未同步', 'syncing' => '同步中', 'success' => '同步成功', 'failed' => '同步失败'];
 @endphp
@@ -101,14 +99,14 @@
         <div class="form-group"><label>关键词</label><input class="form-control sl-keyword" name="keyword" value="{{ $filters['keyword'] ?? '' }}" placeholder="订单号、客户、邮箱、SKU、商品名称"></div>
         <div class="form-group"><label>店铺</label><select class="form-control" name="store_handle"><option value="">全部 Shopline 店铺</option>@foreach($storeHandles as $store)<option value="{{ $store->shop_name }}" @selected(strtolower(trim((string) ($filters['store_handle'] ?? ''))) === strtolower(trim((string) $store->shop_name)))>{{ $store->shop_name }}</option>@endforeach</select></div>
         <div class="form-group"><label>运营人员</label><select class="form-control" name="operator_id"><option value="">全部运营人员</option>@foreach($operators as $operator)<option value="{{ $operator->id }}" @selected((string)($filters['operator_id'] ?? '') === (string)$operator->id)>{{ $operator->name ?: $operator->username }}</option>@endforeach</select></div>
-        <div class="form-group"><label>订单状态</label><select class="form-control" name="status"><option value="">全部</option><option value="open" @selected(($filters['status'] ?? '') === 'open')>处理中</option><option value="cancelled" @selected(($filters['status'] ?? '') === 'cancelled')>已取消</option></select></div>
-        <div class="form-group"><label>支付状态</label><select class="form-control" name="payment_status"><option value="">全部</option>@foreach($paymentLabels as $key => $label)<option value="{{ $key }}" @selected(($filters['payment_status'] ?? '') === $key)>{{ $label }}</option>@endforeach</select></div>
-        <div class="form-group"><label>发货状态</label><select class="form-control" name="fulfillment_status"><option value="">全部</option>@foreach($fulfillmentLabels as $key => $label)<option value="{{ $key }}" @selected(($filters['fulfillment_status'] ?? '') === $key)>{{ $label }}</option>@endforeach</select></div>
-        <div class="form-group"><label>订单来源</label><select class="form-control" name="marketing_source"><option value="">全部</option>@foreach($marketingSourceLabels as $key => $label)<option value="{{ $key }}" @selected(($filters['marketing_source'] ?? '') === $key)>{{ $label }}</option>@endforeach</select></div>
+        <div class="form-group"><label>订单状态</label><select class="form-control" name="status"><option value="">全部订单状态</option><option value="open" @selected(($filters['status'] ?? '') === 'open')>处理中</option><option value="cancelled" @selected(($filters['status'] ?? '') === 'cancelled')>已取消</option></select></div>
+        <div class="form-group"><label>支付状态</label><select class="form-control" name="payment_status"><option value="">全部支付状态</option>@foreach($paymentLabels as $key => $label)<option value="{{ $key }}" @selected(($filters['payment_status'] ?? '') === $key)>{{ $label }}</option>@endforeach</select></div>
+        <div class="form-group"><label>发货状态</label><select class="form-control" name="fulfillment_status"><option value="">全部发货状态</option>@foreach($fulfillmentFilterLabels as $key => $label)<option value="{{ $key }}" @selected(($filters['fulfillment_status'] ?? '') === $key)>{{ $label }}</option>@endforeach</select></div>
+        <div class="form-group"><label>订单来源</label><select class="form-control" name="marketing_source"><option value="">全部订单来源</option>@foreach($marketingSourceLabels as $key => $label)<option value="{{ $key }}" @selected(($filters['marketing_source'] ?? '') === $key)>{{ $label }}</option>@endforeach</select></div>
         <div class="form-group"><label>下单开始</label><input class="form-control" type="date" name="date_from" value="{{ $filters['date_from'] ?? '' }}"></div>
         <div class="form-group"><label>下单结束</label><input class="form-control" type="date" name="date_to" value="{{ $filters['date_to'] ?? '' }}"></div>
         <div class="form-group"><label>每页</label><select class="form-control" name="per_page">@foreach([20, 50, 100] as $size)<option value="{{ $size }}" @selected((int)($filters['per_page'] ?? 20) === $size)>{{ $size }} 条</option>@endforeach</select></div>
-        <button class="btn btn-primary sl-query" type="submit"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default sl-reset" href="{{ route('fashion-logistics.shopline-orders.index') }}"><i class="fa fa-refresh"></i> 重置</a>
+        <div class="sl-filter-actions"><button class="btn btn-primary sl-query" type="submit"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default sl-reset" href="{{ route('fashion-logistics.shopline-orders.index') }}"><i class="fa fa-refresh"></i> 重置</a></div>
     </form></div>
 
     <div class="box">
@@ -181,7 +179,7 @@
                     <div class="form-group"><label>同步条件</label><select class="form-control" id="shopline-sync-configuration"><option value="">全部</option><option value="ready">可同步</option><option value="missing">缺少配置</option></select></div>
                     <div class="form-group"><label>同步状态</label><select class="form-control" id="shopline-sync-status"><option value="">全部</option><option value="pending">未同步</option><option value="syncing">同步中</option><option value="success">同步成功</option><option value="failed">同步失败</option></select></div>
                     <div class="form-group"><label>每页</label><select class="form-control" id="shopline-sync-per-page"><option value="20">20 条</option><option value="50">50 条</option><option value="100">100 条</option></select></div>
-                    <button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> 查询</button>
+                    <button class="btn btn-primary" id="shopline-sync-submit" type="submit"><i class="fa fa-search"></i> 查询</button>
                 </form>
                 <div class="sl-sync-summary" id="shopline-sync-summary"></div>
                 <div class="table-responsive"><table class="table sl-sync-table"><thead><tr><th>店铺 Handle</th><th>同步条件</th><th>最近同步</th><th>状态</th><th>店铺订单数</th><th>今日订单数</th><th>最近错误</th></tr></thead><tbody id="shopline-sync-rows"><tr><td colspan="7" class="text-center text-muted">正在加载…</td></tr></tbody></table></div>
@@ -234,6 +232,16 @@ var shoplineSyncRows = document.getElementById('shopline-sync-rows');
 var shoplineSyncSummary = document.getElementById('shopline-sync-summary');
 var shoplineSyncRange = document.getElementById('shopline-sync-range');
 var shoplineSyncPagination = document.getElementById('shopline-sync-pagination');
+var shoplineSyncSubmit = document.getElementById('shopline-sync-submit');
+var shoplineSyncRequest = null;
+
+function setShoplineSyncSubmitting(isSubmitting) {
+    if (!shoplineSyncSubmit) return;
+    shoplineSyncSubmit.disabled = isSubmitting;
+    shoplineSyncSubmit.innerHTML = isSubmitting
+        ? '<i class="fa fa-spinner fa-spin"></i> 正在查询…'
+        : '<i class="fa fa-search"></i> 查询';
+}
 
 $('#shopline-sync-modal').on('shown.bs.modal', function () { loadShoplineSyncStatus(1); });
 shoplineSyncFilter.addEventListener('submit', function (event) { event.preventDefault(); loadShoplineSyncStatus(1); });
@@ -245,8 +253,10 @@ shoplineSyncPagination.addEventListener('click', function (event) {
 
 function loadShoplineSyncStatus(page) {
     if (!shoplineSyncEndpoint) return;
+    if (shoplineSyncRequest) return;
     shoplineSyncRows.innerHTML = '<tr><td colspan="7" class="text-center text-muted"><i class="fa fa-spinner fa-spin"></i> \u6b63\u5728\u52a0\u8f7d\u5f53\u524d\u9875\u6570\u636e...</td></tr>';
     shoplineSyncPagination.innerHTML = '';
+    setShoplineSyncSubmitting(true);
     var params = new URLSearchParams({
         page: String(page || 1),
         keyword: document.getElementById('shopline-sync-keyword').value || '',
@@ -254,13 +264,21 @@ function loadShoplineSyncStatus(page) {
         sync_status: document.getElementById('shopline-sync-status').value || '',
         per_page: document.getElementById('shopline-sync-per-page').value || '20'
     });
-    fetch(shoplineSyncEndpoint + '?' + params.toString(), {headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}})
+    var abortController = window.AbortController ? new AbortController() : null;
+    var requestTimer = window.setTimeout(function () { if (abortController) abortController.abort(); }, 20000);
+    shoplineSyncRequest = fetch(shoplineSyncEndpoint + '?' + params.toString(), {headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}, signal: abortController ? abortController.signal : undefined})
         .then(function (response) { if (!response.ok) throw new Error('HTTP ' + response.status); return response.json(); })
         .then(renderShoplineSyncStatus)
         .catch(function (error) {
-            shoplineSyncRows.innerHTML = '<tr><td colspan="7" class="text-center text-danger">\u65e0\u6cd5\u8bfb\u53d6\u540c\u6b65\u72b6\u6001\uff1a' + shoplineEscape(error.message) + '</td></tr>';
+            var message = error && error.name === 'AbortError' ? '\u8bf7\u6c42\u8d85\u65f6\uff0c\u8bf7\u91cd\u8bd5' : ('\u65e0\u6cd5\u8bfb\u53d6\u540c\u6b65\u72b6\u6001\uff1a' + shoplineEscape(error.message));
+            shoplineSyncRows.innerHTML = '<tr><td colspan="7" class="text-center text-danger">' + message + '</td></tr>';
             shoplineSyncSummary.innerHTML = '';
             shoplineSyncRange.textContent = '';
+        })
+        .then(function () {
+            window.clearTimeout(requestTimer);
+            shoplineSyncRequest = null;
+            setShoplineSyncSubmitting(false);
         });
 }
 
