@@ -953,8 +953,12 @@ class FinancePortalTest extends TestCase
         $add('FX-FEE-USD', 'T0200', '2026-10-16', 'USD', '-7.26', parent: 'PAY-CAD');
         $add('FX-FEE-CAD', 'T0200', '2026-10-16', 'CAD', '10', parent: 'PAY-CAD');
         $add('UNLINKED-REFUND', 'T1201', '2026-10-17', 'USD', '-10', parent: 'MISSING-PAYMENT');
-        $add('RELATED-OTHER-EVENT', 'T0403', '2026-10-18', 'USD', '-20', parent: 'PAY-CAD');
-        $add('UNRELATED-OTHER-EVENT', 'T0403', '2026-10-18', 'USD', '-20', parent: 'MISSING-PAYMENT');
+        $add('RELATED-OTHER-EVENT', 'T0800', '2026-10-18', 'USD', '20', parent: 'PAY-CAD');
+        $add('UNRELATED-OTHER-EVENT', 'T0800', '2026-10-18', 'USD', '20', parent: 'MISSING-PAYMENT');
+        $add('WITHDRAWAL', 'T0403', '2026-10-18', 'USD', '-20', parent: 'PAY-CAD');
+        $add('FX-WITHDRAWAL-CAD', 'T0200', '2026-10-18', 'CAD', '-28', parent: 'WITHDRAWAL');
+        $add('FX-WITHDRAWAL-USD', 'T0200', '2026-10-18', 'USD', '20', parent: 'WITHDRAWAL');
+        $add('FX-NO-REFERENCE', 'T0200', '2026-10-18', 'USD', '18');
 
         $url = '/finance/reports/paypal-settlement?from=2026-09-01&to=2026-09-30';
         $page = $this->get($url)->assertOk()->assertSee('data-view-settlement')->assertSee('data-edit-settlement')
@@ -987,10 +991,11 @@ class FinancePortalTest extends TestCase
             ->assertSee('FX-RELEASE-USD')->assertSee('REFUND')->assertDontSee('APPROVAL-ID')
             ->assertSee('PAY-CAD')
             ->assertSeeText(['原交易号', '关联交易号', '关联号类型', '原币', '原币金额', '原币手续费', '美元金额', '美元汇率', '美元来源', '-2.91'])
-            ->assertSeeText(['原币净额', '56.34', '美元净额', '账单号', 'Asia/Shanghai', 'T0403', '仅供核对'])
+            ->assertSeeText(['原币净额', '56.34', '美元净额', '账单号', 'Asia/Shanghai', 'T0800', '仅供核对'])
             ->assertSeeText(['查看全部流水字段（43 项）', '2026-09-18 20:05:00', '核对样本附注', 'CAD 100.20',
                 '物品标题', '样本商品', 'ITEM-123', '42 Sample Street'])
             ->assertSee('RELATED-OTHER-EVENT')->assertDontSee('UNRELATED-OTHER-EVENT')
+            ->assertDontSee('WITHDRAWAL')->assertDontSee('FX-NO-REFERENCE')
             ->assertSee('-9.85')->assertDontSee('PAY-OTHER');
         $this->assertNotContains('PAY-USD', array_column($detail->viewData('row')['events'], 'reference'));
         foreach ($detail->viewData('row')['events'] as $event) {
@@ -1006,6 +1011,15 @@ class FinancePortalTest extends TestCase
         $this->get('/finance/reports/paypal-settlement/records/'.$unlinkedId)->assertOk()
             ->assertSee('UNLINKED-REFUND')->assertSee('待关联交易')->assertSee('待核对');
         $this->get('/finance/reports/paypal-settlement/records/999999')->assertNotFound();
+        $allUrl = '/finance/reports/paypal-settlement';
+        $this->get($allUrl)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->total() === 5);
+        $allExport = $this->readDownload($this->get($allUrl.'?download=1')->assertOk()->streamedContent())->toArray();
+        $this->assertEqualsCanonicalizing(['PAY-CAD', 'PAY-USD', 'PAY-OTHER', 'UNLINKED-REFUND', 'FX-NO-REFERENCE'],
+            array_column(array_slice($allExport, 1), array_search('交易 ID', $allExport[0], true)));
+        $withdrawalExchangeId = DB::table('finance_payment_transactions')->where('transaction_id', 'FX-WITHDRAWAL-USD')->value('finance_record_id');
+        $this->get($allUrl.'/records/'.$withdrawalExchangeId)->assertNotFound();
+        $this->assertDatabaseHas('finance_payment_transactions', ['transaction_id' => 'WITHDRAWAL']);
+        $this->assertDatabaseHas('finance_payment_transactions', ['transaction_id' => 'FX-WITHDRAWAL-USD']);
 
         $this->get($url.'&reference=REFUND')->assertOk()->assertViewHas('rows', fn ($rows) => $rows->total() === 1);
         $sheet = $this->readDownload($this->get($url.'&download=1&reference=REFUND')->assertOk()->streamedContent())->toArray();
