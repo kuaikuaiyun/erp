@@ -41,7 +41,9 @@ class FashionOrderController extends Controller
         $keyword = trim((string) ($validated['keyword'] ?? ''));
         $storeKeyword = trim((string) ($validated['store_keyword'] ?? ''));
         $selectedStatus = (string) ($validated['status'] ?? 'completed');
-        $query = FashionLogisticsOrder::query()->with(['items', 'store']);
+        $query = FashionLogisticsOrder::query()
+            ->with(['items', 'store'])
+            ->where('source_platform', 'xshoppy');
         if ($keyword !== '') {
             $query->where(function ($query) use ($keyword): void {
                 $query->where('order_number', 'like', "%{$keyword}%")
@@ -96,7 +98,10 @@ class FashionOrderController extends Controller
             ->orderBy('name')->orderBy('username')->get(['id', 'name', 'username']);
         $syncStates = FashionLogisticsSyncState::query()
             ->with('store:id,shop_name,domain')
-            ->withCount(['orders as stored_orders_count'])
+            ->whereHas('store', static fn ($stores) => $stores
+                ->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy')"))
+            ->withCount(['orders as stored_orders_count' => static fn ($orders) => $orders
+                ->where('source_platform', 'xshoppy')])
             ->latest('last_started_at')
             ->get();
         return view('portals.fashion-logistics.orders.index', [
