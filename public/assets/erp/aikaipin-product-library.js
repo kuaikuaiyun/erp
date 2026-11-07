@@ -72,6 +72,7 @@
     var isProductSubmitting = false;
     var uploadTimer = null;
     var packageUploadToken = '';
+    var referenceUploadToken = '';
     var productSaveStartedAt = 0;
     var uploadSubmitHtml = uploadSubmit ? uploadSubmit.innerHTML : '';
     var uploadCategories = loadCategories();
@@ -879,6 +880,7 @@
         existingReferenceFile = null;
         existingPackageFile = null;
         packageUploadToken = '';
+        referenceUploadToken = '';
         isProductSubmitting = false;
         renderSkus();
         renderCategories([]);
@@ -1162,8 +1164,71 @@
         });
     }
 
+    function uploadReference(file) {
+        var totalChunks = Math.ceil(file.size / (5 * 1024 * 1024));
+
+        return jsonRequest(config.packageUploadInitializeUrl, 'POST', {
+            client_fingerprint: packageFingerprint(file),
+            original_name: file.name,
+            mime_type: file.type || 'text/html',
+            total_size: file.size,
+            total_chunks: totalChunks
+        }).then(function (session) {
+            var uploaded = {};
+            var chunkIndex = 0;
+
+            referenceUploadToken = session.upload_token;
+            (session.uploaded_chunks || []).forEach(function (index) {
+                uploaded[Number(index)] = true;
+            });
+            updateProductSaveProgress(Number(session.received_size || 0), file.size);
+
+            function uploadNextPart() {
+                while (chunkIndex < totalChunks && uploaded[chunkIndex]) {
+                    chunkIndex += 1;
+                }
+                if (chunkIndex >= totalChunks) {
+                    return jsonRequest(packageCompleteUrl(referenceUploadToken), 'POST').then(function (completed) {
+                        referenceUploadToken = completed.upload_token;
+                        updateProductSaveProgress(file.size, file.size);
+                        return completed;
+                    });
+                }
+
+                var start = chunkIndex * 5 * 1024 * 1024;
+                var end = Math.min(file.size, start + 5 * 1024 * 1024);
+                var currentIndex = chunkIndex;
+                var partData = new FormData();
+                partData.append('chunk', file.slice(start, end), file.name + '.part');
+
+                function sendPart(attempt) {
+                    return formDataRequest(packagePartUrl(referenceUploadToken, currentIndex), partData).catch(function (error) {
+                        if (attempt >= 3) {
+                            throw error;
+                        }
+                        return new Promise(function (resolve) {
+                            window.setTimeout(resolve, attempt * 800);
+                        }).then(function () {
+                            return sendPart(attempt + 1);
+                        });
+                    });
+                }
+
+                return sendPart(1).then(function (updatedSession) {
+                    uploaded[currentIndex] = true;
+                    chunkIndex = currentIndex + 1;
+                    updateProductSaveProgress(Number(updatedSession.received_size || 0), file.size);
+                    return uploadNextPart();
+                });
+            }
+
+            return session.status === 'completed' ? session : uploadNextPart();
+        });
+    }
+
     function submitProduct() {
         var packageFileToUpload = packageFile && packageFile.files && packageFile.files[0];
+        var referenceFileToUpload = referenceFile && referenceFile.files && referenceFile.files[0];
         var shopifyCsvToUpload = uploadShopifyCsv && uploadShopifyCsv.files && uploadShopifyCsv.files[0];
         var isEditing = editingProductId !== null;
         var packageRequest;
@@ -1197,6 +1262,14 @@
         }
 
         packageRequest.then(function (session) {
+            if (!referenceFileToUpload) {
+                return { packageSession: session, referenceSession: null };
+            }
+            setUploadSubmitState(true, '正在分片上传参考页面...');
+            return uploadReference(referenceFileToUpload).then(function (referenceSession) {
+                return { packageSession: session, referenceSession: referenceSession };
+            });
+        }).then(function (sessions) {
             var formData = new FormData(uploadForm);
             var requestUrl = isEditing
                 ? String(config.productUpdateUrlTemplate || '').replace('__product__', encodeURIComponent(editingProductId))
@@ -1208,14 +1281,14 @@
             uploadImageFiles.forEach(function (item) {
                 formData.append('images[]', item.file, item.file.name);
             });
-            if (referenceFile && referenceFile.files && referenceFile.files[0]) {
-                formData.append('reference_file', referenceFile.files[0], referenceFile.files[0].name);
-            }
             removedImageIds.forEach(function (index) {
                 formData.append('remove_image_indexes[]', String(index));
             });
-            if (session && session.upload_token) {
-                formData.append('package_upload_token', session.upload_token);
+            if (sessions.packageSession && sessions.packageSession.upload_token) {
+                formData.append('package_upload_token', sessions.packageSession.upload_token);
+            }
+            if (sessions.referenceSession && sessions.referenceSession.upload_token) {
+                formData.append('reference_upload_token', sessions.referenceSession.upload_token);
             }
             if (isEditing) {
                 formData.append('_method', 'PUT');

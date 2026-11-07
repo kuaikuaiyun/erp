@@ -77,7 +77,7 @@ class ProductLibraryController extends Controller
             'client_fingerprint' => ['required', 'string', 'size:64'],
             'original_name' => ['required', 'string', 'max:255'],
             'mime_type' => ['nullable', 'string', 'max:191'],
-            'total_size' => ['required', 'integer', 'min:1', 'max:157286400'],
+            'total_size' => ['required', 'integer', 'min:1', 'max:268435456'],
             'total_chunks' => ['required', 'integer', 'min:1'],
         ]);
         $expectedChunks = (int) ceil((int) $data['total_size'] / AikaipinProductLibraryStorageService::PACKAGE_CHUNK_SIZE);
@@ -230,6 +230,7 @@ class ProductLibraryController extends Controller
             'images' => ['nullable', 'array', 'max:3'],
             'images.*' => ['file', 'image', 'max:20480'],
             'reference_file' => ['nullable', 'file', 'extensions:html,htm', 'max:'.self::REFERENCE_FILE_MAX_KILOBYTES],
+            'reference_upload_token' => ['nullable', 'uuid'],
             'shopify_csv' => ['required', 'file', 'mimes:csv,txt', 'max:20480'],
             'package_upload_token' => ['nullable', 'uuid'],
             'authorized_department_ids' => ['nullable', 'array'],
@@ -268,6 +269,7 @@ class ProductLibraryController extends Controller
             $connection = config('admin.database.connection') ?: config('database.default');
             $product = DB::connection($connection)->transaction(function () use ($context, $data, $categories, $departmentIds, $skuValues, $shopifyPayload, $shopifySourceName, &$createdPaths): AikaipinProduct {
                 $session = null;
+                $referenceSession = null;
                 if (filled($data['package_upload_token'] ?? null)) {
                     $session = $this->uploadSessionForUser($context['user'], (string) $data['package_upload_token'], true);
                     if ($session->status !== AikaipinProductUploadSession::STATUS_COMPLETED
@@ -275,6 +277,18 @@ class ProductLibraryController extends Controller
                         || ! Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($session->assembled_path)) {
                         throw ValidationException::withMessages([
                             'package_upload_token' => __('aikaipin.messages.package_upload_incomplete_message'),
+                        ]);
+                    }
+                }
+                if (filled($data['reference_upload_token'] ?? null)) {
+                    $referenceSession = $this->uploadSessionForUser($context['user'], (string) $data['reference_upload_token'], true);
+                    $extension = strtolower(pathinfo((string) $referenceSession->original_name, PATHINFO_EXTENSION));
+                    if ($referenceSession->status !== AikaipinProductUploadSession::STATUS_COMPLETED
+                        || ! $referenceSession->assembled_path
+                        || ! Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($referenceSession->assembled_path)
+                        || ! in_array($extension, ['html', 'htm'], true)) {
+                        throw ValidationException::withMessages([
+                            'reference_upload_token' => '参考页面文件上传不完整或格式不正确，请重新上传。',
                         ]);
                     }
                 }
@@ -304,7 +318,11 @@ class ProductLibraryController extends Controller
                 }
 
                 $referenceFile = null;
-                if (($data['reference_file'] ?? null) instanceof UploadedFile) {
+                if ($referenceSession !== null) {
+                    $referencePayload = $this->storage->copyStoredFile($referenceSession->assembled_path, 'references', $referenceSession->original_name, $referenceSession->mime_type);
+                    $createdPaths[] = $referencePayload['path'];
+                    $referenceFile = $this->productFilePayload($referencePayload);
+                } elseif (($data['reference_file'] ?? null) instanceof UploadedFile) {
                     /** @var UploadedFile $referenceFile */
                     $referenceFile = $data['reference_file'];
                     $referencePayload = $this->storage->storeUploadedFile($referenceFile, 'references');
@@ -317,6 +335,12 @@ class ProductLibraryController extends Controller
                     $packagePayload = $this->storage->copyStoredFile($session->assembled_path, 'packages', $session->original_name, $session->mime_type);
                     $createdPaths[] = $packagePayload['path'];
                     $packageFile = $this->productFilePayload($packagePayload);
+                }
+                if ($referenceSession !== null) {
+                    $referenceSession->forceFill([
+                        'status' => AikaipinProductUploadSession::STATUS_CONSUMED,
+                        'expires_at' => now()->addHour(),
+                    ])->save();
                 }
 
                 $product->forceFill([
@@ -363,6 +387,16 @@ class ProductLibraryController extends Controller
         if ($completedSession !== null) {
             try {
                 $this->deleteUploadSession($completedSession);
+            } catch (\Throwable $exception) {
+                report($exception);
+            }
+        }
+        $completedReferenceSession = filled($data['reference_upload_token'] ?? null)
+            ? AikaipinProductUploadSession::query()->where('upload_token', $data['reference_upload_token'])->first()
+            : null;
+        if ($completedReferenceSession !== null) {
+            try {
+                $this->deleteUploadSession($completedReferenceSession);
             } catch (\Throwable $exception) {
                 report($exception);
             }
@@ -491,6 +525,7 @@ class ProductLibraryController extends Controller
             'remove_image_indexes' => ['nullable', 'array'],
             'remove_image_indexes.*' => ['integer', 'min:0', 'distinct'],
             'reference_file' => ['nullable', 'file', 'extensions:html,htm', 'max:'.self::REFERENCE_FILE_MAX_KILOBYTES],
+            'reference_upload_token' => ['nullable', 'uuid'],
             'package_upload_token' => ['nullable', 'uuid'],
             'authorized_department_ids' => ['nullable', 'array'],
             'authorized_department_ids.*' => ['integer', 'distinct'],
@@ -527,10 +562,11 @@ class ProductLibraryController extends Controller
         $createdPaths = [];
         $obsoletePaths = [];
         $completedSession = null;
+        $completedReferenceSession = null;
 
         try {
             $connection = config('admin.database.connection') ?: config('database.default');
-            DB::connection($connection)->transaction(function () use ($context, $product, $data, $categories, $departmentIds, $skuValues, $removedImageIndexes, $newImages, &$createdPaths, &$obsoletePaths, &$completedSession): void {
+            DB::connection($connection)->transaction(function () use ($context, $product, $data, $categories, $departmentIds, $skuValues, $removedImageIndexes, $newImages, &$createdPaths, &$obsoletePaths, &$completedSession, &$completedReferenceSession): void {
                 $images = $product->imageFiles();
                 foreach (array_reverse($removedImageIndexes) as $index) {
                     $removedFile = $images[$index] ?? null;
@@ -549,7 +585,29 @@ class ProductLibraryController extends Controller
                 }
 
                 $referenceFile = $product->referenceFilePayload();
-                if (($data['reference_file'] ?? null) instanceof UploadedFile) {
+                if ($data['reference_upload_token'] ?? null) {
+                    $referenceSession = $this->uploadSessionForUser($context['user'], (string) $data['reference_upload_token'], true);
+                    $extension = strtolower(pathinfo((string) $referenceSession->original_name, PATHINFO_EXTENSION));
+                    if ($referenceSession->status !== AikaipinProductUploadSession::STATUS_COMPLETED
+                        || ! $referenceSession->assembled_path
+                        || ! Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($referenceSession->assembled_path)
+                        || ! in_array($extension, ['html', 'htm'], true)) {
+                        throw ValidationException::withMessages([
+                            'reference_upload_token' => '参考页面文件上传不完整或格式不正确，请重新上传。',
+                        ]);
+                    }
+                    $referencePayload = $this->storage->copyStoredFile($referenceSession->assembled_path, 'references', $referenceSession->original_name, $referenceSession->mime_type);
+                    $createdPaths[] = $referencePayload['path'];
+                    if ($referenceFile !== null) {
+                        $obsoletePaths[] = $referenceFile['path'];
+                    }
+                    $referenceFile = $this->productFilePayload($referencePayload);
+                    $referenceSession->forceFill([
+                        'status' => AikaipinProductUploadSession::STATUS_CONSUMED,
+                        'expires_at' => now()->addHour(),
+                    ])->save();
+                    $completedReferenceSession = $referenceSession;
+                } elseif (($data['reference_file'] ?? null) instanceof UploadedFile) {
                     /** @var UploadedFile $uploadedReferenceFile */
                     $uploadedReferenceFile = $data['reference_file'];
                     $referencePayload = $this->storage->storeUploadedFile($uploadedReferenceFile, 'references');
@@ -622,6 +680,13 @@ class ProductLibraryController extends Controller
         if ($completedSession !== null) {
             try {
                 $this->deleteUploadSession($completedSession);
+            } catch (\Throwable $exception) {
+                report($exception);
+            }
+        }
+        if ($completedReferenceSession !== null) {
+            try {
+                $this->deleteUploadSession($completedReferenceSession);
             } catch (\Throwable $exception) {
                 report($exception);
             }
