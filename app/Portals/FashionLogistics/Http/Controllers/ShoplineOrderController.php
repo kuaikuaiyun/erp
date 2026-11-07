@@ -39,7 +39,7 @@ class ShoplineOrderController extends Controller
             'operator_id' => ['nullable', 'integer'],
             'status' => ['nullable', 'in:open,cancelled,any'],
             'payment_status' => ['nullable', 'in:unpaid,authorized,pending,partially_paid,paid,partially_refunded,refunded'],
-            'fulfillment_status' => ['nullable', 'in:unshipped,unfulfilled,partial,partially_fulfilled,shipped,fulfilled'],
+            'fulfillment_status' => ['nullable', 'in:unshipped,partial,shipped'],
             'marketing_source' => ['nullable', 'in:google_ads,tiktok,meta,other_utm,external_referral,direct_or_unknown'],
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
@@ -80,7 +80,12 @@ class ShoplineOrderController extends Controller
         }
         $query->when(($validated['status'] ?? '') !== '' && ($validated['status'] ?? '') !== 'any', fn ($orders) => $orders->where('status', $validated['status']));
         $query->when($validated['payment_status'] ?? null, fn ($orders, $status) => $orders->where('payment_status', $status));
-        $query->when($validated['fulfillment_status'] ?? null, fn ($orders, $status) => $orders->where('fulfillment_status', $status));
+        $fulfillmentStatusGroups = [
+            'unshipped' => ['unshipped', 'unfulfilled'],
+            'partial' => ['partial', 'partially_fulfilled'],
+            'shipped' => ['shipped', 'fulfilled'],
+        ];
+        $query->when($validated['fulfillment_status'] ?? null, fn ($orders, $status) => $orders->whereIn('fulfillment_status', $fulfillmentStatusGroups[$status] ?? [$status]));
         $query->when($validated['marketing_source'] ?? null, fn ($orders, $source) => $orders->where('marketing_source', $source));
         $query->when($validated['date_from'] ?? null, fn ($orders, $date) => $orders->where('order_created_at', '>=', $date.' 00:00:00'));
         $query->when($validated['date_to'] ?? null, fn ($orders, $date) => $orders->where('order_created_at', '<=', $date.' 23:59:59'));
