@@ -598,7 +598,13 @@ class OperationReportDashboardController extends Controller
                 'report_first_roi' => $actualAdSpend > 0 ? (float) $row['first_total_revenue'] / $actualAdSpend : null,
             ];
 
-            return $operatorRows
+            $storeRows = $operatorRows->filter(function (array $item): bool {
+                $domain = trim((string) ($item['shop_domain'] ?? ''));
+
+                return $domain !== '' && ! in_array($domain, ['—', '未知店铺'], true);
+            });
+
+            return $storeRows
                 ->groupBy(fn (array $item) => mb_strtolower(trim((string) ($item['shop_domain'] ?? '—'))))
                 ->map(function ($domainRows) use ($sumFields, $shared): array {
                     $domainFirst = $domainRows->first();
@@ -609,7 +615,6 @@ class OperationReportDashboardController extends Controller
                     $domainCost = (float) $domainMetrics['first_purchase_cost']
                         + (float) $domainMetrics['first_shipping_cost']
                         + (float) $domainMetrics['first_return_fee'];
-                    $domainProfit = (float) $domainMetrics['first_total_revenue'] - $domainSpend - $domainCost;
                     $domainMediaRows = $domainRows->groupBy(
                         fn (array $item) => mb_strtolower(trim((string) ($item['media_source'] ?? '其他')))
                     );
@@ -632,8 +637,8 @@ class OperationReportDashboardController extends Controller
                         'media_roi' => null,
                         'allocated_actual_ad_spend' => $domainSpend,
                         'first_total_cost' => $domainCost,
-                        'first_profit' => $domainProfit,
-                        'first_loss_rate' => $domainCost > 0 ? $domainProfit / $domainCost : null,
+                        'first_profit' => null,
+                        'first_loss_rate' => null,
                         'store_media_names' => $domainMediaNames,
                         'store_media_order_counts' => $domainMediaOrderCounts,
                         'store_media_rois' => $domainMediaRois,
