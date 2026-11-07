@@ -194,17 +194,30 @@ class OperationReportDashboardController extends Controller
                 $approvedReport = $report?->status === OperationReport::STATUS_APPROVED ? $report : null;
                 $isEmptyOrderDay = (int) $dateRows->sum('total_orders') === 0
                     && $dateRows->every(fn (array $row) => ($row['shop_domain'] ?? '—') === '—');
-                if ($isEmptyOrderDay && $approvedReport) {
-                    $advertisingMedia = collect($approvedReport->advertising_rows ?: [])
+                $advertisingMedia = collect($approvedReport?->advertising_rows ?: [])
                         ->map(fn (array $row) => trim((string) ($row['media_source'] ?? '')) ?: '其他')
                         ->unique(fn (string $media) => mb_strtolower($media))
                         ->values();
+                if ($isEmptyOrderDay && $approvedReport) {
                     if ($advertisingMedia->isNotEmpty()) {
                         $dateRows = $advertisingMedia->map(fn (string $media) => $this->emptyMetricRow(
                             (string) $rowDate,
                             (string) ($operator->name ?: $operator->username),
                             $media,
                         ));
+                    }
+                } elseif ($advertisingMedia->isNotEmpty()) {
+                    $existingMediaKeys = $dateRows->pluck('media_source')
+                        ->map(fn ($media) => mb_strtolower(trim((string) $media) ?: '其他'))
+                        ->all();
+                    foreach ($advertisingMedia as $media) {
+                        if (! in_array(mb_strtolower($media), $existingMediaKeys, true)) {
+                            $dateRows->push($this->emptyMetricRow(
+                                (string) $rowDate,
+                                (string) ($operator->name ?: $operator->username),
+                                $media,
+                            ));
+                        }
                     }
                 }
                 $mediaMetrics = collect($this->metrics->mediaRoiSummary(
@@ -237,6 +250,9 @@ class OperationReportDashboardController extends Controller
                             ->filter(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? '其他'))) === mb_strtolower($media))
                             ->sum('first_total_orders');
                     })->all(),
+                    'daily_media_ad_spends' => $dailyMediaNames->map(function (string $media) use ($mediaMetrics): float {
+                        return (float) ($mediaMetrics->get(mb_strtolower($media))['actual_ad_spend'] ?? 0);
+                    })->all(),
                     'daily_media_rois' => $dailyMediaNames->map(function (string $media) use ($mediaMetrics): ?float {
                         $metric = $mediaMetrics->get(mb_strtolower($media));
                         return isset($metric['first_roi']) ? (float) $metric['first_roi'] : null;
@@ -250,9 +266,10 @@ class OperationReportDashboardController extends Controller
                 $mediaKey = mb_strtolower(trim((string) ($row['media_source'] ?? '其他')));
                 $mediaSpend = (float) ($mediaMetrics->get($mediaKey)['actual_ad_spend'] ?? 0);
                 $mediaRevenue = (float) ($revenueByMedia->get($mediaKey) ?? 0);
+                $isMediaPlaceholder = trim((string) ($row['shop_domain'] ?? '')) === '—';
                 $allocatedSpend = $mediaRevenue > 0
                     ? $mediaSpend * (float) ($row['first_total_revenue'] ?? 0) / $mediaRevenue
-                    : ($isEmptyOrderDay ? $mediaSpend : 0.0);
+                    : ($isMediaPlaceholder ? $mediaSpend : 0.0);
                 $totalCost = (float) ($row['first_purchase_cost'] ?? 0)
                     + (float) ($row['first_shipping_cost'] ?? 0)
                     + (float) ($row['first_return_fee'] ?? 0);
@@ -542,6 +559,7 @@ class OperationReportDashboardController extends Controller
             $mediaRows = $operatorRows->groupBy(fn (array $item) => mb_strtolower(trim((string) ($item['media_source'] ?? '其他'))));
             $mediaNames = [];
             $mediaOrderCounts = [];
+            $mediaAdSpends = [];
             $mediaRois = [];
             foreach ($mediaRows as $items) {
                 $mediaName = trim((string) ($items->first()['media_source'] ?? '')) ?: '其他';
@@ -550,6 +568,7 @@ class OperationReportDashboardController extends Controller
                 $mediaSpend = (float) $items->sum('allocated_actual_ad_spend');
                 $mediaNames[] = $mediaName;
                 $mediaOrderCounts[] = (int) $items->sum('first_total_orders');
+                $mediaAdSpends[] = $mediaSpend;
                 $mediaRois[] = $mediaSpend > 0 ? $mediaRevenue / $mediaSpend : null;
             }
             $shopDomains = $operatorRows->pluck('shop_domain')
@@ -588,6 +607,7 @@ class OperationReportDashboardController extends Controller
                 'daily_first_loss_rate' => $firstCost > 0 ? $firstProfit / $firstCost : null,
                 'daily_media_names' => $mediaNames,
                 'daily_media_order_counts' => $mediaOrderCounts,
+                'daily_media_ad_spends' => $mediaAdSpends,
                 'daily_media_rois' => $mediaRois,
                 'daily_first_roi' => $actualAdSpend > 0 ? (float) $row['first_total_revenue'] / $actualAdSpend : null,
                 'daily_renewal_orders' => (int) $row['renewal_orders'],
