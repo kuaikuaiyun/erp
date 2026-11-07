@@ -32,6 +32,7 @@
                 url = new URL(source.form.action || window.location.href, window.location.href);
                 url.search = new URLSearchParams(new FormData(source.form)).toString();
                 url.searchParams.set('download', '1');
+                source.form.dispatchEvent(new CustomEvent('finance:prepare-export', {detail: url.searchParams}));
             } else url = new URL(source.href, window.location.href);
             url.searchParams.delete('page');
             if (source.hasAttribute('data-selection-records')) url.searchParams.set('export_scope', 'records');

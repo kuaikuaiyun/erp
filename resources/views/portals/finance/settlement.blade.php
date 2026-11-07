@@ -1,50 +1,189 @@
 @extends('portals.finance.layout', ['title' => __('finance.menus.'.$report)])
 @push('styles')
 <style>
-.settlement-page .box{border-top:0;border-radius:7px}.settlement-page .box-body{padding:18px 20px}.settlement-filter{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 20px}.settlement-filter label{display:block;font-weight:400;margin-bottom:7px}.settlement-filter .form-control{width:100%;height:35px;background:#f3f6f9}.settlement-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:18px;padding-top:14px;border-top:1px solid #e5edf3}.settlement-actions .form-control{width:120px}.settlement-page .finance-table-wrap{max-height:650px;overflow:auto}.settlement-page .finance-table{width:max-content;min-width:100%;margin:0;border-collapse:separate;border-spacing:0}.settlement-page .finance-table th,.settlement-page .finance-table td{border:1px solid #e1eaf1;padding:11px 14px;text-align:center;white-space:nowrap;min-width:125px;max-width:240px}.settlement-page .finance-table th{position:sticky;top:0;z-index:2}.settlement-page .finance-table td{background:white}.settlement-page .finance-table tr:nth-child(even) td{background:#f8fafc}.settlement-page .finance-table th:first-child,.settlement-page .finance-table td:first-child{position:sticky;left:0;z-index:3;min-width:80px}.settlement-page .finance-table th:first-child{z-index:4}.settlement-columns{margin-left:auto}.settlement-columns .column-list{position:absolute;right:20px;z-index:8;background:white;border:1px solid #dce6ee;border-radius:6px;padding:14px;box-shadow:0 6px 20px #173f6120;max-width:650px;max-height:320px;overflow:auto;display:grid;grid-template-columns:repeat(3,1fr);gap:9px}.settlement-dialog{width:780px;max-width:calc(100vw - 32px);max-height:85vh;border:0;border-radius:8px;padding:0;color:#3b5870}.settlement-dialog::backdrop{background:#102c4866}.settlement-dialog header{padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e2eaf2}.settlement-dialog h3{font-size:17px;margin:0}.settlement-dialog header button{border:0;background:none;font-size:24px}.settlement-edit-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:20px;max-height:58vh;overflow:auto}.settlement-edit-grid label{display:block;font-weight:400}.settlement-edit-grid .form-control{width:100%}.settlement-dialog footer{padding:14px 20px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid #e2eaf2}.settlement-note{font-size:12px;color:#8192a2;margin:12px 0}.settlement-pending{color:#8e9ba9}.settlement-import-drop{position:relative;display:block;background:#f2faff;border:1px dashed #3498db;padding:40px 20px;text-align:center;margin:20px;cursor:pointer}.settlement-import-drop input{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}.settlement-import-drop .fa{display:block;font-size:30px;margin-bottom:12px;color:#2885b1}@media(max-width:1000px){.settlement-filter{grid-template-columns:repeat(2,minmax(0,1fr))}.settlement-edit-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:600px){.settlement-filter,.settlement-edit-grid{grid-template-columns:1fr}.settlement-columns .column-list{grid-template-columns:1fr 1fr}}
+.settlement-page .box{border-top:0;border-radius:7px}.settlement-page .box-body{padding:18px 20px}.settlement-filter{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 20px}.settlement-filter label{display:block;font-weight:400;margin-bottom:7px}.settlement-filter .form-control{width:100%;height:35px;background:#f3f6f9}.settlement-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:18px;padding-top:14px;border-top:1px solid #e5edf3}.settlement-actions .form-control{width:120px}.settlement-page .finance-table-wrap{max-height:650px;overflow:auto}.settlement-page .finance-table{width:max-content;min-width:100%;margin:0;border-collapse:separate;border-spacing:0}.settlement-page .finance-table th,.settlement-page .finance-table td{border:1px solid #e1eaf1;padding:11px 14px;text-align:center;white-space:nowrap;min-width:125px;max-width:240px}.settlement-page .finance-table th{position:sticky;top:0;z-index:2}.settlement-page .finance-table td{background:white}.settlement-page .finance-table tr:nth-child(even) td{background:#f8fafc}.settlement-page .finance-table th:first-child,.settlement-page .finance-table td:first-child{position:sticky;left:0;z-index:3;min-width:80px}.settlement-page .finance-table th:first-child{z-index:4}.settlement-dialog{width:780px;max-width:calc(100vw - 32px);max-height:85vh;border:0;border-radius:8px;padding:0;color:#3b5870}.settlement-dialog::backdrop{background:#102c4866}.settlement-dialog header{padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e2eaf2}.settlement-dialog h3{font-size:17px;margin:0}.settlement-dialog header button{border:0;background:none;font-size:24px}.settlement-edit-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:20px;max-height:58vh;overflow:auto}.settlement-edit-grid label{display:block;font-weight:400}.settlement-edit-grid .form-control{width:100%}.settlement-dialog footer{padding:14px 20px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid #e2eaf2}.settlement-note{font-size:12px;color:#8192a2;margin:12px 0}.settlement-pending{color:#8e9ba9}.settlement-import-drop{position:relative;display:block;background:#f2faff;border:1px dashed #3498db;padding:40px 20px;text-align:center;margin:20px;cursor:pointer}.settlement-import-drop input{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}.settlement-import-drop .fa{display:block;font-size:30px;margin-bottom:12px;color:#2885b1}@media(max-width:1000px){.settlement-filter{grid-template-columns:repeat(2,minmax(0,1fr))}.settlement-edit-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:600px){.settlement-filter,.settlement-edit-grid{grid-template-columns:1fr}}
+.paypal-editor{width:1080px;max-height:90vh;overflow:hidden;border-radius:12px;box-shadow:0 24px 80px #102c4833}
+.paypal-editor[open]{display:flex;flex-direction:column}.paypal-editor>header{flex-shrink:0;padding:22px 26px;background:#fff}.paypal-editor h3{font-size:19px;font-weight:600;color:#244861}.paypal-editor #settlement-edit-reference{display:block;margin-top:8px;font-size:12px;color:#7b8d9d;overflow-wrap:anywhere}.paypal-editor>form{display:flex;flex-direction:column;min-height:0;margin:0;overflow:hidden}.paypal-editor-body{overflow:auto;min-height:0;padding:20px 26px;background:#f4f7fa;scrollbar-gutter:stable}.paypal-editor-section{margin:0 0 16px;padding:20px;background:#fff;border:1px solid #e3eaf0;border-radius:8px;min-width:0}.paypal-editor-section h4{margin:0 0 20px;font-size:15px;font-weight:600;color:#244861;border-left:3px solid #3498db;padding-left:10px}.paypal-editor-fields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px 20px}.paypal-editor-field{min-width:0}.paypal-editor-field label{display:block;font-size:13px;font-weight:400;margin:0 0 7px;color:#536b7e}.paypal-editor-field .form-control{width:100%;height:38px;border:1px solid #d6e1ea;border-radius:5px;box-shadow:none;color:#304f66;background:#fff;padding:8px 10px}.paypal-editor-field .form-control:focus{border-color:#3c9bd1;box-shadow:0 0 0 3px #3498db15;outline:0}.paypal-editor-field-wide{grid-column:span 2}.paypal-editor-field-note{grid-column:1/-1}.paypal-editor-field textarea.form-control{height:82px;resize:vertical;min-height:70px}.paypal-editor-help{margin:14px 0 0;font-size:12px;line-height:1.8;color:#7b8d9d}.paypal-editor footer{flex-shrink:0;padding:16px 26px;background:#fff}.paypal-editor footer .btn{border-radius:5px;min-height:36px;padding:7px 16px}
+@media(max-width:900px){.paypal-editor-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:600px){.paypal-editor{max-width:calc(100vw - 16px);max-height:94vh}.paypal-editor>header{padding:16px}.paypal-editor-body{padding:12px}.paypal-editor-section{padding:15px}.paypal-editor-fields{grid-template-columns:1fr;gap:14px}.paypal-editor-field-wide{grid-column:auto}.paypal-editor footer{padding:12px;gap:8px;flex-wrap:wrap}.paypal-editor footer .btn{padding:7px 10px}}
+.settlement-page .finance-table th.settlement-operation,.settlement-page .finance-table td.settlement-operation{position:sticky;right:0;min-width:90px;width:90px;max-width:90px;z-index:3;box-shadow:-4px 0 8px #173f6110;border-left:1px solid #cddde9}
+.settlement-page .finance-table th.settlement-operation{z-index:5;background:#e8f2f8}
+.settlement-page .finance-table :is(th,td).settlement-paypal-operation{min-width:125px;width:125px;max-width:125px}
+.settlement-paypal-detail{position:fixed;inset:0;margin:auto;width:1120px;box-shadow:0 20px 64px #102c4833}
+.settlement-paypal-detail[open]{display:flex;flex-direction:column}
+.settlement-paypal-detail>header,.settlement-paypal-detail>footer{flex-shrink:0}
+.settlement-paypal-detail h3 .fa{margin-right:8px;color:#2985b6}
+.settlement-paypal-detail [hidden]{display:none!important}
+.settlement-detail-body{min-height:min(240px,45vh);padding:20px;overflow:auto;background:#f4f7fa}
+.settlement-detail-state{min-height:200px;display:grid;justify-items:center;align-content:center;gap:10px;color:#526c81;text-align:center}
+.settlement-detail-state .fa{font-size:26px;color:#2985b6}
+.settlement-detail-state--error .fa{color:#bd4a3e}
+.settlement-events-panel{display:grid;gap:16px}
+.settlement-detail-section{min-width:0;padding:16px;background:#fff;border:1px solid #dfe8ef;border-radius:7px}
+.settlement-detail-section h4{margin:0 0 12px;color:#244861;font-size:15px;font-weight:600}
+.settlement-detail-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0}
+.settlement-detail-summary>div{min-width:0;padding:10px 12px;background:#f4f8fc;border-radius:5px}
+.settlement-detail-section dt{color:#526c81;font-size:12px;font-weight:400}
+.settlement-detail-section dd{margin:4px 0 0;overflow-wrap:anywhere}
+.settlement-detail-summary dd{color:#244861;font-size:16px;font-weight:600}
+.settlement-detail-identifiers{display:flex;flex-wrap:wrap;gap:10px 24px;margin:12px 0 0}
+.settlement-detail-identifiers dd:empty::after{content:"—";color:#687d8e}
+.settlement-detail-review{margin:12px 0 0;padding:8px 12px;background:#fff7e5;border-radius:5px;color:#765921;overflow-wrap:anywhere}
+.settlement-event-list{display:grid;gap:10px;list-style:none;margin:0;padding:0}
+.settlement-event{min-width:0;border:1px solid #dce7ef;border-radius:6px;overflow:hidden}
+.settlement-event-heading{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px 16px;padding:10px 14px;background:#eef4f8;border-bottom:1px solid #dce7ef}
+.settlement-event-title,.settlement-event-context{display:flex;align-items:center;flex-wrap:wrap;gap:5px 8px}
+.settlement-event-title strong{color:#244861;font-size:14px;overflow-wrap:anywhere}
+.settlement-event-code,.settlement-event-category,.settlement-event-context{color:#526c81;font-size:12px}
+.settlement-event-code{font-family:monospace}
+.settlement-event-context{gap:5px 14px;overflow-wrap:anywhere}
+.settlement-event-context small{margin-left:3px}
+.settlement-event-grid{display:grid;grid-template-columns:1.45fr 1fr 1fr;gap:0 16px;padding:12px 14px}
+.settlement-event-fields{display:grid;gap:4px;margin:0}
+.settlement-event-fields>div{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:8px;align-items:baseline}
+.settlement-event-fields dd{margin:0}
+.settlement-event-money{align-content:start;padding-left:16px;border-left:1px solid #e5edf3;font-variant-numeric:tabular-nums}
+.settlement-event-money dd{text-align:right}
+.settlement-event-usd-value{color:#22634c;font-size:16px;font-weight:700}
+.settlement-event-usd-value.is-negative{color:#a23834}
+.settlement-event-more{padding:8px 14px;border-top:1px solid #e5edf3;background:#f8fafc}
+.settlement-event-more summary{width:fit-content;cursor:pointer;color:#275d80;font-size:13px}
+.settlement-event-field-group{margin:10px 0;padding:12px;background:#fff;border:1px solid #e5edf3;border-radius:5px}
+.settlement-event-field-group h5{margin:0 0 10px;color:#244861;font-size:13px;font-weight:600}
+.settlement-event-field-group dl{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 16px;margin:0}
+.settlement-event-field-group dd{white-space:pre-wrap}
+.settlement-event-empty{padding:16px;text-align:center;color:#526c81;background:#f4f8fc;border-radius:5px}
+.settlement-detail-status{display:inline-block;padding:2px 6px;background:#fff;border-radius:4px;font-size:12px}
+.settlement-detail-status.is-complete{background:#eaf6ef;color:#286747}
+.settlement-detail-status.is-pending{background:#fff3d8;color:#765921}
+.settlement-detail-status.is-closed{background:#fceceb;color:#923a33}
+.settlement-detail-payment-list{display:flex;flex-wrap:wrap;gap:8px 16px}
+.settlement-detail-payment-list span{overflow-wrap:anywhere}
+@media(max-width:600px){.settlement-detail-body{padding:12px}.settlement-detail-section{padding:12px}.settlement-detail-summary{grid-template-columns:1fr}}
+@media(max-width:720px){.settlement-event-grid{grid-template-columns:minmax(0,1fr);gap:10px}.settlement-event-money{padding:10px 0 0;border-left:0;border-top:1px solid #e5edf3}.settlement-event-field-group dl{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(prefers-reduced-motion:reduce){.settlement-detail-state .fa-spin{animation:none}}
+.settlement-page td[data-settlement-column=order_status]{font-weight:600;white-space:normal;min-width:165px}
+
+.finance-delete-dialog{box-sizing:border-box;width:calc(100% - 32px);max-width:460px;max-height:calc(100vh - 32px);overflow:auto;padding:26px;border:1px solid #e4eaf0;border-radius:14px;background:#fff;color:#273849;box-shadow:0 20px 64px rgba(18,39,57,.22);font-family:inherit;font-size:14px;line-height:1.7}
+.finance-delete-dialog::backdrop{background:rgba(17,35,51,.42)}
+.finance-delete-heading{display:flex;align-items:center;gap:14px;margin-bottom:22px}
+.finance-delete-icon{display:flex;align-items:center;justify-content:center;flex-shrink:0;width:46px;height:46px;border-radius:12px;background:#fff0ee;color:#cc493c;font-size:22px}
+.finance-delete-heading h3{margin:0 0 3px;font-size:19px;font-weight:600;color:#223647;line-height:1.5}
+.finance-delete-heading p{margin:0;color:#b8493e;font-size:12px}
+.finance-delete-description{margin:0 0 12px;color:#536576}
+.finance-delete-scope{display:grid;gap:7px;padding:14px 16px;border:1px solid #e9eef3;border-radius:8px;background:#f7f9fc;color:#42576a;font-size:13px}
+.finance-delete-scope span::before{content:'•';margin-right:9px;color:#8fa0b1}
+.finance-delete-hint{margin:12px 0 22px;color:#788897;font-size:12px}
+.finance-delete-actions{display:flex;justify-content:flex-end;gap:10px;padding-top:18px;border-top:1px solid #edf1f5}
+.finance-delete-actions .btn{min-width:88px;padding:8px 16px;border-radius:6px;font-size:13px}
+.finance-delete-actions .btn-danger{background:#d64c40;border-color:#d64c40}
+.finance-delete-actions .btn-danger:hover{background:#bd3d32;border-color:#bd3d32}
+.finance-delete-actions .btn:focus-visible{outline:3px solid #98bce4;outline-offset:3px}
+#settlement-delete-confirm{margin:auto;position:fixed;inset:0}
 </style>
 @endpush
 @section('finance_content')
+@php
+    $hasOperations = $orderView || $canManage;
+    $operationClass = $orderView ? 'settlement-operation settlement-paypal-operation' : 'settlement-operation';
+@endphp
 <div class="settlement-page">
-<div class="box"><div class="box-body"><form method="get" id="settlement-filter">
+<div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}" id="settlement-filter">
 <input type="hidden" name="per_page" value="{{ $rows->perPage() }}">
 <div class="settlement-filter">
 <div><label for="settlement-account">支付账户</label><select id="settlement-account" name="account" class="form-control"><option value="">全部账户</option>@foreach($accounts as $account)<option value="{{ $account->activity_account }}" @selected(($filters['account'] ?? '') === $account->activity_account)>{{ \App\Portals\Finance\FinanceCatalog::simplified($account->account_name) }}</option>@endforeach</select></div>
 <div><label for="settlement-from">开始日期</label><input id="settlement-from" class="form-control" type="date" name="from" value="{{ $filters['from'] ?? '' }}"></div>
 <div><label for="settlement-to">结束日期</label><input id="settlement-to" class="form-control" type="date" name="to" value="{{ $filters['to'] ?? '' }}"></div>
-<div><label for="settlement-zone">时区</label><select id="settlement-zone" name="timezone" class="form-control">@foreach(\App\Portals\Finance\FinanceWorkbookService::TIMEZONES as $zone)<option value="{{ $zone }}" @selected($filters['timezone'] === $zone)>{{ \App\Portals\Finance\FinanceCatalog::timezoneLabel($zone) }}</option>@endforeach</select></div>
+<div><label for="settlement-zone">时区</label><select id="settlement-zone" name="timezone" class="form-control">@include('portals.finance.partials.timezone-options', ['selectedTimezone' => $filters['timezone']])</select></div>
 <div><label for="settlement-reference">交易ID</label><input id="settlement-reference" class="form-control" name="reference" value="{{ $filters['reference'] ?? '' }}"></div>
+@if($orderView)
+<div><label for="settlement-order-status">当前订单状态</label><select id="settlement-order-status" name="order_status" class="form-control">
+<option value="">全部状态</option>@foreach(['已付款', '付款失败', '付款待确认', '全额退款', '部分退款', '退款待确认', '仍有冻结', '冻结已解除', '返还待核对', '待关联交易'] as $status)
+<option @selected(($filters['order_status'] ?? '') === $status)>{{ $status }}</option>@endforeach
+</select></div>
+@endif
 <div><label for="settlement-team">团队</label><select id="settlement-team" name="team" class="form-control"><option value="">全部团队</option>@foreach($teams as $team)<option @selected(($filters['team'] ?? '') === $team)>{{ $team }}</option>@endforeach</select></div>
 <div><label for="settlement-subscription">订阅类型</label><input id="settlement-subscription" class="form-control" name="subscription" list="settlement-subscriptions" value="{{ $filters['subscription'] ?? '' }}"></div>
 <div><label for="settlement-domain">域名</label><input id="settlement-domain" class="form-control" name="domain" value="{{ $filters['domain'] ?? '' }}"></div>
 @if($channel === 'credit_card')<div><label for="settlement-source">数据来源</label><select id="settlement-source" name="source" class="form-control"><option value="">合并去重</option>@foreach(['xuzong2-orders' => '信用卡订单', 'xuzong2-details' => '信用卡导入明细', 'xuzong1-details' => '历史信用卡明细'] as $source => $label)<option value="{{ $source }}" @selected(($filters['source'] ?? '') === $source)>{{ $label }}</option>@endforeach</select></div>@endif
 </div>
-@include('portals.finance.partials.filter-conditions')
-<div class="settlement-actions"><button class="btn btn-primary">查询</button><a class="btn btn-default" href="{{ route('finance.report', $report) }}">重置</a><button type="button" class="btn btn-default" id="settlement-add-condition">添加筛选条件</button><select class="form-control" name="format" aria-label="导出格式"><option value="xlsx">Excel (.xlsx)</option><option value="xls">Excel (.xls)</option></select><button type="button" data-finance-download  class="btn btn-default" >导出筛选结果</button>@if($canManage)<button type="button" class="btn btn-default" data-open-settlement-import>导入数据</button> <button type="button" class="btn btn-danger" data-delete-selected-settlements>删除所选</button> @endif</div>
+@include('portals.finance.partials.filter-conditions', ['enhancedConditions' => true])
+<div class="settlement-actions"><button class="btn btn-primary">查询</button><a class="btn btn-default" href="{{ route('finance.report', $report) }}">重置</a><select class="form-control" name="format" aria-label="导出格式"><option value="xlsx" @selected(($filters['format'] ?? 'xlsx') === 'xlsx')>Excel (.xlsx)</option><option value="xls" @selected(($filters['format'] ?? 'xlsx') === 'xls')>Excel (.xls)</option></select><label class="settlement-template-toolbar">导出模板 <select class="form-control" data-active-export-template aria-label="本次使用的导出模板"><option value="">{{ $orderView ? '按当前列表导出' : '默认字段设置' }}</option></select></label><button type="button" data-finance-download  class="btn btn-default" >导出筛选结果</button>@if($canManage)<button type="button" class="btn btn-default" data-open-settlement-import>导入数据</button> <button type="button" class="btn btn-danger" data-delete-selected-settlements>删除所选</button> @endif</div>
 </form></div></div>
-<div class="box"><div class="box-body"><div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><span>共 {{ $rows->total() }} 条</span><details class="settlement-columns"><summary>显示列</summary><div class="column-list">@foreach($columns as $field => $label)<label><input type="checkbox" data-column="{{ $field }}" checked> {{ $label }}</label>@endforeach</div></details></div>
-<div class="finance-table-wrap"><table class="table finance-table"><thead><tr><th class="finance-selection"><input type="checkbox" data-export-all aria-label="全选当前页"></th>@if($canManage)<th>操作</th>@endif @foreach($columns as $field => $label)<th data-settlement-column="{{ $field }}">{{ $label }}</th>@endforeach</tr></thead><tbody>
-@forelse($rows as $row)<tr><td class="finance-selection"><input type="checkbox" data-record-id="{{ $row['id'] }}" data-locked="{{ $row['locked'] ? '1' : '0' }}" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($row) }}" aria-label="选择此行"></td>@if($canManage)<td>@if($row['locked'])<span class="settlement-pending">已锁定</span>@else<button class="btn btn-default btn-xs" type="button" data-edit-settlement data-row="{{ json_encode(array_intersect_key($row, array_flip(['id', 'reference', 'currency', ...array_keys($moneyFields), ...array_keys($textFields), ...array_keys($editorFields)])), JSON_UNESCAPED_UNICODE) }}">编辑</button> <button class="btn btn-danger btn-xs" type="button" data-delete-settlement="{{ $row['id'] }}">删除</button>@endif</td>@endif
-@foreach($columns as $field => $label)<td data-settlement-column="{{ $field }}" title="{{ $row[$field] ?? '' }}" @class(['settlement-pending' => ($row[$field] ?? null) === null])>@if(isset($moneyFields[$field]) || in_array($field, ['gross','settlement','source_settlement_usd','converted_usd','paypal_7','paypal_8','paypal_9'], true)){{ ($row[$field] ?? null) === null ? '' : \App\Portals\Finance\FinanceCatalog::reportAmount($row[$field]) }}@else{{ \Illuminate\Support\Str::limit(\App\Portals\Finance\FinanceCatalog::simplified((string) ($row[$field] ?? '')), 40) }}@endif</td>@endforeach
+<div class="box"><div class="box-body"><div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><span>共 {{ $rows->total() }} 条</span><div class="settlement-column-settings-trigger">@include('portals.finance.partials.settlement-column-settings')</div></div>
+<div class="finance-table-wrap"><table class="table finance-table"><thead><tr><th class="finance-selection"><input type="checkbox" data-export-all aria-label="全选当前页"></th>@foreach($columns as $field => $label)<th data-settlement-column="{{ $field }}">{{ $label }}</th>@endforeach @if($hasOperations)<th class="{{ $operationClass }}">操作</th>@endif</tr></thead><tbody>
+@forelse($rows as $row)
+@php($editable = $orderView ? ($row['payments'][0] ?? null) : $row)
+<tr><td class="finance-selection"><input type="checkbox" data-record-id="{{ $row['id'] }}" @if($orderView) data-payment-ids="{{ json_encode(array_column($row['payments'], 'id')) }}" @endif data-locked="{{ $row['locked'] ? '1' : '0' }}" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($row) }}" aria-label="选择此行"></td>
+@foreach($columns as $field => $label)
+<td data-settlement-column="{{ $field }}" title="{{ $row[$field] ?? '' }}" @class(['settlement-pending' => ($row[$field] ?? null) === null])>
+@if(isset($moneyFields[$field]) || in_array($field, ['gross','settlement','source_settlement_usd','converted_usd','paypal_7','paypal_8','paypal_9','payable','open_hold'], true))
+{{ ($row[$field] ?? null) === null ? ($orderView && in_array($field, ['payable','open_hold'], true) ? '待核对' : '') : \App\Portals\Finance\FinanceCatalog::reportAmount($row[$field]) }}
+@else{{ \Illuminate\Support\Str::limit(\App\Portals\Finance\FinanceCatalog::simplified((string) ($row[$field] ?? '')), 40) }}@endif
+</td>
+@endforeach
+@if($hasOperations)<td class="{{ $operationClass }}">
+@if($orderView)
+<button type="button" class="btn btn-default btn-xs" aria-haspopup="dialog" data-view-settlement="{{ route('finance.settlement.paypal.detail', ['record' => $row['id'], 'timezone' => $filters['timezone']]) }}">查看</button>
+@endif
+@if($canManage && $editable && (! $orderView || count($row['payments']) === 1))
+    @if($editable['locked'])<span class="settlement-pending">已锁定</span>
+    @else @include('portals.finance.partials.settlement-edit-button', ['editable' => $editable])
+    @endif
+@endif
+</td>@endif
 </tr>
-@empty<tr><td colspan="{{ count($columns) + 1 + ($canManage ? 1 : 0) }}">无符合条件的记录</td></tr>@endforelse
+@empty<tr><td data-settlement-colspan="{{ $hasOperations ? 2 : 1 }}" colspan="{{ count($columns) + ($hasOperations ? 2 : 1) }}">无符合条件的记录</td></tr>@endforelse
 </tbody></table></div>@include('portals.finance.pagination', ['paginator' => $rows])
-<p class="settlement-note">费用和返还金额以美元填写，物流和采购以人民币填写。金额可按需补充。使用人和团队优先显示导入补充值，未补充时按域名匹配。已锁定月份不可修改。</p>
+<p class="settlement-note">@if($orderView)按最近同步的资金流水显示当前状态。待关联付款保留原交易号，缺少换汇或返还依据的金额待核对。@endif 费用和返还金额以美元填写，物流和采购以人民币填写。金额可按需补充。使用人和团队优先显示导入补充值，未补充时按域名匹配。已锁定月份不可修改。</p>
 </div></div>
+@if($orderView)
+<dialog class="settlement-dialog settlement-paypal-detail" id="settlement-detail" aria-labelledby="settlement-detail-title">
+    <header><h3 id="settlement-detail-title"><i class="fa fa-file-text-o" aria-hidden="true"></i>PayPal 交易明细</h3><button type="button" data-settlement-close aria-label="关闭" autofocus>×</button></header>
+    <div class="settlement-detail-body">
+        <div class="settlement-detail-state" role="status" data-detail-loading hidden>
+            <i class="fa fa-circle-o-notch fa-spin" aria-hidden="true"></i><span>正在加载交易明细…</span>
+        </div>
+        <div class="settlement-detail-state settlement-detail-state--error" data-detail-error hidden>
+            <i class="fa fa-exclamation-circle" aria-hidden="true"></i><span role="alert">交易明细加载失败</span>
+            <button type="button" class="btn btn-default" data-detail-retry>重试</button>
+        </div>
+        <div data-detail-content hidden></div>
+    </div>
+    <footer><button type="button" class="btn btn-default" data-settlement-close>关闭</button></footer>
+</dialog>
+@endif
 @if($canManage)
+<dialog class="finance-delete-dialog" id="settlement-delete-confirm" aria-labelledby="settlement-delete-title" aria-describedby="settlement-delete-description">
+<div class="finance-delete-heading"><span class="finance-delete-icon" aria-hidden="true"><i class="fa fa-trash-o"></i></span><div><h3 id="settlement-delete-title">确认删除结算明细？</h3><p>请核对删除范围后继续</p></div></div>
+<p class="finance-delete-description" id="settlement-delete-description">将删除所选的 <strong id="settlement-delete-count"></strong> 条结算明细。</p>
+<div class="finance-delete-scope"><span>从结算明细列表及汇总中移除</span><span>原始订单保留，不受影响</span></div>
+<div class="finance-delete-actions"><button type="button" class="btn btn-default" data-settlement-delete-cancel autofocus>取消</button><button type="button" class="btn btn-danger" data-settlement-delete-confirm>确认删除</button></div>
+</dialog>
 <form id="settlement-delete-form" method="post" action="{{ route('finance.settlement.delete', $report) }}" hidden>@csrf @method('DELETE')<div data-delete-ids></div></form>
-<dialog class="settlement-dialog" id="settlement-editor"><header><h3>编辑结算明细 <small id="settlement-edit-reference"></small></h3><button type="button" data-settlement-close aria-label="关闭">×</button></header>
-<form method="post" action="{{ route('finance.settlement.save', ['report' => $report, ...$filters]) }}">@csrf<input type="hidden" name="id">
+<dialog @class(['settlement-dialog', 'paypal-editor' => $channel === 'paypal']) id="settlement-editor" aria-label="编辑结算明细"><header><h3>编辑结算明细 <small id="settlement-edit-reference"></small></h3><button type="button" data-settlement-close aria-label="关闭">×</button></header>
+<form method="post" action="{{ route('finance.settlement.save', ['report' => $report, ...$filters, 'page' => $rows->currentPage() > 1 ? $rows->currentPage() : null]) }}">@csrf<input type="hidden" name="id">
+@if($channel === 'paypal')
+@include('portals.finance.partials.paypal-settlement-editor')
+@else
 <div class="settlement-edit-grid">
 @foreach($editorFields as $field => $label)<div><label for="edit-{{ $field }}">{{ $label }}</label>
+@if($field === 'timezone')
+<select id="edit-timezone" name="timezone" class="form-control">
+    <option value="">请选择时区</option>
+    @include('portals.finance.partials.timezone-options', ['selectedTimezone' => null])
+</select>
+@else
 <input id="edit-{{ $field }}" name="{{ $field }}" class="form-control" @if(in_array($field, $editorNumericFields, true)) type="number" step="0.00000001" @if(isset($moneyFields[$field]) && $field !== 'usd_rate') data-settlement-cost @endif @else maxlength="{{ $field === 'note' ? 2000 : 191 }}" @endif @if($field === 'subscription') list="settlement-subscriptions" @elseif($field === 'account') list="settlement-accounts" @endif>
+@endif
 </div>@endforeach
 <div style="grid-column:1/-1" class="settlement-note">记录ID由系统生成。交易ID及支付记录须保持唯一；日期时间填写 YYYY-MM-DD HH:mm:ss，月份填写 YYYY-MM。已锁定月份不可修改。</div>
-</div><footer><button type="button" class="btn btn-default" id="settlement-zero-costs">确认空费用为0</button><button type="button" class="btn btn-default" data-settlement-close>取消</button><button class="btn btn-primary">保存</button></footer></form></dialog>
+</div>
+@endif
+<footer><button class="btn btn-primary">保存</button><button type="button" class="btn btn-danger" id="settlement-editor-delete">删除</button><button type="button" class="btn btn-default" data-settlement-close>取消</button></footer></form></dialog>
 <dialog class="settlement-dialog" id="settlement-import"><header><h3>导入结算明细</h3><button type="button" data-settlement-close aria-label="关闭">×</button></header><form method="post" action="{{ route('finance.settlement.import', ['report' => $report, 'account' => $filters['account'] ?? null]) }}" enctype="multipart/form-data">@csrf
-@if($channel === 'credit_card')<div class="settlement-edit-grid"><div><label for="credit-manual-account">支付账户</label><select id="credit-manual-account" name="account" class="form-control" required><option value="">请选择账户</option>@foreach($accounts as $account)<option value="{{ $account->activity_account }}" @selected(($filters['account'] ?? '') === $account->activity_account)>{{ $account->account_name }}</option>@endforeach</select></div><div><label for="credit-manual-month">所属月份</label><input id="credit-manual-month" type="month" name="import_month" class="form-control" value="{{ now('Asia/Shanghai')->format('Y-m') }}" required></div></div>@endif
+@if($channel === 'credit_card')<div class="settlement-edit-grid"><div><label for="credit-manual-account">支付账户</label><select id="credit-manual-account" name="account" class="form-control" required><option value="">请选择账户</option>@foreach($accounts as $account)<option value="{{ $account->activity_account }}" @selected(($filters['account'] ?? '') === $account->activity_account)>{{ $account->account_name }}</option>@endforeach</select></div></div>@endif
 @if($channel === 'paypal')<p class="settlement-note" style="padding:0 20px">导入只新增数据，记录ID由系统生成；相同支付账户及交易ID的重复行自动跳过，其余行继续导入。修改已有记录请使用列表中的编辑按钮。</p>@endif
-<label class="settlement-import-drop"><i class="fa fa-cloud-upload" aria-hidden="true"></i>拖拽文件到这里，或点击选择文件<input type="file" name="file" accept=".xlsx,.csv" required></label><p style="padding:0 20px"><a href="{{ route('finance.report', ['report' => $report, 'template' => 1]) }}">下载导入模板（XLSX）</a></p><p class="settlement-note" style="padding:0 20px">@if($channel === 'credit_card')信用卡导入只新增数据；相同账户、商户订单号、平台订单号及交易时间、状态的重复行自动跳过，其他行继续导入。修改已有记录请使用编辑按钮。@endif 支持XLSX、CSV，最大10MB。</p><footer><button type="button" class="btn btn-default" data-settlement-close>取消</button><button class="btn btn-success">确认导入</button></footer></form></dialog>
+<label class="settlement-import-drop"><i class="fa fa-cloud-upload" aria-hidden="true"></i>拖拽文件到这里，或点击选择文件<input type="file" name="file" accept=".xlsx,.csv" required></label><p style="padding:0 20px"><a href="{{ route('finance.report', ['report' => $report, 'template' => 1]) }}">下载导入模板（XLSX）</a></p><p class="settlement-note" style="padding:0 20px">@if($channel === 'credit_card')所属月份按表格中的订单时间自动确定。信用卡导入只新增数据；相同账户、商户订单号、平台订单号及交易时间、状态的重复行自动跳过，其他行继续导入。修改已有记录请使用编辑按钮。@endif 支持XLSX、CSV，最大10MB。</p><footer><button type="button" class="btn btn-default" data-settlement-close>取消</button><button class="btn btn-success">确认导入</button></footer></form></dialog>
 @endif
 
 
@@ -55,13 +194,81 @@
 @push('scripts')
 <script>
 (function(){
-document.querySelectorAll('[data-column]').forEach(function(input){function update(){document.querySelectorAll('[data-settlement-column="'+input.dataset.column+'"]').forEach(function(cell){cell.hidden=!input.checked;});}input.addEventListener('change',update);update();});
+
 var editor=document.getElementById('settlement-editor'),importer=document.getElementById('settlement-import');
 var deleteForm=document.getElementById('settlement-delete-form');
-function deleteSettlements(ids){if(!ids.length){alert('请先勾选要删除的记录。');return;}if(!confirm('确认删除这 '+ids.length+' 条结算明细？删除后将从结算明细和汇总中移除，原始订单保留。'))return;var container=deleteForm.querySelector('[data-delete-ids]');container.replaceChildren();ids.forEach(function(id){var input=document.createElement('input');input.type='hidden';input.name='ids[]';input.value=id;container.appendChild(input);});deleteForm.submit();}
-if(deleteForm){document.querySelectorAll('[data-delete-settlement]').forEach(function(button){button.addEventListener('click',function(){deleteSettlements([button.dataset.deleteSettlement]);});});document.querySelector('[data-delete-selected-settlements]').addEventListener('click',function(){var selected=Array.from(document.querySelectorAll('[data-export-row]:checked'));if(selected.some(function(input){return input.dataset.locked==='1';})){alert('所选记录包含已锁定月份，请取消勾选后重试。');return;}deleteSettlements(selected.map(function(input){return input.dataset.recordId;}));});}
-if(editor){document.querySelectorAll('[data-edit-settlement]').forEach(function(button){button.addEventListener('click',function(){var form=editor.querySelector('form');form.reset();var row=JSON.parse(button.dataset.row);Object.keys(row).forEach(function(key){if(form.elements[key])form.elements[key].value=row[key]===null?'':row[key];});document.getElementById('settlement-edit-reference').textContent=row.reference;editor.showModal();});});document.querySelector('[data-open-settlement-import]').addEventListener('click',function(){importer.showModal();});document.querySelectorAll('[data-settlement-close]').forEach(function(button){button.addEventListener('click',function(){button.closest('dialog').close();});});}
-if(editor){document.getElementById('settlement-zero-costs').addEventListener('click',function(){editor.querySelectorAll('[data-settlement-cost]').forEach(function(input){if(input.name!=='usd_rate'&&input.value==='')input.value='0';});});}
+var deleteDialog=document.getElementById('settlement-delete-confirm'),pendingDeleteIds=[];
+function deleteSettlements(ids){if(!ids.length){alert('请先勾选要删除的记录。');return;}pendingDeleteIds=ids.slice();document.getElementById('settlement-delete-count').textContent=ids.length;deleteDialog.querySelector('[data-settlement-delete-confirm]').disabled=false;deleteDialog.showModal();}
+if(deleteDialog){deleteDialog.querySelector('[data-settlement-delete-cancel]').addEventListener('click',function(){deleteDialog.close();});deleteDialog.addEventListener('close',function(){pendingDeleteIds=[];});deleteDialog.querySelector('[data-settlement-delete-confirm]').addEventListener('click',function(){if(!pendingDeleteIds.length)return;this.disabled=true;var container=deleteForm.querySelector('[data-delete-ids]');container.replaceChildren();pendingDeleteIds.forEach(function(id){var input=document.createElement('input');input.type='hidden';input.name='ids[]';input.value=id;container.appendChild(input);});deleteForm.submit();});}
+if(deleteForm){document.querySelector('[data-delete-selected-settlements]').addEventListener('click',function(){var selected=Array.from(document.querySelectorAll('[data-export-row]:checked'));if(selected.some(function(input){return input.dataset.locked==='1';})){alert('所选记录包含不可删除的明细或已锁定月份，请取消勾选后重试。');return;}var ids=selected.flatMap(function(input){return input.dataset.paymentIds ? JSON.parse(input.dataset.paymentIds) : [input.dataset.recordId];});if(ids.length>100){alert('每次最多删除100笔付款明细，请减少所选订单。');return;}deleteSettlements(ids);});}
+var detailDialog=document.getElementById('settlement-detail');
+if(detailDialog){
+    var detailLoading=detailDialog.querySelector('[data-detail-loading]');
+    var detailError=detailDialog.querySelector('[data-detail-error]');
+    var detailRetry=detailDialog.querySelector('[data-detail-retry]');
+    var detailContent=detailDialog.querySelector('[data-detail-content]');
+    var detailUrl, activeRequest;
+    function setDetailState(state){
+        detailLoading.hidden=state!=='loading';
+        detailError.hidden=state!=='error';
+        detailContent.hidden=state!=='content';
+    }
+    async function loadDetail(){
+        activeRequest?.abort();
+        var request=new AbortController();
+        activeRequest=request;
+        setDetailState('loading');
+        detailContent.replaceChildren();
+        try{
+            var response=await fetch(detailUrl,{headers:{Accept:'text/html','X-Requested-With':'XMLHttpRequest'},signal:request.signal});
+            if(!response.ok||response.redirected)throw new Error('Detail request failed');
+            var content=await response.text();
+            if(request.signal.aborted||!detailDialog.open)return;
+            detailContent.innerHTML=content;
+            setDetailState('content');
+        }catch(error){
+            if(request.signal.aborted||!detailDialog.open)return;
+            setDetailState('error');
+        }
+    }
+    document.querySelectorAll('[data-view-settlement]').forEach(function(button){
+        button.addEventListener('click',function(){
+            detailUrl=button.dataset.viewSettlement;
+            detailDialog.showModal();
+            loadDetail();
+        });
+    });
+    detailRetry.addEventListener('click',loadDetail);
+    detailDialog.addEventListener('close',function(){
+        if(detailDialog.open)return;
+        activeRequest?.abort();
+        detailContent.replaceChildren();
+    });
+}
+document.querySelectorAll('[data-settlement-close]').forEach(function(button){
+    button.addEventListener('click',function(){button.closest('dialog').close();});
+});
+if(editor){
+    document.addEventListener('click',function(event){
+        var button=event.target.closest('[data-edit-settlement]');
+        if(!button)return;
+        var form=editor.querySelector('form');
+        form.reset();
+        var row=JSON.parse(button.dataset.row);
+        Object.keys(row).forEach(function(key){
+            var input=form.elements[key];
+            if(!input)return;
+            var value=row[key]===null?'':row[key];
+            if(input.tagName==='SELECT'&&value!==''&&!Array.from(input.options).some(function(option){return option.value===String(value);}))input.add(new Option(value,value));
+            input.value=value;
+        });
+        document.getElementById('settlement-edit-reference').textContent=row.reference;
+        if(detailDialog?.open)detailDialog.close();
+        editor.showModal();
+    });
+    document.querySelector('[data-open-settlement-import]').addEventListener('click',function(){importer.showModal();});
+}
+if(editor&&deleteForm){document.getElementById('settlement-editor-delete').addEventListener('click',function(){var id=editor.querySelector('form').elements['id'].value;if(id)deleteSettlements([id]);});}
 document.querySelectorAll('.settlement-dialog input[type=file]').forEach(function(input){input.addEventListener('change',function(){var file=input.files[0];input.setCustomValidity(file&&(!/\.(xlsx|csv)$/i.test(file.name)||file.size>10*1024*1024)?'请选择不超过10MB的XLSX或CSV文件。':'');var label=input.closest('label'),status=label.nextElementSibling;if(!status||!status.hasAttribute('data-file-status')){status=document.createElement('p');status.setAttribute('data-file-status','');status.setAttribute('role','status');status.style.cssText='padding:0 20px;color:#52748d;overflow-wrap:anywhere';label.after(status);}status.textContent=file?'已选择：'+file.name:'';if(file)input.reportValidity();});});
 @if(old('id'))
 if(editor){var failedValues={!! \Illuminate\Support\Js::from(\Illuminate\Support\Arr::only(session()->getOldInput(), ['id', ...array_keys($editorFields)])) !!};Object.keys(failedValues).forEach(function(key){if(editor.querySelector('form').elements[key])editor.querySelector('form').elements[key].value=failedValues[key]??'';});editor.showModal();}

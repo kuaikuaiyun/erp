@@ -2,7 +2,7 @@
                             @php
                                 $weight = static fn ($value) => is_numeric($value) ? (float) $value.' 克' : '';
                                 $goodsWeight = $item->sale_weight_gram ?: $item->tongtu_goods_weight_gram;
-                                $productName = $item->tongtu_product_name ?: $item->product_title;
+                                $productName = \App\Portals\Finance\FinanceProductNames::item($item);
                             @endphp
                             <div class="logistics-sale-product-detail-item">
                                 <div @class(['logistics-sale-product-detail-code', 'is-empty' => blank($item->tongtu_product_code)])><b>PCL:</b><span title="{{ $item->tongtu_product_code }}">{{ $item->tongtu_product_code ?: '' }}</span></div>
@@ -15,6 +15,6 @@
                                     <span><b>商品重量:</b>{{ $weight($goodsWeight) }}</span>
                                     <span><b>包裹重量:</b>{{ $weight($item->tongtu_package_weight_gram) }}</span>
                                 </div>
-                                <div class="logistics-sale-product-detail-name"><b>配货:</b><span title="{{ $productName }}">{{ $productName ?: '' }}</span></div>
+                                <div class="logistics-sale-product-detail-name"><b>配货:</b><span title="{{ $item->product_title ?: $productName }}">{{ $productName ?: '' }}</span></div>
                             </div>
                         @endforeach

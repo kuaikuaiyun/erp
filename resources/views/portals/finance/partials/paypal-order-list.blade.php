@@ -86,7 +86,8 @@
                     <td class="logistics-sale-product-details">
                         @php
                             $productItems = $paypalOrderItems->get($order?->id, collect());
-                            $productItems = \App\Portals\Finance\FinancePayPalOrderExport::productItems($productItems, (string) $fields[18],
+                            $sourceTitle = $dataset === 'paypal-orders' ? ($record->payload[$definition['headers'][18]] ?? '') : $fields[18];
+                            $productItems = \App\Portals\Finance\FinancePayPalOrderExport::productItems($productItems, (string) ($sourceTitle ?: $order?->tongtu_product_name),
                                 $dataset === 'paypal-orders' ? (string) ($record->payload[$definition['headers'][28]] ?? '') : (string) $fields[28]);
                         @endphp
                         @include('portals.finance.partials.paypal-order-products', ['items' => $productItems])
@@ -102,7 +103,7 @@
                 @endif
             @endforeach
             @php
-                $dateText = static fn ($value) => $value ? \Carbon\Carbon::parse($value)->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') : '';
+                $dateText = static fn ($value) => $value ? \Carbon\CarbonImmutable::parse($value, 'UTC')->setTimezone($filters['timezone'])->format('Y-m-d H:i:s') : '';
                 $extraBlocks = [
                     ['实付金额' => $order?->paid_amount_usd ?? $fields[7], '运费' => $order?->total_shipping_usd],
                     ['入库时间' => $dateText($order?->created_at), '下单时间' => $dateText($order?->order_created_at), '付款时间' => $dateText($order?->paid_at)],
@@ -136,7 +137,7 @@
             @endforeach
             <td>{{ $order?->data_status }}</td>
             <td>
-                <button type="button" class="btn btn-info btn-xs js-logistics-order-detail" data-paypal-detail="paypal-detail-{{ $record->id }}" data-order-detail-url="{{ route('finance.records', ['dataset' => $dataset, 'order_detail' => $record->id]) }}" aria-haspopup="dialog"><i class="fa fa-eye" aria-hidden="true"></i> 查看</button>
+                <button type="button" class="btn btn-info btn-xs js-logistics-order-detail" data-paypal-detail="paypal-detail-{{ $record->id }}" data-order-detail-url="{{ route('finance.records', ['dataset' => $dataset, 'order_detail' => $record->id, 'timezone' => $filters['timezone']]) }}" aria-haspopup="dialog"><i class="fa fa-eye" aria-hidden="true"></i> 查看</button>
                 <template id="paypal-detail-{{ $record->id }}">
                     @php
                         $detailGroups = [

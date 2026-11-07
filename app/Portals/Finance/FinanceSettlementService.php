@@ -68,6 +68,14 @@ class FinanceSettlementService
             'domain' => '域名', 'owner' => '使用人', 'team' => '团队', 'erp_order' => '通途订单', 'note' => '备注'];
     }
 
+    public function exportColumns(string $channel): array
+    {
+        $columns = $this->columns($channel);
+        return $channel === 'paypal'
+            ? FinancePayPalSettlementOrders::listColumns($columns) + FinancePayPalSettlementOrders::sourceExportColumns()
+            : $columns;
+    }
+
     public function query(string $channel, array $filters)
     {
         $query = FinanceRecord::query()->whereIn('dataset', $channel === 'paypal' ? ['paypal-orders'] : ['xuzong2-orders', 'xuzong2-details', 'xuzong1-details']);
@@ -243,6 +251,25 @@ class FinanceSettlementService
             $row['team'] = filled($saved['team'] ?? null) ? $saved['team'] : ($group?->team ?? ($p['团队'] ?? ''));
             $row = [...$row, ...($saved['_edited_fields'] ?? [])];
             $row['locked'] = $row['locked'] || in_array($row['month'], $locks, true);
+            if (! empty($filters['order_view'])) {
+                foreach (array_slice($headers, 15, null, true) as $index => $header) {
+                    if (filled($p[$header] ?? null)) {
+                        $row['paypal_'.$index] = $header === '物品标题'
+                            ? FinanceProductNames::display((string) $p[$header]) : $p[$header];
+                    }
+                }
+                $row['paypal_18'] ??= FinanceProductNames::display($metadata[$record->id]['order']->tongtu_product_name ?? '');
+                $row['source_added_date'] = $p['新增日期'] ?? '';
+                $row['business_order_id'] = $metadata[$record->id]['logistics_order_id'] ?? null;
+                $row['shopify_order_number'] = $metadata[$record->id]['order']->shopify_order_number ?? '';
+                $row['source_account_key'] = $owner?->activity_account ?? $record->account;
+                $row['source_date'] = $record->occurred_at;
+                $keys = [...array_keys(self::MONEY), ...array_values($this->importFields('paypal')), '结算金额-美元', 'settlement'];
+                $row['manual_values'] = [
+                    ...array_intersect_key($p, array_flip($keys)), ...array_intersect_key($saved, array_flip($keys)),
+                    ...array_intersect_key($saved['_edited_fields'] ?? [], array_flip($keys)),
+                ];
+            }
 
             return $row;
         })->filter(fn ($row) => (! filled($filters['team'] ?? null) || $row['team'] === $filters['team'])
@@ -277,7 +304,7 @@ class FinanceSettlementService
     }
 
     /** Enrich settlements from a linked logistics order or a unique payment reference. */
-    public function logisticsMetadata(Collection $records, string $channel): array
+    public function logisticsMetadata(Collection $records, string $channel, bool $matchOnly = false): array
     {
         $db = $this->workbooks->database();
         if ($records->isEmpty() || ! $db->getSchemaBuilder()->hasTable('logistics_orders')) {
@@ -291,7 +318,7 @@ class FinanceSettlementService
         if ($referenceFields === [] && ! ($channel === 'paypal' && $db->getSchemaBuilder()->hasTable('logistics_order_payment_references'))) {
             return [];
         }
-        $selected = array_values(array_unique(array_intersect(['id', ...$referenceFields, 'assistant_domain_store_id', 'source_shop_domain', 'subscription_type', 'is_add_on', 'tongtu_order_number',
+        $selected = $matchOnly ? ['id', ...$referenceFields] : array_values(array_unique(array_intersect(['id', ...$referenceFields, 'assistant_domain_store_id', 'source_shop_domain', 'subscription_type', 'is_add_on', 'tongtu_order_number',
             'shopify_order_number', 'shopify_order_id', 'store_name', 'subscription_status', 'subscription_origin_order_id',
             'tongtu_sku', 'tongtu_product_name', 'sale_quantity', 'sale_product_weight', 'payment_gateway', 'payment_method',
             ...array_keys(FinancePayPalOrderExport::COLUMNS), 'created_at', 'buyer_name', 'buyer_email', 'destination'], $columns)));
@@ -302,13 +329,17 @@ class FinanceSettlementService
             ? $db->table('logistics_order_payment_references')->whereIn('reference_number', $references)
                 ->get(['reference_number', 'logistics_order_id']) : collect();
         $linkedIds = $paymentReferences->pluck('logistics_order_id')->unique();
-        $orders = $db->table('logistics_orders')->where(function ($query) use ($referenceFields, $references, $linkedIds): void {
-            $query->whereIntegerInRaw('id', $linkedIds->all());
-            foreach ($referenceFields as $field) {
-                $query->orWhereIn($field, $references);
-            }
-        })->get($selected)->keyBy('id');
-        $stores = $db->getSchemaBuilder()->hasTable('assistant_domain_stores')
+        $matches = null;
+        foreach ($referenceFields as $field) {
+            $lookup = $db->table('logistics_orders')->select('id')->whereIn($field, $references);
+            $matches = $matches ? $matches->union($lookup) : $lookup;
+        }
+        // Resolve IDs through each reference index before loading the wider order rows.
+        if ($matches) {
+            $linkedIds = $linkedIds->merge($matches->pluck('id'))->unique();
+        }
+        $orders = $db->table('logistics_orders')->whereIntegerInRaw('id', $linkedIds->all())->get($selected)->keyBy('id');
+        $stores = ! $matchOnly && $db->getSchemaBuilder()->hasTable('assistant_domain_stores')
             ? $db->table('assistant_domain_stores')->whereIn('id', $orders->pluck('assistant_domain_store_id')->filter())->pluck('domain', 'id') : collect();
         $index = [];
         foreach ($orders as $order) {
@@ -335,6 +366,10 @@ class FinanceSettlementService
                 continue;
             }
             $order = reset($candidates);
+            if ($matchOnly) {
+                $result[$record->id] = ['logistics_order_id' => $order->id];
+                continue;
+            }
             $result[$record->id] = ['logistics_order_id' => $order->id, 'domain' => $stores->get($order->assistant_domain_store_id ?? null) ?: ($order->source_shop_domain ?? ''),
                 'payment_method' => $order->payment_method ?? '',
                 'subscription' => $order->subscription_type ?? '', 'upsell' => $order->is_add_on ?? '', 'erp_order' => $order->tongtu_order_number ?? ''];
@@ -344,6 +379,18 @@ class FinanceSettlementService
         }
 
         return $result;
+    }
+
+    public function logisticsPaymentReferences(object $order): array
+    {
+        $db = $this->workbooks->database();
+        $references = collect([$order->bill_number ?? '', $order->transaction_id ?? '', $order->payment_gateway_order_id ?? '']);
+        if ($db->getSchemaBuilder()->hasTable('logistics_order_payment_references')) {
+            $references = $references->merge($db->table('logistics_order_payment_references')
+                ->where('logistics_order_id', $order->id)->pluck('reference_number'));
+        }
+
+        return $references->filter(fn ($reference) => filled($reference))->flip()->all();
     }
 
     /** Match API transaction/invoice references without any legacy account binding. */
@@ -425,15 +472,13 @@ class FinanceSettlementService
         $datasets = ['paypal-orders', 'xuzong2-orders', 'xuzong2-details', 'xuzong1-details'];
         $types = FinanceRecord::query()->whereIn('dataset', $datasets)->select('payload->订阅类型 as subscription')->distinct()->pluck('subscription');
         $supplements = $db->table('finance_settlement_supplements')->select('payload->subscription as subscription')->distinct()->pluck('subscription');
-        $logistics = $db->getSchemaBuilder()->hasColumn('logistics_orders', 'subscription_type')
-            ? $db->table('logistics_orders')->whereNotNull('subscription_type')->distinct()->pluck('subscription_type') : collect();
+        $columns = array_intersect(['subscription_type', 'is_add_on'], $db->getSchemaBuilder()->getColumnListing('logistics_orders'));
+        $logistics = $columns === [] ? collect() : $db->table('logistics_orders')->distinct()->get(array_values($columns));
         $upsells = FinanceRecord::query()->whereIn('dataset', $datasets)->select('payload->是否加购 as upsell')->distinct()->pluck('upsell')
             ->concat($db->table('finance_settlement_supplements')->select('payload->upsell as upsell')->distinct()->pluck('upsell'));
-        if ($db->getSchemaBuilder()->hasColumn('logistics_orders', 'is_add_on')) {
-            $upsells = $upsells->concat($db->table('logistics_orders')->distinct()->pluck('is_add_on'));
-        }
+        $upsells = $upsells->concat($logistics->pluck('is_add_on'));
 
-        return $rows->pluck('subscription')->concat($types)->concat($supplements)->concat($logistics)
+        return $rows->pluck('subscription')->concat($types)->concat($supplements)->concat($logistics->pluck('subscription_type'))
             ->concat($upsells->contains(self::isUpsell(...)) ? ['加购'] : [])
             ->map(self::subscriptionLabel(...))->filter(fn ($value) => $value !== '')->unique()->sort()->values();
     }

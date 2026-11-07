@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 
 class FinanceLogisticsCreditOrders
 {
-    public function query(): Builder
+    public function query(bool $withPayload = true): Builder
     {
         $db = app(FinanceWorkbookService::class)->database();
         if (! $db->getSchemaBuilder()->hasTable('logistics_orders')) {
@@ -31,6 +31,13 @@ class FinanceLogisticsCreditOrders
             $source->whereRaw("LOWER(TRIM(COALESCE(o.payment_gateway, ''))) <> ?", ['paypal']);
         }
         $occurredAt = $indexed ? 'o.finance_credit_occurred_at' : 'COALESCE(o.order_created_at, o.paid_at)';
+        $source->selectRaw("o.id, 'xuzong2-orders' as dataset, {$account} as account, {$reference} as reference,
+            {$occurredAt} as occurred_at, 'USD' as currency,
+            o.payment_status as status, {$domain} as domain, NULL as raw_type");
+        if (! $withPayload) {
+            return FinanceRecord::query()->fromSub($source, 'finance_records');
+        }
+
         $values = [
             'o.store_name', $account, 'o.shopify_order_number', $reference,
             'COALESCE('.$json('currentTotalPriceSet.shopMoney.currencyCode').', '.$json('currency').')',
@@ -45,10 +52,7 @@ class FinanceLogisticsCreditOrders
             $pairs[] = '?, '.$values[$index];
             $bindings[] = $header;
         }
-        $source->selectRaw("o.id, 'xuzong2-orders' as dataset, {$account} as account, {$reference} as reference,
-            {$occurredAt} as occurred_at, 'USD' as currency,
-            o.payment_status as status, {$domain} as domain, NULL as raw_type")
-            ->selectRaw('JSON_OBJECT('.implode(', ', $pairs).') as payload', $bindings);
+        $source->selectRaw('JSON_OBJECT('.implode(', ', $pairs).') as payload', $bindings);
 
         return FinanceRecord::query()->fromSub($source, 'finance_records');
     }
