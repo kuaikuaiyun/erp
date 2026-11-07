@@ -10,6 +10,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use RuntimeException;
 
@@ -19,8 +20,62 @@ class ShoplineOrderSyncService
 
     private const API_VERSION = 'v20261201';
 
+    /** @return array{orders:int,items:int,sync_states:int} */
+    public function clearableDataCounts(): array
+    {
+        $connection = config('admin.database.connection') ?: config('database.default');
+        $db = DB::connection($connection);
+        $orders = $db->table('fashion_logistics_orders')->where('source_platform', self::PLATFORM);
+
+        return [
+            'orders' => (clone $orders)->count(),
+            'items' => $db->table('fashion_logistics_order_items')
+                ->whereIn('fashion_logistics_order_id', (clone $orders)->select('id'))
+                ->count(),
+            'sync_states' => FashionLogisticsSyncState::query()
+                ->whereIn('assistant_domain_store_id', $this->shoplineStoreIds())
+                ->count(),
+        ];
+    }
+
+    /** @return array{orders:int,items:int,sync_states:int} */
+    public function clearShoplineData(): array
+    {
+        $connection = config('admin.database.connection') ?: config('database.default');
+
+        return DB::connection($connection)->transaction(function () use ($connection): array {
+            $db = DB::connection($connection);
+            $orders = $db->table('fashion_logistics_orders')->where('source_platform', self::PLATFORM);
+            $items = $db->table('fashion_logistics_order_items')
+                ->whereIn('fashion_logistics_order_id', (clone $orders)->select('id'))
+                ->delete();
+            $orderCount = (clone $orders)->count();
+            $orders->delete();
+            $syncStates = FashionLogisticsSyncState::query()
+                ->whereIn('assistant_domain_store_id', $this->shoplineStoreIds())
+                ->delete();
+
+            return ['orders' => $orderCount, 'items' => $items, 'sync_states' => $syncStates];
+        });
+    }
+
     /** @return array{stores:int,success:int,failed:int,created:int,updated:int,errors:list<string>} */
     public function syncAll(?int $storeId = null, int $initialDays = 60, bool $full = false, bool $allHistory = false): array
+    {
+        $lock = Cache::lock('fashion-logistics:shopline-sync', 86400);
+        if (! $lock->get()) {
+            return ['stores' => 0, 'success' => 0, 'failed' => 0, 'created' => 0, 'updated' => 0, 'errors' => ['Shopline sync is already running.']];
+        }
+
+        try {
+            return $this->syncAllUnlocked($storeId, $initialDays, $full, $allHistory);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /** @return array{stores:int,success:int,failed:int,created:int,updated:int,errors:list<string>} */
+    private function syncAllUnlocked(?int $storeId = null, int $initialDays = 60, bool $full = false, bool $allHistory = false): array
     {
         $stores = AssistantDomainStore::query()
             ->when($storeId, fn ($query) => $query->whereKey($storeId))
@@ -52,9 +107,10 @@ class ShoplineOrderSyncService
         $state = FashionLogisticsSyncState::query()->firstOrCreate(['assistant_domain_store_id' => $store->getKey()]);
         $state->forceFill(['status' => 'syncing', 'last_started_at' => now(), 'last_error' => null])->save();
 
-        $after = $allHistory
-            ? Carbon::create(2000, 1, 1, 0, 0, 0, 'UTC')
-            : (! $full && $state->last_cursor_at
+        $historyStart = Carbon::create(2000, 1, 1, 0, 0, 0, 'UTC');
+        $after = $allHistory || (! $full && ! $state->last_cursor_at)
+            ? $historyStart
+            : (! $full
                 ? $state->last_cursor_at->copy()->subMinutes(10)
                 : now()->subDays(max(1, $initialDays)));
         $before = now()->addMinute();
@@ -245,6 +301,13 @@ class ShoplineOrderSyncService
     private function endpoint(AssistantDomainStore $store): string
     {
         return 'https://'.$this->handle($store).'.myshopline.com/admin/openapi/'.self::API_VERSION.'/orders.json';
+    }
+
+    private function shoplineStoreIds()
+    {
+        return AssistantDomainStore::query()
+            ->select('id')
+            ->whereRaw("LOWER(TRIM(site_builder)) = 'shopline'");
     }
 
     private function handle(AssistantDomainStore $store): string

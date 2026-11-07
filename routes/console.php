@@ -2,6 +2,7 @@
 
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schedule;
 use App\Models\LogisticsOrder;
 use App\Models\LogisticsOrderItem;
@@ -36,7 +37,8 @@ Schedule::command('fashion-logistics:sync-orders --days=60')
 
 Schedule::command('fashion-logistics:sync-shopline-orders --days=60')
     ->everyFiveMinutes()
-    ->withoutOverlapping(10)
+    ->when(fn () => ! Cache::has('fashion-logistics:shopline-sync-paused'))
+    ->withoutOverlapping(1440)
     ->runInBackground();
 
 Schedule::command('payment:paypal-risk:refresh-weekly')
