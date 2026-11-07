@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class FashionAdvertisingReport extends Model
 {
@@ -32,6 +33,11 @@ class FashionAdvertisingReport extends Model
     public function adSpendEntries(): HasMany
     {
         return $this->hasMany(FashionAdSpendEntry::class)->orderBy('id');
+    }
+
+    public function submitter(): BelongsTo
+    {
+        return $this->belongsTo(AdminUser::class, 'submitter_id');
     }
 
     public function statusLabel(): string

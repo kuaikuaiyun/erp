@@ -40,7 +40,7 @@ class AdvertisingSpendSummaryController extends Controller
             'account_number' => ['nullable', 'string', 'max:150'],
         ]);
         $now = Carbon::now(OperationReportMetricsService::REPORT_TIMEZONE);
-        $dateFrom = (string) ($validated['date_from'] ?? $now->format('Y-m-d'));
+        $dateFrom = (string) ($validated['date_from'] ?? $now->copy()->subDays(6)->format('Y-m-d'));
         $dateTo = (string) ($validated['date_to'] ?? $now->format('Y-m-d'));
         abort_if($dateFrom > $dateTo, 422, '开始日期不能晚于结束日期。');
 

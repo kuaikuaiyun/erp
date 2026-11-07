@@ -8,6 +8,7 @@ use App\Models\FashionLogisticsOrder;
 use App\Models\AdminUser;
 use App\Models\AssistantAdvertisingAgency;
 use App\Models\AssistantAdvertisingMedia;
+use App\Models\Department;
 use App\Portal\Http\Controllers\PortalEntryController;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -32,10 +33,14 @@ class AdvertisingExpenseController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
 
+        $user = $context['user'];
+        $isBoss = $this->isBoss($user);
+        $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
+
         $from = $this->dateFilter($request->input('from'));
         $to = $this->dateFilter($request->input('to'));
         $query = FashionAdvertisingReport::query()->with(['performanceEntries', 'adSpendEntries']);
-        if (!$context['user']->isAdministrator()) $query->where('submitter_id', $context['user']->getKey());
+        if (!$isBoss) $query->where('submitter_id', $user->getKey());
         if ($from) $query->whereDate('report_date', '>=', $from);
         if ($to) $query->whereDate('report_date', '<=', $to);
 
@@ -43,8 +48,16 @@ class AdvertisingExpenseController extends Controller
         $editing = null;
         if ($request->filled('edit')) {
             $editing = FashionAdvertisingReport::query()->with(['performanceEntries', 'adSpendEntries'])->findOrFail((int) $request->input('edit'));
-            $this->authorizeReport($context['user'], $editing);
+            $this->authorizeReport($user, $editing);
+            if ($isBoss && ! $operatorOptions->contains('id', (int) $editing->submitter_id)) {
+                $editingOperator = AdminUser::query()->find((int) $editing->submitter_id);
+                if ($editingOperator) $operatorOptions->push($editingOperator);
+            }
         }
+
+        $selectedOperatorId = $editing?->submitter_id
+            ?: ($isBoss ? (int) ($request->integer('operator_user_id') ?: $operatorOptions->first()?->id) : (int) $user->id);
+        $selectedOperator = $operatorOptions->firstWhere('id', $selectedOperatorId) ?: $user;
 
         $context['portal']->loadMissing('menus');
         $advertisingOptions = $this->advertisingOptions();
@@ -54,7 +67,11 @@ class AdvertisingExpenseController extends Controller
             'editing' => $editing,
             'filters' => ['from' => $from ?? '', 'to' => $to ?? ''],
             'agencyOptions' => $advertisingOptions['agencies'],
+            'agencyMediaOptions' => $advertisingOptions['agency_media'],
             'mediaOptions' => $advertisingOptions['media'],
+            'isBoss' => $isBoss,
+            'operatorOptions' => $operatorOptions,
+            'selectedOperator' => $selectedOperator,
         ]);
     }
 
@@ -63,14 +80,15 @@ class AdvertisingExpenseController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) abort(403);
         $data = $this->validatePayload($request);
+        $submitter = $this->resolveSubmitter($request, $context['user']);
 
         $duplicate = FashionAdvertisingReport::query()
             ->whereDate('report_date', $data['report_date'])
-            ->where('submitter_id', $context['user']->getKey())
+            ->where('submitter_id', $submitter->getKey())
             ->exists();
         if ($duplicate) return back()->withInput()->withErrors(['report_date' => '该日期已经填写过报表，可在下方记录中点击编辑。']);
 
-        $this->persist($request, $data, $context['user']);
+        $this->persist($request, $data, $submitter);
         return redirect()->route('fashion.advertising-expenses.index')->with('success', '广告费用保存成功，营业额数据已由系统自动统计。');
     }
 
@@ -79,6 +97,7 @@ class AdvertisingExpenseController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) abort(403);
         $this->authorizeReport($context['user'], $report);
+        abort_unless(in_array($report->status, [FashionAdvertisingReport::STATUS_PENDING, FashionAdvertisingReport::STATUS_REJECTED], true), 422, '审核通过的报表不能重新修改。');
         $data = $this->validatePayload($request);
 
         $duplicate = FashionAdvertisingReport::query()
@@ -134,6 +153,7 @@ class AdvertisingExpenseController extends Controller
             'advertising.*.actual_spend_usd' => ['required', 'numeric', 'min:0'],
             'advertising.*.remark' => ['nullable', 'string', 'max:1000'],
             'advertising.*.existing_screenshot' => ['nullable', 'string', 'max:500'],
+            'advertising.*.remove_screenshot' => ['nullable', 'boolean'],
             'advertising.*.screenshot' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
         ], [
             'advertising.*.agency.required' => '请填写广告代理。',
@@ -189,10 +209,11 @@ class AdvertisingExpenseController extends Controller
     {
         return collect($rows)->map(function (array $row, int|string $index) use ($request, $group): array {
             $path = Arr::get($row, 'existing_screenshot');
+            if ((bool) Arr::get($row, 'remove_screenshot', false)) $path = null;
             if ($file = $request->file("{$group}.{$index}.screenshot")) {
                 $path = $file->storeAs('fashion-advertising/'.now()->format('Ym'), Str::uuid().'.'.$file->extension(), 'local');
             }
-            unset($row['screenshot'], $row['existing_screenshot']);
+            unset($row['screenshot'], $row['existing_screenshot'], $row['remove_screenshot']);
             foreach (['revenue_usd', 'book_spend_usd', 'actual_spend_usd'] as $field) {
                 if (array_key_exists($field, $row)) $row[$field] = round((float) $row[$field], 2);
             }
@@ -248,7 +269,37 @@ class AdvertisingExpenseController extends Controller
 
     private function authorizeReport($user, FashionAdvertisingReport $report): void
     {
-        abort_unless($user->isAdministrator() || (int) $report->submitter_id === (int) $user->getKey(), 403);
+        abort_unless($this->isBoss($user) || (int) $report->submitter_id === (int) $user->getKey(), 403);
+    }
+
+    private function isBoss(AdminUser $user): bool
+    {
+        return $user->isAdministrator() || strcasecmp((string) $user->username, 'kky_boss') === 0;
+    }
+
+    private function operatorOptions()
+    {
+        $root = Department::business()->where('name', '服装运营部门')->first(['id']);
+        if (! $root) return collect();
+        $departments = Department::business()->get(['id', 'parent_id']);
+        $departmentIds = [(int) $root->id];
+        do {
+            $children = $departments->whereIn('parent_id', $departmentIds)->pluck('id')->map(fn ($id) => (int) $id)->diff($departmentIds)->values()->all();
+            $before = count($departmentIds);
+            $departmentIds = array_values(array_unique([...$departmentIds, ...$children]));
+        } while (count($departmentIds) > $before);
+
+        return AdminUser::query()->where('status', AdminUser::STATUS_ACTIVE)
+            ->whereHas('departments', fn ($query) => $query->whereIn('id', $departmentIds))
+            ->orderBy('name')->orderBy('username')->get(['id', 'name', 'username']);
+    }
+
+    private function resolveSubmitter(Request $request, AdminUser $actor): AdminUser
+    {
+        if (! $this->isBoss($actor)) return $actor;
+        $operatorId = $request->integer('operator_user_id');
+        abort_unless($operatorId > 0 && $this->operatorOptions()->contains('id', $operatorId), 422, '请选择有效的服装运营账号。');
+        return AdminUser::query()->findOrFail($operatorId);
     }
 
     private function dateFilter(mixed $value): ?string
@@ -270,6 +321,12 @@ class AdvertisingExpenseController extends Controller
             ->pluck('name')->map(fn ($name): string => trim((string) $name))->filter()->unique()->values();
         $media = $media->merge($agencies->pluck('media'))->filter()->unique()->values();
 
-        return ['agencies' => $agencies->all(), 'media' => $media->all()];
+        $agencyMedia = $agencies->groupBy('name')->map(fn ($items) => $items->pluck('media')->filter()->unique()->values()->all())->all();
+
+        return [
+            'agencies' => $agencies->pluck('name')->filter()->unique()->values()->all(),
+            'agency_media' => $agencyMedia,
+            'media' => $media->all(),
+        ];
     }
 }

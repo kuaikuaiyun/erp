@@ -311,12 +311,12 @@ class OperationReportMetricsService
     /** @param list<int> $operatorUserIds
      *  @return array<int,array{rows:list<array<string,mixed>>,totals:array<string,float|int>,warnings:list<string>}>
      */
-    public function buildRangeForOperators(string $dateFrom, string $dateTo, array $operatorUserIds): array
+    public function buildRangeForOperators(string $dateFrom, string $dateTo, array $operatorUserIds, string $timezone = self::REPORT_TIMEZONE): array
     {
         $operatorUserIds = collect($operatorUserIds)->map(fn ($id) => (int) $id)->filter()->unique()->values()->all();
         if ($operatorUserIds === []) return [];
-        $start = Carbon::createFromFormat('Y-m-d H:i:s', $dateFrom.' 00:00:00', self::REPORT_TIMEZONE)->utc();
-        $end = Carbon::createFromFormat('Y-m-d H:i:s', $dateTo.' 23:59:59', self::REPORT_TIMEZONE)->utc();
+        $start = Carbon::createFromFormat('Y-m-d H:i:s', $dateFrom.' 00:00:00', $timezone)->utc();
+        $end = Carbon::createFromFormat('Y-m-d H:i:s', $dateTo.' 23:59:59', $timezone)->utc();
         $operatorUsers = AdminUser::query()->whereIn('id', $operatorUserIds)->get();
         $operatorIdentityMap = $this->operatorIdentityMap($operatorUsers);
         $operatorSearchValues = $this->operatorSearchValues($operatorUsers);
@@ -356,7 +356,7 @@ class OperationReportMetricsService
             if ($operatorId === null) continue;
             $domain = trim((string) ($order->store?->domain ?: $order->source_shop_domain ?: $order->store_name ?: '未知店铺'));
             $media = trim((string) ($order->media_source ?: LogisticsOrder::MEDIA_SOURCE_OTHER));
-            $rowDate = Carbon::parse($order->getRawOriginal('order_created_at'), 'UTC')->timezone(self::REPORT_TIMEZONE)->format('Y-m-d');
+            $rowDate = Carbon::parse($order->getRawOriginal('order_created_at'), 'UTC')->timezone($timezone)->format('Y-m-d');
             $key = $rowDate."\x1F".$domain."\x1F".$media;
             $groups[$operatorId][$key] ??= $this->emptyRow($rowDate, (string) $operatorNames->get($operatorId, '未分配'), $domain, $media);
             $row = &$groups[$operatorId][$key];
@@ -418,10 +418,10 @@ class OperationReportMetricsService
     }
 
     /** @return array{summary:array<string,float|int|string>,orders:list<array<string,mixed>>,pagination:array<string,int>} */
-    public function orderDetailsRange(string $dateFrom, string $dateTo, int $operatorUserId, string $type, int $page = 1, int $perPage = 10, ?string $shopDomain = null, ?string $mediaSource = null): array
+    public function orderDetailsRange(string $dateFrom, string $dateTo, int $operatorUserId, string $type, int $page = 1, int $perPage = 10, ?string $shopDomain = null, ?string $mediaSource = null, string $timezone = self::REPORT_TIMEZONE): array
     {
-        $start = Carbon::createFromFormat('Y-m-d H:i:s', $dateFrom.' 00:00:00', self::REPORT_TIMEZONE)->utc();
-        $end = Carbon::createFromFormat('Y-m-d H:i:s', $dateTo.' 23:59:59', self::REPORT_TIMEZONE)->utc();
+        $start = Carbon::createFromFormat('Y-m-d H:i:s', $dateFrom.' 00:00:00', $timezone)->utc();
+        $end = Carbon::createFromFormat('Y-m-d H:i:s', $dateTo.' 23:59:59', $timezone)->utc();
         $operator = AdminUser::query()->find($operatorUserId);
         $operatorUsers = $operator ? collect([$operator]) : collect();
         $operatorIdentityMap = $this->operatorIdentityMap($operatorUsers);
@@ -525,7 +525,7 @@ class OperationReportMetricsService
                 'order_number' => trim((string) ($order->shopify_order_number ?: $order->tongtu_order_number)) ?: '—',
                 'shop_domain' => trim((string) ($order->store?->domain ?: $order->source_shop_domain ?: $order->store_name)) ?: '未知店铺',
                 'media_source' => trim((string) ($order->media_source ?: LogisticsOrder::MEDIA_SOURCE_OTHER)),
-                'ordered_at' => Carbon::parse($order->getRawOriginal('order_created_at'), 'UTC')->timezone(self::REPORT_TIMEZONE)->format('Y-m-d H:i:s'),
+                'ordered_at' => Carbon::parse($order->getRawOriginal('order_created_at'), 'UTC')->timezone($timezone)->format('Y-m-d H:i:s'),
                 'subscription_type' => (string) $order->subscription_type,
                 'revenue' => round($revenue, 4),
                 'purchase_cost' => round($purchaseCost, 4),

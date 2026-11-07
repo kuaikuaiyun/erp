@@ -38,11 +38,13 @@ class OperationReportDashboardController extends Controller
         $validated = $request->validate([
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
+            'timezone' => ['nullable', Rule::in(array_keys($this->timezoneOptions()))],
             'operation_department_ids' => ['nullable', 'array'],
             'operation_department_ids.*' => ['integer', 'distinct'],
             'operator_user_id' => ['nullable', 'integer'],
         ]);
-        $reportNow = Carbon::now(OperationReportMetricsService::REPORT_TIMEZONE);
+        $timezone = (string) ($validated['timezone'] ?? OperationReportMetricsService::REPORT_TIMEZONE);
+        $reportNow = Carbon::now($timezone);
         $dateFrom = (string) ($validated['date_from'] ?? $reportNow->copy()->startOfMonth()->format('Y-m-d'));
         $dateTo = (string) ($validated['date_to'] ?? $reportNow->copy()->endOfMonth()->format('Y-m-d'));
         abort_if($dateFrom > $dateTo, 422, '开始日期不能晚于结束日期。');
@@ -109,12 +111,12 @@ class OperationReportDashboardController extends Controller
                 $report->report_date->format('Y-m-d'),
                 $this->normalizeOperatorName((string) $report->operator_name),
             ]));
-        $cacheKey = 'assistant-operation-report:v3-owner-snapshot:'.$dateFrom.':'.$dateTo.':'.sha1($operatorIds->implode(','));
-        $calculatedByOperator = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($operatorIds, $dateFrom, $dateTo): array {
+        $cacheKey = 'assistant-operation-report:v4-timezone:'.$timezone.':'.$dateFrom.':'.$dateTo.':'.sha1($operatorIds->implode(','));
+        $calculatedByOperator = Cache::remember($cacheKey, now()->addMinutes(5), function () use ($operatorIds, $dateFrom, $dateTo, $timezone): array {
             $calculated = [];
             // 分批读取，避免整月订单及商品明细一次载入导致 PHP 内存溢出。
             foreach ($operatorIds->chunk(2) as $operatorIdBatch) {
-                $calculated += $this->metrics->buildRangeForOperators($dateFrom, $dateTo, $operatorIdBatch->values()->all());
+                $calculated += $this->metrics->buildRangeForOperators($dateFrom, $dateTo, $operatorIdBatch->values()->all(), $timezone);
                 gc_collect_cycles();
             }
             return $calculated;
@@ -284,6 +286,8 @@ class OperationReportDashboardController extends Controller
             'user' => $context['user'],
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
+            'timezone' => $timezone,
+            'timezoneOptions' => $this->timezoneOptions(),
             'departments' => $departments,
             'selectedDepartmentIds' => $selectedDepartmentIds->all(),
             'operatorOptions' => $operatorOptions,
@@ -309,6 +313,7 @@ class OperationReportDashboardController extends Controller
         $validated = $request->validate([
             'date_from' => ['required', 'date_format:Y-m-d'],
             'date_to' => ['required', 'date_format:Y-m-d', 'after_or_equal:date_from'],
+            'timezone' => ['nullable', Rule::in(array_keys($this->timezoneOptions()))],
             'operator_user_id' => ['required', 'integer'],
             'type' => ['required', Rule::in(['first_subscription', 'first_normal', 'first_total', 'renewal', 'total'])],
             'page' => ['nullable', 'integer', 'min:1'],
@@ -328,7 +333,24 @@ class OperationReportDashboardController extends Controller
             $validated['type'],
             (int) ($validated['page'] ?? 1),
             (int) ($validated['per_page'] ?? 10),
+            null,
+            null,
+            (string) ($validated['timezone'] ?? OperationReportMetricsService::REPORT_TIMEZONE),
         ));
+    }
+
+    /** @return array<string,string> */
+    private function timezoneOptions(): array
+    {
+        $options = [];
+        for ($offset = -12; $offset <= 14; $offset++) {
+            $value = sprintf('%s%02d:00', $offset < 0 ? '-' : '+', abs($offset));
+            $label = 'UTC'.($offset >= 0 ? '+' : '').$offset;
+            if ($value === '+08:00') $label .= '（北京时间）';
+            if ($value === OperationReportMetricsService::REPORT_TIMEZONE) $label .= '（默认）';
+            $options[$value] = $label;
+        }
+        return $options;
     }
 
     private function context(Request $request): array|Response
@@ -448,8 +470,7 @@ class OperationReportDashboardController extends Controller
 
             $calculationDays = null;
             if (! empty($first['hired_at'])) {
-                $calculationStart = Carbon::parse($first['hired_at'])->startOfDay()
-                    ->max(Carbon::parse($dateFrom)->startOfDay());
+                $calculationStart = Carbon::parse($first['hired_at'])->startOfDay();
                 $calculationEnd = Carbon::parse($dateTo)->startOfDay()->min(today());
                 $calculationDays = $calculationStart->lte($calculationEnd)
                     ? $calculationStart->diffInDays($calculationEnd) + 1

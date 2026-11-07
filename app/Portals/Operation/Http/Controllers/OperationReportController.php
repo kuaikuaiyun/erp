@@ -49,10 +49,12 @@ class OperationReportController extends Controller
         $validated = $request->validate([
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
+            'timezone' => ['nullable', Rule::in(array_keys($this->timezoneOptions()))],
             'operation_department_id' => ['nullable', 'integer'],
             'operator_user_id' => ['nullable', 'string', 'max:20'],
         ]);
-        $reportNow = Carbon::now(OperationReportMetricsService::REPORT_TIMEZONE);
+        $timezone = (string) ($validated['timezone'] ?? OperationReportMetricsService::REPORT_TIMEZONE);
+        $reportNow = Carbon::now($timezone);
         $dateFrom = (string) ($validated['date_from'] ?? $reportNow->copy()->startOfMonth()->format('Y-m-d'));
         $dateTo = (string) ($validated['date_to'] ?? $reportNow->copy()->endOfMonth()->format('Y-m-d'));
         abort_if($dateFrom > $dateTo, 422, '开始日期不能晚于结束日期。');
@@ -92,7 +94,7 @@ class OperationReportController extends Controller
         $operatorIds = $selectAllOperators
             ? $operatorOptions->pluck('id')->map(fn ($id) => (int) $id)->values()
             : collect([$operatorId]);
-        $calculatedByOperator = $this->metrics->buildRangeForOperators($dateFrom, $dateTo, $operatorIds->all());
+        $calculatedByOperator = $this->metrics->buildRangeForOperators($dateFrom, $dateTo, $operatorIds->all(), $timezone);
         $calculated = [
             'rows' => $operatorIds->flatMap(function (int $id) use ($calculatedByOperator) {
                 return collect($calculatedByOperator[$id]['rows'] ?? [])->map(function (array $row) use ($id): array {
@@ -184,6 +186,8 @@ class OperationReportController extends Controller
             'user' => $user,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
+            'timezone' => $timezone,
+            'timezoneOptions' => $this->timezoneOptions(),
             'selectedOperator' => $operator,
             'selectAllOperators' => $selectAllOperators,
             'operatorOptions' => $operatorOptions,
@@ -222,16 +226,18 @@ class OperationReportController extends Controller
         $validated = $request->validate([
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:date_from'],
+            'timezone' => ['nullable', Rule::in(array_keys($this->timezoneOptions()))],
             'operation_department_id' => ['nullable', 'integer'],
             'operator_user_id' => ['nullable', 'string', 'max:20'],
         ]);
 
-        $now = Carbon::now(OperationReportMetricsService::REPORT_TIMEZONE);
+        $timezone = (string) ($validated['timezone'] ?? OperationReportMetricsService::REPORT_TIMEZONE);
+        $now = Carbon::now($timezone);
         $requestedDateFrom = (string) ($validated['date_from'] ?? $now->copy()->startOfMonth()->format('Y-m-d'));
         $requestedDateTo = (string) ($validated['date_to'] ?? $now->copy()->endOfMonth()->format('Y-m-d'));
-        $rangeStart = Carbon::createFromFormat('Y-m-d', $requestedDateFrom, OperationReportMetricsService::REPORT_TIMEZONE)
+        $rangeStart = Carbon::createFromFormat('Y-m-d', $requestedDateFrom, $timezone)
             ->startOfWeek(Carbon::MONDAY)->startOfDay();
-        $rangeEnd = Carbon::createFromFormat('Y-m-d', $requestedDateTo, OperationReportMetricsService::REPORT_TIMEZONE)
+        $rangeEnd = Carbon::createFromFormat('Y-m-d', $requestedDateTo, $timezone)
             ->endOfWeek(Carbon::SUNDAY)->startOfDay();
         $dateFrom = $rangeStart->format('Y-m-d');
         $dateTo = $rangeEnd->format('Y-m-d');
@@ -286,9 +292,9 @@ class OperationReportController extends Controller
             $cursor = $periodEnd->copy()->addDay();
         }
 
-        $weeklyRows = $periods->flatMap(function (array $period) use ($operatorIds, $operatorOptions) {
+        $weeklyRows = $periods->flatMap(function (array $period) use ($operatorIds, $operatorOptions, $timezone) {
             [$periodFrom, $periodTo] = $period;
-            $calculatedByOperator = $this->metrics->buildRangeForOperators($periodFrom, $periodTo, $operatorIds->all());
+            $calculatedByOperator = $this->metrics->buildRangeForOperators($periodFrom, $periodTo, $operatorIds->all(), $timezone);
             $reportsByOperator = OperationReport::query()
                 ->whereIn('operator_user_id', $operatorIds->all())
                 ->whereBetween('report_date', [$periodFrom, $periodTo])
@@ -377,6 +383,8 @@ class OperationReportController extends Controller
             'inputDateTo' => $requestedDateTo,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
+            'timezone' => $timezone,
+            'timezoneOptions' => $this->timezoneOptions(),
             'weeklyRows' => $weeklyRows,
             'summary' => $summary,
         ]);
@@ -390,6 +398,7 @@ class OperationReportController extends Controller
         $isBoss = $this->isBoss($user);
         $validated = $request->validate([
             'date' => ['required', 'date_format:Y-m-d'],
+            'timezone' => ['nullable', Rule::in(array_keys($this->timezoneOptions()))],
             'operator_user_id' => ['nullable', 'integer'],
             'shop_domain' => ['nullable', 'string', 'max:255'],
             'media_source' => ['required', 'string', 'max:100'],
@@ -417,6 +426,7 @@ class OperationReportController extends Controller
             (int) ($validated['per_page'] ?? 10),
             $shopDomain !== '' ? $shopDomain : null,
             trim($validated['media_source']),
+            (string) ($validated['timezone'] ?? OperationReportMetricsService::REPORT_TIMEZONE),
         ));
     }
 
@@ -1136,5 +1146,19 @@ class OperationReportController extends Controller
         }
 
         return $bands;
+    }
+
+    /** @return array<string,string> */
+    private function timezoneOptions(): array
+    {
+        $options = [];
+        for ($offset = -12; $offset <= 14; $offset++) {
+            $value = sprintf('%s%02d:00', $offset < 0 ? '-' : '+', abs($offset));
+            $label = 'UTC'.($offset >= 0 ? '+' : '').$offset;
+            if ($value === '+08:00') $label .= '（北京时间）';
+            if ($value === OperationReportMetricsService::REPORT_TIMEZONE) $label .= '（默认）';
+            $options[$value] = $label;
+        }
+        return $options;
     }
 }
