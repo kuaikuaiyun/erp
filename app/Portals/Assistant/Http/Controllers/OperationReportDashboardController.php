@@ -525,7 +525,7 @@ class OperationReportDashboardController extends Controller
             'total_orders', 'total_revenue',
         ];
 
-        return collect($rows)->groupBy('operator_user_id')->map(function ($operatorRows) use ($sumFields, $dateFrom, $dateTo): array {
+        return collect($rows)->groupBy('operator_user_id')->flatMap(function ($operatorRows) use ($sumFields, $dateFrom, $dateTo) {
             $first = $operatorRows->first();
             $row = collect($sumFields)->mapWithKeys(
                 fn (string $field) => [$field => (float) $operatorRows->sum($field)]
@@ -567,7 +567,7 @@ class OperationReportDashboardController extends Controller
                     : 0;
             }
 
-            return array_merge($row, [
+            $shared = [
                 '_report_id' => (int) $first['operator_user_id'].'|'.$dateFrom.'|'.$dateTo,
                 'operator_user_id' => (int) $first['operator_user_id'],
                 'date' => $dateFrom === $dateTo ? $dateFrom : $dateFrom.' 至 '.$dateTo,
@@ -577,15 +577,9 @@ class OperationReportDashboardController extends Controller
                 'hired_at' => $first['hired_at'] ?? null,
                 'calculation_days' => $calculationDays,
                 'operation_department_name' => (string) $first['operation_department_name'],
-                'shop_domain' => $shopDomains[0] ?? '—',
                 'shop_domains' => $shopDomains,
-                'media_source' => '汇总',
-                'media_roi' => null,
-                'allocated_actual_ad_spend' => $actualAdSpend,
-                'first_total_cost' => $firstCost,
-                'first_profit' => $firstProfit,
-                'first_loss_rate' => $firstCost > 0 ? $firstProfit / $firstCost : null,
                 'daily_first_total_orders' => (int) $row['first_total_orders'],
+                'daily_first_subscription_orders' => (int) $row['first_subscription_orders'],
                 'daily_first_total_revenue' => (float) $row['first_total_revenue'],
                 'daily_first_average_order_value' => (int) $row['first_total_orders'] > 0
                     ? (float) $row['first_total_revenue'] / (int) $row['first_total_orders']
@@ -602,7 +596,54 @@ class OperationReportDashboardController extends Controller
                 'submission_status_label' => $hasApprovedReport ? '已提报' : '未提报',
                 'report_actual_ad_spend' => $actualAdSpend,
                 'report_first_roi' => $actualAdSpend > 0 ? (float) $row['first_total_revenue'] / $actualAdSpend : null,
-            ]);
+            ];
+
+            return $operatorRows
+                ->groupBy(fn (array $item) => mb_strtolower(trim((string) ($item['shop_domain'] ?? '—'))))
+                ->map(function ($domainRows) use ($sumFields, $shared): array {
+                    $domainFirst = $domainRows->first();
+                    $domainMetrics = collect($sumFields)->mapWithKeys(
+                        fn (string $field) => [$field => (float) $domainRows->sum($field)]
+                    )->all();
+                    $domainSpend = (float) $domainRows->sum('allocated_actual_ad_spend');
+                    $domainCost = (float) $domainMetrics['first_purchase_cost']
+                        + (float) $domainMetrics['first_shipping_cost']
+                        + (float) $domainMetrics['first_return_fee'];
+                    $domainProfit = (float) $domainMetrics['first_total_revenue'] - $domainSpend - $domainCost;
+                    $domainMediaRows = $domainRows->groupBy(
+                        fn (array $item) => mb_strtolower(trim((string) ($item['media_source'] ?? '其他')))
+                    );
+                    $domainMediaNames = [];
+                    $domainMediaOrderCounts = [];
+                    $domainMediaRois = [];
+                    foreach ($domainMediaRows as $mediaItems) {
+                        $mediaName = trim((string) ($mediaItems->first()['media_source'] ?? '')) ?: '其他';
+                        if ($mediaName === '—') continue;
+                        $mediaRevenue = (float) $mediaItems->sum('first_total_revenue');
+                        $mediaSpend = (float) $mediaItems->sum('allocated_actual_ad_spend');
+                        $domainMediaNames[] = $mediaName;
+                        $domainMediaOrderCounts[] = (int) $mediaItems->sum('first_total_orders');
+                        $domainMediaRois[] = $mediaSpend > 0 ? $mediaRevenue / $mediaSpend : null;
+                    }
+
+                    return array_merge($domainMetrics, $shared, [
+                        'shop_domain' => trim((string) ($domainFirst['shop_domain'] ?? '')) ?: '—',
+                        'media_source' => '汇总',
+                        'media_roi' => null,
+                        'allocated_actual_ad_spend' => $domainSpend,
+                        'first_total_cost' => $domainCost,
+                        'first_profit' => $domainProfit,
+                        'first_loss_rate' => $domainCost > 0 ? $domainProfit / $domainCost : null,
+                        'store_media_names' => $domainMediaNames,
+                        'store_media_order_counts' => $domainMediaOrderCounts,
+                        'store_media_rois' => $domainMediaRois,
+                        'store_first_roi' => $domainSpend > 0
+                            ? (float) $domainMetrics['first_total_revenue'] / $domainSpend
+                            : null,
+                    ]);
+                })
+                ->sortBy('shop_domain', SORT_NATURAL | SORT_FLAG_CASE)
+                ->values();
         })->values()->all();
     }
 
