@@ -12,12 +12,45 @@ class AssistantStoreOwnerService
 {
     public const OPERATION_DEPARTMENT_CODE = 'dept-000022';
 
+    /**
+     * Store ownership is shared by the Operations and Service Operations
+     * department trees. Other consumers of operationDepartments() deliberately
+     * remain limited to the original Operations tree.
+     */
+    private const STORE_OWNERSHIP_DEPARTMENT_CODES = [
+        self::OPERATION_DEPARTMENT_CODE,
+        'dept-000037',
+    ];
+
     /** @return Collection<int, Department> */
     public function operationDepartments(): Collection
     {
-        $root = Department::business()->where('slug', self::OPERATION_DEPARTMENT_CODE)->first();
+        return $this->departmentTrees([self::OPERATION_DEPARTMENT_CODE]);
+    }
 
-        if (!$root) {
+    /**
+     * Departments which an Assistant department may be granted for domain-store
+     * ownership. This includes the descendants of both approved root trees.
+     *
+     * @return Collection<int, Department>
+     */
+    public function storeOwnershipOperationDepartments(): Collection
+    {
+        return $this->departmentTrees(self::STORE_OWNERSHIP_DEPARTMENT_CODES);
+    }
+
+    /**
+     * @param list<string> $rootSlugs
+     * @return Collection<int, Department>
+     */
+    private function departmentTrees(array $rootSlugs): Collection
+    {
+        $roots = Department::business()
+            ->whereIn('slug', $rootSlugs)
+            ->orderBy('sort')
+            ->orderBy('name')
+            ->get();
+        if ($roots->isEmpty()) {
             return collect();
         }
 
@@ -27,7 +60,9 @@ class AssistantStoreOwnerService
             ->get()
             ->keyBy('id');
         $result = collect();
-        $this->appendDepartmentTree($result, $departments, $root, 0);
+        foreach ($roots as $root) {
+            $this->appendDepartmentTree($result, $departments, $root, 0);
+        }
 
         return $result->values();
     }

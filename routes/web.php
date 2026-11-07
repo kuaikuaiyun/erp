@@ -37,12 +37,16 @@ use App\Portals\Payment\Http\Controllers\PaymentPortalController;
 use App\Portals\Fashion\Http\Controllers\AdvertisingExpenseController;
 use App\Portals\Fashion\Http\Controllers\PerformanceReportController;
 use App\Portals\FashionLogistics\Http\Controllers\FashionOrderController;
+use App\Portals\FashionLogistics\Http\Controllers\ShoplineOrderController;
 use App\Http\Middleware\MonitorPaymentPerformance;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/fashion/advertising-expenses', [AdvertisingExpenseController::class, 'index'])->name('fashion.advertising-expenses.index');
 Route::get('/fashion/performance-report', [PerformanceReportController::class, 'index'])->name('fashion.performance-report.index');
 Route::get('/fashion-logistics/orders', [FashionOrderController::class, 'index'])->name('fashion-logistics.orders.index');
+Route::get('/fashion-logistics/shopline-orders', [ShoplineOrderController::class, 'index'])->name('fashion-logistics.shopline-orders.index');
+Route::get('/fashion-logistics/shopline-orders/sync-status', [ShoplineOrderController::class, 'syncStatus'])->name('fashion-logistics.shopline-orders.sync-status');
+Route::get('/fashion-logistics/shopline-orders/{order}', [ShoplineOrderController::class, 'show'])->whereNumber('order')->name('fashion-logistics.shopline-orders.show');
 Route::post('/fashion/advertising-expenses', [AdvertisingExpenseController::class, 'store'])->name('fashion.advertising-expenses.store');
 Route::put('/fashion/advertising-expenses/{report}', [AdvertisingExpenseController::class, 'update'])->name('fashion.advertising-expenses.update');
 Route::delete('/fashion/advertising-expenses/{report}', [AdvertisingExpenseController::class, 'destroy'])->name('fashion.advertising-expenses.destroy');
