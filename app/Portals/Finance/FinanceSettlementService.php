@@ -70,10 +70,40 @@ class FinanceSettlementService
 
     public function exportColumns(string $channel): array
     {
+        $columns = $this->listColumns($channel);
+        if ($channel !== 'paypal') {
+            return $columns;
+        }
+
+        $payable = ['payable' => $columns['payable']];
+        unset($columns['payable']);
+        $position = array_search('logistics', array_keys($columns), true);
+
+        return array_slice($columns, 0, $position, true) + $payable
+            + array_slice($columns, $position, null, true) + FinancePayPalSettlementOrders::sourceExportColumns();
+    }
+
+    public function listColumns(string $channel): array
+    {
         $columns = $this->columns($channel);
+
+        return $channel === 'paypal' ? FinancePayPalSettlementOrders::listColumns($columns) : $columns;
+    }
+
+    public function conditionFields(string $channel): array
+    {
+        if ($channel !== 'paypal') {
+            return self::CONDITION_FIELDS;
+        }
+
+        return $this->listColumns($channel) + ['gross' => self::CONDITION_FIELDS['gross']];
+    }
+
+    public function numericConditionFields(string $channel): array
+    {
         return $channel === 'paypal'
-            ? FinancePayPalSettlementOrders::listColumns($columns) + FinancePayPalSettlementOrders::sourceExportColumns()
-            : $columns;
+            ? ['id', 'gross', 'paypal_7', 'paypal_8', 'paypal_9', 'settlement', 'payable', 'open_hold', ...array_keys($this->moneyFields($channel))]
+            : ['gross', 'settlement', 'fee', 'refund'];
     }
 
     public function query(string $channel, array $filters)
@@ -278,15 +308,18 @@ class FinanceSettlementService
             && $this->matches($row, $filters['conditions'] ?? []))->values();
     }
 
-    public function matches(array $row, array $conditions): bool
+    public function matches(array $row, array $conditions, ?array $numericFields = null): bool
     {
         foreach ($conditions as $condition) {
             $actual = $row[$condition['field']] ?? null;
             $expected = $condition['value'] ?? '';
             $operator = $condition['operator'];
             $empty = $actual === null || $actual === '';
-            $numeric = $this->number($actual) !== null && $this->number($expected) !== null;
-            $comparison = $numeric ? bccomp($actual, $expected, 8) : strcmp((string) $actual, $expected);
+            $canCompareNumbers = $numericFields === null || in_array($condition['field'], $numericFields, true);
+            $actualNumber = $canCompareNumbers ? $this->number($actual) : null;
+            $expectedNumber = $canCompareNumbers ? $this->number($expected) : null;
+            $numeric = $actualNumber !== null && $expectedNumber !== null;
+            $comparison = $numeric ? bccomp($actualNumber, $expectedNumber, 8) : strcmp((string) $actual, $expected);
             $match = match ($operator) {
                 'empty' => $empty, 'not_empty' => ! $empty,
                 'contains' => mb_stripos(FinanceCatalog::simplified((string) $actual), FinanceCatalog::simplified($expected)) !== false,

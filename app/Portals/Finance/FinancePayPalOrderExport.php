@@ -11,6 +11,11 @@ class FinancePayPalOrderExport
         '实付金额', '运费', '入库时间', '下单时间', '付款时间', 'PayPal实际退款', '信用卡实际退款',
         '买家名称', 'Email', '国家/地区', '物流公司', '物流单号', '物流状态', '数据状态', '交易分类', '交易时间', '查看时区'];
 
+    public static function pageHeaders(string $dataset): array
+    {
+        return $dataset === 'paypal-orders' ? [...self::PAGE_HEADERS, '余额'] : self::PAGE_HEADERS;
+    }
+
     public static function pageValues($record, array $metadata, $group, string $account, string $category, string $timezone, iterable $items = [], array $refunds = [], string $dataset = 'paypal-orders'): array
     {
         $definition = FinanceCatalog::dataset('paypal-orders');
@@ -50,7 +55,8 @@ class FinancePayPalOrderExport
             $get('total_shipping_usd'), $date($get('created_at')), $date($get('order_created_at')), $date($get('paid_at')),
             $refunds['paypal'] ?? '', $refunds['credit_card'] ?? '', $get('buyer_name', $fields[3]), $get('buyer_email', $fields[10]),
             $get('destination', $fields[36]), $get('shipping_company'), $get('tracking_number'), $get('logistics_status'),
-            $get('data_status'), $category, $record->occurred_at->setTimezone($timezone)->format('Y-m-d H:i:s'), FinanceCatalog::timezoneLabel($timezone)];
+            $get('data_status'), $category, $record->occurred_at->setTimezone($timezone)->format('Y-m-d H:i:s'), FinanceCatalog::timezoneLabel($timezone),
+            ...($dataset === 'paypal-orders' ? [$fields[30]] : [])];
     }
 
     /** Same product rows and fallback rules as the order list. */
@@ -94,7 +100,7 @@ class FinancePayPalOrderExport
                     foreach (array_values($row) as $index => $value) {
                         $text = FinanceCatalog::simplified((string) ($value ?? ''));
                         $lines = max($lines, substr_count($text, "\n") + 1);
-                        $numeric = preg_match('/金额|运费|净额|手续费/u', $headers[$index])
+                        $numeric = preg_match('/金额|运费|净额|手续费|^余额$/u', $headers[$index])
                             && is_numeric($text) && strlen(str_replace(['-', '.'], '', $text)) <= 15;
                         $cells[] = ['value' => $numeric ? (float) $text : $text, 'type' => $numeric ? 'money' : 'text', 'wrap' => true];
                     }

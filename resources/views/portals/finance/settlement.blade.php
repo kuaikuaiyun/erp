@@ -56,8 +56,6 @@
 .settlement-detail-status.is-complete{background:#eaf6ef;color:#286747}
 .settlement-detail-status.is-pending{background:#fff3d8;color:#765921}
 .settlement-detail-status.is-closed{background:#fceceb;color:#923a33}
-.settlement-detail-payment-list{display:flex;flex-wrap:wrap;gap:8px 16px}
-.settlement-detail-payment-list span{overflow-wrap:anywhere}
 @media(max-width:600px){.settlement-detail-body{padding:12px}.settlement-detail-section{padding:12px}.settlement-detail-summary{grid-template-columns:1fr}}
 @media(max-width:720px){.settlement-event-grid{grid-template-columns:minmax(0,1fr);gap:10px}.settlement-event-money{padding:10px 0 0;border-left:0;border-top:1px solid #e5edf3}.settlement-event-field-group dl{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(prefers-reduced-motion:reduce){.settlement-detail-state .fa-spin{animation:none}}
@@ -134,7 +132,7 @@
 </tr>
 @empty<tr><td data-settlement-colspan="{{ $hasOperations ? 2 : 1 }}" colspan="{{ count($columns) + ($hasOperations ? 2 : 1) }}">无符合条件的记录</td></tr>@endforelse
 </tbody></table></div>@include('portals.finance.pagination', ['paginator' => $rows])
-<p class="settlement-note">@if($orderView)按最近同步的资金流水显示当前状态。待关联付款保留原交易号，缺少换汇或返还依据的金额待核对。@endif 费用和返还金额以美元填写，物流和采购以人民币填写。金额可按需补充。使用人和团队优先显示导入补充值，未补充时按域名匹配。已锁定月份不可修改。</p>
+<p class="settlement-note">@if($orderView)每笔付款单独列示。应结算为美元收款金额减去手续费至争议费各列，再加上三项返还。缺少换汇或返还依据的金额待核对。@endif 费用和返还金额以美元填写，物流和采购以人民币填写。金额可按需补充。使用人和团队优先显示导入补充值，未补充时按域名匹配。已锁定月份不可修改。</p>
 </div></div>
 @if($orderView)
 <dialog class="settlement-dialog settlement-paypal-detail" id="settlement-detail" aria-labelledby="settlement-detail-title">

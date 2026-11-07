@@ -783,7 +783,8 @@ class FinanceController extends Controller
         $filters = $this->filters($request, $dataset);
         $pageLayout = in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true) && $request->input('export_layout') === 'page';
         $productIndex = array_search('物品标题', array_map(FinanceCatalog::simplified(...), $definition['headers']), true);
-        $exportColumnCount = $pageLayout ? count(\App\Portals\Finance\FinancePayPalOrderExport::PAGE_HEADERS)
+        $pageHeaders = $pageLayout ? \App\Portals\Finance\FinancePayPalOrderExport::pageHeaders($dataset) : [];
+        $exportColumnCount = $pageLayout ? count($pageHeaders)
             : count($definition['headers']) + ($dataset === 'xuzong2-orders' ? 3 : 4)
                 + ($dataset === 'paypal-orders' ? count(\App\Portals\Finance\FinancePayPalOrderExport::COLUMNS) : 0);
         $selection = $request->validate([
@@ -796,6 +797,13 @@ class FinanceController extends Controller
             'report_columns' => 'required_with:report_fields_customized|array|min:1|max:'.$exportColumnCount,
             'report_columns.*' => ['required', 'integer', 'distinct', Rule::in(range(0, $exportColumnCount - 1))],
         ], ['export_scope.required' => __('finance.records.selection_required')]);
+        if ($request->boolean('export_template')) {
+            abort_unless($pageLayout && $dataset === 'paypal-orders', 404);
+            $headers = isset($selection['report_columns'])
+                ? array_map(fn ($index) => $pageHeaders[$index], $selection['report_columns']) : $pageHeaders;
+
+            return $this->downloadRecords($headers, [], $dataset.'-export-template', $filters['export_format'] ?? 'xlsx', $pageLayout);
+        }
         $selected = $selection['export_scope'] === 'accounts' ? 'selected_accounts' : 'selected_ids';
         if ($selection['export_scope'] !== 'filtered' && empty($selection[$selected])) {
             throw ValidationException::withMessages([$selected => __('finance.records.selection_required')]);
@@ -890,7 +898,7 @@ class FinanceController extends Controller
             $headers = [...$headers, '收支方向', '月度人民币汇率', '折合人民币'];
         }
         if ($pageLayout) {
-            $headers = \App\Portals\Finance\FinancePayPalOrderExport::PAGE_HEADERS;
+            $headers = $pageHeaders;
         } elseif ($productIndex !== false) {
             $headers[$productIndex] = '商品大类';
         }
@@ -901,7 +909,12 @@ class FinanceController extends Controller
         }
         $filename = $dataset.'-'.now()->format('Ymd-His');
 
-        return match ($filters['export_format'] ?? 'xlsx') {
+        return $this->downloadRecords($headers, $rows, $filename, $filters['export_format'] ?? 'xlsx', $pageLayout);
+    }
+
+    private function downloadRecords(array $headers, iterable $rows, string $filename, string $format, bool $pageLayout): Response
+    {
+        return match ($format) {
             'xls' => $this->workbooks->download($headers, $rows, $filename.'.xls', 'xls'),
             'csv' => $this->workbooks->downloadDelimited($headers, $rows, $filename.'.csv'),
             'tsv' => $this->workbooks->downloadDelimited($headers, $rows, $filename.'.tsv', "\t"),
@@ -1121,15 +1134,8 @@ class FinanceController extends Controller
         $row = app(\App\Portals\Finance\FinancePayPalSettlementOrders::class)->detailRow($record, $timezone);
         abort_if($row === null, 404);
 
-        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
-
-        return response()->view('portals.finance.partials.paypal-settlement-events', [
-            'row' => $row,
-            'canManage' => $context['canManage'],
-            'moneyFields' => $service->moneyFields('paypal'),
-            'textFields' => $service->textFields('paypal'),
-            'editorFields' => array_diff_key($service->columns('paypal'), ['id' => true]),
-        ])->header('Cache-Control', 'private, no-store');
+        return response()->view('portals.finance.partials.paypal-settlement-events', ['row' => $row])
+            ->header('Cache-Control', 'private, no-store');
     }
 
     public function report(Request $request, string $report): Response
@@ -1232,7 +1238,7 @@ class FinanceController extends Controller
         ]);
     }
 
-    private function settlementFilters(Request $request): array
+    private function settlementFilters(Request $request, array $conditionFields): array
     {
         return [...$request->validate([
             'account' => 'nullable|string|max:191', 'reference' => 'nullable|string|max:191',
@@ -1243,7 +1249,7 @@ class FinanceController extends Controller
             'per_page' => ['nullable', 'integer', Rule::in([10, 20, 50, 100])],
             'source' => ['nullable', Rule::in(['xuzong2-orders', 'xuzong2-details', 'xuzong1-details'])],
             'conditions' => 'nullable|array|max:10', 'conditions.*' => 'array:field,operator,value',
-            'conditions.*.field' => ['required', Rule::in(['account','reference','team','owner','domain','subscription','gross','settlement','fee','refund','note','payable'])],
+            'conditions.*.field' => ['required', Rule::in(array_keys($conditionFields))],
             'conditions.*.operator' => ['required', Rule::in(['equals','contains','not_equals','empty','not_empty','gt','gte','lt','lte'])],
             'conditions.*.value' => 'nullable|string|max:191',
             'format' => ['nullable', Rule::in(['xls', 'xlsx'])],
@@ -1258,11 +1264,13 @@ class FinanceController extends Controller
         }
         $channel = $report === 'paypal-settlement' ? 'paypal' : 'credit_card';
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
-        $filters = $this->settlementFilters($request);
+        $conditionFields = $service->conditionFields($channel);
+        $numericConditionFields = $service->numericConditionFields($channel);
+        $filters = $this->settlementFilters($request, $conditionFields);
         foreach ($filters['conditions'] ?? [] as $condition) {
             if (in_array($condition['operator'], ['gt','gte','lt','lte'], true)
-                && (! in_array($condition['field'], ['gross','settlement','fee','refund','payable'], true) || $service->number($condition['value'] ?? null) === null)) {
-                throw ValidationException::withMessages(['conditions' => '大小比较请选择金额字段并填写有效数字。']);
+                && (! in_array($condition['field'], $numericConditionFields, true) || $service->number($condition['value'] ?? null) === null)) {
+                throw ValidationException::withMessages(['conditions' => '大小比较请选择数值字段并填写有效数字。']);
             }
         }
         $columns = $service->columns($channel);
@@ -1274,15 +1282,13 @@ class FinanceController extends Controller
         $paginator = null;
         $editorFields = array_diff_key($columns, ['id' => true]);
         $orderView = $channel === 'paypal';
-        if ($orderView) {
-            $columns = \App\Portals\Finance\FinancePayPalSettlementOrders::listColumns($columns);
-        }
+        $columns = $service->listColumns($channel);
         $exportColumns = $service->exportColumns($channel);
         if ($request->boolean('download')) {
             $requestedColumns = $request->validate([
                 'export_columns' => 'sometimes|required|array|list|min:1|max:'.count($exportColumns),
                 'export_columns.*' => ['required', 'string', 'distinct', Rule::in(array_keys($exportColumns))],
-            ])['export_columns'] ?? array_keys($columns);
+            ])['export_columns'] ?? array_keys(array_intersect_key($exportColumns, $columns));
             $downloadHeaders = array_map(fn ($field) => $exportColumns[$field], $requestedColumns);
             if ($request->boolean('export_template')) {
                 $format = $filters['format'] ?? 'xlsx';
@@ -1308,7 +1314,7 @@ class FinanceController extends Controller
         }
         if ($request->has('suggestion_field')) {
             $suggestion = $request->validate([
-                'suggestion_field' => ['required', Rule::in(['account','reference','team','owner','domain','subscription','gross','settlement','fee','refund','note','payable'])],
+                'suggestion_field' => ['required', Rule::in(array_keys($conditionFields))],
                 'suggestion_q' => 'nullable|string|max:191',
             ]);
             $search = FinanceCatalog::simplified($suggestion['suggestion_q'] ?? '');
@@ -1339,30 +1345,34 @@ class FinanceController extends Controller
             'moneyFields' => $service->moneyFields($channel), 'textFields' => $service->textFields($channel),
             'editorFields' => $editorFields, 'orderView' => $orderView,
             'editorNumericFields' => app(\App\Portals\Finance\FinanceSettlementEditor::class)->numericFields($channel),
-            'conditionFields' => $orderView ? [...$service::CONDITION_FIELDS, 'payable' => '应结算（USD）'] : $service::CONDITION_FIELDS,
+            'conditionFields' => $conditionFields, 'numericConditionFields' => $numericConditionFields,
             'subscriptionOptions' => $service->subscriptionOptions($rows),
             'accounts' => FinancePaymentAccount::query()->where('account_type', $channel)->orderBy('id')->get(),
             'teams' => $this->workbooks->domainGroups()->pluck('team')->filter()->unique()->sort()->values(),
         ]);
     }
 
-    public function previewSettlementExportTemplate(Request $request, string $report): Response
+    public function previewExportTemplate(Request $request, string $report): Response
     {
         $context = $this->context($request);
         if ($context instanceof Response) {
             return $context;
         }
+        $formats = $report === 'paypal-orders' ? 'XLSX、XLS、CSV 或 TSV' : 'XLSX、XLS 或 CSV';
+        $extensions = $report === 'paypal-orders' ? 'xlsx,xls,csv,tsv' : 'xlsx,xls,csv';
         $data = $request->validate([
-            'file' => 'required|file|extensions:xlsx,xls,csv|max:5120',
+            'file' => 'required|file|extensions:'.$extensions.'|max:5120',
             'header_row' => 'required|integer|min:1|max:1000',
         ], [
             'file.required' => '请选择模板文件。',
-            'file.extensions' => '请选择 XLSX、XLS 或 CSV 文件。',
+            'file.extensions' => '请选择 '.$formats.' 文件。',
             'file.max' => '模板文件不能超过 5 MB。',
             'header_row.*' => '表头行号必须在 1 到 1000 之间。',
         ]);
         $channel = $report === 'paypal-settlement' ? 'paypal' : 'credit_card';
-        $columns = app(\App\Portals\Finance\FinanceSettlementService::class)->exportColumns($channel);
+        $columns = $report === 'paypal-orders'
+            ? \App\Portals\Finance\FinancePayPalOrderExport::pageHeaders($report)
+            : app(\App\Portals\Finance\FinanceSettlementService::class)->exportColumns($channel);
 
         return response()->json($this->workbooks->readExportTemplate($data['file'], (int) $data['header_row'], $columns));
     }
@@ -1390,12 +1400,12 @@ class FinanceController extends Controller
         }
         $channel = $report === 'paypal-settlement' ? 'paypal' : 'credit_card';
         $request->validate(['id' => 'required|integer|min:1']);
-        $returnFilters = $this->settlementFilters(Request::create('/', 'GET', $request->query()));
+        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $returnFilters = $this->settlementFilters(Request::create('/', 'GET', $request->query()), $service->conditionFields($channel));
         $page = filter_var($request->query('page'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 2]]);
         if ($page !== false) {
             $returnFilters['page'] = $page;
         }
-        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
         $record = $service->query($channel, [])->findOrFail($request->input('id'));
         try {
             app(\App\Portals\Finance\FinanceSettlementEditor::class)->save($record, $request->all(), $channel, (int) $context['user']->getKey());

@@ -73,16 +73,4 @@
             @endforelse
         </ol>
     </section>
-    @if($canManage && count($row['payments']) > 1)
-        <section class="settlement-detail-section">
-            <h4>付款记录</h4>
-            <div class="settlement-detail-payment-list">
-            @foreach($row['payments'] as $editable)
-                <span>{{ $editable['reference'] }}
-                @if($editable['locked'])（已锁定）@else @include('portals.finance.partials.settlement-edit-button') @endif
-                </span>
-            @endforeach
-            </div>
-        </section>
-    @endif
 </div>

@@ -1,23 +1,33 @@
 (function () {
     'use strict';
     const dialog = document.getElementById('settlement-column-settings');
-    const form = document.getElementById('settlement-filter');
+    const form = document.getElementById(dialog?.dataset.filterForm || 'settlement-filter');
     if (!dialog || !form) return;
 
     const displayInputs = Array.from(dialog.querySelectorAll('[data-display-field]'));
     const exportInputs = Array.from(dialog.querySelectorAll('[data-export-field]'));
     const displayKeys = displayInputs.map(input => input.value);
     const exportKeys = exportInputs.map(input => input.value);
+    const visibleExportKeys = exportKeys.filter(field => displayKeys.includes(field));
     const exportVisible = dialog.hasAttribute('data-export-visible-columns');
     const labels = new Map(exportInputs.map(input => [input.value, input.dataset.label]));
     const orderList = dialog.querySelector('[data-export-field-order]');
     const templateSelect = dialog.querySelector('[data-export-template]');
-    const activeSelect = form.querySelector('[data-active-export-template]');
+    const activeSelect = document.querySelector('[data-active-export-template]');
+    const columnParam = dialog.dataset.exportColumnParam || 'export_columns[]';
+    const formatParam = dialog.dataset.templateFormatParam || 'format';
     const templateName = dialog.querySelector('[data-template-name]');
     const message = dialog.querySelector('[data-column-message]');
     const key = dialog.dataset.preferenceKey;
     let saved = {};
-    try { saved = JSON.parse(localStorage.getItem(key)) || {}; } catch (error) {}
+    try {
+        saved = JSON.parse(localStorage.getItem(key)) || {};
+        if (!saved.fields && dialog.dataset.legacyPreferenceKey) {
+            const legacy = validKeys(JSON.parse(localStorage.getItem(dialog.dataset.legacyPreferenceKey)), exportKeys);
+            // An old all-fields selection should also include the newly added balance.
+            if (legacy.length < exportKeys.length - 1) saved.fields = legacy;
+        }
+    } catch (error) {}
 
     function validKeys(value, available) {
         return Array.isArray(value) ? [...new Set(value.filter(field => available.includes(field)))] : [];
@@ -56,6 +66,7 @@
         document.querySelectorAll('[data-settlement-colspan]').forEach(cell => {
             cell.colSpan = Number(cell.dataset.settlementColspan) + display.length;
         });
+        dialog.dispatchEvent(new Event('finance:columns-changed', {bubbles: true}));
     }
 
     function renderFields() {
@@ -108,7 +119,7 @@
 
     function currentExportFields() {
         return templates.find(template => template.name === activeTemplate)?.fields
-            ?? (exportVisible ? displayKeys.filter(field => display.includes(field)) : fields);
+            ?? (exportVisible ? visibleExportKeys.filter(field => display.includes(field)) : fields);
     }
 
     function selectTab(tab) {
@@ -142,7 +153,8 @@
         displayInputs.forEach(input => { input.checked = true; });
     });
     dialog.querySelector('[data-export-default]').addEventListener('click', () => {
-        draft = exportVisible ? displayInputs.filter(input => input.checked).map(input => input.value) : exportKeys.slice();
+        const checked = displayInputs.filter(input => input.checked).map(input => input.value);
+        draft = exportVisible ? visibleExportKeys.filter(field => checked.includes(field)) : exportKeys.slice();
         renderFields();
     });
     dialog.querySelector('[data-export-clear]').addEventListener('click', () => {
@@ -243,7 +255,7 @@
                 importStatus.textContent = result.errors?.file?.[0] || result.errors?.header_row?.[0] || '读取失败，请检查文件后重试。';
                 return;
             }
-            const matched = validKeys(result.fields, exportKeys);
+            const matched = validKeys(result.fields.map(String), exportKeys);
             const notes = [
                 result.unmatched?.length ? '未匹配：' + result.unmatched.join('、') : '',
                 result.duplicates?.length ? '重复列：' + result.duplicates.join('、') : '',
@@ -334,19 +346,21 @@
     });
     dialog.querySelector('[data-download-export-template]').addEventListener('click', () => {
         if (!requireExportFields()) return;
-        const url = new URL(form.action, window.location.href);
-        url.search = '';
-        url.searchParams.set('download', '1');
+        const url = new URL(dialog.dataset.templateUrl || form.action, window.location.href);
+        if (!dialog.dataset.templateUrl) {
+            url.search = '';
+            url.searchParams.set('download', '1');
+        }
         url.searchParams.set('export_template', '1');
-        url.searchParams.set('format', form.elements.format.value);
-        draft.forEach(field => url.searchParams.append('export_columns[]', field));
+        url.searchParams.set(formatParam, form.elements[formatParam].value);
+        draft.forEach(field => url.searchParams.append(columnParam, field));
         window.location.assign(url.toString());
     });
     form.addEventListener('finance:prepare-export', event => {
         const selected = currentExportFields();
-        const defaults = exportVisible ? displayKeys : exportKeys;
+        const defaults = exportVisible ? visibleExportKeys : exportKeys;
         if (selected.length === defaults.length && selected.every((field, index) => field === defaults[index])) return;
-        selected.forEach(field => event.detail.append('export_columns[]', field));
+        selected.forEach(field => event.detail.append(columnParam, field));
     });
     renderActiveTemplate();
     applyDisplay();
