@@ -334,7 +334,6 @@ class OperationReportDashboardController extends Controller
             'dashboardScopeUpdateUrl' => $canManageDashboardScope
                 ? route('operation-dashboard.operation-reports.department-scope.update')
                 : null,
-            'isDashboardPortal' => $this->isDashboard($context),
         ]);
     }
 
