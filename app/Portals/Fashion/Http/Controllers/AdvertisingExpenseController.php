@@ -68,6 +68,7 @@ class AdvertisingExpenseController extends Controller
             'filters' => ['from' => $from ?? '', 'to' => $to ?? ''],
             'agencyOptions' => $advertisingOptions['agencies'],
             'agencyMediaOptions' => $advertisingOptions['agency_media'],
+            'agencyRateOptions' => $advertisingOptions['agency_rates'],
             'mediaOptions' => $advertisingOptions['media'],
             'isBoss' => $isBoss,
             'operatorOptions' => $operatorOptions,
@@ -150,6 +151,7 @@ class AdvertisingExpenseController extends Controller
             'advertising.*.account_name' => ['required', 'string', 'max:191'],
             'advertising.*.account_number' => ['required', 'string', 'max:191'],
             'advertising.*.book_spend_usd' => ['required', 'numeric', 'min:0'],
+            'advertising.*.settlement_coefficient' => ['required', 'numeric', 'min:0'],
             'advertising.*.actual_spend_usd' => ['required', 'numeric', 'min:0'],
             'advertising.*.remark' => ['nullable', 'string', 'max:1000'],
             'advertising.*.existing_screenshot' => ['nullable', 'string', 'max:500'],
@@ -214,6 +216,16 @@ class AdvertisingExpenseController extends Controller
                 $path = $file->storeAs('fashion-advertising/'.now()->format('Ym'), Str::uuid().'.'.$file->extension(), 'local');
             }
             unset($row['screenshot'], $row['existing_screenshot'], $row['remove_screenshot']);
+            if ($group === 'advertising') {
+                $configuredCoefficient = AssistantAdvertisingAgency::query()
+                    ->where('name', trim((string) ($row['agency'] ?? '')))
+                    ->whereHas('advertisingMedia', fn ($query) => $query->where('name', trim((string) ($row['media'] ?? ''))))
+                    ->value('settlement_coefficient');
+                $coefficient = round((float) ($configuredCoefficient ?? $row['settlement_coefficient'] ?? 0), 4);
+                $bookSpend = round((float) ($row['book_spend_usd'] ?? 0), 2);
+                $row['settlement_coefficient'] = $coefficient;
+                $row['actual_spend_usd'] = round($bookSpend + ($bookSpend * $coefficient), 2);
+            }
             foreach (['revenue_usd', 'book_spend_usd', 'actual_spend_usd'] as $field) {
                 if (array_key_exists($field, $row)) $row[$field] = round((float) $row[$field], 2);
             }
@@ -314,6 +326,7 @@ class AdvertisingExpenseController extends Controller
             ->map(fn (AssistantAdvertisingAgency $agency): array => [
                 'name' => trim((string) $agency->name),
                 'media' => trim((string) ($agency->advertisingMedia?->name ?? '')),
+                'coefficient' => (float) $agency->settlement_coefficient,
             ])->filter(fn (array $agency): bool => $agency['name'] !== '')
             ->unique(fn (array $agency): string => mb_strtolower($agency['name'].'|'.$agency['media']))->values();
 
@@ -322,10 +335,14 @@ class AdvertisingExpenseController extends Controller
         $media = $media->merge($agencies->pluck('media'))->filter()->unique()->values();
 
         $agencyMedia = $agencies->groupBy('name')->map(fn ($items) => $items->pluck('media')->filter()->unique()->values()->all())->all();
+        $agencyRates = $agencies->mapWithKeys(fn (array $agency): array => [
+            mb_strtolower($agency['name'].'|'.$agency['media']) => $agency['coefficient'],
+        ])->all();
 
         return [
             'agencies' => $agencies->pluck('name')->filter()->unique()->values()->all(),
             'agency_media' => $agencyMedia,
+            'agency_rates' => $agencyRates,
             'media' => $media->all(),
         ];
     }
