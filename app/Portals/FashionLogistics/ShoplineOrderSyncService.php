@@ -25,6 +25,7 @@ class ShoplineOrderSyncService
         $stores = AssistantDomainStore::query()
             ->when($storeId, fn ($query) => $query->whereKey($storeId))
             ->whereRaw("LOWER(TRIM(site_builder)) = 'shopline'")
+            ->where('shop_status', AssistantDomainStore::SHOP_STATUS_IN_USE)
             ->orderBy('id')
             ->get();
 

@@ -47,11 +47,14 @@ class ShoplineOrderController extends Controller
 
         $stores = AssistantDomainStore::query()
             ->whereRaw("LOWER(TRIM(site_builder)) = 'shopline'")
+            ->where('shop_status', AssistantDomainStore::SHOP_STATUS_IN_USE)
             ->orderBy('shop_name')
             ->get(['id', 'shop_name', 'shopline_app_token', 'owner_user_id', 'user_name']);
         $query = FashionLogisticsOrder::query()
-            ->with(['items', 'store'])
-            ->where('source_platform', self::PLATFORM);
+            ->with(['items', 'store.ownerUser:id,name,username'])
+            ->where('source_platform', self::PLATFORM)
+            ->whereHas('store', static fn ($stores) => $stores
+                ->where('shop_status', AssistantDomainStore::SHOP_STATUS_IN_USE));
         $keyword = trim((string) ($validated['keyword'] ?? ''));
         if ($keyword !== '') {
             $query->where(function ($orders) use ($keyword): void {
@@ -127,7 +130,9 @@ class ShoplineOrderController extends Controller
             'sync_status' => ['nullable', 'in:pending,syncing,success,failed'],
             'per_page' => ['nullable', 'integer', 'in:20,50,100'],
         ]);
-        $base = AssistantDomainStore::query()->whereRaw("LOWER(TRIM(site_builder)) = 'shopline'");
+        $base = AssistantDomainStore::query()
+            ->whereRaw("LOWER(TRIM(site_builder)) = 'shopline'")
+            ->where('shop_status', AssistantDomainStore::SHOP_STATUS_IN_USE);
         $summaryBase = clone $base;
         $summary = [
             'total' => (clone $summaryBase)->count(),
