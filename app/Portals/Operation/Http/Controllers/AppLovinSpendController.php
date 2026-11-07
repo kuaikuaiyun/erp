@@ -33,6 +33,7 @@ class AppLovinSpendController extends Controller
         $filters = $request->validate(['over_threshold' => ['nullable', 'in:1']]);
         $canSeeAll = $user->isAdministrator() || strcasecmp((string) $user->username, 'kky_boss') === 0;
         $reports = OperationReport::query()
+            ->where('status', '!=', OperationReport::STATUS_REJECTED)
             ->when(! $canSeeAll, fn ($query) => $query->where('operator_user_id', $user->getKey()))
             ->orderBy('report_date')->get();
 
@@ -52,7 +53,10 @@ class AppLovinSpendController extends Controller
         $validated = $request->validate(['account_key' => ['required', 'string', 'size:64'], 'screenshot' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120']]);
         $user = $context['user'];
         $canSeeAll = $user->isAdministrator() || strcasecmp((string) $user->username, 'kky_boss') === 0;
-        $reports = OperationReport::query()->when(! $canSeeAll, fn ($query) => $query->where('operator_user_id', $user->getKey()))->get();
+        $reports = OperationReport::query()
+            ->where('status', '!=', OperationReport::STATUS_REJECTED)
+            ->when(! $canSeeAll, fn ($query) => $query->where('operator_user_id', $user->getKey()))
+            ->get();
         $account = $this->summarize($reports)->firstWhere('account_key', $validated['account_key']);
         if (! $account || $account['total'] < 5000) throw ValidationException::withMessages(['screenshot' => '只有累计消耗大于等于 5000 的账户可以上传图片。']);
         $path = $validated['screenshot']->store('applovin-spend-screenshots', 'local');
@@ -76,6 +80,7 @@ class AppLovinSpendController extends Controller
         $user = $context['user'];
         $canSeeAll = $user->isAdministrator() || strcasecmp((string) $user->username, 'kky_boss') === 0;
         $reports = OperationReport::query()
+            ->where('status', '!=', OperationReport::STATUS_REJECTED)
             ->when(! $canSeeAll, fn ($query) => $query->where('operator_user_id', $user->getKey()))
             ->get();
         $accounts = $this->summarize($reports)->where('total', '>=', 5000)->values();
