@@ -117,7 +117,8 @@ class FinanceSettlementService
         $this->filterAccountHistory($query, $channel);
         if ($channel === 'paypal') {
             $types = $this->workbooks->database()->table('finance_transaction_types')->where('category', '结账付款')->pluck('raw_type');
-            $query->whereIn('raw_type', $types);
+            $query->whereIn('raw_type', $types)->where('raw_type', 'not like', 'T04%')
+                ->where('raw_type', 'not like', 'T02%');
         } elseif (($filters['source'] ?? '') !== '') {
             $query->where('dataset', $filters['source']);
         } else {

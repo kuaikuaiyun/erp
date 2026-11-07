@@ -193,6 +193,10 @@ class FinancePayPalSettlementOrders
             ->join('finance_records as record', 'record.id', '=', 'txn.finance_record_id')
             ->join('finance_payment_accounts as account', 'account.id', '=', 'txn.payment_account_id')
             ->whereNull('account.deleted_at');
+        $withdrawals = (clone $transactions)->where('txn.event_code', 'like', 'T04%')
+            ->get(['txn.payment_account_id', 'txn.transaction_id'])
+            ->groupBy('payment_account_id')->map(fn ($rows) => $rows->pluck('transaction_id')->flip()->all())->all();
+        $transactions->where('txn.event_code', 'not like', 'T04%');
         $settlementCodes = [...array_keys(self::EVENTS), 'T0200'];
         $settlementTransactions = (clone $transactions)->where(function ($query) use ($settlementCodes): void {
             $query->whereIn('txn.event_code', $settlementCodes)
@@ -242,6 +246,10 @@ class FinancePayPalSettlementOrders
             $info = json_decode((string) $txn->transaction_info, true) ?? [];
             $relatedId = $info['paypal_reference_id'] ?? '';
             $relatedType = $relatedId !== '' ? ($info['paypal_reference_id_type'] ?? '') : '';
+            if (str_starts_with($txn->event_code, 'T02') && (isset($withdrawals[$txn->payment_account_id][$txn->transaction_id])
+                || ($relatedType === 'TXN' && isset($withdrawals[$txn->payment_account_id][$relatedId])))) {
+                continue;
+            }
             $event = [
                 'id' => (int) $txn->finance_record_id, 'account_id' => (int) $txn->payment_account_id,
                 'account' => $txn->account_name, 'account_key' => $txn->activity_account,
