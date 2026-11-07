@@ -224,6 +224,7 @@ Route::get('/assistant/operation-reports', [OperationReportDashboardController::
 Route::get('/assistant/operation-reports/order-details', [OperationReportDashboardController::class, 'orderDetails'])->name('assistant.operation-reports.order-details');
 Route::get('/operation-dashboard/operation-reports', [OperationReportDashboardController::class, 'index'])->name('operation-dashboard.operation-reports.index');
 Route::get('/operation-dashboard/operation-reports/order-details', [OperationReportDashboardController::class, 'orderDetails'])->name('operation-dashboard.operation-reports.order-details');
+Route::post('/operation-dashboard/operation-reports/department-scope', [OperationReportDashboardController::class, 'updateDepartmentScope'])->name('operation-dashboard.operation-reports.department-scope.update');
 Route::get('/operation-dashboard/applovin-spends', [AppLovinSpendReviewController::class, 'index'])->name('operation-dashboard.applovin-spends.index');
 Route::get('/operation-dashboard/applovin-spends/screenshots/{screenshot}', [AppLovinSpendReviewController::class, 'screenshot'])
     ->whereNumber('screenshot')->name('operation-dashboard.applovin-spends.screenshot');

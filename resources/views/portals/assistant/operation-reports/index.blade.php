@@ -14,12 +14,35 @@
 .detail-media-breakdown{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}.detail-media-item{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid #d7e6f0;border-radius:18px;background:#f6fbfe;color:#315f7d}.detail-media-item b{color:#174c70}.detail-order-media{display:inline-block;margin-left:6px;padding:3px 8px;border-radius:11px;background:#dceefa;color:#21658d;font-size:12px}
 .department-multi-dropdown{position:relative;min-width:300px}.department-multi-toggle{display:flex;width:100%;min-height:38px;align-items:center;gap:6px;padding:4px 30px 4px 6px;border:1px solid #d6e2eb;border-radius:6px;background:#fff;color:#3f5d73;text-align:left;position:relative}.department-multi-toggle .caret{position:absolute;right:11px;top:16px}.department-tags{display:flex;flex-wrap:wrap;gap:4px}.department-tag{display:inline-flex;align-items:center;gap:5px;padding:4px 7px;border:1px solid #b9dcf1;border-radius:5px;background:#eaf6fd;color:#2584bc;white-space:nowrap}.department-tag-remove{border:0;background:transparent;color:#72a9c9;padding:0;font-size:14px;line-height:1}.department-placeholder{padding:3px 5px;color:#7d91a0}.department-multi-menu{width:520px;padding:0;border:1px solid #8bc3e7;border-radius:7px;overflow:hidden;box-shadow:0 8px 22px rgba(25,58,85,.15)}.department-cascade{display:grid;grid-template-columns:220px 1fr;min-height:230px;max-height:360px}.department-groups,.department-children{overflow:auto}.department-groups{border-right:1px solid #b9d9ed;background:#f8fbfd}.department-group,.department-multi-option{display:flex;align-items:center;gap:9px;margin:0;padding:10px 13px;color:#36576e;font-weight:400;cursor:pointer}.department-group{justify-content:space-between}.department-group:hover,.department-group.active,.department-multi-option:hover{background:#eaf6fd;color:#2584bc}.department-group-main{display:flex;align-items:center;gap:9px}.department-group input,.department-multi-option input{margin:0}.department-child-panel{display:none}.department-child-panel.active{display:block}.department-multi-clear{display:block;width:100%;border:0;border-top:1px solid #d9e8f2;background:#fff;padding:9px 13px;color:#3383b2;text-align:left}
 .assistant-report-filter{position:relative;z-index:50;overflow:visible}.assistant-report-filter .box-body{overflow:visible}.department-multi-dropdown.open{z-index:1001}.department-multi-menu{z-index:1002;background:#fff}.report-kpis,.assistant-report-box{position:relative;z-index:1}
+.dashboard-scope-box{border:0;border-radius:11px;box-shadow:0 4px 16px rgba(27,62,91,.09);overflow:hidden}.dashboard-scope-box .box-header{padding:14px 18px;background:linear-gradient(135deg,#f5fbff,#eef7fc)}.dashboard-scope-box .box-title{color:#1e587c;font-weight:600}.dashboard-scope-body{padding:16px 18px!important}.dashboard-scope-account{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:14px}.dashboard-scope-account .form-group{margin:0}.dashboard-scope-account label{display:block;color:#607789;font-size:12px;margin-bottom:6px}.dashboard-scope-account select{min-width:260px;height:38px;border-radius:6px}.dashboard-scope-departments{display:flex;flex-wrap:wrap;gap:9px}.dashboard-scope-option{display:flex;align-items:center;gap:7px;margin:0;padding:9px 12px;border:1px solid #d5e4ee;border-radius:7px;background:#f8fbfd;color:#365c75;font-weight:400;cursor:pointer}.dashboard-scope-option:has(input:checked){border-color:#69b5e3;background:#eaf6fd;color:#1977ad}.dashboard-scope-option input{margin:0}.dashboard-scope-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;padding-top:13px;border-top:1px solid #edf1f4}.dashboard-scope-help{color:#788c9b;font-size:12px}
 </style>
 @endpush
 
 @section('content')
 <section class="content-header"><h1>运营报表 <small>查看已绑定运营部门的完整报表数据</small></h1></section>
 <section class="content">
+    @if(session('success'))<div class="alert alert-success"><i class="fa fa-check-circle"></i> {{ session('success') }}</div>@endif
+    @if($canManageDashboardScope)
+        <div class="box dashboard-scope-box">
+            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-shield"></i> 账号部门查看权限</h3></div>
+            <div class="box-body dashboard-scope-body">
+                <form method="get" action="{{ $reportIndexUrl }}" class="dashboard-scope-account">
+                    <div class="form-group"><label>设置账号</label><select class="form-control" name="scope_user_id" onchange="this.form.submit()">@foreach($dashboardScopeUsers as $scopeUser)<option value="{{ $scopeUser->id }}" @selected($scopeSelectedUserId === (int)$scopeUser->id)>{{ $scopeUser->name ?: $scopeUser->username }}（{{ $scopeUser->username }}）</option>@endforeach</select></div>
+                    <noscript><button class="btn btn-default" type="submit">切换账号</button></noscript>
+                </form>
+                @if($scopeSelectedUserId)
+                    <form method="post" action="{{ $dashboardScopeUpdateUrl }}">
+                        @csrf
+                        <input type="hidden" name="user_id" value="{{ $scopeSelectedUserId }}">
+                        <div class="dashboard-scope-departments">@foreach($departments as $department)<label class="dashboard-scope-option"><input type="checkbox" name="department_ids[]" value="{{ $department->id }}" @checked(in_array((int)$department->id,$scopeSelectedDepartmentIds,true))><span>{{ $department->name }}</span></label>@endforeach</div>
+                        <div class="dashboard-scope-footer"><span class="dashboard-scope-help"><i class="fa fa-info-circle"></i> 勾选后，该账号只能查看所选部门；不勾选表示不限制，可查看全部运营部门。</span><button class="btn btn-primary" type="submit"><i class="fa fa-save"></i> 保存查看权限</button></div>
+                    </form>
+                @else
+                    <div class="text-muted">暂无可配置的启用账号。</div>
+                @endif
+            </div>
+        </div>
+    @endif
     <div class="box assistant-report-filter"><div class="box-body">
         <form method="get" action="{{ $reportIndexUrl }}" class="report-toolbar" id="assistant-report-filter">
             <div class="form-group"><label>开始日期</label><input class="form-control" type="date" name="date_from" value="{{ $dateFrom }}"></div>
