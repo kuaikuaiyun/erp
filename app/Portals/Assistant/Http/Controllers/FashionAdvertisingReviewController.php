@@ -33,7 +33,7 @@ class FashionAdvertisingReviewController extends Controller
             'to' => $this->date($request->input('to')),
             'submitter' => trim((string) $request->input('submitter', '')),
         ];
-        $reports = FashionAdvertisingReport::query()->with(['performanceEntries', 'adSpendEntries'])
+        $reports = FashionAdvertisingReport::query()->with(['performanceEntries', 'adSpendEntries', 'submitter.departments'])
             ->when($filters['status'] !== '', fn ($query) => $query->where('status', $filters['status']))
             ->when($filters['from'], fn ($query) => $query->whereDate('report_date', '>=', $filters['from']))
             ->when($filters['to'], fn ($query) => $query->whereDate('report_date', '<=', $filters['to']))

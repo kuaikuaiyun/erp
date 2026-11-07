@@ -5,6 +5,7 @@ namespace App\Portals\Fashion\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\FashionLogisticsOrder;
 use App\Models\AdminUser;
+use App\Models\Department;
 use App\Portal\Http\Controllers\PortalEntryController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -94,11 +95,16 @@ class PerformanceReportController extends Controller
 
         $operators = collect();
         if ($user->isAdministrator()) {
-            $operators = DB::connection($connection)->table($storeTable.' as stores')
+            $storeOperators = DB::connection($connection)->table($storeTable.' as stores')
                 ->join($userTable.' as owners', 'owners.id', '=', 'stores.owner_user_id')
                 ->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy')")
                 ->select(['owners.id', 'owners.name', 'owners.username'])
                 ->distinct()->orderBy('owners.name')->get();
+            $operators = $this->fashionOperators()
+                ->concat($storeOperators)
+                ->unique(fn ($operator) => (int) $operator->id)
+                ->sortBy(fn ($operator) => mb_strtolower((string) ($operator->name ?: $operator->username)))
+                ->values();
         }
 
         $orderCount = (int) ($summary->order_count ?? 0);
@@ -121,5 +127,26 @@ class PerformanceReportController extends Controller
                 'store_count' => (int) ($summary->store_count ?? 0),
             ],
         ]);
+    }
+
+    private function fashionOperators()
+    {
+        $root = Department::business()->where('name', '服装运营部门')->first(['id']);
+        if (! $root) return collect();
+
+        $departments = Department::business()->get(['id', 'parent_id']);
+        $departmentIds = [(int) $root->id];
+        do {
+            $children = $departments->whereIn('parent_id', $departmentIds)
+                ->pluck('id')->map(fn ($id): int => (int) $id)
+                ->diff($departmentIds)->values()->all();
+            $before = count($departmentIds);
+            $departmentIds = array_values(array_unique([...$departmentIds, ...$children]));
+        } while (count($departmentIds) > $before);
+
+        return AdminUser::query()
+            ->where('status', AdminUser::STATUS_ACTIVE)
+            ->whereHas('departments', fn ($query) => $query->whereIn('id', $departmentIds))
+            ->get(['id', 'name', 'username']);
     }
 }
