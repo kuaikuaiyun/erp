@@ -32,7 +32,7 @@ class AccountOpeningReviewController extends Controller
         ]);
 
         $query = DailyAccountOpening::query();
-        $allDepartments = $this->storeOwners->operationDepartments();
+        $allDepartments = $this->storeOwners->boundBusinessDepartments();
         $visibleIds = null;
         if (! $context['user']->isAdministrator()) {
             $visibleIds = $this->storeOwners->visibleOperationDepartmentIds($context['user']);

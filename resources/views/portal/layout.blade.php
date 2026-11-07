@@ -130,6 +130,13 @@
         var badge=$('#operation-abnormal-order-badge');if(!badge.length)return;
         $.get(@json(route('operation.abnormal-orders.pending-count'))).done(function(response){badge.text(response.count||0);});
     }
+    function updateAppLovinGiftBadge(){
+        var badge=$('#operation-applovin-gift-badge');if(!badge.length)return;
+        $.get(@json(route('operation.applovin-spends.pending-count'))).done(function(response){
+            var count=parseInt(response.count,10)||0;
+            badge.text(count).toggle(count>0);
+        });
+    }
     function show(){
         if(index>=messages.length){modal.modal('hide');return;}
         var item=messages[index];
@@ -150,8 +157,8 @@
             .fail(function(){readButton.prop('disabled',false).html('<i class="fa fa-check"></i> 重新标记已读');});
     });
     $.get(@json(route('internal-messages.unread'))).done(function(response){messages=response.messages||[];if(messages.length)show();});
-    updatePendingBadge();updateAbnormalOrderBadge();
-    setInterval(function(){updatePendingBadge();updateAbnormalOrderBadge();},60000);
+    updatePendingBadge();updateAbnormalOrderBadge();updateAppLovinGiftBadge();
+    setInterval(function(){updatePendingBadge();updateAbnormalOrderBadge();updateAppLovinGiftBadge();},60000);
 })(jQuery);
 </script>
 @endif

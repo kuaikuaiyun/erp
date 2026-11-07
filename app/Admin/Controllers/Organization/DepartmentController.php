@@ -44,11 +44,11 @@ class DepartmentController extends Controller
         abort_unless($this->administrator()->isAdministrator(), 403);
 
         return $content
-            ->title('运营部门与助理部门绑定')
-            ->description('设置每个助理部门对应的运营部门')
+            ->title('业务部门与助理部门绑定')
+            ->description('设置每个助理部门可以关联的业务部门')
             ->body(view('admin.organization.departments.bindings', [
                 'assistantDepartments' => $this->assistantAuthorization->assistantChildDepartments(),
-                'operationDepartments' => $this->assistantStoreOwners->operationDepartments(),
+                'businessDepartments' => $this->bindableBusinessDepartments(),
                 'scopeMap' => $this->assistantStoreOwners->scopeMap(),
             ])->render());
     }
@@ -65,7 +65,7 @@ class DepartmentController extends Controller
         ]);
         $assistantIds = $this->assistantAuthorization->assistantChildDepartments()
             ->pluck('id')->map(static fn ($id): int => (int) $id);
-        $operationIds = $this->assistantStoreOwners->operationDepartments()
+        $businessDepartmentIds = $this->bindableBusinessDepartments()
             ->pluck('id')->map(static fn ($id): int => (int) $id);
         $bindings = [];
 
@@ -77,9 +77,9 @@ class DepartmentController extends Controller
                 ->values();
 
             if (! $assistantIds->contains($assistantDepartmentId)
-                || $selectedOperationIds->diff($operationIds)->isNotEmpty()) {
+                || $selectedOperationIds->diff($businessDepartmentIds)->isNotEmpty()) {
                 throw ValidationException::withMessages([
-                    'bindings' => ['提交的助理部门或运营部门不存在，请刷新页面后重试。'],
+                    'bindings' => ['提交的助理部门或业务部门不存在，请刷新页面后重试。'],
                 ]);
             }
 
@@ -87,9 +87,28 @@ class DepartmentController extends Controller
         }
 
         $this->assistantStoreOwners->replaceScopes($bindings, $actor);
-        admin_success('部门绑定', '运营部门与助理部门的绑定关系已保存。');
+        admin_success('部门绑定', '业务部门与助理部门的绑定关系已保存。');
 
         return redirect(admin_url('organization/departments/bindings'));
+    }
+
+    private function bindableBusinessDepartments()
+    {
+        $assistantRoot = Department::business()
+            ->where('slug', AssistantPortalAuthorizationService::EDITOR_DEPARTMENT_CODE)
+            ->first();
+        $excludedIds = $assistantRoot
+            ? $assistantRoot->children()->pluck('id')->push($assistantRoot->id)->all()
+            : [];
+
+        return Department::business()
+            ->whereNotIn('id', $excludedIds)
+            ->with('parent:id,name')
+            ->orderByRaw('CASE WHEN parent_id = 0 OR parent_id IS NULL THEN id ELSE parent_id END')
+            ->orderBy('parent_id')
+            ->orderBy('sort')
+            ->orderBy('name')
+            ->get();
     }
 
     public function create(Request $request, Content $content): Content
@@ -467,4 +486,3 @@ class DepartmentController extends Controller
         return $administrator;
     }
 }
-

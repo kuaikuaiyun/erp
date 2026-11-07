@@ -24,7 +24,12 @@ use App\Portals\Operation\Http\Controllers\OperationReportController;
 use App\Portals\Operation\Http\Controllers\DailySubmissionController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingRechargeReviewController;
 use App\Portals\Assistant\Http\Controllers\AccountOpeningReviewController;
+use App\Portals\Assistant\Http\Controllers\AssistantProjectController;
+use App\Portals\Assistant\Http\Controllers\AssistantWebsiteSystemController;
 use App\Portals\Assistant\Http\Controllers\AppLovinSpendReviewController;
+use App\Portals\Assistant\Http\Controllers\StoreLaunchReviewController;
+use App\Portals\Assistant\Http\Controllers\AdvertisingAccountAuthorizationReviewController;
+use App\Portals\Assistant\Http\Controllers\AccountStoreTransferReviewController;
 use App\Portals\Operation\Http\Controllers\AppLovinSpendController;
 use App\Portals\Assistant\Http\Controllers\OperationReportReviewController;
 use App\Portals\Assistant\Http\Controllers\OperationReportDashboardController;
@@ -112,6 +117,16 @@ Route::post('/advertising-agencies', [AdvertisingAgencyController::class, 'store
 Route::patch('/advertising-agencies/{advertisingAgency}', [AdvertisingAgencyController::class, 'update'])->name('assistant.advertising-agencies.update');
 Route::patch('/advertising-agencies/{advertisingAgency}/toggle', [AdvertisingAgencyController::class, 'toggle'])->name('assistant.advertising-agencies.toggle');
 Route::delete('/advertising-agencies/{advertisingAgency}', [AdvertisingAgencyController::class, 'destroy'])->name('assistant.advertising-agencies.destroy');
+Route::get('/assistant-projects', [AssistantProjectController::class, 'index'])->name('assistant.projects.index');
+Route::post('/assistant-projects', [AssistantProjectController::class, 'store'])->name('assistant.projects.store');
+Route::patch('/assistant-projects/{project}', [AssistantProjectController::class, 'update'])->name('assistant.projects.update');
+Route::patch('/assistant-projects/{project}/toggle', [AssistantProjectController::class, 'toggle'])->name('assistant.projects.toggle');
+Route::delete('/assistant-projects/{project}', [AssistantProjectController::class, 'destroy'])->name('assistant.projects.destroy');
+Route::get('/assistant-website-systems', [AssistantWebsiteSystemController::class, 'index'])->name('assistant.website-systems.index');
+Route::post('/assistant-website-systems', [AssistantWebsiteSystemController::class, 'store'])->name('assistant.website-systems.store');
+Route::patch('/assistant-website-systems/{websiteSystem}', [AssistantWebsiteSystemController::class, 'update'])->name('assistant.website-systems.update');
+Route::patch('/assistant-website-systems/{websiteSystem}/toggle', [AssistantWebsiteSystemController::class, 'toggle'])->name('assistant.website-systems.toggle');
+Route::delete('/assistant-website-systems/{websiteSystem}', [AssistantWebsiteSystemController::class, 'destroy'])->name('assistant.website-systems.destroy');
 Route::post('/domain-stores/email-purchases/sync', [DomainStoreController::class, 'syncEmailPurchases'])->name('assistant.domain-stores.email-purchases.sync');
 Route::get('/domain-stores/email-purchases/status', [DomainStoreController::class, 'emailPurchaseStatus'])->name('assistant.domain-stores.email-purchases.status');
 Route::get('/domain-stores/batch-edit', [DomainStoreController::class, 'batchEdit'])->name('assistant.domain-stores.batch-edit');
@@ -154,6 +169,12 @@ Route::post('/operation/daily-submissions/advertising-recharge', [DailySubmissio
     ->name('operation.daily-submissions.advertising-recharge.store');
 Route::post('/operation/daily-submissions/account-opening', [DailySubmissionController::class, 'storeAccountOpening'])
     ->name('operation.daily-submissions.account-opening.store');
+Route::post('/operation/daily-submissions/store-launch', [DailySubmissionController::class, 'storeStoreLaunch'])
+    ->name('operation.daily-submissions.store-launch.store');
+Route::post('/operation/daily-submissions/advertising-account-authorization', [DailySubmissionController::class, 'storeAdvertisingAccountAuthorization'])
+    ->name('operation.daily-submissions.advertising-account-authorization.store');
+Route::post('/operation/daily-submissions/account-store-transfer', [DailySubmissionController::class, 'storeAccountStoreTransfer'])
+    ->name('operation.daily-submissions.account-store-transfer.store');
 Route::get('/assistant/daily-submissions/advertising-recharges', [AdvertisingRechargeReviewController::class, 'index'])
     ->name('assistant.daily-submissions.advertising-recharges.index');
 Route::patch('/assistant/daily-submissions/advertising-recharges/{submission}/process', [AdvertisingRechargeReviewController::class, 'process'])
@@ -162,8 +183,22 @@ Route::get('/assistant/daily-submissions/account-openings', [AccountOpeningRevie
     ->name('assistant.daily-submissions.account-openings.index');
 Route::patch('/assistant/daily-submissions/account-openings/{submission}/process', [AccountOpeningReviewController::class, 'process'])
     ->whereNumber('submission')->name('assistant.daily-submissions.account-openings.process');
+Route::get('/assistant/daily-submissions/store-launches', [StoreLaunchReviewController::class, 'index'])
+    ->name('assistant.daily-submissions.store-launches.index');
+Route::patch('/assistant/daily-submissions/store-launches/{submission}/process', [StoreLaunchReviewController::class, 'process'])
+    ->whereNumber('submission')->name('assistant.daily-submissions.store-launches.process');
+Route::get('/assistant/daily-submissions/advertising-account-authorizations', [AdvertisingAccountAuthorizationReviewController::class, 'index'])
+    ->name('assistant.daily-submissions.advertising-account-authorizations.index');
+Route::patch('/assistant/daily-submissions/advertising-account-authorizations/{submission}/process', [AdvertisingAccountAuthorizationReviewController::class, 'process'])
+    ->whereNumber('submission')->name('assistant.daily-submissions.advertising-account-authorizations.process');
+Route::get('/assistant/daily-submissions/account-store-transfers', [AccountStoreTransferReviewController::class, 'index'])
+    ->name('assistant.daily-submissions.account-store-transfers.index');
+Route::patch('/assistant/daily-submissions/account-store-transfers/{submission}/process', [AccountStoreTransferReviewController::class, 'process'])
+    ->whereNumber('submission')->name('assistant.daily-submissions.account-store-transfers.process');
 Route::get('/operation/daily-submissions/applovin-spends', [AppLovinSpendController::class, 'index'])
     ->name('operation.applovin-spends.index');
+Route::get('/operation/daily-submissions/applovin-spends/pending-count', [AppLovinSpendController::class, 'pendingCount'])
+    ->name('operation.applovin-spends.pending-count');
 Route::post('/operation/daily-submissions/applovin-spends/screenshot', [AppLovinSpendController::class, 'uploadScreenshot'])
     ->name('operation.applovin-spends.screenshot.upload');
 Route::get('/operation/daily-submissions/applovin-spends/screenshots/{screenshot}', [AppLovinSpendController::class, 'screenshot'])
@@ -187,6 +222,11 @@ Route::get('/operation/reports/{report}', [OperationReportController::class, 'sh
 Route::post('/operation/reports/{report}/approve', [OperationReportController::class, 'approve'])->name('operation.reports.approve');
 Route::get('/assistant/operation-reports', [OperationReportDashboardController::class, 'index'])->name('assistant.operation-reports.index');
 Route::get('/assistant/operation-reports/order-details', [OperationReportDashboardController::class, 'orderDetails'])->name('assistant.operation-reports.order-details');
+Route::get('/operation-dashboard/operation-reports', [OperationReportDashboardController::class, 'index'])->name('operation-dashboard.operation-reports.index');
+Route::get('/operation-dashboard/operation-reports/order-details', [OperationReportDashboardController::class, 'orderDetails'])->name('operation-dashboard.operation-reports.order-details');
+Route::get('/operation-dashboard/applovin-spends', [AppLovinSpendReviewController::class, 'index'])->name('operation-dashboard.applovin-spends.index');
+Route::get('/operation-dashboard/applovin-spends/screenshots/{screenshot}', [AppLovinSpendReviewController::class, 'screenshot'])
+    ->whereNumber('screenshot')->name('operation-dashboard.applovin-spends.screenshot');
 Route::get('/assistant/advertising-spend-summary', [AdvertisingSpendSummaryController::class, 'index'])->name('assistant.advertising-spend-summary.index');
 Route::get('/assistant/advertising-spend-analysis', [AdvertisingSpendAnalysisController::class, 'index'])->name('assistant.advertising-spend-analysis.index');
 Route::get('/assistant/fashion-advertising-reviews', [FashionAdvertisingReviewController::class, 'index'])->name('assistant.fashion-advertising-reviews.index');

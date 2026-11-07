@@ -20,6 +20,8 @@ use Symfony\Component\HttpFoundation\Response;
 
 class OperationReportDashboardController extends Controller
 {
+    private const DASHBOARD_PORTAL_CODE = 'yunying-kanban';
+
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
@@ -36,7 +38,8 @@ class OperationReportDashboardController extends Controller
         $validated = $request->validate([
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
-            'operation_department_id' => ['nullable', 'integer'],
+            'operation_department_ids' => ['nullable', 'array'],
+            'operation_department_ids.*' => ['integer', 'distinct'],
             'operator_user_id' => ['nullable', 'integer'],
         ]);
         $reportNow = Carbon::now(OperationReportMetricsService::REPORT_TIMEZONE);
@@ -44,23 +47,20 @@ class OperationReportDashboardController extends Controller
         $dateTo = (string) ($validated['date_to'] ?? $reportNow->copy()->endOfMonth()->format('Y-m-d'));
         abort_if($dateFrom > $dateTo, 422, '开始日期不能晚于结束日期。');
 
-        $visibleDepartmentIds = $this->assistantStoreOwners->visibleOperationDepartmentIds($context['user']);
+        $visibleDepartmentIds = $this->visibleDepartmentIds($context);
         $departments = Department::business()->whereIn('id', $visibleDepartmentIds)
             ->orderBy('sort')->orderBy('name')->get();
-        $selectedDepartmentId = isset($validated['operation_department_id'])
-            ? (int) $validated['operation_department_id']
-            : null;
-        if ($selectedDepartmentId !== null) {
-            abort_unless(in_array($selectedDepartmentId, $visibleDepartmentIds, true), 403);
-        }
+        $selectedDepartmentIds = collect($validated['operation_department_ids'] ?? [])
+            ->map(fn ($id) => (int) $id)->unique()->values();
+        abort_unless($selectedDepartmentIds->diff($visibleDepartmentIds)->isEmpty(), 403);
 
         $allReports = OperationReport::query()
             ->whereIn('operation_department_id', $visibleDepartmentIds)
-            ->when($selectedDepartmentId !== null, fn ($query) => $query->where('operation_department_id', $selectedDepartmentId))
+            ->when($selectedDepartmentIds->isNotEmpty(), fn ($query) => $query->whereIn('operation_department_id', $selectedDepartmentIds->all()))
             ->whereBetween('report_date', [$dateFrom, $dateTo])
             ->orderBy('id')
             ->get();
-        $operatorDepartmentIds = $selectedDepartmentId !== null ? [$selectedDepartmentId] : $visibleDepartmentIds;
+        $operatorDepartmentIds = $selectedDepartmentIds->isNotEmpty() ? $selectedDepartmentIds->all() : $visibleDepartmentIds;
         $operators = AdminUser::query()
             ->where('status', AdminUser::STATUS_ACTIVE)
             ->whereHas('departments', fn ($query) => $query->whereIn('admin_roles.id', $operatorDepartmentIds))
@@ -285,7 +285,7 @@ class OperationReportDashboardController extends Controller
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
             'departments' => $departments,
-            'selectedDepartmentId' => $selectedDepartmentId,
+            'selectedDepartmentIds' => $selectedDepartmentIds->all(),
             'operatorOptions' => $operatorOptions,
             'selectedOperatorId' => $selectedOperatorId,
             'rows' => $rows,
@@ -293,6 +293,12 @@ class OperationReportDashboardController extends Controller
             'identityRowspans' => $this->identityRowspans($rows),
             'reportRowspans' => $this->reportRowspans($rows),
             'reportBands' => $this->reportBands($rows),
+            'reportIndexUrl' => $this->isDashboard($context)
+                ? route('operation-dashboard.operation-reports.index')
+                : route('assistant.operation-reports.index'),
+            'orderDetailsUrl' => $this->isDashboard($context)
+                ? route('operation-dashboard.operation-reports.order-details')
+                : route('assistant.operation-reports.order-details'),
         ]);
     }
 
@@ -308,7 +314,7 @@ class OperationReportDashboardController extends Controller
             'page' => ['nullable', 'integer', 'min:1'],
             'per_page' => ['nullable', 'integer', Rule::in([10, 20, 50])],
         ]);
-        $visibleDepartmentIds = $this->assistantStoreOwners->visibleOperationDepartmentIds($context['user']);
+        $visibleDepartmentIds = $this->visibleDepartmentIds($context);
         $canViewOperator = AdminUser::query()
             ->whereKey((int) $validated['operator_user_id'])
             ->whereHas('departments', fn ($query) => $query->whereIn('admin_roles.id', $visibleDepartmentIds))
@@ -329,9 +335,23 @@ class OperationReportDashboardController extends Controller
     {
         $context = $this->portalEntries->portalContext($request);
         if ($context instanceof Response) return $context;
+        if ($this->isDashboard($context)) return $context;
         $this->authorization->assertAssistantPortal($context['portal']);
         abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
         return $context;
+    }
+
+    private function isDashboard(array $context): bool
+    {
+        return (string) $context['portal']->code === self::DASHBOARD_PORTAL_CODE;
+    }
+
+    /** @return list<int> */
+    private function visibleDepartmentIds(array $context): array
+    {
+        return $this->isDashboard($context)
+            ? $this->assistantStoreOwners->operationDepartments()->pluck('id')->map(fn ($id) => (int) $id)->all()
+            : $this->assistantStoreOwners->visibleOperationDepartmentIds($context['user']);
     }
 
     private function totals(array $rows, float $actualAdSpend): array

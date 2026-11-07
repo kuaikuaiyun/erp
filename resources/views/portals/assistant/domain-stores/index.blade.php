@@ -157,6 +157,22 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-ownership-20261020-1.css?v=20261102-1">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-domain-stores-form-20261021-1.css?v=20261021-3">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/assistant-team-picker-20261023-1.css?v=20261023-1">
+    <style>
+        .assistant-domain-stores-table tbody tr.assistant-shop-status-stopped > td {
+            background-color: #f8d7da !important;
+            border-color: #efb8bd !important;
+        }
+        .assistant-domain-stores-table tbody tr.assistant-shop-status-abandoned > td {
+            background-color: #fff3cd !important;
+            border-color: #eadca8 !important;
+        }
+        .assistant-domain-stores-table.table-hover tbody tr.assistant-shop-status-stopped:hover > td {
+            background-color: #f3c6ca !important;
+        }
+        .assistant-domain-stores-table.table-hover tbody tr.assistant-shop-status-abandoned:hover > td {
+            background-color: #f9e7ad !important;
+        }
+    </style>
 @endpush
 
 @section('content')
@@ -409,7 +425,7 @@
                     </thead>
                     <tbody>
                     @forelse ($stores as $store)
-                        <tr class="assistant-store-row">
+                        <tr class="assistant-store-row @if($store->shop_status === \App\Models\AssistantDomainStore::SHOP_STATUS_STOPPED) assistant-shop-status-stopped @elseif($store->shop_status === \App\Models\AssistantDomainStore::SHOP_STATUS_ABANDONED) assistant-shop-status-abandoned @endif">
                             <td class="assistant-selection-column assistant-record-selection-cell" rowspan="2">
                                 @if ($canManage || $canManageStoreOwnership)
                                     <button type="button" class="btn btn-default btn-xs assistant-row-selector" data-store-id="{{ $store->getKey() }}" aria-pressed="false" aria-label="{{ $t('selection.select_record', ['name' => $store->shop_name]) }}">{{ $t('common.select') }}</button>
@@ -469,7 +485,7 @@
                                 @endif
                             </td>
                         </tr>
-                        <tr class="assistant-store-note-row">
+                        <tr class="assistant-store-note-row @if($store->shop_status === \App\Models\AssistantDomainStore::SHOP_STATUS_STOPPED) assistant-shop-status-stopped @elseif($store->shop_status === \App\Models\AssistantDomainStore::SHOP_STATUS_ABANDONED) assistant-shop-status-abandoned @endif">
                             <td colspan="25"><span class="assistant-note-label">{{ $t('fields.remark') }}</span><span class="assistant-note-value">{{ $store->remark ?: $t('common.empty') }}</span></td>
                         </tr>
                     @empty

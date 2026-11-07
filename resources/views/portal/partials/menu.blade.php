@@ -70,6 +70,8 @@
             <span id="operation-internal-message-badge" class="badge bg-yellow" style="margin-left:6px;">0</span>
             @elseif($menu->code === 'operation_abnormal_orders')
             <span id="operation-abnormal-order-badge" class="badge bg-yellow" style="margin-left:6px;">0</span>
+            @elseif($menu->code === 'operation_daily_applovin_spends')
+            <span id="operation-applovin-gift-badge" class="badge bg-yellow" style="margin-left:6px;display:none;" title="待上传礼金图数量">0</span>
             @endif
         </a>
     </li>

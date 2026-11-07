@@ -196,6 +196,9 @@ class FinanceSettlementService
                 $row['subscription'] = '加购';
             }
             $row['usd_rate'] = $record->currency === 'USD' ? '1' : $row['usd_rate'];
+            if (isset($saved['_edited_fields']['usd_rate'])) {
+                $row['usd_rate'] = $saved['_edited_fields']['usd_rate'];
+            }
             if ($channel === 'paypal') {
                 foreach (array_slice($headers, 0, 15) as $index => $header) {
                     $row['paypal_'.$index] = $index === 12 && filled($saved['paypal_12'] ?? null)
@@ -238,6 +241,8 @@ class FinanceSettlementService
             $group = $domains->get(strtolower((string) $row['domain']));
             $row['owner'] = filled($saved['owner'] ?? null) ? $saved['owner'] : ($group?->owner ?? ($p['使用人'] ?? ''));
             $row['team'] = filled($saved['team'] ?? null) ? $saved['team'] : ($group?->team ?? ($p['团队'] ?? ''));
+            $row = [...$row, ...($saved['_edited_fields'] ?? [])];
+            $row['locked'] = $row['locked'] || in_array($row['month'], $locks, true);
 
             return $row;
         })->filter(fn ($row) => (! filled($filters['team'] ?? null) || $row['team'] === $filters['team'])
@@ -582,6 +587,9 @@ class FinanceSettlementService
             app(FinanceAccountingService::class)->guardUnlocked($record->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'));
             $existing = $db->table('finance_settlement_supplements')->where('finance_record_id', $record->id)->first();
             $data = $existing ? json_decode($existing->payload, true, 512, JSON_THROW_ON_ERROR) : [];
+            if (filled($data['_edited_fields']['month'] ?? null)) {
+                app(FinanceAccountingService::class)->guardUnlocked($data['_edited_fields']['month']);
+            }
             foreach ($values as $key => $value) {
                 if ($value === null && isset(self::MONEY[$key])) {
                     unset($data[$key]);
