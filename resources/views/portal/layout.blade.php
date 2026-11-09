@@ -191,12 +191,13 @@
 
 {{-- 全局图片放大 overlay：所有 portal 页面的 .erp-zoomable 图片点击放大都用这一个。零依赖、零影响（默认 display:none）。 --}}
 <div id="erp-image-zoom" role="dialog" aria-modal="true" aria-label="图片放大预览"
-     style="position:fixed;inset:0;z-index:9999;display:none;background:rgba(0,0,0,0.88);cursor:zoom-out;"
+     style="position:fixed;inset:0;z-index:9999;display:none;background:rgba(0,0,0,0.88);cursor:default;overflow:hidden;"
      tabindex="-1">
+    <div id="erp-image-zoom-hint" style="position:absolute;top:18px;left:50%;z-index:2;transform:translateX(-50%);padding:6px 13px;border-radius:16px;background:rgba(0,0,0,.58);color:#fff;font-size:12px;pointer-events:none;">点击图片继续放大</div>
     <button type="button" id="erp-image-zoom-close" aria-label="关闭"
             style="position:absolute;top:16px;right:20px;background:none;border:none;color:#fff;font-size:28px;line-height:1;cursor:pointer;padding:4px 10px;opacity:0.7;">×</button>
     <img id="erp-image-zoom-img" alt=""
-         style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);max-width:92vw;max-height:90vh;object-fit:contain;border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,0.6);pointer-events:none;">
+         style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) scale(1);max-width:92vw;max-height:90vh;object-fit:contain;border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,0.6);cursor:zoom-in;transition:transform .2s ease;transform-origin:center center;">
 </div>
 <script>
 (function(){
@@ -204,10 +205,28 @@
     if (!overlay) return;
     var img = document.getElementById('erp-image-zoom-img');
     var closeBtn = document.getElementById('erp-image-zoom-close');
+    var hint = document.getElementById('erp-image-zoom-hint');
+    var zoomed = false;
+
+    function setZoom(value, ev) {
+        zoomed = value;
+        if (zoomed && ev) {
+            var rect = img.getBoundingClientRect();
+            var x = Math.max(0, Math.min(100, (ev.clientX - rect.left) / rect.width * 100));
+            var y = Math.max(0, Math.min(100, (ev.clientY - rect.top) / rect.height * 100));
+            img.style.transformOrigin = x + '% ' + y + '%';
+        } else {
+            img.style.transformOrigin = 'center center';
+        }
+        img.style.transform = 'translate(-50%,-50%) scale(' + (zoomed ? 2 : 1) + ')';
+        img.style.cursor = zoomed ? 'zoom-out' : 'zoom-in';
+        if (hint) hint.textContent = zoomed ? '再次点击图片还原' : '点击图片继续放大';
+    }
 
     function open(src) {
         if (!src) return;
         img.src = src;
+        setZoom(false);
         overlay.style.display = 'block';
         document.body.style.overflow = 'hidden';
         overlay.focus();
@@ -216,6 +235,7 @@
         overlay.style.display = 'none';
         document.body.style.overflow = '';
         img.src = '';
+        setZoom(false);
     }
 
     // 暴露到 window，供内联 onclick="window.erpZoomOpen(this.src)" 直接调用
@@ -229,6 +249,7 @@
         // 放大后点 overlay 本体或 × 关闭
         if (overlay.style.display === 'block') {
             if (target === overlay || target === closeBtn) { close(); ev.stopPropagation(); return; }
+            if (target === img) { setZoom(!zoomed, ev); ev.preventDefault(); ev.stopPropagation(); return; }
         }
         // 拦截 .erp-zoomable 图片点击
         if (target.tagName === 'IMG' && target.classList.contains('erp-zoomable')) {
