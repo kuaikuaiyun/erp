@@ -637,27 +637,33 @@ class FinancePortalTest extends TestCase
             3 => [...$this->recordRow(), '交易 ID' => 'ORDINARY-PAYMENT', '自定义编号' => 'xm-670'],
             4 => [...$this->recordRow(), '交易 ID' => 'AUTO-BRUSH', '自定义编号' => 'xm-67'],
             5 => [...$this->recordRow(), '交易 ID' => 'AMBIGUOUS-PAYMENT', '自定义编号' => 'duplicate'],
+            6 => [...$this->recordRow(), '交易 ID' => 'MANUAL-BRUSH'],
         ], 'Domain classification', 'UTC', 1);
         $record = FinanceRecord::where('reference', 'BRUSH-PAYMENT')->sole();
         $this->post('/finance/reports/paypal-settlement/save', [
             'id' => $record->id, 'domain' => 'brush.example.com', 'upsell' => '已加购',
             'subscription' => '订阅', 'owner' => '原使用人', 'team' => '原团队',
         ])->assertRedirect();
+        $this->post('/finance/reports/paypal-settlement/save', [
+            'id' => FinanceRecord::where('reference', 'MANUAL-BRUSH')->sole()->id, 'owner' => '尚云pp刷单',
+        ])->assertRedirect();
 
         $url = '/finance/reports/paypal-settlement';
         $rows = $this->get($url)->assertOk()->viewData('rows')->getCollection()->keyBy('reference');
         $this->assertSame('未匹配', $rows['ORDINARY-PAYMENT']['subscription']);
         $this->assertSame('未匹配', $rows['AMBIGUOUS-PAYMENT']['subscription']);
-        $labels = ['brush.example.com', '刷单', '尚云pp刷单', ''];
+        $this->assertSame('', $rows['ORDINARY-PAYMENT']['operation_region']);
+        $this->assertSame('刷单', $rows['MANUAL-BRUSH']['team']);
+        $this->assertSame('刷单', $rows['MANUAL-BRUSH']['operation_region']);
+        $labels = ['brush.example.com', '刷单', '尚云pp刷单', '刷单', '刷单'];
         foreach (['BRUSH-PAYMENT', 'AUTO-BRUSH'] as $reference) {
             $brush = $rows[$reference];
-            $this->assertSame($labels, [$brush['domain'], $brush['subscription'], $brush['owner'], $brush['team']]);
+            $this->assertSame($labels, [$brush['domain'], $brush['subscription'], $brush['owner'], $brush['team'], $brush['operation_region']]);
         }
 
         $sheet = $this->readDownload($this->get($url.'?'.http_build_query([
-            'subscription' => '刷单', 'download' => 1, 'export_columns' => ['reference', 'domain', 'subscription', 'owner', 'team'],
+            'subscription' => '刷单', 'download' => 1, 'export_columns' => ['reference', 'domain', 'subscription', 'owner', 'team', 'operation_region'],
         ]))->assertOk()->streamedContent())->toArray();
-        $labels[3] = null;
         $this->assertEqualsCanonicalizing([['BRUSH-PAYMENT', ...$labels], ['AUTO-BRUSH', ...$labels]], array_slice($sheet, 1));
     }
 
