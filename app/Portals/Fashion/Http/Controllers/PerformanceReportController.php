@@ -53,15 +53,16 @@ class PerformanceReportController extends Controller
         $storeTable = 'assistant_domain_stores';
         $userTable = config('admin.database.users_table');
         $orderTable = (new FashionLogisticsOrder())->getTable();
-        // All fashion orders are stored as China time for display. The selected
-        // statistics timezone is applied only when defining and grouping its day.
-        $orderTimestampSql = 'orders.paid_at_utc';
+        // paid_at preserves the original payment wall-clock time returned by the
+        // store. The selected timezone tells us how to interpret that time before
+        // applying the report's date range and daily grouping.
+        $orderTimestampSql = "CONVERT_TZ(orders.paid_at, '{$timezone}', '+00:00')";
 
         $base = DB::connection($connection)->table($orderTable.' as orders')
             ->join($storeTable.' as stores', 'stores.id', '=', 'orders.assistant_domain_store_id')
             ->leftJoin($userTable.' as owners', 'owners.id', '=', 'stores.owner_user_id')
-            ->whereNotNull($orderTimestampSql)
-            ->whereBetween($orderTimestampSql, [$utcFrom, $utcTo])
+            ->whereNotNull('orders.paid_at')
+            ->whereBetween(DB::raw($orderTimestampSql), [$utcFrom, $utcTo])
             ->where(function ($platform): void {
                 $platform->where(function ($xshoppy): void {
                     $xshoppy->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy')")
@@ -229,15 +230,19 @@ class PerformanceReportController extends Controller
         abort_unless($store, 403, '无权查看该店铺订单。');
         $sourcePlatform = mb_strtolower(trim((string) $store->site_builder)) === 'shopline' ? 'shopline' : 'xshoppy';
 
+        // paid_at is the original payment wall-clock time. Interpret it with the
+        // selected store timezone so the detail dialog uses the same range as the
+        // daily report.
+        $orderTimestampSql = "CONVERT_TZ(paid_at, '{$timezone}', '+00:00')";
         $ordersQuery = FashionLogisticsOrder::query()
             ->where('assistant_domain_store_id', (int) $validated['store_id'])
             ->where('source_platform', $sourcePlatform)
-            ->whereNotNull('paid_at_utc')
-            ->whereBetween('paid_at_utc', [$utcFrom, $utcTo]);
+            ->whereNotNull('paid_at')
+            ->whereBetween(DB::raw($orderTimestampSql), [$utcFrom, $utcTo]);
         $amount = (float) (clone $ordersQuery)->sum('total_amount');
         $orders = $ordersQuery
             ->with(['items:id,fashion_logistics_order_id,product_name,sku,quantity,total'])
-            ->orderByDesc('paid_at_utc')->orderByDesc('id')->paginate(20);
+            ->orderByRaw($orderTimestampSql.' desc')->orderByDesc('id')->paginate(20);
 
         return response()->json([
             'date' => $validated['date'],
@@ -262,7 +267,7 @@ class PerformanceReportController extends Controller
                 'customer_email' => (string) ($order->customer_email ?: '—'),
                 'payment_method' => (string) ($order->payment_method_title ?: $order->payment_method ?: '—'),
                 'order_created_at' => $this->formatChinaOrderTime($order, $timezone),
-                'paid_at' => $order->paid_at?->format('Y-m-d H:i:s'),
+                'paid_at' => $order->getRawOriginal('paid_at'),
                 'items' => $order->items->map(fn ($item): array => [
                     'product_name' => (string) ($item->product_name ?: '—'),
                     'sku' => (string) ($item->sku ?: '—'),
