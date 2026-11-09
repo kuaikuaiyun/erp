@@ -81,12 +81,13 @@ class PerformanceReportController extends Controller
                 'stores.id as store_id',
                 'stores.shop_name',
                 'stores.domain',
+                'stores.site_builder',
                 'stores.owner_user_id',
                 'owners.name as owner_name',
                 'owners.username as owner_username',
             ])
             ->selectRaw('COUNT(*) as order_count, COALESCE(SUM(orders.total_amount), 0) as revenue')
-            ->groupByRaw('DATE(orders.order_created_at), stores.id, stores.shop_name, stores.domain, stores.owner_user_id, owners.name, owners.username')
+            ->groupByRaw('DATE(orders.order_created_at), stores.id, stores.shop_name, stores.domain, stores.site_builder, stores.owner_user_id, owners.name, owners.username')
             ->orderByDesc('report_date')
             ->orderBy('owner_name')
             ->orderBy('stores.shop_name')
