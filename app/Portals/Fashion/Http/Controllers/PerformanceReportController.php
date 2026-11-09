@@ -7,10 +7,12 @@ use App\Models\FashionLogisticsOrder;
 use App\Models\AdminUser;
 use App\Models\Department;
 use App\Portal\Http\Controllers\PortalEntryController;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
+use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\Response;
 
 class PerformanceReportController extends Controller
@@ -27,17 +29,22 @@ class PerformanceReportController extends Controller
         if ($context instanceof Response) return $context;
         abort_unless($context['portal']->code === self::PORTAL_CODE, 404);
 
+        $timezoneOptions = $this->timezoneOptions();
         $validated = $request->validate([
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
+            'timezone' => ['nullable', Rule::in(array_keys($timezoneOptions))],
             'operator_id' => ['nullable', 'integer'],
             'per_page' => ['nullable', 'integer', 'in:20,50,100'],
         ]);
 
-        $month = now();
+        $timezone = (string) ($validated['timezone'] ?? '+00:00');
+        $month = now($timezone);
         $dateFrom = $validated['date_from'] ?? $month->copy()->startOfMonth()->toDateString();
         $dateTo = $validated['date_to'] ?? $month->copy()->endOfMonth()->toDateString();
         if ($dateFrom > $dateTo) [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
+        $utcFrom = CarbonImmutable::parse($dateFrom.' 00:00:00', $timezone)->utc()->format('Y-m-d H:i:s');
+        $utcTo = CarbonImmutable::parse($dateTo.' 23:59:59', $timezone)->utc()->format('Y-m-d H:i:s');
 
         $user = $context['user'];
         $connection = config('admin.database.connection') ?: config('database.default');
@@ -48,7 +55,7 @@ class PerformanceReportController extends Controller
         $base = DB::connection($connection)->table($orderTable.' as orders')
             ->join($storeTable.' as stores', 'stores.id', '=', 'orders.assistant_domain_store_id')
             ->leftJoin($userTable.' as owners', 'owners.id', '=', 'stores.owner_user_id')
-            ->whereBetween('orders.order_created_at', [$dateFrom.' 00:00:00', $dateTo.' 23:59:59'])
+            ->whereBetween('orders.order_created_at', [$utcFrom, $utcTo])
             ->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy')")
             ->where(function ($paid): void {
                 $paid->whereNotNull('orders.paid_at')
@@ -76,8 +83,12 @@ class PerformanceReportController extends Controller
             'COUNT(*) as order_count, COALESCE(SUM(orders.total_amount), 0) as revenue, COUNT(DISTINCT stores.id) as store_count'
         )->first();
 
+        // The offset is restricted by timezoneOptions(), so it is safe to embed. Using two
+        // parameter placeholders makes MySQL ONLY_FULL_GROUP_BY treat SELECT/GROUP BY as
+        // different expressions even when both bound values are identical.
+        $reportDateSql = "DATE(CONVERT_TZ(orders.order_created_at, '+00:00', '{$timezone}'))";
         $rows = (clone $base)
-            ->selectRaw('DATE(orders.order_created_at) as report_date')
+            ->selectRaw($reportDateSql.' as report_date')
             ->addSelect([
                 'stores.id as store_id',
                 'stores.shop_name',
@@ -88,7 +99,7 @@ class PerformanceReportController extends Controller
                 'owners.username as owner_username',
             ])
             ->selectRaw('COUNT(*) as order_count, COALESCE(SUM(orders.total_amount), 0) as revenue')
-            ->groupByRaw('DATE(orders.order_created_at), stores.id, stores.shop_name, stores.domain, stores.site_builder, stores.owner_user_id, owners.name, owners.username')
+            ->groupByRaw($reportDateSql.', stores.id, stores.shop_name, stores.domain, stores.site_builder, stores.owner_user_id, owners.name, owners.username')
             ->orderByDesc('report_date')
             ->orderBy('owner_name')
             ->orderBy('stores.shop_name')
@@ -116,9 +127,11 @@ class PerformanceReportController extends Controller
             ...$context,
             'rows' => $rows,
             'operators' => $operators,
+            'timezoneOptions' => $timezoneOptions,
             'filters' => [
                 'date_from' => $dateFrom,
                 'date_to' => $dateTo,
+                'timezone' => $timezone,
                 'operator_id' => $validated['operator_id'] ?? '',
                 'per_page' => (int) ($validated['per_page'] ?? 20),
             ],
@@ -140,7 +153,11 @@ class PerformanceReportController extends Controller
             'date' => ['required', 'date_format:Y-m-d'],
             'store_id' => ['required', 'integer'],
             'page' => ['nullable', 'integer', 'min:1'],
+            'timezone' => ['nullable', Rule::in(array_keys($this->timezoneOptions()))],
         ]);
+        $timezone = (string) ($validated['timezone'] ?? '+00:00');
+        $utcFrom = CarbonImmutable::parse($validated['date'].' 00:00:00', $timezone)->utc()->format('Y-m-d H:i:s');
+        $utcTo = CarbonImmutable::parse($validated['date'].' 23:59:59', $timezone)->utc()->format('Y-m-d H:i:s');
         $user = $context['user'];
         $store = DB::connection(config('admin.database.connection') ?: config('database.default'))
             ->table('assistant_domain_stores')
@@ -158,7 +175,7 @@ class PerformanceReportController extends Controller
         $ordersQuery = FashionLogisticsOrder::query()
             ->where('assistant_domain_store_id', (int) $validated['store_id'])
             ->where('source_platform', 'xshoppy')
-            ->whereBetween('order_created_at', [$validated['date'].' 00:00:00', $validated['date'].' 23:59:59'])
+            ->whereBetween('order_created_at', [$utcFrom, $utcTo])
             ->where(fn ($query) => $query->whereNotNull('paid_at')->orWhereIn('status', ['processing', 'completed']));
         $amount = (float) (clone $ordersQuery)->sum('total_amount');
         $orders = $ordersQuery
@@ -187,8 +204,8 @@ class PerformanceReportController extends Controller
                 'customer_name' => (string) ($order->customer_name ?: '—'),
                 'customer_email' => (string) ($order->customer_email ?: '—'),
                 'payment_method' => (string) ($order->payment_method_title ?: $order->payment_method ?: '—'),
-                'order_created_at' => $order->order_created_at?->format('Y-m-d H:i:s'),
-                'paid_at' => $order->paid_at?->format('Y-m-d H:i:s'),
+                'order_created_at' => $order->order_created_at?->timezone($timezone)->format('Y-m-d H:i:s'),
+                'paid_at' => $order->paid_at?->timezone($timezone)->format('Y-m-d H:i:s'),
                 'items' => $order->items->map(fn ($item): array => [
                     'product_name' => (string) ($item->product_name ?: '—'),
                     'sku' => (string) ($item->sku ?: '—'),
@@ -218,5 +235,19 @@ class PerformanceReportController extends Controller
             ->where('status', AdminUser::STATUS_ACTIVE)
             ->whereHas('departments', fn ($query) => $query->whereIn('id', $departmentIds))
             ->get(['id', 'name', 'username']);
+    }
+
+    /** @return array<string,string> */
+    private function timezoneOptions(): array
+    {
+        $options = [];
+        for ($offset = -12; $offset <= 14; $offset++) {
+            $value = sprintf('%s%02d:00', $offset < 0 ? '-' : '+', abs($offset));
+            $label = 'UTC'.($offset >= 0 ? '+' : '').$offset;
+            if ($value === '+00:00') $label .= '（默认）';
+            if ($value === '+08:00') $label .= '（北京时间）';
+            $options[$value] = $label;
+        }
+        return $options;
     }
 }
