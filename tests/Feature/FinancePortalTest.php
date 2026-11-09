@@ -1209,7 +1209,8 @@ class FinancePortalTest extends TestCase
         ], 'A', 'UTC', 1);
         $url = '/finance/reports/paypal-settlement';
         $selectedId = FinanceRecord::where('reference', '0000123')->sole()->id;
-        $page = $this->get($url)->assertOk()->assertSee('列与导出设置')->assertSee('下载空白模板')->assertSee('比较方式')
+        $page = $this->get($url)->assertOk()->assertSee('列与导出设置')->assertSee('下载空白模板')->assertDontSee('比较方式')
+            ->assertSee('type="hidden" data-condition-operator value="equals"', false)
             ->assertDontSee('name="product_name_mode"', false);
         $parameters = ['download' => 1, 'export_columns' => ['order_status', 'reference', 'paypal_18']];
         $selection = [\App\Portals\Finance\FinanceExportSelection::key(['id' => $selectedId])];
@@ -2525,6 +2526,36 @@ class FinancePortalTest extends TestCase
         $this->post('/finance/balances/xuzong2')->assertForbidden();
     }
 
+    public function test_workbench_loads_sync_history_in_pages_only_for_managers_with_menu_access(): void
+    {
+        $this->get('/finance/sync-logs')->assertOk()->assertSee('暂无同步记录');
+        $account = $this->financePayPalAccount('同步历史账户');
+        foreach (range(1, 23) as $count) {
+            DB::table('finance_sync_logs')->insert([
+                'payment_account_id' => $account->id, 'operation' => 'transaction_search',
+                'status' => 'success', 'page_count' => 1, 'record_count' => $count,
+                'created_at' => '2026-11-09 01:00:00',
+            ]);
+        }
+
+        $this->get('/finance')->assertOk()->assertSee('data-open-sync-logs', false)
+            ->assertDontSee('2026-11-09 09:00:00');
+        $this->get('/finance/sync-logs')->assertOk()
+            ->assertSee('2026-11-09 09:00:00')->assertSee('共 23 条')
+            ->assertSeeInOrder(['1 / 23', '1 / 14'])->assertDontSee('1 / 13')
+            ->assertSee('page=2');
+        $this->get('/finance/sync-logs?page=3')->assertOk()
+            ->assertSeeInOrder(['1 / 3', '1 / 2', '1 / 1'])->assertDontSee('1 / 4')
+            ->assertSee('page=2')->assertDontSee('page=4');
+
+        $this->user->manage = false;
+        $this->get('/finance')->assertOk()->assertDontSee('data-open-sync-logs', false);
+        $this->get('/finance/sync-logs')->assertForbidden();
+        $this->user->manage = true;
+        DB::table('portal_menus')->where('code', 'finance_home')->update(['is_enabled' => false]);
+        $this->get('/finance/sync-logs')->assertForbidden();
+    }
+
     public function test_balance_menu_migration_hides_existing_entry_and_preserves_balances(): void
     {
         $portalId = Portal::query()->where('code', 'caiwu')->value('id');
@@ -2973,7 +3004,7 @@ class FinancePortalTest extends TestCase
         ])->assertOk()->assertJsonPath('fields', [$balanceIndex, $referenceIndex]);
         $settlement = $this->readDownload($this->get('/finance/reports/paypal-settlement?download=1')->assertOk()->streamedContent())->toArray();
         foreach (['通途订单' => 'ERP-LINKED', '域名' => 'linked.example.test', '使用人' => 'Linked owner',
-            '团队' => 'Linked team', '订阅类型' => '待核对', '是否加购' => '待核对'] as $header => $expected) {
+            '团队' => 'Linked team', '订阅类型' => '未匹配', '是否加购' => '已加购'] as $header => $expected) {
             $this->assertSame($expected, $settlement[1][array_search($header, $settlement[0], true)], $header);
         }
         $this->getJson('/finance/records/paypal-orders/export?export_scope=filtered&export_layout=page&report_columns[]=999')->assertUnprocessable();
@@ -2995,7 +3026,7 @@ class FinancePortalTest extends TestCase
         });
         DB::table('logistics_orders')->insert([
             'id' => 1, 'bill_number' => 'PRIMARY-PAYMENT',
-            'subscription_type' => '订阅首次购买', 'is_add_on' => '已加购',
+            'subscription_type' => '订阅复购1次', 'is_add_on' => '已加购',
         ]);
         DB::table('logistics_order_payment_references')->insert([
             ['logistics_order_id' => 1, 'reference_number' => 'PRIMARY-PAYMENT', 'reference_type' => 'primary'],
@@ -3020,10 +3051,10 @@ class FinancePortalTest extends TestCase
         $this->assertSame(['交易 ID', '订阅类型', '是否加购'], array_shift($sheet));
         $exported = collect($sheet)->keyBy(0);
         foreach ([
-            'PRIMARY-PAYMENT' => ['订阅', '未加购'],
+            'PRIMARY-PAYMENT' => ['订阅复购1次', '已加购'],
             'UPSELL-PAYMENT' => ['加购', '已加购'],
             'UNKNOWN-PAYMENT' => ['未匹配', '未匹配'],
-            'INVOICE-ONLY' => ['未匹配', '未匹配'],
+            'INVOICE-ONLY' => ['未匹配', '已加购'],
             'REVIEWED-PAYMENT' => ['加购', '已加购'],
         ] as $reference => $labels) {
             $this->assertSame($labels, [$page[$reference]['subscription'], $page[$reference]['upsell']]);
@@ -4075,6 +4106,33 @@ class FinancePortalTest extends TestCase
         $headers=FinanceCatalog::dataset('paypal-orders')['headers'];
         $this->assertSame('12',FinanceRecord::query()->sole()->payload[$headers[7]]);
         $this->travelBack();
+    }
+
+    public function test_hourly_balance_refresh_continues_other_accounts_and_retries_failed_accounts_next_run(): void
+    {
+        $relay = ['relay_certificate_sha1' => str_repeat('ab', 20)];
+        $first = $this->financePayPalAccount('Retry hourly', $relay);
+        $second = $this->financePayPalAccount('Other hourly', [...$relay, 'relay_hmac_key_id' => 'second-hourly-key']);
+        $this->financePayPalAccount('Disabled hourly', ['status' => 'disabled']);
+        $this->financePayPalAccount('Unconfigured hourly', ['relay_url' => null]);
+        $this->financePayPalAccount('Card hourly', ['account_type' => 'credit_card']);
+        $fail = true;
+        Http::fake(function ($request) use ($first, $second, &$fail) {
+            $account = $request->header('X-Relay-Key')[0] === $first->relay_hmac_key_id ? $first : $second;
+            if ($account->is($first) && $fail) {
+                return $this->signedRelayResponse($request, $account, ['error' => 'temporary'], 502);
+            }
+
+            return $this->signedRelayResponse($request, $account, ['as_of_time' => '2026-11-09T05:00:00Z', 'balances' => []]);
+        });
+        $this->artisan('finance:paypal-balances:refresh')->assertFailed();
+        $this->assertDatabaseHas('finance_sync_logs', ['payment_account_id' => $first->id, 'operation' => 'balances', 'status' => 'failed', 'actor_id' => 0]);
+        $this->assertDatabaseHas('finance_balance_snapshots', ['payment_account_id' => $second->id]);
+
+        $fail = false;
+        $this->artisan('finance:paypal-balances:refresh')->assertSuccessful();
+        $this->assertDatabaseHas('finance_balance_snapshots', ['payment_account_id' => $first->id]);
+        Http::assertSentCount(4);
     }
 
     public function test_hourly_scheduler_queues_configured_accounts_once_without_requesting_balances(): void

@@ -65,6 +65,7 @@ Route::prefix('finance')->name('finance.')->middleware(\App\Http\Middleware\Redi
     Route::post('/management/menus/order', [PortalMenuConfigurationController::class, 'saveOrder'])->name('menus.order');
     Route::get('/', 'index')->name('home');
     Route::get('/balances', 'balances')->name('balances');
+    Route::get('/sync-logs', 'syncLogs')->name('sync-logs');
     Route::get('/orders/paypal/refresh', 'latestPayPalOrderRefresh')->name('orders.paypal.latest');
     Route::post('/orders/paypal/refresh', 'queuePayPalOrderRefresh')->name('orders.paypal.refresh');
     Route::get('/orders/paypal/refresh/{batch}', 'payPalOrderRefreshStatus')->whereUuid('batch')->name('orders.paypal.status');

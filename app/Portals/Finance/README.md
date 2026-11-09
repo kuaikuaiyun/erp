@@ -108,7 +108,9 @@ PayPal 订单详情、结算及物流字段筛选通过接口交易号或账单�
 
 工作台刷新只等待余额接口；成功后将订单同步放入独立 database 连接 finance_orders、队列 finance-orders，不依赖默认 QUEUE_CONNECTION，默认配置为 sync 时也不会在页面请求内同步订单。订单成功或失败仍记录在 finance_sync_logs，同账户任务通过唯一锁避免重复排队，停用或删除后未执行的任务直接跳过。
 
-使用项目现有 Laravel 调度器（每分钟运行 php artisan schedule:run），新增调度项会串行处理 finance-orders 队列。队列表使用现有 jobs 表，不新增业务数据迁移。发布后如缓存配置需刷新配置缓存，并确认调度器正常运行；未启动调度器时余额可立即更新，但订单将留在队列等待。也可用独立常驻 worker：php artisan queue:work finance_orders --queue=finance-orders --tries=1 --timeout=900。该连接 retry_after=960，大于任务超时。
+Laravel 调度器每小时执行 `php artisan finance:paypal-balances:refresh`，刷新启用且已配置接口的 PayPal 账户。失败写入同步日志，保留最近成功的余额，下一个整点继续尝试。余额抓取与订单同步均可在工作台关闭时执行。
+
+部署时每分钟运行 `php artisan schedule:run`，或常驻运行 `php artisan schedule:work`。只运行财务调度时，在调度进程中设置 `ERP_FINANCE_SCHEDULER_ONLY=1`。调度器串行消费 `finance-orders` 队列，使用现有 jobs 表。该连接 `retry_after=960`，大于任务超时。
 
 订单列表刷新弹窗按账户展示排队、同步中、成功、失败或跳过，并每2秒轮询处理条数和失败原因。状态保存在应用缓存中24小时；生产环境需使用持久共享缓存（database、redis或单机file，不能使用array/null），Web和队列进程必须使用同一缓存配置。重复提交通过账户级原子锁沿用活动任务，后台失败保留已处理条数，状态接口按发起人和财务菜单权限检查访问。
 

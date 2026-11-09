@@ -11,7 +11,8 @@
     <div class="paypal-balance-heading">
         <h2 id="paypal-balance-title">{{ __('finance.paypal.title') }}</h2>
         @if($canManage)<div class="paypal-balance-actions">
-            <span class="text-muted" style="font-size:12px">每小时自动更新</span>
+            @include('portals.finance.partials.sync-log-button')
+            <span class="text-muted" style="font-size:12px">后台每小时自动更新</span>
             <button type="button" class="btn btn-default btn-sm" id="finance-refresh-all">{{ __('finance.sync.refresh_all') }}</button>
             <button type="button" class="btn btn-primary btn-sm" data-add-payment-account="paypal"><i class="fa fa-plus" aria-hidden="true"></i> {{ __('finance.payment_accounts.add') }}</button>
         </div>@endif
@@ -238,28 +239,6 @@
         run(forms.filter(function (form) { return form.dataset.refreshAllowed === 'true'; }));
     });
     unlock();
-    var nextAutoRefresh = Date.now() + 60 * 60 * 1000;
-    async function autoRefresh() {
-        if (busy || Date.now() < nextAutoRefresh) return;
-        nextAutoRefresh = Date.now() + 60 * 60 * 1000;
-        await run(forms.filter(function (form) {
-            var card = form.closest('[data-paypal-account]');
-            return form.dataset.refreshAllowed === 'true'
-                && card.querySelector('[data-connection-status]').dataset.state === 'connected';
-        }));
-    }
-    // Recheck the deadline after browser sleep or a background-tab timer delay.
-    var autoRefreshTimer = window.setInterval(autoRefresh, 60000);
-    document.addEventListener('visibilitychange', function () {
-        if (!document.hidden) autoRefresh();
-    });
-    window.addEventListener('pagehide', function () { window.clearInterval(autoRefreshTimer); });
-    window.addEventListener('pageshow', function (event) {
-        if (event.persisted) {
-            autoRefreshTimer = window.setInterval(autoRefresh, 60000);
-            autoRefresh();
-        }
-    });
     var connectedKey = @json(session('refreshConnectedAccount'));
     if (connectedKey) {
         var connectedForm = forms.find(function (form) { return form.closest('[data-paypal-account]').dataset.paypalAccount === connectedKey; });

@@ -1,6 +1,6 @@
 @extends('portals.finance.layout', ['title' => __('finance.menus.home')])
 @push('styles')
-<link rel="stylesheet" href="{{ request()->getSchemeAndHttpHost() }}/assets/erp/finance-workbench.css?v=20261105-1">
+<link rel="stylesheet" href="{{ request()->getSchemeAndHttpHost() }}/assets/erp/finance-workbench.css?v=20261109-1">
 @endpush
 @section('finance_content')
 <div id="finance-workbench">
@@ -20,12 +20,22 @@
         @include('portals.finance.partials.payment-balance')
     </div>
     @if($canManage)
-        <details><summary>最近同步记录</summary><div class="finance-table-wrap"><table class="table finance-table"><thead><tr><th>账户</th><th>操作</th><th>状态</th><th>已保存页数 / 条数</th><th>结果说明</th><th>发起时间（北京时间）</th></tr></thead><tbody>@forelse($recentSyncLogs as $log)<tr><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($log->account_name)) }}</td><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($log->operation === 'balances' ? '刷新余额' : '同步交易')) }}</td><td>{{ ['running' => '执行中', 'success' => '成功', 'failed' => '失败'][$log->status] ?? $log->status }}</td><td>{{ $log->page_count }} / {{ $log->record_count }}</td><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($log->error_code ? __('finance.sync.errors.'.$log->error_code) : '—')) }}</td><td>{{ \Carbon\CarbonImmutable::parse($log->created_at, 'UTC')->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s') }}</td></tr>@empty<tr><td colspan="6">暂无同步记录</td></tr>@endforelse</tbody></table></div></details>
+        <dialog id="finance-sync-logs" class="finance-sync-log-dialog" aria-labelledby="finance-sync-logs-title" data-url="{{ route('finance.sync-logs') }}">
+            <header>
+                <h2 id="finance-sync-logs-title">最近同步记录</h2>
+                <form method="dialog"><button class="btn btn-default btn-sm" autofocus>关闭</button></form>
+            </header>
+            <div class="finance-sync-log-status">
+                <span data-sync-log-status role="status"></span>
+                <button type="button" class="btn btn-default btn-sm" data-sync-log-retry hidden>重试</button>
+            </div>
+            <div data-sync-log-content></div>
+        </dialog>
         @include('portals.finance.partials.payment-account-create')
     @endif
 </div>
 @endsection
 @push('scripts')
-<script src="{{ request()->getSchemeAndHttpHost() }}/assets/erp/finance-workbench.js?v=20261103-3"></script>
+<script src="{{ request()->getSchemeAndHttpHost() }}/assets/erp/finance-workbench.js?v=20261109-1"></script>
 @if($canManage)<script src="{{ request()->getSchemeAndHttpHost() }}/assets/erp/finance-payment-accounts.js?v=20261104-4"></script>@endif
 @endpush
