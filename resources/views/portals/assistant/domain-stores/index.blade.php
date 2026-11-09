@@ -709,8 +709,9 @@
                                         <p class="text-muted">{{ $t('selection.choose_operation_departments') }}</p>
                                         <div class="assistant-owner-scope-options">
                                             @forelse ($operationDepartments as $operationDepartment)
+                                                @php($isSelectableOperationDepartment = in_array((int) $operationDepartment->getKey(), $selectableOperationDepartmentIds, true))
                                                 <label style="--owner-scope-depth: {{ (int) ($operationDepartment->tree_depth ?? 0) }}">
-                                                    <input type="checkbox" @if ((int) ($operationDepartment->tree_depth ?? 0) > 0) name="scopes[{{ $assistantDepartment->getKey() }}][]" @endif value="{{ $operationDepartment->getKey() }}" data-owner-scope-checkbox data-department-id="{{ $operationDepartment->getKey() }}" data-parent-id="{{ $operationDepartment->parent_id ?: '' }}" @checked((int) ($operationDepartment->tree_depth ?? 0) > 0 && in_array((int) $operationDepartment->getKey(), $operationScopeMap[$assistantDepartment->getKey()] ?? [], true))>
+                                                    <input type="checkbox" @if ($isSelectableOperationDepartment) name="scopes[{{ $assistantDepartment->getKey() }}][]" @endif value="{{ $operationDepartment->getKey() }}" data-owner-scope-checkbox data-department-id="{{ $operationDepartment->getKey() }}" data-parent-id="{{ $operationDepartment->parent_id ?: '' }}" @checked($isSelectableOperationDepartment && in_array((int) $operationDepartment->getKey(), $operationScopeMap[$assistantDepartment->getKey()] ?? [], true))>
                                                     <span>{{ $operationDepartment->name }}</span>
                                                 </label>
                                             @empty
