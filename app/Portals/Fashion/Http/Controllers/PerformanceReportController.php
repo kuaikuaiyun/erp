@@ -53,16 +53,16 @@ class PerformanceReportController extends Controller
         $storeTable = 'assistant_domain_stores';
         $userTable = config('admin.database.users_table');
         $orderTable = (new FashionLogisticsOrder())->getTable();
-        // paid_at_utc is retained as a legacy column name, but stores the payment
-        // instant normalized to China time. Convert it to the selected store
-        // timezone before defining the report date and grouping each day.
-        $orderTimestampSql = 'orders.paid_at_utc';
+        // XShoppy stores China-normalized payment time in the legacy paid_at_utc
+        // column. Shopline continues to store real UTC there, so normalize both
+        // platforms to China time before applying the selected report timezone.
+        $orderTimestampSql = "CASE WHEN orders.source_platform = 'xshoppy' THEN orders.paid_at_utc ELSE CONVERT_TZ(orders.paid_at_utc, '+00:00', '+08:00') END";
 
         $base = DB::connection($connection)->table($orderTable.' as orders')
             ->join($storeTable.' as stores', 'stores.id', '=', 'orders.assistant_domain_store_id')
             ->leftJoin($userTable.' as owners', 'owners.id', '=', 'stores.owner_user_id')
-            ->whereNotNull($orderTimestampSql)
-            ->whereBetween($orderTimestampSql, [$storageFrom, $storageTo])
+            ->whereNotNull('orders.paid_at_utc')
+            ->whereBetween(DB::raw($orderTimestampSql), [$storageFrom, $storageTo])
             ->where(function ($platform): void {
                 $platform->where(function ($xshoppy): void {
                     $xshoppy->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy')")
@@ -230,18 +230,20 @@ class PerformanceReportController extends Controller
         abort_unless($store, 403, '无权查看该店铺订单。');
         $sourcePlatform = mb_strtolower(trim((string) $store->site_builder)) === 'shopline' ? 'shopline' : 'xshoppy';
 
-        // paid_at_utc stores China-normalized payment time despite its legacy
-        // column name. Use the same selected-timezone range as the daily report.
-        $orderTimestampSql = 'paid_at_utc';
+        // Match the daily report: XShoppy is China-normalized in this legacy
+        // column, while Shopline remains stored as real UTC.
+        $orderTimestampSql = $sourcePlatform === 'xshoppy'
+            ? 'paid_at_utc'
+            : "CONVERT_TZ(paid_at_utc, '+00:00', '+08:00')";
         $ordersQuery = FashionLogisticsOrder::query()
             ->where('assistant_domain_store_id', (int) $validated['store_id'])
             ->where('source_platform', $sourcePlatform)
-            ->whereNotNull($orderTimestampSql)
-            ->whereBetween($orderTimestampSql, [$storageFrom, $storageTo]);
+            ->whereNotNull('paid_at_utc')
+            ->whereBetween(DB::raw($orderTimestampSql), [$storageFrom, $storageTo]);
         $amount = (float) (clone $ordersQuery)->sum('total_amount');
         $orders = $ordersQuery
             ->with(['items:id,fashion_logistics_order_id,product_name,sku,quantity,total'])
-            ->orderByDesc($orderTimestampSql)->orderByDesc('id')->paginate(20);
+            ->orderByRaw($orderTimestampSql.' desc')->orderByDesc('id')->paginate(20);
 
         return response()->json([
             'date' => $validated['date'],
