@@ -53,6 +53,9 @@ class FinanceWorkbookService
         if ($withAssignedOwner) {
             $columns[] = 'owner_user_id';
         }
+        if ($withAssignedOwner && $db->getSchemaBuilder()->hasColumn('assistant_domain_stores', 'shop_status')) {
+            $columns[] = 'shop_status';
+        }
 
         $stores = $db->table('assistant_domain_stores')->select($columns)
             ->whereNotNull('domain')->where('domain', '!=', '')->orderBy('domain')->get();
@@ -69,6 +72,8 @@ class FinanceWorkbookService
                     'team' => FinanceCatalog::teamLabel($store->team),
                     'shop_name' => $store->shop_name ?? '',
                     'assigned_owner' => $withAssignedOwner ? ($assignedOwner?->name ?: ($assignedOwner?->username ?? '')) : null,
+                    'assigned_owner_user_id' => $assignedOwner?->getKey(),
+                    'shop_status' => $store->shop_status ?? null,
                 ];
             });
     }
