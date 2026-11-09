@@ -41,6 +41,14 @@ Schedule::command('fashion-logistics:sync-shopline-orders --days=60')
     ->withoutOverlapping(1440)
     ->runInBackground();
 
+// The existing VPS push endpoint remains available. This pull job is opt-in
+// and must be enabled explicitly through LOGISTICS_PAYPAL_RELAY_SYNC_ENABLED.
+Schedule::command('logistics:paypal-relay:sync')
+    ->hourly()
+    ->when(fn (): bool => (bool) config('logistics.paypal.relay.sync_enabled', false))
+    ->withoutOverlapping(120)
+    ->runInBackground();
+
 Schedule::command('payment:paypal-risk:refresh-weekly')
     ->mondays()
     ->at('00:10')
