@@ -45,8 +45,8 @@ class PerformanceReportController extends Controller
         $dateFrom = $validated['date_from'] ?? $month->copy()->startOfMonth()->toDateString();
         $dateTo = $validated['date_to'] ?? $month->copy()->endOfMonth()->toDateString();
         if ($dateFrom > $dateTo) [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
-        $chinaFrom = CarbonImmutable::parse($dateFrom.' 00:00:00', $timezone)->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
-        $chinaTo = CarbonImmutable::parse($dateTo.' 23:59:59', $timezone)->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
+        $utcFrom = CarbonImmutable::parse($dateFrom.' 00:00:00', $timezone)->utc()->format('Y-m-d H:i:s');
+        $utcTo = CarbonImmutable::parse($dateTo.' 23:59:59', $timezone)->utc()->format('Y-m-d H:i:s');
 
         $user = $context['user'];
         $connection = config('admin.database.connection') ?: config('database.default');
@@ -55,12 +55,13 @@ class PerformanceReportController extends Controller
         $orderTable = (new FashionLogisticsOrder())->getTable();
         // All fashion orders are stored as China time for display. The selected
         // statistics timezone is applied only when defining and grouping its day.
-        $orderTimestampSql = 'orders.order_created_at';
+        $orderTimestampSql = 'orders.paid_at_utc';
 
         $base = DB::connection($connection)->table($orderTable.' as orders')
             ->join($storeTable.' as stores', 'stores.id', '=', 'orders.assistant_domain_store_id')
             ->leftJoin($userTable.' as owners', 'owners.id', '=', 'stores.owner_user_id')
-            ->whereBetween($orderTimestampSql, [$chinaFrom, $chinaTo])
+            ->whereNotNull($orderTimestampSql)
+            ->whereBetween($orderTimestampSql, [$utcFrom, $utcTo])
             ->where(function ($platform): void {
                 $platform->where(function ($xshoppy): void {
                     $xshoppy->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy')")
@@ -103,7 +104,7 @@ class PerformanceReportController extends Controller
         // The offset is restricted by timezoneOptions(), so it is safe to embed. Using two
         // parameter placeholders makes MySQL ONLY_FULL_GROUP_BY treat SELECT/GROUP BY as
         // different expressions even when both bound values are identical.
-        $reportDateSql = "DATE(CONVERT_TZ({$orderTimestampSql}, '+08:00', '{$timezone}'))";
+        $reportDateSql = "DATE(CONVERT_TZ({$orderTimestampSql}, '+00:00', '{$timezone}'))";
         $rows = (clone $base)
             ->selectRaw($reportDateSql.' as report_date')
             ->addSelect([
@@ -211,8 +212,8 @@ class PerformanceReportController extends Controller
             'timezone' => ['nullable', Rule::in(array_keys($this->timezoneOptions()))],
         ]);
         $timezone = (string) ($validated['timezone'] ?? '+00:00');
-        $chinaFrom = CarbonImmutable::parse($validated['date'].' 00:00:00', $timezone)->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
-        $chinaTo = CarbonImmutable::parse($validated['date'].' 23:59:59', $timezone)->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
+        $utcFrom = CarbonImmutable::parse($validated['date'].' 00:00:00', $timezone)->utc()->format('Y-m-d H:i:s');
+        $utcTo = CarbonImmutable::parse($validated['date'].' 23:59:59', $timezone)->utc()->format('Y-m-d H:i:s');
         $user = $context['user'];
         $store = DB::connection(config('admin.database.connection') ?: config('database.default'))
             ->table('assistant_domain_stores')
@@ -231,11 +232,12 @@ class PerformanceReportController extends Controller
         $ordersQuery = FashionLogisticsOrder::query()
             ->where('assistant_domain_store_id', (int) $validated['store_id'])
             ->where('source_platform', $sourcePlatform)
-            ->whereBetween('order_created_at', [$chinaFrom, $chinaTo]);
+            ->whereNotNull('paid_at_utc')
+            ->whereBetween('paid_at_utc', [$utcFrom, $utcTo]);
         $amount = (float) (clone $ordersQuery)->sum('total_amount');
         $orders = $ordersQuery
             ->with(['items:id,fashion_logistics_order_id,product_name,sku,quantity,total'])
-            ->orderByDesc('order_created_at')->orderByDesc('id')->paginate(20);
+            ->orderByDesc('paid_at_utc')->orderByDesc('id')->paginate(20);
 
         return response()->json([
             'date' => $validated['date'],
@@ -260,7 +262,7 @@ class PerformanceReportController extends Controller
                 'customer_email' => (string) ($order->customer_email ?: '—'),
                 'payment_method' => (string) ($order->payment_method_title ?: $order->payment_method ?: '—'),
                 'order_created_at' => $this->formatChinaOrderTime($order, $timezone),
-                'paid_at' => $order->paid_at?->timezone($timezone)->format('Y-m-d H:i:s'),
+                'paid_at' => $order->paid_at?->format('Y-m-d H:i:s'),
                 'items' => $order->items->map(fn ($item): array => [
                     'product_name' => (string) ($item->product_name ?: '—'),
                     'sku' => (string) ($item->sku ?: '—'),

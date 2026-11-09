@@ -257,6 +257,7 @@ class ShoplineOrderSyncService
                 'order_created_at' => $this->date($payload['created_at'] ?? $payload['order_at'] ?? null)?->setTimezone('Asia/Shanghai'),
                 'order_modified_at' => $this->date($payload['updated_at'] ?? null),
                 'paid_at' => $this->date($payload['paid_at'] ?? $payload['processed_at'] ?? null),
+                'paid_at_utc' => $this->date($payload['paid_at'] ?? $payload['processed_at'] ?? null)?->utc(),
                 'completed_at' => $this->date($payload['closed_at'] ?? $payload['completed_at'] ?? null),
                 'source_payload' => $payload,
                 'source_synced_at' => now(),
