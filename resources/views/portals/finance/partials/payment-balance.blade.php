@@ -8,6 +8,7 @@
     <div class="payment-balance-heading">
         <div><h2 id="payment-balance-title">{{ __('finance.balances.xuzong2') }}</h2><p>{{ __('finance.payment_balance.title') }}@if($paymentBalance['as_of']) · {{ __('finance.payment_balance.as_of') }} @if(!$paymentBalance['oldest_as_of']->equalTo($paymentBalance['as_of'])){{ $paymentBalance['oldest_as_of']->setTimezone('Asia/Shanghai')->format('Y-m-d H:i') }} ~ @endif{{ $paymentBalance['as_of']->setTimezone('Asia/Shanghai')->format('Y-m-d H:i') }} · {{ __('finance.payment_balance.source') }}@endif</p></div>
         <div class="payment-balance-controls">
+            @if($canManage)@include('portals.finance.partials.sync-log-button')@endif
             <form method="get" action="{{ route('finance.home') }}"><input type="hidden" name="balance_tab" value="credit-card" data-balance-tab-input><input type="hidden" name="paypal_currency" value="{{ $paypalBalance['summary']['currency'] }}"><select class="form-control" name="balance_account" aria-label="{{ __('finance.payment_balance.account') }}" onchange="this.form.submit()">
                 <option value="">{{ __('finance.payment_balance.all_accounts') }}</option>
                 @foreach($paymentBalance['accounts'] as $accountName)<option value="{{ $accountName }}" @selected($paymentBalance['account'] === $accountName)>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($accountName)) }}</option>@endforeach

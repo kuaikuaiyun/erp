@@ -217,7 +217,7 @@ return [
     'save' => '保存', 'cancel' => '取消', 'saved' => '已保存。', 'imported' => '已处理 :count 条记录，重复业务标识已更新。',
     'errors' => [
         'timezone' => '请选择支持的原始数据时区。',
-        'file' => '无法读取文件，请上传有效的XLSX、CSV或制表符文本文件。', 'size' => '单次最多5,000条数据、100列，请拆分文件。',
+        'file' => '无法读取文件，请上传有效的XLSX、CSV或制表符文本文件。', 'size' => '单次最多:rows条数据、100列，请拆分文件。',
         'duplicate_header' => '表头“:header”重复，请保留唯一列名。', 'header' => '缺少表头“:header”，请按模板导入。',
         'formula' => '第 :row 行包含公式，请先粘贴为值再导入。', 'empty' => '没有可导入的数据。',
         'reference' => '第 :row 行交易编号不能为空，且不能超过191字。', 'date' => '第 :row 行日期时间无效，请使用YYYY-MM-DD及HH:mm:ss格式。',

@@ -212,31 +212,6 @@ class XShoppyOrderSyncService
         if ($this->domain($store) === '') throw new RuntimeException('店铺未填写有效的店铺登入网址。');
     }
 
-    private function isPaid(array $payload): bool
-    {
-        if (! blank($payload['date_paid_gmt'] ?? null) || ! blank($payload['date_paid'] ?? null)) {
-            return true;
-        }
-
-        return in_array(strtolower(trim((string) ($payload['status'] ?? ''))), ['processing', 'completed'], true);
-    }
-
-    private function deleteExistingOrder(AssistantDomainStore $store, string $externalId): void
-    {
-        $order = FashionLogisticsOrder::query()
-            ->where('assistant_domain_store_id', $store->getKey())
-            ->where('source_platform', 'xshoppy')
-            ->where('external_order_id', $externalId)
-            ->first();
-
-        if (! $order) return;
-
-        DB::connection($order->getConnectionName())->transaction(function () use ($order): void {
-            $order->items()->delete();
-            $order->delete();
-        });
-    }
-
     private function endpoint(AssistantDomainStore $store): string
     {
         return 'https://'.$this->domain($store).'/wp-json/wc/v3/orders';

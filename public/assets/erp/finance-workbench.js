@@ -31,4 +31,61 @@
             tabs[next].focus();
         });
     });
+
+    var dialog = document.getElementById('finance-sync-logs');
+    if (!dialog) return;
+    var content = dialog.querySelector('[data-sync-log-content]');
+    var status = dialog.querySelector('[data-sync-log-status]');
+    var retry = dialog.querySelector('[data-sync-log-retry]');
+    var request = null;
+    var pageUrl;
+
+    async function loadSyncLogs(url, focusTable) {
+        if (request) return;
+        var controller = new AbortController();
+        request = controller;
+        pageUrl = url;
+        status.textContent = '正在加载同步记录…';
+        retry.hidden = true;
+        content.setAttribute('aria-busy', 'true');
+        try {
+            var response = await fetch(url, {signal: controller.signal});
+            if (!response.ok || response.redirected) throw new Error('Sync logs unavailable');
+            var html = await response.text();
+            if (controller.signal.aborted || !dialog.open) return;
+            content.innerHTML = html;
+            status.textContent = '';
+            if (focusTable) content.querySelector('.finance-table-wrap').focus();
+        } catch (error) {
+            if (controller.signal.aborted || !dialog.open) return;
+            status.textContent = '同步记录加载失败，请重试。';
+            retry.hidden = false;
+            if (focusTable) retry.focus();
+        } finally {
+            if (request === controller) {
+                request = null;
+                content.removeAttribute('aria-busy');
+            }
+        }
+    }
+
+    root.querySelectorAll('[data-open-sync-logs]').forEach(function (button) {
+        button.addEventListener('click', function () {
+            content.replaceChildren();
+            dialog.showModal();
+            loadSyncLogs(dialog.dataset.url, false);
+        });
+    });
+    content.addEventListener('click', function (event) {
+        var link = event.target.closest('[data-sync-log-page]');
+        if (!link) return;
+        event.preventDefault();
+        loadSyncLogs(link.href, true);
+    });
+    retry.addEventListener('click', function () { loadSyncLogs(pageUrl, true); });
+    dialog.addEventListener('close', function () {
+        if (request) request.abort();
+        request = null;
+        content.removeAttribute('aria-busy');
+    });
 })();

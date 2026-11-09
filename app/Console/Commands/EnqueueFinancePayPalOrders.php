@@ -14,11 +14,7 @@ class EnqueueFinancePayPalOrders extends Command
 
     public function handle(FinanceOrderRefreshProgress $progress): int
     {
-        $accounts = FinancePaymentAccount::query()->where('account_type', 'paypal')->where('status', 'enabled')
-            ->whereNotNull('relay_url')->where('relay_url', '!=', '')
-            ->whereNotNull('relay_certificate_sha1')->where('relay_certificate_sha1', '!=', '')
-            ->whereNotNull('relay_hmac_key_id')->where('relay_hmac_key_id', '!=', '')
-            ->whereNotNull('relay_hmac_secret')->where('relay_hmac_secret', '!=', '')
+        $accounts = FinancePaymentAccount::query()->configuredPayPal()
             ->orderBy('id')->get(['id', 'account_name']);
         $failed = 0;
         foreach ($accounts as $account) {

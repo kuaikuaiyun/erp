@@ -79,6 +79,10 @@ class DailySubmissionController extends Controller
     public function storeAdvertisingRecharge(Request $request): RedirectResponse
     {
         $context = $this->operationContext($request);
+        $now = now('Asia/Shanghai');
+        if ($now->greaterThanOrEqualTo($now->copy()->setTime(15, 0))) {
+            throw ValidationException::withMessages(['submission_time' => '广告充值每天仅可在 15:00 前提交，今日提交时间已截止。']);
+        }
         $user = $context['user'];
         $isBoss = $this->isBoss($user);
         $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
@@ -150,7 +154,7 @@ class DailySubmissionController extends Controller
         })->values()->all();
 
         DailyAdvertisingRecharge::query()->create([
-            'report_date' => now()->toDateString(),
+            'report_date' => $now->toDateString(),
             'operator_user_id' => (int) $operator->getKey(),
             'operator_name' => (string) ($operator->name ?: $operator->username),
             'operation_department_id' => $operationDepartment?->getKey(),
@@ -333,6 +337,7 @@ class DailySubmissionController extends Controller
     /** @param array{portal:mixed,user:\App\Models\AdminUser} $context */
     private function advertisingRecharge(Request $request, array $context): View
     {
+        $now = now('Asia/Shanghai');
         $user = $context['user'];
         $isBoss = $this->isBoss($user);
         $operatorOptions = $isBoss ? $this->operatorOptions() : collect([$user]);
@@ -356,6 +361,8 @@ class DailySubmissionController extends Controller
             'accountHistoryMatches' => $this->advertisingRechargeAccountMatches(
                 collect($advertisingAgencyGroups)->flatten(1)->pluck('key')->map(fn ($id) => (int) $id)->all()
             ),
+            'rechargeSubmissionClosed' => $now->greaterThanOrEqualTo($now->copy()->setTime(15, 0)),
+            'rechargeSubmissionCutoff' => $now->copy()->setTime(15, 0)->format('Y-m-d H:i'),
             'history' => DailyAdvertisingRecharge::query()
                 ->where('operator_user_id', $operator->getKey())
                 ->latest('report_date')->latest('id')->paginate(15)->withQueryString(),

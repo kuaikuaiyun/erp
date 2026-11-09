@@ -13,6 +13,12 @@ use App\Portals\Operation\OperationReportMetricsService;
 use App\Portals\Payment\PaymentAccountRiskSnapshotService;
 use App\Portals\Payment\PaymentPayPalLedgerBackfillService;
 
+$financeScheduleOnly = getenv('ERP_FINANCE_SCHEDULER_ONLY') === '1';
+require __DIR__.'/finance_schedule.php';
+if ($financeScheduleOnly) {
+    return;
+}
+
 require __DIR__.'/assistant_shopify_analytics_schedule.php';
 
 Schedule::command('logistics:tracking:process --limit=80')
@@ -185,9 +191,3 @@ Artisan::command('logistics:tongtu-skus:reset-all {--execute : Actually reset ma
     $this->info("Completed. Mapping rows removed: {$result['deleted_mappings']}; queued Tongtu jobs removed: {$result['deleted_jobs']}; SKU mappings queued: {$result['queued_skus']}.");
     return 0;
 })->purpose('Safely rebuild Tongtu SKU mapping state without deleting logistics orders or order items');
-
-// Keep balance requests short; process finance orders serially in a separate worker.
-Schedule::command('queue:work finance_orders --queue=finance-orders --stop-when-empty --tries=1 --timeout=900')
-    ->everyMinute()->withoutOverlapping(20)->runInBackground();
-
-Schedule::command('finance:paypal-orders:enqueue')->hourly()->withoutOverlapping(10);

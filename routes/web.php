@@ -37,11 +37,13 @@ use App\Portals\Assistant\Http\Controllers\OperationReportDashboardController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingSpendSummaryController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingSpendAnalysisController;
 use App\Portals\Assistant\Http\Controllers\FashionAdvertisingReviewController;
+use App\Portals\Assistant\Http\Controllers\FashionOperationReportController;
 use App\Portals\ProductRequests\Http\Controllers\ProductRequestController;
 use App\Portals\Aikaipin\Http\Controllers\ProductLibraryController;
 use App\Portals\Payment\Http\Controllers\PaymentPortalController;
 use App\Portals\Fashion\Http\Controllers\AdvertisingExpenseController;
 use App\Portals\Fashion\Http\Controllers\PerformanceReportController;
+use App\Portals\Fashion\Http\Controllers\StoreController as FashionStoreController;
 use App\Portals\FashionLogistics\Http\Controllers\FashionOrderController;
 use App\Portals\FashionLogistics\Http\Controllers\ShoplineOrderController;
 use App\Http\Middleware\MonitorPaymentPerformance;
@@ -49,6 +51,9 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/fashion/advertising-expenses', [AdvertisingExpenseController::class, 'index'])->name('fashion.advertising-expenses.index');
 Route::get('/fashion/performance-report', [PerformanceReportController::class, 'index'])->name('fashion.performance-report.index');
+Route::get('/fashion/performance-report/orders', [PerformanceReportController::class, 'orders'])->name('fashion.performance-report.orders');
+Route::get('/fashion/stores', [FashionStoreController::class, 'index'])->name('fashion.stores.index');
+Route::patch('/fashion/stores/{store}/xshoppy-credentials', [FashionStoreController::class, 'updateCredentials'])->whereNumber('store')->name('fashion.stores.credentials.update');
 Route::get('/fashion-logistics/orders', [FashionOrderController::class, 'index'])->name('fashion-logistics.orders.index');
 Route::get('/fashion-logistics/shopline-orders', [ShoplineOrderController::class, 'index'])->name('fashion-logistics.shopline-orders.index');
 Route::get('/fashion-logistics/shopline-orders/sync-status', [ShoplineOrderController::class, 'syncStatus'])->name('fashion-logistics.shopline-orders.sync-status');
@@ -63,6 +68,7 @@ Route::prefix('finance')->name('finance.')->middleware(\App\Http\Middleware\Redi
     Route::post('/management/menus/order', [PortalMenuConfigurationController::class, 'saveOrder'])->name('menus.order');
     Route::get('/', 'index')->name('home');
     Route::get('/balances', 'balances')->name('balances');
+    Route::get('/sync-logs', 'syncLogs')->name('sync-logs');
     Route::get('/orders/paypal/refresh', 'latestPayPalOrderRefresh')->name('orders.paypal.latest');
     Route::post('/orders/paypal/refresh', 'queuePayPalOrderRefresh')->name('orders.paypal.refresh');
     Route::get('/orders/paypal/refresh/{batch}', 'payPalOrderRefreshStatus')->whereUuid('batch')->name('orders.paypal.status');
@@ -185,6 +191,8 @@ Route::get('/assistant/daily-submissions/advertising-recharges', [AdvertisingRec
     ->name('assistant.daily-submissions.advertising-recharges.index');
 Route::patch('/assistant/daily-submissions/advertising-recharges/{submission}/process', [AdvertisingRechargeReviewController::class, 'process'])
     ->whereNumber('submission')->name('assistant.daily-submissions.advertising-recharges.process');
+Route::post('/assistant/daily-submissions/advertising-recharges/process-selected', [AdvertisingRechargeReviewController::class, 'processSelected'])
+    ->name('assistant.daily-submissions.advertising-recharges.process-selected');
 Route::get('/assistant/daily-submissions/account-openings', [AccountOpeningReviewController::class, 'index'])
     ->name('assistant.daily-submissions.account-openings.index');
 Route::patch('/assistant/daily-submissions/account-openings/{submission}/process', [AccountOpeningReviewController::class, 'process'])
@@ -239,6 +247,7 @@ Route::get('/assistant/advertising-spend-analysis', [AdvertisingSpendAnalysisCon
 Route::get('/assistant/fashion-advertising-reviews', [FashionAdvertisingReviewController::class, 'index'])->name('assistant.fashion-advertising-reviews.index');
 Route::post('/assistant/fashion-advertising-reviews/{report}/review', [FashionAdvertisingReviewController::class, 'review'])->whereNumber('report')->name('assistant.fashion-advertising-reviews.review');
 Route::get('/assistant/fashion-advertising-reviews/screenshots/{type}/{entry}', [FashionAdvertisingReviewController::class, 'screenshot'])->whereIn('type', ['performance', 'advertising'])->whereNumber('entry')->name('assistant.fashion-advertising-reviews.screenshot');
+Route::get('/assistant/fashion-operation-reports', [FashionOperationReportController::class, 'index'])->name('assistant.fashion-operation-reports.index');
 Route::get('/operation-report-reviews', [OperationReportReviewController::class, 'index'])->name('assistant.operation-report-reviews.index');
 Route::get('/operation-report-reviews/import-template', [OperationReportReviewController::class, 'importTemplate'])->name('assistant.operation-report-reviews.import-template');
 Route::post('/operation-report-reviews/import', [OperationReportReviewController::class, 'import'])->name('assistant.operation-report-reviews.import');

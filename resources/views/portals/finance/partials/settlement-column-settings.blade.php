@@ -2,7 +2,7 @@
     <i class="fa fa-columns" aria-hidden="true"></i> 列与导出设置
 </button>
 <dialog id="settlement-column-settings" class="settlement-dialog" aria-labelledby="settlement-column-title"
-    data-preference-key="finance-settlement-columns:{{ $report }}:{{ $user->getAuthIdentifier() }}"
+    data-preference-key="finance-settlement-columns:{{ $report }}:{{ $user->getAuthIdentifier() }}{{ isset($columnCardChannel) ? ':'.$columnCardChannel : '' }}"
     @if($orderView) data-export-visible-columns @endif
     @if($report === 'paypal-settlement')
     data-new-display-fields="{{ implode(' ', array_keys(\App\Portals\Finance\FinancePayPalSettlementOrders::REFUND_SPLIT_COLUMNS)) }}"
@@ -14,7 +14,10 @@
     data-template-url="{{ route('finance.records.export', ['dataset' => $report, 'export_layout' => 'page', 'export_scope' => 'filtered']) }}"
     data-legacy-preference-key="finance:paypal-orders:page-export-columns:v2"
     @endif
-    data-template-preview-url="{{ route($report === 'paypal-orders' ? 'finance.records.export-template.preview' : 'finance.settlement.export-template.preview', $report) }}"
+    @isset($columnCardChannel)
+    data-template-url="{{ route('finance.report', [$report, 'download' => 1, 'card_channel' => $columnCardChannel]) }}"
+    @endisset
+    data-template-preview-url="{{ route($report === 'paypal-orders' ? 'finance.records.export-template.preview' : 'finance.settlement.export-template.preview', isset($columnCardChannel) ? [$report, 'card_channel' => $columnCardChannel] : $report) }}"
     data-csrf-token="{{ csrf_token() }}">
     <header>
         <h3 id="settlement-column-title">列与导出设置</h3>

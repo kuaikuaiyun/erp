@@ -3,6 +3,8 @@
 namespace App\Portals\Assistant\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\AdminUser;
+use App\Models\Department;
 use App\Models\FashionAdvertisingReport;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
@@ -31,13 +33,30 @@ class FashionAdvertisingReviewController extends Controller
             'status' => in_array($request->input('status'), ['pending', 'approved', 'rejected'], true) ? (string) $request->input('status') : '',
             'from' => $this->date($request->input('from')),
             'to' => $this->date($request->input('to')),
-            'submitter' => trim((string) $request->input('submitter', '')),
+            'department_id' => max(0, (int) $request->input('department_id')),
+            'submitter_id' => max(0, (int) $request->input('submitter_id')),
         ];
+
+        $reportSubmitterIds = FashionAdvertisingReport::query()
+            ->whereNotNull('submitter_id')
+            ->distinct()
+            ->pluck('submitter_id');
+        $submitters = AdminUser::query()
+            ->whereIn('id', $reportSubmitterIds)
+            ->orderBy('name')
+            ->get(['id', 'name', 'username']);
+        $departments = Department::business()
+            ->whereHas('departmentMembers', fn ($query) => $query->whereIn('admin_users.id', $reportSubmitterIds))
+            ->orderBy('sort')
+            ->orderBy('name')
+            ->get(['id', 'name']);
+
         $reports = FashionAdvertisingReport::query()->with(['performanceEntries', 'adSpendEntries', 'submitter.departments'])
             ->when($filters['status'] !== '', fn ($query) => $query->where('status', $filters['status']))
             ->when($filters['from'], fn ($query) => $query->whereDate('report_date', '>=', $filters['from']))
             ->when($filters['to'], fn ($query) => $query->whereDate('report_date', '<=', $filters['to']))
-            ->when($filters['submitter'] !== '', fn ($query) => $query->where('submitter_name', 'like', '%'.addcslashes($filters['submitter'], '%_\\').'%'))
+            ->when($filters['department_id'] > 0, fn ($query) => $query->whereHas('submitter.departments', fn ($departmentQuery) => $departmentQuery->whereKey($filters['department_id'])))
+            ->when($filters['submitter_id'] > 0, fn ($query) => $query->where('submitter_id', $filters['submitter_id']))
             ->orderByRaw("CASE status WHEN 'pending' THEN 0 WHEN 'rejected' THEN 1 ELSE 2 END")
             ->orderByDesc('report_date')->orderByDesc('id')->paginate(20)->withQueryString();
 
@@ -46,6 +65,8 @@ class FashionAdvertisingReviewController extends Controller
             ...$context,
             'reports' => $reports,
             'filters' => $filters,
+            'departments' => $departments,
+            'submitters' => $submitters,
             'pendingCount' => FashionAdvertisingReport::query()->where('status', FashionAdvertisingReport::STATUS_PENDING)->count(),
         ]);
     }
