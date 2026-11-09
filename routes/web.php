@@ -36,6 +36,7 @@ use App\Portals\Assistant\Http\Controllers\OperationReportDashboardController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingSpendSummaryController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingSpendAnalysisController;
 use App\Portals\Assistant\Http\Controllers\FashionAdvertisingReviewController;
+use App\Portals\Assistant\Http\Controllers\FashionOperationReportController;
 use App\Portals\ProductRequests\Http\Controllers\ProductRequestController;
 use App\Portals\Aikaipin\Http\Controllers\ProductLibraryController;
 use App\Portals\Payment\Http\Controllers\PaymentPortalController;
@@ -245,6 +246,7 @@ Route::get('/assistant/advertising-spend-analysis', [AdvertisingSpendAnalysisCon
 Route::get('/assistant/fashion-advertising-reviews', [FashionAdvertisingReviewController::class, 'index'])->name('assistant.fashion-advertising-reviews.index');
 Route::post('/assistant/fashion-advertising-reviews/{report}/review', [FashionAdvertisingReviewController::class, 'review'])->whereNumber('report')->name('assistant.fashion-advertising-reviews.review');
 Route::get('/assistant/fashion-advertising-reviews/screenshots/{type}/{entry}', [FashionAdvertisingReviewController::class, 'screenshot'])->whereIn('type', ['performance', 'advertising'])->whereNumber('entry')->name('assistant.fashion-advertising-reviews.screenshot');
+Route::get('/assistant/fashion-operation-reports', [FashionOperationReportController::class, 'index'])->name('assistant.fashion-operation-reports.index');
 Route::get('/operation-report-reviews', [OperationReportReviewController::class, 'index'])->name('assistant.operation-report-reviews.index');
 Route::get('/operation-report-reviews/import-template', [OperationReportReviewController::class, 'importTemplate'])->name('assistant.operation-report-reviews.import-template');
 Route::post('/operation-report-reviews/import', [OperationReportReviewController::class, 'import'])->name('assistant.operation-report-reviews.import');

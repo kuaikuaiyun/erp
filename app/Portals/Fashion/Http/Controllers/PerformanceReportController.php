@@ -4,6 +4,7 @@ namespace App\Portals\Fashion\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\FashionLogisticsOrder;
+use App\Models\FashionAdvertisingReport;
 use App\Models\AdminUser;
 use App\Models\Department;
 use App\Portal\Http\Controllers\PortalEntryController;
@@ -56,11 +57,7 @@ class PerformanceReportController extends Controller
             ->join($storeTable.' as stores', 'stores.id', '=', 'orders.assistant_domain_store_id')
             ->leftJoin($userTable.' as owners', 'owners.id', '=', 'stores.owner_user_id')
             ->whereBetween('orders.order_created_at', [$utcFrom, $utcTo])
-            ->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy')")
-            ->where(function ($paid): void {
-                $paid->whereNotNull('orders.paid_at')
-                    ->orWhereIn('orders.status', ['processing', 'completed']);
-            });
+            ->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy')");
 
         if (! $user->isAdministrator()) {
             $ownerNames = collect([$user->name, $user->username])
@@ -106,6 +103,40 @@ class PerformanceReportController extends Controller
             ->paginate((int) ($validated['per_page'] ?? 20))
             ->withQueryString();
 
+        $operatorDailyRevenue = (clone $base)
+            ->selectRaw($reportDateSql.' as report_date, stores.owner_user_id, COALESCE(SUM(orders.total_amount),0) revenue')
+            ->whereNotNull('stores.owner_user_id')
+            ->groupByRaw($reportDateSql.', stores.owner_user_id')
+            ->get()->keyBy(fn ($item) => (int) $item->owner_user_id.'|'.$item->report_date);
+        $scopeOperatorIds = $operatorDailyRevenue->pluck('owner_user_id')->map(fn ($id) => (int) $id)->unique()->values();
+        $operatorProfiles = AdminUser::query()->with('departments')->whereIn('id', $scopeOperatorIds)->get()->keyBy('id');
+        $approvedReports = FashionAdvertisingReport::query()
+            ->where('status', FashionAdvertisingReport::STATUS_APPROVED)
+            ->whereBetween('report_date', [$dateFrom, $dateTo])
+            ->whereIn('submitter_id', $scopeOperatorIds)
+            ->with('adSpendEntries')->get();
+        $reportsByOperatorDate = $approvedReports->groupBy(fn (FashionAdvertisingReport $report) => (int) $report->submitter_id.'|'.$report->report_date->format('Y-m-d'));
+        $rows->setCollection($rows->getCollection()->map(function ($row) use ($operatorProfiles, $operatorDailyRevenue, $reportsByOperatorDate): object {
+            $operatorId = (int) $row->owner_user_id;
+            $profile = $operatorProfiles->get($operatorId);
+            $department = $profile?->departments?->first(fn ($item) => (bool) ($item->pivot->is_primary ?? false)) ?: $profile?->departments?->first();
+            $dailyRevenue = (float) ($operatorDailyRevenue->get($operatorId.'|'.$row->report_date)->revenue ?? 0);
+            $dailyReports = $reportsByOperatorDate->get($operatorId.'|'.$row->report_date, collect());
+            $media = $dailyReports->flatMap->adSpendEntries->groupBy(fn ($entry) => trim((string) $entry->media) ?: '未设置媒体')
+                ->map(function ($entries, string $name) use ($dailyRevenue): array {
+                    $spend = round((float) $entries->sum('actual_spend_usd'), 2);
+                    return ['name' => $name, 'spend' => $spend, 'roi' => $spend > 0 ? $dailyRevenue / $spend : null];
+                })->sortKeys()->values();
+            $adSpend = round((float) $media->sum('spend'), 2);
+            $row->department_name = (string) ($department?->name ?: '未分配部门');
+            $row->hired_at = $profile?->hired_at?->format('Y-m-d');
+            $row->hire_days = $profile?->hired_at ? max(1, (int) $profile->hired_at->diffInDays(CarbonImmutable::parse($row->report_date)) + 1) : null;
+            $row->media_metrics = $media;
+            $row->actual_ad_spend = $adSpend;
+            $row->total_roi = $adSpend > 0 ? $dailyRevenue / $adSpend : null;
+            return $row;
+        }));
+
         $operators = collect();
         if ($user->isAdministrator()) {
             $storeOperators = DB::connection($connection)->table($storeTable.' as stores')
@@ -122,6 +153,7 @@ class PerformanceReportController extends Controller
 
         $orderCount = (int) ($summary->order_count ?? 0);
         $revenue = (float) ($summary->revenue ?? 0);
+        $summaryAdSpend = round((float) $approvedReports->flatMap->adSpendEntries->sum('actual_spend_usd'), 2);
 
         return view('portals.fashion.performance-report.index', [
             ...$context,
@@ -140,6 +172,8 @@ class PerformanceReportController extends Controller
                 'revenue' => $revenue,
                 'average_order_value' => $orderCount > 0 ? $revenue / $orderCount : 0,
                 'store_count' => (int) ($summary->store_count ?? 0),
+                'ad_spend' => $summaryAdSpend,
+                'roi' => $summaryAdSpend > 0 ? $revenue / $summaryAdSpend : null,
             ],
         ]);
     }
@@ -175,8 +209,7 @@ class PerformanceReportController extends Controller
         $ordersQuery = FashionLogisticsOrder::query()
             ->where('assistant_domain_store_id', (int) $validated['store_id'])
             ->where('source_platform', 'xshoppy')
-            ->whereBetween('order_created_at', [$utcFrom, $utcTo])
-            ->where(fn ($query) => $query->whereNotNull('paid_at')->orWhereIn('status', ['processing', 'completed']));
+            ->whereBetween('order_created_at', [$utcFrom, $utcTo]);
         $amount = (float) (clone $ordersQuery)->sum('total_amount');
         $orders = $ordersQuery
             ->with(['items:id,fashion_logistics_order_id,product_name,sku,quantity,total'])
