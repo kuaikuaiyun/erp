@@ -4,11 +4,14 @@ namespace App\Portals\Assistant\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\DailyAdvertisingRecharge;
+use App\Models\InternalMessage;
+use App\Models\InternalMessageRecipient;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -47,7 +50,7 @@ class AdvertisingRechargeReviewController extends Controller
         $todaySubmissions = (clone $query)->whereDate('report_date', $today)->orderBy('id')->get();
         $todayRechargeGroups = [];
         foreach ($todaySubmissions as $submission) {
-            foreach ($submission->entries ?? [] as $entry) {
+            foreach ($submission->entries ?? [] as $entryIndex => $entry) {
                 $agencyName = trim((string) ($entry['agency'] ?? '')) ?: '未设置代理';
                 $mediaName = trim((string) ($entry['media'] ?? '')) ?: '未设置平台';
                 $key = mb_strtolower($mediaName).'|'.mb_strtolower($agencyName);
@@ -60,6 +63,8 @@ class AdvertisingRechargeReviewController extends Controller
                     ];
                 }
                 $todayRechargeGroups[$key]['details'][] = [
+                    'submission_id' => (int) $submission->getKey(),
+                    'entry_index' => (int) $entryIndex,
                     'operator_user_id' => (int) $submission->operator_user_id,
                     'operator_name' => (string) $submission->operator_name,
                     'operation_department_name' => (string) ($submission->operation_department_name ?? ''),
@@ -67,6 +72,7 @@ class AdvertisingRechargeReviewController extends Controller
                     'account_number' => (string) ($entry['account_number'] ?? ''),
                     'amount' => round((float) ($entry['amount'] ?? 0), 2),
                     'submitted_at' => $submission->created_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s'),
+                    'status' => (string) ($entry['status'] ?? ($submission->status === DailyAdvertisingRecharge::STATUS_PROCESSED ? DailyAdvertisingRecharge::STATUS_PROCESSED : DailyAdvertisingRecharge::STATUS_PENDING)),
                 ];
             }
         }
@@ -146,6 +152,81 @@ class AdvertisingRechargeReviewController extends Controller
         });
 
         return back()->with('success', '该条广告充值明细已标记为已处理。');
+    }
+
+    public function processSelected(Request $request): RedirectResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        $validated = $request->validate([
+            'records' => ['required', 'array', 'min:1', 'max:100'],
+            'records.*' => ['required', 'string', 'regex:/^\d+:\d+$/'],
+        ], ['records.required' => '请至少勾选一条充值记录。', 'records.min' => '请至少勾选一条充值记录。']);
+
+        $selected = collect($validated['records'])->unique()->map(function (string $record): array {
+            [$submissionId, $entryIndex] = array_map('intval', explode(':', $record, 2));
+            return compact('submissionId', 'entryIndex');
+        })->groupBy('submissionId');
+        $processorId = (int) $context['user']->getKey();
+        $processorName = (string) ($context['user']->name ?: $context['user']->username);
+        $visibleDepartmentIds = $context['user']->isAdministrator() ? null : $this->assistantStoreOwners->visibleOperationDepartmentIds($context['user']);
+        $today = now('Asia/Shanghai')->toDateString();
+
+        $processedCount = DB::connection((new DailyAdvertisingRecharge)->getConnectionName())->transaction(function () use ($selected, $processorId, $processorName, $visibleDepartmentIds, $today, $context): int {
+            $notifications = [];
+            $processedCount = 0;
+            foreach ($selected as $submissionId => $items) {
+                $submission = DailyAdvertisingRecharge::query()->lockForUpdate()->findOrFail((int) $submissionId);
+                abort_unless($submission->report_date?->toDateString() === $today, 422, '只能从今日充值统计中处理当天提交的记录。');
+                if ($visibleDepartmentIds !== null) abort_unless(in_array((int) $submission->operation_department_id, $visibleDepartmentIds, true), 403);
+                $entries = array_values($submission->entries ?? []);
+                foreach ($items->pluck('entryIndex')->unique() as $entryIndex) {
+                    abort_unless(isset($entries[$entryIndex]), 422, '所选充值明细不存在，请刷新页面后重试。');
+                    $status = (string) ($entries[$entryIndex]['status'] ?? ($submission->status === DailyAdvertisingRecharge::STATUS_PROCESSED ? DailyAdvertisingRecharge::STATUS_PROCESSED : DailyAdvertisingRecharge::STATUS_PENDING));
+                    if ($status === DailyAdvertisingRecharge::STATUS_PROCESSED) continue;
+                    $processedAt = now();
+                    $entries[$entryIndex]['status'] = DailyAdvertisingRecharge::STATUS_PROCESSED;
+                    $entries[$entryIndex]['processed_by'] = $processorId;
+                    $entries[$entryIndex]['processed_by_name'] = $processorName;
+                    $entries[$entryIndex]['processed_at'] = $processedAt->toDateTimeString();
+                    $notifications[(int) $submission->operator_user_id][] = $entries[$entryIndex];
+                    $processedCount++;
+                }
+                $allProcessed = collect($entries)->every(fn (array $entry) => ($entry['status'] ?? null) === DailyAdvertisingRecharge::STATUS_PROCESSED);
+                $submission->update([
+                    'entries' => $entries,
+                    'status' => $allProcessed ? DailyAdvertisingRecharge::STATUS_PROCESSED : DailyAdvertisingRecharge::STATUS_PENDING,
+                    'processed_by' => $allProcessed ? $processorId : null,
+                    'processed_by_name' => $allProcessed ? $processorName : null,
+                    'processed_at' => $allProcessed ? now() : null,
+                ]);
+            }
+            abort_if($processedCount === 0, 422, '所选记录均已处理，请刷新页面查看最新状态。');
+            foreach ($notifications as $recipientId => $entries) {
+                $lines = collect($entries)->map(fn (array $entry) => sprintf(
+                    '%s / %s｜账户：%s（%s）｜充值金额：$%s',
+                    $entry['agency'] ?? '未设置代理', $entry['media'] ?? '未设置社媒',
+                    $entry['account_name'] ?? '—', $entry['account_number'] ?? '—',
+                    number_format((float) ($entry['amount'] ?? 0), 2)
+                ));
+                $message = InternalMessage::query()->create([
+                    'title' => '广告充值处理完成通知',
+                    'content' => "您提交的以下广告充值记录已处理完成：\n\n".$lines->implode("\n")."\n\n处理人：{$processorName}",
+                    'sender_user_id' => $processorId,
+                    'sender_name' => $processorName,
+                    'sender_portal_code' => (string) $context['portal']->code,
+                    'sender_portal_name' => (string) $context['portal']->name,
+                    'published_at' => now(),
+                ]);
+                InternalMessageRecipient::query()->create([
+                    'internal_message_id' => $message->getKey(),
+                    'recipient_user_id' => $recipientId,
+                ]);
+            }
+            return $processedCount;
+        });
+
+        return back()->with('success', "已处理 {$processedCount} 条充值记录，并已发送站内消息通知对应运营人员。");
     }
 
     private function context(Request $request): array|Response

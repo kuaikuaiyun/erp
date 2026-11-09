@@ -188,6 +188,8 @@ Route::get('/assistant/daily-submissions/advertising-recharges', [AdvertisingRec
     ->name('assistant.daily-submissions.advertising-recharges.index');
 Route::patch('/assistant/daily-submissions/advertising-recharges/{submission}/process', [AdvertisingRechargeReviewController::class, 'process'])
     ->whereNumber('submission')->name('assistant.daily-submissions.advertising-recharges.process');
+Route::post('/assistant/daily-submissions/advertising-recharges/process-selected', [AdvertisingRechargeReviewController::class, 'processSelected'])
+    ->name('assistant.daily-submissions.advertising-recharges.process-selected');
 Route::get('/assistant/daily-submissions/account-openings', [AccountOpeningReviewController::class, 'index'])
     ->name('assistant.daily-submissions.account-openings.index');
 Route::patch('/assistant/daily-submissions/account-openings/{submission}/process', [AccountOpeningReviewController::class, 'process'])

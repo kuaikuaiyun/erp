@@ -93,7 +93,7 @@
     </footer>
 </div>
 
-@if($portal->code === 'yunying')
+@if(in_array($portal->code, ['yunying', 'daily-report'], true))
 <div class="modal fade" id="internal-message-popup" tabindex="-1" role="dialog" aria-labelledby="internal-message-title">
     <div class="modal-dialog" role="document" style="max-width:760px"><div class="modal-content" style="border:0;border-radius:12px;overflow:hidden;box-shadow:0 18px 60px rgba(0,0,0,.28)">
         <div class="modal-header" style="background:linear-gradient(135deg,#173b5e,#2f7fae);color:#fff;padding:17px 20px"><h4 class="modal-title" id="internal-message-title"><i class="fa fa-bullhorn"></i> 站内消息</h4></div>
@@ -121,7 +121,7 @@
 @if(in_array($portal->code, ['yunying', 'caigou', 'cangku'], true))
 <script src="{{ $portalOrigin }}/assets/erp/procurement-pending-watcher.js?v=20261026-1"></script>
 @endif
-@if($portal->code === 'yunying')
+@if(in_array($portal->code, ['yunying', 'daily-report'], true))
 <script>
 (function($){
     var messages=[],index=0,modal=$('#internal-message-popup'),readButton=$('#internal-message-read');

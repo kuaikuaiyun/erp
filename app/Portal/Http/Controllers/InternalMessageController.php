@@ -127,7 +127,8 @@ class InternalMessageController extends Controller
         $filters = $request->validate([
             'status' => ['nullable', Rule::in(['pending', 'processed', 'all'])],
         ]);
-        $status = (string) ($filters['status'] ?? 'pending');
+        $isDailyReport = $context['portal']->code === 'daily-report';
+        $status = $isDailyReport ? 'all' : (string) ($filters['status'] ?? 'pending');
         $recipients = InternalMessageRecipient::query()
             ->where('recipient_user_id', $context['user']->getKey())
             ->when($status === 'pending', fn ($query) => $query->whereNull('processed_at'))
@@ -142,6 +143,7 @@ class InternalMessageController extends Controller
             'user' => $context['user'],
             'recipients' => $recipients,
             'status' => $status,
+            'isDailyReport' => $isDailyReport,
             'pendingCount' => InternalMessageRecipient::query()
                 ->where('recipient_user_id', $context['user']->getKey())
                 ->whereNull('processed_at')->count(),
@@ -204,7 +206,7 @@ class InternalMessageController extends Controller
         if ($context instanceof Response) return $context;
         $isSender = in_array($context['portal']->code, self::SENDER_PORTALS, true)
             && $message->sender_portal_code === $context['portal']->code;
-        $isRecipient = $context['portal']->code === 'yunying' && InternalMessageRecipient::query()
+        $isRecipient = in_array($context['portal']->code, ['yunying', 'daily-report'], true) && InternalMessageRecipient::query()
             ->where('internal_message_id', $message->getKey())->where('recipient_user_id', $context['user']->getKey())->exists();
         abort_unless($isSender || $isRecipient, 403);
         abort_unless(Storage::disk('public')->exists($image->path), 404);
@@ -239,7 +241,7 @@ class InternalMessageController extends Controller
     {
         $context = $this->portalEntries->portalContext($request);
         if ($context instanceof Response) return $context;
-        abort_unless($context['portal']->code === 'yunying', 403);
+        abort_unless(in_array($context['portal']->code, ['yunying', 'daily-report'], true), 403);
         $operationIds = $this->operationUsers()->pluck('id')->map(fn ($id) => (int) $id);
         abort_unless($context['user']->isAdministrator() || $operationIds->contains((int) $context['user']->getKey()), 403);
         return $context;
