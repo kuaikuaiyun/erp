@@ -17,10 +17,41 @@
         </div>
     </div>
     @if($creditAccounts->isNotEmpty())
+    @php
+        $settlementAuthorization = app(\App\Portal\Services\PortalMenuAuthorizationService::class);
+        $settlementMenu = $settlementAuthorization->menuForRequest($portal, '/finance/reports/credit-settlement');
+        $canViewCreditSettlement = $settlementMenu && $settlementAuthorization->canAccess($user, $settlementMenu);
+    @endphp
     <div class="box finance-credit-accounts"><div class="box-header with-border"><h3 class="box-title">{{ __('finance.payment_accounts.credit_accounts') }}</h3></div><div class="box-body">
         <p class="finance-note">{{ __('finance.payment_accounts.credit_unavailable') }}</p>
-        <div class="finance-table-wrap"><table class="table finance-table"><thead><tr>@foreach(['account_name', 'account_code', 'main_currency', 'status', 'remark'] as $field)<th>{{ __('finance.payment_accounts.attributes.'.$field) }}</th>@endforeach @if($canManage)<th>{{ __('finance.fields.actions') }}</th>@endif</tr></thead><tbody>
-            @foreach($creditAccounts as $creditAccount)<tr><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($creditAccount->account_name)) }}</td><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($creditAccount->account_code)) }}</td><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($creditAccount->main_currency)) }}</td><td>{{ __('finance.payment_accounts.'.$creditAccount->status) }}</td><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($creditAccount->remark)) }}</td>@if($canManage)<td><button type="button" class="btn btn-default btn-sm" data-edit-payment-account="finance-{{ $creditAccount->id }}">{{ __('finance.settings.edit') }}</button> <form method="post" action="{{ route('finance.payment-accounts.delete', 'finance-'.$creditAccount->id) }}" data-loading="off" data-delete-account style="display:inline">@csrf @method('DELETE')<button type="submit" class="btn btn-default btn-sm">{{ __('finance.payment_accounts.delete') }}</button></form></td>@endif</tr>@endforeach
+        <div class="finance-table-wrap"><table class="table finance-table"><thead><tr><th>{{ __('finance.payment_accounts.attributes.account_name') }}</th><th>支付平台</th>@foreach(['account_code', 'main_currency', 'status', 'remark'] as $field)<th>{{ __('finance.payment_accounts.attributes.'.$field) }}</th>@endforeach @if($canManage || $canViewCreditSettlement)<th>{{ __('finance.fields.actions') }}</th>@endif</tr></thead><tbody>
+            @foreach($creditAccounts->groupBy(fn ($account) => $account->card_group_id ?? 0) as $groupId => $groupAccounts)
+                <tr class="active"><th scope="rowgroup" colspan="{{ $canManage || $canViewCreditSettlement ? 7 : 6 }}">
+                    {{ $cardGroups->get($groupId, '未分组账户') }}
+                    @if($groupId && $canManage)
+                        <button type="button" class="btn btn-default btn-xs" data-add-payment-account="credit_card" data-credit-group="{{ $cardGroups->get($groupId) }}">添加子账户</button>
+                    @endif
+                </th></tr>
+            @foreach($groupAccounts as $creditAccount)
+                @php($creditPlatform = \App\Portals\Finance\FinanceCreditSettlementLayout::accountPlatform($creditAccount))
+                <tr>
+                    <td>{{ \App\Portals\Finance\FinanceCatalog::simplified($creditAccount->account_name) }}@if($creditAccount->card_merchant_key)<br><small>{{ $creditAccount->card_merchant_key }}</small>@endif</td>
+                    <td>{{ \App\Portals\Finance\FinanceCreditSettlementLayout::CHANNELS[$creditAccount->card_platform] ?? '未设置' }}</td>
+                    <td>{{ $creditAccount->account_code }}</td><td>{{ $creditAccount->main_currency }}</td>
+                    <td>{{ __('finance.payment_accounts.'.$creditAccount->status) }}</td>
+                    <td>{{ \App\Portals\Finance\FinanceCatalog::simplified($creditAccount->remark) }}</td>
+                    @if($canManage || $canViewCreditSettlement)
+                    <td>
+                        @if($canViewCreditSettlement)<a class="btn btn-default btn-sm" href="{{ route('finance.report', ['report' => 'credit-settlement', 'card_channel' => $creditPlatform, 'card_group' => $creditAccount->card_group_id, 'account' => $creditAccount->activity_account]) }}">结算明细</a>@endif
+                        @if($canManage)
+                        <button type="button" class="btn btn-default btn-sm" data-edit-payment-account="finance-{{ $creditAccount->id }}">{{ __('finance.settings.edit') }}</button>
+                        <form method="post" action="{{ route('finance.payment-accounts.delete', 'finance-'.$creditAccount->id) }}" data-loading="off" data-delete-account style="display:inline">@csrf @method('DELETE')<button type="submit" class="btn btn-default btn-sm">{{ __('finance.payment_accounts.delete') }}</button></form>
+                        @endif
+                    </td>
+                    @endif
+                </tr>
+            @endforeach
+            @endforeach
         </tbody></table></div>
     </div></div>
     @endif

@@ -10,6 +10,8 @@ use Illuminate\Support\Collection;
 
 class FinanceSettlementService
 {
+    public const PAYPAL_COST_HEADERS = ['通途订单', '物流-元', '采购成本-元'];
+
     public const CONDITION_FIELDS = ['account' => '支付账户', 'reference' => '交易单号', 'team' => '团队', 'owner' => '使用人',
         'domain' => '域名', 'subscription' => '订阅类型', 'gross' => '原币总额', 'settlement' => '结算金额',
         'fee' => '手续费', 'refund' => '退款金额', 'note' => '备注'];
@@ -138,6 +140,10 @@ class FinanceSettlementService
         if ($channel === 'credit_card' && filled($filters['card_channel'] ?? null)) {
             FinanceCreditSettlementLayout::filter($query, $filters['card_channel']);
         }
+        if ($channel === 'credit_card' && filled($filters['card_group'] ?? null)) {
+            $query->whereIn('account', FinancePaymentAccount::query()->where('account_type', 'credit_card')
+                ->where('card_group_id', $filters['card_group'])->select('activity_account'));
+        }
         foreach (['account', 'reference'] as $field) {
             if (filled($filters[$field] ?? null)) {
                 $query->where($field, $filters[$field]);
@@ -186,10 +192,19 @@ class FinanceSettlementService
         $owners = $db->table('finance_payment_transactions')->whereIn('finance_record_id', $records->modelKeys())
             ->pluck('payment_account_id', 'finance_record_id');
         $accountsById = $accountModels->keyBy('id');
-        $domains = $this->workbooks->domainGroups()->keyBy('domain');
+        $domainGroups = $this->workbooks->domainGroups();
+        $domains = $domainGroups->keyBy('domain');
+        $brushStores = $channel === 'paypal' ? $domainGroups
+            ->filter(fn ($group) => filled($group->shop_name ?? null))
+            ->groupBy(fn ($group) => trim($group->shop_name))
+            ->filter(fn ($groups) => $groups->count() === 1 && str_contains((string) $groups->first()->owner, '刷单'))
+            ->map(fn ($groups) => $groups->first()) : collect();
         $locks = $db->table('finance_period_locks')->whereNotNull('report_snapshot')->pluck('month')->all();
         $metadata = $this->logisticsMetadata($records, $channel);
-        return $records->map(function ($record) use ($channel, $filters, $supplements, $accounts, $owners, $accountsById, $domains, $locks, $metadata): array {
+        $conflux = $channel === 'credit_card' && ($filters['card_channel'] ?? null) === 'ye'
+            ? app(FinanceConfluxSettlement::class) : null;
+        $ledger = $conflux?->entriesFor($records, $accountModels->keyBy('activity_account'));
+        return $records->map(function ($record) use ($channel, $filters, $supplements, $accounts, $owners, $accountsById, $domains, $brushStores, $locks, $metadata, $conflux, $ledger): array {
             $owner = $accountsById->get($owners->get($record->id));
             $p = $record->payload;
             $definition = FinanceCatalog::dataset($record->dataset);
@@ -303,6 +318,16 @@ class FinanceSettlementService
                     : ($paymentType === LogisticsOrderPaymentReference::TYPE_UPSELL
                         || ($paymentType === null && self::isUpsell($p['是否加购'] ?? '')));
                 $row['subscription'] = $isUpsellPayment ? '加购' : self::subscriptionLabel($row['subscription']);
+                $domainGroup = $domains->get(strtolower(trim((string) $row['domain'])));
+                if (blank($row['domain'])) {
+                    $domainGroup = $brushStores->get(trim((string) ($p['自定义编号'] ?? '')));
+                    $row['domain'] = $domainGroup?->domain ?? $row['domain'];
+                }
+                $brushOwner = str_contains((string) $domainGroup?->owner, '刷单');
+                if ($brushOwner || str_contains((string) $domainGroup?->team, '刷单')) {
+                    $row['subscription'] = $row['team'] = '刷单';
+                    $row['owner'] = $brushOwner ? $domainGroup->owner : '刷单';
+                }
             }
             $row['locked'] = $row['locked'] || in_array($row['month'], $locks, true);
             if (! empty($filters['order_view'])) {
@@ -326,16 +351,29 @@ class FinanceSettlementService
             }
 
             if ($channel === 'credit_card' && filled($filters['card_channel'] ?? null)) {
+                $manual = [...$saved, ...($saved['_edited_fields'] ?? [])];
                 $row['card_layout'] = FinanceCreditSettlementLayout::values(
-                    $filters['card_channel'], $row, $p, [...$saved, ...($saved['_edited_fields'] ?? [])],
+                    $filters['card_channel'], $row, $p, $manual,
                 );
+                if ($ledger?->has($record->id)) {
+                    $details = $conflux->details($ledger->get($record->id));
+                    $row['card_layout'] = array_replace($row['card_layout'], array_diff_key($details['values'], $manual), [
+                        'ledger_dates' => $details['dates'], 'ledger_exceptions' => implode('；', $details['reasons']),
+                    ]);
+                }
+                if ($conflux) {
+                    $row['ledger_matched'] = $ledger->has($record->id);
+                    $row['card_layout']['ledger_status'] = $row['ledger_matched'] ? '已匹配账单' : '待匹配账单';
+                }
             }
 
             return $row;
         })->filter(fn ($row) => (! filled($filters['team'] ?? null) || $row['team'] === $filters['team'])
             && (! filled($filters['subscription'] ?? null) || $row['subscription'] === self::subscriptionLabel($filters['subscription']))
             && (! filled($filters['domain'] ?? null) || str_contains((string) $row['domain'], $filters['domain']))
-            && $this->matches($row, $filters['conditions'] ?? []))->values();
+            && (empty($filters['card_exceptions']) || filled($row['card_layout']['ledger_exceptions'] ?? null))
+            && (empty($filters['card_match']) || ($row['ledger_matched'] ?? false) === ($filters['card_match'] === 'matched'))
+            && $this->matches(array_replace($row, $row['card_layout'] ?? []), $filters['conditions'] ?? []))->values();
     }
 
     public function matches(array $row, array $conditions, ?array $numericFields = null): bool
@@ -465,6 +503,32 @@ class FinanceSettlementService
         }
 
         return $references->filter(fn ($reference) => filled($reference))->flip()->all();
+    }
+
+    /** Resolve costs to a uniquely matched primary PayPal payment. */
+    public function paypalCostPayments(array $orderNumbers, array $filters): Collection
+    {
+        $db = $this->workbooks->database();
+        $schema = $db->getSchemaBuilder();
+        if (! $schema->hasColumns('logistics_orders', ['tongtu_order_number', 'bill_number'])) {
+            return collect();
+        }
+        $orders = $db->table('logistics_orders')->whereIn('tongtu_order_number', $orderNumbers)
+            ->get(['id', 'tongtu_order_number', 'bill_number']);
+        $references = $orders->pluck('bill_number');
+        if ($schema->hasColumns('logistics_order_payment_references', ['reference_type', 'reference_number', 'logistics_order_id'])) {
+            $references = $references->merge($db->table('logistics_order_payment_references')
+                ->whereIn('logistics_order_id', $orders->pluck('id'))
+                ->where('reference_type', LogisticsOrderPaymentReference::TYPE_PRIMARY)->pluck('reference_number'));
+        }
+        $payments = $this->query('paypal', $filters)->whereIn('reference', $references->filter()->unique()->values())
+            ->orderBy('id')->lockForUpdate()->get();
+        $metadata = $this->logisticsMetadata($payments, 'paypal');
+
+        return $payments->filter(fn ($payment) => in_array(strtoupper((string) $payment->status),
+            ['S', 'SUCCESS', 'COMPLETED', 'PAID', '已付款', '已完成', '成功'], true)
+            && ($metadata[$payment->id]['payment_reference_type'] ?? null) === LogisticsOrderPaymentReference::TYPE_PRIMARY)
+            ->groupBy(fn ($payment) => $metadata[$payment->id]['erp_order']);
     }
 
     /** Match API transaction/invoice references without any legacy account binding. */

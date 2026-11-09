@@ -3,16 +3,20 @@
 namespace App\Portals\Finance\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\FinanceCreditAccountGroup;
 use App\Models\FinancePaymentBalance;
 use App\Models\FinancePaymentAccount;
 use App\Models\FinanceRecord;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Finance\FinanceCatalog;
+use App\Portals\Finance\FinanceConfluxSettlement;
 use App\Portals\Finance\FinanceCreditSettlementLayout;
 use App\Portals\Finance\FinancePaymentBalanceService;
 use App\Portals\Finance\FinancePayPalBalanceService;
 use App\Portals\Finance\FinancePayPalSettlementOrders;
 use App\Portals\Finance\FinanceProductNames;
+use App\Portals\Finance\FinanceSettlementEditor;
+use App\Portals\Finance\FinanceSettlementService;
 use App\Portals\Finance\FinanceWorkbookService;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
@@ -43,6 +47,8 @@ class FinanceController extends Controller
         $filters = $request->validate([
             'balance_account' => 'nullable|string|max:100', 'paypal_currency' => ['nullable', 'regex:/^[A-Z]{3}$/'],
             'balance_tab' => ['nullable', Rule::in(['paypal', 'credit-card'])],
+            'add_credit_merchant' => ['nullable', Rule::in(array_keys(FinanceCreditSettlementLayout::CHANNELS))],
+            'card_group' => 'nullable|integer|min:1',
         ]);
         $paypalBalance = $this->paypalBalances->dashboard($filters['paypal_currency'] ?? 'USD');
         $paymentBalance = $this->paymentBalances->dashboard($filters['balance_account'] ?? null);
@@ -53,12 +59,16 @@ class FinanceController extends Controller
             $activeBalanceTab = 'paypal';
         }
 
+        $cardGroups = FinanceCreditAccountGroup::query()->orderBy('name')->pluck('name', 'id');
+
         return response()->view('portals.finance.home', [
             ...$context, ...$paypalBalance, 'paypalBalance' => $paypalBalance,
             'paymentBalance' => $paymentBalance, 'paymentOverview' => $paymentOverview, 'activeBalanceTab' => $activeBalanceTab,
             'balanceFormatter' => $this->paymentBalances,
             'creditAccounts' => FinancePaymentAccount::query()->where('account_type', 'credit_card')->orderBy('id')->get(),
             'paymentAccountEditors' => $context['canManage'] ? $this->paymentAccountEditors($paypalBalance['cards']) : [],
+            'newCardPlatform' => $filters['add_credit_merchant'] ?? null,
+            'cardGroups' => $cardGroups, 'newCardGroup' => $cardGroups->get($filters['card_group'] ?? 0),
             'paymentAccountActivities' => $this->paymentAccountActivities($paypalBalance['cards']),
             'activityCategories' => $this->workbooks->database()->table('finance_transaction_types')->pluck('category')
                 ->map(fn ($category) => $category === null || $category === '' ? __('finance.records.unclassified') : $category)
@@ -337,11 +347,17 @@ class FinanceController extends Controller
         }
         $data = $this->validatedPaymentAccount($request);
         $displayOptions = array_intersect_key($data, array_flip(['paypal_currency', 'balance_account']));
-        unset($data['paypal_currency'], $data['balance_account'], $data['balance_tab']);
-        $account = FinancePaymentAccount::query()->create([
-            ...$data, 'account_code' => 'FA-'.Str::ulid(), 'activity_account' => $data['account_name'],
+        $fromSettlement = ! empty($data['from_credit_settlement']);
+        unset($data['paypal_currency'], $data['balance_account'], $data['balance_tab'], $data['from_credit_settlement']);
+        $account = $this->workbooks->database()->transaction(fn () => FinancePaymentAccount::query()->create([
+            ...$this->accountGroupAttributes($data), 'account_code' => 'FA-'.Str::ulid(), 'activity_account' => $data['account_name'],
             'created_by' => (int) $context['user']->getKey(), 'updated_by' => (int) $context['user']->getKey(),
-        ]);
+        ]));
+        if ($fromSettlement && $account->account_type === 'credit_card') {
+            return redirect()->route('finance.report', ['report' => 'credit-settlement',
+                'card_channel' => $account->card_platform, 'card_group' => $account->card_group_id, 'account' => $account->activity_account])
+                ->with('success', __('finance.payment_accounts.created'));
+        }
 
         return redirect()->route('finance.home', [
             ...$displayOptions, 'balance_tab' => $data['account_type'] === 'paypal' ? 'paypal' : 'credit-card',
@@ -359,7 +375,7 @@ class FinanceController extends Controller
         $account = FinancePaymentAccount::query()->findOrFail($matches[1]);
         $data = $this->validatedPaymentAccount($request, $account);
         $displayOptions = array_intersect_key($data, array_flip(['paypal_currency', 'balance_account']));
-        unset($data['paypal_currency'], $data['balance_account'], $data['balance_tab']);
+        unset($data['paypal_currency'], $data['balance_account'], $data['balance_tab'], $data['from_credit_settlement']);
         $db = $this->workbooks->database();
         $db->transaction(function () use ($account, $data, $context, $db): void {
             $account = FinancePaymentAccount::query()->lockForUpdate()->findOrFail($account->id);
@@ -368,7 +384,14 @@ class FinanceController extends Controller
                     || $db->table('finance_payment_transactions')->where('payment_account_id', $account->id)->exists())) {
                 throw ValidationException::withMessages(['account_type' => __('finance.payment_accounts.linked_type_locked')])->errorBag('paymentAccount');
             }
-            $account->update([...$data, 'updated_by' => (int) $context['user']->getKey()]);
+            $platformChanged = array_key_exists('card_platform', $data) && $data['card_platform'] !== $account->card_platform;
+            $merchantChanged = array_key_exists('card_merchant_key', $data)
+                && strcasecmp((string) $data['card_merchant_key'], (string) $account->card_merchant_key) !== 0;
+            if (($platformChanged || $merchantChanged)
+                && $db->table(FinanceConfluxSettlement::TABLE)->where('payment_account_id', $account->id)->exists()) {
+                throw ValidationException::withMessages(['card_merchant_key' => '该商户已有结算流水，不能更换支付平台或商户标识。'])->errorBag('paymentAccount');
+            }
+            $account->update([...$this->accountGroupAttributes($data), 'updated_by' => (int) $context['user']->getKey()]);
         });
 
         return redirect()->route('finance.home', [
@@ -394,6 +417,12 @@ class FinanceController extends Controller
         $data = $request->validateWithBag('paymentAccount', [
             'account_name' => ['required', 'string', 'max:100', Rule::unique($db->getName().'.finance_payment_accounts', 'account_name')->where('account_type', $request->input('account_type'))->whereNull('deleted_at')->ignore($account?->id)],
             'account_type' => ['required', Rule::in(['paypal', 'credit_card'])],
+            'card_platform' => [Rule::excludeIf($isPayPal), 'nullable', Rule::in(array_keys(FinanceCreditSettlementLayout::CHANNELS))],
+            'card_group_name' => [Rule::excludeIf($isPayPal), 'nullable', 'string', 'max:100'],
+            'card_merchant_key' => [Rule::excludeIf($isPayPal || $request->input('card_platform') !== 'ye'),
+                Rule::requiredIf($request->boolean('from_credit_settlement') && $request->input('card_platform') === 'ye'), 'nullable', 'string',
+                'max:100', 'regex:/^[A-Za-z0-9._-]+$/', Rule::unique($db->getName().'.finance_payment_accounts', 'card_merchant_key')
+                    ->where('card_platform', 'ye')->whereNull('deleted_at')->ignore($account?->id)],
             'main_currency' => ['required', 'regex:/^[A-Z]{3}$/'],
             'status' => ['required', Rule::in(['enabled', 'disabled'])],
             'remark' => 'nullable|string|max:1000',
@@ -415,6 +444,7 @@ class FinanceController extends Controller
             'balance_tab' => ['nullable', Rule::in(['paypal', 'credit-card'])],
             'paypal_currency' => ['nullable', 'regex:/^[A-Z]{3}$/'],
             'balance_account' => 'nullable|string|max:100',
+            'from_credit_settlement' => 'nullable|boolean',
         ], [], trans('finance.payment_accounts.attributes'));
         $cards = $this->paypalBalances->dashboard()['cards'];
         $currentKey = $account ? 'finance-'.$account->id : null;
@@ -425,8 +455,30 @@ class FinanceController extends Controller
             foreach (['relay_url', 'relay_certificate_sha1', 'relay_hmac_key_id', 'relay_hmac_secret', 'relay_server_remark'] as $field) {
                 $data[$field] = null;
             }
-        } elseif (! isset($data['relay_hmac_secret']) || $data['relay_hmac_secret'] === '') {
-            unset($data['relay_hmac_secret']);
+        } else {
+            if ($account?->card_platform !== null) {
+                $data['card_platform'] = null;
+            }
+            if (! isset($data['relay_hmac_secret']) || $data['relay_hmac_secret'] === '') {
+                unset($data['relay_hmac_secret']);
+            }
+        }
+        if (($data['card_platform'] ?? null) !== 'ye' && $account?->card_merchant_key !== null
+            && (array_key_exists('card_platform', $data) || $isPayPal)) {
+            $data['card_merchant_key'] = null;
+        }
+
+        return $data;
+    }
+
+    private function accountGroupAttributes(array $data): array
+    {
+        if ($data['account_type'] === 'paypal') {
+            $data['card_group_id'] = null;
+        } elseif (array_key_exists('card_group_name', $data)) {
+            $name = trim((string) $data['card_group_name']);
+            $data['card_group_id'] = $name === '' ? null : FinanceCreditAccountGroup::query()->firstOrCreate(['name' => $name])->id;
+            unset($data['card_group_name']);
         }
 
         return $data;
@@ -434,7 +486,7 @@ class FinanceController extends Controller
 
     private function paymentAccountEditors(\Illuminate\Support\Collection $cards): array
     {
-        $accounts = FinancePaymentAccount::query()->get()->keyBy('id');
+        $accounts = FinancePaymentAccount::query()->with('creditGroup')->get()->keyBy('id');
         $editors = [];
         foreach ($cards as $card) {
             $account = isset($card['finance_account_id']) ? $accounts->get($card['finance_account_id']) : null;
@@ -476,6 +528,9 @@ class FinanceController extends Controller
             'url' => route('finance.payment-accounts.update', $key),
             'account_name' => $account?->account_name ?? $card['name'],
             'account_type' => $account?->account_type ?? 'paypal',
+            'card_platform' => $account?->card_platform,
+            'card_group_name' => $account?->creditGroup?->name,
+            'card_merchant_key' => $account?->card_merchant_key,
             'main_currency' => $account?->main_currency ?? $card['main_currency'],
             'status' => $account?->status ?? $card['status'], 'remark' => $account?->remark ?? ($card['remark'] ?? ''),
             'relay_url' => $account?->relay_url ?? '', 'relay_certificate_sha1' => $account?->relay_certificate_sha1 ?? '',
@@ -1268,6 +1323,9 @@ class FinanceController extends Controller
             'per_page' => ['nullable', 'integer', Rule::in([10, 20, 50, 100])],
             'source' => ['nullable', Rule::in(['xuzong2-orders', 'xuzong2-details', 'xuzong1-details'])],
             'card_channel' => ['nullable', Rule::in(array_keys(FinanceCreditSettlementLayout::CHANNELS))],
+            'card_exceptions' => 'nullable|boolean',
+            'card_match' => ['nullable', Rule::in(['matched', 'waiting'])],
+            'card_group' => 'nullable|integer|min:1',
             'conditions' => 'nullable|array|max:10', 'conditions.*' => 'array:field,operator,value',
             'conditions.*.field' => ['required', Rule::in(array_keys($conditionFields))],
             'conditions.*.operator' => ['required', Rule::in(['equals','contains','not_equals','empty','not_empty','gt','gte','lt','lte'])],
@@ -1288,6 +1346,12 @@ class FinanceController extends Controller
         $numericConditionFields = $service->numericConditionFields($channel);
         $filters = $this->settlementFilters($request, $conditionFields);
         $cardLayout = $channel === 'credit_card' ? FinanceCreditSettlementLayout::columns($filters['card_channel'] ?? null) : [];
+        if ($channel !== 'credit_card' || ($filters['card_channel'] ?? null) !== 'ye') {
+            unset($filters['card_exceptions'], $filters['card_match']);
+        }
+        if ($channel !== 'credit_card') {
+            unset($filters['card_group']);
+        }
         foreach ($filters['conditions'] ?? [] as $condition) {
             if (in_array($condition['operator'], ['gt','gte','lt','lte'], true)
                 && (! in_array($condition['field'], $numericConditionFields, true) || $service->number($condition['value'] ?? null) === null)) {
@@ -1296,6 +1360,9 @@ class FinanceController extends Controller
         }
         $columns = $service->columns($channel);
         if ($request->boolean('template')) {
+            if ($channel === 'paypal' && $request->input('import_kind') === 'tongtu_costs') {
+                return $this->workbooks->download(FinanceSettlementService::PAYPAL_COST_HEADERS, [], 'paypal-tongtu-costs-template.xlsx');
+            }
             $templateHeaders = array_values($cardLayout ?: ($channel === 'paypal'
                 ? $service->columns($channel) : ['account' => '支付账户', ...array_combine(FinanceCatalog::dataset('xuzong2-details')['headers'], FinanceCatalog::dataset('xuzong2-details')['headers']), 'usd_rate' => '汇率']));
             return $this->workbooks->download($templateHeaders, [], $report.'-template.xlsx');
@@ -1305,6 +1372,13 @@ class FinanceController extends Controller
         $orderView = $channel === 'paypal';
         $columns = $cardLayout ?: $service->listColumns($channel);
         $exportColumns = $cardLayout ?: $service->exportColumns($channel);
+        if ($channel === 'credit_card' && ($filters['card_channel'] ?? null) === 'ye') {
+            $columns = ['ledger_status' => '匹配状态', 'ledger_dates' => '账单日期', ...$columns];
+        }
+        if (! empty($filters['card_exceptions'])) {
+            $columns += FinanceConfluxSettlement::EXCEPTION_COLUMNS;
+            $exportColumns += FinanceConfluxSettlement::EXCEPTION_COLUMNS;
+        }
         if ($request->boolean('download')) {
             $requestedColumns = $request->validate([
                 'export_columns' => 'sometimes|required|array|list|min:1|max:'.count($exportColumns),
@@ -1325,6 +1399,7 @@ class FinanceController extends Controller
         }
         // Computed fields still need the complete matching set before filtering.
         $canPaginate = ! $request->boolean('download') && ! $request->has('suggestion_field')
+            && empty($filters['card_exceptions']) && empty($filters['card_match'])
             && ! filled($filters['team'] ?? null) && ! filled($filters['subscription'] ?? null)
             && ! filled($filters['domain'] ?? null) && empty($filters['conditions']);
         if ($orderView) {
@@ -1371,6 +1446,18 @@ class FinanceController extends Controller
         $perPage = (int) ($filters['per_page'] ?? 10);
         $page = max(1, (int) $request->query('page', 1));
         $paginator ??= new \Illuminate\Pagination\LengthAwarePaginator($rows->forPage($page, $perPage)->values(), $rows->count(), $perPage, $page, ['path' => $request->url(), 'query' => $request->query()]);
+        $accounts = FinancePaymentAccount::query()->where('account_type', $channel)->orderBy('id')->get();
+        $filterAccounts = $accounts;
+        if ($cardLayout && $accounts->isNotEmpty()) {
+            $platform = $filters['card_channel'];
+            $history = $service->query($channel, ['card_channel' => $platform])
+                ->whereIn('account', $accounts->pluck('activity_account'))->distinct()->pluck('account')->flip();
+            $filterAccounts = $accounts->filter(fn ($account) => FinanceCreditSettlementLayout::accountPlatform($account) === $platform
+                || $history->has($account->activity_account));
+        }
+        if (filled($filters['card_group'] ?? null)) {
+            $filterAccounts = $filterAccounts->where('card_group_id', (int) $filters['card_group']);
+        }
 
         return response()->view('portals.finance.settlement', [...$context, 'report' => $report, 'channel' => $channel, 'filters' => $filters,
             'rows' => $paginator, 'columns' => $columns, 'exportColumns' => $exportColumns,
@@ -1379,7 +1466,8 @@ class FinanceController extends Controller
             'editorNumericFields' => app(\App\Portals\Finance\FinanceSettlementEditor::class)->numericFields($channel),
             'conditionFields' => $conditionFields, 'numericConditionFields' => $numericConditionFields,
             'subscriptionOptions' => $service->subscriptionOptions($rows),
-            'accounts' => FinancePaymentAccount::query()->where('account_type', $channel)->orderBy('id')->get(),
+            'accounts' => $accounts, 'filterAccounts' => $filterAccounts,
+            'cardGroups' => $channel === 'credit_card' ? FinanceCreditAccountGroup::query()->orderBy('name')->pluck('name', 'id') : collect(),
             'teams' => $this->workbooks->domainGroups()->pluck('team')->filter()->unique()->sort()->values(),
         ]);
     }
@@ -1409,6 +1497,9 @@ class FinanceController extends Controller
         $columns = $report === 'paypal-orders'
             ? \App\Portals\Finance\FinancePayPalOrderExport::pageHeaders($report)
             : ($cardLayout ?: app(\App\Portals\Finance\FinanceSettlementService::class)->exportColumns($channel));
+        if ($cardLayout && $request->query('card_channel') === 'ye' && $request->boolean('card_exceptions')) {
+            $columns += FinanceConfluxSettlement::EXCEPTION_COLUMNS;
+        }
 
         return response()->json($this->workbooks->readExportTemplate($data['file'], (int) $data['header_row'], $columns));
     }
@@ -1490,7 +1581,27 @@ class FinanceController extends Controller
         $channel = $report === 'paypal-settlement' ? 'paypal' : 'credit_card';
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
         if ($channel === 'paypal') {
+            if ($request->input('import_kind') === 'tongtu_costs') {
+                return $this->importPayPalTongtuCosts($request, $service, (int) $context['user']->getKey());
+            }
             return $this->importNewPayPalSettlements($request, $service, (int) $context['user']->getKey());
+        }
+        if ($request->input('import_kind') === 'conflux_report') {
+            $data = $request->validate([
+                'card_channel' => 'required|in:ye', 'account' => 'required|string|max:191',
+                'card_group' => 'nullable|integer|min:1',
+                'file' => 'required|file|mimes:xlsx',
+            ]);
+            $conflux = app(FinanceConfluxSettlement::class);
+            try {
+                $result = $conflux->import($conflux->read($request->file('file')), $data['account'],
+                    (int) $context['user']->getKey(), isset($data['card_group']) ? (int) $data['card_group'] : null);
+            } catch (\App\Portals\Finance\FinanceRelayException $e) {
+                throw ValidationException::withMessages(['file' => $e->getMessage()]);
+            }
+
+            return redirect()->route('finance.report', ['report' => $report, ...array_diff_key($data, ['file' => true])])
+                ->with('success', '新增 '.$result['inserted'].' 条账单流水，'.$result['unmatched'].' 笔原交易待匹配。');
         }
         if ($request->filled('card_channel')) {
             return $this->importCreditChannelDetails($request, $report, (int) $context['user']->getKey());
@@ -1671,6 +1782,54 @@ class FinanceController extends Controller
         return redirect()->route('finance.report', $route)->with('success', $message);
     }
 
+    private function importPayPalTongtuCosts(Request $request, FinanceSettlementService $service, int $actor): Response
+    {
+        $filters = $request->validate(['account' => 'nullable|string|max:191']);
+        $headers = [...FinanceSettlementService::PAYPAL_COST_HEADERS, '通途订单号', '通途单号',
+            FinanceSettlementService::MONEY['logistics'], FinanceSettlementService::MONEY['purchase']];
+        $rows = $this->workbooks->read($request->file('file'), $headers, optionalHeaders: $headers);
+        $costs = [];
+        foreach ($rows as $line => $row) {
+            $order = $row['通途订单'] ?: ($row['通途订单号'] ?: $row['通途单号']);
+            $values = array_filter([
+                'logistics' => $row['物流-元'] !== '' ? $row['物流-元'] : $row[FinanceSettlementService::MONEY['logistics']],
+                'purchase' => $row['采购成本-元'] !== '' ? $row['采购成本-元'] : $row[FinanceSettlementService::MONEY['purchase']],
+            ], fn ($value) => $value !== '');
+            if (blank($order) || $values === []) {
+                throw ValidationException::withMessages(['file' => '第'.$line.'行请填写通途订单号和至少一项成本。']);
+            }
+            $values = $this->settlementValues($values, 'paypal');
+            $prior = $costs[$order] ?? ['line' => $line, 'values' => []];
+            foreach (array_intersect_key($values, $prior['values']) as $field => $value) {
+                if (bccomp($prior['values'][$field], $value, 8) !== 0) {
+                    throw ValidationException::withMessages([
+                        'file' => '第'.$line.'行通途订单 '.$order.' 的'.FinanceSettlementService::MONEY[$field].'与文件内同单号的金额不一致。',
+                    ]);
+                }
+            }
+            $costs[$order] = ['line' => $prior['line'], 'values' => $prior['values'] + $values];
+        }
+
+        try {
+            $this->workbooks->database()->transaction(function () use ($service, $filters, $costs, $actor): void {
+                $payments = $service->paypalCostPayments(array_keys($costs), $filters);
+                $editor = app(FinanceSettlementEditor::class);
+                foreach ($costs as $order => $cost) {
+                    $matches = $payments->get($order, collect());
+                    if ($matches->count() !== 1) {
+                        throw ValidationException::withMessages(['file' => '第'.$cost['line'].'行通途订单 '.$order.' 无法唯一匹配已付款的 PayPal 主单。']);
+                    }
+                    $editor->save($matches->sole(), $cost['values'], 'paypal', $actor);
+                }
+            });
+        } catch (\App\Portals\Finance\FinanceRelayException $e) {
+            throw ValidationException::withMessages(['file' => $e->getMessage()]);
+        }
+
+        return redirect()->route('finance.report', ['report' => 'paypal-settlement', ...$filters])
+            ->with('success', '已导入 '.count($costs).' 笔主单的物流或采购成本。');
+    }
+
     private function importNewPayPalSettlements(Request $request, \App\Portals\Finance\FinanceSettlementService $service, int $actor): Response
     {
         $columns = $service->columns('paypal');
@@ -1750,6 +1909,7 @@ class FinanceController extends Controller
     {
         $data = $request->validate([
             'card_channel' => ['required', Rule::in(array_keys(FinanceCreditSettlementLayout::CHANNELS))],
+            'card_group' => 'nullable|integer|min:1',
             'account' => 'required|string|max:191',
             'timezone' => ['required', Rule::in(FinanceWorkbookService::TIMEZONES)],
         ]);
@@ -1769,6 +1929,12 @@ class FinanceController extends Controller
                     ->where('activity_account', $data['account'])->lockForUpdate()->first();
                 if (! $account) {
                     throw ValidationException::withMessages(['account' => '请选择有效的信用卡支付账户。']);
+                }
+                if ($account->card_platform !== $data['card_channel']) {
+                    throw ValidationException::withMessages(['account' => '所选支付账户不属于当前支付平台。']);
+                }
+                if (isset($data['card_group']) && (int) $account->card_group_id !== (int) $data['card_group']) {
+                    throw ValidationException::withMessages(['account' => '所选账户不属于当前归属主体。']);
                 }
 
                 return $this->workbooks->importRecords('xuzong2-details', $rows, $account->activity_account,
