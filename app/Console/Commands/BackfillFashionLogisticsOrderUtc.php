@@ -13,7 +13,7 @@ class BackfillFashionLogisticsOrderUtc extends Command
         {--all : Recalculate rows that already have a UTC timestamp}
         {--chunk=500 : Number of rows read per batch}';
 
-    protected $description = 'Backfill canonical UTC and China display order times for fashion orders';
+    protected $description = 'Backfill order timestamps and China-normalized payment times for fashion orders';
 
     public function handle(): int
     {
@@ -60,7 +60,7 @@ class BackfillFashionLogisticsOrderUtc extends Command
                                 ? CarbonImmutable::parse($sourcePaidAt, new DateTimeZone((string) $order->source_order_timezone))
                                 : CarbonImmutable::parse($sourcePaidAt);
                             $values['paid_at'] = $paidAt->format('Y-m-d H:i:s');
-                            $values['paid_at_utc'] = $paidAt->utc()->format('Y-m-d H:i:s');
+                            $values['paid_at_utc'] = $paidAt->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
                         }
 
                         DB::connection($connection)->table($table)->where('id', $order->id)->update($values);

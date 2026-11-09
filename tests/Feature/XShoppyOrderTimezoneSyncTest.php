@@ -139,6 +139,6 @@ class XShoppyOrderTimezoneSyncTest extends TestCase
         $this->assertSame('2026-11-06 07:15:08', $order->order_created_at_utc?->format('Y-m-d H:i:s'));
         $this->assertSame('2026-11-06 15:15:08', $order->order_created_at?->format('Y-m-d H:i:s'));
         $this->assertSame('2026-11-06 02:17:39', $order->paid_at?->format('Y-m-d H:i:s'));
-        $this->assertSame('2026-11-06 07:17:39', $order->paid_at_utc?->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-11-06 15:17:39', $order->paid_at_utc?->format('Y-m-d H:i:s'));
     }
 }

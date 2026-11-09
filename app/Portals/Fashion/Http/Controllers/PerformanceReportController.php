@@ -40,29 +40,29 @@ class PerformanceReportController extends Controller
             'per_page' => ['nullable', 'integer', 'in:20,50,100'],
         ]);
 
-        $timezone = (string) ($validated['timezone'] ?? '+00:00');
+        $timezone = (string) ($validated['timezone'] ?? '+08:00');
         $month = now($timezone);
         $dateFrom = $validated['date_from'] ?? $month->copy()->startOfMonth()->toDateString();
         $dateTo = $validated['date_to'] ?? $month->copy()->endOfMonth()->toDateString();
         if ($dateFrom > $dateTo) [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
-        $utcFrom = CarbonImmutable::parse($dateFrom.' 00:00:00', $timezone)->utc()->format('Y-m-d H:i:s');
-        $utcTo = CarbonImmutable::parse($dateTo.' 23:59:59', $timezone)->utc()->format('Y-m-d H:i:s');
+        $storageFrom = CarbonImmutable::parse($dateFrom.' 00:00:00', $timezone)->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
+        $storageTo = CarbonImmutable::parse($dateTo.' 23:59:59', $timezone)->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
 
         $user = $context['user'];
         $connection = config('admin.database.connection') ?: config('database.default');
         $storeTable = 'assistant_domain_stores';
         $userTable = config('admin.database.users_table');
         $orderTable = (new FashionLogisticsOrder())->getTable();
-        // paid_at preserves the original payment wall-clock time returned by the
-        // store. The selected timezone tells us how to interpret that time before
-        // applying the report's date range and daily grouping.
-        $orderTimestampSql = "CONVERT_TZ(orders.paid_at, '{$timezone}', '+00:00')";
+        // paid_at_utc is retained as a legacy column name, but stores the payment
+        // instant normalized to China time. Convert it to the selected store
+        // timezone before defining the report date and grouping each day.
+        $orderTimestampSql = 'orders.paid_at_utc';
 
         $base = DB::connection($connection)->table($orderTable.' as orders')
             ->join($storeTable.' as stores', 'stores.id', '=', 'orders.assistant_domain_store_id')
             ->leftJoin($userTable.' as owners', 'owners.id', '=', 'stores.owner_user_id')
-            ->whereNotNull('orders.paid_at')
-            ->whereBetween(DB::raw($orderTimestampSql), [$utcFrom, $utcTo])
+            ->whereNotNull($orderTimestampSql)
+            ->whereBetween($orderTimestampSql, [$storageFrom, $storageTo])
             ->where(function ($platform): void {
                 $platform->where(function ($xshoppy): void {
                     $xshoppy->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy')")
@@ -105,7 +105,7 @@ class PerformanceReportController extends Controller
         // The offset is restricted by timezoneOptions(), so it is safe to embed. Using two
         // parameter placeholders makes MySQL ONLY_FULL_GROUP_BY treat SELECT/GROUP BY as
         // different expressions even when both bound values are identical.
-        $reportDateSql = "DATE(CONVERT_TZ({$orderTimestampSql}, '+00:00', '{$timezone}'))";
+        $reportDateSql = "DATE(CONVERT_TZ({$orderTimestampSql}, '+08:00', '{$timezone}'))";
         $rows = (clone $base)
             ->selectRaw($reportDateSql.' as report_date')
             ->addSelect([
@@ -212,9 +212,9 @@ class PerformanceReportController extends Controller
             'page' => ['nullable', 'integer', 'min:1'],
             'timezone' => ['nullable', Rule::in(array_keys($this->timezoneOptions()))],
         ]);
-        $timezone = (string) ($validated['timezone'] ?? '+00:00');
-        $utcFrom = CarbonImmutable::parse($validated['date'].' 00:00:00', $timezone)->utc()->format('Y-m-d H:i:s');
-        $utcTo = CarbonImmutable::parse($validated['date'].' 23:59:59', $timezone)->utc()->format('Y-m-d H:i:s');
+        $timezone = (string) ($validated['timezone'] ?? '+08:00');
+        $storageFrom = CarbonImmutable::parse($validated['date'].' 00:00:00', $timezone)->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
+        $storageTo = CarbonImmutable::parse($validated['date'].' 23:59:59', $timezone)->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
         $user = $context['user'];
         $store = DB::connection(config('admin.database.connection') ?: config('database.default'))
             ->table('assistant_domain_stores')
@@ -230,19 +230,18 @@ class PerformanceReportController extends Controller
         abort_unless($store, 403, '无权查看该店铺订单。');
         $sourcePlatform = mb_strtolower(trim((string) $store->site_builder)) === 'shopline' ? 'shopline' : 'xshoppy';
 
-        // paid_at is the original payment wall-clock time. Interpret it with the
-        // selected store timezone so the detail dialog uses the same range as the
-        // daily report.
-        $orderTimestampSql = "CONVERT_TZ(paid_at, '{$timezone}', '+00:00')";
+        // paid_at_utc stores China-normalized payment time despite its legacy
+        // column name. Use the same selected-timezone range as the daily report.
+        $orderTimestampSql = 'paid_at_utc';
         $ordersQuery = FashionLogisticsOrder::query()
             ->where('assistant_domain_store_id', (int) $validated['store_id'])
             ->where('source_platform', $sourcePlatform)
-            ->whereNotNull('paid_at')
-            ->whereBetween(DB::raw($orderTimestampSql), [$utcFrom, $utcTo]);
+            ->whereNotNull($orderTimestampSql)
+            ->whereBetween($orderTimestampSql, [$storageFrom, $storageTo]);
         $amount = (float) (clone $ordersQuery)->sum('total_amount');
         $orders = $ordersQuery
             ->with(['items:id,fashion_logistics_order_id,product_name,sku,quantity,total'])
-            ->orderByRaw($orderTimestampSql.' desc')->orderByDesc('id')->paginate(20);
+            ->orderByDesc($orderTimestampSql)->orderByDesc('id')->paginate(20);
 
         return response()->json([
             'date' => $validated['date'],
@@ -318,8 +317,7 @@ class PerformanceReportController extends Controller
         for ($offset = -12; $offset <= 14; $offset++) {
             $value = sprintf('%s%02d:00', $offset < 0 ? '-' : '+', abs($offset));
             $label = 'UTC'.($offset >= 0 ? '+' : '').$offset;
-            if ($value === '+00:00') $label .= '（默认）';
-            if ($value === '+08:00') $label .= '（北京时间）';
+            if ($value === '+08:00') $label .= '（默认，北京时间）';
             $options[$value] = $label;
         }
         return $options;

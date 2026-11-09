@@ -183,7 +183,8 @@ class XShoppyOrderSyncService
                 'order_created_at' => $this->parseStoreTimeChina($payload['date_created'] ?? null, $storeTimezone),
                 'order_modified_at' => $this->parseStoreTimeChina($payload['date_modified'] ?? null, $storeTimezone),
                 'paid_at' => $this->parseStoreTime($payload['date_paid'] ?? null, $storeTimezone),
-                'paid_at_utc' => $this->parseStoreTimeUtc($payload['date_paid'] ?? null, $storeTimezone),
+                // Keep the legacy column as the China-normalized payment time.
+                'paid_at_utc' => $this->parseStoreTimeChina($payload['date_paid'] ?? null, $storeTimezone),
                 'completed_at' => $this->parseStoreTimeChina($payload['date_completed'] ?? null, $storeTimezone),
                 'source_payload' => $payload, 'source_synced_at' => now(),
             ])->save();
