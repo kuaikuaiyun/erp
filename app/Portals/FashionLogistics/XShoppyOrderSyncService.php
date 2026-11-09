@@ -179,6 +179,7 @@ class XShoppyOrderSyncService
                 'customer_note' => (string) ($payload['customer_note'] ?? ''),
                 'source_order_created_at' => $this->parseStoreTime($payload['date_created'] ?? null, $storeTimezone),
                 'source_order_timezone' => $storeTimezone,
+                'order_created_at_utc' => $this->parseStoreTimeUtc($payload['date_created'] ?? null, $storeTimezone),
                 'order_created_at' => $this->parseStoreTimeChina($payload['date_created'] ?? null, $storeTimezone),
                 'order_modified_at' => $this->parseStoreTimeChina($payload['date_modified'] ?? null, $storeTimezone),
                 'paid_at' => $this->parseStoreTimeChina($payload['date_paid'] ?? null, $storeTimezone),

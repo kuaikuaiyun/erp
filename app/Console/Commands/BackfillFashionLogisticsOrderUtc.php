@@ -1,0 +1,63 @@
+<?php
+
+namespace App\Console\Commands;
+
+use Carbon\CarbonImmutable;
+use DateTimeZone;
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
+
+class BackfillFashionLogisticsOrderUtc extends Command
+{
+    protected $signature = 'fashion-logistics:backfill-order-utc
+        {--all : Recalculate rows that already have a UTC timestamp}
+        {--chunk=500 : Number of rows read per batch}';
+
+    protected $description = 'Backfill the canonical UTC order time used by the fashion performance report';
+
+    public function handle(): int
+    {
+        $connection = config('admin.database.connection') ?: config('database.default');
+        $table = 'fashion_logistics_orders';
+        $chunk = max(1, (int) $this->option('chunk'));
+        $overwrite = (bool) $this->option('all');
+        $updated = 0;
+        $skipped = 0;
+        $invalid = 0;
+
+        DB::connection($connection)->table($table)
+            ->select(['id', 'source_platform', 'source_order_created_at', 'source_order_timezone', 'order_created_at', 'order_created_at_utc'])
+            ->whereNotNull('order_created_at')
+            ->when(! $overwrite, fn ($query) => $query->whereNull('order_created_at_utc'))
+            ->orderBy('id')
+            ->chunkById($chunk, function ($orders) use ($connection, $table, &$updated, &$skipped, &$invalid): void {
+                foreach ($orders as $order) {
+                    try {
+                        if ($order->source_platform === 'xshoppy') {
+                            if (blank($order->source_order_created_at) || blank($order->source_order_timezone)) {
+                                $skipped++;
+                                continue;
+                            }
+
+                            $utc = CarbonImmutable::parse((string) $order->source_order_created_at, new DateTimeZone((string) $order->source_order_timezone))->utc();
+                        } else {
+                            // Shopline timestamps were historically stored in the application's UTC timezone.
+                            $utc = CarbonImmutable::parse((string) $order->order_created_at, 'UTC')->utc();
+                        }
+
+                        DB::connection($connection)->table($table)->where('id', $order->id)->update([
+                            'order_created_at_utc' => $utc->format('Y-m-d H:i:s'),
+                            'updated_at' => now(),
+                        ]);
+                        $updated++;
+                    } catch (\Throwable) {
+                        $invalid++;
+                    }
+                }
+            });
+
+        $this->info("UTC time backfill completed: updated {$updated}, skipped {$skipped}, invalid {$invalid}.");
+
+        return self::SUCCESS;
+    }
+}

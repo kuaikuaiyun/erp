@@ -1577,8 +1577,11 @@ class FinanceController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
-        $request->validate(['file' => 'required|file|mimes:xlsx,csv,txt|max:10240']);
         $channel = $report === 'paypal-settlement' ? 'paypal' : 'credit_card';
+        if ($channel === 'credit_card' && $request->input('card_channel') === 'ye' && $request->has('files')) {
+            return $this->importConfluxFiles($request, $report, (int) $context['user']->getKey());
+        }
+        $request->validate(['file' => 'required|file|mimes:xlsx,csv,txt|max:10240']);
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
         if ($channel === 'paypal') {
             if ($request->input('import_kind') === 'tongtu_costs') {
@@ -1905,6 +1908,99 @@ class FinanceController extends Controller
         return redirect()->route('finance.report', $route)->with('success', '已新增 '.count($created).' 条结算明细，跳过重复 '.$duplicates.' 条。新记录ID由系统生成。');
     }
 
+    private function importConfluxFiles(Request $request, string $report, int $actor): Response
+    {
+        $data = $request->validate([
+            'account' => 'required|string|max:191', 'card_group' => 'nullable|integer|min:1',
+            'timezone' => ['required', Rule::in(FinanceWorkbookService::TIMEZONES)],
+            'files' => 'required|array|list|min:1|max:5',
+            'files.*' => 'required|file|mimes:xlsx,csv,txt|max:10240',
+        ]);
+        $files = $data['files'];
+        unset($data['files']);
+        $data['card_channel'] = 'ye';
+        $conflux = app(FinanceConfluxSettlement::class);
+        $batch = [];
+        foreach ($files as $index => $file) {
+            try {
+                $batch[] = ['index' => $index, 'file' => $file, 'statement' => $conflux->isStatement($file)];
+            } catch (\PhpOffice\PhpSpreadsheet\Exception $e) {
+                throw ValidationException::withMessages(['files.'.$index => '无法识别文件：'.$file->getClientOriginalName()]);
+            }
+        }
+        // All orders are available before looking up statement references, regardless of selection order.
+        usort($batch, fn ($left, $right) => $left['statement'] <=> $right['statement']);
+        $counts = $this->workbooks->database()->transaction(function () use ($batch, $data, $actor, $conflux): array {
+            $account = $this->lockCreditImportAccount($data);
+            $counts = ['orders' => 0, 'duplicates' => 0, 'statements' => 0, 'entries' => 0,
+                'repeated_statements' => 0, 'statements_with_unmatched' => 0];
+            foreach ($batch as ['index' => $index, 'file' => $file, 'statement' => $statement]) {
+                try {
+                    if ($statement) {
+                        $result = $conflux->import($conflux->read($file), $account->activity_account,
+                            $actor, isset($data['card_group']) ? (int) $data['card_group'] : null);
+                        $counts['statements']++;
+                        $counts['entries'] += $result['inserted'];
+                        $counts['repeated_statements'] += (int) ($result['inserted'] === 0);
+                        $counts['statements_with_unmatched'] += (int) ($result['unmatched'] > 0);
+                    } else {
+                        $rows = $this->readCreditChannelRows($file, 'ye');
+                        $added = $this->workbooks->importRecords('xuzong2-details', $rows, $account->activity_account,
+                            $data['timezone'], $actor, createOnly: true, guardSettlementMonth: true);
+                        $counts['orders'] += $added;
+                        $counts['duplicates'] += count($rows) - $added;
+                        unset($rows);
+                    }
+                } catch (ValidationException|\App\Portals\Finance\FinanceRelayException $e) {
+                    throw ValidationException::withMessages(['files.'.$index => $file->getClientOriginalName().'：'.$e->getMessage()]);
+                }
+            }
+
+            return $counts;
+        });
+
+        $message = '新增订单 '.$counts['orders'].' 笔，跳过重复订单 '.$counts['duplicates'].' 笔。';
+        if ($counts['statements']) {
+            $message .= '识别结算报表 '.$counts['statements'].' 份，新增账单流水 '.$counts['entries'].' 条，跳过重复报表 '.$counts['repeated_statements'].' 份。';
+        }
+        if ($counts['statements_with_unmatched']) {
+            $message .= '其中 '.$counts['statements_with_unmatched'].' 份报表仍有待匹配交易，后续可补导订单。';
+        }
+
+        return redirect()->route('finance.report', ['report' => $report, ...$data])->with('success', $message);
+    }
+
+    private function lockCreditImportAccount(array $data): FinancePaymentAccount
+    {
+        $account = FinancePaymentAccount::query()->where('account_type', 'credit_card')
+            ->where('activity_account', $data['account'])->lockForUpdate()->first();
+        if (! $account) {
+            throw ValidationException::withMessages(['account' => '请选择有效的信用卡支付账户。']);
+        }
+        if ($account->card_platform !== $data['card_channel']) {
+            throw ValidationException::withMessages(['account' => '所选支付账户不属于当前支付平台。']);
+        }
+        if (isset($data['card_group']) && (int) $account->card_group_id !== (int) $data['card_group']) {
+            throw ValidationException::withMessages(['account' => '所选账户不属于当前归属主体。']);
+        }
+
+        return $account;
+    }
+
+    private function readCreditChannelRows(\Illuminate\Http\UploadedFile $file, string $channel): array
+    {
+        $limit = ini_parse_quantity((string) ini_get('memory_limit'));
+        if ($limit > 0 && $limit < 384 * 1024 ** 2) {
+            ini_set('memory_limit', '384M');
+        }
+        $columns = FinanceCreditSettlementLayout::columns($channel);
+        $optional = $channel === 'ye' ? array_keys(array_slice($columns, 21, preserve_keys: true)) : [];
+        $rows = $this->workbooks->read($file, $columns, FinanceCreditSettlementLayout::SHEETS[$channel],
+            $optional, keyedHeaders: true, maxRows: 10000);
+
+        return array_map(fn (array $row) => FinanceCreditSettlementLayout::importPayload($channel, $row), $rows);
+    }
+
     private function importCreditChannelDetails(Request $request, string $report, int $actor): Response
     {
         $data = $request->validate([
@@ -1913,29 +2009,10 @@ class FinanceController extends Controller
             'account' => 'required|string|max:191',
             'timezone' => ['required', Rule::in(FinanceWorkbookService::TIMEZONES)],
         ]);
-        $channel = $data['card_channel'];
-        $limit = ini_parse_quantity((string) ini_get('memory_limit'));
-        if ($limit > 0 && $limit < 384 * 1024 ** 2) {
-            ini_set('memory_limit', '384M');
-        }
-        $columns = FinanceCreditSettlementLayout::columns($channel);
-        $optional = $channel === 'ye' ? array_keys(array_slice($columns, 21, preserve_keys: true)) : [];
-        $rows = $this->workbooks->read($request->file('file'), $columns, FinanceCreditSettlementLayout::SHEETS[$channel],
-            $optional, keyedHeaders: true, maxRows: 10000);
-        $rows = array_map(fn (array $row) => FinanceCreditSettlementLayout::importPayload($channel, $row), $rows);
+        $rows = $this->readCreditChannelRows($request->file('file'), $data['card_channel']);
         try {
             $count = $this->workbooks->database()->transaction(function () use ($data, $rows, $actor): int {
-                $account = FinancePaymentAccount::query()->where('account_type', 'credit_card')
-                    ->where('activity_account', $data['account'])->lockForUpdate()->first();
-                if (! $account) {
-                    throw ValidationException::withMessages(['account' => '请选择有效的信用卡支付账户。']);
-                }
-                if ($account->card_platform !== $data['card_channel']) {
-                    throw ValidationException::withMessages(['account' => '所选支付账户不属于当前支付平台。']);
-                }
-                if (isset($data['card_group']) && (int) $account->card_group_id !== (int) $data['card_group']) {
-                    throw ValidationException::withMessages(['account' => '所选账户不属于当前归属主体。']);
-                }
+                $account = $this->lockCreditImportAccount($data);
 
                 return $this->workbooks->importRecords('xuzong2-details', $rows, $account->activity_account,
                     $data['timezone'], $actor, createOnly: true, guardSettlementMonth: true);

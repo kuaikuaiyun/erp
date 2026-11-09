@@ -42,6 +42,22 @@ class FinanceConfluxSettlement
 
     public function __construct(private readonly FinanceWorkbookService $workbooks) {}
 
+    public function isStatement(UploadedFile $file): bool
+    {
+        $reader = IOFactory::createReader(IOFactory::READER_XLSX);
+        if (! $reader->canRead($file->getRealPath())) {
+            return false;
+        }
+
+        foreach ($reader->listWorksheetNames($file->getRealPath()) as $name) {
+            if (isset(self::SHEETS[explode('-', $name, 2)[0]])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function read(UploadedFile $file): array
     {
         try {
