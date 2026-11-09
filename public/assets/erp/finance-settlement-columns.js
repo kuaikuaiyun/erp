@@ -35,7 +35,11 @@
     function withDefault(fields, defaults) {
         return fields.length ? fields : defaults.slice();
     }
-    let display = withDefault(validKeys(saved.display, displayKeys), displayKeys);
+    const newDisplayFields = validKeys((dialog.dataset.newDisplayFields || '').split(' '), displayKeys);
+    const introducedDisplayFields = validKeys(saved.introducedDisplayFields, displayKeys);
+    const selectedDisplay = withDefault(validKeys(saved.display, displayKeys), displayKeys);
+    const missingDisplayFields = newDisplayFields.filter(field => !introducedDisplayFields.includes(field));
+    let display = displayKeys.filter(field => selectedDisplay.includes(field) || missingDisplayFields.includes(field));
     let fields = withDefault(validKeys(saved.fields, exportKeys), exportKeys);
     let templates = (Array.isArray(saved.templates) ? saved.templates : [])
         .filter(template => template && typeof template.name === 'string')
@@ -51,6 +55,7 @@
         try {
             localStorage.setItem(key, JSON.stringify({
                 display: nextDisplay, fields: nextFields, templates: nextTemplates, activeTemplate: nextActive,
+                introducedDisplayFields: [...new Set([...introducedDisplayFields, ...newDisplayFields])],
             }));
             return true;
         } catch (error) {

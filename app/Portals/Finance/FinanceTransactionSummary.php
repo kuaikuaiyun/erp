@@ -41,6 +41,7 @@ class FinanceTransactionSummary
             $group['orders'] += (int) $row['success'];
             $paypal = $row['channel'] === 'paypal';
             $values = array_intersect_key($row, [...self::PAYPAL, ...self::CARD, 'logistics' => true, 'purchase' => true]);
+            $values['refund'] = FinanceSettlementService::refundIncludingSplit($row);
             $values['settlement'] = $row['failed'] ? null : $row['settlement'];
             $values['amount'] = $paypal ? $values['settlement'] : $row['gross'];
             if ($tab === 'combined' && $paypal) {

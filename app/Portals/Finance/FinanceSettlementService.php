@@ -4,6 +4,7 @@ namespace App\Portals\Finance;
 
 use App\Models\FinancePaymentAccount;
 use App\Models\FinanceRecord;
+use App\Models\LogisticsOrderPaymentReference;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
@@ -15,6 +16,7 @@ class FinanceSettlementService
     public const MONEY = [
         'converted_usd' => '转换美元',
         'usd_rate' => '折算美元汇率', 'fee' => '手续费', 'hold' => '冻结金额', 'dispute_hold' => '争议冻结金额',
+        ...FinancePayPalSettlementOrders::REFUND_SPLIT_COLUMNS,
         'refund' => '退款金额', 'refund_fee' => '退款费用', 'dispute_refund' => '争议退款', 'dispute_fee' => '争议费',
         'fee_return' => '返还手续费', 'dispute_release' => '返还争议冻结', 'release' => '返还冻结',
         'per_order_fee' => '单笔费用（含失败交易）', 'chargeback' => '拒付金额', 'chargeback_fee' => '拒付费用',
@@ -37,6 +39,7 @@ class FinanceSettlementService
     {
         if ($channel === 'paypal') {
             return ['reference' => '交易 ID', 'erp_order' => '通途订单', 'converted_usd' => '转换美元', 'usd_rate' => '汇率', 'hold' => '冻结金额', 'dispute_hold' => '争议冻结金额',
+                ...FinancePayPalSettlementOrders::REFUND_SPLIT_COLUMNS,
                 'refund' => '退款金额', 'refund_fee' => '退款费用', 'dispute_refund' => '争议退款', 'dispute_fee' => '争议费',
                 'fee_return' => '返还手续费', 'dispute_release' => '返还争议冻结', 'release' => '返还冻结',
                 'logistics' => '物流-元', 'purchase' => '采购成本-元',
@@ -64,7 +67,7 @@ class FinanceSettlementService
         return ['id' => '记录ID', 'account' => '支付账户', ...$source,
             'month' => '年月', 'date' => '时间点', 'timezone' => '导出时区', 'subscription' => '订阅类型', 'upsell' => '是否加购',
             'converted_usd' => '转换美元', 'usd_rate' => '汇率', 'settlement' => '结算金额-美元',
-            ...array_intersect_key($this->moneyFields('paypal'), array_flip(['fee','hold','dispute_hold','refund','refund_fee','dispute_refund','dispute_fee','fee_return','dispute_release','release','logistics','purchase'])),
+            ...array_diff_key($this->moneyFields('paypal'), array_flip(['converted_usd', 'usd_rate'])),
             'domain' => '域名', 'owner' => '使用人', 'team' => '团队', 'erp_order' => '通途订单', 'note' => '备注'];
     }
 
@@ -75,12 +78,7 @@ class FinanceSettlementService
             return $columns;
         }
 
-        $payable = ['payable' => $columns['payable']];
-        unset($columns['payable']);
-        $position = array_search('logistics', array_keys($columns), true);
-
-        return array_slice($columns, 0, $position, true) + $payable
-            + array_slice($columns, $position, null, true) + FinancePayPalSettlementOrders::sourceExportColumns();
+        return $columns + FinancePayPalSettlementOrders::sourceExportColumns();
     }
 
     public function listColumns(string $channel): array
@@ -102,7 +100,8 @@ class FinanceSettlementService
     public function numericConditionFields(string $channel): array
     {
         return $channel === 'paypal'
-            ? ['id', 'gross', 'paypal_7', 'paypal_8', 'paypal_9', 'settlement', 'payable', 'open_hold', ...array_keys($this->moneyFields($channel))]
+            ? ['id', 'gross', 'paypal_7', 'paypal_8', 'paypal_9', 'settlement', 'payable', 'open_hold',
+                ...array_keys($this->moneyFields($channel))]
             : ['gross', 'settlement', 'fee', 'refund'];
     }
 
@@ -207,7 +206,7 @@ class FinanceSettlementService
                 'erp_order' => $p['通途订单'] ?? '', 'note' => $p['备注'] ?? '',
             ];
             foreach ($metadata[$record->id] ?? [] as $field => $value) {
-                if ($field === 'order') {
+                if (in_array($field, ['order', 'payment_reference_type'], true)) {
                     continue;
                 }
                 if ($field === 'logistics_order_id' && empty($filters['logistics_costs'])) {
@@ -215,6 +214,20 @@ class FinanceSettlementService
                 }
                 if (blank($row[$field] ?? null)) {
                     $row[$field] = $value;
+                }
+            }
+            if ($channel === 'paypal') {
+                $business = $metadata[$record->id] ?? [];
+                $paymentType = $business['payment_reference_type'] ?? null;
+                if ($paymentType === LogisticsOrderPaymentReference::TYPE_PRIMARY) {
+                    $row['subscription'] = $business['subscription'];
+                    $row['upsell'] = '未加购';
+                } elseif ($paymentType === LogisticsOrderPaymentReference::TYPE_UPSELL) {
+                    $row['upsell'] = '已加购';
+                } elseif (self::isUpsell($business['upsell'] ?? '')) {
+                    // An order-level tag does not identify the add-on payment.
+                    $row['subscription'] = $p['订阅类型'] ?? '';
+                    $row['upsell'] = $p['是否加购'] ?? '';
                 }
             }
             $aliases = ['usd_rate' => '汇率', 'fee' => $channel === 'paypal' ? '手续费' : '交易手续费', 'logistics' => '物流-元', 'purchase' => '采购成本-元',
@@ -230,9 +243,8 @@ class FinanceSettlementService
             }
             $saved = isset($supplements[$record->id]) ? json_decode($supplements[$record->id]->payload, true, 512, JSON_THROW_ON_ERROR) : [];
             $row = [...$row, ...$saved];
-            $row['subscription'] = self::subscriptionLabel($row['subscription']);
-            if (self::isUpsell($row['upsell'])) {
-                $row['subscription'] = '加购';
+            if ($channel !== 'paypal') {
+                $row['subscription'] = self::isUpsell($row['upsell']) ? '加购' : self::subscriptionLabel($row['subscription']);
             }
             $row['usd_rate'] = $record->currency === 'USD' ? '1' : $row['usd_rate'];
             if (isset($saved['_edited_fields']['usd_rate'])) {
@@ -281,6 +293,9 @@ class FinanceSettlementService
             $row['owner'] = filled($saved['owner'] ?? null) ? $saved['owner'] : ($group?->owner ?? ($p['使用人'] ?? ''));
             $row['team'] = filled($saved['team'] ?? null) ? $saved['team'] : ($group?->team ?? ($p['团队'] ?? ''));
             $row = [...$row, ...($saved['_edited_fields'] ?? [])];
+            if ($channel === 'paypal') {
+                $row['subscription'] = self::isUpsell($row['upsell']) ? '加购' : self::subscriptionLabel($row['subscription']);
+            }
             $row['locked'] = $row['locked'] || in_array($row['month'], $locks, true);
             if (! empty($filters['order_view'])) {
                 foreach (array_slice($headers, 15, null, true) as $index => $header) {
@@ -359,9 +374,15 @@ class FinanceSettlementService
         $referenceValues = fn ($record) => $channel === 'paypal' ? [$record->reference, trim((string) ($record->payload['帳單號碼'] ?? ''))]
             : [$record->reference, $record->payload['商户订单号'] ?? '', $record->payload['Shopify订单号'] ?? ''];
         $references = $records->flatMap($referenceValues)->filter()->unique()->all();
-        $paymentReferences = $channel === 'paypal' && $db->getSchemaBuilder()->hasTable('logistics_order_payment_references')
-            ? $db->table('logistics_order_payment_references')->whereIn('reference_number', $references)
-                ->get(['reference_number', 'logistics_order_id']) : collect();
+        $paymentReferences = collect();
+        $paymentTypes = [];
+        if ($channel === 'paypal' && $db->getSchemaBuilder()->hasTable('logistics_order_payment_references')) {
+            $columns = ['reference_number', 'logistics_order_id'];
+            if (! $matchOnly && $db->getSchemaBuilder()->hasColumn('logistics_order_payment_references', 'reference_type')) {
+                $columns[] = 'reference_type';
+            }
+            $paymentReferences = $db->table('logistics_order_payment_references')->whereIn('reference_number', $references)->get($columns);
+        }
         $linkedIds = $paymentReferences->pluck('logistics_order_id')->unique();
         $matches = null;
         foreach ($referenceFields as $field) {
@@ -386,6 +407,9 @@ class FinanceSettlementService
         foreach ($paymentReferences as $reference) {
             if ($order = $orders->get($reference->logistics_order_id)) {
                 $index[$reference->reference_number][$order->id] = $order;
+                if (isset($reference->reference_type)) {
+                    $paymentTypes[$reference->reference_number][$order->id] = $reference->reference_type;
+                }
             }
         }
         $result = [];
@@ -409,6 +433,8 @@ class FinanceSettlementService
                 'subscription' => $order->subscription_type ?? '', 'upsell' => $order->is_add_on ?? '', 'erp_order' => $order->tongtu_order_number ?? ''];
             if ($channel === 'paypal') {
                 $result[$record->id]['order'] = $order;
+                $result[$record->id]['payment_reference_type'] = $paymentTypes[$record->reference][$order->id]
+                    ?? ((string) ($order->bill_number ?? '') === $record->reference ? LogisticsOrderPaymentReference::TYPE_PRIMARY : null);
             }
         }
 
@@ -569,7 +595,7 @@ class FinanceSettlementService
 
     public function moneyFields(string $channel): array
     {
-        $keys = $channel === 'paypal' ? ['converted_usd', 'usd_rate', 'fee', 'hold', 'dispute_hold', 'refund', 'refund_fee', 'dispute_refund', 'dispute_fee', 'fee_return', 'dispute_release', 'release', 'logistics', 'purchase']
+        $keys = $channel === 'paypal' ? ['converted_usd', 'usd_rate', 'fee', 'hold', 'dispute_hold', 'frozen_refund', 'refund_top_up', 'refund', 'refund_fee', 'dispute_refund', 'dispute_fee', 'fee_return', 'dispute_release', 'release', 'logistics', 'purchase']
             : ['usd_rate', 'fee', 'hold', 'per_order_fee', 'refund', 'refund_fee', 'chargeback', 'chargeback_fee', 'ethoca_refund', 'ethoca_fee', 'rdr_refund', 'rdr_fee', 'release', 'logistics', 'purchase'];
 
         $fields = array_intersect_key(self::MONEY, array_flip($keys));
@@ -650,13 +676,29 @@ class FinanceSettlementService
                     continue;
                 }
                 // Workbook SUM ignores empty cells; retain blanks in detail, sum known values here.
-                if ($row[$field] !== null) {
-                    $groups[$key][$field] = bcadd($groups[$key][$field] ?? '0', $row[$field], 8);
+                $amount = $field === 'refund' ? self::refundIncludingSplit($row) : $row[$field];
+                if ($amount !== null) {
+                    $groups[$key][$field] = bcadd($groups[$key][$field] ?? '0', $amount, 8);
                 }
             }
         }
 
         return array_values($groups);
+    }
+
+    public static function refundIncludingSplit(array $row): ?string
+    {
+        $refund = $row['refund'] ?? null;
+        if ($row['channel'] === 'paypal') {
+            foreach (['frozen_refund' => 'refund', 'refund_top_up' => 'refund_fee'] as $field => $legacy) {
+                // A legacy amount may already cover this component.
+                if (isset($row[$field]) && bccomp($row[$legacy] ?? '0', '0', 8) === 0) {
+                    $refund = bcadd($refund ?? '0', $row[$field], 8);
+                }
+            }
+        }
+
+        return $refund;
     }
 
     public function save(FinanceRecord $record, array $values, int $actor): void

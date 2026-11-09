@@ -113,8 +113,11 @@
 @php($editable = $orderView ? ($row['payments'][0] ?? null) : $row)
 <tr><td class="finance-selection"><input type="checkbox" data-record-id="{{ $row['id'] }}" @if($orderView) data-payment-ids="{{ json_encode(array_column($row['payments'], 'id')) }}" @endif data-locked="{{ $row['locked'] ? '1' : '0' }}" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($row) }}" aria-label="选择此行"></td>
 @foreach($columns as $field => $label)
-<td data-settlement-column="{{ $field }}" title="{{ $row[$field] ?? '' }}" @class(['settlement-pending' => ($row[$field] ?? null) === null])>
-@if(isset($moneyFields[$field]) || in_array($field, ['gross','settlement','source_settlement_usd','converted_usd','paypal_7','paypal_8','paypal_9','payable','open_hold'], true))
+@php($splitRefundNote = $orderView ? \App\Portals\Finance\FinancePayPalSettlementOrders::splitRefundNote($row, $field) : null)
+<td data-settlement-column="{{ $field }}" title="{{ $splitRefundNote ?? $row[$field] ?? '' }}" @class(['settlement-pending' => ($row[$field] ?? null) === null])>
+@if($splitRefundNote !== null)
+{{ $splitRefundNote }}
+@elseif(isset($moneyFields[$field]) || in_array($field, ['gross','settlement','source_settlement_usd','converted_usd','paypal_7','paypal_8','paypal_9','payable','open_hold'], true))
 {{ ($row[$field] ?? null) === null ? ($orderView && in_array($field, ['payable','open_hold'], true) ? '待核对' : '') : \App\Portals\Finance\FinanceCatalog::reportAmount($row[$field]) }}
 @else{{ \Illuminate\Support\Str::limit(\App\Portals\Finance\FinanceCatalog::simplified((string) ($row[$field] ?? '')), 40) }}@endif
 </td>

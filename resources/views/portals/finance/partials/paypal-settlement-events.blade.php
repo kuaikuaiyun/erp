@@ -6,6 +6,11 @@
             @foreach(['payable' => '应结算（USD）', 'open_hold' => '未解除冻结（USD）'] as $field => $label)
                 <div><dt>{{ $label }}</dt><dd>{{ ($row[$field] ?? null) === null ? '待核对' : \App\Portals\Finance\FinanceCatalog::reportAmount($row[$field]) }}</dd></div>
             @endforeach
+            @foreach(\App\Portals\Finance\FinancePayPalSettlementOrders::REFUND_SPLIT_COLUMNS as $field => $label)
+                @if((float) ($row[$field] ?? 0) > 0)
+                    <div><dt>{{ $label }}（USD）</dt><dd>{{ \App\Portals\Finance\FinanceCatalog::reportAmount($row[$field]) }}</dd></div>
+                @endif
+            @endforeach
         </dl>
         <dl class="settlement-detail-identifiers">
             @foreach(['shopify_order_number' => 'Shopify订单号', 'reference' => '交易 ID', 'account' => '支付账户'] as $field => $label)
