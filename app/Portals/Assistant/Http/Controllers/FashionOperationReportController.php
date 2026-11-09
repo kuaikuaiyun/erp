@@ -72,15 +72,6 @@ class FashionOperationReportController extends Controller
             $before = $fashionDepartmentIds->count();
             $fashionDepartmentIds = $fashionDepartmentIds->merge($childIds)->unique()->values();
         } while ($fashionDepartmentIds->count() > $before);
-        $departmentOptions = $fashionDepartment
-            ? $departmentRows->filter(fn (Department $department): bool => (int) $department->id === (int) $fashionDepartment->id
-                || (int) $department->parent_id === (int) $fashionDepartment->id)
-                ->sortBy(fn (Department $department): string => ((int) $department->id === (int) $fashionDepartment->id ? '0' : '1')
-                    .str_pad((string) ((int) $department->sort), 8, '0', STR_PAD_LEFT)
-                    .mb_strtolower((string) $department->name))
-                ->values()
-            : collect();
-
         $orderMetrics = FashionLogisticsOrder::query()
             ->whereIn('assistant_domain_store_id', $stores->pluck('id'))
             ->where(function ($platform) use ($stores): void {
@@ -101,10 +92,14 @@ class FashionOperationReportController extends Controller
             ->whereIn('submitter_id', $operatorIds)
             ->with('adSpendEntries')->get()->groupBy('submitter_id');
 
-        $rows = $storesByOperator->map(function ($operatorStores, int $operatorId) use ($operators, $orderMetrics, $reports, $dateTo): ?array {
+        $fashionRootDepartmentId = (int) ($fashionDepartment?->id ?? 0);
+        $allRows = $storesByOperator->map(function ($operatorStores, int $operatorId) use ($operators, $orderMetrics, $reports, $dateTo, $fashionDepartmentIds, $fashionRootDepartmentId): ?array {
             $operator = $operators->get($operatorId);
             if (! $operator) return null;
-            $department = $operator->departments->first(fn ($item) => (bool) ($item->pivot->is_primary ?? false)) ?: $operator->departments->first();
+            $department = $operator->departments->first(fn ($item) => (int) $item->id !== $fashionRootDepartmentId && $fashionDepartmentIds->contains((int) $item->id))
+                ?: $operator->departments->first(fn ($item) => $fashionDepartmentIds->contains((int) $item->id))
+                ?: $operator->departments->first(fn ($item) => (bool) ($item->pivot->is_primary ?? false))
+                ?: $operator->departments->first();
             $storeRows = $operatorStores->map(function (AssistantDomainStore $store) use ($orderMetrics): array {
                 $metric = $orderMetrics->get($store->getKey());
                 return ['name' => (string) ($store->shop_name ?: $store->domain), 'domain' => (string) $store->domain,
@@ -135,7 +130,19 @@ class FashionOperationReportController extends Controller
                     'submitted' => '已提报',
                     default => '未提报',
                 }];
-        })->filter()->filter(function (array $row) use ($validated, $fashionDepartmentIds): bool {
+        })->filter()->values();
+
+        $boundDepartmentIds = $allRows->pluck('department_id')->map(fn ($id): int => (int) $id)->filter()->unique();
+        $departmentOptions = $fashionDepartment
+            ? $departmentRows->filter(fn (Department $department): bool => (int) $department->id === $fashionRootDepartmentId
+                || $boundDepartmentIds->contains((int) $department->id))
+                ->sortBy(fn (Department $department): string => ((int) $department->id === $fashionRootDepartmentId ? '0' : '1')
+                    .str_pad((string) ((int) $department->sort), 8, '0', STR_PAD_LEFT)
+                    .mb_strtolower((string) $department->name))
+                ->values()
+            : $departmentRows->whereIn('id', $boundDepartmentIds)->sortBy('name')->values();
+
+        $rows = $allRows->filter(function (array $row) use ($validated, $fashionDepartmentIds): bool {
             $department = trim((string) ($validated['department'] ?? ''));
             $operator = trim((string) ($validated['operator'] ?? ''));
             $matchesDepartment = $department === ''
