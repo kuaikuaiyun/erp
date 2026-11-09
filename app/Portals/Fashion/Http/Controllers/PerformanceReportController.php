@@ -57,7 +57,15 @@ class PerformanceReportController extends Controller
             ->join($storeTable.' as stores', 'stores.id', '=', 'orders.assistant_domain_store_id')
             ->leftJoin($userTable.' as owners', 'owners.id', '=', 'stores.owner_user_id')
             ->whereBetween('orders.order_created_at', [$utcFrom, $utcTo])
-            ->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy')");
+            ->where(function ($platform): void {
+                $platform->where(function ($xshoppy): void {
+                    $xshoppy->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy')")
+                        ->where('orders.source_platform', 'xshoppy');
+                })->orWhere(function ($shopline): void {
+                    $shopline->whereRaw("LOWER(TRIM(stores.site_builder)) = 'shopline'")
+                        ->where('orders.source_platform', 'shopline');
+                });
+            });
 
         if (! $user->isAdministrator()) {
             $ownerNames = collect([$user->name, $user->username])
@@ -141,7 +149,7 @@ class PerformanceReportController extends Controller
         if ($user->isAdministrator()) {
             $storeOperators = DB::connection($connection)->table($storeTable.' as stores')
                 ->join($userTable.' as owners', 'owners.id', '=', 'stores.owner_user_id')
-                ->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy')")
+                ->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy','shopline')")
                 ->select(['owners.id', 'owners.name', 'owners.username'])
                 ->distinct()->orderBy('owners.name')->get();
             $operators = $this->fashionOperators()
@@ -196,7 +204,7 @@ class PerformanceReportController extends Controller
         $store = DB::connection(config('admin.database.connection') ?: config('database.default'))
             ->table('assistant_domain_stores')
             ->where('id', (int) $validated['store_id'])
-            ->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy')")
+            ->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')")
             ->when(! $user->isAdministrator(), function ($query) use ($user): void {
                 $names = collect([$user->name, $user->username])->filter()->map(fn ($name) => trim((string) $name))->unique()->values()->all();
                 $query->where(function ($binding) use ($user, $names): void {
@@ -205,10 +213,11 @@ class PerformanceReportController extends Controller
                 });
             })->first();
         abort_unless($store, 403, '无权查看该店铺订单。');
+        $sourcePlatform = mb_strtolower(trim((string) $store->site_builder)) === 'shopline' ? 'shopline' : 'xshoppy';
 
         $ordersQuery = FashionLogisticsOrder::query()
             ->where('assistant_domain_store_id', (int) $validated['store_id'])
-            ->where('source_platform', 'xshoppy')
+            ->where('source_platform', $sourcePlatform)
             ->whereBetween('order_created_at', [$utcFrom, $utcTo]);
         $amount = (float) (clone $ordersQuery)->sum('total_amount');
         $orders = $ordersQuery

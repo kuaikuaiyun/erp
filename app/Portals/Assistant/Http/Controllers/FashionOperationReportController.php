@@ -46,7 +46,7 @@ class FashionOperationReportController extends Controller
         $utcTo = CarbonImmutable::parse($dateTo.' 23:59:59', $timezone)->utc()->format('Y-m-d H:i:s');
 
         $stores = AssistantDomainStore::query()
-            ->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy')")
+            ->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')")
             ->with('ownerUser.departments')
             ->orderBy('shop_name')->get();
         $nameUsers = AdminUser::query()->with('departments')->whereIn('name', $stores->pluck('user_name')->filter()->unique())
@@ -62,7 +62,15 @@ class FashionOperationReportController extends Controller
 
         $orderMetrics = FashionLogisticsOrder::query()
             ->whereIn('assistant_domain_store_id', $stores->pluck('id'))
-            ->where('source_platform', 'xshoppy')
+            ->where(function ($platform) use ($stores): void {
+                $platform->where(function ($xshoppy): void {
+                    $xshoppy->where('source_platform', 'xshoppy')
+                        ->whereIn('assistant_domain_store_id', $stores->filter(fn (AssistantDomainStore $store) => in_array(mb_strtolower(trim((string) $store->site_builder)), ['xshoppy', 'xshopy'], true))->pluck('id'));
+                })->orWhere(function ($shopline): void {
+                    $shopline->where('source_platform', 'shopline')
+                        ->whereIn('assistant_domain_store_id', $stores->filter(fn (AssistantDomainStore $store) => mb_strtolower(trim((string) $store->site_builder)) === 'shopline')->pluck('id'));
+                });
+            })
             ->whereBetween('order_created_at', [$utcFrom, $utcTo])
             ->selectRaw('assistant_domain_store_id, COUNT(*) order_count, COALESCE(SUM(total_amount),0) revenue')
             ->groupBy('assistant_domain_store_id')->get()->keyBy('assistant_domain_store_id');
@@ -80,6 +88,7 @@ class FashionOperationReportController extends Controller
             $storeRows = $operatorStores->map(function (AssistantDomainStore $store) use ($orderMetrics): array {
                 $metric = $orderMetrics->get($store->getKey());
                 return ['name' => (string) ($store->shop_name ?: $store->domain), 'domain' => (string) $store->domain,
+                    'site_builder' => in_array(mb_strtolower(trim((string) $store->site_builder)), ['xshoppy', 'xshopy'], true) ? 'XShoppy' : 'Shopline',
                     'orders' => (int) ($metric->order_count ?? 0), 'revenue' => (float) ($metric->revenue ?? 0)];
             })->values();
             $orderCount = (int) $storeRows->sum('orders');
