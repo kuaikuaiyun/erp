@@ -11,7 +11,7 @@ class DailyAccountOpening extends Model
 
     protected $fillable = [
         'operator_user_id', 'operator_name', 'operation_department_id', 'operation_department_name',
-        'media', 'quantity', 'email', 'profile_link', 'bcid', 'status',
+        'agency_id', 'agency_name', 'media', 'quantity', 'email', 'profile_link', 'bcid', 'status',
         'processed_by', 'processed_by_name', 'processed_at', 'response_text',
     ];
 
@@ -27,6 +27,7 @@ class DailyAccountOpening extends Model
             'operator_user_id' => 'integer',
             'operation_department_id' => 'integer',
             'quantity' => 'integer',
+            'agency_id' => 'integer',
             'processed_by' => 'integer',
             'processed_at' => 'datetime',
         ];

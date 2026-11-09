@@ -27,6 +27,7 @@ class AccountOpeningReviewController extends Controller
         $filters = $request->validate([
             'operation_department_id' => ['nullable', 'integer'],
             'status' => ['nullable', 'in:pending,processed'],
+            'agency' => ['nullable', 'string', 'max:100'],
             'media' => ['nullable', 'string', 'max:100'],
             'operator' => ['nullable', 'string', 'max:100'],
         ]);
@@ -39,8 +40,11 @@ class AccountOpeningReviewController extends Controller
             $visibleIds === [] ? $query->whereRaw('1 = 0') : $query->whereIn('operation_department_id', $visibleIds);
         }
         $departments = $visibleIds === null ? $allDepartments : $allDepartments->whereIn('id', $visibleIds)->values();
+        $optionQuery = DailyAccountOpening::query()
+            ->when($visibleIds !== null, fn ($q) => $visibleIds === [] ? $q->whereRaw('1 = 0') : $q->whereIn('operation_department_id', $visibleIds));
         $query->when($filters['operation_department_id'] ?? null, fn ($q, $id) => $q->where('operation_department_id', $id))
             ->when($filters['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
+            ->when($filters['agency'] ?? null, fn ($q, $agency) => $q->where('agency_name', $agency))
             ->when($filters['media'] ?? null, fn ($q, $media) => $q->where('media', $media))
             ->when($filters['operator'] ?? null, fn ($q, $name) => $q->where('operator_name', 'like', '%'.$name.'%'));
 
@@ -49,7 +53,8 @@ class AccountOpeningReviewController extends Controller
             'user' => $context['user'],
             'filters' => $filters,
             'departments' => $departments,
-            'mediaOptions' => DailyAccountOpening::query()->distinct()->orderBy('media')->pluck('media'),
+            'agencyOptions' => (clone $optionQuery)->whereNotNull('agency_name')->where('agency_name', '!=', '')->distinct()->orderBy('agency_name')->pluck('agency_name'),
+            'mediaOptions' => $optionQuery->distinct()->orderBy('media')->pluck('media'),
             'submissions' => $query->orderByRaw("CASE WHEN status = 'pending' THEN 0 ELSE 1 END")->latest('id')->paginate(20)->withQueryString(),
         ]);
     }

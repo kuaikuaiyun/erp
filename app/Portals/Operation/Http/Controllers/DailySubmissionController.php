@@ -4,7 +4,6 @@ namespace App\Portals\Operation\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\AssistantAdvertisingAgency;
-use App\Models\AssistantAdvertisingMedia;
 use App\Models\AdminUser;
 use App\Models\DailyAdvertisingRecharge;
 use App\Models\DailyAccountOpening;
@@ -97,6 +96,7 @@ class DailySubmissionController extends Controller
             : null;
         $agencies = AssistantAdvertisingAgency::query()
             ->where('is_enabled', true)
+            ->whereHas('advertisingMedia', fn ($query) => $query->where('is_enabled', true))
             ->when($assistantDepartmentIds !== null, fn ($query) => $query->whereIn('assistant_department_id', $assistantDepartmentIds))
             ->with('advertisingMedia')
             ->get()
@@ -178,29 +178,38 @@ class DailySubmissionController extends Controller
         $assistantDepartmentIds = $operationDepartment
             ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $operationDepartment->getKey())
             : null;
-        $mediaOptions = $this->accountOpeningMediaOptions($assistantDepartmentIds);
-        $mediaType = $this->accountOpeningMediaType((string) $request->input('media'));
+        $agencies = AssistantAdvertisingAgency::query()
+            ->where('is_enabled', true)
+            ->when($assistantDepartmentIds !== null, fn ($query) => $query->whereIn('assistant_department_id', $assistantDepartmentIds))
+            ->with('advertisingMedia')->get()->keyBy('id');
+        $selectedAgency = $agencies->get($request->integer('agency_id'));
+        $mediaType = $this->accountOpeningMediaType((string) ($selectedAgency?->advertisingMedia?->name ?? ''));
 
         $validated = $request->validate([
-            'media' => ['required', 'string', Rule::in($mediaOptions)],
+            'agency_id' => ['required', 'integer', Rule::in($agencies->keys()->all())],
             'quantity' => ['required', 'integer', 'min:1', 'max:10000'],
             'email' => [Rule::requiredIf(in_array($mediaType, ['facebook', 'email'], true)), 'nullable', 'string', 'max:191'],
             'profile_link' => [Rule::requiredIf($mediaType === 'facebook'), 'nullable', 'string', 'max:2000'],
             'bcid' => [Rule::requiredIf($mediaType === 'tiktok'), 'nullable', 'string', 'max:191'],
         ], [
-            'media.required' => '请选择社媒。',
+            'agency_id.required' => '请先选择广告代理，再选择对应社媒。',
+            'agency_id.in' => '所选广告代理和社媒不属于当前运营部门可用范围。',
             'quantity.required' => '请填写开户数量。',
             'email.required' => '该社媒必须填写邮箱。',
             'profile_link.required' => 'Facebook 必须填写个号链接。',
             'bcid.required' => 'TikTok 必须填写 BCID。',
         ]);
+        /** @var AssistantAdvertisingAgency $selectedAgency */
+        $selectedAgency = $agencies->get((int) $validated['agency_id']);
 
         DailyAccountOpening::query()->create([
             'operator_user_id' => (int) $operator->getKey(),
             'operator_name' => (string) ($operator->name ?: $operator->username),
             'operation_department_id' => $operationDepartment?->getKey(),
             'operation_department_name' => $operationDepartment?->name,
-            'media' => $validated['media'],
+            'agency_id' => (int) $selectedAgency->getKey(),
+            'agency_name' => (string) $selectedAgency->name,
+            'media' => (string) $selectedAgency->advertisingMedia?->name,
             'quantity' => (int) $validated['quantity'],
             'email' => isset($validated['email']) ? trim((string) $validated['email']) : null,
             'profile_link' => isset($validated['profile_link']) ? trim((string) $validated['profile_link']) : null,
@@ -368,7 +377,7 @@ class DailySubmissionController extends Controller
             'isBoss' => $isBoss,
             'operatorOptions' => $operatorOptions,
             'selectedOperator' => $operator,
-            'mediaOptions' => $this->accountOpeningMediaOptions($assistantDepartmentIds),
+            'advertisingAgencyGroups' => AssistantAdvertisingAgency::enabledGroups($assistantDepartmentIds),
             'history' => DailyAccountOpening::query()->where('operator_user_id', $operator->getKey())->latest('id')->paginate(15)->withQueryString(),
         ]);
     }
@@ -413,14 +422,6 @@ class DailySubmissionController extends Controller
             'advertisingAgencyGroups' => AssistantAdvertisingAgency::enabledGroups($assistantIds), 'projects' => $projects,
             'history' => DailyAccountStoreTransfer::query()->where('operator_user_id', $operator->id)->latest('id')->paginate(15)->withQueryString(),
         ]);
-    }
-
-    /** @return list<string> */
-    private function accountOpeningMediaOptions(?array $assistantDepartmentIds): array
-    {
-        return collect(['Facebook', 'TikTok', 'Google', 'Bigo', 'MediaGo'])
-            ->merge(AssistantAdvertisingMedia::enabledNames($assistantDepartmentIds))
-            ->filter()->unique(fn ($name) => mb_strtolower(trim((string) $name)))->values()->all();
     }
 
     private function accountOpeningMediaType(string $media): string
