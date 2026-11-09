@@ -234,6 +234,7 @@ var shoplineSyncRange = document.getElementById('shopline-sync-range');
 var shoplineSyncPagination = document.getElementById('shopline-sync-pagination');
 var shoplineSyncSubmit = document.getElementById('shopline-sync-submit');
 var shoplineSyncRequest = null;
+var shoplineSyncRequestSequence = 0;
 
 function setShoplineSyncSubmitting(isSubmitting) {
     if (!shoplineSyncSubmit) return;
@@ -265,7 +266,22 @@ function loadShoplineSyncStatus(page) {
         per_page: document.getElementById('shopline-sync-per-page').value || '20'
     });
     var abortController = window.AbortController ? new AbortController() : null;
-    var requestTimer = window.setTimeout(function () { if (abortController) abortController.abort(); }, 20000);
+    var requestSequence = ++shoplineSyncRequestSequence;
+    var releaseRequest = function (timedOut) {
+        if (requestSequence !== shoplineSyncRequestSequence) return;
+        window.clearTimeout(requestTimer);
+        shoplineSyncRequest = null;
+        setShoplineSyncSubmitting(false);
+        if (timedOut) {
+            shoplineSyncRows.innerHTML = '<tr><td colspan="7" class="text-center text-danger">请求超时，请重试</td></tr>';
+            shoplineSyncSummary.innerHTML = '';
+            shoplineSyncRange.textContent = '';
+        }
+    };
+    var requestTimer = window.setTimeout(function () {
+        if (abortController) abortController.abort();
+        releaseRequest(true);
+    }, 20000);
     shoplineSyncRequest = fetch(shoplineSyncEndpoint + '?' + params.toString(), {headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}, signal: abortController ? abortController.signal : undefined})
         .then(function (response) { if (!response.ok) throw new Error('HTTP ' + response.status); return response.json(); })
         .then(renderShoplineSyncStatus)
@@ -275,11 +291,7 @@ function loadShoplineSyncStatus(page) {
             shoplineSyncSummary.innerHTML = '';
             shoplineSyncRange.textContent = '';
         })
-        .then(function () {
-            window.clearTimeout(requestTimer);
-            shoplineSyncRequest = null;
-            setShoplineSyncSubmitting(false);
-        });
+        .then(function () { releaseRequest(false); });
 }
 
 function renderShoplineSyncStatus(data) {
