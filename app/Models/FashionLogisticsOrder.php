@@ -13,7 +13,7 @@ class FashionLogisticsOrder extends Model
         'status', 'payment_status', 'fulfillment_status', 'currency', 'total_amount', 'shipping_amount', 'discount_amount', 'tax_amount',
         'payment_method', 'payment_method_title', 'transaction_id', 'customer_id', 'customer_name',
         'customer_email', 'customer_phone', 'shipping_country', 'shipping_state', 'shipping_city',
-        'shipping_address', 'customer_note', 'source_order_created_at', 'source_order_timezone', 'order_created_at_utc', 'order_created_at', 'order_modified_at', 'paid_at',
+        'shipping_address', 'customer_note', 'source_order_created_at', 'source_order_timezone', 'order_created_at_utc', 'order_created_at', 'order_modified_at', 'paid_at', 'paid_at_utc',
         'completed_at', 'source_payload', 'source_synced_at',
     ];
 
@@ -28,7 +28,7 @@ class FashionLogisticsOrder extends Model
         return [
             'total_amount' => 'decimal:4', 'shipping_amount' => 'decimal:4', 'discount_amount' => 'decimal:4',
             'tax_amount' => 'decimal:4', 'source_payload' => 'array', 'source_order_created_at' => 'datetime', 'order_created_at_utc' => 'datetime', 'order_created_at' => 'datetime',
-            'order_modified_at' => 'datetime', 'paid_at' => 'datetime', 'completed_at' => 'datetime',
+            'order_modified_at' => 'datetime', 'paid_at' => 'datetime', 'paid_at_utc' => 'datetime', 'completed_at' => 'datetime',
             'source_synced_at' => 'datetime',
         ];
     }

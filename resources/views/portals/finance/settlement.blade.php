@@ -168,7 +168,7 @@
 </tr>
 @empty<tr><td data-settlement-colspan="{{ $hasOperations ? 2 : 1 }}" colspan="{{ count($columns) + ($hasOperations ? 2 : 1) }}">无符合条件的记录</td></tr>@endforelse
 </tbody></table></div>@include('portals.finance.pagination', ['paginator' => $rows])
-<p class="settlement-note">@if($orderView)每笔付款单独列示。应结算为美元收款金额减去手续费至争议费各列，再加上三项返还。缺少换汇或返还依据的金额待核对。@endif 费用和返还金额以美元填写，物流和采购以人民币填写。金额可按需补充。使用人和团队优先显示财务补录。@if($orderView)已匹配物流订单时，使用人优先取下单时的归属人，其次取订单使用人。团队取订单所属组。@else 未补充时按域名匹配。@endif 已锁定月份不可修改。</p>
+<p class="settlement-note">@if($orderView)每笔付款单独列示。应结算为美元收款金额减去手续费至争议费各列，再加上三项返还。缺少换汇或返还依据的金额待核对。@endif 费用和返还金额以美元填写，物流和采购以人民币填写。金额可按需补充。使用人和团队优先显示财务补录。@if($orderView)已匹配物流订单时，使用人按下单时生效的归属历史显示，早于第一条记录的订单按第一条归属，未分配时留空。查不到历史时，依次取订单归属快照和绑定店铺的归属人。团队取订单所属组。@else 未补充时按域名匹配。@endif 已锁定月份不可修改。</p>
 </div></div>
 @if($orderView)
 <dialog class="settlement-dialog settlement-paypal-detail" id="settlement-detail" aria-labelledby="settlement-detail-title">
