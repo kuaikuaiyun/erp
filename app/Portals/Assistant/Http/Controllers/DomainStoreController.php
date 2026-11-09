@@ -93,6 +93,9 @@ class DomainStoreController extends Controller
             'operationDepartments' => $canConfigureStoreOwnership
                 ? $this->storeOwners->storeOwnershipOperationDepartments()
                 : collect(),
+            'selectableOperationDepartmentIds' => $canConfigureStoreOwnership
+                ? $this->storeOwners->storeOwnershipSelectableOperationDepartments()->pluck('id')->map(static fn ($id): int => (int) $id)->all()
+                : [],
             'operationScopeMap' => $operationScopeMap,
             'domainCheckLabels' => AssistantDomainStore::domainCheckLabels(),
             'shopStatusLabels' => AssistantDomainStore::shopStatusLabels(),
@@ -778,8 +781,7 @@ class DomainStoreController extends Controller
         $assistantDepartmentIds = $this->authorization->assistantChildDepartments()
             ->pluck('id')
             ->map(static fn (mixed $id): int => (int) $id);
-        $operationDepartmentIds = $this->storeOwners->storeOwnershipOperationDepartments()
-            ->filter(static fn ($department): bool => (int) ($department->tree_depth ?? 0) > 0)
+        $operationDepartmentIds = $this->storeOwners->storeOwnershipSelectableOperationDepartments()
             ->pluck('id')
             ->map(static fn (mixed $id): int => (int) $id);
         $scopeMap = [];
@@ -1536,10 +1538,7 @@ class DomainStoreController extends Controller
             ->unique()
             ->values();
 
-        return $this->storeOwners->storeOwnershipOperationDepartments()
-            // Each configured root is a visual select-all group, not an
-            // assignable department. This also hides legacy root mappings.
-            ->filter(static fn ($department): bool => (int) ($department->tree_depth ?? 0) > 0)
+        return $this->storeOwners->storeOwnershipSelectableOperationDepartments()
             ->whereIn('id', $operationDepartmentIds->all())
             ->values();
     }

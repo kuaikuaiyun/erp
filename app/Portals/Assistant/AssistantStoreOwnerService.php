@@ -20,6 +20,7 @@ class AssistantStoreOwnerService
     private const STORE_OWNERSHIP_DEPARTMENT_CODES = [
         self::OPERATION_DEPARTMENT_CODE,
         'dept-000037',
+        'dept-000029',
     ];
 
     /** @return Collection<int, Department> */
@@ -37,6 +38,26 @@ class AssistantStoreOwnerService
     public function storeOwnershipOperationDepartments(): Collection
     {
         return $this->departmentTrees(self::STORE_OWNERSHIP_DEPARTMENT_CODES);
+    }
+
+    /**
+     * A root with children is only a visual select-all group. A root without
+     * children is itself a leaf and remains selectable for store ownership.
+     *
+     * @return Collection<int, Department>
+     */
+    public function storeOwnershipSelectableOperationDepartments(): Collection
+    {
+        $departments = $this->storeOwnershipOperationDepartments();
+        $parentIds = $departments
+            ->pluck('parent_id')
+            ->filter()
+            ->map(static fn (mixed $id): int => (int) $id)
+            ->unique();
+
+        return $departments
+            ->reject(fn (Department $department): bool => $parentIds->contains((int) $department->getKey()))
+            ->values();
     }
 
     /**
