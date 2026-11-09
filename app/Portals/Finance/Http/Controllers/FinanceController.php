@@ -8,6 +8,7 @@ use App\Models\FinancePaymentAccount;
 use App\Models\FinanceRecord;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Finance\FinanceCatalog;
+use App\Portals\Finance\FinanceCreditSettlementLayout;
 use App\Portals\Finance\FinancePaymentBalanceService;
 use App\Portals\Finance\FinancePayPalBalanceService;
 use App\Portals\Finance\FinancePayPalSettlementOrders;
@@ -1266,6 +1267,7 @@ class FinanceController extends Controller
             'order_status' => ['nullable', Rule::in(['已付款', '付款失败', '付款待确认', '全额退款', '部分退款', '退款待确认', '仍有冻结', '冻结已解除', '返还待核对', '待关联交易'])],
             'per_page' => ['nullable', 'integer', Rule::in([10, 20, 50, 100])],
             'source' => ['nullable', Rule::in(['xuzong2-orders', 'xuzong2-details', 'xuzong1-details'])],
+            'card_channel' => ['nullable', Rule::in(array_keys(FinanceCreditSettlementLayout::CHANNELS))],
             'conditions' => 'nullable|array|max:10', 'conditions.*' => 'array:field,operator,value',
             'conditions.*.field' => ['required', Rule::in(array_keys($conditionFields))],
             'conditions.*.operator' => ['required', Rule::in(['equals','contains','not_equals','empty','not_empty','gt','gte','lt','lte'])],
@@ -1285,6 +1287,7 @@ class FinanceController extends Controller
         $conditionFields = $service->conditionFields($channel);
         $numericConditionFields = $service->numericConditionFields($channel);
         $filters = $this->settlementFilters($request, $conditionFields);
+        $cardLayout = $channel === 'credit_card' ? FinanceCreditSettlementLayout::columns($filters['card_channel'] ?? null) : [];
         foreach ($filters['conditions'] ?? [] as $condition) {
             if (in_array($condition['operator'], ['gt','gte','lt','lte'], true)
                 && (! in_array($condition['field'], $numericConditionFields, true) || $service->number($condition['value'] ?? null) === null)) {
@@ -1293,15 +1296,15 @@ class FinanceController extends Controller
         }
         $columns = $service->columns($channel);
         if ($request->boolean('template')) {
-            $templateHeaders = array_values($channel === 'paypal'
-                ? $service->columns($channel) : ['account' => '支付账户', ...array_combine(FinanceCatalog::dataset('xuzong2-details')['headers'], FinanceCatalog::dataset('xuzong2-details')['headers']), 'usd_rate' => '汇率']);
+            $templateHeaders = array_values($cardLayout ?: ($channel === 'paypal'
+                ? $service->columns($channel) : ['account' => '支付账户', ...array_combine(FinanceCatalog::dataset('xuzong2-details')['headers'], FinanceCatalog::dataset('xuzong2-details')['headers']), 'usd_rate' => '汇率']));
             return $this->workbooks->download($templateHeaders, [], $report.'-template.xlsx');
         }
         $paginator = null;
         $editorFields = array_diff_key($columns, ['id' => true]);
         $orderView = $channel === 'paypal';
-        $columns = $service->listColumns($channel);
-        $exportColumns = $service->exportColumns($channel);
+        $columns = $cardLayout ?: $service->listColumns($channel);
+        $exportColumns = $cardLayout ?: $service->exportColumns($channel);
         if ($request->boolean('download')) {
             $requestedColumns = $request->validate([
                 'export_columns' => 'sometimes|required|array|list|min:1|max:'.count($exportColumns),
@@ -1357,8 +1360,9 @@ class FinanceController extends Controller
             }
             return $this->workbooks->download($downloadHeaders, $rows->lazy()->map(fn ($row) => array_map(
                 fn ($field) => match (true) {
-                    ! $orderView => $row[$field] ?? '',
+                    ! $orderView => ($row['card_layout'] ?? $row)[$field] ?? '',
                     $field === 'paypal_18' => FinanceProductNames::categories((string) ($row[$field] ?? '')),
+                    $field === 'review' && ($row['review'] ?? null) === FinancePayPalSettlementOrders::ACCOUNT_RESERVE_NOTE => '',
                     default => FinancePayPalSettlementOrders::splitRefundNote($row, $field) ?? ($row[$field] ?? ''),
                 },
                 $requestedColumns,
@@ -1398,9 +1402,13 @@ class FinanceController extends Controller
             'header_row.*' => '表头行号必须在 1 到 1000 之间。',
         ]);
         $channel = $report === 'paypal-settlement' ? 'paypal' : 'credit_card';
+        $cardLayout = $channel === 'credit_card' && $report !== 'paypal-orders'
+            ? FinanceCreditSettlementLayout::columns($request->validate([
+                'card_channel' => ['nullable', Rule::in(array_keys(FinanceCreditSettlementLayout::CHANNELS))],
+            ])['card_channel'] ?? null) : [];
         $columns = $report === 'paypal-orders'
             ? \App\Portals\Finance\FinancePayPalOrderExport::pageHeaders($report)
-            : app(\App\Portals\Finance\FinanceSettlementService::class)->exportColumns($channel);
+            : ($cardLayout ?: app(\App\Portals\Finance\FinanceSettlementService::class)->exportColumns($channel));
 
         return response()->json($this->workbooks->readExportTemplate($data['file'], (int) $data['header_row'], $columns));
     }
@@ -1483,6 +1491,9 @@ class FinanceController extends Controller
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
         if ($channel === 'paypal') {
             return $this->importNewPayPalSettlements($request, $service, (int) $context['user']->getKey());
+        }
+        if ($request->filled('card_channel')) {
+            return $this->importCreditChannelDetails($request, $report, (int) $context['user']->getKey());
         }
         if ($request->input('import_kind') === 'source') {
             abort_unless($channel === 'credit_card', 422);
@@ -1733,6 +1744,42 @@ class FinanceController extends Controller
         }
 
         return redirect()->route('finance.report', $route)->with('success', '已新增 '.count($created).' 条结算明细，跳过重复 '.$duplicates.' 条。新记录ID由系统生成。');
+    }
+
+    private function importCreditChannelDetails(Request $request, string $report, int $actor): Response
+    {
+        $data = $request->validate([
+            'card_channel' => ['required', Rule::in(array_keys(FinanceCreditSettlementLayout::CHANNELS))],
+            'account' => 'required|string|max:191',
+            'timezone' => ['required', Rule::in(FinanceWorkbookService::TIMEZONES)],
+        ]);
+        $channel = $data['card_channel'];
+        $limit = ini_parse_quantity((string) ini_get('memory_limit'));
+        if ($limit > 0 && $limit < 384 * 1024 ** 2) {
+            ini_set('memory_limit', '384M');
+        }
+        $columns = FinanceCreditSettlementLayout::columns($channel);
+        $optional = $channel === 'ye' ? array_keys(array_slice($columns, 21, preserve_keys: true)) : [];
+        $rows = $this->workbooks->read($request->file('file'), $columns, FinanceCreditSettlementLayout::SHEETS[$channel],
+            $optional, keyedHeaders: true, maxRows: 10000);
+        $rows = array_map(fn (array $row) => FinanceCreditSettlementLayout::importPayload($channel, $row), $rows);
+        try {
+            $count = $this->workbooks->database()->transaction(function () use ($data, $rows, $actor): int {
+                $account = FinancePaymentAccount::query()->where('account_type', 'credit_card')
+                    ->where('activity_account', $data['account'])->lockForUpdate()->first();
+                if (! $account) {
+                    throw ValidationException::withMessages(['account' => '请选择有效的信用卡支付账户。']);
+                }
+
+                return $this->workbooks->importRecords('xuzong2-details', $rows, $account->activity_account,
+                    $data['timezone'], $actor, createOnly: true, guardSettlementMonth: true);
+            });
+        } catch (\App\Portals\Finance\FinanceRelayException $e) {
+            throw ValidationException::withMessages(['file' => $e->getMessage()]);
+        }
+
+        return redirect()->route('finance.report', ['report' => $report, ...$data])
+            ->with('success', '已新增 '.$count.' 条信用卡明细，跳过重复 '.(count($rows) - $count).' 条。');
     }
 
     private function creditImportMonths(?int $accountId = null, ?string $account = null): array
