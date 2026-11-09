@@ -1,6 +1,7 @@
 @extends('portals.finance.layout', ['title' => __('finance.menus.'.$report)])
 @push('styles')
 <style>
+#credit-merchant-empty[hidden], #credit-add-merchant[hidden] { display: none !important; }
 .settlement-page .box{border-top:0;border-radius:7px}.settlement-page .box-body{padding:18px 20px}.settlement-filter{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 20px}.settlement-filter label{display:block;font-weight:400;margin-bottom:7px}.settlement-filter .form-control{width:100%;height:35px;background:#f3f6f9}.settlement-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:18px;padding-top:14px;border-top:1px solid #e5edf3}.settlement-actions .form-control{width:120px}.settlement-page .finance-table-wrap{max-height:650px;overflow:auto}.settlement-page .finance-table{width:max-content;min-width:100%;margin:0;border-collapse:separate;border-spacing:0}.settlement-page .finance-table th,.settlement-page .finance-table td{border:1px solid #e1eaf1;padding:11px 14px;text-align:center;white-space:nowrap;min-width:125px;max-width:240px}.settlement-page .finance-table th{position:sticky;top:0;z-index:2}.settlement-page .finance-table td{background:white}.settlement-page .finance-table tr:nth-child(even) td{background:#f8fafc}.settlement-page .finance-table th:first-child,.settlement-page .finance-table td:first-child{position:sticky;left:0;z-index:3;min-width:80px}.settlement-page .finance-table th:first-child{z-index:4}.settlement-dialog{width:780px;max-width:calc(100vw - 32px);max-height:85vh;border:0;border-radius:8px;padding:0;color:#3b5870}.settlement-dialog::backdrop{background:#102c4866}.settlement-dialog header{padding:16px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e2eaf2}.settlement-dialog h3{font-size:17px;margin:0}.settlement-dialog header button{border:0;background:none;font-size:24px}.settlement-edit-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:20px;max-height:58vh;overflow:auto}.settlement-edit-grid label{display:block;font-weight:400}.settlement-edit-grid .form-control{width:100%}.settlement-dialog footer{padding:14px 20px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid #e2eaf2}.settlement-note{font-size:12px;color:#8192a2;margin:12px 0}.settlement-pending{color:#8e9ba9}.settlement-import-drop{position:relative;display:block;background:#f2faff;border:1px dashed #3498db;padding:40px 20px;text-align:center;margin:20px;cursor:pointer}.settlement-import-drop input{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}.settlement-import-drop .fa{display:block;font-size:30px;margin-bottom:12px;color:#2885b1}@media(max-width:1000px){.settlement-filter{grid-template-columns:repeat(2,minmax(0,1fr))}.settlement-edit-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:600px){.settlement-filter,.settlement-edit-grid{grid-template-columns:1fr}}
 .paypal-editor{width:1080px;max-height:90vh;overflow:hidden;border-radius:12px;box-shadow:0 24px 80px #102c4833}
 .paypal-editor[open]{display:flex;flex-direction:column}.paypal-editor>header{flex-shrink:0;padding:22px 26px;background:#fff}.paypal-editor h3{font-size:19px;font-weight:600;color:#244861}.paypal-editor #settlement-edit-reference{display:block;margin-top:8px;font-size:12px;color:#7b8d9d;overflow-wrap:anywhere}.paypal-editor>form{display:flex;flex-direction:column;min-height:0;margin:0;overflow:hidden}.paypal-editor-body{overflow:auto;min-height:0;padding:20px 26px;background:#f4f7fa;scrollbar-gutter:stable}.paypal-editor-section{margin:0 0 16px;padding:20px;background:#fff;border:1px solid #e3eaf0;border-radius:8px;min-width:0}.paypal-editor-section h4{margin:0 0 20px;font-size:15px;font-weight:600;color:#244861;border-left:3px solid #3498db;padding-left:10px}.paypal-editor-fields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px 20px}.paypal-editor-field{min-width:0}.paypal-editor-field label{display:block;font-size:13px;font-weight:400;margin:0 0 7px;color:#536b7e}.paypal-editor-field .form-control{width:100%;height:38px;border:1px solid #d6e1ea;border-radius:5px;box-shadow:none;color:#304f66;background:#fff;padding:8px 10px}.paypal-editor-field .form-control:focus{border-color:#3c9bd1;box-shadow:0 0 0 3px #3498db15;outline:0}.paypal-editor-field-wide{grid-column:span 2}.paypal-editor-field-note{grid-column:1/-1}.paypal-editor-field textarea.form-control{height:82px;resize:vertical;min-height:70px}.paypal-editor-help{margin:14px 0 0;font-size:12px;line-height:1.8;color:#7b8d9d}.paypal-editor footer{flex-shrink:0;padding:16px 26px;background:#fff}.paypal-editor footer .btn{border-radius:5px;min-height:36px;padding:7px 16px}
@@ -167,7 +168,7 @@
 </tr>
 @empty<tr><td data-settlement-colspan="{{ $hasOperations ? 2 : 1 }}" colspan="{{ count($columns) + ($hasOperations ? 2 : 1) }}">无符合条件的记录</td></tr>@endforelse
 </tbody></table></div>@include('portals.finance.pagination', ['paginator' => $rows])
-<p class="settlement-note">@if($orderView)每笔付款单独列示。应结算为美元收款金额减去手续费至争议费各列，再加上三项返还。缺少换汇或返还依据的金额待核对。@endif 费用和返还金额以美元填写，物流和采购以人民币填写。金额可按需补充。使用人和团队优先显示导入补充值，未补充时按域名匹配。已锁定月份不可修改。</p>
+<p class="settlement-note">@if($orderView)每笔付款单独列示。应结算为美元收款金额减去手续费至争议费各列，再加上三项返还。缺少换汇或返还依据的金额待核对。@endif 费用和返还金额以美元填写，物流和采购以人民币填写。金额可按需补充。使用人和团队优先显示财务补录。@if($orderView)已匹配物流订单时，使用人优先取下单时的归属人，其次取订单使用人。团队取订单所属组。@else 未补充时按域名匹配。@endif 已锁定月份不可修改。</p>
 </div></div>
 @if($orderView)
 <dialog class="settlement-dialog settlement-paypal-detail" id="settlement-detail" aria-labelledby="settlement-detail-title">
@@ -237,9 +238,6 @@
     <p class="help-block" id="credit-merchant-empty" hidden>当前平台暂无可用商户。</p>
     <a id="credit-add-merchant" href="{{ route('finance.home', ['balance_tab' => 'credit-card']) }}" hidden>到工作台新增商户</a>
     </div>
-    <div id="credit-import-kind-field"><label for="credit-import-kind">文件类型</label><select id="credit-import-kind" name="import_kind" class="form-control">
-        <option value="">订单明细</option><option value="conflux_report" @selected(old('import_kind') === 'conflux_report')>结算报表</option>
-    </select></div>
     <div id="credit-import-timezone-field"><label for="credit-import-timezone">文件时区</label><select id="credit-import-timezone" name="timezone" class="form-control">@include('portals.finance.partials.timezone-options', ['selectedTimezone' => old('timezone', $cardChannel === 'ye' ? 'Asia/Shanghai' : $filters['timezone'])])</select></div>
 </div>
 @endif
@@ -252,14 +250,14 @@
 </div>
 <p class="settlement-note" style="padding:0 20px">新增结算明细时自动跳过重复交易。按通途订单导入成本时，物流费和采购成本只写入匹配到的主付款。</p>
 @endif
-<label class="settlement-import-drop"><i class="fa fa-cloud-upload" aria-hidden="true"></i>拖拽文件到这里，或点击选择文件<input type="file" name="file" accept=".xlsx,.csv" required></label>
+<label class="settlement-import-drop"><i class="fa fa-cloud-upload" aria-hidden="true"></i><span data-upload-label>拖拽文件到这里，或点击选择文件</span><input type="file" name="file" accept=".xlsx,.csv" required></label>
 <p style="padding:0 20px" data-order-template><a href="{{ route('finance.report', ['report' => $report, 'template' => 1, 'card_channel' => $cardChannel]) }}">下载导入模板（XLSX）</a></p>
 @if($channel === 'paypal')
 <p style="padding:0 20px"><a href="{{ route('finance.report', ['report' => $report, 'template' => 1, 'import_kind' => 'tongtu_costs']) }}">下载通途成本模板（XLSX）</a></p>
 @endif
 <p class="settlement-note" style="padding:0 20px">
 @if($channel === 'credit_card')
-    可先按归属主体筛选，再选择支付平台和具体单包账户。ConfluxAPI 结算报表会核对工作台里的商户标识。
+    ConfluxAPI 可一次选择最多 5 个文件，系统自动识别订单明细和结算报表。同批文件应属于同一个单包账户，结算报表会核对商户标识。
 @endif
 支持 XLSX、CSV，最大 10 MB。
 </p>
@@ -350,44 +348,50 @@ if(editor){
 }
 var importPlatform=document.getElementById('credit-import-platform');
 if(importPlatform){
-    var importForm=importPlatform.form, merchant=importForm.elements.account, kind=importForm.elements.import_kind, group=importForm.elements.card_group;
+    var importForm=importPlatform.form, merchant=importForm.elements.account, group=importForm.elements.card_group;
+    var upload=importForm.querySelector('input[type=file]'), uploadLabel=importForm.querySelector('[data-upload-label]');
     var template=importer.querySelector('[data-order-template]');
     var addMerchant=document.getElementById('credit-add-merchant'), merchantEmpty=document.getElementById('credit-merchant-empty');
     function updateImportScope(){
         var platform=importPlatform.value, isConflux=platform==='ye';
-        kind.disabled=!isConflux;
-        kind.closest('div').hidden=!isConflux;
-        if(!isConflux)kind.value='';
-        var isStatement=isConflux&&kind.value==='conflux_report';
+        if(upload.multiple!==isConflux){
+            upload.value='';
+            upload.multiple=isConflux;
+            upload.name=isConflux?'files[]':'file';
+            upload.dispatchEvent(new Event('change'));
+        }
+        uploadLabel.textContent=isConflux?'拖拽或同时选择订单明细和结算报表':'拖拽文件到这里，或点击选择文件';
         Array.from(merchant.options).forEach(function(option){
-            var available=!option.value||((!group.value||option.dataset.group===group.value)&&(!platform||option.dataset.platform===platform)&&(!isStatement||option.dataset.merchant));
+            var available=!option.value||((!group.value||option.dataset.group===group.value)&&(!platform||option.dataset.platform===platform));
             option.hidden=option.disabled=!available;
         });
         if(merchant.selectedOptions[0]?.disabled)merchant.value='';
         var merchantOptions=Array.from(merchant.options);
         merchantEmpty.hidden=merchantOptions.some(function(option){return option.value&&!option.disabled;});
-        var needsMerchantKey=isStatement&&!merchantEmpty.hidden&&merchantOptions.some(function(option){return option.dataset.platform===platform&&(!group.value||option.dataset.group===group.value);});
-        merchantEmpty.textContent=needsMerchantKey?'请在工作台为现有账户填写 ConfluxAPI 商户标识。':'当前平台暂无可用商户。';
         addMerchant.hidden=!platform;
-        addMerchant.textContent=needsMerchantKey?'到工作台配置商户标识':'到工作台新增商户';
         var accountUrl=new URL(addMerchant.href);
-        if(platform&&!needsMerchantKey)accountUrl.searchParams.set('add_credit_merchant',platform);else accountUrl.searchParams.delete('add_credit_merchant');
+        if(platform)accountUrl.searchParams.set('add_credit_merchant',platform);else accountUrl.searchParams.delete('add_credit_merchant');
         if(group.value)accountUrl.searchParams.set('card_group',group.value);else accountUrl.searchParams.delete('card_group');
         addMerchant.href=accountUrl;
-        importForm.elements.timezone.disabled=!platform||isStatement;
-        importForm.elements.timezone.closest('div').hidden=!platform||isStatement;
-        template.hidden=isStatement;
+        importForm.elements.timezone.disabled=!platform;
+        importForm.elements.timezone.closest('div').hidden=!platform;
         var url=new URL(template.querySelector('a').href);
         if(platform)url.searchParams.set('card_channel',platform);else url.searchParams.delete('card_channel');
         template.querySelector('a').href=url;
     }
     importPlatform.addEventListener('change',function(){merchant.value='';if(importPlatform.value==='ye')importForm.elements.timezone.value='Asia/Shanghai';updateImportScope();});
     group.addEventListener('change',updateImportScope);
-    kind.addEventListener('change',updateImportScope);
     updateImportScope();
 }
 if(editor&&deleteForm){document.getElementById('settlement-editor-delete').addEventListener('click',function(){var id=editor.querySelector('form').elements['id'].value;if(id)deleteSettlements([id]);});}
-document.querySelectorAll('.settlement-dialog input[type=file]').forEach(function(input){input.addEventListener('change',function(){var file=input.files[0];input.setCustomValidity(file&&(!/\.(xlsx|csv)$/i.test(file.name)||file.size>10*1024*1024)?'请选择不超过10MB的XLSX或CSV文件。':'');var label=input.closest('label'),status=label.nextElementSibling;if(!status||!status.hasAttribute('data-file-status')){status=document.createElement('p');status.setAttribute('data-file-status','');status.setAttribute('role','status');status.style.cssText='padding:0 20px;color:#52748d;overflow-wrap:anywhere';label.after(status);}status.textContent=file?'已选择：'+file.name:'';if(file)input.reportValidity();});});
+document.querySelectorAll('.settlement-dialog input[type=file]').forEach(function(input){input.addEventListener('change',function(){
+    var files=Array.from(input.files), invalid=files.some(function(file){return !/\.(xlsx|csv)$/i.test(file.name)||file.size>10*1024*1024;});
+    input.setCustomValidity(files.length>5?'一次最多选择 5 个文件。':invalid?'请选择不超过 10 MB 的 XLSX 或 CSV 文件。':'');
+    var label=input.closest('label'),status=label.nextElementSibling;
+    if(!status||!status.hasAttribute('data-file-status')){status=document.createElement('p');status.setAttribute('data-file-status','');status.setAttribute('role','status');status.style.cssText='padding:0 20px;color:#52748d;overflow-wrap:anywhere';label.after(status);}
+    status.textContent=files.length?'已选择：'+files.map(function(file){return file.name;}).join('、'):'';
+    if(files.length)input.reportValidity();
+});});
 @if(old('id'))
 if(editor){var failedValues={!! \Illuminate\Support\Js::from(\Illuminate\Support\Arr::only(session()->getOldInput(), ['id', ...array_keys($editorFields)])) !!};Object.keys(failedValues).forEach(function(key){if(editor.querySelector('form').elements[key])editor.querySelector('form').elements[key].value=failedValues[key]??'';});editor.showModal();}
 @endif

@@ -193,7 +193,10 @@ class FinanceSettlementService
             ->pluck('payment_account_id', 'finance_record_id');
         $accountsById = $accountModels->keyBy('id');
         $domainGroups = $this->workbooks->domainGroups();
-        $domains = $domainGroups->keyBy('domain');
+        $storesById = $channel === 'paypal' ? $domainGroups->keyBy('id') : collect();
+        $domains = $channel === 'paypal'
+            ? $domainGroups->groupBy('domain')->filter(fn ($groups) => $groups->count() === 1)->map(fn ($groups) => $groups->first())
+            : $domainGroups->keyBy('domain');
         $brushStores = $channel === 'paypal' ? $domainGroups
             ->filter(fn ($group) => filled($group->shop_name ?? null))
             ->groupBy(fn ($group) => trim($group->shop_name))
@@ -204,7 +207,7 @@ class FinanceSettlementService
         $conflux = $channel === 'credit_card' && ($filters['card_channel'] ?? null) === 'ye'
             ? app(FinanceConfluxSettlement::class) : null;
         $ledger = $conflux?->entriesFor($records, $accountModels->keyBy('activity_account'));
-        return $records->map(function ($record) use ($channel, $filters, $supplements, $accounts, $owners, $accountsById, $domains, $brushStores, $locks, $metadata, $conflux, $ledger): array {
+        return $records->map(function ($record) use ($channel, $filters, $supplements, $accounts, $owners, $accountsById, $domains, $storesById, $brushStores, $locks, $metadata, $conflux, $ledger): array {
             $owner = $accountsById->get($owners->get($record->id));
             $p = $record->payload;
             $definition = FinanceCatalog::dataset($record->dataset);
@@ -308,9 +311,22 @@ class FinanceSettlementService
             if ($channel === 'paypal' && ! array_key_exists('fee', $saved) && $row['fee'] !== null) {
                 $row['fee'] = $row['usd_rate'] === null ? null : bcmul($row['fee'], $row['usd_rate'], 8);
             }
-            $group = $domains->get(strtolower((string) $row['domain']));
-            $row['owner'] = filled($saved['owner'] ?? null) ? $saved['owner'] : ($group?->owner ?? ($p['使用人'] ?? ''));
-            $row['team'] = filled($saved['team'] ?? null) ? $saved['team'] : ($group?->team ?? ($p['团队'] ?? ''));
+            $order = $metadata[$record->id]['order'] ?? null;
+            $domain = strtolower(trim((string) ($saved['_edited_fields']['domain'] ?? $row['domain'])));
+            $orderStore = $storesById->get($order->assistant_domain_store_id ?? null);
+            $group = $orderStore?->domain === $domain ? $orderStore : $domains->get($domain);
+            $ownerName = $group?->owner ?? ($p['使用人'] ?? '');
+            $team = $group?->team ?? ($p['团队'] ?? '');
+            if ($order !== null) {
+                if (property_exists($order, 'assigned_owner_name') || property_exists($order, 'operator_name')) {
+                    $ownerName = ($order->assigned_owner_name ?? null) ?: ($order->operator_name ?? '');
+                }
+                if (property_exists($order, 'group_names')) {
+                    $team = FinanceCatalog::teamLabel($order->group_names);
+                }
+            }
+            $row['owner'] = filled($saved['owner'] ?? null) ? $saved['owner'] : $ownerName;
+            $row['team'] = filled($saved['team'] ?? null) ? $saved['team'] : $team;
             $row = [...$row, ...($saved['_edited_fields'] ?? [])];
             if ($channel === 'paypal') {
                 $manualUpsell = $saved['_edited_fields']['upsell'] ?? $saved['upsell'] ?? null;
@@ -318,7 +334,7 @@ class FinanceSettlementService
                     : ($paymentType === LogisticsOrderPaymentReference::TYPE_UPSELL
                         || ($paymentType === null && self::isUpsell($p['是否加购'] ?? '')));
                 $row['subscription'] = $isUpsellPayment ? '加购' : self::subscriptionLabel($row['subscription']);
-                $domainGroup = $domains->get(strtolower(trim((string) $row['domain'])));
+                $domainGroup = $group;
                 if (blank($row['domain'])) {
                     $domainGroup = $brushStores->get(trim((string) ($p['自定义编号'] ?? '')));
                     $row['domain'] = $domainGroup?->domain ?? $row['domain'];
@@ -422,6 +438,7 @@ class FinanceSettlementService
         $selected = $matchOnly ? ['id', ...$referenceFields] : array_values(array_unique(array_intersect(['id', ...$referenceFields, 'assistant_domain_store_id', 'source_shop_domain', 'subscription_type', 'is_add_on', 'tongtu_order_number',
             'shopify_order_number', 'shopify_order_id', 'store_name', 'subscription_status', 'subscription_origin_order_id',
             'tongtu_sku', 'tongtu_product_name', 'sale_quantity', 'sale_product_weight', 'payment_gateway', 'payment_method',
+            'assigned_owner_name', 'operator_name', 'group_names',
             ...array_keys(FinancePayPalOrderExport::COLUMNS), 'created_at', 'buyer_name', 'buyer_email', 'destination'], $columns)));
         $referenceValues = fn ($record) => $channel === 'paypal' ? [$record->reference, trim((string) ($record->payload['帳單號碼'] ?? ''))]
             : [$record->reference, $record->payload['商户订单号'] ?? '', $record->payload['Shopify订单号'] ?? ''];

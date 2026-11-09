@@ -660,6 +660,57 @@ class FinancePortalTest extends TestCase
         $this->assertEqualsCanonicalizing([['BRUSH-PAYMENT', ...$labels], ['AUTO-BRUSH', ...$labels]], array_slice($sheet, 1));
     }
 
+    public function test_paypal_settlement_uses_the_order_owner_snapshot_after_a_store_transfer(): void
+    {
+        Schema::create('assistant_domain_stores', function (Blueprint $table): void {
+            $table->id();
+            $table->string('domain');
+            $table->string('user_name');
+            $table->text('team')->nullable();
+        });
+        DB::table('assistant_domain_stores')->insert([
+            ['id' => 1, 'domain' => 'transfer.example.com', 'user_name' => '备用曾11', 'team' => '厦门总部'],
+            ['id' => 2, 'domain' => 'transfer.example.com', 'user_name' => '陈志霖', 'team' => '深圳团队'],
+        ]);
+        Schema::create('logistics_orders', function (Blueprint $table): void {
+            $table->id();
+            $table->string('bill_number');
+            $table->string('source_shop_domain');
+            $table->string('assigned_owner_name')->nullable();
+            $table->string('operator_name')->nullable();
+            $table->string('group_names')->nullable();
+            $table->unsignedBigInteger('assistant_domain_store_id');
+        });
+        DB::table('logistics_orders')->insert([
+            ['bill_number' => 'BEFORE-TRANSFER', 'source_shop_domain' => 'transfer.example.com',
+                'assistant_domain_store_id' => 1, 'operator_name' => '订单运营', 'group_names' => '郑州团队',
+                'assigned_owner_name' => '张清洪'],
+            ['bill_number' => 'NO-OWNER', 'source_shop_domain' => 'transfer.example.com',
+                'assistant_domain_store_id' => 1, 'operator_name' => null, 'group_names' => null,
+                'assigned_owner_name' => null],
+        ]);
+        $this->workbooks->importRecords('paypal-orders', [
+            2 => [...$this->recordRow(), '日期' => '2026-11-01', '時間' => '03:10:23', '交易 ID' => 'BEFORE-TRANSFER'],
+            3 => [...$this->recordRow(), '日期' => '2026-11-01', '時間' => '03:10:24', '交易 ID' => 'NO-OWNER'],
+        ], 'PayPal owners', 'UTC', 1);
+
+        $url = '/finance/reports/paypal-settlement?timezone=-04%3A00';
+        $rows = $this->get($url)->assertOk()->viewData('rows')->getCollection()->keyBy('reference');
+        $this->assertSame('张清洪', $rows['BEFORE-TRANSFER']['owner']);
+        $this->assertSame('2026-10-31 23:10:23', $rows['BEFORE-TRANSFER']['date']);
+        $this->assertSame('', $rows['NO-OWNER']['owner']);
+        $this->assertSame('', $rows['NO-OWNER']['team']);
+        $sheet = $this->readDownload($this->get($url.'&download=1&export_columns[]=reference&export_columns[]=owner&export_columns[]=team')
+            ->assertOk()->streamedContent())->toArray();
+        $this->assertSame(['BEFORE-TRANSFER', '张清洪', '郑州团队'], collect(array_slice($sheet, 1))->keyBy(0)['BEFORE-TRANSFER']);
+
+        $record = FinanceRecord::where('reference', 'BEFORE-TRANSFER')->sole();
+        $this->post('/finance/reports/paypal-settlement/save', ['id' => $record->id, 'owner' => '财务补录'])
+            ->assertSessionHasNoErrors();
+        $this->get($url.'&reference=BEFORE-TRANSFER')->assertOk()
+            ->assertViewHas('rows', fn ($rows) => $rows->first()['owner'] === '财务补录');
+    }
+
     public function test_settlement_reports_extract_checkout_and_save_without_changing_orders(): void
     {
         DB::table('finance_domain_groups')->insert(['domain' => 'shopyayashi.com', 'owner' => 'Test owner', 'team' => '厦门']);
@@ -993,6 +1044,41 @@ class FinancePortalTest extends TestCase
         $this->assertEquals(2, $row['rdr_refund']);
         $this->get($url.'?'.http_build_query(['card_channel' => 'ye', 'account' => $other->activity_account, 'card_exceptions' => 1]))
             ->assertOk()->assertViewHas('rows', fn ($rows) => $rows->total() === 0);
+    }
+
+    public function test_conflux_batch_detects_orders_and_statements_and_rejects_the_entire_batch_for_a_wrong_merchant(): void
+    {
+        $account = $this->financePayPalAccount('郑州单包', [
+            'account_type' => 'credit_card', 'card_platform' => 'ye', 'card_merchant_key' => 'ZZdanbao',
+        ]);
+        $orders = new Spreadsheet;
+        $orders->getActiveSheet()->setTitle('订单')->fromArray([
+            array_slice(array_values(\App\Portals\Finance\FinanceCreditSettlementLayout::columns('ye')), 0, 21),
+            [null, '2026-11-06 02:00:00', null, 'BATCH-ORDER', null, null, null, null, null, null, null, null, 'USD', 30, '成功'],
+        ]);
+        $statement = new Spreadsheet;
+        $statement->getActiveSheet()->setTitle('结算统计-XAdanbao')->fromArray([
+            ['结算日期', '商户号', '结算金额'], ['2026-11-09', 'merchant-1', 30],
+        ]);
+        $sales = $statement->createSheet()->setTitle('成功交易-XAdanbao')->fromArray([
+            ['流水订单号', '结算货币', '结算金额'], ['BATCH-ORDER', 'USD', 30],
+        ]);
+        $url = '/finance/reports/credit-settlement';
+        $data = ['card_channel' => 'ye', 'account' => $account->activity_account, 'timezone' => 'Asia/Shanghai'];
+        $submit = fn () => $this->post($url.'/import', [...$data, 'files' => [$this->upload($statement), $this->upload($orders)]]);
+
+        $submit()->assertSessionHasErrors('files.0');
+        $this->assertDatabaseMissing('finance_records', ['reference' => 'BATCH-ORDER']);
+        $this->assertDatabaseCount('finance_credit_settlement_entries', 0);
+
+        $statement->getActiveSheet()->setTitle('结算统计-ZZdanbao');
+        $sales->setTitle('成功交易-ZZdanbao');
+        $submit()->assertSessionHasNoErrors()
+            ->assertSessionHas('success', '新增订单 1 笔，跳过重复订单 0 笔。识别结算报表 1 份，新增账单流水 2 条，跳过重复报表 0 份。');
+        $this->get($url.'?'.http_build_query([...$data, 'card_match' => 'matched']))->assertOk()
+            ->assertViewHas('rows', fn ($rows) => $rows->getCollection()->sole()['card_layout']['settlement'] === '30.00000000');
+        $submit()->assertSessionHasNoErrors()
+            ->assertSessionHas('success', '新增订单 0 笔，跳过重复订单 1 笔。识别结算报表 1 份，新增账单流水 0 条，跳过重复报表 1 份。');
     }
 
     public function test_credit_channel_workbooks_can_be_imported_manually_without_overwriting_transactions(): void
