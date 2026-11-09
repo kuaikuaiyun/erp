@@ -672,7 +672,7 @@ class DepartmentOrganizationService
         if (Schema::connection($this->connectionName())->hasColumn('portal_menus', 'permission_slug')) {
             $portals = \App\Models\Portal::query()->with('menus')->orderBy('name')->get();
             foreach ($portals as $portal) {
-                $portalMenus = $portal->menus;
+                $portalMenus = $portal->menus->where('is_enabled', true)->values();
                 $portalByParent = $portalMenus->groupBy(fn ($menu) => $menu->parent_id ?: 0);
                 $buildPortal = function (int $parentId) use (&$buildPortal, $portalByParent, $permissions): array {
                     return $portalByParent->get($parentId, collect())
@@ -1319,7 +1319,10 @@ class DepartmentOrganizationService
 
         if (Schema::connection($this->connectionName())->hasColumn('portal_menus', 'permission_slug')) {
             $permissionModel = config('admin.database.permissions_model');
-            $portalSlugs = \App\Models\PortalMenu::query()->whereNotNull('permission_slug')->pluck('permission_slug');
+            $portalSlugs = \App\Models\PortalMenu::query()
+                ->where('is_enabled', true)
+                ->whereNotNull('permission_slug')
+                ->pluck('permission_slug');
             $permissionIds = $permissionIds->merge(
                 $permissionModel::query()->whereIn('slug', $portalSlugs)->pluck('id'),
             );
@@ -1343,6 +1346,7 @@ class DepartmentOrganizationService
 
         $portals = $connection->table('portals')->get(['id', 'code', 'name'])->keyBy('id');
         $menus = $connection->table('portal_menus')
+            ->where('is_enabled', 1)
             ->whereNotIn('code', ['home', 'backend_management', 'menu_configuration'])
             ->where('path', '!=', '#')
             ->get(['id', 'portal_id', 'code', 'title', 'title_key', 'permission_slug']);
