@@ -254,7 +254,7 @@ class ShoplineOrderSyncService
                 'shipping_address' => $this->address($recipient),
                 'customer_note' => (string) ($payload['buyer_note'] ?? $payload['note'] ?? ''),
                 'order_created_at_utc' => $this->date($payload['created_at'] ?? $payload['order_at'] ?? null)?->utc(),
-                'order_created_at' => $this->date($payload['created_at'] ?? $payload['order_at'] ?? null),
+                'order_created_at' => $this->date($payload['created_at'] ?? $payload['order_at'] ?? null)?->setTimezone('Asia/Shanghai'),
                 'order_modified_at' => $this->date($payload['updated_at'] ?? null),
                 'paid_at' => $this->date($payload['paid_at'] ?? $payload['processed_at'] ?? null),
                 'completed_at' => $this->date($payload['closed_at'] ?? $payload['completed_at'] ?? null),

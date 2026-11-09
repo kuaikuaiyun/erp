@@ -13,7 +13,7 @@ class BackfillFashionLogisticsOrderUtc extends Command
         {--all : Recalculate rows that already have a UTC timestamp}
         {--chunk=500 : Number of rows read per batch}';
 
-    protected $description = 'Backfill the canonical UTC order time used by the fashion performance report';
+    protected $description = 'Backfill canonical UTC and China display order times for fashion orders';
 
     public function handle(): int
     {
@@ -47,6 +47,7 @@ class BackfillFashionLogisticsOrderUtc extends Command
 
                         DB::connection($connection)->table($table)->where('id', $order->id)->update([
                             'order_created_at_utc' => $utc->format('Y-m-d H:i:s'),
+                            'order_created_at' => $utc->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s'),
                             'updated_at' => now(),
                         ]);
                         $updated++;
