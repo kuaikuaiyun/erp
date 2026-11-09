@@ -75,7 +75,8 @@ class FinanceSettlementService
             'month' => '年月', 'date' => '时间点', 'timezone' => '导出时区', 'subscription' => '订阅类型', 'upsell' => '是否加购',
             'converted_usd' => '转换美元', 'usd_rate' => '汇率', 'settlement' => '结算金额-美元',
             ...array_diff_key($this->moneyFields('paypal'), array_flip(['converted_usd', 'usd_rate'])),
-            'domain' => '域名', 'owner' => '使用人', 'team' => self::OPERATION_DEPARTMENT, 'erp_order' => '通途订单', 'note' => '备注'];
+            'domain' => '域名', 'owner' => '使用人', 'team' => self::OPERATION_DEPARTMENT, 'operation_region' => '地区',
+            'erp_order' => '通途订单', 'note' => '备注'];
     }
 
     public function exportColumns(string $channel): array

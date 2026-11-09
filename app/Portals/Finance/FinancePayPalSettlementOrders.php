@@ -408,6 +408,7 @@ class FinancePayPalSettlementOrders
         $result = $this->calculate($payment, $root, $children[$id] ?? [], $conversions[$id] ?? [],
             $root && count($crossAccount[$root['reference']] ?? []) > 1, $crossRates, $zone, $includeDetails);
         $result['team'] = $payment['operation_department'];
+        $result['operation_region'] = $this->operationRegion($result['team']);
         $result['order_status'] = $this->paymentStatus($result);
         if (isset($ambiguous[$id])) {
             $result['payable'] = $result['open_hold'] = null;
@@ -430,6 +431,24 @@ class FinancePayPalSettlementOrders
         $result['paypal_reference_type'] = $root['related_type'] ?? '';
 
         return $result;
+    }
+
+    private function operationRegion(string $department): string
+    {
+        $region = '';
+        foreach (explode('、', $department) as $name) {
+            // Existing departments use city prefixes. New cities can use their full city name.
+            if (! preg_match('/^(厦门|深圳|郑州|西安)|^(\p{Han}{2,8}?)市(?=$|[\s·—-]|运营|[一二三四五六七八九十0-9]+部)/u', trim($name), $matches)) {
+                return '';
+            }
+            $matchedRegion = $matches[2] ?? $matches[1];
+            if ($region !== '' && $region !== $matchedRegion) {
+                return '';
+            }
+            $region = $matchedRegion;
+        }
+
+        return $region;
     }
 
     private function unlinkedRow(array $event, string $zone, bool $includeDetails): array

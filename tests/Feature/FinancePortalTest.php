@@ -765,6 +765,7 @@ class FinancePortalTest extends TestCase
         $url = '/finance/reports/paypal-settlement?timezone=-04%3A00';
         $page = $this->get($url)->assertOk()->assertSee('运营所属部门');
         $this->assertSame('运营所属部门', $page->viewData('columns')['team']);
+        $this->assertSame('地区', $page->viewData('columns')['operation_region']);
         $rows = $page->viewData('rows')->getCollection()->keyBy('reference');
         $this->assertSame('张清洪', $rows['BEFORE-TRANSFER']['owner']);
         $this->assertSame('2026-10-31 23:10:23', $rows['BEFORE-TRANSFER']['date']);
@@ -774,26 +775,36 @@ class FinancePortalTest extends TestCase
         $this->assertSame('', $rows['UNASSIGNED']['owner']);
         $this->assertSame('陈志霖', $rows['BEFORE-HISTORY']['owner']);
         $this->assertSame('郑州运营部', $rows['BEFORE-TRANSFER']['team']);
+        $this->assertSame('郑州', $rows['BEFORE-TRANSFER']['operation_region']);
+        $this->assertSame('深圳', $rows['BEFORE-HISTORY']['operation_region']);
         $this->get($url.'&team='.rawurlencode('郑州运营部'))->assertOk()
             ->assertViewHas('rows', fn ($rows) => $rows->pluck('reference')->all() === ['BEFORE-TRANSFER']);
-        $exportUrl = $url.'&download=1&export_columns[]=reference&export_columns[]=owner&export_columns[]=team';
+        $exportUrl = $url.'&download=1&export_columns[]=reference&export_columns[]=owner&export_columns[]=team&export_columns[]=operation_region';
         $export = function () use ($exportUrl) {
             $sheet = $this->readDownload($this->get($exportUrl)->assertOk()->streamedContent())->toArray();
             $this->assertSame('运营所属部门', $sheet[0][2]);
+            $this->assertSame('地区', $sheet[0][3]);
 
             return collect($sheet)->slice(1)->keyBy(0);
         };
         $exported = $export();
-        $this->assertSame(['BEFORE-TRANSFER', '张清洪', '郑州运营部'], $exported['BEFORE-TRANSFER']);
-        $this->assertSame(['NO-OWNER', '钱锦山', '厦门运营部'], $exported['NO-OWNER']);
-        $this->assertSame(['AT-TRANSFER', '钱锦山', '厦门运营部'], $exported['AT-TRANSFER']);
+        $this->assertSame(['BEFORE-TRANSFER', '张清洪', '郑州运营部', '郑州'], $exported['BEFORE-TRANSFER']);
+        $this->assertSame(['NO-OWNER', '钱锦山', '厦门运营部', '厦门'], $exported['NO-OWNER']);
+        $this->assertSame(['AT-TRANSFER', '钱锦山', '厦门运营部', '厦门'], $exported['AT-TRANSFER']);
         $this->assertEmpty($exported['UNASSIGNED'][1]);
         $this->assertEmpty($exported['UNASSIGNED'][2]);
-        $this->assertSame(['BEFORE-HISTORY', '陈志霖', '深圳运营部'], $exported['BEFORE-HISTORY']);
+        $this->assertSame(['BEFORE-HISTORY', '陈志霖', '深圳运营部', '深圳'], $exported['BEFORE-HISTORY']);
+
+        DB::table($roles)->insert(['id' => 25, 'name' => '杭州市运营一部', 'slug' => 'test-operations-hz', 'parent_id' => 21]);
+        DB::table($memberships)->where('user_id', 11)->update(['role_id' => 25]);
+        $regionFilter = http_build_query(['conditions' => [['field' => 'operation_region', 'operator' => 'equals', 'value' => '杭州']]]);
+        $this->get($url.'&'.$regionFilter)->assertOk()
+            ->assertViewHas('rows', fn ($rows) => $rows->pluck('reference')->all() === ['BEFORE-HISTORY']);
+        $this->assertSame(['BEFORE-HISTORY', '陈志霖', '杭州市运营一部', '杭州'], $export()['BEFORE-HISTORY']);
 
         $history->clone()->where('id', 2)->update(['effective_to' => '2026-11-01 03:00:09']);
         $history->clone()->where('id', 3)->update(['effective_from' => '2026-11-01 03:00:09']);
-        $this->assertSame(['BEFORE-TRANSFER', '钱锦山', '厦门运营部'], $export()['BEFORE-TRANSFER']);
+        $this->assertSame(['BEFORE-TRANSFER', '钱锦山', '厦门运营部', '厦门'], $export()['BEFORE-TRANSFER']);
 
         $record = FinanceRecord::where('reference', 'BEFORE-TRANSFER')->sole();
         $this->post('/finance/reports/paypal-settlement/save', ['id' => $record->id, 'owner' => '财务补录'])
@@ -816,7 +827,7 @@ class FinancePortalTest extends TestCase
         foreach (['AT-TRANSFER', 'NO-OWNER'] as $reference) {
             $this->assertSame('钱锦山', $rows[$reference]['owner']);
             $this->assertSame('厦门运营部', $rows[$reference]['team']);
-            $this->assertSame([$reference, '钱锦山', '厦门运营部'], $exported[$reference]);
+            $this->assertSame([$reference, '钱锦山', '厦门运营部', '厦门'], $exported[$reference]);
         }
         $this->assertSame('', $rows['UNASSIGNED']['owner']);
         $this->assertSame('', $rows['UNASSIGNED']['team']);
@@ -920,7 +931,7 @@ class FinancePortalTest extends TestCase
             'subscription' => '订阅', 'upsell' => '否', 'converted_usd' => '34.8', 'usd_rate' => '1.2', 'settlement' => '36', 'fee' => '1.2',
             'domain' => 'edited.example.test', 'owner' => '编辑使用人', 'team' => '编辑团队', 'erp_order' => 'EDITED-ERP', 'note' => '编辑备注'];
         $page = $this->get('/finance/reports/paypal-settlement')->assertOk();
-        foreach (array_diff_key($service->columns('paypal'), ['id' => true, 'team' => true]) as $field => $label) {
+        foreach (array_diff_key($service->columns('paypal'), ['id' => true, 'team' => true, 'operation_region' => true]) as $field => $label) {
             $page->assertSee('id="edit-'.$field.'"', false);
         }
         $page->assertDontSee('id="edit-team"', false);
@@ -1367,6 +1378,7 @@ class FinancePortalTest extends TestCase
         $expected = array_map(FinanceCatalog::simplified(...), array_values(FinanceCatalog::source()['headers'])[0]);
         $expected = array_values(array_filter($expected, fn ($header) => $header !== '应结算'));
         $expected[array_search('团队', $expected, true)] = '运营所属部门';
+        array_splice($expected, array_search('运营所属部门', $expected, true) + 1, 0, ['地区']);
         array_splice($expected, array_search('退款金额', $expected, true), 0, ['冻结退款', '补差价退款']);
         $actual = array_values($service->columns('paypal'));
         $this->assertSame(['记录ID', '支付账户', ...$expected], $actual);
@@ -1375,7 +1387,7 @@ class FinancePortalTest extends TestCase
         $sheet = $this->readDownload($this->get('/finance/reports/paypal-settlement?download=1')->assertOk()->streamedContent());
         $headers = $sheet->toArray()[0];
         $page = $this->get('/finance/reports/paypal-settlement')->assertOk()->assertSee('按当前列表导出')
-            ->assertSee('data-new-display-fields="frozen_refund refund_top_up"', false);
+            ->assertSee('data-new-display-fields="frozen_refund refund_top_up operation_region"', false);
         $this->assertSame(array_values($page->viewData('columns')), $headers);
         $this->assertSame([
             '转换美元', '汇率', '收款金额-美元', '手续费', '冻结金额', '争议冻结金额', '冻结退款', '补差价退款',
