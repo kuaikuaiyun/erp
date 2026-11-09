@@ -40,7 +40,7 @@ class FashionOrderController extends Controller
 
         $keyword = trim((string) ($validated['keyword'] ?? ''));
         $storeKeyword = trim((string) ($validated['store_keyword'] ?? ''));
-        $selectedStatus = (string) ($validated['status'] ?? 'completed');
+        $selectedStatus = (string) ($validated['status'] ?? '');
         $query = FashionLogisticsOrder::query()
             ->with(['items', 'store'])
             ->where('source_platform', 'xshoppy');
@@ -78,7 +78,7 @@ class FashionOrderController extends Controller
                 });
             });
         }
-        $query->where('status', $selectedStatus);
+        $query->when($selectedStatus !== '', fn ($orders) => $orders->where('status', $selectedStatus));
         $query->when($validated['date_from'] ?? null, fn ($query, $date) => $query->where('order_created_at', '>=', $date.' 00:00:00'));
         $query->when($validated['date_to'] ?? null, fn ($query, $date) => $query->where('order_created_at', '<=', $date.' 23:59:59'));
 

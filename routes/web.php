@@ -11,6 +11,7 @@ use App\Portals\Assistant\Http\Controllers\AdvertisingAgencyController;
 use App\Portals\Assistant\Http\Controllers\ShopifyAnalyticsController;
 use App\Portals\Logistics\Http\Controllers\LogisticsOrderController;
 use App\Portals\Logistics\Http\Controllers\PayPalRiskController;
+use App\Portals\Logistics\Http\Controllers\PayPalDisputeAnalysisController;
 use App\Portals\Logistics\Http\Controllers\PayPalImportController;
 use App\Portals\Logistics\Http\Controllers\ProductStatisticsController;
 use App\Portals\Logistics\Http\Controllers\WarehouseProductStatisticsController;
@@ -407,6 +408,8 @@ Route::get('/placement-evaluations/{evaluation}', [ProductLibraryController::cla
 Route::put('/placement-evaluations/{evaluation}', [ProductLibraryController::class, 'updatePlacementEvaluation'])->name('aikaipin.placement-evaluations.update');
 Route::delete('/placement-evaluations/{evaluation}', [ProductLibraryController::class, 'destroyPlacementEvaluation'])->name('aikaipin.placement-evaluations.destroy');
 Route::get('/paypal-risk', [PayPalRiskController::class, 'index'])->name('logistics.paypal-risk.index');
+Route::get('/paypal-dispute-analysis', [PayPalDisputeAnalysisController::class, 'index'])->name('logistics.paypal-dispute-analysis.index');
+Route::post('/paypal-dispute-analysis/{dispute}/handle', [PayPalDisputeAnalysisController::class, 'handle'])->name('logistics.paypal-dispute-analysis.handle');
 Route::post('/paypal-risk/accounts', [PayPalRiskController::class, 'store'])->name('logistics.paypal-risk.accounts.store');
 Route::put('/paypal-risk/accounts/{account}', [PayPalRiskController::class, 'update'])->name('logistics.paypal-risk.accounts.update');
 Route::get('/paypal-risk/accounts/{account}/detail', [PayPalRiskController::class, 'detail'])->name('logistics.paypal-risk.accounts.detail');

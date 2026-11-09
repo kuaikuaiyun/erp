@@ -626,6 +626,9 @@ return [
             ],
         ],
     ],
+    'paypal_dispute_analysis' => [
+        'menu' => 'Paypal争议分析',
+    ],
     'refund_import' => [
         'title' => '导入真实退款记录',
         'open_button' => '更新退款记录',

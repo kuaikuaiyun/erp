@@ -6,6 +6,7 @@ use App\Models\AssistantDomainStore;
 use App\Models\FashionLogisticsOrder;
 use App\Models\FashionLogisticsSyncState;
 use Carbon\Carbon;
+use DateTimeZone;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -73,12 +74,14 @@ class XShoppyOrderSyncService
     public function syncStore(AssistantDomainStore $store, int $initialDays = 60, bool $full = false, bool $allHistory = false): array
     {
         $this->assertStore($store);
+        $storeTimezone = $this->requestStoreTimezone($store);
         $state = FashionLogisticsSyncState::query()->firstOrCreate(['assistant_domain_store_id' => $store->getKey()]);
         $state->forceFill(['status' => 'syncing', 'last_started_at' => now(), 'last_error' => null])->save();
-        $after = $allHistory
-            ? Carbon::create(2000, 1, 1, 0, 0, 0, 'UTC')
-            : (! $full && $state->last_cursor_at
-                ? $state->last_cursor_at->copy()->subMinutes(10)
+        $historyStart = Carbon::create(2000, 1, 1, 0, 0, 0, 'UTC');
+        $after = $allHistory || (! $full && ! $state->last_cursor_at)
+            ? $historyStart
+            : (! $full
+                ? $state->last_cursor_at->copy()->subHours(3)
                 : now()->subDays(max(1, $initialDays)));
         $before = now()->addMinute();
         $created = 0;
@@ -92,10 +95,15 @@ class XShoppyOrderSyncService
                 $pages++;
                 foreach ($orders as $payload) {
                     if (! is_array($payload) || blank($payload['id'] ?? null)) continue;
-                    $modified = $this->date($payload['date_modified_gmt'] ?? $payload['date_modified'] ?? null);
+                    $modified = $this->parseStoreTimeUtc($payload['date_modified'] ?? null, $storeTimezone);
                     if ($modified && $modified->gt($latestModified)) $latestModified = $modified;
 
-                    $result = $this->persist($store, $payload);
+                    if (! $this->isPaid($payload)) {
+                        $this->deleteExistingOrder($store, (string) $payload['id']);
+                        continue;
+                    }
+
+                    $result = $this->persist($store, $payload, $storeTimezone);
                     $result['created'] ? $created++ : $updated++;
                 }
                 if (count($orders) < 100) break;
@@ -141,14 +149,14 @@ class XShoppyOrderSyncService
     }
 
     /** @return array{created:bool,order:FashionLogisticsOrder} */
-    private function persist(AssistantDomainStore $store, array $payload): array
+    private function persist(AssistantDomainStore $store, array $payload, string $storeTimezone): array
     {
         $billing = is_array($payload['billing'] ?? null) ? $payload['billing'] : [];
         $shipping = is_array($payload['shipping'] ?? null) ? $payload['shipping'] : [];
         $externalId = (string) $payload['id'];
         $connection = config('admin.database.connection') ?: config('database.default');
 
-        return DB::connection($connection)->transaction(function () use ($store, $payload, $billing, $shipping, $externalId): array {
+        return DB::connection($connection)->transaction(function () use ($store, $payload, $billing, $shipping, $externalId, $storeTimezone): array {
             $order = FashionLogisticsOrder::query()->firstOrNew([
                 'assistant_domain_store_id' => $store->getKey(),
                 'source_platform' => 'xshoppy',
@@ -169,10 +177,12 @@ class XShoppyOrderSyncService
                 'shipping_country' => (string) ($shipping['country'] ?? ''), 'shipping_state' => (string) ($shipping['state'] ?? ''),
                 'shipping_city' => (string) ($shipping['city'] ?? ''), 'shipping_address' => $address,
                 'customer_note' => (string) ($payload['customer_note'] ?? ''),
-                'order_created_at' => $this->date($payload['date_created_gmt'] ?? $payload['date_created'] ?? null),
-                'order_modified_at' => $this->date($payload['date_modified_gmt'] ?? $payload['date_modified'] ?? null),
-                'paid_at' => $this->date($payload['date_paid_gmt'] ?? $payload['date_paid'] ?? null),
-                'completed_at' => $this->date($payload['date_completed_gmt'] ?? $payload['date_completed'] ?? null),
+                'source_order_created_at' => $this->parseStoreTime($payload['date_created'] ?? null, $storeTimezone),
+                'source_order_timezone' => $storeTimezone,
+                'order_created_at' => $this->parseStoreTimeChina($payload['date_created'] ?? null, $storeTimezone),
+                'order_modified_at' => $this->parseStoreTimeChina($payload['date_modified'] ?? null, $storeTimezone),
+                'paid_at' => $this->parseStoreTimeChina($payload['date_paid'] ?? null, $storeTimezone),
+                'completed_at' => $this->parseStoreTimeChina($payload['date_completed'] ?? null, $storeTimezone),
                 'source_payload' => $payload, 'source_synced_at' => now(),
             ])->save();
 
@@ -207,6 +217,41 @@ class XShoppyOrderSyncService
         return 'https://'.$this->domain($store).'/wp-json/wc/v3/orders';
     }
 
+    private function shopEndpoint(AssistantDomainStore $store): string
+    {
+        return 'https://'.$this->domain($store).'/wp-json/wc/v3/shop';
+    }
+
+    private function requestStoreTimezone(AssistantDomainStore $store): string
+    {
+        try {
+            $response = Http::acceptJson()->timeout(45)->connectTimeout(15)->retry(2, 1000)
+                ->get($this->shopEndpoint($store), [
+                    'consumer_key' => trim((string) $store->xshoppy_api_key),
+                    'consumer_secret' => trim((string) $store->xshoppy_password),
+                ]);
+        } catch (ConnectionException $exception) {
+            throw new RuntimeException('无法连接 XShoppy 店铺信息接口：'.$exception->getMessage(), 0, $exception);
+        }
+
+        if (! $response->successful()) {
+            throw new RuntimeException('XShoppy 店铺信息接口返回 HTTP '.$response->status().'：'.Str::limit($response->body(), 500));
+        }
+
+        $timezone = trim((string) data_get($response->json(), 'data.time_zone'));
+        if ($timezone === '') {
+            throw new RuntimeException('XShoppy 店铺信息未返回 time_zone，已停止同步以避免订单时间错误。');
+        }
+
+        try {
+            new DateTimeZone($timezone);
+        } catch (\Throwable) {
+            throw new RuntimeException('XShoppy 店铺信息返回了无效时区：'.$timezone);
+        }
+
+        return $timezone;
+    }
+
     private function domain(AssistantDomainStore $store): string
     {
         $value = trim((string) $store->shop_login_url);
@@ -215,10 +260,20 @@ class XShoppyOrderSyncService
         return strtolower(trim((string) $host, '.'));
     }
 
-    private function date(mixed $value): ?Carbon
+    private function parseStoreTime(mixed $value, string $storeTimezone): ?Carbon
     {
         if (! is_string($value) || trim($value) === '') return null;
-        try { return Carbon::parse($value); } catch (\Throwable) { return null; }
+        try { return Carbon::parse($value, $storeTimezone); } catch (\Throwable) { return null; }
+    }
+
+    private function parseStoreTimeChina(mixed $value, string $storeTimezone): ?Carbon
+    {
+        return $this->parseStoreTime($value, $storeTimezone)?->setTimezone('Asia/Shanghai');
+    }
+
+    private function parseStoreTimeUtc(mixed $value, string $storeTimezone): ?Carbon
+    {
+        return $this->parseStoreTime($value, $storeTimezone)?->utc();
     }
 
     private function decimal(mixed $value): float
