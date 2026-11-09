@@ -8,7 +8,7 @@ use PhpOffice\PhpSpreadsheet\Shared\Date;
 
 class FinanceCreditSettlementLayout
 {
-    public const CHANNELS = ['ye' => '叶总支付', 'worldpay' => 'Worldpay 单包'];
+    public const CHANNELS = ['ye' => 'ConfluxAPI', 'worldpay' => 'Worldpay'];
 
     public const SHEETS = ['ye' => '叶总订单明细', 'worldpay' => 'worldpay单包'];
 
@@ -56,9 +56,8 @@ class FinanceCreditSettlementLayout
     public static function filter(Builder $query, string $channel): void
     {
         $accounts = FinancePaymentAccount::query()->where('account_type', 'credit_card')
-            ->get(['activity_account', 'account_name'])
-            ->filter(fn ($account) => str_contains(mb_strtolower($account->account_name.' '.$account->activity_account),
-                $channel === 'ye' ? '叶总' : 'worldpay'))
+            ->get()
+            ->filter(fn (FinancePaymentAccount $account) => self::accountPlatform($account) === $channel)
             ->pluck('activity_account');
         [$sourceField, $otherField] = $channel === 'ye' ? ['网站名称', '网关接入号'] : ['网关接入号', '网站名称'];
 
@@ -69,6 +68,22 @@ class FinanceCreditSettlementLayout
                         ->orWhere(fn (Builder $query) => $query->whereIn('account', $accounts)
                             ->where(fn (Builder $query) => $query->whereNull('payload->'.$otherField)->orWhere('payload->'.$otherField, '')))));
         });
+    }
+
+    public static function accountPlatform(FinancePaymentAccount $account): ?string
+    {
+        if ($account->card_platform !== null) {
+            return $account->card_platform;
+        }
+
+        // Older accounts may predate explicit platform configuration.
+        $name = mb_strtolower($account->account_name.' '.$account->activity_account);
+
+        return match (true) {
+            str_contains($name, 'worldpay') => 'worldpay',
+            str_contains($name, 'confluxapi'), str_contains($name, '叶总') => 'ye',
+            default => null,
+        };
     }
 
     public static function importPayload(string $channel, array $values): array

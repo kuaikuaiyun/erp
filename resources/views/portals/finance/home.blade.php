@@ -37,5 +37,5 @@
 @endsection
 @push('scripts')
 <script src="{{ request()->getSchemeAndHttpHost() }}/assets/erp/finance-workbench.js?v=20261109-1"></script>
-@if($canManage)<script src="{{ request()->getSchemeAndHttpHost() }}/assets/erp/finance-payment-accounts.js?v=20261104-4"></script>@endif
+@if($canManage)<script src="{{ request()->getSchemeAndHttpHost() }}/assets/erp/finance-payment-accounts.js?v=20261109-4"></script>@endif
 @endpush

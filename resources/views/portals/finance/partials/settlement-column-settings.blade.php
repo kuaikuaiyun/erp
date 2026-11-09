@@ -1,8 +1,9 @@
+@php($columnExceptionScope = ! empty($filters['card_exceptions']) && ($columnCardChannel ?? null) === 'ye' ? ['card_exceptions' => 1] : [])
 <button type="button" class="btn btn-default" data-open-column-settings>
     <i class="fa fa-columns" aria-hidden="true"></i> 列与导出设置
 </button>
 <dialog id="settlement-column-settings" class="settlement-dialog" aria-labelledby="settlement-column-title"
-    data-preference-key="finance-settlement-columns:{{ $report }}:{{ $user->getAuthIdentifier() }}{{ isset($columnCardChannel) ? ':'.$columnCardChannel : '' }}"
+    data-preference-key="finance-settlement-columns:{{ $report }}:{{ $user->getAuthIdentifier() }}{{ isset($columnCardChannel) ? ':'.$columnCardChannel : '' }}{{ $columnExceptionScope ? ':exceptions' : '' }}"
     @if($orderView) data-export-visible-columns @endif
     @if($report === 'paypal-settlement')
     data-new-display-fields="{{ implode(' ', array_keys(\App\Portals\Finance\FinancePayPalSettlementOrders::REFUND_SPLIT_COLUMNS)) }}"
@@ -15,9 +16,9 @@
     data-legacy-preference-key="finance:paypal-orders:page-export-columns:v2"
     @endif
     @isset($columnCardChannel)
-    data-template-url="{{ route('finance.report', [$report, 'download' => 1, 'card_channel' => $columnCardChannel]) }}"
+    data-template-url="{{ route('finance.report', [$report, 'download' => 1, 'card_channel' => $columnCardChannel, ...$columnExceptionScope]) }}"
     @endisset
-    data-template-preview-url="{{ route($report === 'paypal-orders' ? 'finance.records.export-template.preview' : 'finance.settlement.export-template.preview', isset($columnCardChannel) ? [$report, 'card_channel' => $columnCardChannel] : $report) }}"
+    data-template-preview-url="{{ route($report === 'paypal-orders' ? 'finance.records.export-template.preview' : 'finance.settlement.export-template.preview', isset($columnCardChannel) ? [$report, 'card_channel' => $columnCardChannel, ...$columnExceptionScope] : $report) }}"
     data-csrf-token="{{ csrf_token() }}">
     <header>
         <h3 id="settlement-column-title">列与导出设置</h3>
