@@ -1027,6 +1027,10 @@ class FinancePortalTest extends TestCase
         $allExport = $this->readDownload($this->get($allUrl.'?download=1')->assertOk()->streamedContent())->toArray();
         $this->assertEqualsCanonicalizing(['PAY-CAD', 'PAY-USD', 'PAY-OTHER', 'UNLINKED-REFUND', 'FX-NO-REFERENCE'],
             array_column(array_slice($allExport, 1), array_search('交易 ID', $allExport[0], true)));
+        $headers = array_flip($allExport[0]);
+        $unlinked = collect(array_slice($allExport, 1))->first(fn ($row) => $row[$headers['交易 ID']] === 'UNLINKED-REFUND');
+        $this->assertSame('未匹配', $unlinked[$headers['订阅类型']]);
+        $this->assertSame('未匹配', $unlinked[$headers['是否加购']]);
         $withdrawalExchangeId = DB::table('finance_payment_transactions')->where('transaction_id', 'FX-WITHDRAWAL-USD')->value('finance_record_id');
         $this->get($allUrl.'/records/'.$withdrawalExchangeId)->assertNotFound();
         $this->assertDatabaseHas('finance_payment_transactions', ['transaction_id' => 'WITHDRAWAL']);
@@ -3019,7 +3023,7 @@ class FinancePortalTest extends TestCase
             'PRIMARY-PAYMENT' => ['订阅', '未加购'],
             'UPSELL-PAYMENT' => ['加购', '已加购'],
             'UNKNOWN-PAYMENT' => ['未匹配', '未匹配'],
-            'INVOICE-ONLY' => ['待核对', '待核对'],
+            'INVOICE-ONLY' => ['未匹配', '未匹配'],
             'REVIEWED-PAYMENT' => ['加购', '已加购'],
         ] as $reference => $labels) {
             $this->assertSame($labels, [$page[$reference]['subscription'], $page[$reference]['upsell']]);

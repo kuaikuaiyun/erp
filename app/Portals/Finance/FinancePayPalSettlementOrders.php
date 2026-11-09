@@ -418,10 +418,9 @@ class FinancePayPalSettlementOrders
         $payment['filter_date'] = $payment['source_date'];
         unset($payment['manual_values'], $payment['source_date'], $result['manual_values'], $result['source_date']);
         $result['payments'] = [$payment];
-        $missingClassification = $payment['business_order_id'] === null ? '未匹配' : '待核对';
         foreach (['subscription', 'upsell'] as $field) {
             if (blank($result[$field])) {
-                $result[$field] = $missingClassification;
+                $result[$field] = '未匹配';
             }
         }
         $result['source_category'] = '结账付款';
@@ -441,6 +440,7 @@ class FinancePayPalSettlementOrders
             'paypal_12' => $event['related_id'], 'paypal_reference_type' => $event['related_type'],
             'source_category' => FinancePayPalEventTypes::TYPES[$event['code']][1] ?? '',
             'date' => $date->format('Y-m-d H:i:s'), 'month' => $date->format('Y-m'), 'timezone' => $zone,
+            'subscription' => '未匹配', 'upsell' => '未匹配',
             'order_status' => '待关联交易',
             'review' => $reserveWithoutReference ? '预备金流水无原付款关联号，未计入订单应结算' : '未找到唯一的原付款，未计入应结算',
             ...($includeDetails ? ['events' => [$this->detail($event, $zone)]] : []),
