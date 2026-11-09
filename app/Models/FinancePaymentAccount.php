@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class FinancePaymentAccount extends Model
@@ -19,6 +20,11 @@ class FinancePaymentAccount extends Model
     {
         $this->setConnection(config('admin.database.connection') ?: config('database.default'));
         parent::__construct($attributes);
+    }
+
+    public function creditGroup(): BelongsTo
+    {
+        return $this->belongsTo(FinanceCreditAccountGroup::class, 'card_group_id');
     }
 
     #[Scope]

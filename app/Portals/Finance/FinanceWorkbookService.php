@@ -45,7 +45,12 @@ class FinanceWorkbookService
             return $db->table('finance_domain_groups')->orderBy('domain')->get();
         }
 
-        return $db->table('assistant_domain_stores')->select(['id', 'domain', 'user_name', 'team'])
+        $columns = ['id', 'domain', 'user_name', 'team'];
+        if ($db->getSchemaBuilder()->hasColumn('assistant_domain_stores', 'shop_name')) {
+            $columns[] = 'shop_name';
+        }
+
+        return $db->table('assistant_domain_stores')->select($columns)
             ->whereNotNull('domain')->where('domain', '!=', '')->orderBy('domain')->get()
             ->map(function ($store) {
                 return (object) [
@@ -53,6 +58,7 @@ class FinanceWorkbookService
                     'domain' => strtolower(trim($store->domain)),
                     'owner' => $store->user_name ?? '',
                     'team' => FinanceCatalog::teamLabel($store->team),
+                    'shop_name' => $store->shop_name ?? '',
                 ];
             });
     }

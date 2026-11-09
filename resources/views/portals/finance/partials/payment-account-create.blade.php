@@ -3,7 +3,8 @@
 @endpush
 <div class="modal fade" id="finance-payment-account-create" tabindex="-1" role="dialog" aria-labelledby="finance-payment-account-create-title">
     <div class="modal-dialog" role="document"><div class="modal-content">
-        <form method="post" action="{{ route('finance.payment-accounts.store') }}" id="finance-payment-account-form" autocomplete="off" data-store-url="{{ route('finance.payment-accounts.store') }}" data-create-title="{{ __('finance.payment_accounts.add') }}" data-edit-title="{{ __('finance.payment_accounts.edit') }}" data-secret-preserved="{{ __('finance.payment_accounts.secret_preserved') }}" data-failed="{{ $errors->paymentAccount->any() ? 'true' : 'false' }}">@csrf
+        <form method="post" action="{{ route('finance.payment-accounts.store') }}" id="finance-payment-account-form" autocomplete="off" data-store-url="{{ route('finance.payment-accounts.store') }}" data-create-title="{{ __('finance.payment_accounts.add') }}" data-edit-title="{{ __('finance.payment_accounts.edit') }}" data-secret-preserved="{{ __('finance.payment_accounts.secret_preserved') }}" data-failed="{{ $errors->paymentAccount->any() ? 'true' : 'false' }}" data-new-card-platform="{{ $newCardPlatform ?? '' }}" data-new-card-group="{{ $newCardGroup ?? '' }}">@csrf
+            @if($newCardPlatform ?? false)<input type="hidden" name="from_credit_settlement" value="1">@endif
             <input type="hidden" name="account_editor_key" value="{{ is_string(old('account_editor_key')) ? old('account_editor_key') : '' }}">
             <input type="hidden" name="paypal_currency" value="{{ $paypalBalance['summary']['currency'] }}">
             <input type="hidden" name="balance_tab" value="{{ $activeBalanceTab }}" data-balance-tab-input>
@@ -14,11 +15,31 @@
                 @php
                     $accountOldValue = static fn ($field, $default = '') => is_string(old($field)) ? old($field) : $default;
                 @endphp
+                <div class="form-group" id="finance-card-group-field" @if($accountOldValue('account_type', 'paypal') === 'paypal') hidden @endif>
+                    <label for="finance-card-group">归属主体</label>
+                    <input class="form-control" id="finance-card-group" name="card_group_name" list="finance-card-group-options" maxlength="100" value="{{ $accountOldValue('card_group_name') }}" placeholder="例如：叶总">
+                    <datalist id="finance-card-group-options">@foreach($cardGroups as $groupName)<option value="{{ $groupName }}">@endforeach</datalist>
+                    <p class="help-block">选择已有主体，或输入新主体名称。一个主体下可添加多个单包账户。</p>
+                </div>
                 <div class="form-group"><label for="finance-account-name">{{ __('finance.payment_accounts.attributes.account_name') }}</label><input class="form-control" id="finance-account-name" name="account_name" required maxlength="100" value="{{ $accountOldValue('account_name') }}"></div>
                 <div class="finance-account-form-grid">
                     <div class="form-group"><label for="finance-account-type">{{ __('finance.payment_accounts.attributes.account_type') }}</label><select class="form-control" id="finance-account-type" name="account_type"><option value="paypal" @selected($accountOldValue('account_type', 'paypal') === 'paypal')>PayPal</option><option value="credit_card" @selected($accountOldValue('account_type') === 'credit_card')>{{ __('finance.workbench.credit_card') }}</option></select></div>
                     <div class="form-group"><label for="finance-account-currency">{{ __('finance.payment_accounts.attributes.main_currency') }}</label><input class="form-control" id="finance-account-currency" name="main_currency" required maxlength="3" pattern="[A-Z]{3}" value="{{ $accountOldValue('main_currency', 'USD') }}" style="text-transform:uppercase"></div>
                     <div class="form-group"><label for="finance-account-status">{{ __('finance.payment_accounts.attributes.status') }}</label><select class="form-control" id="finance-account-status" name="status">@foreach(['enabled', 'disabled'] as $status)<option value="{{ $status }}" @selected($accountOldValue('status', 'enabled') === $status)>{{ __('finance.payment_accounts.'.$status) }}</option>@endforeach</select></div>
+                </div>
+                <div class="form-group" id="finance-card-platform-field" @if($accountOldValue('account_type', 'paypal') === 'paypal') hidden @endif>
+                    <label for="finance-card-platform">支付平台</label>
+                    <select class="form-control" id="finance-card-platform" name="card_platform">
+                        <option value="">未设置</option>
+                        @foreach(\App\Portals\Finance\FinanceCreditSettlementLayout::CHANNELS as $key => $label)
+                            <option value="{{ $key }}" @selected($accountOldValue('card_platform') === $key)>{{ $label }}</option>
+                        @endforeach
+                    </select>
+                </div>
+                <div class="form-group" id="finance-card-merchant-field" @if($accountOldValue('card_platform') !== 'ye') hidden @endif>
+                    <label for="finance-card-merchant">ConfluxAPI 商户标识</label>
+                    <input class="form-control" id="finance-card-merchant" name="card_merchant_key" maxlength="100" value="{{ $accountOldValue('card_merchant_key') }}">
+                    <p class="help-block">填结算报表工作表后缀，例如 ZZdanbao。一个单包建一个商户账户。</p>
                 </div>
                 <p id="finance-account-type-lock" class="help-block" hidden>{{ __('finance.payment_accounts.linked_type_locked') }}</p>
                 <div class="form-group"><label for="finance-account-remark">{{ __('finance.payment_accounts.attributes.remark') }}</label><textarea class="form-control" id="finance-account-remark" name="remark" rows="2" maxlength="1000">{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($accountOldValue('remark'))) }}</textarea></div>
