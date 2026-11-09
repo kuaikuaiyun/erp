@@ -6,7 +6,7 @@
     data-preference-key="finance-settlement-columns:{{ $report }}:{{ $user->getAuthIdentifier() }}{{ isset($columnCardChannel) ? ':'.$columnCardChannel : '' }}{{ $columnExceptionScope ? ':exceptions' : '' }}"
     @if($orderView) data-export-visible-columns @endif
     @if($report === 'paypal-settlement')
-    data-new-display-fields="{{ implode(' ', array_keys(\App\Portals\Finance\FinancePayPalSettlementOrders::REFUND_SPLIT_COLUMNS)) }}"
+    data-new-display-fields="{{ implode(' ', [...array_keys(\App\Portals\Finance\FinancePayPalSettlementOrders::REFUND_SPLIT_COLUMNS), 'operation_region']) }}"
     @endif
     @if($report === 'paypal-orders')
     data-filter-form="finance-filters"

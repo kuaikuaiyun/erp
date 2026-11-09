@@ -1368,7 +1368,8 @@ class FinanceController extends Controller
             return $this->workbooks->download($templateHeaders, [], $report.'-template.xlsx');
         }
         $paginator = null;
-        $editorFields = array_diff_key($columns, $channel === 'paypal' ? ['id' => true, 'team' => true] : ['id' => true]);
+        $editorFields = array_diff_key($columns, $channel === 'paypal'
+            ? ['id' => true, 'team' => true, 'operation_region' => true] : ['id' => true]);
         $orderView = $channel === 'paypal';
         $columns = $cardLayout ?: $service->listColumns($channel);
         $exportColumns = $cardLayout ?: $service->exportColumns($channel);
