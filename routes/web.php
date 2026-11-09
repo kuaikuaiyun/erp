@@ -246,6 +246,7 @@ Route::get('/assistant/advertising-spend-summary', [AdvertisingSpendSummaryContr
 Route::get('/assistant/advertising-spend-analysis', [AdvertisingSpendAnalysisController::class, 'index'])->name('assistant.advertising-spend-analysis.index');
 Route::get('/assistant/fashion-advertising-reviews', [FashionAdvertisingReviewController::class, 'index'])->name('assistant.fashion-advertising-reviews.index');
 Route::post('/assistant/fashion-advertising-reviews/{report}/review', [FashionAdvertisingReviewController::class, 'review'])->whereNumber('report')->name('assistant.fashion-advertising-reviews.review');
+Route::delete('/assistant/fashion-advertising-reviews/{report}', [FashionAdvertisingReviewController::class, 'destroy'])->whereNumber('report')->name('assistant.fashion-advertising-reviews.destroy');
 Route::get('/assistant/fashion-advertising-reviews/screenshots/{type}/{entry}', [FashionAdvertisingReviewController::class, 'screenshot'])->whereIn('type', ['performance', 'advertising'])->whereNumber('entry')->name('assistant.fashion-advertising-reviews.screenshot');
 Route::get('/assistant/fashion-operation-reports', [FashionOperationReportController::class, 'index'])->name('assistant.fashion-operation-reports.index');
 Route::get('/operation-report-reviews', [OperationReportReviewController::class, 'index'])->name('assistant.operation-report-reviews.index');

@@ -117,15 +117,12 @@ class AdvertisingExpenseController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) abort(403);
         $this->authorizeReport($context['user'], $report);
-        $report->load(['performanceEntries', 'adSpendEntries']);
-        $paths = $report->performanceEntries->pluck('screenshot_path')->merge($report->adSpendEntries->pluck('screenshot_path'))->filter()->all();
-        DB::connection($report->getConnectionName())->transaction(function () use ($report): void {
-            $report->performanceEntries()->delete();
-            $report->adSpendEntries()->delete();
-            $report->delete();
-        });
-        Storage::disk('local')->delete($paths);
-        return redirect()->route('fashion.advertising-expenses.index')->with('success', '报表已删除。');
+        $report->forceFill([
+            'deleted_by' => $context['user']->getKey(),
+            'deleter_name' => $context['user']->name ?: $context['user']->username,
+        ])->save();
+        $report->delete();
+        return redirect()->route('fashion.advertising-expenses.index')->with('success', '报表已删除，可重新填写该日期的广告费。');
     }
 
     public function screenshot(Request $request, string $type, int $entry): BinaryFileResponse
