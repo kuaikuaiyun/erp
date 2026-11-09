@@ -11,6 +11,7 @@ class BackfillFashionLogisticsOrderUtc extends Command
 {
     protected $signature = 'fashion-logistics:backfill-order-utc
         {--all : Recalculate rows that already have a UTC timestamp}
+        {--platform= : Only backfill the specified source platform, for example xshoppy}
         {--chunk=500 : Number of rows read per batch}';
 
     protected $description = 'Backfill order timestamps and China-normalized payment times for fashion orders';
@@ -21,6 +22,7 @@ class BackfillFashionLogisticsOrderUtc extends Command
         $table = 'fashion_logistics_orders';
         $chunk = max(1, (int) $this->option('chunk'));
         $overwrite = (bool) $this->option('all');
+        $platform = strtolower(trim((string) $this->option('platform')));
         $updated = 0;
         $skipped = 0;
         $invalid = 0;
@@ -28,6 +30,7 @@ class BackfillFashionLogisticsOrderUtc extends Command
         DB::connection($connection)->table($table)
             ->select(['id', 'source_platform', 'source_order_created_at', 'source_order_timezone', 'order_created_at', 'order_created_at_utc', 'paid_at', 'paid_at_utc', 'source_payload'])
             ->whereNotNull('order_created_at')
+            ->when($platform !== '', fn ($query) => $query->where('source_platform', $platform))
             ->when(! $overwrite, fn ($query) => $query->where(fn ($missing) => $missing->whereNull('order_created_at_utc')->orWhereNull('paid_at_utc')))
             ->orderBy('id')
             ->chunkById($chunk, function ($orders) use ($connection, $table, &$updated, &$skipped, &$invalid): void {
@@ -60,7 +63,9 @@ class BackfillFashionLogisticsOrderUtc extends Command
                                 ? CarbonImmutable::parse($sourcePaidAt, new DateTimeZone((string) $order->source_order_timezone))
                                 : CarbonImmutable::parse($sourcePaidAt);
                             $values['paid_at'] = $paidAt->format('Y-m-d H:i:s');
-                            $values['paid_at_utc'] = $paidAt->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
+                            $values['paid_at_utc'] = ($order->source_platform === 'xshoppy'
+                                ? $paidAt->setTimezone('Asia/Shanghai')
+                                : $paidAt->utc())->format('Y-m-d H:i:s');
                         }
 
                         DB::connection($connection)->table($table)->where('id', $order->id)->update($values);
