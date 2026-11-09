@@ -52,11 +52,14 @@ class PerformanceReportController extends Controller
         $storeTable = 'assistant_domain_stores';
         $userTable = config('admin.database.users_table');
         $orderTable = (new FashionLogisticsOrder())->getTable();
+        // The UTC value is the reporting source of truth. The legacy fallback keeps
+        // historical rows visible until the one-time UTC backfill has completed.
+        $orderTimestampSql = 'COALESCE(orders.order_created_at_utc, orders.order_created_at)';
 
         $base = DB::connection($connection)->table($orderTable.' as orders')
             ->join($storeTable.' as stores', 'stores.id', '=', 'orders.assistant_domain_store_id')
             ->leftJoin($userTable.' as owners', 'owners.id', '=', 'stores.owner_user_id')
-            ->whereBetween('orders.order_created_at', [$utcFrom, $utcTo])
+            ->whereBetween(DB::raw($orderTimestampSql), [$utcFrom, $utcTo])
             ->where(function ($platform): void {
                 $platform->where(function ($xshoppy): void {
                     $xshoppy->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy')")
@@ -91,7 +94,7 @@ class PerformanceReportController extends Controller
         // The offset is restricted by timezoneOptions(), so it is safe to embed. Using two
         // parameter placeholders makes MySQL ONLY_FULL_GROUP_BY treat SELECT/GROUP BY as
         // different expressions even when both bound values are identical.
-        $reportDateSql = "DATE(CONVERT_TZ(orders.order_created_at, '+00:00', '{$timezone}'))";
+        $reportDateSql = "DATE(CONVERT_TZ({$orderTimestampSql}, '+00:00', '{$timezone}'))";
         $rows = (clone $base)
             ->selectRaw($reportDateSql.' as report_date')
             ->addSelect([
@@ -215,14 +218,15 @@ class PerformanceReportController extends Controller
         abort_unless($store, 403, '无权查看该店铺订单。');
         $sourcePlatform = mb_strtolower(trim((string) $store->site_builder)) === 'shopline' ? 'shopline' : 'xshoppy';
 
+        $orderTimestampSql = 'COALESCE(order_created_at_utc, order_created_at)';
         $ordersQuery = FashionLogisticsOrder::query()
             ->where('assistant_domain_store_id', (int) $validated['store_id'])
             ->where('source_platform', $sourcePlatform)
-            ->whereBetween('order_created_at', [$utcFrom, $utcTo]);
+            ->whereBetween(DB::raw($orderTimestampSql), [$utcFrom, $utcTo]);
         $amount = (float) (clone $ordersQuery)->sum('total_amount');
         $orders = $ordersQuery
             ->with(['items:id,fashion_logistics_order_id,product_name,sku,quantity,total'])
-            ->orderByDesc('order_created_at')->orderByDesc('id')->paginate(20);
+            ->orderByRaw($orderTimestampSql.' DESC')->orderByDesc('id')->paginate(20);
 
         return response()->json([
             'date' => $validated['date'],
@@ -246,7 +250,7 @@ class PerformanceReportController extends Controller
                 'customer_name' => (string) ($order->customer_name ?: '—'),
                 'customer_email' => (string) ($order->customer_email ?: '—'),
                 'payment_method' => (string) ($order->payment_method_title ?: $order->payment_method ?: '—'),
-                'order_created_at' => $order->order_created_at?->timezone($timezone)->format('Y-m-d H:i:s'),
+                'order_created_at' => ($order->order_created_at_utc ?: $order->order_created_at)?->timezone($timezone)->format('Y-m-d H:i:s'),
                 'paid_at' => $order->paid_at?->timezone($timezone)->format('Y-m-d H:i:s'),
                 'items' => $order->items->map(fn ($item): array => [
                     'product_name' => (string) ($item->product_name ?: '—'),

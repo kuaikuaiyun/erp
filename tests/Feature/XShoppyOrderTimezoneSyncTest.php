@@ -69,6 +69,7 @@ class XShoppyOrderTimezoneSyncTest extends TestCase
             $table->text('customer_note')->nullable();
             $table->dateTime('source_order_created_at')->nullable();
             $table->string('source_order_timezone', 100)->nullable();
+            $table->dateTime('order_created_at_utc')->nullable();
             $table->dateTime('order_created_at')->nullable();
             $table->dateTime('order_modified_at')->nullable();
             $table->dateTime('paid_at')->nullable();
@@ -134,6 +135,7 @@ class XShoppyOrderTimezoneSyncTest extends TestCase
         $order = FashionLogisticsOrder::query()->sole();
         $this->assertSame('America/New_York', $order->source_order_timezone);
         $this->assertSame('2026-11-06 02:15:08', $order->source_order_created_at?->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-11-06 07:15:08', $order->order_created_at_utc?->format('Y-m-d H:i:s'));
         $this->assertSame('2026-11-06 15:15:08', $order->order_created_at?->format('Y-m-d H:i:s'));
     }
 }
