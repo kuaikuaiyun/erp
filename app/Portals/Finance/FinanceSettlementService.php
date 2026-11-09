@@ -2,15 +2,20 @@
 
 namespace App\Portals\Finance;
 
+use App\Models\AdminUser;
+use App\Models\AssistantDomainStore;
 use App\Models\FinancePaymentAccount;
 use App\Models\FinanceRecord;
 use App\Models\LogisticsOrderPaymentReference;
+use App\Portals\Assistant\AssistantStoreOwnerService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
 class FinanceSettlementService
 {
     public const PAYPAL_COST_HEADERS = ['通途订单', '物流-元', '采购成本-元'];
+
+    public const OPERATION_DEPARTMENT = '运营所属部门';
 
     public const CONDITION_FIELDS = ['account' => '支付账户', 'reference' => '交易单号', 'team' => '团队', 'owner' => '使用人',
         'domain' => '域名', 'subscription' => '订阅类型', 'gross' => '原币总额', 'settlement' => '结算金额',
@@ -70,7 +75,7 @@ class FinanceSettlementService
             'month' => '年月', 'date' => '时间点', 'timezone' => '导出时区', 'subscription' => '订阅类型', 'upsell' => '是否加购',
             'converted_usd' => '转换美元', 'usd_rate' => '汇率', 'settlement' => '结算金额-美元',
             ...array_diff_key($this->moneyFields('paypal'), array_flip(['converted_usd', 'usd_rate'])),
-            'domain' => '域名', 'owner' => '使用人', 'team' => '团队', 'erp_order' => '通途订单', 'note' => '备注'];
+            'domain' => '域名', 'owner' => '使用人', 'team' => self::OPERATION_DEPARTMENT, 'erp_order' => '通途订单', 'note' => '备注'];
     }
 
     public function exportColumns(string $channel): array
@@ -204,10 +209,14 @@ class FinanceSettlementService
             ->map(fn ($groups) => $groups->first()) : collect();
         $locks = $db->table('finance_period_locks')->whereNotNull('report_snapshot')->pluck('month')->all();
         $metadata = $this->logisticsMetadata($records, $channel);
+        $departmentMembers = $channel === 'paypal' && ! empty($filters['order_view']) && $records->isNotEmpty()
+            ? $this->operationDepartmentMembers() : collect();
+        $membersById = $departmentMembers->keyBy('id');
+        $membersByName = $departmentMembers->groupBy(fn ($member) => array_unique(array_filter([$member->name, $member->username])));
         $conflux = $channel === 'credit_card' && ($filters['card_channel'] ?? null) === 'ye'
             ? app(FinanceConfluxSettlement::class) : null;
         $ledger = $conflux?->entriesFor($records, $accountModels->keyBy('activity_account'));
-        return $records->map(function ($record) use ($channel, $filters, $supplements, $accounts, $owners, $accountsById, $domains, $storesById, $brushStores, $locks, $metadata, $conflux, $ledger): array {
+        return $records->map(function ($record) use ($channel, $filters, $supplements, $accounts, $owners, $accountsById, $domains, $storesById, $brushStores, $locks, $metadata, $membersById, $membersByName, $conflux, $ledger): array {
             $owner = $accountsById->get($owners->get($record->id));
             $p = $record->payload;
             $definition = FinanceCatalog::dataset($record->dataset);
@@ -314,12 +323,27 @@ class FinanceSettlementService
             $order = $metadata[$record->id]['order'] ?? null;
             $domain = strtolower(trim((string) ($saved['_edited_fields']['domain'] ?? $row['domain'])));
             $orderStore = $storesById->get($order->assistant_domain_store_id ?? null);
+            $inactiveOrderStore = in_array($orderStore->shop_status ?? null, [
+                AssistantDomainStore::SHOP_STATUS_ABANDONED, AssistantDomainStore::SHOP_STATUS_STOPPED,
+                'closed', 'idle', 'banned',
+            ], true);
             $group = $orderStore?->domain === $domain ? $orderStore : $domains->get($domain);
             $ownerName = $group?->assigned_owner ?? $group?->owner ?? ($p['使用人'] ?? '');
+            $ownerId = $group?->assigned_owner_user_id ?? null;
             $team = $group?->team ?? ($p['团队'] ?? '');
             if ($order !== null) {
-                if (isset($order->historical_owner_name) || property_exists($order, 'assigned_owner_name')) {
-                    $ownerName = $order->historical_owner_name ?? (($order->assigned_owner_name ?? null) ?: ($orderStore?->assigned_owner ?? ''));
+                if (isset($order->owner_history_id)) {
+                    $ownerName = $order->historical_owner_name ?? '';
+                    $ownerId = $order->historical_owner_user_id;
+                } elseif (filled($order->assigned_owner_name ?? null)) {
+                    $ownerName = $order->assigned_owner_name;
+                    $ownerId = $order->assigned_owner_user_id ?? null;
+                } elseif (property_exists($order, 'assigned_owner_name')) {
+                    $ownerName = $orderStore?->assigned_owner ?? '';
+                    $ownerId = $orderStore?->assigned_owner_user_id ?? null;
+                }
+                if ($inactiveOrderStore && ! isset($order->owner_history_id) && blank($ownerName)) {
+                    $ownerName = trim((string) ($order->operator_name ?? ''));
                 }
                 if (property_exists($order, 'group_names')) {
                     $team = FinanceCatalog::teamLabel($order->group_names);
@@ -347,6 +371,21 @@ class FinanceSettlementService
             }
             $row['locked'] = $row['locked'] || in_array($row['month'], $locks, true);
             if (! empty($filters['order_view'])) {
+                $displayedOwner = trim((string) $row['owner']);
+                $displayedOwnerId = $displayedOwner !== '' && $displayedOwner === trim((string) $ownerName) ? $ownerId : null;
+                $nameMatches = $membersByName->get($displayedOwner);
+                $member = $displayedOwnerId !== null
+                    ? $membersById->get($displayedOwnerId)
+                    : ($nameMatches?->count() === 1 ? $nameMatches->first() : null);
+                $row['operation_department'] = $member?->operation_department ?? '';
+                if ($member === null && $inactiveOrderStore && $displayedOwner !== '') {
+                    // A stopped store can retain an order's former operator and team after current memberships change.
+                    $snapshotOwner = trim((string) (($order->assigned_owner_name ?? null) ?: ($order->operator_name ?? '')));
+                    if ($displayedOwner === $snapshotOwner
+                        || ($displayedOwnerId !== null && (int) $displayedOwnerId === (int) ($order->assigned_owner_user_id ?? 0))) {
+                        $row['operation_department'] = FinanceCatalog::teamLabel($order->group_names ?? null);
+                    }
+                }
                 foreach (array_slice($headers, 15, null, true) as $index => $header) {
                     if (filled($p[$header] ?? null)) {
                         $row['paypal_'.$index] = $header === '物品标题'
@@ -420,6 +459,41 @@ class FinanceSettlementService
         return true;
     }
 
+    public function operationDepartments(): Collection
+    {
+        if (! $this->workbooks->database()->getSchemaBuilder()->hasTable(config('admin.database.roles_table'))) {
+            return collect();
+        }
+
+        return app(AssistantStoreOwnerService::class)->storeOwnershipSelectableOperationDepartments();
+    }
+
+    private function operationDepartmentMembers(): Collection
+    {
+        $schema = $this->workbooks->database()->getSchemaBuilder();
+        $user = new AdminUser;
+        if (! $schema->hasTable($user->getTable()) || ! $schema->hasTable(config('admin.database.role_users_table'))) {
+            return collect();
+        }
+
+        $departmentIds = $this->operationDepartments()->pluck('id')->all();
+        if ($departmentIds === []) {
+            return collect();
+        }
+
+        $scope = fn ($query) => $query->whereIn(config('admin.database.roles_table').'.id', $departmentIds);
+
+        return AdminUser::query()->withWhereHas('departments', $scope)->get(['id', 'name', 'username'])
+            ->map(function (AdminUser $member) {
+                $departments = $member->departments->sortBy('id');
+                $department = $departments->first(fn ($department) => (bool) $department->pivot->is_primary)
+                    ?? $departments->first();
+                $member->operation_department = $department?->name ?? '';
+
+                return $member;
+            });
+    }
+
     /** Enrich settlements from a linked logistics order or a unique payment reference. */
     public function logisticsMetadata(Collection $records, string $channel, bool $matchOnly = false): array
     {
@@ -438,7 +512,7 @@ class FinanceSettlementService
         $selected = $matchOnly ? ['id', ...$referenceFields] : array_values(array_unique(array_intersect(['id', ...$referenceFields, 'assistant_domain_store_id', 'source_shop_domain', 'subscription_type', 'is_add_on', 'tongtu_order_number',
             'shopify_order_number', 'shopify_order_id', 'store_name', 'subscription_status', 'subscription_origin_order_id',
             'tongtu_sku', 'tongtu_product_name', 'sale_quantity', 'sale_product_weight', 'payment_gateway', 'payment_method',
-            'assigned_owner_name', 'group_names',
+            'assigned_owner_name', 'assigned_owner_user_id', 'operator_name', 'group_names',
             ...array_keys(FinancePayPalOrderExport::COLUMNS), 'created_at', 'buyer_name', 'buyer_email', 'destination'], $columns)));
         $referenceValues = fn ($record) => $channel === 'paypal' ? [$record->reference, trim((string) ($record->payload['帳單號碼'] ?? ''))]
             : [$record->reference, $record->payload['商户订单号'] ?? '', $record->payload['Shopify订单号'] ?? ''];
@@ -462,15 +536,15 @@ class FinanceSettlementService
         if ($matches) {
             $linkedIds = $linkedIds->merge($matches->pluck('id'))->unique();
         }
-        $orderQuery = $db->table('logistics_orders')->whereIntegerInRaw('id', $linkedIds->all())->select($selected);
+        $orderQuery = $db->table('logistics_orders')->whereIntegerInRaw('logistics_orders.id', $linkedIds->all())
+            ->select(array_map(fn ($column) => 'logistics_orders.'.$column, $selected));
         if ($channel === 'paypal'
             && in_array('order_created_at', $selected, true)
             && in_array('assistant_domain_store_id', $selected, true)
             && $db->getSchemaBuilder()->hasTable('assistant_domain_store_owner_histories')
         ) {
-            // An empty name in an active interval means unassigned. NULL means no matching interval.
-            $orderQuery->addSelect(['historical_owner_name' => $db->table('assistant_domain_store_owner_histories')
-                ->selectRaw("COALESCE(owner_name_snapshot, '')")
+            $historyId = $db->table('assistant_domain_store_owner_histories')
+                ->select('id')
                 ->whereColumn('assistant_domain_store_id', 'logistics_orders.assistant_domain_store_id')
                 ->whereNotNull('logistics_orders.order_created_at')
                 ->where(function ($query) use ($db): void {
@@ -483,7 +557,11 @@ class FinanceSettlementService
                 })
                 ->where(fn ($query) => $query->whereNull('effective_to')
                     ->orWhereColumn('effective_to', '>', 'logistics_orders.order_created_at'))
-                ->orderByDesc('effective_from')->orderByDesc('id')->limit(1)]);
+                ->orderByDesc('effective_from')->orderByDesc('id')->limit(1);
+            $orderQuery->leftJoin('assistant_domain_store_owner_histories as owner_history', fn ($join) =>
+                $join->where('owner_history.id', '=', $historyId))
+                ->addSelect('owner_history.id as owner_history_id', 'owner_history.owner_name_snapshot as historical_owner_name',
+                    'owner_history.owner_user_id as historical_owner_user_id');
         }
         $orders = $orderQuery->get()->keyBy('id');
         $stores = ! $matchOnly && $db->getSchemaBuilder()->hasTable('assistant_domain_stores')

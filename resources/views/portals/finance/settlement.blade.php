@@ -121,7 +121,7 @@
 <option @selected(($filters['order_status'] ?? '') === $status)>{{ $status }}</option>@endforeach
 </select></div>
 @endif
-<div><label for="settlement-team">团队</label><select id="settlement-team" name="team" class="form-control"><option value="">全部团队</option>@foreach($teams as $team)<option @selected(($filters['team'] ?? '') === $team)>{{ $team }}</option>@endforeach</select></div>
+<div><label for="settlement-team">{{ $orderView ? '运营所属部门' : '团队' }}</label><select id="settlement-team" name="team" class="form-control"><option value="">{{ $orderView ? '全部运营部门' : '全部团队' }}</option>@foreach($teams as $team)<option @selected(($filters['team'] ?? '') === $team)>{{ $team }}</option>@endforeach</select></div>
 <div><label for="settlement-subscription">订阅类型</label><input id="settlement-subscription" class="form-control" name="subscription" list="settlement-subscriptions" value="{{ $filters['subscription'] ?? '' }}"></div>
 <div><label for="settlement-domain">域名</label><input id="settlement-domain" class="form-control" name="domain" value="{{ $filters['domain'] ?? '' }}"></div>
 @if($channel === 'credit_card')<div><label for="settlement-source">数据来源</label><select id="settlement-source" name="source" class="form-control"><option value="">合并去重</option>@foreach(['xuzong2-orders' => '信用卡订单', 'xuzong2-details' => '信用卡导入明细', 'xuzong1-details' => '历史信用卡明细'] as $source => $label)<option value="{{ $source }}" @selected(($filters['source'] ?? '') === $source)>{{ $label }}</option>@endforeach</select></div>@endif
@@ -168,7 +168,7 @@
 </tr>
 @empty<tr><td data-settlement-colspan="{{ $hasOperations ? 2 : 1 }}" colspan="{{ count($columns) + ($hasOperations ? 2 : 1) }}">无符合条件的记录</td></tr>@endforelse
 </tbody></table></div>@include('portals.finance.pagination', ['paginator' => $rows])
-<p class="settlement-note">@if($orderView)每笔付款单独列示。应结算为美元收款金额减去手续费至争议费各列，再加上三项返还。缺少换汇或返还依据的金额待核对。@endif 费用和返还金额以美元填写，物流和采购以人民币填写。金额可按需补充。使用人和团队优先显示财务补录。@if($orderView)已匹配物流订单时，使用人按下单时生效的归属历史显示，早于第一条记录的订单按第一条归属，未分配时留空。查不到历史时，依次取订单归属快照和绑定店铺的归属人。团队取订单所属组。@else 未补充时按域名匹配。@endif 已锁定月份不可修改。</p>
+<p class="settlement-note">@if($orderView)每笔付款单独列示。应结算为美元收款金额减去手续费至争议费各列，再加上三项返还。缺少换汇或返还依据的金额待核对。@endif 费用和返还金额以美元填写，物流和采购以人民币填写。金额可按需补充。@if($orderView)使用人优先显示财务补录。已匹配物流订单时，按下单时间匹配归属历史，早于第一条记录的订单按第一条归属，未分配时留空。查不到历史时，依次取订单归属快照和绑定店铺的归属人。运营所属部门取使用人在助理系统对应的运营部门。@else 使用人和团队优先显示财务补录，未补充时按域名匹配。@endif 已锁定月份不可修改。</p>
 </div></div>
 @if($orderView)
 <dialog class="settlement-dialog settlement-paypal-detail" id="settlement-detail" aria-labelledby="settlement-detail-title">

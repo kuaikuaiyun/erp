@@ -407,6 +407,7 @@ class FinancePayPalSettlementOrders
         $root = $roots[$id] ?? null;
         $result = $this->calculate($payment, $root, $children[$id] ?? [], $conversions[$id] ?? [],
             $root && count($crossAccount[$root['reference']] ?? []) > 1, $crossRates, $zone, $includeDetails);
+        $result['team'] = $payment['operation_department'];
         $result['order_status'] = $this->paymentStatus($result);
         if (isset($ambiguous[$id])) {
             $result['payable'] = $result['open_hold'] = null;
