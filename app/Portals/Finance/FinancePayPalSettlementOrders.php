@@ -15,6 +15,7 @@ class FinancePayPalSettlementOrders
     ];
 
     public const REFUND_SPLIT_COLUMNS = ['frozen_refund' => '冻结退款', 'refund_top_up' => '补差价退款'];
+    public const ACCOUNT_RESERVE_NOTE = '预备金流水无原付款关联号，未计入订单应结算';
     private const LEGACY_REFUND_FIELDS = ['refund' => 'frozen_refund', 'refund_fee' => 'refund_top_up'];
 
     private const EVENTS = [
@@ -433,7 +434,7 @@ class FinancePayPalSettlementOrders
     private function unlinkedRow(array $event, string $zone, bool $includeDetails): array
     {
         $date = CarbonImmutable::createFromTimestamp($event['time'], 'UTC')->setTimezone($zone);
-        $reserveWithoutReference = in_array($event['code'], ['T2103', 'T2104'], true)
+        $accountReserve = in_array($event['code'], ['T2103', 'T2104'], true)
             && $event['related_id'] === '' && $event['invoice'] === '';
         return [
             'id' => $event['id'], 'account' => $event['account'], 'reference' => $event['reference'],
@@ -442,7 +443,7 @@ class FinancePayPalSettlementOrders
             'date' => $date->format('Y-m-d H:i:s'), 'month' => $date->format('Y-m'), 'timezone' => $zone,
             'subscription' => '未匹配', 'upsell' => '未匹配',
             'order_status' => '待关联交易',
-            'review' => $reserveWithoutReference ? '预备金流水无原付款关联号，未计入订单应结算' : '未找到唯一的原付款，未计入应结算',
+            'review' => $accountReserve ? self::ACCOUNT_RESERVE_NOTE : '未找到唯一的原付款，未计入应结算',
             ...($includeDetails ? ['events' => [$this->detail($event, $zone)]] : []),
             'payments' => [], 'locked' => true,
             'unlinked_account' => $event['account_key'], 'unlinked_date' => $date,

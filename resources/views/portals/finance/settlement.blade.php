@@ -83,11 +83,23 @@
 @php
     $hasOperations = $orderView || $canManage;
     $operationClass = $orderView ? 'settlement-operation settlement-paypal-operation' : 'settlement-operation';
+    $cardChannel = $channel === 'credit_card' ? ($filters['card_channel'] ?? null) : null;
 @endphp
 <div class="settlement-page">
 <div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}" id="settlement-filter">
 <input type="hidden" name="per_page" value="{{ $rows->perPage() }}">
 <div class="settlement-filter">
+@if($channel === 'credit_card')
+<div>
+    <label for="settlement-card-channel">支付渠道</label>
+    <select id="settlement-card-channel" name="card_channel" class="form-control" onchange="this.form.requestSubmit()">
+        <option value="">全部渠道</option>
+        @foreach(\App\Portals\Finance\FinanceCreditSettlementLayout::CHANNELS as $key => $label)
+        <option value="{{ $key }}" @selected(($filters['card_channel'] ?? '') === $key)>{{ $label }}</option>
+        @endforeach
+    </select>
+</div>
+@endif
 <div><label for="settlement-account">支付账户</label><select id="settlement-account" name="account" class="form-control"><option value="">全部账户</option>@foreach($accounts as $account)<option value="{{ $account->activity_account }}" @selected(($filters['account'] ?? '') === $account->activity_account)>{{ \App\Portals\Finance\FinanceCatalog::simplified($account->account_name) }}</option>@endforeach</select></div>
 <div><label for="settlement-from">开始日期</label><input id="settlement-from" class="form-control" type="date" name="from" value="{{ $filters['from'] ?? '' }}"></div>
 <div><label for="settlement-to">结束日期</label><input id="settlement-to" class="form-control" type="date" name="to" value="{{ $filters['to'] ?? '' }}"></div>
@@ -107,19 +119,20 @@
 @include('portals.finance.partials.filter-conditions', ['enhancedConditions' => true, 'hideConditionOperator' => $channel === 'paypal'])
 <div class="settlement-actions"><button class="btn btn-primary">查询</button><a class="btn btn-default" href="{{ route('finance.report', $report) }}">重置</a><select class="form-control" name="format" aria-label="导出格式"><option value="xlsx" @selected(($filters['format'] ?? 'xlsx') === 'xlsx')>Excel (.xlsx)</option><option value="xls" @selected(($filters['format'] ?? 'xlsx') === 'xls')>Excel (.xls)</option></select><label class="settlement-template-toolbar">导出模板 <select class="form-control" data-active-export-template aria-label="本次使用的导出模板"><option value="">{{ $orderView ? '按当前列表导出' : '默认字段设置' }}</option></select></label><button type="button" data-finance-download  class="btn btn-default" >导出筛选结果</button>@if($canManage)<button type="button" class="btn btn-default" data-open-settlement-import>导入数据</button> <button type="button" class="btn btn-danger" data-delete-selected-settlements>删除所选</button> @endif</div>
 </form></div></div>
-<div class="box"><div class="box-body"><div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><span>共 {{ $rows->total() }} 条</span><div class="settlement-column-settings-trigger">@include('portals.finance.partials.settlement-column-settings')</div></div>
+<div class="box"><div class="box-body"><div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><span>共 {{ $rows->total() }} 条</span><div class="settlement-column-settings-trigger">@include('portals.finance.partials.settlement-column-settings', ['columnCardChannel' => $cardChannel])</div></div>
 <div class="finance-table-wrap"><table class="table finance-table"><thead><tr><th class="finance-selection"><input type="checkbox" data-export-all aria-label="全选当前页"></th>@foreach($columns as $field => $label)<th data-settlement-column="{{ $field }}">{{ $label }}</th>@endforeach @if($hasOperations)<th class="{{ $operationClass }}">操作</th>@endif</tr></thead><tbody>
 @forelse($rows as $row)
 @php($editable = $orderView ? ($row['payments'][0] ?? null) : $row)
 <tr><td class="finance-selection"><input type="checkbox" data-record-id="{{ $row['id'] }}" @if($orderView) data-payment-ids="{{ json_encode(array_column($row['payments'], 'id')) }}" @endif data-locked="{{ $row['locked'] ? '1' : '0' }}" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($row) }}" aria-label="选择此行"></td>
 @foreach($columns as $field => $label)
 @php($splitRefundNote = $orderView ? \App\Portals\Finance\FinancePayPalSettlementOrders::splitRefundNote($row, $field) : null)
-<td data-settlement-column="{{ $field }}" title="{{ $splitRefundNote ?? $row[$field] ?? '' }}" @class(['settlement-pending' => ($row[$field] ?? null) === null])>
+@php($cellValue = ($row['card_layout'] ?? $row)[$field] ?? null)
+<td data-settlement-column="{{ $field }}" title="{{ $splitRefundNote ?? $cellValue ?? '' }}" @class(['settlement-pending' => $cellValue === null])>
 @if($splitRefundNote !== null)
 {{ $splitRefundNote }}
 @elseif(isset($moneyFields[$field]) || in_array($field, ['gross','settlement','source_settlement_usd','converted_usd','paypal_7','paypal_8','paypal_9','payable','open_hold'], true))
-{{ ($row[$field] ?? null) === null ? ($orderView && in_array($field, ['payable','open_hold'], true) ? '待核对' : '') : \App\Portals\Finance\FinanceCatalog::reportAmount($row[$field]) }}
-@else{{ \Illuminate\Support\Str::limit(\App\Portals\Finance\FinanceCatalog::simplified((string) ($row[$field] ?? '')), 40) }}@endif
+{{ $cellValue === null ? ($orderView && in_array($field, ['payable','open_hold'], true) ? '待核对' : '') : \App\Portals\Finance\FinanceCatalog::reportAmount($cellValue) }}
+@else{{ \Illuminate\Support\Str::limit(\App\Portals\Finance\FinanceCatalog::simplified((string) ($cellValue ?? '')), 40) }}@endif
 </td>
 @endforeach
 @if($hasOperations)<td class="{{ $operationClass }}">
@@ -182,9 +195,28 @@
 @endif
 <footer><button class="btn btn-primary">保存</button><button type="button" class="btn btn-danger" id="settlement-editor-delete">删除</button><button type="button" class="btn btn-default" data-settlement-close>取消</button></footer></form></dialog>
 <dialog class="settlement-dialog" id="settlement-import"><header><h3>导入结算明细</h3><button type="button" data-settlement-close aria-label="关闭">×</button></header><form method="post" action="{{ route('finance.settlement.import', ['report' => $report, 'account' => $filters['account'] ?? null]) }}" enctype="multipart/form-data">@csrf
-@if($channel === 'credit_card')<div class="settlement-edit-grid"><div><label for="credit-manual-account">支付账户</label><select id="credit-manual-account" name="account" class="form-control" required><option value="">请选择账户</option>@foreach($accounts as $account)<option value="{{ $account->activity_account }}" @selected(($filters['account'] ?? '') === $account->activity_account)>{{ $account->account_name }}</option>@endforeach</select></div></div>@endif
+@if($channel === 'credit_card')
+<div class="settlement-edit-grid">
+    <div><label for="credit-manual-account">支付账户</label><select id="credit-manual-account" name="account" class="form-control" required><option value="">请选择账户</option>@foreach($accounts as $account)<option value="{{ $account->activity_account }}" @selected(($filters['account'] ?? '') === $account->activity_account)>{{ $account->account_name }}</option>@endforeach</select></div>
+    @if($cardChannel)
+        <div><label>支付渠道</label><div>{{ \App\Portals\Finance\FinanceCreditSettlementLayout::CHANNELS[$cardChannel] }}</div><input type="hidden" name="card_channel" value="{{ $cardChannel }}"></div>
+        <div><label for="credit-import-timezone">文件时区</label><select id="credit-import-timezone" name="timezone" class="form-control">@include('portals.finance.partials.timezone-options', ['selectedTimezone' => $cardChannel === 'ye' ? 'Asia/Shanghai' : $filters['timezone']])</select></div>
+    @endif
+</div>
+@endif
 @if($channel === 'paypal')<p class="settlement-note" style="padding:0 20px">导入只新增数据，记录ID由系统生成；相同支付账户及交易ID的重复行自动跳过，其余行继续导入。修改已有记录请使用列表中的编辑按钮。</p>@endif
-<label class="settlement-import-drop"><i class="fa fa-cloud-upload" aria-hidden="true"></i>拖拽文件到这里，或点击选择文件<input type="file" name="file" accept=".xlsx,.csv" required></label><p style="padding:0 20px"><a href="{{ route('finance.report', ['report' => $report, 'template' => 1]) }}">下载导入模板（XLSX）</a></p><p class="settlement-note" style="padding:0 20px">@if($channel === 'credit_card')所属月份按表格中的订单时间自动确定。信用卡导入只新增数据；相同账户、商户订单号、平台订单号及交易时间、状态的重复行自动跳过，其他行继续导入。修改已有记录请使用编辑按钮。@endif 支持XLSX、CSV，最大10MB。</p><footer><button type="button" class="btn btn-default" data-settlement-close>取消</button><button class="btn btn-success">确认导入</button></footer></form></dialog>
+<label class="settlement-import-drop"><i class="fa fa-cloud-upload" aria-hidden="true"></i>拖拽文件到这里，或点击选择文件<input type="file" name="file" accept=".xlsx,.csv" required></label>
+<p style="padding:0 20px"><a href="{{ route('finance.report', ['report' => $report, 'template' => 1, 'card_channel' => $cardChannel]) }}">下载导入模板（XLSX）</a></p>
+<p class="settlement-note" style="padding:0 20px">
+@if($cardChannel)
+    @if($cardChannel === 'ye')可上传叶总平台导出的订单文件，也可使用本页模板。@endif
+    请保留表头和列顺序，将公式结果粘贴为值，长订单号以文本填写。重复交易自动跳过。
+@elseif($channel === 'credit_card')
+    当前使用通用导入模板。导入叶总支付或 Worldpay 单包时，请先在页面筛选对应渠道。所属月份按订单时间确定，重复交易自动跳过。
+@endif
+支持 XLSX、CSV，最大 10 MB。
+</p>
+<footer><button type="button" class="btn btn-default" data-settlement-close>取消</button><button class="btn btn-success">确认导入</button></footer></form></dialog>
 @endif
 
 

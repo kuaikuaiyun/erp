@@ -155,6 +155,9 @@ class FinanceSettlementEditor
                 $identity = [$record->dataset, $candidate->account, $candidate->reference, $candidate->occurred_at->toIso8601String(), $candidate->raw_type ?? '', $candidate->currency, $candidate->status ?? ''];
                 if ($channel === 'credit_card') {
                     $identity[] = trim((string) ($payload['商户订单号'] ?? $payload['Shopify订单号'] ?? ''));
+                    if (isset($payload['_card_channel'])) {
+                        $identity[] = $payload['_card_channel'];
+                    }
                 }
                 $link = $db->table('finance_payment_transactions')->where('finance_record_id', $record->id)->first();
                 if ($link) {
@@ -227,6 +230,10 @@ class FinanceSettlementEditor
             $matches->whereIn('dataset', ['xuzong2-orders', 'xuzong2-details', 'xuzong1-details'])->where('account', $record->account)
                 ->where('occurred_at', $record->occurred_at)->where('currency', $record->currency)->where('status', $record->status)
                 ->where(fn ($q) => $q->where('payload->商户订单号', $merchant)->orWhere('payload->Shopify订单号', $merchant));
+            if (isset($record->payload['_card_channel'])) {
+                $matches->where(fn ($q) => $q->whereNull('payload->_card_channel')
+                    ->orWhere('payload->_card_channel', $record->payload['_card_channel']));
+            }
         }
         if ($matches->exists()) {
             throw ValidationException::withMessages(['reference' => '交易ID或对应支付记录已存在，不能重复。']);

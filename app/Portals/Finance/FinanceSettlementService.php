@@ -135,6 +135,9 @@ class FinanceSettlementService
                 });
             });
         }
+        if ($channel === 'credit_card' && filled($filters['card_channel'] ?? null)) {
+            FinanceCreditSettlementLayout::filter($query, $filters['card_channel']);
+        }
         foreach (['account', 'reference'] as $field) {
             if (filled($filters[$field] ?? null)) {
                 $query->where($field, $filters[$field]);
@@ -320,6 +323,12 @@ class FinanceSettlementService
                     ...array_intersect_key($p, array_flip($keys)), ...array_intersect_key($saved, array_flip($keys)),
                     ...array_intersect_key($saved['_edited_fields'] ?? [], array_flip($keys)),
                 ];
+            }
+
+            if ($channel === 'credit_card' && filled($filters['card_channel'] ?? null)) {
+                $row['card_layout'] = FinanceCreditSettlementLayout::values(
+                    $filters['card_channel'], $row, $p, [...$saved, ...($saved['_edited_fields'] ?? [])],
+                );
             }
 
             return $row;

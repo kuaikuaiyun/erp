@@ -771,6 +771,91 @@ class FinancePortalTest extends TestCase
         $this->assertEquals(28, $export[1][array_search('结算金额（美元）', $export[0], true)]);
     }
 
+    public function test_credit_settlement_channel_switch_uses_the_source_columns_for_display_and_export(): void
+    {
+        $account = $this->financePayPalAccount('叶总支付', ['account_type' => 'credit_card']);
+        $payload = ['平台订单号' => 'YE-ORDER', '创建时间' => '2026-11-06 02:00:00',
+            '交易币种' => 'USD', '交易金额' => '10', '支付状态' => 'SUCCESS',
+            '订单退款金额' => '2', '退款金额' => '3'];
+        $this->workbooks->importRecords('xuzong2-details', [
+            2 => $payload,
+            3 => [...$payload, '平台订单号' => 'WP-ORDER', '网关接入号' => '123', '预仲裁金额' => '4'],
+        ], $account->activity_account, 'UTC', 1);
+
+        $report = '/finance/reports/credit-settlement';
+        $ye = $this->get($report.'?card_channel=ye')->assertOk();
+        $ye->assertSeeInOrder(['>网站名称</th>', '>流水订单号</th>', '>退款状态</th>', '>退款金额</th>',
+            '>单笔费用</th>', '>退款金额</th>', '>应结算</th>', '>备注</th>'], false)
+            ->assertSee('YE-ORDER')->assertDontSee('WP-ORDER')->assertDontSee('>预仲裁金额</th>', false);
+        $worldpay = $this->get($report.'?card_channel=worldpay')->assertOk();
+        $worldpay->assertSeeInOrder(['>网关接入号</th>', '>流水订单号</th>', '>结单汇率</th>', '>预仲裁金额</th>',
+            '>RDR申诉成功</th>', '>商品名称-简称</th>'], false)->assertSee('WP-ORDER')->assertDontSee('YE-ORDER');
+
+        $yeExport = $this->readDownload($this->get($report.'?card_channel=ye&download=1')->assertOk()->streamedContent())->toArray();
+        $this->assertCount(48, $yeExport[0]);
+        $this->assertSame('退款金额', $yeExport[0][18]);
+        $this->assertSame('退款金额', $yeExport[0][29]);
+        $this->assertEquals(2, $yeExport[1][18]);
+        $this->assertEquals(3, $yeExport[1][29]);
+        $this->assertCount(2, $yeExport);
+        $worldpayExport = $this->readDownload($this->get($report.'?card_channel=worldpay&download=1')->assertOk()->streamedContent())->toArray();
+        $this->assertCount(42, $worldpayExport[0]);
+        $this->assertSame('网关接入号', $worldpayExport[0][0]);
+        $this->assertSame('预仲裁金额', $worldpayExport[0][30]);
+        $this->assertEquals(4, $worldpayExport[1][30]);
+        $this->assertCount(2, $worldpayExport);
+
+        $template = $this->readDownload($this->get($report.'?card_channel=ye&download=1&export_template=1')
+            ->assertOk()->streamedContent());
+        $this->assertSame([$yeExport[0]], $template->toArray());
+        $this->postJson($report.'/export-template/preview?card_channel=ye', [
+            'file' => $this->upload($template->getParent()), 'header_row' => 1,
+        ])->assertOk()->assertJsonPath('fields.18', 'order_refund')->assertJsonPath('fields.29', 'refund')
+            ->assertJsonPath('duplicates', []);
+    }
+
+    public function test_credit_channel_workbooks_can_be_imported_manually_without_overwriting_transactions(): void
+    {
+        $account = $this->financePayPalAccount('信用卡导入', ['account_type' => 'credit_card']);
+        $report = '/finance/reports/credit-settlement';
+        $reference = '12345678901234567890';
+        foreach (['ye' => [4, 2, 13, 14, 15], 'worldpay' => [2, 9, 4, 5, 10]] as $channel => [$ref, $date, $currency, $amount, $status]) {
+            $sheet = $this->readDownload($this->get($report.'?template=1&card_channel='.$channel)->assertOk()->streamedContent());
+            $sheet->setTitle($channel === 'ye' ? '叶总订单明细' : 'worldpay单包');
+            $sheet->getParent()->createSheet(0)->setTitle('说明');
+            $sheet->getParent()->setActiveSheetIndex(0);
+            $sheet->setCellValueExplicit([$ref, 2], $reference, DataType::TYPE_STRING);
+            $sheet->setCellValue([$date, 2], 46332.5);
+            $sheet->setCellValue([$currency, 2], 'USD');
+            $sheet->setCellValue([$amount, 2], 10);
+            $sheet->setCellValue([$status, 2], '成功');
+            if ($channel === 'ye') {
+                $sheet->setCellValue('S2', 2);
+                $sheet->setCellValue('AD2', 3);
+                $sheet->setCellValue('U2', 'https://example.com/payment');
+            } else {
+                $sheet->setCellValue('AE2', 4);
+            }
+            $data = ['card_channel' => $channel, 'account' => $account->activity_account, 'timezone' => 'Asia/Shanghai'];
+            $this->post($report.'/import', [...$data, 'file' => $this->upload($sheet->getParent())])
+                ->assertSessionHasNoErrors()->assertSessionHas('success', '已新增 1 条信用卡明细，跳过重复 0 条。');
+            $this->post($report.'/import', [...$data, 'file' => $this->upload($sheet->getParent())])
+                ->assertSessionHasNoErrors()->assertSessionHas('success', '已新增 0 条信用卡明细，跳过重复 1 条。');
+
+            $export = $this->readDownload($this->get($report.'?download=1&card_channel='.$channel)->assertOk()->streamedContent())->toArray();
+            $this->assertCount(2, $export);
+            $this->assertSame($reference, $export[1][$ref - 1]);
+            if ($channel === 'ye') {
+                $this->assertEquals(2, $export[1][18]);
+                $this->assertEquals(3, $export[1][29]);
+                $this->assertSame('example.com', $export[1][42]);
+            } else {
+                $this->assertEquals(4, $export[1][30]);
+            }
+        }
+        $this->assertSame(2, FinanceRecord::query()->where('reference', $reference)->count());
+    }
+
     public function test_settlement_editor_saves_all_supplement_text_fields(): void
     {
         $this->workbooks->importRecords('paypal-orders', [2 => [
@@ -1196,9 +1281,28 @@ class FinancePortalTest extends TestCase
             && str_contains($rows->first()['review'], '按 2026-09 财务月汇率折算美元'));
 
         $add('RESERVE-WITHOUT-ORDER', 'T2103', '2026-09-29', 'USD', '-40000.00');
-        $this->get($url.'&reference=RESERVE-WITHOUT-ORDER')->assertOk()
-            ->assertViewHas('rows', fn ($rows) => ($rows->first()['payable'] ?? null) === null
+        $add('RESERVE-RELEASE-WITHOUT-ORDER', 'T2104', '2026-09-29', 'USD', '40000.00');
+        foreach (['RESERVE-WITHOUT-ORDER', 'RESERVE-RELEASE-WITHOUT-ORDER'] as $reference) {
+            $reserveUrl = $url.'&reference='.$reference;
+            $this->get($reserveUrl)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->total() === 1
                 && $rows->first()['review'] === '预备金流水无原付款关联号，未计入订单应结算');
+            foreach (['xlsx', 'xls'] as $format) {
+                $export = $this->readDownload($this->get($reserveUrl.'&download=1&format='.$format)->assertOk()->streamedContent())->toArray();
+                $this->assertCount(2, $export);
+                $headers = array_flip($export[0]);
+                $this->assertSame($reference, $export[1][$headers['交易 ID']]);
+                $this->assertTrue(blank($export[1][$headers['核对说明']]));
+            }
+            $id = FinanceRecord::where('reference', $reference)->sole()->id;
+            $this->get('/finance/reports/paypal-settlement/records/'.$id)->assertOk();
+        }
+
+        $add('PAY-RESERVE', 'T0006', '2026-09-29', 'USD', '20.00');
+        $add('RESERVE-FOR-ORDER', 'T2103', '2026-09-29', 'USD', '-5.00', parent: 'PAY-RESERVE');
+        $add('RESERVE-RELEASE-FOR-ORDER', 'T2104', '2026-09-30', 'USD', '3.00', parent: 'PAY-RESERVE');
+        $this->get($url.'&reference=PAY-RESERVE')->assertOk()
+            ->assertViewHas('rows', fn ($rows) => $rows->first()['payable'] === '18.00000000'
+                && $rows->first()['open_hold'] === '2.00000000');
     }
 
     public function test_settlement_custom_export_order_applies_to_selected_rows_and_blank_templates(): void

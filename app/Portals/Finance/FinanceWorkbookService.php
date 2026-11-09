@@ -84,7 +84,7 @@ class FinanceWorkbookService
         ]);
     }
 
-    public function read(UploadedFile $file, array $headers, ?string $sheetName = null, array $optionalHeaders = []): array
+    public function read(UploadedFile $file, array $headers, ?string $sheetName = null, array $optionalHeaders = [], bool $keyedHeaders = false, int $maxRows = 5000): array
     {
         try {
             $reader = IOFactory::createReaderForFile($file->getRealPath());
@@ -100,39 +100,49 @@ class FinanceWorkbookService
                 $sheet = $book->getSheetByName($legacyName);
             }
             $sheet ??= $book->getActiveSheet();
-            if ($sheet->getHighestDataRow() > 5001 || Coordinate::columnIndexFromString($sheet->getHighestDataColumn()) > 100) {
-                throw ValidationException::withMessages(['file' => __('finance.errors.size')]);
+            ['row' => $lastRow, 'column' => $lastColumn] = $sheet->getHighestRowAndColumn();
+            $width = Coordinate::columnIndexFromString($lastColumn);
+            if ($lastRow > $maxRows + 1 || $width > 100) {
+                throw ValidationException::withMessages(['file' => __('finance.errors.size', ['rows' => number_format($maxRows)])]);
             }
             $positions = [];
-            for ($column = 1; $column <= Coordinate::columnIndexFromString($sheet->getHighestDataColumn()); $column++) {
+            $expected = array_count_values(array_map(FinanceCatalog::simplified(...), $headers));
+            for ($column = 1; $column <= $width; $column++) {
                 $name = trim(ltrim((string) $sheet->getCell([$column, 1])->getValue(), "\xEF\xBB\xBF"));
                 $name = FinanceCatalog::simplified($name);
                 if ($name !== '') {
-                    if (isset($positions[$name])) {
+                    if (count($positions[$name] ?? []) >= ($keyedHeaders ? ($expected[$name] ?? 1) : 1)) {
                         throw ValidationException::withMessages(['file' => __('finance.errors.duplicate_header', ['header' => $name])]);
                     }
-                    $positions[$name] = $column;
+                    $positions[$name][] = $column;
                 }
             }
-            foreach ($headers as $header) {
-                if (! isset($positions[FinanceCatalog::simplified($header)]) && ! in_array($header, $optionalHeaders, true)) {
+            $columns = [];
+            $occurrences = [];
+            foreach ($headers as $key => $header) {
+                $name = FinanceCatalog::simplified($header);
+                $occurrence = $keyedHeaders ? ($occurrences[$name] ?? 0) : 0;
+                $column = $positions[$name][$occurrence] ?? null;
+                if ($column === null && ! in_array($keyedHeaders ? $key : $header, $optionalHeaders, true)) {
                     throw ValidationException::withMessages(['file' => __('finance.errors.header', ['header' => $header])]);
                 }
+                $occurrences[$name] = $occurrence + 1;
+                $columns[$keyedHeaders ? $key : $header] = $column;
             }
             $rows = [];
-            for ($row = 2; $row <= $sheet->getHighestDataRow(); $row++) {
+            for ($row = 2; $row <= $lastRow; $row++) {
                 $values = [];
-                foreach ($headers as $header) {
-                    if (! isset($positions[FinanceCatalog::simplified($header)])) {
-                        $values[$header] = '';
+                foreach ($columns as $key => $column) {
+                    if ($column === null) {
+                        $values[$key] = '';
                         continue;
                     }
-                    $cell = $sheet->getCell([$positions[FinanceCatalog::simplified($header)], $row]);
+                    $cell = $sheet->getCell([$column, $row]);
                     if ($cell->isFormula()) {
                         throw ValidationException::withMessages(['file' => __('finance.errors.formula', ['row' => $row])]);
                     }
                     $value = $cell->getValue();
-                    $values[$header] = is_scalar($value) ? trim((string) $value) : '';
+                    $values[$key] = is_scalar($value) ? trim((string) $value) : '';
                 }
                 if (count(array_filter($values, static fn ($value) => $value !== '')) > 0) {
                     $rows[$row] = $values;
@@ -187,7 +197,7 @@ class FinanceWorkbookService
             ) ?? '');
             $known = [];
             foreach ($columns as $field => $label) {
-                $known[$normalize($label)] = $field;
+                $known[$normalize($label)][] = $field;
             }
             foreach ([
                 '交易号' => 'reference', '交易单号' => 'reference', '订单状态' => 'order_status',
@@ -196,7 +206,7 @@ class FinanceWorkbookService
                 '结算金额-美元' => 'settlement', '自定义编号' => 'paypal_27', '联系电话号码' => 'paypal_37',
             ] as $alias => $field) {
                 if (isset($columns[$field])) {
-                    $known[$normalize($alias)] ??= $field;
+                    $known[$normalize($alias)] ??= [$field];
                 }
             }
             $selected = $unmatched = $duplicates = [];
@@ -207,13 +217,14 @@ class FinanceWorkbookService
                 if ($label === '') {
                     continue;
                 }
-                $field = $cell->isFormula() ? null : ($known[$normalize($label)] ?? null);
-                if ($field === null) {
+                $candidates = $cell->isFormula() ? [] : ($known[$normalize($label)] ?? []);
+                $remaining = array_diff_key(array_fill_keys($candidates, true), $selected);
+                if ($candidates === []) {
                     $unmatched[] = $label;
-                } elseif (isset($selected[$field])) {
+                } elseif ($remaining === []) {
                     $duplicates[] = $label;
                 } else {
-                    $selected[$field] = true;
+                    $selected[array_key_first($remaining)] = true;
                 }
             }
             return ['fields' => array_keys($selected), 'unmatched' => $unmatched, 'duplicates' => $duplicates];
@@ -222,7 +233,7 @@ class FinanceWorkbookService
         }
     }
 
-    public function importRecords(string $dataset, array $rows, string $account, string $timezone, int $actor, bool $createOnly = false): int
+    public function importRecords(string $dataset, array $rows, string $account, string $timezone, int $actor, bool $createOnly = false, bool $guardSettlementMonth = false): int
     {
         if (! in_array($timezone, self::TIMEZONES, true)) {
             throw ValidationException::withMessages(['source_timezone' => __('finance.errors.timezone')]);
@@ -295,6 +306,9 @@ class FinanceWorkbookService
             $identity = [$dataset, $account, $reference, $occurred->toIso8601String(), $rawType, $currency, $status];
             if ($definition['channel'] !== 'paypal') {
                 $identity[] = trim((string) ($payload['商户订单号'] ?? $payload['Shopify订单号'] ?? ''));
+                if (isset($payload['_card_channel'])) {
+                    $identity[] = $payload['_card_channel'];
+                }
             }
             $records[] = [
                 'dataset' => $dataset, 'account' => $account, 'reference' => $reference,
@@ -307,12 +321,20 @@ class FinanceWorkbookService
             ];
         }
 
-        return $this->database()->transaction(function () use ($records, $createOnly): int {
+        return $this->database()->transaction(function () use ($records, $createOnly, $guardSettlementMonth): int {
             $created = 0;
+            $checkedMonths = [];
             foreach ($records as $record) {
                 $model = $createOnly
                     ? FinanceRecord::query()->firstOrCreate(['fingerprint' => $record['fingerprint']], $record)
                     : FinanceRecord::query()->updateOrCreate(['fingerprint' => $record['fingerprint']], $record);
+                if ($guardSettlementMonth && $model->wasRecentlyCreated) {
+                    $month = $model->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m');
+                    if (! isset($checkedMonths[$month])) {
+                        app(FinanceAccountingService::class)->guardUnlocked($month);
+                        $checkedMonths[$month] = true;
+                    }
+                }
                 $created += (int) $model->wasRecentlyCreated;
                 if ($record['raw_type']) {
                     $this->registerType($record['raw_type']);
