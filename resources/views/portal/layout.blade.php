@@ -33,6 +33,9 @@
         : ($greetingHour < 18 ? 'admin.greeting.afternoon' : 'admin.greeting.evening');
     $greeting = trans($greetingKey, ['name' => $user->name]);
     $footer = app(\App\Services\SystemSettingService::class)->footer();
+    $assistantDailyPendingCounts = $portal->code === 'zhuli'
+        ? app(\App\Portals\Assistant\AssistantDailySubmissionPendingCountService::class)->forUser($user)
+        : [];
 @endphp
 <div class="wrapper">
     <header class="main-header">

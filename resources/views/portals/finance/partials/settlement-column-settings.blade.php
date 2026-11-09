@@ -4,6 +4,9 @@
 <dialog id="settlement-column-settings" class="settlement-dialog" aria-labelledby="settlement-column-title"
     data-preference-key="finance-settlement-columns:{{ $report }}:{{ $user->getAuthIdentifier() }}"
     @if($orderView) data-export-visible-columns @endif
+    @if($report === 'paypal-settlement')
+    data-new-display-fields="{{ implode(' ', array_keys(\App\Portals\Finance\FinancePayPalSettlementOrders::REFUND_SPLIT_COLUMNS)) }}"
+    @endif
     @if($report === 'paypal-orders')
     data-filter-form="finance-filters"
     data-export-column-param="report_columns[]"
@@ -124,5 +127,5 @@
 </style>
 @endpush
 @push('scripts')
-<script src="{{ asset('assets/erp/finance-settlement-columns.js') }}?v=6"></script>
+<script src="{{ asset('assets/erp/finance-settlement-columns.js') }}?v=7"></script>
 @endpush

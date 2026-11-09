@@ -10,6 +10,7 @@ use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Finance\FinanceCatalog;
 use App\Portals\Finance\FinancePaymentBalanceService;
 use App\Portals\Finance\FinancePayPalBalanceService;
+use App\Portals\Finance\FinancePayPalSettlementOrders;
 use App\Portals\Finance\FinanceProductNames;
 use App\Portals\Finance\FinanceWorkbookService;
 use Carbon\CarbonImmutable;
@@ -1331,8 +1332,11 @@ class FinanceController extends Controller
                 throw ValidationException::withMessages(['format' => 'XLS最多65535条，请使用XLSX。']);
             }
             return $this->workbooks->download($downloadHeaders, $rows->lazy()->map(fn ($row) => array_map(
-                fn ($field) => $field === 'paypal_18' && $orderView
-                    ? FinanceProductNames::categories((string) ($row[$field] ?? '')) : ($row[$field] ?? ''),
+                fn ($field) => match (true) {
+                    ! $orderView => $row[$field] ?? '',
+                    $field === 'paypal_18' => FinanceProductNames::categories((string) ($row[$field] ?? '')),
+                    default => FinancePayPalSettlementOrders::splitRefundNote($row, $field) ?? ($row[$field] ?? ''),
+                },
                 $requestedColumns,
             )), $report.'.'.$format, $format, plain: $orderView);
         }
