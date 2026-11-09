@@ -276,6 +276,17 @@ class XShoppyOrderSyncService
         return $this->parseStoreTime($value, $storeTimezone)?->utc();
     }
 
+    /**
+     * XShoppy / WooCommerce 的部分订单可能尚未写入 date_paid，
+     * 但已进入 processing 或 completed 状态；这两种状态同样视为已支付。
+     */
+    private function isPaid(array $payload): bool
+    {
+        if (filled($payload['date_paid'] ?? null)) return true;
+
+        return in_array(strtolower(trim((string) ($payload['status'] ?? ''))), ['processing', 'completed'], true);
+    }
+
     private function decimal(mixed $value): float
     {
         return is_numeric($value) ? (float) $value : 0.0;
