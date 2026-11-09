@@ -38,7 +38,7 @@ class FinanceWorkbookService
     }
 
     /** Read the same domain, usage name and team fields maintained by the assistant portal. */
-    public function domainGroups(): \Illuminate\Support\Collection
+    public function domainGroups(bool $withAssignedOwner = false): \Illuminate\Support\Collection
     {
         $db = $this->database();
         if (! $db->getSchemaBuilder()->hasTable('assistant_domain_stores')) {
@@ -49,16 +49,26 @@ class FinanceWorkbookService
         if ($db->getSchemaBuilder()->hasColumn('assistant_domain_stores', 'shop_name')) {
             $columns[] = 'shop_name';
         }
+        $withAssignedOwner = $withAssignedOwner && $db->getSchemaBuilder()->hasColumn('assistant_domain_stores', 'owner_user_id');
+        if ($withAssignedOwner) {
+            $columns[] = 'owner_user_id';
+        }
 
-        return $db->table('assistant_domain_stores')->select($columns)
-            ->whereNotNull('domain')->where('domain', '!=', '')->orderBy('domain')->get()
-            ->map(function ($store) {
+        $stores = $db->table('assistant_domain_stores')->select($columns)
+            ->whereNotNull('domain')->where('domain', '!=', '')->orderBy('domain')->get();
+        $ownerIds = $stores->pluck('owner_user_id')->filter()->unique();
+        $owners = $ownerIds->isEmpty() ? collect() : \App\Models\AdminUser::query()
+            ->whereKey($ownerIds->all())->get(['id', 'name', 'username'])->keyBy('id');
+
+        return $stores->map(function ($store) use ($owners, $withAssignedOwner) {
+                $assignedOwner = $owners->get($store->owner_user_id ?? null);
                 return (object) [
                     'id' => $store->id,
                     'domain' => strtolower(trim($store->domain)),
                     'owner' => $store->user_name ?? '',
                     'team' => FinanceCatalog::teamLabel($store->team),
                     'shop_name' => $store->shop_name ?? '',
+                    'assigned_owner' => $withAssignedOwner ? ($assignedOwner?->name ?: ($assignedOwner?->username ?? '')) : null,
                 ];
             });
     }

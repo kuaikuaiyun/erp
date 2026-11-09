@@ -660,22 +660,46 @@ class FinancePortalTest extends TestCase
         $this->assertEqualsCanonicalizing([['BRUSH-PAYMENT', ...$labels], ['AUTO-BRUSH', ...$labels]], array_slice($sheet, 1));
     }
 
-    public function test_paypal_settlement_uses_the_order_owner_snapshot_after_a_store_transfer(): void
+    public function test_paypal_settlement_and_export_use_store_owner_history_at_order_time(): void
     {
+        $users = (new \App\Models\AdminUser)->getTable();
+        Schema::create($users, function (Blueprint $table): void {
+            $table->id();
+            $table->string('name');
+            $table->string('username');
+        });
+        DB::table($users)->insert([
+            ['id' => 10, 'name' => '钱锦山', 'username' => 'original-owner'],
+            ['id' => 11, 'name' => '陈志霖', 'username' => 'new-owner'],
+        ]);
         Schema::create('assistant_domain_stores', function (Blueprint $table): void {
             $table->id();
             $table->string('domain');
             $table->string('user_name');
             $table->text('team')->nullable();
+            $table->unsignedBigInteger('owner_user_id');
         });
         DB::table('assistant_domain_stores')->insert([
-            ['id' => 1, 'domain' => 'transfer.example.com', 'user_name' => '备用曾11', 'team' => '厦门总部'],
-            ['id' => 2, 'domain' => 'transfer.example.com', 'user_name' => '陈志霖', 'team' => '深圳团队'],
+            ['id' => 1, 'domain' => 'transfer.example.com', 'user_name' => '备用曾11', 'team' => '厦门总部', 'owner_user_id' => 10],
+            ['id' => 2, 'domain' => 'transfer.example.com', 'user_name' => '陈志霖', 'team' => '深圳团队', 'owner_user_id' => 11],
+        ]);
+        (require database_path('migrations/2026_10_30_000003_create_assistant_domain_store_owner_histories.php'))->up();
+        $history = DB::table('assistant_domain_store_owner_histories');
+        $history->insert([
+            ['id' => 4, 'assistant_domain_store_id' => 1, 'owner_name_snapshot' => '陈志霖', 'event' => 'baseline',
+                'effective_from' => '2026-10-27 00:00:00', 'effective_to' => '2026-10-28 00:00:00'],
+            ['id' => 1, 'assistant_domain_store_id' => 1, 'owner_name_snapshot' => null, 'event' => 'cleared',
+                'effective_from' => '2026-10-28 00:00:00', 'effective_to' => '2026-11-01 03:00:00'],
+            ['id' => 2, 'assistant_domain_store_id' => 1, 'owner_name_snapshot' => '张清洪', 'event' => 'assigned',
+                'effective_from' => '2026-11-01 03:00:00', 'effective_to' => '2026-11-01 03:00:10'],
+            ['id' => 3, 'assistant_domain_store_id' => 1, 'owner_name_snapshot' => '钱锦山', 'event' => 'transferred',
+                'effective_from' => '2026-11-01 03:00:10', 'effective_to' => null],
         ]);
         Schema::create('logistics_orders', function (Blueprint $table): void {
             $table->id();
             $table->string('bill_number');
             $table->string('source_shop_domain');
+            $table->dateTime('order_created_at')->nullable();
             $table->string('assigned_owner_name')->nullable();
             $table->string('operator_name')->nullable();
             $table->string('group_names')->nullable();
@@ -684,25 +708,50 @@ class FinancePortalTest extends TestCase
         DB::table('logistics_orders')->insert([
             ['bill_number' => 'BEFORE-TRANSFER', 'source_shop_domain' => 'transfer.example.com',
                 'assistant_domain_store_id' => 1, 'operator_name' => '订单运营', 'group_names' => '郑州团队',
-                'assigned_owner_name' => '张清洪'],
+                'assigned_owner_name' => '旧快照', 'order_created_at' => '2026-11-01 03:00:09'],
             ['bill_number' => 'NO-OWNER', 'source_shop_domain' => 'transfer.example.com',
-                'assistant_domain_store_id' => 1, 'operator_name' => null, 'group_names' => null,
-                'assigned_owner_name' => null],
+                'assistant_domain_store_id' => 1, 'operator_name' => '备用曾11', 'group_names' => null,
+                'assigned_owner_name' => null, 'order_created_at' => null],
+            ['bill_number' => 'AT-TRANSFER', 'source_shop_domain' => 'transfer.example.com',
+                'assistant_domain_store_id' => 1, 'operator_name' => '备用曾11', 'group_names' => null,
+                'assigned_owner_name' => '张清洪', 'order_created_at' => '2026-11-01 03:00:10'],
+            ['bill_number' => 'UNASSIGNED', 'source_shop_domain' => 'transfer.example.com',
+                'assistant_domain_store_id' => 1, 'operator_name' => '备用曾11', 'group_names' => null,
+                'assigned_owner_name' => null, 'order_created_at' => '2026-11-01 02:59:59'],
+            ['bill_number' => 'BEFORE-HISTORY', 'source_shop_domain' => 'transfer.example.com',
+                'assistant_domain_store_id' => 1, 'operator_name' => '备用曾11', 'group_names' => null,
+                'assigned_owner_name' => null, 'order_created_at' => '2026-10-26 23:59:59'],
         ]);
         $this->workbooks->importRecords('paypal-orders', [
             2 => [...$this->recordRow(), '日期' => '2026-11-01', '時間' => '03:10:23', '交易 ID' => 'BEFORE-TRANSFER'],
             3 => [...$this->recordRow(), '日期' => '2026-11-01', '時間' => '03:10:24', '交易 ID' => 'NO-OWNER'],
+            4 => [...$this->recordRow(), '日期' => '2026-11-01', '時間' => '03:10:25', '交易 ID' => 'AT-TRANSFER'],
+            5 => [...$this->recordRow(), '日期' => '2026-11-01', '時間' => '03:10:26', '交易 ID' => 'UNASSIGNED'],
+            6 => [...$this->recordRow(), '日期' => '2026-11-01', '時間' => '03:10:27', '交易 ID' => 'BEFORE-HISTORY'],
         ], 'PayPal owners', 'UTC', 1);
 
         $url = '/finance/reports/paypal-settlement?timezone=-04%3A00';
         $rows = $this->get($url)->assertOk()->viewData('rows')->getCollection()->keyBy('reference');
         $this->assertSame('张清洪', $rows['BEFORE-TRANSFER']['owner']);
         $this->assertSame('2026-10-31 23:10:23', $rows['BEFORE-TRANSFER']['date']);
-        $this->assertSame('', $rows['NO-OWNER']['owner']);
+        $this->assertSame('钱锦山', $rows['NO-OWNER']['owner']);
         $this->assertSame('', $rows['NO-OWNER']['team']);
-        $sheet = $this->readDownload($this->get($url.'&download=1&export_columns[]=reference&export_columns[]=owner&export_columns[]=team')
-            ->assertOk()->streamedContent())->toArray();
-        $this->assertSame(['BEFORE-TRANSFER', '张清洪', '郑州团队'], collect(array_slice($sheet, 1))->keyBy(0)['BEFORE-TRANSFER']);
+        $this->assertSame('钱锦山', $rows['AT-TRANSFER']['owner']);
+        $this->assertSame('', $rows['UNASSIGNED']['owner']);
+        $this->assertSame('陈志霖', $rows['BEFORE-HISTORY']['owner']);
+        $exportUrl = $url.'&download=1&export_columns[]=reference&export_columns[]=owner&export_columns[]=team';
+        $export = fn () => collect($this->readDownload($this->get($exportUrl)->assertOk()->streamedContent())->toArray())
+            ->slice(1)->keyBy(0);
+        $exported = $export();
+        $this->assertSame(['BEFORE-TRANSFER', '张清洪', '郑州团队'], $exported['BEFORE-TRANSFER']);
+        $this->assertSame('钱锦山', $exported['NO-OWNER'][1]);
+        $this->assertSame('钱锦山', $exported['AT-TRANSFER'][1]);
+        $this->assertEmpty($exported['UNASSIGNED'][1]);
+        $this->assertSame('陈志霖', $exported['BEFORE-HISTORY'][1]);
+
+        $history->clone()->where('id', 2)->update(['effective_to' => '2026-11-01 03:00:09']);
+        $history->clone()->where('id', 3)->update(['effective_from' => '2026-11-01 03:00:09']);
+        $this->assertSame('钱锦山', $export()['BEFORE-TRANSFER'][1]);
 
         $record = FinanceRecord::where('reference', 'BEFORE-TRANSFER')->sole();
         $this->post('/finance/reports/paypal-settlement/save', ['id' => $record->id, 'owner' => '财务补录'])

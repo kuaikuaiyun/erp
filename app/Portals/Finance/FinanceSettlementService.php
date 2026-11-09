@@ -192,7 +192,7 @@ class FinanceSettlementService
         $owners = $db->table('finance_payment_transactions')->whereIn('finance_record_id', $records->modelKeys())
             ->pluck('payment_account_id', 'finance_record_id');
         $accountsById = $accountModels->keyBy('id');
-        $domainGroups = $this->workbooks->domainGroups();
+        $domainGroups = $this->workbooks->domainGroups(withAssignedOwner: $channel === 'paypal');
         $storesById = $channel === 'paypal' ? $domainGroups->keyBy('id') : collect();
         $domains = $channel === 'paypal'
             ? $domainGroups->groupBy('domain')->filter(fn ($groups) => $groups->count() === 1)->map(fn ($groups) => $groups->first())
@@ -315,11 +315,11 @@ class FinanceSettlementService
             $domain = strtolower(trim((string) ($saved['_edited_fields']['domain'] ?? $row['domain'])));
             $orderStore = $storesById->get($order->assistant_domain_store_id ?? null);
             $group = $orderStore?->domain === $domain ? $orderStore : $domains->get($domain);
-            $ownerName = $group?->owner ?? ($p['使用人'] ?? '');
+            $ownerName = $group?->assigned_owner ?? $group?->owner ?? ($p['使用人'] ?? '');
             $team = $group?->team ?? ($p['团队'] ?? '');
             if ($order !== null) {
-                if (property_exists($order, 'assigned_owner_name') || property_exists($order, 'operator_name')) {
-                    $ownerName = ($order->assigned_owner_name ?? null) ?: ($order->operator_name ?? '');
+                if (isset($order->historical_owner_name) || property_exists($order, 'assigned_owner_name')) {
+                    $ownerName = $order->historical_owner_name ?? (($order->assigned_owner_name ?? null) ?: ($orderStore?->assigned_owner ?? ''));
                 }
                 if (property_exists($order, 'group_names')) {
                     $team = FinanceCatalog::teamLabel($order->group_names);
@@ -438,7 +438,7 @@ class FinanceSettlementService
         $selected = $matchOnly ? ['id', ...$referenceFields] : array_values(array_unique(array_intersect(['id', ...$referenceFields, 'assistant_domain_store_id', 'source_shop_domain', 'subscription_type', 'is_add_on', 'tongtu_order_number',
             'shopify_order_number', 'shopify_order_id', 'store_name', 'subscription_status', 'subscription_origin_order_id',
             'tongtu_sku', 'tongtu_product_name', 'sale_quantity', 'sale_product_weight', 'payment_gateway', 'payment_method',
-            'assigned_owner_name', 'operator_name', 'group_names',
+            'assigned_owner_name', 'group_names',
             ...array_keys(FinancePayPalOrderExport::COLUMNS), 'created_at', 'buyer_name', 'buyer_email', 'destination'], $columns)));
         $referenceValues = fn ($record) => $channel === 'paypal' ? [$record->reference, trim((string) ($record->payload['帳單號碼'] ?? ''))]
             : [$record->reference, $record->payload['商户订单号'] ?? '', $record->payload['Shopify订单号'] ?? ''];
@@ -462,7 +462,30 @@ class FinanceSettlementService
         if ($matches) {
             $linkedIds = $linkedIds->merge($matches->pluck('id'))->unique();
         }
-        $orders = $db->table('logistics_orders')->whereIntegerInRaw('id', $linkedIds->all())->get($selected)->keyBy('id');
+        $orderQuery = $db->table('logistics_orders')->whereIntegerInRaw('id', $linkedIds->all())->select($selected);
+        if ($channel === 'paypal'
+            && in_array('order_created_at', $selected, true)
+            && in_array('assistant_domain_store_id', $selected, true)
+            && $db->getSchemaBuilder()->hasTable('assistant_domain_store_owner_histories')
+        ) {
+            // An empty name in an active interval means unassigned. NULL means no matching interval.
+            $orderQuery->addSelect(['historical_owner_name' => $db->table('assistant_domain_store_owner_histories')
+                ->selectRaw("COALESCE(owner_name_snapshot, '')")
+                ->whereColumn('assistant_domain_store_id', 'logistics_orders.assistant_domain_store_id')
+                ->whereNotNull('logistics_orders.order_created_at')
+                ->where(function ($query) use ($db): void {
+                    // The first recorded owner also covers orders placed before the first boundary.
+                    $firstEffectiveFrom = $db->table('assistant_domain_store_owner_histories')
+                        ->selectRaw('MIN(effective_from)')
+                        ->whereColumn('assistant_domain_store_id', 'logistics_orders.assistant_domain_store_id');
+                    $query->whereColumn('effective_from', '<=', 'logistics_orders.order_created_at')
+                        ->orWhere('effective_from', '=', $firstEffectiveFrom);
+                })
+                ->where(fn ($query) => $query->whereNull('effective_to')
+                    ->orWhereColumn('effective_to', '>', 'logistics_orders.order_created_at'))
+                ->orderByDesc('effective_from')->orderByDesc('id')->limit(1)]);
+        }
+        $orders = $orderQuery->get()->keyBy('id');
         $stores = ! $matchOnly && $db->getSchemaBuilder()->hasTable('assistant_domain_stores')
             ? $db->table('assistant_domain_stores')->whereIn('id', $orders->pluck('assistant_domain_store_id')->filter())->pluck('domain', 'id') : collect();
         $index = [];
