@@ -49,6 +49,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/fashion/advertising-expenses', [AdvertisingExpenseController::class, 'index'])->name('fashion.advertising-expenses.index');
 Route::get('/fashion/performance-report', [PerformanceReportController::class, 'index'])->name('fashion.performance-report.index');
+Route::get('/fashion/performance-report/orders', [PerformanceReportController::class, 'orders'])->name('fashion.performance-report.orders');
 Route::get('/fashion/stores', [FashionStoreController::class, 'index'])->name('fashion.stores.index');
 Route::patch('/fashion/stores/{store}/xshoppy-credentials', [FashionStoreController::class, 'updateCredentials'])->whereNumber('store')->name('fashion.stores.credentials.update');
 Route::get('/fashion-logistics/orders', [FashionOrderController::class, 'index'])->name('fashion-logistics.orders.index');

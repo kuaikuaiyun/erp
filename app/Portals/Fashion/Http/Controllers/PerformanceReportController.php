@@ -8,6 +8,7 @@ use App\Models\AdminUser;
 use App\Models\Department;
 use App\Portal\Http\Controllers\PortalEntryController;
 use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
@@ -127,6 +128,74 @@ class PerformanceReportController extends Controller
                 'average_order_value' => $orderCount > 0 ? $revenue / $orderCount : 0,
                 'store_count' => (int) ($summary->store_count ?? 0),
             ],
+        ]);
+    }
+
+    public function orders(Request $request): Response|JsonResponse
+    {
+        $context = $this->portalEntries->portalContext($request);
+        if ($context instanceof Response) return $context;
+        abort_unless($context['portal']->code === self::PORTAL_CODE, 404);
+        $validated = $request->validate([
+            'date' => ['required', 'date_format:Y-m-d'],
+            'store_id' => ['required', 'integer'],
+            'page' => ['nullable', 'integer', 'min:1'],
+        ]);
+        $user = $context['user'];
+        $store = DB::connection(config('admin.database.connection') ?: config('database.default'))
+            ->table('assistant_domain_stores')
+            ->where('id', (int) $validated['store_id'])
+            ->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy')")
+            ->when(! $user->isAdministrator(), function ($query) use ($user): void {
+                $names = collect([$user->name, $user->username])->filter()->map(fn ($name) => trim((string) $name))->unique()->values()->all();
+                $query->where(function ($binding) use ($user, $names): void {
+                    $binding->where('owner_user_id', $user->getKey());
+                    if ($names !== []) $binding->orWhereIn('user_name', $names);
+                });
+            })->first();
+        abort_unless($store, 403, '无权查看该店铺订单。');
+
+        $ordersQuery = FashionLogisticsOrder::query()
+            ->where('assistant_domain_store_id', (int) $validated['store_id'])
+            ->where('source_platform', 'xshoppy')
+            ->whereBetween('order_created_at', [$validated['date'].' 00:00:00', $validated['date'].' 23:59:59'])
+            ->where(fn ($query) => $query->whereNotNull('paid_at')->orWhereIn('status', ['processing', 'completed']));
+        $amount = (float) (clone $ordersQuery)->sum('total_amount');
+        $orders = $ordersQuery
+            ->with(['items:id,fashion_logistics_order_id,product_name,sku,quantity,total'])
+            ->orderByDesc('order_created_at')->orderByDesc('id')->paginate(20);
+
+        return response()->json([
+            'date' => $validated['date'],
+            'store' => (string) ($store->shop_name ?: $store->domain),
+            'count' => $orders->total(),
+            'amount' => round($amount, 2),
+            'pagination' => [
+                'current_page' => $orders->currentPage(),
+                'last_page' => $orders->lastPage(),
+                'per_page' => $orders->perPage(),
+                'total' => $orders->total(),
+                'from' => $orders->firstItem(),
+                'to' => $orders->lastItem(),
+            ],
+            'orders' => $orders->getCollection()->map(fn (FashionLogisticsOrder $order): array => [
+                'id' => (int) $order->getKey(),
+                'order_number' => (string) ($order->order_number ?: $order->external_order_id),
+                'status' => (string) ($order->status ?: '—'),
+                'currency' => (string) ($order->currency ?: 'USD'),
+                'total_amount' => (float) $order->total_amount,
+                'customer_name' => (string) ($order->customer_name ?: '—'),
+                'customer_email' => (string) ($order->customer_email ?: '—'),
+                'payment_method' => (string) ($order->payment_method_title ?: $order->payment_method ?: '—'),
+                'order_created_at' => $order->order_created_at?->format('Y-m-d H:i:s'),
+                'paid_at' => $order->paid_at?->format('Y-m-d H:i:s'),
+                'items' => $order->items->map(fn ($item): array => [
+                    'product_name' => (string) ($item->product_name ?: '—'),
+                    'sku' => (string) ($item->sku ?: '—'),
+                    'quantity' => (float) $item->quantity,
+                    'total' => (float) $item->total,
+                ])->values()->all(),
+            ])->values()->all(),
         ]);
     }
 

@@ -39,14 +39,14 @@ class StoreController extends Controller
         $orderTable = (new FashionLogisticsOrder())->getTable();
         $metrics = DB::connection(config('admin.database.connection') ?: config('database.default'))->table($orderTable)
             ->selectRaw('assistant_domain_store_id, COUNT(*) order_count, COALESCE(SUM(total_amount),0) revenue')
-            ->where('source_platform', 'xshoppy')
+            ->whereIn('source_platform', ['xshoppy', 'shopline'])
             ->whereBetween('order_created_at', [$dateFrom.' 00:00:00', $dateTo.' 23:59:59'])
             ->where(fn ($q) => $q->whereNotNull('paid_at')->orWhereIn('status', ['processing', 'completed']))
             ->groupBy('assistant_domain_store_id');
         $today = now('Asia/Shanghai')->toDateString();
         $todayMetrics = DB::connection(config('admin.database.connection') ?: config('database.default'))->table($orderTable)
             ->selectRaw('assistant_domain_store_id, COUNT(*) today_orders, COALESCE(SUM(total_amount),0) today_revenue')
-            ->where('source_platform', 'xshoppy')
+            ->whereIn('source_platform', ['xshoppy', 'shopline'])
             ->whereBetween('order_created_at', [$today.' 00:00:00', $today.' 23:59:59'])
             ->where(fn ($q) => $q->whereNotNull('paid_at')->orWhereIn('status', ['processing', 'completed']))
             ->groupBy('assistant_domain_store_id');
@@ -78,7 +78,16 @@ class StoreController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) abort($context->getStatusCode());
         abort_unless($this->accessibleStores($context['user'])->whereKey($store->getKey())->exists(), 403);
-        abort_unless(in_array(mb_strtolower(trim((string) $store->site_builder)), ['xshoppy', 'xshopy'], true), 422, '只能维护 XShoppy 店铺应用信息。');
+        $siteBuilder = mb_strtolower(trim((string) $store->site_builder));
+        abort_unless(in_array($siteBuilder, ['xshoppy', 'xshopy', 'shopline'], true), 422, '只能维护 XShoppy 或 Shopline 店铺应用信息。');
+        if ($siteBuilder === 'shopline') {
+            abort_if(filled($store->shopline_app_token), 422, '该店铺的 Shopline 后台 API 访问令牌已配置，不能再次编辑。');
+            $data = $request->validate(['shopline_app_token' => ['required', 'string', 'max:65535']], [
+                'shopline_app_token.required' => '请填写 Shopline 后台 API 访问令牌。',
+            ]);
+            $store->update(['shopline_app_token' => trim((string) $data['shopline_app_token'])]);
+            return back()->with('success', 'Shopline 后台 API 访问令牌已配置。');
+        }
         abort_if(filled($store->xshoppy_api_key) && filled($store->xshoppy_password), 422, '该店铺的 XShoppy App API 密钥和密码已配置，不能再次编辑。');
         $data = $request->validate([
             'xshoppy_api_key' => ['nullable', 'string', 'max:255'],
@@ -105,7 +114,7 @@ class StoreController extends Controller
 
     private function accessibleStores(AdminUser $user): Builder
     {
-        $query = AssistantDomainStore::query()->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy')");
+        $query = AssistantDomainStore::query()->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')");
         if ($user->isAdministrator()) return $query;
         $names = collect([$user->name, $user->username])->filter()->map(fn ($v) => trim((string) $v))->unique()->values()->all();
         return $query->where(function ($q) use ($user, $names): void {
@@ -116,7 +125,7 @@ class StoreController extends Controller
 
     private function storeOperators()
     {
-        $stores = AssistantDomainStore::query()->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy')")->get(['owner_user_id', 'user_name']);
+        $stores = AssistantDomainStore::query()->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')")->get(['owner_user_id', 'user_name']);
         $ids = $stores->pluck('owner_user_id')->filter()->unique();
         $names = $stores->pluck('user_name')->filter()->unique();
         return AdminUser::query()->where(function ($q) use ($ids, $names): void {
