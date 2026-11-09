@@ -34,6 +34,8 @@
         .'　运营人员：'.(($filters['operator'] ?? '') !== '' ? $filters['operator'] : '全部');
     $imageTotalSummary = '运营人数：'.$summary['people']
         .'　订单量：'.$summary['orders']
+        .'　总业绩：$'.number_format($summary['revenue'], 2)
+        .'　客单价：'.($summary['aov'] !== null ? '$'.number_format($summary['aov'], 2) : '—')
         .'　广告费：$'.number_format($summary['ad_spend'], 2)
         .'　总 ROI：'.($summary['roi'] !== null ? number_format($summary['roi'], 2) : '—');
 @endphp
@@ -44,12 +46,12 @@
     var rows=@json($rows->values());
     var filterSummary={{ Illuminate\Support\Js::from($imageFilterSummary) }};
     var totalSummary={{ Illuminate\Support\Js::from($imageTotalSummary) }};
-    var headers=['运营部门','人名','入职天数','订单量','各媒体 / 广告费 / ROI','广告费($)','总 ROI'];
-    var widths=[190,150,120,120,440,150,120],padding=34,lineHeight=24;
+    var headers=['运营部门','人名','订单量','总业绩($)','客单价($)','各媒体 / 广告费 / ROI','广告费($)','总 ROI'];
+    var widths=[180,145,110,150,130,420,140,110],padding=34,lineHeight=24;
     function money(value){return '$'+Number(value||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
     function valueRows(row){
         var media=(row.media||[]).map(function(item){return (item.name||'未设置媒体')+'  '+money(item.spend)+'  ROI '+(item.roi===null||item.roi===undefined?'—':Number(item.roi).toFixed(2));});
-        return [row.department||'—',row.operator||'—',row.hire_days===null||row.hire_days===undefined?'—':row.hire_days+' 天',String(row.order_count||0),media.length?media.join('\n'):'暂无已审核的广告费',money(row.ad_spend),row.roi===null||row.roi===undefined?'—':Number(row.roi).toFixed(2)];
+        return [row.department||'—',row.operator||'—',String(row.order_count||0),money(row.revenue),row.aov===null||row.aov===undefined?'—':money(row.aov),media.length?media.join('\n'):'暂无已审核的广告费',money(row.ad_spend),row.roi===null||row.roi===undefined?'—':Number(row.roi).toFixed(2)];
     }
     function wrap(ctx,text,maxWidth){
         var output=[];String(text==null?'':text).split('\n').forEach(function(paragraph){if(paragraph===''){output.push('');return;}var line='';Array.from(paragraph).forEach(function(char){var next=line+char;if(line&&ctx.measureText(next).width>maxWidth){output.push(line);line=char;}else line=next;});if(line)output.push(line);});return output.length?output:[''];
@@ -70,7 +72,7 @@
                 ctx.fillText(totalSummary,padding,98);
                 ctx.fillStyle='#acd4e9';ctx.fillRect(padding,130,tableWidth,4);
                 var x=padding;ctx.font='700 16px "Microsoft YaHei","PingFang SC",Arial,sans-serif';headers.forEach(function(header,index){ctx.fillStyle='#dcecf6';ctx.fillRect(x,headerTop,widths[index],tableHeaderHeight);ctx.strokeStyle='#b7ccd9';ctx.strokeRect(x+.5,headerTop+.5,widths[index]-1,tableHeaderHeight-1);ctx.fillStyle='#244f6d';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(header,x+widths[index]/2,headerTop+tableHeaderHeight/2);x+=widths[index];});
-                var y=headerTop+tableHeaderHeight;prepared.forEach(function(row,rowIndex){x=padding;row.cells.forEach(function(lines,index){ctx.fillStyle=rowIndex%2===0?'#f4f9fc':'#fff8ef';ctx.fillRect(x,y,widths[index],row.height);ctx.strokeStyle='#c4d5df';ctx.strokeRect(x+.5,y+.5,widths[index]-1,row.height-1);ctx.fillStyle=index===6?'#16805c':'#294b61';ctx.font=(index===1||index===3||index===6?'700 ':'500 ')+'16px "Microsoft YaHei","PingFang SC",Arial,sans-serif';ctx.textAlign=[2,3,5,6].indexOf(index)>=0?'center':'left';ctx.textBaseline='top';var start=y+(row.height-lines.length*lineHeight)/2,tx=ctx.textAlign==='center'?x+widths[index]/2:x+9;lines.forEach(function(line,lineIndex){ctx.fillText(line,tx,start+lineIndex*lineHeight);});x+=widths[index];});y+=row.height;});
+                var y=headerTop+tableHeaderHeight;prepared.forEach(function(row,rowIndex){x=padding;row.cells.forEach(function(lines,index){ctx.fillStyle=rowIndex%2===0?'#f4f9fc':'#fff8ef';ctx.fillRect(x,y,widths[index],row.height);ctx.strokeStyle='#c4d5df';ctx.strokeRect(x+.5,y+.5,widths[index]-1,row.height-1);ctx.fillStyle=index===7?'#16805c':'#294b61';ctx.font=(index===1||index===2||index===3||index===7?'700 ':'500 ')+'16px "Microsoft YaHei","PingFang SC",Arial,sans-serif';ctx.textAlign=[2,3,4,6,7].indexOf(index)>=0?'center':'left';ctx.textBaseline='top';var start=y+(row.height-lines.length*lineHeight)/2,tx=ctx.textAlign==='center'?x+widths[index]/2:x+9;lines.forEach(function(line,lineIndex){ctx.fillText(line,tx,start+lineIndex*lineHeight);});x+=widths[index];});y+=row.height;});
                 var link=document.createElement('a');link.download='服装运营报表_列表_{{ $filters['date_from'] }}_{{ $filters['date_to'] }}.png';link.href=canvas.toDataURL('image/png');document.body.appendChild(link);link.click();link.remove();
             }catch(error){window.alert('图片生成失败，请刷新页面后重试。');if(window.console)console.error(error);}finally{button.disabled=false;label.textContent=original;}
         },30);
