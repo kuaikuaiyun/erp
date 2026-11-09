@@ -31,12 +31,12 @@ Schedule::command('logistics:sku-database:backfill-guide-costs --batch=100')
     ->runInBackground();
 
 Schedule::command('fashion-logistics:sync-orders --days=60')
-    ->everyFiveMinutes()
+    ->everyTenMinutes()
     ->withoutOverlapping(10)
     ->runInBackground();
 
 Schedule::command('fashion-logistics:sync-shopline-orders --days=60')
-    ->everyFiveMinutes()
+    ->everyTenMinutes()
     ->when(fn () => ! Cache::has('fashion-logistics:shopline-sync-paused'))
     ->withoutOverlapping(1440)
     ->runInBackground();

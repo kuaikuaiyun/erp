@@ -1,0 +1,23 @@
+.paypal-dispute-table { min-width: 1780px; }
+.paypal-dispute-table th { background: #eaf0f7 !important; color: #314b68 !important; font-weight: 800 !important; white-space: nowrap; }
+.paypal-dispute-table td { min-width: 170px; padding: 8px !important; vertical-align: top !important; white-space: normal; }
+.paypal-dispute-table td:nth-child(1) { min-width: 210px; width: 220px; }
+.paypal-dispute-table td:nth-child(2) { min-width: 185px; width: 195px; }
+.paypal-dispute-table td:nth-child(3) { min-width: 150px; width: 160px; }
+.paypal-dispute-table td:nth-child(4) { min-width: 170px; width: 180px; }
+.paypal-dispute-table td:nth-child(5) { min-width: 160px; width: 170px; }
+.paypal-dispute-table td:nth-child(6) { min-width: 170px; width: 180px; }
+.paypal-dispute-table td:nth-child(7) { min-width: 245px; width: 265px; }
+.paypal-dispute-table td:nth-child(8) { min-width: 150px; width: 165px; }
+.paypal-dispute-table td:last-child, .paypal-dispute-table th:last-child { position: sticky; right: 0; min-width: 126px; width: 126px; box-shadow: -3px 0 8px rgba(45, 69, 94, .08); }
+.paypal-dispute-table td:last-child { z-index: 2; background: #fff; }
+.paypal-dispute-table tbody tr:nth-child(even) > td:last-child { background: #f8fafc; }
+.paypal-dispute-table.table-hover tbody tr:hover > td:last-child { background: #edf5fb !important; }
+.pd-block { color: #58738d; font-size: 11px; line-height: 18px; }
+.pd-block b { color: #45617c; font-size: 11px; font-weight: 800; }
+.pd-block hr { margin: 5px 0 4px; border-top: 1px dashed #dce5ee; }
+.pd-mono { color: #2f73ae; font-family: SFMono-Regular, Consolas, 'Liberation Mono', monospace; font-size: 11px; overflow-wrap: anywhere; }
+.pd-manual { color: #b16c18; font-weight: 800; }
+.pd-operation-count { margin-top: 6px; color: #7a8997; font-size: 11px; line-height: 16px; }
+.pd-operation-list { margin: 8px 0 0; padding-left: 18px; color: #58738d; line-height: 1.7; }
+.paypal-dispute-count { color: #617588; font-size: 13px; line-height: 30px; }

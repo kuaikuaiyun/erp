@@ -18,6 +18,8 @@ class LogisticsPayPalDispute extends Model
         'life_cycle_stage', 'channel', 'dispute_amount_usd', 'original_amount',
         'currency_code', 'dispute_created_at', 'dispute_updated_at',
         'seller_response_due_at', 'outcome_code', 'raw_payload', 'synced_at',
+        'subscription_cancelled', 'add_on_cancelled', 'first_handled_at',
+        'first_handled_by', 'first_handled_by_name',
     ];
 
     public function __construct(array $attributes = [])
@@ -34,6 +36,9 @@ class LogisticsPayPalDispute extends Model
             'dispute_created_at' => 'datetime',
             'dispute_updated_at' => 'datetime',
             'seller_response_due_at' => 'datetime',
+            'subscription_cancelled' => 'boolean',
+            'add_on_cancelled' => 'boolean',
+            'first_handled_at' => 'datetime',
             'synced_at' => 'datetime',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
@@ -53,6 +58,11 @@ class LogisticsPayPalDispute extends Model
     public function refundLinks(): HasMany
     {
         return $this->hasMany(LogisticsPayPalDisputeRefund::class, 'logistics_paypal_dispute_id');
+    }
+
+    public function operations(): HasMany
+    {
+        return $this->hasMany(LogisticsPayPalDisputeOperation::class, 'logistics_paypal_dispute_id');
     }
 
     public static function typeKeyFor(mixed $channel, mixed $lifeCycleStage = null): string
