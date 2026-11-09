@@ -35,6 +35,7 @@ class PerformanceReportController extends Controller
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
             'timezone' => ['nullable', Rule::in(array_keys($timezoneOptions))],
+            'site_builder' => ['nullable', Rule::in(['xshoppy', 'shopline'])],
             'operator_id' => ['nullable', 'integer'],
             'per_page' => ['nullable', 'integer', 'in:20,50,100'],
         ]);
@@ -69,6 +70,14 @@ class PerformanceReportController extends Controller
                         ->where('orders.source_platform', 'shopline');
                 });
             });
+
+        if (($validated['site_builder'] ?? '') === 'xshoppy') {
+            $base->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy')")
+                ->where('orders.source_platform', 'xshoppy');
+        } elseif (($validated['site_builder'] ?? '') === 'shopline') {
+            $base->whereRaw("LOWER(TRIM(stores.site_builder)) = 'shopline'")
+                ->where('orders.source_platform', 'shopline');
+        }
 
         if (! $user->isAdministrator()) {
             $ownerNames = collect([$user->name, $user->username])
@@ -175,6 +184,7 @@ class PerformanceReportController extends Controller
                 'date_from' => $dateFrom,
                 'date_to' => $dateTo,
                 'timezone' => $timezone,
+                'site_builder' => $validated['site_builder'] ?? '',
                 'operator_id' => $validated['operator_id'] ?? '',
                 'per_page' => (int) ($validated['per_page'] ?? 20),
             ],
