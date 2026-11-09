@@ -47,9 +47,11 @@
 @push('scripts')
 <script>
 (function(){
- var csrf=@json(csrf_token()), deleteActions=@json($reports->getCollection()->reject->trashed()->mapWithKeys(fn($report)=>[(string)$report->id=>route('assistant.fashion-advertising-reviews.destroy',$report)]));
+ var csrf=@json(csrf_token()), deleteActions=@json($reports->getCollection()->reject->trashed()->mapWithKeys(fn($report)=>[(string)$report->id=>route('assistant.fashion-advertising-reviews.destroy',$report)])), submittedTimes=@json($reports->getCollection()->mapWithKeys(fn($report)=>[(string)$report->id=>$report->created_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s')]));
+ var headerRow=document.querySelector('.review-table thead tr');if(headerRow&&headerRow.cells.length>=6){var submittedHeader=document.createElement('th');submittedHeader.textContent='提交时间';headerRow.insertBefore(submittedHeader,headerRow.cells[5]);}
  document.querySelectorAll('.review-table tbody>tr:not(.review-detail)').forEach(function(row){
   var detail=row.nextElementSibling,id=detail&&detail.id?detail.id.replace('fashion-review-',''):'',actions=row.querySelector('.review-actions');
+  if(row.cells.length>=6){var submittedCell=document.createElement('td');submittedCell.style.whiteSpace='nowrap';submittedCell.textContent=submittedTimes[id]||'—';row.insertBefore(submittedCell,row.cells[5]);}
   if(actions){actions.querySelectorAll('form').forEach(function(form){if(form.querySelector('input[name="decision"]'))form.style.display='none';});var reject=actions.querySelector('.js-reject');if(reject)reject.style.display='none';}
   if(!actions||!deleteActions[id])return;
   var form=document.createElement('form');form.method='post';form.action=deleteActions[id];form.style.display='inline';form.innerHTML='<input type="hidden" name="_token" value="'+csrf+'"><input type="hidden" name="_method" value="DELETE"><button class="btn btn-default btn-xs" type="submit"><i class="fa fa-trash text-red"></i> 删除</button>';
