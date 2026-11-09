@@ -287,6 +287,26 @@ class XShoppyOrderSyncService
         return in_array(strtolower(trim((string) ($payload['status'] ?? ''))), ['processing', 'completed'], true);
     }
 
+    /**
+     * 同一订单若已不再处于支付完成状态，移除既有订单与其明细，
+     * 确保服装订单列表仅保留当前接口认定为已支付的订单。
+     */
+    private function deleteExistingOrder(AssistantDomainStore $store, string $externalOrderId): void
+    {
+        $order = FashionLogisticsOrder::query()
+            ->where('assistant_domain_store_id', $store->getKey())
+            ->where('source_platform', 'xshoppy')
+            ->where('external_order_id', $externalOrderId)
+            ->first();
+
+        if (! $order) return;
+
+        DB::connection($order->getConnectionName())->transaction(function () use ($order): void {
+            $order->items()->delete();
+            $order->delete();
+        });
+    }
+
     private function decimal(mixed $value): float
     {
         return is_numeric($value) ? (float) $value : 0.0;
