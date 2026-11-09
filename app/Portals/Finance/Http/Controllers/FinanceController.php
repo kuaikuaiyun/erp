@@ -1368,7 +1368,8 @@ class FinanceController extends Controller
             return $this->workbooks->download($templateHeaders, [], $report.'-template.xlsx');
         }
         $paginator = null;
-        $editorFields = array_diff_key($columns, ['id' => true]);
+        $editorFields = array_diff_key($columns, $channel === 'paypal'
+            ? ['id' => true, 'team' => true, 'operation_region' => true] : ['id' => true]);
         $orderView = $channel === 'paypal';
         $columns = $cardLayout ?: $service->listColumns($channel);
         $exportColumns = $cardLayout ?: $service->exportColumns($channel);
@@ -1468,7 +1469,8 @@ class FinanceController extends Controller
             'subscriptionOptions' => $service->subscriptionOptions($rows),
             'accounts' => $accounts, 'filterAccounts' => $filterAccounts,
             'cardGroups' => $channel === 'credit_card' ? FinanceCreditAccountGroup::query()->orderBy('name')->pluck('name', 'id') : collect(),
-            'teams' => $this->workbooks->domainGroups()->pluck('team')->filter()->unique()->sort()->values(),
+            'teams' => ($orderView ? $service->operationDepartments()->pluck('name') : $this->workbooks->domainGroups()->pluck('team'))
+                ->filter()->unique()->sort()->values(),
         ]);
     }
 
@@ -1836,7 +1838,7 @@ class FinanceController extends Controller
     private function importNewPayPalSettlements(Request $request, \App\Portals\Finance\FinanceSettlementService $service, int $actor): Response
     {
         $columns = $service->columns('paypal');
-        $headers = array_values($columns);
+        $headers = [...array_values($columns), '团队'];
         $rows = $this->workbooks->read($request->file('file'), $headers, '贝宝导入模版', $headers);
         $created = [];
         $duplicates = 0;

@@ -637,25 +637,32 @@ class FinancePortalTest extends TestCase
             3 => [...$this->recordRow(), '交易 ID' => 'ORDINARY-PAYMENT', '自定义编号' => 'xm-670'],
             4 => [...$this->recordRow(), '交易 ID' => 'AUTO-BRUSH', '自定义编号' => 'xm-67'],
             5 => [...$this->recordRow(), '交易 ID' => 'AMBIGUOUS-PAYMENT', '自定义编号' => 'duplicate'],
+            6 => [...$this->recordRow(), '交易 ID' => 'MANUAL-BRUSH'],
         ], 'Domain classification', 'UTC', 1);
         $record = FinanceRecord::where('reference', 'BRUSH-PAYMENT')->sole();
         $this->post('/finance/reports/paypal-settlement/save', [
             'id' => $record->id, 'domain' => 'brush.example.com', 'upsell' => '已加购',
             'subscription' => '订阅', 'owner' => '原使用人', 'team' => '原团队',
         ])->assertRedirect();
+        $this->post('/finance/reports/paypal-settlement/save', [
+            'id' => FinanceRecord::where('reference', 'MANUAL-BRUSH')->sole()->id, 'owner' => '尚云pp刷单',
+        ])->assertRedirect();
 
         $url = '/finance/reports/paypal-settlement';
         $rows = $this->get($url)->assertOk()->viewData('rows')->getCollection()->keyBy('reference');
         $this->assertSame('未匹配', $rows['ORDINARY-PAYMENT']['subscription']);
         $this->assertSame('未匹配', $rows['AMBIGUOUS-PAYMENT']['subscription']);
-        $labels = ['brush.example.com', '刷单', '尚云pp刷单', '刷单'];
+        $this->assertSame('', $rows['ORDINARY-PAYMENT']['operation_region']);
+        $this->assertSame('刷单', $rows['MANUAL-BRUSH']['team']);
+        $this->assertSame('刷单', $rows['MANUAL-BRUSH']['operation_region']);
+        $labels = ['brush.example.com', '刷单', '尚云pp刷单', '刷单', '刷单'];
         foreach (['BRUSH-PAYMENT', 'AUTO-BRUSH'] as $reference) {
             $brush = $rows[$reference];
-            $this->assertSame($labels, [$brush['domain'], $brush['subscription'], $brush['owner'], $brush['team']]);
+            $this->assertSame($labels, [$brush['domain'], $brush['subscription'], $brush['owner'], $brush['team'], $brush['operation_region']]);
         }
 
         $sheet = $this->readDownload($this->get($url.'?'.http_build_query([
-            'subscription' => '刷单', 'download' => 1, 'export_columns' => ['reference', 'domain', 'subscription', 'owner', 'team'],
+            'subscription' => '刷单', 'download' => 1, 'export_columns' => ['reference', 'domain', 'subscription', 'owner', 'team', 'operation_region'],
         ]))->assertOk()->streamedContent())->toArray();
         $this->assertEqualsCanonicalizing([['BRUSH-PAYMENT', ...$labels], ['AUTO-BRUSH', ...$labels]], array_slice($sheet, 1));
     }
@@ -671,13 +678,44 @@ class FinancePortalTest extends TestCase
         DB::table($users)->insert([
             ['id' => 10, 'name' => '钱锦山', 'username' => 'original-owner'],
             ['id' => 11, 'name' => '陈志霖', 'username' => 'new-owner'],
+            ['id' => 12, 'name' => '张清洪（现名）', 'username' => 'historical-owner'],
+        ]);
+        $roles = config('admin.database.roles_table');
+        Schema::create($roles, function (Blueprint $table): void {
+            $table->id();
+            $table->string('name');
+            $table->string('slug');
+            $table->integer('sort')->default(0);
+            $table->unsignedBigInteger('parent_id')->nullable();
+        });
+        DB::table($roles)->insert([
+            ['id' => 21, 'name' => '运营部', 'slug' => 'dept-000022', 'parent_id' => null],
+            ['id' => 22, 'name' => '厦门运营部', 'slug' => 'test-operations-xm', 'parent_id' => 21],
+            ['id' => 23, 'name' => '深圳运营部', 'slug' => 'test-operations-sz', 'parent_id' => 21],
+            ['id' => 24, 'name' => '郑州运营部', 'slug' => 'test-operations-zz', 'parent_id' => 21],
+        ]);
+        $memberships = config('admin.database.role_users_table');
+        Schema::create($memberships, function (Blueprint $table): void {
+            $table->unsignedBigInteger('user_id');
+            $table->unsignedBigInteger('role_id');
+            $table->string('position')->nullable();
+            $table->unsignedInteger('position_slot')->nullable();
+            $table->boolean('is_primary')->default(false);
+            $table->timestamps();
+        });
+        DB::table($memberships)->insert([
+            ['user_id' => 10, 'role_id' => 22, 'is_primary' => true],
+            ['user_id' => 11, 'role_id' => 23, 'is_primary' => true],
+            ['user_id' => 12, 'role_id' => 22, 'is_primary' => false],
+            ['user_id' => 12, 'role_id' => 24, 'is_primary' => true],
         ]);
         Schema::create('assistant_domain_stores', function (Blueprint $table): void {
             $table->id();
             $table->string('domain');
             $table->string('user_name');
             $table->text('team')->nullable();
-            $table->unsignedBigInteger('owner_user_id');
+            $table->unsignedBigInteger('owner_user_id')->nullable();
+            $table->string('shop_status')->default('in_use');
         });
         DB::table('assistant_domain_stores')->insert([
             ['id' => 1, 'domain' => 'transfer.example.com', 'user_name' => '备用曾11', 'team' => '厦门总部', 'owner_user_id' => 10],
@@ -686,13 +724,13 @@ class FinancePortalTest extends TestCase
         (require database_path('migrations/2026_10_30_000003_create_assistant_domain_store_owner_histories.php'))->up();
         $history = DB::table('assistant_domain_store_owner_histories');
         $history->insert([
-            ['id' => 4, 'assistant_domain_store_id' => 1, 'owner_name_snapshot' => '陈志霖', 'event' => 'baseline',
+            ['id' => 4, 'assistant_domain_store_id' => 1, 'owner_user_id' => 11, 'owner_name_snapshot' => '陈志霖', 'event' => 'baseline',
                 'effective_from' => '2026-10-27 00:00:00', 'effective_to' => '2026-10-28 00:00:00'],
-            ['id' => 1, 'assistant_domain_store_id' => 1, 'owner_name_snapshot' => null, 'event' => 'cleared',
+            ['id' => 1, 'assistant_domain_store_id' => 1, 'owner_user_id' => null, 'owner_name_snapshot' => null, 'event' => 'cleared',
                 'effective_from' => '2026-10-28 00:00:00', 'effective_to' => '2026-11-01 03:00:00'],
-            ['id' => 2, 'assistant_domain_store_id' => 1, 'owner_name_snapshot' => '张清洪', 'event' => 'assigned',
+            ['id' => 2, 'assistant_domain_store_id' => 1, 'owner_user_id' => 12, 'owner_name_snapshot' => '张清洪', 'event' => 'assigned',
                 'effective_from' => '2026-11-01 03:00:00', 'effective_to' => '2026-11-01 03:00:10'],
-            ['id' => 3, 'assistant_domain_store_id' => 1, 'owner_name_snapshot' => '钱锦山', 'event' => 'transferred',
+            ['id' => 3, 'assistant_domain_store_id' => 1, 'owner_user_id' => 10, 'owner_name_snapshot' => '钱锦山', 'event' => 'transferred',
                 'effective_from' => '2026-11-01 03:00:10', 'effective_to' => null],
         ]);
         Schema::create('logistics_orders', function (Blueprint $table): void {
@@ -731,33 +769,74 @@ class FinancePortalTest extends TestCase
         ], 'PayPal owners', 'UTC', 1);
 
         $url = '/finance/reports/paypal-settlement?timezone=-04%3A00';
-        $rows = $this->get($url)->assertOk()->viewData('rows')->getCollection()->keyBy('reference');
+        $page = $this->get($url)->assertOk()->assertSee('运营所属部门');
+        $this->assertSame('运营所属部门', $page->viewData('columns')['team']);
+        $this->assertSame('地区', $page->viewData('columns')['operation_region']);
+        $rows = $page->viewData('rows')->getCollection()->keyBy('reference');
         $this->assertSame('张清洪', $rows['BEFORE-TRANSFER']['owner']);
         $this->assertSame('2026-10-31 23:10:23', $rows['BEFORE-TRANSFER']['date']);
         $this->assertSame('钱锦山', $rows['NO-OWNER']['owner']);
-        $this->assertSame('', $rows['NO-OWNER']['team']);
+        $this->assertSame('厦门运营部', $rows['NO-OWNER']['team']);
         $this->assertSame('钱锦山', $rows['AT-TRANSFER']['owner']);
         $this->assertSame('', $rows['UNASSIGNED']['owner']);
         $this->assertSame('陈志霖', $rows['BEFORE-HISTORY']['owner']);
-        $exportUrl = $url.'&download=1&export_columns[]=reference&export_columns[]=owner&export_columns[]=team';
-        $export = fn () => collect($this->readDownload($this->get($exportUrl)->assertOk()->streamedContent())->toArray())
-            ->slice(1)->keyBy(0);
+        $this->assertSame('郑州运营部', $rows['BEFORE-TRANSFER']['team']);
+        $this->assertSame('郑州', $rows['BEFORE-TRANSFER']['operation_region']);
+        $this->assertSame('深圳', $rows['BEFORE-HISTORY']['operation_region']);
+        $this->get($url.'&team='.rawurlencode('郑州运营部'))->assertOk()
+            ->assertViewHas('rows', fn ($rows) => $rows->pluck('reference')->all() === ['BEFORE-TRANSFER']);
+        $exportUrl = $url.'&download=1&export_columns[]=reference&export_columns[]=owner&export_columns[]=team&export_columns[]=operation_region';
+        $export = function () use ($exportUrl) {
+            $sheet = $this->readDownload($this->get($exportUrl)->assertOk()->streamedContent())->toArray();
+            $this->assertSame('运营所属部门', $sheet[0][2]);
+            $this->assertSame('地区', $sheet[0][3]);
+
+            return collect($sheet)->slice(1)->keyBy(0);
+        };
         $exported = $export();
-        $this->assertSame(['BEFORE-TRANSFER', '张清洪', '郑州团队'], $exported['BEFORE-TRANSFER']);
-        $this->assertSame('钱锦山', $exported['NO-OWNER'][1]);
-        $this->assertSame('钱锦山', $exported['AT-TRANSFER'][1]);
+        $this->assertSame(['BEFORE-TRANSFER', '张清洪', '郑州运营部', '郑州'], $exported['BEFORE-TRANSFER']);
+        $this->assertSame(['NO-OWNER', '钱锦山', '厦门运营部', '厦门'], $exported['NO-OWNER']);
+        $this->assertSame(['AT-TRANSFER', '钱锦山', '厦门运营部', '厦门'], $exported['AT-TRANSFER']);
         $this->assertEmpty($exported['UNASSIGNED'][1]);
-        $this->assertSame('陈志霖', $exported['BEFORE-HISTORY'][1]);
+        $this->assertEmpty($exported['UNASSIGNED'][2]);
+        $this->assertSame(['BEFORE-HISTORY', '陈志霖', '深圳运营部', '深圳'], $exported['BEFORE-HISTORY']);
+
+        DB::table($roles)->insert(['id' => 25, 'name' => '杭州市运营一部', 'slug' => 'test-operations-hz', 'parent_id' => 21]);
+        DB::table($memberships)->where('user_id', 11)->update(['role_id' => 25]);
+        $regionFilter = http_build_query(['conditions' => [['field' => 'operation_region', 'operator' => 'equals', 'value' => '杭州']]]);
+        $this->get($url.'&'.$regionFilter)->assertOk()
+            ->assertViewHas('rows', fn ($rows) => $rows->pluck('reference')->all() === ['BEFORE-HISTORY']);
+        $this->assertSame(['BEFORE-HISTORY', '陈志霖', '杭州市运营一部', '杭州'], $export()['BEFORE-HISTORY']);
 
         $history->clone()->where('id', 2)->update(['effective_to' => '2026-11-01 03:00:09']);
         $history->clone()->where('id', 3)->update(['effective_from' => '2026-11-01 03:00:09']);
-        $this->assertSame('钱锦山', $export()['BEFORE-TRANSFER'][1]);
+        $this->assertSame(['BEFORE-TRANSFER', '钱锦山', '厦门运营部', '厦门'], $export()['BEFORE-TRANSFER']);
 
         $record = FinanceRecord::where('reference', 'BEFORE-TRANSFER')->sole();
         $this->post('/finance/reports/paypal-settlement/save', ['id' => $record->id, 'owner' => '财务补录'])
             ->assertSessionHasNoErrors();
         $this->get($url.'&reference=BEFORE-TRANSFER')->assertOk()
             ->assertViewHas('rows', fn ($rows) => $rows->first()['owner'] === '财务补录');
+
+        // The old shop stopped and a different shop still uses the same domain.
+        DB::table('assistant_domain_stores')->where('id', 1)->update(['shop_status' => 'stopped', 'owner_user_id' => null]);
+        $history->clone()->where('id', 3)->update(['effective_to' => '2026-11-07 00:00:00']);
+        $history->insert(['assistant_domain_store_id' => 1, 'event' => 'cleared', 'effective_from' => '2026-11-07 00:00:00']);
+        DB::table($memberships)->where('user_id', 10)->delete();
+        DB::table('logistics_orders')->where('bill_number', 'AT-TRANSFER')
+            ->update(['assigned_owner_name' => '钱锦山', 'group_names' => '厦门运营部']);
+        DB::table('logistics_orders')->where('bill_number', 'NO-OWNER')
+            ->update(['operator_name' => '钱锦山', 'group_names' => '厦门运营部']);
+
+        $rows = $this->get($url)->assertOk()->viewData('rows')->getCollection()->keyBy('reference');
+        $exported = $export();
+        foreach (['AT-TRANSFER', 'NO-OWNER'] as $reference) {
+            $this->assertSame('钱锦山', $rows[$reference]['owner']);
+            $this->assertSame('厦门运营部', $rows[$reference]['team']);
+            $this->assertSame([$reference, '钱锦山', '厦门运营部', '厦门'], $exported[$reference]);
+        }
+        $this->assertSame('', $rows['UNASSIGNED']['owner']);
+        $this->assertSame('', $rows['UNASSIGNED']['team']);
     }
 
     public function test_settlement_reports_extract_checkout_and_save_without_changing_orders(): void
@@ -858,9 +937,10 @@ class FinancePortalTest extends TestCase
             'subscription' => '订阅', 'upsell' => '否', 'converted_usd' => '34.8', 'usd_rate' => '1.2', 'settlement' => '36', 'fee' => '1.2',
             'domain' => 'edited.example.test', 'owner' => '编辑使用人', 'team' => '编辑团队', 'erp_order' => 'EDITED-ERP', 'note' => '编辑备注'];
         $page = $this->get('/finance/reports/paypal-settlement')->assertOk();
-        foreach (array_diff_key($service->columns('paypal'), ['id' => true]) as $field => $label) {
+        foreach (array_diff_key($service->columns('paypal'), ['id' => true, 'team' => true, 'operation_region' => true]) as $field => $label) {
             $page->assertSee('id="edit-'.$field.'"', false);
         }
+        $page->assertDontSee('id="edit-team"', false);
         $page->assertDontSee('原始交易与计算结果（只读）');
         DB::table('finance_payment_transactions')->insert(['payment_account_id' => $account->id, 'finance_record_id' => $record->id, 'transaction_id' => $record->reference, 'event_code' => 'T0006', 'raw_payload' => '{}']);
         $listFilters = ['from' => '2026-11-01', 'timezone' => 'UTC', 'per_page' => 20, 'page' => 2];
@@ -1181,7 +1261,7 @@ class FinancePortalTest extends TestCase
         $record = FinanceRecord::sole();
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
         $page = $this->get('/finance/reports/paypal-settlement')->assertOk();
-        foreach ($service->textFields('paypal') as $field => $label) {
+        foreach (array_diff_key($service->textFields('paypal'), ['team' => true]) as $field => $label) {
             $page->assertSee('id="edit-'.$field.'"', false);
         }
         $page->assertSee('id="edit-reference"', false)->assertSee('删除所选');
@@ -1303,6 +1383,8 @@ class FinancePortalTest extends TestCase
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
         $expected = array_map(FinanceCatalog::simplified(...), array_values(FinanceCatalog::source()['headers'])[0]);
         $expected = array_values(array_filter($expected, fn ($header) => $header !== '应结算'));
+        $expected[array_search('团队', $expected, true)] = '运营所属部门';
+        array_splice($expected, array_search('运营所属部门', $expected, true) + 1, 0, ['地区']);
         array_splice($expected, array_search('退款金额', $expected, true), 0, ['冻结退款', '补差价退款']);
         $actual = array_values($service->columns('paypal'));
         $this->assertSame(['记录ID', '支付账户', ...$expected], $actual);
@@ -1311,7 +1393,7 @@ class FinancePortalTest extends TestCase
         $sheet = $this->readDownload($this->get('/finance/reports/paypal-settlement?download=1')->assertOk()->streamedContent());
         $headers = $sheet->toArray()[0];
         $page = $this->get('/finance/reports/paypal-settlement')->assertOk()->assertSee('按当前列表导出')
-            ->assertSee('data-new-display-fields="frozen_refund refund_top_up"', false);
+            ->assertSee('data-new-display-fields="frozen_refund refund_top_up operation_region"', false);
         $this->assertSame(array_values($page->viewData('columns')), $headers);
         $this->assertSame([
             '转换美元', '汇率', '收款金额-美元', '手续费', '冻结金额', '争议冻结金额', '冻结退款', '补差价退款',
@@ -3474,7 +3556,7 @@ class FinancePortalTest extends TestCase
         ])->assertOk()->assertJsonPath('fields', [$balanceIndex, $referenceIndex]);
         $settlement = $this->readDownload($this->get('/finance/reports/paypal-settlement?download=1')->assertOk()->streamedContent())->toArray();
         foreach (['通途订单' => 'ERP-LINKED', '域名' => 'linked.example.test', '使用人' => 'Linked owner',
-            '团队' => 'Linked team', '订阅类型' => '未匹配', '是否加购' => '已加购'] as $header => $expected) {
+            '运营所属部门' => '', '订阅类型' => '未匹配', '是否加购' => '已加购'] as $header => $expected) {
             $this->assertSame($expected, $settlement[1][array_search($header, $settlement[0], true)], $header);
         }
         $this->getJson('/finance/records/paypal-orders/export?export_scope=filtered&export_layout=page&report_columns[]=999')->assertUnprocessable();

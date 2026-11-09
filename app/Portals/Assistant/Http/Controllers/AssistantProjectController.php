@@ -21,7 +21,16 @@ class AssistantProjectController extends Controller
     {
         $context = $this->context($request); if ($context instanceof Response) return $context;
         $department = $this->scope->selectedDepartment($context['user'], $request->input('assistant_department_id'));
-        return view('portals.assistant.projects.index', ['portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'], 'projects' => AssistantProject::query()->where('assistant_department_id', $department->id)->withCount('websiteSystems')->orderBy('sort')->orderBy('id')->get(), 'assistantDepartments' => $this->scope->departmentsFor($context['user']), 'selectedAssistantDepartment' => $department]);
+        $projects = AssistantProject::query()
+            ->where('assistant_department_id', $department->id)
+            ->with(['websiteSystems' => fn ($query) => $query->orderBy('sort')->orderBy('id')])
+            ->orderBy('sort')->orderBy('id')->get();
+        $projects->each(function (AssistantProject $project): void {
+            $names = $project->websiteSystems->map(fn ($system): string => $system->name.($system->is_enabled ? '' : '（已停用）'));
+            $project->setAttribute('website_systems_count', $names->implode('、') ?: '未关联');
+        });
+
+        return view('portals.assistant.projects.index', ['portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'], 'projects' => $projects, 'assistantDepartments' => $this->scope->departmentsFor($context['user']), 'selectedAssistantDepartment' => $department]);
     }
 
     public function store(Request $request): RedirectResponse

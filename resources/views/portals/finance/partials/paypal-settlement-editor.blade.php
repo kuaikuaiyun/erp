@@ -3,14 +3,13 @@
         '交易信息' => ['account', 'reference', 'paypal_4', 'paypal_5', 'paypal_0', 'paypal_1', 'paypal_2', 'month', 'paypal_3', 'paypal_10', 'paypal_12', 'paypal_13', 'paypal_14', 'date', 'timezone'],
         '金额与结算' => ['paypal_6', 'paypal_7', 'paypal_8', 'paypal_9', 'converted_usd', 'usd_rate', 'settlement'],
         '费用与退款' => ['fee', 'hold', 'dispute_hold', 'frozen_refund', 'refund_top_up', 'refund', 'refund_fee', 'dispute_refund', 'dispute_fee', 'fee_return', 'dispute_release', 'release', 'logistics', 'purchase'],
-        '业务归属' => ['domain', 'owner', 'team', 'subscription', 'upsell', 'erp_order', 'note'],
+        '业务归属' => ['domain', 'owner', 'subscription', 'upsell', 'erp_order', 'note'],
     ];
     $editorSuggestions = [
         'paypal_4' => collect(\App\Portals\Finance\FinancePayPalEventTypes::TYPES)->filter(fn ($type) => $type[1] === '结账付款')->pluck(0)->all(),
         'paypal_5' => ['S', 'D', 'PENDING', 'VOIDED'],
         'paypal_6' => ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'HKD', 'CNY', 'SGD'],
         'paypal_14' => ['Credit', 'Debit', 'Memo'],
-        'team' => $teams->all(),
         'owner' => [],
         'domain' => [],
         'upsell' => ['是', '否'],

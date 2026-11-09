@@ -193,11 +193,17 @@
 <div id="erp-image-zoom" role="dialog" aria-modal="true" aria-label="图片放大预览"
      style="position:fixed;inset:0;z-index:9999;display:none;background:rgba(0,0,0,0.88);cursor:default;overflow:hidden;"
      tabindex="-1">
-    <div id="erp-image-zoom-hint" style="position:absolute;top:18px;left:50%;z-index:2;transform:translateX(-50%);padding:6px 13px;border-radius:16px;background:rgba(0,0,0,.58);color:#fff;font-size:12px;pointer-events:none;">点击图片继续放大</div>
+    <div id="erp-image-zoom-hint" style="position:absolute;top:18px;left:50%;z-index:2;transform:translateX(-50%);padding:6px 13px;border-radius:16px;background:rgba(0,0,0,.58);color:#fff;font-size:12px;pointer-events:none;">滚轮或按钮缩放，放大后可拖动</div>
+    <div id="erp-image-zoom-controls" style="position:absolute;left:50%;bottom:20px;z-index:3;display:flex;align-items:center;gap:8px;transform:translateX(-50%);padding:7px 10px;border-radius:22px;background:rgba(0,0,0,.68);">
+        <button type="button" data-erp-zoom="out" aria-label="缩小" style="width:32px;height:32px;border:0;border-radius:16px;background:#fff;color:#273f50;font-size:22px;line-height:28px;cursor:pointer;">−</button>
+        <span id="erp-image-zoom-level" style="min-width:52px;color:#fff;text-align:center;font-size:13px;">100%</span>
+        <button type="button" data-erp-zoom="in" aria-label="放大" style="width:32px;height:32px;border:0;border-radius:16px;background:#fff;color:#273f50;font-size:20px;line-height:28px;cursor:pointer;">+</button>
+        <button type="button" data-erp-zoom="reset" style="height:32px;padding:0 11px;border:0;border-radius:16px;background:#e7f2f8;color:#265d7b;cursor:pointer;">还原</button>
+    </div>
     <button type="button" id="erp-image-zoom-close" aria-label="关闭"
             style="position:absolute;top:16px;right:20px;background:none;border:none;color:#fff;font-size:28px;line-height:1;cursor:pointer;padding:4px 10px;opacity:0.7;">×</button>
     <img id="erp-image-zoom-img" alt=""
-         style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) scale(1);max-width:92vw;max-height:90vh;object-fit:contain;border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,0.6);cursor:zoom-in;transition:transform .2s ease;transform-origin:center center;">
+         style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) translate(0,0) scale(1);max-width:92vw;max-height:86vh;object-fit:contain;border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,0.6);cursor:zoom-in;transform-origin:center center;user-select:none;-webkit-user-drag:none;">
 </div>
 <script>
 (function(){
@@ -206,27 +212,28 @@
     var img = document.getElementById('erp-image-zoom-img');
     var closeBtn = document.getElementById('erp-image-zoom-close');
     var hint = document.getElementById('erp-image-zoom-hint');
-    var zoomed = false;
+    var level = document.getElementById('erp-image-zoom-level');
+    var scale = 1, offsetX = 0, offsetY = 0, dragging = false, moved = false, startX = 0, startY = 0;
 
-    function setZoom(value, ev) {
-        zoomed = value;
-        if (zoomed && ev) {
-            var rect = img.getBoundingClientRect();
-            var x = Math.max(0, Math.min(100, (ev.clientX - rect.left) / rect.width * 100));
-            var y = Math.max(0, Math.min(100, (ev.clientY - rect.top) / rect.height * 100));
-            img.style.transformOrigin = x + '% ' + y + '%';
-        } else {
-            img.style.transformOrigin = 'center center';
-        }
-        img.style.transform = 'translate(-50%,-50%) scale(' + (zoomed ? 2 : 1) + ')';
-        img.style.cursor = zoomed ? 'zoom-out' : 'zoom-in';
-        if (hint) hint.textContent = zoomed ? '再次点击图片还原' : '点击图片继续放大';
+    function renderZoom() {
+        img.style.transform = 'translate(-50%,-50%) translate(' + offsetX + 'px,' + offsetY + 'px) scale(' + scale + ')';
+        img.style.cursor = scale > 1 ? (dragging ? 'grabbing' : 'grab') : 'zoom-in';
+        if (level) level.textContent = Math.round(scale * 100) + '%';
+    }
+    function setScale(value) {
+        scale = Math.max(.5, Math.min(4, Math.round(value * 4) / 4));
+        if (scale <= 1) offsetX = offsetY = 0;
+        renderZoom();
+    }
+    function resetZoom() {
+        scale = 1; offsetX = offsetY = 0; dragging = false; moved = false;
+        renderZoom();
     }
 
     function open(src) {
         if (!src) return;
         img.src = src;
-        setZoom(false);
+        resetZoom();
         overlay.style.display = 'block';
         document.body.style.overflow = 'hidden';
         overlay.focus();
@@ -235,7 +242,7 @@
         overlay.style.display = 'none';
         document.body.style.overflow = '';
         img.src = '';
-        setZoom(false);
+        resetZoom();
     }
 
     // 暴露到 window，供内联 onclick="window.erpZoomOpen(this.src)" 直接调用
@@ -249,7 +256,9 @@
         // 放大后点 overlay 本体或 × 关闭
         if (overlay.style.display === 'block') {
             if (target === overlay || target === closeBtn) { close(); ev.stopPropagation(); return; }
-            if (target === img) { setZoom(!zoomed, ev); ev.preventDefault(); ev.stopPropagation(); return; }
+            var control = target.closest && target.closest('[data-erp-zoom]');
+            if (control) { var action=control.getAttribute('data-erp-zoom');if(action==='in')setScale(scale+.25);else if(action==='out')setScale(scale-.25);else resetZoom();ev.preventDefault();ev.stopPropagation();return; }
+            if (target === img) { if(!moved)setScale(scale===1?2:1);moved=false;ev.preventDefault();ev.stopPropagation();return; }
         }
         // 拦截 .erp-zoomable 图片点击
         if (target.tagName === 'IMG' && target.classList.contains('erp-zoomable')) {
@@ -257,6 +266,19 @@
             if (src) { open(src); ev.preventDefault(); ev.stopPropagation(); }
         }
     }, false); // false = 冒泡阶段
+
+    overlay.addEventListener('wheel', function(ev){
+        if (overlay.style.display !== 'block') return;
+        setScale(scale + (ev.deltaY < 0 ? .25 : -.25));
+        ev.preventDefault();
+    }, {passive:false});
+    img.addEventListener('mousedown', function(ev){
+        if(scale<=1)return;dragging=true;moved=false;startX=ev.clientX-offsetX;startY=ev.clientY-offsetY;renderZoom();ev.preventDefault();
+    });
+    document.addEventListener('mousemove', function(ev){
+        if(!dragging)return;var nextX=ev.clientX-startX,nextY=ev.clientY-startY;if(Math.abs(nextX-offsetX)>2||Math.abs(nextY-offsetY)>2)moved=true;offsetX=nextX;offsetY=nextY;renderZoom();
+    });
+    document.addEventListener('mouseup', function(){if(!dragging)return;dragging=false;renderZoom();});
 
     // ESC 关闭
     document.addEventListener('keydown', function(ev){
