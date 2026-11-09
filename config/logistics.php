@@ -30,6 +30,24 @@ return [
         'import_secret' => env('LOGISTICS_PAYPAL_IMPORT_SECRET', ''),
         'import_max_bytes' => (int) env('LOGISTICS_PAYPAL_IMPORT_MAX_BYTES', 20 * 1024 * 1024),
         'import_clock_skew_seconds' => (int) env('LOGISTICS_PAYPAL_IMPORT_CLOCK_SKEW_SECONDS', 300),
+        // Pulling through the VPS is opt-in. Keeping this disabled preserves the
+        // existing VPS-to-ERP push workflow until it is intentionally switched.
+        'relay' => [
+            'sync_enabled' => filter_var(env('LOGISTICS_PAYPAL_RELAY_SYNC_ENABLED', false), FILTER_VALIDATE_BOOL),
+            'ca_bundle' => env('LOGISTICS_PAYPAL_RELAY_CA_BUNDLE'),
+            'timeout' => (int) env('LOGISTICS_PAYPAL_RELAY_TIMEOUT', 60),
+            'clock_skew_seconds' => (int) env('LOGISTICS_PAYPAL_RELAY_CLOCK_SKEW_SECONDS', 300),
+            'max_response_bytes' => (int) env('LOGISTICS_PAYPAL_RELAY_MAX_RESPONSE_BYTES', 20 * 1024 * 1024),
+            'initial_days' => (int) env('LOGISTICS_PAYPAL_RELAY_INITIAL_DAYS', 90),
+            'existing_account_initial_days' => (int) env('LOGISTICS_PAYPAL_RELAY_EXISTING_ACCOUNT_INITIAL_DAYS', 1),
+            'overlap_days' => (int) env('LOGISTICS_PAYPAL_RELAY_OVERLAP_DAYS', 1),
+            'transaction_segment_days' => (int) env('LOGISTICS_PAYPAL_RELAY_TRANSACTION_SEGMENT_DAYS', 30),
+            'dispute_segment_days' => (int) env('LOGISTICS_PAYPAL_RELAY_DISPUTE_SEGMENT_DAYS', 7),
+            'transaction_page_size' => (int) env('LOGISTICS_PAYPAL_RELAY_TRANSACTION_PAGE_SIZE', 500),
+            'dispute_page_size' => (int) env('LOGISTICS_PAYPAL_RELAY_DISPUTE_PAGE_SIZE', 50),
+            'max_transaction_pages' => (int) env('LOGISTICS_PAYPAL_RELAY_MAX_TRANSACTION_PAGES', 1000),
+            'max_dispute_pages' => (int) env('LOGISTICS_PAYPAL_RELAY_MAX_DISPUTE_PAGES', 100),
+        ],
     ],
     'tracking' => [
         'api_key' => env('TRACKING51_API_KEY', ''),

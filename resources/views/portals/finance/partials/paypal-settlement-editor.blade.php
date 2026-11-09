@@ -2,7 +2,7 @@
     $editorGroups = [
         '交易信息' => ['account', 'reference', 'paypal_4', 'paypal_5', 'paypal_0', 'paypal_1', 'paypal_2', 'month', 'paypal_3', 'paypal_10', 'paypal_12', 'paypal_13', 'paypal_14', 'date', 'timezone'],
         '金额与结算' => ['paypal_6', 'paypal_7', 'paypal_8', 'paypal_9', 'converted_usd', 'usd_rate', 'settlement'],
-        '费用与退款' => ['fee', 'hold', 'dispute_hold', 'refund', 'refund_fee', 'dispute_refund', 'dispute_fee', 'fee_return', 'dispute_release', 'release', 'logistics', 'purchase'],
+        '费用与退款' => ['fee', 'hold', 'dispute_hold', 'frozen_refund', 'refund_top_up', 'refund', 'refund_fee', 'dispute_refund', 'dispute_fee', 'fee_return', 'dispute_release', 'release', 'logistics', 'purchase'],
         '业务归属' => ['domain', 'owner', 'team', 'subscription', 'upsell', 'erp_order', 'note'],
     ];
     $editorSuggestions = [
@@ -26,6 +26,7 @@
     }
 @endphp
 <div class="paypal-editor-body">
+    <p class="settlement-note">冻结退款、补差价退款按已核实的美元金额补录。留空使用流水自动计算。同一笔支出只填对应的一列。</p>
 @foreach($editorGroups as $title => $fields)
 <section class="paypal-editor-section" aria-labelledby="paypal-editor-group-{{ $loop->iteration }}">
     <h4 id="paypal-editor-group-{{ $loop->iteration }}">{{ $title }}</h4>

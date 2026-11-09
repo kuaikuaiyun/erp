@@ -14,6 +14,9 @@ class FinancePayPalSettlementOrders
         'paypal_reference_type' => '关联号类型',
     ];
 
+    public const REFUND_SPLIT_COLUMNS = ['frozen_refund' => '冻结退款', 'refund_top_up' => '补差价退款'];
+    private const LEGACY_REFUND_FIELDS = ['refund' => 'frozen_refund', 'refund_fee' => 'refund_top_up'];
+
     private const EVENTS = [
         'T2101' => 'hold', 'T2103' => 'hold', 'T2102' => 'release', 'T2104' => 'release',
         'T1110' => 'dispute_hold', 'T1111' => 'dispute_release',
@@ -55,8 +58,11 @@ class FinancePayPalSettlementOrders
 
     public static function listColumns(array $columns): array
     {
+        $payablePosition = array_search('logistics', array_keys($columns), true);
+        $columns = array_slice($columns, 0, $payablePosition, true)
+            + ['payable' => self::COLUMNS['payable']] + array_slice($columns, $payablePosition, null, true);
         $columns = [...$columns, ...self::COLUMNS, 'settlement' => '收款金额-美元'];
-        $primary = array_flip(['shopify_order_number', 'reference', 'account', 'order_status', 'payable',
+        $primary = array_flip(['shopify_order_number', 'reference', 'account', 'order_status',
             'open_hold', 'review', 'paypal_12', 'paypal_reference_type']);
 
         return array_replace($primary, array_intersect_key($columns, $primary)) + $columns;
@@ -75,6 +81,17 @@ class FinancePayPalSettlementOrders
             };
         }
         return $source + ['source_category' => '类型-分类', 'source_added_date' => '新增日期'];
+    }
+
+    public static function splitRefundNote(array $row, string $field): ?string
+    {
+        $split = self::LEGACY_REFUND_FIELDS[$field] ?? null;
+        if ($split === null || ! isset($row[$field], $row[$split])
+            || bccomp($row[$field], '0', self::SCALE) !== 0 || bccomp($row[$split], '0', self::SCALE) <= 0) {
+            return null;
+        }
+
+        return self::REFUND_SPLIT_COLUMNS[$split].'已列 '.FinanceCatalog::reportAmount($row[$split]).' USD';
     }
 
     public function detailRow(int $recordId, string $timezone): ?array
@@ -263,6 +280,10 @@ class FinancePayPalSettlementOrders
                 'fee' => $this->settlements->number($info['fee_amount']['value'] ?? null),
                 'status' => $info['transaction_status'] ?? '',
             ];
+            if ($event['code'] === 'T1111') {
+                $updated = $info['transaction_updated_date'] ?? null;
+                $event['updated_time'] = is_string($updated) ? strtotime($updated) : false;
+            }
             if ($recordId !== null) {
                 $event['transaction_row_id'] = (int) $txn->id;
                 $event['configured_category'] = $txn->configured_category;
@@ -326,6 +347,11 @@ class FinancePayPalSettlementOrders
         }
         unset($events, $index, $byId, $paymentIds, $invoiceRoots);
 
+        $crossRates = [
+            'monthly' => $db->table('finance_monthly_exchange_rates')->get(['month', 'currency', 'cny_rate'])
+                ->groupBy('month')->map(fn ($rates) => $rates->pluck('cny_rate', 'currency')->put('CNY', '1')),
+            'paypal' => $this->referenceExchangeRates($roots, $conversions),
+        ];
         foreach ($unlinked as $event) {
             $orders['event:'.$event['id']] = ['id' => $event['id'], 'time' => $event['time'], 'event' => $event];
         }
@@ -354,7 +380,7 @@ class FinancePayPalSettlementOrders
                     if ($payment === null) {
                         continue;
                     }
-                    $row = $this->paymentRow($payment, $roots, $children, $conversions, $crossAccount, $ambiguous, $filters['timezone'], $recordId !== null);
+                    $row = $this->paymentRow($payment, $roots, $children, $conversions, $crossAccount, $ambiguous, $crossRates, $filters['timezone'], $recordId !== null);
                 }
                 if ($this->matches($row, $filters, $children, $numericConditionFields)) {
                     if ($recordId === null && $pageOffset === null) {
@@ -374,12 +400,12 @@ class FinancePayPalSettlementOrders
         return $rows;
     }
 
-    private function paymentRow(array $payment, array $roots, array $children, array $conversions, array $crossAccount, array $ambiguous, string $zone, bool $includeDetails): array
+    private function paymentRow(array $payment, array $roots, array $children, array $conversions, array $crossAccount, array $ambiguous, array $crossRates, string $zone, bool $includeDetails): array
     {
         $id = $payment['id'];
         $root = $roots[$id] ?? null;
         $result = $this->calculate($payment, $root, $children[$id] ?? [], $conversions[$id] ?? [],
-            $root && count($crossAccount[$root['reference']] ?? []) > 1, $zone, $includeDetails);
+            $root && count($crossAccount[$root['reference']] ?? []) > 1, $crossRates, $zone, $includeDetails);
         $result['order_status'] = $this->paymentStatus($result);
         if (isset($ambiguous[$id])) {
             $result['payable'] = $result['open_hold'] = null;
@@ -392,6 +418,11 @@ class FinancePayPalSettlementOrders
         $payment['filter_date'] = $payment['source_date'];
         unset($payment['manual_values'], $payment['source_date'], $result['manual_values'], $result['source_date']);
         $result['payments'] = [$payment];
+        foreach (['subscription', 'upsell'] as $field) {
+            if (blank($result[$field])) {
+                $result[$field] = '未匹配';
+            }
+        }
         $result['source_category'] = '结账付款';
         $result['paypal_12'] = $root['related_id'] ?? $payment['paypal_12'];
         $result['paypal_reference_type'] = $root['related_type'] ?? '';
@@ -402,12 +433,16 @@ class FinancePayPalSettlementOrders
     private function unlinkedRow(array $event, string $zone, bool $includeDetails): array
     {
         $date = CarbonImmutable::createFromTimestamp($event['time'], 'UTC')->setTimezone($zone);
+        $reserveWithoutReference = in_array($event['code'], ['T2103', 'T2104'], true)
+            && $event['related_id'] === '' && $event['invoice'] === '';
         return [
             'id' => $event['id'], 'account' => $event['account'], 'reference' => $event['reference'],
             'paypal_12' => $event['related_id'], 'paypal_reference_type' => $event['related_type'],
             'source_category' => FinancePayPalEventTypes::TYPES[$event['code']][1] ?? '',
             'date' => $date->format('Y-m-d H:i:s'), 'month' => $date->format('Y-m'), 'timezone' => $zone,
-            'order_status' => '待关联交易', 'review' => '未找到唯一的原付款，未计入应结算',
+            'subscription' => '未匹配', 'upsell' => '未匹配',
+            'order_status' => '待关联交易',
+            'review' => $reserveWithoutReference ? '预备金流水无原付款关联号，未计入订单应结算' : '未找到唯一的原付款，未计入应结算',
             ...($includeDetails ? ['events' => [$this->detail($event, $zone)]] : []),
             'payments' => [], 'locked' => true,
             'unlinked_account' => $event['account_key'], 'unlinked_date' => $date,
@@ -471,11 +506,12 @@ class FinancePayPalSettlementOrders
             && $this->settlements->matches($row, $filters['conditions'] ?? [], $numericConditionFields);
     }
 
-    private function calculate(array $payment, ?array $root, array $events, array $conversions, bool $duplicate, string $zone, bool $includeDetails): array
+    private function calculate(array $payment, ?array $root, array $events, array $conversions, bool $duplicate, array $crossRates, string $zone, bool $includeDetails): array
     {
         $result = $payment;
         $manual = $payment['manual_values'];
         $money = array_fill_keys([...self::COSTS, ...self::RETURNS], $root ? '0' : null);
+        $refundSplit = array_fill_keys(array_keys(self::REFUND_SPLIT_COLUMNS), '0');
         $details = [];
         $review = [];
         $holds = [];
@@ -486,6 +522,15 @@ class FinancePayPalSettlementOrders
         $complete = $payment['success'];
         $hasHold = false;
         $manualFields = $this->settlements->importFields('paypal');
+        $manualSplit = [];
+        foreach (self::REFUND_SPLIT_COLUMNS as $field => $label) {
+            $override = $this->settlements->number($manual[$field] ?? $manual[$label] ?? null);
+            if ($override !== null) {
+                $manualSplit[$field] = $override;
+            }
+        }
+        $nonUsdReceipt = null;
+        $crossRateSource = null;
 
         if ($root) {
             $result['reference'] = $root['reference'];
@@ -508,16 +553,36 @@ class FinancePayPalSettlementOrders
             $result['usd_rate'] = $rate;
             $result['converted_usd'] = $converted ?? $manualNet
                 ?? ($rate !== null && $net !== null ? bcmul($net, $rate, self::SCALE) : null);
+            if ($result['converted_usd'] === null && $net !== null && $root['currency'] !== 'USD') {
+                $nonUsdReceipt = $this->exchangeLeg($root, $net, $conversions, $usedExchanges, false, null);
+                if ($nonUsdReceipt !== null && $nonUsdReceipt['currency'] !== 'USD' && bccomp($net, '0', self::SCALE) > 0) {
+                    [$crossRate, $crossRateSource] = $this->receiptCrossRate($nonUsdReceipt, $crossRates);
+                    if ($crossRate !== null) {
+                        $result['converted_usd'] = bcmul($nonUsdReceipt['amount'], $crossRate, self::SCALE);
+                        $result['usd_rate'] = $rate = bcdiv($result['converted_usd'], $net, self::SCALE);
+                    }
+                }
+            }
             $money['fee'] = $rate === null ? null : bcmul($fee, '-'.$rate, self::SCALE);
             $result['settlement'] = $complete && $result['converted_usd'] !== null && $money['fee'] !== null
                 ? bcadd($result['converted_usd'], $money['fee'], self::SCALE) : null;
-            $source = $root['currency'] === 'USD' ? '接口USD' : ($converted !== null ? '实际换汇' : ($rate !== null ? '财务折算' : '待折算'));
+            $source = $crossRateSource ?? ($root['currency'] === 'USD' ? '接口USD' : ($converted !== null ? '实际换汇' : ($rate !== null ? '财务折算' : '待折算')));
             if ($includeDetails) {
                 $details[] = [...$this->detail($root, $zone, $result['converted_usd'], $source),
                     'rate' => $rate, 'category' => '结账付款', 'usd_label' => '美元净额'];
             }
 
             $disputeHolds = collect($events)->where('code', 'T1110')->keyBy('reference');
+            $pairedDisputes = [];
+            foreach ($events as $event) {
+                if ($event['code'] === 'T1111' && in_array($event['status'], ['S', 'D'], true)
+                    && $this->matchesDisputeHold($event, $disputeHolds->get($event['reference']))) {
+                    $pairedDisputes[$event['reference']] = true;
+                }
+            }
+            $fundedRefund = $pairedDisputes !== [] && $root['currency'] !== 'USD'
+                ? $this->refundFromReleasedHold($root, $events, $disputeHolds, $pairedDisputes, $conversions, $usedExchanges, $manualSplit['refund_top_up'] ?? null)
+                : null;
             foreach ($events as $event) {
                 if ($event['code'] === 'T0200') {
                     if ($includeDetails) {
@@ -539,11 +604,12 @@ class FinancePayPalSettlementOrders
                 }
                 $effective = $event['status'] === 'S' || ($field === 'dispute_hold' && $event['status'] === 'P');
                 $rejectedRelease = $field === 'dispute_release' && $event['status'] === 'D';
-                $amount = $effective || $rejectedRelease
-                    ? $this->exchange($event, $event['amount'], $conversions, $usedExchanges, $rejectedRelease) : null;
+                $fundedAmount = $fundedRefund['amounts'][$event['id']] ?? null;
+                $amount = $fundedAmount ?? ($effective || $rejectedRelease
+                    ? $this->exchange($event, $event['amount'], $conversions, $usedExchanges, $rejectedRelease) : null);
                 if ($rejectedRelease) {
                     $effective = $event['currency'] === 'USD'
-                        ? $this->matchesDisputeHold($event, $disputeHolds->get($event['reference']))
+                        ? isset($pairedDisputes[$event['reference']])
                         : $amount !== null;
                     if (! $effective) {
                         $money[$field] = null;
@@ -558,6 +624,7 @@ class FinancePayPalSettlementOrders
                 }
                 $amount = $event['currency'] === 'USD' ? $event['amount'] : $amount;
                 $source = match (true) {
+                    $fundedAmount !== null && $field !== 'dispute_hold' => '解冻资金用于退款',
                     $event['currency'] !== 'USD' => $amount !== null ? '实际换汇' : '待折算',
                     $rejectedRelease => '同交易号争议冻结返还',
                     default => '接口USD',
@@ -570,11 +637,20 @@ class FinancePayPalSettlementOrders
                 } elseif ($refund) {
                     $refundPending = true;
                 }
-                $this->addMoney($money, $review, $field, $amount,
-                    in_array($field, self::RETURNS, true) ? 1 : -1);
+                if ($fundedAmount !== null && $refund) {
+                    $this->addMoney($refundSplit, $review, 'frozen_refund', $amount, -1);
+                    $this->addMoney($refundSplit, $review, 'refund_top_up', $fundedRefund['shortfall_usd'], -1);
+                } else {
+                    $this->addMoney($money, $review, $field, $amount,
+                        in_array($field, self::RETURNS, true) ? 1 : -1);
+                }
                 if (in_array($field, ['hold', 'release', 'dispute_hold', 'dispute_release'], true)) {
                     $kind = str_starts_with($field, 'dispute_') ? 'dispute' : 'reserve';
-                    $holds[$kind.'|'.$event['currency']][] = ['amount' => $event['amount'], 'usd' => $amount];
+                    $key = $kind.'|'.$event['currency'];
+                    if ($kind === 'dispute' && isset($pairedDisputes[$event['reference']])) {
+                        $key .= '|'.$event['reference'];
+                    }
+                    $holds[$key][] = ['amount' => $event['amount'], 'usd' => $amount];
                 }
 
                 if ($refund && $event['fee'] !== null && bccomp($event['fee'], '0', self::SCALE) !== 0) {
@@ -599,16 +675,33 @@ class FinancePayPalSettlementOrders
                 ];
             }
         }
-
+        $conflictingRefund = false;
         foreach (array_keys($money) as $field) {
+            $splitField = self::LEGACY_REFUND_FIELDS[$field] ?? null;
             $override = $this->settlements->number($manual[$field] ?? $manual[$manualFields[$field] ?? ''] ?? null);
             if ($override !== null) {
                 $manualHold = $manualHold || in_array($field, ['hold', 'release', 'dispute_hold', 'dispute_release'], true);
                 $money[$field] = $override;
                 unset($review[$field]);
+                // A positive legacy amount may already cover the split deduction.
+                if ($splitField !== null && bccomp($override, '0', self::SCALE) > 0) {
+                    $refundSplit[$splitField] = '0';
+                }
             } elseif ($root === null) {
                 $money[$field] = $payment[$field];
             }
+            if ($splitField !== null && isset($manualSplit[$splitField])
+                && bccomp($money[$field] ?? '0', '0', self::SCALE) > 0
+                && bccomp($manualSplit[$splitField], '0', self::SCALE) > 0) {
+                $conflictingRefund = true;
+            }
+        }
+        $money += array_replace($refundSplit, $manualSplit);
+        if ($manualSplit !== []) {
+            $review['manual_refund_split'] = '已人工补录'.implode('、', array_intersect_key(self::REFUND_SPLIT_COLUMNS, $manualSplit));
+        }
+        if ($conflictingRefund) {
+            $review['refund_conflict'] = '旧退款列与人工补录的拆分退款同时有金额，待核对是否重复';
         }
         if ($root === null || isset($manual['settlement']) || isset($manual['结算金额-美元'])) {
             $result['settlement'] = $payment['settlement'];
@@ -617,10 +710,14 @@ class FinancePayPalSettlementOrders
             $review['duplicate'] = '跨账户存在相同交易号，待核对是否重复入账';
         }
         if ($payment['business_order_id'] === null) {
-            $review['order'] = '待关联业务订单';
+            $review['order'] = '未匹配物流订单';
         }
-        if ($result['settlement'] === null && $complete) {
-            $review['rate'] = '收款美元金额待折算';
+        if ($crossRateSource !== null) {
+            $review['rate'] = $crossRateSource;
+        } elseif ($result['settlement'] === null && $complete) {
+            $review['rate'] = $nonUsdReceipt === null || $nonUsdReceipt['currency'] === 'USD'
+                ? '收款美元金额待折算'
+                : '收款实际换入 '.$nonUsdReceipt['amount'].' '.$nonUsdReceipt['currency'].'，缺少美元折算依据';
         }
         $result = [...$result, ...$money];
         $open = $this->balance($money, ['hold', 'dispute_hold'], ['release', 'dispute_release']);
@@ -634,8 +731,8 @@ class FinancePayPalSettlementOrders
         $result['open_hold'] = $open;
         $result['had_hold'] = $hasHold || isset($review['dispute_release']) || bccomp($money['hold'] ?? '0', '0', self::SCALE) > 0
             || bccomp($money['dispute_hold'] ?? '0', '0', self::SCALE) > 0;
-        $result['payable'] = $duplicate || $result['settlement'] === null || $open === null
-            ? null : $this->balance($money, self::RETURNS, self::COSTS, $result['settlement']);
+        $result['payable'] = $duplicate || $conflictingRefund || $result['settlement'] === null || $open === null
+            ? null : $this->balance($money, self::RETURNS, [...self::COSTS, ...array_keys($refundSplit)], $result['settlement']);
         if ($complete && $result['payable'] === null) {
             $review['payable'] = '应结算待核对';
         }
@@ -644,7 +741,11 @@ class FinancePayPalSettlementOrders
         $comparisonAmount = $root['amount'] ?? $result['settlement'];
         if ($root === null || isset($manual['refund']) || isset($manual['退款金额'])
             || isset($manual['dispute_refund']) || isset($manual['争议退款'])) {
-            $refundOriginal = bcadd($money['refund'] ?? '0', $money['dispute_refund'] ?? '0', self::SCALE);
+            $refundOriginal = bcadd(
+                bcadd($money['refund'] ?? '0', $money['dispute_refund'] ?? '0', self::SCALE),
+                bcadd($money['frozen_refund'], $money['refund_top_up'], self::SCALE),
+                self::SCALE
+            );
             $comparisonAmount = $result['settlement'];
         }
         if (bccomp($refundOriginal, '0', self::SCALE) > 0) {
@@ -660,6 +761,59 @@ class FinancePayPalSettlementOrders
             $result['events'] = $details;
         }
         return $result;
+    }
+
+    private function refundFromReleasedHold(array $root, array $events, Collection $holds, array $pairedDisputes,
+        array $conversions, array &$usedExchanges, ?string $manualTopUp): ?array
+    {
+        $refunds = collect($events)->filter(fn ($event) => (self::EVENTS[$event['code']] ?? null) === 'refund'
+            && $event['status'] === 'S' && $event['currency'] === $root['currency']);
+        if ($refunds->count() !== 1 || $root['amount'] === null) {
+            return null;
+        }
+        $refund = $refunds->first();
+        if ($refund['amount'] === null || bccomp(bcadd($refund['amount'], $root['amount'], self::SCALE), '0', self::SCALE) !== 0
+            || bccomp($refund['fee'] ?? '0', '0', self::SCALE) !== 0) {
+            return null;
+        }
+
+        // The release and full refund post together. The refund FX pair funds only the difference.
+        $releases = collect($events)->filter(fn ($event) => $event['code'] === 'T1111' && $event['status'] === 'D'
+            && $event['currency'] === $refund['currency'] && isset($pairedDisputes[$event['reference']])
+            && $event['time'] <= $refund['time']
+            // Some cancellations retain the hold's initiation time and record the release as an update.
+            && ($event['updated_time'] === $refund['time']
+                || ($event['time'] === $refund['time'] && $event['time'] > $holds->get($event['reference'])['time'])));
+        if ($releases->count() !== 1) {
+            return null;
+        }
+        $release = $releases->first();
+        $shortfall = bcadd($refund['amount'], $release['amount'], self::SCALE);
+        if (bccomp($shortfall, '0', self::SCALE) >= 0) {
+            return null;
+        }
+
+        $probe = $usedExchanges;
+        if ($this->exchange($release, $release['amount'], $conversions, $probe, true) !== null
+            || $this->exchange($refund, $refund['amount'], $conversions, $probe) !== null) {
+            return null;
+        }
+        $hold = $holds->get($release['reference']);
+        $holdUsd = $this->exchange($hold, $hold['amount'], $conversions, $probe);
+        if ($holdUsd === null) {
+            return null;
+        }
+        $shortfallUsd = $this->exchange($refund, $shortfall, array_intersect_key($conversions, [$refund['reference'] => true]), $probe);
+        if ($shortfallUsd === null && $manualTopUp === null) {
+            return null;
+        }
+
+        $usedExchanges = $probe;
+
+        return [
+            'amounts' => [$hold['id'] => $holdUsd, $release['id'] => bcsub('0', $holdUsd, self::SCALE), $refund['id'] => $holdUsd],
+            'shortfall_usd' => $shortfallUsd ?? bcsub('0', $manualTopUp, self::SCALE),
+        ];
     }
 
     private function matchesDisputeHold(array $release, ?array $hold): bool
@@ -726,11 +880,74 @@ class FinancePayPalSettlementOrders
         return $total;
     }
 
+    private function referenceExchangeRates(array $roots, array $conversions): array
+    {
+        $rates = [];
+        foreach ($conversions as $id => $legs) {
+            $root = $roots[$id] ?? null;
+            if ($root === null || $root['currency'] !== 'USD' || $root['status'] !== 'S' || $root['amount'] === null) {
+                continue;
+            }
+            $net = bcadd($root['amount'], $root['fee'] ?? '0', self::SCALE);
+            if (bccomp($net, '0', self::SCALE) <= 0) {
+                continue;
+            }
+            $destination = $this->exchangeLeg($root, $net, $legs, [], false, null);
+            if ($destination !== null) {
+                $month = CarbonImmutable::createFromTimestamp($destination['time'], 'Asia/Shanghai')->format('Y-m');
+                $rates[$root['account_id']][$destination['currency']][$month][] = [
+                    'time' => $destination['time'], 'reference' => $root['reference'],
+                    'rate' => bcdiv($net, $destination['amount'], 16),
+                ];
+            }
+        }
+
+        return $rates;
+    }
+
+    private function receiptCrossRate(array $receipt, array $crossRates): array
+    {
+        $currency = $receipt['currency'];
+        $month = CarbonImmutable::createFromTimestamp($receipt['time'], 'Asia/Shanghai')->format('Y-m');
+        $monthly = $crossRates['monthly']->get($month);
+        if (isset($monthly[$currency], $monthly['USD'])
+            && bccomp((string) $monthly[$currency], '0', 16) > 0 && bccomp((string) $monthly['USD'], '0', 16) > 0) {
+            return [bcdiv((string) $monthly[$currency], (string) $monthly['USD'], 16),
+                '实际换入 '.$receipt['amount'].' '.$currency.'，按 '.$month.' 财务月汇率折算美元'];
+        }
+
+        $nearest = null;
+        $nearestKey = null;
+        foreach ($crossRates['paypal'][$receipt['account_id']][$currency][$month] ?? [] as $rate) {
+            $key = [abs($rate['time'] - $receipt['time']), $rate['time'], $rate['reference']];
+            if ($key[0] <= 2 * 86400 && ($nearestKey === null || $key < $nearestKey)) {
+                $nearest = $rate;
+                $nearestKey = $key;
+            }
+        }
+        if ($nearest === null) {
+            return [null, null];
+        }
+
+        return [$nearest['rate'], '实际换入 '.$receipt['amount'].' '.$currency.'，按同账户 PayPal 参考汇率折算美元（交易 '.$nearest['reference'].'）'];
+    }
+
     private function exchange(array $event, ?string $amount, array $conversions, array &$usedExchanges, bool $release = false): ?string
     {
         if ($amount === null || $event['currency'] === 'USD' || bccomp($amount, '0', self::SCALE) === 0) {
             return $amount;
         }
+        $leg = $this->exchangeLeg($event, $amount, $conversions, $usedExchanges, $release, 'USD');
+        if ($leg === null) {
+            return null;
+        }
+        $usedExchanges[$leg['id']] = true;
+
+        return $leg['amount'];
+    }
+
+    private function exchangeLeg(array $event, string $amount, array $conversions, array $usedExchanges, bool $release, ?string $target): ?array
+    {
         $groups = [];
         $direction = bccomp($amount, '0', self::SCALE);
         $references = $release ? [$event['reference']] : array_unique([$event['reference'], $event['parent']]);
@@ -749,10 +966,11 @@ class FinancePayPalSettlementOrders
             foreach ($times as $group) {
                 $original = array_filter($group, fn ($item) => $item['currency'] === $event['currency']
                     && bccomp(bcadd($item['amount'], $amount, self::SCALE), '0', self::SCALE) === 0);
-                $usd = array_values(array_filter($group, fn ($item) => $item['currency'] === 'USD'
+                $destination = array_values(array_filter($group, fn ($item) => $item['currency'] !== $event['currency']
+                    && ($target === null || $item['currency'] === $target)
                     && bccomp($item['amount'], '0', self::SCALE) === $direction));
-                if (count($group) === 2 && count($original) === 1 && count($usd) === 1) {
-                    $matches[$usd[0]['id']] = $usd[0]['amount'];
+                if (count($group) === 2 && count($original) === 1 && count($destination) === 1) {
+                    $matches[$destination[0]['id']] = $destination[0];
                 }
             }
         }
@@ -760,7 +978,6 @@ class FinancePayPalSettlementOrders
         if (count($matches) !== 1 || isset($usedExchanges[$id])) {
             return null;
         }
-        $usedExchanges[$id] = true;
         return $matches[$id];
     }
 

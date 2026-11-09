@@ -852,14 +852,20 @@ class FinancePortalTest extends TestCase
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
         $expected = array_map(FinanceCatalog::simplified(...), array_values(FinanceCatalog::source()['headers'])[0]);
         $expected = array_values(array_filter($expected, fn ($header) => $header !== '应结算'));
+        array_splice($expected, array_search('退款金额', $expected, true), 0, ['冻结退款', '补差价退款']);
         $actual = array_values($service->columns('paypal'));
         $this->assertSame(['记录ID', '支付账户', ...$expected], $actual);
         $template = $this->readDownload($this->get('/finance/reports/paypal-settlement?template=1')->assertOk()->streamedContent());
         $this->assertSame(array_values($service->columns('paypal')), $template->toArray()[0]);
         $sheet = $this->readDownload($this->get('/finance/reports/paypal-settlement?download=1')->assertOk()->streamedContent());
         $headers = $sheet->toArray()[0];
-        $page = $this->get('/finance/reports/paypal-settlement')->assertOk()->assertSee('按当前列表导出');
-        $this->assertSame(array_values(array_intersect_key($page->viewData('exportColumns'), $page->viewData('columns'))), $headers);
+        $page = $this->get('/finance/reports/paypal-settlement')->assertOk()->assertSee('按当前列表导出')
+            ->assertSee('data-new-display-fields="frozen_refund refund_top_up"', false);
+        $this->assertSame(array_values($page->viewData('columns')), $headers);
+        $this->assertSame([
+            '转换美元', '汇率', '收款金额-美元', '手续费', '冻结金额', '争议冻结金额', '冻结退款', '补差价退款',
+            '退款金额', '退款费用', '争议退款', '争议费', '返还手续费', '返还争议冻结', '返还冻结', '应结算（USD）',
+        ], array_slice($headers, array_search('转换美元', $headers, true), 16));
         $this->assertSame('应结算（USD）', $page->viewData('columns')['payable']);
         $this->assertSame(['Shopify订单号', '交易 ID', '支付账户', '当前订单状态',
             '未解除冻结（USD）', '核对说明', '偏好设定 Txn ID', '关联号类型', '记录ID', '日期'],
@@ -907,7 +913,7 @@ class FinancePortalTest extends TestCase
         $account = $this->financePayPalAccount('PayPal结算测试');
         DB::table('finance_transaction_types')->updateOrInsert(['raw_type' => 'T0006'], ['category' => '结账付款']);
         $sync = app(\App\Portals\Finance\FinancePayPalSyncService::class);
-        $add = function ($id, $code, $day, $currency, $amount, $status = 'S', $parent = '', $fee = null, $invoice = '', $referenceType = 'TXN', $paymentAccount = null) use ($account, $sync): void {
+        $add = function ($id, $code, $day, $currency, $amount, $status = 'S', $parent = '', $fee = null, $invoice = '', $referenceType = 'TXN', $paymentAccount = null, $updatedAt = null) use ($account, $sync): void {
             $paymentAccount ??= $account;
             $info = [
                 'transaction_id' => $id, 'transaction_event_code' => $code,
@@ -915,6 +921,9 @@ class FinancePortalTest extends TestCase
                 'transaction_amount' => ['value' => $amount, 'currency_code' => $currency], 'invoice_id' => $invoice,
                 'paypal_reference_id' => $parent, 'paypal_reference_id_type' => $referenceType,
             ];
+            if ($updatedAt !== null) {
+                $info['transaction_updated_date'] = $updatedAt;
+            }
             if ($fee !== null) {
                 $info['fee_amount'] = ['value' => $fee, 'currency_code' => $currency];
             }
@@ -980,6 +989,8 @@ class FinancePortalTest extends TestCase
         $this->assertSame('已付款 · 全额退款 · 冻结已解除', $order['order_status']);
         $this->assertSame('39.67000000', $order['dispute_hold']);
         $this->assertSame('41.58000000', $order['refund']);
+        $this->assertSame('0', $order['frozen_refund']);
+        $this->assertSame('0', $order['refund_top_up']);
         $this->assertSame('-9.85000000', $order['payable']);
         $other = $rows->getCollection()->firstWhere('reference', 'PAY-OTHER');
         $this->assertNull($other['payable']);
@@ -1016,6 +1027,10 @@ class FinancePortalTest extends TestCase
         $allExport = $this->readDownload($this->get($allUrl.'?download=1')->assertOk()->streamedContent())->toArray();
         $this->assertEqualsCanonicalizing(['PAY-CAD', 'PAY-USD', 'PAY-OTHER', 'UNLINKED-REFUND', 'FX-NO-REFERENCE'],
             array_column(array_slice($allExport, 1), array_search('交易 ID', $allExport[0], true)));
+        $headers = array_flip($allExport[0]);
+        $unlinked = collect(array_slice($allExport, 1))->first(fn ($row) => $row[$headers['交易 ID']] === 'UNLINKED-REFUND');
+        $this->assertSame('未匹配', $unlinked[$headers['订阅类型']]);
+        $this->assertSame('未匹配', $unlinked[$headers['是否加购']]);
         $withdrawalExchangeId = DB::table('finance_payment_transactions')->where('transaction_id', 'FX-WITHDRAWAL-USD')->value('finance_record_id');
         $this->get($allUrl.'/records/'.$withdrawalExchangeId)->assertNotFound();
         $this->assertDatabaseHas('finance_payment_transactions', ['transaction_id' => 'WITHDRAWAL']);
@@ -1057,6 +1072,11 @@ class FinancePortalTest extends TestCase
         $disputeExport = $this->readDownload($this->get($disputeUrl.'&download=1')->assertOk()->streamedContent())->toArray();
         $this->assertSame(-2.64, (float) $disputeExport[1][array_search('应结算（USD）', $disputeExport[0], true)]);
 
+        $add('SECOND-USD-DISPUTE', 'T1110', '2026-09-26', 'USD', '-50.43', 'P', 'PAY-DISPUTE');
+        $this->get($disputeUrl)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->first()['open_hold'] === '50.43000000'
+            && $rows->first()['payable'] === '-53.07000000'
+            && str_contains($rows->first()['order_status'], '仍有冻结'));
+
         $usdRelease = DB::table('finance_payment_transactions')->where('transaction_id', 'USD-DISPUTE')->where('event_code', 'T1111');
         $payload = json_decode($usdRelease->value('raw_payload'), true);
         $payload['transaction_info']['transaction_amount']['value'] = '50.42';
@@ -1069,9 +1089,116 @@ class FinancePortalTest extends TestCase
             ->assertViewHas('rows', fn ($rows) => $rows->first()['payable'] === null
                 && str_contains($rows->first()['review'], '存在无法唯一归属的资金流水'));
 
+        $add('PAY-CAD-REFUNDED', 'T0006', '2026-09-20', 'CAD', '56.85', fee: '-2.80');
+        $add('PAYMENT-FX-CAD', 'T0200', '2026-09-20', 'CAD', '-54.05', parent: 'PAY-CAD-REFUNDED');
+        $add('PAYMENT-FX-USD', 'T0200', '2026-09-20', 'USD', '37.40', parent: 'PAY-CAD-REFUNDED');
+        $add('HOLD-FOR-REFUND', 'T1110', '2026-10-04', 'CAD', '-54.05', 'P', 'PAY-CAD-REFUNDED');
+        $add('HOLD-FX-CAD', 'T0200', '2026-10-04', 'CAD', '54.05', parent: 'HOLD-FOR-REFUND');
+        $add('HOLD-FX-USD', 'T0200', '2026-10-04', 'USD', '-38.06', parent: 'HOLD-FOR-REFUND');
+        $add('HOLD-FOR-REFUND', 'T1111', '2026-10-04', 'CAD', '54.05', 'D', 'PAY-CAD-REFUNDED',
+            updatedAt: '2026-10-09T12:00:00Z');
+        $add('REFUND-USING-HOLD', 'T1107', '2026-10-09', 'CAD', '-56.85', parent: 'PAY-CAD-REFUNDED');
+        $add('REFUND-TOPUP-CAD', 'T0200', '2026-10-09', 'CAD', '2.80', parent: 'REFUND-USING-HOLD');
+        $add('REFUND-TOPUP-USD', 'T0200', '2026-10-09', 'USD', '-1.97', parent: 'REFUND-USING-HOLD');
+        $fundedUrl = $url.'&reference=PAY-CAD-REFUNDED';
+        $funded = $this->get($fundedUrl)->assertOk()
+            ->assertSeeText(['冻结退款已列 38.06 USD', '补差价退款已列 1.97 USD'])->viewData('rows')->first();
+        $this->assertSame('0', $funded['refund']);
+        $this->assertSame('0', $funded['refund_fee']);
+        $this->assertSame('38.06000000', $funded['frozen_refund']);
+        $this->assertSame('1.97000000', $funded['refund_top_up']);
+        $this->assertSame('38.06000000', $funded['dispute_release']);
+        $this->assertSame('0', $funded['open_hold']);
+        $this->assertSame('-2.63000000', $funded['payable']);
+        $this->assertSame('full', $funded['refund_state']);
+        $this->get('/finance/reports/paypal-settlement/records/'.$funded['id'])->assertOk()
+            ->assertSeeText(['解冻资金用于退款', '冻结退款（USD）', '补差价退款（USD）']);
+        $fundedExport = $this->readDownload($this->get($fundedUrl.'&download=1')->assertOk()->streamedContent())->toArray();
+        $this->assertSame(38.06, (float) $fundedExport[1][array_search('冻结退款', $fundedExport[0], true)]);
+        $this->assertSame(1.97, (float) $fundedExport[1][array_search('补差价退款', $fundedExport[0], true)]);
+        $this->assertSame('冻结退款已列 38.06 USD', $fundedExport[1][array_search('退款金额', $fundedExport[0], true)]);
+        $this->assertSame('补差价退款已列 1.97 USD', $fundedExport[1][array_search('退款费用', $fundedExport[0], true)]);
+        $this->assertSame(38.06, (float) $fundedExport[1][array_search('返还争议冻结', $fundedExport[0], true)]);
+        $this->assertSame(-2.63, (float) $fundedExport[1][array_search('应结算（USD）', $fundedExport[0], true)]);
+
+        $fundedRecord = FinanceRecord::findOrFail($funded['id']);
+        $settlements = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $settlements->save($fundedRecord, ['refund' => '0', 'refund_fee' => '0'], 1);
+        $this->get($fundedUrl)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->first()['payable'] === '-2.63000000'
+            && $rows->first()['frozen_refund'] === '38.06000000' && $rows->first()['refund_top_up'] === '1.97000000');
+        $settlements->save($fundedRecord, ['refund' => null, 'refund_fee' => null], 1);
+        $settlements->save($fundedRecord, ['refund_fee' => '1.97'], 1);
+        $this->get($fundedUrl)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->first()['refund_fee'] === '1.97'
+            && $rows->first()['refund_top_up'] === '0' && $rows->first()['payable'] === '-2.63000000');
+        $settlements->save($fundedRecord, ['refund_fee' => null], 1);
+
+        $release = DB::table('finance_payment_transactions')->where('transaction_id', 'HOLD-FOR-REFUND')->where('event_code', 'T1111');
+        $releasePayload = json_decode($release->value('raw_payload'), true);
+        unset($releasePayload['transaction_info']['transaction_updated_date']);
+        $releasePayload['transaction_info']['transaction_initiation_date'] = '2026-10-09T12:00:00Z';
+        $release->update(['raw_payload' => json_encode($releasePayload)]);
+        FinanceRecord::findOrFail($release->value('finance_record_id'))->update(['occurred_at' => '2026-10-09 12:00:00']);
+        $this->get($fundedUrl)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->first()['payable'] === '-2.63000000'
+            && $rows->first()['frozen_refund'] === '38.06000000' && $rows->first()['refund_top_up'] === '1.97000000');
+
+        $refundTopup = DB::table('finance_payment_transactions')->where('transaction_id', 'REFUND-TOPUP-CAD');
+        $payload = json_decode($refundTopup->value('raw_payload'), true);
+        $payload['transaction_info']['transaction_amount']['value'] = '2.79';
+        $refundTopup->update(['raw_payload' => json_encode($payload)]);
+        $this->get($fundedUrl)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->first()['payable'] === null
+            && $rows->first()['frozen_refund'] === '0' && $rows->first()['refund_top_up'] === '0');
+
+        $saveUrl = '/finance/reports/paypal-settlement/save';
+        $this->get($fundedUrl)->assertOk()->assertSee('name="frozen_refund"', false)->assertSee('name="refund_top_up"', false);
+        $this->post($saveUrl, ['id' => $funded['id'], 'refund_top_up' => '-1.97'])->assertSessionHasErrors('refund_top_up');
+        $this->post($saveUrl, ['id' => $funded['id'], 'refund_top_up' => '1.97'])->assertRedirect()->assertSessionHasNoErrors();
+        $this->get($fundedUrl)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->first()['payable'] === '-2.63000000'
+            && $rows->first()['frozen_refund'] === '38.06000000'
+            && str_contains($rows->first()['review'], '已人工补录补差价退款'));
+        $this->post($saveUrl, ['id' => $funded['id'], 'refund_fee' => '1.97'])->assertRedirect()->assertSessionHasNoErrors();
+        $this->get($fundedUrl)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->first()['payable'] === null
+            && str_contains($rows->first()['review'], '待核对是否重复'));
+        $this->post($saveUrl, ['id' => $funded['id'], 'refund_fee' => ''])->assertRedirect()->assertSessionHasNoErrors();
+        $this->post($saveUrl, ['id' => $funded['id'], 'refund_top_up' => ''])->assertRedirect()->assertSessionHasNoErrors();
+        $this->get($fundedUrl)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->first()['payable'] === null);
+
         $otherAccount = $this->financePayPalAccount('另一 PayPal 账户');
         $add('PAY-CAD', 'T0006', '2026-09-18', 'CAD', '59.25', paymentAccount: $otherAccount);
         $this->get($detailUrl)->assertOk()->assertViewHas('row', fn ($row) => $row['payable'] === null);
+
+        $add('PAY-TO-HKD', 'T0006', '2026-09-28', 'CAD', '28.80', fee: '-1.57');
+        $add('FX-HKD-SOURCE', 'T0200', '2026-09-28', 'CAD', '-27.23', parent: 'PAY-TO-HKD');
+        $add('FX-HKD-TARGET', 'T0200', '2026-09-28', 'HKD', '147.80', parent: 'PAY-TO-HKD');
+        $hkdUrl = $url.'&reference=PAY-TO-HKD';
+        $hkdRow = $this->get($hkdUrl)->assertOk()->viewData('rows')->first();
+        $this->assertStringContainsString('收款实际换入 147.80 HKD，缺少美元折算依据', $hkdRow['review']);
+        $this->assertNull($hkdRow['payable']);
+        $settlements->save(FinanceRecord::findOrFail($hkdRow['id']), ['usd_rate' => '0.70'], 1);
+        $this->get($hkdUrl)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->first()['payable'] === '19.06100000'
+            && ! str_contains($rows->first()['review'], '缺少美元折算依据'));
+        $settlements->save(FinanceRecord::findOrFail($hkdRow['id']), ['usd_rate' => null], 1);
+
+        $add('OTHER-HKD-REFERENCE', 'T0006', '2026-09-28', 'USD', '20.00', paymentAccount: $otherAccount);
+        $add('OTHER-HKD-USD', 'T0200', '2026-09-28', 'USD', '-20.00', parent: 'OTHER-HKD-REFERENCE', paymentAccount: $otherAccount);
+        $add('OTHER-HKD-TARGET', 'T0200', '2026-09-28', 'HKD', '150.00', parent: 'OTHER-HKD-REFERENCE', paymentAccount: $otherAccount);
+        $this->get($hkdUrl)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->first()['payable'] === null);
+
+        $add('HKD-REFERENCE', 'T0006', '2026-09-29', 'USD', '21.00', fee: '-1.00');
+        $add('HKD-REFERENCE-USD', 'T0200', '2026-09-29', 'USD', '-20.00', parent: 'HKD-REFERENCE');
+        $add('HKD-REFERENCE-HKD', 'T0200', '2026-09-29', 'HKD', '150.00', parent: 'HKD-REFERENCE');
+        $this->get($hkdUrl)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->first()['payable'] === '19.70666666'
+            && str_contains($rows->first()['review'], '同账户 PayPal 参考汇率折算美元（交易 HKD-REFERENCE）'));
+        DB::table('finance_monthly_exchange_rates')->insert([
+            ['month' => '2026-09', 'currency' => 'HKD', 'cny_rate' => '0.90'],
+            ['month' => '2026-09', 'currency' => 'USD', 'cny_rate' => '7.20'],
+        ]);
+        $this->get($hkdUrl)->assertOk()->assertViewHas('rows', fn ($rows) => $rows->first()['payable'] === '18.47500000'
+            && str_contains($rows->first()['review'], '按 2026-09 财务月汇率折算美元'));
+
+        $add('RESERVE-WITHOUT-ORDER', 'T2103', '2026-09-29', 'USD', '-40000.00');
+        $this->get($url.'&reference=RESERVE-WITHOUT-ORDER')->assertOk()
+            ->assertViewHas('rows', fn ($rows) => ($rows->first()['payable'] ?? null) === null
+                && $rows->first()['review'] === '预备金流水无原付款关联号，未计入订单应结算');
     }
 
     public function test_settlement_custom_export_order_applies_to_selected_rows_and_blank_templates(): void
@@ -1152,7 +1279,7 @@ class FinancePortalTest extends TestCase
         $paypal->fromArray([array_values($paypalRow)], null, 'A2');
         $card = $book->createSheet()->setTitle('徐总支付导入模版');
         $cardHeaders = array_values($service->importFields('credit_card'));
-        $this->assertCount(22, $paypalHeaders); $this->assertCount(25, $cardHeaders);
+        $this->assertCount(24, $paypalHeaders); $this->assertCount(25, $cardHeaders);
         $card->fromArray($cardHeaders, null, 'A1');
         $cardRow = array_fill_keys($cardHeaders, '');
         $cardRow['商户订单号'] = 'MERCHANT-1'; $cardRow['平台订单号'] = 'PLATFORM-1'; $cardRow['结算金额'] = '9.5'; $cardRow['交易手续费'] = '0.5';
@@ -2846,10 +2973,73 @@ class FinancePortalTest extends TestCase
         ])->assertOk()->assertJsonPath('fields', [$balanceIndex, $referenceIndex]);
         $settlement = $this->readDownload($this->get('/finance/reports/paypal-settlement?download=1')->assertOk()->streamedContent())->toArray();
         foreach (['通途订单' => 'ERP-LINKED', '域名' => 'linked.example.test', '使用人' => 'Linked owner',
-            '团队' => 'Linked team', '订阅类型' => '加购'] as $header => $expected) {
+            '团队' => 'Linked team', '订阅类型' => '待核对', '是否加购' => '待核对'] as $header => $expected) {
             $this->assertSame($expected, $settlement[1][array_search($header, $settlement[0], true)], $header);
         }
         $this->getJson('/finance/records/paypal-orders/export?export_scope=filtered&export_layout=page&report_columns[]=999')->assertUnprocessable();
+    }
+
+    public function test_paypal_settlement_classifies_each_payment_and_exports_the_same_labels(): void
+    {
+        Schema::create('logistics_orders', function (Blueprint $table): void {
+            $table->id();
+            $table->string('bill_number');
+            $table->string('subscription_type');
+            $table->string('is_add_on');
+        });
+        Schema::create('logistics_order_payment_references', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('logistics_order_id');
+            $table->string('reference_number');
+            $table->string('reference_type');
+        });
+        DB::table('logistics_orders')->insert([
+            'id' => 1, 'bill_number' => 'PRIMARY-PAYMENT',
+            'subscription_type' => '订阅首次购买', 'is_add_on' => '已加购',
+        ]);
+        DB::table('logistics_order_payment_references')->insert([
+            ['logistics_order_id' => 1, 'reference_number' => 'PRIMARY-PAYMENT', 'reference_type' => 'primary'],
+            ['logistics_order_id' => 1, 'reference_number' => 'UPSELL-PAYMENT', 'reference_type' => 'upsell'],
+        ]);
+        $this->workbooks->importRecords('paypal-orders', [
+            2 => [...$this->recordRow(), '交易 ID' => 'PRIMARY-PAYMENT'],
+            3 => [...$this->recordRow(), '交易 ID' => 'UPSELL-PAYMENT'],
+            4 => [...$this->recordRow(), '交易 ID' => 'UNKNOWN-PAYMENT'],
+            5 => [...$this->recordRow(), '交易 ID' => 'INVOICE-ONLY', '帳單號碼' => 'PRIMARY-PAYMENT'],
+            6 => [...$this->recordRow(), '交易 ID' => 'REVIEWED-PAYMENT', '订阅类型' => '订阅'],
+        ], 'Payment classifications', 'UTC', 1);
+        $reviewed = FinanceRecord::query()->where('reference', 'REVIEWED-PAYMENT')->sole();
+        app(\App\Portals\Finance\FinanceSettlementEditor::class)->save($reviewed, ['upsell' => '已加购'], 'paypal', 1);
+
+        $url = '/finance/reports/paypal-settlement';
+        $page = $this->get($url)->assertOk()->viewData('rows')->getCollection()->keyBy('reference');
+        $exportQuery = [
+            'download' => 1, 'export_columns' => ['reference', 'subscription', 'upsell'],
+        ];
+        $sheet = $this->readDownload($this->get($url.'?'.http_build_query($exportQuery))->assertOk()->streamedContent())->toArray();
+        $this->assertSame(['交易 ID', '订阅类型', '是否加购'], array_shift($sheet));
+        $exported = collect($sheet)->keyBy(0);
+        foreach ([
+            'PRIMARY-PAYMENT' => ['订阅', '未加购'],
+            'UPSELL-PAYMENT' => ['加购', '已加购'],
+            'UNKNOWN-PAYMENT' => ['未匹配', '未匹配'],
+            'INVOICE-ONLY' => ['未匹配', '未匹配'],
+            'REVIEWED-PAYMENT' => ['加购', '已加购'],
+        ] as $reference => $labels) {
+            $this->assertSame($labels, [$page[$reference]['subscription'], $page[$reference]['upsell']]);
+            $this->assertSame([$reference, ...$labels], $exported[$reference]);
+        }
+
+        DB::table('logistics_order_payment_references')->insert([
+            'logistics_order_id' => 1, 'reference_number' => 'UNKNOWN-PAYMENT', 'reference_type' => 'upsell',
+        ]);
+        $updated = $this->get($url.'?reference=UNKNOWN-PAYMENT')->assertOk()->viewData('rows')->getCollection()->sole();
+        $this->assertSame(['加购', '已加购'], [$updated['subscription'], $updated['upsell']]);
+        $this->assertStringNotContainsString('未匹配物流订单', $updated['review']);
+        $updatedExport = $this->readDownload($this->get($url.'?'.http_build_query([
+            ...$exportQuery, 'reference' => 'UNKNOWN-PAYMENT',
+        ]))->assertOk()->streamedContent())->toArray();
+        $this->assertSame(['UNKNOWN-PAYMENT', '加购', '已加购'], $updatedExport[1]);
     }
 
     public function test_api_paypal_order_filters_and_metadata_match_without_legacy_accounts(): void
