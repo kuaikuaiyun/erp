@@ -3,16 +3,19 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class FashionAdvertisingReport extends Model
 {
+    use SoftDeletes;
+
     public const STATUS_PENDING = 'pending';
     public const STATUS_APPROVED = 'approved';
     public const STATUS_REJECTED = 'rejected';
 
-    protected $fillable = ['report_date', 'submitter_id', 'submitter_name', 'total_revenue_usd', 'total_order_count', 'total_ad_spend_usd', 'roi', 'status', 'reviewed_by', 'reviewer_name', 'reviewed_at', 'review_reason'];
+    protected $fillable = ['report_date', 'submitter_id', 'submitter_name', 'total_revenue_usd', 'total_order_count', 'total_ad_spend_usd', 'roi', 'status', 'reviewed_by', 'reviewer_name', 'reviewed_at', 'review_reason', 'deleted_by', 'deleter_name'];
 
     public function __construct(array $attributes = [])
     {
@@ -22,7 +25,7 @@ class FashionAdvertisingReport extends Model
 
     protected function casts(): array
     {
-        return ['report_date' => 'date:Y-m-d', 'total_revenue_usd' => 'decimal:2', 'total_ad_spend_usd' => 'decimal:2', 'roi' => 'decimal:4', 'reviewed_at' => 'datetime'];
+        return ['report_date' => 'date:Y-m-d', 'total_revenue_usd' => 'decimal:2', 'total_ad_spend_usd' => 'decimal:2', 'roi' => 'decimal:4', 'reviewed_at' => 'datetime', 'deleted_at' => 'datetime'];
     }
 
     public function performanceEntries(): HasMany
@@ -42,6 +45,8 @@ class FashionAdvertisingReport extends Model
 
     public function statusLabel(): string
     {
+        if ($this->trashed()) return '已删除';
+
         return match ($this->status) {
             self::STATUS_APPROVED => '审核通过',
             self::STATUS_REJECTED => '审核不通过',
