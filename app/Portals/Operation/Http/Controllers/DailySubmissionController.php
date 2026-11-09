@@ -142,6 +142,10 @@ class DailySubmissionController extends Controller
                 'account_name' => trim((string) $entry['account_name']),
                 'account_number' => trim((string) $entry['account_number']),
                 'amount' => round((float) $entry['amount'], 2),
+                'status' => DailyAdvertisingRecharge::STATUS_PENDING,
+                'processed_by' => null,
+                'processed_by_name' => null,
+                'processed_at' => null,
             ];
         })->values()->all();
 
