@@ -95,7 +95,7 @@ class XShoppyOrderSyncService
                 $pages++;
                 foreach ($orders as $payload) {
                     if (! is_array($payload) || blank($payload['id'] ?? null)) continue;
-                    $modified = $this->parseStoreTimeUtc($payload['date_modified'] ?? null, $storeTimezone);
+                    $modified = $this->parseApiChinaTimeUtc($payload['date_modified'] ?? null);
                     if ($modified && $modified->gt($latestModified)) $latestModified = $modified;
 
                     if (! $this->isPaid($payload)) {
@@ -177,15 +177,18 @@ class XShoppyOrderSyncService
                 'shipping_country' => (string) ($shipping['country'] ?? ''), 'shipping_state' => (string) ($shipping['state'] ?? ''),
                 'shipping_city' => (string) ($shipping['city'] ?? ''), 'shipping_address' => $address,
                 'customer_note' => (string) ($payload['customer_note'] ?? ''),
-                'source_order_created_at' => $this->parseStoreTime($payload['date_created'] ?? null, $storeTimezone),
+                // XShoppy returns its order timestamps in China time (UTC+8). The
+                // shop time_zone is retained as metadata for local-time reporting,
+                // but must not be applied when parsing the API timestamp itself.
+                'source_order_created_at' => $this->parseApiChinaTime($payload['date_created'] ?? null),
                 'source_order_timezone' => $storeTimezone,
-                'order_created_at_utc' => $this->parseStoreTimeUtc($payload['date_created'] ?? null, $storeTimezone),
-                'order_created_at' => $this->parseStoreTimeChina($payload['date_created'] ?? null, $storeTimezone),
-                'order_modified_at' => $this->parseStoreTimeChina($payload['date_modified'] ?? null, $storeTimezone),
-                'paid_at' => $this->parseStoreTime($payload['date_paid'] ?? null, $storeTimezone),
-                // Keep the legacy column as the China-normalized payment time.
-                'paid_at_utc' => $this->parseStoreTimeChina($payload['date_paid'] ?? null, $storeTimezone),
-                'completed_at' => $this->parseStoreTimeChina($payload['date_completed'] ?? null, $storeTimezone),
+                'order_created_at_utc' => $this->parseApiChinaTimeUtc($payload['date_created'] ?? null),
+                'order_created_at' => $this->parseApiChinaTime($payload['date_created'] ?? null),
+                'order_modified_at' => $this->parseApiChinaTime($payload['date_modified'] ?? null),
+                'paid_at' => $this->parseApiChinaTime($payload['date_paid'] ?? null),
+                // Keep the legacy column as China time for performance reporting.
+                'paid_at_utc' => $this->parseApiChinaTime($payload['date_paid'] ?? null),
+                'completed_at' => $this->parseApiChinaTime($payload['date_completed'] ?? null),
                 'source_payload' => $payload, 'source_synced_at' => now(),
             ])->save();
 
@@ -263,20 +266,15 @@ class XShoppyOrderSyncService
         return strtolower(trim((string) $host, '.'));
     }
 
-    private function parseStoreTime(mixed $value, string $storeTimezone): ?Carbon
+    private function parseApiChinaTime(mixed $value): ?Carbon
     {
         if (! is_string($value) || trim($value) === '') return null;
-        try { return Carbon::parse($value, $storeTimezone); } catch (\Throwable) { return null; }
+        try { return Carbon::parse($value, 'Asia/Shanghai'); } catch (\Throwable) { return null; }
     }
 
-    private function parseStoreTimeChina(mixed $value, string $storeTimezone): ?Carbon
+    private function parseApiChinaTimeUtc(mixed $value): ?Carbon
     {
-        return $this->parseStoreTime($value, $storeTimezone)?->setTimezone('Asia/Shanghai');
-    }
-
-    private function parseStoreTimeUtc(mixed $value, string $storeTimezone): ?Carbon
-    {
-        return $this->parseStoreTime($value, $storeTimezone)?->utc();
+        return $this->parseApiChinaTime($value)?->utc();
     }
 
     /**

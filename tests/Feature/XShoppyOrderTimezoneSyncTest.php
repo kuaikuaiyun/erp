@@ -98,7 +98,7 @@ class XShoppyOrderTimezoneSyncTest extends TestCase
         });
     }
 
-    public function test_uses_login_url_host_and_store_timezone_for_xshoppy_order_times(): void
+    public function test_uses_login_url_host_and_preserves_xshoppy_china_api_times(): void
     {
         $store = AssistantDomainStore::query()->create([
             'site_builder' => 'xshoppy',
@@ -136,9 +136,9 @@ class XShoppyOrderTimezoneSyncTest extends TestCase
         $order = FashionLogisticsOrder::query()->sole();
         $this->assertSame('America/New_York', $order->source_order_timezone);
         $this->assertSame('2026-11-06 02:15:08', $order->source_order_created_at?->format('Y-m-d H:i:s'));
-        $this->assertSame('2026-11-06 07:15:08', $order->order_created_at_utc?->format('Y-m-d H:i:s'));
-        $this->assertSame('2026-11-06 15:15:08', $order->order_created_at?->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-11-05 18:15:08', $order->order_created_at_utc?->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-11-06 02:15:08', $order->order_created_at?->format('Y-m-d H:i:s'));
         $this->assertSame('2026-11-06 02:17:39', $order->paid_at?->format('Y-m-d H:i:s'));
-        $this->assertSame('2026-11-06 15:17:39', $order->paid_at_utc?->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-11-06 02:17:39', $order->paid_at_utc?->format('Y-m-d H:i:s'));
     }
 }

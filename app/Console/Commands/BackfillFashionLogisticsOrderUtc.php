@@ -3,7 +3,6 @@
 namespace App\Console\Commands;
 
 use Carbon\CarbonImmutable;
-use DateTimeZone;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
@@ -14,7 +13,7 @@ class BackfillFashionLogisticsOrderUtc extends Command
         {--platform= : Only backfill the specified source platform, for example xshoppy}
         {--chunk=500 : Number of rows read per batch}';
 
-    protected $description = 'Backfill order timestamps and China-normalized payment times for fashion orders';
+    protected $description = 'Backfill fashion-order timestamps and China-time payment fields';
 
     public function handle(): int
     {
@@ -36,13 +35,17 @@ class BackfillFashionLogisticsOrderUtc extends Command
             ->chunkById($chunk, function ($orders) use ($connection, $table, &$updated, &$skipped, &$invalid): void {
                 foreach ($orders as $order) {
                     try {
+                        $payload = json_decode((string) $order->source_payload, true);
                         if ($order->source_platform === 'xshoppy') {
-                            if (blank($order->source_order_created_at) || blank($order->source_order_timezone)) {
+                            $sourceCreatedAt = data_get($payload, 'date_created') ?: $order->source_order_created_at;
+                            if (! is_string($sourceCreatedAt) || trim($sourceCreatedAt) === '') {
                                 $skipped++;
                                 continue;
                             }
 
-                            $utc = CarbonImmutable::parse((string) $order->source_order_created_at, new DateTimeZone((string) $order->source_order_timezone))->utc();
+                            // XShoppy serializes date_created/date_paid in China time.
+                            $createdAt = CarbonImmutable::parse($sourceCreatedAt, 'Asia/Shanghai');
+                            $utc = $createdAt->utc();
                         } else {
                             // Shopline timestamps were historically stored in the application's UTC timezone.
                             $utc = CarbonImmutable::parse((string) $order->order_created_at, 'UTC')->utc();
@@ -54,17 +57,20 @@ class BackfillFashionLogisticsOrderUtc extends Command
                             'updated_at' => now(),
                         ];
 
-                        $payload = json_decode((string) $order->source_payload, true);
+                        if ($order->source_platform === 'xshoppy') {
+                            $values['source_order_created_at'] = $createdAt->format('Y-m-d H:i:s');
+                        }
+
                         $sourcePaidAt = $order->source_platform === 'xshoppy'
-                            ? data_get($payload, 'date_paid')
+                            ? (data_get($payload, 'date_paid') ?: $order->paid_at)
                             : (data_get($payload, 'paid_at') ?? data_get($payload, 'processed_at'));
                         if (is_string($sourcePaidAt) && trim($sourcePaidAt) !== '') {
                             $paidAt = $order->source_platform === 'xshoppy'
-                                ? CarbonImmutable::parse($sourcePaidAt, new DateTimeZone((string) $order->source_order_timezone))
+                                ? CarbonImmutable::parse($sourcePaidAt, 'Asia/Shanghai')
                                 : CarbonImmutable::parse($sourcePaidAt);
                             $values['paid_at'] = $paidAt->format('Y-m-d H:i:s');
                             $values['paid_at_utc'] = ($order->source_platform === 'xshoppy'
-                                ? $paidAt->setTimezone('Asia/Shanghai')
+                                ? $paidAt
                                 : $paidAt->utc())->format('Y-m-d H:i:s');
                         }
 
@@ -76,7 +82,7 @@ class BackfillFashionLogisticsOrderUtc extends Command
                 }
             });
 
-        $this->info("UTC time backfill completed: updated {$updated}, skipped {$skipped}, invalid {$invalid}.");
+        $this->info("Order timestamp backfill completed: updated {$updated}, skipped {$skipped}, invalid {$invalid}.");
 
         return self::SUCCESS;
     }
