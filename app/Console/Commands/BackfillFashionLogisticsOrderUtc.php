@@ -13,7 +13,7 @@ class BackfillFashionLogisticsOrderUtc extends Command
         {--all : Recalculate rows that already have a UTC timestamp}
         {--chunk=500 : Number of rows read per batch}';
 
-    protected $description = 'Backfill the canonical UTC order time used by the fashion performance report';
+    protected $description = 'Backfill canonical UTC and China display order times for fashion orders';
 
     public function handle(): int
     {
@@ -26,9 +26,9 @@ class BackfillFashionLogisticsOrderUtc extends Command
         $invalid = 0;
 
         DB::connection($connection)->table($table)
-            ->select(['id', 'source_platform', 'source_order_created_at', 'source_order_timezone', 'order_created_at', 'order_created_at_utc'])
+            ->select(['id', 'source_platform', 'source_order_created_at', 'source_order_timezone', 'order_created_at', 'order_created_at_utc', 'paid_at', 'paid_at_utc', 'source_payload'])
             ->whereNotNull('order_created_at')
-            ->when(! $overwrite, fn ($query) => $query->whereNull('order_created_at_utc'))
+            ->when(! $overwrite, fn ($query) => $query->where(fn ($missing) => $missing->whereNull('order_created_at_utc')->orWhereNull('paid_at_utc')))
             ->orderBy('id')
             ->chunkById($chunk, function ($orders) use ($connection, $table, &$updated, &$skipped, &$invalid): void {
                 foreach ($orders as $order) {
@@ -45,10 +45,25 @@ class BackfillFashionLogisticsOrderUtc extends Command
                             $utc = CarbonImmutable::parse((string) $order->order_created_at, 'UTC')->utc();
                         }
 
-                        DB::connection($connection)->table($table)->where('id', $order->id)->update([
+                        $values = [
                             'order_created_at_utc' => $utc->format('Y-m-d H:i:s'),
+                            'order_created_at' => $utc->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s'),
                             'updated_at' => now(),
-                        ]);
+                        ];
+
+                        $payload = json_decode((string) $order->source_payload, true);
+                        $sourcePaidAt = $order->source_platform === 'xshoppy'
+                            ? data_get($payload, 'date_paid')
+                            : (data_get($payload, 'paid_at') ?? data_get($payload, 'processed_at'));
+                        if (is_string($sourcePaidAt) && trim($sourcePaidAt) !== '') {
+                            $paidAt = $order->source_platform === 'xshoppy'
+                                ? CarbonImmutable::parse($sourcePaidAt, new DateTimeZone((string) $order->source_order_timezone))
+                                : CarbonImmutable::parse($sourcePaidAt);
+                            $values['paid_at'] = $paidAt->format('Y-m-d H:i:s');
+                            $values['paid_at_utc'] = $paidAt->utc()->format('Y-m-d H:i:s');
+                        }
+
+                        DB::connection($connection)->table($table)->where('id', $order->id)->update($values);
                         $updated++;
                     } catch (\Throwable) {
                         $invalid++;

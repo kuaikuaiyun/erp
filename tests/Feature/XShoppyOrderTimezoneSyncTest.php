@@ -73,6 +73,7 @@ class XShoppyOrderTimezoneSyncTest extends TestCase
             $table->dateTime('order_created_at')->nullable();
             $table->dateTime('order_modified_at')->nullable();
             $table->dateTime('paid_at')->nullable();
+            $table->dateTime('paid_at_utc')->nullable();
             $table->dateTime('completed_at')->nullable();
             $table->json('source_payload')->nullable();
             $table->dateTime('source_synced_at')->nullable();
@@ -137,5 +138,7 @@ class XShoppyOrderTimezoneSyncTest extends TestCase
         $this->assertSame('2026-11-06 02:15:08', $order->source_order_created_at?->format('Y-m-d H:i:s'));
         $this->assertSame('2026-11-06 07:15:08', $order->order_created_at_utc?->format('Y-m-d H:i:s'));
         $this->assertSame('2026-11-06 15:15:08', $order->order_created_at?->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-11-06 02:17:39', $order->paid_at?->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-11-06 07:17:39', $order->paid_at_utc?->format('Y-m-d H:i:s'));
     }
 }
