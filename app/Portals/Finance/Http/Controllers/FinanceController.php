@@ -62,8 +62,25 @@ class FinanceController extends Controller
             'activityCategories' => $this->workbooks->database()->table('finance_transaction_types')->pluck('category')
                 ->map(fn ($category) => $category === null || $category === '' ? __('finance.records.unclassified') : $category)
                 ->push(__('finance.records.unclassified'))->unique()->sort()->values(),
-            'recentSyncLogs' => $context['canManage'] ? $this->workbooks->database()->table('finance_sync_logs as l')->leftJoin('finance_payment_accounts as a', 'a.id', '=', 'l.payment_account_id')->orderByDesc('l.id')->limit(20)->get(['l.operation', 'l.status', 'l.error_code', 'l.page_count', 'l.record_count', 'l.created_at', 'a.account_name']) : collect(),
         ]);
+    }
+
+    public function syncLogs(Request $request): Response
+    {
+        $context = $this->context($request, true);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $filters = $request->validate(['page' => 'sometimes|required|integer|min:1|max:2147483647']);
+        $logs = $this->workbooks->database()->table('finance_sync_logs as l')
+            ->leftJoin('finance_payment_accounts as a', 'a.id', '=', 'l.payment_account_id')
+            ->orderByDesc('l.id')
+            ->paginate(10, ['l.operation', 'l.status', 'l.error_code', 'l.page_count', 'l.record_count', 'l.created_at', 'a.account_name'],
+                page: (int) ($filters['page'] ?? 1));
+
+        return response()->view('portals.finance.partials.sync-log-page', ['logs' => $logs])
+            ->header('Cache-Control', 'private, no-store');
     }
 
     public function balances(Request $request): Response
@@ -1295,6 +1312,13 @@ class FinanceController extends Controller
                 $format = $filters['format'] ?? 'xlsx';
                 return $this->workbooks->download($downloadHeaders, [], $report.'-export-template.'.$format, $format, plain: $orderView);
             }
+            if ($orderView) {
+                // Matching payment events can exceed the default PHP limit before the writer starts.
+                $limit = ini_parse_quantity((string) ini_get('memory_limit'));
+                if ($limit > 0 && $limit < 256 * 1024 ** 2) {
+                    ini_set('memory_limit', '256M');
+                }
+            }
         }
         // Computed fields still need the complete matching set before filtering.
         $canPaginate = ! $request->boolean('download') && ! $request->has('suggestion_field')
@@ -1894,7 +1918,7 @@ class FinanceController extends Controller
         abort_unless($context['portal']->code === FinanceCatalog::PORTAL_CODE, 404);
         abort_unless($context['user']->can('finance.view') && (! $write || $context['user']->can('finance.manage')), 403);
         if ($request->is('finance', 'finance/*') || $request->getPathInfo() === '/') {
-            $currentPath = $request->getPathInfo() === '/' || $request->routeIs('finance.balances', 'finance.balances.xuzong2.save', 'finance.exchange-rates.save', 'finance.paypal-accounts.update', 'finance.payment-accounts.*')
+            $currentPath = $request->getPathInfo() === '/' || $request->routeIs('finance.balances', 'finance.sync-logs', 'finance.balances.xuzong2.save', 'finance.exchange-rates.save', 'finance.paypal-accounts.update', 'finance.payment-accounts.*')
                 ? '/finance' : rtrim($request->getPathInfo(), '/');
             if ($request->routeIs('finance.transactions.raw', 'finance.payment-accounts.sync', 'finance.orders.paypal.refresh', 'finance.orders.paypal.status', 'finance.orders.paypal.latest')) {
                 $currentPath = '/finance/records/paypal-orders';

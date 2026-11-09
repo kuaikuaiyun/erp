@@ -72,3 +72,15 @@
 .finance-delete-actions .btn-danger{background:#d64c40;border-color:#d64c40}
 .finance-delete-actions .btn-danger:hover{background:#bd3d32;border-color:#bd3d32}
 .finance-delete-actions .btn:focus-visible{outline:3px solid #98bce4;outline-offset:3px}
+
+.finance-sync-log-dialog{width:960px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);padding:0;border:0;border-radius:10px;color:#17324d;box-shadow:0 16px 48px rgba(22,49,76,.25)}
+.finance-sync-log-dialog::backdrop{background:rgba(16,44,70,.45)}
+.finance-sync-log-dialog header,.finance-sync-log-pagination{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px 18px}
+.finance-sync-log-dialog header{border-bottom:1px solid #e1eaf3}
+.finance-sync-log-dialog h2{margin:0;font-size:18px;font-weight:600}
+.finance-sync-log-status:not(:has([data-sync-log-status]:empty)){padding:14px 18px}
+.finance-sync-log-status [hidden]{display:none}
+.finance-sync-log-dialog .finance-table-wrap{max-height:60vh;overflow:auto}
+.finance-sync-log-dialog .finance-table{min-width:700px;margin:0}
+.finance-sync-log-dialog th{position:sticky;top:0}
+.finance-sync-log-pagination{border-top:1px solid #e1eaf3;font-size:13px}

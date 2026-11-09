@@ -216,18 +216,19 @@ class FinanceSettlementService
                     $row[$field] = $value;
                 }
             }
+            $paymentType = null;
             if ($channel === 'paypal') {
                 $business = $metadata[$record->id] ?? [];
                 $paymentType = $business['payment_reference_type'] ?? null;
+                $orderUpsell = $business['upsell'] ?? '';
+                $row['upsell'] = self::isUpsell($orderUpsell) ? '已加购' : ($orderUpsell ?: $row['upsell']);
                 if ($paymentType === LogisticsOrderPaymentReference::TYPE_PRIMARY) {
                     $row['subscription'] = $business['subscription'];
-                    $row['upsell'] = '未加购';
                 } elseif ($paymentType === LogisticsOrderPaymentReference::TYPE_UPSELL) {
                     $row['upsell'] = '已加购';
                 } elseif (self::isUpsell($business['upsell'] ?? '')) {
-                    // An order-level tag does not identify the add-on payment.
+                    // An order-level tag does not identify the payment's subscription type.
                     $row['subscription'] = $p['订阅类型'] ?? '';
-                    $row['upsell'] = $p['是否加购'] ?? '';
                 }
             }
             $aliases = ['usd_rate' => '汇率', 'fee' => $channel === 'paypal' ? '手续费' : '交易手续费', 'logistics' => '物流-元', 'purchase' => '采购成本-元',
@@ -294,7 +295,11 @@ class FinanceSettlementService
             $row['team'] = filled($saved['team'] ?? null) ? $saved['team'] : ($group?->team ?? ($p['团队'] ?? ''));
             $row = [...$row, ...($saved['_edited_fields'] ?? [])];
             if ($channel === 'paypal') {
-                $row['subscription'] = self::isUpsell($row['upsell']) ? '加购' : self::subscriptionLabel($row['subscription']);
+                $manualUpsell = $saved['_edited_fields']['upsell'] ?? $saved['upsell'] ?? null;
+                $isUpsellPayment = $manualUpsell !== null ? self::isUpsell($manualUpsell)
+                    : ($paymentType === LogisticsOrderPaymentReference::TYPE_UPSELL
+                        || ($paymentType === null && self::isUpsell($p['是否加购'] ?? '')));
+                $row['subscription'] = $isUpsellPayment ? '加购' : self::subscriptionLabel($row['subscription']);
             }
             $row['locked'] = $row['locked'] || in_array($row['month'], $locks, true);
             if (! empty($filters['order_view'])) {

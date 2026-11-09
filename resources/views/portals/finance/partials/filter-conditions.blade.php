@@ -1,14 +1,17 @@
 @php
     $enhancedConditions = $enhancedConditions ?? false;
+    $showConditionOperator = $enhancedConditions && !($hideConditionOperator ?? false);
 @endphp
-<div @class(['settlement-conditions-section', 'settlement-conditions-enhanced' => $enhancedConditions])>
+<div @class(['settlement-conditions-section', 'settlement-conditions-enhanced' => $enhancedConditions, 'settlement-conditions-with-operator' => $showConditionOperator])>
     @if($enhancedConditions)
         <div class="settlement-conditions-heading">
             <div><strong>筛选条件</strong><span>同时满足以下条件</span></div>
             <button type="button" class="btn btn-default" id="settlement-add-condition"><i class="fa fa-plus" aria-hidden="true"></i> 添加筛选条件</button>
         </div>
         <div data-condition-headings class="settlement-condition-row settlement-condition-labels" hidden>
-            <span>筛选字段</span><span>比较方式</span><span>筛选值</span><span></span>
+            <span>筛选字段</span>
+            @if($showConditionOperator)<span>比较方式</span>@endif
+            <span>筛选值</span><span></span>
         </div>
     @endif
     <div id="settlement-conditions">
@@ -30,7 +33,8 @@
 .settlement-conditions-enhanced{margin-top:16px;padding:12px 14px;background:#f7f9fc;border:1px solid #dfe8ef;border-radius:6px}
 .settlement-conditions-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .settlement-conditions-heading span{margin-left:10px;color:#64788a;font-size:12px}
-.settlement-conditions-enhanced .settlement-condition-row{display:grid;grid-template-columns:minmax(140px,1fr) minmax(95px,.65fr) minmax(180px,2fr) auto;gap:10px;align-items:center}
+.settlement-conditions-enhanced .settlement-condition-row{display:grid;grid-template-columns:minmax(140px,1fr) minmax(180px,2fr) auto;gap:10px;align-items:center}
+.settlement-conditions-with-operator .settlement-condition-row{grid-template-columns:minmax(140px,1fr) minmax(95px,.65fr) minmax(180px,2fr) auto}
 .settlement-conditions-enhanced .settlement-condition-row[hidden]{display:none}
 .settlement-conditions-enhanced .settlement-condition-row .form-control{width:100%;min-width:0}
 .settlement-condition-labels{margin:12px 0 5px;color:#526d83;font-size:12px}
@@ -61,6 +65,8 @@
                     option.disabled = comparisons.includes(option.value) && !numeric;
                 });
                 if (!op.value || op.selectedOptions[0].disabled) op.value = 'equals';
+            } else if (changed) {
+                op.value = 'equals';
             }
             var noValue = ['empty', 'not_empty'].includes(op.value);
             var prefix = 'conditions[' + index + ']';
