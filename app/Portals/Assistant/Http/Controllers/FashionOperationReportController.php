@@ -5,6 +5,7 @@ namespace App\Portals\Assistant\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
 use App\Models\AssistantDomainStore;
+use App\Models\Department;
 use App\Models\FashionAdvertisingReport;
 use App\Models\FashionLogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
@@ -37,6 +38,9 @@ class FashionOperationReportController extends Controller
             'department' => ['nullable', 'string', 'max:100'],
             'operator' => ['nullable', 'string', 'max:100'],
         ]);
+        $validated['department'] = $request->has('department')
+            ? trim((string) ($validated['department'] ?? ''))
+            : '服装运营部门';
         $timezone = (string) ($validated['timezone'] ?? '+00:00');
         $month = now($timezone);
         $dateFrom = $validated['date_from'] ?? $month->copy()->startOfMonth()->toDateString();
@@ -59,14 +63,31 @@ class FashionOperationReportController extends Controller
         })->forget(0);
         $operatorIds = $storesByOperator->keys()->map(fn ($id) => (int) $id)->values();
         $operators = AdminUser::query()->with('departments')->whereIn('id', $operatorIds)->get()->keyBy('id');
+        $departmentRows = Department::business()->get(['id', 'name', 'parent_id', 'sort']);
+        $fashionDepartment = $departmentRows->firstWhere('name', '服装运营部门');
+        $fashionDepartmentIds = collect($fashionDepartment ? [(int) $fashionDepartment->id] : []);
+        do {
+            $childIds = $departmentRows->whereIn('parent_id', $fashionDepartmentIds)
+                ->pluck('id')->map(fn ($id): int => (int) $id)->diff($fashionDepartmentIds)->values();
+            $before = $fashionDepartmentIds->count();
+            $fashionDepartmentIds = $fashionDepartmentIds->merge($childIds)->unique()->values();
+        } while ($fashionDepartmentIds->count() > $before);
+        $departmentOptions = $fashionDepartment
+            ? $departmentRows->filter(fn (Department $department): bool => (int) $department->id === (int) $fashionDepartment->id
+                || (int) $department->parent_id === (int) $fashionDepartment->id)
+                ->sortBy(fn (Department $department): string => ((int) $department->id === (int) $fashionDepartment->id ? '0' : '1')
+                    .str_pad((string) ((int) $department->sort), 8, '0', STR_PAD_LEFT)
+                    .mb_strtolower((string) $department->name))
+                ->values()
+            : collect();
 
         $orderMetrics = FashionLogisticsOrder::query()
             ->whereIn('assistant_domain_store_id', $stores->pluck('id'))
             ->where(function ($platform) use ($stores): void {
-                $platform->where(function ($xshoppy): void {
+                $platform->where(function ($xshoppy) use ($stores): void {
                     $xshoppy->where('source_platform', 'xshoppy')
                         ->whereIn('assistant_domain_store_id', $stores->filter(fn (AssistantDomainStore $store) => in_array(mb_strtolower(trim((string) $store->site_builder)), ['xshoppy', 'xshopy'], true))->pluck('id'));
-                })->orWhere(function ($shopline): void {
+                })->orWhere(function ($shopline) use ($stores): void {
                     $shopline->where('source_platform', 'shopline')
                         ->whereIn('assistant_domain_store_id', $stores->filter(fn (AssistantDomainStore $store) => mb_strtolower(trim((string) $store->site_builder)) === 'shopline')->pluck('id'));
                 });
@@ -76,7 +97,6 @@ class FashionOperationReportController extends Controller
             ->groupBy('assistant_domain_store_id')->get()->keyBy('assistant_domain_store_id');
 
         $reports = FashionAdvertisingReport::query()
-            ->whereIn('status', [FashionAdvertisingReport::STATUS_APPROVED, FashionAdvertisingReport::STATUS_REJECTED])
             ->whereBetween('report_date', [$dateFrom, $dateTo])
             ->whereIn('submitter_id', $operatorIds)
             ->with('adSpendEntries')->get()->groupBy('submitter_id');
@@ -93,21 +113,36 @@ class FashionOperationReportController extends Controller
             })->values();
             $orderCount = (int) $storeRows->sum('orders');
             $revenue = round((float) $storeRows->sum('revenue'), 2);
-            $media = $reports->get($operatorId, collect())->flatMap->adSpendEntries->groupBy(fn ($entry) => trim((string) $entry->media) ?: '未设置媒体')
+            $operatorReports = $reports->get($operatorId, collect());
+            $includedReports = $operatorReports->whereIn('status', [FashionAdvertisingReport::STATUS_APPROVED, FashionAdvertisingReport::STATUS_REJECTED]);
+            $media = $includedReports->flatMap->adSpendEntries->groupBy(fn ($entry) => trim((string) $entry->media) ?: '未设置媒体')
                 ->map(function ($entries, string $name) use ($revenue): array {
                     $spend = round((float) $entries->sum('actual_spend_usd'), 2);
                     return ['name' => $name, 'spend' => $spend, 'roi' => $spend > 0 ? $revenue / $spend : null];
                 })->sortKeys()->values();
             $totalSpend = round((float) $media->sum('spend'), 2);
+            $submissionStatus = $operatorReports->isEmpty()
+                ? 'not_submitted'
+                : ($operatorReports->contains('status', FashionAdvertisingReport::STATUS_PENDING) ? 'pending' : 'submitted');
             $hireDays = $operator->hired_at ? max(1, $operator->hired_at->diffInDays(CarbonImmutable::parse($dateTo)) + 1) : null;
-            return ['department' => (string) ($department?->name ?: '未分配部门'), 'operator' => (string) ($operator->name ?: $operator->username),
+            return ['department' => (string) ($department?->name ?: '未分配部门'), 'department_id' => (int) ($department?->id ?? 0), 'operator' => (string) ($operator->name ?: $operator->username),
                 'hired_at' => $operator->hired_at?->format('Y-m-d'), 'hire_days' => $hireDays, 'stores' => $storeRows,
                 'order_count' => $orderCount, 'revenue' => $revenue, 'aov' => $orderCount > 0 ? $revenue / $orderCount : null,
-                'media' => $media, 'ad_spend' => $totalSpend, 'roi' => $totalSpend > 0 ? $revenue / $totalSpend : null];
-        })->filter()->filter(function (array $row) use ($validated): bool {
+                'media' => $media, 'ad_spend' => $totalSpend, 'roi' => $totalSpend > 0 ? $revenue / $totalSpend : null,
+                'submission_status' => $submissionStatus,
+                'submission_label' => match ($submissionStatus) {
+                    'pending' => '已提报·待审核',
+                    'submitted' => '已提报',
+                    default => '未提报',
+                }];
+        })->filter()->filter(function (array $row) use ($validated, $fashionDepartmentIds): bool {
             $department = trim((string) ($validated['department'] ?? ''));
             $operator = trim((string) ($validated['operator'] ?? ''));
-            return ($department === '' || str_contains(mb_strtolower($row['department']), mb_strtolower($department)))
+            $matchesDepartment = $department === ''
+                || ($department === '服装运营部门'
+                    ? $fashionDepartmentIds->contains((int) $row['department_id'])
+                    : str_contains(mb_strtolower($row['department']), mb_strtolower($department)));
+            return $matchesDepartment
                 && ($operator === '' || str_contains(mb_strtolower($row['operator']), mb_strtolower($operator)));
         })->sortBy(fn (array $row) => $row['department'].'|'.$row['operator'])->values();
 
@@ -115,6 +150,7 @@ class FashionOperationReportController extends Controller
         $summarySpend = (float) $rows->sum('ad_spend');
         return view('portals.assistant.fashion-operation-reports.index', [
             ...$context, 'rows' => $rows, 'timezoneOptions' => $timezones,
+            'departmentOptions' => $departmentOptions,
             'filters' => [...$validated, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'timezone' => $timezone],
             'summary' => ['people' => $rows->count(), 'stores' => $rows->sum(fn ($row) => count($row['stores'])),
                 'orders' => $rows->sum('order_count'), 'revenue' => $summaryRevenue, 'ad_spend' => $summarySpend,
