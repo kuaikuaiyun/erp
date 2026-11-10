@@ -28,6 +28,7 @@ use App\Portals\Assistant\Http\Controllers\AccountOpeningReviewController;
 use App\Portals\Assistant\Http\Controllers\AssistantProjectController;
 use App\Portals\Assistant\Http\Controllers\AssistantWebsiteSystemController;
 use App\Portals\Assistant\Http\Controllers\AppLovinSpendReviewController;
+use App\Portals\Assistant\Http\Controllers\AppLovinPerformanceReportController;
 use App\Portals\Assistant\Http\Controllers\StoreLaunchReviewController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingAccountAuthorizationReviewController;
 use App\Portals\Assistant\Http\Controllers\AccountStoreTransferReviewController;
@@ -219,6 +220,8 @@ Route::get('/operation/daily-submissions/applovin-spends/screenshots/{screenshot
     ->whereNumber('screenshot')->name('operation.applovin-spends.screenshot');
 Route::get('/assistant/daily-submissions/applovin-spends', [AppLovinSpendReviewController::class, 'index'])
     ->name('assistant.applovin-spends.index');
+Route::get('/assistant/applovin-performance-reports', [AppLovinPerformanceReportController::class, 'index'])
+    ->name('assistant.applovin-performance-reports.index');
 Route::post('/assistant/daily-submissions/applovin-spends/store-binding', [AppLovinSpendReviewController::class, 'bindStore'])
     ->name('assistant.applovin-spends.store-binding');
 Route::get('/assistant/daily-submissions/applovin-spends/screenshots/{screenshot}', [AppLovinSpendReviewController::class, 'screenshot'])
