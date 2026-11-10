@@ -17,10 +17,10 @@
 .paypal-dispute-table td:last-child { z-index: 2; background: #fff; }
 .paypal-dispute-table tbody tr:nth-child(even) > td:last-child { background: #f8fafc; }
 .paypal-dispute-table.table-hover tbody tr:hover > td:last-child { background: #edf5fb !important; }
-.paypal-dispute-table tbody tr.pd-dispute-resolved > td { background: #eef8f1 !important; border-color: #cfe4d5 !important; }
-.paypal-dispute-table tbody tr.pd-dispute-resolved > td:last-child { background: #eef8f1 !important; }
-.paypal-dispute-table.table-hover tbody tr.pd-dispute-resolved:hover > td { background: #e4f3e9 !important; }
-.paypal-dispute-table.table-hover tbody tr.pd-dispute-resolved:hover > td:last-child { background: #e4f3e9 !important; }
+.paypal-dispute-table tbody tr.pd-dispute-resolved > td { background: #a7e9bb !important; border-color: #8edca6 !important; }
+.paypal-dispute-table tbody tr.pd-dispute-resolved > td:last-child { background: #a7e9bb !important; }
+.paypal-dispute-table.table-hover tbody tr.pd-dispute-resolved:hover > td { background: #92dfaa !important; }
+.paypal-dispute-table.table-hover tbody tr.pd-dispute-resolved:hover > td:last-child { background: #92dfaa !important; }
 .pd-block { color: #526f8b; font-size: 13px; line-height: 21px; white-space: nowrap; }
 .pd-block b { color: #365875; font-size: 13px; font-weight: 800; white-space: nowrap; }
 .pd-block hr { margin: 5px 0 4px; border-top: 1px dashed #dce5ee; }
