@@ -39,6 +39,7 @@ class OperationReportDashboardController extends Controller
         if ($context instanceof Response) return $context;
 
         $validated = $request->validate([
+            'date_range' => ['nullable', Rule::in(['today', 'yesterday', 'last_7_days', 'last_15_days', 'last_30_days', 'this_month', 'last_month', 'custom'])],
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
             'timezone' => ['nullable', Rule::in(array_keys($this->timezoneOptions()))],
@@ -51,8 +52,28 @@ class OperationReportDashboardController extends Controller
         ]);
         $timezone = (string) ($validated['timezone'] ?? OperationReportMetricsService::REPORT_TIMEZONE);
         $reportNow = Carbon::now($timezone);
-        $dateFrom = (string) ($validated['date_from'] ?? $reportNow->copy()->startOfMonth()->format('Y-m-d'));
-        $dateTo = (string) ($validated['date_to'] ?? $reportNow->copy()->endOfMonth()->format('Y-m-d'));
+        $dateRange = (string) ($validated['date_range'] ?? (
+            $request->filled('date_from') || $request->filled('date_to') ? 'custom' : 'this_month'
+        ));
+        [$dateFrom, $dateTo] = match ($dateRange) {
+            'today' => [$reportNow->format('Y-m-d'), $reportNow->format('Y-m-d')],
+            'yesterday' => [$reportNow->copy()->subDay()->format('Y-m-d'), $reportNow->copy()->subDay()->format('Y-m-d')],
+            'last_7_days' => [$reportNow->copy()->subDays(6)->format('Y-m-d'), $reportNow->format('Y-m-d')],
+            'last_15_days' => [$reportNow->copy()->subDays(14)->format('Y-m-d'), $reportNow->format('Y-m-d')],
+            'last_30_days' => [$reportNow->copy()->subDays(29)->format('Y-m-d'), $reportNow->format('Y-m-d')],
+            'last_month' => [
+                $reportNow->copy()->subMonthNoOverflow()->startOfMonth()->format('Y-m-d'),
+                $reportNow->copy()->subMonthNoOverflow()->endOfMonth()->format('Y-m-d'),
+            ],
+            'custom' => [
+                (string) ($validated['date_from'] ?? $reportNow->copy()->startOfMonth()->format('Y-m-d')),
+                (string) ($validated['date_to'] ?? $reportNow->copy()->endOfMonth()->format('Y-m-d')),
+            ],
+            default => [
+                $reportNow->copy()->startOfMonth()->format('Y-m-d'),
+                $reportNow->copy()->endOfMonth()->format('Y-m-d'),
+            ],
+        };
         abort_if($dateFrom > $dateTo, 422, '开始日期不能晚于结束日期。');
 
         $visibleDepartmentIds = $this->visibleDepartmentIds($context);
@@ -344,6 +365,7 @@ class OperationReportDashboardController extends Controller
             'user' => $context['user'],
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
+            'dateRange' => $dateRange,
             'timezone' => $timezone,
             'timezoneOptions' => $this->timezoneOptions(),
             'departments' => $departments,
