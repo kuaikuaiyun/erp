@@ -53,10 +53,9 @@ class PerformanceReportController extends Controller
         $storeTable = 'assistant_domain_stores';
         $userTable = config('admin.database.users_table');
         $orderTable = (new FashionLogisticsOrder())->getTable();
-        // XShoppy stores China-normalized payment time in the legacy paid_at_utc
-        // column. Shopline continues to store real UTC there, so normalize both
-        // platforms to China time before applying the selected report timezone.
-        $orderTimestampSql = "CASE WHEN orders.source_platform = 'xshoppy' THEN orders.paid_at_utc ELSE CONVERT_TZ(orders.paid_at_utc, '+00:00', '+08:00') END";
+        // Both platforms store their China-normalized payment time in this legacy
+        // column. The selected report timezone is applied below for date grouping.
+        $orderTimestampSql = 'orders.paid_at_utc';
 
         $base = DB::connection($connection)->table($orderTable.' as orders')
             ->join($storeTable.' as stores', 'stores.id', '=', 'orders.assistant_domain_store_id')
@@ -230,11 +229,8 @@ class PerformanceReportController extends Controller
         abort_unless($store, 403, '无权查看该店铺订单。');
         $sourcePlatform = mb_strtolower(trim((string) $store->site_builder)) === 'shopline' ? 'shopline' : 'xshoppy';
 
-        // Match the daily report: XShoppy is China-normalized in this legacy
-        // column, while Shopline remains stored as real UTC.
-        $orderTimestampSql = $sourcePlatform === 'xshoppy'
-            ? 'paid_at_utc'
-            : "CONVERT_TZ(paid_at_utc, '+00:00', '+08:00')";
+        // Both platforms use China-normalized payment time in this legacy column.
+        $orderTimestampSql = 'paid_at_utc';
         $ordersQuery = FashionLogisticsOrder::query()
             ->where('assistant_domain_store_id', (int) $validated['store_id'])
             ->where('source_platform', $sourcePlatform)

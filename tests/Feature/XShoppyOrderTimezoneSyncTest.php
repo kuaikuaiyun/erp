@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\AssistantDomainStore;
 use App\Models\FashionLogisticsOrder;
 use App\Models\FashionLogisticsSyncState;
+use App\Portals\FashionLogistics\ShoplineOrderSyncService;
 use App\Portals\FashionLogistics\XShoppyOrderSyncService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Http;
@@ -28,6 +29,7 @@ class XShoppyOrderTimezoneSyncTest extends TestCase
             $table->string('shop_login_url', 500)->nullable();
             $table->string('xshoppy_api_key', 191)->nullable();
             $table->string('xshoppy_password', 191)->nullable();
+            $table->string('shopline_app_token', 500)->nullable();
             $table->timestamps();
         });
         Schema::create('fashion_logistics_sync_states', function (Blueprint $table): void {
@@ -48,9 +50,12 @@ class XShoppyOrderTimezoneSyncTest extends TestCase
             $table->string('source_platform', 30);
             $table->string('store_name', 191)->nullable();
             $table->string('source_domain', 191)->nullable();
+            $table->string('marketing_source', 40)->nullable();
             $table->string('external_order_id', 191);
             $table->string('order_number', 191)->nullable();
             $table->string('status', 50)->nullable();
+            $table->string('payment_status', 50)->nullable();
+            $table->string('fulfillment_status', 50)->nullable();
             $table->string('currency', 20)->nullable();
             $table->decimal('total_amount', 18, 4)->default(0);
             $table->decimal('shipping_amount', 18, 4)->default(0);
@@ -162,5 +167,41 @@ class XShoppyOrderTimezoneSyncTest extends TestCase
             return ($query['after'] ?? null) === '2026-11-07T02:31:52Z'
                 && ($query['before'] ?? null) === '2026-11-13T02:31:52Z';
         });
+    }
+
+    public function test_shopline_uses_the_same_cursor_window_and_stores_china_payment_time(): void
+    {
+        $store = AssistantDomainStore::query()->create([
+            'site_builder' => 'shopline',
+            'shop_name' => 'shopline-test',
+            'shopline_app_token' => 'token',
+        ]);
+        FashionLogisticsSyncState::query()->create([
+            'assistant_domain_store_id' => $store->getKey(),
+            'last_cursor_at' => '2026-11-10 02:31:52',
+        ]);
+        Http::fake(fn () => Http::response(['orders' => [[
+            'id' => 'shopline-order-1',
+            'name' => '1001',
+            'status' => 'open',
+            'financial_status' => 'paid',
+            'currency' => 'USD',
+            'current_total_price' => '37.98',
+            'created_at' => '2026-11-09T21:44:40-05:00',
+            'processed_at' => '2026-11-09T21:45:37-05:00',
+            'updated_at' => '2026-11-09T21:45:39-05:00',
+            'line_items' => [],
+        ]]], 200));
+
+        app(ShoplineOrderSyncService::class)->syncStore($store);
+
+        Http::assertSent(function ($request): bool {
+            parse_str(parse_url($request->url(), PHP_URL_QUERY) ?: '', $query);
+
+            return ($query['updated_at_min'] ?? null) === '2026-11-07T02:31:52Z'
+                && ($query['updated_at_max'] ?? null) === '2026-11-13T02:31:52Z';
+        });
+        $order = FashionLogisticsOrder::query()->where('source_platform', 'shopline')->sole();
+        $this->assertSame('2026-11-10 10:45:37', $order->paid_at_utc?->format('Y-m-d H:i:s'));
     }
 }

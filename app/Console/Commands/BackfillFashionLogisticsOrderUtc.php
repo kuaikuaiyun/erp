@@ -69,9 +69,9 @@ class BackfillFashionLogisticsOrderUtc extends Command
                                 ? CarbonImmutable::parse($sourcePaidAt, 'Asia/Shanghai')
                                 : CarbonImmutable::parse($sourcePaidAt);
                             $values['paid_at'] = $paidAt->format('Y-m-d H:i:s');
-                            $values['paid_at_utc'] = ($order->source_platform === 'xshoppy'
-                                ? $paidAt
-                                : $paidAt->utc())->format('Y-m-d H:i:s');
+                            // This legacy column is the unified China-time payment timestamp
+                            // used by both platforms in the performance report.
+                            $values['paid_at_utc'] = $paidAt->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
                         }
 
                         DB::connection($connection)->table($table)->where('id', $order->id)->update($values);

@@ -108,12 +108,15 @@ class ShoplineOrderSyncService
         $state->forceFill(['status' => 'syncing', 'last_started_at' => now(), 'last_error' => null])->save();
 
         $historyStart = Carbon::create(2000, 1, 1, 0, 0, 0, 'UTC');
+        $hasIncrementalCursor = ! $full && ! $allHistory && $state->last_cursor_at !== null;
         $after = $allHistory || (! $full && ! $state->last_cursor_at)
             ? $historyStart
             : (! $full
-                ? $state->last_cursor_at->copy()->subMinutes(10)
+                ? $state->last_cursor_at->copy()->subDays(3)
                 : now()->subDays(max(1, $initialDays)));
-        $before = now()->addMinute();
+        $before = $hasIncrementalCursor
+            ? $state->last_cursor_at->copy()->addDays(3)
+            : now()->addMinute();
         $latestModified = $state->last_cursor_at?->copy() ?: $after->copy();
         $created = 0;
         $updated = 0;
@@ -257,7 +260,8 @@ class ShoplineOrderSyncService
                 'order_created_at' => $this->date($payload['created_at'] ?? $payload['order_at'] ?? null)?->setTimezone('Asia/Shanghai'),
                 'order_modified_at' => $this->date($payload['updated_at'] ?? null),
                 'paid_at' => $this->date($payload['paid_at'] ?? $payload['processed_at'] ?? null),
-                'paid_at_utc' => $this->date($payload['paid_at'] ?? $payload['processed_at'] ?? null)?->utc(),
+                // Keep the legacy column as China time for unified performance reporting.
+                'paid_at_utc' => $this->date($payload['paid_at'] ?? $payload['processed_at'] ?? null)?->setTimezone('Asia/Shanghai'),
                 'completed_at' => $this->date($payload['closed_at'] ?? $payload['completed_at'] ?? null),
                 'source_payload' => $payload,
                 'source_synced_at' => now(),
