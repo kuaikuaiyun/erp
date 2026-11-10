@@ -98,7 +98,7 @@ class XShoppyOrderTimezoneSyncTest extends TestCase
         });
     }
 
-    public function test_uses_login_url_host_and_preserves_xshoppy_china_api_times(): void
+    public function test_uses_login_url_host_and_preserves_xshoppy_china_api_times_without_shop_request(): void
     {
         $store = AssistantDomainStore::query()->create([
             'site_builder' => 'xshoppy',
@@ -109,11 +109,7 @@ class XShoppyOrderTimezoneSyncTest extends TestCase
             'xshoppy_password' => 'secret',
         ]);
 
-        Http::fake(function ($request) {
-            if (str_contains($request->url(), '/wp-json/wc/v3/shop')) {
-                return Http::response(['code' => 0, 'data' => ['time_zone' => 'America/New_York']], 200);
-            }
-
+        Http::fake(function () {
             return Http::response([[
                 'id' => 'order-1',
                 'number' => 'order-1',
@@ -130,11 +126,11 @@ class XShoppyOrderTimezoneSyncTest extends TestCase
 
         app(XShoppyOrderSyncService::class)->syncStore($store);
 
-        Http::assertSent(fn ($request) => str_starts_with($request->url(), 'https://api-host.example/wp-json/wc/v3/shop'));
         Http::assertSent(fn ($request) => str_starts_with($request->url(), 'https://api-host.example/wp-json/wc/v3/orders'));
 
         $order = FashionLogisticsOrder::query()->sole();
-        $this->assertSame('America/New_York', $order->source_order_timezone);
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/wp-json/wc/v3/shop'));
+        $this->assertNull($order->source_order_timezone);
         $this->assertSame('2026-11-06 02:15:08', $order->source_order_created_at?->format('Y-m-d H:i:s'));
         $this->assertSame('2026-11-05 18:15:08', $order->order_created_at_utc?->format('Y-m-d H:i:s'));
         $this->assertSame('2026-11-06 02:15:08', $order->order_created_at?->format('Y-m-d H:i:s'));
