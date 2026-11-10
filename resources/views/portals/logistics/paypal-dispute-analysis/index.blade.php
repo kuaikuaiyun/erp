@@ -24,7 +24,7 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $origin }}/assets/erp/logistics.css?v=20261109-1">
-    <link rel="stylesheet" href="{{ $origin }}/assets/erp/paypal-dispute-analysis.css?v=20261110-9">
+    <link rel="stylesheet" href="{{ $origin }}/assets/erp/paypal-dispute-analysis.css?v=20261110-10">
 @endpush
 
 @section('content')
@@ -70,7 +70,7 @@
                         <tr>
                             <td class="pd-dispute-select-cell"><input class="paypal-dispute-check" type="checkbox" value="{{ $dispute->id }}" aria-label="选择事件 {{ $dispute->dispute_id }}"></td>
                             <td><div class="pd-block"><b>PP账户：</b>{{ $text($dispute->account?->account_name) }}<br><b>事件ID：</b><span class="pd-mono">{{ $text($dispute->dispute_id) }}</span><br><b>交易ID：</b><span class="pd-mono">{{ $text($dispute->disputed_transaction_id) }}</span></div></td>
-                            <td><div class="pd-block"><b>客户邮箱：</b>{{ $text($order?->buyer_email ?: '未匹配') }}<br><b>发起日期：</b>{{ $date($dispute->dispute_created_at) ?: '—' }}<br><b>首次处理：</b>{{ $date($dispute->first_handled_at) ?: '无' }}<br><b>下单日期：</b>{{ $date($order?->order_created_at) ?: '未匹配' }}</div></td>
+                            <td><div class="pd-block"><b>客户邮箱：</b>{{ $text($order?->buyer_email ?: '未匹配') }}<br><b>发起日期：</b>{{ $date($dispute->dispute_created_at) ?: '—' }}<br><b>下单日期：</b>{{ $date($order?->order_created_at) ?: '未匹配' }}</div></td>
                             <td><div class="pd-block"><b>申诉金额：</b>{{ $amount($dispute->original_amount ?? $dispute->dispute_amount_usd, $dispute->currency_code) }}<br><b>订单金额：</b>{{ $amount($orderAmount, $orderCurrency) }}<br><b>退款金额：</b>{{ $refunds->isEmpty() ? '—' : $amount($refundAmount, $refundCurrency) }}<br><b>纠纷费：</b>—</div></td>
                             <td><div class="pd-block"><b>订阅/定期：</b>{{ $text($order?->subscription_type ?: '未匹配') }}<br><b>PostUpsell：</b>{{ $order ? ($order->is_add_on === '已加购' ? '是' : '否') : '未匹配' }}<br><b>是否复购单：</b>{{ $order ? (filled($order->subscription_origin_order_id) ? '是' : '否') : '未匹配' }}<br><b>取消订阅：</b><span class="pd-manual">{{ $flag($dispute->subscription_cancelled) }}</span><br><b>取消加购：</b><span class="pd-manual">{{ $flag($dispute->add_on_cancelled) }}</span></div></td>
                             <td><div class="pd-block"><b>类型：</b>{{ $dispute->typeLabel() }}<br><b>纠纷理由：</b>{{ $dispute->reasonLabel() }}</div></td>

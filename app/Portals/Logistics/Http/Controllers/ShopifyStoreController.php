@@ -20,7 +20,7 @@ use Symfony\Component\HttpFoundation\Response;
 
 class ShopifyStoreController extends Controller
 {
-    private const MANUAL_SYNC_DAYS = 60;
+    private const MANUAL_SYNC_DAYS = 180;
 
     public function __construct(
         private readonly PortalEntryController $portalEntries,

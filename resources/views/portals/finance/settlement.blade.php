@@ -133,6 +133,14 @@
     <option value="">全部交易</option><option value="1" @selected(! empty($filters['card_exceptions']))>仅看结算异常</option>
 </select></div>
 @endif
+@if($channel === 'credit_card')
+<div><label for="settlement-card-transaction-status">交易状态</label><select id="settlement-card-transaction-status" name="card_transaction_status" class="form-control">
+    <option value="">全部状态</option>
+    @foreach(\App\Portals\Finance\FinanceSettlementService::CARD_TRANSACTION_STATUSES as $value => $label)
+        <option value="{{ $value }}" @selected(($filters['card_transaction_status'] ?? '') === $value)>{{ $label }}</option>
+    @endforeach
+</select></div>
+@endif
 </div>
 @include('portals.finance.partials.filter-conditions', ['enhancedConditions' => true, 'hideConditionOperator' => $channel === 'paypal'])
 <div class="settlement-actions"><button class="btn btn-primary">查询</button><a class="btn btn-default" href="{{ route('finance.report', $report) }}">重置</a><select class="form-control" name="format" aria-label="导出格式"><option value="xlsx" @selected(($filters['format'] ?? 'xlsx') === 'xlsx')>Excel (.xlsx)</option><option value="xls" @selected(($filters['format'] ?? 'xlsx') === 'xls')>Excel (.xls)</option></select><label class="settlement-template-toolbar">导出模板 <select class="form-control" data-active-export-template aria-label="本次使用的导出模板"><option value="">{{ $orderView ? '按当前列表导出' : '默认字段设置' }}</option></select></label><button type="button" data-finance-download  class="btn btn-default" >导出筛选结果</button>@if($canManage)<button type="button" class="btn btn-default" data-open-settlement-import>导入数据</button> <button type="button" class="btn btn-danger" data-delete-selected-settlements>删除所选</button> @endif</div>
@@ -168,7 +176,9 @@
 </tr>
 @empty<tr><td data-settlement-colspan="{{ $hasOperations ? 2 : 1 }}" colspan="{{ count($columns) + ($hasOperations ? 2 : 1) }}">无符合条件的记录</td></tr>@endforelse
 </tbody></table></div>@include('portals.finance.pagination', ['paginator' => $rows])
-<p class="settlement-note">@if($orderView)每笔付款单独列示。应结算为美元收款金额减去手续费至争议费各列，再加上三项返还。缺少换汇或返还依据的金额待核对。@endif 费用和返还金额以美元填写，物流和采购以人民币填写。金额可按需补充。@if($orderView)使用人优先显示财务补录。已匹配物流订单时，按下单时间匹配归属历史，早于第一条记录的订单按第一条归属，未分配时留空。查不到历史时，依次取订单归属快照和绑定店铺的归属人。运营所属部门取使用人在助理系统对应的运营部门。@else 使用人和团队优先显示财务补录，未补充时按域名匹配。@endif 已锁定月份不可修改。</p>
+<p class="settlement-note">@if($orderView)每笔付款单独列示。应结算为美元收款金额减去手续费至争议费各列，再加上三项返还。缺少换汇或返还依据的金额待核对。@endif
+@if($cardChannel === 'ye')保证金和交易手续费按每笔结算金额及费率计算，处理费按账单核对后填入。费用和返还使用结算币种。应结算按明细公式计算，平台净结算以结算统计为准。
+@else 费用和返还金额以美元填写。@endif 物流和采购以人民币填写。金额可按需补充。@if($orderView)使用人优先显示财务补录，其次按下单时间匹配归属历史。已停用店铺的初始归属为空时，可用订单快照或该店紧接着登记的归属补齐；明确清空归属的时段仍留空。查不到历史时，依次取订单归属快照和绑定店铺的归属人。运营所属部门取使用人在助理系统对应的运营部门。@else 使用人和团队优先显示财务补录，未补充时按域名匹配。@endif 已锁定月份不可修改。</p>
 </div></div>
 @if($orderView)
 <dialog class="settlement-dialog settlement-paypal-detail" id="settlement-detail" aria-labelledby="settlement-detail-title">

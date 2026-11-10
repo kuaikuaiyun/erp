@@ -9,7 +9,7 @@ use ZipArchive;
 class StreamedXlsxWriter
 {
     /**
-     * @param list<array{label:string,width:float|int}> $columns
+     * @param list<array{label:string,width:float|int,headerFill?:string}> $columns
      * @param callable():iterable<array{kind?:string,height?:float|int,outline?:int,mergeDown?:array<int,int>,mergeAcross?:array<int,int>,cells:list<array{value:mixed,type?:string,align?:string,wrap?:bool}>}> $rows
      */
     public function response(
@@ -19,8 +19,11 @@ class StreamedXlsxWriter
         callable $rows,
         bool $showGridlines = true,
         bool $plain = false,
+        string $fontName = 'Calibri',
     ): StreamedResponse {
-        return response()->streamDownload(function () use ($sheetName, $columns, $rows, $showGridlines, $plain): void {
+        $headerFills = array_values(array_unique(array_filter(array_column($columns, 'headerFill'), fn ($color) => preg_match('/^[0-9A-F]{6}$/D', $color))));
+
+        return response()->streamDownload(function () use ($sheetName, $columns, $rows, $showGridlines, $plain, $fontName, $headerFills): void {
             if (function_exists('set_time_limit')) {
                 @set_time_limit(0);
             }
@@ -32,8 +35,8 @@ class StreamedXlsxWriter
             }
 
             try {
-                $this->writeSheet($sheetPath, $columns, $rows, $showGridlines, $plain);
-                $this->writeWorkbook($xlsxPath, $sheetPath, $sheetName);
+                $this->writeSheet($sheetPath, $columns, $rows, $showGridlines, $plain, $headerFills);
+                $this->writeWorkbook($xlsxPath, $sheetPath, $sheetName, $fontName, $headerFills);
 
                 $handle = fopen($xlsxPath, 'rb');
                 if ($handle === false) {
@@ -52,10 +55,10 @@ class StreamedXlsxWriter
     }
 
     /**
-     * @param list<array{label:string,width:float|int}> $columns
+     * @param list<array{label:string,width:float|int,headerFill?:string}> $columns
      * @param callable():iterable<array{kind?:string,height?:float|int,outline?:int,mergeDown?:array<int,int>,mergeAcross?:array<int,int>,cells:list<array{value:mixed,type?:string,align?:string,wrap?:bool}>}> $rows
      */
-    private function writeSheet(string $path, array $columns, callable $rows, bool $showGridlines, bool $plain): int
+    private function writeSheet(string $path, array $columns, callable $rows, bool $showGridlines, bool $plain, array $headerFills): int
     {
         $handle = fopen($path, 'wb');
         if ($handle === false) {
@@ -79,7 +82,9 @@ class StreamedXlsxWriter
 
         fwrite($handle, $plain ? '<sheetData><row r="1">' : '<sheetData><row r="1" ht="26" customHeight="1">');
         foreach ($columns as $index => $column) {
-            fwrite($handle, $this->stringCell($this->columnName($index + 1).'1', (string) $column['label'], $plain ? 0 : 1));
+            $fillIndex = array_search($column['headerFill'] ?? '', $headerFills, true);
+            $style = $fillIndex === false ? ($plain ? 0 : 1) : 19 + $fillIndex;
+            fwrite($handle, $this->stringCell($this->columnName($index + 1).'1', (string) $column['label'], $style));
         }
         fwrite($handle, '</row>');
 
@@ -120,14 +125,14 @@ class StreamedXlsxWriter
                 $cell = $row['cells'][$index] ?? ['value' => ''];
                 $reference = $this->columnName($index + 1).$rowNumber;
                 $type = (string) ($cell['type'] ?? 'text');
-                $style = $plain ? 0 : $this->styleIndex(
+                $style = $type === 'datetime' ? 18 : ($plain ? 0 : $this->styleIndex(
                     $kind,
                     $type,
                     (string) ($cell['align'] ?? 'left'),
                     (bool) ($cell['wrap'] ?? false),
-                );
+                ));
                 $value = $cell['value'] ?? null;
-                if (in_array($type, ['money', 'rate', 'number', 'decimal', 'quantity'], true) && $value !== null && $value !== '' && is_numeric($value)) {
+                if (in_array($type, ['money', 'rate', 'number', 'decimal', 'quantity', 'datetime'], true) && $value !== null && $value !== '' && is_numeric($value)) {
                     $rowXml .= '<c r="'.$reference.'" s="'.$style.'" t="n"><v>'.(string) ((float) $value).'</v></c>';
                 } else {
                     $rowXml .= $this->stringCell($reference, $this->displayValue($value), $style);
@@ -155,7 +160,7 @@ class StreamedXlsxWriter
         return $lastRow;
     }
 
-    private function writeWorkbook(string $xlsxPath, string $sheetPath, string $sheetName): void
+    private function writeWorkbook(string $xlsxPath, string $sheetPath, string $sheetName, string $fontName, array $headerFills): void
     {
         $zip = new ZipArchive();
         $opened = $zip->open($xlsxPath, ZipArchive::CREATE | ZipArchive::OVERWRITE);
@@ -171,7 +176,7 @@ class StreamedXlsxWriter
         $zip->addFromString('docProps/core.xml', $this->coreProperties($createdAt));
         $zip->addFromString('xl/workbook.xml', $this->workbookXml($safeSheetName));
         $zip->addFromString('xl/_rels/workbook.xml.rels', $this->workbookRelationships());
-        $zip->addFromString('xl/styles.xml', $this->stylesXml());
+        $zip->addFromString('xl/styles.xml', $this->stylesXml($fontName, $headerFills));
         $zip->addFile($sheetPath, 'xl/worksheets/sheet1.xml');
         $zip->close();
     }
@@ -306,30 +311,36 @@ class StreamedXlsxWriter
             .'<dcterms:modified xsi:type="dcterms:W3CDTF">'.$createdAt.'</dcterms:modified></cp:coreProperties>';
     }
 
-    private function stylesXml(): string
+    private function stylesXml(string $fontName, array $headerFills): string
     {
         $alignLeft = '<alignment vertical="center"/>';
         $alignCenter = '<alignment horizontal="center" vertical="center"/>';
         $alignWrap = '<alignment vertical="center" wrapText="1"/>';
         $alignRight = '<alignment horizontal="right" vertical="center"/>';
+        $extraFills = '';
+        $extraStyles = '';
+        foreach ($headerFills as $index => $color) {
+            $extraFills .= '<fill><patternFill patternType="solid"><fgColor rgb="FF'.$color.'"/><bgColor indexed="64"/></patternFill></fill>';
+            $extraStyles .= $this->xf(0, 0, 5 + $index, 0, $alignLeft);
+        }
 
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             .'<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-            .'<numFmts count="4"><numFmt numFmtId="164" formatCode="&quot;$&quot;#,##0.00;[Red]-&quot;$&quot;#,##0.00"/><numFmt numFmtId="165" formatCode="0.00&quot;%&quot;"/><numFmt numFmtId="166" formatCode="#,##0.00########"/><numFmt numFmtId="167" formatCode="#,##0.########"/></numFmts>'
+            .'<numFmts count="5"><numFmt numFmtId="164" formatCode="&quot;$&quot;#,##0.00;[Red]-&quot;$&quot;#,##0.00"/><numFmt numFmtId="165" formatCode="0.00&quot;%&quot;"/><numFmt numFmtId="166" formatCode="#,##0.00########"/><numFmt numFmtId="167" formatCode="#,##0.########"/><numFmt numFmtId="168" formatCode="yyyy/m/d hh:mm:ss"/></numFmts>'
             .'<fonts count="4">'
-            .'<font><sz val="11"/><name val="Calibri"/><family val="2"/></font>'
+            .'<font><sz val="11"/><name val="'.$this->xml($fontName).'"/><family val="2"/></font>'
             .'<font><b/><color rgb="FF2D4F73"/><sz val="11"/><name val="Calibri"/></font>'
             .'<font><b/><color rgb="FF294F76"/><sz val="11"/><name val="Calibri"/></font>'
             .'<font><color rgb="FF647D96"/><sz val="11"/><name val="Calibri"/></font>'
             .'</fonts>'
-            .'<fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
+            .'<fills count="'.(5 + count($headerFills)).'"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
             .'<fill><patternFill patternType="solid"><fgColor rgb="FFEAF2F8"/><bgColor indexed="64"/></patternFill></fill>'
             .'<fill><patternFill patternType="solid"><fgColor rgb="FFF9FCFF"/><bgColor indexed="64"/></patternFill></fill>'
-            .'<fill><patternFill patternType="solid"><fgColor rgb="FFFCFDFF"/><bgColor indexed="64"/></patternFill></fill></fills>'
+            .'<fill><patternFill patternType="solid"><fgColor rgb="FFFCFDFF"/><bgColor indexed="64"/></patternFill></fill>'.$extraFills.'</fills>'
             .'<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>'
             .'<border><left/><right/><top style="thin"><color rgb="FFBDD8F1"/></top><bottom/><diagonal/></border></borders>'
             .'<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-            .'<cellXfs count="18">'
+            .'<cellXfs count="'.(19 + count($headerFills)).'">'
             .$this->xf(0, 0, 0, 0, $alignLeft).$this->xf(0, 1, 2, 0, $alignCenter)
             .$this->xf(164, 0, 0, 0, $alignRight).$this->xf(165, 0, 0, 0, $alignRight)
             .$this->xf(0, 0, 0, 0, $alignWrap).$this->xf(0, 0, 0, 0, $alignCenter)
@@ -338,6 +349,7 @@ class StreamedXlsxWriter
             .$this->xf(0, 3, 4, 0, $alignLeft).$this->xf(0, 3, 4, 0, $alignCenter)
             .$this->xf(164, 3, 4, 0, $alignRight).$this->xf(165, 3, 4, 0, $alignRight).$this->xf(0, 3, 4, 0, $alignWrap)
             .$this->xf(166, 0, 0, 0, $alignRight).$this->xf(167, 0, 0, 0, $alignRight)
+            .$this->xf(168, 0, 0, 0, $alignRight).$extraStyles
             .'</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
             .'</styleSheet>';
     }

@@ -6,6 +6,11 @@ class FinanceCatalog
 {
     public const PORTAL_CODE = 'caiwu';
 
+    public const XUZONG_REPORT_IMPORTS = [
+        'xuzong1-details' => 'xuzong-credit-source-1',
+        'xuzong2-details' => 'xuzong-credit-source-2',
+    ];
+
     public static function timezoneLabel(string $timezone): string
     {
         return match ($timezone) {
@@ -86,6 +91,7 @@ class FinanceCatalog
 
     public static function dataset(string $key): array
     {
+        $key = array_search($key, self::XUZONG_REPORT_IMPORTS, true) ?: $key;
         abort_unless(isset(self::datasets()[$key]), 404);
 
         return self::datasets()[$key];
