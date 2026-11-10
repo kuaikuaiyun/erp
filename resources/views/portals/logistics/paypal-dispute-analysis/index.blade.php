@@ -24,7 +24,7 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $origin }}/assets/erp/logistics.css?v=20261109-1">
-    <link rel="stylesheet" href="{{ $origin }}/assets/erp/paypal-dispute-analysis.css?v=20261110-9">
+    <link rel="stylesheet" href="{{ $origin }}/assets/erp/paypal-dispute-analysis.css?v=20261110-10">
 @endpush
 
 @section('content')
