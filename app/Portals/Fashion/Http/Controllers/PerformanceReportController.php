@@ -3,31 +3,31 @@
 namespace App\Portals\Fashion\Http\Controllers;
 
 use App\Http\Controllers\Controller;
-use App\Models\FashionLogisticsOrder;
-use App\Models\FashionAdvertisingReport;
 use App\Models\AdminUser;
 use App\Models\Department;
+use App\Models\FashionAdvertisingReport;
+use App\Models\FashionLogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
 use Carbon\CarbonImmutable;
-use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\View\View;
 use Illuminate\Validation\Rule;
+use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 
 class PerformanceReportController extends Controller
 {
     private const PORTAL_CODE = 'fuzhuang';
 
-    public function __construct(private readonly PortalEntryController $portalEntries)
-    {
-    }
+    public function __construct(private readonly PortalEntryController $portalEntries) {}
 
     public function index(Request $request): Response|View
     {
         $context = $this->portalEntries->portalContext($request);
-        if ($context instanceof Response) return $context;
+        if ($context instanceof Response) {
+            return $context;
+        }
         abort_unless($context['portal']->code === self::PORTAL_CODE, 404);
 
         $timezoneOptions = $this->timezoneOptions();
@@ -44,7 +44,9 @@ class PerformanceReportController extends Controller
         $month = now($timezone);
         $dateFrom = $validated['date_from'] ?? $month->copy()->startOfMonth()->toDateString();
         $dateTo = $validated['date_to'] ?? $month->copy()->endOfMonth()->toDateString();
-        if ($dateFrom > $dateTo) [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
+        if ($dateFrom > $dateTo) {
+            [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
+        }
         $storageFrom = CarbonImmutable::parse($dateFrom.' 00:00:00', $timezone)->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
         $storageTo = CarbonImmutable::parse($dateTo.' 23:59:59', $timezone)->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
 
@@ -52,7 +54,7 @@ class PerformanceReportController extends Controller
         $connection = config('admin.database.connection') ?: config('database.default');
         $storeTable = 'assistant_domain_stores';
         $userTable = config('admin.database.users_table');
-        $orderTable = (new FashionLogisticsOrder())->getTable();
+        $orderTable = (new FashionLogisticsOrder)->getTable();
         // Both platforms store their China-normalized payment time in this legacy
         // column. The selected report timezone is applied below for date grouping.
         $orderTimestampSql = 'orders.paid_at_utc';
@@ -85,7 +87,9 @@ class PerformanceReportController extends Controller
                 ->filter()->map(fn ($name): string => trim((string) $name))->unique()->values()->all();
             $base->where(function ($binding) use ($user, $ownerNames): void {
                 $binding->where('stores.owner_user_id', $user->getKey());
-                if ($ownerNames !== []) $binding->orWhereIn('stores.user_name', $ownerNames);
+                if ($ownerNames !== []) {
+                    $binding->orWhereIn('stores.user_name', $ownerNames);
+                }
             });
         } elseif (! empty($validated['operator_id'])) {
             $operator = AdminUser::query()->find((int) $validated['operator_id']);
@@ -93,7 +97,9 @@ class PerformanceReportController extends Controller
                 ->filter()->map(fn ($name): string => trim((string) $name))->unique()->values()->all();
             $base->where(function ($binding) use ($validated, $operatorNames): void {
                 $binding->where('stores.owner_user_id', (int) $validated['operator_id']);
-                if ($operatorNames !== []) $binding->orWhereIn('stores.user_name', $operatorNames);
+                if ($operatorNames !== []) {
+                    $binding->orWhereIn('stores.user_name', $operatorNames);
+                }
             });
         }
 
@@ -144,9 +150,10 @@ class PerformanceReportController extends Controller
             $dailyRevenue = (float) ($operatorDailyRevenue->get($operatorId.'|'.$row->report_date)->revenue ?? 0);
             $dailyReports = $reportsByOperatorDate->get($operatorId.'|'.$row->report_date, collect());
             $media = $dailyReports->flatMap->adSpendEntries->groupBy(fn ($entry) => trim((string) $entry->media) ?: '未设置媒体')
-                ->map(function ($entries, string $name) use ($dailyRevenue): array {
+                ->map(function ($entries, string $name): array {
                     $spend = round((float) $entries->sum('actual_spend_usd'), 2);
-                    return ['name' => $name, 'spend' => $spend, 'roi' => $spend > 0 ? $dailyRevenue / $spend : null];
+
+                    return ['name' => $name, 'spend' => $spend];
                 })->sortKeys()->values();
             $adSpend = round((float) $media->sum('spend'), 2);
             $row->department_name = (string) ($department?->name ?: '未分配部门');
@@ -155,6 +162,7 @@ class PerformanceReportController extends Controller
             $row->media_metrics = $media;
             $row->actual_ad_spend = $adSpend;
             $row->total_roi = $adSpend > 0 ? $dailyRevenue / $adSpend : null;
+
             return $row;
         }));
 
@@ -203,7 +211,9 @@ class PerformanceReportController extends Controller
     public function orders(Request $request): Response|JsonResponse
     {
         $context = $this->portalEntries->portalContext($request);
-        if ($context instanceof Response) return $context;
+        if ($context instanceof Response) {
+            return $context;
+        }
         abort_unless($context['portal']->code === self::PORTAL_CODE, 404);
         $validated = $request->validate([
             'date' => ['required', 'date_format:Y-m-d'],
@@ -223,7 +233,9 @@ class PerformanceReportController extends Controller
                 $names = collect([$user->name, $user->username])->filter()->map(fn ($name) => trim((string) $name))->unique()->values()->all();
                 $query->where(function ($binding) use ($user, $names): void {
                     $binding->where('owner_user_id', $user->getKey());
-                    if ($names !== []) $binding->orWhereIn('user_name', $names);
+                    if ($names !== []) {
+                        $binding->orWhereIn('user_name', $names);
+                    }
                 });
             })->first();
         abort_unless($store, 403, '无权查看该店铺订单。');
@@ -278,7 +290,9 @@ class PerformanceReportController extends Controller
     private function formatChinaOrderTime(FashionLogisticsOrder $order, string $timezone): ?string
     {
         $value = $order->getRawOriginal('order_created_at');
-        if (! is_string($value) || trim($value) === '') return null;
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
 
         try {
             return CarbonImmutable::parse($value, 'Asia/Shanghai')->setTimezone($timezone)->format('Y-m-d H:i:s');
@@ -290,7 +304,9 @@ class PerformanceReportController extends Controller
     private function fashionOperators()
     {
         $root = Department::business()->where('name', '服装运营部门')->first(['id']);
-        if (! $root) return collect();
+        if (! $root) {
+            return collect();
+        }
 
         $departments = Department::business()->get(['id', 'parent_id']);
         $departmentIds = [(int) $root->id];
@@ -315,10 +331,15 @@ class PerformanceReportController extends Controller
         for ($offset = -12; $offset <= 14; $offset++) {
             $value = sprintf('%s%02d:00', $offset < 0 ? '-' : '+', abs($offset));
             $label = 'UTC'.($offset >= 0 ? '+' : '').$offset;
-            if ($value === '-08:00') $label .= '（默认）';
-            if ($value === '+08:00') $label .= '（北京时间）';
+            if ($value === '-08:00') {
+                $label .= '（默认）';
+            }
+            if ($value === '+08:00') {
+                $label .= '（北京时间）';
+            }
             $options[$value] = $label;
         }
+
         return $options;
     }
 }
