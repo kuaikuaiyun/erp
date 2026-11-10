@@ -30,10 +30,20 @@ class OperationTaskController extends Controller
     public function recaps(Request $request): Response|View
     {
         $context = $this->context($request); if ($context instanceof Response) return $context;
+        $yesterday = now('Asia/Shanghai')->subDay()->format('Y-m-d');
+        $yesterdayRecap = OperationTaskRecap::query()
+            ->where('user_id', $context['user']->id)
+            ->whereDate('data_date', $yesterday)
+            ->first();
         $query = OperationTaskRecap::query()->orderByDesc('data_date')->orderByDesc('id');
         if (! $this->canManage($context['user'])) $query->where('user_id', $context['user']->id);
         elseif (! $context['user']->isAdministrator()) $query->whereIn('department_id', $this->visibleDepartmentIds($context['user']));
-        return view('portals.operation-tasks.recaps', [...$context, 'recaps' => $query->paginate(20)->withQueryString(), 'mediaOptions' => self::MEDIA]);
+        return view('portals.operation-tasks.recaps', [...$context,
+            'recaps' => $query->paginate(20)->withQueryString(),
+            'mediaOptions' => self::MEDIA,
+            'yesterday' => $yesterday,
+            'yesterdayRecap' => $yesterdayRecap,
+        ]);
     }
 
     public function storeRecap(Request $request): RedirectResponse
