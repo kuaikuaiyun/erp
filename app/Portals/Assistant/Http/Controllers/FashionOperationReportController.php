@@ -49,8 +49,13 @@ class FashionOperationReportController extends Controller
         if ($dateFrom > $dateTo) {
             [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
         }
-        $utcFrom = CarbonImmutable::parse($dateFrom.' 00:00:00', $timezone)->utc()->format('Y-m-d H:i:s');
-        $utcTo = CarbonImmutable::parse($dateTo.' 23:59:59', $timezone)->utc()->format('Y-m-d H:i:s');
+        // Keep the assistant report on the exact same time basis as the fashion
+        // performance report. The legacy paid_at_utc column stores a
+        // China-normalized payment time for both XShoppy and Shopline orders.
+        $storageFrom = CarbonImmutable::parse($dateFrom.' 00:00:00', $timezone)
+            ->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
+        $storageTo = CarbonImmutable::parse($dateTo.' 23:59:59', $timezone)
+            ->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
 
         $stores = AssistantDomainStore::query()
             ->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')")
@@ -89,7 +94,8 @@ class FashionOperationReportController extends Controller
                         ->whereIn('assistant_domain_store_id', $stores->filter(fn (AssistantDomainStore $store) => mb_strtolower(trim((string) $store->site_builder)) === 'shopline')->pluck('id'));
                 });
             })
-            ->whereBetween('order_created_at', [$utcFrom, $utcTo])
+            ->whereNotNull('paid_at_utc')
+            ->whereBetween('paid_at_utc', [$storageFrom, $storageTo])
             ->selectRaw('assistant_domain_store_id, COUNT(*) order_count, COALESCE(SUM(total_amount),0) revenue')
             ->groupBy('assistant_domain_store_id')->get()->keyBy('assistant_domain_store_id');
 
