@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\AssistantDomainStore;
 use App\Models\FashionLogisticsOrder;
+use App\Models\FashionLogisticsSyncState;
 use App\Portals\FashionLogistics\XShoppyOrderSyncService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Http;
@@ -136,5 +137,30 @@ class XShoppyOrderTimezoneSyncTest extends TestCase
         $this->assertSame('2026-11-06 02:15:08', $order->order_created_at?->format('Y-m-d H:i:s'));
         $this->assertSame('2026-11-06 02:17:39', $order->paid_at?->format('Y-m-d H:i:s'));
         $this->assertSame('2026-11-06 02:17:39', $order->paid_at_utc?->format('Y-m-d H:i:s'));
+    }
+
+    public function test_incremental_sync_queries_three_days_before_and_after_its_cursor(): void
+    {
+        $store = AssistantDomainStore::query()->create([
+            'site_builder' => 'xshoppy',
+            'shop_name' => 'Cursor Window Store',
+            'shop_login_url' => 'https://api-host.example/admin/',
+            'xshoppy_api_key' => 'key',
+            'xshoppy_password' => 'secret',
+        ]);
+        FashionLogisticsSyncState::query()->create([
+            'assistant_domain_store_id' => $store->getKey(),
+            'last_cursor_at' => '2026-11-10 02:31:52',
+        ]);
+        Http::fake(fn () => Http::response([], 200));
+
+        app(XShoppyOrderSyncService::class)->syncStore($store);
+
+        Http::assertSent(function ($request): bool {
+            parse_str(parse_url($request->url(), PHP_URL_QUERY) ?: '', $query);
+
+            return ($query['after'] ?? null) === '2026-11-07T02:31:52Z'
+                && ($query['before'] ?? null) === '2026-11-13T02:31:52Z';
+        });
     }
 }
