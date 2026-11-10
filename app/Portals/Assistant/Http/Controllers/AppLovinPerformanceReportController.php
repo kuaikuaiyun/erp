@@ -156,7 +156,7 @@ class AppLovinPerformanceReportController extends Controller
                     })->values()->all(),
                 ];
             })
-            ->sortBy(fn (array $row) => $row['department'].'|'.$row['operator'].'|'.$row['store_domain'])
+            ->sortByDesc('ad_spend')
             ->values();
 
         $totals = [
