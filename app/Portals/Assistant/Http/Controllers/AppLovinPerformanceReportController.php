@@ -42,7 +42,7 @@ class AppLovinPerformanceReportController extends Controller
             'operator' => ['nullable', 'string', 'max:100'],
             'store_domain' => ['nullable', 'string', 'max:191'],
             'gift_status' => ['nullable', Rule::in(['yes', 'no'])],
-            'consumption_range' => ['nullable', Rule::in(['5000_10000', 'gt_10000', 'custom'])],
+            'consumption_range' => ['nullable', Rule::in(['lt_5000', '5000_10000', 'gt_10000', 'custom'])],
             'consumption_custom' => ['nullable', 'numeric', 'min:0', 'required_if:consumption_range,custom'],
             'consumption_custom_max' => ['nullable', 'numeric', 'min:0', 'required_if:consumption_range,custom', 'gte:consumption_custom'],
         ]);
@@ -221,7 +221,9 @@ class AppLovinPerformanceReportController extends Controller
             $selectedDomain = mb_strtolower(trim((string) $filters['store_domain']));
             $rows = $rows->filter(fn (array $row): bool => mb_strtolower(trim((string) $row['store_domain'])) === $selectedDomain)->values();
         }
-        if (($filters['consumption_range'] ?? '') === '5000_10000') {
+        if (($filters['consumption_range'] ?? '') === 'lt_5000') {
+            $rows = $rows->filter(fn (array $row): bool => (float) $row['total_consumption'] < 5000)->values();
+        } elseif (($filters['consumption_range'] ?? '') === '5000_10000') {
             $rows = $rows->filter(fn (array $row): bool => (float) $row['total_consumption'] >= 5000 && (float) $row['total_consumption'] <= 10000)->values();
         } elseif (($filters['consumption_range'] ?? '') === 'gt_10000') {
             $rows = $rows->filter(fn (array $row): bool => (float) $row['total_consumption'] > 10000)->values();
