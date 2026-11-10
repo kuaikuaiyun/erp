@@ -10,15 +10,21 @@ use App\Models\LogisticsPayPalTransaction;
 use App\Models\LogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Logistics\LogisticsPortalService;
+use App\Portals\Logistics\PayPalDisputeAnalysisExportService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 
 class PayPalDisputeAnalysisController extends Controller
 {
-    public function __construct(private readonly PortalEntryController $portalEntries, private readonly LogisticsPortalService $logistics) {}
+    public function __construct(
+        private readonly PortalEntryController $portalEntries,
+        private readonly LogisticsPortalService $logistics,
+        private readonly PayPalDisputeAnalysisExportService $exports,
+    ) {}
 
     public function index(Request $request): Response|View
     {
@@ -58,6 +64,26 @@ class PayPalDisputeAnalysisController extends Controller
         if ($changes !== []) $dispute->forceFill($changes)->save();
         LogisticsPayPalDisputeOperation::query()->create(['logistics_paypal_dispute_id' => $dispute->getKey(), 'operator_id' => $context['user']->getKey(), 'operator_name' => $context['user']->name, 'action' => 'manual_handle', 'payload' => ['subscription_cancelled' => $data['subscription_cancelled'] ?? null, 'add_on_cancelled' => $data['add_on_cancelled'] ?? null, 'note' => trim((string) ($data['note'] ?? '')) ?: null]]);
         return $this->indexRedirect($request)->with('success', '争议人工处理信息已保存。');
+    }
+
+    public function export(Request $request): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) return $context;
+
+        $data = $request->validate([
+            'scope' => ['required', 'in:selected,filtered'],
+            'selected_ids' => ['required_if:scope,selected', 'array', 'min:1'],
+            'selected_ids.*' => ['integer', 'distinct'],
+        ]);
+        $disputes = $this->query($this->filters($request));
+        if ($data['scope'] === 'selected') $disputes->whereKey($data['selected_ids']);
+
+        if (!(clone $disputes)->exists()) {
+            throw ValidationException::withMessages(['scope' => '当前导出范围内没有可导出的 PayPal 争议记录。']);
+        }
+
+        return $this->exports->download($disputes);
     }
 
     private function query(array $filters): Builder

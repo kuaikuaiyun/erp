@@ -24,7 +24,7 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $origin }}/assets/erp/logistics.css?v=20261109-1">
-    <link rel="stylesheet" href="{{ $origin }}/assets/erp/paypal-dispute-analysis.css?v=20261110-8">
+    <link rel="stylesheet" href="{{ $origin }}/assets/erp/paypal-dispute-analysis.css?v=20261110-9">
 @endpush
 
 @section('content')
@@ -50,10 +50,10 @@
         </div>
 
         <div class="box box-solid logistics-table-box">
-            <div class="box-header with-border logistics-list-toolbar"><span class="paypal-dispute-count">共 {{ $disputes->total() }} 条</span>@include('portals.logistics.partials.pagination', ['paginator' => $disputes, 'filters' => $filters, 'routeName' => 'logistics.paypal-dispute-analysis.index', 'loadingTarget' => '.paypal-dispute-scroll'])</div>
+            <div class="box-header with-border logistics-list-toolbar"><button class="btn btn-default btn-sm" type="button" data-toggle="modal" data-target="#paypal-dispute-export-modal"><i class="fa fa-download"></i> 导出</button><span class="paypal-dispute-count">共 {{ $disputes->total() }} 条</span>@include('portals.logistics.partials.pagination', ['paginator' => $disputes, 'filters' => $filters, 'routeName' => 'logistics.paypal-dispute-analysis.index', 'loadingTarget' => '.paypal-dispute-scroll'])</div>
             <div class="box-body table-responsive no-padding paypal-dispute-scroll">
                 <table class="table table-hover logistics-table paypal-dispute-table">
-                    <thead><tr><th>基本信息</th><th>订单信息</th><th>金额信息</th><th>订阅信息</th><th>纠纷信息</th><th>物流信息</th><th>商品信息</th><th>处理结果</th><th>操作</th></tr></thead>
+                    <thead><tr><th class="pd-dispute-select-cell"><input id="paypal-dispute-check-all" type="checkbox" aria-label="全选当前页"></th><th>基本信息</th><th>订单信息</th><th>金额信息</th><th>订阅信息</th><th>纠纷信息</th><th>物流信息</th><th>商品信息</th><th>处理结果</th><th>操作</th></tr></thead>
                     <tbody>@forelse($disputes as $dispute)
                         @php
                             $order = $dispute->order;
@@ -64,21 +64,41 @@
                             $refundCurrency = $refunds->pluck('currency_code')->filter()->unique()->count() === 1 ? $refunds->pluck('currency_code')->filter()->first() : '';
                             $refundAmount = $refunds->sum(fn ($refund) => (float) ($refund->original_amount ?? $refund->refund_amount_usd ?? 0));
                             $items = $order?->items ?? collect();
+                            $latestOperation = $dispute->operations->first(fn ($operation) => filled($operation->payload['note'] ?? null));
+                            $latestNote = $latestOperation ? ($latestOperation->payload['note'] ?? null) : null;
                         @endphp
                         <tr>
+                            <td class="pd-dispute-select-cell"><input class="paypal-dispute-check" type="checkbox" value="{{ $dispute->id }}" aria-label="选择事件 {{ $dispute->dispute_id }}"></td>
                             <td><div class="pd-block"><b>PP账户：</b>{{ $text($dispute->account?->account_name) }}<br><b>事件ID：</b><span class="pd-mono">{{ $text($dispute->dispute_id) }}</span><br><b>交易ID：</b><span class="pd-mono">{{ $text($dispute->disputed_transaction_id) }}</span></div></td>
                             <td><div class="pd-block"><b>客户邮箱：</b>{{ $text($order?->buyer_email ?: '未匹配') }}<br><b>发起日期：</b>{{ $date($dispute->dispute_created_at) ?: '—' }}<br><b>首次处理：</b>{{ $date($dispute->first_handled_at) ?: '无' }}<br><b>下单日期：</b>{{ $date($order?->order_created_at) ?: '未匹配' }}</div></td>
                             <td><div class="pd-block"><b>申诉金额：</b>{{ $amount($dispute->original_amount ?? $dispute->dispute_amount_usd, $dispute->currency_code) }}<br><b>订单金额：</b>{{ $amount($orderAmount, $orderCurrency) }}<br><b>退款金额：</b>{{ $refunds->isEmpty() ? '—' : $amount($refundAmount, $refundCurrency) }}<br><b>纠纷费：</b>—</div></td>
                             <td><div class="pd-block"><b>订阅/定期：</b>{{ $text($order?->subscription_type ?: '未匹配') }}<br><b>PostUpsell：</b>{{ $order ? ($order->is_add_on === '已加购' ? '是' : '否') : '未匹配' }}<br><b>是否复购单：</b>{{ $order ? (filled($order->subscription_origin_order_id) ? '是' : '否') : '未匹配' }}<br><b>取消订阅：</b><span class="pd-manual">{{ $flag($dispute->subscription_cancelled) }}</span><br><b>取消加购：</b><span class="pd-manual">{{ $flag($dispute->add_on_cancelled) }}</span></div></td>
                             <td><div class="pd-block"><b>类型：</b>{{ $dispute->typeLabel() }}<br><b>纠纷理由：</b>{{ $dispute->reasonLabel() }}</div></td>
-                            <td><div class="pd-block"><b>是否发货：</b>{{ $order ? (in_array($order->logistics_status, [\App\Models\LogisticsOrder::LOGISTICS_SHIPPED, \App\Models\LogisticsOrder::LOGISTICS_DELIVERED, \App\Models\LogisticsOrder::LOGISTICS_IN_TRANSIT], true) ? '是' : '否') : '未匹配' }}<br><b>物流状态：</b>{{ $text($order?->logistics_status ?: '未匹配') }}<br><b>物流单号：</b><span class="pd-mono">{{ $text($order?->tracking_number ?: '未匹配') }}</span></div></td>
+                            <td><div class="pd-block"><b>事件时状态：</b>{{ $dispute->event_logistics_captured_at ? $text($dispute->event_logistics_status ?: '待发货') : '未留存' }}<br><b>事件时是否发货：</b>{{ $dispute->event_logistics_captured_at ? ($dispute->event_shipped ? '是' : '否') : '未留存' }}<br><b>事件时单号：</b><span class="pd-mono">{{ $dispute->event_logistics_captured_at ? $text($dispute->event_tracking_number ?: '无') : '未留存' }}</span><hr><b>当前物流状态：</b>{{ $text($order?->logistics_status ?: '未匹配') }}<br><b>当前是否发货：</b>{{ $order ? (in_array($order->logistics_status, [\App\Models\LogisticsOrder::LOGISTICS_SHIPPED, \App\Models\LogisticsOrder::LOGISTICS_DELIVERED, \App\Models\LogisticsOrder::LOGISTICS_IN_TRANSIT], true) ? '是' : '否') : '未匹配' }}<br><b>当前物流单号：</b><span class="pd-mono">{{ $text($order?->tracking_number ?: '未匹配') }}</span></div></td>
                             <td><div class="pd-block"><b>通途订单号：</b>{{ $text($order?->tongtu_order_number ?: '未匹配') }}@forelse($items as $item)<hr><b>通途SKU：</b>{{ $text($item->tongtu_sku) }}<br><b>中文品名：</b>{{ $text($item->tongtu_product_name ?: $item->product_title) }}@empty<hr><b>通途SKU：</b>未匹配<br><b>中文品名：</b>未匹配@endforelse</div></td>
-                            <td><div class="pd-block"><b>解决方案：</b>{{ $dispute->outcomeLabel() }}<br><b>状态：</b>{{ $dispute->statusLabel() }}@if($dispute->first_handled_by_name)<hr><b>首次操作人：</b>{{ $dispute->first_handled_by_name }}@endif</div></td>
+                            <td><div class="pd-block"><b>解决方案：</b>{{ $dispute->outcomeLabel() }}<br><b>状态：</b>{{ $dispute->statusLabel() }}@if($dispute->first_handled_by_name)<br><b>首次操作人：</b>{{ $dispute->first_handled_by_name }}@endif@if(filled($latestNote))<hr><b>最新处理备注：</b>{{ $latestNote }}@endif</div></td>
                             <td><button class="btn btn-primary btn-sm" type="button" data-toggle="modal" data-target="#handle-dispute-{{ $dispute->id }}"><i class="fa fa-pencil"></i> 处理 / 查看</button><button class="pd-operation-history-link" type="button" data-toggle="modal" data-target="#dispute-history-{{ $dispute->id }}">{{ $dispute->operations->count() }} 条处理记录</button></td>
                         </tr>
-                    @empty<tr><td colspan="9" class="text-center text-muted">暂无 PayPal 争议记录</td></tr>@endforelse</tbody>
+                    @empty<tr><td colspan="10" class="text-center text-muted">暂无 PayPal 争议记录</td></tr>@endforelse</tbody>
                 </table>
             </div>
+        </div>
+
+        <div class="modal fade" id="paypal-dispute-export-modal" tabindex="-1" role="dialog" aria-labelledby="paypal-dispute-export-title">
+            <div class="modal-dialog" role="document"><form id="paypal-dispute-export-form" class="modal-content" method="post" action="{{ route('logistics.paypal-dispute-analysis.export') }}" data-loading="download">
+                @csrf
+                @foreach($filters as $name => $value)<input type="hidden" name="{{ $name }}" value="{{ $value }}">@endforeach
+                <div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="关闭"><span aria-hidden="true">&times;</span></button><h4 class="modal-title" id="paypal-dispute-export-title"><i class="fa fa-download"></i> 导出 Paypal 争议分析</h4></div>
+                <div class="modal-body">
+                    <div class="alert alert-info logistics-export-notice"><i class="fa fa-info-circle"></i> 导出文件包含当前争议分析展示字段，请仅在受控环境中使用和保管。</div>
+                    <h5 class="logistics-modal-section-title">导出范围</h5>
+                    <label class="logistics-export-scope"><input type="radio" name="scope" value="selected" checked> <strong>导出当前页已选记录</strong><small id="paypal-dispute-selected-count">当前已选择 0 条记录。</small></label>
+                    <label class="logistics-export-scope"><input type="radio" name="scope" value="filtered"> <strong>导出当前筛选结果全部记录</strong><small>当前筛选结果共 {{ $disputes->total() }} 条记录。</small></label>
+                    <div id="paypal-dispute-selected-inputs"></div>
+                    @error('scope')<p class="text-danger m-t-sm"><i class="fa fa-exclamation-circle"></i> {{ $message }}</p>@enderror
+                </div>
+                <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">取消</button><button type="submit" class="btn btn-primary"><i class="fa fa-download"></i> 确认导出</button></div>
+            </form></div>
         </div>
 
         @foreach($disputes as $dispute)
@@ -95,3 +115,41 @@
         @endforeach
     </section>
 @endsection
+
+@push('scripts')
+<script>
+    (function () {
+        var form = document.getElementById('paypal-dispute-export-form');
+        var selectAll = document.getElementById('paypal-dispute-check-all');
+        var selectedInputs = document.getElementById('paypal-dispute-selected-inputs');
+        var selectedCount = document.getElementById('paypal-dispute-selected-count');
+
+        if (!form || !selectAll || !selectedInputs || !selectedCount) return;
+
+        function checks() { return Array.prototype.slice.call(document.querySelectorAll('.paypal-dispute-check')); }
+        function selected() { return checks().filter(function (item) { return item.checked; }); }
+        function refresh() {
+            var selectedItems = selected();
+            selectedCount.textContent = '当前已选择 ' + selectedItems.length + ' 条记录。';
+            selectAll.checked = checks().length > 0 && selectedItems.length === checks().length;
+            selectAll.indeterminate = selectedItems.length > 0 && selectedItems.length < checks().length;
+            form.querySelector('input[name="scope"][value="selected"]').disabled = selectedItems.length === 0;
+            if (selectedItems.length === 0) form.querySelector('input[name="scope"][value="filtered"]').checked = true;
+        }
+        selectAll.addEventListener('change', function () { checks().forEach(function (item) { item.checked = selectAll.checked; }); refresh(); });
+        document.addEventListener('change', function (event) { if (event.target.classList.contains('paypal-dispute-check')) refresh(); });
+        form.addEventListener('submit', function (event) {
+            selectedInputs.innerHTML = '';
+            if (form.querySelector('input[name="scope"]:checked').value !== 'selected') return;
+            var selectedItems = selected();
+            if (selectedItems.length === 0) { event.preventDefault(); refresh(); return; }
+            selectedItems.forEach(function (item) { var input = document.createElement('input'); input.type = 'hidden'; input.name = 'selected_ids[]'; input.value = item.value; selectedInputs.appendChild(input); });
+        });
+        if (window.jQuery) $('#paypal-dispute-export-modal').on('show.bs.modal', refresh);
+        refresh();
+        @if($errors->has('scope'))
+        if (window.jQuery) $('#paypal-dispute-export-modal').modal('show');
+        @endif
+    }());
+</script>
+@endpush
