@@ -76,14 +76,17 @@ class XShoppyOrderSyncService
         $state = FashionLogisticsSyncState::query()->firstOrCreate(['assistant_domain_store_id' => $store->getKey()]);
         $state->forceFill(['status' => 'syncing', 'last_started_at' => now(), 'last_error' => null])->save();
         $historyStart = Carbon::create(2000, 1, 1, 0, 0, 0, 'UTC');
-        $hasIncrementalCursor = ! $full && ! $allHistory && $state->last_cursor_at !== null;
+        $isIncrementalSync = ! $full && ! $allHistory && $state->last_cursor_at !== null;
         $after = $allHistory || (! $full && ! $state->last_cursor_at)
             ? $historyStart
             : (! $full
-                ? $state->last_cursor_at->copy()->subDays(3)
+                // The XShoppy endpoint filters by order creation time rather
+                // than modification/payment time. Re-read a rolling window so
+                // orders created earlier but paid later are collected as well.
+                ? now()->subDays(30)
                 : now()->subDays(max(1, $initialDays)));
-        $before = $hasIncrementalCursor
-            ? $state->last_cursor_at->copy()->addDays(3)
+        $before = $isIncrementalSync
+            ? now()->addDays(3)
             : now()->addMinute();
         $created = 0;
         $updated = 0;

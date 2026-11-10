@@ -8,6 +8,10 @@
     $date = static fn ($value): string => $value ? $value->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') : '';
     $flag = static fn ($value): string => $value === null ? '未处理' : ($value ? '是' : '否');
     $amount = static fn ($value, $currency): string => $value === null || $value === '' ? '—' : number_format((float) $value, 2).' '.($currency ?: '');
+    $messageTime = static function ($value): string {
+        if (blank($value)) return '';
+        try { return \Illuminate\Support\Carbon::parse((string) $value)->timezone('Asia/Shanghai')->format('Y-m-d H:i:s'); } catch (\Throwable) { return (string) $value; }
+    };
     $hasFilters = collect($filters)->except('per_page')->contains(fn ($value) => $value !== '');
     $disputeStatuses = ['OPEN' => '处理中', 'WAITING_FOR_BUYER_RESPONSE' => '等待买家回复', 'WAITING_FOR_SELLER_RESPONSE' => '等待卖家回复', 'UNDER_REVIEW' => '审核中', 'RESOLVED' => '已解决'];
     $disputeTypes = ['INTERNAL' => '索偿', 'EXTERNAL' => '撤销付款', 'ALERT' => '预警', 'INQUIRY' => '查询'];
@@ -24,7 +28,7 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $origin }}/assets/erp/logistics.css?v=20261109-1">
-    <link rel="stylesheet" href="{{ $origin }}/assets/erp/paypal-dispute-analysis.css?v=20261110-10">
+    <link rel="stylesheet" href="{{ $origin }}/assets/erp/paypal-dispute-analysis.css?v=20261110-11">
 @endpush
 
 @section('content')
@@ -37,7 +41,7 @@
                 <form method="get" action="{{ route('logistics.paypal-dispute-analysis.index') }}" class="logistics-filter-form">
                     <input type="hidden" name="per_page" value="{{ $filters['per_page'] }}">
                     <div class="pd-filter-sections">
-                        <div class="pd-filter-section"><h4>基本信息</h4><div class="logistics-filter-grid"><div class="logistics-filter-field"><label>PP账户</label><select class="form-control" name="account_id"><option value="">全部账户</option>@foreach($accounts as $account)<option value="{{ $account->id }}" @selected((string) $filters['account_id'] === (string) $account->id)>{{ $account->account_name }}</option>@endforeach</select></div><div class="logistics-filter-field"><label>事件 / 交易 ID</label><input class="form-control" name="keyword" value="{{ $filters['keyword'] }}" placeholder="事件ID、交易ID、账户"></div><div class="logistics-filter-field"><label>订单关联</label><select class="form-control" name="matched"><option value="">全部</option><option value="yes" @selected($filters['matched'] === 'yes')>已匹配</option><option value="no" @selected($filters['matched'] === 'no')>未匹配</option></select></div></div></div>
+                        <div class="pd-filter-section"><h4>基本信息</h4><div class="logistics-filter-grid"><div class="logistics-filter-field"><label>PP账户</label><select class="form-control" name="account_id"><option value="">全部账户</option>@foreach($accounts as $account)<option value="{{ $account->id }}" @selected((string) $filters['account_id'] === (string) $account->id)>{{ $account->account_name }}</option>@endforeach</select></div><div class="logistics-filter-field"><label>事件 / 交易 ID</label><div class="pd-clearable"><input id="paypal-dispute-keyword" class="form-control" name="keyword" value="{{ $filters['keyword'] }}" placeholder="事件ID、交易ID、账户"><button id="paypal-dispute-keyword-clear" class="pd-clear-input" type="button" aria-label="清空事件或交易 ID" title="清空"><i class="fa fa-times"></i></button></div></div><div class="logistics-filter-field"><label>订单关联</label><select class="form-control" name="matched"><option value="">全部</option><option value="yes" @selected($filters['matched'] === 'yes')>已匹配</option><option value="no" @selected($filters['matched'] === 'no')>未匹配</option></select></div></div></div>
                         <div class="pd-filter-section"><div class="logistics-filter-grid"><div class="logistics-filter-field"><label>客户邮箱</label><input class="form-control" name="customer_email" value="{{ $filters['customer_email'] }}" placeholder="输入客户邮箱"></div></div></div>
                         <div class="pd-filter-section"><h4>金额信息</h4><div class="logistics-filter-grid"><div class="logistics-filter-field pd-amount-range"><label>申诉金额</label><div><input class="form-control" type="number" step="0.01" min="0" name="dispute_amount_min" value="{{ $filters['dispute_amount_min'] }}" placeholder="最低"><span>至</span><input class="form-control" type="number" step="0.01" min="0" name="dispute_amount_max" value="{{ $filters['dispute_amount_max'] }}" placeholder="最高"></div></div><div class="logistics-filter-field pd-amount-range"><label>订单金额</label><div><input class="form-control" type="number" step="0.01" min="0" name="order_amount_min" value="{{ $filters['order_amount_min'] }}" placeholder="最低"><span>至</span><input class="form-control" type="number" step="0.01" min="0" name="order_amount_max" value="{{ $filters['order_amount_max'] }}" placeholder="最高"></div></div><div class="logistics-filter-field pd-amount-range"><label>退款金额（单笔）</label><div><input class="form-control" type="number" step="0.01" min="0" name="refund_amount_min" value="{{ $filters['refund_amount_min'] }}" placeholder="最低"><span>至</span><input class="form-control" type="number" step="0.01" min="0" name="refund_amount_max" value="{{ $filters['refund_amount_max'] }}" placeholder="最高"></div></div><div class="logistics-filter-field"><label>币种</label><select class="form-control" name="currency"><option value="">全部币种</option>@foreach($currencies as $currency)<option value="{{ $currency }}" @selected($filters['currency'] === $currency)>{{ $currency }}</option>@endforeach</select></div></div></div>
                         <div class="pd-filter-section"><h4>订阅、纠纷与处理</h4><div class="logistics-filter-grid"><div class="logistics-filter-field"><label>订阅/定期</label><select class="form-control" name="subscription_type"><option value="">全部</option>@foreach($subscriptionTypes as $subscriptionType)<option value="{{ $subscriptionType }}" @selected($filters['subscription_type'] === $subscriptionType)>{{ $subscriptionType }}</option>@endforeach</select></div><div class="logistics-filter-field"><label>PostUpsell</label><select class="form-control" name="post_upsell"><option value="">全部</option><option value="yes" @selected($filters['post_upsell'] === 'yes')>是</option><option value="no" @selected($filters['post_upsell'] === 'no')>否</option></select></div><div class="logistics-filter-field"><label>是否复购单</label><select class="form-control" name="repurchase"><option value="">全部</option><option value="yes" @selected($filters['repurchase'] === 'yes')>是</option><option value="no" @selected($filters['repurchase'] === 'no')>否</option></select></div><div class="logistics-filter-field"><label>取消订阅</label><select class="form-control" name="subscription_cancelled"><option value="">全部</option><option value="yes" @selected($filters['subscription_cancelled'] === 'yes')>是</option><option value="no" @selected($filters['subscription_cancelled'] === 'no')>否</option></select></div><div class="logistics-filter-field"><label>取消加购</label><select class="form-control" name="add_on_cancelled"><option value="">全部</option><option value="yes" @selected($filters['add_on_cancelled'] === 'yes')>是</option><option value="no" @selected($filters['add_on_cancelled'] === 'no')>否</option></select></div><div class="logistics-filter-field"><label>类型</label><select class="form-control" name="type"><option value="">全部类型</option>@foreach($disputeTypes as $key => $label)<option value="{{ $key }}" @selected($filters['type'] === $key)>{{ $label }}</option>@endforeach</select></div><div class="logistics-filter-field"><label>纠纷理由</label><select class="form-control" name="reason"><option value="">全部理由</option>@foreach($reasonOptions as $key => $label)<option value="{{ $key }}" @selected($filters['reason'] === $key)>{{ $label }}</option>@endforeach</select></div><div class="logistics-filter-field"><label>解决方案</label><select class="form-control" name="outcome"><option value="">全部方案</option>@foreach($outcomeOptions as $key => $label)<option value="{{ $key }}" @selected($filters['outcome'] === $key)>{{ $label }}</option>@endforeach</select></div><div class="logistics-filter-field"><label>状态</label><select class="form-control" name="status"><option value="">全部状态</option>@foreach($disputeStatuses as $key => $label)<option value="{{ $key }}" @selected($filters['status'] === $key)>{{ $label }}</option>@endforeach</select></div><div class="logistics-filter-field"><label>人工处理</label><select class="form-control" name="handled"><option value="">全部</option><option value="yes" @selected($filters['handled'] === 'yes')>已处理</option><option value="no" @selected($filters['handled'] === 'no')>未处理</option></select></div></div></div>
@@ -53,7 +57,7 @@
             <div class="box-header with-border logistics-list-toolbar"><button class="btn btn-default btn-sm" type="button" data-toggle="modal" data-target="#paypal-dispute-export-modal"><i class="fa fa-download"></i> 导出</button><span class="paypal-dispute-count">共 {{ $disputes->total() }} 条</span>@include('portals.logistics.partials.pagination', ['paginator' => $disputes, 'filters' => $filters, 'routeName' => 'logistics.paypal-dispute-analysis.index', 'loadingTarget' => '.paypal-dispute-scroll'])</div>
             <div class="box-body table-responsive no-padding paypal-dispute-scroll">
                 <table class="table table-hover logistics-table paypal-dispute-table">
-                    <thead><tr><th class="pd-dispute-select-cell"><input id="paypal-dispute-check-all" type="checkbox" aria-label="全选当前页"></th><th>基本信息</th><th>订单信息</th><th>金额信息</th><th>订阅信息</th><th>纠纷信息</th><th>物流信息</th><th>商品信息</th><th>处理结果</th><th>操作</th></tr></thead>
+                    <thead><tr><th class="pd-dispute-select-cell"><input id="paypal-dispute-check-all" type="checkbox" aria-label="全选当前页"></th><th>基本信息</th><th>订单信息</th><th>客户留言</th><th>金额信息</th><th>订阅信息</th><th>纠纷信息</th><th>物流信息</th><th>商品信息</th><th>处理结果</th><th>操作</th></tr></thead>
                     <tbody>@forelse($disputes as $dispute)
                         @php
                             $order = $dispute->order;
@@ -66,11 +70,14 @@
                             $items = $order?->items ?? collect();
                             $latestOperation = $dispute->operations->first(fn ($operation) => filled($operation->payload['note'] ?? null));
                             $latestNote = $latestOperation ? ($latestOperation->payload['note'] ?? null) : null;
+                            $rawPayload = json_decode((string) $dispute->raw_payload, true);
+                            $buyerMessages = collect(is_array($rawPayload) ? ($rawPayload['messages'] ?? []) : [])->filter(fn ($message) => is_array($message) && strtoupper(trim((string) ($message['posted_by'] ?? ''))) === 'BUYER' && filled($message['content'] ?? null))->sortBy('time_posted')->values();
                         @endphp
-                        <tr>
+                        <tr class="{{ strtoupper((string) $dispute->status) === 'RESOLVED' ? 'pd-dispute-resolved' : '' }}">
                             <td class="pd-dispute-select-cell"><input class="paypal-dispute-check" type="checkbox" value="{{ $dispute->id }}" aria-label="选择事件 {{ $dispute->dispute_id }}"></td>
-                            <td><div class="pd-block"><b>PP账户：</b>{{ $text($dispute->account?->account_name) }}<br><b>事件ID：</b><span class="pd-mono">{{ $text($dispute->dispute_id) }}</span><br><b>交易ID：</b><span class="pd-mono">{{ $text($dispute->disputed_transaction_id) }}</span></div></td>
+                            <td><div class="pd-block"><b>PP账户：</b>{{ $text($dispute->account?->account_name) }}<br><b>事件ID：</b><span class="pd-mono">{{ $text($dispute->dispute_id) }}</span><button class="pd-copy-button" type="button" data-copy-value="{{ $dispute->dispute_id }}" title="复制事件 ID" aria-label="复制事件 ID"><i class="fa fa-copy"></i></button><br><b>交易ID：</b><span class="pd-mono">{{ $text($dispute->disputed_transaction_id) }}</span><button class="pd-copy-button" type="button" data-copy-value="{{ $dispute->disputed_transaction_id }}" title="复制交易 ID" aria-label="复制交易 ID"><i class="fa fa-copy"></i></button></div></td>
                             <td><div class="pd-block"><b>客户邮箱：</b>{{ $text($order?->buyer_email ?: '未匹配') }}<br><b>发起日期：</b>{{ $date($dispute->dispute_created_at) ?: '—' }}<br><b>下单日期：</b>{{ $date($order?->order_created_at) ?: '未匹配' }}</div></td>
+                            <td class="pd-customer-message-cell"><div class="pd-customer-messages">@forelse($buyerMessages as $message)<div class="pd-customer-message"><div class="pd-customer-message-head"><b>客户留言 {{ $loop->iteration }}</b><span>{{ $messageTime($message['time_posted'] ?? null) }}</span></div><div class="pd-customer-message-content">{{ $message['content'] }}</div></div>@empty<span class="text-muted">暂无客户留言</span>@endforelse</div></td>
                             <td><div class="pd-block"><b>申诉金额：</b>{{ $amount($dispute->original_amount ?? $dispute->dispute_amount_usd, $dispute->currency_code) }}<br><b>订单金额：</b>{{ $amount($orderAmount, $orderCurrency) }}<br><b>退款金额：</b>{{ $refunds->isEmpty() ? '—' : $amount($refundAmount, $refundCurrency) }}<br><b>纠纷费：</b>—</div></td>
                             <td><div class="pd-block"><b>订阅/定期：</b>{{ $text($order?->subscription_type ?: '未匹配') }}<br><b>PostUpsell：</b>{{ $order ? ($order->is_add_on === '已加购' ? '是' : '否') : '未匹配' }}<br><b>是否复购单：</b>{{ $order ? (filled($order->subscription_origin_order_id) ? '是' : '否') : '未匹配' }}<br><b>取消订阅：</b><span class="pd-manual">{{ $flag($dispute->subscription_cancelled) }}</span><br><b>取消加购：</b><span class="pd-manual">{{ $flag($dispute->add_on_cancelled) }}</span></div></td>
                             <td><div class="pd-block"><b>类型：</b>{{ $dispute->typeLabel() }}<br><b>纠纷理由：</b>{{ $dispute->reasonLabel() }}</div></td>
@@ -83,12 +90,12 @@
                                     <br><b>首次操作人：</b>{{ $dispute->first_handled_by_name }}
                                 @endif
                                 @if(filled($latestNote))
-                                    <hr><b>最新处理备注：</b>{{ $latestNote }}
+                                    <hr><b>最新处理备注：</b><div class="pd-latest-note">{{ $latestNote }}</div>
                                 @endif
                             </div></td>
                             <td><button class="btn btn-primary btn-sm" type="button" data-toggle="modal" data-target="#handle-dispute-{{ $dispute->id }}"><i class="fa fa-pencil"></i> 处理 / 查看</button><button class="pd-operation-history-link" type="button" data-toggle="modal" data-target="#dispute-history-{{ $dispute->id }}">{{ $dispute->operations->count() }} 条处理记录</button></td>
                         </tr>
-                    @empty<tr><td colspan="10" class="text-center text-muted">暂无 PayPal 争议记录</td></tr>@endforelse</tbody>
+                    @empty<tr><td colspan="11" class="text-center text-muted">暂无 PayPal 争议记录</td></tr>@endforelse</tbody>
                 </table>
             </div>
         </div>
@@ -113,7 +120,11 @@
         @foreach($disputes as $dispute)
             <div class="modal fade" id="handle-dispute-{{ $dispute->id }}" tabindex="-1"><div class="modal-dialog"><form class="modal-content" method="post" action="{{ route('logistics.paypal-dispute-analysis.handle', $dispute) }}">@csrf
                 <div class="modal-header"><button type="button" class="close" data-dismiss="modal">×</button><h4 class="modal-title">处理争议：{{ $dispute->dispute_id }}</h4></div>
-                <div class="modal-body"><input type="hidden" name="return_to" value="{{ request()->fullUrl() }}"><p class="text-muted">首次保存人工处理信息时，系统自动写入首次处理日期和操作人，之后不会覆盖。</p><div class="form-group"><label>是否取消订阅</label><select class="form-control" name="subscription_cancelled"><option value="">不修改</option><option value="yes" @selected($dispute->subscription_cancelled === true)>是</option><option value="no" @selected($dispute->subscription_cancelled === false)>否</option></select></div><div class="form-group"><label>是否取消加购</label><select class="form-control" name="add_on_cancelled"><option value="">不修改</option><option value="yes" @selected($dispute->add_on_cancelled === true)>是</option><option value="no" @selected($dispute->add_on_cancelled === false)>否</option></select></div><div class="form-group"><label>处理备注</label><textarea class="form-control" rows="3" name="note" maxlength="1000" placeholder="可选，保存后写入处理记录"></textarea></div></div>
+                @php
+                    $latestOperation = $dispute->operations->first(fn ($operation) => filled($operation->payload['note'] ?? null));
+                    $latestNote = $latestOperation ? ($latestOperation->payload['note'] ?? '') : '';
+                @endphp
+                <div class="modal-body"><input type="hidden" name="return_to" value="{{ request()->fullUrl() }}"><p class="text-muted">首次保存人工处理信息时，系统自动写入首次处理日期和操作人，之后不会覆盖。</p><div class="form-group"><label>是否取消订阅</label><select class="form-control" name="subscription_cancelled"><option value="">不修改</option><option value="yes" @selected($dispute->subscription_cancelled === true)>是</option><option value="no" @selected($dispute->subscription_cancelled === false)>否</option></select></div><div class="form-group"><label>是否取消加购</label><select class="form-control" name="add_on_cancelled"><option value="">不修改</option><option value="yes" @selected($dispute->add_on_cancelled === true)>是</option><option value="no" @selected($dispute->add_on_cancelled === false)>否</option></select></div><div class="form-group"><label>处理备注</label><textarea class="form-control" rows="3" name="note" maxlength="1000" placeholder="可选，保存后写入处理记录">{{ $latestNote }}</textarea></div></div>
                 <div class="modal-footer"><button class="btn btn-default" type="button" data-dismiss="modal">关闭</button><button class="btn btn-primary" type="submit">保存处理信息</button></div>
             </form></div></div>
             <div class="modal fade" id="dispute-history-{{ $dispute->id }}" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
@@ -132,6 +143,38 @@
         var selectAll = document.getElementById('paypal-dispute-check-all');
         var selectedInputs = document.getElementById('paypal-dispute-selected-inputs');
         var selectedCount = document.getElementById('paypal-dispute-selected-count');
+        var keyword = document.getElementById('paypal-dispute-keyword');
+        var clearKeyword = document.getElementById('paypal-dispute-keyword-clear');
+
+        if (keyword && clearKeyword) {
+            var refreshKeywordClear = function () { clearKeyword.classList.toggle('is-visible', keyword.value.length > 0); };
+            keyword.addEventListener('input', refreshKeywordClear);
+            clearKeyword.addEventListener('click', function () { keyword.value = ''; keyword.focus(); refreshKeywordClear(); });
+            refreshKeywordClear();
+        }
+
+        function copyText(value) {
+            if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(value);
+            return new Promise(function (resolve, reject) {
+                var helper = document.createElement('textarea');
+                helper.value = value; helper.setAttribute('readonly', ''); helper.style.position = 'fixed'; helper.style.opacity = '0';
+                document.body.appendChild(helper); helper.select();
+                try { document.execCommand('copy') ? resolve() : reject(); } catch (error) { reject(error); }
+                document.body.removeChild(helper);
+            });
+        }
+        document.addEventListener('click', function (event) {
+            var button = event.target.closest('.pd-copy-button');
+            if (!button) return;
+            var value = button.getAttribute('data-copy-value') || '';
+            if (!value) return;
+            var icon = button.querySelector('.fa');
+            copyText(value).then(function () {
+                button.classList.add('is-copied'); button.title = '已复制';
+                if (icon) { icon.classList.remove('fa-copy'); icon.classList.add('fa-check'); }
+                window.setTimeout(function () { button.classList.remove('is-copied'); button.title = button.getAttribute('aria-label'); if (icon) { icon.classList.remove('fa-check'); icon.classList.add('fa-copy'); } }, 1200);
+            }).catch(function () { button.title = '复制失败，请手动复制'; });
+        });
 
         if (!form || !selectAll || !selectedInputs || !selectedCount) return;
 

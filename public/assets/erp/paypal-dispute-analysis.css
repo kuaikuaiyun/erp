@@ -1,4 +1,4 @@
-.paypal-dispute-table { min-width: 2750px; margin-bottom: 0; font-size: 14px; }
+.paypal-dispute-table { min-width: 3320px; margin-bottom: 0; font-size: 14px; }
 .paypal-dispute-table th { padding: 10px 8px !important; background: #eaf0f7 !important; color: #314b68 !important; border-bottom: 1px solid #c5d1dd !important; font-size: 14px; font-weight: 700 !important; text-align: center; vertical-align: middle !important; white-space: nowrap; }
 .paypal-dispute-table td { min-width: 170px; padding: 10px 12px !important; border-color: #d2dce6 !important; vertical-align: middle !important; white-space: nowrap; }
 .paypal-dispute-table td, .paypal-dispute-table th { border-right: 1px solid #ced9e3; }
@@ -6,21 +6,35 @@
 .paypal-dispute-table .pd-dispute-select-cell { min-width: 46px; width: 46px; padding: 10px 6px !important; text-align: center; }
 .paypal-dispute-table td:nth-child(2) { min-width: 230px; width: 230px; }
 .paypal-dispute-table td:nth-child(3) { min-width: 270px; width: 270px; }
-.paypal-dispute-table td:nth-child(4) { min-width: 205px; width: 205px; }
-.paypal-dispute-table td:nth-child(5) { min-width: 275px; width: 275px; }
-.paypal-dispute-table td:nth-child(6) { min-width: 245px; width: 245px; }
-.paypal-dispute-table td:nth-child(7) { min-width: 285px; width: 285px; }
-.paypal-dispute-table td:nth-child(8) { min-width: 465px; width: 465px; }
-.paypal-dispute-table td:nth-child(9) { min-width: 245px; width: 245px; }
+.paypal-dispute-table td:nth-child(4) { min-width: 430px; width: 430px; white-space: normal; }
+.paypal-dispute-table td:nth-child(5) { min-width: 205px; width: 205px; }
+.paypal-dispute-table td:nth-child(6) { min-width: 275px; width: 275px; }
+.paypal-dispute-table td:nth-child(7) { min-width: 245px; width: 245px; }
+.paypal-dispute-table td:nth-child(8) { min-width: 285px; width: 285px; }
+.paypal-dispute-table td:nth-child(9) { min-width: 465px; width: 465px; }
+.paypal-dispute-table td:nth-child(10) { min-width: 300px; width: 300px; white-space: normal; }
 .paypal-dispute-table td:last-child, .paypal-dispute-table th:last-child { position: sticky; right: 0; min-width: 145px; width: 145px; box-shadow: -3px 0 8px rgba(45, 69, 94, .08); }
 .paypal-dispute-table td:last-child { z-index: 2; background: #fff; }
 .paypal-dispute-table tbody tr:nth-child(even) > td:last-child { background: #f8fafc; }
 .paypal-dispute-table.table-hover tbody tr:hover > td:last-child { background: #edf5fb !important; }
+.paypal-dispute-table tbody tr.pd-dispute-resolved > td { background: #eef8f1 !important; border-color: #cfe4d5 !important; }
+.paypal-dispute-table tbody tr.pd-dispute-resolved > td:last-child { background: #eef8f1 !important; }
+.paypal-dispute-table.table-hover tbody tr.pd-dispute-resolved:hover > td { background: #e4f3e9 !important; }
+.paypal-dispute-table.table-hover tbody tr.pd-dispute-resolved:hover > td:last-child { background: #e4f3e9 !important; }
 .pd-block { color: #526f8b; font-size: 13px; line-height: 21px; white-space: nowrap; }
 .pd-block b { color: #365875; font-size: 13px; font-weight: 800; white-space: nowrap; }
 .pd-block hr { margin: 5px 0 4px; border-top: 1px dashed #dce5ee; }
 .pd-mono { color: #2f73ae; font-family: SFMono-Regular, Consolas, 'Liberation Mono', monospace; font-size: 12px; white-space: nowrap; overflow-wrap: normal; }
+.pd-copy-button { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin-left: 4px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #5584a9; font-size: 12px; vertical-align: middle; }
+.pd-copy-button:hover, .pd-copy-button:focus { background: #dcebf6; color: #1f6c9f; outline: 0; }
 .pd-manual { color: #b16c18; font-weight: 800; }
+.pd-latest-note { margin-top: 3px; color: #526f8b; line-height: 1.58; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pd-customer-messages { min-width: 0; }
+.pd-customer-message + .pd-customer-message { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #d4e0e9; }
+.pd-customer-message-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; color: #4c6f8a; font-size: 12px; line-height: 1.4; }
+.pd-customer-message-head b { color: #365875; font-size: 13px; }
+.pd-customer-message-head span { flex: 0 0 auto; color: #7b92a5; font-size: 11px; white-space: nowrap; }
+.pd-customer-message-content { margin-top: 5px; color: #526f8b; font-size: 13px; line-height: 1.58; white-space: pre-wrap; overflow-wrap: anywhere; }
 .pd-operation-history-link { display: block; margin: 4px 0 0; padding: 0; border: 0; background: transparent; color: #6b8298; font-size: 11px; line-height: 16px; text-align: left; }
 .pd-operation-history-link:hover, .pd-operation-history-link:focus { color: #2d77ad; text-decoration: underline; outline: 0; }
 .pd-history-modal-body { max-height: min(520px, calc(100vh - 220px)); overflow: auto; padding: 16px 18px; }
@@ -36,6 +50,11 @@
 .pd-filter-section h4 { display: none; }
 .pd-filter-section .logistics-filter-field { display: grid; grid-template-columns: 118px minmax(0, 1fr); align-items: center; gap: 10px; min-width: 0; margin: 0; }
 .pd-filter-section .logistics-filter-field label { margin: 0; color: #495b79; font-size: inherit; font-weight: 500; text-align: right; white-space: nowrap; }
+.pd-clearable { position: relative; min-width: 0; }
+.pd-clearable .form-control { padding-right: 32px; }
+.pd-clear-input { position: absolute; top: 50%; right: 4px; display: none; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%; transform: translateY(-50%); background: transparent; color: #8192a2; }
+.pd-clear-input.is-visible { display: inline-flex; }
+.pd-clear-input:hover, .pd-clear-input:focus { background: #e8eef3; color: #4e6f89; outline: 0; }
 .pd-filter-section .logistics-date-range > div, .pd-filter-section .pd-amount-range > div { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; }
 .pd-filter-section .logistics-date-range .form-control, .pd-filter-section .pd-amount-range .form-control { min-width: 0; }
 .pd-filter-section .logistics-date-range span, .pd-filter-section .pd-amount-range span { color: #708398; flex: 0 0 auto; }
