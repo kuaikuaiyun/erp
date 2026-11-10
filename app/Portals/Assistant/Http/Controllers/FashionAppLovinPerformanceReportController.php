@@ -3,6 +3,8 @@
 namespace App\Portals\Assistant\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\AppLovinAccountStoreBinding;
+use App\Models\AppLovinSpendScreenshot;
 use App\Models\AssistantDomainStore;
 use App\Models\Department;
 use App\Models\FashionAdvertisingReport;
@@ -59,38 +61,44 @@ class FashionAppLovinPerformanceReportController extends Controller
             ->when($filters['operator'] ?? null, fn ($query, $name) => $query->where('submitter_name', 'like', '%'.$name.'%'))
             ->orderBy('report_date')->get();
 
-        $storeIds = $reports->flatMap->adSpendEntries->pluck('assistant_domain_store_id')->filter()->map(fn ($id) => (int) $id)->unique()->values();
+        $accountBindings = AppLovinAccountStoreBinding::query()->pluck('assistant_domain_store_id', 'account_key');
+        $storeIds = $reports->flatMap->adSpendEntries->pluck('assistant_domain_store_id')->merge($accountBindings->values())
+            ->filter()->map(fn ($id) => (int) $id)->unique()->values();
         $stores = AssistantDomainStore::query()->whereIn('id', $storeIds)->get(['id', 'domain', 'site_builder'])->keyBy('id');
-        $dailyRows = $reports->flatMap(function (FashionAdvertisingReport $report) use ($stores): array {
-            return $report->adSpendEntries->filter(fn ($entry) => (int) $entry->assistant_domain_store_id > 0)
-                ->groupBy('assistant_domain_store_id')->map(function ($entries, $storeId) use ($report, $stores): ?array {
-                    $store = $stores->get((int) $storeId);
-                    if (! $store) {
-                        return null;
-                    }
-                    $from = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 00:00:00', '-08:00')->utc();
-                    $to = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 23:59:59', '-08:00')->utc();
-                    $platform = mb_strtolower(trim((string) $store->site_builder)) === 'shopline' ? 'shopline' : 'xshoppy';
-                    $metrics = FashionLogisticsOrder::query()->where('assistant_domain_store_id', $storeId)->where('source_platform', $platform)
-                        ->whereBetween('order_created_at', [$from, $to])->selectRaw('COUNT(*) order_count, COALESCE(SUM(total_amount),0) revenue')->first();
-                    $orders = (int) ($metrics?->order_count ?? 0);
-                    $revenue = round((float) ($metrics?->revenue ?? 0), 2);
-                    $spend = round((float) $entries->sum('actual_spend_usd'), 2);
+        $dailyRows = $reports->flatMap(function (FashionAdvertisingReport $report) use ($stores, $accountBindings): array {
+            return $report->adSpendEntries->map(function ($entry) use ($report, $accountBindings) {
+                $accountKey = AppLovinSpendScreenshot::accountKey((int) $report->submitter_id, (string) $entry->agency, (string) $entry->media, (string) $entry->account_name, (string) $entry->account_number);
+                $storeId = (int) ($entry->assistant_domain_store_id ?: ($accountBindings->get($accountKey) ?? 0));
+                $entry->setAttribute('resolved_store_id', $storeId);
+                $entry->setAttribute('resolved_group_key', $storeId > 0 ? 'store:'.$storeId : 'account:'.$accountKey);
 
-                    return [
-                        'date' => $report->report_date->format('Y-m-d'),
-                        'department' => $report->submitter?->departments?->pluck('name')->filter()->unique()->implode('、') ?: '—',
-                        'operator_id' => (int) $report->submitter_id,
-                        'operator' => (string) $report->submitter_name,
-                        'store_id' => (int) $storeId,
-                        'store_domain' => (string) ($entries->pluck('store_domain')->filter()->first() ?: $store->domain),
-                        'site_builder' => $platform === 'shopline' ? 'Shopline' : 'XShoppy',
-                        'orders' => $orders,
-                        'revenue' => $revenue,
-                        'ad_spend' => $spend,
-                        'roi' => $spend > 0 ? $revenue / $spend : null,
-                    ];
-                })->filter()->values()->all();
+                return $entry;
+            })->groupBy('resolved_group_key')->map(function ($entries) use ($report, $stores): array {
+                $storeId = (int) $entries->first()->resolved_store_id;
+                $store = $stores->get((int) $storeId);
+                $from = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 00:00:00', '-08:00')->utc();
+                $to = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 23:59:59', '-08:00')->utc();
+                $platform = $store && mb_strtolower(trim((string) $store->site_builder)) === 'shopline' ? 'shopline' : 'xshoppy';
+                $metrics = $storeId > 0 ? FashionLogisticsOrder::query()->where('assistant_domain_store_id', $storeId)->where('source_platform', $platform)
+                    ->whereBetween('order_created_at', [$from, $to])->selectRaw('COUNT(*) order_count, COALESCE(SUM(total_amount),0) revenue')->first() : null;
+                $orders = (int) ($metrics?->order_count ?? 0);
+                $revenue = round((float) ($metrics?->revenue ?? 0), 2);
+                $spend = round((float) $entries->sum('actual_spend_usd'), 2);
+
+                return [
+                    'date' => $report->report_date->format('Y-m-d'),
+                    'department' => $report->submitter?->departments?->pluck('name')->filter()->unique()->implode('、') ?: '—',
+                    'operator_id' => (int) $report->submitter_id,
+                    'operator' => (string) $report->submitter_name,
+                    'store_id' => (int) $storeId,
+                    'store_domain' => (string) ($entries->pluck('store_domain')->filter()->first() ?: $store?->domain ?: '未绑定店铺'),
+                    'site_builder' => $storeId > 0 ? ($platform === 'shopline' ? 'Shopline' : 'XShoppy') : '未绑定',
+                    'orders' => $orders,
+                    'revenue' => $revenue,
+                    'ad_spend' => $spend,
+                    'roi' => $spend > 0 ? $revenue / $spend : null,
+                ];
+            })->filter()->values()->all();
         })->values();
 
         $rows = $dailyRows->groupBy(fn (array $row) => $row['operator_id'].'|'.$row['store_id'])
@@ -104,7 +112,7 @@ class FashionAppLovinPerformanceReportController extends Controller
                     'orders' => $orders, 'revenue' => $revenue, 'ad_spend' => $spend, 'roi' => $spend > 0 ? $revenue / $spend : null,
                     'details' => $group->sortByDesc('date')->values()->all()];
             })->sortByDesc('ad_spend')->values();
-        $totals = ['stores' => $rows->pluck('store_id')->unique()->count(), 'orders' => (int) $rows->sum('orders'),
+        $totals = ['stores' => $rows->pluck('store_id')->filter(fn ($id) => (int) $id > 0)->unique()->count(), 'orders' => (int) $rows->sum('orders'),
             'revenue' => round((float) $rows->sum('revenue'), 2), 'ad_spend' => round((float) $rows->sum('ad_spend'), 2)];
         $totals['roi'] = $totals['ad_spend'] > 0 ? $totals['revenue'] / $totals['ad_spend'] : null;
         $page = max(1, (int) $request->query('page', 1));

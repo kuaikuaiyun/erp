@@ -51,8 +51,9 @@ class AppLovinPerformanceReportController extends Controller
             $visibleIds === [] ? $query->whereRaw('1=0') : $query->whereIn('operation_department_id', $visibleIds);
         }
         $query->when($filters['department_id'] ?? null, fn ($q, $id) => $q->where('operation_department_id', $id))
-            ->when($filters['operator'] ?? null, fn ($q, $name) => $q->where('operator_name', 'like', '%'.$name.'%'))
-            ->when($dateFrom !== '', fn ($q) => $q->whereDate('report_date', '>=', $dateFrom))
+            ->when($filters['operator'] ?? null, fn ($q, $name) => $q->where('operator_name', 'like', '%'.$name.'%'));
+        $accountSpendReports = (clone $query)->get();
+        $query->when($dateFrom !== '', fn ($q) => $q->whereDate('report_date', '>=', $dateFrom))
             ->when($dateTo !== '', fn ($q) => $q->whereDate('report_date', '<=', $dateTo));
 
         $reports = $query->orderBy('report_date')->orderBy('operator_name')->get();
@@ -61,7 +62,7 @@ class AppLovinPerformanceReportController extends Controller
             $reports->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])->pluck('assistant_domain_store_id'))
         )->filter()->map(fn ($id) => (int) $id)->unique()->values();
         $stores = AssistantDomainStore::query()->whereIn('id', $storeIds)->get(['id', 'domain'])->keyBy('id');
-        $accountSpendTotals = $reports->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])
+        $accountSpendTotals = $accountSpendReports->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])
             ->filter(fn (array $ad) => mb_strtolower(trim((string) ($ad['media_source'] ?? ''))) === 'applovin')
             ->map(fn (array $ad): array => [
                 'account_key' => AppLovinSpendScreenshot::accountKey(
@@ -75,7 +76,7 @@ class AppLovinPerformanceReportController extends Controller
             ]))->groupBy('account_key')->map(fn ($items) => (float) $items->sum('spend'));
         $giftScreenshots = AppLovinSpendScreenshot::query()->whereIn('account_key', $accountSpendTotals->keys())->get()->keyBy('account_key');
 
-        $dailyRows = $reports->flatMap(function (OperationReport $report) use ($bindings, $stores): array {
+        $dailyRows = $reports->flatMap(function (OperationReport $report) use ($bindings, $stores, $accountSpendTotals): array {
             $ads = collect($report->advertising_rows ?: [])
                 ->filter(fn (array $ad) => mb_strtolower(trim((string) ($ad['media_source'] ?? ''))) === 'applovin')
                 ->map(function (array $ad) use ($report, $bindings, $stores): ?array {
@@ -102,7 +103,7 @@ class AppLovinPerformanceReportController extends Controller
                 ->filter()
                 ->groupBy('resolved_store_id');
 
-            return $ads->map(function ($storeAds) use ($report): array {
+            return $ads->map(function ($storeAds) use ($report, $accountSpendTotals): array {
                 $domain = trim((string) $storeAds->first()['resolved_store_domain']);
                 $domainKey = mb_strtolower($domain);
                 $metrics = collect($report->metric_rows ?: [])->filter(fn (array $metric) => mb_strtolower(trim((string) ($metric['shop_domain'] ?? ''))) === $domainKey
@@ -113,6 +114,7 @@ class AppLovinPerformanceReportController extends Controller
                 $subscriptionOrders = (int) $metrics->sum('first_subscription_orders');
                 $subscriptionRevenue = round((float) $metrics->sum('first_subscription_revenue'), 2);
                 $spend = round((float) $storeAds->sum('actual_spend'), 2);
+                $accountKeys = $storeAds->pluck('account_key')->filter()->unique()->values();
 
                 return [
                     'date' => $report->report_date->format('Y-m-d'),
@@ -123,15 +125,18 @@ class AppLovinPerformanceReportController extends Controller
                     'store_id' => (int) $storeAds->first()['resolved_store_id'],
                     'store_domain' => $domain,
                     'account_names' => $storeAds->pluck('account_name')->map(fn ($name) => trim((string) $name))->filter()->unique()->values()->all(),
-                    'account_keys' => $storeAds->pluck('account_key')->filter()->unique()->values()->all(),
+                    'account_numbers' => $storeAds->pluck('account_number')->map(fn ($number) => trim((string) $number))->filter()->unique()->values()->all(),
+                    'account_keys' => $accountKeys->all(),
                     'agency_names' => $storeAds->pluck('agency')->map(fn ($agency) => trim((string) $agency))->filter()->unique()->values()->all(),
                     'first_orders' => $orders,
                     'first_revenue' => $revenue,
                     'first_subscription_orders' => $subscriptionOrders,
                     'first_subscription_revenue' => $subscriptionRevenue,
+                    'subscription_rate' => $orders > 0 ? $subscriptionOrders / $orders : null,
                     'average_order_value' => $orders > 0 ? $revenue / $orders : null,
                     'ad_spend' => $spend,
                     'roi' => $spend > 0 ? $revenue / $spend : null,
+                    'total_consumption' => round((float) $accountKeys->sum(fn ($key) => (float) ($accountSpendTotals->get($key) ?? 0)), 2),
                 ];
             })->values()->all();
         })->values();
@@ -150,6 +155,7 @@ class AppLovinPerformanceReportController extends Controller
                 $giftStatus = $giftEligibleKeys->isEmpty()
                     ? 'not_eligible'
                     : ($giftEligibleKeys->contains(fn ($key) => $giftScreenshots->has($key)) ? 'available' : 'pending_upload');
+                $accountKeys = $group->pluck('account_keys')->flatten()->filter()->unique()->values();
 
                 return [
                     'department' => $first['department'],
@@ -157,17 +163,22 @@ class AppLovinPerformanceReportController extends Controller
                     'store_domain' => $first['store_domain'],
                     'date_label' => $group->min('date') === $group->max('date') ? $group->min('date') : $group->min('date').' 至 '.$group->max('date'),
                     'account_names' => $group->pluck('account_names')->flatten()->filter()->unique()->implode('、'),
+                    'account_numbers' => $group->pluck('account_numbers')->flatten()->filter()->unique()->implode('、'),
+                    'account_keys' => $accountKeys->all(),
                     'agency_names' => $group->pluck('agency_names')->flatten()->filter()->unique()->implode('、'),
                     'first_orders' => $orders,
                     'first_revenue' => $revenue,
                     'first_subscription_orders' => $subscriptionOrders,
                     'first_subscription_revenue' => $subscriptionRevenue,
+                    'subscription_rate' => $orders > 0 ? $subscriptionOrders / $orders : null,
                     'average_order_value' => $orders > 0 ? $revenue / $orders : null,
                     'ad_spend' => $spend,
                     'roi' => $spend > 0 ? $revenue / $spend : null,
+                    'total_consumption' => round((float) $accountKeys->sum(fn ($key) => (float) ($accountSpendTotals->get($key) ?? 0)), 2),
                     'gift_status' => $giftStatus,
                     'details' => $group->sortByDesc('date')->map(function (array $detail): array {
                         $detail['account_names'] = implode('、', $detail['account_names']);
+                        $detail['account_numbers'] = implode('、', $detail['account_numbers']);
                         $detail['agency_names'] = implode('、', $detail['agency_names']);
 
                         return $detail;
@@ -186,7 +197,9 @@ class AppLovinPerformanceReportController extends Controller
             'ad_spend' => round((float) $rows->sum('ad_spend'), 2),
         ];
         $totals['average_order_value'] = $totals['orders'] > 0 ? $totals['revenue'] / $totals['orders'] : null;
+        $totals['subscription_rate'] = $totals['orders'] > 0 ? $totals['subscription_orders'] / $totals['orders'] : null;
         $totals['roi'] = $totals['ad_spend'] > 0 ? $totals['revenue'] / $totals['ad_spend'] : null;
+        $totals['total_consumption'] = round((float) $rows->pluck('account_keys')->flatten()->filter()->unique()->sum(fn ($key) => (float) ($accountSpendTotals->get($key) ?? 0)), 2);
         $page = max(1, (int) $request->query('page', 1));
         $paginator = new LengthAwarePaginator($rows->forPage($page, 30)->values(), $rows->count(), 30, $page, ['path' => $request->url(), 'query' => $request->query()]);
 
