@@ -219,6 +219,8 @@ Route::get('/operation/daily-submissions/applovin-spends/screenshots/{screenshot
     ->whereNumber('screenshot')->name('operation.applovin-spends.screenshot');
 Route::get('/assistant/daily-submissions/applovin-spends', [AppLovinSpendReviewController::class, 'index'])
     ->name('assistant.applovin-spends.index');
+Route::post('/assistant/daily-submissions/applovin-spends/store-binding', [AppLovinSpendReviewController::class, 'bindStore'])
+    ->name('assistant.applovin-spends.store-binding');
 Route::get('/assistant/daily-submissions/applovin-spends/screenshots/{screenshot}', [AppLovinSpendReviewController::class, 'screenshot'])
     ->whereNumber('screenshot')->name('assistant.applovin-spends.screenshot');
 Route::get('/operation/reports/order-details', [OperationReportController::class, 'orderDetails'])->name('operation.reports.order-details');

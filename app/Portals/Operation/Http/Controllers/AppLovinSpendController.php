@@ -110,10 +110,12 @@ class AppLovinSpendController extends Controller
         return $reports->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])
             ->filter(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? ''))) === 'applovin')
             ->map(fn (array $row) => [...$row, 'report_id' => $report->getKey(), 'date' => $report->report_date->format('Y-m-d'), 'operator_user_id' => (int)$report->operator_user_id, 'operation_department_id' => $report->operation_department_id, 'operator_name' => $report->operator_name, 'department' => $report->operation_department_name]))
-            ->groupBy(fn (array $row) => implode('|', [$row['operator_name'], $row['agency'] ?? '', $row['account_name'] ?? '', $row['account_number'] ?? '']))
+            ->groupBy(fn (array $row) => implode('|', [(int)($row['operator_user_id']??0), mb_strtolower(trim((string)($row['agency']??''))), trim((string)($row['account_number']??''))]))
             ->map(function ($rows): array {
                 $first = $rows->first();
-                $agency=(string)($first['agency']??''); $media=(string)($first['media_source']??''); $name=(string)($first['account_name']??''); $number=(string)($first['account_number']??'');
+                $agency=(string)($first['agency']??''); $media=(string)($first['media_source']??''); $number=trim((string)($first['account_number']??''));
+                $names=$rows->pluck('account_name')->map(fn($name)=>trim((string)$name))->filter()->values();
+                $name=$names->filter(fn($candidate)=>$candidate!==$number&&!ctype_digit($candidate))->last() ?: $names->last() ?: $number;
                 return ['account_key'=>AppLovinSpendScreenshot::accountKey((int)$first['operator_user_id'],$agency,$media,$name,$number),'operator_user_id'=>(int)$first['operator_user_id'],'operation_department_id'=>$first['operation_department_id'],'operator_name' => $first['operator_name'], 'department' => $first['department'], 'agency' => $agency, 'media' => $media, 'account_name' => $name, 'account_number' => $number,
                     'total' => (float) $rows->sum('actual_spend'), 'details' => $rows->values()];
             })->sortByDesc('total')->values();

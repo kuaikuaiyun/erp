@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class FashionAdSpendEntry extends Model
 {
-    protected $fillable = ['agency', 'media', 'account_name', 'account_number', 'book_spend_usd', 'settlement_coefficient', 'actual_spend_usd', 'screenshot_path', 'remark'];
+    protected $fillable = ['agency', 'media', 'account_name', 'account_number', 'assistant_domain_store_id', 'store_domain', 'book_spend_usd', 'settlement_coefficient', 'actual_spend_usd', 'screenshot_path', 'remark'];
 
     protected function casts(): array
     {

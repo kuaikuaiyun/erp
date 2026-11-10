@@ -7,6 +7,8 @@ use App\Models\AdminUser;
 use App\Models\AssistantAdvertisingMedia;
 use App\Models\AssistantAdvertisingAgency;
 use App\Models\AssistantDomainStore;
+use App\Models\AppLovinAccountStoreBinding;
+use App\Models\AppLovinSpendScreenshot;
 use App\Models\Department;
 use App\Models\OperationReport;
 use App\Portal\Http\Controllers\PortalEntryController;
@@ -490,6 +492,7 @@ class OperationReportController extends Controller
             'advertisingAgencyMedia' => AssistantAdvertisingAgency::enabledMediaNames($advertisingAssistantDepartmentIds),
             'advertisingAgencyNames' => AssistantAdvertisingAgency::enabledNames($advertisingAssistantDepartmentIds),
             'advertisingAgencyGroups' => $this->advertisingAgencyGroups($advertisingAssistantDepartmentIds),
+            'operatorStores' => AssistantDomainStore::query()->where('owner_user_id', $operatorId)->whereNotNull('domain')->where('domain', '!=', '')->orderBy('domain')->get(['id','domain','shop_name']),
             'isBoss' => $isBoss, 'canReview' => $canReview,
             'canEditReport' => true, 'history' => $history,
             'canViewMissingGuideSkus' => false,
@@ -726,6 +729,7 @@ class OperationReportController extends Controller
             'ads.*.agency' => ['required', 'string', Rule::in(array_keys($agencyOptions))],
             'ads.*.account_name' => ['required', 'string', 'max:191'],
             'ads.*.account_number' => ['required', 'string', 'max:191'],
+            'ads.*.assistant_domain_store_id' => ['nullable', 'integer'],
             'ads.*.book_spend' => ['required', 'numeric', 'min:0'],
             'ads.*.settlement_coefficient' => ['required', 'numeric', 'min:0'],
             'ads.*.existing_screenshot' => ['nullable', 'string', 'max:500', 'regex:/^operation-reports\/ads\/[A-Za-z0-9._-]+$/'],
@@ -767,11 +771,18 @@ class OperationReportController extends Controller
             if ($mediaSource === '') {
                 throw ValidationException::withMessages(['ads.'.$index.'.agency' => '该广告代理尚未关联广告社媒，请先到助理系统中设置。']);
             }
+            $store = null;
+            if (mb_strtolower($mediaSource) === 'applovin') {
+                $store = AssistantDomainStore::query()->whereKey((int) ($ad['assistant_domain_store_id'] ?? 0))->where('owner_user_id', $operatorId)->first();
+                if (! $store) throw ValidationException::withMessages(['ads.'.$index.'.assistant_domain_store_id' => '选择 AppLovin 时必须选择该运营已绑定的店铺域名。']);
+            }
             $ads[] = [
                 'media_source' => $mediaSource,
                 'agency' => trim((string) ($agencyNames[$ad['agency']] ?? '')),
                 'account_name' => trim((string) ($ad['account_name'] ?? '')),
                 'account_number' => trim((string) ($ad['account_number'] ?? '')),
+                'assistant_domain_store_id' => $store?->getKey(),
+                'store_domain' => $store?->domain,
                 'book_spend' => round($bookSpend, 4),
                 'settlement_coefficient' => round($coefficient, 4),
                 'handling_fee' => round($handlingFee, 4),
@@ -801,6 +812,11 @@ class OperationReportController extends Controller
             ];
         if ($editingReport) $editingReport->update($values);
         else OperationReport::query()->create($values);
+        foreach (collect($ads)->where(fn ($row) => mb_strtolower(trim((string) ($row['media_source'] ?? ''))) === 'applovin') as $row) {
+            AppLovinAccountStoreBinding::query()->updateOrCreate([
+                'account_key' => AppLovinSpendScreenshot::accountKey($operatorId, (string) $row['agency'], (string) $row['media_source'], (string) $row['account_name'], (string) $row['account_number']),
+            ], ['assistant_domain_store_id' => (int) $row['assistant_domain_store_id'], 'bound_by' => $user->getKey()]);
+        }
 
         return redirect()->route('operation.advertising-reports.index', ['report_date' => $validated['report_date'], 'operator_user_id' => $isBoss ? $operatorId : null])->with('success', $editingReport ? '运营报表已重新提交，状态仍为待审核。' : '运营报表已提交，当前状态为待审核。');
     }
