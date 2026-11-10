@@ -1916,7 +1916,7 @@ class FinanceController extends Controller
             'account' => 'required|string|max:191', 'card_group' => 'nullable|integer|min:1',
             'timezone' => ['required', Rule::in(FinanceWorkbookService::TIMEZONES)],
             'files' => 'required|array|list|min:1|max:5',
-            'files.*' => 'required|file|mimes:xlsx,csv,txt|max:10240',
+            'files.*' => 'required|file|extensions:xlsx,csv,txt|max:10240',
         ]);
         $files = $data['files'];
         unset($data['files']);
@@ -1946,7 +1946,10 @@ class FinanceController extends Controller
                         $counts['repeated_statements'] += (int) ($result['inserted'] === 0);
                         $counts['statements_with_unmatched'] += (int) ($result['unmatched'] > 0);
                     } else {
-                        $rows = $this->readCreditChannelRows($file, 'ye');
+                        $readerType = strtolower($file->getClientOriginalExtension()) === 'xlsx'
+                            ? \PhpOffice\PhpSpreadsheet\IOFactory::READER_XLSX
+                            : \PhpOffice\PhpSpreadsheet\IOFactory::READER_CSV;
+                        $rows = $this->readCreditChannelRows($file, 'ye', [$readerType]);
                         $added = $this->workbooks->importRecords('xuzong2-details', $rows, $account->activity_account,
                             $data['timezone'], $actor, createOnly: true, guardSettlementMonth: true);
                         $counts['orders'] += $added;
@@ -1989,7 +1992,7 @@ class FinanceController extends Controller
         return $account;
     }
 
-    private function readCreditChannelRows(\Illuminate\Http\UploadedFile $file, string $channel): array
+    private function readCreditChannelRows(\Illuminate\Http\UploadedFile $file, string $channel, ?array $readerTypes = null): array
     {
         $limit = ini_parse_quantity((string) ini_get('memory_limit'));
         if ($limit > 0 && $limit < 384 * 1024 ** 2) {
@@ -1998,7 +2001,7 @@ class FinanceController extends Controller
         $columns = FinanceCreditSettlementLayout::columns($channel);
         $optional = $channel === 'ye' ? array_keys(array_slice($columns, 21, preserve_keys: true)) : [];
         $rows = $this->workbooks->read($file, $columns, FinanceCreditSettlementLayout::SHEETS[$channel],
-            $optional, keyedHeaders: true, maxRows: 10000);
+            $optional, keyedHeaders: true, maxRows: 10000, readerTypes: $readerTypes);
 
         return array_map(fn (array $row) => FinanceCreditSettlementLayout::importPayload($channel, $row), $rows);
     }

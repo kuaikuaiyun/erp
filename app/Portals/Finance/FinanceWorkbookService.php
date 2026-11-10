@@ -105,10 +105,10 @@ class FinanceWorkbookService
         ]);
     }
 
-    public function read(UploadedFile $file, array $headers, ?string $sheetName = null, array $optionalHeaders = [], bool $keyedHeaders = false, int $maxRows = 5000): array
+    public function read(UploadedFile $file, array $headers, ?string $sheetName = null, array $optionalHeaders = [], bool $keyedHeaders = false, int $maxRows = 5000, ?array $readerTypes = null): array
     {
         try {
-            $reader = IOFactory::createReaderForFile($file->getRealPath());
+            $reader = IOFactory::createReaderForFile($file->getRealPath(), $readerTypes);
             $reader->setReadDataOnly(true);
             $book = $reader->load($file->getRealPath());
         } catch (Exception $e) {

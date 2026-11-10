@@ -4,6 +4,7 @@ namespace App\Portals\Finance;
 
 use App\Models\AdminUser;
 use App\Models\AssistantDomainStore;
+use App\Models\AssistantDomainStoreOwnerHistory;
 use App\Models\FinancePaymentAccount;
 use App\Models\FinanceRecord;
 use App\Models\LogisticsOrderPaymentReference;
@@ -209,7 +210,7 @@ class FinanceSettlementService
             ->filter(fn ($groups) => $groups->count() === 1 && str_contains((string) $groups->first()->owner, '刷单'))
             ->map(fn ($groups) => $groups->first()) : collect();
         $locks = $db->table('finance_period_locks')->whereNotNull('report_snapshot')->pluck('month')->all();
-        $metadata = $this->logisticsMetadata($records, $channel);
+        $metadata = $this->logisticsMetadata($records, $channel, withCustomReference: ! empty($filters['order_view']));
         $departmentMembers = $channel === 'paypal' && ! empty($filters['order_view']) && $records->isNotEmpty()
             ? $this->operationDepartmentMembers() : collect();
         $membersById = $departmentMembers->keyBy('id');
@@ -332,6 +333,7 @@ class FinanceSettlementService
             $ownerName = $group?->assigned_owner ?? $group?->owner ?? ($p['使用人'] ?? '');
             $ownerId = $group?->assigned_owner_user_id ?? null;
             $team = $group?->team ?? ($p['团队'] ?? '');
+            $usesLegacyOperator = false;
             if ($order !== null) {
                 if (isset($order->owner_history_id)) {
                     $ownerName = $order->historical_owner_name ?? '';
@@ -345,6 +347,15 @@ class FinanceSettlementService
                 }
                 if ($inactiveOrderStore && ! isset($order->owner_history_id) && blank($ownerName)) {
                     $ownerName = trim((string) ($order->operator_name ?? ''));
+                }
+                $legacyOperator = trim((string) ($order->operator_name ?? ''));
+                // An empty initial record can coexist with the older order and store operator fields.
+                if (blank($ownerName) && $ownerId === null && $legacyOperator !== ''
+                    && $legacyOperator === trim((string) ($orderStore->owner ?? ''))
+                    && (! isset($order->owner_history_id)
+                        || $order->historical_owner_event === AssistantDomainStoreOwnerHistory::EVENT_BASELINE)) {
+                    $ownerName = $legacyOperator;
+                    $usesLegacyOperator = true;
                 }
                 if (property_exists($order, 'group_names')) {
                     $team = FinanceCatalog::teamLabel($order->group_names);
@@ -379,8 +390,8 @@ class FinanceSettlementService
                     ? $membersById->get($displayedOwnerId)
                     : ($nameMatches?->count() === 1 ? $nameMatches->first() : null);
                 $row['operation_department'] = $member?->operation_department ?? '';
-                if ($member === null && $inactiveOrderStore && $displayedOwner !== '') {
-                    // A stopped store can retain an order's former operator and team after current memberships change.
+                if ($member === null && ($inactiveOrderStore || $usesLegacyOperator) && $displayedOwner !== '') {
+                    // Keep the recorded team when it belongs to the operator shown on the settlement.
                     $snapshotOwner = trim((string) (($order->assigned_owner_name ?? null) ?: ($order->operator_name ?? '')));
                     if ($displayedOwner === $snapshotOwner
                         || ($displayedOwnerId !== null && (int) $displayedOwnerId === (int) ($order->assigned_owner_user_id ?? 0))) {
@@ -496,7 +507,7 @@ class FinanceSettlementService
     }
 
     /** Enrich settlements from a linked logistics order or a unique payment reference. */
-    public function logisticsMetadata(Collection $records, string $channel, bool $matchOnly = false): array
+    public function logisticsMetadata(Collection $records, string $channel, bool $matchOnly = false, bool $withCustomReference = false): array
     {
         $db = $this->workbooks->database();
         if ($records->isEmpty() || ! $db->getSchemaBuilder()->hasTable('logistics_orders')) {
@@ -518,20 +529,38 @@ class FinanceSettlementService
         $referenceValues = fn ($record) => $channel === 'paypal' ? [$record->reference, trim((string) ($record->payload['帳單號碼'] ?? ''))]
             : [$record->reference, $record->payload['商户订单号'] ?? '', $record->payload['Shopify订单号'] ?? ''];
         $references = $records->flatMap($referenceValues)->filter()->unique()->all();
+        $customReferences = collect();
+        if ($channel === 'paypal' && $withCustomReference && ! $matchOnly
+            && in_array('transaction_id', $columns, true) && in_array('paid_amount_usd', $columns, true)) {
+            $checkoutLabels = array_column(array_filter(FinancePayPalEventTypes::TYPES, fn ($type) => $type[1] === '结账付款'), 0);
+            $customReferences = $records->filter(fn ($record) => $record->currency === 'USD'
+                && in_array(FinancePayPalEventTypes::label((string) $record->raw_type), $checkoutLabels, true)
+                && in_array(strtoupper((string) $record->status), ['S', 'SUCCESS', 'COMPLETED', 'PAID', '已付款', '已完成', '成功'], true))
+                ->mapWithKeys(fn ($record) => [$record->id => trim((string) ($record->payload['自定义编号'] ?? ''))])
+                ->filter(fn ($reference) => $reference !== '');
+            if ($customReferences->isNotEmpty()) {
+                $selected = array_values(array_unique([...$selected, 'paid_amount_usd']));
+            }
+        }
         $paymentReferences = collect();
         $paymentTypes = [];
+        $paymentReferenceColumns = [];
         if ($channel === 'paypal' && $db->getSchemaBuilder()->hasTable('logistics_order_payment_references')) {
-            $columns = ['reference_number', 'logistics_order_id'];
+            $paymentReferenceColumns = ['reference_number', 'logistics_order_id'];
             if (! $matchOnly && $db->getSchemaBuilder()->hasColumn('logistics_order_payment_references', 'reference_type')) {
-                $columns[] = 'reference_type';
+                $paymentReferenceColumns[] = 'reference_type';
             }
-            $paymentReferences = $db->table('logistics_order_payment_references')->whereIn('reference_number', $references)->get($columns);
+            $paymentReferences = $db->table('logistics_order_payment_references')->whereIn('reference_number', $references)->get($paymentReferenceColumns);
         }
         $linkedIds = $paymentReferences->pluck('logistics_order_id')->unique();
         $matches = null;
         foreach ($referenceFields as $field) {
             $lookup = $db->table('logistics_orders')->select('id')->whereIn($field, $references);
             $matches = $matches ? $matches->union($lookup) : $lookup;
+        }
+        if ($customReferences->isNotEmpty()) {
+            $matches->union($db->table('logistics_orders')->select('id')
+                ->whereIn('transaction_id', $customReferences->unique()->values()));
         }
         // Resolve IDs through each reference index before loading the wider order rows.
         if ($matches) {
@@ -562,13 +591,18 @@ class FinanceSettlementService
             $orderQuery->leftJoin('assistant_domain_store_owner_histories as owner_history', fn ($join) =>
                 $join->where('owner_history.id', '=', $historyId))
                 ->addSelect('owner_history.id as owner_history_id', 'owner_history.owner_name_snapshot as historical_owner_name',
-                    'owner_history.owner_user_id as historical_owner_user_id');
+                    'owner_history.owner_user_id as historical_owner_user_id', 'owner_history.event as historical_owner_event');
         }
         $orders = $orderQuery->get()->keyBy('id');
         $stores = ! $matchOnly && $db->getSchemaBuilder()->hasTable('assistant_domain_stores')
             ? $db->table('assistant_domain_stores')->whereIn('id', $orders->pluck('assistant_domain_store_id')->filter())->pluck('domain', 'id') : collect();
         $index = [];
+        $customIndex = [];
+        $customValues = $customReferences->flip();
         foreach ($orders as $order) {
+            if (isset($customValues[$order->transaction_id ?? ''])) {
+                $customIndex[$order->transaction_id][$order->id] = $order;
+            }
             foreach ($referenceFields as $field) {
                 if (filled($order->$field)) {
                     $index[(string) $order->$field][$order->id] = $order;
@@ -583,12 +617,33 @@ class FinanceSettlementService
                 }
             }
         }
+        $customOrderIds = collect($customIndex)->filter(fn ($orders) => count($orders) === 1)
+            ->flatMap(fn ($orders) => array_keys($orders))->all();
+        $ordersWithPrimaryReference = $customOrderIds !== [] && in_array('reference_type', $paymentReferenceColumns, true)
+            ? $db->table('logistics_order_payment_references')->whereIntegerInRaw('logistics_order_id', $customOrderIds)
+                ->where('reference_type', LogisticsOrderPaymentReference::TYPE_PRIMARY)->pluck('logistics_order_id')->flip()
+            : collect();
         $result = [];
         foreach ($records as $record) {
             $candidates = [];
             foreach (array_filter($referenceValues($record), fn ($value) => trim((string) $value) !== '') as $reference) {
                 foreach ($index[(string) $reference] ?? [] as $id => $order) {
                     $candidates[$id] = $order;
+                }
+            }
+            $matchedCustomReference = false;
+            if ($candidates === [] && $customReferences->has($record->id)) {
+                $customCandidates = $customIndex[$customReferences->get($record->id)] ?? [];
+                if (count($customCandidates) === 1) {
+                    $candidate = reset($customCandidates);
+                    $gross = $this->number($record->payload[FinanceCatalog::dataset('paypal-orders')['headers'][7]] ?? null);
+                    $paid = $this->number($candidate->paid_amount_usd);
+                    if (blank($candidate->bill_number ?? null) && ! $ordersWithPrimaryReference->has($candidate->id)
+                        && $gross !== null && $paid !== null
+                        && bccomp($gross, '0', 4) > 0 && bccomp($gross, $paid, 4) === 0) {
+                        $candidates = $customCandidates;
+                        $matchedCustomReference = true;
+                    }
                 }
             }
             if (count($candidates) !== 1) {
@@ -605,7 +660,8 @@ class FinanceSettlementService
             if ($channel === 'paypal') {
                 $result[$record->id]['order'] = $order;
                 $result[$record->id]['payment_reference_type'] = $paymentTypes[$record->reference][$order->id]
-                    ?? ((string) ($order->bill_number ?? '') === $record->reference ? LogisticsOrderPaymentReference::TYPE_PRIMARY : null);
+                    ?? ($matchedCustomReference || (string) ($order->bill_number ?? '') === $record->reference
+                        ? LogisticsOrderPaymentReference::TYPE_PRIMARY : null);
             }
         }
 
