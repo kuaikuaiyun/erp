@@ -275,6 +275,8 @@ Route::get('/assistant/advertising-spend-analysis', [AdvertisingSpendAnalysisCon
 Route::get('/assistant/fashion-advertising-reviews', [FashionAdvertisingReviewController::class, 'index'])->name('assistant.fashion-advertising-reviews.index');
 Route::post('/assistant/fashion-advertising-reviews/bulk-review', [FashionAdvertisingReviewController::class, 'bulkReview'])->name('assistant.fashion-advertising-reviews.bulk-review');
 Route::get('/assistant/fashion-advertising-reviews/{report}', [FashionAdvertisingReviewController::class, 'show'])->withTrashed()->whereNumber('report')->name('assistant.fashion-advertising-reviews.show');
+Route::get('/assistant/fashion-advertising-reviews/{report}/edit', [FashionAdvertisingReviewController::class, 'edit'])->whereNumber('report')->name('assistant.fashion-advertising-reviews.edit');
+Route::put('/assistant/fashion-advertising-reviews/{report}', [FashionAdvertisingReviewController::class, 'update'])->whereNumber('report')->name('assistant.fashion-advertising-reviews.update');
 Route::post('/assistant/fashion-advertising-reviews/{report}/review', [FashionAdvertisingReviewController::class, 'review'])->whereNumber('report')->name('assistant.fashion-advertising-reviews.review');
 Route::delete('/assistant/fashion-advertising-reviews/{report}', [FashionAdvertisingReviewController::class, 'destroy'])->whereNumber('report')->name('assistant.fashion-advertising-reviews.destroy');
 Route::get('/assistant/fashion-advertising-reviews/screenshots/{type}/{entry}', [FashionAdvertisingReviewController::class, 'screenshot'])->whereIn('type', ['performance', 'advertising'])->whereNumber('entry')->name('assistant.fashion-advertising-reviews.screenshot');
@@ -285,6 +287,8 @@ Route::post('/operation-report-reviews/import', [OperationReportReviewController
 Route::get('/operation-report-reviews/screenshot', [OperationReportReviewController::class, 'screenshot'])->name('assistant.operation-report-reviews.screenshot');
 Route::post('/operation-report-reviews/bulk-review', [OperationReportReviewController::class, 'bulkReview'])->name('assistant.operation-report-reviews.bulk-review');
 Route::get('/operation-report-reviews/{report}', [OperationReportReviewController::class, 'show'])->withTrashed()->whereNumber('report')->name('assistant.operation-report-reviews.show');
+Route::get('/operation-report-reviews/{report}/edit', [OperationReportReviewController::class, 'edit'])->whereNumber('report')->name('assistant.operation-report-reviews.edit');
+Route::put('/operation-report-reviews/{report}', [OperationReportReviewController::class, 'update'])->whereNumber('report')->name('assistant.operation-report-reviews.update');
 Route::post('/operation-report-reviews/{report}/approve', [OperationReportReviewController::class, 'approve'])->whereNumber('report')->name('assistant.operation-report-reviews.approve');
 Route::post('/operation-report-reviews/{report}/reject', [OperationReportReviewController::class, 'reject'])->whereNumber('report')->name('assistant.operation-report-reviews.reject');
 Route::delete('/operation-report-reviews/{report}', [OperationReportReviewController::class, 'destroy'])->whereNumber('report')->name('assistant.operation-report-reviews.destroy');

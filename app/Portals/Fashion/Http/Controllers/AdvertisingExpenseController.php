@@ -109,7 +109,11 @@ class AdvertisingExpenseController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) abort(403);
         $this->authorizeReport($context['user'], $report);
-        abort_unless(in_array($report->status, [FashionAdvertisingReport::STATUS_PENDING, FashionAdvertisingReport::STATUS_REJECTED], true), 422, '审核通过的报表不能重新修改。');
+        abort_unless(in_array($report->status, [
+            FashionAdvertisingReport::STATUS_PENDING,
+            FashionAdvertisingReport::STATUS_APPROVED,
+            FashionAdvertisingReport::STATUS_REJECTED,
+        ], true), 422, '该报表当前不能修改。');
         $data = $this->validatePayload($request, (int) $report->submitter_id);
 
         $duplicate = FashionAdvertisingReport::query()

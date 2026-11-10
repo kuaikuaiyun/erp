@@ -18,6 +18,8 @@
         <div class="form-group"><label>报表结束日期</label><input class="form-control" type="date" name="date_to" value="{{ $filters['date_to'] }}"></div>
         <div class="form-group"><label>运营团队</label><select class="form-control" name="team_id"><option value="">全部团队</option>@foreach($teamOptions as $team)<option value="{{ $team->operation_department_id }}" @selected((int)$filters['team_id'] === (int)$team->operation_department_id)>{{ $team->operation_department_name ?: '未命名团队' }}</option>@endforeach</select></div>
         <div class="form-group"><label>运营人员</label><input class="form-control" name="operator" value="{{ $filters['operator'] }}" placeholder="输入运营姓名"></div>
+        <div class="form-group"><label>广告社媒</label><input class="form-control" name="media" value="{{ $filters['media'] }}" placeholder="输入社媒名称"></div>
+        <div class="form-group"><label>账户编号</label><input class="form-control" name="account_number" value="{{ $filters['account_number'] }}" placeholder="输入账户编号"></div>
         <button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{ route('assistant.operation-report-reviews.index') }}">重置</a>
     </form></div></div>
     <form id="bulk-review-form" method="post" action="{{ route('assistant.operation-report-reviews.bulk-review') }}">@csrf

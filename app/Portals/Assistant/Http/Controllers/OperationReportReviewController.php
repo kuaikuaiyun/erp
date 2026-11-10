@@ -16,6 +16,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
@@ -85,10 +86,14 @@ class OperationReportReviewController extends Controller
             'date_to' => ['nullable', 'date_format:Y-m-d'],
             'team_id' => ['nullable', 'integer', 'min:1'],
             'operator' => ['nullable', 'string', 'max:100'],
+            'media' => ['nullable', 'string', 'max:100'],
+            'account_number' => ['nullable', 'string', 'max:191'],
             'per_page' => ['nullable', 'integer', Rule::in([20, 50, 100])],
         ]);
         $status = trim((string) ($filters['status'] ?? ''));
         $operator = trim((string) ($filters['operator'] ?? ''));
+        $media = trim((string) ($filters['media'] ?? ''));
+        $accountNumber = trim((string) ($filters['account_number'] ?? ''));
         $teamId = (int) ($filters['team_id'] ?? 0);
         $perPage = (int) ($filters['per_page'] ?? 20);
 
@@ -108,6 +113,14 @@ class OperationReportReviewController extends Controller
             ->when(!empty($filters['date_to']), fn ($query) => $query->whereDate('report_date', '<=', $filters['date_to']))
             ->when($teamId > 0, fn ($query) => $query->where('operation_department_id', $teamId))
             ->when($operator !== '', fn ($query) => $query->where('operator_name', 'like', '%'.$operator.'%'))
+            ->when($media !== '', fn ($query) => $query->whereRaw(
+                'LOWER(CAST(advertising_rows AS CHAR)) LIKE ?',
+                ['%"media_source"%:%"%'.mb_strtolower($media).'%"%'],
+            ))
+            ->when($accountNumber !== '', fn ($query) => $query->whereRaw(
+                'LOWER(CAST(advertising_rows AS CHAR)) LIKE ?',
+                ['%"account_number"%:%"%'.mb_strtolower($accountNumber).'%"%'],
+            ))
             ->orderByRaw("CASE WHEN deleted_at IS NOT NULL THEN 2 WHEN status = 'pending' THEN 0 ELSE 1 END")
             ->orderByDesc('report_date')
             ->orderByDesc('id')
@@ -127,6 +140,8 @@ class OperationReportReviewController extends Controller
                 'date_to' => (string) ($filters['date_to'] ?? ''),
                 'team_id' => $teamId,
                 'operator' => $operator,
+                'media' => $media,
+                'account_number' => $accountNumber,
                 'per_page' => $perPage,
             ],
         ]);
@@ -145,12 +160,91 @@ class OperationReportReviewController extends Controller
             'metricRowspans' => $this->identityRowspans($rows),
             'advertisingRows' => $report->advertising_rows ?: [],
             'mediaRoiRows' => $this->metrics->mediaRoiSummary($rows, $report->advertising_rows ?: []),
-            'canReview' => ! $report->trashed(), 'canEdit' => false,
+            'canReview' => ! $report->trashed(),
+            'canEdit' => ! $report->trashed() && $report->status === OperationReport::STATUS_APPROVED,
+            'editUrl' => route('assistant.operation-report-reviews.edit', $report),
             'backUrl' => route('assistant.operation-report-reviews.index'),
             'approveUrl' => route('assistant.operation-report-reviews.approve', $report),
             'rejectUrl' => route('assistant.operation-report-reviews.reject', $report),
             'screenshotRouteName' => 'assistant.operation-report-reviews.screenshot',
         ]);
+    }
+
+    public function edit(Request $request, OperationReport $report): Response|View
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+        abort_unless($this->canAccessReport($report, $context['user']), 403);
+        abort_unless($report->status === OperationReport::STATUS_APPROVED, 422, '只有审核通过的报表可以重新编辑广告信息。');
+
+        return view('portals.assistant.operation-report-reviews.edit', [
+            'portal' => $context['portal']->loadMissing('menus'),
+            'user' => $context['user'],
+            'report' => $report,
+            'advertisingRows' => $report->advertising_rows ?: [],
+        ]);
+    }
+
+    public function update(Request $request, OperationReport $report): RedirectResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        abort_unless($this->canAccessReport($report, $context['user']), 403);
+        abort_unless($report->status === OperationReport::STATUS_APPROVED, 422, '只有审核通过的报表可以重新编辑广告信息。');
+
+        $validated = $request->validate([
+            'ads' => ['required', 'array', 'min:1', 'max:50'],
+            'ads.*.agency' => ['required', 'string', 'max:100'],
+            'ads.*.media_source' => ['required', 'string', 'max:100'],
+            'ads.*.account_name' => ['required', 'string', 'max:191'],
+            'ads.*.account_number' => ['required', 'string', 'max:191'],
+            'ads.*.book_spend' => ['required', 'numeric', 'min:0'],
+            'ads.*.settlement_coefficient' => ['required', 'numeric', 'min:0'],
+            'ads.*.existing_screenshot' => ['nullable', 'string', 'max:500'],
+            'ads.*.screenshot' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+        ]);
+
+        $oldRows = collect($report->advertising_rows ?: []);
+        $rows = collect($validated['ads'])->map(function (array $row, int $index) use ($request, $oldRows): array {
+            $bookSpend = round((float) $row['book_spend'], 4);
+            $coefficient = round((float) $row['settlement_coefficient'], 4);
+            $old = (array) ($oldRows->get($index) ?? []);
+            $screenshot = trim((string) ($old['screenshot'] ?? '')) ?: null;
+            if ($file = $request->file('ads.'.$index.'.screenshot')) {
+                $screenshot = $file->storeAs('operation-reports/ads', Str::uuid().'.'.$file->extension(), 'public');
+            }
+
+            return [
+                ...$old,
+                'agency' => trim((string) $row['agency']),
+                'media_source' => trim((string) $row['media_source']),
+                'account_name' => trim((string) $row['account_name']),
+                'account_number' => trim((string) $row['account_number']),
+                'book_spend' => $bookSpend,
+                'settlement_coefficient' => $coefficient,
+                'handling_fee' => round($bookSpend * $coefficient, 4),
+                'actual_spend' => round($bookSpend * (1 + $coefficient), 4),
+                'screenshot' => $screenshot,
+            ];
+        })->values()->all();
+
+        $adSpend = round((float) collect($rows)->sum('actual_spend'), 4);
+        $firstRevenue = (float) collect($report->metric_rows ?: [])->sum('first_total_revenue');
+        $firstProfit = $firstRevenue - (float) $report->first_purchase_cost - (float) $report->first_shipping_cost
+            - (float) $report->first_return_fee - $adSpend;
+        $report->update([
+            'advertising_rows' => $rows,
+            'actual_ad_spend' => $adSpend,
+            'first_profit' => $firstProfit,
+            'overall_profit' => $firstProfit + (float) $report->renewal_net_revenue,
+            'status' => OperationReport::STATUS_APPROVED,
+            'reviewed_by' => $context['user']->getKey(),
+            'reviewed_at' => now(),
+            'review_reason' => null,
+        ]);
+
+        return redirect()->route('assistant.operation-report-reviews.show', $report)
+            ->with('success', '广告信息已修改，报表保持审核通过状态。');
     }
 
     public function approve(Request $request, OperationReport $report): RedirectResponse
