@@ -732,7 +732,8 @@ class FinancePayPalSettlementOrders
             $review['duplicate'] = '跨账户存在相同交易号，待核对是否重复入账';
         }
         if ($payment['business_order_id'] === null) {
-            $review['order'] = '未匹配物流订单';
+            $review['order'] = $payment['candidate_order'] === null
+                ? '未匹配物流订单' : '未匹配物流订单，候选通途订单 '.$payment['candidate_order'].'，待人工确认';
         }
         if ($crossRateSource !== null) {
             $review['rate'] = $crossRateSource;

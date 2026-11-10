@@ -11,6 +11,7 @@ use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Finance\FinanceCatalog;
 use App\Portals\Finance\FinanceConfluxSettlement;
 use App\Portals\Finance\FinanceCreditSettlementLayout;
+use App\Portals\Finance\FinanceCreditUsdRates;
 use App\Portals\Finance\FinancePaymentBalanceService;
 use App\Portals\Finance\FinancePayPalBalanceService;
 use App\Portals\Finance\FinancePayPalSettlementOrders;
@@ -18,6 +19,7 @@ use App\Portals\Finance\FinanceProductNames;
 use App\Portals\Finance\FinanceSettlementEditor;
 use App\Portals\Finance\FinanceSettlementService;
 use App\Portals\Finance\FinanceWorkbookService;
+use App\Portals\Finance\FinanceXuzongCreditReport;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
@@ -731,7 +733,8 @@ class FinanceController extends Controller
         $records = $query->orderByDesc('occurred_at')->orderByDesc('id')
             ->paginate($perPage, total: (int) $exportAccounts->sum('total'))->withQueryString();
         $types = $this->workbooks->database()->table('finance_transaction_types')->pluck('category', 'raw_type');
-        $groups = $this->workbooks->domainGroups()->keyBy('domain');
+        $xuzongReport = $request->routeIs('finance.reports.xuzong-credit');
+        $groups = $xuzongReport ? collect() : $this->workbooks->domainGroups()->keyBy('domain');
         $paymentAccounts = FinancePaymentAccount::query()
             ->where('account_type', $definition['channel'] === 'paypal' ? 'paypal' : 'credit_card')
             ->orderBy('id')->get(['activity_account', 'account_name']);
@@ -744,7 +747,7 @@ class FinanceController extends Controller
 
         $paypalOrderMetadata = $dataset === 'paypal-orders'
             ? app(\App\Portals\Finance\FinanceSettlementService::class)->logisticsMetadata($records->getCollection(), 'paypal') : [];
-        if ($dataset === 'xuzong2-orders' && $records->isNotEmpty()) {
+        if ($dataset === 'xuzong2-orders' && ! $xuzongReport && $records->isNotEmpty()) {
             $db = $this->workbooks->database();
             $orders = \App\Models\LogisticsOrder::query()->whereIn('id', $records->pluck('id'))->get()->keyBy('id');
             foreach ($records as $record) {
@@ -804,7 +807,9 @@ class FinanceController extends Controller
         }
 
         return response()->view('portals.finance.records', [
-            ...$context, ...compact('dataset', 'definition', 'filters', 'records', 'types', 'groups'),
+            ...$context, ...compact('dataset', 'definition', 'filters', 'records', 'types', 'groups', 'xuzongReport'),
+            'xuzongRows' => $xuzongReport ? app(FinanceXuzongCreditReport::class)->rows($records->getCollection(), $filters['timezone']) : collect(),
+            'xuzongImportAccounts' => $xuzongReport ? $accountLabels->union($accounts->filter()->mapWithKeys(fn ($account) => [$account => $account])) : collect(),
             'accounts' => $accounts,
             'accountLabels' => $accountLabels,
             'refreshablePayPalAccounts' => $dataset === 'paypal-orders' && $context['canManage']
@@ -843,6 +848,51 @@ class FinanceController extends Controller
         return redirect('/finance/records/'.$dataset)->with('success', __('finance.imported', ['count' => $count]));
     }
 
+    public function importXuzongCreditDetails(Request $request): Response
+    {
+        $context = $this->context($request, true);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        $data = $request->validate([
+            'file' => 'required|file|mimes:xlsx,csv,tsv,txt|max:10240',
+            'source' => ['required', Rule::in(array_keys(FinanceCatalog::XUZONG_REPORT_IMPORTS))],
+            'account' => 'required|string|max:191',
+            'source_timezone' => ['required', Rule::in(FinanceWorkbookService::TIMEZONES)],
+        ]);
+        $source = $data['source'];
+        // The workbook's payable column is a formula. The report calculates it from the matched amounts.
+        $headers = array_values(array_diff(FinanceCatalog::dataset($source)['headers'], ['应结算']));
+        $optionalHeaders = FinanceCatalog::optionalImportHeaders($source);
+        if ($source === 'xuzong1-details') {
+            $extra = ['商户号', '是否3D', '发卡国家', '卡号'];
+            $headers = [...$headers, ...$extra];
+            $optionalHeaders = [...$optionalHeaders, ...$extra];
+        }
+        $rows = $this->workbooks->read($data['file'], $headers, trans('finance.sheets.'.$source), $optionalHeaders);
+        foreach ($rows as &$row) {
+            if (filled($row['卡号'] ?? null)) {
+                $row['卡号'] = preg_match('/(\d{4})$/D', trim((string) $row['卡号']), $lastFour) ? '****'.$lastFour[1] : '';
+            }
+        }
+        unset($row);
+        $dataset = FinanceCatalog::XUZONG_REPORT_IMPORTS[$source];
+        $affected = $this->workbooks->database()->transaction(function () use ($data, $dataset, $rows, $context): int {
+            $account = FinancePaymentAccount::query()->where('account_type', 'credit_card')
+                ->where('activity_account', $data['account'])->lockForUpdate()->first();
+            if (! $account && ! app(\App\Portals\Finance\FinanceLogisticsCreditOrders::class)->query(withPayload: false)
+                ->where('account', $data['account'])->exists()) {
+                throw ValidationException::withMessages(['account' => '请选择已有的信用卡收款账户。']);
+            }
+
+            return $this->workbooks->importRecords($dataset, $rows, $account?->activity_account ?? $data['account'], $data['source_timezone'],
+                (int) $context['user']->getKey(), createOnly: true, fillMissing: true);
+        });
+
+        return redirect()->route('finance.reports.xuzong-credit')->with('success',
+            '已新增或补齐 '.$affected.' 条账单记录，跳过 '.(count($rows) - $affected).' 条。报表会自动匹配订单。');
+    }
+
     public function exportRecords(Request $request, string $dataset): Response
     {
         $definition = FinanceCatalog::dataset($dataset);
@@ -856,11 +906,15 @@ class FinanceController extends Controller
         }
         $filters = $this->filters($request, $dataset);
         $pageLayout = in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true) && $request->input('export_layout') === 'page';
+        $xuzongReport = $request->routeIs('finance.reports.xuzong-credit.export');
         $productIndex = array_search('物品标题', array_map(FinanceCatalog::simplified(...), $definition['headers']), true);
         $pageHeaders = $pageLayout ? \App\Portals\Finance\FinancePayPalOrderExport::pageHeaders($dataset) : [];
-        $exportColumnCount = $pageLayout ? count($pageHeaders)
-            : count($definition['headers']) + ($dataset === 'xuzong2-orders' ? 3 : 4)
-                + ($dataset === 'paypal-orders' ? count(\App\Portals\Finance\FinancePayPalOrderExport::COLUMNS) : 0);
+        $exportColumnCount = match (true) {
+            $xuzongReport => count(FinanceXuzongCreditReport::headers()),
+            $pageLayout => count($pageHeaders),
+            default => count($definition['headers']) + ($dataset === 'xuzong2-orders' ? 3 : 4)
+                + ($dataset === 'paypal-orders' ? count(\App\Portals\Finance\FinancePayPalOrderExport::COLUMNS) : 0),
+        };
         $selection = $request->validate([
             'export_layout' => 'nullable|in:page,source',
             'export_scope' => ['required', Rule::in(['accounts', 'records', 'filtered'])],
@@ -896,6 +950,23 @@ class FinanceController extends Controller
         }
         if (($filters['export_format'] ?? 'xlsx') === 'xls' && (clone $query)->count() > 65535) {
             throw ValidationException::withMessages(['export_format' => __('finance.records.xls_row_limit')]);
+        }
+        if ($xuzongReport) {
+            $headers = FinanceXuzongCreditReport::headers();
+            if (isset($selection['report_columns'])) {
+                $headers = array_map(fn ($index) => $headers[$index], $selection['report_columns']);
+            }
+            $report = app(FinanceXuzongCreditReport::class);
+            $rows = $query->reorder()->lazyById(300)->chunk(300)->flatMap(fn ($batch) =>
+                $report->rows($batch->collect(), $filters['timezone'])->values()->map(fn ($values) =>
+                    array_map(fn ($header) => $values[$header] ?? '', $headers)));
+
+            $filename = 'xuzong-credit-'.now()->format('Ymd-His');
+            $format = $filters['export_format'] ?? 'xlsx';
+
+            return $format === 'xlsx'
+                ? FinanceXuzongCreditReport::downloadXlsx($headers, $rows, $filename.'.xlsx')
+                : $this->downloadRecords($headers, $rows, $filename, $format, false);
         }
         $types = $this->workbooks->database()->table('finance_transaction_types')->pluck('category', 'raw_type');
         $groups = $this->workbooks->domainGroups()->keyBy('domain');
@@ -1138,6 +1209,7 @@ class FinanceController extends Controller
 
         return response()->view('portals.finance.accounting', [
             ...$context, 'rates' => $db->table('finance_monthly_exchange_rates')->orderByDesc('month')->orderBy('currency')->get(),
+            'creditUsdRates' => $db->table(FinanceCreditUsdRates::TABLE)->orderByDesc('starts_on')->orderBy('currency')->get(),
             'rateCurrencies' => FinanceRecord::query()->whereNotNull('currency')->distinct()->pluck('currency'),
             'rules' => $db->table('finance_transaction_type_mappings')->orderBy('priority')->orderBy('id')->get(),
             'locks' => $db->table('finance_period_locks')->whereNotNull('report_snapshot')->orderByDesc('month')->get(),
@@ -1153,7 +1225,20 @@ class FinanceController extends Controller
         $service = app(\App\Portals\Finance\FinanceAccountingService::class);
         $db = $this->workbooks->database();
         try {
-            if ($action === 'rule') {
+            if ($action === 'credit-usd-rate') {
+                $data = $request->validate([
+                    'usd_scope' => ['required', Rule::in(array_keys(FinanceCreditUsdRates::SCOPES))],
+                    'usd_currency' => ['required', 'regex:/^[A-Z]{3}$/', 'not_in:USD'],
+                    'usd_month' => ['exclude_unless:usd_scope,month', 'required', 'date_format:Y-m'],
+                    'usd_start' => ['exclude_if:usd_scope,month', 'required', 'date_format:Y-m-d'],
+                    'usd_end' => ['exclude_unless:usd_scope,range', 'required', 'date_format:Y-m-d', 'after_or_equal:usd_start'],
+                    'usd_rate' => ['required', 'numeric', 'regex:/^\d{1,10}(?:\.\d{1,8})?$/', 'gt:0'],
+                ], [], [
+                    'usd_scope' => '汇率适用范围', 'usd_currency' => '原币币种', 'usd_month' => '适用月份',
+                    'usd_start' => '开始日期', 'usd_end' => '结束日期', 'usd_rate' => '美元汇率',
+                ]);
+                app(FinanceCreditUsdRates::class)->save($data, (int) $context['user']->getKey());
+            } elseif ($action === 'rule') {
                 $data = $request->validate([
                     'id' => 'nullable|integer|min:1', 'name' => 'required|string|max:100',
                     'source_field' => ['required', Rule::in($service::SOURCES)], 'match_type' => ['required', Rule::in(['equals', 'contains', 'prefix'])],
@@ -1325,6 +1410,7 @@ class FinanceController extends Controller
             'card_channel' => ['nullable', Rule::in(array_keys(FinanceCreditSettlementLayout::CHANNELS))],
             'card_exceptions' => 'nullable|boolean',
             'card_match' => ['nullable', Rule::in(['matched', 'waiting'])],
+            'card_transaction_status' => ['nullable', Rule::in(array_keys(FinanceSettlementService::CARD_TRANSACTION_STATUSES))],
             'card_group' => 'nullable|integer|min:1',
             'conditions' => 'nullable|array|max:10', 'conditions.*' => 'array:field,operator,value',
             'conditions.*.field' => ['required', Rule::in(array_keys($conditionFields))],
@@ -1350,7 +1436,7 @@ class FinanceController extends Controller
             unset($filters['card_exceptions'], $filters['card_match']);
         }
         if ($channel !== 'credit_card') {
-            unset($filters['card_group']);
+            unset($filters['card_group'], $filters['card_transaction_status']);
         }
         foreach ($filters['conditions'] ?? [] as $condition) {
             if (in_array($condition['operator'], ['gt','gte','lt','lte'], true)
@@ -1949,11 +2035,12 @@ class FinanceController extends Controller
                         $readerType = strtolower($file->getClientOriginalExtension()) === 'xlsx'
                             ? \PhpOffice\PhpSpreadsheet\IOFactory::READER_XLSX
                             : \PhpOffice\PhpSpreadsheet\IOFactory::READER_CSV;
-                        $rows = $this->readCreditChannelRows($file, 'ye', [$readerType]);
-                        $added = $this->workbooks->importRecords('xuzong2-details', $rows, $account->activity_account,
-                            $data['timezone'], $actor, createOnly: true, guardSettlementMonth: true);
-                        $counts['orders'] += $added;
-                        $counts['duplicates'] += count($rows) - $added;
+                        foreach ($this->creditChannelOrderBatches($file, 'ye', [$readerType]) as $rows) {
+                            $added = $this->workbooks->importRecords('xuzong2-details', $rows, $account->activity_account,
+                                $data['timezone'], $actor, createOnly: true, guardSettlementMonth: true);
+                            $counts['orders'] += $added;
+                            $counts['duplicates'] += count($rows) - $added;
+                        }
                         unset($rows);
                     }
                 } catch (ValidationException|\App\Portals\Finance\FinanceRelayException $e) {
@@ -1992,7 +2079,7 @@ class FinanceController extends Controller
         return $account;
     }
 
-    private function readCreditChannelRows(\Illuminate\Http\UploadedFile $file, string $channel, ?array $readerTypes = null): array
+    private function creditChannelOrderBatches(\Illuminate\Http\UploadedFile $file, string $channel, ?array $readerTypes = null): \Generator
     {
         $limit = ini_parse_quantity((string) ini_get('memory_limit'));
         if ($limit > 0 && $limit < 384 * 1024 ** 2) {
@@ -2000,10 +2087,13 @@ class FinanceController extends Controller
         }
         $columns = FinanceCreditSettlementLayout::columns($channel);
         $optional = $channel === 'ye' ? array_keys(array_slice($columns, 21, preserve_keys: true)) : [];
-        $rows = $this->workbooks->read($file, $columns, FinanceCreditSettlementLayout::SHEETS[$channel],
-            $optional, keyedHeaders: true, maxRows: 10000, readerTypes: $readerTypes);
-
-        return array_map(fn (array $row) => FinanceCreditSettlementLayout::importPayload($channel, $row), $rows);
+        $sheetName = FinanceCreditSettlementLayout::SHEETS[$channel];
+        $batches = $channel === 'ye' && strtolower($file->getClientOriginalExtension()) === 'xlsx'
+            ? $this->workbooks->readConfluxOrderBatches($file, $columns, $sheetName, $optional)
+            : [$this->workbooks->read($file, $columns, $sheetName, $optional, keyedHeaders: true, maxRows: 10000, readerTypes: $readerTypes)];
+        foreach ($batches as $rows) {
+            yield array_map(fn (array $row) => FinanceCreditSettlementLayout::importPayload($channel, $row), $rows);
+        }
     }
 
     private function importCreditChannelDetails(Request $request, string $report, int $actor): Response
@@ -2014,20 +2104,25 @@ class FinanceController extends Controller
             'account' => 'required|string|max:191',
             'timezone' => ['required', Rule::in(FinanceWorkbookService::TIMEZONES)],
         ]);
-        $rows = $this->readCreditChannelRows($request->file('file'), $data['card_channel']);
+        $file = $request->file('file');
         try {
-            $count = $this->workbooks->database()->transaction(function () use ($data, $rows, $actor): int {
+            [$count, $total] = $this->workbooks->database()->transaction(function () use ($data, $file, $actor): array {
                 $account = $this->lockCreditImportAccount($data);
+                $count = $total = 0;
+                foreach ($this->creditChannelOrderBatches($file, $data['card_channel']) as $rows) {
+                    $count += $this->workbooks->importRecords('xuzong2-details', $rows, $account->activity_account,
+                        $data['timezone'], $actor, createOnly: true, guardSettlementMonth: true);
+                    $total += count($rows);
+                }
 
-                return $this->workbooks->importRecords('xuzong2-details', $rows, $account->activity_account,
-                    $data['timezone'], $actor, createOnly: true, guardSettlementMonth: true);
+                return [$count, $total];
             });
         } catch (\App\Portals\Finance\FinanceRelayException $e) {
             throw ValidationException::withMessages(['file' => $e->getMessage()]);
         }
 
         return redirect()->route('finance.report', ['report' => $report, ...$data])
-            ->with('success', '已新增 '.$count.' 条信用卡明细，跳过重复 '.(count($rows) - $count).' 条。');
+            ->with('success', '已新增 '.$count.' 条信用卡明细，跳过重复 '.($total - $count).' 条。');
     }
 
     private function creditImportMonths(?int $accountId = null, ?string $account = null): array
