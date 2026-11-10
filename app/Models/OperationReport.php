@@ -23,6 +23,17 @@ class OperationReport extends Model
         'deletion_key',
     ];
 
+    protected static function booted(): void
+    {
+        static::deleting(function (self $report): void {
+            if (! $report->isForceDeleting() && (int) $report->deletion_key === 0) {
+                // Keep the soft-deleted row for audit history, while removing
+                // it from the active date/operator unique-key slot.
+                $report->forceFill(['deletion_key' => (int) $report->getKey()])->saveQuietly();
+            }
+        });
+    }
+
     public function __construct(array $attributes = [])
     {
         $this->setConnection(config('admin.database.connection') ?: config('database.default'));
