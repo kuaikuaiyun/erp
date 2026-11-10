@@ -76,7 +76,16 @@
                             <td><div class="pd-block"><b>类型：</b>{{ $dispute->typeLabel() }}<br><b>纠纷理由：</b>{{ $dispute->reasonLabel() }}</div></td>
                             <td><div class="pd-block"><b>事件时状态：</b>{{ $dispute->event_logistics_captured_at ? $text($dispute->event_logistics_status ?: '待发货') : '未留存' }}<br><b>事件时是否发货：</b>{{ $dispute->event_logistics_captured_at ? ($dispute->event_shipped ? '是' : '否') : '未留存' }}<br><b>事件时单号：</b><span class="pd-mono">{{ $dispute->event_logistics_captured_at ? $text($dispute->event_tracking_number ?: '无') : '未留存' }}</span><hr><b>当前物流状态：</b>{{ $text($order?->logistics_status ?: '未匹配') }}<br><b>当前是否发货：</b>{{ $order ? (in_array($order->logistics_status, [\App\Models\LogisticsOrder::LOGISTICS_SHIPPED, \App\Models\LogisticsOrder::LOGISTICS_DELIVERED, \App\Models\LogisticsOrder::LOGISTICS_IN_TRANSIT], true) ? '是' : '否') : '未匹配' }}<br><b>当前物流单号：</b><span class="pd-mono">{{ $text($order?->tracking_number ?: '未匹配') }}</span></div></td>
                             <td><div class="pd-block"><b>通途订单号：</b>{{ $text($order?->tongtu_order_number ?: '未匹配') }}@forelse($items as $item)<hr><b>通途SKU：</b>{{ $text($item->tongtu_sku) }}<br><b>中文品名：</b>{{ $text($item->tongtu_product_name ?: $item->product_title) }}@empty<hr><b>通途SKU：</b>未匹配<br><b>中文品名：</b>未匹配@endforelse</div></td>
-                            <td><div class="pd-block"><b>解决方案：</b>{{ $dispute->outcomeLabel() }}<br><b>状态：</b>{{ $dispute->statusLabel() }}@if($dispute->first_handled_by_name)<br><b>首次操作人：</b>{{ $dispute->first_handled_by_name }}@endif@if(filled($latestNote))<hr><b>最新处理备注：</b>{{ $latestNote }}@endif</div></td>
+                            <td><div class="pd-block">
+                                <b>解决方案：</b>{{ $dispute->outcomeLabel() }}<br>
+                                <b>状态：</b>{{ $dispute->statusLabel() }}
+                                @if($dispute->first_handled_by_name)
+                                    <br><b>首次操作人：</b>{{ $dispute->first_handled_by_name }}
+                                @endif
+                                @if(filled($latestNote))
+                                    <hr><b>最新处理备注：</b>{{ $latestNote }}
+                                @endif
+                            </div></td>
                             <td><button class="btn btn-primary btn-sm" type="button" data-toggle="modal" data-target="#handle-dispute-{{ $dispute->id }}"><i class="fa fa-pencil"></i> 处理 / 查看</button><button class="pd-operation-history-link" type="button" data-toggle="modal" data-target="#dispute-history-{{ $dispute->id }}">{{ $dispute->operations->count() }} 条处理记录</button></td>
                         </tr>
                     @empty<tr><td colspan="10" class="text-center text-muted">暂无 PayPal 争议记录</td></tr>@endforelse</tbody>
