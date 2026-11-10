@@ -39,6 +39,8 @@ class AppLovinPerformanceReportController extends Controller
             'date_to' => ['nullable', 'date_format:Y-m-d'],
             'department_id' => ['nullable', 'integer', Rule::in($visibleIds)],
             'operator' => ['nullable', 'string', 'max:100'],
+            'gift_status' => ['nullable', Rule::in(['yes', 'no'])],
+            'consumption_over_10000' => ['nullable', Rule::in(['1'])],
         ]);
         $dateFrom = (string) ($filters['date_from'] ?? now()->subDays(6)->toDateString());
         $dateTo = (string) ($filters['date_to'] ?? now()->toDateString());
@@ -188,6 +190,15 @@ class AppLovinPerformanceReportController extends Controller
             ->sortByDesc('ad_spend')
             ->values();
 
+        if (($filters['gift_status'] ?? '') === 'yes') {
+            $rows = $rows->where('gift_status', 'available')->values();
+        } elseif (($filters['gift_status'] ?? '') === 'no') {
+            $rows = $rows->where('gift_status', '!=', 'available')->values();
+        }
+        if (($filters['consumption_over_10000'] ?? '') === '1') {
+            $rows = $rows->filter(fn (array $row): bool => (float) $row['total_consumption'] > 10000)->values();
+        }
+
         $totals = [
             'stores' => $rows->pluck('store_domain')->unique()->count(),
             'subscription_orders' => (int) $rows->sum('first_subscription_orders'),
@@ -209,6 +220,8 @@ class AppLovinPerformanceReportController extends Controller
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
             'selectedDepartmentId' => $filters['department_id'] ?? null,
+            'selectedGiftStatus' => $filters['gift_status'] ?? '',
+            'consumptionOver10000' => ($filters['consumption_over_10000'] ?? '') === '1',
             'departmentOptions' => $this->storeOwners->operationDepartments()->whereIn('id', $visibleIds)->values(),
         ]);
     }
