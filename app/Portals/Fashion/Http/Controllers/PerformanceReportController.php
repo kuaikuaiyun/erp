@@ -40,7 +40,7 @@ class PerformanceReportController extends Controller
             'per_page' => ['nullable', 'integer', 'in:20,50,100'],
         ]);
 
-        $timezone = (string) ($validated['timezone'] ?? '+08:00');
+        $timezone = (string) ($validated['timezone'] ?? '-08:00');
         $month = now($timezone);
         $dateFrom = $validated['date_from'] ?? $month->copy()->startOfMonth()->toDateString();
         $dateTo = $validated['date_to'] ?? $month->copy()->endOfMonth()->toDateString();
@@ -212,7 +212,7 @@ class PerformanceReportController extends Controller
             'page' => ['nullable', 'integer', 'min:1'],
             'timezone' => ['nullable', Rule::in(array_keys($this->timezoneOptions()))],
         ]);
-        $timezone = (string) ($validated['timezone'] ?? '+08:00');
+        $timezone = (string) ($validated['timezone'] ?? '-08:00');
         $storageFrom = CarbonImmutable::parse($validated['date'].' 00:00:00', $timezone)->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
         $storageTo = CarbonImmutable::parse($validated['date'].' 23:59:59', $timezone)->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
         $user = $context['user'];
@@ -319,7 +319,8 @@ class PerformanceReportController extends Controller
         for ($offset = -12; $offset <= 14; $offset++) {
             $value = sprintf('%s%02d:00', $offset < 0 ? '-' : '+', abs($offset));
             $label = 'UTC'.($offset >= 0 ? '+' : '').$offset;
-            if ($value === '+08:00') $label .= '（默认，北京时间）';
+            if ($value === '-08:00') $label .= '（默认）';
+            if ($value === '+08:00') $label .= '（北京时间）';
             $options[$value] = $label;
         }
         return $options;
