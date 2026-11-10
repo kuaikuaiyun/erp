@@ -667,6 +667,40 @@ class FinancePortalTest extends TestCase
         $this->assertEqualsCanonicalizing([['BRUSH-PAYMENT', ...$labels], ['AUTO-BRUSH', ...$labels]], array_slice($sheet, 1));
     }
 
+    public function test_paypal_settlement_matches_a_unique_custom_reference_with_the_same_paid_amount(): void
+    {
+        Schema::create('logistics_orders', function (Blueprint $table): void {
+            $table->id();
+            $table->string('bill_number')->nullable();
+            $table->string('transaction_id')->nullable();
+            $table->string('tongtu_order_number');
+            $table->decimal('paid_amount_usd', 18, 4);
+        });
+        DB::table('logistics_orders')->insert([
+            ['bill_number' => null, 'transaction_id' => '0648195064384248627243', 'tongtu_order_number' => 'store-1010', 'paid_amount_usd' => '10.00'],
+            ['bill_number' => 'DIRECT', 'transaction_id' => null, 'tongtu_order_number' => 'store-1011', 'paid_amount_usd' => '10.00'],
+            ['bill_number' => null, 'transaction_id' => 'duplicate-reference', 'tongtu_order_number' => 'store-1012', 'paid_amount_usd' => '10.00'],
+            ['bill_number' => null, 'transaction_id' => 'duplicate-reference', 'tongtu_order_number' => 'store-1013', 'paid_amount_usd' => '11.00'],
+        ]);
+        $this->workbooks->importRecords('paypal-orders', [
+            2 => [...$this->recordRow(), '交易 ID' => 'FALLBACK', '自定义编号' => '0648195064384248627243'],
+            3 => [...$this->recordRow(), '交易 ID' => 'DIRECT', '自定义编号' => '0648195064384248627243'],
+            4 => [...$this->recordRow(), '交易 ID' => 'AMBIGUOUS', '自定义编号' => 'duplicate-reference'],
+            5 => [...$this->recordRow(), '交易 ID' => 'WRONG-AMOUNT', '自定义编号' => '0648195064384248627243', '總額' => '10.01'],
+        ], 'Custom reference', 'UTC', 1);
+
+        $url = '/finance/reports/paypal-settlement';
+        $rows = $this->get($url)->assertOk()->viewData('rows')->getCollection()->keyBy('reference');
+        $this->assertSame('store-1010', $rows['FALLBACK']['erp_order']);
+        $this->assertSame('store-1011', $rows['DIRECT']['erp_order']);
+        $this->assertSame('', $rows['AMBIGUOUS']['erp_order']);
+        $this->assertSame('', $rows['WRONG-AMOUNT']['erp_order']);
+
+        $sheet = $this->readDownload($this->get($url.'?download=1&export_columns[]=reference&export_columns[]=erp_order')
+            ->assertOk()->streamedContent())->toArray();
+        $this->assertSame(['FALLBACK', 'store-1010'], collect($sheet)->slice(1)->keyBy(0)['FALLBACK']);
+    }
+
     public function test_paypal_settlement_and_export_use_store_owner_history_at_order_time(): void
     {
         $users = (new \App\Models\AdminUser)->getTable();
@@ -1194,7 +1228,20 @@ class FinancePortalTest extends TestCase
         ]);
         $url = '/finance/reports/credit-settlement';
         $data = ['card_channel' => 'ye', 'account' => $account->activity_account, 'timezone' => 'Asia/Shanghai'];
-        $submit = fn () => $this->post($url.'/import', [...$data, 'files' => [$this->upload($statement), $this->upload($orders)]]);
+        $octetStreamUpload = function (Spreadsheet $book): UploadedFile {
+            $file = $this->upload($book);
+
+            return new class($file->getPathname(), 'finance.xlsx', 'application/octet-stream', null, true) extends UploadedFile {
+                public function getMimeType(): ?string
+                {
+                    return 'application/octet-stream';
+                }
+            };
+        };
+        $submit = fn () => $this->post($url.'/import', [...$data, 'files' => [$octetStreamUpload($statement), $octetStreamUpload($orders)]]);
+
+        $this->post($url.'/import', [...$data, 'files' => [UploadedFile::fake()->createWithContent('invalid.xlsx', 'not a workbook')]])
+            ->assertSessionHasErrors('files.0');
 
         $submit()->assertSessionHasErrors('files.0');
         $this->assertDatabaseMissing('finance_records', ['reference' => 'BATCH-ORDER']);

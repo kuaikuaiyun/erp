@@ -44,9 +44,12 @@ class FinanceConfluxSettlement
 
     public function isStatement(UploadedFile $file): bool
     {
+        if (strtolower($file->getClientOriginalExtension()) !== 'xlsx') {
+            return false;
+        }
         $reader = IOFactory::createReader(IOFactory::READER_XLSX);
         if (! $reader->canRead($file->getRealPath())) {
-            return false;
+            throw new \PhpOffice\PhpSpreadsheet\Reader\Exception('Invalid XLSX workbook.');
         }
 
         foreach ($reader->listWorksheetNames($file->getRealPath()) as $name) {
