@@ -214,6 +214,10 @@ Route::patch('/assistant/daily-submissions/advertising-account-authorizations/{s
     ->whereNumber('submission')->name('assistant.daily-submissions.advertising-account-authorizations.process');
 Route::get('/assistant/daily-submissions/account-store-transfers', [AccountStoreTransferReviewController::class, 'index'])
     ->name('assistant.daily-submissions.account-store-transfers.index');
+Route::get('/assistant/daily-submissions/account-store-transfers/{submission}/images/{image}', [AccountStoreTransferReviewController::class, 'image'])
+    ->whereNumber('submission')->whereNumber('image')->name('assistant.daily-submissions.account-store-transfers.images.view');
+Route::get('/assistant/daily-submissions/account-store-transfers/{submission}/images/{image}/download', [AccountStoreTransferReviewController::class, 'downloadImage'])
+    ->whereNumber('submission')->whereNumber('image')->name('assistant.daily-submissions.account-store-transfers.images.download');
 Route::patch('/assistant/daily-submissions/account-store-transfers/{submission}/process', [AccountStoreTransferReviewController::class, 'process'])
     ->whereNumber('submission')->name('assistant.daily-submissions.account-store-transfers.process');
 Route::get('/operation/daily-submissions/applovin-spends', [AppLovinSpendController::class, 'index'])

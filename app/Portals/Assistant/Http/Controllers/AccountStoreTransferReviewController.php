@@ -9,7 +9,9 @@ use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response;
 
 class AccountStoreTransferReviewController extends Controller
@@ -32,6 +34,45 @@ class AccountStoreTransferReviewController extends Controller
         $data=$request->validate(['response_text'=>['required','string','max:5000']],['response_text.required'=>'请填写回复内容。']);
         $submission->update(['status'=>DailyAccountStoreTransfer::STATUS_PROCESSED,'response_text'=>trim($data['response_text']),'processed_by'=>$context['user']->id,'processed_by_name'=>$context['user']->name?:$context['user']->username,'processed_at'=>now()]);
         return back()->with('success','弃用/转让需求已回复并标记为已处理。');
+    }
+    public function image(Request $request, DailyAccountStoreTransfer $submission, int $image): BinaryFileResponse
+    {
+        $this->authorizeSubmission($request, $submission);
+        $attachment = $this->attachment($submission, $image);
+
+        return response()->file(Storage::disk('local')->path($attachment['path']), [
+            'Content-Type' => $attachment['mime'] ?? 'application/octet-stream',
+            'Cache-Control' => 'private, max-age=3600',
+        ]);
+    }
+
+    public function downloadImage(Request $request, DailyAccountStoreTransfer $submission, int $image): BinaryFileResponse
+    {
+        $this->authorizeSubmission($request, $submission);
+        $attachment = $this->attachment($submission, $image);
+
+        return response()->download(
+            Storage::disk('local')->path($attachment['path']),
+            basename((string) ($attachment['name'] ?? 'reason-image'))
+        );
+    }
+
+    /** @return array{path:string,name?:string,mime?:string,size?:int} */
+    private function attachment(DailyAccountStoreTransfer $submission, int $image): array
+    {
+        $attachment = ($submission->reason_images ?? [])[$image] ?? null;
+        abort_unless(is_array($attachment) && isset($attachment['path']) && Storage::disk('local')->exists($attachment['path']), 404);
+
+        return $attachment;
+    }
+
+    private function authorizeSubmission(Request $request, DailyAccountStoreTransfer $submission): void
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        if (! $context['user']->isAdministrator()) {
+            abort_unless(in_array((int) $submission->operation_department_id, $this->storeOwners->visibleOperationDepartmentIds($context['user']), true), 403);
+        }
     }
     private function context(Request $request):array|Response{$context=$this->portalEntries->portalContext($request);if($context instanceof Response)return $context;$this->authorization->assertAssistantPortal($context['portal']);abort_unless($this->authorization->isAssistantDepartmentMember($context['user']),403);return $context;}
 }

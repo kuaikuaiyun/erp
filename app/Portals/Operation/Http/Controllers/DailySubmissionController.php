@@ -308,6 +308,8 @@ class DailySubmissionController extends Controller
         $data = $request->validate([
             'target_type' => ['required', Rule::in(['account', 'store'])], 'action_type' => ['required', Rule::in(['discard', 'transfer'])],
             'reason' => ['required', 'string', 'max:2000'],
+            'reason_images' => ['nullable', 'array', 'max:5'],
+            'reason_images.*' => ['image', 'mimes:jpg,jpeg,png,webp,gif', 'max:10240'],
             'agency_id' => [Rule::requiredIf($targetType === 'account'), 'nullable', 'integer', Rule::in($agencies->keys()->all())],
             'account_name' => [Rule::requiredIf($targetType === 'account'), 'nullable', 'string', 'max:191'],
             'account_number' => [Rule::requiredIf($targetType === 'account'), 'nullable', 'string', 'max:191'],
@@ -319,11 +321,19 @@ class DailySubmissionController extends Controller
         $project = $targetType === 'store' ? $projects->get((int) $data['project_id']) : null;
         $system = $targetType === 'store' ? $systems->get((int) $data['website_system_id']) : null;
         if ($targetType === 'store') abort_unless($project && $system && (int) $system->project_id === (int) $project->id, 422, '建站系统与所选项目不匹配。');
+        $reasonImages = collect($request->file('reason_images', []))->map(function ($image): array {
+            return [
+                'path' => $image->store('daily-account-store-transfers/'.now()->format('Y/m'), 'local'),
+                'name' => $image->getClientOriginalName(),
+                'mime' => $image->getMimeType(),
+                'size' => $image->getSize(),
+            ];
+        })->values()->all();
         DailyAccountStoreTransfer::query()->create([
             'operator_user_id' => $operator->id, 'operator_name' => $operator->name ?: $operator->username,
             'operation_department_id' => $department?->id, 'operation_department_name' => $department?->name,
             'assistant_department_id' => $agency?->assistant_department_id ?: $project?->assistant_department_id,
-            'target_type' => $targetType, 'action_type' => $actionType, 'reason' => trim($data['reason']),
+            'target_type' => $targetType, 'action_type' => $actionType, 'reason' => trim($data['reason']), 'reason_images' => $reasonImages ?: null,
             'agency_id' => $agency?->id, 'agency_name' => $agency?->name, 'media_name' => $agency?->advertisingMedia?->name,
             'account_name' => isset($data['account_name']) ? trim((string) $data['account_name']) : null,
             'account_number' => isset($data['account_number']) ? trim((string) $data['account_number']) : null,
