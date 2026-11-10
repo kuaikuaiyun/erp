@@ -4,6 +4,7 @@ namespace App\Portals\Finance;
 
 use App\Models\AdminUser;
 use App\Models\AssistantDomainStore;
+use App\Models\AssistantDomainStoreOwnerHistory;
 use App\Models\FinancePaymentAccount;
 use App\Models\FinanceRecord;
 use App\Models\LogisticsOrderPaymentReference;
@@ -332,6 +333,7 @@ class FinanceSettlementService
             $ownerName = $group?->assigned_owner ?? $group?->owner ?? ($p['使用人'] ?? '');
             $ownerId = $group?->assigned_owner_user_id ?? null;
             $team = $group?->team ?? ($p['团队'] ?? '');
+            $usesLegacyOperator = false;
             if ($order !== null) {
                 if (isset($order->owner_history_id)) {
                     $ownerName = $order->historical_owner_name ?? '';
@@ -345,6 +347,15 @@ class FinanceSettlementService
                 }
                 if ($inactiveOrderStore && ! isset($order->owner_history_id) && blank($ownerName)) {
                     $ownerName = trim((string) ($order->operator_name ?? ''));
+                }
+                $legacyOperator = trim((string) ($order->operator_name ?? ''));
+                // An empty initial record can coexist with the older order and store operator fields.
+                if (blank($ownerName) && $ownerId === null && $legacyOperator !== ''
+                    && $legacyOperator === trim((string) ($orderStore->owner ?? ''))
+                    && (! isset($order->owner_history_id)
+                        || $order->historical_owner_event === AssistantDomainStoreOwnerHistory::EVENT_BASELINE)) {
+                    $ownerName = $legacyOperator;
+                    $usesLegacyOperator = true;
                 }
                 if (property_exists($order, 'group_names')) {
                     $team = FinanceCatalog::teamLabel($order->group_names);
@@ -379,8 +390,8 @@ class FinanceSettlementService
                     ? $membersById->get($displayedOwnerId)
                     : ($nameMatches?->count() === 1 ? $nameMatches->first() : null);
                 $row['operation_department'] = $member?->operation_department ?? '';
-                if ($member === null && $inactiveOrderStore && $displayedOwner !== '') {
-                    // A stopped store can retain an order's former operator and team after current memberships change.
+                if ($member === null && ($inactiveOrderStore || $usesLegacyOperator) && $displayedOwner !== '') {
+                    // Keep the recorded team when it belongs to the operator shown on the settlement.
                     $snapshotOwner = trim((string) (($order->assigned_owner_name ?? null) ?: ($order->operator_name ?? '')));
                     if ($displayedOwner === $snapshotOwner
                         || ($displayedOwnerId !== null && (int) $displayedOwnerId === (int) ($order->assigned_owner_user_id ?? 0))) {
@@ -580,7 +591,7 @@ class FinanceSettlementService
             $orderQuery->leftJoin('assistant_domain_store_owner_histories as owner_history', fn ($join) =>
                 $join->where('owner_history.id', '=', $historyId))
                 ->addSelect('owner_history.id as owner_history_id', 'owner_history.owner_name_snapshot as historical_owner_name',
-                    'owner_history.owner_user_id as historical_owner_user_id');
+                    'owner_history.owner_user_id as historical_owner_user_id', 'owner_history.event as historical_owner_event');
         }
         $orders = $orderQuery->get()->keyBy('id');
         $stores = ! $matchOnly && $db->getSchemaBuilder()->hasTable('assistant_domain_stores')

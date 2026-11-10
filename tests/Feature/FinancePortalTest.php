@@ -871,6 +871,21 @@ class FinancePortalTest extends TestCase
         }
         $this->assertSame('', $rows['UNASSIGNED']['owner']);
         $this->assertSame('', $rows['UNASSIGNED']['team']);
+
+        // Older orders can have an operator and team even when formal ownership started empty.
+        DB::table('assistant_domain_stores')->where('id', 1)->update(['shop_status' => 'in_use', 'user_name' => '七七']);
+        $history->clone()->where('id', 1)->update(['event' => 'baseline']);
+        DB::table('logistics_orders')->whereIn('bill_number', ['NO-OWNER', 'UNASSIGNED'])
+            ->update(['operator_name' => '七七', 'group_names' => '深圳团队']);
+        DB::table('logistics_orders')->where('bill_number', 'NO-OWNER')->update(['order_created_at' => '2026-10-31 00:00:00']);
+        DB::table('logistics_orders')->where('bill_number', 'UNASSIGNED')->update(['order_created_at' => '2026-11-08 00:00:00']);
+
+        $rows = $this->get($url)->assertOk()->viewData('rows')->getCollection()->keyBy('reference');
+        $this->assertSame('七七', $rows['NO-OWNER']['owner']);
+        $this->assertSame('深圳团队', $rows['NO-OWNER']['team']);
+        $this->assertSame('深圳', $rows['NO-OWNER']['operation_region']);
+        $this->assertSame('', $rows['UNASSIGNED']['owner']);
+        $this->assertSame(['NO-OWNER', '七七', '深圳团队', '深圳'], $export()['NO-OWNER']);
     }
 
     public function test_settlement_reports_extract_checkout_and_save_without_changing_orders(): void
