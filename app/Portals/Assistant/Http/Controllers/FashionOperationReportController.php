@@ -167,6 +167,9 @@ class FashionOperationReportController extends Controller
 
         $summaryRevenue = (float) $rows->sum('revenue');
         $summarySpend = (float) $rows->sum('ad_spend');
+        $roiRevenue = (float) $rows
+            ->filter(fn (array $row): bool => (float) ($row['ad_spend'] ?? 0) > 0)
+            ->sum('revenue');
         return view('portals.assistant.fashion-operation-reports.index', [
             ...$context, 'rows' => $rows, 'timezoneOptions' => $timezones,
             'departmentOptions' => $departmentOptions,
@@ -174,7 +177,7 @@ class FashionOperationReportController extends Controller
             'summary' => ['people' => $rows->count(), 'stores' => $rows->sum(fn ($row) => count($row['stores'])),
                 'orders' => $rows->sum('order_count'), 'revenue' => $summaryRevenue, 'ad_spend' => $summarySpend,
                 'aov' => $rows->sum('order_count') > 0 ? $summaryRevenue / $rows->sum('order_count') : null,
-                'roi' => $summarySpend > 0 ? $summaryRevenue / $summarySpend : null],
+                'roi' => $summarySpend > 0 ? $roiRevenue / $summarySpend : null],
         ]);
     }
 

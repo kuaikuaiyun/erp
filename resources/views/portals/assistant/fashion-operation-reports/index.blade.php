@@ -23,7 +23,7 @@
 <tr class="report-main-row"><td>{{ $row['department'] }}</td><td><b>{{ $row['operator'] }}</b></td><td>{{ $row['hire_days']!==null?$row['hire_days'].' 天':'—' }}</td><td class="text-right"><b>{{ $row['order_count'] }}</b></td><td class="text-right"><b>${{ number_format($row['revenue'],2) }}</b></td><td class="text-right">{{ $row['aov']!==null?number_format($row['aov'],2):'—' }}</td><td><div class="media-list">@forelse($row['media'] as $media)<div class="media-item"><b>{{ $media['name'] }}</b><span>${{ number_format($media['spend'],2) }}</span></div>@empty<span class="text-muted">暂无已审核的广告费</span>@endforelse</div></td><td class="text-right">${{ number_format($row['ad_spend'],2) }}</td><td class="text-center roi">{{ $row['roi']!==null?number_format($row['roi'],2):'—' }}</td><td class="text-center"><button type="button" class="btn btn-info btn-xs detail-toggle" data-toggle="collapse" data-target="#fashion-operation-detail-{{ $loop->index }}"><i class="fa fa-eye"></i> 查看明细</button></td><td class="text-center"><span class="submission-status {{ $row['submission_status'] }}">{{ $row['submission_label'] }}</span></td></tr>
 <tr class="collapse report-detail-row" id="fashion-operation-detail-{{ $loop->index }}"><td colspan="11"><div class="report-detail-card"><div class="report-detail-meta"><b>{{ $row['operator'] }}</b>　入职日期：{{ $row['hired_at']?:'—' }}　绑定店铺：{{ count($row['stores']) }} 家</div><div class="report-detail-stores">@foreach($row['stores'] as $store)<div class="report-detail-store"><b>{{ $store['name'] }}</b><span class="label label-info">{{ $store['site_builder'] }}</span><small>{{ $store['domain']?:'—' }}</small><strong>{{ $store['orders'] }} 单 · ${{ number_format($store['revenue'],2) }}</strong></div>@endforeach</div></div></td></tr>
 @empty<tr><td colspan="11" class="empty"><i class="fa fa-inbox fa-2x"></i><br>当前筛选范围暂无服装运营数据</td></tr>@endforelse
-</tbody><tfoot><tr><td class="total-label" colspan="3">合计</td><td class="text-right">{{ $summary['orders'] }}</td><td class="text-right">${{ number_format($summary['revenue'],2) }}</td><td></td><td></td><td class="text-right">${{ number_format($summary['ad_spend'],2) }}</td><td></td><td></td><td></td></tr></tfoot></table></div></div>
+</tbody><tfoot><tr><td class="total-label" colspan="3">合计</td><td class="text-right">{{ $summary['orders'] }}</td><td class="text-right">${{ number_format($summary['revenue'],2) }}</td><td class="text-right">{{ $summary['aov']!==null?'$'.number_format($summary['aov'],2):'—' }}</td><td></td><td class="text-right">${{ number_format($summary['ad_spend'],2) }}</td><td class="text-center roi">{{ $summary['roi']!==null?number_format($summary['roi'],2):'—' }}</td><td></td><td></td></tr></tfoot></table></div></div>
 </section>
 @endsection
 
@@ -44,10 +44,10 @@
         '',
         (string) $summary['orders'],
         '$'.number_format($summary['revenue'], 2),
-        '',
+        $summary['aov'] !== null ? '$'.number_format($summary['aov'], 2) : '—',
         '',
         '$'.number_format($summary['ad_spend'], 2),
-        '',
+        $summary['roi'] !== null ? number_format($summary['roi'], 2) : '—',
     ];
 @endphp
 <script>
