@@ -16,6 +16,7 @@ use PhpOffice\PhpSpreadsheet\Reader\Exception;
 use PhpOffice\PhpSpreadsheet\Reader\IReadFilter;
 use PhpOffice\PhpSpreadsheet\Shared\Date;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xls;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -115,60 +116,13 @@ class FinanceWorkbookService
             throw ValidationException::withMessages(['file' => __('finance.errors.file')]);
         }
         try {
-            $sheet = $sheetName ? $book->getSheetByName($sheetName) : null;
-            if (! $sheet && $sheetName) {
-                $legacyName = str_replace(['PayPal', '信用卡'], ['贝宝', '徐总支付'], $sheetName);
-                $sheet = $book->getSheetByName($legacyName);
-            }
-            $sheet ??= $book->getActiveSheet();
+            $sheet = $this->importSheet($book, $sheetName);
             ['row' => $lastRow, 'column' => $lastColumn] = $sheet->getHighestRowAndColumn();
             $width = Coordinate::columnIndexFromString($lastColumn);
             if ($lastRow > $maxRows + 1 || $width > 100) {
                 throw ValidationException::withMessages(['file' => __('finance.errors.size', ['rows' => number_format($maxRows)])]);
             }
-            $positions = [];
-            $expected = array_count_values(array_map(FinanceCatalog::simplified(...), $headers));
-            for ($column = 1; $column <= $width; $column++) {
-                $name = trim(ltrim((string) $sheet->getCell([$column, 1])->getValue(), "\xEF\xBB\xBF"));
-                $name = FinanceCatalog::simplified($name);
-                if ($name !== '') {
-                    if (count($positions[$name] ?? []) >= ($keyedHeaders ? ($expected[$name] ?? 1) : 1)) {
-                        throw ValidationException::withMessages(['file' => __('finance.errors.duplicate_header', ['header' => $name])]);
-                    }
-                    $positions[$name][] = $column;
-                }
-            }
-            $columns = [];
-            $occurrences = [];
-            foreach ($headers as $key => $header) {
-                $name = FinanceCatalog::simplified($header);
-                $occurrence = $keyedHeaders ? ($occurrences[$name] ?? 0) : 0;
-                $column = $positions[$name][$occurrence] ?? null;
-                if ($column === null && ! in_array($keyedHeaders ? $key : $header, $optionalHeaders, true)) {
-                    throw ValidationException::withMessages(['file' => __('finance.errors.header', ['header' => $header])]);
-                }
-                $occurrences[$name] = $occurrence + 1;
-                $columns[$keyedHeaders ? $key : $header] = $column;
-            }
-            $rows = [];
-            for ($row = 2; $row <= $lastRow; $row++) {
-                $values = [];
-                foreach ($columns as $key => $column) {
-                    if ($column === null) {
-                        $values[$key] = '';
-                        continue;
-                    }
-                    $cell = $sheet->getCell([$column, $row]);
-                    if ($cell->isFormula()) {
-                        throw ValidationException::withMessages(['file' => __('finance.errors.formula', ['row' => $row])]);
-                    }
-                    $value = $cell->getValue();
-                    $values[$key] = is_scalar($value) ? trim((string) $value) : '';
-                }
-                if (count(array_filter($values, static fn ($value) => $value !== '')) > 0) {
-                    $rows[$row] = $values;
-                }
-            }
+            $rows = $this->readRows($sheet, $headers, $optionalHeaders, $keyedHeaders, $width, 2, $lastRow);
             if ($rows === []) {
                 throw ValidationException::withMessages(['file' => __('finance.errors.empty')]);
             }
@@ -177,6 +131,114 @@ class FinanceWorkbookService
         } finally {
             $book->disconnectWorksheets();
         }
+    }
+
+    public function readConfluxOrderBatches(UploadedFile $file, array $headers, string $sheetName, array $optionalHeaders): \Generator
+    {
+        $maxRows = 20000;
+        $batchSize = 5000;
+        $reader = IOFactory::createReader(IOFactory::READER_XLSX);
+        $reader->setReadDataOnly(true);
+        $path = $file->getRealPath();
+        try {
+            $info = array_column($reader->listWorksheetInfo($path), null, 'worksheetName');
+            $selected = $info[$sheetName] ?? (count($info) === 1 ? reset($info) : null);
+            $hasRows = false;
+            for ($first = 2; $first === 2 || $first <= $selected['totalRows']; $first += $batchSize) {
+                $last = $first + $batchSize - 1;
+                if ($selected) {
+                    $reader->setLoadSheetsOnly($selected['worksheetName']);
+                }
+                $reader->setReadFilter(new class($first, $last) implements IReadFilter {
+                    public function __construct(private int $first, private int $last) {}
+
+                    public function readCell(string $columnAddress, int $row, string $worksheetName = ''): bool
+                    {
+                        return ($row === 1 || ($row >= $this->first && $row <= $this->last))
+                            && Coordinate::columnIndexFromString($columnAddress) <= 100;
+                    }
+                });
+                $book = $reader->load($path);
+                try {
+                    $sheet = $this->importSheet($book, $selected['worksheetName'] ?? $sheetName);
+                    $selected = $info[$sheet->getTitle()];
+                    if ($selected['totalRows'] > $maxRows + 1 || $selected['totalColumns'] > 100) {
+                        throw ValidationException::withMessages(['file' => __('finance.errors.size', ['rows' => number_format($maxRows)])]);
+                    }
+                    $rows = $this->readRows($sheet, $headers, $optionalHeaders, true, $selected['totalColumns'],
+                        $first, min($last, $selected['totalRows']));
+                } finally {
+                    $book->disconnectWorksheets();
+                }
+                if ($rows !== []) {
+                    $hasRows = true;
+                    yield $rows;
+                }
+            }
+            if (! $hasRows) {
+                throw ValidationException::withMessages(['file' => __('finance.errors.empty')]);
+            }
+        } catch (Exception $e) {
+            throw ValidationException::withMessages(['file' => __('finance.errors.file')]);
+        }
+    }
+
+    private function importSheet(Spreadsheet $book, ?string $sheetName): Worksheet
+    {
+        if ($sheetName === null) {
+            return $book->getActiveSheet();
+        }
+        $legacyName = str_replace(['PayPal', '信用卡'], ['贝宝', '徐总支付'], $sheetName);
+
+        return $book->getSheetByName($sheetName) ?? $book->getSheetByName($legacyName) ?? $book->getActiveSheet();
+    }
+
+    private function readRows(Worksheet $sheet, array $headers, array $optionalHeaders, bool $keyedHeaders, int $width, int $firstRow, int $lastRow): array
+    {
+        $positions = [];
+        $expected = array_count_values(array_map(FinanceCatalog::simplified(...), $headers));
+        for ($column = 1; $column <= $width; $column++) {
+            $name = trim(ltrim((string) $sheet->getCell([$column, 1])->getValue(), "\xEF\xBB\xBF"));
+            $name = FinanceCatalog::simplified($name);
+            if ($name !== '') {
+                if (count($positions[$name] ?? []) >= ($keyedHeaders ? ($expected[$name] ?? 1) : 1)) {
+                    throw ValidationException::withMessages(['file' => __('finance.errors.duplicate_header', ['header' => $name])]);
+                }
+                $positions[$name][] = $column;
+            }
+        }
+        $columns = [];
+        $occurrences = [];
+        foreach ($headers as $key => $header) {
+            $name = FinanceCatalog::simplified($header);
+            $occurrence = $keyedHeaders ? ($occurrences[$name] ?? 0) : 0;
+            $column = $positions[$name][$occurrence] ?? null;
+            if ($column === null && ! in_array($keyedHeaders ? $key : $header, $optionalHeaders, true)) {
+                throw ValidationException::withMessages(['file' => __('finance.errors.header', ['header' => $header])]);
+            }
+            $occurrences[$name] = $occurrence + 1;
+            $columns[$keyedHeaders ? $key : $header] = $column;
+        }
+        $rows = [];
+        for ($row = $firstRow; $row <= $lastRow; $row++) {
+            $values = [];
+            foreach ($columns as $key => $column) {
+                if ($column === null) {
+                    $values[$key] = '';
+                    continue;
+                }
+                $cell = $sheet->getCell([$column, $row]);
+                if ($cell->isFormula()) {
+                    throw ValidationException::withMessages(['file' => __('finance.errors.formula', ['row' => $row])]);
+                }
+                $value = $cell->getValue();
+                $values[$key] = is_scalar($value) ? trim((string) $value) : '';
+            }
+            if (count(array_filter($values, static fn ($value) => $value !== '')) > 0) {
+                $rows[$row] = $values;
+            }
+        }
+        return $rows;
     }
 
     public function readExportTemplate(UploadedFile $file, int $headerRow, array $columns): array
@@ -254,7 +316,7 @@ class FinanceWorkbookService
         }
     }
 
-    public function importRecords(string $dataset, array $rows, string $account, string $timezone, int $actor, bool $createOnly = false, bool $guardSettlementMonth = false): int
+    public function importRecords(string $dataset, array $rows, string $account, string $timezone, int $actor, bool $createOnly = false, bool $guardSettlementMonth = false, bool $fillMissing = false): int
     {
         if (! in_array($timezone, self::TIMEZONES, true)) {
             throw ValidationException::withMessages(['source_timezone' => __('finance.errors.timezone')]);
@@ -342,27 +404,45 @@ class FinanceWorkbookService
             ];
         }
 
-        return $this->database()->transaction(function () use ($records, $createOnly, $guardSettlementMonth): int {
-            $created = 0;
+        return $this->database()->transaction(function () use ($records, $createOnly, $guardSettlementMonth, $fillMissing): int {
+            $affected = 0;
             $checkedMonths = [];
             foreach ($records as $record) {
                 $model = $createOnly
                     ? FinanceRecord::query()->firstOrCreate(['fingerprint' => $record['fingerprint']], $record)
                     : FinanceRecord::query()->updateOrCreate(['fingerprint' => $record['fingerprint']], $record);
-                if ($guardSettlementMonth && $model->wasRecentlyCreated) {
+                $created = $model->wasRecentlyCreated;
+                if ($fillMissing && ! $created) {
+                    $model = FinanceRecord::query()->whereKey($model->id)->lockForUpdate()->firstOrFail();
+                    $payload = $model->payload;
+                    foreach ($record['payload'] as $key => $value) {
+                        if (blank($payload[$key] ?? null) && filled($value)) {
+                            $payload[$key] = $value;
+                        }
+                    }
+                    $model->payload = $payload;
+                    if (blank($model->domain) && filled($record['domain'])) {
+                        $model->domain = $record['domain'];
+                    }
+                }
+                $updated = $fillMissing && ! $created && $model->isDirty();
+                if ($guardSettlementMonth && ($created || $updated)) {
                     $month = $model->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m');
                     if (! isset($checkedMonths[$month])) {
                         app(FinanceAccountingService::class)->guardUnlocked($month);
                         $checkedMonths[$month] = true;
                     }
                 }
-                $created += (int) $model->wasRecentlyCreated;
+                if ($updated) {
+                    $model->save();
+                }
+                $affected += (int) ($created || $updated);
                 if ($record['raw_type']) {
                     $this->registerType($record['raw_type']);
                 }
             }
 
-            return $createOnly ? $created : count($records);
+            return $createOnly ? $affected : count($records);
         });
     }
 

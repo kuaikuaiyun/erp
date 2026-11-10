@@ -89,12 +89,15 @@ Route::prefix('finance')->name('finance.')->middleware(\App\Http\Middleware\Redi
     Route::post('/records/{report}/export-template/preview', 'previewExportTemplate')
         ->where('report', 'paypal-orders')->name('records.export-template.preview');
     Route::get('/settings/accounting', 'accounting')->name('accounting');
-    Route::post('/settings/accounting/{action}', 'saveAccounting')->whereIn('action', ['rate', 'rule', 'reapply', 'lock'])->name('accounting.save');
+    Route::post('/settings/accounting/{action}', 'saveAccounting')->whereIn('action', ['rate', 'credit-usd-rate', 'rule', 'reapply', 'lock'])->name('accounting.save');
     Route::get('/settings/{kind}', 'settings')->name('settings');
     Route::post('/settings/{kind}', 'saveSetting')->name('settings.save');
     Route::delete('/settings/types/{type}', 'deleteTypeSetting')->whereNumber('type')->name('settings.types.delete');
     Route::post('/settings/{kind}/import', 'importSettings')->name('settings.import');
     Route::get('/settings/{kind}/export', 'exportSettings')->name('settings.export');
+    Route::get('/reports/xuzong-credit', 'records')->defaults('dataset', 'xuzong2-orders')->name('reports.xuzong-credit');
+    Route::get('/reports/xuzong-credit/export', 'exportRecords')->defaults('dataset', 'xuzong2-orders')->name('reports.xuzong-credit.export');
+    Route::post('/reports/xuzong-credit/import', 'importXuzongCreditDetails')->name('reports.xuzong-credit.import');
     Route::get('/reports/{report}', 'report')->name('report');
     Route::get('/reports/paypal-settlement/records/{record}', 'paypalSettlementDetail')->whereNumber('record')->name('settlement.paypal.detail');
     Route::post('/reports/{report}/export-template/preview', 'previewExportTemplate')

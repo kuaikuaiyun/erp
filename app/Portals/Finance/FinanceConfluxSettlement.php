@@ -40,6 +40,13 @@ class FinanceConfluxSettlement
         'release' => ['release', '保证金币种', '释放保证金'],
     ];
 
+    private const EVENT_FEES = [
+        'refund' => ['refund_fee', '退款处理费', '2.00', '2.00'],
+        'chargeback' => ['chargeback_fee', '拒付处理费', '25.00', '19.00'],
+        'rdr' => ['rdr_fee', 'RDR处理费', '15.00', '12.00'],
+        'ethoca' => ['ethoca_fee', 'Ethoca处理费', '19.00', '15.00'],
+    ];
+
     public function __construct(private readonly FinanceWorkbookService $workbooks) {}
 
     public function isStatement(UploadedFile $file): bool
@@ -231,7 +238,103 @@ class FinanceConfluxSettlement
         return $entries;
     }
 
-    public function details(Collection $entries): array
+    public function feesFor(Collection $matchedEntries): array
+    {
+        $fees = [];
+        $batches = $matchedEntries->flatten(1)->groupBy(['payment_account_id', 'settlement_date']);
+        foreach ($batches as $accountId => $dates) {
+            foreach ($dates as $date => $entries) {
+                $wanted = $entries->pluck('id')->flip()->all();
+                $bill = $this->workbooks->database()->table(self::TABLE)->where([
+                    'payment_account_id' => $accountId, 'settlement_date' => $date, 'platform' => 'ye',
+                ])->whereIn('kind', ['summary', 'sale', 'failed', ...array_keys(self::EVENT_FEES)])->get(['id', 'kind', 'payload']);
+                $fees += array_intersect_key($this->statementFees($bill, $date), $wanted);
+            }
+        }
+
+        return $fees;
+    }
+
+    private function statementFees(Collection $bill, string $settlementDate): array
+    {
+        $entries = $bill->map(function ($entry) {
+            $payload = json_decode($entry->payload, true, 512, JSON_THROW_ON_ERROR);
+            $merchant = trim($payload['商户号'] ?? '');
+            $descriptor = trim($payload['账单描述符'] ?? '');
+            $entry->merchant_descriptor = $merchant !== '' && $descriptor !== '' ? $merchant.'|'.$descriptor : null;
+            $tradeTime = $payload[$entry->kind === 'summary' ? '交易日期' : '交易时间'] ?? '';
+            $entry->trade_date = $this->date(is_numeric($tradeTime) ? $tradeTime : substr($tradeTime, 0, 10));
+            $entry->data = $payload;
+
+            return $entry;
+        });
+        $sales = $entries->where('kind', 'sale');
+        $currencies = $sales->map(fn ($entry) => strtoupper($entry->data['结算货币']))->unique();
+        $currency = $currencies->count() === 1 ? $currencies->first() : null;
+        if (! in_array($currency, ['USD', 'GBP'], true)) {
+            return [];
+        }
+        $fees = [];
+        foreach ($sales as $entry) {
+            $amount = $entry->data['结算金额'];
+            $fees[$entry->id] = [
+                'hold' => $this->roundMoney(bcmul($amount, '0.10', 10)),
+                'fee' => $this->roundMoney(bcmul($amount, $currency === 'USD' ? '0.05' : '0.06', 10)),
+            ];
+        }
+        foreach ($entries->whereNotNull('merchant_descriptor')->groupBy('merchant_descriptor') as $merchantEntries) {
+            $summaries = $merchantEntries->where('kind', 'summary');
+            foreach ($merchantEntries->whereNotNull('trade_date')->groupBy('trade_date') as $dayEntries) {
+                $summary = $dayEntries->where('kind', 'summary');
+                if ($summary->count() !== 1) {
+                    continue;
+                }
+                $isWallet = stripos($summary->first()->data['账单描述符'], 'wallet') !== false;
+                $gatewayFee = $currency === 'USD' && $settlementDate >= '2026-10-13' && $isWallet ? '0.35' : '0.30';
+                foreach (['sale' => '成功网关费', 'failed' => '失败网关费'] as $kind => $column) {
+                    $this->addVerifiedFees($fees, $dayEntries->where('kind', $kind), $summary, 'per_order_fee', $column, $gatewayFee);
+                }
+            }
+            foreach (self::EVENT_FEES as $kind => [$field, $column, $usdRate, $gbpRate]) {
+                // Event fees are booked in the statement period, even for older transactions.
+                $this->addVerifiedFees($fees, $merchantEntries->where('kind', $kind), $summaries, $field, $column,
+                    $currency === 'USD' ? $usdRate : $gbpRate);
+            }
+        }
+        foreach ($fees as &$values) {
+            $values['currency'] = $currency;
+        }
+        unset($values);
+
+        return $fees;
+    }
+
+    private function roundMoney(string $amount): string
+    {
+        return bcadd($amount, bccomp($amount, '0', 10) < 0 ? '-0.005' : '0.005', 2);
+    }
+
+    private function addVerifiedFees(array &$fees, Collection $entries, Collection $summaries, string $field, string $column, string $rate): void
+    {
+        if ($entries->isEmpty() || $summaries->isEmpty()) {
+            return;
+        }
+        $total = '0';
+        foreach ($summaries as $summary) {
+            $amount = $summary->data[$column] ?? '';
+            if (! preg_match('/^-?\d{1,18}(?:\.\d{1,8})?$/D', $amount) || bccomp($amount, '0', 8) > 0) {
+                return;
+            }
+            $total = bcsub($total, $amount, 8);
+        }
+        if (bccomp($total, bcmul((string) $entries->count(), $rate, 8), 8) === 0) {
+            foreach ($entries as $entry) {
+                $fees[$entry->id][$field] = $rate;
+            }
+        }
+    }
+
+    public function details(Collection $entries, array $fees = []): array
     {
         $byType = $entries->groupBy('kind');
         $values = [];
@@ -243,6 +346,16 @@ class FinanceConfluxSettlement
                 $currency = strtoupper($payload[$currencyField] ?? '');
                 $amount = $payload[$amountField] ?? '';
                 $currencies[$currency] = true;
+                $amounts[$field] = bcadd($amounts[$field] ?? '0', $amount, 8);
+            }
+        }
+        foreach ($entries as $entry) {
+            $entryFees = $fees[$entry->id] ?? [];
+            if ($entryFees !== []) {
+                $currencies[$entryFees['currency']] = true;
+                unset($entryFees['currency']);
+            }
+            foreach ($entryFees as $field => $amount) {
                 $amounts[$field] = bcadd($amounts[$field] ?? '0', $amount, 8);
             }
         }
@@ -268,6 +381,45 @@ class FinanceConfluxSettlement
 
         return ['values' => $values, 'reasons' => $reasons,
             'dates' => $entries->pluck('settlement_date')->unique()->implode('、')];
+    }
+
+    public function payable(Collection $entries, array $values): ?string
+    {
+        $required = [];
+        $kinds = $entries->pluck('kind')->unique();
+        // An Ethoca alert can describe the same refund or have a different currency.
+        if ($kinds->contains('ethoca')) {
+            return null;
+        }
+        foreach ($kinds as $kind) {
+            if (isset(self::AMOUNTS[$kind])) {
+                $required[] = self::AMOUNTS[$kind][0];
+            }
+            $required = array_merge($required, match ($kind) {
+                'sale' => ['hold', 'fee', 'per_order_fee'],
+                'failed' => ['per_order_fee'],
+                default => isset(self::EVENT_FEES[$kind]) ? [self::EVENT_FEES[$kind][0]] : [],
+            });
+        }
+        if ($required === [] || ! in_array($values['settlement_currency'] ?? null, ['USD', 'GBP'], true)) {
+            return null;
+        }
+        foreach ($required as $field) {
+            if (! isset($values[$field])) {
+                return null;
+            }
+        }
+
+        $principal = $kinds->contains('sale') ? $values['settlement'] : '0';
+        $payable = bcadd($principal, (string) ($values['release'] ?? '0'), 8);
+        foreach (['hold', 'fee', 'per_order_fee', 'refund', 'refund_fee', 'chargeback', 'chargeback_fee',
+            'ethoca_refund', 'ethoca_fee', 'rdr_refund', 'rdr_fee'] as $field) {
+            if (isset($values[$field])) {
+                $payable = bcsub($payable, (string) $values[$field], 8);
+            }
+        }
+
+        return $payable;
     }
 
     private function orders(string $account)

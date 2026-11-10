@@ -45,7 +45,7 @@ return [
     'remark' => '支付渠道账务、收支明细与基础资料管理',
     'permissions' => ['view' => '财务系统：查看与导出', 'manage' => '财务系统：维护与导入'],
     'menus' => [
-        'paypal-settlement' => 'PayPal结算明细', 'credit-settlement' => '信用卡结算明细',
+        'paypal-settlement' => 'PayPal结算明细', 'credit-settlement' => '信用卡结算明细', 'xuzong-credit' => '徐总信用卡',
         'home' => '财务工作台', 'balances' => '实时余额', 'orders' => '订单列表',
         'paypal-orders' => 'PayPal订单数据', 'xuzong2-orders' => '信用卡订单数据',
         'details' => '支付明细', 'paypal-details' => 'PayPal明细表', 'xuzong2-details' => '信用卡2明细表',

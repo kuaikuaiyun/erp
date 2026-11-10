@@ -23,6 +23,29 @@
 <div class="finance-accounting-table">
 <table class="table finance-table"><thead><tr><th>月份</th><th>币种</th><th>人民币汇率</th><th>来源</th><th>更新人 / 更新时间</th></tr></thead><tbody>@forelse($rates as $rate)<tr><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($rate->month)) }}</td><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($rate->currency)) }}</td><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($rate->cny_rate)) }}</td><td>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($rate->source)) }}</td><td>{{ $rate->updated_by }} / {{ $rate->updated_at }}</td></tr>@empty<tr><td colspan="5">尚未配置月度汇率</td></tr>@endforelse</tbody></table>
 </div></div></div>
+<div class="box"><div class="box-header with-border"><h3 class="box-title">信用卡美元折算汇率</h3></div><div class="box-body">
+<p class="finance-accounting-help">用于 ConfluxAPI 明细的「结算-美元」，按北京时间交易日匹配。单日优先，其次日期区间，再按整月。区间重叠时优先选开始较晚的区间，开始相同则选结束较早的区间。日期区间包含首尾两天。</p>
+<p class="finance-accounting-help">未手动填写时，系统使用欧洲央行当天公布的参考汇率。需要更正时，可在这里填写汇率覆盖自动取值。当天没有参考汇率时，明细显示「汇率未填写」。</p>
+@php($usdScopes = \App\Portals\Finance\FinanceCreditUsdRates::SCOPES)
+<form method="post" action="{{ route('finance.accounting.save', 'credit-usd-rate') }}" class="finance-filter" id="finance-credit-usd-rate">@csrf
+    <div class="form-group"><label for="credit-usd-scope">适用范围</label><select id="credit-usd-scope" name="usd_scope" class="form-control">@foreach($usdScopes as $value => $label)<option value="{{ $value }}" @selected(old('usd_scope', 'day') === $value)>{{ $label }}</option>@endforeach</select></div>
+    <div class="form-group" data-usd-scopes="day range"><label for="credit-usd-start">开始日期</label><input id="credit-usd-start" type="date" name="usd_start" class="form-control" value="{{ old('usd_start', now('Asia/Shanghai')->toDateString()) }}"></div>
+    <div class="form-group" data-usd-scopes="range"><label for="credit-usd-end">结束日期</label><input id="credit-usd-end" type="date" name="usd_end" class="form-control" value="{{ old('usd_end') }}"></div>
+    <div class="form-group" data-usd-scopes="month"><label for="credit-usd-month">适用月份</label><input id="credit-usd-month" type="month" name="usd_month" class="form-control" value="{{ old('usd_month', now('Asia/Shanghai')->format('Y-m')) }}"></div>
+    <div class="form-group"><label for="credit-usd-currency">原币币种</label><input id="credit-usd-currency" name="usd_currency" list="credit-usd-currencies" class="form-control" required maxlength="3" placeholder="如 GBP" value="{{ old('usd_currency') }}"><datalist id="credit-usd-currencies">@foreach($rateCurrencies->reject(fn ($currency) => $currency === 'USD') as $currency)<option value="{{ $currency }}"></option>@endforeach</datalist></div>
+    <div class="form-group"><label for="credit-usd-value">1 单位原币折合美元</label><input id="credit-usd-value" name="usd_rate" class="form-control" type="number" step="0.00000001" min="0.00000001" value="{{ old('usd_rate') }}" required></div>
+    <div class="form-group"><button class="btn btn-primary">保存美元汇率</button></div>
+</form>
+<p class="finance-accounting-help">相同币种和适用范围可重新保存以更正汇率。涉及已结账月份的汇率不可修改。</p>
+<div class="finance-accounting-table">
+<table class="table finance-table"><thead><tr><th>币种</th><th>适用范围</th><th>适用日期</th><th>美元汇率</th><th>更新人 / 更新时间</th></tr></thead><tbody>
+@forelse($creditUsdRates as $rate)
+    <tr><td>{{ $rate->currency }}</td><td>{{ $usdScopes[$rate->scope] }}</td><td>{{ $rate->starts_on }}@if($rate->ends_on !== $rate->starts_on) 至 {{ $rate->ends_on }}@endif</td><td>{{ $rate->usd_rate }}</td><td>{{ $rate->updated_by }} / {{ $rate->updated_at }}</td></tr>
+@empty
+    <tr><td colspan="5">尚未配置信用卡美元折算汇率</td></tr>
+@endforelse
+</tbody></table>
+</div></div></div>
 <div class="box"><div class="box-header with-border"><h3 class="box-title">月度结账</h3></div><div class="box-body">
 <p class="finance-accounting-help">更新本月数据会重新应用分类与汇率。确认结账将锁定该月，之后不可修改或补录交易。</p>
 <form method="post" action="{{ route('finance.accounting.save', 'reapply') }}" class="finance-filter" id="finance-close-period">@csrf
@@ -55,6 +78,21 @@
 </div></details>
 @endsection
 @push('scripts')<script>
+(function(){
+    const scope = document.getElementById('credit-usd-scope');
+    const fields = scope.form.querySelectorAll('[data-usd-scopes]');
+    function showPeriodFields() {
+        fields.forEach(field => {
+            const visible = field.dataset.usdScopes.split(' ').includes(scope.value);
+            const input = field.querySelector('input');
+            field.hidden = !visible;
+            input.disabled = !visible;
+            input.required = visible;
+        });
+    }
+    scope.addEventListener('change', showPeriodFields);
+    showPeriodFields();
+})();
 (function(){
     var form=document.getElementById('finance-monthly-rate');
     var rates=@json($rateData);

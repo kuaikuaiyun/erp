@@ -1,5 +1,6 @@
 @php
     $orderColumns = ['编号','订单信息','店铺信息','订阅信息','订阅复购原订单ID','出单产品明细','支付信息','金额信息','订单时间','PayPal实际退款','信用卡实际退款','交易号','账单号','买家信息','物流信息','数据状态'];
+    $exportHeaders = $xuzongReport ? \App\Portals\Finance\FinanceXuzongCreditReport::headers() : \App\Portals\Finance\FinancePayPalOrderExport::pageHeaders($dataset);
 @endphp
 <div class="box-header with-border logistics-list-toolbar paypal-order-toolbar {{ $dataset === 'paypal-orders' && $canManage ? 'has-order-refresh' : '' }}">
     <h3 class="box-title">订单列表</h3><button id="paypal-export-selected" type="button" class="btn btn-default btn-sm" hidden style="display:none" disabled>导出所选</button>
@@ -11,7 +12,7 @@
         <select class="form-control" data-active-export-template aria-label="本次使用的导出模板"><option value="">默认字段设置</option></select>
         @include('portals.finance.partials.settlement-column-settings', [
             'report' => $dataset, 'orderView' => false, 'columns' => $orderColumns,
-            'exportColumns' => \App\Portals\Finance\FinancePayPalOrderExport::pageHeaders($dataset),
+            'exportColumns' => $exportHeaders,
         ])
     @else
     <details class="finance-export-columns">
@@ -20,7 +21,7 @@
             <div class="finance-export-column-actions"><strong>选择需要导出的字段</strong><button type="button" class="btn btn-default btn-xs" data-export-columns-all>全选</button><button type="button" class="btn btn-default btn-xs" data-export-columns-none>清空</button></div>
             <input type="hidden" name="report_fields_customized" value="1" form="finance-filters">
             <div class="finance-export-column-grid">
-            @foreach(\App\Portals\Finance\FinancePayPalOrderExport::pageHeaders($dataset) as $column)
+            @foreach($exportHeaders as $column)
                 <label><input type="checkbox" name="report_columns[]" value="{{ $loop->index }}" form="finance-filters" checked> {{ \App\Portals\Finance\FinanceCatalog::simplified($column) }}</label>
             @endforeach
             </div>
@@ -29,9 +30,15 @@
     </details>
     @endif
     <select name="export_format" form="finance-filters" class="form-control" aria-label="{{ __('finance.records.export_format') }}">@foreach(__('finance.records.formats') as $format => $label)<option value="{{ $format }}" @selected(($filters['export_format'] ?? 'xlsx') === $format)>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($label)) }}</option>@endforeach</select>
-    <a id="finance-export-filtered" class="btn btn-default btn-sm" href="{{ route('finance.records.export', ['dataset' => $dataset, ...$filters, 'export_scope' => 'filtered', 'export_format' => 'xlsx', ...(['export_layout' => 'page'])]) }}"><i class="fa fa-download" aria-hidden="true"></i> 导出</a>
+    <a id="finance-export-filtered" class="btn btn-default btn-sm" href="{{ route($recordsExportRoute, [...$recordsRouteParameters, ...$filters, 'export_scope' => 'filtered', 'export_format' => 'xlsx', 'export_layout' => 'page']) }}"><i class="fa fa-download" aria-hidden="true"></i> 导出</a>
+    @if($xuzongReport && $canManage)
+        @include('portals.finance.partials.xuzong-credit-import')
+    @endif
     @include('portals.finance.pagination', ['paginator' => $records])
 </div>
+@if($xuzongReport)
+@include('portals.finance.partials.xuzong-credit-orders')
+@else
 <div id="finance-order-horizontal-scroll" style="overflow-x:auto;overflow-y:hidden;height:18px" aria-label="订单列表横向滚动" tabindex="0"><div style="height:1px"></div></div>
 <div class="box-body table-responsive no-padding logistics-orders-scroll" id="finance-order-table-scroll">
 <table class="table table-hover logistics-table logistics-orders-table paypal-order-table show-extra-columns">
@@ -146,7 +153,7 @@
             @endforeach
             <td data-settlement-column="15">{{ $order?->data_status }}</td>
             <td>
-                <button type="button" class="btn btn-info btn-xs js-logistics-order-detail" data-paypal-detail="paypal-detail-{{ $record->id }}" data-order-detail-url="{{ route('finance.records', ['dataset' => $dataset, 'order_detail' => $record->id, 'timezone' => $filters['timezone']]) }}" aria-haspopup="dialog"><i class="fa fa-eye" aria-hidden="true"></i> 查看</button>
+                <button type="button" class="btn btn-info btn-xs js-logistics-order-detail" data-paypal-detail="paypal-detail-{{ $record->id }}" data-order-detail-url="{{ route($recordsRoute, [...$recordsRouteParameters, 'order_detail' => $record->id, 'timezone' => $filters['timezone']]) }}" aria-haspopup="dialog"><i class="fa fa-eye" aria-hidden="true"></i> 查看</button>
                 <template id="paypal-detail-{{ $record->id }}">
                     @php
                         $detailGroups = [
@@ -259,6 +266,7 @@
 })();
 </script>
 @endpush
+@endif
 
 @if($dataset === 'paypal-orders' && $canManage)
 <dialog id="finance-order-refresh-dialog" style="width:720px;max-width:calc(100vw - 32px);border:1px solid #dce6ef;border-radius:8px;padding:22px;color:#31516b">

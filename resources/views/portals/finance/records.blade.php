@@ -1,4 +1,9 @@
-@extends('portals.finance.layout', ['title' => __('finance.menus.'.$dataset)])
+@php
+    $recordsRoute = $xuzongReport ? 'finance.reports.xuzong-credit' : 'finance.records';
+    $recordsExportRoute = $xuzongReport ? 'finance.reports.xuzong-credit.export' : 'finance.records.export';
+    $recordsRouteParameters = $xuzongReport ? [] : ['dataset' => $dataset];
+@endphp
+@extends('portals.finance.layout', ['title' => __('finance.menus.'.($xuzongReport ? 'xuzong-credit' : $dataset))])
 @push('styles')
 @if(in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true))
 <link rel="stylesheet" href="{{ asset('assets/erp/logistics.css') }}?v=20261024-8">
@@ -6,6 +11,7 @@
 <style>
 .paypal-order-toolbar{flex-wrap:wrap}.paypal-order-toolbar .finance-pages{margin:0}
 .logistics-orders-table.paypal-order-table{width:100%;min-width:1493px;table-layout:fixed}
+.xuzong-credit-table th,.xuzong-credit-table td{white-space:nowrap}
 .logistics-orders-table.paypal-order-table th,.logistics-orders-table.paypal-order-table td{white-space:normal}
 .logistics-orders-table.paypal-order-table th:first-child,.logistics-orders-table.paypal-order-table td:first-child{width:68px;min-width:68px;max-width:68px}
 .logistics-orders-table.paypal-order-table th:nth-child(2),.logistics-orders-table.paypal-order-table td:nth-child(2){width:190px;min-width:175px;max-width:none}
@@ -215,7 +221,7 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
     </div>
     @endif
     @if(in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true))</div>@endif
-    <div class="{{ in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true) ? 'logistics-filter-actions' : 'finance-tools finance-filter-actions' }}">@if(in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true))<button type="button" class="btn btn-default" id="paypal-toggle-filters" aria-expanded="false">更多筛选</button>@endif <button class="btn btn-primary"><i class="fa fa-search" aria-hidden="true"></i> {{ __('finance.search') }}</button><a class="btn btn-default" href="{{ route('finance.records', $dataset) }}">{{ __('finance.reset') }}</a>@if(! in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true))<button type="button" class="btn btn-default" id="finance-add-filter">{{ __('finance.records.add_filter') }}</button>@endif
+    <div class="{{ in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true) ? 'logistics-filter-actions' : 'finance-tools finance-filter-actions' }}">@if(in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true))<button type="button" class="btn btn-default" id="paypal-toggle-filters" aria-expanded="false">更多筛选</button>@endif <button class="btn btn-primary"><i class="fa fa-search" aria-hidden="true"></i> {{ __('finance.search') }}</button><a class="btn btn-default" href="{{ route($recordsRoute, $recordsRouteParameters) }}">{{ __('finance.reset') }}</a>@if(! in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true))<button type="button" class="btn btn-default" id="finance-add-filter">{{ __('finance.records.add_filter') }}</button>@endif
 @if(! in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true))<a id="finance-export-filtered" data-finance-select-export data-selection-records class="btn btn-default" href="{{ route('finance.records.export', ['dataset' => $dataset, ...$filters, 'export_scope' => 'filtered', 'export_format' => 'xlsx']) }}">导出当前筛选结果</a>@endif @if(! in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true))<select name="export_format" class="form-control" aria-label="{{ __('finance.records.export_format') }}">@foreach(__('finance.records.formats') as $format => $label)<option value="{{ $format }}" @selected(($filters['export_format'] ?? 'xlsx') === $format)>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($label)) }}</option>@endforeach</select>@endif @if($canImport)<a class="btn btn-default" href="{{ route('finance.records.export', ['dataset' => $dataset, 'template' => 1]) }}">{{ __('finance.template') }}</a>@endif</div>
 </form>
 </div></div>
@@ -329,7 +335,7 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
 <script>
 document.querySelectorAll('.finance-export-columns').forEach(function(panel){
     var checks=Array.from(panel.querySelectorAll('[name="report_columns[]"]'));
-    var storageKey='finance:'+@json($dataset)+':page-export-columns:v2';
+    var storageKey='finance:'+@json($xuzongReport ? 'xuzong-credit' : $dataset)+':page-export-columns:v2';
     try {
         var saved=JSON.parse(localStorage.getItem(storageKey));
         if(Array.isArray(saved)&&saved.some(function(value){return checks.some(function(input){return input.value===value;});})){
@@ -362,7 +368,7 @@ document.getElementById('finance-export-filtered').addEventListener('click',func
     }
     query.set('export_format',document.querySelector('[name="export_format"]').value);
     form.dispatchEvent(new CustomEvent('finance:prepare-export',{detail:query}));
-    this.href=@json(route('finance.records.export', $dataset))+'?'+query.toString();
+    this.href=@json(route($recordsExportRoute, $recordsRouteParameters))+'?'+query.toString();
     event.preventDefault();
     window.financeDownload(this.href,this);
 });
