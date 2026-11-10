@@ -1,16 +1,17 @@
-.paypal-dispute-table { min-width: 2700px; margin-bottom: 0; font-size: 14px; }
+.paypal-dispute-table { min-width: 2750px; margin-bottom: 0; font-size: 14px; }
 .paypal-dispute-table th { padding: 10px 8px !important; background: #eaf0f7 !important; color: #314b68 !important; border-bottom: 1px solid #c5d1dd !important; font-size: 14px; font-weight: 700 !important; text-align: center; vertical-align: middle !important; white-space: nowrap; }
 .paypal-dispute-table td { min-width: 170px; padding: 10px 12px !important; border-color: #d2dce6 !important; vertical-align: middle !important; white-space: nowrap; }
 .paypal-dispute-table td, .paypal-dispute-table th { border-right: 1px solid #ced9e3; }
 .paypal-dispute-table td:last-child, .paypal-dispute-table th:last-child { border-right: 0; }
-.paypal-dispute-table td:nth-child(1) { min-width: 285px; width: 285px; }
-.paypal-dispute-table td:nth-child(2) { min-width: 325px; width: 325px; }
-.paypal-dispute-table td:nth-child(3) { min-width: 235px; width: 235px; }
-.paypal-dispute-table td:nth-child(4) { min-width: 275px; width: 275px; }
-.paypal-dispute-table td:nth-child(5) { min-width: 245px; width: 245px; }
-.paypal-dispute-table td:nth-child(6) { min-width: 285px; width: 285px; }
-.paypal-dispute-table td:nth-child(7) { min-width: 465px; width: 465px; }
-.paypal-dispute-table td:nth-child(8) { min-width: 245px; width: 245px; }
+.paypal-dispute-table .pd-dispute-select-cell { min-width: 46px; width: 46px; padding: 10px 6px !important; text-align: center; }
+.paypal-dispute-table td:nth-child(2) { min-width: 285px; width: 285px; }
+.paypal-dispute-table td:nth-child(3) { min-width: 325px; width: 325px; }
+.paypal-dispute-table td:nth-child(4) { min-width: 235px; width: 235px; }
+.paypal-dispute-table td:nth-child(5) { min-width: 275px; width: 275px; }
+.paypal-dispute-table td:nth-child(6) { min-width: 245px; width: 245px; }
+.paypal-dispute-table td:nth-child(7) { min-width: 285px; width: 285px; }
+.paypal-dispute-table td:nth-child(8) { min-width: 465px; width: 465px; }
+.paypal-dispute-table td:nth-child(9) { min-width: 245px; width: 245px; }
 .paypal-dispute-table td:last-child, .paypal-dispute-table th:last-child { position: sticky; right: 0; min-width: 145px; width: 145px; box-shadow: -3px 0 8px rgba(45, 69, 94, .08); }
 .paypal-dispute-table td:last-child { z-index: 2; background: #fff; }
 .paypal-dispute-table tbody tr:nth-child(even) > td:last-child { background: #f8fafc; }

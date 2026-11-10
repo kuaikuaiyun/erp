@@ -8,6 +8,7 @@ use App\Models\LogisticsPayPalDisputeRefund;
 use App\Models\LogisticsPayPalRefund;
 use App\Models\LogisticsPayPalImport;
 use App\Models\LogisticsPayPalTransaction;
+use App\Models\LogisticsOrder;
 use App\Portals\Payment\PaymentPayPalLedgerImportService;
 use Carbon\Carbon;
 use Carbon\CarbonInterface;
@@ -284,9 +285,34 @@ class PayPalImportService
             'raw_payload' => json_encode($detail, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             'synced_at' => now(),
         ]);
+        if ($dispute->wasRecentlyCreated) $this->captureEventLogisticsSnapshot($dispute, $order);
         $this->linkDisputeToRefunds($dispute);
 
         return (bool) $order;
+    }
+
+    /**
+     * Keep the logistics state known when this dispute first enters ERP.
+     * Future 51Tracking updates intentionally change only the order's current
+     * logistics state and must never overwrite this dispute snapshot.
+     */
+    private function captureEventLogisticsSnapshot(LogisticsPayPalDispute $dispute, ?LogisticsOrder $order): void
+    {
+        if (! $order instanceof LogisticsOrder || $dispute->event_logistics_captured_at !== null) {
+            return;
+        }
+
+        $status = trim((string) $order->logistics_status);
+        $dispute->forceFill([
+            'event_logistics_status' => $status !== '' ? $status : null,
+            'event_tracking_number' => trim((string) $order->tracking_number) ?: null,
+            'event_shipped' => in_array($status, [
+                LogisticsOrder::LOGISTICS_SHIPPED,
+                LogisticsOrder::LOGISTICS_IN_TRANSIT,
+                LogisticsOrder::LOGISTICS_DELIVERED,
+            ], true),
+            'event_logistics_captured_at' => now(),
+        ])->save();
     }
 
     private function linkRefundToDisputes(LogisticsPayPalRefund $refund): void

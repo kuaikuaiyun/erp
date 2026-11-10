@@ -20,6 +20,8 @@ class LogisticsPayPalDispute extends Model
         'seller_response_due_at', 'outcome_code', 'raw_payload', 'synced_at',
         'subscription_cancelled', 'add_on_cancelled', 'first_handled_at',
         'first_handled_by', 'first_handled_by_name',
+        'event_logistics_status', 'event_tracking_number', 'event_shipped',
+        'event_logistics_captured_at',
     ];
 
     public function __construct(array $attributes = [])
@@ -39,6 +41,8 @@ class LogisticsPayPalDispute extends Model
             'subscription_cancelled' => 'boolean',
             'add_on_cancelled' => 'boolean',
             'first_handled_at' => 'datetime',
+            'event_shipped' => 'boolean',
+            'event_logistics_captured_at' => 'datetime',
             'synced_at' => 'datetime',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
