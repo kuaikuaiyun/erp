@@ -4,6 +4,7 @@
 <style>
 .fashion-report-filter,.fashion-report-box{border:0;border-radius:12px;box-shadow:0 5px 19px rgba(28,65,92,.09);overflow:hidden}.report-filter{display:flex;align-items:flex-end;gap:11px;flex-wrap:wrap}.report-filter .form-group{margin:0}.report-filter label{display:block;margin-bottom:5px;color:#688092;font-size:12px}.report-filter .form-control{height:37px;border-radius:6px;min-width:145px}.report-download-button{height:37px;border:0;border-radius:6px;background:#19a974;color:#fff;box-shadow:0 3px 9px rgba(25,169,116,.2)}.report-download-button:hover,.report-download-button:focus{background:#138b60;color:#fff}.report-download-button[disabled]{opacity:.65}.report-summary{display:grid;grid-template-columns:repeat(7,minmax(125px,1fr));gap:11px;margin:15px 0}.report-card{padding:14px 16px;border-left:4px solid #328fc0;border-radius:9px;background:#fff;box-shadow:0 3px 13px rgba(30,65,95,.08)}.report-card span{display:block;color:#718697;font-size:12px}.report-card strong{display:block;margin-top:5px;color:#173f60;font-size:21px}.fashion-report-table{min-width:1180px;margin:0}.fashion-report-table th{padding:10px 8px!important;background:#dcecf6!important;color:#244f6d;text-align:center;white-space:nowrap}.fashion-report-table td{padding:9px 8px!important;vertical-align:middle!important}.fashion-report-table th:nth-child(7),.fashion-report-table td:nth-child(7){width:230px;max-width:230px}.fashion-report-table tbody tr.report-main-row:nth-of-type(4n+1)>td{background:#f4f9fc}.fashion-report-table tbody tr.report-main-row:nth-of-type(4n+3)>td{background:#fff8ef}.store-list,.media-list{display:grid;gap:6px}.store-list{min-width:280px}.media-list{width:100%;min-width:190px}.store-item,.media-item{padding:7px 9px;border:1px solid #dbe6ed;border-radius:6px;background:rgba(255,255,255,.7)}.media-item{display:grid;grid-template-columns:minmax(75px,1fr) auto;gap:8px}.roi{font-weight:700;color:#16805c}.report-note{padding:11px 15px;border-radius:7px;background:#fff7df;color:#765a17;margin-bottom:14px}.report-detail-row>td{padding:0!important;background:#edf5f9!important}.report-detail-card{margin:12px 18px;padding:14px 16px;border-left:4px solid #3c8dbc;border-radius:8px;background:#fff;box-shadow:0 3px 11px rgba(35,78,105,.08)}.report-detail-meta{margin-bottom:10px;color:#607d90}.report-detail-meta b{color:#274e68}.report-detail-stores{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:9px}.report-detail-store{padding:10px 12px;border:1px solid #d5e4ec;border-radius:7px;background:#f8fbfd}.report-detail-store .label{margin-left:6px}.report-detail-store small{display:block;margin-top:4px;color:#718797}.report-detail-store strong{display:block;margin-top:7px;color:#1c668f}.detail-toggle{border:0;border-radius:5px}.empty{padding:50px!important;text-align:center;color:#8295a3}@media(max-width:1000px){.report-summary{grid-template-columns:repeat(2,1fr)}}
 .submission-status{display:inline-block;padding:5px 10px;border-radius:14px;font-size:12px;font-weight:700;white-space:nowrap}.submission-status.submitted{background:#dff5e9;color:#18764d}.submission-status.pending{background:#fff0bf;color:#986b00}.submission-status.not_submitted{background:#eef1f4;color:#7a8790}
+.fashion-report-table tfoot td{padding:11px 8px!important;background:#d9e9f3!important;border-color:#b9d0de!important;color:#173f60;font-weight:700;vertical-align:middle!important}.fashion-report-table tfoot .media-item{background:#f6fbfe}.fashion-report-table tfoot .total-label{text-align:center;font-size:15px}
 </style>
 @endpush
 @section('content')
@@ -22,7 +23,7 @@
 <tr class="report-main-row"><td>{{ $row['department'] }}</td><td><b>{{ $row['operator'] }}</b></td><td>{{ $row['hire_days']!==null?$row['hire_days'].' 天':'—' }}</td><td class="text-right"><b>{{ $row['order_count'] }}</b></td><td class="text-right"><b>${{ number_format($row['revenue'],2) }}</b></td><td class="text-right">{{ $row['aov']!==null?number_format($row['aov'],2):'—' }}</td><td><div class="media-list">@forelse($row['media'] as $media)<div class="media-item"><b>{{ $media['name'] }}</b><span>${{ number_format($media['spend'],2) }}</span></div>@empty<span class="text-muted">暂无已审核的广告费</span>@endforelse</div></td><td class="text-right">${{ number_format($row['ad_spend'],2) }}</td><td class="text-center roi">{{ $row['roi']!==null?number_format($row['roi'],2):'—' }}</td><td class="text-center"><button type="button" class="btn btn-info btn-xs detail-toggle" data-toggle="collapse" data-target="#fashion-operation-detail-{{ $loop->index }}"><i class="fa fa-eye"></i> 查看明细</button></td><td class="text-center"><span class="submission-status {{ $row['submission_status'] }}">{{ $row['submission_label'] }}</span></td></tr>
 <tr class="collapse report-detail-row" id="fashion-operation-detail-{{ $loop->index }}"><td colspan="11"><div class="report-detail-card"><div class="report-detail-meta"><b>{{ $row['operator'] }}</b>　入职日期：{{ $row['hired_at']?:'—' }}　绑定店铺：{{ count($row['stores']) }} 家</div><div class="report-detail-stores">@foreach($row['stores'] as $store)<div class="report-detail-store"><b>{{ $store['name'] }}</b><span class="label label-info">{{ $store['site_builder'] }}</span><small>{{ $store['domain']?:'—' }}</small><strong>{{ $store['orders'] }} 单 · ${{ number_format($store['revenue'],2) }}</strong></div>@endforeach</div></div></td></tr>
 @empty<tr><td colspan="11" class="empty"><i class="fa fa-inbox fa-2x"></i><br>当前筛选范围暂无服装运营数据</td></tr>@endforelse
-</tbody></table></div></div>
+</tbody><tfoot><tr><td class="total-label" colspan="3">合计</td><td class="text-right">{{ $summary['orders'] }}</td><td class="text-right">${{ number_format($summary['revenue'],2) }}</td><td></td><td></td><td class="text-right">${{ number_format($summary['ad_spend'],2) }}</td><td></td><td></td><td></td></tr></tfoot></table></div></div>
 </section>
 @endsection
 
@@ -38,6 +39,16 @@
         .'　客单价：'.($summary['aov'] !== null ? '$'.number_format($summary['aov'], 2) : '—')
         .'　广告费：$'.number_format($summary['ad_spend'], 2)
         .'　总 ROI：'.($summary['roi'] !== null ? number_format($summary['roi'], 2) : '—');
+    $imageTableTotal = [
+        '合计',
+        '',
+        (string) $summary['orders'],
+        '$'.number_format($summary['revenue'], 2),
+        '',
+        '',
+        '$'.number_format($summary['ad_spend'], 2),
+        '',
+    ];
 @endphp
 <script>
 (function(){
@@ -46,6 +57,7 @@
     var rows=@json($rows->values());
     var filterSummary={{ Illuminate\Support\Js::from($imageFilterSummary) }};
     var totalSummary={{ Illuminate\Support\Js::from($imageTotalSummary) }};
+    var tableTotal={{ Illuminate\Support\Js::from($imageTableTotal) }};
     var headers=['运营部门','人名','订单量','总业绩($)','客单价($)','各媒体 / 广告费','广告费($)','总 ROI'];
     var widths=[180,145,110,150,130,420,140,110],padding=34,lineHeight=24;
     function money(value){return '$'+Number(value||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
@@ -63,7 +75,8 @@
         window.setTimeout(function(){
             try{
                 var measure=document.createElement('canvas').getContext('2d');measure.font='500 16px "Microsoft YaHei","PingFang SC",Arial,sans-serif';
-                var prepared=rows.map(function(row){var cells=valueRows(row).map(function(text,index){return wrap(measure,text,widths[index]-18);});return {cells:cells,height:Math.max(52,Math.max.apply(null,cells.map(function(lines){return lines.length;}))*lineHeight+18)};});
+                var prepared=rows.map(function(row){var cells=valueRows(row).map(function(text,index){return wrap(measure,text,widths[index]-18);});return {cells:cells,height:Math.max(52,Math.max.apply(null,cells.map(function(lines){return lines.length;}))*lineHeight+18),total:false};});
+                var totalCells=tableTotal.map(function(text,index){return wrap(measure,text,widths[index]-18);});prepared.push({cells:totalCells,height:Math.max(58,Math.max.apply(null,totalCells.map(function(lines){return lines.length;}))*lineHeight+18),total:true});
                 var tableWidth=widths.reduce(function(total,width){return total+width;},0),headerTop=150,tableHeaderHeight=48,totalHeight=headerTop+tableHeaderHeight+prepared.reduce(function(total,row){return total+row.height;},0)+padding;
                 var ratio=Math.min(2,30000/Math.max(tableWidth+padding*2,totalHeight)),canvas=document.createElement('canvas');canvas.width=Math.ceil((tableWidth+padding*2)*ratio);canvas.height=Math.ceil(totalHeight*ratio);
                 var ctx=canvas.getContext('2d');ctx.scale(ratio,ratio);ctx.fillStyle='#f4f8fb';ctx.fillRect(0,0,tableWidth+padding*2,totalHeight);
@@ -72,7 +85,7 @@
                 ctx.fillText(totalSummary,padding,98);
                 ctx.fillStyle='#acd4e9';ctx.fillRect(padding,130,tableWidth,4);
                 var x=padding;ctx.font='700 16px "Microsoft YaHei","PingFang SC",Arial,sans-serif';headers.forEach(function(header,index){ctx.fillStyle='#dcecf6';ctx.fillRect(x,headerTop,widths[index],tableHeaderHeight);ctx.strokeStyle='#b7ccd9';ctx.strokeRect(x+.5,headerTop+.5,widths[index]-1,tableHeaderHeight-1);ctx.fillStyle='#244f6d';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(header,x+widths[index]/2,headerTop+tableHeaderHeight/2);x+=widths[index];});
-                var y=headerTop+tableHeaderHeight;prepared.forEach(function(row,rowIndex){x=padding;row.cells.forEach(function(lines,index){ctx.fillStyle=rowIndex%2===0?'#f4f9fc':'#fff8ef';ctx.fillRect(x,y,widths[index],row.height);ctx.strokeStyle='#c4d5df';ctx.strokeRect(x+.5,y+.5,widths[index]-1,row.height-1);ctx.fillStyle=index===7?'#16805c':'#294b61';ctx.font=(index===1||index===2||index===3||index===7?'700 ':'500 ')+'16px "Microsoft YaHei","PingFang SC",Arial,sans-serif';ctx.textAlign=[2,3,4,6,7].indexOf(index)>=0?'center':'left';ctx.textBaseline='top';var start=y+(row.height-lines.length*lineHeight)/2,tx=ctx.textAlign==='center'?x+widths[index]/2:x+9;lines.forEach(function(line,lineIndex){ctx.fillText(line,tx,start+lineIndex*lineHeight);});x+=widths[index];});y+=row.height;});
+                var y=headerTop+tableHeaderHeight;prepared.forEach(function(row,rowIndex){x=padding;row.cells.forEach(function(lines,index){ctx.fillStyle=row.total?'#d9e9f3':(rowIndex%2===0?'#f4f9fc':'#fff8ef');ctx.fillRect(x,y,widths[index],row.height);ctx.strokeStyle=row.total?'#9fbccc':'#c4d5df';ctx.strokeRect(x+.5,y+.5,widths[index]-1,row.height-1);ctx.fillStyle=index===7?'#16805c':'#294b61';ctx.font=(row.total||index===1||index===2||index===3||index===7?'700 ':'500 ')+'16px "Microsoft YaHei","PingFang SC",Arial,sans-serif';ctx.textAlign=[0,1,2,3,4,6,7].indexOf(index)>=0?'center':'left';ctx.textBaseline='top';var start=y+(row.height-lines.length*lineHeight)/2,tx=ctx.textAlign==='center'?x+widths[index]/2:x+9;lines.forEach(function(line,lineIndex){ctx.fillText(line,tx,start+lineIndex*lineHeight);});x+=widths[index];});y+=row.height;});
                 var link=document.createElement('a');link.download='服装运营报表_列表_{{ $filters['date_from'] }}_{{ $filters['date_to'] }}.png';link.href=canvas.toDataURL('image/png');document.body.appendChild(link);link.click();link.remove();
             }catch(error){window.alert('图片生成失败，请刷新页面后重试。');if(window.console)console.error(error);}finally{button.disabled=false;label.textContent=original;}
         },30);

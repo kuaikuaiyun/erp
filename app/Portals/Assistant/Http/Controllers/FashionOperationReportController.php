@@ -167,7 +167,6 @@ class FashionOperationReportController extends Controller
 
         $summaryRevenue = (float) $rows->sum('revenue');
         $summarySpend = (float) $rows->sum('ad_spend');
-
         return view('portals.assistant.fashion-operation-reports.index', [
             ...$context, 'rows' => $rows, 'timezoneOptions' => $timezones,
             'departmentOptions' => $departmentOptions,
