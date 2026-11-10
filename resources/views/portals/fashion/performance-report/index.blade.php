@@ -48,7 +48,7 @@
 @push('scripts')
 <script>
 (function($){
- var modal=$('#performanceOrderModal'),title=$('#performanceOrderTitle'),body=$('#performanceOrderBody'),url=@json(route('fashion.performance-report.orders')),current={date:'',storeId:'',storeName:'',timezone:'+08:00'};
+ var modal=$('#performanceOrderModal'),title=$('#performanceOrderTitle'),body=$('#performanceOrderBody'),url=@json(route('fashion.performance-report.orders')),current={date:'',storeId:'',storeName:'',timezone:'-08:00'};
  function esc(v){return $('<div>').text(v==null?'':String(v)).html()}
  function money(v,c){return esc(c||'USD')+' '+Number(v||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
  function pageButtons(meta){var html='<div class="order-detail-pagination"><span>显示 '+meta.from+'-'+meta.to+' 条，共 '+meta.total+' 条　第 '+meta.current_page+' / '+meta.last_page+' 页</span><div class="order-detail-pages">';html+='<button data-order-page="'+(meta.current_page-1)+'" '+(meta.current_page<=1?'disabled':'')+'><i class="fa fa-angle-left"></i></button>';var start=Math.max(1,meta.current_page-2),end=Math.min(meta.last_page,start+4);start=Math.max(1,end-4);for(var i=start;i<=end;i++)html+='<button data-order-page="'+i+'" class="'+(i===meta.current_page?'active':'')+'">'+i+'</button>';html+='<button data-order-page="'+(meta.current_page+1)+'" '+(meta.current_page>=meta.last_page?'disabled':'')+'><i class="fa fa-angle-right"></i></button></div></div>';return html}
