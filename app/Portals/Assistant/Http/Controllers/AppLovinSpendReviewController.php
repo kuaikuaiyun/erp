@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AppLovinSpendScreenshot;
 use App\Models\AppLovinAccountStoreBinding;
 use App\Models\AssistantDomainStore;
+use App\Models\FashionAdvertisingReport;
 use App\Models\OperationReport;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
@@ -51,6 +52,35 @@ class AppLovinSpendReviewController extends Controller
         $rows = $query->orderBy('report_date')->get()->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])
             ->filter(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? ''))) === 'applovin')
             ->map(fn (array $row) => [...$row, 'report_id' => $report->getKey(), 'date' => $report->report_date->format('Y-m-d'), 'operator_user_id' => (int)$report->operator_user_id, 'operator_name' => $report->operator_name, 'department' => $report->operation_department_name]));
+        $fashionQuery = FashionAdvertisingReport::query()
+            ->where('status', FashionAdvertisingReport::STATUS_APPROVED)
+            ->with(['adSpendEntries', 'submitter.departments']);
+        $fashionQuery->when($filters['operator'] ?? null, fn ($q, $name) => $q->where('submitter_name', 'like', '%'.$name.'%'));
+        $fashionRows = $fashionQuery->get()
+            ->filter(function (FashionAdvertisingReport $report) use ($filters): bool {
+                if (empty($filters['department_id'])) return true;
+                return $report->submitter?->departments?->contains('id', (int) $filters['department_id']) ?? false;
+            })
+            ->flatMap(function (FashionAdvertisingReport $report) {
+                $department = $report->submitter?->departments?->first(fn ($item) => (bool) ($item->pivot->is_primary ?? false))
+                    ?: $report->submitter?->departments?->first();
+                return $report->adSpendEntries
+                    ->filter(fn ($entry) => mb_strtolower(trim((string) $entry->media)) === 'applovin')
+                    ->map(fn ($entry): array => [
+                        'agency' => (string) $entry->agency,
+                        'media_source' => (string) $entry->media,
+                        'account_name' => (string) $entry->account_name,
+                        'account_number' => (string) $entry->account_number,
+                        'actual_spend' => (float) $entry->actual_spend_usd,
+                        'report_id' => $report->getKey(),
+                        'date' => $report->report_date->format('Y-m-d'),
+                        'operator_user_id' => (int) $report->submitter_id,
+                        'operator_name' => (string) $report->submitter_name,
+                        'department' => (string) ($department?->name ?: '服装运营部门'),
+                        'source' => 'fashion',
+                    ]);
+            });
+        $rows = $rows->concat($fashionRows);
         $accounts = $rows->groupBy(fn (array $row) => implode('|', [$row['operator_name'], $row['agency'] ?? '', $row['account_name'] ?? '', $row['account_number'] ?? '']))
             ->map(function ($group): array { $first=$group->first(); $agency=(string)($first['agency']??'');$media=(string)($first['media_source']??'');$name=(string)($first['account_name']??'');$number=(string)($first['account_number']??''); return ['account_key'=>AppLovinSpendScreenshot::accountKey((int)$first['operator_user_id'],$agency,$media,$name,$number),'operator_user_id'=>(int)$first['operator_user_id'],'operator_name'=>$first['operator_name'],'department'=>$first['department'],'agency'=>$agency,'media'=>$media,'account_name'=>$name,'account_number'=>$number,'total'=>(float)$group->sum('actual_spend'),'details'=>$group->values()]; })->sortByDesc('total')->values();
         $screenshots = AppLovinSpendScreenshot::query()->whereIn('account_key', $accounts->pluck('account_key'))->get()->keyBy('account_key');
@@ -96,6 +126,14 @@ class AppLovinSpendReviewController extends Controller
                     'media' => mb_strtolower(trim((string) ($row['media_source'] ?? ''))),
                 ];
             }))->first(fn (array $row) => $row['media'] === 'applovin' && hash_equals($row['account_key'], $validated['account_key']));
+        if (! $account) {
+            $account = FashionAdvertisingReport::query()->where('status', FashionAdvertisingReport::STATUS_APPROVED)
+                ->with('adSpendEntries')->get()->flatMap(fn (FashionAdvertisingReport $report) => $report->adSpendEntries->map(fn ($entry): array => [
+                    'account_key' => AppLovinSpendScreenshot::accountKey((int) $report->submitter_id, (string) $entry->agency, (string) $entry->media, (string) $entry->account_name, (string) $entry->account_number),
+                    'operator_user_id' => (int) $report->submitter_id,
+                    'media' => mb_strtolower(trim((string) $entry->media)),
+                ]))->first(fn (array $row) => $row['media'] === 'applovin' && hash_equals($row['account_key'], $validated['account_key']));
+        }
         abort_unless($account, 403);
 
         if (empty($validated['store_id'])) {

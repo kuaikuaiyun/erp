@@ -47,7 +47,16 @@ class AdvertisingRechargeReviewController extends Controller
             : $allDepartments->whereIn('id', $departmentIds)->values();
 
         $today = now('Asia/Shanghai')->toDateString();
-        $todaySubmissions = (clone $query)->whereDate('report_date', $today)->orderBy('id')->get();
+        $summaryFrom = $filters['date_from'] ?? $filters['date_to'] ?? $today;
+        $summaryTo = $filters['date_to'] ?? $filters['date_from'] ?? $today;
+        if ($summaryFrom > $summaryTo) [$summaryFrom, $summaryTo] = [$summaryTo, $summaryFrom];
+        $summaryQuery = (clone $query)
+            ->when($filters['operation_department_id'] ?? null, fn ($q, $id) => $q->where('operation_department_id', $id))
+            ->when($filters['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
+            ->when($filters['operator'] ?? null, fn ($q, $name) => $q->where('operator_name', 'like', '%'.$name.'%'))
+            ->whereDate('report_date', '>=', $summaryFrom)
+            ->whereDate('report_date', '<=', $summaryTo);
+        $todaySubmissions = $summaryQuery->orderBy('report_date')->orderBy('id')->get();
         $todayRechargeGroups = [];
         foreach ($todaySubmissions as $submission) {
             foreach ($submission->entries ?? [] as $entryIndex => $entry) {
@@ -99,7 +108,10 @@ class AdvertisingRechargeReviewController extends Controller
             'user' => $context['user'],
             'filters' => $filters,
             'departmentOptions' => $departmentOptions,
-            'today' => $today,
+            'today' => $summaryFrom === $summaryTo ? $summaryFrom : $summaryFrom.' 至 '.$summaryTo,
+            'summaryFrom' => $summaryFrom,
+            'summaryTo' => $summaryTo,
+            'summaryDateLabel' => $summaryFrom === $summaryTo ? $summaryFrom : $summaryFrom.' 至 '.$summaryTo,
             'todayRechargeGroups' => $todayRechargeGroups,
             'todayRechargeSummary' => [
                 'group_count' => $todayRechargeGroups->count(),

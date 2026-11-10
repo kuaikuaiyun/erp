@@ -8,6 +8,9 @@ use App\Models\FashionLogisticsOrder;
 use App\Models\AdminUser;
 use App\Models\AssistantAdvertisingAgency;
 use App\Models\AssistantAdvertisingMedia;
+use App\Models\AssistantDomainStore;
+use App\Models\AppLovinAccountStoreBinding;
+use App\Models\AppLovinSpendScreenshot;
 use App\Models\Department;
 use App\Portal\Http\Controllers\PortalEntryController;
 use Illuminate\Http\RedirectResponse;
@@ -17,6 +20,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -58,6 +62,8 @@ class AdvertisingExpenseController extends Controller
         $selectedOperatorId = $editing?->submitter_id
             ?: ($isBoss ? (int) ($request->integer('operator_user_id') ?: $operatorOptions->first()?->id) : (int) $user->id);
         $selectedOperator = $operatorOptions->firstWhere('id', $selectedOperatorId) ?: $user;
+        $operatorStores = AssistantDomainStore::query()->where('owner_user_id', $selectedOperator->getKey())
+            ->whereNotNull('domain')->where('domain', '!=', '')->orderBy('domain')->get(['id', 'domain', 'shop_name']);
 
         $context['portal']->loadMissing('menus');
         $advertisingOptions = $this->advertisingOptions();
@@ -73,6 +79,7 @@ class AdvertisingExpenseController extends Controller
             'isBoss' => $isBoss,
             'operatorOptions' => $operatorOptions,
             'selectedOperator' => $selectedOperator,
+            'operatorStores' => $operatorStores,
         ]);
     }
 
@@ -80,8 +87,8 @@ class AdvertisingExpenseController extends Controller
     {
         $context = $this->context($request);
         if ($context instanceof Response) abort(403);
-        $data = $this->validatePayload($request);
         $submitter = $this->resolveSubmitter($request, $context['user']);
+        $data = $this->validatePayload($request, (int) $submitter->getKey());
 
         $duplicate = FashionAdvertisingReport::query()
             ->whereDate('report_date', $data['report_date'])
@@ -99,7 +106,7 @@ class AdvertisingExpenseController extends Controller
         if ($context instanceof Response) abort(403);
         $this->authorizeReport($context['user'], $report);
         abort_unless(in_array($report->status, [FashionAdvertisingReport::STATUS_PENDING, FashionAdvertisingReport::STATUS_REJECTED], true), 422, '审核通过的报表不能重新修改。');
-        $data = $this->validatePayload($request);
+        $data = $this->validatePayload($request, (int) $report->submitter_id);
 
         $duplicate = FashionAdvertisingReport::query()
             ->whereKeyNot($report->getKey())
@@ -138,15 +145,16 @@ class AdvertisingExpenseController extends Controller
         return response()->file(Storage::disk('local')->path($item->screenshot_path));
     }
 
-    private function validatePayload(Request $request): array
+    private function validatePayload(Request $request, int $operatorId): array
     {
-        return $request->validate([
+        $data = $request->validate([
             'report_date' => ['required', 'date'],
             'advertising' => ['required', 'array', 'min:1', 'max:50'],
             'advertising.*.agency' => ['required', 'string', 'max:100'],
             'advertising.*.media' => ['required', 'string', 'max:100'],
             'advertising.*.account_name' => ['required', 'string', 'max:191'],
             'advertising.*.account_number' => ['required', 'string', 'max:191'],
+            'advertising.*.assistant_domain_store_id' => ['nullable', 'integer'],
             'advertising.*.book_spend_usd' => ['required', 'numeric', 'min:0'],
             'advertising.*.settlement_coefficient' => ['required', 'numeric', 'min:0'],
             'advertising.*.actual_spend_usd' => ['required', 'numeric', 'min:0'],
@@ -160,6 +168,16 @@ class AdvertisingExpenseController extends Controller
             'advertising.*.account_number.required' => '请填写广告账户编号。',
             '*.screenshot.max' => '截图不能超过 5MB。',
         ]);
+        foreach ($data['advertising'] as $index => &$row) {
+            if (mb_strtolower(trim((string) $row['media'])) !== 'applovin') {
+                $row['assistant_domain_store_id'] = null; $row['store_domain'] = null; continue;
+            }
+            $store = AssistantDomainStore::query()->whereKey((int) ($row['assistant_domain_store_id'] ?? 0))->where('owner_user_id', $operatorId)->first();
+            if (! $store) throw ValidationException::withMessages(["advertising.{$index}.assistant_domain_store_id" => '选择 AppLovin 时必须选择该运营已绑定的店铺域名。']);
+            $row['store_domain'] = (string) $store->domain;
+        }
+        unset($row);
+        return $data;
     }
 
     private function persist(Request $request, array $data, $user, ?FashionAdvertisingReport $report = null): void
@@ -199,6 +217,11 @@ class AdvertisingExpenseController extends Controller
             $report->performanceEntries()->createMany($performance);
             $report->adSpendEntries()->createMany($advertising);
         });
+        foreach (collect($advertising)->where(fn ($row) => mb_strtolower(trim((string) ($row['media'] ?? ''))) === 'applovin') as $row) {
+            AppLovinAccountStoreBinding::query()->updateOrCreate([
+                'account_key' => AppLovinSpendScreenshot::accountKey((int) $performanceOwnerId, (string) $row['agency'], (string) $row['media'], (string) $row['account_name'], (string) $row['account_number']),
+            ], ['assistant_domain_store_id' => (int) $row['assistant_domain_store_id'], 'bound_by' => $user->getKey()]);
+        }
 
         $newPaths = collect($performance)->pluck('screenshot_path')->merge(collect($advertising)->pluck('screenshot_path'))->filter()->all();
         Storage::disk('local')->delete(array_values(array_diff($oldPaths, $newPaths)));
