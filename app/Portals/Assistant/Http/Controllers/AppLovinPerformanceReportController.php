@@ -44,6 +44,7 @@ class AppLovinPerformanceReportController extends Controller
             'gift_status' => ['nullable', Rule::in(['yes', 'no'])],
             'consumption_range' => ['nullable', Rule::in(['5000_10000', 'gt_10000', 'custom'])],
             'consumption_custom' => ['nullable', 'numeric', 'min:0', 'required_if:consumption_range,custom'],
+            'consumption_custom_max' => ['nullable', 'numeric', 'min:0', 'required_if:consumption_range,custom', 'gte:consumption_custom'],
         ]);
         $today = now('Asia/Shanghai')->startOfDay();
         $dateRange = (string) ($filters['date_range'] ?? ($request->hasAny(['date_from', 'date_to']) ? 'custom' : 'last_7'));
@@ -226,7 +227,9 @@ class AppLovinPerformanceReportController extends Controller
             $rows = $rows->filter(fn (array $row): bool => (float) $row['total_consumption'] > 10000)->values();
         } elseif (($filters['consumption_range'] ?? '') === 'custom') {
             $minimumConsumption = (float) ($filters['consumption_custom'] ?? 0);
-            $rows = $rows->filter(fn (array $row): bool => (float) $row['total_consumption'] > $minimumConsumption)->values();
+            $maximumConsumption = (float) ($filters['consumption_custom_max'] ?? 0);
+            $rows = $rows->filter(fn (array $row): bool => (float) $row['total_consumption'] >= $minimumConsumption
+                && (float) $row['total_consumption'] <= $maximumConsumption)->values();
         }
 
         $totals = [
@@ -256,6 +259,7 @@ class AppLovinPerformanceReportController extends Controller
             'selectedGiftStatus' => $filters['gift_status'] ?? '',
             'selectedConsumptionRange' => $filters['consumption_range'] ?? '',
             'consumptionCustom' => $filters['consumption_custom'] ?? '',
+            'consumptionCustomMax' => $filters['consumption_custom_max'] ?? '',
             'departmentOptions' => $this->storeOwners->operationDepartments()->whereIn('id', $visibleIds)->values(),
         ]);
     }
