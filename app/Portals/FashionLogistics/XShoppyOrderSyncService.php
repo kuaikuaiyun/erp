@@ -143,6 +143,12 @@ class XShoppyOrderSyncService
         if (! $response->successful()) {
             throw new RuntimeException('XShoppy 接口返回 HTTP '.$response->status().'：'.Str::limit($response->body(), 500));
         }
+        // Some XShoppy stores respond with an empty successful body instead of
+        // an empty JSON array when the requested page is beyond the last page.
+        // Treat only that exact case as the normal pagination terminator.
+        $body = trim($response->body());
+        if ($body === '') return [];
+
         $data = $response->json();
         if (! is_array($data)) throw new RuntimeException('XShoppy 接口返回格式不是 JSON 数组。');
         if (isset($data['data']) && is_array($data['data'])) $data = $data['data'];
