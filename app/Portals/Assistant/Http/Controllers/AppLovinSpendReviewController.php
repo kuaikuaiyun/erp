@@ -81,16 +81,26 @@ class AppLovinSpendReviewController extends Controller
                     ]);
             });
         $rows = $rows->concat($fashionRows);
-        $accounts = $rows->groupBy(fn (array $row) => implode('|', [$row['operator_name'], $row['agency'] ?? '', $row['account_name'] ?? '', $row['account_number'] ?? '']))
-            ->map(function ($group): array { $first=$group->first(); $agency=(string)($first['agency']??'');$media=(string)($first['media_source']??'');$name=(string)($first['account_name']??'');$number=(string)($first['account_number']??''); return ['account_key'=>AppLovinSpendScreenshot::accountKey((int)$first['operator_user_id'],$agency,$media,$name,$number),'operator_user_id'=>(int)$first['operator_user_id'],'operator_name'=>$first['operator_name'],'department'=>$first['department'],'agency'=>$agency,'media'=>$media,'account_name'=>$name,'account_number'=>$number,'total'=>(float)$group->sum('actual_spend'),'details'=>$group->values()]; })->sortByDesc('total')->values();
-        $screenshots = AppLovinSpendScreenshot::query()->whereIn('account_key', $accounts->pluck('account_key'))->get()->keyBy('account_key');
-        $bindings = AppLovinAccountStoreBinding::query()->whereIn('account_key', $accounts->pluck('account_key'))->get()->keyBy('account_key');
+        $accounts = $rows->groupBy(fn (array $row) => implode('|', [(int)($row['operator_user_id']??0), mb_strtolower(trim((string)($row['agency']??''))), trim((string)($row['account_number']??''))]))
+            ->map(function ($group): array {
+                $first=$group->first(); $agency=trim((string)($first['agency']??''));$media=(string)($first['media_source']??'');$number=trim((string)($first['account_number']??''));
+                $names=$group->pluck('account_name')->map(fn($name)=>trim((string)$name))->filter()->values();
+                $name=$names->filter(fn($candidate)=>$candidate!==$number&&!ctype_digit($candidate))->last() ?: $names->last() ?: $number;
+                $keys=$names->unique()->map(fn($candidate)=>AppLovinSpendScreenshot::accountKey((int)$first['operator_user_id'],$agency,$media,$candidate,$number));
+                if($keys->isEmpty())$keys=collect([AppLovinSpendScreenshot::accountKey((int)$first['operator_user_id'],$agency,$media,$name,$number)]);
+                return ['account_key'=>$keys->first(),'account_keys'=>$keys->values(),'operator_user_id'=>(int)$first['operator_user_id'],'operator_name'=>$first['operator_name'],'department'=>$first['department'],'agency'=>$agency,'media'=>$media,'account_name'=>$name,'account_number'=>$number,'total'=>(float)$group->sum('actual_spend'),'details'=>$group->values()];
+            })->sortByDesc('total')->values();
+        $allAccountKeys=$accounts->flatMap('account_keys')->unique()->values();
+        $screenshots = AppLovinSpendScreenshot::query()->whereIn('account_key', $allAccountKeys)->get()->keyBy('account_key');
+        $bindings = AppLovinAccountStoreBinding::query()->whereIn('account_key', $allAccountKeys)->get()->keyBy('account_key');
         $stores = AssistantDomainStore::query()->whereNotNull('owner_user_id')->whereNotNull('domain')->where('domain', '!=', '')
             ->orderBy('domain')->get(['id', 'owner_user_id', 'shop_name', 'domain']);
-        $accounts = $accounts->map(fn (array $account) => [...$account,
-            'uploaded_screenshot' => $screenshots->get($account['account_key']),
-            'store_binding' => $bindings->get($account['account_key']),
-        ]);
+        $accounts = $accounts->map(function (array $account) use ($screenshots,$bindings): array {
+            $screenshot=$account['account_keys']->map(fn($key)=>$screenshots->get($key))->filter()->first();
+            $binding=$account['account_keys']->map(fn($key)=>$bindings->get($key))->filter()->first();
+            $account['account_key']=$binding?->account_key ?: $screenshot?->account_key ?: $account['account_key'];
+            return [...$account,'uploaded_screenshot'=>$screenshot,'store_binding'=>$binding];
+        });
         if (($filters['over_threshold'] ?? '') === '1') $accounts = $accounts->where('total', '>=', 5000)->values();
         $page=max(1,(int)$request->query('page',1));
         $accounts = new LengthAwarePaginator($accounts->forPage($page,20)->values(),$accounts->count(),20,$page,['path'=>$request->url(),'query'=>$request->query()]);
