@@ -9,11 +9,17 @@
     $flag = static fn ($value): string => $value === null ? '未处理' : ($value ? '是' : '否');
     $amount = static fn ($value, $currency): string => $value === null || $value === '' ? '—' : number_format((float) $value, 2).' '.($currency ?: '');
     $hasFilters = collect($filters)->except('per_page')->contains(fn ($value) => $value !== '');
+    $operationChoice = static function ($value): string {
+        if ($value === true || $value === 'yes') return '是';
+        if ($value === false || $value === 'no') return '否';
+
+        return '未修改';
+    };
 @endphp
 
 @push('styles')
     <link rel="stylesheet" href="{{ $origin }}/assets/erp/logistics.css?v=20261109-1">
-    <link rel="stylesheet" href="{{ $origin }}/assets/erp/paypal-dispute-analysis.css?v=20261109-2">
+    <link rel="stylesheet" href="{{ $origin }}/assets/erp/paypal-dispute-analysis.css?v=20261110-4">
 @endpush
 
 @section('content')
@@ -63,7 +69,7 @@
                             <td><div class="pd-block"><b>是否发货：</b>{{ $order ? (in_array($order->logistics_status, [\App\Models\LogisticsOrder::LOGISTICS_SHIPPED, \App\Models\LogisticsOrder::LOGISTICS_DELIVERED, \App\Models\LogisticsOrder::LOGISTICS_IN_TRANSIT], true) ? '是' : '否') : '未匹配' }}<br><b>物流单号：</b><span class="pd-mono">{{ $text($order?->tracking_number ?: '未匹配') }}</span></div></td>
                             <td><div class="pd-block"><b>通途订单号：</b>{{ $text($order?->tongtu_order_number ?: '未匹配') }}@forelse($items as $item)<hr><b>通途SKU：</b>{{ $text($item->tongtu_sku) }}<br><b>中文品名：</b>{{ $text($item->tongtu_product_name ?: $item->product_title) }}@empty<hr><b>通途SKU：</b>未匹配<br><b>中文品名：</b>未匹配@endforelse</div></td>
                             <td><div class="pd-block"><b>解决方案：</b>{{ $dispute->outcomeLabel() }}<br><b>状态：</b>{{ $dispute->statusLabel() }}@if($dispute->first_handled_by_name)<hr><b>首次操作人：</b>{{ $dispute->first_handled_by_name }}@endif</div></td>
-                            <td><button class="btn btn-primary btn-sm" type="button" data-toggle="modal" data-target="#handle-dispute-{{ $dispute->id }}"><i class="fa fa-pencil"></i> 处理 / 查看</button><div class="text-muted pd-operation-count">{{ $dispute->operations->count() }} 条处理记录</div></td>
+                            <td><button class="btn btn-primary btn-sm" type="button" data-toggle="modal" data-target="#handle-dispute-{{ $dispute->id }}"><i class="fa fa-pencil"></i> 处理 / 查看</button><button class="pd-operation-history-link" type="button" data-toggle="modal" data-target="#dispute-history-{{ $dispute->id }}">{{ $dispute->operations->count() }} 条处理记录</button></td>
                         </tr>
                     @empty<tr><td colspan="9" class="text-center text-muted">暂无 PayPal 争议记录</td></tr>@endforelse</tbody>
                 </table>
@@ -73,9 +79,14 @@
         @foreach($disputes as $dispute)
             <div class="modal fade" id="handle-dispute-{{ $dispute->id }}" tabindex="-1"><div class="modal-dialog"><form class="modal-content" method="post" action="{{ route('logistics.paypal-dispute-analysis.handle', $dispute) }}">@csrf
                 <div class="modal-header"><button type="button" class="close" data-dismiss="modal">×</button><h4 class="modal-title">处理争议：{{ $dispute->dispute_id }}</h4></div>
-                <div class="modal-body"><input type="hidden" name="return_to" value="{{ request()->fullUrl() }}"><p class="text-muted">首次保存人工处理信息时，系统自动写入首次处理日期和操作人，之后不会覆盖。</p><div class="form-group"><label>是否取消订阅</label><select class="form-control" name="subscription_cancelled"><option value="">不修改</option><option value="yes" @selected($dispute->subscription_cancelled === true)>是</option><option value="no" @selected($dispute->subscription_cancelled === false)>否</option></select></div><div class="form-group"><label>是否取消加购</label><select class="form-control" name="add_on_cancelled"><option value="">不修改</option><option value="yes" @selected($dispute->add_on_cancelled === true)>是</option><option value="no" @selected($dispute->add_on_cancelled === false)>否</option></select></div><div class="form-group"><label>处理备注</label><textarea class="form-control" rows="3" name="note" maxlength="1000" placeholder="可选，保存后写入处理记录"></textarea></div>@if($dispute->operations->isNotEmpty())<hr><strong>最近处理记录</strong><ul class="pd-operation-list">@foreach($dispute->operations->take(5) as $operation)<li>{{ $date($operation->created_at) }} · {{ $operation->operator_name ?: '系统' }}@if(filled($operation->payload['note'] ?? null))：{{ $operation->payload['note'] }}@endif</li>@endforeach</ul>@endif</div>
+                <div class="modal-body"><input type="hidden" name="return_to" value="{{ request()->fullUrl() }}"><p class="text-muted">首次保存人工处理信息时，系统自动写入首次处理日期和操作人，之后不会覆盖。</p><div class="form-group"><label>是否取消订阅</label><select class="form-control" name="subscription_cancelled"><option value="">不修改</option><option value="yes" @selected($dispute->subscription_cancelled === true)>是</option><option value="no" @selected($dispute->subscription_cancelled === false)>否</option></select></div><div class="form-group"><label>是否取消加购</label><select class="form-control" name="add_on_cancelled"><option value="">不修改</option><option value="yes" @selected($dispute->add_on_cancelled === true)>是</option><option value="no" @selected($dispute->add_on_cancelled === false)>否</option></select></div><div class="form-group"><label>处理备注</label><textarea class="form-control" rows="3" name="note" maxlength="1000" placeholder="可选，保存后写入处理记录"></textarea></div></div>
                 <div class="modal-footer"><button class="btn btn-default" type="button" data-dismiss="modal">关闭</button><button class="btn btn-primary" type="submit">保存处理信息</button></div>
             </form></div></div>
+            <div class="modal fade" id="dispute-history-{{ $dispute->id }}" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
+                <div class="modal-header"><button type="button" class="close" data-dismiss="modal">×</button><h4 class="modal-title">处理历史 <small>事件 ID：{{ $dispute->dispute_id }}</small></h4></div>
+                <div class="modal-body pd-history-modal-body"><div class="table-responsive"><table class="table pd-history-table"><thead><tr><th>处理时间</th><th>操作人</th><th>是否取消订阅</th><th>是否取消加购</th><th>处理备注</th></tr></thead><tbody>@forelse($dispute->operations as $operation)<tr><td>{{ $date($operation->created_at) }}</td><td>{{ $operation->operator_name ?: '系统' }}</td><td>{{ $operationChoice($operation->payload['subscription_cancelled'] ?? null) }}</td><td>{{ $operationChoice($operation->payload['add_on_cancelled'] ?? null) }}</td><td class="pd-history-note">{{ filled($operation->payload['note'] ?? null) ? $operation->payload['note'] : '未填写备注' }}</td></tr>@empty<tr><td colspan="5" class="text-center text-muted">暂无处理历史</td></tr>@endforelse</tbody></table></div></div>
+                <div class="modal-footer"><button class="btn btn-default" type="button" data-dismiss="modal">关闭</button></div>
+            </div></div></div>
         @endforeach
     </section>
 @endsection

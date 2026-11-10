@@ -9,6 +9,7 @@ use App\Models\FashionLogisticsOrder;
 use App\Models\FashionLogisticsSyncState;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\FashionLogistics\FashionLogisticsPortalService;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
@@ -26,6 +27,8 @@ class FashionOrderController extends Controller
         $context = $this->portalEntries->portalContext($request);
         if ($context instanceof Response) return $context;
         $this->portalService->assertPortal($context['portal']);
+        /** @var AdminUser $user */
+        $user = $context['user'];
 
         $validated = $request->validate([
             'keyword' => ['nullable', 'string', 'max:191'],
@@ -43,7 +46,10 @@ class FashionOrderController extends Controller
         $selectedStatus = (string) ($validated['status'] ?? '');
         $query = FashionLogisticsOrder::query()
             ->with(['items', 'store'])
-            ->where('source_platform', 'xshoppy');
+            ->where('source_platform', 'xshoppy')
+            ->whereHas('store', function (Builder $stores) use ($user): void {
+                $this->applyStoreVisibility($stores, $user);
+            });
         if ($keyword !== '') {
             $query->where(function ($query) use ($keyword): void {
                 $query->where('order_number', 'like', "%{$keyword}%")
@@ -68,7 +74,7 @@ class FashionOrderController extends Controller
         $selectedOperator = isset($validated['operator_id'])
             ? AdminUser::query()->find((int) $validated['operator_id'])
             : null;
-        if ($selectedOperator) {
+        if ($user->isAdministrator() && $selectedOperator) {
             $operatorNames = collect([$selectedOperator->name, $selectedOperator->username])
                 ->filter()->map(fn ($name): string => trim((string) $name))->unique()->values()->all();
             $query->whereHas('store', function ($stores) use ($selectedOperator, $operatorNames): void {
@@ -83,7 +89,10 @@ class FashionOrderController extends Controller
         $query->when($validated['date_to'] ?? null, fn ($query, $date) => $query->where('order_created_at', '<=', $date.' 23:59:59'));
 
         $orders = $query->latest('order_created_at')->latest('id')->paginate((int) ($validated['per_page'] ?? 20))->withQueryString();
-        $stores = AssistantDomainStore::query()->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy')")->orderBy('shop_name')->get(['id', 'shop_name', 'domain', 'owner_user_id', 'user_name']);
+        $stores = $this->applyStoreVisibility(
+            AssistantDomainStore::query()->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy')"),
+            $user,
+        )->orderBy('shop_name')->get(['id', 'shop_name', 'domain', 'owner_user_id', 'user_name']);
         $ownerIds = $stores->pluck('owner_user_id')->filter()->map(fn ($id): int => (int) $id)->unique()->values();
         $ownerNames = $stores->pluck('user_name')->filter()->map(fn ($name): string => trim((string) $name))->unique()->values();
         $operators = AdminUser::query()
@@ -98,8 +107,10 @@ class FashionOrderController extends Controller
             ->orderBy('name')->orderBy('username')->get(['id', 'name', 'username']);
         $syncStates = FashionLogisticsSyncState::query()
             ->with('store:id,shop_name,domain')
-            ->whereHas('store', static fn ($stores) => $stores
-                ->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy')"))
+            ->whereHas('store', function (Builder $stores) use ($user): void {
+                $this->applyStoreVisibility($stores, $user)
+                    ->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy')");
+            })
             ->withCount(['orders as stored_orders_count' => static fn ($orders) => $orders
                 ->where('source_platform', 'xshoppy')])
             ->latest('last_started_at')
@@ -112,5 +123,26 @@ class FashionOrderController extends Controller
             'syncStates' => $syncStates,
             'filters' => [...$validated, 'status' => $selectedStatus],
         ]);
+    }
+
+    private function applyStoreVisibility(Builder $query, AdminUser $user): Builder
+    {
+        if ($user->isAdministrator()) {
+            return $query;
+        }
+
+        $names = collect([$user->name, $user->username])
+            ->filter()
+            ->map(fn ($name): string => trim((string) $name))
+            ->unique()
+            ->values()
+            ->all();
+
+        return $query->where(function (Builder $stores) use ($user, $names): void {
+            $stores->where('owner_user_id', $user->getKey());
+            if ($names !== []) {
+                $stores->orWhereIn('user_name', $names);
+            }
+        });
     }
 }

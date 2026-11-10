@@ -5,12 +5,10 @@ namespace App\Portals\Fashion\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
 use App\Models\AssistantDomainStore;
-use App\Models\FashionLogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -26,50 +24,38 @@ class StoreController extends Controller
         if ($context instanceof Response) return $context;
         $validated = $request->validate([
             'keyword' => ['nullable', 'string', 'max:191'],
-            'date_from' => ['nullable', 'date_format:Y-m-d'],
-            'date_to' => ['nullable', 'date_format:Y-m-d'],
+            'platform' => ['nullable', 'in:xshoppy,shopline'],
             'operator_id' => ['nullable', 'integer'],
             'per_page' => ['nullable', 'integer', 'in:20,50,100'],
         ]);
-        $dateFrom = $validated['date_from'] ?? now('Asia/Shanghai')->startOfMonth()->toDateString();
-        $dateTo = $validated['date_to'] ?? now('Asia/Shanghai')->endOfMonth()->toDateString();
-        if ($dateFrom > $dateTo) [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
         $user = $context['user'];
 
-        $orderTable = (new FashionLogisticsOrder())->getTable();
-        $metrics = DB::connection(config('admin.database.connection') ?: config('database.default'))->table($orderTable)
-            ->selectRaw('assistant_domain_store_id, COUNT(*) order_count, COALESCE(SUM(total_amount),0) revenue')
-            ->whereIn('source_platform', ['xshoppy', 'shopline'])
-            ->whereBetween('order_created_at', [$dateFrom.' 00:00:00', $dateTo.' 23:59:59'])
-            ->where(fn ($q) => $q->whereNotNull('paid_at')->orWhereIn('status', ['processing', 'completed']))
-            ->groupBy('assistant_domain_store_id');
-        $today = now('Asia/Shanghai')->toDateString();
-        $todayMetrics = DB::connection(config('admin.database.connection') ?: config('database.default'))->table($orderTable)
-            ->selectRaw('assistant_domain_store_id, COUNT(*) today_orders, COALESCE(SUM(total_amount),0) today_revenue')
-            ->whereIn('source_platform', ['xshoppy', 'shopline'])
-            ->whereBetween('order_created_at', [$today.' 00:00:00', $today.' 23:59:59'])
-            ->where(fn ($q) => $q->whereNotNull('paid_at')->orWhereIn('status', ['processing', 'completed']))
-            ->groupBy('assistant_domain_store_id');
-
-        $query = $this->accessibleStores($user)->with('ownerUser:id,name,username')
-            ->leftJoinSub($metrics, 'store_metrics', 'store_metrics.assistant_domain_store_id', '=', 'assistant_domain_stores.id')
-            ->leftJoinSub($todayMetrics, 'today_metrics', 'today_metrics.assistant_domain_store_id', '=', 'assistant_domain_stores.id')
-            ->select('assistant_domain_stores.*')
-            ->selectRaw('COALESCE(store_metrics.order_count,0) order_count, COALESCE(store_metrics.revenue,0) revenue, COALESCE(today_metrics.today_orders,0) today_orders, COALESCE(today_metrics.today_revenue,0) today_revenue');
+        $query = $this->accessibleStores($user)->with('ownerUser:id,name,username');
         $keyword = trim((string) ($validated['keyword'] ?? ''));
         if ($keyword !== '') $query->where(fn ($q) => $q->where('assistant_domain_stores.shop_name', 'like', "%{$keyword}%")->orWhere('assistant_domain_stores.domain', 'like', "%{$keyword}%"));
+        if (($validated['platform'] ?? '') === 'shopline') {
+            $query->whereRaw("LOWER(TRIM(assistant_domain_stores.site_builder)) = 'shopline'");
+        } elseif (($validated['platform'] ?? '') === 'xshoppy') {
+            $query->whereRaw("LOWER(TRIM(assistant_domain_stores.site_builder)) IN ('xshoppy','xshopy')");
+        }
         if ($user->isAdministrator() && ! empty($validated['operator_id'])) {
             $operator = AdminUser::query()->find((int) $validated['operator_id']);
             $names = collect([$operator?->name, $operator?->username])->filter()->map(fn ($v) => trim((string) $v))->all();
             $query->where(fn ($q) => $q->where('assistant_domain_stores.owner_user_id', (int) $validated['operator_id'])->when($names, fn ($q) => $q->orWhereIn('assistant_domain_stores.user_name', $names)));
         }
-        $stores = $query->orderByDesc('revenue')->orderBy('assistant_domain_stores.shop_name')->paginate((int) ($validated['per_page'] ?? 20))->withQueryString();
+        $stores = $query->orderBy('assistant_domain_stores.shop_name')->orderBy('assistant_domain_stores.domain')->paginate((int) ($validated['per_page'] ?? 20))->withQueryString();
+        $storeOptions = $this->accessibleStores($user)
+            ->when(($validated['platform'] ?? '') === 'shopline', fn ($stores) => $stores->whereRaw("LOWER(TRIM(site_builder)) = 'shopline'"))
+            ->when(($validated['platform'] ?? '') === 'xshoppy', fn ($stores) => $stores->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy')"))
+            ->orderBy('shop_name')->orderBy('domain')
+            ->get(['shop_name', 'domain']);
 
         return view('portals.fashion.stores.index', [
             ...$context,
             'stores' => $stores,
+            'storeOptions' => $storeOptions,
             'operators' => $user->isAdministrator() ? $this->storeOperators() : collect(),
-            'filters' => [...$validated, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'per_page' => (int) ($validated['per_page'] ?? 20)],
+            'filters' => [...$validated, 'per_page' => (int) ($validated['per_page'] ?? 20)],
         ]);
     }
 

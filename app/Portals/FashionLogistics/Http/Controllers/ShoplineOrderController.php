@@ -9,6 +9,7 @@ use App\Models\FashionLogisticsOrder;
 use App\Models\FashionLogisticsSyncState;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\FashionLogistics\FashionLogisticsPortalService;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -31,6 +32,8 @@ class ShoplineOrderController extends Controller
             return $context;
         }
         $this->portalService->assertPortal($context['portal']);
+        /** @var AdminUser $user */
+        $user = $context['user'];
 
         $validated = $request->validate([
             'keyword' => ['nullable', 'string', 'max:191'],
@@ -46,9 +49,9 @@ class ShoplineOrderController extends Controller
             'per_page' => ['nullable', 'integer', 'in:20,50,100'],
         ]);
 
-        $stores = AssistantDomainStore::query()
+        $stores = $this->applyStoreVisibility(AssistantDomainStore::query()
             ->whereRaw("LOWER(TRIM(site_builder)) = 'shopline'")
-            ->where('shop_status', AssistantDomainStore::SHOP_STATUS_IN_USE)
+            ->where('shop_status', AssistantDomainStore::SHOP_STATUS_IN_USE), $user)
             ->orderBy('shop_name')
             ->get(['id', 'shop_name', 'shopline_app_token', 'owner_user_id', 'user_name']);
         $storeHandles = $stores
@@ -58,8 +61,10 @@ class ShoplineOrderController extends Controller
         $query = FashionLogisticsOrder::query()
             ->with(['items', 'store.ownerUser:id,name,username'])
             ->where('source_platform', self::PLATFORM)
-            ->whereHas('store', static fn ($stores) => $stores
-                ->where('shop_status', AssistantDomainStore::SHOP_STATUS_IN_USE));
+            ->whereHas('store', function (Builder $stores) use ($user): void {
+                $this->applyStoreVisibility($stores, $user)
+                    ->where('shop_status', AssistantDomainStore::SHOP_STATUS_IN_USE);
+            });
         $keyword = trim((string) ($validated['keyword'] ?? ''));
         if ($keyword !== '') {
             $query->where(function ($orders) use ($keyword): void {
@@ -91,7 +96,7 @@ class ShoplineOrderController extends Controller
         $query->when($validated['date_to'] ?? null, fn ($orders, $date) => $orders->where('order_created_at', '<=', $date.' 23:59:59'));
 
         $selectedOperator = isset($validated['operator_id']) ? AdminUser::query()->find((int) $validated['operator_id']) : null;
-        if ($selectedOperator) {
+        if ($user->isAdministrator() && $selectedOperator) {
             $names = collect([$selectedOperator->name, $selectedOperator->username])->filter()->map(fn ($name) => trim((string) $name))->unique()->all();
             $query->whereHas('store', function ($shop) use ($selectedOperator, $names): void {
                 $shop->where('owner_user_id', $selectedOperator->getKey());
@@ -139,6 +144,8 @@ class ShoplineOrderController extends Controller
             return $context;
         }
         $this->portalService->assertPortal($context['portal']);
+        /** @var AdminUser $user */
+        $user = $context['user'];
 
         $validated = $request->validate([
             'keyword' => ['nullable', 'string', 'max:191'],
@@ -146,9 +153,9 @@ class ShoplineOrderController extends Controller
             'sync_status' => ['nullable', 'in:pending,syncing,success,failed'],
             'per_page' => ['nullable', 'integer', 'in:20,50,100'],
         ]);
-        $base = AssistantDomainStore::query()
+        $base = $this->applyStoreVisibility(AssistantDomainStore::query()
             ->whereRaw("LOWER(TRIM(site_builder)) = 'shopline'")
-            ->where('shop_status', AssistantDomainStore::SHOP_STATUS_IN_USE);
+            ->where('shop_status', AssistantDomainStore::SHOP_STATUS_IN_USE), $user);
         $summaryBase = clone $base;
         $summary = [
             'total' => (clone $summaryBase)->count(),
@@ -230,6 +237,12 @@ class ShoplineOrderController extends Controller
         }
         $this->portalService->assertPortal($context['portal']);
         abort_unless($order->source_platform === self::PLATFORM, 404);
+        abort_unless(
+            $this->applyStoreVisibility(AssistantDomainStore::query(), $context['user'])
+                ->whereKey($order->assistant_domain_store_id)
+                ->exists(),
+            403,
+        );
         $order->load(['items', 'store']);
 
         return response()->json([
@@ -237,5 +250,26 @@ class ShoplineOrderController extends Controller
             'items' => $order->items,
             'store' => $order->store?->only(['id', 'shop_name', 'user_name']),
         ]);
+    }
+
+    private function applyStoreVisibility(Builder $query, AdminUser $user): Builder
+    {
+        if ($user->isAdministrator()) {
+            return $query;
+        }
+
+        $names = collect([$user->name, $user->username])
+            ->filter()
+            ->map(fn ($name): string => trim((string) $name))
+            ->unique()
+            ->values()
+            ->all();
+
+        return $query->where(function (Builder $stores) use ($user, $names): void {
+            $stores->where('owner_user_id', $user->getKey());
+            if ($names !== []) {
+                $stores->orWhereIn('user_name', $names);
+            }
+        });
     }
 }

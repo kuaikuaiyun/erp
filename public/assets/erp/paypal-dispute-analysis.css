@@ -1,6 +1,8 @@
-.paypal-dispute-table { min-width: 1780px; }
-.paypal-dispute-table th { background: #eaf0f7 !important; color: #314b68 !important; font-weight: 800 !important; white-space: nowrap; }
-.paypal-dispute-table td { min-width: 170px; padding: 8px !important; vertical-align: top !important; white-space: normal; }
+.paypal-dispute-table { min-width: 1780px; margin-bottom: 0; font-size: 13px; }
+.paypal-dispute-table th { padding: 7px 8px !important; background: #eaf0f7 !important; color: #314b68 !important; border-bottom: 1px solid #c5d1dd !important; font-weight: 700 !important; vertical-align: middle !important; white-space: nowrap; }
+.paypal-dispute-table td { min-width: 170px; padding: 7px 8px !important; border-color: #d2dce6 !important; vertical-align: middle !important; white-space: normal; }
+.paypal-dispute-table td, .paypal-dispute-table th { border-right: 1px solid #ced9e3; }
+.paypal-dispute-table td:last-child, .paypal-dispute-table th:last-child { border-right: 0; }
 .paypal-dispute-table td:nth-child(1) { min-width: 210px; width: 220px; }
 .paypal-dispute-table td:nth-child(2) { min-width: 185px; width: 195px; }
 .paypal-dispute-table td:nth-child(3) { min-width: 150px; width: 160px; }
@@ -15,9 +17,21 @@
 .paypal-dispute-table.table-hover tbody tr:hover > td:last-child { background: #edf5fb !important; }
 .pd-block { color: #58738d; font-size: 11px; line-height: 18px; }
 .pd-block b { color: #45617c; font-size: 11px; font-weight: 800; }
-.pd-block hr { margin: 5px 0 4px; border-top: 1px dashed #dce5ee; }
+.pd-block hr { margin: 4px 0 3px; border-top: 1px dashed #dce5ee; }
 .pd-mono { color: #2f73ae; font-family: SFMono-Regular, Consolas, 'Liberation Mono', monospace; font-size: 11px; overflow-wrap: anywhere; }
 .pd-manual { color: #b16c18; font-weight: 800; }
-.pd-operation-count { margin-top: 6px; color: #7a8997; font-size: 11px; line-height: 16px; }
-.pd-operation-list { margin: 8px 0 0; padding-left: 18px; color: #58738d; line-height: 1.7; }
+.pd-operation-history-link { display: block; margin: 4px 0 0; padding: 0; border: 0; background: transparent; color: #6b8298; font-size: 11px; line-height: 16px; text-align: left; }
+.pd-operation-history-link:hover, .pd-operation-history-link:focus { color: #2d77ad; text-decoration: underline; outline: 0; }
+.pd-history-modal-body { max-height: min(520px, calc(100vh - 220px)); overflow: auto; padding: 16px 18px; }
+.pd-history-table { min-width: 760px; margin: 0; border: 1px solid #d4dfe9; color: #526b82; font-size: 12px; }
+.pd-history-table th { padding: 9px 11px !important; border-color: #d4dfe9 !important; background: #edf3f8; color: #385774; font-weight: 700; vertical-align: middle !important; white-space: nowrap; }
+.pd-history-table td { padding: 9px 11px !important; border-color: #dce5ed !important; vertical-align: top !important; line-height: 1.55; }
+.pd-history-table tbody tr:nth-child(even) td { background: #f8fafc; }
+.pd-history-table th:nth-child(1) { width: 160px; }.pd-history-table th:nth-child(2) { width: 120px; }.pd-history-table th:nth-child(3), .pd-history-table th:nth-child(4) { width: 130px; }
+.pd-history-note { min-width: 260px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .paypal-dispute-count { color: #617588; font-size: 13px; line-height: 30px; }
+.paypal-dispute-scroll { position: relative; min-height: 320px; max-height: calc(100vh - 175px); overflow: auto !important; overscroll-behavior: contain; scrollbar-color: #71869d #e7edf3; scrollbar-width: auto; }
+.paypal-dispute-scroll::-webkit-scrollbar { width: 14px; height: 14px; }
+.paypal-dispute-scroll::-webkit-scrollbar-track { background: #e7edf3; }
+.paypal-dispute-scroll::-webkit-scrollbar-thumb { border: 3px solid #e7edf3; border-radius: 9px; background: #71869d; }
+.paypal-dispute-scroll::-webkit-scrollbar-thumb:hover { background: #536c86; }
