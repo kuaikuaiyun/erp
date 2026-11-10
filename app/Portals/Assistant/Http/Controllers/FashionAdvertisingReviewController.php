@@ -15,6 +15,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -40,6 +41,8 @@ class FashionAdvertisingReviewController extends Controller
             'to' => $this->date($request->input('to')),
             'department_id' => max(0, (int) $request->input('department_id')),
             'submitter_id' => max(0, (int) $request->input('submitter_id')),
+            'media' => trim((string) $request->input('media')),
+            'account_number' => trim((string) $request->input('account_number')),
             'per_page' => in_array((int) $request->input('per_page'), [20, 50, 100], true) ? (int) $request->input('per_page') : 20,
         ];
 
@@ -64,6 +67,10 @@ class FashionAdvertisingReviewController extends Controller
             ->when($filters['to'], fn ($query) => $query->whereDate('report_date', '<=', $filters['to']))
             ->when($filters['department_id'] > 0, fn ($query) => $query->whereHas('submitter.departments', fn ($departmentQuery) => $departmentQuery->whereKey($filters['department_id'])))
             ->when($filters['submitter_id'] > 0, fn ($query) => $query->where('submitter_id', $filters['submitter_id']))
+            ->when($filters['media'] !== '', fn ($query) => $query->whereHas('adSpendEntries', fn ($entryQuery) => $entryQuery
+                ->where('media', 'like', '%'.$filters['media'].'%')))
+            ->when($filters['account_number'] !== '', fn ($query) => $query->whereHas('adSpendEntries', fn ($entryQuery) => $entryQuery
+                ->where('account_number', 'like', '%'.$filters['account_number'].'%')))
             ->orderByRaw("CASE status WHEN 'pending' THEN 0 WHEN 'rejected' THEN 1 ELSE 2 END")
             ->orderByDesc('report_date')->orderByDesc('id')->paginate($filters['per_page'])->withQueryString();
 
@@ -153,6 +160,73 @@ class FashionAdvertisingReviewController extends Controller
         $context['portal']->loadMissing('menus');
 
         return view('portals.assistant.fashion-advertising-reviews.show', [...$context, 'report' => $report]);
+    }
+
+    public function edit(Request $request, FashionAdvertisingReport $report): Response|View
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+        abort_unless($report->status === FashionAdvertisingReport::STATUS_APPROVED, 422, '只有审核通过的报表可以重新编辑广告信息。');
+        $report->load(['adSpendEntries', 'submitter.departments']);
+
+        return view('portals.assistant.fashion-advertising-reviews.edit', [...$context, 'report' => $report]);
+    }
+
+    public function update(Request $request, FashionAdvertisingReport $report): RedirectResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) abort(403);
+        abort_unless($report->status === FashionAdvertisingReport::STATUS_APPROVED, 422, '只有审核通过的报表可以重新编辑广告信息。');
+        $report->load('adSpendEntries');
+        $entryIds = $report->adSpendEntries->modelKeys();
+        $data = $request->validate([
+            'entries' => ['required', 'array', 'min:1', 'max:50'],
+            'entries.*.id' => ['required', 'integer', Rule::in($entryIds)],
+            'entries.*.agency' => ['required', 'string', 'max:100'],
+            'entries.*.media' => ['required', 'string', 'max:100'],
+            'entries.*.account_name' => ['required', 'string', 'max:191'],
+            'entries.*.account_number' => ['required', 'string', 'max:191'],
+            'entries.*.store_domain' => ['nullable', 'string', 'max:191'],
+            'entries.*.book_spend_usd' => ['required', 'numeric', 'min:0'],
+            'entries.*.settlement_coefficient' => ['required', 'numeric', 'min:0'],
+            'entries.*.screenshot' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+        ]);
+
+        DB::connection($report->getConnectionName())->transaction(function () use ($request, $report, $data, $context): void {
+            foreach ($data['entries'] as $index => $row) {
+                $entry = $report->adSpendEntries->firstWhere('id', (int) $row['id']);
+                abort_unless($entry, 422);
+                $bookSpend = round((float) $row['book_spend_usd'], 2);
+                $coefficient = round((float) $row['settlement_coefficient'], 4);
+                $values = [
+                    'agency' => trim((string) $row['agency']),
+                    'media' => trim((string) $row['media']),
+                    'account_name' => trim((string) $row['account_name']),
+                    'account_number' => trim((string) $row['account_number']),
+                    'store_domain' => trim((string) ($row['store_domain'] ?? '')) ?: null,
+                    'book_spend_usd' => $bookSpend,
+                    'settlement_coefficient' => $coefficient,
+                    'actual_spend_usd' => round($bookSpend * (1 + $coefficient), 2),
+                ];
+                if ($file = $request->file('entries.'.$index.'.screenshot')) {
+                    $values['screenshot_path'] = $file->storeAs('fashion-advertising/'.now()->format('Ym'), Str::uuid().'.'.$file->extension(), 'local');
+                }
+                $entry->update($values);
+            }
+            $spend = round((float) $report->adSpendEntries()->sum('actual_spend_usd'), 2);
+            $report->update([
+                'total_ad_spend_usd' => $spend,
+                'roi' => $spend > 0 ? round((float) $report->total_revenue_usd / $spend, 4) : 0,
+                'status' => FashionAdvertisingReport::STATUS_APPROVED,
+                'reviewed_by' => $context['user']->getKey(),
+                'reviewer_name' => $context['user']->name ?: $context['user']->username,
+                'reviewed_at' => now(),
+                'review_reason' => null,
+            ]);
+        });
+
+        return redirect()->route('assistant.fashion-advertising-reviews.show', $report)
+            ->with('success', '广告信息已修改，报表保持审核通过状态。');
     }
 
     public function bulkReview(Request $request): RedirectResponse

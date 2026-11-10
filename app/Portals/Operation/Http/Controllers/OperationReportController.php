@@ -446,7 +446,7 @@ class OperationReportController extends Controller
         ]);
         $editingReport = ! empty($validated['edit_report']) ? OperationReport::query()->findOrFail((int) $validated['edit_report']) : null;
         if ($editingReport) {
-            abort_unless(in_array($editingReport->status, [OperationReport::STATUS_PENDING, OperationReport::STATUS_REJECTED], true), 422, '只有待审核或审核不通过的提报可以编辑。');
+            abort_unless(in_array($editingReport->status, [OperationReport::STATUS_PENDING, OperationReport::STATUS_APPROVED, OperationReport::STATUS_REJECTED], true), 422, '该提报当前不能编辑。');
             abort_unless($isBoss || (int) $editingReport->operator_user_id === (int) $user->getKey(), 403);
         }
         $date = $editingReport?->report_date?->format('Y-m-d')
@@ -669,7 +669,7 @@ class OperationReportController extends Controller
             'advertisingRows' => $report->advertising_rows ?: [],
             'mediaRoiRows' => $this->metrics->mediaRoiSummary($rows, $report->advertising_rows ?: []),
             'canReview' => false,
-            'canEdit' => in_array($report->status, [OperationReport::STATUS_PENDING, OperationReport::STATUS_REJECTED], true)
+            'canEdit' => in_array($report->status, [OperationReport::STATUS_PENDING, OperationReport::STATUS_APPROVED, OperationReport::STATUS_REJECTED], true)
                 && ($this->isBoss($user) || (int) $report->operator_user_id === (int) $user->getKey()),
         ]);
     }
@@ -686,7 +686,7 @@ class OperationReportController extends Controller
             'user' => $user,
             'report' => $report,
             'advertisingRows' => $report->advertising_rows ?: [],
-            'canEdit' => in_array($report->status, [OperationReport::STATUS_PENDING, OperationReport::STATUS_REJECTED], true),
+            'canEdit' => in_array($report->status, [OperationReport::STATUS_PENDING, OperationReport::STATUS_APPROVED, OperationReport::STATUS_REJECTED], true),
             'canDelete' => in_array($report->status, [OperationReport::STATUS_PENDING, OperationReport::STATUS_REJECTED], true),
         ]);
     }
