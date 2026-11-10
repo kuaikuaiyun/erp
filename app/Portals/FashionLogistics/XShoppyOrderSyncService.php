@@ -6,7 +6,6 @@ use App\Models\AssistantDomainStore;
 use App\Models\FashionLogisticsOrder;
 use App\Models\FashionLogisticsSyncState;
 use Carbon\Carbon;
-use DateTimeZone;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -74,7 +73,6 @@ class XShoppyOrderSyncService
     public function syncStore(AssistantDomainStore $store, int $initialDays = 60, bool $full = false, bool $allHistory = false): array
     {
         $this->assertStore($store);
-        $storeTimezone = $this->requestStoreTimezone($store);
         $state = FashionLogisticsSyncState::query()->firstOrCreate(['assistant_domain_store_id' => $store->getKey()]);
         $state->forceFill(['status' => 'syncing', 'last_started_at' => now(), 'last_error' => null])->save();
         $historyStart = Carbon::create(2000, 1, 1, 0, 0, 0, 'UTC');
@@ -103,7 +101,7 @@ class XShoppyOrderSyncService
                         continue;
                     }
 
-                    $result = $this->persist($store, $payload, $storeTimezone);
+                    $result = $this->persist($store, $payload);
                     $result['created'] ? $created++ : $updated++;
                 }
                 if (count($orders) < 100) break;
@@ -149,14 +147,14 @@ class XShoppyOrderSyncService
     }
 
     /** @return array{created:bool,order:FashionLogisticsOrder} */
-    private function persist(AssistantDomainStore $store, array $payload, string $storeTimezone): array
+    private function persist(AssistantDomainStore $store, array $payload): array
     {
         $billing = is_array($payload['billing'] ?? null) ? $payload['billing'] : [];
         $shipping = is_array($payload['shipping'] ?? null) ? $payload['shipping'] : [];
         $externalId = (string) $payload['id'];
         $connection = config('admin.database.connection') ?: config('database.default');
 
-        return DB::connection($connection)->transaction(function () use ($store, $payload, $billing, $shipping, $externalId, $storeTimezone): array {
+        return DB::connection($connection)->transaction(function () use ($store, $payload, $billing, $shipping, $externalId): array {
             $order = FashionLogisticsOrder::query()->firstOrNew([
                 'assistant_domain_store_id' => $store->getKey(),
                 'source_platform' => 'xshoppy',
@@ -178,10 +176,8 @@ class XShoppyOrderSyncService
                 'shipping_city' => (string) ($shipping['city'] ?? ''), 'shipping_address' => $address,
                 'customer_note' => (string) ($payload['customer_note'] ?? ''),
                 // XShoppy returns its order timestamps in China time (UTC+8). The
-                // shop time_zone is retained as metadata for local-time reporting,
-                // but must not be applied when parsing the API timestamp itself.
+                // Store time_zone does not participate in timestamp parsing.
                 'source_order_created_at' => $this->parseApiChinaTime($payload['date_created'] ?? null),
-                'source_order_timezone' => $storeTimezone,
                 'order_created_at_utc' => $this->parseApiChinaTimeUtc($payload['date_created'] ?? null),
                 'order_created_at' => $this->parseApiChinaTime($payload['date_created'] ?? null),
                 'order_modified_at' => $this->parseApiChinaTime($payload['date_modified'] ?? null),
@@ -221,41 +217,6 @@ class XShoppyOrderSyncService
     private function endpoint(AssistantDomainStore $store): string
     {
         return 'https://'.$this->domain($store).'/wp-json/wc/v3/orders';
-    }
-
-    private function shopEndpoint(AssistantDomainStore $store): string
-    {
-        return 'https://'.$this->domain($store).'/wp-json/wc/v3/shop';
-    }
-
-    private function requestStoreTimezone(AssistantDomainStore $store): string
-    {
-        try {
-            $response = Http::acceptJson()->timeout(45)->connectTimeout(15)->retry(2, 1000)
-                ->get($this->shopEndpoint($store), [
-                    'consumer_key' => trim((string) $store->xshoppy_api_key),
-                    'consumer_secret' => trim((string) $store->xshoppy_password),
-                ]);
-        } catch (ConnectionException $exception) {
-            throw new RuntimeException('无法连接 XShoppy 店铺信息接口：'.$exception->getMessage(), 0, $exception);
-        }
-
-        if (! $response->successful()) {
-            throw new RuntimeException('XShoppy 店铺信息接口返回 HTTP '.$response->status().'：'.Str::limit($response->body(), 500));
-        }
-
-        $timezone = trim((string) data_get($response->json(), 'data.time_zone'));
-        if ($timezone === '') {
-            throw new RuntimeException('XShoppy 店铺信息未返回 time_zone，已停止同步以避免订单时间错误。');
-        }
-
-        try {
-            new DateTimeZone($timezone);
-        } catch (\Throwable) {
-            throw new RuntimeException('XShoppy 店铺信息返回了无效时区：'.$timezone);
-        }
-
-        return $timezone;
     }
 
     private function domain(AssistantDomainStore $store): string
