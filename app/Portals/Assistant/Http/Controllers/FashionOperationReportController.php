@@ -12,7 +12,6 @@ use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
@@ -27,7 +26,9 @@ class FashionOperationReportController extends Controller
     public function index(Request $request): Response|View
     {
         $context = $this->portalEntries->portalContext($request);
-        if ($context instanceof Response) return $context;
+        if ($context instanceof Response) {
+            return $context;
+        }
         $this->authorization->assertAssistantPortal($context['portal']);
 
         $timezones = $this->timezoneOptions();
@@ -41,11 +42,13 @@ class FashionOperationReportController extends Controller
         $validated['department'] = $request->has('department')
             ? trim((string) ($validated['department'] ?? ''))
             : '服装运营部门';
-        $timezone = (string) ($validated['timezone'] ?? '+00:00');
+        $timezone = (string) ($validated['timezone'] ?? '-08:00');
         $month = now($timezone);
         $dateFrom = $validated['date_from'] ?? $month->copy()->startOfMonth()->toDateString();
         $dateTo = $validated['date_to'] ?? $month->copy()->endOfMonth()->toDateString();
-        if ($dateFrom > $dateTo) [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
+        if ($dateFrom > $dateTo) {
+            [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
+        }
         $utcFrom = CarbonImmutable::parse($dateFrom.' 00:00:00', $timezone)->utc()->format('Y-m-d H:i:s');
         $utcTo = CarbonImmutable::parse($dateTo.' 23:59:59', $timezone)->utc()->format('Y-m-d H:i:s');
 
@@ -58,7 +61,10 @@ class FashionOperationReportController extends Controller
             ->keyBy(fn (AdminUser $user) => mb_strtolower((string) ($user->name ?: $user->username)));
 
         $storesByOperator = $stores->groupBy(function (AssistantDomainStore $store) use ($nameUsers): int {
-            if ($store->owner_user_id) return (int) $store->owner_user_id;
+            if ($store->owner_user_id) {
+                return (int) $store->owner_user_id;
+            }
+
             return (int) ($nameUsers->get(mb_strtolower(trim((string) $store->user_name)))?->getKey() ?? 0);
         })->forget(0);
         $operatorIds = $storesByOperator->keys()->map(fn ($id) => (int) $id)->values();
@@ -95,13 +101,16 @@ class FashionOperationReportController extends Controller
         $fashionRootDepartmentId = (int) ($fashionDepartment?->id ?? 0);
         $allRows = $storesByOperator->map(function ($operatorStores, int $operatorId) use ($operators, $orderMetrics, $reports, $dateTo, $fashionDepartmentIds, $fashionRootDepartmentId): ?array {
             $operator = $operators->get($operatorId);
-            if (! $operator) return null;
+            if (! $operator) {
+                return null;
+            }
             $department = $operator->departments->first(fn ($item) => (int) $item->id !== $fashionRootDepartmentId && $fashionDepartmentIds->contains((int) $item->id))
                 ?: $operator->departments->first(fn ($item) => $fashionDepartmentIds->contains((int) $item->id))
                 ?: $operator->departments->first(fn ($item) => (bool) ($item->pivot->is_primary ?? false))
                 ?: $operator->departments->first();
             $storeRows = $operatorStores->map(function (AssistantDomainStore $store) use ($orderMetrics): array {
                 $metric = $orderMetrics->get($store->getKey());
+
                 return ['name' => (string) ($store->shop_name ?: $store->domain), 'domain' => (string) $store->domain,
                     'site_builder' => in_array(mb_strtolower(trim((string) $store->site_builder)), ['xshoppy', 'xshopy'], true) ? 'XShoppy' : 'Shopline',
                     'orders' => (int) ($metric->order_count ?? 0), 'revenue' => (float) ($metric->revenue ?? 0)];
@@ -113,6 +122,7 @@ class FashionOperationReportController extends Controller
             $media = $includedReports->flatMap->adSpendEntries->groupBy(fn ($entry) => trim((string) $entry->media) ?: '未设置媒体')
                 ->map(function ($entries, string $name) use ($revenue): array {
                     $spend = round((float) $entries->sum('actual_spend_usd'), 2);
+
                     return ['name' => $name, 'spend' => $spend, 'roi' => $spend > 0 ? $revenue / $spend : null];
                 })->sortKeys()->values();
             $totalSpend = round((float) $media->sum('spend'), 2);
@@ -120,6 +130,7 @@ class FashionOperationReportController extends Controller
                 ? 'not_submitted'
                 : ($operatorReports->contains('status', FashionAdvertisingReport::STATUS_PENDING) ? 'pending' : 'submitted');
             $hireDays = $operator->hired_at ? max(1, $operator->hired_at->diffInDays(CarbonImmutable::parse($dateTo)) + 1) : null;
+
             return ['department' => (string) ($department?->name ?: '未分配部门'), 'department_id' => (int) ($department?->id ?? 0), 'operator' => (string) ($operator->name ?: $operator->username),
                 'hired_at' => $operator->hired_at?->format('Y-m-d'), 'hire_days' => $hireDays, 'stores' => $storeRows,
                 'order_count' => $orderCount, 'revenue' => $revenue, 'aov' => $orderCount > 0 ? $revenue / $orderCount : null,
@@ -149,12 +160,14 @@ class FashionOperationReportController extends Controller
                 || ($department === '服装运营部门'
                     ? $fashionDepartmentIds->contains((int) $row['department_id'])
                     : str_contains(mb_strtolower($row['department']), mb_strtolower($department)));
+
             return $matchesDepartment
                 && ($operator === '' || str_contains(mb_strtolower($row['operator']), mb_strtolower($operator)));
         })->sortBy(fn (array $row) => $row['department'].'|'.$row['operator'])->values();
 
         $summaryRevenue = (float) $rows->sum('revenue');
         $summarySpend = (float) $rows->sum('ad_spend');
+
         return view('portals.assistant.fashion-operation-reports.index', [
             ...$context, 'rows' => $rows, 'timezoneOptions' => $timezones,
             'departmentOptions' => $departmentOptions,
@@ -171,8 +184,9 @@ class FashionOperationReportController extends Controller
         $options = [];
         for ($offset = -12; $offset <= 14; $offset++) {
             $value = sprintf('%s%02d:00', $offset < 0 ? '-' : '+', abs($offset));
-            $options[$value] = 'UTC'.($offset >= 0 ? '+' : '').$offset.($offset === 0 ? '（默认）' : ($offset === 8 ? '（北京时间）' : ''));
+            $options[$value] = 'UTC'.($offset >= 0 ? '+' : '').$offset.($offset === -8 ? '（默认）' : ($offset === 8 ? '（北京时间）' : ''));
         }
+
         return $options;
     }
 }

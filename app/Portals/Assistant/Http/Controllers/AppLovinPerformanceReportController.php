@@ -35,16 +35,25 @@ class AppLovinPerformanceReportController extends Controller
 
         $visibleIds = $this->storeOwners->visibleOperationDepartmentIds($context['user']);
         $filters = $request->validate([
+            'date_from' => ['nullable', 'date_format:Y-m-d'],
+            'date_to' => ['nullable', 'date_format:Y-m-d'],
             'department_id' => ['nullable', 'integer', Rule::in($visibleIds)],
             'operator' => ['nullable', 'string', 'max:100'],
         ]);
+        $dateFrom = (string) ($filters['date_from'] ?? now()->subDays(6)->toDateString());
+        $dateTo = (string) ($filters['date_to'] ?? now()->toDateString());
+        if ($dateFrom !== '' && $dateTo !== '' && $dateFrom > $dateTo) {
+            [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
+        }
 
         $query = OperationReport::query()->where('status', OperationReport::STATUS_APPROVED);
         if (! $context['user']->isAdministrator()) {
             $visibleIds === [] ? $query->whereRaw('1=0') : $query->whereIn('operation_department_id', $visibleIds);
         }
         $query->when($filters['department_id'] ?? null, fn ($q, $id) => $q->where('operation_department_id', $id))
-            ->when($filters['operator'] ?? null, fn ($q, $name) => $q->where('operator_name', 'like', '%'.$name.'%'));
+            ->when($filters['operator'] ?? null, fn ($q, $name) => $q->where('operator_name', 'like', '%'.$name.'%'))
+            ->when($dateFrom !== '', fn ($q) => $q->whereDate('report_date', '>=', $dateFrom))
+            ->when($dateTo !== '', fn ($q) => $q->whereDate('report_date', '<=', $dateTo));
 
         $reports = $query->orderBy('report_date')->orderBy('operator_name')->get();
         $bindings = AppLovinAccountStoreBinding::query()->pluck('assistant_domain_store_id', 'account_key');
@@ -101,6 +110,8 @@ class AppLovinPerformanceReportController extends Controller
                 );
                 $orders = (int) $metrics->sum('first_total_orders');
                 $revenue = round((float) $metrics->sum('first_total_revenue'), 2);
+                $subscriptionOrders = (int) $metrics->sum('first_subscription_orders');
+                $subscriptionRevenue = round((float) $metrics->sum('first_subscription_revenue'), 2);
                 $spend = round((float) $storeAds->sum('actual_spend'), 2);
 
                 return [
@@ -116,6 +127,8 @@ class AppLovinPerformanceReportController extends Controller
                     'agency_names' => $storeAds->pluck('agency')->map(fn ($agency) => trim((string) $agency))->filter()->unique()->values()->all(),
                     'first_orders' => $orders,
                     'first_revenue' => $revenue,
+                    'first_subscription_orders' => $subscriptionOrders,
+                    'first_subscription_revenue' => $subscriptionRevenue,
                     'average_order_value' => $orders > 0 ? $revenue / $orders : null,
                     'ad_spend' => $spend,
                     'roi' => $spend > 0 ? $revenue / $spend : null,
@@ -129,6 +142,8 @@ class AppLovinPerformanceReportController extends Controller
                 $first = $group->first();
                 $orders = (int) $group->sum('first_orders');
                 $revenue = round((float) $group->sum('first_revenue'), 2);
+                $subscriptionOrders = (int) $group->sum('first_subscription_orders');
+                $subscriptionRevenue = round((float) $group->sum('first_subscription_revenue'), 2);
                 $spend = round((float) $group->sum('ad_spend'), 2);
                 $giftEligibleKeys = $group->pluck('account_keys')->flatten()->unique()
                     ->filter(fn ($key) => (float) ($accountSpendTotals->get($key) ?? 0) >= 5000);
@@ -140,10 +155,13 @@ class AppLovinPerformanceReportController extends Controller
                     'department' => $first['department'],
                     'operator' => $first['operator'],
                     'store_domain' => $first['store_domain'],
+                    'date_label' => $group->min('date') === $group->max('date') ? $group->min('date') : $group->min('date').' 至 '.$group->max('date'),
                     'account_names' => $group->pluck('account_names')->flatten()->filter()->unique()->implode('、'),
                     'agency_names' => $group->pluck('agency_names')->flatten()->filter()->unique()->implode('、'),
                     'first_orders' => $orders,
                     'first_revenue' => $revenue,
+                    'first_subscription_orders' => $subscriptionOrders,
+                    'first_subscription_revenue' => $subscriptionRevenue,
                     'average_order_value' => $orders > 0 ? $revenue / $orders : null,
                     'ad_spend' => $spend,
                     'roi' => $spend > 0 ? $revenue / $spend : null,
@@ -161,6 +179,8 @@ class AppLovinPerformanceReportController extends Controller
 
         $totals = [
             'stores' => $rows->pluck('store_domain')->unique()->count(),
+            'subscription_orders' => (int) $rows->sum('first_subscription_orders'),
+            'subscription_revenue' => round((float) $rows->sum('first_subscription_revenue'), 2),
             'orders' => (int) $rows->sum('first_orders'),
             'revenue' => round((float) $rows->sum('first_revenue'), 2),
             'ad_spend' => round((float) $rows->sum('ad_spend'), 2),
@@ -173,6 +193,8 @@ class AppLovinPerformanceReportController extends Controller
         return view('portals.assistant.applovin-performance-reports.index', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'], 'rows' => $paginator, 'totals' => $totals,
             'operator' => $filters['operator'] ?? '',
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
             'selectedDepartmentId' => $filters['department_id'] ?? null,
             'departmentOptions' => $this->storeOwners->operationDepartments()->whereIn('id', $visibleIds)->values(),
         ]);
