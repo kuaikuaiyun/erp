@@ -37,13 +37,33 @@ class AppLovinPerformanceReportController extends Controller
         $filters = $request->validate([
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
+            'date_range' => ['nullable', Rule::in(['custom', 'yesterday', 'last_3', 'last_7', 'last_15', 'last_30', 'last_60', 'last_90', 'last_6_months', 'last_year'])],
             'department_id' => ['nullable', 'integer', Rule::in($visibleIds)],
             'operator' => ['nullable', 'string', 'max:100'],
+            'store_domain' => ['nullable', 'string', 'max:191'],
             'gift_status' => ['nullable', Rule::in(['yes', 'no'])],
-            'consumption_over_10000' => ['nullable', Rule::in(['1'])],
+            'consumption_range' => ['nullable', Rule::in(['5000_10000', 'gt_10000', 'custom'])],
+            'consumption_custom' => ['nullable', 'numeric', 'min:0', 'required_if:consumption_range,custom'],
         ]);
-        $dateFrom = (string) ($filters['date_from'] ?? now()->subDays(6)->toDateString());
-        $dateTo = (string) ($filters['date_to'] ?? now()->toDateString());
+        $today = now('Asia/Shanghai')->startOfDay();
+        $dateRange = (string) ($filters['date_range'] ?? ($request->hasAny(['date_from', 'date_to']) ? 'custom' : 'last_7'));
+        [$presetFrom, $presetTo] = match ($dateRange) {
+            'yesterday' => [$today->copy()->subDay(), $today->copy()->subDay()],
+            'last_3' => [$today->copy()->subDays(2), $today->copy()],
+            'last_15' => [$today->copy()->subDays(14), $today->copy()],
+            'last_30' => [$today->copy()->subDays(29), $today->copy()],
+            'last_60' => [$today->copy()->subDays(59), $today->copy()],
+            'last_90' => [$today->copy()->subDays(89), $today->copy()],
+            'last_6_months' => [$today->copy()->subMonths(6)->addDay(), $today->copy()],
+            'last_year' => [$today->copy()->subYear()->addDay(), $today->copy()],
+            default => [$today->copy()->subDays(6), $today->copy()],
+        };
+        $dateFrom = $dateRange === 'custom'
+            ? (string) ($filters['date_from'] ?? $presetFrom->toDateString())
+            : $presetFrom->toDateString();
+        $dateTo = $dateRange === 'custom'
+            ? (string) ($filters['date_to'] ?? $presetTo->toDateString())
+            : $presetTo->toDateString();
         if ($dateFrom !== '' && $dateTo !== '' && $dateFrom > $dateTo) {
             [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
         }
@@ -195,8 +215,18 @@ class AppLovinPerformanceReportController extends Controller
         } elseif (($filters['gift_status'] ?? '') === 'no') {
             $rows = $rows->where('gift_status', '!=', 'available')->values();
         }
-        if (($filters['consumption_over_10000'] ?? '') === '1') {
+        $domainOptions = $rows->pluck('store_domain')->filter()->unique(fn ($domain) => mb_strtolower((string) $domain))->sort()->values();
+        if (($filters['store_domain'] ?? '') !== '') {
+            $selectedDomain = mb_strtolower(trim((string) $filters['store_domain']));
+            $rows = $rows->filter(fn (array $row): bool => mb_strtolower(trim((string) $row['store_domain'])) === $selectedDomain)->values();
+        }
+        if (($filters['consumption_range'] ?? '') === '5000_10000') {
+            $rows = $rows->filter(fn (array $row): bool => (float) $row['total_consumption'] >= 5000 && (float) $row['total_consumption'] <= 10000)->values();
+        } elseif (($filters['consumption_range'] ?? '') === 'gt_10000') {
             $rows = $rows->filter(fn (array $row): bool => (float) $row['total_consumption'] > 10000)->values();
+        } elseif (($filters['consumption_range'] ?? '') === 'custom') {
+            $minimumConsumption = (float) ($filters['consumption_custom'] ?? 0);
+            $rows = $rows->filter(fn (array $row): bool => (float) $row['total_consumption'] > $minimumConsumption)->values();
         }
 
         $totals = [
@@ -219,9 +249,13 @@ class AppLovinPerformanceReportController extends Controller
             'operator' => $filters['operator'] ?? '',
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
+            'dateRange' => $dateRange,
             'selectedDepartmentId' => $filters['department_id'] ?? null,
+            'selectedStoreDomain' => $filters['store_domain'] ?? '',
+            'domainOptions' => $domainOptions,
             'selectedGiftStatus' => $filters['gift_status'] ?? '',
-            'consumptionOver10000' => ($filters['consumption_over_10000'] ?? '') === '1',
+            'selectedConsumptionRange' => $filters['consumption_range'] ?? '',
+            'consumptionCustom' => $filters['consumption_custom'] ?? '',
             'departmentOptions' => $this->storeOwners->operationDepartments()->whereIn('id', $visibleIds)->values(),
         ]);
     }

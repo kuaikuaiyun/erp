@@ -10,12 +10,15 @@
 <section class="content-header"><h1>订阅 AppLovin 业绩报表 <small>按日期范围统计订阅运营系统已绑定店铺的首单业绩</small></h1></section>
 <section class="content">
 <div class="box ap-card"><div class="box-body"><form method="get" class="ap-filter">
-    <div class="form-group"><label>开始日期</label><input type="date" class="form-control" name="date_from" value="{{$dateFrom}}"></div>
-    <div class="form-group"><label>结束日期</label><input type="date" class="form-control" name="date_to" value="{{$dateTo}}"></div>
+    <div class="form-group"><label>时间范围</label><select class="form-control" name="date_range" id="ap-date-range"><option value="custom" @selected($dateRange==='custom')>自定义时间</option><option value="yesterday" @selected($dateRange==='yesterday')>昨天</option><option value="last_3" @selected($dateRange==='last_3')>近 3 天</option><option value="last_7" @selected($dateRange==='last_7')>近 7 天</option><option value="last_15" @selected($dateRange==='last_15')>近 15 天</option><option value="last_30" @selected($dateRange==='last_30')>近 30 天</option><option value="last_60" @selected($dateRange==='last_60')>近 60 天</option><option value="last_90" @selected($dateRange==='last_90')>近 90 天</option><option value="last_6_months" @selected($dateRange==='last_6_months')>近半年</option><option value="last_year" @selected($dateRange==='last_year')>近一年</option></select></div>
+    <div class="form-group ap-custom-date"><label>开始日期</label><input type="date" class="form-control" name="date_from" value="{{$dateFrom}}"></div>
+    <div class="form-group ap-custom-date"><label>结束日期</label><input type="date" class="form-control" name="date_to" value="{{$dateTo}}"></div>
     <div class="form-group"><label>运营部门</label><select class="form-control" name="department_id"><option value="">全部部门</option>@foreach($departmentOptions as $department)<option value="{{$department->id}}" @selected((string)$selectedDepartmentId===(string)$department->id)>{{$department->name}}</option>@endforeach</select></div>
     <div class="form-group"><label>运营人员</label><input class="form-control" name="operator" value="{{$operator}}" placeholder="输入姓名"></div>
+    <div class="form-group"><label>店铺域名</label><input class="form-control" name="store_domain" value="{{$selectedStoreDomain}}" list="ap-store-domains" placeholder="输入或选择域名"><datalist id="ap-store-domains">@foreach($domainOptions as $domain)<option value="{{$domain}}">@endforeach</datalist></div>
     <div class="form-group"><label>是否有礼金</label><select class="form-control" name="gift_status"><option value="">全部</option><option value="yes" @selected($selectedGiftStatus==='yes')>有礼金</option><option value="no" @selected($selectedGiftStatus==='no')>无礼金</option></select></div>
-    <div class="form-group"><label>账号历史总消耗</label><label class="ap-check-filter"><input type="checkbox" name="consumption_over_10000" value="1" @checked($consumptionOver10000)> 大于 $10,000</label></div>
+    <div class="form-group"><label>账号历史总消耗</label><select class="form-control" name="consumption_range" id="ap-consumption-range"><option value="" @selected($selectedConsumptionRange==='')>全部</option><option value="5000_10000" @selected($selectedConsumptionRange==='5000_10000')>$5,000 - $10,000</option><option value="gt_10000" @selected($selectedConsumptionRange==='gt_10000')>大于 $10,000</option><option value="custom" @selected($selectedConsumptionRange==='custom')>自定义</option></select></div>
+    <div class="form-group" id="ap-consumption-custom-wrap"><label>自定义最低消耗($)</label><input type="number" min="0" step="0.01" class="form-control" name="consumption_custom" value="{{$consumptionCustom}}" placeholder="筛选大于此金额"></div>
     <button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{route('assistant.applovin-performance-reports.index')}}">重置</a>
 </form></div></div>
 <div class="ap-kpis">
@@ -42,5 +45,12 @@
 @push('scripts')
 <script>
 (function(){var pageSize=10;function render(modal,page){var rows=Array.prototype.slice.call(modal.querySelectorAll('.ap-detail-row')),total=rows.length,last=Math.max(1,Math.ceil(total/pageSize));page=Math.max(1,Math.min(page,last));rows.forEach(function(row,index){row.style.display=index>=(page-1)*pageSize&&index<page*pageSize?'':'none';});var from=total?(page-1)*pageSize+1:0,to=Math.min(page*pageSize,total),summary=modal.querySelector('.ap-detail-summary'),pages=modal.querySelector('.ap-detail-pages');summary.textContent='显示第 '+from+'-'+to+' 条，共 '+total+' 条';var html='<button type="button" class="btn btn-default btn-xs ap-page-btn" data-page="'+(page-1)+'" '+(page<=1?'disabled':'')+'><i class="fa fa-angle-left"></i></button>';var start=Math.max(1,page-2),end=Math.min(last,start+4);start=Math.max(1,end-4);for(var i=start;i<=end;i++)html+='<button type="button" class="btn btn-default btn-xs ap-page-btn '+(i===page?'active':'')+'" data-page="'+i+'">'+i+'</button>';html+='<button type="button" class="btn btn-default btn-xs ap-page-btn" data-page="'+(page+1)+'" '+(page>=last?'disabled':'')+'><i class="fa fa-angle-right"></i></button>';pages.innerHTML=html;}$(document).on('show.bs.modal','.ap-detail-modal',function(){render(this,1);});document.addEventListener('click',function(event){var button=event.target.closest('.ap-page-btn');if(!button||button.disabled)return;render(button.closest('.ap-detail-modal'),parseInt(button.getAttribute('data-page'),10)||1);});})();
+</script>
+<script>
+(function(){
+    var dateRange=document.getElementById('ap-date-range'),dateFields=document.querySelectorAll('.ap-custom-date'),consumptionRange=document.getElementById('ap-consumption-range'),customWrap=document.getElementById('ap-consumption-custom-wrap'),customInput=customWrap?customWrap.querySelector('input'):null;
+    function syncConsumption(){var custom=consumptionRange&&consumptionRange.value==='custom';if(customWrap)customWrap.style.display=custom?'block':'none';if(customInput){customInput.disabled=!custom;customInput.required=custom;}}
+    dateFields.forEach(function(field){field.style.display='block';field.querySelectorAll('input').forEach(function(input){input.disabled=false;input.addEventListener('change',function(){if(dateRange)dateRange.value='custom';});});});if(consumptionRange)consumptionRange.addEventListener('change',syncConsumption);syncConsumption();
+})();
 </script>
 @endpush
