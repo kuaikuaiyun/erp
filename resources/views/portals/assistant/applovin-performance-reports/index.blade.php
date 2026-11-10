@@ -17,8 +17,9 @@
     <div class="form-group"><label>运营人员</label><input class="form-control" name="operator" value="{{$operator}}" placeholder="输入姓名"></div>
     <div class="form-group"><label>店铺域名</label><input class="form-control" name="store_domain" value="{{$selectedStoreDomain}}" list="ap-store-domains" placeholder="输入或选择域名"><datalist id="ap-store-domains">@foreach($domainOptions as $domain)<option value="{{$domain}}">@endforeach</datalist></div>
     <div class="form-group"><label>是否有礼金</label><select class="form-control" name="gift_status"><option value="">全部</option><option value="yes" @selected($selectedGiftStatus==='yes')>有礼金</option><option value="no" @selected($selectedGiftStatus==='no')>无礼金</option></select></div>
-    <div class="form-group"><label>账号历史总消耗</label><select class="form-control" name="consumption_range" id="ap-consumption-range"><option value="" @selected($selectedConsumptionRange==='')>全部</option><option value="5000_10000" @selected($selectedConsumptionRange==='5000_10000')>$5,000 - $10,000</option><option value="gt_10000" @selected($selectedConsumptionRange==='gt_10000')>大于 $10,000</option><option value="custom" @selected($selectedConsumptionRange==='custom')>自定义</option></select></div>
-    <div class="form-group" id="ap-consumption-custom-wrap"><label>自定义最低消耗($)</label><input type="number" min="0" step="0.01" class="form-control" name="consumption_custom" value="{{$consumptionCustom}}" placeholder="筛选大于此金额"></div>
+    <div class="form-group"><label>账号历史总消耗</label><select class="form-control" name="consumption_range" id="ap-consumption-range"><option value="" @selected($selectedConsumptionRange==='')>全部</option><option value="lt_5000" @selected($selectedConsumptionRange==='lt_5000')>小于 $5,000</option><option value="5000_10000" @selected($selectedConsumptionRange==='5000_10000')>$5,000 - $10,000</option><option value="gt_10000" @selected($selectedConsumptionRange==='gt_10000')>大于 $10,000</option><option value="custom" @selected($selectedConsumptionRange==='custom')>自定义</option></select></div>
+    <div class="form-group ap-consumption-custom-field"><label>自定义最低消耗($)</label><input type="number" min="0" step="0.01" class="form-control" name="consumption_custom" value="{{$consumptionCustom}}" placeholder="最低消耗金额"></div>
+    <div class="form-group ap-consumption-custom-field"><label>自定义最高消耗($)</label><input type="number" min="0" step="0.01" class="form-control" name="consumption_custom_max" value="{{$consumptionCustomMax}}" placeholder="最高消耗金额"></div>
     <button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{route('assistant.applovin-performance-reports.index')}}">重置</a>
 </form></div></div>
 <div class="ap-kpis">
@@ -48,8 +49,8 @@
 </script>
 <script>
 (function(){
-    var dateRange=document.getElementById('ap-date-range'),dateFields=document.querySelectorAll('.ap-custom-date'),consumptionRange=document.getElementById('ap-consumption-range'),customWrap=document.getElementById('ap-consumption-custom-wrap'),customInput=customWrap?customWrap.querySelector('input'):null;
-    function syncConsumption(){var custom=consumptionRange&&consumptionRange.value==='custom';if(customWrap)customWrap.style.display=custom?'block':'none';if(customInput){customInput.disabled=!custom;customInput.required=custom;}}
+    var dateRange=document.getElementById('ap-date-range'),dateFields=document.querySelectorAll('.ap-custom-date'),consumptionRange=document.getElementById('ap-consumption-range'),customFields=document.querySelectorAll('.ap-consumption-custom-field');
+    function syncConsumption(){var custom=consumptionRange&&consumptionRange.value==='custom';customFields.forEach(function(field){field.style.display=custom?'block':'none';field.querySelectorAll('input').forEach(function(input){input.disabled=!custom;input.required=custom;});});}
     dateFields.forEach(function(field){field.style.display='block';field.querySelectorAll('input').forEach(function(input){input.disabled=false;input.addEventListener('change',function(){if(dateRange)dateRange.value='custom';});});});if(consumptionRange)consumptionRange.addEventListener('change',syncConsumption);syncConsumption();
 })();
 </script>
