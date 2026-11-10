@@ -90,7 +90,7 @@ class AppLovinSpendReviewController extends Controller
                 if($keys->isEmpty())$keys=collect([AppLovinSpendScreenshot::accountKey((int)$first['operator_user_id'],$agency,$media,$name,$number)]);
                 return ['account_key'=>$keys->first(),'account_keys'=>$keys->values(),'operator_user_id'=>(int)$first['operator_user_id'],'operator_name'=>$first['operator_name'],'department'=>$first['department'],'agency'=>$agency,'media'=>$media,'account_name'=>$name,'account_number'=>$number,'total'=>(float)$group->sum('actual_spend'),'details'=>$group->values()];
             })->sortByDesc('total')->values();
-        $allAccountKeys=$accounts->flatMap('account_keys')->unique()->values();
+        $allAccountKeys=$accounts->pluck('account_keys')->flatten()->unique()->values();
         $screenshots = AppLovinSpendScreenshot::query()->whereIn('account_key', $allAccountKeys)->get()->keyBy('account_key');
         $bindings = AppLovinAccountStoreBinding::query()->whereIn('account_key', $allAccountKeys)->get()->keyBy('account_key');
         $stores = AssistantDomainStore::query()->whereNotNull('owner_user_id')->whereNotNull('domain')->where('domain', '!=', '')
