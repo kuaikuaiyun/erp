@@ -46,6 +46,8 @@ class OperationReportDashboardController extends Controller
             'operation_department_ids.*' => ['integer', 'distinct'],
             'operator_user_id' => ['nullable', 'integer'],
             'scope_user_id' => ['nullable', 'integer'],
+            'sort_by' => ['nullable', Rule::in(['first_subscription_orders', 'first_total_orders'])],
+            'sort_direction' => ['nullable', Rule::in(['asc', 'desc'])],
         ]);
         $timezone = (string) ($validated['timezone'] ?? OperationReportMetricsService::REPORT_TIMEZONE);
         $reportNow = Carbon::now($timezone);
@@ -297,7 +299,22 @@ class OperationReportDashboardController extends Controller
             }
         }
         $rows = $this->aggregateRangeRows($rows, $dateFrom, $dateTo);
-        usort($rows, fn (array $a, array $b) => [$a['operation_department_name'], $a['operator_name']] <=> [$b['operation_department_name'], $b['operator_name']]);
+        $sortBy = $validated['sort_by'] ?? null;
+        $sortDirection = (string) ($validated['sort_direction'] ?? 'desc');
+        usort($rows, function (array $a, array $b) use ($sortBy, $sortDirection): int {
+            if ($sortBy !== null) {
+                $valueKey = $sortBy === 'first_subscription_orders'
+                    ? 'daily_first_subscription_orders'
+                    : 'daily_first_total_orders';
+                $comparison = ((int) ($a[$valueKey] ?? 0)) <=> ((int) ($b[$valueKey] ?? 0));
+                if ($comparison !== 0) {
+                    return $sortDirection === 'asc' ? $comparison : -$comparison;
+                }
+            }
+
+            return [$a['operation_department_name'], $a['operator_name'], $a['shop_domain']]
+                <=> [$b['operation_department_name'], $b['operator_name'], $b['shop_domain']];
+        });
 
         $approvedAdSpend = (float) $allReports->where('status', OperationReport::STATUS_APPROVED)->sum('actual_ad_spend');
         $totals = $this->totals($rows, $approvedAdSpend);
@@ -333,6 +350,8 @@ class OperationReportDashboardController extends Controller
             'selectedDepartmentIds' => $selectedDepartmentIds->all(),
             'operatorOptions' => $operatorOptions,
             'selectedOperatorId' => $selectedOperatorId,
+            'sortBy' => $sortBy,
+            'sortDirection' => $sortDirection,
             'rows' => $rows,
             'totals' => $totals,
             'identityRowspans' => $this->identityRowspans($rows),

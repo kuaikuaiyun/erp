@@ -13,6 +13,7 @@ use App\Models\AppLovinAccountStoreBinding;
 use App\Models\AppLovinSpendScreenshot;
 use App\Models\Department;
 use App\Portal\Http\Controllers\PortalEntryController;
+use App\Portals\Assistant\AssistantStoreOwnerService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -28,7 +29,10 @@ class AdvertisingExpenseController extends Controller
 {
     private const PORTAL_CODE = 'fuzhuang';
 
-    public function __construct(private readonly PortalEntryController $portalEntries)
+    public function __construct(
+        private readonly PortalEntryController $portalEntries,
+        private readonly AssistantStoreOwnerService $assistantStoreOwners,
+    )
     {
     }
 
@@ -66,7 +70,7 @@ class AdvertisingExpenseController extends Controller
             ->whereNotNull('domain')->where('domain', '!=', '')->orderBy('domain')->get(['id', 'domain', 'shop_name']);
 
         $context['portal']->loadMissing('menus');
-        $advertisingOptions = $this->advertisingOptions();
+        $advertisingOptions = $this->advertisingOptions($this->assistantDepartmentIdsForUser($selectedOperator));
         return view('portals.fashion.advertising-expenses.index', [
             ...$context,
             'reports' => $reports,
@@ -190,7 +194,7 @@ class AdvertisingExpenseController extends Controller
 
         $performanceOwnerId = $report?->submitter_id ?: $user->getKey();
         $performance = $this->calculatedPerformanceRows($data['report_date'], (int) $performanceOwnerId);
-        $advertising = $this->prepareRows($request, $data['advertising'], 'advertising');
+        $advertising = $this->prepareRows($request, $data['advertising'], 'advertising', (int) $performanceOwnerId);
         $revenue = round(collect($performance)->sum('revenue_usd'), 2);
         $orders = (int) collect($performance)->sum('order_count');
         $spend = round(collect($advertising)->sum('actual_spend_usd'), 2);
@@ -227,9 +231,9 @@ class AdvertisingExpenseController extends Controller
         Storage::disk('local')->delete(array_values(array_diff($oldPaths, $newPaths)));
     }
 
-    private function prepareRows(Request $request, array $rows, string $group): array
+    private function prepareRows(Request $request, array $rows, string $group, ?int $operatorId = null): array
     {
-        return collect($rows)->map(function (array $row, int|string $index) use ($request, $group): array {
+        return collect($rows)->map(function (array $row, int|string $index) use ($request, $group, $operatorId): array {
             $path = Arr::get($row, 'existing_screenshot');
             if ((bool) Arr::get($row, 'remove_screenshot', false)) $path = null;
             if ($file = $request->file("{$group}.{$index}.screenshot")) {
@@ -238,6 +242,7 @@ class AdvertisingExpenseController extends Controller
             unset($row['screenshot'], $row['existing_screenshot'], $row['remove_screenshot']);
             if ($group === 'advertising') {
                 $configuredCoefficient = AssistantAdvertisingAgency::query()
+                    ->when($operatorId !== null, fn ($query) => $query->whereIn('assistant_department_id', $this->assistantDepartmentIdsForUser(AdminUser::query()->findOrFail($operatorId))))
                     ->where('name', trim((string) ($row['agency'] ?? '')))
                     ->whereHas('advertisingMedia', fn ($query) => $query->where('name', trim((string) ($row['media'] ?? ''))))
                     ->value('settlement_coefficient');
@@ -339,19 +344,33 @@ class AdvertisingExpenseController extends Controller
         return is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) ? $value : null;
     }
 
-    private function advertisingOptions(): array
+    /** @param list<int> $assistantDepartmentIds */
+    private function advertisingOptions(array $assistantDepartmentIds): array
     {
-        $agencies = AssistantAdvertisingAgency::query()->where('is_enabled', true)->with('advertisingMedia')
+        $rawAgencies = AssistantAdvertisingAgency::query()->where('is_enabled', true)
+            ->whereIn('assistant_department_id', $assistantDepartmentIds)
+            ->with('advertisingMedia')
             ->orderBy('sort')->orderBy('id')->get()
             ->map(fn (AssistantAdvertisingAgency $agency): array => [
                 'name' => trim((string) $agency->name),
-                'media' => trim((string) ($agency->advertisingMedia?->name ?? '')),
+                'media' => $this->canonicalAdvertisingMedia((string) ($agency->advertisingMedia?->name ?? '')),
                 'coefficient' => (float) $agency->settlement_coefficient,
-            ])->filter(fn (array $agency): bool => $agency['name'] !== '')
-            ->unique(fn (array $agency): string => mb_strtolower($agency['name'].'|'.$agency['media']))->values();
+            ])->filter(fn (array $agency): bool => $agency['name'] !== '')->values();
 
-        $media = AssistantAdvertisingMedia::query()->where('is_enabled', true)->orderBy('sort')->orderBy('id')
-            ->pluck('name')->map(fn ($name): string => trim((string) $name))->filter()->unique()->values();
+        $canonicalAgencyNames = $rawAgencies
+            ->groupBy(fn (array $agency): string => $this->advertisingNameKey($agency['name']))
+            ->map(fn ($items): string => (string) $items->countBy('name')->sortDesc()->keys()->first());
+
+        $agencies = $rawAgencies->map(function (array $agency) use ($canonicalAgencyNames): array {
+            $agency['name'] = $canonicalAgencyNames->get($this->advertisingNameKey($agency['name']), $agency['name']);
+
+            return $agency;
+        })->unique(fn (array $agency): string => $this->advertisingNameKey($agency['name']).'|'.mb_strtolower($agency['media']))->values();
+
+        $media = AssistantAdvertisingMedia::query()->where('is_enabled', true)
+            ->whereIn('assistant_department_id', $assistantDepartmentIds)
+            ->orderBy('sort')->orderBy('id')
+            ->pluck('name')->map(fn ($name): string => $this->canonicalAdvertisingMedia((string) $name))->filter()->unique()->values();
         $media = $media->merge($agencies->pluck('media'))->filter()->unique()->values();
 
         $agencyMedia = $agencies->groupBy('name')->map(fn ($items) => $items->pluck('media')->filter()->unique()->values()->all())->all();
@@ -365,5 +384,27 @@ class AdvertisingExpenseController extends Controller
             'agency_rates' => $agencyRates,
             'media' => $media->all(),
         ];
+    }
+
+    private function advertisingNameKey(string $name): string
+    {
+        return str_replace('藍', '蓝', mb_strtolower(trim($name)));
+    }
+
+    private function canonicalAdvertisingMedia(string $media): string
+    {
+        $media = trim($media);
+
+        return mb_strtolower($media) === 'applovin' ? 'AppLovin' : $media;
+    }
+
+    /** @return list<int> */
+    private function assistantDepartmentIdsForUser(AdminUser $user): array
+    {
+        $department = $this->assistantStoreOwners->boundBusinessDepartmentForUser($user);
+
+        return $department
+            ? $this->assistantStoreOwners->assistantDepartmentIdsForOperationDepartment((int) $department->id)
+            : [];
     }
 }

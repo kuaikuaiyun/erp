@@ -46,6 +46,7 @@ use App\Portals\Logistics\Http\Controllers\WarehouseProductStatisticsController;
 use App\Portals\Logistics\Http\Controllers\WarehouseWeightExceptionController;
 use App\Portals\Operation\Http\Controllers\AppLovinSpendController;
 use App\Portals\Operation\Http\Controllers\DailySubmissionController;
+use App\Portals\OperationTasks\Http\Controllers\OperationTaskController;
 use App\Portals\Operation\Http\Controllers\OperationAiProductLibraryController;
 use App\Portals\Operation\Http\Controllers\OperationDomainStoreController;
 use App\Portals\Operation\Http\Controllers\OperationReportController;
@@ -194,6 +195,16 @@ Route::post('/operation/daily-submissions/advertising-account-authorization', [D
     ->name('operation.daily-submissions.advertising-account-authorization.store');
 Route::post('/operation/daily-submissions/account-store-transfer', [DailySubmissionController::class, 'storeAccountStoreTransfer'])
     ->name('operation.daily-submissions.account-store-transfer.store');
+Route::get('/operation-tasks/recaps', [OperationTaskController::class, 'recaps'])->name('operation-tasks.recaps.index');
+Route::post('/operation-tasks/recaps', [OperationTaskController::class, 'storeRecap'])->name('operation-tasks.recaps.store');
+Route::get('/operation-tasks/tests', [OperationTaskController::class, 'tests'])->name('operation-tasks.tests.index');
+Route::post('/operation-tasks/tests', [OperationTaskController::class, 'storeTest'])->name('operation-tasks.tests.store');
+Route::get('/operation-tasks/tests/{task}', [OperationTaskController::class, 'showTest'])->whereNumber('task')->name('operation-tasks.tests.show');
+Route::get('/operation-tasks/assets/{asset}/file', [OperationTaskController::class, 'assetFile'])->whereNumber('asset')->name('operation-tasks.assets.file');
+Route::post('/operation-tasks/assets/{asset}/daily-records', [OperationTaskController::class, 'storeAssetDaily'])->whereNumber('asset')->name('operation-tasks.assets.daily-records.store');
+Route::get('/operation-tasks/reviews', [OperationTaskController::class, 'reviews'])->name('operation-tasks.reviews.index');
+Route::post('/operation-tasks/reviews', [OperationTaskController::class, 'review'])->name('operation-tasks.reviews.store');
+Route::get('/operation-tasks/dashboard', [OperationTaskController::class, 'dashboard'])->name('operation-tasks.dashboard');
 Route::get('/assistant/daily-submissions/advertising-recharges', [AdvertisingRechargeReviewController::class, 'index'])
     ->name('assistant.daily-submissions.advertising-recharges.index');
 Route::patch('/assistant/daily-submissions/advertising-recharges/{submission}/process', [AdvertisingRechargeReviewController::class, 'process'])
@@ -214,6 +225,10 @@ Route::patch('/assistant/daily-submissions/advertising-account-authorizations/{s
     ->whereNumber('submission')->name('assistant.daily-submissions.advertising-account-authorizations.process');
 Route::get('/assistant/daily-submissions/account-store-transfers', [AccountStoreTransferReviewController::class, 'index'])
     ->name('assistant.daily-submissions.account-store-transfers.index');
+Route::get('/assistant/daily-submissions/account-store-transfers/{submission}/images/{image}', [AccountStoreTransferReviewController::class, 'image'])
+    ->whereNumber('submission')->whereNumber('image')->name('assistant.daily-submissions.account-store-transfers.images.view');
+Route::get('/assistant/daily-submissions/account-store-transfers/{submission}/images/{image}/download', [AccountStoreTransferReviewController::class, 'downloadImage'])
+    ->whereNumber('submission')->whereNumber('image')->name('assistant.daily-submissions.account-store-transfers.images.download');
 Route::patch('/assistant/daily-submissions/account-store-transfers/{submission}/process', [AccountStoreTransferReviewController::class, 'process'])
     ->whereNumber('submission')->name('assistant.daily-submissions.account-store-transfers.process');
 Route::get('/operation/daily-submissions/applovin-spends', [AppLovinSpendController::class, 'index'])
