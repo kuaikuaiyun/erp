@@ -498,11 +498,16 @@ GRAPHQL;
 
     private function validTimezone(string $timezone): string
     {
-        if ($timezone === '' || !in_array($timezone, timezone_identifiers_list(), true)) {
+        $timezone = trim($timezone);
+        if ($timezone === '') {
             throw new RuntimeException('Shopify returned an invalid IANA timezone.');
         }
 
-        return $timezone;
+        try {
+            return (new \DateTimeZone($timezone))->getName();
+        } catch (\Exception) {
+            throw new RuntimeException('Shopify returned an invalid IANA timezone.');
+        }
     }
 
     private function validCurrency(string $currency): string
