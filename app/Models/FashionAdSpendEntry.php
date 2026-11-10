@@ -13,6 +13,11 @@ class FashionAdSpendEntry extends Model
         return ['book_spend_usd' => 'decimal:2', 'settlement_coefficient' => 'decimal:4', 'actual_spend_usd' => 'decimal:2'];
     }
 
+    public function getFeeUsdAttribute(): float
+    {
+        return max(0, round((float) $this->actual_spend_usd - (float) $this->book_spend_usd, 2));
+    }
+
     public function __construct(array $attributes = [])
     {
         $this->setConnection(config('admin.database.connection') ?: config('database.default'));

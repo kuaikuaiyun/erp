@@ -1,53 +1,56 @@
 <?php
 
+use App\Http\Middleware\MonitorPaymentPerformance;
+use App\Http\Middleware\RedirectFinanceDomain;
+use App\Portal\Http\Controllers\AbnormalOrderController;
+use App\Portal\Http\Controllers\InternalMessageController;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portal\Http\Controllers\PortalMenuConfigurationController;
-use App\Portal\Http\Controllers\InternalMessageController;
-use App\Portal\Http\Controllers\AbnormalOrderController;
+use App\Portals\Aikaipin\Http\Controllers\ProductLibraryController;
 use App\Portals\AiProducts\Http\Controllers\AiProductController;
-use App\Portals\Assistant\Http\Controllers\DomainStoreController;
-use App\Portals\Assistant\Http\Controllers\AdvertisingMediaController;
-use App\Portals\Assistant\Http\Controllers\AdvertisingAgencyController;
-use App\Portals\Assistant\Http\Controllers\ShopifyAnalyticsController;
-use App\Portals\Logistics\Http\Controllers\LogisticsOrderController;
-use App\Portals\Logistics\Http\Controllers\PayPalRiskController;
-use App\Portals\Logistics\Http\Controllers\PayPalDisputeAnalysisController;
-use App\Portals\Logistics\Http\Controllers\PayPalImportController;
-use App\Portals\Logistics\Http\Controllers\ProductStatisticsController;
-use App\Portals\Logistics\Http\Controllers\WarehouseProductStatisticsController;
-use App\Portals\Logistics\Http\Controllers\WarehouseWeightExceptionController;
-use App\Portals\Logistics\Http\Controllers\AbnormalSkuController;
-use App\Portals\Logistics\Http\Controllers\ShopifyStoreController;
-use App\Portals\Logistics\Http\Controllers\ShopifyWebhookController;
-use App\Portals\Operation\Http\Controllers\OperationDomainStoreController;
-use App\Portals\Operation\Http\Controllers\OperationAiProductLibraryController;
-use App\Portals\Operation\Http\Controllers\OperationReportController;
-use App\Portals\Operation\Http\Controllers\DailySubmissionController;
-use App\Portals\Assistant\Http\Controllers\AdvertisingRechargeReviewController;
 use App\Portals\Assistant\Http\Controllers\AccountOpeningReviewController;
+use App\Portals\Assistant\Http\Controllers\AccountStoreTransferReviewController;
+use App\Portals\Assistant\Http\Controllers\AdvertisingAccountAuthorizationReviewController;
+use App\Portals\Assistant\Http\Controllers\AdvertisingAgencyController;
+use App\Portals\Assistant\Http\Controllers\AdvertisingMediaController;
+use App\Portals\Assistant\Http\Controllers\AdvertisingRechargeReviewController;
+use App\Portals\Assistant\Http\Controllers\AdvertisingSpendAnalysisController;
+use App\Portals\Assistant\Http\Controllers\AdvertisingSpendSummaryController;
+use App\Portals\Assistant\Http\Controllers\AppLovinPerformanceReportController;
+use App\Portals\Assistant\Http\Controllers\AppLovinSpendReviewController;
 use App\Portals\Assistant\Http\Controllers\AssistantProjectController;
 use App\Portals\Assistant\Http\Controllers\AssistantWebsiteSystemController;
-use App\Portals\Assistant\Http\Controllers\AppLovinSpendReviewController;
-use App\Portals\Assistant\Http\Controllers\AppLovinPerformanceReportController;
-use App\Portals\Assistant\Http\Controllers\StoreLaunchReviewController;
-use App\Portals\Assistant\Http\Controllers\AdvertisingAccountAuthorizationReviewController;
-use App\Portals\Assistant\Http\Controllers\AccountStoreTransferReviewController;
-use App\Portals\Operation\Http\Controllers\AppLovinSpendController;
-use App\Portals\Assistant\Http\Controllers\OperationReportReviewController;
-use App\Portals\Assistant\Http\Controllers\OperationReportDashboardController;
-use App\Portals\Assistant\Http\Controllers\AdvertisingSpendSummaryController;
-use App\Portals\Assistant\Http\Controllers\AdvertisingSpendAnalysisController;
+use App\Portals\Assistant\Http\Controllers\DomainStoreController;
 use App\Portals\Assistant\Http\Controllers\FashionAdvertisingReviewController;
+use App\Portals\Assistant\Http\Controllers\FashionAppLovinPerformanceReportController;
 use App\Portals\Assistant\Http\Controllers\FashionOperationReportController;
-use App\Portals\ProductRequests\Http\Controllers\ProductRequestController;
-use App\Portals\Aikaipin\Http\Controllers\ProductLibraryController;
-use App\Portals\Payment\Http\Controllers\PaymentPortalController;
+use App\Portals\Assistant\Http\Controllers\OperationReportDashboardController;
+use App\Portals\Assistant\Http\Controllers\OperationReportReviewController;
+use App\Portals\Assistant\Http\Controllers\ShopifyAnalyticsController;
+use App\Portals\Assistant\Http\Controllers\StoreLaunchReviewController;
 use App\Portals\Fashion\Http\Controllers\AdvertisingExpenseController;
 use App\Portals\Fashion\Http\Controllers\PerformanceReportController;
 use App\Portals\Fashion\Http\Controllers\StoreController as FashionStoreController;
 use App\Portals\FashionLogistics\Http\Controllers\FashionOrderController;
 use App\Portals\FashionLogistics\Http\Controllers\ShoplineOrderController;
-use App\Http\Middleware\MonitorPaymentPerformance;
+use App\Portals\Finance\Http\Controllers\FinanceController;
+use App\Portals\Logistics\Http\Controllers\AbnormalSkuController;
+use App\Portals\Logistics\Http\Controllers\LogisticsOrderController;
+use App\Portals\Logistics\Http\Controllers\PayPalDisputeAnalysisController;
+use App\Portals\Logistics\Http\Controllers\PayPalImportController;
+use App\Portals\Logistics\Http\Controllers\PayPalRiskController;
+use App\Portals\Logistics\Http\Controllers\ProductStatisticsController;
+use App\Portals\Logistics\Http\Controllers\ShopifyStoreController;
+use App\Portals\Logistics\Http\Controllers\ShopifyWebhookController;
+use App\Portals\Logistics\Http\Controllers\WarehouseProductStatisticsController;
+use App\Portals\Logistics\Http\Controllers\WarehouseWeightExceptionController;
+use App\Portals\Operation\Http\Controllers\AppLovinSpendController;
+use App\Portals\Operation\Http\Controllers\DailySubmissionController;
+use App\Portals\Operation\Http\Controllers\OperationAiProductLibraryController;
+use App\Portals\Operation\Http\Controllers\OperationDomainStoreController;
+use App\Portals\Operation\Http\Controllers\OperationReportController;
+use App\Portals\Payment\Http\Controllers\PaymentPortalController;
+use App\Portals\ProductRequests\Http\Controllers\ProductRequestController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/fashion/advertising-expenses', [AdvertisingExpenseController::class, 'index'])->name('fashion.advertising-expenses.index');
@@ -64,7 +67,7 @@ Route::put('/fashion/advertising-expenses/{report}', [AdvertisingExpenseControll
 Route::delete('/fashion/advertising-expenses/{report}', [AdvertisingExpenseController::class, 'destroy'])->name('fashion.advertising-expenses.destroy');
 Route::get('/fashion/advertising-expenses/screenshots/{type}/{entry}', [AdvertisingExpenseController::class, 'screenshot'])->whereIn('type', ['performance', 'advertising'])->whereNumber('entry')->name('fashion.advertising-expenses.screenshot');
 
-Route::prefix('finance')->name('finance.')->middleware(\App\Http\Middleware\RedirectFinanceDomain::class)->controller(\App\Portals\Finance\Http\Controllers\FinanceController::class)->group(function (): void {
+Route::prefix('finance')->name('finance.')->middleware(RedirectFinanceDomain::class)->controller(FinanceController::class)->group(function (): void {
     Route::get('/management/menus', [PortalMenuConfigurationController::class, 'index'])->name('menus.index');
     Route::post('/management/menus/order', [PortalMenuConfigurationController::class, 'saveOrder'])->name('menus.order');
     Route::get('/', 'index')->name('home');
@@ -225,6 +228,8 @@ Route::get('/assistant/daily-submissions/applovin-spends', [AppLovinSpendReviewC
     ->name('assistant.applovin-spends.index');
 Route::get('/assistant/applovin-performance-reports', [AppLovinPerformanceReportController::class, 'index'])
     ->name('assistant.applovin-performance-reports.index');
+Route::get('/assistant/fashion-applovin-performance-reports', [FashionAppLovinPerformanceReportController::class, 'index'])
+    ->name('assistant.fashion-applovin-performance-reports.index');
 Route::post('/assistant/daily-submissions/applovin-spends/store-binding', [AppLovinSpendReviewController::class, 'bindStore'])
     ->name('assistant.applovin-spends.store-binding');
 Route::get('/assistant/daily-submissions/applovin-spends/screenshots/{screenshot}', [AppLovinSpendReviewController::class, 'screenshot'])
@@ -253,6 +258,8 @@ Route::get('/operation-dashboard/applovin-spends/screenshots/{screenshot}', [App
 Route::get('/assistant/advertising-spend-summary', [AdvertisingSpendSummaryController::class, 'index'])->name('assistant.advertising-spend-summary.index');
 Route::get('/assistant/advertising-spend-analysis', [AdvertisingSpendAnalysisController::class, 'index'])->name('assistant.advertising-spend-analysis.index');
 Route::get('/assistant/fashion-advertising-reviews', [FashionAdvertisingReviewController::class, 'index'])->name('assistant.fashion-advertising-reviews.index');
+Route::post('/assistant/fashion-advertising-reviews/bulk-review', [FashionAdvertisingReviewController::class, 'bulkReview'])->name('assistant.fashion-advertising-reviews.bulk-review');
+Route::get('/assistant/fashion-advertising-reviews/{report}', [FashionAdvertisingReviewController::class, 'show'])->withTrashed()->whereNumber('report')->name('assistant.fashion-advertising-reviews.show');
 Route::post('/assistant/fashion-advertising-reviews/{report}/review', [FashionAdvertisingReviewController::class, 'review'])->whereNumber('report')->name('assistant.fashion-advertising-reviews.review');
 Route::delete('/assistant/fashion-advertising-reviews/{report}', [FashionAdvertisingReviewController::class, 'destroy'])->whereNumber('report')->name('assistant.fashion-advertising-reviews.destroy');
 Route::get('/assistant/fashion-advertising-reviews/screenshots/{type}/{entry}', [FashionAdvertisingReviewController::class, 'screenshot'])->whereIn('type', ['performance', 'advertising'])->whereNumber('entry')->name('assistant.fashion-advertising-reviews.screenshot');
