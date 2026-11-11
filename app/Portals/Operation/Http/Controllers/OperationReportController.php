@@ -543,12 +543,12 @@ class OperationReportController extends Controller
         if ($context instanceof Response) abort($context->getStatusCode());
         abort_unless($this->isBoss($context['user']), 403);
         $validated = $request->validate([
-            'import_file' => ['required', 'file', 'max:10240'],
+            'import_file' => ['required', 'file', 'max:102400'],
         ], [
             'import_file.required' => '请选择需要导入的 Excel 文件。',
             'import_file.uploaded' => '文件上传失败，文件可能超过服务器允许的上传大小。当前 PHP 上传限制为 '.ini_get('upload_max_filesize').'，请压缩文件中的图片后重试，或调整服务器上传限制。',
             'import_file.file' => '上传的内容不是有效文件，请重新选择 Excel 文件。',
-            'import_file.max' => '导入文件不能超过 10MB，请压缩文件中的图片后重试。',
+            'import_file.max' => '导入文件不能超过 100MB，请压缩文件中的图片后重试。',
         ]);
         $operators = $this->operatorOptions();
         $operatorConfigurations = [];

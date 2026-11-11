@@ -268,7 +268,13 @@ class AdvertisingReportSpreadsheetService
             foreach (array_slice(self::HEADERS, 0, 7) as $header) $values[$header] = $row[$columns[$header]] ?? '';
             if (collect($values)->every(fn ($value) => $value === '')) continue;
             $excelRow = $index + $headerOffset + 2;
-            $imageCellValue = (string) ($row[$columns['广告消耗截图']] ?? '');
+            $rawImageCellValue = $row[$columns['广告消耗截图']] ?? '';
+            // Some Excel/WPS versions expose an in-cell image as a Drawing
+            // object in toArray(), without adding it to the drawing collection.
+            if (! isset($images[$excelRow]) && ($rawImageCellValue instanceof Drawing || $rawImageCellValue instanceof MemoryDrawing)) {
+                $images[$excelRow] = $this->imageFromDrawing($rawImageCellValue, $excelRow);
+            }
+            $imageCellValue = is_scalar($rawImageCellValue) ? (string) $rawImageCellValue : '';
             if (! isset($images[$excelRow]) && preg_match('/DISPIMG\("([^"]+)"/i', $imageCellValue, $match)) {
                 $images[$excelRow] = $cellImages[$match[1]] ?? null;
                 if ($images[$excelRow] === null) unset($images[$excelRow]);
@@ -310,19 +316,26 @@ class AdvertisingReportSpreadsheetService
             if (Coordinate::columnIndexFromString($column) !== 8) continue;
             if (isset($images[$row])) throw new InvalidArgumentException("第 {$row} 行只能放置一张广告消耗截图。");
 
-            $bytes = null;
-            if ($drawing instanceof MemoryDrawing) {
-                ob_start();
-                $render = $drawing->getRenderingFunction();
-                $render($drawing->getImageResource());
-                $bytes = ob_get_clean();
-            } elseif ($drawing instanceof Drawing) {
-                $bytes = @file_get_contents($drawing->getPath());
-            }
-            $images[$row] = $this->validatedImage($bytes, $row);
+            $images[$row] = $this->imageFromDrawing($drawing, $row);
         }
 
         return $images;
+    }
+
+    /** @return array{bytes:string,extension:string} */
+    private function imageFromDrawing(Drawing|MemoryDrawing $drawing, int $row): array
+    {
+        $bytes = null;
+        if ($drawing instanceof MemoryDrawing) {
+            ob_start();
+            $render = $drawing->getRenderingFunction();
+            $render($drawing->getImageResource());
+            $bytes = ob_get_clean();
+        } else {
+            $bytes = @file_get_contents($drawing->getPath());
+        }
+
+        return $this->validatedImage($bytes, $row);
     }
 
     /** @return array<string, array{bytes:string,extension:string}> */
