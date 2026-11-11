@@ -155,15 +155,13 @@ class FashionOperationReportController extends Controller
                 }];
         })->filter()->values();
 
-        $boundDepartmentIds = $allRows->pluck('department_id')->map(fn ($id): int => (int) $id)->filter()->unique();
         $departmentOptions = $fashionDepartment
-            ? $departmentRows->filter(fn (Department $department): bool => (int) $department->id === $fashionRootDepartmentId
-                || $boundDepartmentIds->contains((int) $department->id))
+            ? $departmentRows->filter(fn (Department $department): bool => $fashionDepartmentIds->contains((int) $department->id))
                 ->sortBy(fn (Department $department): string => ((int) $department->id === $fashionRootDepartmentId ? '0' : '1')
                     .str_pad((string) ((int) $department->sort), 8, '0', STR_PAD_LEFT)
                     .mb_strtolower((string) $department->name))
                 ->values()
-            : $departmentRows->whereIn('id', $boundDepartmentIds)->sortBy('name')->values();
+            : collect();
 
         $rows = $allRows->filter(function (array $row) use ($validated, $fashionDepartmentIds): bool {
             $departments = collect($validated['department'] ?? [])->map(fn ($name) => trim((string) $name))->filter();
