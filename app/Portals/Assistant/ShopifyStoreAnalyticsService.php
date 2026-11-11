@@ -22,7 +22,7 @@ use RuntimeException;
  */
 class ShopifyStoreAnalyticsService
 {
-    private const INITIAL_HISTORY_DAYS = 90;
+    private const INITIAL_HISTORY_DAYS = 180;
 
     /** Extra prior days protect arbitrary report-timezone boundaries. */
     private const INITIAL_TIMEZONE_BUFFER_DAYS = 2;
@@ -37,7 +37,7 @@ class ShopifyStoreAnalyticsService
     }
 
     /**
-     * First successful request for a store loads the latest 90 store-local
+     * First successful request for a store loads the latest 180 store-local
      * calendar days (plus a prior timezone-boundary buffer). Later requests
      * replace the source rows for the current local date and prior 3 dates.
      */
@@ -45,6 +45,8 @@ class ShopifyStoreAnalyticsService
         AssistantDomainStore $store,
         ?AdminUser $actor = null,
         bool $allowSubscriptionHistoryBackfill = false,
+        ?int $historyDays = null,
+        bool $forceHistory = false,
     ): AssistantShopifyStoreMetric
     {
         $metric = AssistantShopifyStoreMetric::query()->firstOrNew([
@@ -74,8 +76,9 @@ class ShopifyStoreAnalyticsService
 
             $localToday = CarbonImmutable::now($shop['timezone'])->startOfDay();
             $isInitial = $metric->orders_initial_backfilled_at === null;
+            $historyDays = $this->historyDays($historyDays);
             $historyFromDate = $localToday->subDays(
-                (self::INITIAL_HISTORY_DAYS - 1) + self::INITIAL_TIMEZONE_BUFFER_DAYS,
+                ($historyDays - 1) + self::INITIAL_TIMEZONE_BUFFER_DAYS,
             );
             $historyStartUtc = $historyFromDate->startOfDay()->setTimezone('UTC');
             $historyEndUtc = $localToday->addDay()->startOfDay()->setTimezone('UTC');
@@ -91,7 +94,7 @@ class ShopifyStoreAnalyticsService
             );
             // Tags were introduced after order-history storage already existed.
             // Only an explicit user-selected synchronization may perform this
-            // one-time 90-day tag backfill; the automatic 30-minute process
+            // one-time history tag backfill; the automatic 30-minute process
             // remains incremental and cannot unexpectedly fan out API work.
             $needsSubscriptionTagBackfill = $allowSubscriptionHistoryBackfill
                 && $this->hasUnclassifiedSubscriptionOrders(
@@ -99,7 +102,7 @@ class ShopifyStoreAnalyticsService
                     $historyStartUtc,
                     $historyEndUtc,
                 );
-            $requiresFullHistory = $isInitial || $needsSubscriptionTagBackfill;
+            $requiresFullHistory = $forceHistory || $isInitial || $needsSubscriptionTagBackfill;
             $fromDate = $requiresFullHistory
                 ? $historyFromDate
                 : $localToday->subDays(self::INCREMENTAL_SYNC_DAYS - 1);
@@ -162,6 +165,17 @@ class ShopifyStoreAnalyticsService
 
             return $this->markFailure($metric, $failure['status'], $failure['reason']);
         }
+    }
+
+    private function historyDays(?int $requestedDays): int
+    {
+        if ($requestedDays === null) {
+            return self::INITIAL_HISTORY_DAYS;
+        }
+
+        // A manual repair may request a wider window, but keep accidental
+        // command input from turning one click into an unbounded API import.
+        return max(1, min(365, $requestedDays));
     }
 
     private function repairStoredSubscriptionCategories(
