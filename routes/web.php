@@ -292,6 +292,7 @@ Route::get('/assistant/advertising-spend-summary', [AdvertisingSpendSummaryContr
 Route::get('/assistant/advertising-spend-analysis', [AdvertisingSpendAnalysisController::class, 'index'])->name('assistant.advertising-spend-analysis.index');
 Route::get('/assistant/fashion-advertising-reviews', [FashionAdvertisingReviewController::class, 'index'])->name('assistant.fashion-advertising-reviews.index');
 Route::get('/assistant/fashion-advertising-reviews/import-template', [FashionAdvertisingReviewController::class, 'importTemplate'])->name('assistant.fashion-advertising-reviews.import-template');
+Route::get('/assistant/fashion-advertising-reviews/export', [FashionAdvertisingReviewController::class, 'export'])->name('assistant.fashion-advertising-reviews.export');
 Route::post('/assistant/fashion-advertising-reviews/import', [FashionAdvertisingReviewController::class, 'import'])->name('assistant.fashion-advertising-reviews.import');
 Route::post('/assistant/fashion-advertising-reviews/bulk-review', [FashionAdvertisingReviewController::class, 'bulkReview'])->name('assistant.fashion-advertising-reviews.bulk-review');
 Route::get('/assistant/fashion-advertising-reviews/{report}', [FashionAdvertisingReviewController::class, 'show'])->withTrashed()->whereNumber('report')->name('assistant.fashion-advertising-reviews.show');
