@@ -22,7 +22,7 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/portal-shell.css?v=20261006-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/interaction-loading-20261011-1.css?v=20261011-3">
 @if (($portal->code ?? null) === 'fuzhuang' || request()->routeIs('operation-tasks.*'))
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/operation-tasks.css?v=20261111-8">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/operation-tasks.css?v=20261111-14">
 @endif
     <script>window.ErpInteractionLoadingConfig = @json(__('loading'));</script>
     @stack('styles')
@@ -57,6 +57,9 @@
             <a href="#" class="sidebar-toggle" data-toggle="offcanvas" role="button">
                 <span class="sr-only">{{ __('admin.toggle_navigation') }}</span>
             </a>
+            @if(($portal->code ?? null) === 'fuzhuang')
+            <div class="fuzhuang-top-notice"><span><i class="fa fa-info-circle"></i> 温馨提示：每日复盘请每天 11:00 提交！测品任务请每天 18:30 前提交</span></div>
+            @endif
             <div class="navbar-custom-menu">
                 <ul class="nav navbar-nav">
                     <li>
