@@ -827,11 +827,11 @@ class OperationTaskController extends Controller
         $scopeIds = $this->portalDepartmentScopeIds($portal);
 
         return $user->departments()
-            ->whereIn('departments.id', $scopeIds)
-            ->whereNotNull('departments.parent_id')
+            ->whereIn('admin_roles.id', $scopeIds)
+            ->whereNotNull('admin_roles.parent_id')
             ->orderByPivot('is_primary', 'desc')
             ->first()
-            ?: $user->departments()->whereIn('departments.id', $scopeIds)->orderByPivot('is_primary', 'desc')->first()
+            ?: $user->departments()->whereIn('admin_roles.id', $scopeIds)->orderByPivot('is_primary', 'desc')->first()
             ?: $this->department($user);
     }
 
