@@ -446,7 +446,11 @@ class OperationReportController extends Controller
         ]);
         $editingReport = ! empty($validated['edit_report']) ? OperationReport::query()->findOrFail((int) $validated['edit_report']) : null;
         if ($editingReport) {
-            abort_unless(in_array($editingReport->status, [OperationReport::STATUS_PENDING, OperationReport::STATUS_APPROVED, OperationReport::STATUS_REJECTED], true), 422, '该提报当前不能编辑。');
+            if (! in_array($editingReport->status, [OperationReport::STATUS_PENDING, OperationReport::STATUS_REJECTED], true)) {
+                return redirect()->route('operation.advertising-reports.index', [
+                    'report_date' => $editingReport->report_date->format('Y-m-d'),
+                ])->with('warning', '该广告费提报已审核通过，无法继续编辑。请查看已审核记录。');
+            }
             abort_unless($isBoss || (int) $editingReport->operator_user_id === (int) $user->getKey(), 403);
         }
         $date = $editingReport?->report_date?->format('Y-m-d')
@@ -498,6 +502,21 @@ class OperationReportController extends Controller
             'canViewMissingGuideSkus' => false,
             'missingGuideSkus' => [],
             'missingOriginalSkuItems' => [],
+        ]);
+    }
+
+    public function advertisingEditStatus(Request $request, OperationReport $report): Response|JsonResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+
+        $user = $context['user'];
+        abort_unless($this->isBoss($user) || (int) $report->operator_user_id === (int) $user->getKey(), 403);
+
+        return response()->json([
+            'editable' => in_array($report->status, [OperationReport::STATUS_PENDING, OperationReport::STATUS_REJECTED], true),
+            'status' => $report->status,
+            'status_label' => $report->statusLabel(),
         ]);
     }
 
@@ -737,6 +756,11 @@ class OperationReportController extends Controller
         $operatorId = $isBoss && ! empty($validated['operator_user_id'])
             ? (int) $validated['operator_user_id'] : (int) $user->getKey();
         $editingReport = ! empty($validated['report_id']) ? OperationReport::query()->findOrFail((int) $validated['report_id']) : null;
+        if ($editingReport && ! in_array($editingReport->status, [OperationReport::STATUS_PENDING, OperationReport::STATUS_REJECTED], true)) {
+            return redirect()->route('operation.advertising-reports.index', [
+                'report_date' => $editingReport->report_date->format('Y-m-d'),
+            ])->with('warning', '该广告费提报已审核通过，无法继续编辑。本次修改未保存。');
+        }
         if ($editingReport) {
             abort_unless(in_array($editingReport->status, [OperationReport::STATUS_PENDING, OperationReport::STATUS_REJECTED], true), 422, '只有待审核或审核不通过的提报可以编辑。');
             abort_unless($isBoss || (int) $editingReport->operator_user_id === (int) $user->getKey(), 403);

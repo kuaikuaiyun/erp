@@ -10,7 +10,8 @@ class LogisticsOrderItemService
 {
     /**
      * Persist Shopify line items and split order-level amounts by each item's paid amount.
-     * Tongtu fields are intentionally preserved here and are populated after matching.
+     * Tongtu fields and manually corrected SKUs on existing lines are intentionally
+     * preserved here and are populated after matching or by ERP operators.
      *
      * @param array<string, mixed> $payload
      */
@@ -66,18 +67,25 @@ class LogisticsOrderItemService
                     'logistics_order_id' => $order->getKey(),
                     'source_key' => $row['source_key'],
                 ]);
-                $item->fill([
+                $changes = [
                     'shopify_line_item_id' => $row['shopify_line_item_id'],
                     'shopify_product_id' => $row['shopify_product_id'],
                     'shopify_variant_id' => $row['shopify_variant_id'],
                     'product_title' => $row['product_title'],
                     'variant_title' => $row['variant_title'],
                     'product_image_url' => $row['product_image_url'],
-                    'shopify_sku' => $row['shopify_sku'],
                     'quantity' => $this->decimal($row['quantity']),
                     'unit_price_usd' => $this->decimal($row['unit_price_usd']),
                     'line_revenue_usd' => $this->decimal($revenues[$index]),
-                ]);
+                ];
+
+                // Existing lines may have an ERP operator-corrected SKU. Keep that
+                // value on every re-sync; Shopify is only the SKU source for new lines.
+                if (! $item->exists) {
+                    $changes['shopify_sku'] = $row['shopify_sku'];
+                }
+
+                $item->fill($changes);
                 $item->save();
             }
 

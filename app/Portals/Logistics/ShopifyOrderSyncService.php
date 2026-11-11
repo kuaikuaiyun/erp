@@ -395,10 +395,15 @@ GRAPHQL, [
         $isAssigned = $store instanceof AssistantDomainStore;
         $tongtuOrderNumber = $isAssigned ? $store->makeTongtuOrderNumber($orderNumber) : null;
 
-        $dataStatus = $this->dataStatus($isAssigned, $missingSku);
-        $skuExceptionReason = $missingSku
-            ? 'Shopify SKU 缺失'
-            : ($current->data_status === LogisticsOrder::STATUS_SKU_EXCEPTION ? $current->sku_exception_reason : null);
+        // Existing Shopify lines retain ERP-corrected SKUs. Therefore an incoming
+        // blank SKU must not turn a manually repaired order back into an exception.
+        $preserveSkuStatus = ! $isNew && ($missingSku || $current->data_status === LogisticsOrder::STATUS_SKU_EXCEPTION);
+        $dataStatus = $preserveSkuStatus
+            ? $current->data_status
+            : $this->dataStatus($isAssigned, $missingSku);
+        $skuExceptionReason = $preserveSkuStatus
+            ? $current->sku_exception_reason
+            : ($missingSku ? 'Shopify SKU 缺失' : null);
         $paymentMethod = $attributes['yx_payment_method'] ?? null;
         $paymentGateway = $attributes['yx_payment_gateway'] ?? ($paidTransaction['gateway'] ?? null);
         $skuFingerprint = $this->skuFingerprint($lineItems);

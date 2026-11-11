@@ -195,16 +195,28 @@ Route::post('/operation/daily-submissions/advertising-account-authorization', [D
     ->name('operation.daily-submissions.advertising-account-authorization.store');
 Route::post('/operation/daily-submissions/account-store-transfer', [DailySubmissionController::class, 'storeAccountStoreTransfer'])
     ->name('operation.daily-submissions.account-store-transfer.store');
-Route::get('/operation-tasks/recaps', [OperationTaskController::class, 'recaps'])->name('operation-tasks.recaps.index');
-Route::post('/operation-tasks/recaps', [OperationTaskController::class, 'storeRecap'])->name('operation-tasks.recaps.store');
-Route::get('/operation-tasks/tests', [OperationTaskController::class, 'tests'])->name('operation-tasks.tests.index');
-Route::post('/operation-tasks/tests', [OperationTaskController::class, 'storeTest'])->name('operation-tasks.tests.store');
-Route::get('/operation-tasks/tests/{task}', [OperationTaskController::class, 'showTest'])->whereNumber('task')->name('operation-tasks.tests.show');
-Route::get('/operation-tasks/assets/{asset}/file', [OperationTaskController::class, 'assetFile'])->whereNumber('asset')->name('operation-tasks.assets.file');
-Route::post('/operation-tasks/assets/{asset}/daily-records', [OperationTaskController::class, 'storeAssetDaily'])->whereNumber('asset')->name('operation-tasks.assets.daily-records.store');
-Route::get('/operation-tasks/reviews', [OperationTaskController::class, 'reviews'])->name('operation-tasks.reviews.index');
-Route::post('/operation-tasks/reviews', [OperationTaskController::class, 'review'])->name('operation-tasks.reviews.store');
-Route::get('/operation-tasks/dashboard', [OperationTaskController::class, 'dashboard'])->name('operation-tasks.dashboard');
+Route::prefix('fashion/operation-tasks')->name('operation-tasks.')->controller(OperationTaskController::class)->group(function (): void {
+    Route::get('/recaps', 'recaps')->name('recaps.index');
+    Route::post('/recaps', 'storeRecap')->name('recaps.store');
+    Route::post('/recaps/questions', 'saveRecapQuestions')->name('recaps.questions.store');
+    Route::get('/tests', 'tests')->name('tests.index');
+    Route::post('/tests', 'storeTest')->name('tests.store');
+    Route::get('/tests/{task}', 'showTest')->whereNumber('task')->name('tests.show');
+    Route::get('/assets/{asset}/file', 'assetFile')->whereNumber('asset')->name('assets.file');
+    Route::post('/assets/{asset}/daily-records', 'storeAssetDaily')->whereNumber('asset')->name('assets.daily-records.store');
+    Route::post('/daily-plans', 'storeDailyPlan')->name('daily-plans.store');
+    Route::post('/tests/{task}/assets', 'appendAsset')->whereNumber('task')->name('tests.assets.store');
+    Route::post('/assets/{asset}/versions', 'replaceAsset')->whereNumber('asset')->name('assets.versions.store');
+    Route::post('/assets/{asset}/retire', 'retireAsset')->whereNumber('asset')->name('assets.retire');
+    Route::post('/assets/{asset}/first-live', 'markAssetLive')->whereNumber('asset')->name('assets.first-live');
+    Route::post('/assets/{asset}/delivery-rounds', 'storeDeliveryRound')->whereNumber('asset')->name('assets.delivery-rounds.store');
+    Route::post('/delivery-rounds/{round}/stop', 'stopDeliveryRound')->whereNumber('round')->name('delivery-rounds.stop');
+    Route::post('/rectifications/{rectification}/resubmit', 'resubmitRectification')->whereNumber('rectification')->name('rectifications.resubmit');
+    Route::post('/rectifications/{rectification}/restore', 'restoreRectification')->whereNumber('rectification')->name('rectifications.restore');
+    Route::get('/reviews', 'reviews')->name('reviews.index');
+    Route::post('/reviews', 'review')->name('reviews.store');
+    Route::get('/dashboard', 'dashboard')->name('dashboard');
+});
 Route::get('/assistant/daily-submissions/advertising-recharges', [AdvertisingRechargeReviewController::class, 'index'])
     ->name('assistant.daily-submissions.advertising-recharges.index');
 Route::patch('/assistant/daily-submissions/advertising-recharges/{submission}/process', [AdvertisingRechargeReviewController::class, 'process'])
@@ -253,6 +265,7 @@ Route::get('/operation/reports/order-details', [OperationReportController::class
 Route::get('/operation/advertising-reports', [OperationReportController::class, 'advertising'])->name('operation.advertising-reports.index');
 Route::get('/operation/advertising-reports/import-template', [OperationReportController::class, 'advertisingImportTemplate'])->name('operation.advertising-reports.import-template');
 Route::post('/operation/advertising-reports/import', [OperationReportController::class, 'advertisingImport'])->name('operation.advertising-reports.import');
+Route::get('/operation/advertising-reports/{report}/edit-status', [OperationReportController::class, 'advertisingEditStatus'])->whereNumber('report')->name('operation.advertising-reports.edit-status');
 Route::get('/operation/advertising-reports/{report}', [OperationReportController::class, 'advertisingShow'])->whereNumber('report')->name('operation.advertising-reports.show');
 Route::get('/operation/reports/export', [OperationReportController::class, 'export'])->name('operation.reports.export');
 Route::get('/operation/reports/missing-guide-skus.txt', [OperationReportController::class, 'exportMissingGuideSkus'])->name('operation.reports.missing-guide-skus.export');
