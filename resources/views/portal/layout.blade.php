@@ -36,6 +36,9 @@
     $assistantDailyPendingCounts = $portal->code === 'zhuli'
         ? app(\App\Portals\Assistant\AssistantDailySubmissionPendingCountService::class)->forUser($user)
         : [];
+    // Review and dashboard navigation is reserved for department managers; routes remain protected separately.
+    $canManageOperationTasks = $user->isAdministrator()
+        || app(\App\Services\DepartmentAuthorizationService::class)->managedDepartmentIds($user)->isNotEmpty();
 @endphp
 <div class="wrapper">
     <header class="main-header">
@@ -75,6 +78,7 @@
                         'menus' => $portal->menus,
                         'portalOrigin' => $portalOrigin,
                         'canManagePortalMenus' => $user->isAdministrator(),
+                        'canManageOperationTasks' => $canManageOperationTasks,
                     ])
                 @endforeach
             </ul>

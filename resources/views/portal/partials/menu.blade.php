@@ -4,7 +4,8 @@
     $children = $menus
         ->where('parent_id', $menu->getKey())
         ->where('is_enabled', true)
-        ->filter(fn ($child) => $canManagePortalMenus || !in_array($child->code, $configurationCodes, true));
+        ->filter(fn ($child) => ($canManagePortalMenus || !in_array($child->code, $configurationCodes, true))
+            && (($canManageOperationTasks ?? false) || !in_array($child->code, ['fashion_operation_task_reviews', 'fashion_operation_task_dashboard'], true)));
     $path = trim((string) $menu->path);
     if (!\Illuminate\Support\Str::startsWith($path, ['http://', 'https://', '#'])) {
         $path = app(\App\Portal\Services\PortalDomainService::class)->portalPath($portal, $path);
@@ -48,9 +49,11 @@
     };
     $canAccessAssistantAnalyticsMenu = $menu->code !== 'assistant_shopify_analytics'
         || app(\App\Portals\Assistant\AssistantPortalAuthorizationService::class)->canViewShopifyAnalytics($user);
+    $canAccessOperationTaskManagementMenu = ($canManageOperationTasks ?? false)
+        || !in_array($menu->code, ['fashion_operation_task_reviews', 'fashion_operation_task_dashboard'], true);
 @endphp
 
-@if ((!$isConfigurationMenu || $canManagePortalMenus) && $canAccessProductRequestMenu && $canAccessAssistantAnalyticsMenu)
+@if ((!$isConfigurationMenu || $canManagePortalMenus) && $canAccessProductRequestMenu && $canAccessAssistantAnalyticsMenu && $canAccessOperationTaskManagementMenu)
     @if ($children->isEmpty())
     <li class="{{ $isCurrent ? 'active' : '' }}">
         <a href="{{ $href }}">
@@ -95,6 +98,7 @@
                     'menus' => $menus,
                     'portalOrigin' => $portalOrigin,
                     'canManagePortalMenus' => $canManagePortalMenus,
+                    'canManageOperationTasks' => $canManageOperationTasks,
                 ])
             @endforeach
         </ul>
