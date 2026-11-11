@@ -59,6 +59,18 @@
         <a href="{{ $href }}">
             <i class="fa {{ $icon }}"></i>
             <span>{{ $label }}</span>
+            @if($portal->code === 'fuzhuang' && $menu->code === 'fashion_operation_task_recaps' && ($operationTaskReviewCounts['rejected_recaps'] ?? 0) > 0)
+            <span class="operation-recap-deadline" title="每日复盘请在每天 11 点前提交"><span>每天 11 点前提交</span></span>
+            @endif
+            @if($portal->code === 'fuzhuang' && $menu->code === 'fashion_operation_task_recaps' && ($operationTaskReviewCounts['rejected_recaps'] ?? 0) > 0)
+            <span class="operation-rejected-count" title="复盘被驳回待修改">驳回 {{ $operationTaskReviewCounts['rejected_recaps'] }}</span>
+            @endif
+            @if($portal->code === 'fuzhuang' && $menu->code === 'fashion_operation_task_reviews' && (($operationTaskReviewCounts['recaps'] ?? 0) > 0 || ($operationTaskReviewCounts['tests'] ?? 0) > 0))
+            <span class="operation-review-counts" title="待审核：每日复盘 / 测品任务">
+                <span class="operation-review-count operation-review-count-recap">复 {{ $operationTaskReviewCounts['recaps'] ?? 0 }}</span>
+                <span class="operation-review-count operation-review-count-test">测 {{ $operationTaskReviewCounts['tests'] ?? 0 }}</span>
+            </span>
+            @endif
             @if(array_key_exists($menu->code, $assistantDailyPendingCounts ?? []))
             <span class="badge {{ $assistantDailyPendingCounts[$menu->code] > 0 ? 'bg-yellow' : 'bg-gray' }} pull-right" title="待处理任务数">{{ $assistantDailyPendingCounts[$menu->code] }}</span>
             @endif
@@ -89,6 +101,14 @@
         <a href="#">
             <i class="fa {{ $icon }}"></i>
             <span>{{ $label }}</span>
+            @if($portal->code === 'fuzhuang' && $menu->code === 'fashion_operation_tasks')
+                <span class="operation-recap-deadline">每天 11 点前提交</span>
+            @endif
+            @if($portal->code === 'fuzhuang' && $menu->code === 'fashion_operation_tasks')
+                @if(($operationTaskReviewCounts['rejected_recaps'] ?? 0) > 0)
+                    <span class="operation-rejected-count">驳回 {{ $operationTaskReviewCounts['rejected_recaps'] }}</span>
+                @endif
+            @endif
             <i class="fa fa-angle-left pull-right"></i>
         </a>
         <ul class="treeview-menu" @if($isExpanded) style="display:block" @endif>
@@ -99,6 +119,7 @@
                     'portalOrigin' => $portalOrigin,
                     'canManagePortalMenus' => $canManagePortalMenus,
                     'canManageOperationTasks' => $canManageOperationTasks,
+                    'operationTaskReviewCounts' => $operationTaskReviewCounts ?? ['recaps' => 0, 'tests' => 0, 'rejected_recaps' => 0],
                 ])
             @endforeach
         </ul>

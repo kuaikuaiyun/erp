@@ -106,10 +106,10 @@ Route::prefix('finance')->name('finance.')->middleware(RedirectFinanceDomain::cl
     Route::get('/reports/{report}', 'report')->name('report');
     Route::get('/reports/paypal-settlement/records/{record}', 'paypalSettlementDetail')->whereNumber('record')->name('settlement.paypal.detail');
     Route::post('/reports/{report}/export-template/preview', 'previewExportTemplate')
-        ->whereIn('report', ['paypal-settlement', 'credit-settlement', ...array_keys(\App\Portals\Finance\FinanceCreditSettlementLayout::REPORT_CHANNELS)])->name('settlement.export-template.preview');
-    Route::post('/reports/{report}/save', 'saveSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement', ...array_keys(\App\Portals\Finance\FinanceCreditSettlementLayout::REPORT_CHANNELS)])->name('settlement.save');
-    Route::delete('/reports/{report}/records', 'deleteSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement', ...array_keys(\App\Portals\Finance\FinanceCreditSettlementLayout::REPORT_CHANNELS)])->name('settlement.delete');
-    Route::post('/reports/{report}/import', 'importSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement', ...array_keys(\App\Portals\Finance\FinanceCreditSettlementLayout::REPORT_CHANNELS)])->name('settlement.import');
+        ->whereIn('report', ['paypal-settlement', 'credit-settlement', 'ye-settlement', 'worldpay-settlement'])->name('settlement.export-template.preview');
+    Route::post('/reports/{report}/save', 'saveSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement', 'ye-settlement', 'worldpay-settlement'])->name('settlement.save');
+    Route::delete('/reports/{report}/records', 'deleteSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement', 'ye-settlement', 'worldpay-settlement'])->name('settlement.delete');
+    Route::post('/reports/{report}/import', 'importSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement', 'ye-settlement', 'worldpay-settlement'])->name('settlement.import');
 });
 
 Route::get('/', [PortalEntryController::class, 'root'])->middleware(MonitorPaymentPerformance::class)->name('portal.root');
@@ -199,6 +199,7 @@ Route::post('/operation/daily-submissions/account-store-transfer', [DailySubmiss
 Route::prefix('fashion/operation-tasks')->name('operation-tasks.')->controller(OperationTaskController::class)->group(function (): void {
     Route::get('/recaps', 'recaps')->name('recaps.index');
     Route::post('/recaps', 'storeRecap')->name('recaps.store');
+    Route::post('/recaps/{recap}/reviews', 'reviewRecap')->name('recaps.reviews.store');
     Route::post('/recaps/questions', 'saveRecapQuestions')->name('recaps.questions.store');
     Route::get('/tests', 'tests')->name('tests.index');
     Route::post('/tests', 'storeTest')->name('tests.store');
@@ -216,6 +217,7 @@ Route::prefix('fashion/operation-tasks')->name('operation-tasks.')->controller(O
     Route::post('/rectifications/{rectification}/restore', 'restoreRectification')->whereNumber('rectification')->name('rectifications.restore');
     Route::get('/reviews', 'reviews')->name('reviews.index');
     Route::post('/reviews', 'review')->name('reviews.store');
+    Route::post('/reviews/assets', 'reviewAssets')->name('reviews.assets.store');
     Route::get('/dashboard', 'dashboard')->name('dashboard');
 });
 Route::get('/assistant/daily-submissions/advertising-recharges', [AdvertisingRechargeReviewController::class, 'index'])
