@@ -51,7 +51,7 @@
         summary:'绑定店铺 {{$totals['stores']}}　订单量 {{$totals['orders']}}　营业额 '+money({{$totals['revenue']}})+'　广告费 '+money({{$totals['ad_spend']}})+'　ROI {{$totals['roi']!==null?number_format($totals['roi'],2):'—'}}　账号历史总消耗 '+money({{$totals['total_consumption']}}),
         headers:['日期','运营部门','运营人员','绑定店铺域名','订单量','营业额($)','广告费($)','ROI','是否有礼金','账号编号','账号历史总消耗($)'],
         widths:[180,210,130,190,110,155,145,105,150,190,180],
-        rows:source.map(function(row){return [row.date_label,row.department,row.operator,row.store_domain,number(row.orders),money(row.revenue),money(row.ad_spend),row.roi===null?'—':Number(row.roi).toFixed(2),gift(row.gift_status),row.account_numbers||'—',money(row.total_consumption)];}),
+        rows:source.map(function(row){return [row.date_label,row.department,row.operator,row.store_domain,number(row.orders),money(row.revenue),money(row.ad_spend),row.roi===null?'—':Number(row.roi).toFixed(2),gift(row.gift_status),row.account_numbers||'—',money(row.total_consumption)];}).concat([['合计','','','',number({{$totals['orders']}}),money({{$totals['revenue']}}),money({{$totals['ad_spend']}}),'{{$totals['roi']!==null?number_format($totals['roi'],2):'—'}}','','',money({{$totals['total_consumption']}})]]),
         filename:'服装-AppLovin-业绩报表-{{$dateFrom}}-{{$dateTo}}.png'
     });});
 })();

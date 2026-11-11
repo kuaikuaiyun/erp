@@ -172,10 +172,7 @@ class FashionAppLovinPerformanceReportController extends Controller
 
                         return $detail;
                     })->values()->all()];
-            })->sortBy([
-                ['orders', 'desc'],
-                ['ad_spend', 'desc'],
-            ])->values();
+            })->values();
         if (($filters['gift_status'] ?? '') === 'yes') {
             $rows = $rows->where('gift_status', 'available')->values();
         } elseif (($filters['gift_status'] ?? '') === 'no') {
@@ -198,6 +195,13 @@ class FashionAppLovinPerformanceReportController extends Controller
             $rows = $rows->filter(fn (array $row): bool => (float) $row['total_consumption'] >= $minimumConsumption
                 && (float) $row['total_consumption'] <= $maximumConsumption)->values();
         }
+        $rows = $rows->sort(function (array $left, array $right): int {
+            $orderComparison = (int) $right['orders'] <=> (int) $left['orders'];
+
+            return $orderComparison !== 0
+                ? $orderComparison
+                : ((float) $right['ad_spend'] <=> (float) $left['ad_spend']);
+        })->values();
         $totalAccountKeys = $rows->pluck('account_keys')->flatten()->filter()->unique()->values();
         $totals = ['stores' => $rows->pluck('store_id')->filter(fn ($id) => (int) $id > 0)->unique()->count(), 'orders' => (int) $rows->sum('orders'),
             'revenue' => round((float) $rows->sum('revenue'), 2), 'ad_spend' => round((float) $rows->sum('ad_spend'), 2),

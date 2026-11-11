@@ -66,10 +66,11 @@
                 y += 48;
                 wrappedRows.forEach(function (row, rowIndex) {
                     x = 0;
+                    var isTotalRow = String(rows[rowIndex][0] || '') === '合计';
                     row.forEach(function (lines, columnIndex) {
-                        context.fillStyle = rowIndex % 2 ? '#fff8ef' : '#f3f9fc'; context.fillRect(x, y, widths[columnIndex], rowHeights[rowIndex]);
+                        context.fillStyle = isTotalRow ? '#d7e9f3' : (rowIndex % 2 ? '#fff8ef' : '#f3f9fc'); context.fillRect(x, y, widths[columnIndex], rowHeights[rowIndex]);
                         context.strokeStyle = '#c6d9e4'; context.strokeRect(x, y, widths[columnIndex], rowHeights[rowIndex]);
-                        context.fillStyle = '#263f50'; context.font = '14px "Microsoft YaHei", Arial';
+                        context.fillStyle = isTotalRow ? '#173f5d' : '#263f50'; context.font = (isTotalRow ? 'bold ' : '') + '14px "Microsoft YaHei", Arial';
                         lines.forEach(function (line, lineIndex) { context.fillText(line, x + padding, y + padding + 17 + lineIndex * lineHeight); });
                         x += widths[columnIndex];
                     });
