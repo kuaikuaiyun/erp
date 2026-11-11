@@ -25,7 +25,8 @@ class AdvertisingAccountAuthorizationReviewController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
         $filters = $request->validate([
-            'operation_department_id' => ['nullable', 'integer'],
+            'operation_department_ids' => ['nullable', 'array'],
+            'operation_department_ids.*' => ['integer', 'distinct'],
             'status' => ['nullable', 'in:pending,processed'],
             'operator' => ['nullable', 'string', 'max:100'],
         ]);
@@ -38,7 +39,7 @@ class AdvertisingAccountAuthorizationReviewController extends Controller
         }
         $departments = $visibleIds === null ? $allDepartments : $allDepartments->whereIn('id', $visibleIds)->values();
         $query
-            ->when($filters['operation_department_id'] ?? null, fn ($q, $id) => $q->where('operation_department_id', $id))
+            ->when($filters['operation_department_ids'] ?? [], fn ($q, $ids) => $q->whereIn('operation_department_id', $ids))
             ->when($filters['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
             ->when($filters['operator'] ?? null, fn ($q, $operator) => $q->where('operator_name', 'like', '%'.$operator.'%'));
 

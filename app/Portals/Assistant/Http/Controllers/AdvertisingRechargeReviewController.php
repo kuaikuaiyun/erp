@@ -28,7 +28,8 @@ class AdvertisingRechargeReviewController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
         $filters = $request->validate([
-            'operation_department_id' => ['nullable', 'integer'],
+            'operation_department_ids' => ['nullable', 'array'],
+            'operation_department_ids.*' => ['integer', 'distinct'],
             'status' => ['nullable', 'in:pending,processed'],
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
@@ -51,7 +52,7 @@ class AdvertisingRechargeReviewController extends Controller
         $summaryTo = $filters['date_to'] ?? $filters['date_from'] ?? $today;
         if ($summaryFrom > $summaryTo) [$summaryFrom, $summaryTo] = [$summaryTo, $summaryFrom];
         $summaryQuery = (clone $query)
-            ->when($filters['operation_department_id'] ?? null, fn ($q, $id) => $q->where('operation_department_id', $id))
+            ->when($filters['operation_department_ids'] ?? [], fn ($q, $ids) => $q->whereIn('operation_department_id', $ids))
             ->when($filters['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
             ->when($filters['operator'] ?? null, fn ($q, $name) => $q->where('operator_name', 'like', '%'.$name.'%'))
             ->whereDate('report_date', '>=', $summaryFrom)
@@ -97,7 +98,7 @@ class AdvertisingRechargeReviewController extends Controller
             ];
         })->values();
 
-        $query->when($filters['operation_department_id'] ?? null, fn ($q, $id) => $q->where('operation_department_id', $id))
+        $query->when($filters['operation_department_ids'] ?? [], fn ($q, $ids) => $q->whereIn('operation_department_id', $ids))
             ->when($filters['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
             ->when($filters['date_from'] ?? null, fn ($q, $date) => $q->whereDate('report_date', '>=', $date))
             ->when($filters['date_to'] ?? null, fn ($q, $date) => $q->whereDate('report_date', '<=', $date))
