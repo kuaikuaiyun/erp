@@ -164,13 +164,13 @@ class DepartmentAuthorizationService
         return $permissionIds->filter()->unique()->values();
     }
 
-    public function hasPermission(AdminUser $user, string $permission): bool
+    public function hasPermission(AdminUser $user, string $permission, ?Collection $permissionSlugs = null): bool
     {
         if (in_array($permission, ['organization.accounts', 'organization.departments'], true)) {
             return $this->canManageOrganization($user);
         }
 
-        $slugs = $this->permissionsFor($user)->pluck('slug');
+        $slugs = $permissionSlugs ?? $this->permissionsFor($user)->pluck('slug');
 
         return $slugs->contains('*') || $slugs->contains($permission);
     }

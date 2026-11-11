@@ -8,14 +8,14 @@ class FinanceTransactionSummary
 {
     public const VIEWS = ['paypal' => 'PayPal', 'credit_card' => '信用卡', 'combined' => 'Shopify'];
 
-    private const COMMON = ['channel' => '通道', 'currency' => '币种', 'team' => '区域', 'subscription' => '订阅类型',
+    private const COMMON = ['channel' => '通道', 'currency' => '货币', 'team' => '区域', 'subscription' => '订阅类型',
         'month' => '年月', 'orders' => '订单数', 'amount' => '金额', 'settlement' => '结算金额'];
 
-    private const PAYPAL = ['fee' => '手续费', 'hold' => '冻结金额', 'dispute_hold' => '争议冻结金额', 'refund' => '退款金额',
+    private const PAYPAL = ['fee' => FinanceSettlementService::MONEY['fee'], 'hold' => '冻结金额', 'dispute_hold' => '争议冻结金额', 'refund' => '退款金额',
         'refund_fee' => '退款费用', 'dispute_refund' => '争议退款', 'dispute_fee' => '争议费', 'fee_return' => '返还手续费',
         'dispute_release' => '返还争议冻结', 'release' => '返还冻结'];
 
-    private const CARD = ['fee' => '交易手续费', 'per_order_fee' => '单笔费用', 'refund' => '退款金额', 'refund_fee' => '退款费用',
+    private const CARD = ['fee' => FinanceSettlementService::MONEY['fee'], 'per_order_fee' => '单笔费用', 'refund' => '退款金额', 'refund_fee' => '退款费用',
         'chargeback' => '拒付金额', 'chargeback_fee' => '拒付费用', 'ethoca_refund' => 'ethoca-预警退款', 'ethoca_fee' => '拒付预警ethoca',
         'rdr_refund' => '拒付RDR金额', 'rdr_fee' => '拒付RDR费用', 'release' => '保证金返还'];
 

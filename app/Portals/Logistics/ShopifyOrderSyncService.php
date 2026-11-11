@@ -8,6 +8,7 @@ use App\Models\LogisticsOrder;
 use App\Models\LogisticsShopifyConnection;
 use App\Models\LogisticsSyncLog;
 use App\Portals\Assistant\AssistantStoreOwnerTimelineService;
+use App\Portals\Finance\FinanceLogisticsCreditOrders;
 use Carbon\Carbon;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Arr;
@@ -89,6 +90,10 @@ class ShopifyOrderSyncService
 
     public function syncWebhookOrder(LogisticsShopifyConnection $connection, array $webhookPayload, ?string $topic): ?LogisticsOrder
     {
+        $transactionWebhook = $topic === 'order_transactions/create';
+        if ($transactionWebhook && !in_array(strtoupper($webhookPayload['status'] ?? ''), ['FAILURE', 'ERROR'], true)) {
+            return null;
+        }
         $orderId = $this->webhookOrderId($webhookPayload, $topic);
         if ($orderId === '') {
             throw new RuntimeException('Webhook 未包含可识别的 Shopify 原生订单 ID。');
@@ -121,6 +126,19 @@ class ShopifyOrderSyncService
         $assignedStore = $this->isActiveShopifyStoreForDomain($sourceStore, (string) $connection->shop_domain)
             ? $sourceStore
             : null;
+
+        if ($transactionWebhook) {
+            if (!$this->isPaidOrder($payload, null)) {
+                $transactions = is_array($payload['transactions'] ?? null) ? $payload['transactions'] : [];
+                $transactions[] = $webhookPayload;
+                app(FinanceLogisticsCreditOrders::class)->captureFailure(
+                    $payload, $this->attributes($payload['customAttributes'] ?? []), $transactions,
+                    $this->normaliseDomain($connection->shop_domain), $assignedStore,
+                );
+            }
+
+            return null;
+        }
 
         $result = $this->persistOrder($assignedStore, $payload, (string) $connection->shop_domain, $connection);
 
@@ -280,6 +298,7 @@ class ShopifyOrderSyncService
             'ORDERS_CREATE',
             'ORDERS_PAID',
             'ORDERS_UPDATED',
+            'ORDER_TRANSACTIONS_CREATE',
             'ORDERS_FULFILLED',
             'ORDERS_PARTIALLY_FULFILLED',
             'REFUNDS_CREATE',
@@ -372,13 +391,16 @@ GRAPHQL, [
 
         $sourceShopDomain = $this->normaliseDomain($sourceShopDomain);
         $current = $this->existingOrder($store, $sourceShopDomain, $shopifyOrderId);
+        $attributes = $this->attributes($payload['customAttributes'] ?? []);
+        $transactions = is_array($payload['transactions'] ?? null) ? $payload['transactions'] : [];
         if (!$this->isPaidOrder($payload, $current)) {
+            app(FinanceLogisticsCreditOrders::class)->captureFailure($payload, $attributes, $transactions, $sourceShopDomain, $store);
+
             return null;
         }
         $isNew = !$current;
         $current ??= new LogisticsOrder();
 
-        $attributes = $this->attributes($payload['customAttributes'] ?? []);
         $lineItems = is_array($payload['lineItems']['nodes'] ?? null) ? $payload['lineItems']['nodes'] : [];
         $shopifyTags = $this->normalisedTags($payload['tags'] ?? []);
         $skuRows = array_map(static fn (array $item): string => trim((string) ($item['sku'] ?? '')), $lineItems);
@@ -387,10 +409,9 @@ GRAPHQL, [
             ? 0
             : count(array_filter($skuRows, static fn (string $sku): bool => $sku === ''));
         $missingSku = $lineItems === [] || $missingSkuCount > 0;
-        $transactions = is_array($payload['transactions'] ?? null) ? $payload['transactions'] : [];
         $refunds = is_array($payload['refunds'] ?? null) ? $payload['refunds'] : [];
         $refundData = $this->refundData($refunds);
-        $paidTransaction = $this->successfulPayment($transactions);
+        $paidTransaction = self::successfulPayment($transactions);
         $orderNumber = preg_replace('/^#/', '', (string) ($payload['name'] ?? ''));
         $isAssigned = $store instanceof AssistantDomainStore;
         $tongtuOrderNumber = $isAssigned ? $store->makeTongtuOrderNumber($orderNumber) : null;
@@ -561,7 +582,7 @@ GRAPHQL, [
     }
 
     /** @return array<string, mixed> */
-    private function successfulPayment(array $transactions): array
+    public static function successfulPayment(array $transactions): array
     {
         foreach ($transactions as $transaction) {
             if (strtoupper((string) ($transaction['status'] ?? '')) === 'SUCCESS'
@@ -656,7 +677,7 @@ GRAPHQL, [
 
         $transactions = is_array($payload['transactions'] ?? null) ? $payload['transactions'] : [];
 
-        return $this->successfulPayment($transactions) !== [];
+        return self::successfulPayment($transactions) !== [];
     }
 
     /** @param list<array<string, mixed>> $lineItems */

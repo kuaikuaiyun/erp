@@ -91,6 +91,9 @@ class FinanceCatalog
 
     public static function dataset(string $key): array
     {
+        if ($key === FinanceLogisticsCreditOrders::IMPORTED_DATASET) {
+            $key = 'xuzong2-details';
+        }
         $key = array_search($key, self::XUZONG_REPORT_IMPORTS, true) ?: $key;
         abort_unless(isset(self::datasets()[$key]), 404);
 

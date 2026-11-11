@@ -241,7 +241,7 @@ class FinanceWorkbookService
         return $rows;
     }
 
-    public function readExportTemplate(UploadedFile $file, int $headerRow, array $columns): array
+    public function readExportTemplate(UploadedFile $file, int $headerRow, array $columns, array $legacyColumns = []): array
     {
         $path = $file->getRealPath();
         try {
@@ -281,6 +281,12 @@ class FinanceWorkbookService
             $known = [];
             foreach ($columns as $field => $label) {
                 $known[$normalize($label)][] = $field;
+            }
+            foreach ($legacyColumns as $field => $label) {
+                $name = $normalize($label);
+                if (! in_array($field, $known[$name] ?? [], true)) {
+                    $known[$name][] = $field;
+                }
             }
             foreach ([
                 '交易号' => 'reference', '交易单号' => 'reference', '订单状态' => 'order_status',
@@ -383,7 +389,10 @@ class FinanceWorkbookService
             $currency = strtoupper($value('currency'));
             $status = $value('status');
             $domain = strtolower($value('domain'));
-            if (mb_strlen($rawType) > 191 || mb_strlen($status) > 100 || mb_strlen($domain) > 191 || ! preg_match('/^[A-Z]{3}$/', $currency)) {
+            $currencyMissingOnFailedBill = $currency === '' && in_array($dataset, [...FinanceCatalog::XUZONG_REPORT_IMPORTS, FinanceLogisticsCreditOrders::IMPORTED_DATASET], true)
+                && FinanceSettlementService::transactionStatusCategory($status) === 'failed';
+            if (mb_strlen($rawType) > 191 || mb_strlen($status) > 100 || mb_strlen($domain) > 191
+                || (! $currencyMissingOnFailedBill && ! preg_match('/^[A-Z]{3}$/', $currency))) {
                 throw ValidationException::withMessages(['file' => __('finance.errors.fields', ['row' => $row])]);
             }
             $identity = [$dataset, $account, $reference, $occurred->toIso8601String(), $rawType, $currency, $status];
@@ -402,6 +411,10 @@ class FinanceWorkbookService
                 'fingerprint' => hash('sha256', json_encode($identity, JSON_UNESCAPED_UNICODE)),
                 'payload' => $payload, 'imported_by' => $actor,
             ];
+        }
+
+        if ($dataset === FinanceLogisticsCreditOrders::IMPORTED_DATASET && $createOnly && $fillMissing && ! $guardSettlementMonth) {
+            return $this->saveImportedCreditOrders($records);
         }
 
         return $this->database()->transaction(function () use ($records, $createOnly, $guardSettlementMonth, $fillMissing): int {
@@ -443,6 +456,47 @@ class FinanceWorkbookService
             }
 
             return $createOnly ? $affected : count($records);
+        });
+    }
+
+    private function saveImportedCreditOrders(array $records): int
+    {
+        return $this->database()->transaction(function () use ($records): int {
+            $existing = FinanceRecord::query()->whereIn('fingerprint', array_column($records, 'fingerprint'))
+                ->lockForUpdate()->get()->keyBy('fingerprint');
+            $inserts = [];
+            $updated = 0;
+            $now = now();
+            foreach ($records as $record) {
+                $fingerprint = $record['fingerprint'];
+                $model = $existing->get($fingerprint);
+                if ($model === null) {
+                    $inserts[$fingerprint] ??= [
+                        ...$record, 'payload' => json_encode($record['payload'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+                        'created_at' => $now, 'updated_at' => $now,
+                    ];
+                    continue;
+                }
+                $payload = $model->payload;
+                foreach ($record['payload'] as $key => $value) {
+                    if (blank($payload[$key] ?? null) && filled($value)) {
+                        $payload[$key] = $value;
+                    }
+                }
+                $model->payload = $payload;
+                $model->domain = $model->domain ?: $record['domain'];
+                if ($model->isDirty()) {
+                    $model->save();
+                    $updated++;
+                }
+            }
+            // Keep the SQL parameter count within the limits of each database driver.
+            $batchSize = $this->database()->getDriverName() === 'mysql' ? 300 : 75;
+            foreach (array_chunk($inserts, $batchSize) as $batch) {
+                $this->database()->table('finance_records')->insert($batch);
+            }
+
+            return count($inserts) + $updated;
         });
     }
 
@@ -492,12 +546,12 @@ class FinanceWorkbookService
         });
     }
 
-    public function download(array $headers, iterable $rows, string $filename, string $format = 'xlsx', bool $plain = false): StreamedResponse
+    public function download(array $headers, iterable $rows, string $filename, string $format = 'xlsx', bool $plain = false, bool $simplifyText = true): StreamedResponse
     {
         if ($format === 'xlsx') {
-            return $this->downloadStreamingXlsx($headers, $rows, $filename, $plain);
+            return $this->downloadStreamingXlsx($headers, $rows, $filename, $plain, $simplifyText);
         }
-        return response()->streamDownload(function () use ($headers, $rows, $format, $plain): void {
+        return response()->streamDownload(function () use ($headers, $rows, $format, $plain, $simplifyText): void {
             // Spreadsheet cells and ZIP compression coexist during export.
             // Keep the higher budget local to this download, not the whole PHP service.
             $previousLimit = ini_get('memory_limit');
@@ -513,7 +567,9 @@ class FinanceWorkbookService
                 $book->getDefaultStyle()->getFont()->setName('Microsoft YaHei')->setSize(10);
             }
             $sheet = $book->getActiveSheet();
-            $headers = array_map(FinanceCatalog::simplified(...), $headers);
+            if ($simplifyText) {
+                $headers = array_map(FinanceCatalog::simplified(...), $headers);
+            }
             $sheet->fromArray($headers, null, 'A1');
             $numericColumns = [];
             foreach ($headers as $index => $header) {
@@ -524,7 +580,10 @@ class FinanceWorkbookService
             foreach ($rows as $row) {
                 foreach (array_values($row) as $column => $value) {
                     // Financial references and literal text must survive export without formula execution.
-                    $value = FinanceCatalog::simplified((string) ($value ?? ''));
+                    $value = (string) ($value ?? '');
+                    if ($simplifyText) {
+                        $value = FinanceCatalog::simplified($value);
+                    }
                     $number = str_replace(',', '', $value);
                     $numeric = ($numericColumns[$column] ?? false)
                         && preg_match('/^-?\d+(?:\.\d+)?$/D', $number)
@@ -576,9 +635,11 @@ class FinanceWorkbookService
         }, $filename, ['Content-Type' => $format === 'xls' ? 'application/vnd.ms-excel' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
     }
 
-    private function downloadStreamingXlsx(array $headers, iterable $rows, string $filename, bool $plain): StreamedResponse
+    private function downloadStreamingXlsx(array $headers, iterable $rows, string $filename, bool $plain, bool $simplifyText): StreamedResponse
     {
-        $headers = array_map(FinanceCatalog::simplified(...), $headers);
+        if ($simplifyText) {
+            $headers = array_map(FinanceCatalog::simplified(...), $headers);
+        }
         $numeric = [];
         $columns = [];
         foreach ($headers as $index => $header) {
@@ -587,11 +648,14 @@ class FinanceWorkbookService
             $columns[] = ['label' => $header, 'width' => $this->downloadColumnWidth($header, $plain)];
         }
         return app(\App\Portals\Logistics\StreamedXlsxWriter::class)->response($filename, 'Sheet1', $columns,
-            function () use ($headers, $numeric, $rows): iterable {
+            function () use ($headers, $numeric, $rows, $simplifyText): iterable {
                 foreach ($rows as $row) {
                     $cells = [];
                     foreach (array_values($row) as $column => $raw) {
-                        $value = FinanceCatalog::simplified((string) ($raw ?? ''));
+                        $value = (string) ($raw ?? '');
+                        if ($simplifyText) {
+                            $value = FinanceCatalog::simplified($value);
+                        }
                         $number = str_replace(',', '', $value);
                         $isNumeric = ($numeric[$column] ?? false) && preg_match('/^-?\d+(?:\.\d+)?$/D', $number)
                             && strlen(ltrim(str_replace(['-', '.'], '', $number), '0')) <= 15;
@@ -626,15 +690,18 @@ class FinanceWorkbookService
         });
     }
 
-    public function downloadDelimited(array $headers, iterable $rows, string $filename, string $delimiter = ','): StreamedResponse
+    public function downloadDelimited(array $headers, iterable $rows, string $filename, string $delimiter = ',', bool $simplifyText = true): StreamedResponse
     {
-        return response()->streamDownload(function () use ($headers, $rows, $delimiter): void {
+        return response()->streamDownload(function () use ($headers, $rows, $delimiter, $simplifyText): void {
             $stream = fopen('php://output', 'wb');
             fwrite($stream, "\xEF\xBB\xBF");
-            fputcsv($stream, array_map(FinanceCatalog::simplified(...), $headers), $delimiter, '"', '');
+            fputcsv($stream, $simplifyText ? array_map(FinanceCatalog::simplified(...), $headers) : $headers, $delimiter, '"', '');
             foreach ($rows as $row) {
-                $values = array_map(static function ($value): string {
-                    $value = FinanceCatalog::simplified((string) ($value ?? ''));
+                $values = array_map(static function ($value) use ($simplifyText): string {
+                    $value = (string) ($value ?? '');
+                    if ($simplifyText) {
+                        $value = FinanceCatalog::simplified($value);
+                    }
 
                     return ! is_numeric($value) && preg_match('/^[=+\-@\t\r]/', $value) ? "'".$value : $value;
                 }, array_values($row));
