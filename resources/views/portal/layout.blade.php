@@ -17,10 +17,13 @@
     <link rel="stylesheet" href="{{ $portalOrigin }}/vendor/laravel-admin/AdminLTE/dist/css/AdminLTE.min.css">
     <link rel="stylesheet" href="{{ $portalOrigin }}/vendor/laravel-admin/AdminLTE/dist/css/skins/{{ config('admin.skin', 'skin-blue-light') }}.min.css">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/system-font.css?v=20260928-1">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/sidebar-layout.css?v=20261006-2">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/sidebar-layout.css?v=20261111-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/admin-notifications.css?v=20260929-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/portal-shell.css?v=20261006-2">
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/interaction-loading-20261011-1.css?v=20261011-3">
+@if (($portal->code ?? null) === 'fuzhuang' || request()->routeIs('operation-tasks.*'))
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/operation-tasks.css?v=20261111-8">
+@endif
     <script>window.ErpInteractionLoadingConfig = @json(__('loading'));</script>
     @stack('styles')
     <script src="{{ $portalOrigin }}/vendor/laravel-admin/AdminLTE/plugins/jQuery/jQuery-2.1.4.min.js"></script>
@@ -36,6 +39,9 @@
     $assistantDailyPendingCounts = $portal->code === 'zhuli'
         ? app(\App\Portals\Assistant\AssistantDailySubmissionPendingCountService::class)->forUser($user)
         : [];
+    $operationTaskReviewCounts = $portal->code === 'fuzhuang'
+        ? app(\App\Services\OperationTaskPendingCountService::class)->forUser($user)
+        : ['recaps' => 0, 'tests' => 0, 'rejected_recaps' => 0];
     // Review and dashboard navigation is reserved for department managers; routes remain protected separately.
     $canManageOperationTasks = $user->isAdministrator()
         || app(\App\Services\DepartmentAuthorizationService::class)->managedDepartmentIds($user)->isNotEmpty();
@@ -79,6 +85,7 @@
                         'portalOrigin' => $portalOrigin,
                         'canManagePortalMenus' => $user->isAdministrator(),
                         'canManageOperationTasks' => $canManageOperationTasks,
+                        'operationTaskReviewCounts' => $operationTaskReviewCounts,
                     ])
                 @endforeach
             </ul>
@@ -97,7 +104,7 @@
     </footer>
 </div>
 
-@if(in_array($portal->code, ['yunying', 'daily-report'], true))
+@if(in_array($portal->code, ['yunying', 'daily-report', 'fuzhuang'], true))
 <div class="modal fade" id="internal-message-popup" tabindex="-1" role="dialog" aria-labelledby="internal-message-title">
     <div class="modal-dialog" role="document" style="max-width:760px"><div class="modal-content" style="border:0;border-radius:12px;overflow:hidden;box-shadow:0 18px 60px rgba(0,0,0,.28)">
         <div class="modal-header" style="background:linear-gradient(135deg,#173b5e,#2f7fae);color:#fff;padding:17px 20px"><h4 class="modal-title" id="internal-message-title"><i class="fa fa-bullhorn"></i> 站内消息</h4></div>
@@ -125,7 +132,7 @@
 @if(in_array($portal->code, ['yunying', 'caigou', 'cangku'], true))
 <script src="{{ $portalOrigin }}/assets/erp/procurement-pending-watcher.js?v=20261026-1"></script>
 @endif
-@if(in_array($portal->code, ['yunying', 'daily-report'], true))
+@if(in_array($portal->code, ['yunying', 'daily-report', 'fuzhuang'], true))
 <script>
 (function($){
     var messages=[],index=0,modal=$('#internal-message-popup'),readButton=$('#internal-message-read');

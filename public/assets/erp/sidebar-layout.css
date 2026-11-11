@@ -133,6 +133,33 @@
     font-size: 13px;
 }
 
+.main-sidebar .sidebar-menu .treeview-menu > li > a .operation-recap-deadline {
+    display: inline-block;
+    vertical-align: middle;
+    max-width: 92px;
+    margin-left: 5px;
+    overflow: hidden;
+    color: #89d3bd;
+    font-size: 11px;
+    line-height: 16px;
+    white-space: nowrap;
+}
+
+.main-sidebar .sidebar-menu .treeview-menu > li > a .operation-recap-deadline > span {
+    display: inline-block;
+    min-width: max-content;
+}
+
+.main-sidebar .sidebar-menu .treeview-menu > li > a:hover .operation-recap-deadline > span,
+.main-sidebar .sidebar-menu .treeview-menu > li.active > a .operation-recap-deadline > span {
+    animation: operation-recap-deadline-scroll 4.2s ease-in-out infinite alternate;
+}
+
+@keyframes operation-recap-deadline-scroll {
+    from { transform: translateX(0); }
+    to { transform: translateX(-24px); }
+}
+
 .main-sidebar .sidebar-menu .treeview-menu > li > a > .fa,
 .main-sidebar .sidebar-menu .treeview-menu > li > a > .glyphicon,
 .main-sidebar .sidebar-menu .treeview-menu > li > a > .ion {
@@ -155,3 +182,4 @@
 .main-sidebar .sidebar-menu .treeview-menu > li.active > a > .ion {
     color: #76c5f2 !important;
 }
+.operation-review-counts{display:inline-flex;gap:3px;margin-left:5px;vertical-align:middle}.operation-review-count{display:inline-block;min-width:30px;padding:1px 5px;border-radius:9px;color:#fff;font-size:10px;line-height:16px;text-align:center}.operation-review-count-recap{background:#2f91c9}.operation-review-count-test{background:#f39c12}

@@ -4,7 +4,7 @@
 
 @section('content')
 <link rel="stylesheet" href="{{ asset('assets/erp/operation-tasks.css') }}?v=20261111-6">
-<link rel="stylesheet" href="{{ asset('assets/erp/operation-tasks-dashboard.css') }}?v=20261111-1">
+<link rel="stylesheet" href="{{ asset('assets/erp/operation-tasks-dashboard.css') }}?v=20261111-2">
 @include('portals.operation-tasks.partials.head')
 
 <section class="content ot-page ot-dashboard-page">
@@ -68,10 +68,13 @@
                     <div class="table-responsive"><table class="table ot-table ot-dashboard-table"><thead><tr><th>成员 / 角色</th><th>复盘提交</th><th>总营业额</th><th>总单量</th><th>总广告费</th><th>ROI</th><th>操作</th></tr></thead><tbody>
                         <?php foreach ($team->members as $row): ?>
                             <tr>
-                                <td><b>{{ $row->name }}</b><small>{{ $row->position ?: '成员' }}</small></td><td>{{ $row->recap_days }} / {{ $row->expected_days }} 天</td><td>${{ number_format($row->revenue, 2) }}</td><td>{{ $row->orders }}</td><td>${{ number_format($row->spend, 2) }}</td><td>{{ $row->spend > 0 ? number_format($row->revenue / $row->spend, 2) : '—' }}</td><td><a class="btn btn-default btn-sm" href="{{ route('operation-tasks.recaps.index', ['operator' => $row->name, 'from' => $from, 'to' => $to]) }}">查看复盘</a></td>
+                                <td><b>{{ $row->name }}</b><small>{{ $row->position ?: '成员' }}</small></td><td>{{ $row->recap_days }} / {{ $row->expected_days }} 天</td><td>${{ number_format($row->revenue, 2) }}</td><td>{{ $row->orders }}</td><td>${{ number_format($row->spend, 2) }}</td><td>{{ $row->spend > 0 ? number_format($row->revenue / $row->spend, 2) : '—' }}</td><td><button type="button" class="btn btn-default btn-sm" data-toggle="modal" data-target="#ot-dashboard-recaps-{{ $team->id }}-{{ $row->id }}">查看复盘</button></td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody></table></div>
+                    <?php foreach ($team->members as $row): ?>
+                        <div class="modal fade ot-modal" id="ot-dashboard-recaps-{{ $team->id }}-{{ $row->id }}" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><button type="button" class="close" data-dismiss="modal">×</button><h4 class="modal-title">{{ $row->name }} · 每日复盘记录</h4><p>{{ $from }} 至 {{ $to }} · 每天一条，未提交日期会明确标识。</p></div><div class="modal-body"><div class="table-responsive"><table class="table ot-table ot-dashboard-recap-history"><thead><tr><th>数据日期</th><th>提交状态</th><th>审核进度</th><th>营业额</th><th>单量</th><th>广告费</th><th>ROI</th></tr></thead><tbody>@foreach($row->recap_day_records as $record)@if(!empty($record['missing']))<tr class="is-missing"><td>{{ $record['date'] }}</td><td><span class="ot-badge orange">未提交</span></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>@else @php($state = $record['workflow_status'] ?? 'approved')<tr><td><b>{{ $record['date'] }}</b><small>v{{ $record['version'] }} · {{ $record['updated_at'] }}</small></td><td><span class="ot-badge">已提交</span></td><td><span class="ot-badge {{ $state === 'rejected' ? 'red' : ($state === 'approved' ? '' : 'orange') }}">{{ $state === 'approved' ? '双级已通过' : ($state === 'pending_leader' ? '待二级主管审核' : ($state === 'pending_department' ? '待一级主管审核' : '已驳回待修改')) }}</span>@if(!empty($record['rejection_opinion']))<small class="ot-dashboard-rejection">{{ $record['rejection_opinion'] }}</small>@endif</td><td>${{ number_format($record['revenue'], 2) }}</td><td>{{ $record['orders'] }}</td><td>${{ number_format($record['spend'], 2) }}</td><td>{{ $record['spend'] > 0 ? number_format($record['revenue'] / $record['spend'], 2) : '—' }}</td></tr>@endif @endforeach</tbody></table></div></div><div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">关闭</button></div></div></div></div>
+                    <?php endforeach; ?>
                 </div>
             <?php endforeach; ?>
         <?php endif; ?>
