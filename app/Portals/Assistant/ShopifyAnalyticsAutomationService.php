@@ -58,16 +58,42 @@ class ShopifyAnalyticsAutomationService
     /** @return array{processed: int, succeeded: int, failed: int, completed: int, history_rows: int} */
     public function runInitialBackfill(int $limit = 10): array
     {
-        // Initial history is now synchronized in the explicit user-selected
-        // store task itself, using order detail rows. This legacy command is
-        // intentionally retained as a harmless no-op for old BaoTa entries.
-        return ['processed' => 0, 'succeeded' => 0, 'failed' => 0, 'completed' => 0, 'history_rows' => 0];
+        return $this->runHistoryResync(180, $limit);
     }
 
     /** @return array{processed: int, succeeded: int, failed: int, completed: int, history_rows: int} */
     public function runAllInitialBackfills(): array
     {
+        return $this->runHistoryResync(180, 0);
+    }
+
+    /**
+     * Re-read a bounded period for eligible Shopify stores.
+     *
+     * @return array{processed: int, succeeded: int, failed: int, completed: int, history_rows: int}
+     */
+    public function runHistoryResync(int $days, int $limit = 0): array
+    {
         $result = ['processed' => 0, 'succeeded' => 0, 'failed' => 0, 'completed' => 0, 'history_rows' => 0];
+        $stores = $this->eligibleStores()->orderBy('id');
+
+        if ($limit > 0) {
+            $stores->limit($limit);
+        }
+
+        foreach ($stores->get() as $store) {
+            $result['processed']++;
+            $metric = $this->analytics->refresh($store, null, true, $days, true);
+
+            if ($metric->sync_status !== AssistantShopifyStoreMetric::STATUS_SUCCESS) {
+                $result['failed']++;
+
+                continue;
+            }
+
+            $result['succeeded']++;
+            $result['completed']++;
+        }
 
         return $result;
     }

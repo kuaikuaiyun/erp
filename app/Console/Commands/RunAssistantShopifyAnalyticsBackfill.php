@@ -9,10 +9,11 @@ use Illuminate\Support\Facades\Cache;
 class RunAssistantShopifyAnalyticsBackfill extends Command
 {
     protected $signature = 'assistant:shopify-analytics:backfill
-                            {--limit=10 : Maximum stores to process in a normal scheduled run}
-                            {--all : Process every currently due store backfill in this one command}';
+                            {--days=180 : Recent store-local calendar days to re-read; maximum 365}
+                            {--limit=10 : Maximum stores to process unless --all is supplied}
+                            {--all : Process every eligible Shopify store in this one command}';
 
-    protected $description = 'Legacy no-op: initial Shopify order history is synchronized by selected store tasks';
+    protected $description = 'Re-sync Shopify analytics source orders for a bounded history window';
 
     public function handle(ShopifyAnalyticsAutomationService $automation): int
     {
@@ -24,20 +25,20 @@ class RunAssistantShopifyAnalyticsBackfill extends Command
         }
 
         try {
-            $result = $this->option('all')
-                ? $automation->runAllInitialBackfills()
-                : $automation->runInitialBackfill((int) $this->option('limit'));
+            $days = max(1, min(365, (int) $this->option('days')));
+            $limit = $this->option('all') ? 0 : max(1, (int) $this->option('limit'));
+            $result = $automation->runHistoryResync($days, $limit);
         } finally {
             $lock->release();
         }
 
         $this->info(sprintf(
-            'Legacy tasks processed: %d; succeeded: %d; failed: %d; completed: %d; order rows written: %d.',
+            'History re-sync (%d days) processed: %d; succeeded: %d; failed: %d; completed: %d.',
+            $days,
             $result['processed'],
             $result['succeeded'],
             $result['failed'],
             $result['completed'],
-            $result['history_rows'],
         ));
 
         return self::SUCCESS;
