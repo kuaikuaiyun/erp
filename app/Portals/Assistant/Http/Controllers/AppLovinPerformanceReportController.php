@@ -220,7 +220,10 @@ class AppLovinPerformanceReportController extends Controller
                     })->values()->all(),
                 ];
             })
-            ->sortByDesc('ad_spend')
+            ->sortBy([
+                ['first_orders', 'desc'],
+                ['ad_spend', 'desc'],
+            ])
             ->values();
 
         if (($filters['gift_status'] ?? '') === 'yes') {
@@ -258,11 +261,27 @@ class AppLovinPerformanceReportController extends Controller
         $totals['subscription_rate'] = $totals['orders'] > 0 ? $totals['subscription_orders'] / $totals['orders'] : null;
         $totals['roi'] = $totals['ad_spend'] > 0 ? $totals['revenue'] / $totals['ad_spend'] : null;
         $totals['total_consumption'] = round((float) $rows->pluck('account_keys')->flatten()->filter()->unique()->sum(fn ($key) => (float) ($accountSpendTotals->get($key) ?? 0)), 2);
+        $exportRows = $rows->map(fn (array $row): array => [
+            'date_label' => $row['date_label'],
+            'department' => $row['department'],
+            'operator' => $row['operator'],
+            'store_domain' => $row['store_domain'],
+            'first_subscription_orders' => $row['first_subscription_orders'],
+            'subscription_rate' => $row['subscription_rate'],
+            'first_subscription_revenue' => $row['first_subscription_revenue'],
+            'first_orders' => $row['first_orders'],
+            'first_revenue' => $row['first_revenue'],
+            'ad_spend' => $row['ad_spend'],
+            'gift_status' => $row['gift_status'],
+            'roi' => $row['roi'],
+            'account_numbers' => $row['account_numbers'],
+            'total_consumption' => $row['total_consumption'],
+        ])->values();
         $page = max(1, (int) $request->query('page', 1));
         $paginator = new LengthAwarePaginator($rows->forPage($page, 30)->values(), $rows->count(), 30, $page, ['path' => $request->url(), 'query' => $request->query()]);
 
         return view('portals.assistant.applovin-performance-reports.index', [
-            'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'], 'rows' => $paginator, 'totals' => $totals,
+            'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'], 'rows' => $paginator, 'exportRows' => $exportRows, 'totals' => $totals,
             'operator' => $filters['operator'] ?? '',
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,

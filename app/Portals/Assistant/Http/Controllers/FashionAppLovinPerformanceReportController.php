@@ -172,7 +172,10 @@ class FashionAppLovinPerformanceReportController extends Controller
 
                         return $detail;
                     })->values()->all()];
-            })->sortByDesc('ad_spend')->values();
+            })->sortBy([
+                ['orders', 'desc'],
+                ['ad_spend', 'desc'],
+            ])->values();
         if (($filters['gift_status'] ?? '') === 'yes') {
             $rows = $rows->where('gift_status', 'available')->values();
         } elseif (($filters['gift_status'] ?? '') === 'no') {
@@ -200,11 +203,24 @@ class FashionAppLovinPerformanceReportController extends Controller
             'revenue' => round((float) $rows->sum('revenue'), 2), 'ad_spend' => round((float) $rows->sum('ad_spend'), 2),
             'total_consumption' => round((float) $totalAccountKeys->sum(fn ($key) => (float) ($accountSpendTotals->get($key) ?? 0)), 2)];
         $totals['roi'] = $totals['ad_spend'] > 0 ? $totals['revenue'] / $totals['ad_spend'] : null;
+        $exportRows = $rows->map(fn (array $row): array => [
+            'date_label' => $row['date_label'],
+            'department' => $row['department'],
+            'operator' => $row['operator'],
+            'store_domain' => $row['store_domain'],
+            'orders' => $row['orders'],
+            'revenue' => $row['revenue'],
+            'ad_spend' => $row['ad_spend'],
+            'roi' => $row['roi'],
+            'gift_status' => $row['gift_status'],
+            'account_numbers' => $row['account_numbers'],
+            'total_consumption' => $row['total_consumption'],
+        ])->values();
         $page = max(1, (int) $request->query('page', 1));
         $rows = new LengthAwarePaginator($rows->forPage($page, 30)->values(), $rows->count(), 30, $page, ['path' => $request->url(), 'query' => $request->query()]);
 
         return view('portals.assistant.fashion-applovin-performance-reports.index', [
-            'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'], 'rows' => $rows, 'totals' => $totals,
+            'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'], 'rows' => $rows, 'exportRows' => $exportRows, 'totals' => $totals,
             'dateFrom' => $dateFrom, 'dateTo' => $dateTo, 'operator' => $filters['operator'] ?? '',
             'timezone' => $timezone, 'timezoneOptions' => $timezoneOptions,
             'dateRange' => $dateRange, 'selectedStoreDomain' => $filters['store_domain'] ?? '', 'domainOptions' => $domainOptions,

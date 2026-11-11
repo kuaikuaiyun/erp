@@ -21,7 +21,7 @@
     <div class="form-group"><label>账号历史总消耗</label><select class="form-control" name="consumption_range" id="ap-consumption-range"><option value="" @selected($selectedConsumptionRange==='')>全部</option><option value="lt_5000" @selected($selectedConsumptionRange==='lt_5000')>小于 $5,000</option><option value="5000_10000" @selected($selectedConsumptionRange==='5000_10000')>$5,000 - $10,000</option><option value="gt_10000" @selected($selectedConsumptionRange==='gt_10000')>大于 $10,000</option><option value="custom" @selected($selectedConsumptionRange==='custom')>自定义</option></select></div>
     <div class="form-group ap-consumption-custom-field"><label>自定义最低消耗($)</label><input type="number" min="0" step="0.01" class="form-control" name="consumption_custom" value="{{$consumptionCustom}}" placeholder="最低消耗金额"></div>
     <div class="form-group ap-consumption-custom-field"><label>自定义最高消耗($)</label><input type="number" min="0" step="0.01" class="form-control" name="consumption_custom_max" value="{{$consumptionCustomMax}}" placeholder="最高消耗金额"></div>
-    <button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{route('assistant.applovin-performance-reports.index')}}">重置</a>
+    <button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{route('assistant.applovin-performance-reports.index')}}">重置</a><button type="button" class="btn btn-success" id="apReportImageDownload"><i class="fa fa-picture-o"></i> <span>下载列表图片</span></button>
 </form></div></div>
 <div class="ap-kpis">
     <div class="ap-kpi"><span>绑定店铺数</span><strong>{{$totals['stores']}}</strong></div>
@@ -61,6 +61,25 @@
 </section>
 @endsection
 @push('scripts')
+<script src="{{ asset('js/report-table-image-export.js') }}?v=20261111-1"></script>
+<script>
+(function(){
+    var button=document.getElementById('apReportImageDownload');
+    if(!button||!window.ReportTableImageExport)return;
+    var source=@json($exportRows);
+    var money=function(value){return '$'+Number(value||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});};
+    var number=function(value){return Number(value||0).toLocaleString('en-US');};
+    var gift=function(value){return value==='available'?'有礼金':(value==='pending_upload'?'未上传礼金图':'未达 $5,000');};
+    button.addEventListener('click',function(){window.ReportTableImageExport.download({
+        button:button,title:'订阅 AppLovin 业绩报表',subtitle:'日期：{{$dateFrom}} 至 {{$dateTo}}　统计时区：UTC{{$timezone}}',
+        summary:'绑定店铺 {{$totals['stores']}}　首单订阅单量 {{$totals['subscription_orders']}}　首单总单量 {{$totals['orders']}}　首单总营业额 '+money({{$totals['revenue']}})+'　广告费 '+money({{$totals['ad_spend']}})+'　首单 ROI {{$totals['roi']!==null?number_format($totals['roi'],2):'—'}}',
+        headers:['日期','运营部门','运营人员','绑定店铺域名','首单订阅单量','首单订阅率','首单订阅营业额($)','首单总单量','首单总营业额($)','广告费($)','是否有礼金','首单 ROI','账号编号','账号历史总消耗($)'],
+        widths:[180,190,130,190,140,130,170,140,170,145,150,125,190,180],
+        rows:source.map(function(row){return [row.date_label,row.department,row.operator,row.store_domain,number(row.first_subscription_orders),row.subscription_rate===null?'—':(Number(row.subscription_rate)*100).toFixed(2)+'%',money(row.first_subscription_revenue),number(row.first_orders),money(row.first_revenue),money(row.ad_spend),gift(row.gift_status),row.roi===null?'—':Number(row.roi).toFixed(2),row.account_numbers||'—',money(row.total_consumption)];}),
+        filename:'订阅-AppLovin-业绩报表-{{$dateFrom}}-{{$dateTo}}.png'
+    });});
+})();
+</script>
 <script>
 (function(){var pageSize=10;function render(modal,page){var rows=Array.prototype.slice.call(modal.querySelectorAll('.ap-detail-row')),total=rows.length,last=Math.max(1,Math.ceil(total/pageSize));page=Math.max(1,Math.min(page,last));rows.forEach(function(row,index){row.style.display=index>=(page-1)*pageSize&&index<page*pageSize?'':'none';});var from=total?(page-1)*pageSize+1:0,to=Math.min(page*pageSize,total),summary=modal.querySelector('.ap-detail-summary'),pages=modal.querySelector('.ap-detail-pages');summary.textContent='显示第 '+from+'-'+to+' 条，共 '+total+' 条';var html='<button type="button" class="btn btn-default btn-xs ap-page-btn" data-page="'+(page-1)+'" '+(page<=1?'disabled':'')+'><i class="fa fa-angle-left"></i></button>';var start=Math.max(1,page-2),end=Math.min(last,start+4);start=Math.max(1,end-4);for(var i=start;i<=end;i++)html+='<button type="button" class="btn btn-default btn-xs ap-page-btn '+(i===page?'active':'')+'" data-page="'+i+'">'+i+'</button>';html+='<button type="button" class="btn btn-default btn-xs ap-page-btn" data-page="'+(page+1)+'" '+(page>=last?'disabled':'')+'><i class="fa fa-angle-right"></i></button>';pages.innerHTML=html;}$(document).on('show.bs.modal','.ap-detail-modal',function(){render(this,1);});document.addEventListener('click',function(event){var button=event.target.closest('.ap-page-btn');if(!button||button.disabled)return;render(button.closest('.ap-detail-modal'),parseInt(button.getAttribute('data-page'),10)||1);});})();
 </script>
