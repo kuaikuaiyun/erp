@@ -27,6 +27,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -260,7 +261,11 @@ class OperationTaskController extends Controller
             'ai_confirmed' => ['accepted'],
         ]);
         foreach ($data['assets'] as $index => $asset) {
-            abort_if(! $request->hasFile("assets.$index.file") && empty($asset['url']), 422, '每条素材必须上传文件或填写素材链接。');
+            if (! $request->hasFile("assets.$index.file") && empty($asset['url'])) {
+                throw ValidationException::withMessages([
+                    "assets.$index.file" => '每条素材必须上传文件或填写素材链接。',
+                ]);
+            }
         }
         $existing = OperationTestTask::query()->where('owner_user_id', $user->id)->where('landing_url', $data['landing_url'])->first();
         if ($existing) {

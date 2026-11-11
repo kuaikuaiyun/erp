@@ -5,6 +5,7 @@ namespace App\Portals\Assistant;
 use App\Models\AdminUser;
 use App\Models\AssistantDomainStore;
 use App\Models\AssistantDomainStoreOwnerHistory;
+use App\Models\Department;
 use App\Models\LogisticsOrder;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Carbon;
@@ -35,6 +36,8 @@ class AssistantStoreOwnerTimelineService
             'assistant_domain_store_id' => $store->getKey(),
             'owner_user_id' => $owner?->getKey(),
             'owner_name_snapshot' => $this->userName($owner),
+            'operation_department_id' => $store->owner_operation_department_id,
+            'operation_department_name_snapshot' => $this->operationDepartmentName($store->owner_operation_department_id),
             'event' => AssistantDomainStoreOwnerHistory::EVENT_BASELINE,
             'effective_from' => $effectiveFrom,
             'actor_id' => $actor?->getKey(),
@@ -42,7 +45,7 @@ class AssistantStoreOwnerTimelineService
         ]);
     }
 
-    public function assign(AssistantDomainStore $store, ?AdminUser $newOwner, CarbonInterface $effectiveAt, ?AdminUser $actor = null): bool
+    public function assign(AssistantDomainStore $store, ?AdminUser $newOwner, ?Department $operationDepartment, CarbonInterface $effectiveAt, ?AdminUser $actor = null): bool
     {
         $effectiveAt = Carbon::instance($effectiveAt)->utc();
         $this->ensureBaseline($store, $actor);
@@ -83,6 +86,8 @@ class AssistantStoreOwnerTimelineService
                 'assistant_domain_store_id' => $store->getKey(),
                 'owner_user_id' => $newOwnerId,
                 'owner_name_snapshot' => $this->userName($newOwner),
+                'operation_department_id' => $operationDepartment?->getKey(),
+                'operation_department_name_snapshot' => $operationDepartment?->name,
                 'event' => $newOwner === null ? AssistantDomainStoreOwnerHistory::EVENT_CLEARED : AssistantDomainStoreOwnerHistory::EVENT_ASSIGNED,
                 'effective_from' => $effectiveAt,
                 'effective_to' => $next?->effective_from,
@@ -93,20 +98,28 @@ class AssistantStoreOwnerTimelineService
             $this->refreshSnapshots($store, $effectiveAt);
             $current = $this->resolveAt($store, now());
             $store->owner_user_id = $current['owner_user_id'];
+            $store->owner_operation_department_id = $current['operation_department_id'];
             $store->unsetRelation('ownerUser');
+            $store->unsetRelation('ownerOperationDepartment');
             $store->save();
 
             return true;
         }
 
         $newOwnerId = $newOwner?->getKey();
-        if ((int) ($active->owner_user_id ?? 0) === (int) ($newOwnerId ?? 0)) return false;
+        $newOperationDepartmentId = $operationDepartment?->getKey();
+        if (
+            (int) ($active->owner_user_id ?? 0) === (int) ($newOwnerId ?? 0)
+            && (int) ($active->operation_department_id ?? 0) === (int) ($newOperationDepartmentId ?? 0)
+        ) return false;
 
         $next = $histories->first(static fn (AssistantDomainStoreOwnerHistory $history): bool => $history->effective_from->greaterThan($effectiveAt));
         if ($active->effective_from->equalTo($effectiveAt)) {
             $active->update([
                 'owner_user_id' => $newOwnerId,
                 'owner_name_snapshot' => $this->userName($newOwner),
+                'operation_department_id' => $newOperationDepartmentId,
+                'operation_department_name_snapshot' => $operationDepartment?->name,
                 'event' => $newOwner === null ? AssistantDomainStoreOwnerHistory::EVENT_CLEARED : AssistantDomainStoreOwnerHistory::EVENT_ASSIGNED,
                 'actor_id' => $actor?->getKey(),
                 'actor_name_snapshot' => $this->userName($actor),
@@ -117,6 +130,8 @@ class AssistantStoreOwnerTimelineService
                 'assistant_domain_store_id' => $store->getKey(),
                 'owner_user_id' => $newOwnerId,
                 'owner_name_snapshot' => $this->userName($newOwner),
+                'operation_department_id' => $newOperationDepartmentId,
+                'operation_department_name_snapshot' => $operationDepartment?->name,
                 'event' => $newOwner === null ? AssistantDomainStoreOwnerHistory::EVENT_CLEARED : AssistantDomainStoreOwnerHistory::EVENT_TRANSFERRED,
                 'effective_from' => $effectiveAt,
                 'effective_to' => $next?->effective_from,
@@ -128,7 +143,9 @@ class AssistantStoreOwnerTimelineService
         $this->refreshSnapshots($store, $effectiveAt);
         $current = $this->resolveAt($store, now());
         $store->owner_user_id = $current['owner_user_id'];
+        $store->owner_operation_department_id = $current['operation_department_id'];
         $store->unsetRelation('ownerUser');
+        $store->unsetRelation('ownerOperationDepartment');
         $store->save();
 
         return true;
@@ -185,12 +202,16 @@ class AssistantStoreOwnerTimelineService
 
         $this->refreshSnapshots($store, $previousEffectiveAt->lessThan($effectiveAt) ? $previousEffectiveAt : $effectiveAt);
         $current = $this->resolveAt($store, now());
-        $store->forceFill(['owner_user_id' => $current['owner_user_id']]);
+        $store->forceFill([
+            'owner_user_id' => $current['owner_user_id'],
+            'owner_operation_department_id' => $current['operation_department_id'],
+        ]);
         $store->unsetRelation('ownerUser');
+        $store->unsetRelation('ownerOperationDepartment');
         $store->save();
     }
 
-    /** @return array{owner_user_id:?int,owner_name:?string,effective_from:?CarbonInterface} */
+    /** @return array{owner_user_id:?int,owner_name:?string,operation_department_id:?int,operation_department_name:?string,effective_from:?CarbonInterface} */
     public function resolveAt(AssistantDomainStore $store, CarbonInterface|string|null $at): array
     {
         $at = $at ? Carbon::parse($at)->utc() : now()->utc();
@@ -204,6 +225,8 @@ class AssistantStoreOwnerTimelineService
         return [
             'owner_user_id' => $history?->owner_user_id === null ? null : (int) $history->owner_user_id,
             'owner_name' => $history?->owner_name_snapshot,
+            'operation_department_id' => $history?->operation_department_id === null ? null : (int) $history->operation_department_id,
+            'operation_department_name' => $history?->operation_department_name_snapshot,
             'effective_from' => $history?->effective_from,
         ];
     }
@@ -216,7 +239,7 @@ class AssistantStoreOwnerTimelineService
             $this->ensureBaseline($store);
         }
 
-        $assignment = $store === null ? ['owner_user_id' => null, 'owner_name' => null, 'effective_from' => null] : $this->resolveAt($store, $order->order_created_at);
+        $assignment = $store === null ? ['owner_user_id' => null, 'owner_name' => null, 'operation_department_id' => null, 'operation_department_name' => null, 'effective_from' => null] : $this->resolveAt($store, $order->order_created_at);
         $order->assigned_owner_user_id = $assignment['owner_user_id'];
         $order->assigned_owner_name = $assignment['owner_name'];
         $order->owner_assignment_effective_from = $assignment['effective_from'];
@@ -255,5 +278,10 @@ class AssistantStoreOwnerTimelineService
     private function userName(?AdminUser $user): ?string
     {
         return $user === null ? null : (string) ($user->name ?: $user->username ?: $user->getKey());
+    }
+
+    private function operationDepartmentName(?int $departmentId): ?string
+    {
+        return $departmentId === null ? null : Department::query()->whereKey($departmentId)->value('name');
     }
 }

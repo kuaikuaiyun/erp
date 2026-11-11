@@ -83,6 +83,7 @@ class AssistantDomainStore extends Model
     protected $fillable = [
         'owner_department_id',
         'owner_user_id',
+        'owner_operation_department_id',
         'site_builder',
         'shop_name',
         'domain',
@@ -166,6 +167,11 @@ class AssistantDomainStore extends Model
     public function ownerUser(): BelongsTo
     {
         return $this->belongsTo(AdminUser::class, 'owner_user_id');
+    }
+
+    public function ownerOperationDepartment(): BelongsTo
+    {
+        return $this->belongsTo(Department::class, 'owner_operation_department_id');
     }
 
     public function ownerHistories(): HasMany
@@ -369,6 +375,7 @@ class AssistantDomainStore extends Model
             'payment_note' => self::fieldLabel('payment_note'),
             'authorized_departments' => self::fieldLabel('authorized_departments'),
             'owner_department' => self::fieldLabel('owner_department'),
+            'owner_operation_department' => '归属运营部门',
             'owner_user' => self::fieldLabel('owner_user'),
         ];
     }
@@ -431,6 +438,7 @@ class AssistantDomainStore extends Model
                 ->values()
                 ->all(),
             'owner_department' => $this->ownerDepartment?->name,
+            'owner_operation_department' => $this->ownerOperationDepartment?->name,
             'owner_user' => $this->ownerUser?->name ?: $this->ownerUser?->username,
         ];
     }

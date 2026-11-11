@@ -12,7 +12,7 @@ class AssistantDomainStoreOwnerHistory extends Model
     public const EVENT_TRANSFERRED = 'transferred';
     public const EVENT_CLEARED = 'cleared';
 
-    protected $fillable = ['assistant_domain_store_id', 'owner_user_id', 'owner_name_snapshot', 'event', 'effective_from', 'effective_to', 'actor_id', 'actor_name_snapshot'];
+    protected $fillable = ['assistant_domain_store_id', 'owner_user_id', 'owner_name_snapshot', 'operation_department_id', 'operation_department_name_snapshot', 'event', 'effective_from', 'effective_to', 'actor_id', 'actor_name_snapshot'];
 
     public function __construct(array $attributes = [])
     {
@@ -28,4 +28,5 @@ class AssistantDomainStoreOwnerHistory extends Model
 
     public function store(): BelongsTo { return $this->belongsTo(AssistantDomainStore::class, 'assistant_domain_store_id'); }
     public function owner(): BelongsTo { return $this->belongsTo(AdminUser::class, 'owner_user_id'); }
+    public function operationDepartment(): BelongsTo { return $this->belongsTo(Department::class, 'operation_department_id'); }
 }

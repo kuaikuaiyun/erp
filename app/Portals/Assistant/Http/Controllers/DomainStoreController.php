@@ -8,6 +8,7 @@ use App\Models\AssistantDomainStore;
 use App\Models\AssistantDomainStoreChangeLog;
 use App\Models\AssistantDomainStoreOwnerHistory;
 use App\Models\AssistantDomainStoreQuickOption;
+use App\Models\Department;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantDomainCheckService;
 use App\Portals\Assistant\AssistantDomainStoreHistoryService;
@@ -55,7 +56,7 @@ class DomainStoreController extends Controller
 
         $filters = $this->filters($request);
         $stores = $this->storeQuery($context['user'], $filters)
-            ->with(['ownerUser:id,name,username', 'ownerDepartment:id,name'])
+            ->with(['ownerUser:id,name,username', 'ownerDepartment:id,name', 'ownerOperationDepartment:id,name'])
             ->orderByDesc('created_at')
             ->orderByDesc('id')
             ->paginate($filters['per_page'])
@@ -399,13 +400,15 @@ class DomainStoreController extends Controller
         $data = $this->validatedData($request, null, $context['user']);
         $departmentAccess = $this->departmentAccessForRequest($request, $context['user']);
         $ownerUserId = $this->ownerAssignmentForRequest($request, $context['user']);
+        $ownerOperationDepartmentId = $this->ownerOperationDepartmentIdForRequest($request, null, $ownerUserId);
         $ownerEffectiveAt = $this->ownerEffectiveAt($request);
 
         $store = DB::connection(config('admin.database.connection') ?: config('database.default'))
-            ->transaction(function () use ($data, $context, $departmentAccess, $ownerUserId, $ownerEffectiveAt): AssistantDomainStore {
+            ->transaction(function () use ($data, $context, $departmentAccess, $ownerUserId, $ownerOperationDepartmentId, $ownerEffectiveAt): AssistantDomainStore {
                 $store = new AssistantDomainStore($data);
                 $store->owner_department_id = $departmentAccess['owner_department_id'];
                 $store->owner_user_id = $ownerUserId;
+                $store->owner_operation_department_id = $ownerOperationDepartmentId;
                 $this->setLastOperator($store, $context['user']);
                 $store->save();
                 // New records do not have an existing ownership range. Use the
@@ -474,27 +477,34 @@ class DomainStoreController extends Controller
         $data = $this->validatedData($request, $domainStore, $context['user']);
         $departmentAccess = $this->departmentAccessForRequest($request, $context['user'], $domainStore);
         $ownerUserId = $this->ownerAssignmentForRequest($request, $context['user'], $domainStore);
+        $ownerOperationDepartmentId = $this->ownerOperationDepartmentIdForRequest($request, $domainStore, $ownerUserId);
         $ownerEffectiveAt = $this->ownerEffectiveAt($request);
         $ownerEffectiveAtSubmitted = $this->hasOwnerEffectiveAt($request);
 
-        DB::connection($domainStore->getConnectionName())->transaction(function () use ($domainStore, $data, $context, $departmentAccess, $ownerUserId, $ownerEffectiveAt, $ownerEffectiveAtSubmitted): void {
+        DB::connection($domainStore->getConnectionName())->transaction(function () use ($domainStore, $data, $context, $departmentAccess, $ownerUserId, $ownerOperationDepartmentId, $ownerEffectiveAt, $ownerEffectiveAtSubmitted): void {
             $before = $domainStore->historySnapshot();
             $previousOwnerId = $domainStore->owner_user_id === null ? null : (int) $domainStore->owner_user_id;
-            $ownerTimelineChangeRequested = $previousOwnerId !== $ownerUserId || $ownerEffectiveAtSubmitted;
+            $previousOperationDepartmentId = $domainStore->owner_operation_department_id === null ? null : (int) $domainStore->owner_operation_department_id;
+            $ownerTimelineChangeRequested = $previousOwnerId !== $ownerUserId
+                || $previousOperationDepartmentId !== $ownerOperationDepartmentId
+                || $ownerEffectiveAtSubmitted;
             if ($ownerTimelineChangeRequested) {
                 $this->ownerTimeline->ensureBaseline($domainStore, $context['user']);
             }
             $domainStore->fill($data);
             $domainStore->owner_department_id = $departmentAccess['owner_department_id'];
             $domainStore->owner_user_id = $ownerUserId;
+            $domainStore->owner_operation_department_id = $ownerOperationDepartmentId;
             $domainStore->unsetRelation('ownerUser');
+            $domainStore->unsetRelation('ownerOperationDepartment');
             $this->setLastOperator($domainStore, $context['user']);
             $domainStore->save();
             $this->syncDepartmentAccess($domainStore, $departmentAccess['department_ids']);
             $this->history->recordUpdated($domainStore, $before, $domainStore->historySnapshot(), $context['user']);
             if ($ownerTimelineChangeRequested) {
                 $newOwner = $ownerUserId === null ? null : AdminUser::query()->findOrFail($ownerUserId);
-                $this->ownerTimeline->assign($domainStore, $newOwner, $ownerEffectiveAt, $context['user']);
+                $operationDepartment = $ownerOperationDepartmentId === null ? null : Department::query()->findOrFail($ownerOperationDepartmentId);
+                $this->ownerTimeline->assign($domainStore, $newOwner, $operationDepartment, $ownerEffectiveAt, $context['user']);
             }
         });
 
@@ -1259,7 +1269,7 @@ class DomainStoreController extends Controller
 
         $ownerUserId = old('owner_user_id', $store?->owner_user_id);
         $ownerUserId = $ownerUserId === null || $ownerUserId === '' ? null : (int) $ownerUserId;
-        $operationDepartmentId = old('operation_department_id');
+        $operationDepartmentId = old('operation_department_id', $store?->owner_operation_department_id);
         $operationDepartmentId = $operationDepartmentId === null || $operationDepartmentId === ''
             ? null
             : (int) $operationDepartmentId;
@@ -1369,6 +1379,19 @@ class DomainStoreController extends Controller
         }
 
         return $ownerUserId;
+    }
+
+    private function ownerOperationDepartmentIdForRequest(Request $request, ?AssistantDomainStore $existingStore, ?int $ownerUserId): ?int
+    {
+        $value = $request->input('operation_department_id');
+
+        if ($value === null || $value === '') {
+            return $ownerUserId === null
+                ? null
+                : ($existingStore?->owner_operation_department_id === null ? null : (int) $existingStore->owner_operation_department_id);
+        }
+
+        return (int) $value;
     }
 
     /**
@@ -1579,6 +1602,7 @@ class DomainStoreController extends Controller
         }
 
         $ownerUserId = null;
+        $operationDepartment = null;
 
         if (!$clear) {
             $selectedDepartmentId = (int) $validated['operation_department_id'];
@@ -1598,24 +1622,28 @@ class DomainStoreController extends Controller
                     'owner_user_id' => __('assistant.domain_stores.validation.invalid_owner_user'),
                 ]);
             }
+
+            $operationDepartment = Department::query()->findOrFail($selectedDepartmentId);
         }
 
         $effectiveAt = $this->ownerEffectiveAt($request);
         $updated = DB::connection(config('admin.database.connection') ?: config('database.default'))
-            ->transaction(function () use ($stores, $ownerUserId, $context, $effectiveAt): int {
+            ->transaction(function () use ($stores, $ownerUserId, $operationDepartment, $context, $effectiveAt): int {
                 $count = 0;
 
                 foreach ($stores as $store) {
                     $ownerUnchanged = ($store->owner_user_id === null ? null : (int) $store->owner_user_id) === $ownerUserId;
+                    $operationDepartmentUnchanged = ($store->owner_operation_department_id === null ? null : (int) $store->owner_operation_department_id)
+                        === ($operationDepartment === null ? null : (int) $operationDepartment->getKey());
 
-                    if ($ownerUnchanged) {
+                    if ($ownerUnchanged && $operationDepartmentUnchanged) {
                         continue;
                     }
 
                     $before = $store->historySnapshot();
                     $this->ownerTimeline->ensureBaseline($store, $context['user']);
                     $newOwner = $ownerUserId === null ? null : AdminUser::query()->findOrFail($ownerUserId);
-                    $this->ownerTimeline->assign($store, $newOwner, $effectiveAt, $context['user']);
+                    $this->ownerTimeline->assign($store, $newOwner, $operationDepartment, $effectiveAt, $context['user']);
                     $this->setLastOperator($store, $context['user']);
                     $store->save();
                     $this->history->recordUpdated($store, $before, $store->historySnapshot(), $context['user']);
