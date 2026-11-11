@@ -18,6 +18,7 @@ use Encore\Admin\Layout\Content;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class DepartmentController extends Controller
@@ -90,6 +91,87 @@ class DepartmentController extends Controller
         admin_success('部门绑定', '业务部门与助理部门的绑定关系已保存。');
 
         return redirect(admin_url('organization/departments/bindings'));
+    }
+
+    public function members(Department $department, Request $request, Content $content): Content
+    {
+        $this->authorizeDepartmentManagement($department);
+        $department->load(['children', 'departmentMembers.departments']);
+        $actor = $this->administrator();
+        $filterDepartmentIds = $actor->isAdministrator()
+            ? Department::business()->pluck('id')->map(fn ($id): int => (int) $id)
+            : $this->authorization->managedDepartmentIds($actor);
+        $memberDepartmentOptions = Department::business()
+            ->whereIn('id', $filterDepartmentIds)
+            ->where('id', '!=', $department->getKey())
+            ->orderByRaw('CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END')
+            ->orderBy('sort')
+            ->orderBy('name')
+            ->get(['id', 'parent_id', 'name']);
+        $memberFilters = $request->validate([
+            'search' => ['nullable', 'string', 'max:100'],
+            'member_department_id' => ['nullable', 'integer', Rule::in($memberDepartmentOptions->pluck('id')->all())],
+        ]);
+        $search = trim((string) ($memberFilters['search'] ?? ''));
+        $selectedMemberDepartmentId = (int) ($memberFilters['member_department_id'] ?? 0);
+        $userModel = config('admin.database.users_model');
+        $candidateUsers = $userModel::query()
+            ->with('departments')
+            ->where('status', AdminUser::STATUS_ACTIVE)
+            ->whereDoesntHave('roles', fn ($query) => $query->whereKey($department->getKey()))
+            ->whereDoesntHave('roles', fn ($query) => $query->where('slug', Department::SYSTEM_SLUG))
+            ->when($search !== '', function ($query) use ($search): void {
+                $query->where(fn ($nested) => $nested->where('name', 'like', '%'.$search.'%')
+                    ->orWhere('username', 'like', '%'.$search.'%'));
+            })
+            ->when($selectedMemberDepartmentId > 0, function ($query) use ($selectedMemberDepartmentId): void {
+                $query->whereHas('departments', fn ($departments) => $departments->whereKey($selectedMemberDepartmentId));
+            })
+            ->orderBy('name')->orderBy('username')->paginate(20)->withQueryString();
+
+        return $content
+            ->title('部门成员')
+            ->description($department->name)
+            ->body(view('admin.organization.departments.members', [
+                'department' => $department,
+                'members' => $department->departmentMembers->sortBy(fn (AdminUser $user) => $user->name ?: $user->username)->values(),
+                'candidateUsers' => $candidateUsers,
+                'search' => $search,
+                'memberDepartmentOptions' => $memberDepartmentOptions,
+                'selectedMemberDepartmentId' => $selectedMemberDepartmentId,
+                'positions' => $this->organization->positionOptions(),
+                'canAddMembers' => $department->children->isEmpty(),
+            ])->render());
+    }
+
+    public function addMember(Department $department, Request $request): RedirectResponse
+    {
+        $this->authorizeDepartmentManagement($department);
+        abort_if($department->children()->exists(), 422, '一级部门存在下级部门，请将人员添加到对应的末级部门。');
+        $userModel = config('admin.database.users_model');
+        $validated = $request->validate([
+            'user_id' => ['required', 'integer', Rule::exists((new $userModel())->getTable(), 'id')],
+        ]);
+        /** @var AdminUser $account */
+        $account = $userModel::query()->findOrFail((int) $validated['user_id']);
+        abort_if($account->isAdministrator(), 422, '系统管理员不能添加到业务部门。');
+
+        $managedIds = $this->administrator()->isAdministrator()
+            ? Department::business()->pluck('id')->map(fn ($id) => (int) $id)
+            : $this->authorization->managedDepartmentIds($this->administrator());
+        $memberships = $this->organization->membershipsForAccount($account)
+            ->filter(fn ($membership) => $managedIds->contains((int) $membership->department_id))
+            ->map(fn ($membership): array => [
+                'department_id' => (int) $membership->department_id,
+                'position' => (string) $membership->position,
+            ])->values();
+        if (! $memberships->contains(fn (array $membership) => $membership['department_id'] === (int) $department->getKey())) {
+            $memberships->push(['department_id' => (int) $department->getKey(), 'position' => Department::POSITION_MEMBER]);
+        }
+        $this->organization->syncAccountMemberships($account, $memberships->all(), $this->administrator());
+        admin_success('部门成员', '人员已添加到当前部门。');
+
+        return redirect(admin_url('organization/departments/'.$department->getKey().'/members'));
     }
 
     private function bindableBusinessDepartments()
@@ -292,7 +374,9 @@ class DepartmentController extends Controller
                 $statistics[] = '<span class="organization-capacity-item"><span>'.e(__('organization.departments.member')).'</span><strong>'.e((string) $memberCount).'</strong></span>';
             }
 
-            return '<div class="organization-capacity-summary">'.implode('', $statistics).'</div>';
+            $url = admin_url('organization/departments/'.$this->getKey().'/members');
+
+            return '<a href="'.e($url).'" class="organization-capacity-link" style="display:inline-block;color:inherit;text-decoration:none" title="查看部门成员"><div class="organization-capacity-summary">'.implode('', $statistics).'</div></a>';
         });
         if ($isSystemAdministrator) {
             $grid->column('authorized_pages', __('organization.departments.authorized_pages'))->display(function (): string {
