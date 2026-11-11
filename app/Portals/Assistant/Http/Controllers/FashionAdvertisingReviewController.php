@@ -75,7 +75,10 @@ class FashionAdvertisingReviewController extends Controller
         $status = in_array($request->input('status'), ['pending', 'approved', 'rejected', 'deleted'], true) ? (string) $request->input('status') : '';
         $from = $this->date($request->input('from'));
         $to = $this->date($request->input('to'));
-        $departmentId = max(0, (int) $request->input('department_id'));
+        $departmentIds = collect($request->input('department_ids', []))
+            ->push($request->input('department_id'))
+            ->map(fn ($id): int => max(0, (int) $id))
+            ->filter()->unique()->values();
         $submitterId = max(0, (int) $request->input('submitter_id'));
         $media = trim((string) $request->input('media'));
         $accountNumber = trim((string) $request->input('account_number'));
@@ -85,7 +88,7 @@ class FashionAdvertisingReviewController extends Controller
             ->when(in_array($status, ['pending', 'approved', 'rejected'], true), fn ($query) => $query->whereNull('deleted_at')->where('status', $status))
             ->when($from, fn ($query) => $query->whereDate('report_date', '>=', $from))
             ->when($to, fn ($query) => $query->whereDate('report_date', '<=', $to))
-            ->when($departmentId > 0, fn ($query) => $query->whereHas('submitter.departments', fn ($departmentQuery) => $departmentQuery->whereKey($departmentId)))
+            ->when($departmentIds->isNotEmpty(), fn ($query) => $query->whereHas('submitter.departments', fn ($departmentQuery) => $departmentQuery->whereKey($departmentIds->all())))
             ->when($submitterId > 0, fn ($query) => $query->where('submitter_id', $submitterId))
             ->when($media !== '', fn ($query) => $query->whereHas('adSpendEntries', fn ($entryQuery) => $entryQuery->where('media', 'like', '%'.$media.'%')))
             ->when($accountNumber !== '', fn ($query) => $query->whereHas('adSpendEntries', fn ($entryQuery) => $entryQuery->where('account_number', 'like', '%'.$accountNumber.'%')))
@@ -101,11 +104,15 @@ class FashionAdvertisingReviewController extends Controller
             return $context;
         }
 
+        $departmentIds = collect($request->input('department_ids', []))
+            ->push($request->input('department_id'))
+            ->map(fn ($id): int => max(0, (int) $id))
+            ->filter()->unique()->values()->all();
         $filters = [
             'status' => in_array($request->input('status'), ['pending', 'approved', 'rejected', 'deleted'], true) ? (string) $request->input('status') : '',
             'from' => $this->date($request->input('from')),
             'to' => $this->date($request->input('to')),
-            'department_id' => max(0, (int) $request->input('department_id')),
+            'department_ids' => $departmentIds,
             'submitter_id' => max(0, (int) $request->input('submitter_id')),
             'media' => trim((string) $request->input('media')),
             'account_number' => trim((string) $request->input('account_number')),
@@ -131,7 +138,7 @@ class FashionAdvertisingReviewController extends Controller
             ->when(in_array($filters['status'], ['pending', 'approved', 'rejected'], true), fn ($query) => $query->whereNull('deleted_at')->where('status', $filters['status']))
             ->when($filters['from'], fn ($query) => $query->whereDate('report_date', '>=', $filters['from']))
             ->when($filters['to'], fn ($query) => $query->whereDate('report_date', '<=', $filters['to']))
-            ->when($filters['department_id'] > 0, fn ($query) => $query->whereHas('submitter.departments', fn ($departmentQuery) => $departmentQuery->whereKey($filters['department_id'])))
+            ->when($filters['department_ids'] !== [], fn ($query) => $query->whereHas('submitter.departments', fn ($departmentQuery) => $departmentQuery->whereKey($filters['department_ids'])))
             ->when($filters['submitter_id'] > 0, fn ($query) => $query->where('submitter_id', $filters['submitter_id']))
             ->when($filters['media'] !== '', fn ($query) => $query->whereHas('adSpendEntries', fn ($entryQuery) => $entryQuery
                 ->where('media', 'like', '%'.$filters['media'].'%')))
