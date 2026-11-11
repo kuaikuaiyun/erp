@@ -273,6 +273,8 @@ Route::get('/operation-dashboard/applovin-spends/screenshots/{screenshot}', [App
 Route::get('/assistant/advertising-spend-summary', [AdvertisingSpendSummaryController::class, 'index'])->name('assistant.advertising-spend-summary.index');
 Route::get('/assistant/advertising-spend-analysis', [AdvertisingSpendAnalysisController::class, 'index'])->name('assistant.advertising-spend-analysis.index');
 Route::get('/assistant/fashion-advertising-reviews', [FashionAdvertisingReviewController::class, 'index'])->name('assistant.fashion-advertising-reviews.index');
+Route::get('/assistant/fashion-advertising-reviews/import-template', [FashionAdvertisingReviewController::class, 'importTemplate'])->name('assistant.fashion-advertising-reviews.import-template');
+Route::post('/assistant/fashion-advertising-reviews/import', [FashionAdvertisingReviewController::class, 'import'])->name('assistant.fashion-advertising-reviews.import');
 Route::post('/assistant/fashion-advertising-reviews/bulk-review', [FashionAdvertisingReviewController::class, 'bulkReview'])->name('assistant.fashion-advertising-reviews.bulk-review');
 Route::get('/assistant/fashion-advertising-reviews/{report}', [FashionAdvertisingReviewController::class, 'show'])->withTrashed()->whereNumber('report')->name('assistant.fashion-advertising-reviews.show');
 Route::get('/assistant/fashion-advertising-reviews/{report}/edit', [FashionAdvertisingReviewController::class, 'edit'])->whereNumber('report')->name('assistant.fashion-advertising-reviews.edit');
