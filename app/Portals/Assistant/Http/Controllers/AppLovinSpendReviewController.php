@@ -45,7 +45,12 @@ class AppLovinSpendReviewController extends Controller
         $visibleIds = $isDashboard
             ? $this->storeOwners->operationDepartments()->pluck('id')->map(fn ($id) => (int) $id)->all()
             : $this->storeOwners->visibleOperationDepartmentIds($context['user']);
-        $filters = $request->validate(['operator' => ['nullable', 'string', 'max:100'], 'department_id' => ['nullable', 'integer', Rule::in($visibleIds)], 'over_threshold' => ['nullable', 'in:1']]);
+        $filters = $request->validate([
+            'operator' => ['nullable', 'string', 'max:100'],
+            'department_id' => ['nullable', 'integer', Rule::in($visibleIds)],
+            'over_threshold' => ['nullable', 'in:1'],
+            'account_number' => ['nullable', 'string', 'max:191'],
+        ]);
         $query = OperationReport::query()->where('status', OperationReport::STATUS_APPROVED);
         if (! $isDashboard && ! $context['user']->isAdministrator()) {
             $visibleIds === [] ? $query->whereRaw('1=0') : $query->whereIn('operation_department_id', $visibleIds);
@@ -131,13 +136,20 @@ class AppLovinSpendReviewController extends Controller
         if (($filters['over_threshold'] ?? '') === '1') {
             $accounts = $accounts->where('total', '>=', 5000)->values();
         }
+        $accountNumber = trim((string) ($filters['account_number'] ?? ''));
+        if ($accountNumber !== '') {
+            $accounts = $accounts->filter(fn (array $account): bool => str_contains(
+                mb_strtolower((string) ($account['account_number'] ?? '')),
+                mb_strtolower($accountNumber)
+            ))->values();
+        }
         $page = max(1, (int) $request->query('page', 1));
         $accounts = new LengthAwarePaginator($accounts->forPage($page, 20)->values(), $accounts->count(), 20, $page, ['path' => $request->url(), 'query' => $request->query()]);
         $departmentOptions = $this->storeOwners->operationDepartments()->whereIn('id', $visibleIds)->values();
 
         return view('portals.assistant.daily-submissions.applovin-spend', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
-            'operator' => $filters['operator'] ?? '', 'selectedDepartmentId' => $filters['department_id'] ?? null, 'overThreshold' => $filters['over_threshold'] ?? '', 'departmentOptions' => $departmentOptions, 'accounts' => $accounts, 'threshold' => 5000,
+            'operator' => $filters['operator'] ?? '', 'selectedDepartmentId' => $filters['department_id'] ?? null, 'overThreshold' => $filters['over_threshold'] ?? '', 'accountNumber' => $accountNumber, 'departmentOptions' => $departmentOptions, 'accounts' => $accounts, 'threshold' => 5000,
             'appLovinIndexUrl' => $isDashboard ? route('operation-dashboard.applovin-spends.index') : route('assistant.applovin-spends.index'),
             'appLovinScreenshotRoute' => $isDashboard ? 'operation-dashboard.applovin-spends.screenshot' : 'assistant.applovin-spends.screenshot',
             'stores' => $stores,
