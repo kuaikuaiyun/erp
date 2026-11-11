@@ -91,7 +91,7 @@
             </tbody></table></div>
             <div class="op-actions"><button type="button" class="btn btn-default btn-sm" id="add-ad"><i class="fa fa-plus"></i> 添加广告账户</button></div></fieldset>
             <div class="op-actions" style="margin-top:10px">
-                @if($editingReport)<button class="btn btn-primary" type="submit"><i class="fa fa-save"></i> 保存并重新提交审核</button><a class="btn btn-default" href="{{ route('operation.reports.show',$editingReport) }}">取消编辑</a>@elseif(!$report)<button class="btn btn-primary" type="submit"><i class="fa fa-paper-plane"></i> 提交审核</button>@else<a class="btn btn-info" href="{{ route('operation.reports.show',$report) }}"><i class="fa fa-eye"></i> 查看已提交报表</a><span class="text-muted">当天报表已提交，填报内容不会在当前页面回填。</span>@endif
+                @if($editingReport)<button class="btn btn-primary" type="submit"><i class="fa fa-save"></i> 保存并重新提交审核</button><a class="btn btn-default" href="{{ route('operation.reports.show',$editingReport) }}">取消编辑</a>@elseif(!$report)<button class="btn btn-primary" type="submit"><i class="fa fa-paper-plane"></i> 提交审核</button>@else<button class="btn btn-primary" type="submit"><i class="fa fa-plus-circle"></i> 补充提交审核</button><a class="btn btn-info" href="{{ route('operation.reports.show',$report) }}"><i class="fa fa-eye"></i> 查看已提交报表</a><span class="text-muted">可以补充当天遗漏的媒体或账户；重复的代理、媒体和账户编号不能再次提交。</span>@endif
             </div></div>
         </div>
     </form>
@@ -105,10 +105,10 @@
                 <div class="ad-import-steps">
                     <div class="ad-import-step"><strong><span>1</span>填写模板</strong>每行填写日期、运营人员和广告数据</div>
                     <div class="ad-import-step"><strong><span>2</span>放入截图</strong>把截图粘贴到同一行最后一列</div>
-                    <div class="ad-import-step"><strong><span>3</span>导入提审</strong>按人员和日期分组提交审核</div>
+                    <div class="ad-import-step"><strong><span>3</span>导入提审</strong>按人员和日期新增或补充并提交审核</div>
                 </div>
                 <label class="ad-import-drop"><i class="fa fa-file-excel-o"></i><strong>选择填写完成的 Excel 文件</strong><div class="text-muted">支持 XLSX、XLS、CSV，不限制导入记录条数</div><input type="file" name="import_file" accept=".xlsx,.xls,.csv" required></label>
-                <div class="ad-import-tip"><i class="fa fa-info-circle"></i> 一个文件可以同时导入不同运营人员、不同提报日期的数据。每行必须填写日期和运营人员，并在最后一列放置一张截图。</div>
+                <div class="ad-import-tip"><i class="fa fa-info-circle"></i> 一个文件可以同时导入不同运营人员、不同提报日期的数据。同一天允许补充遗漏的媒体或账户；代理、媒体和账户编号均相同的记录会被拒绝。每行必须填写日期和运营人员，并在最后一列放置一张截图。</div>
                 <div class="ad-import-progress" id="ad-import-progress"><div class="ad-import-progress-head"><strong id="ad-import-progress-text">准备导入</strong><span id="ad-import-progress-percent">0%</span></div><div class="progress"><div class="progress-bar progress-bar-success progress-bar-striped active" id="ad-import-progress-bar" role="progressbar" style="width:0%"></div></div><div class="ad-import-result" id="ad-import-result">正在准备上传文件……</div></div>
             </div>
             <div class="modal-footer"><a class="btn btn-default pull-left" href="{{ route('operation.advertising-reports.import-template') }}"><i class="fa fa-download"></i> 下载模版</a><button type="button" class="btn btn-default" data-dismiss="modal">取消</button><button type="submit" class="btn btn-success" id="ad-import-submit"><i class="fa fa-upload"></i> 导入并提交审核</button></div>

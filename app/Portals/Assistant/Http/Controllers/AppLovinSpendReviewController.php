@@ -47,31 +47,25 @@ class AppLovinSpendReviewController extends Controller
             : $this->storeOwners->visibleOperationDepartmentIds($context['user']);
         $filters = $request->validate([
             'operator' => ['nullable', 'string', 'max:100'],
-            'department_id' => ['nullable', 'integer', Rule::in($visibleIds)],
+            'department_ids' => ['nullable', 'array'],
+            'department_ids.*' => ['integer', 'distinct', Rule::in($visibleIds)],
             'over_threshold' => ['nullable', 'in:1'],
             'account_number' => ['nullable', 'string', 'max:191'],
         ]);
+        $selectedDepartmentIds = collect($filters['department_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values()->all();
         $query = OperationReport::query()->where('status', OperationReport::STATUS_APPROVED);
         if (! $isDashboard && ! $context['user']->isAdministrator()) {
             $visibleIds === [] ? $query->whereRaw('1=0') : $query->whereIn('operation_department_id', $visibleIds);
         }
-        $query->when($filters['department_id'] ?? null, fn ($q, $id) => $q->where('operation_department_id', $id));
         $query->when($filters['operator'] ?? null, fn ($q, $name) => $q->where('operator_name', 'like', '%'.$name.'%'));
         $rows = $query->orderBy('report_date')->get()->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])
             ->filter(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? ''))) === 'applovin')
-            ->map(fn (array $row) => [...$row, 'report_id' => $report->getKey(), 'date' => $report->report_date->format('Y-m-d'), 'operator_user_id' => (int) $report->operator_user_id, 'operator_name' => $report->operator_name, 'department' => $report->operation_department_name]));
+            ->map(fn (array $row) => [...$row, 'report_id' => $report->getKey(), 'date' => $report->report_date->format('Y-m-d'), 'operator_user_id' => (int) $report->operator_user_id, 'operator_name' => $report->operator_name, 'department_id' => (int) $report->operation_department_id, 'department' => $report->operation_department_name]));
         $fashionQuery = FashionAdvertisingReport::query()
             ->where('status', FashionAdvertisingReport::STATUS_APPROVED)
             ->with(['adSpendEntries', 'submitter.departments']);
         $fashionQuery->when($filters['operator'] ?? null, fn ($q, $name) => $q->where('submitter_name', 'like', '%'.$name.'%'));
         $fashionRows = $fashionQuery->get()
-            ->filter(function (FashionAdvertisingReport $report) use ($filters): bool {
-                if (empty($filters['department_id'])) {
-                    return true;
-                }
-
-                return $report->submitter?->departments?->contains('id', (int) $filters['department_id']) ?? false;
-            })
             ->flatMap(function (FashionAdvertisingReport $report) {
                 $department = $report->submitter?->departments?->first(fn ($item) => (bool) ($item->pivot->is_primary ?? false))
                     ?: $report->submitter?->departments?->first();
@@ -88,11 +82,19 @@ class AppLovinSpendReviewController extends Controller
                         'date' => $report->report_date->format('Y-m-d'),
                         'operator_user_id' => (int) $report->submitter_id,
                         'operator_name' => (string) $report->submitter_name,
+                        'department_id' => (int) ($department?->id ?: 0),
                         'department' => (string) ($department?->name ?: '服装运营部门'),
                         'source' => 'fashion',
                     ]);
             });
         $rows = $rows->concat($fashionRows);
+        if (! $isDashboard && ! $context['user']->isAdministrator()) {
+            $rows = $rows->whereIn('department_id', $visibleIds)->values();
+        }
+        $availableDepartmentIds = $rows->pluck('department_id')->map(fn ($id) => (int) $id)->filter()->unique()->values();
+        if ($selectedDepartmentIds !== []) {
+            $rows = $rows->whereIn('department_id', $selectedDepartmentIds)->values();
+        }
         $accounts = $rows->groupBy(function (array $row): string {
             $normalizedAgency = mb_strtolower(trim((string) ($row['agency'] ?? '')));
             $normalizedNumber = preg_replace('/[\s\p{Cf}]+/u', '', mb_strtolower((string) ($row['account_number'] ?? ''))) ?? '';
@@ -158,11 +160,11 @@ class AppLovinSpendReviewController extends Controller
         }
         $page = max(1, (int) $request->query('page', 1));
         $accounts = new LengthAwarePaginator($accounts->forPage($page, 20)->values(), $accounts->count(), 20, $page, ['path' => $request->url(), 'query' => $request->query()]);
-        $departmentOptions = $this->storeOwners->operationDepartments()->whereIn('id', $visibleIds)->values();
+        $departmentOptions = $this->storeOwners->operationDepartments()->whereIn('id', $availableDepartmentIds)->values();
 
         return view('portals.assistant.daily-submissions.applovin-spend', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
-            'operator' => $filters['operator'] ?? '', 'selectedDepartmentId' => $filters['department_id'] ?? null, 'overThreshold' => $filters['over_threshold'] ?? '', 'accountNumber' => $accountNumber, 'departmentOptions' => $departmentOptions, 'accounts' => $accounts, 'threshold' => 5000,
+            'operator' => $filters['operator'] ?? '', 'selectedDepartmentIds' => $selectedDepartmentIds, 'overThreshold' => $filters['over_threshold'] ?? '', 'accountNumber' => $accountNumber, 'departmentOptions' => $departmentOptions, 'accounts' => $accounts, 'threshold' => 5000,
             'appLovinIndexUrl' => $isDashboard ? route('operation-dashboard.applovin-spends.index') : route('assistant.applovin-spends.index'),
             'appLovinScreenshotRoute' => $isDashboard ? 'operation-dashboard.applovin-spends.screenshot' : 'assistant.applovin-spends.screenshot',
             'stores' => $stores,

@@ -38,7 +38,7 @@ class FashionAppLovinPerformanceReportController extends Controller
             ->whereIn('status', [FashionAdvertisingReport::STATUS_APPROVED, FashionAdvertisingReport::STATUS_REJECTED])
             ->pluck('submitter_id')->filter()->unique()->values();
         $departments = Department::business()->whereHas('departmentMembers', fn ($query) => $query->whereIn('admin_users.id', $submitterIds))
-            ->orderBy('sort')->orderBy('name')->get(['id', 'name']);
+            ->orderBy('sort')->orderBy('name')->get(['id', 'parent_id', 'name']);
         $departmentIds = $departments->pluck('id')->map(fn ($id) => (int) $id)->all();
         $timezoneOptions = $this->timezoneOptions();
         $filters = $request->validate([
@@ -46,7 +46,8 @@ class FashionAppLovinPerformanceReportController extends Controller
             'date_to' => ['nullable', 'date_format:Y-m-d'],
             'date_range' => ['nullable', Rule::in(['custom', 'yesterday', 'last_3', 'last_7', 'last_15', 'last_30', 'last_60', 'last_90', 'last_6_months', 'last_year'])],
             'timezone' => ['nullable', Rule::in(array_keys($timezoneOptions))],
-            'department_id' => ['nullable', 'integer', Rule::in($departmentIds)],
+            'department_ids' => ['nullable', 'array'],
+            'department_ids.*' => ['integer', 'distinct', Rule::in($departmentIds)],
             'operator' => ['nullable', 'string', 'max:100'],
             'store_domain' => ['nullable', 'string', 'max:191'],
             'gift_status' => ['nullable', Rule::in(['yes', 'no'])],
@@ -74,11 +75,12 @@ class FashionAppLovinPerformanceReportController extends Controller
             [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
         }
 
+        $selectedDepartmentIds = collect($filters['department_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values()->all();
         $reportQuery = FashionAdvertisingReport::query()
             ->whereIn('status', [FashionAdvertisingReport::STATUS_APPROVED, FashionAdvertisingReport::STATUS_REJECTED])
             ->whereHas('adSpendEntries', fn ($query) => $query->whereRaw("LOWER(TRIM(media)) = 'applovin'"))
             ->with(['adSpendEntries' => fn ($query) => $query->whereRaw("LOWER(TRIM(media)) = 'applovin'"), 'submitter.departments'])
-            ->when($filters['department_id'] ?? null, fn ($query, $id) => $query->whereHas('submitter.departments', fn ($department) => $department->whereKey($id)))
+            ->when($selectedDepartmentIds !== [], fn ($query) => $query->whereHas('submitter.departments', fn ($department) => $department->whereKey($selectedDepartmentIds)))
             ->when($filters['operator'] ?? null, fn ($query, $name) => $query->where('submitter_name', 'like', '%'.$name.'%'));
         $accountSpendReports = (clone $reportQuery)->get();
         $reports = (clone $reportQuery)->whereBetween('report_date', [$dateFrom, $dateTo])->orderBy('report_date')->get();
@@ -230,7 +232,7 @@ class FashionAppLovinPerformanceReportController extends Controller
             'dateRange' => $dateRange, 'selectedStoreDomain' => $filters['store_domain'] ?? '', 'domainOptions' => $domainOptions,
             'selectedGiftStatus' => $filters['gift_status'] ?? '', 'selectedConsumptionRange' => $filters['consumption_range'] ?? '',
             'consumptionCustom' => $filters['consumption_custom'] ?? '', 'consumptionCustomMax' => $filters['consumption_custom_max'] ?? '',
-            'selectedDepartmentId' => $filters['department_id'] ?? null, 'departmentOptions' => $departments,
+            'selectedDepartmentIds' => $selectedDepartmentIds, 'departmentOptions' => $departments,
         ]);
     }
 

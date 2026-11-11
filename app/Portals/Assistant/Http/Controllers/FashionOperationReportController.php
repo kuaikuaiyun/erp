@@ -32,22 +32,16 @@ class FashionOperationReportController extends Controller
         $this->authorization->assertAssistantPortal($context['portal']);
 
         $timezones = $this->timezoneOptions();
-        if ($request->has('department') && ! is_array($request->input('department'))) {
-            $request->merge(['department' => [(string) $request->input('department')]]);
-        }
         $validated = $request->validate([
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
             'timezone' => ['nullable', Rule::in(array_keys($timezones))],
-            'department' => ['nullable', 'array'],
-            'department.*' => ['string', 'max:100'],
+            'department_ids' => ['nullable', 'array'],
+            'department_ids.*' => ['integer', 'distinct'],
             'operator' => ['nullable', 'string', 'max:100'],
             'sort_by' => ['nullable', Rule::in(['order_count', 'revenue'])],
             'sort_order' => ['nullable', Rule::in(['asc', 'desc'])],
         ]);
-        $validated['department'] = $request->has('department')
-            ? collect($validated['department'] ?? [])->map(fn ($name) => trim((string) $name))->filter()->unique()->values()->all()
-            : ['服装运营部门'];
         $timezone = (string) ($validated['timezone'] ?? '-08:00');
         $month = now($timezone);
         $dateFrom = $validated['date_from'] ?? $month->copy()->startOfMonth()->toDateString();
@@ -111,6 +105,9 @@ class FashionOperationReportController extends Controller
             ->with('adSpendEntries')->get()->groupBy('submitter_id');
 
         $fashionRootDepartmentId = (int) ($fashionDepartment?->id ?? 0);
+        $selectedDepartmentIds = $request->has('department_ids')
+            ? collect($validated['department_ids'] ?? [])->map(fn ($id) => (int) $id)->intersect($fashionDepartmentIds)->unique()->values()->all()
+            : array_values(array_filter([$fashionRootDepartmentId]));
         $allRows = $storesByOperator->map(function ($operatorStores, int $operatorId) use ($operators, $orderMetrics, $reports, $dateTo, $fashionDepartmentIds, $fashionRootDepartmentId): ?array {
             $operator = $operators->get($operatorId);
             if (! $operator) {
@@ -163,12 +160,11 @@ class FashionOperationReportController extends Controller
                 ->values()
             : collect();
 
-        $rows = $allRows->filter(function (array $row) use ($validated, $fashionDepartmentIds): bool {
-            $departments = collect($validated['department'] ?? [])->map(fn ($name) => trim((string) $name))->filter();
+        $rows = $allRows->filter(function (array $row) use ($validated, $selectedDepartmentIds, $fashionDepartmentIds, $fashionRootDepartmentId): bool {
             $operator = trim((string) ($validated['operator'] ?? ''));
-            $matchesDepartment = $departments->isEmpty()
-                || ($departments->contains('服装运营部门') && $fashionDepartmentIds->contains((int) $row['department_id']))
-                || $departments->contains(fn ($department) => mb_strtolower($row['department']) === mb_strtolower($department));
+            $matchesDepartment = $selectedDepartmentIds === []
+                || (in_array($fashionRootDepartmentId, $selectedDepartmentIds, true) && $fashionDepartmentIds->contains((int) $row['department_id']))
+                || in_array((int) $row['department_id'], $selectedDepartmentIds, true);
 
             return $matchesDepartment
                 && ($operator === '' || str_contains(mb_strtolower($row['operator']), mb_strtolower($operator)));
@@ -193,7 +189,7 @@ class FashionOperationReportController extends Controller
             ...$context, 'rows' => $rows, 'timezoneOptions' => $timezones,
             'departmentOptions' => $departmentOptions,
             'filters' => [...$validated, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'timezone' => $timezone,
-                'sort_by' => $sortBy, 'sort_order' => $sortOrder],
+                'department_ids' => $selectedDepartmentIds, 'sort_by' => $sortBy, 'sort_order' => $sortOrder],
             'summary' => ['people' => $rows->count(), 'stores' => $rows->sum(fn ($row) => count($row['stores'])),
                 'orders' => $rows->sum('order_count'), 'revenue' => $summaryRevenue, 'ad_spend' => $summarySpend,
                 'aov' => $rows->sum('order_count') > 0 ? $summaryRevenue / $rows->sum('order_count') : null,
