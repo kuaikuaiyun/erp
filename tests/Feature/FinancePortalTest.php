@@ -1300,6 +1300,27 @@ class FinancePortalTest extends TestCase
             ->assertViewHas('rows', fn ($rows) => $rows->getCollection()->pluck('reference')->all() === ['ORDER-'.$second->id]);
     }
 
+    public function test_conflux_filtered_queries_paginate_across_record_batches(): void
+    {
+        (require database_path('migrations/2026_11_11_000001_split_finance_credit_settlement_menu.php'))->up();
+        $orders = [];
+        for ($index = 1; $index <= 512; $index++) {
+            $orders[] = [
+                '_card_channel' => 'ye', '平台订单号' => 'BATCH-'.$index,
+                '创建时间' => '2026-11-06 02:00:00', '交易币种' => 'USD',
+                '交易金额' => '10', '支付状态' => 'SUCCESS',
+            ];
+        }
+        $this->workbooks->importRecords('xuzong2-details', $orders, 'Batch shop', 'UTC', 1);
+
+        // Every record is waiting for a statement, including the records in the second batch.
+        $this->get('/finance/reports/ye-settlement?card_match=waiting&page=51')->assertOk()
+            ->assertViewHas('rows', fn ($rows) => $rows->total() === 512
+                && $rows->getCollection()->pluck('reference')->all() === array_map(
+                    fn ($index) => 'BATCH-'.$index, range(12, 3)
+                ));
+    }
+
     public function test_credit_account_group_can_own_multiple_merchants_and_scope_settlement(): void
     {
         foreach (['郑州单包' => '叶总', '西安单包' => '叶总', '另一单包' => '其他主体'] as $name => $group) {
@@ -4289,13 +4310,17 @@ class FinancePortalTest extends TestCase
         });
         $this->workbooks->importRecords('paypal-orders', [2 => $this->recordRow()], 'API account', 'UTC', 1);
         $record = FinanceRecord::sole();
+        $record->update(['domain' => 'saved.example.test']);
         DB::table('logistics_orders')->insert(['id' => 1, 'transaction_id' => $record->reference, 'tongtu_order_number' => 'ERP-API', 'source_shop_domain' => 'api.example.test']);
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
         $this->assertSame('ERP-API', $service->logisticsMetadata(collect([$record]), 'paypal')[$record->id]['erp_order']);
         $url = '/finance/records/paypal-orders?'.http_build_query(['order_fields' => ['tongtu_order_number' => 'ERP-API']]);
         $this->get($url)->assertOk()->assertViewHas('records', fn ($rows) => $rows->total() === 1);
+        $domainUrl = '/finance/records/paypal-orders?order_fields%5Bdomain%5D=';
+        $this->get($domainUrl.'api.example.test')->assertOk()->assertViewHas('records', fn ($rows) => $rows->total() === 1);
+        $this->get($domainUrl.'saved.example.test')->assertOk()->assertViewHas('records', fn ($rows) => $rows->total() === 0);
         $exportUrl = '/finance/records/paypal-orders/export?'.http_build_query([
-            'order_fields' => ['tongtu_order_number' => 'ERP-API'], 'export_scope' => 'filtered', 'export_format' => 'xlsx',
+            'order_fields' => ['domain' => 'api.example.test'], 'export_scope' => 'filtered', 'export_format' => 'xlsx',
         ]);
         $exported = $this->readDownload($this->get($exportUrl)->assertOk()->streamedContent())->toArray();
         $this->assertCount(2, $exported);
@@ -4312,6 +4337,8 @@ class FinancePortalTest extends TestCase
         DB::table('logistics_orders')->insert(['id' => 2, 'transaction_id' => $payload['帳單號碼'], 'tongtu_order_number' => 'OTHER', 'source_shop_domain' => 'other.example.test']);
         $this->assertSame([], $service->logisticsMetadata(collect([$record]), 'paypal'));
         $this->get($url)->assertOk()->assertViewHas('records', fn ($rows) => $rows->total() === 0);
+        $this->get($domainUrl.'api.example.test')->assertOk()->assertViewHas('records', fn ($rows) => $rows->total() === 0);
+        $this->get($domainUrl.'saved.example.test')->assertOk()->assertViewHas('records', fn ($rows) => $rows->total() === 1);
         $this->artisan('finance:audit-data')->assertExitCode(0);
         $this->assertDatabaseCount('finance_records', 1);
         $this->assertDatabaseCount('logistics_orders', 2);
@@ -4599,10 +4626,11 @@ class FinancePortalTest extends TestCase
         $document = new \DOMDocument();
         @$document->loadHTML($response->getContent());
         $xpath = new \DOMXPath($document);
-        $this->assertSame(2, $xpath->query('//*[@role="tab"]')->length);
+        $this->assertSame(3, $xpath->query('//*[@role="tab"]')->length);
         $this->assertSame(1, $xpath->query('//*[@id="finance-tab-credit-card" and @aria-selected="true"]')->length);
         $this->assertSame(1, $xpath->query('//*[@id="finance-panel-paypal" and @hidden]')->length);
         $this->assertSame(1, $xpath->query('//*[@id="finance-panel-credit-card" and not(@hidden)]')->length);
+        $this->assertSame(1, $xpath->query('//*[@id="finance-panel-conflux" and @hidden]')->length);
         $this->assertSame(1, $xpath->query('//*[@data-paypal-summary and not(ancestor::*[@role="tabpanel"])]')->length);
         $this->assertSame(1, $xpath->query('//*[@data-credit-summary and not(ancestor::*[@role="tabpanel"])]')->length);
         $this->assertSame(0, $xpath->query('//*[@role="tabpanel"]//*[@data-paypal-summary or @data-credit-summary]')->length);
