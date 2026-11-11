@@ -32,18 +32,22 @@ class FashionOperationReportController extends Controller
         $this->authorization->assertAssistantPortal($context['portal']);
 
         $timezones = $this->timezoneOptions();
+        if ($request->has('department') && ! is_array($request->input('department'))) {
+            $request->merge(['department' => [(string) $request->input('department')]]);
+        }
         $validated = $request->validate([
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
             'timezone' => ['nullable', Rule::in(array_keys($timezones))],
-            'department' => ['nullable', 'string', 'max:100'],
+            'department' => ['nullable', 'array'],
+            'department.*' => ['string', 'max:100'],
             'operator' => ['nullable', 'string', 'max:100'],
             'sort_by' => ['nullable', Rule::in(['order_count', 'revenue'])],
             'sort_order' => ['nullable', Rule::in(['asc', 'desc'])],
         ]);
         $validated['department'] = $request->has('department')
-            ? trim((string) ($validated['department'] ?? ''))
-            : '服装运营部门';
+            ? collect($validated['department'] ?? [])->map(fn ($name) => trim((string) $name))->filter()->unique()->values()->all()
+            : ['服装运营部门'];
         $timezone = (string) ($validated['timezone'] ?? '-08:00');
         $month = now($timezone);
         $dateFrom = $validated['date_from'] ?? $month->copy()->startOfMonth()->toDateString();
@@ -162,12 +166,11 @@ class FashionOperationReportController extends Controller
             : $departmentRows->whereIn('id', $boundDepartmentIds)->sortBy('name')->values();
 
         $rows = $allRows->filter(function (array $row) use ($validated, $fashionDepartmentIds): bool {
-            $department = trim((string) ($validated['department'] ?? ''));
+            $departments = collect($validated['department'] ?? [])->map(fn ($name) => trim((string) $name))->filter();
             $operator = trim((string) ($validated['operator'] ?? ''));
-            $matchesDepartment = $department === ''
-                || ($department === '服装运营部门'
-                    ? $fashionDepartmentIds->contains((int) $row['department_id'])
-                    : str_contains(mb_strtolower($row['department']), mb_strtolower($department)));
+            $matchesDepartment = $departments->isEmpty()
+                || ($departments->contains('服装运营部门') && $fashionDepartmentIds->contains((int) $row['department_id']))
+                || $departments->contains(fn ($department) => mb_strtolower($row['department']) === mb_strtolower($department));
 
             return $matchesDepartment
                 && ($operator === '' || str_contains(mb_strtolower($row['operator']), mb_strtolower($operator)));
