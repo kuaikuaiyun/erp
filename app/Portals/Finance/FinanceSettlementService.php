@@ -230,6 +230,7 @@ class FinanceSettlementService
     public function rowBatches(string $channel, array $filters): iterable
     {
         $context = $this->rowContext($channel);
+        $context['conflux_report_fees'] = new \ArrayObject;
         $query = $this->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id');
         foreach ($query->lazy(500)->chunk(500) as $records) {
             yield $this->rows($channel, $filters, new \Illuminate\Database\Eloquent\Collection($records->all()), $context);
@@ -257,7 +258,7 @@ class FinanceSettlementService
         $conflux = $channel === 'credit_card' && ($filters['card_channel'] ?? null) === 'ye'
             ? app(FinanceConfluxSettlement::class) : null;
         $ledger = $conflux?->entriesFor($records, $accountModels->keyBy('activity_account'));
-        $confluxFees = $conflux && $ledger->isNotEmpty() ? $conflux->feesFor($ledger) : [];
+        $confluxFees = $conflux && $ledger->isNotEmpty() ? $conflux->feesFor($ledger, $context['conflux_report_fees'] ?? null) : [];
         $usdRates = app(FinanceCreditUsdRates::class);
         $confluxOrders = $conflux ? $records : ($channel === 'credit_card' && empty($filters['card_channel']) && empty($filters['summary_only'])
             ? $records->filter(fn ($record) => ($record->payload['_card_channel'] ?? null) === 'ye') : collect());
@@ -350,8 +351,10 @@ class FinanceSettlementService
             $failed = in_array(strtoupper((string) $record->status), self::TRANSACTION_STATUS_CODES['failed'], true);
             $row['success'] = $success;
             $row['failed'] = $failed;
+            $isConflux = $conflux !== null || ($p['_card_channel'] ?? null) === 'ye';
             // The source-dollar column is distinct from the manually reconciled settlement.
             $row['source_settlement_usd'] = $channel === 'credit_card' && strtoupper(trim((string) $record->status)) === 'SUCCESS'
+                && (! $isConflux || $record->currency === 'USD')
                 ? $row['gross'] : null;
             $row['status'] = match (strtoupper((string) $record->status)) {
                 'S', 'SUCCESS', 'COMPLETED' => '已完成', 'P', 'PENDING' => '待处理',
@@ -375,6 +378,9 @@ class FinanceSettlementService
             $domain = strtolower(trim((string) ($saved['_edited_fields']['domain'] ?? $row['domain'])));
             $orderStore = $storesById->get($order->assistant_domain_store_id ?? null);
             $group = $orderStore?->domain === $domain ? $orderStore : $domains->get($domain);
+            if ($group === null && $isConflux && str_starts_with($domain, 'www.')) {
+                $group = $domains->get(substr($domain, 4));
+            }
             $ownership = $this->resolveOrderOwner($order, $orderStore, $group, $p);
             $ownerName = $ownership['ownerName'];
             $team = $ownership['team'];
@@ -432,6 +438,9 @@ class FinanceSettlementService
                 $row['card_layout'] = FinanceCreditSettlementLayout::values(
                     $filters['card_channel'], $row, $p, $manual,
                 );
+                if ($conflux !== null) {
+                    $row['card_layout']['operation_region'] = self::operationRegion((string) $row['team']);
+                }
                 if (isset($tradeDate)) {
                     $row['card_layout']['source_settlement_usd'] = $row['source_settlement_usd'];
                     $row['card_layout']['calendar_date'] = $tradeDate;
@@ -442,7 +451,8 @@ class FinanceSettlementService
                     $existingFees = array_intersect_key(array_filter($row['card_layout'], fn ($value) => filled($value)),
                         array_flip(['hold', 'fee', 'per_order_fee', 'refund_fee', 'chargeback_fee', 'ethoca_fee', 'rdr_fee']));
                     $row['card_layout'] = array_replace($row['card_layout'], array_diff_key($details['values'], $manual, $existingFees), [
-                        'ledger_dates' => $details['dates'], 'ledger_exceptions' => implode('；', $details['reasons']),
+                        'ledger_dates' => $details['dates'], 'ledger_settlement_type' => $details['settlement_types'],
+                        'ledger_exception_dates' => $details['exception_dates'], 'ledger_exceptions' => implode('；', $details['reasons']),
                     ]);
                     if ($details['reasons'] === [] && isset($details['values']['settlement_currency'])
                         && ! filled($row['card_layout']['payable'] ?? null)) {
@@ -452,6 +462,17 @@ class FinanceSettlementService
                     }
                 }
                 if ($conflux) {
+                    $layout = $conflux->storeFees($row['card_layout'], $ledger->get($record->id, collect()), $manual);
+                    $builder = trim((string) ($group->site_builder ?? ''));
+                    $platform = strcasecmp($builder, 'xshoppy') === 0 ? '索引' : ($builder === '' ? null : $builder);
+                    foreach (['store_platform' => $platform, 'project' => $group->project ?? null] as $field => $value) {
+                        if (! array_key_exists($field, $manual) && blank($layout[$field] ?? null)) {
+                            $layout[$field] = $value;
+                        }
+                    }
+                    $entries = $ledger->get($record->id, collect());
+                    $row['ledger_wallet'] = $conflux->isWallet($layout['website_name'] ?? null, $entries);
+                    $row['card_layout'] = array_replace($layout, $conflux->exceptionColumns($layout, $entries, $row['ledger_wallet']));
                     $row['ledger_matched'] = $ledger->has($record->id);
                     $row['card_layout']['ledger_status'] = $row['ledger_matched'] ? '已匹配账单' : '待匹配账单';
                 }
@@ -464,10 +485,10 @@ class FinanceSettlementService
                 } else {
                     $layout = $row['card_layout'] ?? [];
                     $layoutCurrency = strtoupper(trim((string) ($layout['settlement_currency'] ?? '')));
-                    $channelAmount = ($layoutCurrency === '' || $layoutCurrency === 'USD')
+                    $channelAmount = ($layoutCurrency === 'USD' || (! $isConflux && $layoutCurrency === ''))
                         ? $this->number($layout['settlement'] ?? null) : null;
                     $row['shop_difference_usd'] = $this->shopDifference(
-                        $channelAmount ?? $row['source_settlement_usd'] ?? $row['settlement'], $shopPaid,
+                        $channelAmount ?? $row['source_settlement_usd'] ?? ($isConflux ? null : $row['settlement']), $shopPaid,
                     );
                     if (isset($row['card_layout'])) {
                         $row['card_layout']['shop_difference_usd'] = $row['shop_difference_usd'];
@@ -480,7 +501,13 @@ class FinanceSettlementService
             && (! filled($filters['subscription'] ?? null) || $row['subscription'] === self::subscriptionLabel($filters['subscription']))
             && (! filled($filters['domain'] ?? null) || str_contains((string) $row['domain'], $filters['domain']))
             && (empty($filters['card_exceptions']) || filled($row['card_layout']['ledger_exceptions'] ?? null))
+            && (empty($filters['card_wallet']) || ! empty($row['ledger_wallet']))
             && (empty($filters['card_match']) || ($row['ledger_matched'] ?? false) === ($filters['card_match'] === 'matched'))
+            && match ($filters['ledger_settlement_type'] ?? '') {
+                '' => true,
+                'waiting' => ! ($row['ledger_matched'] ?? false),
+                default => in_array($filters['ledger_settlement_type'], explode('、', $row['card_layout']['ledger_settlement_type'] ?? ''), true),
+            }
             && $this->matches(array_replace($row, $row['card_layout'] ?? []), $filters['conditions'] ?? []))->values();
     }
 
