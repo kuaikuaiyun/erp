@@ -39,11 +39,13 @@ class FinanceWorkbookService
     }
 
     /** Read the same domain, usage name and team fields maintained by the assistant portal. */
-    public function domainGroups(bool $withAssignedOwner = false): \Illuminate\Support\Collection
+    public function domainGroups(bool $withAssignedOwner = false, ?int $perPage = null): \Illuminate\Support\Collection|\Illuminate\Pagination\LengthAwarePaginator
     {
         $db = $this->database();
         if (! $db->getSchemaBuilder()->hasTable('assistant_domain_stores')) {
-            return $db->table('finance_domain_groups')->orderBy('domain')->get();
+            $groups = $db->table('finance_domain_groups')->orderBy('domain')->orderBy('id');
+
+            return $perPage === null ? $groups->get() : $groups->paginate($perPage)->withQueryString();
         }
 
         $columns = ['id', 'domain', 'user_name', 'team'];
@@ -58,13 +60,15 @@ class FinanceWorkbookService
             $columns[] = 'shop_status';
         }
 
-        $stores = $db->table('assistant_domain_stores')->select($columns)
-            ->whereNotNull('domain')->where('domain', '!=', '')->orderBy('domain')->get();
+        $query = $db->table('assistant_domain_stores')->select($columns)
+            ->whereNotNull('domain')->where('domain', '!=', '')->orderBy('domain')->orderBy('id');
+        $page = $perPage === null ? null : $query->paginate($perPage)->withQueryString();
+        $stores = $page?->getCollection() ?? $query->get();
         $ownerIds = $stores->pluck('owner_user_id')->filter()->unique();
         $owners = $ownerIds->isEmpty() ? collect() : \App\Models\AdminUser::query()
             ->whereKey($ownerIds->all())->get(['id', 'name', 'username'])->keyBy('id');
 
-        return $stores->map(function ($store) use ($owners, $withAssignedOwner) {
+        $groups = $stores->map(function ($store) use ($owners, $withAssignedOwner) {
                 $assignedOwner = $owners->get($store->owner_user_id ?? null);
                 return (object) [
                     'id' => $store->id,
@@ -77,6 +81,8 @@ class FinanceWorkbookService
                     'shop_status' => $store->shop_status ?? null,
                 ];
             });
+
+        return $page ? $page->setCollection($groups) : $groups;
     }
 
     /** Keep source keys for historical lookups, but show one row per logical type. */

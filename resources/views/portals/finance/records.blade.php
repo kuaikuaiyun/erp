@@ -360,6 +360,9 @@ document.querySelectorAll('.finance-export-columns').forEach(function(panel){
         if(Array.isArray(saved)&&saved.includes('33')&&!saved.includes('46')&&!saved.includes('47')){
             saved=saved.concat(['46','47']);
         }
+        if(Array.isArray(saved)&&saved.includes('54')&&!saved.includes('53')){
+            saved=saved.concat('53');
+        }
         @endif
         if(Array.isArray(saved)&&saved.some(function(value){return checks.some(function(input){return input.value===value;});})){
             checks.forEach(function(input){input.checked=saved.includes(input.value);});

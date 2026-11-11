@@ -2,11 +2,24 @@
 
 namespace App\Portals\Finance;
 
+use App\Models\FinanceRecord;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\ValidationException;
 
 class FinanceXuzongOrderImport
 {
+    private const LEGACY_ORDER_SHEET = '徐总1数据';
+
+    private const STATEMENT_AMOUNTS = [
+        '交易本金' => '结算金额', '退款本金' => '退款金额', '拒付本金' => '拒付金额',
+        '拒付处理费' => '拒付费用', '保证金扣除' => '保证金', '保证金返还' => '保证金返还',
+        '拒付返还' => '拒付返还', '交易处理费' => '单笔费用', '交易手续费' => '交易手续费',
+        '退款处理费' => '退款费用', '争议处理费' => '争议处理费',
+        'Ethoca' => '拒付预警ethoca', 'RDR' => 'RDR费用', 'CDRN' => 'CDRN费用',
+    ];
+
+    private const STATEMENT_COLUMNS = ['平台订单号', '商户订单号', '结算币种', '适用汇率', '折算后结算贡献', '结算时间'];
+
     private const REFERENCES = [
         '交易流水号' => 'bill_number',
         '平台订单号' => 'payment_gateway_order_id',
@@ -39,9 +52,13 @@ class FinanceXuzongOrderImport
                     }
                 });
                 $book = $reader->load($file->getPathname());
+                $legacySheet = $book->getSheetByName(self::LEGACY_ORDER_SHEET);
                 $headers = array_map(fn ($header) => FinanceCatalog::simplified(trim((string) $header)),
-                    $book->getActiveSheet()->toArray()[0] ?? []);
+                    ($legacySheet ?? $book->getActiveSheet())->rangeToArray('A1:CV1')[0]);
                 $book->disconnectWorksheets();
+                if ($legacySheet !== null && ! array_diff(['商户订单号', '创建时间', '交易币种', '交易金额', '支付状态'], $headers)) {
+                    return 'legacy_orders';
+                }
             } catch (\PhpOffice\PhpSpreadsheet\Exception | \ValueError) {
                 throw ValidationException::withMessages(['file' => __('finance.errors.file')]);
             }
@@ -50,12 +67,194 @@ class FinanceXuzongOrderImport
         return match (true) {
             in_array('退款单号', $headers, true) => 'refunds',
             in_array('结算批次号', $headers, true) => 'batches',
-            in_array('平台返回code', $headers, true) || in_array('平台返回message', $headers, true) => 'orders',
+            ! array_diff(['平台订单号', '折算后结算贡献', '适用汇率'], $headers) => 'official_statement',
+            array_intersect([FinanceXuzongCreditReport::PLATFORM_CODE, FinanceXuzongCreditReport::PLATFORM_MESSAGE,
+                FinanceXuzongCreditReport::PLATFORM_RESULT], $headers) => 'orders',
             array_intersect(['平台订单号', '交易流水号', '交易 ID', '商户订单号'], $headers)
                 && array_intersect(['支付状态', '状态'], $headers)
                 && ! array_intersect(['结算金额', '保证金', '资金归属', ...array_keys(FinanceXuzongCreditMatches::STATEMENT_HEADERS)], $headers) => 'orders',
             default => null,
         };
+    }
+
+    public function importOfficialStatement(UploadedFile $file, ?string $account): array
+    {
+        $account ??= 'SHANGYUN-v2';
+        $headers = [...self::STATEMENT_COLUMNS, ...array_keys(self::STATEMENT_AMOUNTS)];
+        $batches = in_array(strtolower($file->getClientOriginalExtension()), ['csv', 'tsv', 'txt'], true)
+            ? $this->csvBatches($file, $headers)
+            : [$this->workbooks->read($file, $headers)];
+        $groups = [];
+        $total = 0;
+        $numbers = app(FinanceSettlementService::class);
+        foreach ($batches as $rows) {
+            foreach ($rows as $line => $row) {
+                $reference = trim((string) ($row['平台订单号'] ?? ''));
+                $merchant = trim((string) ($row['商户订单号'] ?? ''));
+                $rate = $numbers->number($row['适用汇率'] ?? null);
+                $net = $numbers->number($row['折算后结算贡献'] ?? null);
+                $time = trim((string) ($row['结算时间'] ?? ''));
+                if ($reference === '' || $merchant === '' || ($row['结算币种'] ?? '') !== 'USD'
+                    || $rate === null || bccomp($rate, '0', 8) <= 0 || $net === null
+                    || ! preg_match('/^\d{4}-(?:0[1-9]|1[0-2])-\d{2}\s\d{2}:\d{2}:\d{2}$/D', $time)) {
+                    throw ValidationException::withMessages(['file' => '第'.$line.'行的订单号、结算币种、汇率、净额或结算时间无效。']);
+                }
+                $group = $groups[$reference] ?? ['merchant' => $merchant, 'amounts' => [], 'times' => [], 'lines' => 0, 'line' => $line];
+                if ($group['merchant'] !== $merchant) {
+                    throw ValidationException::withMessages(['file' => '第'.$line.'行同一平台订单号对应多个商户订单号。']);
+                }
+                foreach (self::STATEMENT_AMOUNTS as $source => $field) {
+                    $value = $numbers->number($row[$source] ?? null);
+                    if ($value === null) {
+                        throw ValidationException::withMessages(['file' => '第'.$line.'行的「'.$source.'」金额无效。']);
+                    }
+                    $sign = in_array($field, ['结算金额', '保证金返还', '拒付返还'], true) ? '1' : '-1';
+                    $value = bcmul(bcmul($value, $rate, 12), $sign, 8);
+                    $group['amounts'][$field] = bcadd($group['amounts'][$field] ?? '0', $value, 8);
+                }
+                $group['amounts']['应结算'] = bcadd($group['amounts']['应结算'] ?? '0', $net, 2);
+                $group['times'][$time] = true;
+                $group['lines']++;
+                $groups[$reference] = $group;
+                $total++;
+            }
+        }
+        if ($groups === []) {
+            throw ValidationException::withMessages(['file' => '账单中没有可导入的流水。']);
+        }
+
+        $hash = hash_file('sha256', $file->getPathname());
+        $saved = $this->workbooks->database()->transaction(function () use ($groups, $account, $hash): int {
+            $accounting = app(FinanceAccountingService::class);
+            $saved = 0;
+            foreach (array_chunk($groups, 300, true) as $batch) {
+                $orders = FinanceRecord::query()->where('dataset', FinanceLogisticsCreditOrders::IMPORTED_DATASET)
+                    ->where('account', $account)->whereIn('reference', array_keys($batch))
+                    ->lockForUpdate()->get()->groupBy('reference');
+                foreach ($batch as $reference => $group) {
+                    $matches = $orders->get($reference, collect())->filter(fn ($order) =>
+                        trim((string) ($order->payload['商户订单号'] ?? '')) === $group['merchant']);
+                    if ($matches->count() !== 1) {
+                        throw ValidationException::withMessages(['file' => '第'.$group['line'].'行无法匹配唯一订单，请先导入对应账户的逐笔订单。']);
+                    }
+                    $order = $matches->sole();
+                    $payload = $order->payload;
+                    $existing = $payload['_xuzong_statement_import'] ?? null;
+                    if (($existing && ($existing['sha256'] ?? null) !== $hash)
+                        || (! $existing && (filled($payload['结算金额'] ?? null) || filled($payload['应结算'] ?? null)))) {
+                        throw ValidationException::withMessages(['file' => '第'.$group['line'].'行已有其他结算数据，请核对重叠流水。']);
+                    }
+                    $times = array_keys($group['times']);
+                    $next = [...$payload, ...$group['amounts'], '结算币种' => 'USD',
+                        '_xuzong_statement_import' => [
+                            'sha256' => $hash, 'lines' => $group['lines'], 'settlement_times' => $times,
+                            'prior_refund' => $existing['prior_refund'] ?? array_intersect_key($payload, array_flip(['退款金额', '退款费用'])),
+                        ]];
+                    if ($next == $payload) {
+                        continue;
+                    }
+                    $accounting->guardUnlocked($order->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'));
+                    foreach ($times as $time) {
+                        $accounting->guardUnlocked(substr($time, 0, 7));
+                    }
+                    $order->update(['payload' => $next]);
+                    $saved++;
+                }
+            }
+
+            return $saved;
+        });
+
+        return ['total' => $total, 'matched' => count($groups), 'saved' => $saved];
+    }
+
+    public function importRefunds(UploadedFile $file, ?string $account): array
+    {
+        $account ??= 'SHANGYUN-v2';
+        $headers = ['退款单号', '平台订单号', '商户订单号', '退款金额', '退款币种', '退款处理费', '退款完成时间', '状态'];
+        $batches = in_array(strtolower($file->getClientOriginalExtension()), ['csv', 'tsv', 'txt'], true)
+            ? $this->csvBatches($file, $headers) : [$this->workbooks->read($file, $headers)];
+        $numbers = app(FinanceSettlementService::class);
+        $refunds = [];
+        $total = 0;
+        foreach ($batches as $rows) {
+            foreach ($rows as $line => $row) {
+                $total++;
+                if (strtoupper((string) ($row['状态'] ?? '')) !== 'SUCCESS') {
+                    continue;
+                }
+                $id = (string) ($row['退款单号'] ?? '');
+                $reference = (string) ($row['平台订单号'] ?? '');
+                $merchant = (string) ($row['商户订单号'] ?? '');
+                $amount = $numbers->number($row['退款金额'] ?? null);
+                $fee = $numbers->number($row['退款处理费'] ?? null);
+                $currency = (string) ($row['退款币种'] ?? '');
+                if ($id === '' || $reference === '' || $merchant === '' || $currency !== 'USD'
+                    || $amount === null || $fee === null || bccomp($amount, '0', 8) < 0 || bccomp($fee, '0', 8) < 0) {
+                    throw ValidationException::withMessages(['file' => '第'.$line.'行的退款单号、订单号、币种或金额无效。']);
+                }
+                $refund = ['refund_id' => $id, 'currency' => $currency, 'completed_at' => $row['退款完成时间'] ?? '',
+                    'amount' => bcadd($amount, '0', 8), 'fee' => bcadd($fee, '0', 8)];
+                $entry = compact('reference', 'merchant', 'refund');
+                if (isset($refunds[$id]) && $refunds[$id] !== $entry) {
+                    throw ValidationException::withMessages(['file' => '第'.$line.'行与同退款单号的记录不一致。']);
+                }
+                $refunds[$id] = $entry;
+            }
+        }
+        $groups = collect($refunds)->groupBy('reference');
+        $saved = $this->workbooks->database()->transaction(function () use ($groups, $account): int {
+            $accounting = app(FinanceAccountingService::class);
+            $saved = 0;
+            foreach ($groups->chunk(300) as $batch) {
+                $orders = FinanceRecord::query()->where('dataset', FinanceLogisticsCreditOrders::IMPORTED_DATASET)
+                    ->where('account', $account)->whereIn('reference', $batch->keys()->all())
+                    ->lockForUpdate()->get()->groupBy('reference');
+                foreach ($batch as $reference => $entries) {
+                    $matches = $orders->get($reference, collect())->filter(fn ($order) => $entries->every(fn ($entry) =>
+                        (string) ($order->payload['商户订单号'] ?? '') === $entry['merchant']));
+                    if ($matches->count() !== 1) {
+                        throw ValidationException::withMessages(['file' => '退款订单 '.$reference.' 无法唯一匹配，请先导入对应账户的逐笔订单。']);
+                    }
+                    $order = $matches->sole();
+                    $payload = $order->payload;
+                    $stored = $payload['_xuzong_refunds'] ?? [];
+                    $legacy = $payload['_xuzong_refund_import']['refund_id'] ?? null;
+                    foreach ($entries as $entry) {
+                        $refund = $entry['refund'];
+                        $id = $refund['refund_id'];
+                        if (isset($stored[$id]) && $stored[$id] != $refund) {
+                            throw ValidationException::withMessages(['file' => '退款单 '.$id.' 与已导入的记录不一致。']);
+                        }
+                        $stored[$id] = $refund;
+                    }
+                    if ($legacy !== null && ! isset($stored[$legacy])) {
+                        throw ValidationException::withMessages(['file' => '订单 '.$reference.' 请同时提供先前导入的退款记录。']);
+                    }
+                    if ($stored == ($payload['_xuzong_refunds'] ?? [])) {
+                        continue;
+                    }
+                    $accounting->guardUnlocked($order->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'));
+                    $amount = $fee = '0';
+                    foreach ($stored as $refund) {
+                        $amount = bcadd($amount, $refund['amount'], 8);
+                        $fee = bcadd($fee, $refund['fee'], 8);
+                    }
+                    $payload['_xuzong_refunds'] = $stored;
+                    if (empty($payload['_xuzong_statement_import']) && blank($payload['结算币种'] ?? null)
+                        && blank($payload['结算金额'] ?? null) && blank($payload['应结算'] ?? null)) {
+                        $payload['退款金额'] = $amount;
+                        $payload['退款费用'] = $fee;
+                    }
+                    $order->update(['payload' => $payload]);
+                    $saved++;
+                }
+            }
+
+            return $saved;
+        });
+
+        return ['total' => $total, 'matched' => $groups->count(), 'saved' => $saved];
     }
 
     public static function accountForRow(array $row): ?string
@@ -77,18 +276,23 @@ class FinanceXuzongOrderImport
         };
     }
 
-    public function import(UploadedFile $file, ?string $account, string $timezone, int $actor): array
+    public function import(UploadedFile $file, ?string $account, string $timezone, int $actor, bool $legacySheet = false): array
     {
-        $headers = [...array_values(FinanceXuzongCreditReport::headers()), ...array_keys(FinanceXuzongCreditReport::DISPLAY_HEADERS), '是否 3D', '交易单号', '交易时间',
-            'Source（域名）', '发行国', '邮箱', ...FinanceXuzongCreditMatches::EXCHANGE_HEADERS];
+        $headers = [...array_values(FinanceXuzongCreditReport::headers()), ...array_keys(FinanceXuzongCreditReport::DISPLAY_HEADERS),
+            FinanceXuzongCreditReport::PLATFORM_CODE, FinanceXuzongCreditReport::PLATFORM_MESSAGE, '是否 3D', '交易单号', '交易时间',
+            'Source（域名）', '发行国', '邮箱', '退款', ...FinanceXuzongCreditMatches::EXCHANGE_HEADERS];
         $batches = in_array(strtolower($file->getClientOriginalExtension()), ['csv', 'tsv', 'txt'], true)
             ? $this->csvBatches($file, $headers)
-            : array_chunk($this->workbooks->read($file, $headers, optionalHeaders: $headers), 300, true);
+            : array_chunk($this->workbooks->read($file, $headers, $legacySheet ? self::LEGACY_ORDER_SHEET : null, $headers), 300, true);
 
         $total = $matched = $saved = 0;
         foreach ($batches as $rows) {
             $total += count($rows);
             foreach ($rows as &$row) {
+                if (filled($row['原始支付状态'] ?? null)) {
+                    $row['支付状态'] = $row['原始支付状态'];
+                }
+                unset($row['原始支付状态']);
                 foreach (FinanceXuzongCreditReport::DISPLAY_HEADERS as $field => $label) {
                     $row[$field] = filled($row[$field] ?? null) ? $row[$field] : ($row[$label] ?? '');
                     unset($row[$label]);

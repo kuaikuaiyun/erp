@@ -85,6 +85,10 @@
 @php
     $hasOperations = $orderView || $canManage;
     $operationClass = $orderView ? 'settlement-operation settlement-paypal-operation' : 'settlement-operation';
+    $cardPlatformOptions = \App\Portals\Finance\FinanceCreditSettlementLayout::CHANNELS;
+    if ($fixedCardChannel) {
+        $cardPlatformOptions = [$fixedCardChannel => $cardPlatformOptions[$fixedCardChannel]];
+    }
     $cardChannel = $channel === 'credit_card' ? ($filters['card_channel'] ?? null) : null;
 @endphp
 <div class="settlement-page">
@@ -104,8 +108,8 @@
 <div>
     <label for="settlement-card-channel">支付平台</label>
     <select id="settlement-card-channel" name="card_channel" class="form-control" onchange="this.form.elements.account.value='';this.form.requestSubmit()">
-        <option value="">全部平台</option>
-        @foreach(\App\Portals\Finance\FinanceCreditSettlementLayout::CHANNELS as $key => $label)
+        @unless($fixedCardChannel)<option value="">全部平台</option>@endunless
+        @foreach($cardPlatformOptions as $key => $label)
         <option value="{{ $key }}" @selected(($filters['card_channel'] ?? '') === $key)>{{ $label }}</option>
         @endforeach
     </select>
@@ -235,8 +239,8 @@
         @endforeach
     </select></div>
     <div><label for="credit-import-platform">支付平台</label><select id="credit-import-platform" name="card_channel" class="form-control">
-        <option value="">通用信用卡模板</option>
-        @foreach(\App\Portals\Finance\FinanceCreditSettlementLayout::CHANNELS as $key => $label)
+        @unless($fixedCardChannel)<option value="">通用信用卡模板</option>@endunless
+        @foreach($cardPlatformOptions as $key => $label)
             <option value="{{ $key }}" @selected(old('card_channel', $cardChannel) === $key)>{{ $label }}</option>
         @endforeach
     </select></div>
