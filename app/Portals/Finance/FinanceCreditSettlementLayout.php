@@ -8,6 +8,8 @@ use PhpOffice\PhpSpreadsheet\Shared\Date;
 
 class FinanceCreditSettlementLayout
 {
+    public const REPORT_CHANNELS = ['ye-settlement' => 'ye', 'worldpay-settlement' => 'worldpay'];
+
     public const CHANNELS = ['ye' => 'ConfluxAPI', 'worldpay' => 'Worldpay'];
 
     public const SHEETS = ['ye' => '叶总订单明细', 'worldpay' => 'worldpay单包'];

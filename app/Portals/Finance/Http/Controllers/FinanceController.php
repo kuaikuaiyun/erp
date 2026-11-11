@@ -358,7 +358,7 @@ class FinanceController extends Controller
             'created_by' => (int) $context['user']->getKey(), 'updated_by' => (int) $context['user']->getKey(),
         ]));
         if ($fromSettlement && $account->account_type === 'credit_card') {
-            return redirect()->route('finance.report', ['report' => 'credit-settlement',
+            return redirect()->route('finance.report', ['report' => array_search($account->card_platform, FinanceCreditSettlementLayout::REPORT_CHANNELS, true) ?: 'credit-settlement',
                 'card_channel' => $account->card_platform, 'card_group' => $account->card_group_id, 'account' => $account->activity_account])
                 ->with('success', __('finance.payment_accounts.created'));
         }
@@ -748,14 +748,32 @@ class FinanceController extends Controller
 
             return response()->json($values->map(fn ($value) => ['value' => (string) $value, 'label' => FinanceCatalog::simplified((string) $value)]));
         }
-        $query = $this->recordsQuery($dataset, $filters, $xuzongReport, lightweight: $xuzongReport);
-        $exportAccounts = (clone $query)->selectRaw('account, count(*) as total')->groupBy('account')->orderBy('account')->get();
+        $indexOnly = $dataset === 'xuzong2-orders' && ! array_filter(\Illuminate\Support\Arr::except(
+            $filters, ['timezone', 'per_page', 'export_format', 'transaction_scope']
+        ), fn ($value) => filled($value)) && ($filters['transaction_scope'] ?? 'all') === 'all';
+        $hydratePage = $xuzongReport || $indexOnly;
+        $query = $indexOnly
+            ? app(FinanceLogisticsCreditOrders::class)->query(xuzongReport: $xuzongReport, indexOnly: true)
+            : $this->recordsQuery($dataset, $filters, $xuzongReport, lightweight: $xuzongReport);
         $perPage = (int) ($filters['per_page'] ?? 10);
-        $records = $query->orderByDesc('occurred_at')->orderByDesc('id')
-            ->paginate($perPage, $xuzongReport ? ['id'] : ['*'], total: (int) $exportAccounts->sum('total'))->withQueryString();
-        if ($xuzongReport && $records->isNotEmpty()) {
+        if ($indexOnly && $xuzongReport && in_array($query->getConnection()->getDriverName(), ['mysql', 'mariadb'], true)) {
+            $orderIndex = Cache::remember($this->filterCacheKey('xuzong-credit:page-index'), 15, fn () => $query
+                ->orderByDesc('occurred_at')->orderByDesc('id')->toBase()->get(['id', 'account']));
+            $exportAccounts = $orderIndex->countBy('account')->sortKeys()
+                ->map(fn ($total, $account) => (object) ['account' => $account, 'total' => $total])->values();
+            $pageNumber = \Illuminate\Pagination\LengthAwarePaginator::resolveCurrentPage();
+            $records = new \Illuminate\Pagination\LengthAwarePaginator(
+                $orderIndex->forPage($pageNumber, $perPage)->values(), $orderIndex->count(), $perPage, $pageNumber,
+                ['path' => $request->url(), 'query' => $request->query()]
+            );
+        } else {
+            $exportAccounts = (clone $query)->selectRaw('account, count(*) as total')->groupBy('account')->orderBy('account')->get();
+            $records = $query->orderByDesc('occurred_at')->orderByDesc('id')
+                ->paginate($perPage, $hydratePage ? ['id'] : ['*'], total: (int) $exportAccounts->sum('total'))->withQueryString();
+        }
+        if ($hydratePage && $records->isNotEmpty()) {
             $ids = $records->pluck('id');
-            $page = app(FinanceLogisticsCreditOrders::class)->query(xuzongReport: true, ids: $ids->all())->get()->keyBy('id');
+            $page = app(FinanceLogisticsCreditOrders::class)->query(xuzongReport: $xuzongReport, ids: $ids->all())->get()->keyBy('id');
             $records->setCollection(new \Illuminate\Database\Eloquent\Collection(
                 $ids->map(fn ($id) => $page->get($id))->filter()->values()->all(),
             ));
@@ -904,17 +922,37 @@ class FinanceController extends Controller
         }
         $orderImport = app(\App\Portals\Finance\FinanceXuzongOrderImport::class);
         $fileType = $orderImport->fileType($data['file']);
-        if (in_array($fileType, ['refunds', 'batches'], true)) {
-            throw ValidationException::withMessages(['file' => $fileType === 'refunds'
-                ? '这份文件是退款明细，请选择逐笔交易文件导入订单。'
-                : '这份文件是结算批次汇总，请选择含逐笔订单号的交易文件。']);
+        if (in_array($fileType, ['official_statement', 'refunds'], true)) {
+            $refunds = $fileType === 'refunds';
+            try {
+                $result = $refunds
+                    ? $orderImport->importRefunds($data['file'], $reportAccount)
+                    : $orderImport->importOfficialStatement($data['file'], $reportAccount);
+            } catch (\App\Portals\Finance\FinanceRelayException $e) {
+                if ($e->reason !== 'period_locked') {
+                    throw $e;
+                }
+
+                throw ValidationException::withMessages(['file' => '文件涉及已关账月份，无法更新结算或退款记录。']);
+            }
+            if ($request->expectsJson()) {
+                return response()->json($result);
+            }
+
+            return redirect()->route('finance.reports.xuzong-credit')->with('success',
+                '已匹配 '.$result['matched'].' 笔订单，更新 '.$result['saved'].' 笔'.($refunds ? '退款' : '结算').'明细。');
         }
-        if (($data['import_kind'] ?? $fileType) === 'orders') {
+        if ($fileType === 'batches') {
+            throw ValidationException::withMessages(['file' => '这份文件是结算批次汇总，请选择含逐笔订单号的交易文件。']);
+        }
+        if (in_array($data['import_kind'] ?? $fileType, ['orders', 'legacy_orders'], true)) {
+            $legacySheet = $fileType === 'legacy_orders';
             $result = $this->workbooks->database()->transaction(fn () => $orderImport->import(
-                $data['file'], $reportAccount, $timezone, (int) $context['user']->getKey(),
+                $data['file'], $legacySheet ? 'SHANGYUN' : $reportAccount, $timezone, (int) $context['user']->getKey(), $legacySheet,
             ));
             Cache::forget($this->filterCacheKey('xuzong-credit:payment-currencies'));
             Cache::forget($this->filterCacheKey('xuzong-credit:order-options'));
+            Cache::forget($this->filterCacheKey('xuzong-credit:page-index'));
 
             if ($request->expectsJson()) {
                 return response()->json($result);
@@ -992,6 +1030,7 @@ class FinanceController extends Controller
         });
 
         Cache::forget($this->filterCacheKey('xuzong-credit:payment-currencies'));
+        Cache::forget($this->filterCacheKey('xuzong-credit:page-index'));
 
         if ($request->expectsJson()) {
             return response()->json(['total' => count($rows), 'saved' => $affected]);
@@ -1074,7 +1113,7 @@ class FinanceController extends Controller
                 $records = $orders->query(xuzongReport: true, ids: $batch->pluck('id')->all())->orderBy('id')->get();
 
                 return $report->rows($records, $filters['timezone'])->values()->map(fn ($values) =>
-                    array_map(fn ($header) => $values[$header] ?? '', $headers));
+                    array_map(fn ($header) => FinanceXuzongCreditReport::formatCell($header, $values[$header] ?? ''), $headers));
             });
 
             $filename = 'xuzong-credit-'.now()->format('Ymd-His');
@@ -1199,13 +1238,12 @@ class FinanceController extends Controller
         $data = $request->validate(['q' => 'nullable|string|max:191', 'category' => 'nullable|string|max:100', 'per_page' => ['nullable', 'integer', Rule::in([10, 20, 50, 100])]]);
         if ($kind === 'types') {
             $types = $this->workbooks->typeSettings();
-            $filtered = $types->filter(function ($row) use ($data): bool {
-                $category = $data['category'] ?? '';
+            $search = FinanceCatalog::simplified($data['q'] ?? '');
+            $category = $data['category'] ?? '';
+            $filtered = $types->filter(function ($row) use ($category, $search): bool {
                 if ($category === '__unclassified' ? filled($row->category) : ($category !== '' && $row->category !== $category)) {
                     return false;
                 }
-                $search = FinanceCatalog::simplified($data['q'] ?? '');
-
                 return $search === '' || mb_stripos(
                     \App\Portals\Finance\FinancePayPalEventTypes::label($row->raw_type).' '.implode(' ', $row->aliases).' '.FinanceCatalog::simplified($row->category ?? ''),
                     $search
@@ -1225,19 +1263,24 @@ class FinanceController extends Controller
             ]);
         }
         $search = FinanceCatalog::simplified($data['q'] ?? '');
-        $groups = $this->workbooks->domainGroups()->filter(fn ($row) => $search === '' || mb_stripos(
-            FinanceCatalog::simplified($row->domain.' '.$row->owner.' '.$row->team), $search
-        ) !== false)->values();
         $perPage = (int) ($data['per_page'] ?? 10);
-        $page = \Illuminate\Pagination\LengthAwarePaginator::resolveCurrentPage();
+        if ($search === '') {
+            $rows = $this->workbooks->domainGroups(perPage: $perPage);
+        } else {
+            $groups = $this->workbooks->domainGroups()->filter(fn ($row) => mb_stripos(
+                FinanceCatalog::simplified($row->domain.' '.$row->owner.' '.$row->team), $search
+            ) !== false)->values();
+            $page = \Illuminate\Pagination\LengthAwarePaginator::resolveCurrentPage();
+            $rows = new \Illuminate\Pagination\LengthAwarePaginator(
+                $groups->forPage($page, $perPage)->values(), $groups->count(), $perPage, $page,
+                ['path' => $request->url(), 'query' => $request->query()]
+            );
+        }
 
         return response()->view('portals.finance.settings', [
             ...$context, 'kind' => $kind, 'canManage' => false,
             'categoryOptions' => collect(),
-            'rows' => new \Illuminate\Pagination\LengthAwarePaginator(
-                $groups->forPage($page, $perPage)->values(), $groups->count(), $perPage, $page,
-                ['path' => $request->url(), 'query' => $request->query()]
-            ),
+            'rows' => $rows,
             'fields' => ['domain', 'owner', 'team'],
         ]);
     }
@@ -1419,7 +1462,7 @@ class FinanceController extends Controller
 
     public function report(Request $request, string $report): Response
     {
-        if (in_array($report, ['paypal-settlement', 'credit-settlement'], true)) {
+        if (in_array($report, ['paypal-settlement', 'credit-settlement', ...array_keys(FinanceCreditSettlementLayout::REPORT_CHANNELS)], true)) {
             return $this->settlement($request, $report);
         }
         if ($report === 'losses' || ($report === 'summary' && $request->query('view') !== 'transactions')) {
@@ -1449,21 +1492,8 @@ class FinanceController extends Controller
         $month = CarbonImmutable::parse($filters['month'].'-01', 'Asia/Shanghai');
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
         $summary = app(\App\Portals\Finance\FinanceTransactionSummary::class);
-        $rows = collect();
-        $channels = $tab === 'combined' ? ['paypal', 'credit_card'] : [$tab];
-        foreach ($channels as $channel) {
-            if (isset($filters['payment_account_id']) && (! $account || $account->account_type !== $channel)) {
-                continue;
-            }
-            $rows = $rows->concat($service->summaryRows($channel, [
-                'from' => $month->toDateString(), 'to' => $month->endOfMonth()->toDateString(),
-                'timezone' => 'Asia/Shanghai', 'account' => $account?->activity_account,
-                'team' => $filters['team'] ?? null, 'subscription' => $filters['subscription'] ?? null,
-                'logistics_costs' => true,
-            ], transactions: true));
-        }
-        $rows = $rows->filter(fn ($row) => empty($filters['currency']) || $row['currency'] === $filters['currency']);
         if ($request->has('suggestion_field')) {
+            $rows = $this->transactionSummaryRows($service, $tab, $filters, $month, $account);
             $suggestion = $request->validate([
                 'suggestion_field' => ['required', Rule::in(array_keys($service::CONDITION_FIELDS))],
                 'suggestion_q' => 'nullable|string|max:191',
@@ -1474,9 +1504,19 @@ class FinanceController extends Controller
                 ->unique()->sort()->take(20)->values()
                 ->map(fn ($value) => ['value' => (string) $value, 'label' => FinanceCatalog::simplified((string) $value)]));
         }
-        $rows = $rows->filter(fn ($row) => $service->matches($row, $filters['conditions'] ?? []));
         $columns = $summary->columns($tab);
-        $items = $summary->summarize($service->withLogisticsCosts($rows), $tab);
+        $scope = \Illuminate\Support\Arr::except($filters, ['page', 'per_page', 'download']);
+        ksort($scope);
+        $build = function () use ($service, $summary, $tab, $scope, $month, $account): array {
+            $rows = $this->transactionSummaryRows($service, $tab, $scope, $month, $account)
+                ->filter(fn ($row) => $service->matches($row, $scope['conditions'] ?? []));
+
+            return [$summary->summarize($service->withLogisticsCosts($rows), $tab), $service->subscriptionOptions($rows)];
+        };
+        [$items, $subscriptionOptions] = ! $request->boolean('download')
+            && in_array($this->workbooks->database()->getDriverName(), ['mysql', 'mariadb'], true)
+            ? Cache::remember($this->filterCacheKey('transaction-summary:'.hash('sha256', serialize([$tab, $scope]))), 15, $build)
+            : $build();
         if ($request->boolean('download')) {
             $export = \App\Portals\Finance\FinanceExportSelection::filter($request, $items)->map(fn ($row) => array_map(fn ($field) => $row[$field] ?? null, array_keys($columns)));
 
@@ -1509,12 +1549,30 @@ class FinanceController extends Controller
                 ->whereNotNull('currency')->distinct()->pluck('currency')
                 ->map(fn ($currency) => strtoupper(trim($currency)))
                 ->filter(fn ($currency) => preg_match('/^[A-Z]{3}$/D', $currency))->unique()->sort()->values(),
-            'subscriptionOptions' => $service->subscriptionOptions($rows),
+            'subscriptionOptions' => $subscriptionOptions,
             'conditionFields' => $service::CONDITION_FIELDS,
             'reportAccounts' => $accounts->filter(fn ($account) => $tab === 'combined' || $account->account_type === $tab),
             'reportTabUrls' => $this->reportTabUrls([...$filters, 'channel' => $tab]),
             'isLocked' => $this->workbooks->database()->table('finance_period_locks')->where('month', $filters['month'])->whereNotNull('report_snapshot')->exists(),
         ]);
+    }
+
+    private function transactionSummaryRows(FinanceSettlementService $service, string $tab, array $filters, CarbonImmutable $month, ?FinancePaymentAccount $account): \Illuminate\Support\Collection
+    {
+        $rows = collect();
+        $channels = $tab === 'combined' ? ['paypal', 'credit_card'] : [$tab];
+        foreach ($channels as $channel) {
+            if (isset($filters['payment_account_id']) && (! $account || $account->account_type !== $channel)) {
+                continue;
+            }
+            $rows = $rows->concat($service->summaryRows($channel, [
+                'from' => $month->toDateString(), 'to' => $month->endOfMonth()->toDateString(),
+                'timezone' => 'Asia/Shanghai', 'account' => $account?->activity_account,
+                'team' => $filters['team'] ?? null, 'subscription' => $filters['subscription'] ?? null,
+                'logistics_costs' => true,
+            ], transactions: true));
+        }
+        return $rows->filter(fn ($row) => empty($filters['currency']) || $row['currency'] === $filters['currency']);
     }
 
     private function settlementFilters(Request $request, array $conditionFields): array
@@ -1550,7 +1608,11 @@ class FinanceController extends Controller
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
         $conditionFields = $service->conditionFields($channel);
         $numericConditionFields = $service->numericConditionFields($channel);
+        $fixedCardChannel = FinanceCreditSettlementLayout::REPORT_CHANNELS[$report] ?? null;
         $filters = $this->settlementFilters($request, $conditionFields);
+        if ($fixedCardChannel !== null) {
+            $filters['card_channel'] = $fixedCardChannel;
+        }
         $cardLayout = $channel === 'credit_card' ? FinanceCreditSettlementLayout::columns($filters['card_channel'] ?? null) : [];
         if ($channel !== 'credit_card' || ($filters['card_channel'] ?? null) !== 'ye') {
             unset($filters['card_exceptions'], $filters['card_match']);
@@ -1665,16 +1727,22 @@ class FinanceController extends Controller
         $filterAccounts = $accounts;
         if ($cardLayout && $accounts->isNotEmpty()) {
             $platform = $filters['card_channel'];
-            $history = $service->query($channel, ['card_channel' => $platform])
-                ->whereIn('account', $accounts->pluck('activity_account'))->distinct()->pluck('account')->flip();
-            $filterAccounts = $accounts->filter(fn ($account) => FinanceCreditSettlementLayout::accountPlatform($account) === $platform
-                || $history->has($account->activity_account));
+            [$configured, $other] = $accounts->partition(
+                fn ($account) => FinanceCreditSettlementLayout::accountPlatform($account) === $platform
+            );
+            if ($other->isNotEmpty()) {
+                $history = $service->query($channel, ['card_channel' => $platform])
+                    ->whereIn('account', $other->pluck('activity_account'))->distinct()->pluck('account')->flip();
+                $filterAccounts = $accounts->filter(fn ($account) => $configured->contains($account)
+                    || $history->has($account->activity_account));
+            }
         }
         if (filled($filters['card_group'] ?? null)) {
             $filterAccounts = $filterAccounts->where('card_group_id', (int) $filters['card_group']);
         }
 
         return response()->view('portals.finance.settlement', [...$context, 'report' => $report, 'channel' => $channel, 'filters' => $filters,
+            'fixedCardChannel' => $fixedCardChannel,
             'rows' => $paginator, 'columns' => $columns, 'exportColumns' => $exportColumns,
             'moneyFields' => $service->moneyFields($channel), 'textFields' => $service->textFields($channel),
             'editorFields' => $editorFields, 'orderView' => $orderView,
@@ -1706,15 +1774,18 @@ class FinanceController extends Controller
             'header_row.*' => '表头行号必须在 1 到 1000 之间。',
         ]);
         $channel = $report === 'paypal-settlement' ? 'paypal' : 'credit_card';
-        $cardChannel = $channel === 'credit_card' && $report !== 'paypal-orders'
+        $cardChannel = FinanceCreditSettlementLayout::REPORT_CHANNELS[$report] ?? ($channel === 'credit_card' && $report !== 'paypal-orders'
             ? ($request->validate([
                 'card_channel' => ['nullable', Rule::in(array_keys(FinanceCreditSettlementLayout::CHANNELS))],
-            ])['card_channel'] ?? null) : null;
+            ])['card_channel'] ?? null) : null);
         $cardLayout = FinanceCreditSettlementLayout::displayColumns($cardChannel);
         $columns = $report === 'paypal-orders'
             ? \App\Portals\Finance\FinancePayPalOrderExport::pageHeaders($report)
             : ($cardLayout ?: app(\App\Portals\Finance\FinanceSettlementService::class)->exportColumns($channel));
-        if ($cardLayout && $request->query('card_channel') === 'ye' && $request->boolean('card_exceptions')) {
+        if (isset(FinanceCreditSettlementLayout::REPORT_CHANNELS[$report])) {
+            $columns += FinanceSettlementService::SHOP_DIFFERENCE_COLUMN;
+        }
+        if ($cardLayout && $cardChannel === 'ye' && $request->boolean('card_exceptions')) {
             $columns += FinanceConfluxSettlement::EXCEPTION_COLUMNS;
         }
 
@@ -1756,13 +1827,18 @@ class FinanceController extends Controller
         if ($page !== false) {
             $returnFilters['page'] = $page;
         }
-        $record = $service->query($channel, [])->findOrFail($request->input('id'));
+        $scope = ['card_channel' => FinanceCreditSettlementLayout::REPORT_CHANNELS[$report] ?? null];
+        $record = $service->query($channel, $scope)->findOrFail($request->input('id'));
         try {
             app(\App\Portals\Finance\FinanceSettlementEditor::class)->save($record, $request->all(), $channel, (int) $context['user']->getKey());
         } catch (\Illuminate\Database\UniqueConstraintViolationException $e) {
             throw ValidationException::withMessages(['reference' => '交易ID或对应支付记录已存在，不能重复。']);
         } catch (\App\Portals\Finance\FinanceRelayException $e) {
             throw ValidationException::withMessages(['month' => $e->getMessage()]);
+        }
+
+        if ($channel === 'paypal') {
+            app(FinancePayPalSettlementOrders::class)->forgetOrderGraph();
         }
 
         return redirect()->route('finance.report', ['report' => $report, ...$returnFilters])->with('success', '结算明细已保存。');
@@ -1777,9 +1853,10 @@ class FinanceController extends Controller
         $data = $request->validate(['ids' => 'required|array|min:1|max:100', 'ids.*' => 'required|integer|min:1|distinct']);
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
         $channel = $report === 'paypal-settlement' ? 'paypal' : 'credit_card';
+        $scope = ['card_channel' => FinanceCreditSettlementLayout::REPORT_CHANNELS[$report] ?? null];
         try {
-            $this->workbooks->database()->transaction(function () use ($data, $service, $channel, $context): void {
-                $records = $service->query($channel, [])->whereIn('id', $data['ids'])->lockForUpdate()->get();
+            $this->workbooks->database()->transaction(function () use ($data, $service, $channel, $scope, $context): void {
+                $records = $service->query($channel, $scope)->whereIn('id', $data['ids'])->lockForUpdate()->get();
                 if ($records->count() !== count($data['ids'])) {
                     throw ValidationException::withMessages(['ids' => '部分记录不存在、已删除或不属于当前结算明细，请刷新后重试。']);
                 }
@@ -1789,6 +1866,10 @@ class FinanceController extends Controller
             });
         } catch (\App\Portals\Finance\FinanceRelayException $e) {
             throw ValidationException::withMessages(['ids' => $e->getMessage()]);
+        }
+
+        if ($channel === 'paypal') {
+            app(FinancePayPalSettlementOrders::class)->forgetOrderGraph();
         }
 
         return redirect()->route('finance.report', $report)->with('success', '已删除 '.count($data['ids']).' 条结算明细，原始订单已保留。');
@@ -1801,6 +1882,9 @@ class FinanceController extends Controller
             return $context;
         }
         $channel = $report === 'paypal-settlement' ? 'paypal' : 'credit_card';
+        if ($fixedCardChannel = FinanceCreditSettlementLayout::REPORT_CHANNELS[$report] ?? null) {
+            $request->merge(['card_channel' => $fixedCardChannel]);
+        }
         if ($channel === 'credit_card' && $request->input('card_channel') === 'ye' && $request->has('files')) {
             return $this->importConfluxFiles($request, $report, (int) $context['user']->getKey());
         }
@@ -2307,81 +2391,34 @@ class FinanceController extends Controller
                 $comparisonMonths[] = $period->format('Y-m');
             }
         }
-        $monthlyLossGroups = [];
-        foreach ($comparisonMonths as $comparisonMonth) {
-        $start = CarbonImmutable::parse($comparisonMonth.'-01', 'Asia/Shanghai');
-        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
-        $filters = [...$data, 'from' => $start->toDateString(), 'to' => $start->endOfMonth()->toDateString(), 'timezone' => 'Asia/Shanghai',
-            'logistics_costs' => $report === 'losses'];
-        $rows = collect();
-        foreach (['paypal', 'credit_card'] as $channel) {
-            if (empty($data['channel']) || $data['channel'] === 'combined' || $data['channel'] === $channel) {
-                $rows = $rows->concat($service->summaryRows($channel, \Illuminate\Support\Arr::except($filters, ['account', 'owner', 'team', 'subscription'])));
-            }
-        }
-        if ($comparisonMonth === $month) {
-        $filterOptions = [
-            'account' => $rows->whereIn('account_key', FinancePaymentAccount::query()->pluck('activity_account'))
-                ->unique('account_key')->map(fn ($row) => ['value' => $row['account_key'], 'label' => $row['account']])->values(),
-        ];
-        foreach (['owner', 'team', 'subscription', 'payment_method'] as $field) {
-            $values = $field === 'subscription' ? $service->subscriptionOptions($rows) : $rows->pluck($field)->filter()->unique()->sort();
-            $filterOptions[$field] = $values->map(fn ($value) => ['value' => $value, 'label' => $value])->values();
-        }
-        }
-        $rows = $rows->filter(function ($row) use ($data, $service): bool {
-            foreach (['account' => 'account_key', 'owner' => 'owner', 'team' => 'team', 'subscription' => 'subscription', 'payment_method' => 'payment_method'] as $filter => $field) {
-                if (filled($data[$filter] ?? null) && $row[$field] !== ($filter === 'subscription' ? $service::subscriptionLabel($data[$filter]) : $data[$filter])) {
-                    return false;
-                }
-            }
-
-            return true;
-        });
         if ($report === 'losses' && ($data['channel'] ?? null) === 'combined') {
             $data['layer'] = in_array($data['layer'] ?? '', ['business', 'classification', 'project_classification'], true)
                 ? 'project_classification' : 'project';
         } elseif ($report === 'losses' && in_array($data['channel'] ?? null, ['paypal', 'credit_card'], true) && ($data['layer'] ?? null) === 'project') {
             $data['layer'] = 'channel';
         }
-        $groups = $service->totals($report === 'losses' ? $service->withLogisticsCosts($rows) : $rows, $data['layer'] ?? 'account');
-        if ($report === 'summary' && ($data['layer'] ?? '') === 'project') {
-            foreach ($groups as &$group) {
-                $group['channel'] = filled($data['channel'] ?? null) ? $data['channel'] : 'combined';
+
+        $service = app(FinanceSettlementService::class);
+        $metrics = [
+            'logistics' => '物流占比', 'purchase' => '采购占比', 'fee' => '手续费占比',
+            'refund' => '退款金额占比', 'refund_fee' => '退款费用占比',
+            'dispute_refund' => '争议冻结退款占比', 'dispute_fee' => '争议费用占比',
+        ];
+        $monthlyLossGroups = [];
+        $scope = \Illuminate\Support\Arr::except($data, ['month', 'month_from', 'month_to']);
+        ksort($scope);
+        $cacheOverview = ! $request->boolean('download')
+            && in_array($this->workbooks->database()->getDriverName(), ['mysql', 'mariadb'], true);
+        foreach ($comparisonMonths as $comparisonMonth) {
+            $includeOptions = $comparisonMonth === $month;
+            $build = fn () => $this->buildSettlementOverviewMonth($comparisonMonth, $report, $scope, $includeOptions, $metrics);
+            [$groups, $options, $rate] = $cacheOverview
+                ? Cache::remember($this->filterCacheKey('overview-result:'.hash('sha256', serialize([$report, $comparisonMonth, $scope, $includeOptions]))), 15, $build)
+                : $build();
+            $monthlyLossGroups[$comparisonMonth] = $groups;
+            if ($includeOptions) {
+                $filterOptions = $options;
             }
-            unset($group);
-        }
-        $rate = $this->workbooks->database()->table('finance_monthly_exchange_rates')->where('month', $comparisonMonth)->where('currency', 'USD')->value('cny_rate');
-        $metrics = ['logistics' => '物流占比', 'purchase' => '采购占比', 'fee' => '手续费占比', 'refund' => '退款金额占比', 'refund_fee' => '退款费用占比', 'dispute_refund' => '争议冻结退款占比', 'dispute_fee' => '争议费用占比'];
-        foreach ($groups as &$group) {
-            $group['ratios'] = [];
-            $group['total_ratio'] = null;
-            $keys = $group['channel'] === 'paypal' ? array_keys($metrics) : ['logistics', 'purchase', 'fee', 'per_order_fee', 'refund', 'refund_fee', 'chargeback', 'chargeback_fee', 'ethoca_refund', 'ethoca_fee', 'rdr_refund', 'rdr_fee'];
-            foreach ($keys as $key) {
-                $amount = $group[$key];
-                if ($key === 'fee' && in_array($group['channel'], ['paypal', 'combined'], true)) {
-                    $amount = $amount === null || $group['fee_return'] === null ? null : bcsub($amount, $group['fee_return'], 8);
-                }
-                if ($key === 'dispute_refund' && $group['channel'] === 'paypal') {
-                    $amount = $amount === null || $group['dispute_hold'] === null || $group['dispute_release'] === null ? null : bcsub(bcadd($amount, $group['dispute_hold'], 8), $group['dispute_release'], 8);
-                }
-                if ($group['channel'] === 'combined' && $key === 'ethoca_refund') {
-                    $amount = bcsub(bcadd(bcadd($amount, $group['dispute_refund'], 8), $group['dispute_hold'], 8), $group['dispute_release'], 8);
-                }
-                if ($group['channel'] === 'combined' && $key === 'ethoca_fee') {
-                    $amount = bcadd($amount, $group['dispute_fee'], 8);
-                }
-                if (in_array($key, ['logistics', 'purchase'], true)) {
-                    $amount = $amount === null || $rate === null ? null : bcdiv($amount, $rate, 8);
-                }
-                $group['ratios'][$key] = $amount === null || $group['settlement'] === null || bccomp($group['settlement'], '0', 8) === 0 ? null : bcmul(bcdiv($amount, $group['settlement'], 10), '100', 8);
-                if ($group['ratios'][$key] !== null) {
-                    $group['total_ratio'] = bcadd($group['total_ratio'] ?? '0', $group['ratios'][$key], 8);
-                }
-            }
-        }
-        unset($group);
-        $monthlyLossGroups[$comparisonMonth] = $groups;
         }
         if ($request->boolean('download') && $report === 'losses') {
             $export = [];
@@ -2421,6 +2458,79 @@ class FinanceController extends Controller
         return response()->view('portals.finance.settlement-overview', [...$context, 'report' => $report, 'filters' => [...$data, 'month' => $month], 'groups' => $groups, 'monthlyLossGroups' => $monthlyLossGroups, 'rate' => $rate, 'creditMonths' => $creditMonths, 'filterOptions' => $filterOptions, 'metrics' => [...$service::MONEY, ...$metrics], 'reportTabUrls' => $this->reportTabUrls([...$data, 'month' => $month])]);
     }
 
+    private function buildSettlementOverviewMonth(string $comparisonMonth, string $report, array $data, bool $includeOptions, array $metrics): array
+    {
+        $start = CarbonImmutable::parse($comparisonMonth.'-01', 'Asia/Shanghai');
+        $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $filters = ['from' => $start->toDateString(), 'to' => $start->endOfMonth()->toDateString(), 'timezone' => 'Asia/Shanghai',
+            'logistics_costs' => $report === 'losses'];
+        $rows = collect();
+        foreach (['paypal', 'credit_card'] as $channel) {
+            if (empty($data['channel']) || $data['channel'] === 'combined' || $data['channel'] === $channel) {
+                $rows = $rows->concat($service->summaryRows($channel, $filters));
+            }
+        }
+        $filterOptions = [];
+        if ($includeOptions) {
+            $filterOptions = [
+                'account' => $rows->whereIn('account_key', FinancePaymentAccount::query()->pluck('activity_account'))
+                    ->unique('account_key')->map(fn ($row) => ['value' => $row['account_key'], 'label' => $row['account']])->values(),
+            ];
+            foreach (['owner', 'team', 'subscription', 'payment_method'] as $field) {
+                $values = $field === 'subscription' ? $service->subscriptionOptions($rows) : $rows->pluck($field)->filter()->unique()->sort();
+                $filterOptions[$field] = $values->map(fn ($value) => ['value' => $value, 'label' => $value])->values();
+            }
+        }
+        $rows = $rows->filter(function ($row) use ($data, $service): bool {
+            foreach (['account' => 'account_key', 'owner' => 'owner', 'team' => 'team', 'subscription' => 'subscription', 'payment_method' => 'payment_method'] as $filter => $field) {
+                if (filled($data[$filter] ?? null) && $row[$field] !== ($filter === 'subscription' ? $service::subscriptionLabel($data[$filter]) : $data[$filter])) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+        $groups = $service->totals($report === 'losses' ? $service->withLogisticsCosts($rows) : $rows, $data['layer'] ?? 'account');
+        if ($report === 'summary' && ($data['layer'] ?? '') === 'project') {
+            foreach ($groups as &$group) {
+                $group['channel'] = filled($data['channel'] ?? null) ? $data['channel'] : 'combined';
+            }
+            unset($group);
+        }
+        $rate = $this->workbooks->database()->table('finance_monthly_exchange_rates')->where('month', $comparisonMonth)->where('currency', 'USD')->value('cny_rate');
+        $metrics = ['logistics' => '物流占比', 'purchase' => '采购占比', 'fee' => '手续费占比', 'refund' => '退款金额占比', 'refund_fee' => '退款费用占比', 'dispute_refund' => '争议冻结退款占比', 'dispute_fee' => '争议费用占比'];
+        foreach ($groups as &$group) {
+            $group['ratios'] = [];
+            $group['total_ratio'] = null;
+            $keys = $group['channel'] === 'paypal' ? array_keys($metrics) : ['logistics', 'purchase', 'fee', 'per_order_fee', 'refund', 'refund_fee', 'chargeback', 'chargeback_fee', 'ethoca_refund', 'ethoca_fee', 'rdr_refund', 'rdr_fee'];
+            foreach ($keys as $key) {
+                $amount = $group[$key];
+                if ($key === 'fee' && in_array($group['channel'], ['paypal', 'combined'], true)) {
+                    $amount = $amount === null || $group['fee_return'] === null ? null : bcsub($amount, $group['fee_return'], 8);
+                }
+                if ($key === 'dispute_refund' && $group['channel'] === 'paypal') {
+                    $amount = $amount === null || $group['dispute_hold'] === null || $group['dispute_release'] === null ? null : bcsub(bcadd($amount, $group['dispute_hold'], 8), $group['dispute_release'], 8);
+                }
+                if ($group['channel'] === 'combined' && $key === 'ethoca_refund') {
+                    $amount = bcsub(bcadd(bcadd($amount, $group['dispute_refund'], 8), $group['dispute_hold'], 8), $group['dispute_release'], 8);
+                }
+                if ($group['channel'] === 'combined' && $key === 'ethoca_fee') {
+                    $amount = bcadd($amount, $group['dispute_fee'], 8);
+                }
+                if (in_array($key, ['logistics', 'purchase'], true)) {
+                    $amount = $amount === null || $rate === null ? null : bcdiv($amount, $rate, 8);
+                }
+                $group['ratios'][$key] = $amount === null || $group['settlement'] === null || bccomp($group['settlement'], '0', 8) === 0 ? null : bcmul(bcdiv($amount, $group['settlement'], 10), '100', 8);
+                if ($group['ratios'][$key] !== null) {
+                    $group['total_ratio'] = bcadd($group['total_ratio'] ?? '0', $group['ratios'][$key], 8);
+                }
+            }
+        }
+        unset($group);
+
+        return [$groups, $filterOptions, $rate];
+    }
+
     private function reportTabUrls(array $filters): array
     {
         $common = \Illuminate\Support\Arr::only($filters, ['month', 'channel']);
@@ -2450,6 +2560,18 @@ class FinanceController extends Controller
             }
             $domains = app(\App\Portal\Services\PortalDomainService::class);
             $homePath = $domains->portalPath($context['portal']);
+            $authorization = app(\App\Portal\Services\PortalMenuAuthorizationService::class);
+            $legacyPath = $domains->portalPath($context['portal'], '/finance/reports/credit-settlement');
+            if ($currentPath === $legacyPath || str_starts_with($currentPath, $legacyPath.'/')) {
+                $legacyMenu = $context['portal']->menus->firstWhere('code', 'finance_credit-settlement');
+                if ($legacyMenu && ! $legacyMenu->is_enabled) {
+                    foreach (array_keys(FinanceCreditSettlementLayout::REPORT_CHANNELS) as $report) {
+                        $menu = $context['portal']->menus->firstWhere('code', 'finance_'.$report);
+                        abort_unless($menu?->is_enabled && $authorization->canAccess($context['user'], $menu), 403);
+                    }
+                    $currentPath = $domains->portalPath($context['portal'], '/finance/reports/ye-settlement');
+                }
+            }
             $menu = $context['portal']->menus->first(function ($menu) use ($currentPath, $domains, $context, $homePath): bool {
                 $path = trim((string) $menu->path);
                 if (! $menu->is_enabled || $path === '' || str_starts_with($path, '#') || preg_match('#^https?://#', $path)) {
@@ -2460,7 +2582,7 @@ class FinanceController extends Controller
                 return $currentPath === $path || ($path !== $homePath && str_starts_with($currentPath, $path.'/'));
             });
             abort_unless($menu, 403);
-            abort_unless(app(\App\Portal\Services\PortalMenuAuthorizationService::class)->canAccess($context['user'], $menu), 403);
+            abort_unless($authorization->canAccess($context['user'], $menu), 403);
         }
         app()->setLocale('zh-CN');
 
@@ -2535,7 +2657,7 @@ class FinanceController extends Controller
                 $values = $values->merge($this->workbooks->database()->table('finance_transaction_types')->pluck('raw_type'))->unique();
             }
             if ($xuzongReport && $field === 'status') {
-                $values = $values->push('失败')->unique();
+                $values = collect(['成功', '失败', '退款']);
             }
             $choices[$field] = $values->map(fn ($value) => [
                 'value' => (string) $value,
@@ -2655,7 +2777,8 @@ class FinanceController extends Controller
                         $linked[$field] = $value;
                         continue;
                     }
-                    $column = $field === 'domain' ? 'domain' : FinanceCatalog::filterColumn($dataset, $field);
+                    $column = $xuzongReport && $field === 'status' ? 'match_status'
+                        : ($field === 'domain' ? 'domain' : FinanceCatalog::filterColumn($dataset, $field));
                     $this->applyCondition($query, $column, in_array($field, ['currency', 'status'], true) ? 'equals' : 'contains', $value);
                 }
             }
@@ -2774,7 +2897,8 @@ class FinanceController extends Controller
                     $this->applyCondition($query, 'direction', $operator, $value);
                 });
             } else {
-                $this->applyCondition($query, FinanceCatalog::filterColumn($dataset, $condition['field']), $operator, $value);
+                $column = $xuzongReport && $condition['field'] === 'status' ? 'match_status' : FinanceCatalog::filterColumn($dataset, $condition['field']);
+                $this->applyCondition($query, $column, $operator, $value);
             }
         }
 

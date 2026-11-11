@@ -12,7 +12,7 @@
             <span data-xuzong-filename style="display:block;white-space:pre-line;overflow-wrap:anywhere;max-height:9em;overflow:auto">点击选择或拖入多个文件</span>
             <input type="file" id="xuzong-import-file" name="file" accept=".xlsx,.csv,.tsv,.txt" multiple required>
         </label>
-        <p class="settlement-note" style="padding:0 20px">上传后自动识别订单或账单，并匹配徐总账户和系统订单。默认按北京时间读取。</p>
+        <p class="settlement-note" style="padding:0 20px">支持订单、退款明细和逐笔结算账单。退款明细按平台订单号匹配，仅计入成功退款。默认按北京时间读取。</p>
         <p id="xuzong-credit-import-progress" style="padding:0 20px;white-space:pre-line;overflow-wrap:anywhere" role="status" aria-live="polite"></p>
         <footer>
             <button type="button" class="btn btn-default" data-xuzong-import-close>取消</button>
@@ -44,8 +44,8 @@
         dialog.addEventListener('cancel', event => {
             if (form.querySelector('[type="submit"]').disabled) event.preventDefault();
         });
-        async function uploadParts(file) {
-            if (!/\.csv$/i.test(file.name)) return [file];
+        async function uploadParts(file, isStatement) {
+            if (isStatement || !/\.csv$/i.test(file.name)) return [file];
             const maxBytes = 1024 * 1024;
             const csv = await file.text();
             const firstBreak = csv.indexOf('\n');
@@ -94,10 +94,17 @@
             let matched = null;
             const errors = [];
             try {
-                for (const [index, file] of files.entries()) {
+                const uploads = await Promise.all(files.map(async file => {
+                    const header = /\.(csv|tsv|txt)$/i.test(file.name) ? (await file.slice(0, 8192).text()).split(/\r?\n/, 1)[0] : '';
+                    const isStatement = header.includes('折算后结算贡献') && header.includes('适用汇率');
+                    const rank = isStatement ? 2 : header.includes('退款单号') ? 1 : 0;
+                    return {file, rank};
+                }));
+                uploads.sort((a, b) => a.rank - b.rank);
+                for (const [index, {file, rank}] of uploads.entries()) {
                     let finished = 0;
                     try {
-                        const parts = await uploadParts(file);
+                        const parts = await uploadParts(file, rank > 0);
                         for (const part of parts) {
                             progress.textContent = '正在导入文件 ' + (index + 1) + ' / ' + files.length + '，第 ' + (finished + 1) + ' / ' + parts.length + ' 段…';
                             const data = new FormData(form);

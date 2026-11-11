@@ -3,6 +3,7 @@
 namespace App\Portals\Finance;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Collection;
 
 class FinancePayPalSettlementOrders
@@ -29,6 +30,11 @@ class FinancePayPalSettlementOrders
     private const COSTS = ['fee', 'hold', 'dispute_hold', 'refund', 'refund_fee', 'dispute_refund', 'dispute_fee'];
     private const RETURNS = ['fee_return', 'dispute_release', 'release'];
     private const SCALE = 8;
+    // Verified USD payments in the historical PayPal HKD statement before November 5.
+    private const HISTORICAL_HKD_PAYMENT_REFERENCES = [
+        '7M960508XY8098841', '8J190334VX070270G', '41880338N4901812T',
+        '54A52495TC569712D', '1G461606GX8747721', '48B55181Y8669881R',
+    ];
 
     private const DETAIL_FIELDS = [
         '交易信息' => [
@@ -177,6 +183,77 @@ class FinancePayPalSettlementOrders
     public function rows(array $filters, ?int $pageOffset = null, int $pageLimit = 10, ?int $recordId = null): Collection
     {
         $db = $this->workbooks->database();
+        $graph = $pageOffset !== null && $recordId === null && in_array($db->getDriverName(), ['mysql', 'mariadb'], true)
+            ? Cache::remember(
+                $this->orderGraphCacheKey(),
+                15,
+                fn () => $this->orderGraph(null),
+            )
+            : $this->orderGraph($recordId);
+        if ($graph === null) {
+            return collect();
+        }
+        [$orders, $roots, $children, $conversions, $crossAccount, $ambiguous, $crossRates] = $graph;
+
+        $total = null;
+        $scope = array_intersect_key($filters, array_flip(['account', 'from', 'to', 'reference', 'team', 'domain', 'subscription', 'order_status', 'conditions']));
+        if ($pageOffset !== null && ! array_filter($scope)) {
+            $total = count($orders);
+            $orders = array_slice($orders, $pageOffset, $pageLimit);
+        }
+        $rows = collect($total === null ? [] : array_fill(0, min($total, $pageOffset), []));
+        $exportFields = $this->settlements->exportColumns('paypal') + ['gross' => '原币总额'];
+        $numericConditionFields = $this->settlements->numericConditionFields('paypal');
+        foreach (array_chunk($orders, 250) as $batch) {
+            $ids = array_column(array_filter($batch, fn ($row) => ! isset($row['event'])), 'id');
+            $records = $this->settlements->query('paypal', [])->whereIntegerInRaw('id', $ids)
+                ->orderByDesc('occurred_at')->orderByDesc('id')->get();
+            $payments = $this->settlements->rows('paypal', ['timezone' => $filters['timezone'], 'order_view' => true], $records)->keyBy('id');
+            foreach ($batch as $order) {
+                if (isset($order['event'])) {
+                    $row = $this->unlinkedRow($order['event'], $filters['timezone'], $recordId !== null);
+                } else {
+                    $payment = $payments->get($order['id']);
+                    if ($payment === null) {
+                        continue;
+                    }
+                    $row = $this->paymentRow($payment, $roots, $children, $conversions, $crossAccount, $ambiguous, $crossRates, $filters['timezone'], $recordId !== null);
+                }
+                if ($this->matches($row, $filters, $children, $numericConditionFields)) {
+                    if ($recordId === null && $pageOffset === null) {
+                        $row = array_intersect_key($row, $exportFields);
+                        $row = array_combine(array_keys($row), array_values($row));
+                    } elseif ($pageOffset !== null && ($rows->count() < $pageOffset || $rows->count() >= $pageOffset + $pageLimit)) {
+                        // Off-page matches count toward pagination without retaining their summaries.
+                        $row = ['subscription' => $row['subscription'] ?? ''];
+                    }
+                    $rows->push($row);
+                }
+            }
+        }
+        if ($total !== null && $rows->count() < $total) {
+            $rows = $rows->concat(array_fill(0, $total - $rows->count(), []));
+        }
+        return $rows;
+    }
+
+    public function forgetOrderGraph(): void
+    {
+        if (in_array($this->workbooks->database()->getDriverName(), ['mysql', 'mariadb'], true)) {
+            Cache::forget($this->orderGraphCacheKey());
+        }
+    }
+
+    private function orderGraphCacheKey(): string
+    {
+        $db = $this->workbooks->database();
+
+        return 'finance:paypal-settlement:order-graph:v1:'.hash('sha256', $db->getName().':'.$db->getDatabaseName());
+    }
+
+    private function orderGraph(?int $recordId): ?array
+    {
+        $db = $this->workbooks->database();
         $mysql = in_array($db->getDriverName(), ['mysql', 'mariadb'], true);
         $paymentQuery = $this->settlements->query('paypal', []);
         $orders = $byId = [];
@@ -190,7 +267,7 @@ class FinancePayPalSettlementOrders
                 ->get(['payment_account_id', 'transaction_id']);
             $detailAccountIds = $detailTransactions->pluck('payment_account_id')->unique()->all();
             if ($detailAccountIds === [] && ! $target) {
-                return collect();
+                return null;
             }
             if ($detailAccountIds !== []) {
                 $byId = (clone $paymentQuery)->pluck('id')->flip()->all();
@@ -360,46 +437,7 @@ class FinancePayPalSettlementOrders
         if ($recordId === null) {
             uasort($orders, fn ($a, $b) => [$b['time'], $b['id']] <=> [$a['time'], $a['id']]);
         }
-        $total = null;
-        $scope = array_intersect_key($filters, array_flip(['account', 'from', 'to', 'reference', 'team', 'domain', 'subscription', 'order_status', 'conditions']));
-        if ($pageOffset !== null && ! array_filter($scope)) {
-            $total = count($orders);
-            $orders = array_slice($orders, $pageOffset, $pageLimit);
-        }
-        $rows = collect($total === null ? [] : array_fill(0, min($total, $pageOffset), []));
-        $exportFields = $this->settlements->exportColumns('paypal') + ['gross' => '原币总额'];
-        $numericConditionFields = $this->settlements->numericConditionFields('paypal');
-        foreach (array_chunk($orders, 250) as $batch) {
-            $ids = array_column(array_filter($batch, fn ($row) => ! isset($row['event'])), 'id');
-            $records = $this->settlements->query('paypal', [])->whereIntegerInRaw('id', $ids)
-                ->orderByDesc('occurred_at')->orderByDesc('id')->get();
-            $payments = $this->settlements->rows('paypal', ['timezone' => $filters['timezone'], 'order_view' => true], $records)->keyBy('id');
-            foreach ($batch as $order) {
-                if (isset($order['event'])) {
-                    $row = $this->unlinkedRow($order['event'], $filters['timezone'], $recordId !== null);
-                } else {
-                    $payment = $payments->get($order['id']);
-                    if ($payment === null) {
-                        continue;
-                    }
-                    $row = $this->paymentRow($payment, $roots, $children, $conversions, $crossAccount, $ambiguous, $crossRates, $filters['timezone'], $recordId !== null);
-                }
-                if ($this->matches($row, $filters, $children, $numericConditionFields)) {
-                    if ($recordId === null && $pageOffset === null) {
-                        $row = array_intersect_key($row, $exportFields);
-                        $row = array_combine(array_keys($row), array_values($row));
-                    } elseif ($pageOffset !== null && ($rows->count() < $pageOffset || $rows->count() >= $pageOffset + $pageLimit)) {
-                        // Off-page matches count toward pagination without retaining their summaries.
-                        $row = ['subscription' => $row['subscription'] ?? ''];
-                    }
-                    $rows->push($row);
-                }
-            }
-        }
-        if ($total !== null && $rows->count() < $total) {
-            $rows = $rows->concat(array_fill(0, $total - $rows->count(), []));
-        }
-        return $rows;
+        return [$orders, $roots, $children, $conversions, $crossAccount, $ambiguous, $crossRates];
     }
 
     private function paymentRow(array $payment, array $roots, array $children, array $conversions, array $crossAccount, array $ambiguous, array $crossRates, string $zone, bool $includeDetails): array
@@ -562,9 +600,13 @@ class FinancePayPalSettlementOrders
             $result['usd_rate'] = $rate;
             $result['converted_usd'] = $converted ?? $manualNet
                 ?? ($rate !== null && $net !== null ? bcmul($net, $rate, self::SCALE) : null);
-            if ($result['converted_usd'] === null && $net !== null && $root['currency'] !== 'USD') {
+            $historicalUsdReceipt = $root['currency'] === 'USD'
+                && $complete
+                && in_array($root['reference'], self::HISTORICAL_HKD_PAYMENT_REFERENCES, true);
+            if ($net !== null && (($result['converted_usd'] === null && $root['currency'] !== 'USD') || $historicalUsdReceipt)) {
                 $nonUsdReceipt = $this->exchangeLeg($root, $net, $conversions, $usedExchanges, false, null);
-                if ($nonUsdReceipt !== null && $nonUsdReceipt['currency'] !== 'USD' && bccomp($net, '0', self::SCALE) > 0) {
+                if ($nonUsdReceipt !== null && $nonUsdReceipt['currency'] !== 'USD' && bccomp($net, '0', self::SCALE) > 0
+                    && (! $historicalUsdReceipt || $nonUsdReceipt['currency'] === 'HKD')) {
                     [$crossRate, $crossRateSource] = $this->receiptCrossRate($nonUsdReceipt, $crossRates);
                     if ($crossRate !== null) {
                         $result['converted_usd'] = bcmul($nonUsdReceipt['amount'], $crossRate, self::SCALE);
