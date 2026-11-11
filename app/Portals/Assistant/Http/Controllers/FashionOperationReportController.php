@@ -172,18 +172,16 @@ class FashionOperationReportController extends Controller
             return $matchesDepartment
                 && ($operator === '' || str_contains(mb_strtolower($row['operator']), mb_strtolower($operator)));
         });
-        $sortBy = (string) ($validated['sort_by'] ?? '');
+        $sortBy = (string) ($validated['sort_by'] ?? 'order_count');
         $sortOrder = (string) ($validated['sort_order'] ?? 'desc');
-        $rows = ($sortBy !== ''
-            ? $rows->sort(function (array $left, array $right) use ($sortBy, $sortOrder): int {
+        $rows = $rows->sort(function (array $left, array $right) use ($sortBy, $sortOrder): int {
                 $comparison = ((float) $left[$sortBy]) <=> ((float) $right[$sortBy]);
                 if ($comparison === 0) {
                     $comparison = [$left['department'], $left['operator']] <=> [$right['department'], $right['operator']];
                 }
 
                 return $sortOrder === 'desc' ? -$comparison : $comparison;
-            })
-            : $rows->sortBy(fn (array $row) => $row['department'].'|'.$row['operator']))->values();
+            })->values();
 
         $summaryRevenue = (float) $rows->sum('revenue');
         $summarySpend = (float) $rows->sum('ad_spend');
@@ -193,7 +191,8 @@ class FashionOperationReportController extends Controller
         return view('portals.assistant.fashion-operation-reports.index', [
             ...$context, 'rows' => $rows, 'timezoneOptions' => $timezones,
             'departmentOptions' => $departmentOptions,
-            'filters' => [...$validated, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'timezone' => $timezone],
+            'filters' => [...$validated, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'timezone' => $timezone,
+                'sort_by' => $sortBy, 'sort_order' => $sortOrder],
             'summary' => ['people' => $rows->count(), 'stores' => $rows->sum(fn ($row) => count($row['stores'])),
                 'orders' => $rows->sum('order_count'), 'revenue' => $summaryRevenue, 'ad_spend' => $summarySpend,
                 'aov' => $rows->sum('order_count') > 0 ? $summaryRevenue / $rows->sum('order_count') : null,
