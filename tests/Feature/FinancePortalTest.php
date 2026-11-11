@@ -1212,6 +1212,9 @@ class FinancePortalTest extends TestCase
         $report = '/finance/reports/credit-settlement?card_channel=ye&timezone=UTC';
         $initial = $this->get($report)->assertOk()->assertSee('汇率未填写')
             ->viewData('rows')->getCollection()->keyBy('reference');
+        $this->assertSame('GBP', $initial['FX-DAY']['card_layout']['currency']);
+        $this->assertSame('10.05', $initial['FX-DAY']['card_layout']['gross']);
+        $this->assertSame('EUR', $initial['FX-EUR']['card_layout']['currency']);
         $this->assertSame('12.56', $initial['FX-DAY']['card_layout']['source_settlement_usd']);
         $this->assertSame('汇率未填写', $initial['FX-RANGE']['card_layout']['source_settlement_usd']);
         $settings = '/finance/settings/accounting';
@@ -1368,6 +1371,8 @@ class FinancePortalTest extends TestCase
         foreach ([
             '成功交易' => [['流水订单号', '结算货币', '结算金额'], ['ORDER-1', 'USD', 30]],
             'Shopline生态代收' => [['流水订单号', '结算货币', '结算金额'], ['ORDER-1', 'USD', 30]],
+            'YY生态代收' => [['流水订单号', '结算货币', '结算金额'], ['ORDER-1', 'USD', 100]],
+            'Shoplazza生态代收' => [['流水订单号', '结算货币', '结算金额'], ['ORDER-1', 'USD', 50]],
             '退款' => [['支付订单号', '退款订单号', '结算币种', '结算金额'], ['ORDER-1', 'REFUND-1', 'USD', 5]],
             'RDR退款' => [['流水订单号', '拒付预警时间', '结算币种', '结算金额'], ['ORDER-1', '2026-11-08', 'USD', 2]],
         ] as $name => $sheetRows) {
@@ -1378,10 +1383,10 @@ class FinancePortalTest extends TestCase
         $this->post($url.'/import', [...$data, 'account' => $other->activity_account, 'file' => $this->upload($book)])
             ->assertSessionHasErrors('account');
         $this->post($url.'/import', [...$data, 'account' => $account->activity_account, 'file' => $this->upload($book)])
-            ->assertSessionHasNoErrors()->assertSessionHas('success', '新增 5 条账单流水，1 笔原交易待匹配。');
+            ->assertSessionHasNoErrors()->assertSessionHas('success', '新增 7 条账单流水，1 笔原交易待匹配。');
         $this->post($url.'/import', [...$data, 'account' => $account->activity_account, 'file' => $this->upload($book)])
             ->assertSessionHasNoErrors()->assertSessionHas('success', '新增 0 条账单流水，1 笔原交易待匹配。');
-        $this->assertDatabaseCount('finance_credit_settlement_entries', 5);
+        $this->assertDatabaseCount('finance_credit_settlement_entries', 7);
 
         $orders = new Spreadsheet;
         $orderSheet = $orders->getActiveSheet()->setTitle('订单');
@@ -1408,57 +1413,66 @@ class FinancePortalTest extends TestCase
         $export = $this->get($url.'?'.http_build_query([...$scope, 'card_match' => 'matched', 'download' => 1]))->assertOk();
         $dataRows = $this->readDownload($export->streamedContent())->toArray();
         $this->assertCount(2, $dataRows);
-        $this->assertCount(49, $dataRows[0]);
-        $this->assertSame(\App\Portals\Finance\FinanceSettlementService::SHOP_DIFFERENCE_LABEL, $dataRows[0][48]);
+        $this->assertCount(53, $dataRows[0]);
+        $this->assertSame(\App\Portals\Finance\FinanceSettlementService::SHOP_DIFFERENCE_LABEL, $dataRows[0][49]);
         $this->assertSame('ORDER-1', $dataRows[1][3]);
         $this->assertEquals(30, $dataRows[1][25]);
         $this->assertEquals(5, $dataRows[1][29]);
         $this->assertEquals(2, $dataRows[1][35]);
         $page = $this->get($url.'?card_channel=ye&card_exceptions=1')->assertOk()
             ->assertSee('退款与 RDR 同时存在')->assertSee('2026-11-09');
+        $exceptionExport = $this->get($url.'?card_channel=ye&card_exceptions=1&download=1')->assertOk();
+        $exceptionSheet = $this->readDownload($exceptionExport->streamedContent());
+        $this->assertSame('异常汇总', $exceptionSheet->getTitle());
+        $exceptionRows = $exceptionSheet->toArray();
+        $exceptionDateColumn = array_search('新增异常账单日期', $exceptionRows[0], true);
+        $this->assertNotFalse($exceptionDateColumn);
+        $this->assertSame('2026-11-09', $exceptionRows[1][$exceptionDateColumn]);
         $row = $page->viewData('rows')->getCollection()->sole()['card_layout'];
         $this->assertEquals(30, $row['settlement']);
         $this->assertEquals(5, $row['refund']);
         $this->assertEquals(2, $row['rdr_refund']);
+        $this->assertSame('0.400', $row['nbc_fee']);
+        $this->assertSame('0.240', $row['store_fee']);
         $this->get($url.'?'.http_build_query(['card_channel' => 'ye', 'account' => $other->activity_account, 'card_exceptions' => 1]))
             ->assertOk()->assertViewHas('rows', fn ($rows) => $rows->total() === 0);
     }
 
-    public function test_conflux_batch_detects_orders_and_statements_and_rejects_the_entire_batch_for_a_wrong_merchant(): void
+    public function test_conflux_batch_creates_accounts_and_rejects_invalid_merchant_identifiers(): void
     {
         $account = $this->financePayPalAccount('郑州单包', [
             'account_type' => 'credit_card', 'card_platform' => 'ye', 'card_merchant_key' => 'ZZdanbao',
         ]);
         $orders = new Spreadsheet;
         $orderSheet = $orders->getActiveSheet()->setTitle('订单');
-        $order = [null, '2026-11-06 02:00:00', null, 'BATCH-ORDER', null, null, null, null, null, null, null, null, 'USD', 30.05, '成功'];
+        $order = ['Kraveloa INC-ZZdanbao2-wallet', '2026-11-06 02:00:00', null, 'BATCH-ORDER', null, null, null, null, null, null, null, null, 'USD', 30.05, '成功'];
         $orderSheet->fromArray([
             array_slice(array_values(\App\Portals\Finance\FinanceCreditSettlementLayout::columns('ye')), 0, 21),
             $order,
         ]);
         $orderSheet->fromArray($order, null, 'A10002');
         $statement = new Spreadsheet;
-        $statement->getActiveSheet()->setTitle('结算统计-XAdanbao')->fromArray([
+        $statement->getActiveSheet()->setTitle('结算统计-XA danbao')->fromArray([
             ['结算日期', '交易日期', '商户号', '账单描述符', '结算金额', '成功网关费'],
             ['2026-11-09', '2026-11-06', 'merchant-1', 'store-wallet', 25.19, -0.35],
         ]);
-        $sales = $statement->createSheet()->setTitle('成功交易-XAdanbao')->fromArray([
+        $sales = $statement->createSheet()->setTitle('成功交易-XA danbao')->fromArray([
             ['流水订单号', '结算货币', '结算金额', '商户号', '账单描述符', '交易时间'],
             ['BATCH-ORDER', 'USD', 30.05, 'merchant-1', 'store-wallet', '2026-11-06 02:00:00'],
         ]);
         $url = '/finance/reports/credit-settlement';
-        $data = ['card_channel' => 'ye', 'account' => $account->activity_account, 'timezone' => 'Asia/Shanghai'];
-        $octetStreamUpload = function (Spreadsheet $book): UploadedFile {
+        $data = ['card_channel' => 'ye', 'timezone' => 'Asia/Shanghai'];
+        $octetStreamUpload = function (Spreadsheet $book, string $filename = 'finance.xlsx'): UploadedFile {
             $file = $this->upload($book);
 
-            return new class($file->getPathname(), 'finance.xlsx', 'application/octet-stream', null, true) extends UploadedFile {
+            return new class($file->getPathname(), $filename, 'application/octet-stream', null, true) extends UploadedFile {
                 public function getMimeType(): ?string
                 {
                     return 'application/octet-stream';
                 }
             };
         };
-        $submit = fn () => $this->post($url.'/import', [...$data, 'files' => [$octetStreamUpload($statement), $octetStreamUpload($orders)]]);
+        $submit = fn () => $this->post($url.'/import', [...$data, 'settlement_type' => '正常结算', 'files' => [$octetStreamUpload($statement), $octetStreamUpload($orders)]]);
 
         $this->post($url.'/import', [...$data, 'files' => [UploadedFile::fake()->createWithContent('invalid.xlsx', 'not a workbook')]])
             ->assertSessionHasErrors('files.0');
@@ -1473,15 +1487,70 @@ class FinancePortalTest extends TestCase
             ->assertSessionHas('success', '新增订单 1 笔，跳过重复订单 1 笔。识别结算报表 1 份，新增账单流水 2 条，跳过重复报表 0 份。');
         $matchedUrl = $url.'?'.http_build_query([...$data, 'card_match' => 'matched']);
         $matched = $this->get($matchedUrl)->assertOk()->viewData('rows')->getCollection()->sole()['card_layout'];
+        $this->assertSame('正常结算', $matched['ledger_settlement_type']);
         $this->assertSame('30.05000000', $matched['settlement']);
         $this->assertSame('3.01000000', $matched['hold']);
         $this->assertSame('1.50000000', $matched['fee']);
         $this->assertSame('0.35000000', $matched['per_order_fee']);
+        $this->get($matchedUrl.'&card_wallet=1&card_exceptions=1')->assertOk()
+            ->assertViewHas('rows', fn ($rows) => $rows->getCollection()->sole()['reference'] === 'BATCH-ORDER');
         $this->assertSame('25.19000000', $matched['payable']);
+        $this->assertNull($matched['nbc_fee']);
+        $this->assertNull($matched['store_fee']);
         $export = $this->readDownload($this->get($matchedUrl.'&download=1')->assertOk()->streamedContent())->toArray();
         $this->assertEquals(25.19, $export[1][array_search('应结算', $export[0], true)]);
         $submit()->assertSessionHasNoErrors()
             ->assertSessionHas('success', '新增订单 0 笔，跳过重复订单 2 笔。识别结算报表 1 份，新增账单流水 0 条，跳过重复报表 1 份。');
+
+        $otherAccount = $this->financePayPalAccount('西安单包', [
+            'account_type' => 'credit_card', 'card_platform' => 'ye', 'card_merchant_key' => 'XAdanbao',
+        ]);
+        $otherOrders = new Spreadsheet;
+        $otherOrders->getActiveSheet()->setTitle('订单')->fromArray([
+            array_slice(array_values(\App\Portals\Finance\FinanceCreditSettlementLayout::columns('ye')), 0, 21),
+            array_replace($order, [0 => 'Store-XAdanbao', 3 => 'OTHER-BATCH-ORDER', 12 => 'GBP']),
+        ]);
+        $statement->getActiveSheet()->setCellValue('D2', 'another-store');
+        $sales->setCellValue('A2', 'ANOTHER-STATEMENT-ORDER')->setCellValue('E2', 'another-store');
+        $this->post($url.'/import', [...$data, 'settlement_type' => '停结算', 'files' => [$octetStreamUpload($statement), $octetStreamUpload($otherOrders)]])
+            ->assertSessionHasNoErrors();
+        $this->assertDatabaseHas('finance_records', [
+            'reference' => 'OTHER-BATCH-ORDER', 'account' => $otherAccount->activity_account, 'currency' => 'GBP',
+        ]);
+        $this->assertDatabaseHas('finance_credit_settlement_entries', [
+            'reference' => 'ANOTHER-STATEMENT-ORDER', 'payment_account_id' => $account->id, 'settlement_date' => '2026-11-09',
+        ]);
+
+        $statement->getActiveSheet()->setTitle('结算统计-kuaiy');
+        $sales->setTitle('成功交易-kuaiy')->setCellValue('A2', 'NEW-SHOP-ORDER')->setCellValue('B2', 'GBP');
+        $otherOrders->getActiveSheet()->setCellValue('A2', 'Vepagrav Limited-kuaiy')->setCellValue('D2', 'NEW-SHOP-ORDER');
+        $this->post($url.'/import', [...$data, 'settlement_type' => '正常结算', 'files' => [$octetStreamUpload($otherOrders), $octetStreamUpload($statement)]])
+            ->assertSessionHasNoErrors();
+        $new = FinancePaymentAccount::query()->where('card_merchant_key', 'kuaiy')->sole();
+        $this->assertSame('GBP', $new->main_currency);
+        $this->assertDatabaseHas('finance_records', ['reference' => 'NEW-SHOP-ORDER', 'account' => $new->activity_account]);
+        $this->assertDatabaseHas('finance_credit_settlement_entries', ['reference' => 'NEW-SHOP-ORDER', 'payment_account_id' => $new->id]);
+
+        $otherOrders->getActiveSheet()->setCellValue('A2', 'Vepagrav Limited-orderonly')->setCellValue('D2', 'ORDER-ONLY');
+        $this->post($url.'/import', [...$data, 'files' => [$octetStreamUpload($otherOrders)]])->assertSessionHasNoErrors();
+        $orderOnly = FinancePaymentAccount::query()->where('card_merchant_key', 'orderonly')->sole();
+        $this->assertDatabaseHas('finance_records', ['reference' => 'ORDER-ONLY', 'account' => $orderOnly->activity_account, 'currency' => 'GBP']);
+
+        $statement->getActiveSheet()->setTitle('结算统计-statementonly');
+        $sales->setTitle('成功交易-statementonly')->setCellValue('A2', 'STATEMENT-ONLY')->setCellValue('G1', '卡种')->setCellValue('G2', 'Visa');
+        $this->post($url.'/import', [...$data, 'settlement_type' => '停结算', 'files' => [$octetStreamUpload($statement)]])
+            ->assertSessionHasNoErrors()->assertSessionHas('success', fn ($message) => str_contains($message, '仍有待匹配交易'));
+        $statementOnly = FinancePaymentAccount::query()->where('card_merchant_key', 'statementonly')->sole();
+        $this->assertDatabaseHas('finance_credit_settlement_entries', ['reference' => 'STATEMENT-ONLY', 'payment_account_id' => $statementOnly->id]);
+        $stopUrl = $url.'?'.http_build_query(['card_channel' => 'ye', 'account' => 'statementonly', 'ledger_settlement_type' => '停结算']);
+        $this->get($stopUrl)->assertOk()->assertSee('未匹配订单')->assertSee('STATEMENT-ONLY')->assertSee('Visa')->assertViewHas('rows', fn ($rows) => $rows->total() === 1);
+
+        $otherOrders->getActiveSheet()->setCellValue('A2', 'Store-statementonly')->setCellValue('D2', 'STATEMENT-ONLY');
+        $this->post($url.'/import', [...$data, 'files' => [$octetStreamUpload($otherOrders)]])->assertSessionHasNoErrors();
+        $matched = $this->get($stopUrl)
+            ->assertOk()->viewData('rows')->getCollection()->sole();
+        $this->assertSame('停结算', $matched['card_layout']['ledger_settlement_type']);
+
     }
 
     public function test_credit_channel_workbooks_can_be_imported_manually_without_overwriting_transactions(): void

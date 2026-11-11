@@ -14,7 +14,6 @@
             <p>按二级部门查看成员的每日复盘、测品任务和素材完成情况。</p>
         </div>
         <?php if ($canManagePlans): ?>
-            <button type="button" class="btn ot-primary" data-toggle="modal" data-target="#ot-daily-plan-modal"><i class="fa fa-calendar-plus-o"></i> 设置每日计划</button>
         <?php endif; ?>
     </div>
 
@@ -100,23 +99,6 @@
         <?php endif; ?>
     </div>
 </section>
-
-<?php if ($canManagePlans): ?>
-    <div class="modal fade ot-modal" id="ot-daily-plan-modal" tabindex="-1" role="dialog"><div class="modal-dialog modal-lg"><div class="modal-content">
-        <form class="ot-form" method="post" action="{{ route('operation-tasks.daily-plans.store') }}">
-            @csrf
-            <div class="modal-header"><button type="button" class="close" data-dismiss="modal">×</button><h4 class="modal-title">确认成员每日测品计划</h4></div>
-            <div class="modal-body"><div class="ot-grid">
-                <div><label>计划日期 *</label><input class="form-control" type="date" name="plan_date" value="{{ now('Asia/Shanghai')->format('Y-m-d') }}" required></div>
-                <div><label>二级部门 *</label><select class="form-control" name="department_id" id="ot-plan-team" required><option value="">请选择二级部门</option><?php foreach ($teamRows as $team): ?><option value="{{ $team->id }}">{{ $team->name }}</option><?php endforeach; ?></select></div>
-                <div><label>成员 *</label><select class="form-control" name="user_id" id="ot-plan-user" required><option value="">请先选择二级部门</option><?php foreach ($teamRows as $team): ?><?php foreach ($team->members as $member): ?><option value="{{ $member->id }}" data-team="{{ $team->id }}" hidden>{{ $member->name }}</option><?php endforeach; ?><?php endforeach; ?></select></div>
-                <div><label>计划类型 *</label><select class="form-control" name="plan_mode" id="ot-plan-mode"><option value="single">单品</option><option value="category">类目</option><option value="mixed">混合计划</option></select></div>
-                <div class="ot-plan-custom" hidden><label>单品目标 *</label><input class="form-control" type="number" min="1" max="30" name="single_target" value="1"></div><div class="ot-plan-custom" hidden><label>类目目标 *</label><input class="form-control" type="number" min="1" max="30" name="category_target" value="1"></div><div class="ot-full"><label>计划说明</label><textarea class="form-control" rows="3" name="plan_note"></textarea></div>
-            </div></div>
-            <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">取消</button><button class="btn ot-primary">确认计划</button></div>
-        </form>
-    </div></div></div>
-<?php endif; ?>
 
 <script src="{{ asset('assets/erp/operation-tasks-dashboard.js') }}" defer></script>
 @endsection

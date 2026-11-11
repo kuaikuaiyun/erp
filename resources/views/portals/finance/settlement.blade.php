@@ -115,7 +115,7 @@
     </select>
 </div>
 @endif
-<div><label for="settlement-account">{{ $channel === 'credit_card' ? '商户账户' : '支付账户' }}</label><select id="settlement-account" name="account" class="form-control"><option value="">{{ $channel === 'credit_card' ? '全部商户' : '全部账户' }}</option>@foreach($filterAccounts as $account)<option value="{{ $account->activity_account }}" @selected(($filters['account'] ?? '') === $account->activity_account)>{{ \App\Portals\Finance\FinanceCatalog::simplified($account->account_name) }}</option>@endforeach</select></div>
+<div><label for="settlement-account">{{ $channel === 'credit_card' ? '商户账户' : '支付账户' }}</label><select id="settlement-account" name="account" class="form-control"><option value="">{{ $channel === 'credit_card' ? '全部商户' : '全部账户' }}</option>@foreach($filterAccounts as $account)<option value="{{ $account->activity_account }}" @selected(($filters['account'] ?? '') === $account->activity_account)>{{ $cardChannel === 'ye' && filled($account->card_merchant_key) ? $account->card_merchant_key : \App\Portals\Finance\FinanceCatalog::simplified($account->account_name) }}</option>@endforeach</select></div>
 <div><label for="settlement-from">开始日期</label><input id="settlement-from" class="form-control" type="date" name="from" value="{{ $filters['from'] ?? '' }}"></div>
 <div><label for="settlement-to">结束日期</label><input id="settlement-to" class="form-control" type="date" name="to" value="{{ $filters['to'] ?? '' }}"></div>
 <div><label for="settlement-zone">时区</label><select id="settlement-zone" name="timezone" class="form-control">@include('portals.finance.partials.timezone-options', ['selectedTimezone' => $filters['timezone']])</select></div>
@@ -129,13 +129,23 @@
 <div><label for="settlement-team">{{ $orderView ? '运营所属部门' : '团队' }}</label><select id="settlement-team" name="team" class="form-control"><option value="">{{ $orderView ? '全部运营部门' : '全部团队' }}</option>@foreach($teams as $team)<option @selected(($filters['team'] ?? '') === $team)>{{ $team }}</option>@endforeach</select></div>
 <div><label for="settlement-subscription">订阅类型</label><input id="settlement-subscription" class="form-control" name="subscription" list="settlement-subscriptions" value="{{ $filters['subscription'] ?? '' }}"></div>
 <div><label for="settlement-domain">域名</label><input id="settlement-domain" class="form-control" name="domain" value="{{ $filters['domain'] ?? '' }}"></div>
-@if($channel === 'credit_card')<div><label for="settlement-source">数据来源</label><select id="settlement-source" name="source" class="form-control"><option value="">合并去重</option>@foreach(['xuzong2-orders' => '信用卡订单', 'xuzong2-details' => '信用卡导入明细', 'xuzong1-details' => '历史信用卡明细'] as $source => $label)<option value="{{ $source }}" @selected(($filters['source'] ?? '') === $source)>{{ $label }}</option>@endforeach</select></div>@endif
+@if($channel === 'credit_card' && ($filters['card_channel'] ?? '') === 'ye')
+<div><label for="settlement-ledger-type">账单结算类型</label><select id="settlement-ledger-type" name="ledger_settlement_type" class="form-control">
+    <option value="">全部类型</option>
+    @foreach(['waiting' => '未匹配', '正常结算' => '正常结算', '停结算' => '停结算'] as $value => $label)
+        <option value="{{ $value }}" @selected(($filters['ledger_settlement_type'] ?? '') === $value)>{{ $label }}</option>
+    @endforeach
+</select></div>
+@elseif($channel === 'credit_card')<div><label for="settlement-source">数据来源</label><select id="settlement-source" name="source" class="form-control"><option value="">合并去重</option>@foreach(['xuzong2-orders' => '信用卡订单', 'xuzong2-details' => '信用卡导入明细', 'xuzong1-details' => '历史信用卡明细'] as $source => $label)<option value="{{ $source }}" @selected(($filters['source'] ?? '') === $source)>{{ $label }}</option>@endforeach</select></div>@endif
 @if($cardChannel === 'ye')
 <div><label for="settlement-match">匹配状态</label><select id="settlement-match" name="card_match" class="form-control">
     <option value="">全部状态</option><option value="matched" @selected(($filters['card_match'] ?? '') === 'matched')>已匹配账单</option><option value="waiting" @selected(($filters['card_match'] ?? '') === 'waiting')>待匹配账单</option>
 </select></div>
 <div><label for="settlement-exceptions">账单筛选</label><select id="settlement-exceptions" name="card_exceptions" class="form-control">
     <option value="">全部交易</option><option value="1" @selected(! empty($filters['card_exceptions']))>仅看结算异常</option>
+</select></div>
+<div><label for="settlement-wallet">Wallet</label><select id="settlement-wallet" name="card_wallet" class="form-control">
+    <option value="">全部交易</option><option value="1" @selected(! empty($filters['card_wallet']))>仅看 Wallet</option>
 </select></div>
 @endif
 @if($channel === 'credit_card')
@@ -153,8 +163,8 @@
 <div class="box"><div class="box-body"><div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><span>共 {{ $rows->total() }} 条</span><div class="settlement-column-settings-trigger">@include('portals.finance.partials.settlement-column-settings', ['columnCardChannel' => $cardChannel])</div></div>
 <div class="finance-table-wrap"><table class="table finance-table"><thead><tr><th class="finance-selection"><input type="checkbox" data-export-all aria-label="全选当前页"></th>@foreach($columns as $field => $label)<th data-settlement-column="{{ $field }}">{{ $label }}</th>@endforeach @if($hasOperations)<th class="{{ $operationClass }}">操作</th>@endif</tr></thead><tbody>
 @forelse($rows as $row)
-@php($editable = $orderView ? ($row['payments'][0] ?? null) : $row)
-<tr><td class="finance-selection"><input type="checkbox" data-record-id="{{ $row['id'] }}" @if($orderView) data-payment-ids="{{ json_encode(array_column($row['payments'], 'id')) }}" @endif data-locked="{{ $row['locked'] ? '1' : '0' }}" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($row) }}" aria-label="选择此行"></td>
+@php($editable = $orderView ? ($row['payments'][0] ?? null) : (empty($row['statement_only']) ? $row : null))
+<tr><td class="finance-selection">@if(empty($row['statement_only']))<input type="checkbox" data-record-id="{{ $row['id'] }}" @if($orderView) data-payment-ids="{{ json_encode(array_column($row['payments'], 'id')) }}" @endif data-locked="{{ $row['locked'] ? '1' : '0' }}" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($row) }}" aria-label="选择此行">@endif</td>
 @foreach($columns as $field => $label)
 @php($splitRefundNote = $orderView ? \App\Portals\Finance\FinancePayPalSettlementOrders::splitRefundNote($row, $field) : null)
 @php($cellValue = ($row['card_layout'] ?? $row)[$field] ?? null)
@@ -253,6 +263,17 @@
     <p class="help-block" id="credit-merchant-empty" hidden>当前平台暂无可用商户。</p>
     <a id="credit-add-merchant" href="{{ route('finance.home', ['balance_tab' => 'credit-card']) }}" hidden>到工作台新增商户</a>
     </div>
+    <p id="credit-conflux-auto-match" hidden>订单明细和结算账单可单独或一起上传。系统自动识别商户并归户。</p>
+    <div id="credit-import-settlement-type-field" hidden>
+        <label for="credit-import-settlement-type">账单结算类型</label>
+        <select id="credit-import-settlement-type" name="settlement_type" class="form-control" disabled>
+            <option value="">仅导入订单时可留空</option>
+            @foreach(['正常结算', '停结算'] as $type)
+                <option value="{{ $type }}" @selected(old('settlement_type') === $type)>{{ $type }}</option>
+            @endforeach
+        </select>
+        <p class="help-block">正常结算和停结算账单请分批上传。</p>
+    </div>
     <div id="credit-import-timezone-field"><label for="credit-import-timezone">文件时区</label><select id="credit-import-timezone" name="timezone" class="form-control">@include('portals.finance.partials.timezone-options', ['selectedTimezone' => old('timezone', $cardChannel === 'ye' ? 'Asia/Shanghai' : $filters['timezone'])])</select></div>
 </div>
 @endif
@@ -272,7 +293,7 @@
 @endif
 <p class="settlement-note" style="padding:0 20px">
 @if($channel === 'credit_card')
-    ConfluxAPI 可一次选择最多 5 个文件，系统自动识别订单明细和结算报表。同批文件应属于同一个单包账户，结算报表会核对商户标识。
+    ConfluxAPI 可一次选择最多 5 个文件，系统自动识别订单明细和结算报表。同批结算报表请选择相同的结算类型。
 @endif
 支持 XLSX、CSV，最大 10 MB。
 </p>
@@ -375,6 +396,14 @@ if(importPlatform){
             upload.name=isConflux?'files[]':'file';
             upload.dispatchEvent(new Event('change'));
         }
+        merchant.disabled=isConflux;
+        merchant.required=!isConflux;
+        merchant.closest('div').hidden=isConflux;
+        document.getElementById('credit-conflux-auto-match').hidden=!isConflux;
+        importForm.elements.settlement_type.disabled=!isConflux;
+        importForm.elements.settlement_type.closest('div').hidden=!isConflux;
+        group.disabled=isConflux;
+        group.closest('div').hidden=isConflux;
         uploadLabel.textContent=isConflux?'拖拽或同时选择订单明细和结算报表':'拖拽文件到这里，或点击选择文件';
         Array.from(merchant.options).forEach(function(option){
             var available=!option.value||((!group.value||option.dataset.group===group.value)&&(!platform||option.dataset.platform===platform));

@@ -57,7 +57,17 @@ class FinanceCreditSettlementLayout
 
     public static function displayColumns(?string $channel): array
     {
-        return self::withDisplayLabels(self::columns($channel));
+        $columns = self::withDisplayLabels(self::columns($channel));
+        if ($channel === 'ye') {
+            $columns['website_name'] = '网站名称 / 账单描述符';
+            $columns['order_refund'] = '订单退款金额';
+            $columns['refund'] = '账单退款金额';
+            $afterTeam = array_search('team', array_keys($columns), true) + 1;
+            $columns = array_slice($columns, 0, $afterTeam, true)
+                + ['operation_region' => '地区'] + array_slice($columns, $afterTeam, null, true);
+        }
+
+        return $columns;
     }
 
     public static function withDisplayLabels(array $columns): array

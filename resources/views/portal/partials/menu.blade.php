@@ -60,9 +60,6 @@
             <i class="fa {{ $icon }}"></i>
             <span>{{ $label }}</span>
             @if($portal->code === 'fuzhuang' && $menu->code === 'fashion_operation_task_recaps' && ($operationTaskReviewCounts['rejected_recaps'] ?? 0) > 0)
-            <span class="operation-recap-deadline" title="每日复盘请在每天 11 点前提交"><span>每天 11 点前提交</span></span>
-            @endif
-            @if($portal->code === 'fuzhuang' && $menu->code === 'fashion_operation_task_recaps' && ($operationTaskReviewCounts['rejected_recaps'] ?? 0) > 0)
             <span class="operation-rejected-count" title="复盘被驳回待修改">驳回 {{ $operationTaskReviewCounts['rejected_recaps'] }}</span>
             @endif
             @if($portal->code === 'fuzhuang' && $menu->code === 'fashion_operation_task_reviews' && (($operationTaskReviewCounts['recaps'] ?? 0) > 0 || ($operationTaskReviewCounts['tests'] ?? 0) > 0))
@@ -101,9 +98,6 @@
         <a href="#">
             <i class="fa {{ $icon }}"></i>
             <span>{{ $label }}</span>
-            @if($portal->code === 'fuzhuang' && $menu->code === 'fashion_operation_tasks')
-                <span class="operation-recap-deadline">每天 11 点前提交</span>
-            @endif
             @if($portal->code === 'fuzhuang' && $menu->code === 'fashion_operation_tasks')
                 @if(($operationTaskReviewCounts['rejected_recaps'] ?? 0) > 0)
                     <span class="operation-rejected-count">驳回 {{ $operationTaskReviewCounts['rejected_recaps'] }}</span>

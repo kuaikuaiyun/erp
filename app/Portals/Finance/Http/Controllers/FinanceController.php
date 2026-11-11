@@ -1598,7 +1598,9 @@ class FinanceController extends Controller
             'source' => ['nullable', Rule::in(['xuzong2-orders', 'xuzong2-details', 'xuzong1-details'])],
             'card_channel' => ['nullable', Rule::in(array_keys(FinanceCreditSettlementLayout::CHANNELS))],
             'card_exceptions' => 'nullable|boolean',
+            'card_wallet' => 'nullable|boolean',
             'card_match' => ['nullable', Rule::in(['matched', 'waiting'])],
+            'ledger_settlement_type' => ['nullable', Rule::in(['waiting', '正常结算', '停结算'])],
             'card_transaction_status' => ['nullable', Rule::in(array_keys(FinanceSettlementService::CARD_TRANSACTION_STATUSES))],
             'card_group' => 'nullable|integer|min:1',
             'conditions' => 'nullable|array|max:10', 'conditions.*' => 'array:field,operator,value',
@@ -1626,7 +1628,7 @@ class FinanceController extends Controller
         }
         $cardLayout = $channel === 'credit_card' ? FinanceCreditSettlementLayout::columns($filters['card_channel'] ?? null) : [];
         if ($channel !== 'credit_card' || ($filters['card_channel'] ?? null) !== 'ye') {
-            unset($filters['card_exceptions'], $filters['card_match']);
+            unset($filters['card_wallet'], $filters['card_exceptions'], $filters['card_match'], $filters['ledger_settlement_type']);
         }
         if ($channel !== 'credit_card') {
             unset($filters['card_group'], $filters['card_transaction_status']);
@@ -1661,7 +1663,8 @@ class FinanceController extends Controller
             $exportColumns = FinanceCreditSettlementLayout::withDisplayLabels($exportColumns);
         }
         if ($channel === 'credit_card' && ($filters['card_channel'] ?? null) === 'ye') {
-            $columns = ['ledger_status' => '匹配状态', 'ledger_dates' => '账单日期', ...$columns];
+            $columns = ['ledger_status' => '匹配状态', 'ledger_dates' => '账单日期', 'ledger_settlement_type' => '账单结算类型', ...$columns];
+            $exportColumns += array_intersect_key($columns, array_flip(['ledger_status', 'ledger_dates', 'ledger_settlement_type']));
         }
         if (! empty($filters['card_exceptions'])) {
             $columns += FinanceConfluxSettlement::EXCEPTION_COLUMNS;
@@ -1685,9 +1688,16 @@ class FinanceController extends Controller
                 }
             }
         }
+        $statementRows = fn () => app(FinanceConfluxSettlement::class)->unmatchedRows($filters);
+        $resultBatches = function () use ($service, $channel, $filters, $statementRows): iterable {
+            yield from $service->rowBatches($channel, $filters);
+            foreach (collect()->lazy()->concat($statementRows())->chunk(500) as $batch) {
+                yield $batch;
+            }
+        };
         // Computed filters are evaluated in batches before counting and slicing the matches.
         $canPaginate = ! $request->boolean('download') && ! $request->has('suggestion_field')
-            && empty($filters['card_exceptions']) && empty($filters['card_match'])
+            && empty($filters['card_wallet']) && empty($filters['card_exceptions']) && empty($filters['card_match']) && empty($filters['ledger_settlement_type'])
             && ! filled($filters['team'] ?? null) && ! filled($filters['subscription'] ?? null)
             && ! filled($filters['domain'] ?? null) && empty($filters['conditions']);
         if ($orderView) {
@@ -1700,6 +1710,17 @@ class FinanceController extends Controller
                 ->paginate((int) ($filters['per_page'] ?? 10))->withQueryString();
             $rows = $service->rows($channel, $filters, $paginator->getCollection());
             $paginator->setCollection($rows);
+            if (($filters['card_channel'] ?? null) === 'ye') {
+                $perPage = $paginator->perPage();
+                $page = $paginator->currentPage();
+                $orderTotal = $paginator->total();
+                $skip = max(0, ($page - 1) * $perPage - $orderTotal);
+                [$statementTotal, $statementPage] = app(FinanceConfluxSettlement::class)
+                    ->unmatchedPage($filters, $skip, $perPage - $rows->count());
+                $rows = $rows->concat($statementPage);
+                $paginator = new \Illuminate\Pagination\LengthAwarePaginator($rows, $orderTotal + $statementTotal, $perPage, $page,
+                    ['path' => $request->url(), 'query' => $request->query()]);
+            }
         } elseif (! $request->boolean('download') && ! $request->has('suggestion_field')) {
             $perPage = (int) ($filters['per_page'] ?? 10);
             $page = max(1, (int) $request->query('page', 1));
@@ -1707,7 +1728,7 @@ class FinanceController extends Controller
             $total = 0;
             $rows = collect();
             $subscriptions = [];
-            foreach ($service->rowBatches($channel, $filters) as $batch) {
+            foreach ($resultBatches() as $batch) {
                 foreach ($batch as $row) {
                     $subscriptions[(string) ($row['subscription'] ?? '')] = ['subscription' => $row['subscription'] ?? null];
                     if ($total >= $offset && $rows->count() < $perPage) {
@@ -1719,7 +1740,7 @@ class FinanceController extends Controller
             $paginator = new \Illuminate\Pagination\LengthAwarePaginator($rows, $total, $perPage, $page,
                 ['path' => $request->url(), 'query' => $request->query()]);
         } else {
-            $rows = $request->boolean('download') ? $service->rows($channel, $filters) : collect();
+            $rows = collect();
         }
         if ($request->has('suggestion_field')) {
             $suggestion = $request->validate([
@@ -1728,7 +1749,7 @@ class FinanceController extends Controller
             ]);
             $search = FinanceCatalog::simplified($suggestion['suggestion_q'] ?? '');
             $values = collect();
-            foreach ($orderView ? [$rows] : $service->rowBatches($channel, $filters) as $batch) {
+            foreach ($orderView ? [$rows] : $resultBatches() as $batch) {
                 $values = $values->concat($batch->pluck($suggestion['suggestion_field'])->filter(fn ($value) => $value !== null && $value !== ''
                     && ($search === '' || mb_stripos(FinanceCatalog::simplified((string) $value), $search) !== false)))
                     ->unique()->sort()->take(20)->values();
@@ -1737,12 +1758,25 @@ class FinanceController extends Controller
             return response()->json($values->map(fn ($value) => ['value' => (string) $value, 'label' => FinanceCatalog::simplified((string) $value)]));
         }
         if ($request->boolean('download')) {
-            $rows = \App\Portals\Finance\FinanceExportSelection::filter($request, $rows);
             $format = $filters['format'] ?? 'xlsx';
-            if ($format === 'xls' && $rows->count() > 65535) {
+            if ($orderView) {
+                $exportRows = \App\Portals\Finance\FinanceExportSelection::filter($request, $rows)->lazy();
+            } else {
+                $exportRows = \Illuminate\Support\LazyCollection::make(function () use ($resultBatches): iterable {
+                    foreach ($resultBatches() as $batch) {
+                        yield from $batch->values()->all();
+                    }
+                });
+                $selected = \App\Portals\Finance\FinanceExportSelection::keys($request);
+                if ($selected !== null) {
+                    $exportRows = \App\Portals\Finance\FinanceExportSelection::filter($request,
+                        $exportRows->filter(fn ($row) => in_array(\App\Portals\Finance\FinanceExportSelection::key($row), $selected, true))->all())->lazy();
+                }
+            }
+            if ($format === 'xls' && $exportRows->take(65536)->count() > 65535) {
                 throw ValidationException::withMessages(['format' => 'XLS最多65535条，请使用XLSX。']);
             }
-            return $this->workbooks->download($downloadHeaders, $rows->lazy()->map(fn ($row) => array_map(
+            return $this->workbooks->download($downloadHeaders, $exportRows->map(fn ($row) => array_map(
                 fn ($field) => match (true) {
                     ! $orderView => ($row['card_layout'] ?? $row)[$field] ?? '',
                     $field === 'paypal_18' => FinanceProductNames::categories((string) ($row[$field] ?? '')),
@@ -1750,7 +1784,8 @@ class FinanceController extends Controller
                     default => FinancePayPalSettlementOrders::splitRefundNote($row, $field) ?? ($row[$field] ?? ''),
                 },
                 $requestedColumns,
-            )), $report.'.'.$format, $format, plain: $orderView);
+            )), $report.'.'.$format, $format, plain: $orderView,
+                sheetTitle: empty($filters['card_exceptions']) ? 'Sheet1' : '异常汇总');
         }
         $perPage = (int) ($filters['per_page'] ?? 10);
         $page = max(1, (int) $request->query('page', 1));
@@ -2250,8 +2285,8 @@ class FinanceController extends Controller
     private function importConfluxFiles(Request $request, string $report, int $actor): Response
     {
         $data = $request->validate([
-            'account' => 'required|string|max:191', 'card_group' => 'nullable|integer|min:1',
             'timezone' => ['required', Rule::in(FinanceWorkbookService::TIMEZONES)],
+            'settlement_type' => ['nullable', Rule::in(['正常结算', '停结算'])],
             'files' => 'required|array|list|min:1|max:5',
             'files.*' => 'required|file|extensions:xlsx,csv,txt|max:10240',
         ]);
@@ -2262,22 +2297,47 @@ class FinanceController extends Controller
         $batch = [];
         foreach ($files as $index => $file) {
             try {
-                $batch[] = ['index' => $index, 'file' => $file, 'statement' => $conflux->isStatement($file)];
-            } catch (\PhpOffice\PhpSpreadsheet\Exception $e) {
-                throw ValidationException::withMessages(['files.'.$index => '无法识别文件：'.$file->getClientOriginalName()]);
+                $statement = null;
+                if ($conflux->isStatement($file)) {
+                    if (empty($data['settlement_type'])) {
+                        throw ValidationException::withMessages(['file' => '请选择账单的结算类型：正常结算或停结算。']);
+                    }
+                    $statement = $conflux->read($file, $data['settlement_type']);
+                }
+                $batch[] = ['index' => $index, 'file' => $file, 'statement' => $statement];
+            } catch (ValidationException|\PhpOffice\PhpSpreadsheet\Exception $e) {
+                $message = $e instanceof ValidationException ? $e->getMessage() : '无法识别文件。';
+                throw ValidationException::withMessages(['files.'.$index => $file->getClientOriginalName().'：'.$message]);
             }
         }
         // All orders are available before looking up statement references, regardless of selection order.
-        usort($batch, fn ($left, $right) => $left['statement'] <=> $right['statement']);
+        usort($batch, fn ($left, $right) => ($left['statement'] !== null) <=> ($right['statement'] !== null));
         $counts = $this->workbooks->database()->transaction(function () use ($batch, $data, $actor, $conflux): array {
-            $account = $this->lockCreditImportAccount($data);
+            $accounts = FinancePaymentAccount::query()->where('account_type', 'credit_card')->where('card_platform', 'ye')
+                ->whereNotNull('card_merchant_key')->orderBy('id')->lockForUpdate()->get();
+            $statementAccounts = [];
+            foreach ($batch as ['index' => $index, 'file' => $file, 'statement' => $statement]) {
+                if ($statement === null) {
+                    continue;
+                }
+                try {
+                    $account = $conflux->findOrCreateStatementAccount($accounts, $statement, $actor);
+                    $statementAccounts[$index] = $account;
+                    if (! $accounts->contains('id', $account->id)) {
+                        $accounts->push($account);
+                    }
+                } catch (ValidationException $e) {
+                    throw ValidationException::withMessages(['files.'.$index => $file->getClientOriginalName().'：'.$e->getMessage()]);
+                }
+            }
+
             $counts = ['orders' => 0, 'duplicates' => 0, 'statements' => 0, 'entries' => 0,
                 'repeated_statements' => 0, 'statements_with_unmatched' => 0];
             foreach ($batch as ['index' => $index, 'file' => $file, 'statement' => $statement]) {
                 try {
                     if ($statement) {
-                        $result = $conflux->import($conflux->read($file), $account->activity_account,
-                            $actor, isset($data['card_group']) ? (int) $data['card_group'] : null);
+                        $account = $statementAccounts[$index];
+                        $result = $conflux->import($statement, $account->activity_account, $actor);
                         $counts['statements']++;
                         $counts['entries'] += $result['inserted'];
                         $counts['repeated_statements'] += (int) ($result['inserted'] === 0);
@@ -2286,7 +2346,17 @@ class FinanceController extends Controller
                         $readerType = strtolower($file->getClientOriginalExtension()) === 'xlsx'
                             ? \PhpOffice\PhpSpreadsheet\IOFactory::READER_XLSX
                             : \PhpOffice\PhpSpreadsheet\IOFactory::READER_CSV;
+                        $account = null;
+                        $websites = [];
                         foreach ($this->creditChannelOrderBatches($file, 'ye', [$readerType]) as $rows) {
+                            foreach (array_unique(array_column($rows, '网站名称')) as $website) {
+                                $website = trim((string) $website);
+                                $matched = $websites[$website] ??= $conflux->resolveAccount($accounts, $website, website: true, actor: $actor);
+                                if ($account !== null && $account->id !== $matched->id) {
+                                    throw ValidationException::withMessages(['file' => '此订单文件包含多个 Conflux 商户，请按商户分别导出。']);
+                                }
+                                $account = $matched;
+                            }
                             $added = $this->workbooks->importRecords('xuzong2-details', $rows, $account->activity_account,
                                 $data['timezone'], $actor, createOnly: true, guardSettlementMonth: true);
                             $counts['orders'] += $added;
@@ -2294,7 +2364,7 @@ class FinanceController extends Controller
                         }
                         unset($rows);
                     }
-                } catch (ValidationException|\App\Portals\Finance\FinanceRelayException $e) {
+                } catch (ValidationException|\App\Portals\Finance\FinanceRelayException|\PhpOffice\PhpSpreadsheet\Exception $e) {
                     throw ValidationException::withMessages(['files.'.$index => $file->getClientOriginalName().'：'.$e->getMessage()]);
                 }
             }
@@ -2309,6 +2379,8 @@ class FinanceController extends Controller
         if ($counts['statements_with_unmatched']) {
             $message .= '其中 '.$counts['statements_with_unmatched'].' 份报表仍有待匹配交易，后续可补导订单。';
         }
+
+        unset($data['settlement_type']);
 
         return redirect()->route('finance.report', ['report' => $report, ...$data])->with('success', $message);
     }

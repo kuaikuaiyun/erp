@@ -224,6 +224,7 @@ Route::prefix('fashion/operation-tasks')->name('operation-tasks.')->controller(O
     Route::get('/reviews', 'reviews')->name('reviews.index');
     Route::post('/reviews', 'review')->name('reviews.store');
     Route::post('/reviews/assets', 'reviewAssets')->name('reviews.assets.store');
+    Route::post('/reviews/batch', 'reviewBatch')->name('reviews.batch.store');
     Route::get('/dashboard', 'dashboard')->name('dashboard');
 });
 Route::get('/assistant/daily-submissions/advertising-recharges', [AdvertisingRechargeReviewController::class, 'index'])

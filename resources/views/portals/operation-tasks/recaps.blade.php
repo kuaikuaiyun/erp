@@ -120,7 +120,11 @@
                 </tbody>
             </table>
         </div>
-        @if($recaps->hasPages())<div class="box-footer">{{ $recaps->links() }}</div>@endif
+        @include('portals.operation-tasks.partials.pagination', [
+            'paginator' => $recaps,
+            'perPageName' => 'recap_per_page',
+            'activeTab' => 'recaps',
+        ])
     </div>
 
     @foreach($recaps as $recap)
