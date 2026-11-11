@@ -40,10 +40,12 @@ class FashionAppLovinPerformanceReportController extends Controller
         $departments = Department::business()->whereHas('departmentMembers', fn ($query) => $query->whereIn('admin_users.id', $submitterIds))
             ->orderBy('sort')->orderBy('name')->get(['id', 'name']);
         $departmentIds = $departments->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $timezoneOptions = $this->timezoneOptions();
         $filters = $request->validate([
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
             'date_range' => ['nullable', Rule::in(['custom', 'yesterday', 'last_3', 'last_7', 'last_15', 'last_30', 'last_60', 'last_90', 'last_6_months', 'last_year'])],
+            'timezone' => ['nullable', Rule::in(array_keys($timezoneOptions))],
             'department_id' => ['nullable', 'integer', Rule::in($departmentIds)],
             'operator' => ['nullable', 'string', 'max:100'],
             'store_domain' => ['nullable', 'string', 'max:191'],
@@ -52,7 +54,8 @@ class FashionAppLovinPerformanceReportController extends Controller
             'consumption_custom' => ['nullable', 'numeric', 'min:0', 'required_if:consumption_range,custom'],
             'consumption_custom_max' => ['nullable', 'numeric', 'min:0', 'required_if:consumption_range,custom', 'gte:consumption_custom'],
         ]);
-        $today = now('Asia/Shanghai')->startOfDay();
+        $timezone = (string) ($filters['timezone'] ?? '-08:00');
+        $today = now($timezone)->startOfDay();
         $dateRange = (string) ($filters['date_range'] ?? ($request->hasAny(['date_from', 'date_to']) ? 'custom' : 'last_7'));
         [$presetFrom, $presetTo] = match ($dateRange) {
             'yesterday' => [$today->copy()->subDay(), $today->copy()->subDay()],
@@ -81,7 +84,23 @@ class FashionAppLovinPerformanceReportController extends Controller
         $reports = (clone $reportQuery)->whereBetween('report_date', [$dateFrom, $dateTo])->orderBy('report_date')->get();
 
         $accountBindings = AppLovinAccountStoreBinding::query()->pluck('assistant_domain_store_id', 'account_key');
-        $storeIds = $reports->flatMap->adSpendEntries->pluck('assistant_domain_store_id')->merge($accountBindings->values())
+        $accountIdentity = static function (int $operatorId, string $agency, string $accountNumber): string {
+            $normalizedAgency = mb_strtolower(trim($agency));
+            $normalizedNumber = preg_replace('/[\s\p{Cf}]+/u', '', mb_strtolower($accountNumber)) ?? '';
+
+            return implode('|', [$operatorId, $normalizedAgency, $normalizedNumber]);
+        };
+        $bindingByIdentity = collect();
+        $accountSpendReports->each(function (FashionAdvertisingReport $report) use ($accountBindings, $accountIdentity, $bindingByIdentity): void {
+            $report->adSpendEntries->each(function ($entry) use ($report, $accountBindings, $accountIdentity, $bindingByIdentity): void {
+                $exactKey = AppLovinSpendScreenshot::accountKey((int) $report->submitter_id, (string) $entry->agency, (string) $entry->media, (string) $entry->account_name, (string) $entry->account_number);
+                $storeId = (int) ($entry->assistant_domain_store_id ?: ($accountBindings->get($exactKey) ?? 0));
+                if ($storeId > 0) {
+                    $bindingByIdentity->put($accountIdentity((int) $report->submitter_id, (string) $entry->agency, (string) $entry->account_number), $storeId);
+                }
+            });
+        });
+        $storeIds = $reports->flatMap->adSpendEntries->pluck('assistant_domain_store_id')->merge($accountBindings->values())->merge($bindingByIdentity->values())
             ->filter()->map(fn ($id) => (int) $id)->unique()->values();
         $stores = AssistantDomainStore::query()->whereIn('id', $storeIds)->get(['id', 'domain', 'site_builder'])->keyBy('id');
         $accountSpendTotals = $accountSpendReports->flatMap(fn (FashionAdvertisingReport $report) => $report->adSpendEntries->map(fn ($entry): array => [
@@ -89,20 +108,21 @@ class FashionAppLovinPerformanceReportController extends Controller
             'spend' => (float) $entry->actual_spend_usd,
         ]))->groupBy('account_key')->map(fn ($items) => (float) $items->sum('spend'));
         $giftScreenshots = AppLovinSpendScreenshot::query()->whereIn('account_key', $accountSpendTotals->keys())->get()->keyBy('account_key');
-        $dailyRows = $reports->flatMap(function (FashionAdvertisingReport $report) use ($stores, $accountBindings, $accountSpendTotals): array {
-            return $report->adSpendEntries->map(function ($entry) use ($report, $accountBindings) {
+        $dailyRows = $reports->flatMap(function (FashionAdvertisingReport $report) use ($stores, $accountBindings, $accountSpendTotals, $accountIdentity, $bindingByIdentity, $timezone): array {
+            return $report->adSpendEntries->map(function ($entry) use ($report, $accountBindings, $accountIdentity, $bindingByIdentity) {
                 $accountKey = AppLovinSpendScreenshot::accountKey((int) $report->submitter_id, (string) $entry->agency, (string) $entry->media, (string) $entry->account_name, (string) $entry->account_number);
-                $storeId = (int) ($entry->assistant_domain_store_id ?: ($accountBindings->get($accountKey) ?? 0));
+                $identity = $accountIdentity((int) $report->submitter_id, (string) $entry->agency, (string) $entry->account_number);
+                $storeId = (int) ($entry->assistant_domain_store_id ?: ($accountBindings->get($accountKey) ?? $bindingByIdentity->get($identity, 0)));
                 $entry->setAttribute('resolved_account_key', $accountKey);
                 $entry->setAttribute('resolved_store_id', $storeId);
                 $entry->setAttribute('resolved_group_key', $storeId > 0 ? 'store:'.$storeId : 'account:'.$accountKey);
 
                 return $entry;
-            })->groupBy('resolved_group_key')->map(function ($entries) use ($report, $stores, $accountSpendTotals): array {
+            })->groupBy('resolved_group_key')->map(function ($entries) use ($report, $stores, $accountSpendTotals, $timezone): array {
                 $storeId = (int) $entries->first()->resolved_store_id;
                 $store = $stores->get((int) $storeId);
-                $from = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 00:00:00', '-08:00')->utc();
-                $to = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 23:59:59', '-08:00')->utc();
+                $from = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 00:00:00', $timezone)->utc();
+                $to = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 23:59:59', $timezone)->utc();
                 $platform = $store && mb_strtolower(trim((string) $store->site_builder)) === 'shopline' ? 'shopline' : 'xshoppy';
                 $metrics = $storeId > 0 ? FashionLogisticsOrder::query()->where('assistant_domain_store_id', $storeId)->where('source_platform', $platform)
                     ->whereBetween('order_created_at', [$from, $to])->selectRaw('COUNT(*) order_count, COALESCE(SUM(total_amount),0) revenue')->first() : null;
@@ -186,10 +206,26 @@ class FashionAppLovinPerformanceReportController extends Controller
         return view('portals.assistant.fashion-applovin-performance-reports.index', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'], 'rows' => $rows, 'totals' => $totals,
             'dateFrom' => $dateFrom, 'dateTo' => $dateTo, 'operator' => $filters['operator'] ?? '',
+            'timezone' => $timezone, 'timezoneOptions' => $timezoneOptions,
             'dateRange' => $dateRange, 'selectedStoreDomain' => $filters['store_domain'] ?? '', 'domainOptions' => $domainOptions,
             'selectedGiftStatus' => $filters['gift_status'] ?? '', 'selectedConsumptionRange' => $filters['consumption_range'] ?? '',
             'consumptionCustom' => $filters['consumption_custom'] ?? '', 'consumptionCustomMax' => $filters['consumption_custom_max'] ?? '',
             'selectedDepartmentId' => $filters['department_id'] ?? null, 'departmentOptions' => $departments,
         ]);
+    }
+
+    /** @return array<string,string> */
+    private function timezoneOptions(): array
+    {
+        $options = [];
+        for ($offset = -12; $offset <= 14; $offset++) {
+            $value = sprintf('%s%02d:00', $offset < 0 ? '-' : '+', abs($offset));
+            $label = 'UTC'.($offset >= 0 ? '+' : '').$offset;
+            if ($value === '+08:00') $label .= '（北京时间）';
+            if ($value === '-08:00') $label .= '（默认）';
+            $options[$value] = $label;
+        }
+
+        return $options;
     }
 }

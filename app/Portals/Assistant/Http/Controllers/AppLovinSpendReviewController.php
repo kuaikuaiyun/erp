@@ -93,15 +93,28 @@ class AppLovinSpendReviewController extends Controller
                     ]);
             });
         $rows = $rows->concat($fashionRows);
-        $accounts = $rows->groupBy(fn (array $row) => implode('|', [(int) ($row['operator_user_id'] ?? 0), mb_strtolower(trim((string) ($row['agency'] ?? ''))), trim((string) ($row['account_number'] ?? ''))]))
+        $accounts = $rows->groupBy(function (array $row): string {
+            $normalizedAgency = mb_strtolower(trim((string) ($row['agency'] ?? '')));
+            $normalizedNumber = preg_replace('/[\s\p{Cf}]+/u', '', mb_strtolower((string) ($row['account_number'] ?? ''))) ?? '';
+
+            return implode('|', [(int) ($row['operator_user_id'] ?? 0), $normalizedAgency, $normalizedNumber]);
+        })
             ->map(function ($group): array {
                 $first = $group->first();
                 $agency = trim((string) ($first['agency'] ?? ''));
-                $media = (string) ($first['media_source'] ?? '');
+                $media = 'AppLovin';
                 $number = trim((string) ($first['account_number'] ?? ''));
                 $names = $group->pluck('account_name')->map(fn ($name) => trim((string) $name))->filter()->values();
                 $name = $names->filter(fn ($candidate) => $candidate !== $number && ! ctype_digit($candidate))->last() ?: $names->last() ?: $number;
-                $keys = $names->unique()->map(fn ($candidate) => AppLovinSpendScreenshot::accountKey((int) $first['operator_user_id'], $agency, $media, $candidate, $number));
+                $keys = $group->map(fn (array $row) => AppLovinSpendScreenshot::accountKey(
+                    (int) ($row['operator_user_id'] ?? 0),
+                    (string) ($row['agency'] ?? ''),
+                    (string) ($row['media_source'] ?? ''),
+                    (string) ($row['account_name'] ?? ''),
+                    (string) ($row['account_number'] ?? '')
+                ))->merge($names->unique()->map(fn ($candidate) => AppLovinSpendScreenshot::accountKey(
+                    (int) $first['operator_user_id'], $agency, $media, $candidate, $number
+                )))->unique()->values();
                 if ($keys->isEmpty()) {
                     $keys = collect([AppLovinSpendScreenshot::accountKey((int) $first['operator_user_id'], $agency, $media, $name, $number)]);
                 }
