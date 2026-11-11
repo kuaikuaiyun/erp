@@ -394,13 +394,21 @@ class AdvertisingReportSpreadsheetService
     private function parseDate(mixed $value, int $row): string
     {
         try {
-            if (is_numeric($value)) return SpreadsheetDate::excelToDateTimeObject((float) $value)->format('Y-m-d');
+            if (is_numeric($value)) {
+                $date = SpreadsheetDate::excelToDateTimeObject((float) $value);
+                if ((int) $date->format('Y') >= 2000 && (int) $date->format('Y') <= 2100) {
+                    return $date->format('Y-m-d');
+                }
+            }
             $text = str_replace('/', '-', trim((string) $value));
             $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $text);
-            if ($date && $date->format('Y-m-d') === $text) return $text;
+            if ($date && $date->format('Y-m-d') === $text
+                && (int) $date->format('Y') >= 2000 && (int) $date->format('Y') <= 2100) {
+                return $text;
+            }
         } catch (\Throwable) {
         }
 
-        throw new InvalidArgumentException("第 {$row} 行的「提报日期」格式不正确，请填写为 YYYY-MM-DD。");
+        throw new InvalidArgumentException("第 {$row} 行的「提报日期」格式不正确，请填写完整的 YYYY-MM-DD 日期（例如 2026-11-01），不能只填写月和日。");
     }
 }
