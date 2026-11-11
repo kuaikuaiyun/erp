@@ -46,11 +46,11 @@ class FashionAdvertisingReviewController extends Controller
     {
         $context = $this->context($request);
         if ($context instanceof Response) abort($context->getStatusCode());
-        $request->validate(['import_file' => ['required', 'file', 'max:10240']], [
+        $request->validate(['import_file' => ['required', 'file', 'max:102400']], [
             'import_file.required' => '请选择需要导入的 Excel 文件。',
             'import_file.uploaded' => '文件上传失败，文件可能超过服务器允许的大小。',
             'import_file.file' => '上传的内容不是有效文件。',
-            'import_file.max' => '导入文件不能超过 10MB。',
+            'import_file.max' => '导入文件不能超过 100MB。',
         ]);
         try {
             $result = $this->bulkImporter->import($request->file('import_file'), $this->importableOperators($context['user']));
