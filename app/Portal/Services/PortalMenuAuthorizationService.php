@@ -33,12 +33,17 @@ class PortalMenuAuthorizationService
 
         $byParent = $menus->groupBy(fn (PortalMenu $menu) => (int) ($menu->parent_id ?: 0));
         $visibleIds = collect();
-        $walk = function (PortalMenu $menu) use (&$walk, $byParent, $user, $visibleIds): bool {
+        $permissionSlugs = null;
+        $walk = function (PortalMenu $menu) use (&$walk, $byParent, $user, $visibleIds, &$permissionSlugs): bool {
             $hasVisibleChild = false;
             foreach ($byParent->get((int) $menu->getKey(), collect()) as $child) {
                 $hasVisibleChild = $walk($child) || $hasVisibleChild;
             }
-            $visible = $this->canAccess($user, $menu) || $hasVisibleChild;
+            $visible = $hasVisibleChild || !$menu->permission_slug || $this->authorization->hasPermission(
+                $user,
+                $menu->permission_slug,
+                $permissionSlugs ??= $this->authorization->permissionsFor($user)->pluck('slug'),
+            );
             if ($visible) {
                 $visibleIds->push((int) $menu->getKey());
             }

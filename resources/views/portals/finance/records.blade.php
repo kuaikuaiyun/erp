@@ -158,7 +158,9 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
 <style>.finance-system .finance-records-panel .finance-condition{grid-template-columns:minmax(160px,1fr) minmax(180px,2fr) 60px}.finance-system .finance-records-data .finance-table th:first-child,.finance-system .finance-records-data .finance-table td:first-child{width:auto;min-width:120px;max-width:240px;padding:10px 12px;text-align:left}.finance-system .finance-records-data .finance-table th:nth-child(2),.finance-system .finance-records-data .finance-table td:nth-child(2){position:static;box-shadow:none}@media(max-width:650px){.finance-system .finance-records-panel .finance-condition{grid-template-columns:minmax(0,1fr) 60px}.finance-condition [data-filter-field]{grid-column:1/-1}}</style>
 @endpush
 @section('finance_content')
-@if($dataset === 'xuzong2-orders')
+@if($xuzongReport)
+<p class="finance-note">订单和支付状态来自 Shopify 与物流系统。导入账单用于补充已匹配订单的结算字段。</p>
+@elseif($dataset === 'xuzong2-orders')
 <p class="finance-note">数据同步自物流系统的信用卡订单，支持查询与导出。订单信息请在物流系统维护。</p>
 @elseif(! in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true))
 <p class="finance-note">{{ __($canImport ? 'finance.records.note' : 'finance.records.order_note') }}</p>
@@ -172,6 +174,13 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
             @foreach(\App\Portals\Finance\FinanceCatalog::PAYPAL_ORDER_FILTERS as $field => $label)
                 @php
                     $commonField = in_array($field, ['id','shopify_order_number','tongtu_order_number','store_name','subscription_type','column_18','domain','column_13','currency','status'], true);
+                    if ($xuzongReport) {
+                        $label = match ($field) {
+                            'currency' => \App\Portals\Finance\FinanceXuzongCreditReport::DISPLAY_HEADERS['交易币种'],
+                            'status' => \App\Portals\Finance\FinanceXuzongCreditReport::DISPLAY_HEADERS['支付状态'],
+                            default => $label,
+                        };
+                    }
                 @endphp
                 @continue(preg_match('/_(from|to)$/', $field))
                 <div class="logistics-filter-field {{ $commonField ? '' : 'paypal-extra-filter' }}" style="order:{{ $loop->index * 10 }}">
@@ -336,8 +345,22 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
 document.querySelectorAll('.finance-export-columns').forEach(function(panel){
     var checks=Array.from(panel.querySelectorAll('[name="report_columns[]"]'));
     var storageKey='finance:'+@json($xuzongReport ? 'xuzong-credit' : $dataset)+':page-export-columns:v2';
+    @if($xuzongReport)
+    var previousStorageKey=storageKey;
+    storageKey='finance:xuzong-credit:page-export-columns:v3';
+    @endif
     try {
         var saved=JSON.parse(localStorage.getItem(storageKey));
+        @if($xuzongReport)
+        if(saved===null){
+            saved=JSON.parse(localStorage.getItem(previousStorageKey));
+            if(Array.isArray(saved)&&!saved.includes('51')) saved=saved.concat('51');
+        }
+        // Carry the old combined-fee selection over to the two replacement columns.
+        if(Array.isArray(saved)&&saved.includes('33')&&!saved.includes('46')&&!saved.includes('47')){
+            saved=saved.concat(['46','47']);
+        }
+        @endif
         if(Array.isArray(saved)&&saved.some(function(value){return checks.some(function(input){return input.value===value;});})){
             checks.forEach(function(input){input.checked=saved.includes(input.value);});
         }

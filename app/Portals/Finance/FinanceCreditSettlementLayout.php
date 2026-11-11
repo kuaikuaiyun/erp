@@ -53,6 +53,23 @@ class FinanceCreditSettlementLayout
         };
     }
 
+    public static function displayColumns(?string $channel): array
+    {
+        return self::withDisplayLabels(self::columns($channel));
+    }
+
+    public static function withDisplayLabels(array $columns): array
+    {
+        return array_replace($columns, array_intersect_key([
+            'reference' => '交易 ID',
+            'currency' => '货币',
+            'gross' => '总额',
+            'status' => '状态',
+            'fee' => FinanceSettlementService::MONEY['fee'],
+            'owner' => '使用人',
+        ], $columns));
+    }
+
     public static function filter(Builder $query, string $channel): void
     {
         $accounts = FinancePaymentAccount::query()->where('account_type', 'credit_card')

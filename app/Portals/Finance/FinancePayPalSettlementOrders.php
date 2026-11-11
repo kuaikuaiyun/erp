@@ -7,6 +7,7 @@ use Illuminate\Support\Collection;
 
 class FinancePayPalSettlementOrders
 {
+    public const USD_RECEIPT_LABEL = '收款金额-美元';
     public const COLUMNS = [
         'shopify_order_number' => 'Shopify订单号', 'order_status' => '当前订单状态',
         'open_hold' => '未解除冻结（USD）', 'payable' => '应结算（USD）',
@@ -62,7 +63,7 @@ class FinancePayPalSettlementOrders
         $payablePosition = array_search('logistics', array_keys($columns), true);
         $columns = array_slice($columns, 0, $payablePosition, true)
             + ['payable' => self::COLUMNS['payable']] + array_slice($columns, $payablePosition, null, true);
-        $columns = [...$columns, ...self::COLUMNS, 'settlement' => '收款金额-美元'];
+        $columns = [...$columns, ...self::COLUMNS, 'settlement' => self::USD_RECEIPT_LABEL];
         $primary = array_flip(['shopify_order_number', 'reference', 'account', 'order_status',
             'open_hold', 'review', 'paypal_12', 'paypal_reference_type']);
 
@@ -407,9 +408,13 @@ class FinancePayPalSettlementOrders
         $root = $roots[$id] ?? null;
         $result = $this->calculate($payment, $root, $children[$id] ?? [], $conversions[$id] ?? [],
             $root && count($crossAccount[$root['reference']] ?? []) > 1, $crossRates, $zone, $includeDetails);
+        $result['shop_difference_usd'] = $this->settlements->shopDifference(
+            $result['settlement'], $payment['shop_paid_usd'] ?? null,
+        );
+        unset($result['shop_paid_usd'], $payment['shop_paid_usd']);
         $isBrushOrder = $payment['subscription'] === '刷单' || str_contains((string) $payment['owner'], '刷单');
         $result['team'] = $isBrushOrder ? '刷单' : $payment['operation_department'];
-        $result['operation_region'] = $isBrushOrder ? '刷单' : $this->operationRegion($result['team']);
+        $result['operation_region'] = FinanceSettlementService::operationRegion($result['team']);
         $result['order_status'] = $this->paymentStatus($result);
         if (isset($ambiguous[$id])) {
             $result['payable'] = $result['open_hold'] = null;
@@ -432,24 +437,6 @@ class FinancePayPalSettlementOrders
         $result['paypal_reference_type'] = $root['related_type'] ?? '';
 
         return $result;
-    }
-
-    private function operationRegion(string $department): string
-    {
-        $region = '';
-        foreach (explode('、', $department) as $name) {
-            // Existing departments use city prefixes. New cities can use their full city name.
-            if (! preg_match('/^(厦门|深圳|郑州|西安)|^(\p{Han}{2,8}?)市(?=$|[\s·—-]|运营|[一二三四五六七八九十0-9]+部)/u', trim($name), $matches)) {
-                return '';
-            }
-            $matchedRegion = $matches[2] ?? $matches[1];
-            if ($region !== '' && $region !== $matchedRegion) {
-                return '';
-            }
-            $region = $matchedRegion;
-        }
-
-        return $region;
     }
 
     private function unlinkedRow(array $event, string $zone, bool $includeDetails): array
