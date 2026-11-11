@@ -37,7 +37,7 @@
 </section>
 @endsection
 @push('scripts')
-<script src="{{ asset('js/report-table-image-export.js') }}?v=20261111-1"></script>
+<script src="{{ asset('js/report-table-image-export.js') }}?v=20261111-2"></script>
 <script>
 (function(){
     var button=document.getElementById('fapReportImageDownload');
@@ -46,9 +46,22 @@
     var money=function(value){return '$'+Number(value||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});};
     var number=function(value){return Number(value||0).toLocaleString('en-US');};
     var gift=function(value){return value==='available'?'有礼金':(value==='pending_upload'?'未上传礼金图':'未达 $5,000');};
+    var consumptionRange=@json($selectedConsumptionRange),consumptionMin=@json($consumptionCustom),consumptionMax=@json($consumptionCustomMax);
+    var consumptionNotice=function(){
+        if(consumptionRange==='lt_5000')return '消耗低于 $5,000';
+        if(consumptionRange==='5000_10000')return '消耗 $5,000 - $10,000';
+        if(consumptionRange==='gt_10000')return '消耗高于 $10,000';
+        if(consumptionRange==='custom'){
+            if(consumptionMin!==null&&consumptionMin!==''&&consumptionMax!==null&&consumptionMax!=='')return '消耗 '+money(consumptionMin)+' - '+money(consumptionMax);
+            if(consumptionMin!==null&&consumptionMin!=='')return '消耗不低于 '+money(consumptionMin);
+            if(consumptionMax!==null&&consumptionMax!=='')return '消耗不高于 '+money(consumptionMax);
+        }
+        return '账号历史总消耗 '+money({{$totals['total_consumption']}});
+    };
     button.addEventListener('click',function(){window.ReportTableImageExport.download({
         button:button,title:'服装 AppLovin 业绩报表',subtitle:'日期：{{$dateFrom}} 至 {{$dateTo}}　统计时区：UTC{{$timezone}}',
-        summary:'绑定店铺 {{$totals['stores']}}　订单量 {{$totals['orders']}}　营业额 '+money({{$totals['revenue']}})+'　广告费 '+money({{$totals['ad_spend']}})+'　ROI {{$totals['roi']!==null?number_format($totals['roi'],2):'—'}}　账号历史总消耗 '+money({{$totals['total_consumption']}}),
+        topRightText:consumptionNotice(),topRightColor:'#d93025',topRightFontSize:24,redColumns:[10],
+        summary:'绑定店铺 {{$totals['stores']}}　订单量 {{$totals['orders']}}　营业额 '+money({{$totals['revenue']}})+'　广告费 '+money({{$totals['ad_spend']}})+'　ROI {{$totals['roi']!==null?number_format($totals['roi'],2):'—'}}',
         headers:['日期','运营部门','运营人员','绑定店铺域名','订单量','营业额($)','广告费($)','ROI','是否有礼金','账号编号','账号历史总消耗($)'],
         widths:[180,210,130,190,110,155,145,105,150,190,180],
         rows:source.map(function(row){return [row.date_label,row.department,row.operator,row.store_domain,number(row.orders),money(row.revenue),money(row.ad_spend),row.roi===null?'—':Number(row.roi).toFixed(2),gift(row.gift_status),row.account_numbers||'—',money(row.total_consumption)];}).concat([['合计','','','',number({{$totals['orders']}}),money({{$totals['revenue']}}),money({{$totals['ad_spend']}}),'{{$totals['roi']!==null?number_format($totals['roi'],2):'—'}}','','',money({{$totals['total_consumption']}})]]),

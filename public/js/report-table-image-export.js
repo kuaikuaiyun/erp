@@ -52,7 +52,15 @@
                 canvas.height = Math.ceil((titleHeight + tableHeight) * scale);
                 context.scale(scale, scale);
                 context.fillStyle = '#f5f9fc'; context.fillRect(0, 0, tableWidth, titleHeight + tableHeight);
-                context.fillStyle = '#173f5d'; context.font = 'bold 27px "Microsoft YaHei", Arial'; context.fillText(options.title || '报表', 20, 36);
+                context.fillStyle = '#173f5d'; context.font = 'bold 27px "Microsoft YaHei", Arial';
+                var reportTitle = options.title || '报表';
+                context.fillText(reportTitle, 20, 36);
+                var reportTitleWidth = context.measureText(reportTitle).width;
+                if (options.topRightText) {
+                    context.fillStyle = options.topRightColor || '#d93025';
+                    context.font = 'bold ' + (options.topRightFontSize || 18) + 'px "Microsoft YaHei", Arial';
+                    context.fillText(options.topRightText, 20 + reportTitleWidth + 42, 36);
+                }
                 context.fillStyle = '#58758a'; context.font = '14px "Microsoft YaHei", Arial'; context.fillText(options.subtitle || '', 20, 65);
                 context.fillStyle = '#245a78'; context.font = 'bold 15px "Microsoft YaHei", Arial'; context.fillText(options.summary || '', 20, 94);
                 var y = titleHeight, x = 0;
@@ -70,7 +78,9 @@
                     row.forEach(function (lines, columnIndex) {
                         context.fillStyle = isTotalRow ? '#d7e9f3' : (rowIndex % 2 ? '#fff8ef' : '#f3f9fc'); context.fillRect(x, y, widths[columnIndex], rowHeights[rowIndex]);
                         context.strokeStyle = '#c6d9e4'; context.strokeRect(x, y, widths[columnIndex], rowHeights[rowIndex]);
-                        context.fillStyle = isTotalRow ? '#173f5d' : '#263f50'; context.font = (isTotalRow ? 'bold ' : '') + '14px "Microsoft YaHei", Arial';
+                        var redColumns = options.redColumns || [];
+                        context.fillStyle = redColumns.indexOf(columnIndex) !== -1 ? '#d93025' : (isTotalRow ? '#173f5d' : '#263f50');
+                        context.font = ((isTotalRow || redColumns.indexOf(columnIndex) !== -1) ? 'bold ' : '') + '14px "Microsoft YaHei", Arial';
                         lines.forEach(function (line, lineIndex) { context.fillText(line, x + padding, y + padding + 17 + lineIndex * lineHeight); });
                         x += widths[columnIndex];
                     });
