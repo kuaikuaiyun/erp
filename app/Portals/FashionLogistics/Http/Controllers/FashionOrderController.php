@@ -9,7 +9,10 @@ use App\Models\FashionLogisticsOrder;
 use App\Models\FashionLogisticsSyncState;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\FashionLogistics\FashionLogisticsPortalService;
+use App\Portals\FashionLogistics\XShoppyOrderSyncService;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
@@ -19,7 +22,31 @@ class FashionOrderController extends Controller
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly FashionLogisticsPortalService $portalService,
+        private readonly XShoppyOrderSyncService $orderSync,
     ) {
+    }
+
+    public function testApi(Request $request, AssistantDomainStore $store): Response|JsonResponse
+    {
+        $configuredToken = trim((string) config('services.xshoppy.order_test_token'));
+        $requestToken = trim((string) ($request->bearerToken() ?: $request->query('token', '')));
+        abort_if($configuredToken === '', 503, 'XShoppy 测试接口令牌尚未配置。');
+        abort_unless($requestToken !== '' && hash_equals($configuredToken, $requestToken), 401, '测试接口令牌无效。');
+
+        $validated = $request->validate([
+            'date_from' => ['nullable', 'date_format:Y-m-d'],
+            'date_to' => ['nullable', 'date_format:Y-m-d'],
+            'page' => ['nullable', 'integer', 'min:1', 'max:1000'],
+        ]);
+        $after = Carbon::parse(($validated['date_from'] ?? now('Asia/Shanghai')->subDays(30)->toDateString()).' 00:00:00', 'Asia/Shanghai')->utc();
+        $before = Carbon::parse(($validated['date_to'] ?? now('Asia/Shanghai')->toDateString()).' 23:59:59', 'Asia/Shanghai')->utc();
+        abort_if($after->gt($before), 422, '开始日期不能晚于结束日期。');
+
+        return response()->json([
+            'success' => true,
+            'message' => '测试接口只读取第三方数据，不会写入本地订单表。',
+            'data' => $this->orderSync->previewStoreOrders($store, $after, $before, (int) ($validated['page'] ?? 1)),
+        ], 200, [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
     }
 
     public function index(Request $request): Response|View

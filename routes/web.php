@@ -61,6 +61,7 @@ Route::get('/fashion/performance-report/orders', [PerformanceReportController::c
 Route::get('/fashion/stores', [FashionStoreController::class, 'index'])->name('fashion.stores.index');
 Route::patch('/fashion/stores/{store}/xshoppy-credentials', [FashionStoreController::class, 'updateCredentials'])->whereNumber('store')->name('fashion.stores.credentials.update');
 Route::get('/fashion-logistics/orders', [FashionOrderController::class, 'index'])->name('fashion-logistics.orders.index');
+Route::get('/fashion-logistics/orders/test-api/{store}', [FashionOrderController::class, 'testApi'])->whereNumber('store')->name('fashion-logistics.orders.test-api');
 Route::get('/fashion-logistics/shopline-orders', [ShoplineOrderController::class, 'index'])->name('fashion-logistics.shopline-orders.index');
 Route::get('/fashion-logistics/shopline-orders/sync-status', [ShoplineOrderController::class, 'syncStatus'])->name('fashion-logistics.shopline-orders.sync-status');
 Route::get('/fashion-logistics/shopline-orders/{order}', [ShoplineOrderController::class, 'show'])->whereNumber('order')->name('fashion-logistics.shopline-orders.show');
@@ -256,6 +257,8 @@ Route::get('/assistant/daily-submissions/applovin-spends', [AppLovinSpendReviewC
     ->name('assistant.applovin-spends.index');
 Route::get('/assistant/applovin-account-statistics', [AppLovinAccountStatisticsController::class, 'index'])
     ->name('assistant.applovin-account-statistics.index');
+Route::get('/assistant/applovin-account-statistics/accounts', [AppLovinAccountStatisticsController::class, 'spendBand'])
+    ->name('assistant.applovin-account-statistics.spend-band');
 Route::get('/assistant/applovin-account-statistics/{operator}', [AppLovinAccountStatisticsController::class, 'show'])
     ->whereNumber('operator')->name('assistant.applovin-account-statistics.show');
 Route::get('/assistant/applovin-performance-reports', [AppLovinPerformanceReportController::class, 'index'])
