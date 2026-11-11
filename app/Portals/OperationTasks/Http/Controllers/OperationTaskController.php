@@ -75,7 +75,10 @@ class OperationTaskController extends Controller
             if ($candidate && (int) $candidate->user_id === (int) $user->id && ($candidate->workflow_status ?? 'approved') === 'rejected') $editingRecap = $candidate;
         }
 
-        $recaps = $query->paginate(20)->withQueryString();
+        $recapPerPage = in_array((int) $request->input('recap_per_page', 20), [20, 50, 100], true)
+            ? (int) $request->input('recap_per_page', 20)
+            : 20;
+        $recaps = $query->paginate($recapPerPage)->withQueryString();
         $recaps->getCollection()->each(function (OperationTaskRecap $recap) use ($user): void {
             $recap->setAttribute('can_leader_review', $this->canLeaderReviewRecap($user, $recap));
             $recap->setAttribute('can_department_review', $this->canDepartmentReviewRecap($user, $recap));
