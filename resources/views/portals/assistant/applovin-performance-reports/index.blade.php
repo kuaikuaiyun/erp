@@ -61,7 +61,7 @@
 </section>
 @endsection
 @push('scripts')
-<script src="{{ asset('js/report-table-image-export.js') }}?v=20261111-1"></script>
+<script src="{{ asset('js/report-table-image-export.js') }}?v=20261111-2"></script>
 <script>
 (function(){
     var button=document.getElementById('apReportImageDownload');
@@ -70,8 +70,21 @@
     var money=function(value){return '$'+Number(value||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});};
     var number=function(value){return Number(value||0).toLocaleString('en-US');};
     var gift=function(value){return value==='available'?'有礼金':(value==='pending_upload'?'未上传礼金图':'未达 $5,000');};
+    var consumptionRange=@json($selectedConsumptionRange),consumptionMin=@json($consumptionCustom),consumptionMax=@json($consumptionCustomMax);
+    var consumptionNotice=function(){
+        if(consumptionRange==='lt_5000')return '消耗低于 $5,000';
+        if(consumptionRange==='5000_10000')return '消耗 $5,000 - $10,000';
+        if(consumptionRange==='gt_10000')return '消耗高于 $10,000';
+        if(consumptionRange==='custom'){
+            if(consumptionMin!==null&&consumptionMin!==''&&consumptionMax!==null&&consumptionMax!=='')return '消耗 '+money(consumptionMin)+' - '+money(consumptionMax);
+            if(consumptionMin!==null&&consumptionMin!=='')return '消耗不低于 '+money(consumptionMin);
+            if(consumptionMax!==null&&consumptionMax!=='')return '消耗不高于 '+money(consumptionMax);
+        }
+        return '账号历史总消耗 '+money({{$totals['total_consumption']}});
+    };
     button.addEventListener('click',function(){window.ReportTableImageExport.download({
         button:button,title:'订阅 AppLovin 业绩报表',subtitle:'日期：{{$dateFrom}} 至 {{$dateTo}}　统计时区：UTC{{$timezone}}',
+        topRightText:consumptionNotice(),topRightColor:'#d93025',topRightFontSize:24,redColumns:[13],
         summary:'绑定店铺 {{$totals['stores']}}　首单订阅单量 {{$totals['subscription_orders']}}　首单总单量 {{$totals['orders']}}　首单总营业额 '+money({{$totals['revenue']}})+'　广告费 '+money({{$totals['ad_spend']}})+'　首单 ROI {{$totals['roi']!==null?number_format($totals['roi'],2):'—'}}',
         headers:['日期','运营部门','运营人员','绑定店铺域名','首单订阅单量','首单订阅率','首单订阅营业额($)','首单总单量','首单总营业额($)','广告费($)','是否有礼金','首单 ROI','账号编号','账号历史总消耗($)'],
         widths:[180,190,130,190,140,130,170,140,170,145,150,125,190,180],
