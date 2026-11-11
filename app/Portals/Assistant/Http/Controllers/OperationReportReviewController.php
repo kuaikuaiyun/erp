@@ -192,6 +192,8 @@ class OperationReportReviewController extends Controller
         abort_unless($this->canAccessReport($report, $context['user']), 403);
         abort_unless($report->status === OperationReport::STATUS_APPROVED, 422, '只有审核通过的报表可以重新编辑广告信息。');
 
+        $oldRows = collect($report->advertising_rows ?: []);
+        $rowIndexes = $oldRows->keys()->map(static fn ($index): int => (int) $index)->all();
         $validated = $request->validate([
             'ads' => ['required', 'array', 'min:1', 'max:50'],
             'ads.*.agency' => ['required', 'string', 'max:100'],
@@ -202,15 +204,31 @@ class OperationReportReviewController extends Controller
             'ads.*.settlement_coefficient' => ['required', 'numeric', 'min:0'],
             'ads.*.existing_screenshot' => ['nullable', 'string', 'max:500'],
             'ads.*.screenshot' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'deleted_indexes' => ['nullable', 'array'],
+            'deleted_indexes.*' => ['integer', 'distinct', Rule::in($rowIndexes)],
         ]);
 
-        $oldRows = collect($report->advertising_rows ?: []);
-        $rows = collect($validated['ads'])->map(function (array $row, int $index) use ($request, $oldRows): array {
+        $submittedIndexes = collect(array_keys($validated['ads']))->map(static fn ($index): int => (int) $index);
+        $deletedIndexes = collect($validated['deleted_indexes'] ?? [])->map(static fn ($index): int => (int) $index);
+        if ($submittedIndexes->intersect($deletedIndexes)->isNotEmpty()
+            || $submittedIndexes->merge($deletedIndexes)->unique()->sort()->values()->all() !== collect($rowIndexes)->sort()->values()->all()) {
+            throw ValidationException::withMessages(['ads' => '广告记录发生变化，请刷新页面后重新操作。']);
+        }
+        if ($submittedIndexes->isEmpty()) {
+            throw ValidationException::withMessages(['ads' => '至少需要保留一条广告记录。']);
+        }
+
+        $removedScreenshotPaths = $oldRows->only($deletedIndexes->all())->pluck('screenshot')->filter()->values();
+        $replacedScreenshotPaths = collect();
+        $rows = collect($validated['ads'])->map(function (array $row, int $index) use ($request, $oldRows, $replacedScreenshotPaths): array {
             $bookSpend = round((float) $row['book_spend'], 4);
             $coefficient = round((float) $row['settlement_coefficient'], 4);
             $old = (array) ($oldRows->get($index) ?? []);
             $screenshot = trim((string) ($old['screenshot'] ?? '')) ?: null;
             if ($file = $request->file('ads.'.$index.'.screenshot')) {
+                if ($screenshot) {
+                    $replacedScreenshotPaths->push($screenshot);
+                }
                 $screenshot = $file->storeAs('operation-reports/ads', Str::uuid().'.'.$file->extension(), 'public');
             }
 
@@ -242,6 +260,9 @@ class OperationReportReviewController extends Controller
             'reviewed_at' => now(),
             'review_reason' => null,
         ]);
+        $removedScreenshotPaths->merge($replacedScreenshotPaths)->unique()->each(
+            static fn (string $path) => Storage::disk('public')->delete($path),
+        );
 
         return redirect()->route('assistant.operation-report-reviews.show', $report)
             ->with('success', '广告信息已修改，报表保持审核通过状态。');

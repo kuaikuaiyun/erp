@@ -227,9 +227,22 @@ class FashionAdvertisingReviewController extends Controller
             'entries.*.book_spend_usd' => ['required', 'numeric', 'min:0'],
             'entries.*.settlement_coefficient' => ['required', 'numeric', 'min:0'],
             'entries.*.screenshot' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'deleted_entry_ids' => ['nullable', 'array'],
+            'deleted_entry_ids.*' => ['integer', 'distinct', Rule::in($entryIds)],
         ]);
 
-        DB::connection($report->getConnectionName())->transaction(function () use ($request, $report, $data, $context): void {
+        $submittedEntryIds = collect($data['entries'])->pluck('id')->map(static fn ($id): int => (int) $id);
+        $deletedEntryIds = collect($data['deleted_entry_ids'] ?? [])->map(static fn ($id): int => (int) $id);
+        if ($submittedEntryIds->intersect($deletedEntryIds)->isNotEmpty()
+            || $submittedEntryIds->merge($deletedEntryIds)->unique()->sort()->values()->all() !== collect($entryIds)->sort()->values()->all()) {
+            throw ValidationException::withMessages(['entries' => '广告记录发生变化，请刷新页面后重新操作。']);
+        }
+        if ($submittedEntryIds->isEmpty()) {
+            throw ValidationException::withMessages(['entries' => '至少需要保留一条广告记录。']);
+        }
+
+        $deletedScreenshotPaths = [];
+        DB::connection($report->getConnectionName())->transaction(function () use ($request, $report, $data, $context, $deletedEntryIds, &$deletedScreenshotPaths): void {
             foreach ($data['entries'] as $index => $row) {
                 $entry = $report->adSpendEntries->firstWhere('id', (int) $row['id']);
                 abort_unless($entry, 422);
@@ -250,6 +263,12 @@ class FashionAdvertisingReviewController extends Controller
                 }
                 $entry->update($values);
             }
+            foreach ($report->adSpendEntries->whereIn('id', $deletedEntryIds) as $entry) {
+                if ($entry->screenshot_path) {
+                    $deletedScreenshotPaths[] = $entry->screenshot_path;
+                }
+                $entry->delete();
+            }
             $spend = round((float) $report->adSpendEntries()->sum('actual_spend_usd'), 2);
             $report->update([
                 'total_ad_spend_usd' => $spend,
@@ -261,6 +280,9 @@ class FashionAdvertisingReviewController extends Controller
                 'review_reason' => null,
             ]);
         });
+        foreach ($deletedScreenshotPaths as $path) {
+            Storage::disk('local')->delete($path);
+        }
 
         return redirect()->route('assistant.fashion-advertising-reviews.show', $report)
             ->with('success', '广告信息已修改，报表保持审核通过状态。');
