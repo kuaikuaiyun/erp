@@ -21,8 +21,8 @@
             <div class="finance-export-column-actions"><strong>选择需要导出的字段</strong><button type="button" class="btn btn-default btn-xs" data-export-columns-all>全选</button><button type="button" class="btn btn-default btn-xs" data-export-columns-none>清空</button></div>
             <input type="hidden" name="report_fields_customized" value="1" form="finance-filters">
             <div class="finance-export-column-grid">
-            @foreach($exportHeaders as $column)
-                <label><input type="checkbox" name="report_columns[]" value="{{ $loop->index }}" form="finance-filters" checked> {{ \App\Portals\Finance\FinanceCatalog::simplified($column) }}</label>
+            @foreach($exportHeaders as $columnId => $column)
+                <label><input type="checkbox" name="report_columns[]" value="{{ $columnId }}" form="finance-filters" checked> {{ \App\Portals\Finance\FinanceCatalog::simplified($column) }}</label>
             @endforeach
             </div>
             <div style="display:flex;align-items:center;gap:12px;margin-top:12px"><p class="text-muted" style="flex:1;margin:0" data-export-columns-message>至少选择一列，保存后记住本浏览器的选择。</p><button type="button" class="btn btn-primary btn-sm" data-export-columns-save>保存</button></div>

@@ -10,6 +10,7 @@ use App\Models\FinanceRecord;
 use App\Models\LogisticsOrderPaymentReference;
 use App\Portals\Assistant\AssistantStoreOwnerService;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Collection;
 
 class FinanceSettlementService
@@ -19,10 +20,11 @@ class FinanceSettlementService
     public const OPERATION_DEPARTMENT = '运营所属部门';
 
     public const CARD_TRANSACTION_STATUSES = ['success' => '成功', 'failed' => '失败', 'pending' => '处理中'];
+    public const CARD_FAILURE_STATUSES = ['D', 'FAIL', 'FAILED', 'FAILURE', 'DECLINED', 'ERROR', '已拒绝', '失败'];
 
     private const TRANSACTION_STATUS_CODES = [
         'success' => ['S', 'SUCCESS', 'COMPLETED', 'PAID', '已付款', '已完成', '成功'],
-        'failed' => ['D', 'FAIL', 'FAILED', 'FAILURE', 'DECLINED', '已拒绝', '失败'],
+        'failed' => self::CARD_FAILURE_STATUSES,
         'pending' => ['P', 'PENDING', 'PROCESSING', '待处理', '处理中'],
     ];
 
@@ -98,9 +100,13 @@ class FinanceSettlementService
         return $columns + FinancePayPalSettlementOrders::sourceExportColumns();
     }
 
+    public const SHOP_DIFFERENCE_LABEL = '与店铺差额（美元）';
+
+    public const SHOP_DIFFERENCE_COLUMN = ['shop_difference_usd' => self::SHOP_DIFFERENCE_LABEL];
+
     public function listColumns(string $channel): array
     {
-        $columns = $this->columns($channel);
+        $columns = $this->columns($channel) + self::SHOP_DIFFERENCE_COLUMN;
 
         return $channel === 'paypal' ? FinancePayPalSettlementOrders::listColumns($columns) : $columns;
     }
@@ -201,15 +207,10 @@ class FinanceSettlementService
         }
     }
 
-    public function rows(string $channel, array $filters, ?Collection $records = null): Collection
+    private function rowContext(string $channel): array
     {
-        $db = $this->workbooks->database();
-        $records ??= $this->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id')->get();
-        $supplements = $db->table('finance_settlement_supplements')->whereIn('finance_record_id', $records->modelKeys())->get()->keyBy('finance_record_id');
         $accountModels = FinancePaymentAccount::query()->where('account_type', $channel)->get();
         $accounts = $accountModels->pluck('account_name', 'activity_account');
-        $owners = $db->table('finance_payment_transactions')->whereIn('finance_record_id', $records->modelKeys())
-            ->pluck('payment_account_id', 'finance_record_id');
         $accountsById = $accountModels->keyBy('id');
         $domainGroups = $this->workbooks->domainGroups(withAssignedOwner: $channel === 'paypal');
         $storesById = $channel === 'paypal' ? $domainGroups->keyBy('id') : collect();
@@ -221,8 +222,23 @@ class FinanceSettlementService
             ->groupBy(fn ($group) => trim($group->shop_name))
             ->filter(fn ($groups) => $groups->count() === 1 && str_contains((string) $groups->first()->owner, '刷单'))
             ->map(fn ($groups) => $groups->first()) : collect();
-        $locks = $db->table('finance_period_locks')->whereNotNull('report_snapshot')->pluck('month')->all();
-        $metadata = $this->logisticsMetadata($records, $channel, withCustomReference: ! empty($filters['order_view']));
+        $locks = $this->workbooks->database()->table('finance_period_locks')->whereNotNull('report_snapshot')->pluck('month')->all();
+
+        return compact('accountModels', 'accounts', 'accountsById', 'storesById', 'domains', 'brushStores', 'locks');
+    }
+
+    public function rows(string $channel, array $filters, ?Collection $records = null, ?array $context = null): Collection
+    {
+        $db = $this->workbooks->database();
+        $records ??= $this->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id')->get();
+        $supplements = $db->table('finance_settlement_supplements')->whereIntegerInRaw('finance_record_id', $records->modelKeys())->get()->keyBy('finance_record_id');
+        $owners = $db->table('finance_payment_transactions')->whereIntegerInRaw('finance_record_id', $records->modelKeys())
+            ->pluck('payment_account_id', 'finance_record_id');
+        ['accountModels' => $accountModels, 'accounts' => $accounts, 'accountsById' => $accountsById,
+            'storesById' => $storesById, 'domains' => $domains, 'brushStores' => $brushStores, 'locks' => $locks] =
+            $context ?? $this->rowContext($channel);
+        $metadata = $this->logisticsMetadata($records, $channel, withCustomReference: ! empty($filters['order_view']),
+            summaryOnly: ! empty($filters['summary_only']));
         $candidateOrders = $channel === 'paypal' && ! empty($filters['order_view'])
             ? app(FinancePayPalOrderCandidates::class)->suggestions($records, $metadata) : [];
         $departmentMembers = $channel === 'paypal' && ! empty($filters['order_view']) && $records->isNotEmpty()
@@ -234,7 +250,7 @@ class FinanceSettlementService
         $ledger = $conflux?->entriesFor($records, $accountModels->keyBy('activity_account'));
         $confluxFees = $conflux && $ledger->isNotEmpty() ? $conflux->feesFor($ledger) : [];
         $usdRates = app(FinanceCreditUsdRates::class);
-        $confluxOrders = $conflux ? $records : ($channel === 'credit_card' && empty($filters['card_channel'])
+        $confluxOrders = $conflux ? $records : ($channel === 'credit_card' && empty($filters['card_channel']) && empty($filters['summary_only'])
             ? $records->filter(fn ($record) => ($record->payload['_card_channel'] ?? null) === 'ye') : collect());
         $confluxOrderIds = $confluxOrders->pluck('id')->flip();
         $creditUsdRates = $usdRates->forOrders($confluxOrders);
@@ -245,7 +261,9 @@ class FinanceSettlementService
             $headers = $definition['headers'];
             $value = static fn ($key) => $p[$headers[$definition[$key]]] ?? '';
             $reportTimezone = $p['_report_timezone'] ?? ($filters['timezone'] ?? 'Asia/Shanghai');
-            $date = $record->occurred_at->setTimezone($reportTimezone);
+            $occurredAt = $record->occurred_at;
+            $date = $occurredAt->setTimezone($reportTimezone);
+            $beijingDate = $reportTimezone === 'Asia/Shanghai' ? $date : $occurredAt->setTimezone('Asia/Shanghai');
             $row = ['id' => $record->id, 'channel' => $channel, 'source' => $record->dataset,
                 'account_key' => $owner?->activity_account ?? $record->account,
                 'account' => $owner?->account_name ?? $accounts->get($record->account, $record->account),
@@ -253,7 +271,7 @@ class FinanceSettlementService
                 'month' => $p['_manual_import_month'] ?? $date->format('Y-m'), 'status' => $record->status, 'currency' => $record->currency,
                 'payment_method' => $p['支付方式'] ?? '',
                 'gross' => $this->number($channel === 'paypal' ? ($p[$headers[7]] ?? null) : ($p['交易金额'] ?? null)),
-                'locked' => in_array($record->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'), $locks, true),
+                'locked' => in_array($beijingDate->format('Y-m'), $locks, true),
                 'domain' => $record->domain ?? '', 'subscription' => $p['订阅类型'] ?? '', 'upsell' => $p['是否加购'] ?? '',
                 'erp_order' => $p['通途订单'] ?? '', 'note' => $p['备注'] ?? '',
             ];
@@ -304,10 +322,12 @@ class FinanceSettlementService
                 $row['usd_rate'] = $saved['_edited_fields']['usd_rate'];
             }
             if ($channel === 'paypal') {
-                foreach (array_slice($headers, 0, 15) as $index => $header) {
-                    $row['paypal_'.$index] = $index === 12 && filled($saved['paypal_12'] ?? null)
-                        ? $saved['paypal_12']
-                        : ($index === 4 ? FinancePayPalEventTypes::label((string) ($p[$header] ?? '')) : ($p[$header] ?? ''));
+                if (empty($filters['summary_only'])) {
+                    foreach (array_slice($headers, 0, 15) as $index => $header) {
+                        $row['paypal_'.$index] = $index === 12 && filled($saved['paypal_12'] ?? null)
+                            ? $saved['paypal_12']
+                            : ($index === 4 ? FinancePayPalEventTypes::label((string) ($p[$header] ?? '')) : ($p[$header] ?? ''));
+                    }
                 }
                 $net = $this->number($p[$headers[9]] ?? null);
                 if ($row['converted_usd'] === null && $net !== null && $row['usd_rate'] !== null) {
@@ -385,7 +405,7 @@ class FinanceSettlementService
                 $row['candidate_order'] = $candidateOrders[$record->id] ?? null;
                 $row['shopify_order_number'] = $metadata[$record->id]['order']->shopify_order_number ?? '';
                 $row['source_account_key'] = $owner?->activity_account ?? $record->account;
-                $row['source_date'] = $record->occurred_at;
+                $row['source_date'] = $occurredAt;
                 $keys = [...array_keys(self::MONEY), ...array_values($this->importFields('paypal')), '结算金额-美元', 'settlement'];
                 $row['manual_values'] = [
                     ...array_intersect_key($p, array_flip($keys)), ...array_intersect_key($saved, array_flip($keys)),
@@ -394,7 +414,7 @@ class FinanceSettlementService
             }
 
             if ($confluxOrderIds->has($record->id) && $row['gross'] !== null && filled($row['currency']) && ! isset($p['_manual_import_month'])) {
-                $tradeDate = $record->occurred_at->setTimezone('Asia/Shanghai')->toDateString();
+                $tradeDate = $beijingDate->toDateString();
                 $row['source_settlement_usd'] = $saved['_edited_fields']['source_settlement_usd'] ?? $saved['source_settlement_usd']
                     ?? $usdRates->convert($creditUsdRates, $row['currency'], $tradeDate, $row['gross']);
             }
@@ -425,6 +445,24 @@ class FinanceSettlementService
                 if ($conflux) {
                     $row['ledger_matched'] = $ledger->has($record->id);
                     $row['card_layout']['ledger_status'] = $row['ledger_matched'] ? '已匹配账单' : '待匹配账单';
+                }
+            }
+
+            if (empty($filters['summary_only'])) {
+                $shopPaid = $order->paid_amount_usd ?? null;
+                if ($channel === 'paypal') {
+                    $row['shop_paid_usd'] = $shopPaid;
+                } else {
+                    $layout = $row['card_layout'] ?? [];
+                    $layoutCurrency = strtoupper(trim((string) ($layout['settlement_currency'] ?? '')));
+                    $channelAmount = ($layoutCurrency === '' || $layoutCurrency === 'USD')
+                        ? $this->number($layout['settlement'] ?? null) : null;
+                    $row['shop_difference_usd'] = $this->shopDifference(
+                        $channelAmount ?? $row['source_settlement_usd'] ?? $row['settlement'], $shopPaid,
+                    );
+                    if (isset($row['card_layout'])) {
+                        $row['card_layout']['shop_difference_usd'] = $row['shop_difference_usd'];
+                    }
                 }
             }
 
@@ -475,6 +513,7 @@ class FinanceSettlementService
         $ownerId = $group?->assigned_owner_user_id ?? null;
         $team = $group?->team ?? ($payload['团队'] ?? '');
         $usesLegacyOperator = false;
+        $emptyBaseline = false;
         if ($order !== null) {
             if (isset($order->owner_history_id)) {
                 $ownerName = $order->historical_owner_name ?? '';
@@ -489,9 +528,9 @@ class FinanceSettlementService
             if ($inactiveOrderStore && ! isset($order->owner_history_id) && blank($ownerName)) {
                 $ownerName = trim((string) ($order->operator_name ?? ''));
             }
-            $emptyStoppedBaseline = $inactiveOrderStore && blank($ownerName) && $ownerId === null
+            $emptyBaseline = blank($ownerName) && $ownerId === null
                 && ($order->historical_owner_event ?? null) === AssistantDomainStoreOwnerHistory::EVENT_BASELINE;
-            if ($emptyStoppedBaseline && filled($order->assigned_owner_name ?? null)) {
+            if ($emptyBaseline && filled($order->assigned_owner_name ?? null)) {
                 $ownerName = $order->assigned_owner_name;
                 $ownerId = $order->assigned_owner_user_id ?? null;
             }
@@ -504,17 +543,20 @@ class FinanceSettlementService
                 $ownerName = $legacyOperator;
                 $usesLegacyOperator = true;
             }
-            if ($emptyStoppedBaseline && blank($ownerName) && $ownerId === null) {
-                // An empty baseline on a retired store can precede its first recorded owner.
+            if ($emptyBaseline && blank($ownerName) && $ownerId === null) {
+                // The initial history row can precede the first recorded owner.
                 $ownerName = $order->initial_owner_name ?? '';
                 $ownerId = $order->initial_owner_user_id ?? null;
             }
-            if (property_exists($order, 'group_names')) {
+            if ($emptyBaseline && blank($ownerName) && $ownerId === null) {
+                $ownerName = $orderStore?->owner ?: ($group?->owner ?? '');
+            }
+            if (property_exists($order, 'group_names') && (! $emptyBaseline || filled($order->group_names))) {
                 $team = FinanceCatalog::teamLabel($order->group_names);
             }
         }
 
-        return compact('ownerName', 'ownerId', 'team', 'inactiveOrderStore', 'usesLegacyOperator');
+        return compact('ownerName', 'ownerId', 'team', 'inactiveOrderStore', 'usesLegacyOperator', 'emptyBaseline');
     }
 
     private function departmentForOrderOwner(?object $order, array $ownership, string $owner, Collection $membersById, Collection $membersByName): string
@@ -535,8 +577,33 @@ class FinanceSettlementService
                 $department = FinanceCatalog::teamLabel($order->group_names ?? null);
             }
         }
+        if ($department === '' && $ownership['emptyBaseline'] && $displayedOwner === trim((string) $ownerName)) {
+            $department = $ownership['team'];
+        }
 
         return $department;
+    }
+
+    public static function operationRegion(string $department): string
+    {
+        if ($department === '刷单') {
+            return $department;
+        }
+
+        $region = '';
+        foreach (explode('、', $department) as $name) {
+            // Existing departments use city prefixes. New cities can use their full city name.
+            if (! preg_match('/^(厦门|深圳|郑州|西安)|^(\p{Han}{2,8}?)市(?=$|[\s·—-]|运营|[一二三四五六七八九十0-9]+部)/u', trim($name), $matches)) {
+                return '';
+            }
+            $matchedRegion = $matches[2] ?? $matches[1];
+            if ($region !== '' && $region !== $matchedRegion) {
+                return '';
+            }
+            $region = $matchedRegion;
+        }
+
+        return $region;
     }
 
     private function brushOrderOwner(?object $group): ?string
@@ -556,8 +623,19 @@ class FinanceSettlementService
         $members = $this->operationDepartmentMembers();
         $membersById = $members->keyBy('id');
         $membersByName = $members->groupBy(fn ($member) => array_unique([$member->name, $member->username]));
+        $departmentNames = $this->operationDepartments()->pluck('name')->unique();
+        $departmentKey = static fn (string $name): string => preg_replace('/(?:运营部门|运营部|总部|部门|团队)$/u', '', trim($name));
+        $departmentAliases = $departmentNames->groupBy($departmentKey)
+            ->filter(fn ($names) => $names->count() === 1)->map(fn ($names) => $names->first());
+        $resolveDepartment = static function (string $name) use ($departmentNames, $departmentKey, $departmentAliases): string {
+            if ($name === '刷单' || $departmentNames->containsStrict($name)) {
+                return $name;
+            }
 
-        return function (FinanceRecord $record, ?object $order) use ($stores, $domains, $membersById, $membersByName): array {
+            return $departmentAliases->get($departmentKey($name), '');
+        };
+
+        return function (FinanceRecord $record, ?object $order) use ($stores, $domains, $membersById, $membersByName, $resolveDepartment): array {
             $domain = strtolower(trim((string) $record->domain));
             $orderStore = $stores->get($order->assistant_domain_store_id ?? null);
             $group = $orderStore?->domain === $domain ? $orderStore : $domains->get($domain);
@@ -565,11 +643,17 @@ class FinanceSettlementService
                 return ['owner' => $brushOwner, 'department' => '刷单'];
             }
             $ownership = $this->resolveOrderOwner($order, $orderStore, $group, $record->payload);
+            $owner = (string) $ownership['ownerName'];
+            $department = str_contains($owner, '刷单') ? '刷单'
+                : $this->departmentForOrderOwner($order, $ownership, $owner, $membersById, $membersByName);
+            $department = $resolveDepartment($department)
+                ?: $resolveDepartment($ownership['team'])
+                ?: $resolveDepartment($group?->team ?? '');
 
             return [
-                'owner' => $ownership['ownerName'],
-                'department' => str_contains((string) $ownership['ownerName'], '刷单') ? '刷单'
-                    : $this->departmentForOrderOwner($order, $ownership, (string) $ownership['ownerName'], $membersById, $membersByName),
+                // The report's usage label can come from the store profile even when its formal owner was cleared.
+                'owner' => filled($owner) ? $owner : ($group?->owner ?? ''),
+                'department' => $department,
             ];
         };
     }
@@ -583,8 +667,8 @@ class FinanceSettlementService
 
         $db = $this->workbooks->database();
         $columns = $db->getSchemaBuilder()->getColumnListing('logistics_orders');
-        $selected = array_intersect(['id', 'transaction_id', 'payment_gateway_order_id', 'buyer_email', 'order_created_at', 'tongtu_order_number',
-            'assistant_domain_store_id', 'assigned_owner_name', 'assigned_owner_user_id', 'operator_name', 'group_names'], $columns);
+        $selected = array_intersect(['id', 'transaction_id', 'payment_gateway_order_id', 'bill_number', 'buyer_email', 'order_created_at', 'tongtu_order_number', 'shopify_payload', 'paid_amount_usd',
+            'assistant_domain_store_id', 'assigned_owner_name', 'assigned_owner_user_id', 'operator_name', 'group_names', 'subscription_type', 'is_add_on'], $columns);
         $query = $db->table('logistics_orders')->whereIntegerInRaw('logistics_orders.id', $ids->all())
             ->select(array_map(fn ($column) => 'logistics_orders.'.$column, $selected));
         $this->joinOrderOwnerHistory($query, $selected);
@@ -671,7 +755,7 @@ class FinanceSettlementService
     }
 
     /** Enrich settlements from a linked logistics order or a unique payment reference. */
-    public function logisticsMetadata(Collection $records, string $channel, bool $matchOnly = false, bool $withCustomReference = false): array
+    public function logisticsMetadata(Collection $records, string $channel, bool $matchOnly = false, bool $withCustomReference = false, bool $summaryOnly = false): array
     {
         $db = $this->workbooks->database();
         if ($records->isEmpty() || ! $db->getSchemaBuilder()->hasTable('logistics_orders')) {
@@ -685,11 +769,16 @@ class FinanceSettlementService
         if ($referenceFields === [] && ! ($channel === 'paypal' && $db->getSchemaBuilder()->hasTable('logistics_order_payment_references'))) {
             return [];
         }
-        $selected = $matchOnly ? ['id', ...$referenceFields] : array_values(array_unique(array_intersect(['id', ...$referenceFields, 'assistant_domain_store_id', 'source_shop_domain', 'subscription_type', 'is_add_on', 'tongtu_order_number',
+        $summaryFields = ['assistant_domain_store_id', 'source_shop_domain', 'subscription_type', 'is_add_on', 'tongtu_order_number',
+            'order_created_at', 'payment_method', 'assigned_owner_name', 'assigned_owner_user_id', 'operator_name', 'group_names'];
+        $detailFields = [
             'shopify_order_number', 'shopify_order_id', 'store_name', 'subscription_status', 'subscription_origin_order_id',
-            'tongtu_sku', 'tongtu_product_name', 'sale_quantity', 'sale_product_weight', 'payment_gateway', 'payment_method',
-            'assigned_owner_name', 'assigned_owner_user_id', 'operator_name', 'group_names',
-            ...array_keys(FinancePayPalOrderExport::COLUMNS), 'created_at', 'buyer_name', 'buyer_email', 'destination'], $columns)));
+            'tongtu_sku', 'tongtu_product_name', 'sale_quantity', 'sale_product_weight', 'payment_gateway',
+            ...array_keys(FinancePayPalOrderExport::COLUMNS), 'created_at', 'buyer_name', 'buyer_email', 'destination',
+        ];
+        $selected = $matchOnly ? ['id', ...$referenceFields] : array_values(array_unique(array_intersect(
+            ['id', ...$referenceFields, ...$summaryFields, ...($summaryOnly ? [] : $detailFields)], $columns,
+        )));
         $referenceValues = fn ($record) => $channel === 'paypal' ? [$record->reference, trim((string) ($record->payload['帳單號碼'] ?? ''))]
             : [$record->reference, $record->payload['商户订单号'] ?? '', $record->payload['Shopify订单号'] ?? ''];
         $references = $records->flatMap($referenceValues)->filter()->unique()->all();
@@ -717,19 +806,21 @@ class FinanceSettlementService
             $paymentReferences = $db->table('logistics_order_payment_references')->whereIn('reference_number', $references)->get($paymentReferenceColumns);
         }
         $linkedIds = $paymentReferences->pluck('logistics_order_id')->unique();
-        $matches = null;
-        foreach ($referenceFields as $field) {
-            $lookup = $db->table('logistics_orders')->select('id')->whereIn($field, $references);
-            $matches = $matches ? $matches->union($lookup) : $lookup;
-        }
-        if ($customReferences->isNotEmpty()) {
-            $matches->union($db->table('logistics_orders')->select('id')
-                ->whereIn('transaction_id', $customReferences->unique()->values()));
-        }
         // Resolve IDs through each reference index before loading the wider order rows.
-        if ($matches) {
-            $linkedIds = $linkedIds->merge($matches->pluck('id'))->unique();
+        foreach (array_chunk($references, 500) as $batch) {
+            $matches = null;
+            foreach ($referenceFields as $field) {
+                $lookup = $db->table('logistics_orders')->select('id')->whereIn($field, $batch);
+                $matches = $matches ? $matches->union($lookup) : $lookup;
+            }
+            if ($matches !== null) {
+                $linkedIds = $linkedIds->merge($matches->pluck('id'));
+            }
         }
+        foreach ($customReferences->unique()->chunk(500) as $batch) {
+            $linkedIds = $linkedIds->merge($db->table('logistics_orders')->whereIn('transaction_id', $batch->values())->pluck('id'));
+        }
+        $linkedIds = $linkedIds->unique();
         $orderQuery = $db->table('logistics_orders')->whereIntegerInRaw('logistics_orders.id', $linkedIds->all())
             ->select(array_map(fn ($column) => 'logistics_orders.'.$column, $selected));
         if ($channel === 'paypal') {
@@ -737,7 +828,8 @@ class FinanceSettlementService
         }
         $orders = $orderQuery->get()->keyBy('id');
         $stores = ! $matchOnly && $db->getSchemaBuilder()->hasTable('assistant_domain_stores')
-            ? $db->table('assistant_domain_stores')->whereIn('id', $orders->pluck('assistant_domain_store_id')->filter())->pluck('domain', 'id') : collect();
+            ? $db->table('assistant_domain_stores')->whereIntegerInRaw('id', $orders->pluck('assistant_domain_store_id')->filter()->unique()->all())
+                ->pluck('domain', 'id') : collect();
         $index = [];
         $customIndex = [];
         $customValues = $customReferences->flip();
@@ -941,17 +1033,22 @@ class FinanceSettlementService
     public function subscriptionOptions(Collection $rows): Collection
     {
         $db = $this->workbooks->database();
-        $datasets = ['paypal-orders', 'xuzong2-orders', 'xuzong2-details', 'xuzong1-details'];
-        $types = FinanceRecord::query()->whereIn('dataset', $datasets)->select('payload->订阅类型 as subscription')->distinct()->pluck('subscription');
-        $supplements = $db->table('finance_settlement_supplements')->select('payload->subscription as subscription')->distinct()->pluck('subscription');
-        $columns = array_intersect(['subscription_type', 'is_add_on'], $db->getSchemaBuilder()->getColumnListing('logistics_orders'));
-        $logistics = $columns === [] ? collect() : $db->table('logistics_orders')->distinct()->get(array_values($columns));
-        $upsells = FinanceRecord::query()->whereIn('dataset', $datasets)->select('payload->是否加购 as upsell')->distinct()->pluck('upsell')
-            ->concat($db->table('finance_settlement_supplements')->select('payload->upsell as upsell')->distinct()->pluck('upsell'));
-        $upsells = $upsells->concat($logistics->pluck('is_add_on'));
+        $key = 'finance:subscription-options:v1:'.hash('sha256', $db->getName().'|'.$db->getDatabaseName());
+        $options = Cache::remember($key, 60, function () use ($db): array {
+            $datasets = ['paypal-orders', 'xuzong2-orders', 'xuzong2-details', 'xuzong1-details'];
+            $types = FinanceRecord::query()->whereIn('dataset', $datasets)->select('payload->订阅类型 as subscription')->distinct()->pluck('subscription');
+            $supplements = $db->table('finance_settlement_supplements')->select('payload->subscription as subscription')->distinct()->pluck('subscription');
+            $columns = array_intersect(['subscription_type', 'is_add_on'], $db->getSchemaBuilder()->getColumnListing('logistics_orders'));
+            $logistics = $columns === [] ? collect() : $db->table('logistics_orders')->distinct()->get(array_values($columns));
+            $upsells = FinanceRecord::query()->whereIn('dataset', $datasets)->select('payload->是否加购 as upsell')->distinct()->pluck('upsell')
+                ->concat($db->table('finance_settlement_supplements')->select('payload->upsell as upsell')->distinct()->pluck('upsell'))
+                ->concat($logistics->pluck('is_add_on'));
 
-        return $rows->pluck('subscription')->concat($types)->concat($supplements)->concat($logistics->pluck('subscription_type'))
-            ->concat($upsells->contains(self::isUpsell(...)) ? ['加购'] : [])
+            return $types->concat($supplements)->concat($logistics->pluck('subscription_type'))
+                ->concat($upsells->contains(self::isUpsell(...)) ? ['加购'] : [])->all();
+        });
+
+        return $rows->pluck('subscription')->concat($options)
             ->map(self::subscriptionLabel(...))->filter(fn ($value) => $value !== '')->unique()->sort()->values();
     }
 
@@ -963,43 +1060,58 @@ class FinanceSettlementService
             || ! $db->getSchemaBuilder()->hasTable('logistics_tongtu_sku_mappings')) {
             return $rows;
         }
-        $items = \App\Models\LogisticsOrderItem::query()->with('skuMapping')
-            ->whereIntegerInRaw('logistics_order_id', $orders->keys()->all())->get()->groupBy('logistics_order_id');
+        $itemColumns = array_intersect(['logistics_order_id', 'tongtu_sku_mapping_id', 'quantity', 'sale_weight_gram', 'tongtu_goods_weight_gram'],
+            $db->getSchemaBuilder()->getColumnListing('logistics_order_items'));
         $fallbacks = [];
-        foreach ($orders as $orderId => $payments) {
-            $payment = $payments->first(fn ($row) => $row['success']);
-            $orderItems = $items->get($orderId);
-            if ($payment === null || $orderItems === null) {
-                continue;
-            }
-            $purchase = $weight = '0';
-            foreach ($orderItems as $item) {
-                $quantity = $this->number($item->quantity);
-                if ($quantity === null || bccomp($quantity, '0', 8) <= 0) {
-                    $purchase = $weight = null;
-                    break;
+        foreach ($orders->chunk(500) as $batch) {
+            $items = \App\Models\LogisticsOrderItem::query()->with('skuMapping:id,product_guide_cost_cny,goods_weight_gram')
+                ->whereIntegerInRaw('logistics_order_id', $batch->keys()->all())->get($itemColumns)->groupBy('logistics_order_id');
+            foreach ($batch as $orderId => $payments) {
+                $payment = $payments->first(fn ($row) => $row['success']);
+                $orderItems = $items->get($orderId);
+                if ($payment === null || $orderItems === null) {
+                    continue;
                 }
-                $cost = $this->number($item->skuMapping?->product_guide_cost_cny);
-                $grams = $this->number($item->sale_weight_gram ?: $item->tongtu_goods_weight_gram ?: $item->skuMapping?->goods_weight_gram);
-                $purchase = $purchase !== null && $cost !== null && bccomp($cost, '0', 8) > 0
-                    ? bcadd($purchase, bcmul($cost, $quantity, 8), 8) : null;
-                $weight = $weight !== null && $grams !== null && bccomp($grams, '0', 8) > 0
-                    ? bcadd($weight, bcmul($grams, $quantity, 8), 8) : null;
-            }
-            // Use the same weight-based estimate as the operations report, in CNY.
-            $logistics = $weight === null ? null : bcadd(bcmul($weight, '0.08', 8), '20', 8);
-            foreach (['purchase' => $purchase, 'logistics' => $logistics] as $field => $value) {
-                if ($value !== null && ! $payments->contains(fn ($row) => $row[$field] !== null)) {
-                    $fallbacks[$payment['id']][$field] = $value;
+                $purchase = $weight = '0';
+                foreach ($orderItems as $item) {
+                    $quantity = $this->number($item->quantity);
+                    if ($quantity === null || bccomp($quantity, '0', 8) <= 0) {
+                        $purchase = $weight = null;
+                        break;
+                    }
+                    $cost = $this->number($item->skuMapping?->product_guide_cost_cny);
+                    $grams = $this->number($item->sale_weight_gram ?: $item->tongtu_goods_weight_gram ?: $item->skuMapping?->goods_weight_gram);
+                    $purchase = $purchase !== null && $cost !== null && bccomp($cost, '0', 8) > 0
+                        ? bcadd($purchase, bcmul($cost, $quantity, 8), 8) : null;
+                    $weight = $weight !== null && $grams !== null && bccomp($grams, '0', 8) > 0
+                        ? bcadd($weight, bcmul($grams, $quantity, 8), 8) : null;
+                }
+                // Use the same weight-based estimate as the operations report, in CNY.
+                $logistics = $weight === null ? null : bcadd(bcmul($weight, '0.08', 8), '20', 8);
+                foreach (['purchase' => $purchase, 'logistics' => $logistics] as $field => $value) {
+                    if ($value !== null && ! $payments->contains(fn ($row) => $row[$field] !== null)) {
+                        $fallbacks[$payment['id']][$field] = $value;
+                    }
                 }
             }
         }
 
-        return $rows->map(fn ($row) => [...$row, ...($fallbacks[$row['id']] ?? [])]);
+        return $rows->map(fn ($row) => isset($fallbacks[$row['id']]) ? array_replace($row, $fallbacks[$row['id']]) : $row);
+    }
+
+    public function shopDifference(mixed $channelAmount, mixed $shopPaid): ?string
+    {
+        $channelAmount = $this->number($channelAmount);
+        $shopPaid = $this->number($shopPaid);
+
+        return $channelAmount !== null && $shopPaid !== null ? bcsub($channelAmount, $shopPaid, 2) : null;
     }
 
     public function number(mixed $value): ?string
     {
+        if ($value === null || $value === '') {
+            return null;
+        }
         $text = str_replace(',', '', trim((string) ($value ?? '')));
 
         return preg_match('/^-?\d{1,18}(?:\.\d{1,8})?$/', $text) ? $text : null;
@@ -1018,12 +1130,37 @@ class FinanceSettlementService
         return $fields;
     }
 
+    public function summaryRows(string $channel, array $filters, bool $transactions = false): Collection
+    {
+        $filters['summary_only'] = true;
+        $fields = self::MONEY + array_fill_keys(['id', 'logistics_order_id', 'channel', 'account', 'account_key',
+            'owner', 'team', 'subscription', 'payment_method', 'success', 'failed', 'settlement'], true);
+        if ($transactions) {
+            $fields += self::CONDITION_FIELDS + array_fill_keys(['currency', 'month'], true);
+        }
+        // Keep the original date order for grouping and for assigning costs to the first successful payment.
+        $ids = $this->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id')->pluck('id');
+        $rows = collect();
+        $context = $ids->isEmpty() ? null : $this->rowContext($channel);
+        foreach ($ids->chunk(1500) as $batch) {
+            $records = FinanceRecord::query()->whereIntegerInRaw('id', $batch->all())
+                ->orderByDesc('occurred_at')->orderByDesc('id')->get();
+            foreach ($this->rows($channel, $filters, $records, $context) as $row) {
+                $rows->push(array_intersect_key($row, $fields));
+            }
+        }
+
+        return $rows;
+    }
+
     public function totals(Collection $rows, string $layer): array
     {
         if ($layer === 'business') {
             $classifiedRows = $rows->map(function ($row) {
                 $isFake = $row['channel'] === 'paypal' && str_contains(($row['team'] ?? '').' '.($row['owner'] ?? ''), '刷单');
-                return [...$row, 'subscription' => $isFake ? '刷单' : ($row['subscription'] ?? '')];
+                $subscription = $isFake ? '刷单' : ($row['subscription'] ?? '');
+
+                return ($row['subscription'] ?? null) === $subscription ? $row : [...$row, 'subscription' => $subscription];
             });
             $groups = [];
             foreach ([['Shopify', 'project_classification'], ['通道', 'classification']] as [$scope, $classification]) {
@@ -1065,6 +1202,8 @@ class FinanceSettlementService
             return [...$totals, ...$details];
         }
         $groups = [];
+        $amountFields = ['settlement', ...array_keys(self::MONEY)];
+        $emptyAmounts = array_replace(array_fill_keys($amountFields, '0'), ['logistics' => null, 'purchase' => null]);
         foreach ($rows as $row) {
             $name = match ($layer) {
                 'project' => 'Shopify',
@@ -1076,14 +1215,11 @@ class FinanceSettlementService
             };
             $channel = $layer === 'project' ? 'combined' : $row['channel'];
             $key = json_encode([$name, $channel]);
-            $groups[$key] ??= ['name' => $name, 'channel' => $channel, 'count' => 0, 'success_count' => 0, 'failed_count' => 0];
+            $groups[$key] ??= ['name' => $name, 'channel' => $channel, 'count' => 0, 'success_count' => 0, 'failed_count' => 0] + $emptyAmounts;
             $groups[$key]['count']++;
             $groups[$key]['success_count'] += $row['success'] ? 1 : 0;
             $groups[$key]['failed_count'] += $row['failed'] ? 1 : 0;
-            foreach (['settlement', ...array_keys(self::MONEY)] as $field) {
-                if (! array_key_exists($field, $groups[$key])) {
-                    $groups[$key][$field] = in_array($field, ['logistics', 'purchase'], true) ? null : '0';
-                }
+            foreach ($amountFields as $field) {
                 if ($field === 'settlement' && $row['failed']) {
                     continue;
                 }

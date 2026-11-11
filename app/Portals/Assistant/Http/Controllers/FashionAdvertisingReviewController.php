@@ -10,13 +10,17 @@ use App\Models\FashionAdvertisingReport;
 use App\Models\FashionLogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
+use App\Portals\Assistant\AssistantStoreOwnerService;
+use App\Portals\Fashion\FashionAdvertisingReportBulkImportService;
 use Carbon\CarbonImmutable;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response;
@@ -26,7 +30,40 @@ class FashionAdvertisingReviewController extends Controller
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
+        private readonly AssistantStoreOwnerService $storeOwners,
+        private readonly FashionAdvertisingReportBulkImportService $bulkImporter,
     ) {}
+
+    public function importTemplate(Request $request): Response
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+
+        return $this->bulkImporter->templateResponse($this->importableOperators($context['user']));
+    }
+
+    public function import(Request $request): RedirectResponse|JsonResponse
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        $request->validate(['import_file' => ['required', 'file', 'max:10240']], [
+            'import_file.required' => '请选择需要导入的 Excel 文件。',
+            'import_file.uploaded' => '文件上传失败，文件可能超过服务器允许的大小。',
+            'import_file.file' => '上传的内容不是有效文件。',
+            'import_file.max' => '导入文件不能超过 10MB。',
+        ]);
+        try {
+            $result = $this->bulkImporter->import($request->file('import_file'), $this->importableOperators($context['user']));
+        } catch (\InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['import_file' => $exception->getMessage()]);
+        }
+        $message = '成功导入 '.$result['imported_count'].' 条广告数据，生成 '.$result['report_count'].' 份待审核记录。';
+        if ($request->expectsJson()) {
+            return response()->json($result + ['ok' => true, 'message' => $message, 'redirect_url' => route('assistant.fashion-advertising-reviews.index')]);
+        }
+
+        return redirect()->route('assistant.fashion-advertising-reviews.index')->with('success', $message);
+    }
 
     public function index(Request $request): Response|View
     {
@@ -190,9 +227,22 @@ class FashionAdvertisingReviewController extends Controller
             'entries.*.book_spend_usd' => ['required', 'numeric', 'min:0'],
             'entries.*.settlement_coefficient' => ['required', 'numeric', 'min:0'],
             'entries.*.screenshot' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'deleted_entry_ids' => ['nullable', 'array'],
+            'deleted_entry_ids.*' => ['integer', 'distinct', Rule::in($entryIds)],
         ]);
 
-        DB::connection($report->getConnectionName())->transaction(function () use ($request, $report, $data, $context): void {
+        $submittedEntryIds = collect($data['entries'])->pluck('id')->map(static fn ($id): int => (int) $id);
+        $deletedEntryIds = collect($data['deleted_entry_ids'] ?? [])->map(static fn ($id): int => (int) $id);
+        if ($submittedEntryIds->intersect($deletedEntryIds)->isNotEmpty()
+            || $submittedEntryIds->merge($deletedEntryIds)->unique()->sort()->values()->all() !== collect($entryIds)->sort()->values()->all()) {
+            throw ValidationException::withMessages(['entries' => '广告记录发生变化，请刷新页面后重新操作。']);
+        }
+        if ($submittedEntryIds->isEmpty()) {
+            throw ValidationException::withMessages(['entries' => '至少需要保留一条广告记录。']);
+        }
+
+        $deletedScreenshotPaths = [];
+        DB::connection($report->getConnectionName())->transaction(function () use ($request, $report, $data, $context, $deletedEntryIds, &$deletedScreenshotPaths): void {
             foreach ($data['entries'] as $index => $row) {
                 $entry = $report->adSpendEntries->firstWhere('id', (int) $row['id']);
                 abort_unless($entry, 422);
@@ -213,6 +263,12 @@ class FashionAdvertisingReviewController extends Controller
                 }
                 $entry->update($values);
             }
+            foreach ($report->adSpendEntries->whereIn('id', $deletedEntryIds) as $entry) {
+                if ($entry->screenshot_path) {
+                    $deletedScreenshotPaths[] = $entry->screenshot_path;
+                }
+                $entry->delete();
+            }
             $spend = round((float) $report->adSpendEntries()->sum('actual_spend_usd'), 2);
             $report->update([
                 'total_ad_spend_usd' => $spend,
@@ -224,6 +280,9 @@ class FashionAdvertisingReviewController extends Controller
                 'review_reason' => null,
             ]);
         });
+        foreach ($deletedScreenshotPaths as $path) {
+            Storage::disk('local')->delete($path);
+        }
 
         return redirect()->route('assistant.fashion-advertising-reviews.show', $report)
             ->with('success', '广告信息已修改，报表保持审核通过状态。');
@@ -303,6 +362,21 @@ class FashionAdvertisingReviewController extends Controller
     private function date(mixed $value): string
     {
         return is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) ? $value : '';
+    }
+
+    private function importableOperators(AdminUser $user)
+    {
+        $ownerIds = AssistantDomainStore::query()->whereNotNull('owner_user_id')
+            ->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')")
+            ->distinct()->pluck('owner_user_id');
+        $query = AdminUser::query()->whereIn('id', $ownerIds);
+        if (! $user->isAdministrator()) {
+            $departmentIds = $this->storeOwners->visibleOperationDepartmentIds($user);
+            if ($departmentIds === []) return collect();
+            $query->whereHas('departments', fn ($departmentQuery) => $departmentQuery->whereIn('admin_roles.id', $departmentIds));
+        }
+
+        return $query->orderBy('name')->get(['id', 'name', 'username']);
     }
 
     private function loadPerformanceMetrics(FashionAdvertisingReport $report): void

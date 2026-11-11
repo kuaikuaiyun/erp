@@ -286,6 +286,8 @@ Route::get('/operation-dashboard/applovin-spends/screenshots/{screenshot}', [App
 Route::get('/assistant/advertising-spend-summary', [AdvertisingSpendSummaryController::class, 'index'])->name('assistant.advertising-spend-summary.index');
 Route::get('/assistant/advertising-spend-analysis', [AdvertisingSpendAnalysisController::class, 'index'])->name('assistant.advertising-spend-analysis.index');
 Route::get('/assistant/fashion-advertising-reviews', [FashionAdvertisingReviewController::class, 'index'])->name('assistant.fashion-advertising-reviews.index');
+Route::get('/assistant/fashion-advertising-reviews/import-template', [FashionAdvertisingReviewController::class, 'importTemplate'])->name('assistant.fashion-advertising-reviews.import-template');
+Route::post('/assistant/fashion-advertising-reviews/import', [FashionAdvertisingReviewController::class, 'import'])->name('assistant.fashion-advertising-reviews.import');
 Route::post('/assistant/fashion-advertising-reviews/bulk-review', [FashionAdvertisingReviewController::class, 'bulkReview'])->name('assistant.fashion-advertising-reviews.bulk-review');
 Route::get('/assistant/fashion-advertising-reviews/{report}', [FashionAdvertisingReviewController::class, 'show'])->withTrashed()->whereNumber('report')->name('assistant.fashion-advertising-reviews.show');
 Route::get('/assistant/fashion-advertising-reviews/{report}/edit', [FashionAdvertisingReviewController::class, 'edit'])->whereNumber('report')->name('assistant.fashion-advertising-reviews.edit');
@@ -296,6 +298,7 @@ Route::get('/assistant/fashion-advertising-reviews/screenshots/{type}/{entry}', 
 Route::get('/assistant/fashion-operation-reports', [FashionOperationReportController::class, 'index'])->name('assistant.fashion-operation-reports.index');
 Route::get('/operation-report-reviews', [OperationReportReviewController::class, 'index'])->name('assistant.operation-report-reviews.index');
 Route::get('/operation-report-reviews/import-template', [OperationReportReviewController::class, 'importTemplate'])->name('assistant.operation-report-reviews.import-template');
+Route::get('/operation-report-reviews/export', [OperationReportReviewController::class, 'export'])->name('assistant.operation-report-reviews.export');
 Route::post('/operation-report-reviews/import', [OperationReportReviewController::class, 'import'])->name('assistant.operation-report-reviews.import');
 Route::get('/operation-report-reviews/screenshot', [OperationReportReviewController::class, 'screenshot'])->name('assistant.operation-report-reviews.screenshot');
 Route::post('/operation-report-reviews/bulk-review', [OperationReportReviewController::class, 'bulkReview'])->name('assistant.operation-report-reviews.bulk-review');

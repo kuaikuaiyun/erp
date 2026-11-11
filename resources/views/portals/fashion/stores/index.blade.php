@@ -13,6 +13,9 @@
 <style>
 .store-autocomplete{position:relative;min-width:245px}.store-autocomplete .store-search{width:100%;padding-right:34px}.store-autocomplete-toggle{position:absolute;right:1px;bottom:1px;width:32px;height:36px;border:0;border-radius:0 7px 7px 0;background:transparent;color:#6f8797}.store-autocomplete-toggle:hover{color:#227cab;background:#eef8fc}.store-autocomplete-menu{display:none;position:absolute;z-index:1050;top:calc(100% + 5px);left:0;width:100%;max-height:276px;overflow-y:auto;border:1px solid #b9d8e8;border-radius:8px;background:#fff;box-shadow:0 10px 24px rgba(27,69,95,.2)}.store-autocomplete-menu.is-open{display:block}.store-autocomplete-option{display:block;width:100%;padding:9px 12px;border:0;border-bottom:1px solid #edf3f6;background:#fff;color:#315c76;text-align:left}.store-autocomplete-option:last-child{border-bottom:0}.store-autocomplete-option:hover,.store-autocomplete-option.is-active{background:#eaf7fc;color:#1678a9}.store-autocomplete-option strong{display:block;font-size:13px}.store-autocomplete-option small{display:block;margin-top:2px;color:#7891a2;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.store-autocomplete-empty{padding:11px 12px;color:#8b9ca7;font-size:12px}.store-autocomplete-option mark{padding:0;background:#fff0b6;color:inherit}@media(max-width:700px){.store-autocomplete{width:100%;min-width:0}}
 </style>
+<style>
+.credential-locked.credentials-visible{display:flex;align-items:flex-end;justify-content:flex-start;gap:9px;padding:9px;text-align:left}.credential-locked.credentials-visible .credential-field{flex:1;min-width:145px}.credential-locked.credentials-visible label{display:block;margin:0 0 4px;color:#648777;font-size:11px;font-weight:700}.credential-locked.credentials-visible .form-control[readonly]{width:100%;height:34px;border-color:#c8dfd3;background:#fff;color:#355f4d;box-shadow:none;cursor:default}.credential-locked.credentials-visible textarea.form-control[readonly]{height:48px;padding-top:8px;resize:none}.credential-lock-note{display:flex;align-items:center;gap:5px;height:34px;padding:0 9px;white-space:nowrap;color:#277351}.credential-lock-note i{color:#359665}@media(max-width:950px){.credential-locked.credentials-visible{min-width:430px}}
+</style>
 @endpush
 @section('content')
 <section class="content-header"><h1>店铺列表 <small>查看绑定的 XShoppy、Shopline 店铺业绩并配置 API 信息</small></h1></section>
@@ -33,7 +36,16 @@
  <tr><td><div class="store-name">{{ $store->shop_name?:'未命名店铺' }}</div><div class="store-domain">{{ $store->domain?:'—' }}</div></td>
  <td class="text-center"><span class="builder-label {{ $isShopline?'shopline':'' }}">{{ $isShopline?'Shopline':'XShoppy' }}</span></td><td>{{ $store->user_name?:$store->ownerUser?->name?:'—' }}</td><td>{{ $store->shop_status==='in_use'?'在用':($store->shop_status==='abandoned'?'已弃用':($store->shop_status==='stopped'?'已停用':'—')) }}</td>
  <td><span class="credential-state {{ $configured?'':'missing' }}">{{ $configured?'已配置':'未配置' }}</span></td><td class="api-config-cell">
- @if($configured)<div class="credential-locked"><i class="fa fa-lock"></i><span>密钥已安全保存</span><small>不可再次编辑</small></div>
+ @if($configured)
+  <div class="credential-locked credentials-visible">
+   @if($isShopline)
+    <div class="credential-field"><label>后台 API 访问令牌</label><textarea class="form-control input-sm" readonly>{{ $store->shopline_app_token }}</textarea></div>
+   @else
+    <div class="credential-field"><label>API 密钥</label><input class="form-control input-sm" type="text" value="{{ $store->xshoppy_api_key }}" readonly></div>
+    <div class="credential-field"><label>密码</label><input class="form-control input-sm" type="text" value="{{ $store->xshoppy_password }}" readonly></div>
+   @endif
+   <div class="credential-lock-note"><i class="fa fa-lock"></i><span>仅查看，不可编辑</span></div>
+  </div>
  @elseif($isShopline)<form class="credential-form" method="post" action="{{ route('fashion.stores.credentials.update',$store) }}">@csrf @method('PATCH')<div class="credential-field"><label>后台 API 访问令牌</label><textarea class="form-control input-sm" name="shopline_app_token" required autocomplete="new-password" placeholder="粘贴 Shopline 访问令牌"></textarea></div><button class="btn btn-primary btn-sm credential-save" onclick="return confirm('确认保存该 Shopline 店铺的后台 API 访问令牌？保存后不能再次编辑。')"><i class="fa fa-save"></i> 保存</button></form>
  @else<form class="credential-form" method="post" action="{{ route('fashion.stores.credentials.update',$store) }}">@csrf @method('PATCH')<div class="credential-field"><label>API 密钥</label><input class="form-control input-sm" type="password" name="xshoppy_api_key" required autocomplete="new-password" placeholder="填写 API 密钥"></div><div class="credential-field"><label>密码</label><input class="form-control input-sm" type="password" name="xshoppy_password" required autocomplete="new-password" placeholder="填写密码"></div><button class="btn btn-primary btn-sm credential-save" onclick="return confirm('确认保存？保存后不能再次编辑。')"><i class="fa fa-save"></i> 保存</button></form>@endif
  </td></tr>

@@ -41,6 +41,36 @@ class OperationReportReviewController extends Controller
         return $this->bulkImporter->templateResponse($this->importableOperators($context['user']));
     }
 
+    public function export(Request $request): Response
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+        $filters = $request->validate([
+            'status' => ['nullable', Rule::in(['', OperationReport::STATUS_PENDING, OperationReport::STATUS_APPROVED, OperationReport::STATUS_REJECTED, 'deleted'])],
+            'date_from' => ['nullable', 'date_format:Y-m-d'], 'date_to' => ['nullable', 'date_format:Y-m-d'],
+            'team_id' => ['nullable', 'integer', 'min:1'], 'operator' => ['nullable', 'string', 'max:100'],
+            'media' => ['nullable', 'string', 'max:100'], 'account_number' => ['nullable', 'string', 'max:191'],
+        ]);
+        $status = trim((string) ($filters['status'] ?? ''));
+        $operator = trim((string) ($filters['operator'] ?? ''));
+        $media = mb_strtolower(trim((string) ($filters['media'] ?? '')));
+        $accountNumber = mb_strtolower(trim((string) ($filters['account_number'] ?? '')));
+        $teamId = (int) ($filters['team_id'] ?? 0);
+        $reports = $this->scopeReports(OperationReport::withTrashed(), $context['user'])
+            ->with(['reviewer:id,name,username', 'operationDepartment:id,name'])
+            ->when($status === 'deleted', fn ($query) => $query->onlyTrashed())
+            ->when($status !== '' && $status !== 'deleted', fn ($query) => $query->whereNull('deleted_at')->where('status', $status))
+            ->when(!empty($filters['date_from']), fn ($query) => $query->whereDate('report_date', '>=', $filters['date_from']))
+            ->when(!empty($filters['date_to']), fn ($query) => $query->whereDate('report_date', '<=', $filters['date_to']))
+            ->when($teamId > 0, fn ($query) => $query->where('operation_department_id', $teamId))
+            ->when($operator !== '', fn ($query) => $query->where('operator_name', 'like', '%'.$operator.'%'))
+            ->when($media !== '', fn ($query) => $query->whereRaw('LOWER(CAST(advertising_rows AS CHAR)) LIKE ?', ['%"media_source"%:%"%'.$media.'%"%']))
+            ->when($accountNumber !== '', fn ($query) => $query->whereRaw('LOWER(CAST(advertising_rows AS CHAR)) LIKE ?', ['%"account_number"%:%"%'.$accountNumber.'%"%']))
+            ->orderByDesc('report_date')->orderByDesc('id')->get();
+
+        return $this->bulkImporter->exportResponse($reports);
+    }
+
     public function import(Request $request): RedirectResponse|JsonResponse
     {
         $context = $this->context($request);
@@ -64,7 +94,9 @@ class OperationReportReviewController extends Controller
             throw ValidationException::withMessages(['import_file' => $exception->getMessage()]);
         }
 
-        $message = '成功导入 '.$result['imported_count'].' 条广告数据，生成 '.$result['report_count'].' 份待审核记录。';
+        $message = '成功导入 '.$result['imported_count'].' 条广告数据，生成 '.$result['report_count'].' 份审核通过记录';
+        if ($result['overwritten_count'] > 0) $message .= '，其中覆盖 '.$result['overwritten_count'].' 份同日原记录';
+        $message .= '。';
         if ($request->expectsJson()) {
             return response()->json($result + [
                 'ok' => true, 'message' => $message,
@@ -192,6 +224,8 @@ class OperationReportReviewController extends Controller
         abort_unless($this->canAccessReport($report, $context['user']), 403);
         abort_unless($report->status === OperationReport::STATUS_APPROVED, 422, '只有审核通过的报表可以重新编辑广告信息。');
 
+        $oldRows = collect($report->advertising_rows ?: []);
+        $rowIndexes = $oldRows->keys()->map(static fn ($index): int => (int) $index)->all();
         $validated = $request->validate([
             'ads' => ['required', 'array', 'min:1', 'max:50'],
             'ads.*.agency' => ['required', 'string', 'max:100'],
@@ -202,15 +236,31 @@ class OperationReportReviewController extends Controller
             'ads.*.settlement_coefficient' => ['required', 'numeric', 'min:0'],
             'ads.*.existing_screenshot' => ['nullable', 'string', 'max:500'],
             'ads.*.screenshot' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
+            'deleted_indexes' => ['nullable', 'array'],
+            'deleted_indexes.*' => ['integer', 'distinct', Rule::in($rowIndexes)],
         ]);
 
-        $oldRows = collect($report->advertising_rows ?: []);
-        $rows = collect($validated['ads'])->map(function (array $row, int $index) use ($request, $oldRows): array {
+        $submittedIndexes = collect(array_keys($validated['ads']))->map(static fn ($index): int => (int) $index);
+        $deletedIndexes = collect($validated['deleted_indexes'] ?? [])->map(static fn ($index): int => (int) $index);
+        if ($submittedIndexes->intersect($deletedIndexes)->isNotEmpty()
+            || $submittedIndexes->merge($deletedIndexes)->unique()->sort()->values()->all() !== collect($rowIndexes)->sort()->values()->all()) {
+            throw ValidationException::withMessages(['ads' => '广告记录发生变化，请刷新页面后重新操作。']);
+        }
+        if ($submittedIndexes->isEmpty()) {
+            throw ValidationException::withMessages(['ads' => '至少需要保留一条广告记录。']);
+        }
+
+        $removedScreenshotPaths = $oldRows->only($deletedIndexes->all())->pluck('screenshot')->filter()->values();
+        $replacedScreenshotPaths = collect();
+        $rows = collect($validated['ads'])->map(function (array $row, int $index) use ($request, $oldRows, $replacedScreenshotPaths): array {
             $bookSpend = round((float) $row['book_spend'], 4);
             $coefficient = round((float) $row['settlement_coefficient'], 4);
             $old = (array) ($oldRows->get($index) ?? []);
             $screenshot = trim((string) ($old['screenshot'] ?? '')) ?: null;
             if ($file = $request->file('ads.'.$index.'.screenshot')) {
+                if ($screenshot) {
+                    $replacedScreenshotPaths->push($screenshot);
+                }
                 $screenshot = $file->storeAs('operation-reports/ads', Str::uuid().'.'.$file->extension(), 'public');
             }
 
@@ -242,6 +292,9 @@ class OperationReportReviewController extends Controller
             'reviewed_at' => now(),
             'review_reason' => null,
         ]);
+        $removedScreenshotPaths->merge($replacedScreenshotPaths)->unique()->each(
+            static fn (string $path) => Storage::disk('public')->delete($path),
+        );
 
         return redirect()->route('assistant.operation-report-reviews.show', $report)
             ->with('success', '广告信息已修改，报表保持审核通过状态。');
