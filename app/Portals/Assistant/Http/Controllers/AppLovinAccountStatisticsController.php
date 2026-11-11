@@ -63,7 +63,10 @@ class AppLovinAccountStatisticsController extends Controller
                 'over_10000_count' => $rows->where('total_spend', '>', 10000)->count(),
                 'total_spend' => (float) $rows->sum('total_spend'),
             ];
-        })->sortBy([['department', 'asc'], ['operator_name', 'asc']])->values();
+        })->sort(function (array $left, array $right): int {
+            return $right['total_spend'] <=> $left['total_spend']
+                ?: strnatcasecmp($left['operator_name'], $right['operator_name']);
+        })->values();
 
         $perPage = (int) ($filters['per_page'] ?? 20);
         $page = max(1, (int) $request->query('page', 1));
@@ -98,6 +101,7 @@ class AppLovinAccountStatisticsController extends Controller
             'over_10000' => $accounts->where('total_spend', '>', 10000)->values(),
             default => $accounts,
         };
+        $accounts = $accounts->sortByDesc('total_spend')->values();
         $page = max(1, (int) $request->query('page', 1));
         $paginator = new LengthAwarePaginator($accounts->forPage($page, 20)->values(), $accounts->count(), 20, $page, [
             'path' => $request->url(), 'query' => $request->query(),
