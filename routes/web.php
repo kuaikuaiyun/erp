@@ -17,6 +17,7 @@ use App\Portals\Assistant\Http\Controllers\AdvertisingRechargeReviewController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingSpendAnalysisController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingSpendSummaryController;
 use App\Portals\Assistant\Http\Controllers\AppLovinPerformanceReportController;
+use App\Portals\Assistant\Http\Controllers\AppLovinAccountStatisticsController;
 use App\Portals\Assistant\Http\Controllers\AppLovinSpendReviewController;
 use App\Portals\Assistant\Http\Controllers\AssistantProjectController;
 use App\Portals\Assistant\Http\Controllers\AssistantWebsiteSystemController;
@@ -253,6 +254,10 @@ Route::get('/operation/daily-submissions/applovin-spends/screenshots/{screenshot
     ->whereNumber('screenshot')->name('operation.applovin-spends.screenshot');
 Route::get('/assistant/daily-submissions/applovin-spends', [AppLovinSpendReviewController::class, 'index'])
     ->name('assistant.applovin-spends.index');
+Route::get('/assistant/applovin-account-statistics', [AppLovinAccountStatisticsController::class, 'index'])
+    ->name('assistant.applovin-account-statistics.index');
+Route::get('/assistant/applovin-account-statistics/{operator}', [AppLovinAccountStatisticsController::class, 'show'])
+    ->whereNumber('operator')->name('assistant.applovin-account-statistics.show');
 Route::get('/assistant/applovin-performance-reports', [AppLovinPerformanceReportController::class, 'index'])
     ->name('assistant.applovin-performance-reports.index');
 Route::get('/assistant/fashion-applovin-performance-reports', [FashionAppLovinPerformanceReportController::class, 'index'])

@@ -107,7 +107,7 @@
                     <div class="ad-import-step"><strong><span>2</span>放入截图</strong>把截图粘贴到同一行最后一列</div>
                     <div class="ad-import-step"><strong><span>3</span>导入提审</strong>按人员和日期分组提交审核</div>
                 </div>
-                <label class="ad-import-drop"><i class="fa fa-file-excel-o"></i><strong>选择填写完成的 Excel 文件</strong><div class="text-muted">支持 XLSX、XLS、CSV，单次最多 100 条</div><input type="file" name="import_file" accept=".xlsx,.xls,.csv" required></label>
+                <label class="ad-import-drop"><i class="fa fa-file-excel-o"></i><strong>选择填写完成的 Excel 文件</strong><div class="text-muted">支持 XLSX、XLS、CSV，不限制导入记录条数</div><input type="file" name="import_file" accept=".xlsx,.xls,.csv" required></label>
                 <div class="ad-import-tip"><i class="fa fa-info-circle"></i> 一个文件可以同时导入不同运营人员、不同提报日期的数据。每行必须填写日期和运营人员，并在最后一列放置一张截图。</div>
                 <div class="ad-import-progress" id="ad-import-progress"><div class="ad-import-progress-head"><strong id="ad-import-progress-text">准备导入</strong><span id="ad-import-progress-percent">0%</span></div><div class="progress"><div class="progress-bar progress-bar-success progress-bar-striped active" id="ad-import-progress-bar" role="progressbar" style="width:0%"></div></div><div class="ad-import-result" id="ad-import-result">正在准备上传文件……</div></div>
             </div>
