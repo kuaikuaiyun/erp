@@ -104,6 +104,9 @@
 
 @section('content')
 <section class="content aikaipin-product-library-page">
+    @if(session('success'))
+        <div class="alert alert-success"><i class="fa fa-check-circle"></i> {{ session('success') }}</div>
+    @endif
     <div class="box box-solid aikaipin-filter-box">
         <div class="box-body">
             <form class="aikaipin-filter-form" method="get" action="{{ route('aikaipin.product-library.index') }}" data-aikaipin-filter-form>
@@ -193,6 +196,7 @@
                         <th class="aikaipin-category-column">{{ $t('table.category') }}</th>
                         <th class="aikaipin-source-column">{{ $t('table.source_type') }}</th>
                         <th class="aikaipin-updated-column">{{ $t('table.updated_at') }}</th>
+                        <th style="width:82px;text-align:center;">上架状态</th>
                         <th class="aikaipin-operation-column">{{ $t('table.operation') }}</th>
                     </tr>
                     </thead>
@@ -275,6 +279,13 @@
                                 <span class="aikaipin-type">{{ trans('aikaipin.upload.type_options.'.$product->product_type) }}</span>
                             </td>
                             <td class="aikaipin-updated-cell"><time datetime="{{ $product->updated_at?->toAtomString() }}">{{ $updatedAt }}</time></td>
+                            <td style="text-align:center;">
+                                @if($product->is_published)
+                                    <span class="label label-success"><i class="fa fa-arrow-up"></i> 已上架</span>
+                                @else
+                                    <span class="label label-default"><i class="fa fa-arrow-down"></i> 已下架</span>
+                                @endif
+                            </td>
                             <td class="aikaipin-operation-cell">
                                 <div class="aikaipin-row-actions" role="group" aria-label="{{ $t('table.operation') }}">
                                     @if ($product->landing_page_url)
@@ -317,6 +328,15 @@
                                         </button>
                                     @endif
                                     @if ($canManageProductLibrary)
+                                        <form method="post" action="{{ route('aikaipin.product-library.publication.update', $product) }}" style="display:inline" onsubmit="return confirm('{{ $product->is_published ? '确认下架该商品？下架后订阅运营系统将不再显示。' : '确认上架该商品？上架后订阅运营系统可以查看。' }}')">
+                                            @csrf @method('PATCH')
+                                            <input type="hidden" name="is_published" value="{{ $product->is_published ? 0 : 1 }}">
+                                            <button class="btn {{ $product->is_published ? 'btn-warning' : 'btn-success' }} aikaipin-row-action-icon" type="submit"
+                                                title="{{ $product->is_published ? '下架商品' : '上架商品' }}" aria-label="{{ $product->is_published ? '下架商品' : '上架商品' }}">
+                                                <i class="fa {{ $product->is_published ? 'fa-arrow-down' : 'fa-arrow-up' }}" aria-hidden="true"></i>
+                                                <span class="sr-only">{{ $product->is_published ? '下架商品' : '上架商品' }}</span>
+                                            </button>
+                                        </form>
                                         <button class="btn btn-info aikaipin-row-action-icon" type="button" data-aikaipin-action="shopify-import"
                                             data-aikaipin-product-id="{{ $product->getKey() }}" data-aikaipin-product-code="{{ $product->product_code }}"
                                             data-aikaipin-product-name="{{ $productName }}" title="导入 Shopify 商品文件" aria-label="导入 Shopify 商品文件">
@@ -343,7 +363,7 @@
                     @endforeach
                     @if ($products->isEmpty())
                     <tr class="aikaipin-empty-row" data-aikaipin-empty-row>
-                        <td colspan="{{ $canManageProductLibrary ? 8 : 7 }}">
+                        <td colspan="{{ $canManageProductLibrary ? 9 : 8 }}">
                             <div class="aikaipin-empty-state">
                                 <i class="fa fa-search" aria-hidden="true"></i>
                                 <p data-aikaipin-empty-message>{{ $t('messages.no_records') }}</p>
@@ -506,6 +526,20 @@
                                 <div class="col-sm-6 form-group">
                                     <label for="aikaipin-upload-landing-url">{{ $t('upload.landing_page_url') }}</label>
                                     <input id="aikaipin-upload-landing-url" class="form-control" name="landing_page_url" type="url" autocomplete="off" data-aikaipin-upload-landing-url>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-sm-6 form-group">
+                                    <label>上架状态</label>
+                                    <div class="btn-group aikaipin-choice-group" data-toggle="buttons">
+                                        <label class="btn btn-default active">
+                                            <input type="radio" name="is_published" value="1" checked> 已上架
+                                        </label>
+                                        <label class="btn btn-default">
+                                            <input type="radio" name="is_published" value="0"> 已下架
+                                        </label>
+                                    </div>
+                                    <p class="help-block">下架后，订阅运营系统的 AI 产品库将不再显示该商品。</p>
                                 </div>
                             </div>
                         </div>

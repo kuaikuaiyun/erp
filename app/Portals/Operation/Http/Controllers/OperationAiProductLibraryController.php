@@ -312,7 +312,7 @@ class OperationAiProductLibraryController extends Controller
     /** @param array{keyword:string,category:string,source:string,type:string} $filters */
     private function productQuery(array $filters): Builder
     {
-        $query = AikaipinProduct::query()->latest('created_at')->latest('id');
+        $query = AikaipinProduct::query()->where('is_published', true)->latest('created_at')->latest('id');
 
         if ($filters['keyword'] !== '') {
             $like = '%'.$filters['keyword'].'%';
@@ -339,6 +339,7 @@ class OperationAiProductLibraryController extends Controller
     private function categoryOptions(): array
     {
         return AikaipinProduct::query()
+            ->where('is_published', true)
             ->whereNotNull('categories')
             ->get(['categories'])
             ->flatMap(static fn (AikaipinProduct $product): array => $product->categoryValues())
