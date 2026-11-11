@@ -10,6 +10,7 @@ use App\Models\OperationReport;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
+use App\Portals\Operation\OperationReportMetricsService;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Validation\Rule;
@@ -22,6 +23,7 @@ class AppLovinPerformanceReportController extends Controller
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
         private readonly AssistantStoreOwnerService $storeOwners,
+        private readonly OperationReportMetricsService $metrics,
     ) {}
 
     public function index(Request $request): Response|View
@@ -34,10 +36,12 @@ class AppLovinPerformanceReportController extends Controller
         abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
 
         $visibleIds = $this->storeOwners->visibleOperationDepartmentIds($context['user']);
+        $timezoneOptions = $this->timezoneOptions();
         $filters = $request->validate([
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
             'date_range' => ['nullable', Rule::in(['custom', 'yesterday', 'last_3', 'last_7', 'last_15', 'last_30', 'last_60', 'last_90', 'last_6_months', 'last_year'])],
+            'timezone' => ['nullable', Rule::in(array_keys($timezoneOptions))],
             'department_id' => ['nullable', 'integer', Rule::in($visibleIds)],
             'operator' => ['nullable', 'string', 'max:100'],
             'store_domain' => ['nullable', 'string', 'max:191'],
@@ -46,7 +50,8 @@ class AppLovinPerformanceReportController extends Controller
             'consumption_custom' => ['nullable', 'numeric', 'min:0', 'required_if:consumption_range,custom'],
             'consumption_custom_max' => ['nullable', 'numeric', 'min:0', 'required_if:consumption_range,custom', 'gte:consumption_custom'],
         ]);
-        $today = now('Asia/Shanghai')->startOfDay();
+        $timezone = (string) ($filters['timezone'] ?? OperationReportMetricsService::REPORT_TIMEZONE);
+        $today = now($timezone)->startOfDay();
         $dateRange = (string) ($filters['date_range'] ?? ($request->hasAny(['date_from', 'date_to']) ? 'custom' : 'last_7'));
         [$presetFrom, $presetTo] = match ($dateRange) {
             'yesterday' => [$today->copy()->subDay(), $today->copy()->subDay()],
@@ -80,6 +85,12 @@ class AppLovinPerformanceReportController extends Controller
             ->when($dateTo !== '', fn ($q) => $q->whereDate('report_date', '<=', $dateTo));
 
         $reports = $query->orderBy('report_date')->orderBy('operator_name')->get();
+        $calculatedByOperator = $this->metrics->buildRangeForOperators(
+            $dateFrom,
+            $dateTo,
+            $reports->pluck('operator_user_id')->map(fn ($id) => (int) $id)->filter()->unique()->values()->all(),
+            $timezone
+        );
         $bindings = AppLovinAccountStoreBinding::query()->pluck('assistant_domain_store_id', 'account_key');
         $storeIds = $bindings->values()->merge(
             $reports->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])->pluck('assistant_domain_store_id'))
@@ -99,7 +110,7 @@ class AppLovinPerformanceReportController extends Controller
             ]))->groupBy('account_key')->map(fn ($items) => (float) $items->sum('spend'));
         $giftScreenshots = AppLovinSpendScreenshot::query()->whereIn('account_key', $accountSpendTotals->keys())->get()->keyBy('account_key');
 
-        $dailyRows = $reports->flatMap(function (OperationReport $report) use ($bindings, $stores, $accountSpendTotals): array {
+        $dailyRows = $reports->flatMap(function (OperationReport $report) use ($bindings, $stores, $accountSpendTotals, $calculatedByOperator): array {
             $ads = collect($report->advertising_rows ?: [])
                 ->filter(fn (array $ad) => mb_strtolower(trim((string) ($ad['media_source'] ?? ''))) === 'applovin')
                 ->map(function (array $ad) use ($report, $bindings, $stores): ?array {
@@ -126,10 +137,11 @@ class AppLovinPerformanceReportController extends Controller
                 ->filter()
                 ->groupBy('resolved_store_id');
 
-            return $ads->map(function ($storeAds) use ($report, $accountSpendTotals): array {
+            return $ads->map(function ($storeAds) use ($report, $accountSpendTotals, $calculatedByOperator): array {
                 $domain = trim((string) $storeAds->first()['resolved_store_domain']);
                 $domainKey = mb_strtolower($domain);
-                $metrics = collect($report->metric_rows ?: [])->filter(fn (array $metric) => mb_strtolower(trim((string) ($metric['shop_domain'] ?? ''))) === $domainKey
+                $metrics = collect($calculatedByOperator[(int) $report->operator_user_id]['rows'] ?? [])->filter(fn (array $metric) => ($metric['date'] ?? '') === $report->report_date->format('Y-m-d')
+                    && mb_strtolower(trim((string) ($metric['shop_domain'] ?? ''))) === $domainKey
                     && mb_strtolower(trim((string) ($metric['media_source'] ?? ''))) === 'applovin'
                 );
                 $orders = (int) $metrics->sum('first_total_orders');
@@ -208,7 +220,10 @@ class AppLovinPerformanceReportController extends Controller
                     })->values()->all(),
                 ];
             })
-            ->sortByDesc('ad_spend')
+            ->sortBy([
+                ['first_orders', 'desc'],
+                ['ad_spend', 'desc'],
+            ])
             ->values();
 
         if (($filters['gift_status'] ?? '') === 'yes') {
@@ -246,14 +261,32 @@ class AppLovinPerformanceReportController extends Controller
         $totals['subscription_rate'] = $totals['orders'] > 0 ? $totals['subscription_orders'] / $totals['orders'] : null;
         $totals['roi'] = $totals['ad_spend'] > 0 ? $totals['revenue'] / $totals['ad_spend'] : null;
         $totals['total_consumption'] = round((float) $rows->pluck('account_keys')->flatten()->filter()->unique()->sum(fn ($key) => (float) ($accountSpendTotals->get($key) ?? 0)), 2);
+        $exportRows = $rows->map(fn (array $row): array => [
+            'date_label' => $row['date_label'],
+            'department' => $row['department'],
+            'operator' => $row['operator'],
+            'store_domain' => $row['store_domain'],
+            'first_subscription_orders' => $row['first_subscription_orders'],
+            'subscription_rate' => $row['subscription_rate'],
+            'first_subscription_revenue' => $row['first_subscription_revenue'],
+            'first_orders' => $row['first_orders'],
+            'first_revenue' => $row['first_revenue'],
+            'ad_spend' => $row['ad_spend'],
+            'gift_status' => $row['gift_status'],
+            'roi' => $row['roi'],
+            'account_numbers' => $row['account_numbers'],
+            'total_consumption' => $row['total_consumption'],
+        ])->values();
         $page = max(1, (int) $request->query('page', 1));
         $paginator = new LengthAwarePaginator($rows->forPage($page, 30)->values(), $rows->count(), 30, $page, ['path' => $request->url(), 'query' => $request->query()]);
 
         return view('portals.assistant.applovin-performance-reports.index', [
-            'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'], 'rows' => $paginator, 'totals' => $totals,
+            'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'], 'rows' => $paginator, 'exportRows' => $exportRows, 'totals' => $totals,
             'operator' => $filters['operator'] ?? '',
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
+            'timezone' => $timezone,
+            'timezoneOptions' => $timezoneOptions,
             'dateRange' => $dateRange,
             'selectedDepartmentId' => $filters['department_id'] ?? null,
             'selectedStoreDomain' => $filters['store_domain'] ?? '',
@@ -264,5 +297,20 @@ class AppLovinPerformanceReportController extends Controller
             'consumptionCustomMax' => $filters['consumption_custom_max'] ?? '',
             'departmentOptions' => $this->storeOwners->operationDepartments()->whereIn('id', $visibleIds)->values(),
         ]);
+    }
+
+    /** @return array<string,string> */
+    private function timezoneOptions(): array
+    {
+        $options = [];
+        for ($offset = -12; $offset <= 14; $offset++) {
+            $value = sprintf('%s%02d:00', $offset < 0 ? '-' : '+', abs($offset));
+            $label = 'UTC'.($offset >= 0 ? '+' : '').$offset;
+            if ($value === '+08:00') $label .= '（北京时间）';
+            if ($value === OperationReportMetricsService::REPORT_TIMEZONE) $label .= '（默认）';
+            $options[$value] = $label;
+        }
+
+        return $options;
     }
 }

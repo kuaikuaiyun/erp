@@ -14,6 +14,7 @@
 <div class="form-group"><label>运营部门</label><select class="form-control" name="department_id"><option value="">全部部门</option>@foreach($departmentOptions as $department)<option value="{{ $department->id }}" @selected((string)$selectedDepartmentId===(string)$department->id)>{{ $department->name }}</option>@endforeach</select></div>
 <div class="form-group"><label>累计消耗</label><select class="form-control" name="over_threshold"><option value="">全部数据</option><option value="1" @selected($overThreshold==='1')>大于等于 $5,000</option></select></div>
 <div class="form-group"><label>运营人员</label><input class="form-control" name="operator" value="{{ $operator }}"></div>
+<div class="form-group"><label>账号编号</label><input class="form-control" name="account_number" value="{{ $accountNumber }}" placeholder="输入账号编号"></div>
 <button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{ $appLovinIndexUrl }}">重置</a>
 </form></div></div>
 <div class="box review-box"><div class="table-responsive"><table class="table table-bordered table-hover">

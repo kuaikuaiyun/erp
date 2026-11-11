@@ -30,6 +30,7 @@ use App\Portals\Assistant\Http\Controllers\OperationReportReviewController;
 use App\Portals\Assistant\Http\Controllers\ShopifyAnalyticsController;
 use App\Portals\Assistant\Http\Controllers\StoreLaunchReviewController;
 use App\Portals\Fashion\Http\Controllers\AdvertisingExpenseController;
+use App\Portals\Fashion\Http\Controllers\AppLovinSpendController as FashionAppLovinSpendController;
 use App\Portals\Fashion\Http\Controllers\PerformanceReportController;
 use App\Portals\Fashion\Http\Controllers\StoreController as FashionStoreController;
 use App\Portals\FashionLogistics\Http\Controllers\FashionOrderController;
@@ -56,6 +57,10 @@ use App\Portals\ProductRequests\Http\Controllers\ProductRequestController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/fashion/advertising-expenses', [AdvertisingExpenseController::class, 'index'])->name('fashion.advertising-expenses.index');
+Route::get('/fashion/applovin-spends', [FashionAppLovinSpendController::class, 'index'])->name('fashion.applovin-spends.index');
+Route::get('/fashion/applovin-spends/pending-count', [FashionAppLovinSpendController::class, 'pendingCount'])->name('fashion.applovin-spends.pending-count');
+Route::post('/fashion/applovin-spends/screenshot', [FashionAppLovinSpendController::class, 'uploadScreenshot'])->name('fashion.applovin-spends.screenshot.upload');
+Route::get('/fashion/applovin-spends/screenshots/{screenshot}', [FashionAppLovinSpendController::class, 'screenshot'])->whereNumber('screenshot')->name('fashion.applovin-spends.screenshot');
 Route::get('/fashion/performance-report', [PerformanceReportController::class, 'index'])->name('fashion.performance-report.index');
 Route::get('/fashion/performance-report/orders', [PerformanceReportController::class, 'orders'])->name('fashion.performance-report.orders');
 Route::get('/fashion/stores', [FashionStoreController::class, 'index'])->name('fashion.stores.index');

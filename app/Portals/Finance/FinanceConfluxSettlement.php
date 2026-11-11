@@ -15,7 +15,7 @@ use PhpOffice\PhpSpreadsheet\Shared\Date;
 class FinanceConfluxSettlement
 {
     public const TABLE = 'finance_credit_settlement_entries';
-    public const EXCEPTION_COLUMNS = ['ledger_dates' => '账单日期', 'ledger_exceptions' => '异常原因'];
+    public const EXCEPTION_COLUMNS = ['ledger_dates' => '账单日期', 'ledger_exception_dates' => '新增异常账单日期', 'ledger_exceptions' => '异常原因'];
 
     private const SHEETS = [
         '结算统计' => ['summary', '结算日期', '商户号', '结算金额'],
@@ -68,7 +68,7 @@ class FinanceConfluxSettlement
         return false;
     }
 
-    public function read(UploadedFile $file): array
+    public function read(UploadedFile $file, ?string $settlementType = null): array
     {
         try {
             $reader = IOFactory::createReader(IOFactory::READER_XLSX);
@@ -168,8 +168,78 @@ class FinanceConfluxSettlement
         ], JSON_THROW_ON_ERROR)), $entries);
         sort($hashes, SORT_STRING);
 
+
         return ['date' => array_key_first($dates), 'merchant' => (string) array_key_first($merchants),
-            'hash' => hash('sha256', implode('', $hashes)), 'entries' => $entries];
+            'hash' => hash('sha256', implode('', $hashes)), 'entries' => $entries, 'settlement_type' => $settlementType];
+    }
+
+    public function findOrCreateStatementAccount(Collection $accounts, array $statement, int $actor): FinancePaymentAccount
+    {
+        $key = $statement['merchant'];
+        if (! preg_match('/^[a-z0-9._-]{1,100}$/D', $key)) {
+            throw ValidationException::withMessages(['file' => '账单工作表中的商户标识无效。']);
+        }
+
+        if ($accounts->contains(fn (FinancePaymentAccount $account) => strcasecmp((string) $account->card_merchant_key, $key) === 0)) {
+            return $this->resolveAccount($accounts, $key);
+        }
+
+        $currencies = collect($statement['entries'])->map(function (array $entry): ?string {
+            $columns = self::AMOUNTS[$entry['kind']] ?? null;
+            $payload = json_decode($entry['payload'], true, 512, JSON_THROW_ON_ERROR);
+
+            return $columns === null ? null : strtoupper($payload[$columns[1]] ?? '');
+        })->filter()->unique()->values();
+
+        return $this->createAccount($key, $currencies->count() === 1 ? $currencies->first() : 'XXX', $actor);
+    }
+
+    private function createAccount(string $key, string $currency, int $actor): FinancePaymentAccount
+    {
+        $name = FinancePaymentAccount::query()->withTrashed()->where('account_type', 'credit_card')
+            ->where(fn ($query) => $query->where('account_name', $key)->orWhere('activity_account', $key));
+        if ($name->exists()) {
+            throw ValidationException::withMessages(['file' => '商户「'.$key.'」与已有账户重名，请核对账户的商户标识。']);
+        }
+
+        return FinancePaymentAccount::query()->create([
+            'account_code' => 'FA-'.\Illuminate\Support\Str::ulid(),
+            'account_name' => $key, 'activity_account' => $key, 'account_type' => 'credit_card',
+            'card_platform' => 'ye', 'card_merchant_key' => $key,
+            'main_currency' => $currency,
+            'status' => 'enabled', 'created_by' => $actor, 'updated_by' => $actor,
+        ]);
+    }
+
+    public function resolveAccount(Collection $accounts, string $identifier, bool $website = false, ?int $actor = null): FinancePaymentAccount
+    {
+        $value = mb_strtolower(trim($identifier));
+        $matches = $accounts->filter(function (FinancePaymentAccount $account) use ($value, $website): bool {
+            $key = mb_strtolower(trim((string) $account->card_merchant_key));
+
+            return $key !== '' && ($value === $key
+                || ($website && preg_match('/(?:^|-)'.preg_quote($key, '/').'(?:-|$)/u', $value) === 1));
+        });
+        if ($matches->isEmpty() && $website) {
+            $matches = $accounts->filter(function (FinancePaymentAccount $account) use ($value): bool {
+                $key = mb_strtolower(trim((string) $account->card_merchant_key));
+
+                return $key !== '' && preg_match('/(?:^|-)'.preg_quote($key, '/').'[0-9]+(?:-|$)/u', $value) === 1;
+            });
+        }
+        if ($matches->isEmpty() && $website && $actor !== null
+            && preg_match('/^[^-]+-([a-z0-9._]{3,100})$/uD', $value, $parts) === 1) {
+            $account = $this->createAccount($parts[1], 'XXX', $actor);
+            $accounts->push($account);
+
+            return $account;
+        }
+        if ($matches->count() !== 1) {
+            $field = $website ? '网站名称' : '商户标识';
+            throw ValidationException::withMessages(['file' => $field.'「'.($identifier ?: '空白').'」无法唯一匹配 Conflux 账户，网站名称无法确认归属时，可先单独导入对应的结算账单。']);
+        }
+
+        return $matches->first();
     }
 
     public function import(array $report, string $accountKey, int $actor, ?int $groupId = null): array
@@ -190,26 +260,52 @@ class FinanceConfluxSettlement
             }
             $batch = ['payment_account_id' => $account->id, 'platform' => 'ye', 'settlement_date' => $report['date']];
             $query = $db->table(self::TABLE)->where($batch);
-            $previous = (clone $query)->value('report_hash');
-            if ($previous !== null && $previous !== $report['hash']) {
-                throw ValidationException::withMessages(['file' => '此账户在该结算日期已有内容不同的报表，请核对原账单后再导入。']);
+            $sameReport = (clone $query)->where('report_hash', $report['hash']);
+            $alreadyImported = $sameReport->exists();
+            if ($alreadyImported && isset($report['settlement_type'])) {
+                $summary = (clone $sameReport)->where('kind', 'summary')->value('payload');
+                $previousType = json_decode($summary ?? '{}', true, 512, JSON_THROW_ON_ERROR)['_settlement_type'] ?? null;
+                if ($previousType !== null && $previousType !== $report['settlement_type']) {
+                    throw ValidationException::withMessages(['file' => '这份账单已按「'.$previousType.'」导入，请核对所选结算类型。']);
+                }
             }
-            if ($previous === null) {
+            if (! $alreadyImported) {
+                $existingSummaries = (clone $query)->where('kind', 'summary')->pluck('payload')
+                    ->map(fn ($payload) => json_decode($payload, true, 512, JSON_THROW_ON_ERROR));
+                $incomingSummaries = collect($report['entries'])->where('kind', 'summary')->pluck('payload')
+                    ->map(fn ($payload) => json_decode($payload, true, 512, JSON_THROW_ON_ERROR));
+                $descriptors = static fn (Collection $summaries) => $summaries
+                    ->map(fn ($summary) => mb_strtolower(trim((string) ($summary['账单描述符'] ?? ''))));
+                if ($existingSummaries->isNotEmpty()) {
+                    $existing = $descriptors($existingSummaries);
+                    $incoming = $descriptors($incomingSummaries);
+                    if ($existing->contains('') || $incoming->isEmpty() || $incoming->contains('')
+                        || $existing->intersect($incoming)->isNotEmpty()) {
+                        throw ValidationException::withMessages(['file' => '此账户在该结算日期已有内容不同的报表，请核对账单描述符及原账单后再导入。']);
+                    }
+                }
                 app(FinanceAccountingService::class)->guardUnlocked(substr($report['date'], 0, 7));
                 $stamp = now();
                 foreach (array_chunk($report['entries'], 80) as $entries) {
-                    $db->table(self::TABLE)->insert(array_map(fn ($entry) => [...$batch, ...$entry,
-                        'report_hash' => $report['hash'], 'imported_by' => $actor, 'created_at' => $stamp], $entries));
+                    $db->table(self::TABLE)->insert(array_map(function (array $entry) use ($batch, $report, $actor, $stamp): array {
+                        if (isset($report['settlement_type'])) {
+                            $payload = json_decode($entry['payload'], true, 512, JSON_THROW_ON_ERROR);
+                            $payload['_settlement_type'] = $report['settlement_type'];
+                            $entry['payload'] = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+                        }
+
+                        return [...$batch, ...$entry, 'report_hash' => $report['hash'], 'imported_by' => $actor, 'created_at' => $stamp];
+                    }, $entries));
                 }
             }
-            $references = (clone $query)->whereNotNull('reference')->distinct()->pluck('reference');
+            $references = $sameReport->whereNotNull('reference')->distinct()->pluck('reference');
             $matched = 0;
             foreach ($references->chunk(500) as $chunk) {
                 $matched += $this->orders($accountKey)->whereIn('reference', $chunk)
                     ->groupBy('reference')->havingRaw('COUNT(*) = 1')->pluck('reference')->count();
             }
 
-            return ['inserted' => $previous === null ? count($report['entries']) : 0,
+            return ['inserted' => $alreadyImported ? 0 : count($report['entries']),
                 'unmatched' => $references->count() - $matched];
         });
     }
@@ -238,18 +334,25 @@ class FinanceConfluxSettlement
         return $entries;
     }
 
-    public function feesFor(Collection $matchedEntries): array
+    public function feesFor(Collection $matchedEntries, ?\ArrayObject $reportFees = null): array
     {
         $fees = [];
-        $batches = $matchedEntries->flatten(1)->groupBy(['payment_account_id', 'settlement_date']);
-        foreach ($batches as $accountId => $dates) {
-            foreach ($dates as $date => $entries) {
-                $wanted = $entries->pluck('id')->flip()->all();
+        $batches = $matchedEntries->flatten(1)->groupBy(fn ($entry) => $entry->payment_account_id.'|'.$entry->report_hash);
+        $reportFees ??= new \ArrayObject;
+        foreach ($batches as $key => $entries) {
+            $report = $entries->first();
+            $wanted = $entries->pluck('id')->flip()->all();
+            if (! $reportFees->offsetExists($key)) {
                 $bill = $this->workbooks->database()->table(self::TABLE)->where([
-                    'payment_account_id' => $accountId, 'settlement_date' => $date, 'platform' => 'ye',
+                    'payment_account_id' => $report->payment_account_id, 'settlement_date' => $report->settlement_date,
+                    'platform' => 'ye', 'report_hash' => $report->report_hash,
                 ])->whereIn('kind', ['summary', 'sale', 'failed', ...array_keys(self::EVENT_FEES)])->get(['id', 'kind', 'payload']);
-                $fees += array_intersect_key($this->statementFees($bill, $date), $wanted);
+                if ($reportFees->count() >= 8) {
+                    unset($reportFees[array_key_first($reportFees->getArrayCopy())]);
+                }
+                $reportFees[$key] = $this->statementFees($bill, $report->settlement_date);
             }
+            $fees += array_intersect_key($reportFees[$key], $wanted);
         }
 
         return $fees;
@@ -339,6 +442,7 @@ class FinanceConfluxSettlement
         $byType = $entries->groupBy('kind');
         $values = [];
         $currencies = [];
+        $currencyDates = [];
         $amounts = [];
         foreach (self::AMOUNTS as $kind => [$field, $currencyField, $amountField]) {
             foreach ($byType->get($kind, []) as $entry) {
@@ -346,6 +450,7 @@ class FinanceConfluxSettlement
                 $currency = strtoupper($payload[$currencyField] ?? '');
                 $amount = $payload[$amountField] ?? '';
                 $currencies[$currency] = true;
+                $currencyDates[$currency][] = $entry->settlement_date;
                 $amounts[$field] = bcadd($amounts[$field] ?? '0', $amount, 8);
             }
         }
@@ -353,6 +458,7 @@ class FinanceConfluxSettlement
             $entryFees = $fees[$entry->id] ?? [];
             if ($entryFees !== []) {
                 $currencies[$entryFees['currency']] = true;
+                $currencyDates[$entryFees['currency']][] = $entry->settlement_date;
                 unset($entryFees['currency']);
             }
             foreach ($entryFees as $field => $amount) {
@@ -363,9 +469,11 @@ class FinanceConfluxSettlement
             $values = ['settlement_currency' => array_key_first($currencies), ...$amounts];
         }
         $reasons = [];
+        $exceptionDates = collect();
         foreach (['sale' => '结算入账', 'refund' => '退款', 'rdr' => 'RDR', 'chargeback' => '拒付', 'ethoca' => 'Ethoca'] as $kind => $label) {
             if (($byType->get($kind)?->count() ?? 0) > 1) {
                 $reasons[] = '多笔'.$label;
+                $exceptionDates = $exceptionDates->concat($byType->get($kind)->pluck('settlement_date')->sort()->skip(1));
                 if ($kind === 'sale') {
                     unset($values['settlement']);
                 }
@@ -374,13 +482,26 @@ class FinanceConfluxSettlement
         if ($byType->has('rdr') && ($byType->has('refund') || $byType->has('chargeback'))) {
             $reasons[] = $byType->has('refund') && $byType->has('chargeback') ? '退款、拒付与 RDR 同时存在'
                 : ($byType->has('refund') ? '退款与 RDR 同时存在' : '拒付与 RDR 同时存在');
+            $firstRdrDate = $byType->get('rdr')->min('settlement_date');
+            foreach (['refund', 'chargeback'] as $kind) {
+                if ($byType->has($kind)) {
+                    $exceptionDates->push(max($firstRdrDate, $byType->get($kind)->min('settlement_date')));
+                }
+            }
         }
         if (count($currencies) > 1) {
             $reasons[] = '结算币种不一致';
+            $exceptionDates = $exceptionDates->concat(collect($currencyDates)->map(fn (array $dates) => min($dates))->sort()->skip(1));
         }
 
         return ['values' => $values, 'reasons' => $reasons,
-            'dates' => $entries->pluck('settlement_date')->unique()->implode('、')];
+            'exception_dates' => $exceptionDates->unique()->sort()->implode('、'),
+            'dates' => $entries->pluck('settlement_date')->unique()->implode('、'),
+            'settlement_types' => $entries->map(function ($entry): string {
+                $payload = json_decode($entry->payload, true, 512, JSON_THROW_ON_ERROR);
+
+                return $payload['_settlement_type'] ?? '未标注';
+            })->unique()->implode('、')];
     }
 
     public function payable(Collection $entries, array $values): ?string
@@ -422,9 +543,189 @@ class FinanceConfluxSettlement
         return $payable;
     }
 
-    private function orders(string $account)
+    public function storeFees(array $layout, Collection $entries, array $manual = []): array
     {
-        return FinanceRecord::query()->where('dataset', 'xuzong2-details')->where('account', $account)
+        $rules = [
+            'nbc_fee' => [['yy'], '0.004'],
+            'store_fee' => [['shoplazza', 'shopline'], '0.003'],
+        ];
+        $settlementCurrency = strtoupper(trim((string) ($layout['settlement_currency'] ?? '')));
+        foreach ($rules as $field => [$kinds, $rate]) {
+            if (array_key_exists($field, $manual) || filled($layout[$field] ?? null)) {
+                continue;
+            }
+            $lines = $entries->whereIn('kind', $kinds);
+            if ($lines->isEmpty()) {
+                continue;
+            }
+
+            $total = '0';
+            $currency = $settlementCurrency;
+            foreach ($lines as $line) {
+                $payload = json_decode($line->payload, true, 512, JSON_THROW_ON_ERROR);
+                $lineCurrency = strtoupper(trim((string) ($payload['结算货币'] ?? '')));
+                $amount = trim((string) ($payload['结算金额'] ?? ''));
+                if (! preg_match('/^[A-Z]{3}$/D', $lineCurrency)
+                    || ! preg_match('/^-?\d{1,18}(?:\.\d{1,8})?$/D', $amount)
+                    || ($currency !== '' && $currency !== $lineCurrency)) {
+                    continue 2;
+                }
+                $currency = $lineCurrency;
+                $total = bcadd($total, $amount, 8);
+            }
+
+            $fee = bcmul($total, $rate, 12);
+            $layout[$field] = bcadd($fee, bccomp($fee, '0', 12) < 0 ? '-0.0005' : '0.0005', 3);
+        }
+
+        return $layout;
+    }
+
+    public function isWallet(mixed $website, Collection $entries): bool
+    {
+        if (stripos((string) $website, 'wallet') !== false) {
+            return true;
+        }
+
+        return $entries->contains(function ($entry): bool {
+            $payload = json_decode($entry->payload, true, 512, JSON_THROW_ON_ERROR);
+
+            return stripos((string) ($payload['账单描述符'] ?? ''), 'wallet') !== false;
+        });
+    }
+
+    public function exceptionColumns(array $layout, Collection $entries, bool $wallet): array
+    {
+        $kinds = $entries->pluck('kind');
+        if ($kinds->contains('refund') && $kinds->contains('chargeback') && ! $kinds->contains('release')
+            && blank($layout['release'] ?? null)) {
+            return ['ledger_exception_dates' => '', 'ledger_exceptions' => ''];
+        }
+
+        $reason = $layout['ledger_exceptions'] ?? '';
+        $dates = $layout['ledger_exception_dates'] ?? '';
+        if ($wallet) {
+            $reason = $reason === '' ? 'Wallet 交易' : 'Wallet 交易；'.$reason;
+            $dates = $dates ?: ($entries->min('settlement_date') ?? '');
+        }
+
+        return ['ledger_exception_dates' => $dates, 'ledger_exceptions' => $reason];
+    }
+
+    private function unmatchedQuery(array $filters): ?\Illuminate\Database\Query\Builder
+    {
+        if (($filters['card_channel'] ?? null) !== 'ye' || ($filters['card_match'] ?? '') === 'matched'
+            || filled($filters['team'] ?? null) || filled($filters['domain'] ?? null)
+            || filled($filters['subscription'] ?? null) || filled($filters['card_transaction_status'] ?? null)
+            || filled($filters['source'] ?? null)) {
+            return null;
+        }
+
+        $matches = $this->orders()->selectRaw('COUNT(*)')
+            ->whereColumn('finance_records.account', 'merchant.activity_account')
+            ->whereColumn('finance_records.reference', 'entry.reference');
+        return $this->workbooks->database()->table(self::TABLE.' as entry')
+            ->join('finance_payment_accounts as merchant', 'merchant.id', '=', 'entry.payment_account_id')
+            ->where('entry.platform', 'ye')->whereNull('merchant.deleted_at')->whereNotNull('entry.reference')
+            ->where($matches->toBase(), '!=', 1)
+            ->when(filled($filters['account'] ?? null), fn ($query) => $query->where('merchant.activity_account', $filters['account']))
+            ->when(filled($filters['card_group'] ?? null), fn ($query) => $query->where('merchant.card_group_id', $filters['card_group']))
+            ->when(filled($filters['reference'] ?? null), fn ($query) => $query->where('entry.reference', $filters['reference']))
+            ->when(filled($filters['from'] ?? null), fn ($query) => $query->where('entry.settlement_date', '>=', $filters['from']))
+            ->when(filled($filters['to'] ?? null), fn ($query) => $query->where('entry.settlement_date', '<=', $filters['to']));
+    }
+
+    public function unmatchedPage(array $filters, int $offset, int $limit): array
+    {
+        $query = $this->unmatchedQuery($filters);
+        if ($query === null) {
+            return [0, collect()];
+        }
+
+        $keys = (clone $query)->select(['entry.payment_account_id', 'entry.reference'])
+            ->groupBy('entry.payment_account_id', 'entry.reference');
+        $total = $this->workbooks->database()->query()->fromSub(clone $keys, 'statement_orders')->count();
+        if ($limit <= 0 || $offset >= $total) {
+            return [$total, collect()];
+        }
+
+        $keys->orderBy('entry.payment_account_id')->orderBy('entry.reference')->offset($offset)->limit($limit);
+        $entries = $query->joinSub($keys, 'page_orders', function ($join): void {
+            $join->on('page_orders.payment_account_id', '=', 'entry.payment_account_id')
+                ->on('page_orders.reference', '=', 'entry.reference');
+        })->select('entry.*');
+
+        return [$total, collect($this->statementRows($entries, $filters))];
+    }
+
+    public function unmatchedRows(array $filters): iterable
+    {
+        $query = $this->unmatchedQuery($filters);
+        if ($query !== null) {
+            yield from $this->statementRows($query->select('entry.*'), $filters);
+        }
+    }
+
+    private function statementRows(\Illuminate\Database\Query\Builder $query, array $filters): iterable
+    {
+        $entries = $query->orderBy('entry.payment_account_id')->orderBy('entry.reference')
+            ->orderByDesc('entry.settlement_date')->orderByDesc('entry.id')->lazy(500);
+        $service = app(FinanceSettlementService::class);
+        $groups = $entries->chunkWhile(fn ($entry, $key, $group) =>
+            $entry->payment_account_id === $group->first()->payment_account_id && $entry->reference === $group->first()->reference);
+        foreach ($groups as $group) {
+            $entry = $group->first();
+            $group = $group->collect();
+            $details = $this->details($group);
+
+            $filterType = $filters['ledger_settlement_type'] ?? '';
+            if (filled($filterType) && $filterType !== 'waiting'
+                && ! in_array($filterType, explode('、', $details['settlement_types']), true)) {
+                continue;
+            }
+            $layout = [
+                'ledger_status' => '未匹配订单', 'ledger_dates' => $details['dates'],
+                'ledger_settlement_type' => $details['settlement_types'], 'reference' => $entry->reference,
+                'ledger_exception_dates' => $details['exception_dates'],
+                'ledger_exceptions' => implode('；', $details['reasons']),
+                ...$details['values'],
+            ];
+            foreach ($group as $item) {
+                $payload = json_decode($item->payload, true, 512, JSON_THROW_ON_ERROR);
+                $layout['website_name'] ??= $payload['网站名称'] ?? $payload['账单描述符'] ?? null;
+                $layout['merchant_order'] ??= $payload['商户订单号'] ?? $payload['商户支付订单号'] ?? null;
+                $layout['status'] ??= $payload['交易状态'] ?? $payload['退款状态'] ?? null;
+                $layout['currency'] ??= $payload['交易币种'] ?? $payload['币种'] ?? null;
+                $layout['gross'] ??= $payload['交易金额'] ?? $payload['订单金额'] ?? null;
+                foreach ([
+                    'three_ds' => '3DS', 'three_ds_status' => '3DS状态', 'card_type' => '卡种', 'email' => '邮箱',
+                    'payer_account' => '付款人账号', 'cardholder_phone' => '持卡人电话', 'recipient_phone' => '收货人电话',
+                    'country' => '国家', 'refund_status' => '退款状态', 'source_page' => '来源页面',
+                    'completed_at' => '完成时间',
+                ] as $field => $header) {
+                    $layout[$field] ??= $payload[$header] ?? null;
+                }
+                $layout['failure_reason'] ??= $item->kind === 'failed' ? ($payload['交易返回信息'] ?? null) : null;
+                $time = $payload['发起时间'] ?? $payload['交易时间'] ?? null;
+                if ($time !== null) {
+                    $layout['initiated_at'] ??= is_numeric($time)
+                        ? Date::excelToDateTimeObject((float) $time)->format('Y-m-d H:i:s') : $time;
+                }
+            }
+            $layout = $this->storeFees($layout, $group);
+            $wallet = $this->isWallet($layout['website_name'] ?? null, $group);
+            $layout = array_replace($layout, $this->exceptionColumns($layout, $group, $wallet));
+            if ((empty($filters['card_wallet']) || $wallet)
+                && (empty($filters['card_exceptions']) || filled($layout['ledger_exceptions']))
+                && $service->matches($layout, $filters['conditions'] ?? [])) {
+                yield ['statement_only' => true, 'card_layout' => $layout];
+            }
+        }
+    }
+
+    private function orders(?string $account = null)
+    {
+        return FinanceRecord::query()->where('dataset', 'xuzong2-details')->when($account !== null, fn ($query) => $query->where('account', $account))
             ->where('payload->_card_channel', 'ye')->whereNotExists(function ($deleted): void {
                 $deleted->selectRaw('1')->from('finance_settlement_supplements')
                     ->whereColumn('finance_record_id', 'finance_records.id')->whereNotNull('payload->_deleted_at');

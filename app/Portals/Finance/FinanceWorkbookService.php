@@ -49,6 +49,11 @@ class FinanceWorkbookService
         }
 
         $columns = ['id', 'domain', 'user_name', 'team'];
+        foreach (['site_builder', 'project'] as $field) {
+            if ($db->getSchemaBuilder()->hasColumn('assistant_domain_stores', $field)) {
+                $columns[] = $field;
+            }
+        }
         if ($db->getSchemaBuilder()->hasColumn('assistant_domain_stores', 'shop_name')) {
             $columns[] = 'shop_name';
         }
@@ -76,6 +81,8 @@ class FinanceWorkbookService
                     'owner' => $store->user_name ?? '',
                     'team' => FinanceCatalog::teamLabel($store->team),
                     'shop_name' => $store->shop_name ?? '',
+                    'site_builder' => $store->site_builder ?? null,
+                    'project' => $store->project ?? null,
                     'assigned_owner' => $withAssignedOwner ? ($assignedOwner?->name ?: ($assignedOwner?->username ?? '')) : null,
                     'assigned_owner_user_id' => $assignedOwner?->getKey(),
                     'shop_status' => $store->shop_status ?? null,
@@ -552,12 +559,12 @@ class FinanceWorkbookService
         });
     }
 
-    public function download(array $headers, iterable $rows, string $filename, string $format = 'xlsx', bool $plain = false, bool $simplifyText = true): StreamedResponse
+    public function download(array $headers, iterable $rows, string $filename, string $format = 'xlsx', bool $plain = false, bool $simplifyText = true, string $sheetTitle = 'Sheet1'): StreamedResponse
     {
         if ($format === 'xlsx') {
-            return $this->downloadStreamingXlsx($headers, $rows, $filename, $plain, $simplifyText);
+            return $this->downloadStreamingXlsx($headers, $rows, $filename, $plain, $simplifyText, $sheetTitle);
         }
-        return response()->streamDownload(function () use ($headers, $rows, $format, $plain, $simplifyText): void {
+        return response()->streamDownload(function () use ($headers, $rows, $format, $plain, $simplifyText, $sheetTitle): void {
             // Spreadsheet cells and ZIP compression coexist during export.
             // Keep the higher budget local to this download, not the whole PHP service.
             $previousLimit = ini_get('memory_limit');
@@ -572,7 +579,7 @@ class FinanceWorkbookService
             if (! $plain) {
                 $book->getDefaultStyle()->getFont()->setName('Microsoft YaHei')->setSize(10);
             }
-            $sheet = $book->getActiveSheet();
+            $sheet = $book->getActiveSheet()->setTitle($sheetTitle);
             if ($simplifyText) {
                 $headers = array_map(FinanceCatalog::simplified(...), $headers);
             }
@@ -641,7 +648,7 @@ class FinanceWorkbookService
         }, $filename, ['Content-Type' => $format === 'xls' ? 'application/vnd.ms-excel' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
     }
 
-    private function downloadStreamingXlsx(array $headers, iterable $rows, string $filename, bool $plain, bool $simplifyText): StreamedResponse
+    private function downloadStreamingXlsx(array $headers, iterable $rows, string $filename, bool $plain, bool $simplifyText, string $sheetTitle): StreamedResponse
     {
         if ($simplifyText) {
             $headers = array_map(FinanceCatalog::simplified(...), $headers);
@@ -653,7 +660,7 @@ class FinanceWorkbookService
                 && preg_match('/金额|总额|净额|费用|手续费|余额|汇率|数量|条数|订单数|人民币|结算|应收|退款|冻结|解冻|保证金|成本|货款|运费|税额|保险|拒付|物流|采购|损耗|转换美元|争议费/u', $header);
             $columns[] = ['label' => $header, 'width' => $this->downloadColumnWidth($header, $plain)];
         }
-        return app(\App\Portals\Logistics\StreamedXlsxWriter::class)->response($filename, 'Sheet1', $columns,
+        return app(\App\Portals\Logistics\StreamedXlsxWriter::class)->response($filename, $sheetTitle, $columns,
             function () use ($headers, $numeric, $rows, $simplifyText): iterable {
                 foreach ($rows as $row) {
                     $cells = [];

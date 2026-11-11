@@ -90,12 +90,23 @@ class AssistantStoreOwnerService
 
     public function operationDepartmentForUser(AdminUser $user): ?Department
     {
-        $operationDepartmentIds = $this->operationDepartments()->pluck('id')->map(static fn ($id): int => (int) $id);
-        if ($operationDepartmentIds->isEmpty()) return null;
+        return $this->departmentForUserFrom($user, $this->operationDepartments());
+    }
+
+    public function storeOwnershipOperationDepartmentForUser(AdminUser $user): ?Department
+    {
+        return $this->departmentForUserFrom($user, $this->storeOwnershipOperationDepartments());
+    }
+
+    /** @param Collection<int, Department> $departmentTree */
+    private function departmentForUserFrom(AdminUser $user, Collection $departmentTree): ?Department
+    {
+        $departmentIds = $departmentTree->pluck('id')->map(static fn ($id): int => (int) $id);
+        if ($departmentIds->isEmpty()) return null;
 
         $rolesTable = config('admin.database.roles_table');
         $departments = $user->departments()
-            ->whereIn($rolesTable.'.id', $operationDepartmentIds->all())
+            ->whereIn($rolesTable.'.id', $departmentIds->all())
             ->get([$rolesTable.'.id', $rolesTable.'.name', $rolesTable.'.parent_id']);
 
         return $departments->first(static fn (Department $department): bool => (bool) ($department->pivot->is_primary ?? false))
