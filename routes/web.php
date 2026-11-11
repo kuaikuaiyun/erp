@@ -285,6 +285,7 @@ Route::get('/assistant/fashion-advertising-reviews/screenshots/{type}/{entry}', 
 Route::get('/assistant/fashion-operation-reports', [FashionOperationReportController::class, 'index'])->name('assistant.fashion-operation-reports.index');
 Route::get('/operation-report-reviews', [OperationReportReviewController::class, 'index'])->name('assistant.operation-report-reviews.index');
 Route::get('/operation-report-reviews/import-template', [OperationReportReviewController::class, 'importTemplate'])->name('assistant.operation-report-reviews.import-template');
+Route::get('/operation-report-reviews/export', [OperationReportReviewController::class, 'export'])->name('assistant.operation-report-reviews.export');
 Route::post('/operation-report-reviews/import', [OperationReportReviewController::class, 'import'])->name('assistant.operation-report-reviews.import');
 Route::get('/operation-report-reviews/screenshot', [OperationReportReviewController::class, 'screenshot'])->name('assistant.operation-report-reviews.screenshot');
 Route::post('/operation-report-reviews/bulk-review', [OperationReportReviewController::class, 'bulkReview'])->name('assistant.operation-report-reviews.bulk-review');

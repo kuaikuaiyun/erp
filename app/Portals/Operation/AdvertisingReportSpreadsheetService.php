@@ -3,6 +3,7 @@
 namespace App\Portals\Operation;
 
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
@@ -20,6 +21,85 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class AdvertisingReportSpreadsheetService
 {
     private const HEADERS = ['提报日期', '运营人员', '广告代理', '广告社媒', '广告账户名称', '广告账户编号', '账面广告费($)', '广告消耗截图'];
+
+    public function exportResponse(iterable $reports): StreamedResponse
+    {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('广告费导入');
+        $sheet->setShowGridlines(false);
+        $sheet->mergeCells('A1:H1');
+        $sheet->setCellValue('A1', 'Shopify运营报表广告费导出（可直接重新导入）');
+        $sheet->mergeCells('A2:H2');
+        $sheet->setCellValue('A2', '字段、顺序和截图均与导入模板一致；修改后可直接导入，同日同运营数据将整份覆盖。');
+        $sheet->fromArray(self::HEADERS, null, 'A4');
+        $rowNumber = 5;
+        foreach ($reports as $report) {
+            $advertisingRows = collect($report->advertising_rows ?: []);
+            foreach ($advertisingRows as $advertising) {
+                $sheet->fromArray([[
+                    $report->report_date?->format('Y-m-d'), $report->operator_name,
+                    $advertising['agency'] ?? '',
+                    $advertising['media_source'] ?? '',
+                    $advertising['account_name'] ?? '',
+                    '',
+                    (float) ($advertising['book_spend'] ?? 0),
+                    '',
+                ]], null, 'A'.$rowNumber);
+                $sheet->setCellValueExplicit('F'.$rowNumber, (string) ($advertising['account_number'] ?? ''), DataType::TYPE_STRING);
+                $screenshot = trim((string) ($advertising['screenshot'] ?? ''));
+                if ($screenshot !== '' && Storage::disk('public')->exists($screenshot)) {
+                    $drawing = new Drawing();
+                    $drawing->setName('广告消耗截图');
+                    $drawing->setDescription('广告消耗截图');
+                    $drawing->setPath(Storage::disk('public')->path($screenshot));
+                    $drawing->setCoordinates('H'.$rowNumber);
+                    $drawing->setOffsetX(5);
+                    $drawing->setOffsetY(4);
+                    $drawing->setHeight(52);
+                    $drawing->setWorksheet($sheet);
+                }
+                $sheet->getRowDimension($rowNumber)->setRowHeight(62);
+                $rowNumber++;
+            }
+        }
+        $lastRow = max(4, $rowNumber - 1);
+        $sheet->freezePane('A5');
+        $sheet->setAutoFilter('A4:H'.$lastRow);
+        $sheet->getStyle('A1:H1')->applyFromArray([
+            'font' => ['bold' => true, 'size' => 16, 'color' => ['rgb' => '1F4665']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT, 'vertical' => Alignment::VERTICAL_CENTER],
+        ]);
+        $sheet->getStyle('A2:H2')->applyFromArray([
+            'font' => ['size' => 10, 'color' => ['rgb' => '6D8293']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F3F8FC']],
+        ]);
+        $sheet->getStyle('A4:H4')->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '245B86']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+        ]);
+        foreach (['A'=>16,'B'=>18,'C'=>22,'D'=>18,'E'=>26,'F'=>24,'G'=>20,'H'=>24] as $column => $width) {
+            $sheet->getColumnDimension($column)->setWidth($width);
+        }
+        $sheet->getRowDimension(1)->setRowHeight(34);
+        $sheet->getRowDimension(2)->setRowHeight(25);
+        $sheet->getRowDimension(4)->setRowHeight(28);
+        if ($lastRow >= 5) {
+            $sheet->getStyle('B5:F'.$lastRow)->getNumberFormat()->setFormatCode('@');
+            $sheet->getStyle('G5:G'.$lastRow)->getNumberFormat()->setFormatCode('0.00');
+            $sheet->getStyle('A5:H'.$lastRow)->applyFromArray([
+                'alignment' => ['vertical' => Alignment::VERTICAL_CENTER],
+                'borders' => ['bottom' => ['borderStyle' => Border::BORDER_HAIR, 'color' => ['rgb' => 'E3EBF1']]],
+            ]);
+        }
+        return response()->streamDownload(function () use ($spreadsheet): void {
+            (new Xlsx($spreadsheet))->save('php://output');
+            $spreadsheet->disconnectWorksheets();
+        }, 'Shopify运营报表审核数据_'.now('Asia/Shanghai')->format('Ymd_His').'.xlsx', [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
+    }
 
     /** @param array<string, array<string, list<array{key:string,media:string,coefficient:float}>>> $operatorAgencyGroups */
     public function templateResponse(array $operatorAgencyGroups): StreamedResponse

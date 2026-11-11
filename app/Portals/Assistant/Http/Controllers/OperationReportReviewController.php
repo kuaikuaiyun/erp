@@ -41,6 +41,36 @@ class OperationReportReviewController extends Controller
         return $this->bulkImporter->templateResponse($this->importableOperators($context['user']));
     }
 
+    public function export(Request $request): Response
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+        $filters = $request->validate([
+            'status' => ['nullable', Rule::in(['', OperationReport::STATUS_PENDING, OperationReport::STATUS_APPROVED, OperationReport::STATUS_REJECTED, 'deleted'])],
+            'date_from' => ['nullable', 'date_format:Y-m-d'], 'date_to' => ['nullable', 'date_format:Y-m-d'],
+            'team_id' => ['nullable', 'integer', 'min:1'], 'operator' => ['nullable', 'string', 'max:100'],
+            'media' => ['nullable', 'string', 'max:100'], 'account_number' => ['nullable', 'string', 'max:191'],
+        ]);
+        $status = trim((string) ($filters['status'] ?? ''));
+        $operator = trim((string) ($filters['operator'] ?? ''));
+        $media = mb_strtolower(trim((string) ($filters['media'] ?? '')));
+        $accountNumber = mb_strtolower(trim((string) ($filters['account_number'] ?? '')));
+        $teamId = (int) ($filters['team_id'] ?? 0);
+        $reports = $this->scopeReports(OperationReport::withTrashed(), $context['user'])
+            ->with(['reviewer:id,name,username', 'operationDepartment:id,name'])
+            ->when($status === 'deleted', fn ($query) => $query->onlyTrashed())
+            ->when($status !== '' && $status !== 'deleted', fn ($query) => $query->whereNull('deleted_at')->where('status', $status))
+            ->when(!empty($filters['date_from']), fn ($query) => $query->whereDate('report_date', '>=', $filters['date_from']))
+            ->when(!empty($filters['date_to']), fn ($query) => $query->whereDate('report_date', '<=', $filters['date_to']))
+            ->when($teamId > 0, fn ($query) => $query->where('operation_department_id', $teamId))
+            ->when($operator !== '', fn ($query) => $query->where('operator_name', 'like', '%'.$operator.'%'))
+            ->when($media !== '', fn ($query) => $query->whereRaw('LOWER(CAST(advertising_rows AS CHAR)) LIKE ?', ['%"media_source"%:%"%'.$media.'%"%']))
+            ->when($accountNumber !== '', fn ($query) => $query->whereRaw('LOWER(CAST(advertising_rows AS CHAR)) LIKE ?', ['%"account_number"%:%"%'.$accountNumber.'%"%']))
+            ->orderByDesc('report_date')->orderByDesc('id')->get();
+
+        return $this->bulkImporter->exportResponse($reports);
+    }
+
     public function import(Request $request): RedirectResponse|JsonResponse
     {
         $context = $this->context($request);
@@ -64,7 +94,9 @@ class OperationReportReviewController extends Controller
             throw ValidationException::withMessages(['import_file' => $exception->getMessage()]);
         }
 
-        $message = '成功导入 '.$result['imported_count'].' 条广告数据，生成 '.$result['report_count'].' 份待审核记录。';
+        $message = '成功导入 '.$result['imported_count'].' 条广告数据，生成 '.$result['report_count'].' 份审核通过记录';
+        if ($result['overwritten_count'] > 0) $message .= '，其中覆盖 '.$result['overwritten_count'].' 份同日原记录';
+        $message .= '。';
         if ($request->expectsJson()) {
             return response()->json($result + [
                 'ok' => true, 'message' => $message,

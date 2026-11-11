@@ -38,7 +38,7 @@ class AdvertisingReportBulkImportService
 
     /**
      * @param Collection<int, AdminUser> $operators
-     * @return array{imported_count:int,report_count:int}
+     * @return array{imported_count:int,report_count:int,overwritten_count:int}
      */
     public function import(UploadedFile $file, Collection $operators, AdminUser $submittedBy): array
     {
@@ -98,11 +98,6 @@ class AdvertisingReportBulkImportService
                 ];
             }
 
-            foreach ($groups as $group) {
-                if (OperationReport::query()->whereDate('report_date', $group['report_date'])->where('operator_user_id', $group['operator_id'])->exists()) {
-                    throw new \InvalidArgumentException($this->operatorLabel($configurations[$group['operator_id']]['operator']).' 在 '.$group['report_date'].' 已有提报记录，请先删除或编辑原记录。');
-                }
-            }
             foreach ($groups as &$group) foreach ($group['ads'] as &$ad) {
                 $path = 'operation-reports/ads/'.Str::uuid().'.'.$ad['_image_extension'];
                 if (!Storage::disk('public')->put($path, $ad['_image_bytes'])) throw new \InvalidArgumentException('广告消耗截图保存失败，请稍后重新导入。');
@@ -112,7 +107,9 @@ class AdvertisingReportBulkImportService
             }
             unset($group, $ad);
 
-            (new OperationReport)->getConnection()->transaction(function () use ($groups, $configurations, $submittedBy): void {
+            $oldScreenshotPaths = collect();
+            $overwrittenCount = 0;
+            (new OperationReport)->getConnection()->transaction(function () use ($groups, $configurations, $submittedBy, $oldScreenshotPaths, &$overwrittenCount): void {
                 foreach ($groups as $group) {
                     $operator = $configurations[$group['operator_id']]['operator'];
                     $department = $configurations[$group['operator_id']]['department'];
@@ -121,7 +118,18 @@ class AdvertisingReportBulkImportService
                     $adSpend = (float) collect($group['ads'])->sum('actual_spend');
                     $firstProfit = $totals['first_total_revenue'] - $totals['first_purchase_cost'] - $totals['first_shipping_cost'] - $totals['first_return_fee'] - $adSpend;
                     $renewalNet = $totals['renewal_revenue'] - $totals['renewal_cost'];
-                    OperationReport::query()->create([
+                    $report = OperationReport::query()
+                        ->whereDate('report_date', $group['report_date'])
+                        ->where('operator_user_id', $group['operator_id'])
+                        ->lockForUpdate()
+                        ->first();
+                    if ($report) {
+                        $overwrittenCount++;
+                        $oldScreenshotPaths->push(...collect($report->advertising_rows ?: [])->pluck('screenshot')->filter()->all());
+                    } else {
+                        $report = new OperationReport();
+                    }
+                    $report->fill([
                         'report_date' => $group['report_date'], 'operator_user_id' => $group['operator_id'],
                         'operator_name' => (string) ($operator->name ?: $operator->username),
                         'operation_department_id' => (int) $department->getKey(), 'operation_department_name' => (string) $department->name,
@@ -129,17 +137,23 @@ class AdvertisingReportBulkImportService
                         'first_purchase_cost' => $totals['first_purchase_cost'], 'first_shipping_cost' => $totals['first_shipping_cost'],
                         'first_return_fee' => $totals['first_return_fee'], 'actual_ad_spend' => $adSpend,
                         'first_profit' => $firstProfit, 'renewal_net_revenue' => $renewalNet, 'overall_profit' => $firstProfit + $renewalNet,
-                        'status' => OperationReport::STATUS_PENDING, 'submitted_by' => $submittedBy->getKey(),
-                        'submitted_at' => now(), 'reviewed_by' => null, 'reviewed_at' => null, 'review_reason' => null,
-                    ]);
+                        'status' => OperationReport::STATUS_APPROVED, 'submitted_by' => $submittedBy->getKey(),
+                        'submitted_at' => now(), 'reviewed_by' => $submittedBy->getKey(), 'reviewed_at' => now(), 'review_reason' => null,
+                    ])->save();
                 }
             });
+            $oldScreenshotPaths->unique()->each(static fn (string $path) => Storage::disk('public')->delete($path));
         } catch (\Throwable $exception) {
             foreach ($storedPaths as $path) Storage::disk('public')->delete($path);
             throw $exception;
         }
 
-        return ['imported_count' => count($rows), 'report_count' => count($groups)];
+        return ['imported_count' => count($rows), 'report_count' => count($groups), 'overwritten_count' => $overwrittenCount];
+    }
+
+    public function exportResponse(iterable $reports): StreamedResponse
+    {
+        return $this->spreadsheets->exportResponse($reports);
     }
 
     private function normalize(string $value): string
