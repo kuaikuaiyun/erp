@@ -48,21 +48,22 @@ class OperationReportReviewController extends Controller
         $filters = $request->validate([
             'status' => ['nullable', Rule::in(['', OperationReport::STATUS_PENDING, OperationReport::STATUS_APPROVED, OperationReport::STATUS_REJECTED, 'deleted'])],
             'date_from' => ['nullable', 'date_format:Y-m-d'], 'date_to' => ['nullable', 'date_format:Y-m-d'],
-            'team_id' => ['nullable', 'integer', 'min:1'], 'operator' => ['nullable', 'string', 'max:100'],
+            'team_ids' => ['nullable', 'array'], 'team_ids.*' => ['integer', 'min:1', 'distinct'],
+            'operator' => ['nullable', 'string', 'max:100'],
             'media' => ['nullable', 'string', 'max:100'], 'account_number' => ['nullable', 'string', 'max:191'],
         ]);
         $status = trim((string) ($filters['status'] ?? ''));
         $operator = trim((string) ($filters['operator'] ?? ''));
         $media = mb_strtolower(trim((string) ($filters['media'] ?? '')));
         $accountNumber = mb_strtolower(trim((string) ($filters['account_number'] ?? '')));
-        $teamId = (int) ($filters['team_id'] ?? 0);
+        $teamIds = collect($filters['team_ids'] ?? [])->map(fn ($id) => (int) $id)->filter()->unique()->values()->all();
         $reports = $this->scopeReports(OperationReport::withTrashed(), $context['user'])
             ->with(['reviewer:id,name,username', 'operationDepartment:id,name'])
             ->when($status === 'deleted', fn ($query) => $query->onlyTrashed())
             ->when($status !== '' && $status !== 'deleted', fn ($query) => $query->whereNull('deleted_at')->where('status', $status))
             ->when(!empty($filters['date_from']), fn ($query) => $query->whereDate('report_date', '>=', $filters['date_from']))
             ->when(!empty($filters['date_to']), fn ($query) => $query->whereDate('report_date', '<=', $filters['date_to']))
-            ->when($teamId > 0, fn ($query) => $query->where('operation_department_id', $teamId))
+            ->when($teamIds !== [], fn ($query) => $query->whereIn('operation_department_id', $teamIds))
             ->when($operator !== '', fn ($query) => $query->where('operator_name', 'like', '%'.$operator.'%'))
             ->when($media !== '', fn ($query) => $query->whereRaw('LOWER(CAST(advertising_rows AS CHAR)) LIKE ?', ['%"media_source"%:%"%'.$media.'%"%']))
             ->when($accountNumber !== '', fn ($query) => $query->whereRaw('LOWER(CAST(advertising_rows AS CHAR)) LIKE ?', ['%"account_number"%:%"%'.$accountNumber.'%"%']))
@@ -116,7 +117,8 @@ class OperationReportReviewController extends Controller
             'status' => ['nullable', Rule::in(['', OperationReport::STATUS_PENDING, OperationReport::STATUS_APPROVED, OperationReport::STATUS_REJECTED, 'deleted'])],
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
-            'team_id' => ['nullable', 'integer', 'min:1'],
+            'team_ids' => ['nullable', 'array'],
+            'team_ids.*' => ['integer', 'min:1', 'distinct'],
             'operator' => ['nullable', 'string', 'max:100'],
             'media' => ['nullable', 'string', 'max:100'],
             'account_number' => ['nullable', 'string', 'max:191'],
@@ -126,7 +128,7 @@ class OperationReportReviewController extends Controller
         $operator = trim((string) ($filters['operator'] ?? ''));
         $media = trim((string) ($filters['media'] ?? ''));
         $accountNumber = trim((string) ($filters['account_number'] ?? ''));
-        $teamId = (int) ($filters['team_id'] ?? 0);
+        $teamIds = collect($filters['team_ids'] ?? [])->map(fn ($id) => (int) $id)->filter()->unique()->values()->all();
         $perPage = (int) ($filters['per_page'] ?? 20);
 
         $teamOptions = $this->scopeReports(OperationReport::withTrashed(), $context['user'])
@@ -143,7 +145,7 @@ class OperationReportReviewController extends Controller
             ->when($status !== '' && $status !== 'deleted', fn ($query) => $query->whereNull('deleted_at')->where('status', $status))
             ->when(!empty($filters['date_from']), fn ($query) => $query->whereDate('report_date', '>=', $filters['date_from']))
             ->when(!empty($filters['date_to']), fn ($query) => $query->whereDate('report_date', '<=', $filters['date_to']))
-            ->when($teamId > 0, fn ($query) => $query->where('operation_department_id', $teamId))
+            ->when($teamIds !== [], fn ($query) => $query->whereIn('operation_department_id', $teamIds))
             ->when($operator !== '', fn ($query) => $query->where('operator_name', 'like', '%'.$operator.'%'))
             ->when($media !== '', fn ($query) => $query->whereRaw(
                 'LOWER(CAST(advertising_rows AS CHAR)) LIKE ?',
@@ -170,7 +172,7 @@ class OperationReportReviewController extends Controller
                 'status' => $status,
                 'date_from' => (string) ($filters['date_from'] ?? ''),
                 'date_to' => (string) ($filters['date_to'] ?? ''),
-                'team_id' => $teamId,
+                'team_ids' => $teamIds,
                 'operator' => $operator,
                 'media' => $media,
                 'account_number' => $accountNumber,
