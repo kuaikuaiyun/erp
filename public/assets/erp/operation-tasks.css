@@ -27,23 +27,32 @@
 .ot-recap-review-card,.ot-test-review-card{border-radius:4px;box-shadow:none}.ot-recap-review-card .ot-recap-review-table-wrap{padding:0}.ot-recap-review-card .ot-unified-pagination{margin:0;border-radius:0;background:#fff}.ot-review-tabs+.ot-recap-review-card,.ot-review-tabs+.ot-test-review-card{margin-top:0}
 .ot-test-review-card .ot-recap-review-table-wrap{padding:0}.ot-test-review-card .ot-unified-pagination{margin:0;border-radius:0;background:#fff}.ot-test-review-table .test-basic{width:245px}.ot-test-review-table .test-summary{width:390px}.ot-test-review-table .test-assets{width:175px}.ot-test-review-table .test-basic b,.ot-test-review-table .test-basic span,.ot-test-review-table .test-basic small,.ot-test-review-table .test-summary b,.ot-test-review-table .test-summary small,.ot-test-review-table .test-assets b,.ot-test-review-table .test-assets span{display:block}.ot-test-review-table .test-basic span,.ot-test-review-table .test-basic small,.ot-test-review-table .test-summary small,.ot-test-review-table .test-assets span{margin-top:5px;color:#617985}.ot-test-review-table .test-summary b{margin-top:7px;color:#173f5a;line-height:1.6}.ot-test-review-table .test-assets b{color:#173f5a}.ot-test-review-table .recap-actions .btn{display:block;width:74px;margin:0 auto 7px}.ot-test-review-table .recap-actions .btn:last-child{margin-bottom:0}
 
-/* 测品任务档案：与审核中心保持一致的线框表格层级。 */
+/* 测品任务档案：与每日复盘保持一致的轻量表格层级。 */
 .ot-tests-page .ot-card{overflow:hidden;border:1px solid #d7e3e9;border-radius:8px;box-shadow:none}
-.ot-tests-page .table-responsive{margin:0;overflow-x:auto}
-.ot-tests-page .ot-test-table{width:100%;margin:0;border-collapse:collapse}
-.ot-tests-page .ot-test-table thead th{border:1px solid #d7e3e9;border-top:0;background:#edf5f8;color:#365a6c;font-weight:700;text-align:center;vertical-align:middle}
-.ot-tests-page .ot-test-table thead th:first-child{border-left:0}
-.ot-tests-page .ot-test-table thead th:last-child{border-right:0}
-.ot-tests-page .ot-test-table tbody td{border:1px solid #d7e3e9;background:#fff;vertical-align:middle}
-.ot-tests-page .ot-test-table tbody td:first-child{border-left:0}
-.ot-tests-page .ot-test-table tbody td:last-child{border-right:0}
+.ot-tests-page .table-responsive{margin:0;overflow-x:visible}
+.ot-tests-page .ot-test-table{width:100%;min-width:0;margin:0;border-collapse:collapse;table-layout:fixed}
+.ot-tests-page .ot-test-table thead th{height:46px;padding:9px 8px;border:0;border-bottom:1px solid #e1e9ed;background:#f8faf9;color:#536b78;font-weight:700;text-align:center;vertical-align:middle;white-space:nowrap}
+.ot-tests-page .ot-test-table thead th:nth-child(1){width:18%}
+.ot-tests-page .ot-test-table thead th:nth-child(2){width:9%}
+.ot-tests-page .ot-test-table thead th:nth-child(3){width:8%}
+.ot-tests-page .ot-test-table thead th:nth-child(4){width:9%}
+.ot-tests-page .ot-test-table thead th:nth-child(5){width:12%}
+.ot-tests-page .ot-test-table thead th:nth-child(6){width:10%}
+.ot-tests-page .ot-test-table thead th:nth-child(7){width:10%}
+.ot-tests-page .ot-test-table thead th:nth-child(8){width:14%}
+.ot-tests-page .ot-test-table thead th:nth-child(9){width:10%}
+.ot-tests-page .ot-task-current-status small{display:block;margin-top:6px;color:#d45b55;line-height:1.45;overflow-wrap:anywhere}
+.ot-tests-page .ot-test-table tbody td{height:62px;padding:9px 8px;border:0;border-bottom:1px solid #e8eef1;background:#fff;text-align:center;vertical-align:middle;overflow-wrap:anywhere}
 .ot-tests-page .ot-test-table tbody tr:last-child td{border-bottom:0}
-.ot-tests-page .ot-test-table tbody tr:nth-child(even) td{background:#f8fbfc}
 .ot-tests-page .ot-test-table tbody tr:hover td{background:#f2f8fa}
-.ot-tests-page .ot-test-table td:not(:first-child){text-align:center}
-.ot-tests-page .ot-test-table .ot-task-info{padding-left:18px;text-align:left}
-.ot-tests-page .ot-test-table .ot-task-info b{font-size:14px;line-height:1.4}
-.ot-tests-page .ot-test-table .ot-task-action .btn{display:inline-flex;min-width:82px;height:32px;align-items:center;justify-content:center;gap:5px}
+.ot-tests-page .ot-test-table td>b,.ot-tests-page .ot-test-table td>small,.ot-tests-page .ot-test-table .ot-task-info>span{display:block}
+.ot-tests-page .ot-test-table td>small,.ot-tests-page .ot-test-table .ot-task-info>span{margin-top:3px;color:#617985;line-height:1.35}
+.ot-tests-page .ot-test-table .ot-task-info{text-align:center}
+.ot-tests-page .ot-test-table .ot-task-info b{color:#123f59;font-size:14px;line-height:1.4}
+.ot-tests-page .ot-test-table .ot-landing-button{display:inline-flex;min-width:62px;align-items:center;justify-content:center;color:#fff}
+.ot-tests-page .ot-test-table .ot-badge{display:inline-flex;align-items:center;justify-content:center}
+.ot-tests-page .ot-test-table .ot-task-action{white-space:nowrap}
+.ot-tests-page .ot-test-table .ot-task-action .btn{display:inline-flex;min-width:76px;height:30px;padding:4px 10px;align-items:center;justify-content:center;gap:4px}
 
 /* 每日复盘记录：表头和每一行内容统一居中。 */
 .ot-recap-page .ot-recap-table thead th,
