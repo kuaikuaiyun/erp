@@ -134,8 +134,12 @@ class XShoppyOrderSyncService
                     'consumer_key' => trim((string) $store->xshoppy_api_key),
                     'consumer_secret' => trim((string) $store->xshoppy_password),
                     'is_show' => 1,
-                    'after' => $after->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
-                    'before' => $before->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
+                    // XShoppy exposes and filters these timestamps as China-local
+                    // wall-clock values. Sending UTC here can exclude orders created
+                    // during the eight-hour offset window (for example 07:28 China
+                    // time is later than a 06:58 UTC-looking cutoff).
+                    'after' => $after->copy()->setTimezone('Asia/Shanghai')->format('Y-m-d\TH:i:s'),
+                    'before' => $before->copy()->setTimezone('Asia/Shanghai')->format('Y-m-d\TH:i:s'),
                     'page' => $page,
                     'per_page' => 100,
                     'status' => 'all',
