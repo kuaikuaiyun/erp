@@ -37,3 +37,4 @@
     </table></div><div class="box-footer clearfix"><span class="text-muted">共 {{ $submissions->total() }} 条，第 {{ $submissions->currentPage() }} / {{ $submissions->lastPage() }} 页，每页 {{ $submissions->perPage() }} 条</span>@if($submissions->hasPages())<div class="pull-right">{{ $submissions->links() }}</div>@endif</div></div>
 </section>
 @endsection
+@include('portals.assistant.partials.legacy-operation-department-multi-upgrade')

@@ -7,6 +7,7 @@ use App\Models\AdminUser;
 use App\Models\AppLovinAccountStoreBinding;
 use App\Models\AppLovinSpendScreenshot;
 use App\Models\AssistantDomainStore;
+use App\Models\Department;
 use App\Models\FashionAdvertisingReport;
 use App\Models\OperationReport;
 use App\Portal\Http\Controllers\PortalEntryController;
@@ -32,16 +33,20 @@ class AppLovinAccountStatisticsController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
 
-        $visibleIds = $this->visibleDepartmentIds($context['user']);
+        $allAccounts = $this->accounts($context['user']);
+        $availableDepartmentIds = $allAccounts->pluck('department_id')
+            ->map(fn ($id): int => (int) $id)->filter()->unique()->values()->all();
         $filters = $request->validate([
-            'department_id' => ['nullable', 'integer', Rule::in($visibleIds)],
+            'department_ids' => ['nullable', 'array'],
+            'department_ids.*' => ['integer', 'distinct', Rule::in($availableDepartmentIds)],
             'operator' => ['nullable', 'string', 'max:100'],
             'per_page' => ['nullable', 'integer', Rule::in([20, 50, 100])],
         ]);
         $operator = trim((string) ($filters['operator'] ?? ''));
-        $departmentId = (int) ($filters['department_id'] ?? 0);
-        $accounts = $this->accounts($context['user'])
-            ->when($departmentId > 0, fn (Collection $rows) => $rows->where('department_id', $departmentId))
+        $departmentIds = collect($filters['department_ids'] ?? [])
+            ->map(fn ($id): int => (int) $id)->unique()->values()->all();
+        $accounts = $allAccounts
+            ->when($departmentIds !== [], fn (Collection $rows) => $rows->whereIn('department_id', $departmentIds))
             ->when($operator !== '', fn (Collection $rows) => $rows->filter(fn (array $row) => str_contains(mb_strtolower($row['operator_name']), mb_strtolower($operator))));
 
         $spendBands = [
@@ -77,8 +82,9 @@ class AppLovinAccountStatisticsController extends Controller
         return view('portals.assistant.applovin-account-statistics.index', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
             'operators' => $operators,
-            'departmentOptions' => $this->storeOwners->operationDepartments()->whereIn('id', $visibleIds)->values(),
-            'filters' => ['department_id' => $departmentId, 'operator' => $operator, 'per_page' => $perPage],
+            'departmentOptions' => Department::business()->whereIn('id', $availableDepartmentIds)
+                ->orderBy('sort')->orderBy('name')->get(['id', 'parent_id', 'name']),
+            'filters' => ['department_ids' => $departmentIds, 'operator' => $operator, 'per_page' => $perPage],
             'spendBands' => $spendBands,
         ]);
     }
@@ -129,17 +135,21 @@ class AppLovinAccountStatisticsController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
 
-        $visibleIds = $this->visibleDepartmentIds($context['user']);
+        $allAccounts = $this->accounts($context['user']);
+        $availableDepartmentIds = $allAccounts->pluck('department_id')
+            ->map(fn ($id): int => (int) $id)->filter()->unique()->values()->all();
         $filters = $request->validate([
             'spend_band' => ['required', Rule::in(['under_5000', 'between_5000_10000', 'over_10000'])],
-            'department_id' => ['nullable', 'integer', Rule::in($visibleIds)],
+            'department_ids' => ['nullable', 'array'],
+            'department_ids.*' => ['integer', 'distinct', Rule::in($availableDepartmentIds)],
             'operator' => ['nullable', 'string', 'max:100'],
         ]);
-        $departmentId = (int) ($filters['department_id'] ?? 0);
+        $departmentIds = collect($filters['department_ids'] ?? [])
+            ->map(fn ($id): int => (int) $id)->unique()->values()->all();
         $operator = trim((string) ($filters['operator'] ?? ''));
         $spendBand = (string) $filters['spend_band'];
-        $accounts = $this->accounts($context['user'])
-            ->when($departmentId > 0, fn (Collection $rows) => $rows->where('department_id', $departmentId))
+        $accounts = $allAccounts
+            ->when($departmentIds !== [], fn (Collection $rows) => $rows->whereIn('department_id', $departmentIds))
             ->when($operator !== '', fn (Collection $rows) => $rows->filter(fn (array $row) => str_contains(mb_strtolower($row['operator_name']), mb_strtolower($operator))));
         $accounts = match ($spendBand) {
             'under_5000' => $accounts->where('total_spend', '<', 5000)->values(),
@@ -152,15 +162,15 @@ class AppLovinAccountStatisticsController extends Controller
             'path' => $request->url(), 'query' => $request->query(),
         ]);
         $backQuery = array_filter([
-            'department_id' => $departmentId ?: null,
+            'department_ids' => $departmentIds ?: null,
             'operator' => $operator !== '' ? $operator : null,
         ]);
 
         return view('portals.assistant.applovin-account-statistics.show', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
             'operatorName' => $operator !== '' ? $operator : '全部运营',
-            'department' => $departmentId > 0
-                ? (string) ($this->storeOwners->operationDepartments()->firstWhere('id', $departmentId)?->name ?: '全部团队')
+            'department' => $departmentIds !== []
+                ? Department::business()->whereIn('id', $departmentIds)->pluck('name')->implode('、')
                 : '全部团队',
             'accounts' => $paginator, 'totalSpend' => (float) $accounts->sum('total_spend'),
             'spendBand' => $spendBand, 'isGlobal' => true,
@@ -232,7 +242,7 @@ class AppLovinAccountStatisticsController extends Controller
     private function visibleDepartmentIds(AdminUser $user): array
     {
         return $user->isAdministrator()
-            ? $this->storeOwners->operationDepartments()->pluck('id')->map(fn ($id) => (int) $id)->all()
+            ? $this->storeOwners->storeOwnershipOperationDepartments()->pluck('id')->map(fn ($id) => (int) $id)->all()
             : $this->storeOwners->visibleOperationDepartmentIds($user);
     }
 

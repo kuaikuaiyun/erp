@@ -612,9 +612,13 @@ class OperationReportController extends Controller
                 ];
             }
             foreach ($reportGroups as $group) {
-                if (OperationReport::query()->whereDate('report_date', $group['report_date'])->where('operator_user_id', $group['operator_id'])->exists()) {
+                $existingReport = OperationReport::query()
+                    ->whereDate('report_date', $group['report_date'])
+                    ->where('operator_user_id', $group['operator_id'])
+                    ->first();
+                if ($duplicate = $this->duplicateAdvertisingMessage($group['ads'], $existingReport?->advertising_rows ?: [])) {
                     $operator = $operatorConfigurations[$group['operator_id']]['operator'];
-                    throw new \InvalidArgumentException($this->operatorImportLabel($operator).' 在 '.$group['report_date'].' 已有提报记录，请先删除或编辑原记录。');
+                    throw new \InvalidArgumentException($this->operatorImportLabel($operator).' 在 '.$group['report_date'].' 的'.$duplicate);
                 }
             }
             foreach ($reportGroups as &$group) foreach ($group['ads'] as &$ad) {
@@ -630,22 +634,33 @@ class OperationReportController extends Controller
                 foreach ($reportGroups as $group) {
                     $operator = $operatorConfigurations[$group['operator_id']]['operator'];
                     $department = $operatorConfigurations[$group['operator_id']]['department'];
+                    $report = OperationReport::query()
+                        ->whereDate('report_date', $group['report_date'])
+                        ->where('operator_user_id', $group['operator_id'])
+                        ->lockForUpdate()
+                        ->first();
+                    if ($duplicate = $this->duplicateAdvertisingMessage($group['ads'], $report?->advertising_rows ?: [])) {
+                        throw new \InvalidArgumentException($this->operatorImportLabel($operator).' 在 '.$group['report_date'].' 的'.$duplicate);
+                    }
+                    $ads = array_values(array_merge($report?->advertising_rows ?: [], $group['ads']));
                     $calculated = $this->metrics->build($group['report_date'], $group['operator_id']);
                     $totals = $calculated['totals'];
-                    $adSpend = collect($group['ads'])->sum('actual_spend');
+                    $adSpend = collect($ads)->sum('actual_spend');
                     $firstProfit = $totals['first_total_revenue'] - $totals['first_purchase_cost'] - $totals['first_shipping_cost'] - $totals['first_return_fee'] - $adSpend;
                     $renewalNet = $totals['renewal_revenue'] - $totals['renewal_cost'];
-                    OperationReport::query()->create([
+                    $values = [
                         'report_date' => $group['report_date'], 'operator_user_id' => $group['operator_id'],
                         'operator_name' => (string) ($operator->name ?: $operator->username),
                         'operation_department_id' => (int) $department->getKey(), 'operation_department_name' => (string) $department->name,
-                        'metric_rows' => $calculated['rows'], 'advertising_rows' => $group['ads'],
+                        'metric_rows' => $calculated['rows'], 'advertising_rows' => $ads,
                         'first_purchase_cost' => $totals['first_purchase_cost'], 'first_shipping_cost' => $totals['first_shipping_cost'],
                         'first_return_fee' => $totals['first_return_fee'], 'actual_ad_spend' => $adSpend,
                         'first_profit' => $firstProfit, 'renewal_net_revenue' => $renewalNet, 'overall_profit' => $firstProfit + $renewalNet,
                         'status' => OperationReport::STATUS_PENDING, 'submitted_by' => $context['user']->getKey(),
                         'submitted_at' => now(), 'reviewed_by' => null, 'reviewed_at' => null, 'review_reason' => null,
-                    ]);
+                    ];
+                    if ($report) $report->update($values);
+                    else OperationReport::query()->create($values);
                 }
             });
         } catch (\Throwable $exception) {
@@ -656,7 +671,7 @@ class OperationReportController extends Controller
             throw $exception;
         }
 
-        $message = '成功导入 '.count($rows).' 条广告数据，已按日期和运营人员生成 '.count($reportGroups).' 份待审核记录并提交到助理系统。';
+        $message = '成功导入 '.count($rows).' 条广告数据，已按日期和运营人员新增或补充 '.count($reportGroups).' 份待审核记录并提交到助理系统。';
         if ($request->expectsJson()) {
             return response()->json([
                 'ok' => true,
@@ -775,9 +790,6 @@ class OperationReportController extends Controller
             ]);
         }
         $existing = OperationReport::query()->whereDate('report_date', $validated['report_date'])->where('operator_user_id', $operatorId)->first();
-        if ($existing && (! $editingReport || (int) $existing->getKey() !== (int) $editingReport->getKey())) {
-            throw ValidationException::withMessages(['report_date' => '该运营当天的报表已经提交，请到提交记录中查看。']);
-        }
 
         $ads = [];
         foreach (($validated['ads'] ?? []) as $index => $ad) {
@@ -815,6 +827,16 @@ class OperationReportController extends Controller
             ];
         }
 
+        $existingAds = ! $editingReport && $existing ? ($existing->advertising_rows ?: []) : [];
+        if ($duplicate = $this->duplicateAdvertisingMessage($ads, $existingAds)) {
+            throw ValidationException::withMessages(['ads' => $duplicate]);
+        }
+        $supplementingExisting = ! $editingReport && $existing !== null;
+        if ($supplementingExisting) {
+            $ads = array_values(array_merge($existingAds, $ads));
+            $editingReport = $existing;
+        }
+
         $calculated = $this->metrics->build($validated['report_date'], $operatorId);
         $totals = $calculated['totals'];
         $adSpend = collect($ads)->sum('actual_spend');
@@ -842,7 +864,11 @@ class OperationReportController extends Controller
             ], ['assistant_domain_store_id' => (int) $row['assistant_domain_store_id'], 'bound_by' => $user->getKey()]);
         }
 
-        return redirect()->route('operation.advertising-reports.index', ['report_date' => $validated['report_date'], 'operator_user_id' => $isBoss ? $operatorId : null])->with('success', $editingReport ? '运营报表已重新提交，状态仍为待审核。' : '运营报表已提交，当前状态为待审核。');
+        $successMessage = $supplementingExisting
+            ? '广告费补录已追加到当天报表，整份报表已转为待审核。'
+            : ($editingReport ? '运营报表已重新提交，状态仍为待审核。' : '运营报表已提交，当前状态为待审核。');
+
+        return redirect()->route('operation.advertising-reports.index', ['report_date' => $validated['report_date'], 'operator_user_id' => $isBoss ? $operatorId : null])->with('success', $successMessage);
     }
 
     public function destroy(Request $request, OperationReport $report): RedirectResponse
@@ -1035,6 +1061,41 @@ class OperationReportController extends Controller
     private function normalizeAdvertisingText(string $value): string
     {
         return mb_strtolower((string) preg_replace('/\s+/u', '', trim($value)));
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $incomingRows
+     * @param  list<array<string, mixed>>  $existingRows
+     */
+    private function duplicateAdvertisingMessage(array $incomingRows, array $existingRows = []): ?string
+    {
+        $seen = [];
+        foreach ($existingRows as $row) {
+            $seen[$this->advertisingIdentity($row)] = true;
+        }
+
+        foreach ($incomingRows as $index => $row) {
+            $identity = $this->advertisingIdentity($row);
+            if (isset($seen[$identity])) {
+                $media = trim((string) ($row['media_source'] ?? ''));
+                $accountNumber = trim((string) ($row['account_number'] ?? ''));
+
+                return '第 '.($index + 1).' 条广告账户与当天已有数据重复（'.$media.' / '.$accountNumber.'），请勿重复提交。';
+            }
+            $seen[$identity] = true;
+        }
+
+        return null;
+    }
+
+    /** @param array<string, mixed> $row */
+    private function advertisingIdentity(array $row): string
+    {
+        return implode('|', [
+            $this->normalizeAdvertisingText((string) ($row['agency'] ?? '')),
+            $this->normalizeAdvertisingText((string) ($row['media_source'] ?? '')),
+            $this->normalizeAdvertisingText((string) ($row['account_number'] ?? '')),
+        ]);
     }
 
     private function operatorImportLabel(AdminUser $operator): string

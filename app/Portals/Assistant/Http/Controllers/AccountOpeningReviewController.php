@@ -25,7 +25,8 @@ class AccountOpeningReviewController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
         $filters = $request->validate([
-            'operation_department_id' => ['nullable', 'integer'],
+            'operation_department_ids' => ['nullable', 'array'],
+            'operation_department_ids.*' => ['integer', 'distinct'],
             'status' => ['nullable', 'in:pending,processed'],
             'agency' => ['nullable', 'string', 'max:100'],
             'media' => ['nullable', 'string', 'max:100'],
@@ -42,7 +43,7 @@ class AccountOpeningReviewController extends Controller
         $departments = $visibleIds === null ? $allDepartments : $allDepartments->whereIn('id', $visibleIds)->values();
         $optionQuery = DailyAccountOpening::query()
             ->when($visibleIds !== null, fn ($q) => $visibleIds === [] ? $q->whereRaw('1 = 0') : $q->whereIn('operation_department_id', $visibleIds));
-        $query->when($filters['operation_department_id'] ?? null, fn ($q, $id) => $q->where('operation_department_id', $id))
+        $query->when($filters['operation_department_ids'] ?? [], fn ($q, $ids) => $q->whereIn('operation_department_id', $ids))
             ->when($filters['status'] ?? null, fn ($q, $status) => $q->where('status', $status))
             ->when($filters['agency'] ?? null, fn ($q, $agency) => $q->where('agency_name', $agency))
             ->when($filters['media'] ?? null, fn ($q, $media) => $q->where('media', $media))

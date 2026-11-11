@@ -42,7 +42,8 @@ class AppLovinPerformanceReportController extends Controller
             'date_to' => ['nullable', 'date_format:Y-m-d'],
             'date_range' => ['nullable', Rule::in(['custom', 'yesterday', 'last_3', 'last_7', 'last_15', 'last_30', 'last_60', 'last_90', 'last_6_months', 'last_year'])],
             'timezone' => ['nullable', Rule::in(array_keys($timezoneOptions))],
-            'department_id' => ['nullable', 'integer', Rule::in($visibleIds)],
+            'department_ids' => ['nullable', 'array'],
+            'department_ids.*' => ['integer', 'distinct', Rule::in($visibleIds)],
             'operator' => ['nullable', 'string', 'max:100'],
             'store_domain' => ['nullable', 'string', 'max:191'],
             'gift_status' => ['nullable', Rule::in(['yes', 'no'])],
@@ -78,7 +79,8 @@ class AppLovinPerformanceReportController extends Controller
         if (! $context['user']->isAdministrator()) {
             $visibleIds === [] ? $query->whereRaw('1=0') : $query->whereIn('operation_department_id', $visibleIds);
         }
-        $query->when($filters['department_id'] ?? null, fn ($q, $id) => $q->where('operation_department_id', $id))
+        $selectedDepartmentIds = collect($filters['department_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values()->all();
+        $query->when($selectedDepartmentIds !== [], fn ($q) => $q->whereIn('operation_department_id', $selectedDepartmentIds))
             ->when($filters['operator'] ?? null, fn ($q, $name) => $q->where('operator_name', 'like', '%'.$name.'%'));
         $accountSpendReports = (clone $query)->get();
         $query->when($dateFrom !== '', fn ($q) => $q->whereDate('report_date', '>=', $dateFrom))
@@ -288,7 +290,7 @@ class AppLovinPerformanceReportController extends Controller
             'timezone' => $timezone,
             'timezoneOptions' => $timezoneOptions,
             'dateRange' => $dateRange,
-            'selectedDepartmentId' => $filters['department_id'] ?? null,
+            'selectedDepartmentIds' => $selectedDepartmentIds,
             'selectedStoreDomain' => $filters['store_domain'] ?? '',
             'domainOptions' => $domainOptions,
             'selectedGiftStatus' => $filters['gift_status'] ?? '',

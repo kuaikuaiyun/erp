@@ -20,11 +20,11 @@ class AccountStoreTransferReviewController extends Controller
     public function index(Request $request):Response|View
     {
         $context=$this->context($request);if($context instanceof Response)return $context;
-        $filters=$request->validate(['operation_department_id'=>['nullable','integer'],'target_type'=>['nullable','in:account,store'],'action_type'=>['nullable','in:discard,transfer'],'status'=>['nullable','in:pending,processed'],'operator'=>['nullable','string','max:100']]);
+        $filters=$request->validate(['operation_department_ids'=>['nullable','array'],'operation_department_ids.*'=>['integer','distinct'],'target_type'=>['nullable','in:account,store'],'action_type'=>['nullable','in:discard,transfer'],'status'=>['nullable','in:pending,processed'],'operator'=>['nullable','string','max:100']]);
         $query=DailyAccountStoreTransfer::query();$all=$this->storeOwners->boundBusinessDepartments();$visible=null;
         if(!$context['user']->isAdministrator()){$visible=$this->storeOwners->visibleOperationDepartmentIds($context['user']);$visible===[]?$query->whereRaw('1=0'):$query->whereIn('operation_department_id',$visible);}
         $departments=$visible===null?$all:$all->whereIn('id',$visible)->values();
-        $query->when($filters['operation_department_id']??null,fn($q,$v)=>$q->where('operation_department_id',$v))->when($filters['target_type']??null,fn($q,$v)=>$q->where('target_type',$v))->when($filters['action_type']??null,fn($q,$v)=>$q->where('action_type',$v))->when($filters['status']??null,fn($q,$v)=>$q->where('status',$v))->when($filters['operator']??null,fn($q,$v)=>$q->where('operator_name','like','%'.$v.'%'));
+        $query->when($filters['operation_department_ids']??[],fn($q,$ids)=>$q->whereIn('operation_department_id',$ids))->when($filters['target_type']??null,fn($q,$v)=>$q->where('target_type',$v))->when($filters['action_type']??null,fn($q,$v)=>$q->where('action_type',$v))->when($filters['status']??null,fn($q,$v)=>$q->where('status',$v))->when($filters['operator']??null,fn($q,$v)=>$q->where('operator_name','like','%'.$v.'%'));
         return view('portals.assistant.daily-submissions.account-store-transfer',['portal'=>$context['portal']->loadMissing('menus'),'user'=>$context['user'],'filters'=>$filters,'departments'=>$departments,'submissions'=>$query->orderByRaw("CASE WHEN status='pending' THEN 0 ELSE 1 END")->latest('id')->paginate(20)->withQueryString()]);
     }
     public function process(Request $request,DailyAccountStoreTransfer $submission):RedirectResponse

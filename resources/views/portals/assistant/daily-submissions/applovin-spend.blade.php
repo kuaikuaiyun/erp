@@ -3,15 +3,15 @@
 @push('styles')
 <link rel="stylesheet" href="{{ asset('vendor/laravel-admin/AdminLTE/plugins/select2/select2.min.css') }}">
 <style>
-.review-box{border:0;border-radius:12px;box-shadow:0 5px 18px rgba(31,67,98,.09);overflow:hidden}.filters{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}.filters .form-group{margin:0}.spend-high{color:#d9534f;font-weight:700}.gift-thumb{width:70px;height:48px;object-fit:cover;border:1px solid #d6e2ea;border-radius:6px;cursor:zoom-in}.pager-wrap{display:flex;justify-content:center;gap:5px;padding:14px}.pager-wrap a,.pager-wrap span{min-width:34px;height:34px;line-height:34px;text-align:center;border:1px solid #d8e4ec;border-radius:7px}.pager-wrap .active{background:#3498db;color:#fff}.store-binding-form{display:flex;gap:6px;align-items:center}.store-binding-form .select2-container{min-width:250px}.select2-container .select2-selection--single{height:30px}.select2-container--default .select2-selection--single .select2-selection__rendered{line-height:28px}
+.review-box{border:0;border-radius:12px;box-shadow:0 5px 18px rgba(31,67,98,.09);overflow:hidden}.review-filter-box{overflow:visible}.filters{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}.filters .form-group{margin:0}.spend-high{color:#d9534f;font-weight:700}.gift-thumb{width:70px;height:48px;object-fit:cover;border:1px solid #d6e2ea;border-radius:6px;cursor:zoom-in}.pager-wrap{display:flex;justify-content:center;gap:5px;padding:14px}.pager-wrap a,.pager-wrap span{min-width:34px;height:34px;line-height:34px;text-align:center;border:1px solid #d8e4ec;border-radius:7px}.pager-wrap .active{background:#3498db;color:#fff}.store-binding-form{display:flex;gap:6px;align-items:center}.store-binding-form .select2-container{min-width:250px}.select2-container .select2-selection--single{height:30px}.select2-container--default .select2-selection--single .select2-selection__rendered{line-height:28px}
 </style>
 @endpush
 @section('content')
 <section class="content-header"><h1>AppLovin账号消耗 <small>自动汇总已审核通过的运营广告费用</small></h1></section>
 <section class="content">
 @if(session('success'))<div class="alert alert-success"><i class="fa fa-check-circle"></i> {{ session('success') }}</div>@endif
-<div class="box review-box"><div class="box-body"><form class="filters" method="get">
-<div class="form-group"><label>运营部门</label><select class="form-control" name="department_id"><option value="">全部部门</option>@foreach($departmentOptions as $department)<option value="{{ $department->id }}" @selected((string)$selectedDepartmentId===(string)$department->id)>{{ $department->name }}</option>@endforeach</select></div>
+<div class="box review-box review-filter-box"><div class="box-body"><form class="filters" method="get">
+@include('portals.assistant.partials.operation-department-multi-filter',['departments'=>$departmentOptions,'selectedIds'=>$selectedDepartmentIds,'inputName'=>'department_ids','label'=>'运营部门'])
 <div class="form-group"><label>累计消耗</label><select class="form-control" name="over_threshold"><option value="">全部数据</option><option value="1" @selected($overThreshold==='1')>大于等于 $5,000</option></select></div>
 <div class="form-group"><label>运营人员</label><input class="form-control" name="operator" value="{{ $operator }}"></div>
 <div class="form-group"><label>账号编号</label><input class="form-control" name="account_number" value="{{ $accountNumber }}" placeholder="输入账号编号"></div>
