@@ -22,6 +22,51 @@ class AdvertisingReportSpreadsheetService
 {
     private const HEADERS = ['提报日期', '运营人员', '广告代理', '广告社媒', '广告账户名称', '广告账户编号', '账面广告费($)', '广告消耗截图'];
 
+    public function exportFashionResponse(iterable $reports): StreamedResponse
+    {
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('广告费导入');
+        $sheet->setShowGridlines(false);
+        $sheet->mergeCells('A1:H1');
+        $sheet->setCellValue('A1', '服装运营报表广告费导出（可直接重新导入）');
+        $sheet->mergeCells('A2:H2');
+        $sheet->setCellValue('A2', '字段、顺序和截图均与导入模板一致；同日同运营的数据重新导入时将整份覆盖。');
+        $sheet->fromArray(['提报日期', '运营人员', '广告代理', '广告社媒', '广告账户名称', '广告账户编号', '账面广告费($)', '广告消耗截图'], null, 'A4');
+        $rowNumber = 5;
+        foreach ($reports as $report) {
+            foreach ($report->adSpendEntries as $entry) {
+                $sheet->fromArray([[$report->report_date?->format('Y-m-d'), $report->submitter_name, $entry->agency, $entry->media, $entry->account_name, '', (float) $entry->book_spend_usd, '']], null, 'A'.$rowNumber);
+                $sheet->setCellValueExplicit('F'.$rowNumber, (string) $entry->account_number, DataType::TYPE_STRING);
+                if ($entry->screenshot_path && Storage::disk('local')->exists($entry->screenshot_path)) {
+                    $drawing = new Drawing();
+                    $drawing->setName('广告消耗截图');
+                    $drawing->setPath(Storage::disk('local')->path($entry->screenshot_path));
+                    $drawing->setCoordinates('H'.$rowNumber);
+                    $drawing->setOffsetX(5)->setOffsetY(4)->setHeight(52)->setWorksheet($sheet);
+                }
+                $sheet->getRowDimension($rowNumber)->setRowHeight(62);
+                $rowNumber++;
+            }
+        }
+        $lastRow = max(4, $rowNumber - 1);
+        $sheet->freezePane('A5');
+        $sheet->setAutoFilter('A4:H'.$lastRow);
+        $sheet->getStyle('A1:H1')->applyFromArray(['font' => ['bold' => true, 'size' => 16, 'color' => ['rgb' => '1F4665']]]);
+        $sheet->getStyle('A2:H2')->applyFromArray(['font' => ['size' => 10, 'color' => ['rgb' => '6D8293']], 'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F3F8FC']]]);
+        $sheet->getStyle('A4:H4')->applyFromArray(['font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']], 'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '245B86']], 'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER]]);
+        foreach (['A'=>16,'B'=>18,'C'=>22,'D'=>18,'E'=>26,'F'=>24,'G'=>20,'H'=>24] as $column => $width) $sheet->getColumnDimension($column)->setWidth($width);
+        if ($lastRow >= 5) {
+            $sheet->getStyle('B5:F'.$lastRow)->getNumberFormat()->setFormatCode('@');
+            $sheet->getStyle('G5:G'.$lastRow)->getNumberFormat()->setFormatCode('0.00');
+            $sheet->getStyle('A5:H'.$lastRow)->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
+        }
+        return response()->streamDownload(function () use ($spreadsheet): void {
+            (new Xlsx($spreadsheet))->save('php://output');
+            $spreadsheet->disconnectWorksheets();
+        }, '服装运营报表审核数据_'.now('Asia/Shanghai')->format('Ymd_His').'.xlsx', ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
+    }
+
     public function exportResponse(iterable $reports): StreamedResponse
     {
         $spreadsheet = new Spreadsheet();
@@ -223,7 +268,13 @@ class AdvertisingReportSpreadsheetService
             foreach (array_slice(self::HEADERS, 0, 7) as $header) $values[$header] = $row[$columns[$header]] ?? '';
             if (collect($values)->every(fn ($value) => $value === '')) continue;
             $excelRow = $index + $headerOffset + 2;
-            $imageCellValue = (string) ($row[$columns['广告消耗截图']] ?? '');
+            $rawImageCellValue = $row[$columns['广告消耗截图']] ?? '';
+            // Some Excel/WPS versions expose an in-cell image as a Drawing
+            // object in toArray(), without adding it to the drawing collection.
+            if (! isset($images[$excelRow]) && ($rawImageCellValue instanceof Drawing || $rawImageCellValue instanceof MemoryDrawing)) {
+                $images[$excelRow] = $this->imageFromDrawing($rawImageCellValue, $excelRow);
+            }
+            $imageCellValue = is_scalar($rawImageCellValue) ? (string) $rawImageCellValue : '';
             if (! isset($images[$excelRow]) && preg_match('/DISPIMG\("([^"]+)"/i', $imageCellValue, $match)) {
                 $images[$excelRow] = $cellImages[$match[1]] ?? null;
                 if ($images[$excelRow] === null) unset($images[$excelRow]);
@@ -265,19 +316,26 @@ class AdvertisingReportSpreadsheetService
             if (Coordinate::columnIndexFromString($column) !== 8) continue;
             if (isset($images[$row])) throw new InvalidArgumentException("第 {$row} 行只能放置一张广告消耗截图。");
 
-            $bytes = null;
-            if ($drawing instanceof MemoryDrawing) {
-                ob_start();
-                $render = $drawing->getRenderingFunction();
-                $render($drawing->getImageResource());
-                $bytes = ob_get_clean();
-            } elseif ($drawing instanceof Drawing) {
-                $bytes = @file_get_contents($drawing->getPath());
-            }
-            $images[$row] = $this->validatedImage($bytes, $row);
+            $images[$row] = $this->imageFromDrawing($drawing, $row);
         }
 
         return $images;
+    }
+
+    /** @return array{bytes:string,extension:string} */
+    private function imageFromDrawing(Drawing|MemoryDrawing $drawing, int $row): array
+    {
+        $bytes = null;
+        if ($drawing instanceof MemoryDrawing) {
+            ob_start();
+            $render = $drawing->getRenderingFunction();
+            $render($drawing->getImageResource());
+            $bytes = ob_get_clean();
+        } else {
+            $bytes = @file_get_contents($drawing->getPath());
+        }
+
+        return $this->validatedImage($bytes, $row);
     }
 
     /** @return array<string, array{bytes:string,extension:string}> */

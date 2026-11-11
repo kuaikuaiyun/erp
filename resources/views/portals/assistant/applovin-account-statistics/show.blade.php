@@ -6,9 +6,9 @@
 </style>
 @endpush
 @section('content')
-<section class="content-header"><h1>AppLovin 账号详情 <small>{{$department}} · {{$operatorName}}</small></h1><div style="margin-top:10px"><a class="btn btn-default btn-sm" href="{{route('assistant.applovin-account-statistics.index')}}"><i class="fa fa-arrow-left"></i> 返回统计列表</a></div></section>
+<section class="content-header"><h1>AppLovin 账号详情 <small>{{$department}} · {{$operatorName}} · {{$spendBandLabel}}</small></h1><div style="margin-top:10px"><a class="btn btn-default btn-sm" href="{{$backUrl}}"><i class="fa fa-arrow-left"></i> 返回统计列表</a>@if($spendBand)<a class="btn btn-primary btn-sm" href="{{$allAccountsUrl}}"><i class="fa fa-list"></i> 查看全部账号</a>@endif</div></section>
 <section class="content">
-<div class="aad-summary"><div class="aad-card"><span>运营团队 / 运营名称</span><strong>{{$department}} · {{$operatorName}}</strong></div><div class="aad-card"><span>AppLovin 户数</span><strong>{{$accounts->total()}} 户</strong></div><div class="aad-card"><span>账号累计消耗</span><strong>${{number_format($totalSpend,2)}}</strong></div></div>
+<div class="aad-summary"><div class="aad-card"><span>运营团队 / 运营名称</span><strong>{{$department}} · {{$operatorName}}</strong></div><div class="aad-card"><span>{{$spendBandLabel}}户数</span><strong>{{$accounts->total()}} 户</strong></div><div class="aad-card"><span>当前明细累计消耗</span><strong>${{number_format($totalSpend,2)}}</strong></div></div>
 <div class="box aad-box"><div class="table-responsive"><table class="table table-hover table-bordered aad-table"><thead><tr><th>数据来源</th><th>广告代理</th><th>账号名称</th><th>账号编号</th><th>绑定店铺域名</th><th>累计消耗($)</th><th>首次提报</th><th>最近提报</th></tr></thead><tbody>
 @forelse($accounts as $account)<tr><td><span class="aad-source">{{$account['sources']}}</span></td><td>{{$account['agency']?:'—'}}</td><td><b>{{$account['account_name']?:'—'}}</b></td><td>{{$account['account_number']?:'—'}}</td><td>{{$account['store_domain']?:'未绑定'}}</td><td class="aad-spend">{{number_format($account['total_spend'],2)}}</td><td>{{$account['first_date']}}</td><td>{{$account['last_date']}}</td></tr>
 @empty<tr><td colspan="8" class="text-center text-muted" style="padding:36px">暂无账号明细</td></tr>@endforelse

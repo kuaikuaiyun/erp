@@ -44,6 +44,12 @@ class AppLovinAccountStatisticsController extends Controller
             ->when($departmentId > 0, fn (Collection $rows) => $rows->where('department_id', $departmentId))
             ->when($operator !== '', fn (Collection $rows) => $rows->filter(fn (array $row) => str_contains(mb_strtolower($row['operator_name']), mb_strtolower($operator))));
 
+        $spendBands = [
+            'under_5000' => $accounts->where('total_spend', '<', 5000)->count(),
+            'between_5000_10000' => $accounts->filter(fn (array $row): bool => $row['total_spend'] >= 5000 && $row['total_spend'] <= 10000)->count(),
+            'over_10000' => $accounts->where('total_spend', '>', 10000)->count(),
+        ];
+
         $operators = $accounts->groupBy('operator_user_id')->map(function (Collection $rows): array {
             $first = $rows->first();
             return [
@@ -52,9 +58,15 @@ class AppLovinAccountStatisticsController extends Controller
                 'department_id' => (int) $first['department_id'],
                 'department' => $first['department'],
                 'account_count' => $rows->count(),
+                'under_5000_count' => $rows->where('total_spend', '<', 5000)->count(),
+                'between_5000_10000_count' => $rows->filter(fn (array $row): bool => $row['total_spend'] >= 5000 && $row['total_spend'] <= 10000)->count(),
+                'over_10000_count' => $rows->where('total_spend', '>', 10000)->count(),
                 'total_spend' => (float) $rows->sum('total_spend'),
             ];
-        })->sortBy([['department', 'asc'], ['operator_name', 'asc']])->values();
+        })->sort(function (array $left, array $right): int {
+            return $right['total_spend'] <=> $left['total_spend']
+                ?: strnatcasecmp($left['operator_name'], $right['operator_name']);
+        })->values();
 
         $perPage = (int) ($filters['per_page'] ?? 20);
         $page = max(1, (int) $request->query('page', 1));
@@ -67,6 +79,7 @@ class AppLovinAccountStatisticsController extends Controller
             'operators' => $operators,
             'departmentOptions' => $this->storeOwners->operationDepartments()->whereIn('id', $visibleIds)->values(),
             'filters' => ['department_id' => $departmentId, 'operator' => $operator, 'per_page' => $perPage],
+            'spendBands' => $spendBands,
         ]);
     }
 
@@ -75,9 +88,20 @@ class AppLovinAccountStatisticsController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
 
+        $filters = $request->validate([
+            'spend_band' => ['nullable', Rule::in(['under_5000', 'between_5000_10000', 'over_10000'])],
+        ]);
         $accounts = $this->accounts($context['user'])->where('operator_user_id', $operator)->values();
         abort_if($accounts->isEmpty(), 404);
         $first = $accounts->first();
+        $spendBand = (string) ($filters['spend_band'] ?? '');
+        $accounts = match ($spendBand) {
+            'under_5000' => $accounts->where('total_spend', '<', 5000)->values(),
+            'between_5000_10000' => $accounts->filter(fn (array $row): bool => $row['total_spend'] >= 5000 && $row['total_spend'] <= 10000)->values(),
+            'over_10000' => $accounts->where('total_spend', '>', 10000)->values(),
+            default => $accounts,
+        };
+        $accounts = $accounts->sortByDesc('total_spend')->values();
         $page = max(1, (int) $request->query('page', 1));
         $paginator = new LengthAwarePaginator($accounts->forPage($page, 20)->values(), $accounts->count(), 20, $page, [
             'path' => $request->url(), 'query' => $request->query(),
@@ -87,6 +111,66 @@ class AppLovinAccountStatisticsController extends Controller
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
             'operatorName' => $first['operator_name'], 'department' => $first['department'],
             'accounts' => $paginator, 'totalSpend' => (float) $accounts->sum('total_spend'),
+            'spendBand' => $spendBand,
+            'isGlobal' => false,
+            'backUrl' => route('assistant.applovin-account-statistics.index'),
+            'allAccountsUrl' => route('assistant.applovin-account-statistics.show', $operator),
+            'spendBandLabel' => match ($spendBand) {
+                'under_5000' => '历史总消耗小于 $5,000',
+                'between_5000_10000' => '历史总消耗 $5,000–$10,000',
+                'over_10000' => '历史总消耗大于 $10,000',
+                default => '全部账号',
+            },
+        ]);
+    }
+
+    public function spendBand(Request $request): Response|View
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+
+        $visibleIds = $this->visibleDepartmentIds($context['user']);
+        $filters = $request->validate([
+            'spend_band' => ['required', Rule::in(['under_5000', 'between_5000_10000', 'over_10000'])],
+            'department_id' => ['nullable', 'integer', Rule::in($visibleIds)],
+            'operator' => ['nullable', 'string', 'max:100'],
+        ]);
+        $departmentId = (int) ($filters['department_id'] ?? 0);
+        $operator = trim((string) ($filters['operator'] ?? ''));
+        $spendBand = (string) $filters['spend_band'];
+        $accounts = $this->accounts($context['user'])
+            ->when($departmentId > 0, fn (Collection $rows) => $rows->where('department_id', $departmentId))
+            ->when($operator !== '', fn (Collection $rows) => $rows->filter(fn (array $row) => str_contains(mb_strtolower($row['operator_name']), mb_strtolower($operator))));
+        $accounts = match ($spendBand) {
+            'under_5000' => $accounts->where('total_spend', '<', 5000)->values(),
+            'between_5000_10000' => $accounts->filter(fn (array $row): bool => $row['total_spend'] >= 5000 && $row['total_spend'] <= 10000)->values(),
+            'over_10000' => $accounts->where('total_spend', '>', 10000)->values(),
+        };
+        $accounts = $accounts->sortByDesc('total_spend')->values();
+        $page = max(1, (int) $request->query('page', 1));
+        $paginator = new LengthAwarePaginator($accounts->forPage($page, 20)->values(), $accounts->count(), 20, $page, [
+            'path' => $request->url(), 'query' => $request->query(),
+        ]);
+        $backQuery = array_filter([
+            'department_id' => $departmentId ?: null,
+            'operator' => $operator !== '' ? $operator : null,
+        ]);
+
+        return view('portals.assistant.applovin-account-statistics.show', [
+            'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
+            'operatorName' => $operator !== '' ? $operator : '全部运营',
+            'department' => $departmentId > 0
+                ? (string) ($this->storeOwners->operationDepartments()->firstWhere('id', $departmentId)?->name ?: '全部团队')
+                : '全部团队',
+            'accounts' => $paginator, 'totalSpend' => (float) $accounts->sum('total_spend'),
+            'spendBand' => $spendBand, 'isGlobal' => true,
+            'backUrl' => route('assistant.applovin-account-statistics.index', $backQuery),
+            'allAccountsUrl' => route('assistant.applovin-account-statistics.index', $backQuery),
+            'spendBandLabel' => match ($spendBand) {
+                'under_5000' => '历史总消耗小于 $5,000',
+                'between_5000_10000' => '历史总消耗 $5,000–$10,000',
+                'over_10000' => '历史总消耗大于 $10,000',
+            },
         ]);
     }
 

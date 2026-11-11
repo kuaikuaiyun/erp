@@ -1,6 +1,6 @@
 @extends('portals.finance.layout', ['title' => __('finance.menus.home')])
 @push('styles')
-<link rel="stylesheet" href="{{ request()->getSchemeAndHttpHost() }}/assets/erp/finance-workbench.css?v=20261109-1">
+<link rel="stylesheet" href="{{ request()->getSchemeAndHttpHost() }}/assets/erp/finance-workbench.css?v=20261111-1">
 @endpush
 @section('finance_content')
 <div id="finance-workbench">
@@ -9,8 +9,8 @@
         @include('portals.finance.partials.credit-summary')
     </div>
     <div class="finance-balance-tabs" role="tablist" aria-label="{{ __('finance.workbench.channels') }}">
-        @foreach(['paypal' => 'paypal', 'credit-card' => 'credit_card'] as $tab => $label)
-        <button type="button" id="finance-tab-{{ $tab }}" role="tab" data-balance-tab="{{ $tab }}" aria-controls="finance-panel-{{ $tab }}" aria-selected="{{ $activeBalanceTab === $tab ? 'true' : 'false' }}" tabindex="{{ $activeBalanceTab === $tab ? '0' : '-1' }}" class="finance-balance-tab {{ $activeBalanceTab === $tab ? 'is-active' : '' }}"><i class="fa {{ $tab === 'paypal' ? 'fa-paypal' : 'fa-credit-card' }}" aria-hidden="true"></i> {{ __('finance.workbench.'.$label) }}</button>
+        @foreach(['paypal' => 'paypal', 'credit-card' => 'credit_card', 'conflux' => 'conflux'] as $tab => $label)
+        <button type="button" id="finance-tab-{{ $tab }}" role="tab" data-balance-tab="{{ $tab }}" aria-controls="finance-panel-{{ $tab }}" aria-selected="{{ $activeBalanceTab === $tab ? 'true' : 'false' }}" tabindex="{{ $activeBalanceTab === $tab ? '0' : '-1' }}" class="finance-balance-tab {{ $activeBalanceTab === $tab ? 'is-active' : '' }}"><i class="fa {{ $tab === 'paypal' ? 'fa-paypal' : ($tab === 'conflux' ? 'fa-shopping-bag' : 'fa-credit-card') }}" aria-hidden="true"></i> {{ $tab === 'conflux' ? 'Conflux' : __('finance.workbench.'.$label) }}</button>
         @endforeach
     </div>
     <div id="finance-panel-paypal" role="tabpanel" aria-labelledby="finance-tab-paypal" tabindex="0" @if($activeBalanceTab !== 'paypal') hidden @endif>
@@ -18,6 +18,9 @@
     </div>
     <div id="finance-panel-credit-card" role="tabpanel" aria-labelledby="finance-tab-credit-card" tabindex="0" @if($activeBalanceTab !== 'credit-card') hidden @endif>
         @include('portals.finance.partials.payment-balance')
+    </div>
+    <div id="finance-panel-conflux" role="tabpanel" aria-labelledby="finance-tab-conflux" tabindex="0" @if($activeBalanceTab !== 'conflux') hidden @endif>
+        @include('portals.finance.partials.payment-balance', ['isConflux' => true, 'creditAccounts' => $confluxAccounts])
     </div>
     @if($canManage)
         <dialog id="finance-sync-logs" class="finance-sync-log-dialog" aria-labelledby="finance-sync-logs-title" data-url="{{ route('finance.sync-logs') }}">
@@ -37,5 +40,5 @@
 @endsection
 @push('scripts')
 <script src="{{ request()->getSchemeAndHttpHost() }}/assets/erp/finance-workbench.js?v=20261109-1"></script>
-@if($canManage)<script src="{{ request()->getSchemeAndHttpHost() }}/assets/erp/finance-payment-accounts.js?v=20261109-4"></script>@endif
+@if($canManage)<script src="{{ request()->getSchemeAndHttpHost() }}/assets/erp/finance-payment-accounts.js?v=20261111-2"></script>@endif
 @endpush

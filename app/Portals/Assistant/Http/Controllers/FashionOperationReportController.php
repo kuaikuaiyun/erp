@@ -38,6 +38,8 @@ class FashionOperationReportController extends Controller
             'timezone' => ['nullable', Rule::in(array_keys($timezones))],
             'department' => ['nullable', 'string', 'max:100'],
             'operator' => ['nullable', 'string', 'max:100'],
+            'sort_by' => ['nullable', Rule::in(['order_count', 'revenue'])],
+            'sort_order' => ['nullable', Rule::in(['asc', 'desc'])],
         ]);
         $validated['department'] = $request->has('department')
             ? trim((string) ($validated['department'] ?? ''))
@@ -169,7 +171,19 @@ class FashionOperationReportController extends Controller
 
             return $matchesDepartment
                 && ($operator === '' || str_contains(mb_strtolower($row['operator']), mb_strtolower($operator)));
-        })->sortBy(fn (array $row) => $row['department'].'|'.$row['operator'])->values();
+        });
+        $sortBy = (string) ($validated['sort_by'] ?? '');
+        $sortOrder = (string) ($validated['sort_order'] ?? 'desc');
+        $rows = ($sortBy !== ''
+            ? $rows->sort(function (array $left, array $right) use ($sortBy, $sortOrder): int {
+                $comparison = ((float) $left[$sortBy]) <=> ((float) $right[$sortBy]);
+                if ($comparison === 0) {
+                    $comparison = [$left['department'], $left['operator']] <=> [$right['department'], $right['operator']];
+                }
+
+                return $sortOrder === 'desc' ? -$comparison : $comparison;
+            })
+            : $rows->sortBy(fn (array $row) => $row['department'].'|'.$row['operator']))->values();
 
         $summaryRevenue = (float) $rows->sum('revenue');
         $summarySpend = (float) $rows->sum('ad_spend');

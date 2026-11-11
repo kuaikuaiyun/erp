@@ -14,6 +14,35 @@ use RuntimeException;
 
 class XShoppyOrderSyncService
 {
+    /**
+     * Test the XShoppy order endpoint without persisting any order data.
+     *
+     * @return array{store_id:int,domain:string,page:int,after:string,before:string,count:int,paid_count:int,orders:list<array<string,mixed>>}
+     */
+    public function previewStoreOrders(AssistantDomainStore $store, Carbon $after, Carbon $before, int $page = 1): array
+    {
+        $this->assertStore($store);
+        $orders = $this->requestPage($store, $after, $before, max(1, $page));
+
+        return [
+            'store_id' => (int) $store->getKey(),
+            'domain' => $this->domain($store),
+            'page' => max(1, $page),
+            'after' => $after->copy()->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s'),
+            'before' => $before->copy()->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s'),
+            'count' => count($orders),
+            'paid_count' => count(array_filter($orders, fn (array $order): bool => $this->isPaid($order))),
+            'orders' => array_map(function (array $order): array {
+                $order['_sync_test'] = [
+                    'is_paid' => $this->isPaid($order),
+                    'would_be_synced' => filled($order['id'] ?? null) && $this->isPaid($order),
+                ];
+
+                return $order;
+            }, $orders),
+        ];
+    }
+
     public function clearOrders(?int $storeId = null): int
     {
         $connection = config('admin.database.connection') ?: config('database.default');

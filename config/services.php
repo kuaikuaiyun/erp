@@ -51,4 +51,8 @@ return [
         ],
     ],
 
+    'xshoppy' => [
+        'order_test_token' => env('XSHOPPY_ORDER_TEST_TOKEN', ''),
+    ],
+
 ];

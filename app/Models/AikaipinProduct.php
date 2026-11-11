@@ -19,6 +19,7 @@ class AikaipinProduct extends Model
         'reference_file',
         'package_file',
         'visible_department_ids',
+        'is_published',
         'shopify_data',
         'created_by',
         'created_by_name',
@@ -41,6 +42,7 @@ class AikaipinProduct extends Model
             'reference_file' => 'array',
             'package_file' => 'array',
             'visible_department_ids' => 'array',
+            'is_published' => 'boolean',
             'shopify_data' => 'array',
         ];
     }

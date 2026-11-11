@@ -1,3 +1,5 @@
+@php($isConflux = $isConflux ?? false)
+@once
 @push('styles')
 <style>
 .payment-balance-section{padding:8px 0 12px;color:#17324d}
@@ -14,18 +16,21 @@
 @media(max-width:767px){.payment-balance-metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}}
 </style>
 @endpush
+@endonce
 
-<section class="payment-balance-section" id="payment2-balances" aria-labelledby="payment-balance-title">
+<section class="payment-balance-section" id="{{ $isConflux ? 'conflux-accounts' : 'payment2-balances' }}" aria-labelledby="{{ $isConflux ? 'conflux-accounts-title' : 'payment-balance-title' }}">
     <div class="payment-balance-heading">
         <div>
-            <h2 id="payment-balance-title">{{ __('finance.balances.xuzong2') }}</h2>
-            <p>{{ __('finance.payment_accounts.credit_unavailable') }}</p>
+            <h2 id="{{ $isConflux ? 'conflux-accounts-title' : 'payment-balance-title' }}">{{ $isConflux ? 'Conflux 店铺账户' : __('finance.balances.xuzong2') }}</h2>
+            @unless($isConflux)<p>{{ __('finance.payment_accounts.credit_unavailable') }}</p>@endunless
         </div>
         @if($canManage)
-            <button type="button" class="btn btn-primary btn-sm" data-add-payment-account="credit_card"><i class="fa fa-plus" aria-hidden="true"></i> {{ __('finance.payment_accounts.add') }}</button>
+            <button type="button" class="btn btn-primary btn-sm" data-add-payment-account="credit_card" @if($isConflux) data-card-platform="ye" @endif><i class="fa fa-plus" aria-hidden="true"></i> {{ $isConflux ? '添加店铺' : __('finance.payment_accounts.add') }}</button>
         @endif
     </div>
-    @if($creditAccounts->isNotEmpty())
+    @if($isConflux)
+        @include('portals.finance.partials.conflux-account-cards')
+    @elseif($creditAccounts->isNotEmpty())
         <div class="box finance-credit-accounts">
             <div class="box-header with-border"><h3 class="box-title">{{ __('finance.payment_accounts.credit_accounts') }}</h3></div>
             <div class="box-body finance-table-wrap">

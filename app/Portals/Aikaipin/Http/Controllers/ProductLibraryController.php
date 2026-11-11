@@ -18,6 +18,7 @@ use App\Portals\Aikaipin\AikaipinSelectionProposalStorageService;
 use App\Portals\Operation\ShopifyProductCsvImporter;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
@@ -222,6 +223,7 @@ class ProductLibraryController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'source_platform' => ['required', 'in:shopify,shopline'],
             'product_type' => ['required', 'in:general,xiaohei'],
+            'is_published' => ['required', 'boolean'],
             'landing_page_url' => ['nullable', 'url', 'max:2048'],
             'skus' => ['nullable', 'array'],
             'skus.*' => ['nullable', 'string', 'max:191', 'distinct'],
@@ -300,6 +302,7 @@ class ProductLibraryController extends Controller
                     'categories' => $categories === [] ? null : $categories,
                     'source_platform' => $data['source_platform'],
                     'product_type' => $data['product_type'],
+                    'is_published' => (bool) $data['is_published'],
                     'landing_page_url' => $data['landing_page_url'] ?: null,
                     'visible_department_ids' => $departmentIds === [] ? null : $departmentIds,
                     'created_by' => (int) $context['user']->getKey(),
@@ -515,6 +518,7 @@ class ProductLibraryController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'source_platform' => ['required', 'in:shopify,shopline'],
             'product_type' => ['required', 'in:general,xiaohei'],
+            'is_published' => ['required', 'boolean'],
             'landing_page_url' => ['nullable', 'url', 'max:2048'],
             'skus' => ['nullable', 'array'],
             'skus.*' => ['nullable', 'string', 'max:191', 'distinct'],
@@ -648,6 +652,7 @@ class ProductLibraryController extends Controller
                     'categories' => $categories === [] ? null : $categories,
                     'source_platform' => $data['source_platform'],
                     'product_type' => $data['product_type'],
+                    'is_published' => (bool) $data['is_published'],
                     'landing_page_url' => $data['landing_page_url'] ?: null,
                     'images' => $images === [] ? null : $images,
                     'reference_file' => $referenceFile,
@@ -824,6 +829,23 @@ class ProductLibraryController extends Controller
                 ? __('aikaipin.messages.visibility_enabled_message', ['count' => count($productIds)])
                 : __('aikaipin.messages.visibility_cancelled_message', ['count' => count($productIds)]),
         ]);
+    }
+
+    public function updatePublication(Request $request, AikaipinProduct $product): RedirectResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) return $context;
+        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
+
+        $data = $request->validate(['is_published' => ['required', 'boolean']]);
+        $published = (bool) $data['is_published'];
+        $product->forceFill([
+            'is_published' => $published,
+            'updated_by' => $context['user']->getKey(),
+            'updated_by_name' => $context['user']->name ?: $context['user']->username,
+        ])->save();
+
+        return back()->with('success', $published ? '商品已上架，订阅运营系统现在可以查看。' : '商品已下架，订阅运营系统将不再显示。');
     }
 
     public function showProductImage(Request $request, AikaipinProduct $product, int $imageIndex): Response
@@ -1435,6 +1457,7 @@ class ProductLibraryController extends Controller
             'name' => (string) $product->name,
             'source_platform' => (string) $product->source_platform,
             'product_type' => (string) $product->product_type,
+            'is_published' => (bool) $product->is_published,
             'landing_page_url' => $product->landing_page_url,
             'skus' => $product->skuValues(),
             'categories' => $product->categoryValues(),
@@ -1805,7 +1828,7 @@ class ProductLibraryController extends Controller
         $query = AikaipinProduct::query()
             ->select([
                 'id', 'product_code', 'name', 'sku', 'categories', 'source_platform', 'product_type',
-                'landing_page_url', 'images', 'reference_file', 'package_file', 'visible_department_ids',
+                'landing_page_url', 'images', 'reference_file', 'package_file', 'visible_department_ids', 'is_published',
                 'created_at', 'updated_at',
             ])
             ->selectRaw('shopify_data IS NOT NULL AS has_shopify_data')

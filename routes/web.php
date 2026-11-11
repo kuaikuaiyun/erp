@@ -61,6 +61,7 @@ Route::get('/fashion/performance-report/orders', [PerformanceReportController::c
 Route::get('/fashion/stores', [FashionStoreController::class, 'index'])->name('fashion.stores.index');
 Route::patch('/fashion/stores/{store}/xshoppy-credentials', [FashionStoreController::class, 'updateCredentials'])->whereNumber('store')->name('fashion.stores.credentials.update');
 Route::get('/fashion-logistics/orders', [FashionOrderController::class, 'index'])->name('fashion-logistics.orders.index');
+Route::get('/fashion-logistics/orders/test-api/{store}', [FashionOrderController::class, 'testApi'])->whereNumber('store')->name('fashion-logistics.orders.test-api');
 Route::get('/fashion-logistics/shopline-orders', [ShoplineOrderController::class, 'index'])->name('fashion-logistics.shopline-orders.index');
 Route::get('/fashion-logistics/shopline-orders/sync-status', [ShoplineOrderController::class, 'syncStatus'])->name('fashion-logistics.shopline-orders.sync-status');
 Route::get('/fashion-logistics/shopline-orders/{order}', [ShoplineOrderController::class, 'show'])->whereNumber('order')->name('fashion-logistics.shopline-orders.show');
@@ -258,6 +259,8 @@ Route::get('/assistant/daily-submissions/applovin-spends', [AppLovinSpendReviewC
     ->name('assistant.applovin-spends.index');
 Route::get('/assistant/applovin-account-statistics', [AppLovinAccountStatisticsController::class, 'index'])
     ->name('assistant.applovin-account-statistics.index');
+Route::get('/assistant/applovin-account-statistics/accounts', [AppLovinAccountStatisticsController::class, 'spendBand'])
+    ->name('assistant.applovin-account-statistics.spend-band');
 Route::get('/assistant/applovin-account-statistics/{operator}', [AppLovinAccountStatisticsController::class, 'show'])
     ->whereNumber('operator')->name('assistant.applovin-account-statistics.show');
 Route::get('/assistant/applovin-performance-reports', [AppLovinPerformanceReportController::class, 'index'])
@@ -294,6 +297,7 @@ Route::get('/assistant/advertising-spend-summary', [AdvertisingSpendSummaryContr
 Route::get('/assistant/advertising-spend-analysis', [AdvertisingSpendAnalysisController::class, 'index'])->name('assistant.advertising-spend-analysis.index');
 Route::get('/assistant/fashion-advertising-reviews', [FashionAdvertisingReviewController::class, 'index'])->name('assistant.fashion-advertising-reviews.index');
 Route::get('/assistant/fashion-advertising-reviews/import-template', [FashionAdvertisingReviewController::class, 'importTemplate'])->name('assistant.fashion-advertising-reviews.import-template');
+Route::get('/assistant/fashion-advertising-reviews/export', [FashionAdvertisingReviewController::class, 'export'])->name('assistant.fashion-advertising-reviews.export');
 Route::post('/assistant/fashion-advertising-reviews/import', [FashionAdvertisingReviewController::class, 'import'])->name('assistant.fashion-advertising-reviews.import');
 Route::post('/assistant/fashion-advertising-reviews/bulk-review', [FashionAdvertisingReviewController::class, 'bulkReview'])->name('assistant.fashion-advertising-reviews.bulk-review');
 Route::get('/assistant/fashion-advertising-reviews/{report}', [FashionAdvertisingReviewController::class, 'show'])->withTrashed()->whereNumber('report')->name('assistant.fashion-advertising-reviews.show');
@@ -442,6 +446,7 @@ Route::middleware(MonitorPaymentPerformance::class)->group(function (): void {
 Route::post('/product-library', [ProductLibraryController::class, 'storeProduct'])->name('aikaipin.product-library.store');
 Route::get('/product-library/{product}/edit-data', [ProductLibraryController::class, 'editProduct'])->name('aikaipin.product-library.edit');
 Route::put('/product-library/{product}', [ProductLibraryController::class, 'updateProduct'])->name('aikaipin.product-library.update');
+Route::patch('/product-library/{product}/publication', [ProductLibraryController::class, 'updatePublication'])->name('aikaipin.product-library.publication.update');
 Route::post('/product-library/{product}/shopify-import/preview', [ProductLibraryController::class, 'previewShopifyImport'])->name('aikaipin.product-library.shopify-import.preview');
 Route::post('/product-library/{product}/shopify-import', [ProductLibraryController::class, 'importShopifyCsv'])->name('aikaipin.product-library.shopify-import.store');
 Route::delete('/product-library/{product}', [ProductLibraryController::class, 'destroyProduct'])->name('aikaipin.product-library.destroy');

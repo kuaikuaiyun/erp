@@ -53,16 +53,48 @@ class FashionAdvertisingReviewController extends Controller
             'import_file.max' => '导入文件不能超过 100MB。',
         ]);
         try {
-            $result = $this->bulkImporter->import($request->file('import_file'), $this->importableOperators($context['user']));
+            $result = $this->bulkImporter->import($request->file('import_file'), $this->importableOperators($context['user']), $context['user']);
         } catch (\InvalidArgumentException $exception) {
             throw ValidationException::withMessages(['import_file' => $exception->getMessage()]);
         }
-        $message = '成功导入 '.$result['imported_count'].' 条广告数据，生成 '.$result['report_count'].' 份待审核记录。';
+        $message = '成功导入 '.$result['imported_count'].' 条广告数据，生成 '.$result['report_count'].' 份审核通过记录';
+        if ($result['overwritten_count'] > 0) $message .= '，覆盖 '.$result['overwritten_count'].' 份原记录';
+        $message .= '。';
         if ($request->expectsJson()) {
             return response()->json($result + ['ok' => true, 'message' => $message, 'redirect_url' => route('assistant.fashion-advertising-reviews.index')]);
         }
 
         return redirect()->route('assistant.fashion-advertising-reviews.index')->with('success', $message);
+    }
+
+    public function export(Request $request): Response
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) return $context;
+
+        $status = in_array($request->input('status'), ['pending', 'approved', 'rejected', 'deleted'], true) ? (string) $request->input('status') : '';
+        $from = $this->date($request->input('from'));
+        $to = $this->date($request->input('to'));
+        $departmentIds = collect($request->input('department_ids', []))
+            ->push($request->input('department_id'))
+            ->map(fn ($id): int => max(0, (int) $id))
+            ->filter()->unique()->values();
+        $submitterId = max(0, (int) $request->input('submitter_id'));
+        $media = trim((string) $request->input('media'));
+        $accountNumber = trim((string) $request->input('account_number'));
+
+        $reports = FashionAdvertisingReport::withTrashed()->with(['adSpendEntries', 'submitter.departments'])
+            ->when($status === 'deleted', fn ($query) => $query->onlyTrashed())
+            ->when(in_array($status, ['pending', 'approved', 'rejected'], true), fn ($query) => $query->whereNull('deleted_at')->where('status', $status))
+            ->when($from, fn ($query) => $query->whereDate('report_date', '>=', $from))
+            ->when($to, fn ($query) => $query->whereDate('report_date', '<=', $to))
+            ->when($departmentIds->isNotEmpty(), fn ($query) => $query->whereHas('submitter.departments', fn ($departmentQuery) => $departmentQuery->whereKey($departmentIds->all())))
+            ->when($submitterId > 0, fn ($query) => $query->where('submitter_id', $submitterId))
+            ->when($media !== '', fn ($query) => $query->whereHas('adSpendEntries', fn ($entryQuery) => $entryQuery->where('media', 'like', '%'.$media.'%')))
+            ->when($accountNumber !== '', fn ($query) => $query->whereHas('adSpendEntries', fn ($entryQuery) => $entryQuery->where('account_number', 'like', '%'.$accountNumber.'%')))
+            ->orderByDesc('report_date')->orderByDesc('id')->get();
+
+        return $this->bulkImporter->exportResponse($reports);
     }
 
     public function index(Request $request): Response|View
@@ -72,11 +104,15 @@ class FashionAdvertisingReviewController extends Controller
             return $context;
         }
 
+        $departmentIds = collect($request->input('department_ids', []))
+            ->push($request->input('department_id'))
+            ->map(fn ($id): int => max(0, (int) $id))
+            ->filter()->unique()->values()->all();
         $filters = [
             'status' => in_array($request->input('status'), ['pending', 'approved', 'rejected', 'deleted'], true) ? (string) $request->input('status') : '',
             'from' => $this->date($request->input('from')),
             'to' => $this->date($request->input('to')),
-            'department_id' => max(0, (int) $request->input('department_id')),
+            'department_ids' => $departmentIds,
             'submitter_id' => max(0, (int) $request->input('submitter_id')),
             'media' => trim((string) $request->input('media')),
             'account_number' => trim((string) $request->input('account_number')),
@@ -102,7 +138,7 @@ class FashionAdvertisingReviewController extends Controller
             ->when(in_array($filters['status'], ['pending', 'approved', 'rejected'], true), fn ($query) => $query->whereNull('deleted_at')->where('status', $filters['status']))
             ->when($filters['from'], fn ($query) => $query->whereDate('report_date', '>=', $filters['from']))
             ->when($filters['to'], fn ($query) => $query->whereDate('report_date', '<=', $filters['to']))
-            ->when($filters['department_id'] > 0, fn ($query) => $query->whereHas('submitter.departments', fn ($departmentQuery) => $departmentQuery->whereKey($filters['department_id'])))
+            ->when($filters['department_ids'] !== [], fn ($query) => $query->whereHas('submitter.departments', fn ($departmentQuery) => $departmentQuery->whereKey($filters['department_ids'])))
             ->when($filters['submitter_id'] > 0, fn ($query) => $query->where('submitter_id', $filters['submitter_id']))
             ->when($filters['media'] !== '', fn ($query) => $query->whereHas('adSpendEntries', fn ($entryQuery) => $entryQuery
                 ->where('media', 'like', '%'.$filters['media'].'%')))

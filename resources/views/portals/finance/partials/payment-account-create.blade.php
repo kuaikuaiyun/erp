@@ -21,7 +21,7 @@
                     <datalist id="finance-card-group-options">@foreach($cardGroups as $groupName)<option value="{{ $groupName }}">@endforeach</datalist>
                     <p class="help-block">选择已有主体，或输入新主体名称。一个主体下可添加多个单包账户。</p>
                 </div>
-                <div class="form-group"><label for="finance-account-name">{{ __('finance.payment_accounts.attributes.account_name') }}</label><input class="form-control" id="finance-account-name" name="account_name" required maxlength="100" value="{{ $accountOldValue('account_name') }}"></div>
+                <div class="form-group"><label for="finance-account-name" data-default-label="{{ __('finance.payment_accounts.attributes.account_name') }}">{{ __('finance.payment_accounts.attributes.account_name') }}</label><input class="form-control" id="finance-account-name" name="account_name" required maxlength="100" value="{{ $accountOldValue('account_name') }}"></div>
                 <div class="finance-account-form-grid">
                     <div class="form-group"><label for="finance-account-type">{{ __('finance.payment_accounts.attributes.account_type') }}</label><select class="form-control" id="finance-account-type" name="account_type"><option value="paypal" @selected($accountOldValue('account_type', 'paypal') === 'paypal')>PayPal</option><option value="credit_card" @selected($accountOldValue('account_type') === 'credit_card')>{{ __('finance.workbench.credit_card') }}</option></select></div>
                     <div class="form-group"><label for="finance-account-currency">{{ __('finance.payment_accounts.attributes.main_currency') }}</label><input class="form-control" id="finance-account-currency" name="main_currency" required maxlength="3" pattern="[A-Z]{3}" value="{{ $accountOldValue('main_currency', 'USD') }}" style="text-transform:uppercase"></div>
@@ -37,7 +37,7 @@
                     </select>
                 </div>
                 <div class="form-group" id="finance-card-merchant-field" @if($accountOldValue('card_platform') !== 'ye') hidden @endif>
-                    <label for="finance-card-merchant">ConfluxAPI 商户标识</label>
+                    <label for="finance-card-merchant">Conflux 商户标识</label>
                     <input class="form-control" id="finance-card-merchant" name="card_merchant_key" maxlength="100" value="{{ $accountOldValue('card_merchant_key') }}">
                     <p class="help-block">填结算报表工作表后缀，例如 ZZdanbao。一个单包建一个商户账户。</p>
                 </div>

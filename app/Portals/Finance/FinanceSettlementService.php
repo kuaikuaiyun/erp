@@ -227,6 +227,15 @@ class FinanceSettlementService
         return compact('accountModels', 'accounts', 'accountsById', 'storesById', 'domains', 'brushStores', 'locks');
     }
 
+    public function rowBatches(string $channel, array $filters): iterable
+    {
+        $context = $this->rowContext($channel);
+        $query = $this->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id');
+        foreach ($query->lazy(500)->chunk(500) as $records) {
+            yield $this->rows($channel, $filters, new \Illuminate\Database\Eloquent\Collection($records->all()), $context);
+        }
+    }
+
     public function rows(string $channel, array $filters, ?Collection $records = null, ?array $context = null): Collection
     {
         $db = $this->workbooks->database();

@@ -50,7 +50,7 @@ class FinanceController extends Controller
 
         $filters = $request->validate([
             'balance_account' => 'nullable|string|max:100', 'paypal_currency' => ['nullable', 'regex:/^[A-Z]{3}$/'],
-            'balance_tab' => ['nullable', Rule::in(['paypal', 'credit-card'])],
+            'balance_tab' => ['nullable', Rule::in(['paypal', 'credit-card', 'conflux'])],
             'add_credit_merchant' => ['nullable', Rule::in(array_keys(FinanceCreditSettlementLayout::CHANNELS))],
             'card_group' => 'nullable|integer|min:1',
         ]);
@@ -59,17 +59,20 @@ class FinanceController extends Controller
         $hasPaymentAccount = $request->filled('balance_account');
         $paymentOverview = $hasPaymentAccount ? $this->paymentBalances->dashboard() : $paymentBalance;
         $activeBalanceTab = old('balance_tab', $filters['balance_tab'] ?? ($hasPaymentAccount ? 'credit-card' : 'paypal'));
-        if (! in_array($activeBalanceTab, ['paypal', 'credit-card'], true)) {
+        if (! in_array($activeBalanceTab, ['paypal', 'credit-card', 'conflux'], true)) {
             $activeBalanceTab = 'paypal';
         }
 
         $cardGroups = FinanceCreditAccountGroup::query()->orderBy('name')->pluck('name', 'id');
 
+        [$confluxAccounts, $creditAccounts] = FinancePaymentAccount::query()->where('account_type', 'credit_card')->orderBy('id')->get()
+            ->partition(fn (FinancePaymentAccount $account) => FinanceCreditSettlementLayout::accountPlatform($account) === 'ye');
+
         return response()->view('portals.finance.home', [
             ...$context, ...$paypalBalance, 'paypalBalance' => $paypalBalance,
             'paymentBalance' => $paymentBalance, 'paymentOverview' => $paymentOverview, 'activeBalanceTab' => $activeBalanceTab,
             'balanceFormatter' => $this->paymentBalances,
-            'creditAccounts' => FinancePaymentAccount::query()->where('account_type', 'credit_card')->orderBy('id')->get(),
+            'creditAccounts' => $creditAccounts, 'confluxAccounts' => $confluxAccounts,
             'paymentAccountEditors' => $context['canManage'] ? $this->paymentAccountEditors($paypalBalance['cards']) : [],
             'newCardPlatform' => $filters['add_credit_merchant'] ?? null,
             'cardGroups' => $cardGroups, 'newCardGroup' => $cardGroups->get($filters['card_group'] ?? 0),
@@ -364,7 +367,11 @@ class FinanceController extends Controller
         }
 
         return redirect()->route('finance.home', [
-            ...$displayOptions, 'balance_tab' => $data['account_type'] === 'paypal' ? 'paypal' : 'credit-card',
+            ...$displayOptions, 'balance_tab' => match (true) {
+                $data['account_type'] === 'paypal' => 'paypal',
+                ($data['card_platform'] ?? null) === 'ye' => 'conflux',
+                default => 'credit-card',
+            },
         ])->with('success', __('finance.payment_accounts.created'))
             ->with('refreshConnectedAccount', $account->account_type === 'paypal' && $account->status === 'enabled' ? 'finance-'.$account->id : null);
     }
@@ -399,7 +406,11 @@ class FinanceController extends Controller
         });
 
         return redirect()->route('finance.home', [
-            ...$displayOptions, 'balance_tab' => $data['account_type'] === 'paypal' ? 'paypal' : 'credit-card',
+            ...$displayOptions, 'balance_tab' => match (true) {
+                $data['account_type'] === 'paypal' => 'paypal',
+                ($data['card_platform'] ?? null) === 'ye' => 'conflux',
+                default => 'credit-card',
+            },
         ])->with('success', __('finance.paypal_profile.saved'))
             ->with('refreshConnectedAccount', $data['account_type'] === 'paypal' && $data['status'] === 'enabled' ? $accountKey : null);
     }
@@ -445,7 +456,7 @@ class FinanceController extends Controller
                 }
             }],
             'relay_server_remark' => [Rule::excludeIf(! $isPayPal), 'nullable', 'string', 'max:255'],
-            'balance_tab' => ['nullable', Rule::in(['paypal', 'credit-card'])],
+            'balance_tab' => ['nullable', Rule::in(['paypal', 'credit-card', 'conflux'])],
             'paypal_currency' => ['nullable', 'regex:/^[A-Z]{3}$/'],
             'balance_account' => 'nullable|string|max:100',
             'from_credit_settlement' => 'nullable|boolean',
@@ -594,7 +605,7 @@ class FinanceController extends Controller
             'rates.*.units_per_usd' => ['nullable', 'numeric', 'regex:/^\d{1,12}(?:\.\d{1,10})?$/', 'gt:0'],
             'paypal_currency' => ['nullable', 'regex:/^[A-Z]{3}$/'],
             'balance_account' => 'nullable|string|max:100',
-            'balance_tab' => ['nullable', Rule::in(['paypal', 'credit-card'])],
+            'balance_tab' => ['nullable', Rule::in(['paypal', 'credit-card', 'conflux'])],
         ], [], ['rates.*.units_per_usd' => __('finance.exchange.rate'), 'rates.*.currency' => __('finance.fields.currency')]);
         foreach ($data['rates'] as $row) {
             if ($row['currency'] === 'USD' && (! isset($row['units_per_usd']) || bccomp($row['units_per_usd'], '1', 10) !== 0)) {
@@ -638,7 +649,7 @@ class FinanceController extends Controller
             'usd_rate' => ['nullable', 'numeric', 'regex:/^\d{1,10}(?:\.\d{1,8})?$/', 'gt:0'],
             'as_of' => ['required', 'date_format:Y-m-d\TH:i'],
             'paypal_currency' => ['nullable', 'regex:/^[A-Z]{3}$/'],
-            'balance_tab' => ['nullable', Rule::in(['paypal', 'credit-card'])],
+            'balance_tab' => ['nullable', Rule::in(['paypal', 'credit-card', 'conflux'])],
         ], [], trans('finance.payment_balance.validation_attributes'));
         $asOf = CarbonImmutable::createFromFormat('!Y-m-d\TH:i', $data['as_of'], 'Asia/Shanghai')->utc();
         if ($asOf->isFuture()) {
@@ -1511,7 +1522,7 @@ class FinanceController extends Controller
             $rows = $this->transactionSummaryRows($service, $tab, $scope, $month, $account)
                 ->filter(fn ($row) => $service->matches($row, $scope['conditions'] ?? []));
 
-            return [$summary->summarize($service->withLogisticsCosts($rows), $tab), $service->subscriptionOptions($rows)];
+            return [$summary->summarize($service->withLogisticsCosts($rows), $tab), $service->subscriptionOptions(isset($subscriptions) ? collect($subscriptions) : $rows)];
         };
         [$items, $subscriptionOptions] = ! $request->boolean('download')
             && in_array($this->workbooks->database()->getDriverName(), ['mysql', 'mariadb'], true)
@@ -1674,7 +1685,7 @@ class FinanceController extends Controller
                 }
             }
         }
-        // Computed fields still need the complete matching set before filtering.
+        // Computed filters are evaluated in batches before counting and slicing the matches.
         $canPaginate = ! $request->boolean('download') && ! $request->has('suggestion_field')
             && empty($filters['card_exceptions']) && empty($filters['card_match'])
             && ! filled($filters['team'] ?? null) && ! filled($filters['subscription'] ?? null)
@@ -1689,8 +1700,26 @@ class FinanceController extends Controller
                 ->paginate((int) ($filters['per_page'] ?? 10))->withQueryString();
             $rows = $service->rows($channel, $filters, $paginator->getCollection());
             $paginator->setCollection($rows);
+        } elseif (! $request->boolean('download') && ! $request->has('suggestion_field')) {
+            $perPage = (int) ($filters['per_page'] ?? 10);
+            $page = max(1, (int) $request->query('page', 1));
+            $offset = ($page - 1) * $perPage;
+            $total = 0;
+            $rows = collect();
+            $subscriptions = [];
+            foreach ($service->rowBatches($channel, $filters) as $batch) {
+                foreach ($batch as $row) {
+                    $subscriptions[(string) ($row['subscription'] ?? '')] = ['subscription' => $row['subscription'] ?? null];
+                    if ($total >= $offset && $rows->count() < $perPage) {
+                        $rows->push($row);
+                    }
+                    $total++;
+                }
+            }
+            $paginator = new \Illuminate\Pagination\LengthAwarePaginator($rows, $total, $perPage, $page,
+                ['path' => $request->url(), 'query' => $request->query()]);
         } else {
-            $rows = $service->rows($channel, $filters);
+            $rows = $request->boolean('download') ? $service->rows($channel, $filters) : collect();
         }
         if ($request->has('suggestion_field')) {
             $suggestion = $request->validate([
@@ -1698,9 +1727,12 @@ class FinanceController extends Controller
                 'suggestion_q' => 'nullable|string|max:191',
             ]);
             $search = FinanceCatalog::simplified($suggestion['suggestion_q'] ?? '');
-            $values = $rows->pluck($suggestion['suggestion_field'])->filter(fn ($value) => $value !== null && $value !== ''
-                && ($search === '' || mb_stripos(FinanceCatalog::simplified((string) $value), $search) !== false))
-                ->unique()->sort()->take(20)->values();
+            $values = collect();
+            foreach ($orderView ? [$rows] : $service->rowBatches($channel, $filters) as $batch) {
+                $values = $values->concat($batch->pluck($suggestion['suggestion_field'])->filter(fn ($value) => $value !== null && $value !== ''
+                    && ($search === '' || mb_stripos(FinanceCatalog::simplified((string) $value), $search) !== false)))
+                    ->unique()->sort()->take(20)->values();
+            }
 
             return response()->json($values->map(fn ($value) => ['value' => (string) $value, 'label' => FinanceCatalog::simplified((string) $value)]));
         }
@@ -1748,7 +1780,7 @@ class FinanceController extends Controller
             'editorFields' => $editorFields, 'orderView' => $orderView,
             'editorNumericFields' => app(\App\Portals\Finance\FinanceSettlementEditor::class)->numericFields($channel),
             'conditionFields' => $conditionFields, 'numericConditionFields' => $numericConditionFields,
-            'subscriptionOptions' => $service->subscriptionOptions($rows),
+            'subscriptionOptions' => $service->subscriptionOptions(isset($subscriptions) ? collect($subscriptions) : $rows),
             'accounts' => $accounts, 'filterAccounts' => $filterAccounts,
             'cardGroups' => $channel === 'credit_card' ? FinanceCreditAccountGroup::query()->orderBy('name')->pluck('name', 'id') : collect(),
             'teams' => ($orderView ? $service->operationDepartments()->pluck('name') : $this->workbooks->domainGroups()->pluck('team'))
@@ -2477,7 +2509,7 @@ class FinanceController extends Controller
                     ->unique('account_key')->map(fn ($row) => ['value' => $row['account_key'], 'label' => $row['account']])->values(),
             ];
             foreach (['owner', 'team', 'subscription', 'payment_method'] as $field) {
-                $values = $field === 'subscription' ? $service->subscriptionOptions($rows) : $rows->pluck($field)->filter()->unique()->sort();
+                $values = $field === 'subscription' ? $service->subscriptionOptions(isset($subscriptions) ? collect($subscriptions) : $rows) : $rows->pluck($field)->filter()->unique()->sort();
                 $filterOptions[$field] = $values->map(fn ($value) => ['value' => $value, 'label' => $value])->values();
             }
         }
@@ -2773,6 +2805,10 @@ class FinanceController extends Controller
                     continue;
                 }
                 if (filled($value) && isset(FinanceCatalog::PAYPAL_ORDER_FILTERS[$field])) {
+                    if ($dataset === 'paypal-orders' && $field === 'domain') {
+                        $this->filterPayPalOrderDomain($query, $value);
+                        continue;
+                    }
                     if (in_array($field, FinanceCatalog::PAYPAL_LOGISTICS_FILTERS, true) || ($dataset === 'xuzong2-orders' && (str_starts_with($field, 'column_') || $field === 'sender_email'))) {
                         $linked[$field] = $value;
                         continue;
@@ -2912,6 +2948,41 @@ class FinanceController extends Controller
         }
 
         return $query;
+    }
+
+    private function filterPayPalOrderDomain(Builder $query, string $value): void
+    {
+        $db = $this->workbooks->database();
+        $schema = $db->getSchemaBuilder();
+        if (! $schema->hasTable('logistics_orders')) {
+            $this->applyCondition($query, 'domain', 'contains', $value);
+
+            return;
+        }
+
+        $domains = [];
+        $orders = $db->table('logistics_orders as domain_order');
+        if ($schema->hasColumn('logistics_orders', 'assistant_domain_store_id')
+            && $schema->hasTable('assistant_domain_stores')) {
+            $orders->leftJoin('assistant_domain_stores as domain_store', 'domain_store.id', '=', 'domain_order.assistant_domain_store_id');
+            $domains[] = "NULLIF(domain_store.domain, '')";
+        }
+        if ($schema->hasColumn('logistics_orders', 'source_shop_domain')) {
+            $domains[] = "NULLIF(domain_order.source_shop_domain, '')";
+        }
+        if ($domains === []) {
+            $this->applyCondition($query, 'domain', 'contains', $value);
+
+            return;
+        }
+
+        $matches = app(\App\Portals\Finance\FinanceSettlementService::class)->paypalOrderMatchIndex();
+        $linkedDomain = $orders->joinSub($matches, 'domain_match', 'domain_match.order_id', '=', 'domain_order.id')
+            ->whereColumn('domain_match.record_id', 'finance_records.id')
+            ->selectRaw('COALESCE('.implode(', ', [...$domains, 'NULL']).')');
+
+        $query->whereRaw('COALESCE(('.$linkedDomain->toSql().'), finance_records.domain) LIKE ?',
+            [...$linkedDomain->getBindings(), '%'.$value.'%']);
     }
 
     private function applyCondition($query, string $column, string $operator, string $value): void

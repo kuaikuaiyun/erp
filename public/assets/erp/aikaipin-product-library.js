@@ -1375,6 +1375,7 @@
             }
             setRadioValue('source_platform', product.source_platform);
             setRadioValue('product_type', product.product_type);
+            setRadioValue('is_published', product.is_published ? '1' : '0');
             uploadSkus = Array.isArray(product.skus) ? product.skus.slice() : [];
             existingImageFiles = Array.isArray(product.images) ? product.images.slice() : [];
             existingReferenceFile = product.reference_file || null;

@@ -39,9 +39,9 @@ class FashionAdvertisingReportBulkImportService
     }
 
     /** @param Collection<int, AdminUser> $operators
-     *  @return array{imported_count:int,report_count:int}
+     *  @return array{imported_count:int,report_count:int,overwritten_count:int}
      */
-    public function import(UploadedFile $file, Collection $operators): array
+    public function import(UploadedFile $file, Collection $operators, AdminUser $reviewer): array
     {
         $rows = $this->spreadsheets->read($file);
         $configurations = [];
@@ -102,11 +102,6 @@ class FashionAdvertisingReportBulkImportService
                 ];
             }
 
-            foreach ($groups as $group) {
-                if (FashionAdvertisingReport::query()->whereDate('report_date', $group['report_date'])->where('submitter_id', $group['operator_id'])->exists()) {
-                    throw new \InvalidArgumentException($this->operatorLabel($configurations[$group['operator_id']]['operator']).' 在 '.$group['report_date'].' 已有提报记录，请先删除或编辑原记录。');
-                }
-            }
             foreach ($groups as &$group) foreach ($group['ads'] as &$ad) {
                 $path = 'fashion-advertising/'.now()->format('Ym').'/'.Str::uuid().'.'.$ad['_image_extension'];
                 if (! Storage::disk('local')->put($path, $ad['_image_bytes'])) throw new \InvalidArgumentException('广告消耗截图保存失败，请稍后重试。');
@@ -116,28 +111,52 @@ class FashionAdvertisingReportBulkImportService
             }
             unset($group, $ad);
 
-            (new FashionAdvertisingReport)->getConnection()->transaction(function () use ($groups, $configurations): void {
+            $oldScreenshotPaths = collect();
+            $overwrittenCount = 0;
+            (new FashionAdvertisingReport)->getConnection()->transaction(function () use ($groups, $configurations, $reviewer, $oldScreenshotPaths, &$overwrittenCount): void {
                 foreach ($groups as $group) {
                     $operator = $configurations[$group['operator_id']]['operator'];
                     [$orders, $revenue] = $this->performance((int) $group['operator_id'], $group['report_date']);
                     $spend = round((float) collect($group['ads'])->sum('actual_spend_usd'), 2);
-                    $report = FashionAdvertisingReport::query()->create([
+                    $report = FashionAdvertisingReport::withTrashed()
+                        ->whereDate('report_date', $group['report_date'])
+                        ->where('submitter_id', $group['operator_id'])
+                        ->lockForUpdate()->first();
+                    if ($report) {
+                        $overwrittenCount++;
+                        $oldScreenshotPaths->push(...$report->adSpendEntries()->pluck('screenshot_path')->filter()->all());
+                        $report->adSpendEntries()->delete();
+                        $report->performanceEntries()->delete();
+                        if ($report->trashed()) $report->restore();
+                    } else {
+                        $report = new FashionAdvertisingReport();
+                    }
+                    $report->fill([
                         'report_date' => $group['report_date'], 'submitter_id' => $group['operator_id'],
                         'submitter_name' => (string) ($operator->name ?: $operator->username),
                         'total_revenue_usd' => $revenue, 'total_order_count' => $orders,
                         'total_ad_spend_usd' => $spend, 'roi' => $spend > 0 ? round($revenue / $spend, 4) : 0,
-                        'status' => FashionAdvertisingReport::STATUS_PENDING,
-                        'reviewed_by' => null, 'reviewer_name' => null, 'reviewed_at' => null, 'review_reason' => null,
-                    ]);
+                        'status' => FashionAdvertisingReport::STATUS_APPROVED,
+                        'reviewed_by' => $reviewer->getKey(),
+                        'reviewer_name' => (string) ($reviewer->name ?: $reviewer->username),
+                        'reviewed_at' => now(), 'review_reason' => null,
+                        'deleted_by' => null, 'deleter_name' => null,
+                    ])->save();
                     $report->adSpendEntries()->createMany($group['ads']);
                 }
             });
+            $oldScreenshotPaths->unique()->each(static fn (string $path) => Storage::disk('local')->delete($path));
         } catch (\Throwable $exception) {
             foreach ($storedPaths as $path) Storage::disk('local')->delete($path);
             throw $exception;
         }
 
-        return ['imported_count' => count($rows), 'report_count' => count($groups)];
+        return ['imported_count' => count($rows), 'report_count' => count($groups), 'overwritten_count' => $overwrittenCount];
+    }
+
+    public function exportResponse(iterable $reports): StreamedResponse
+    {
+        return $this->spreadsheets->exportFashionResponse($reports);
     }
 
     /** @return array{0:int,1:float} */

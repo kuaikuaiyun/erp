@@ -7,6 +7,7 @@
     var secret = form.elements.relay_hmac_secret;
     var relay = document.getElementById('finance-paypal-relay-fields');
     var platform = form.elements.card_platform;
+    var nameLabel = form.querySelector('label[for="finance-account-name"]');
     var hasSecret = false;
     var relayConfigured = false;
     var editing = false;
@@ -14,6 +15,8 @@
     var fields = ['account_name', 'account_type', 'card_group_name', 'card_platform', 'card_merchant_key', 'main_currency', 'status', 'remark', 'relay_url', 'relay_certificate_sha1', 'relay_hmac_key_id', 'relay_server_remark'];
     function updateMerchant() {
         var conflux = !platform.disabled && platform.value === 'ye';
+        nameLabel.textContent = conflux ? '店铺名称' : nameLabel.dataset.defaultLabel;
+        document.getElementById('finance-credit-account-note').hidden = conflux || platform.disabled;
         form.elements.card_merchant_key.disabled = !conflux;
         form.elements.card_merchant_key.required = conflux && !!form.dataset.newCardPlatform;
         document.getElementById('finance-card-merchant-field').hidden = !conflux;
@@ -27,7 +30,6 @@
         document.getElementById('finance-card-group-field').hidden = paypal;
         document.getElementById('finance-card-platform-field').hidden = paypal;
         updateMerchant();
-        document.getElementById('finance-credit-account-note').hidden = paypal;
         relay.querySelectorAll('[data-relay-required]').forEach(function (input) {
             input.required = paypal && (input !== secret || !hasSecret);
         });
@@ -59,7 +61,7 @@
     platform.addEventListener('change', updateMerchant);
     form.elements.main_currency.addEventListener('input', function () { this.value = this.value.toUpperCase(); });
     document.querySelectorAll('[data-add-payment-account]').forEach(function (button) {
-        button.addEventListener('click', function () { open('', button.dataset.addPaymentAccount, false, null, button.dataset.creditGroup); });
+        button.addEventListener('click', function () { open('', button.dataset.addPaymentAccount, false, button.dataset.cardPlatform, button.dataset.creditGroup); });
     });
     document.querySelectorAll('[data-edit-payment-account]').forEach(function (button) {
         button.addEventListener('click', function () { open(button.dataset.editPaymentAccount, null, false); });
