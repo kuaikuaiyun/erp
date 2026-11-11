@@ -30,7 +30,7 @@ class FashionAdvertisingReportBulkImportService
     {
         $groups = [];
         foreach ($operators as $operator) {
-            $department = $this->storeOwners->operationDepartmentForUser($operator);
+            $department = $this->storeOwners->storeOwnershipOperationDepartmentForUser($operator);
             $assistantIds = $department ? $this->storeOwners->assistantDepartmentIdsForOperationDepartment((int) $department->getKey()) : [];
             $groups[$this->operatorLabel($operator)] = $this->agencyGroups($assistantIds);
         }
@@ -67,7 +67,7 @@ class FashionAdvertisingReportBulkImportService
                 $operator = $matches->first();
                 $operatorId = (int) $operator->getKey();
                 if (! isset($configurations[$operatorId])) {
-                    $department = $this->storeOwners->operationDepartmentForUser($operator);
+                    $department = $this->storeOwners->storeOwnershipOperationDepartmentForUser($operator);
                     if (! $department) throw new \InvalidArgumentException("运营人员「{$row['operator_name']}」尚未归属运营部门。");
                     $assistantIds = $this->storeOwners->assistantDepartmentIdsForOperationDepartment((int) $department->getKey());
                     $configurations[$operatorId] = ['operator' => $operator, 'agency_groups' => $this->agencyGroups($assistantIds)];
