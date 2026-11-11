@@ -136,15 +136,15 @@ class AdvertisingReportSpreadsheetService
         foreach (['A' => 16, 'B' => 18, 'C' => 22, 'D' => 18, 'E' => 26, 'F' => 24, 'G' => 20, 'H' => 24] as $column => $width) {
             $sheet->getColumnDimension($column)->setWidth($width);
         }
-        $sheet->getStyle('A5:A104')->getNumberFormat()->setFormatCode('yyyy-mm-dd');
-        $sheet->getStyle('B5:F104')->getNumberFormat()->setFormatCode('@');
-        $sheet->getStyle('G5:G104')->getNumberFormat()->setFormatCode('0.00');
-        $sheet->getStyle('A5:H104')->applyFromArray([
+        $sheet->getStyle('A5:A1004')->getNumberFormat()->setFormatCode('yyyy-mm-dd');
+        $sheet->getStyle('B5:F1004')->getNumberFormat()->setFormatCode('@');
+        $sheet->getStyle('G5:G1004')->getNumberFormat()->setFormatCode('0.00');
+        $sheet->getStyle('A5:H1004')->applyFromArray([
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FBFDFE']],
             'alignment' => ['vertical' => Alignment::VERTICAL_CENTER],
             'borders' => ['bottom' => ['borderStyle' => Border::BORDER_HAIR, 'color' => ['rgb' => 'E3EBF1']]],
         ]);
-        for ($row = 5; $row <= 104; $row++) $sheet->getRowDimension($row)->setRowHeight(62);
+        for ($row = 5; $row <= 1004; $row++) $sheet->getRowDimension($row)->setRowHeight(62);
 
         $options = $spreadsheet->createSheet();
         $options->setTitle('人员可选代理社媒');
@@ -252,7 +252,6 @@ class AdvertisingReportSpreadsheetService
             ];
         }
         if ($result === []) throw new InvalidArgumentException('模板中没有可导入的广告数据。');
-        if (count($result) > 100) throw new InvalidArgumentException('一次最多导入 100 条广告数据。');
 
         return $result;
     }

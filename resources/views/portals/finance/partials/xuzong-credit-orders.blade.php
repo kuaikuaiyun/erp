@@ -10,7 +10,7 @@
             @php($values = $xuzongRows->get($record->id))
             <tr>
                 <td class="paypal-order-selection"><input type="checkbox" class="paypal-order-check" value="{{ $record->id }}" aria-label="选择记录 {{ $record->id }}"></td>
-                @foreach($exportHeaders as $header)<td>{{ $values[$header] ?? '' }}</td>@endforeach
+                @foreach($exportHeaders as $header)<td>{{ \App\Portals\Finance\FinanceXuzongCreditReport::formatCell($header, $values[$header] ?? '') }}</td>@endforeach
                 <td><button type="button" class="btn btn-info btn-xs js-logistics-order-detail" data-order-detail-url="{{ route($recordsRoute, ['order_detail' => $record->id, 'timezone' => $filters['timezone']]) }}" aria-haspopup="dialog"><i class="fa fa-eye" aria-hidden="true"></i> 查看</button></td>
             </tr>
         @empty

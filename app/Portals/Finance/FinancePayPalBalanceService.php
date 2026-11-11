@@ -14,8 +14,13 @@ class FinancePayPalBalanceService
     {
         $db = $this->workbooks->database();
         $accounts = FinancePaymentAccount::query()->where('account_type', 'paypal')->orderBy('id')->get();
-        $snapshots = $db->table('finance_balance_snapshots')->whereIn('payment_account_id', $accounts->modelKeys())
-            ->orderByDesc('as_of')->orderByDesc('id')->get()->unique('payment_account_id')->keyBy('payment_account_id');
+        $latestSnapshot = $db->table('finance_balance_snapshots as latest')
+            ->select('latest.id')->whereColumn('latest.payment_account_id', 'snapshot.payment_account_id')
+            ->orderByDesc('latest.as_of')->orderByDesc('latest.id')->limit(1);
+        $snapshots = $db->table('finance_balance_snapshots as snapshot')
+            ->whereIn('snapshot.payment_account_id', $accounts->modelKeys())
+            ->where('snapshot.id', '=', $latestSnapshot)
+            ->get(['payment_account_id', 'payload', 'as_of', 'created_at'])->keyBy('payment_account_id');
         $latestBalanceLogIds = $db->table('finance_sync_logs')->selectRaw('MAX(id)')
             ->whereIn('payment_account_id', $accounts->modelKeys())->where('operation', 'balances')
             ->whereIn('status', ['success', 'failed'])->groupBy('payment_account_id');

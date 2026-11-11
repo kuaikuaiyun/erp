@@ -45,7 +45,8 @@ return [
     'remark' => '支付渠道账务、收支明细与基础资料管理',
     'permissions' => ['view' => '财务系统：查看与导出', 'manage' => '财务系统：维护与导入'],
     'menus' => [
-        'paypal-settlement' => 'PayPal结算明细', 'credit-settlement' => '信用卡结算明细', 'xuzong-credit' => '徐总信用卡',
+        'paypal-settlement' => 'PayPal结算明细', 'credit-settlement' => '信用卡结算明细',
+        'ye-settlement' => '叶总支付明细', 'worldpay-settlement' => 'worldpy明细', 'xuzong-credit' => '徐总信用卡',
         'home' => '财务工作台', 'balances' => '实时余额', 'orders' => '订单列表',
         'paypal-orders' => 'PayPal订单数据', 'xuzong2-orders' => '信用卡订单数据',
         'details' => '支付明细', 'paypal-details' => 'PayPal明细表', 'xuzong2-details' => '信用卡2明细表',
@@ -103,7 +104,7 @@ return [
         'add' => '添加账户', 'created' => '账户已添加。', 'enabled' => '启用', 'disabled' => '停用', 'code' => '账户标识',
         'edit' => '编辑账户', 'secret_preserved' => '已设置，留空保持不变；输入新值将重置密钥',
         'linked_type_locked' => '此账户已关联余额来源或交易数据，账户类型不可更改。',
-        'credit_accounts' => '信用卡账户', 'credit_unavailable' => '信用卡接口功能暂未开放，仅维护账户资料。',
+        'credit_accounts' => '信用卡账户', 'credit_unavailable' => '信用卡余额功能未开发，目前仅可添加账户。',
         'relay_configuration' => 'PayPal VPS中转配置', 'secret_help' => '填写 VPS 配置中的 HMAC Base64 文本（解码后至少 32 字节）。密钥加密保存且不回显；表单校验失败后需重新输入。',
         'secret_base64' => 'HMAC 密钥必须是有效的 Base64 文本，解码后至少 32 字节。',
         'relay_saved' => '已保存该账户的 VPS 中转配置，以下资料已回填。HMAC 密钥不回显，留空保留原值。',

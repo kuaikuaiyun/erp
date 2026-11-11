@@ -1055,7 +1055,10 @@ class FinanceSettlementService
     public function withLogisticsCosts(Collection $rows): Collection
     {
         $db = $this->workbooks->database();
-        $orders = $rows->filter(fn ($row) => filled($row['logistics_order_id'] ?? null))->groupBy('logistics_order_id');
+        $orders = $rows->filter(fn ($row) => filled($row['logistics_order_id'] ?? null))->groupBy('logistics_order_id')
+            ->filter(fn ($payments) => $payments->contains(fn ($row) => $row['success'])
+                && (! $payments->contains(fn ($row) => $row['purchase'] !== null)
+                    || ! $payments->contains(fn ($row) => $row['logistics'] !== null)));
         if ($orders->isEmpty() || ! $db->getSchemaBuilder()->hasTable('logistics_order_items')
             || ! $db->getSchemaBuilder()->hasTable('logistics_tongtu_sku_mappings')) {
             return $rows;

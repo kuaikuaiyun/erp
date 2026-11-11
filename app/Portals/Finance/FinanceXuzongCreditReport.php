@@ -11,6 +11,33 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class FinanceXuzongCreditReport
 {
+    public const PLATFORM_RESULT = '平台返回结果';
+    public const PLATFORM_CODE = '平台返回code';
+    public const PLATFORM_MESSAGE = '平台返回message';
+
+    private const PLATFORM_RESULTS = [
+        '50001' => ['pick up card', '发卡行要求收回卡片'],
+        '50002' => ['lost card', '卡片已挂失'],
+        '50003' => ['stolen card', '卡片被盗'],
+        '50004' => ['closed account', '账户已关闭'],
+        '50005' => ['invalid card number', '卡号无效'],
+        '50006' => ['invalid cam, dcvv, icvv, cvv or cvv2', '卡片安全验证码无效'],
+        '50007' => ['expired card', '卡片已过期'],
+        '50008' => ['insufficient funds', '余额不足'],
+        '50010' => ['no completed 3d secure', '未完成 3D 安全验证'],
+        '50011' => ['refer to card issuer', '请联系发卡行'],
+        '50012' => ['do not honor', '发卡行拒绝交易'],
+        '50013' => ['transaction not permitted to cardholder', '持卡人不允许进行此类交易'],
+        '50014' => ['suspected fraud', '疑似欺诈'],
+        '50015' => ['fraud/security related reasons', '因欺诈或安全原因被拒绝'],
+        '50016' => ['processer declind by high risk', '支付处理机构因高风险拒绝交易'],
+        '50017' => ['failed', '支付失败'],
+        '60001' => ['blacklist rejected', '命中黑名单，交易被拒绝'],
+        '60002' => ['risk rule blocked', '触发风控规则，交易被拦截'],
+        '3DS_INTERCEPTED' => ['3ds challenge intercepted', '3D 安全验证被拦截'],
+        'DECLINED' => ['declined', '交易被拒绝'],
+    ];
+
     public const DISPLAY_HEADERS = [
         '交易流水号' => '交易 ID',
         '交易币种' => '货币',
@@ -47,7 +74,8 @@ class FinanceXuzongCreditReport
             $ordered += $columns;
         }
 
-        return array_map(fn ($header) => self::DISPLAY_HEADERS[$header] ?? $header, $ordered);
+        return array_map(fn ($header) => self::DISPLAY_HEADERS[$header] ?? $header,
+            $ordered + [52 => '原始支付状态', 53 => self::PLATFORM_RESULT]);
     }
 
     public function rows(Collection $records, string $timezone): Collection
@@ -89,7 +117,7 @@ class FinanceXuzongCreditReport
             if ($imported) {
                 $row = array_replace($row, array_filter(array_intersect_key($record->payload, array_flip([
                     '商户名称', '商户订单号', '交易流水号', '订单币种', '订单金额', '支付方式', '是否3D',
-                    '发卡国家', '卡号', '消费者邮箱', '通途订单',
+                    '发卡国家', '卡号', '消费者邮箱', '通途订单', '物流-元', '采购成本-元', '备注',
                 ])), fn ($value) => filled($value)));
                 $row['创建时间'] = $record->occurred_at?->setTimezone($timezone)->format('Y-m-d H:i:s') ?? '';
                 $row['平台订单号'] = ($record->payload['_platform_missing'] ?? false) ? ($order->payment_gateway_order_id ?? '') : $record->reference;
@@ -114,21 +142,43 @@ class FinanceXuzongCreditReport
             foreach (self::DISPLAY_HEADERS as $field => $label) {
                 $row[$label] = $row[$field] ?? '';
             }
+            $row['状态'] = $record->match_status;
+            $row['原始支付状态'] = $record->status ?? '';
+            $row[self::PLATFORM_RESULT] = self::platformResult($record->payload);
+            if ($record->match_status === '失败') {
+                $note = trim((string) ($row['备注'] ?? ''));
+                $row['备注'] = $note === '' ? '失败'
+                    : ($note === '失败' || str_starts_with($note, '失败；') ? $note : '失败；'.$note);
+            }
 
             return [$record->id => $row];
         });
     }
 
+    private static function platformResult(array $payload): string
+    {
+        $code = strtoupper(trim((string) ($payload[self::PLATFORM_CODE] ?? '')));
+        $message = trim((string) ($payload[self::PLATFORM_MESSAGE] ?? $payload[self::PLATFORM_RESULT] ?? ''));
+        if (isset(self::PLATFORM_RESULTS[$code])) {
+            return self::PLATFORM_RESULTS[$code][1];
+        }
+
+        $normalized = strtolower(rtrim($message, '. '));
+        foreach (self::PLATFORM_RESULTS as [$source, $label]) {
+            if ($source === $normalized) {
+                return $label;
+            }
+        }
+        if (preg_match('/\p{Han}/u', $message)) {
+            return $message;
+        }
+
+        return $code === '' && $message === '' ? '' : '平台返回结果暂无法识别';
+    }
+
     private function applyUsdSettlement(array &$row, ?string $status, ?array $exchange): void
     {
         $row['汇率'] = $row['结算-美元'] = '';
-        if (FinanceSettlementService::transactionStatusCategory($status) === 'failed') {
-            $note = trim((string) ($row['备注'] ?? ''));
-            $row['备注'] = $note === '' ? '失败'
-                : ($note === '失败' || str_starts_with($note, '失败；') ? $note : '失败；'.$note);
-
-            return;
-        }
         if (! FinanceSettlementService::isSuccessfulTransaction($status) || $row['交易金额'] === '') {
             return;
         }
@@ -179,6 +229,22 @@ class FinanceXuzongCreditReport
             '通途订单' => $payload['通途订单'] ?? '',
             '备注' => $payload['备注'] ?? '',
         ];
+    }
+
+    public static function formatCell(string $header, mixed $value): mixed
+    {
+        $field = array_search($header, self::DISPLAY_HEADERS, true) ?: $header;
+        if (is_numeric($value) && (FinanceXuzongCreditMatches::isAmount($field)
+            || in_array($field, ['订单金额', '交易金额', '结算-美元', '应结算（USD）', FinanceSettlementService::SHOP_DIFFERENCE_LABEL], true))) {
+            $amount = trim((string) $value);
+            if (! preg_match('/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/D', $amount)) {
+                return number_format((float) $value, 2, '.', '');
+            }
+
+            return bcadd($amount, str_starts_with($amount, '-') ? '-0.005' : '0.005', 2);
+        }
+
+        return $value;
     }
 
     public static function downloadXlsx(array $headers, iterable $rows, string $filename): StreamedResponse
