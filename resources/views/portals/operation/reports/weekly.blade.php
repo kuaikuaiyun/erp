@@ -13,10 +13,8 @@
 <section class="content">
     <div class="box weekly-filter"><div class="box-body">
         <form class="weekly-toolbar" method="get" action="{{ route('operation.weekly-reports.index') }}">
-            @if($isBoss)
-                <div class="form-group"><label>运营部门</label><select class="form-control input-sm" name="operation_department_id" onchange="this.form.submit()"><option value="">全部运营部门</option>@foreach($operationDepartments as $department)<option value="{{ $department->id }}" @selected($selectedDepartmentId === (int)$department->id)>{{ $department->name }}</option>@endforeach</select></div>
-            @elseif($isReportDepartmentLeader && $viewerOperationDepartment)
-                <div class="form-group"><label>运营部门</label><select class="form-control input-sm" disabled><option>{{ $viewerOperationDepartment->name }}</option></select></div>
+            @if($isBoss || $isReportDepartmentLeader)
+                <div class="form-group"><label>运营部门</label><select class="form-control input-sm" name="operation_department_id" onchange="var person=this.form.querySelector('[name=operator_user_id]');if(person){person.disabled=true;}this.form.submit()"><option value="">全部运营部门</option>@foreach($operationDepartments as $department)<option value="{{ $department->id }}" @selected($selectedDepartmentId === (int)$department->id)>{{ $department->name }}</option>@endforeach</select></div>
             @endif
             @if($canSelectOperator)
                 <div class="form-group"><label>运营人员</label><select class="form-control input-sm" name="operator_user_id"><option value="all" @selected($selectAllOperators)>全部运营人员</option>@foreach($operatorOptions as $option)<option value="{{ $option->id }}" @selected(!$selectAllOperators && $selectedOperator?->id === $option->id)>{{ $option->name ?: $option->username }}</option>@endforeach</select></div>
