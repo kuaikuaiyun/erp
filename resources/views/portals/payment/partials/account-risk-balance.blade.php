@@ -14,7 +14,7 @@
                 </div>
             @endforeach
         </div>
-        <div class="payment-account-balance-meta"><span><i class="fa fa-clock-o" aria-hidden="true"></i> 上次手动刷新：{{ $balance['refreshed_at'] }}</span>@if($balance['hidden_zero_count'] > 0)<button type="button" data-payment-account-balance-toggle data-hidden-count="{{ $balance['hidden_zero_count'] }}"><i class="fa fa-angle-down" aria-hidden="true"></i> 展开 {{ $balance['hidden_zero_count'] }} 个零余额币种</button>@endif</div>
+        <div class="payment-account-balance-meta"><span><i class="fa fa-clock-o" aria-hidden="true"></i> {{ __('payment.balance_refresh_command.updated_at', ['time' => $balance['refreshed_at']]) }}</span>@if($balance['hidden_zero_count'] > 0)<button type="button" data-payment-account-balance-toggle data-hidden-count="{{ $balance['hidden_zero_count'] }}"><i class="fa fa-angle-down" aria-hidden="true"></i> 展开 {{ $balance['hidden_zero_count'] }} 个零余额币种</button>@endif</div>
     </div>
 @else
     <p class="payment-account-balance-pending"><i class="fa fa-info-circle" aria-hidden="true"></i> 尚未获取实时余额</p>

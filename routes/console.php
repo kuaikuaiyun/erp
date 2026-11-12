@@ -55,6 +55,13 @@ Schedule::command('logistics:paypal-relay:sync')
     ->withoutOverlapping(120)
     ->runInBackground();
 
+Schedule::command('payment:paypal-balances:refresh')
+    ->hourly()
+    ->timezone('Asia/Shanghai')
+    ->withoutOverlapping(1440)
+    ->sendOutputTo(storage_path('logs/payment-paypal-balances-schedule.log'))
+    ->runInBackground();
+
 Schedule::command('payment:paypal-risk:refresh-weekly')
     ->mondays()
     ->at('00:10')

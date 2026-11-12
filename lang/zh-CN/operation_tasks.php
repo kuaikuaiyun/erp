@@ -1,6 +1,11 @@
 <?php
 
 return [
+    'recap_edit' => [
+        'button' => '编辑',
+        'locked' => '审核中不可编辑',
+        'notice' => '操作提醒',
+    ],
     'review_task' => [
         'info' => '任务信息',
         'number' => '任务编号：',

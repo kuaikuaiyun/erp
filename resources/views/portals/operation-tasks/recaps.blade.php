@@ -108,7 +108,7 @@
                                 @if((int) $recap->user_id === (int) $user->id && $status === 'rejected')
                                     <a class="btn btn-default btn-xs" href="{{ route('operation-tasks.recaps.index', ['edit' => $recap->id]) }}">修改并重提</a>
                                 @elseif((int) $recap->user_id === (int) $user->id)
-                                    <span class="ot-recap-action-hint">审核中不可编辑</span>
+                                    <button type="button" class="btn btn-default btn-xs ot-recap-edit-locked" aria-disabled="true" data-recap-edit-locked>{{ __('operation_tasks.recap_edit.button') }}</button>
                                 @endif
                             </td>
                         </tr>
@@ -206,5 +206,25 @@
         $('#ot-recap-modal').modal('show');
     @endif
 }());
+</script>
+@endpush
+
+@push('styles')
+<style>
+.ot-recap-page .ot-recap-edit-locked,.ot-recap-page .ot-recap-edit-locked:hover,.ot-recap-page .ot-recap-edit-locked:focus{background:#f0f2f4;border-color:#d9dfe4;color:#929da6;cursor:not-allowed;box-shadow:none}
+</style>
+@endpush
+@push('scripts')
+<script>
+(function (message, title) {
+    document.addEventListener('click', function (event) {
+        var button = event.target.closest && event.target.closest('[data-recap-edit-locked]');
+        if (!button) return;
+        event.preventDefault();
+        if (window.ErpAdminNotifier) {
+            window.ErpAdminNotifier.notify({type: 'warning', title: title, message: message});
+        }
+    });
+})(@json(__('operation_tasks.recap_edit.locked')), @json(__('operation_tasks.recap_edit.notice')));
 </script>
 @endpush

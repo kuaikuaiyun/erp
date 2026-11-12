@@ -257,6 +257,13 @@ $translations = [
 ];
 
 return array_replace_recursive($translations, [
+    'balance_refresh_command' => [
+        'description' => '刷新支付中台已启用且配置中转接口的 PayPal 账户余额',
+        'running' => '支付中台余额刷新任务正在执行，本次跳过。',
+        'failed' => '账户 :account 余额刷新失败，保留原余额，下一轮继续尝试。',
+        'summary' => '支付中台余额刷新完成：成功 :success 个，失败 :failed 个，配置不完整跳过 :skipped 个。',
+        'updated_at' => '上次余额更新：:time',
+    ],
     'account_reason_filter' => [
         'heading' => '筛选原因',
         'clear' => '清空',
