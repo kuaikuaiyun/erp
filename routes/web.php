@@ -26,6 +26,7 @@ use App\Portals\Assistant\Http\Controllers\DomainStoreController;
 use App\Portals\Assistant\Http\Controllers\FashionAdvertisingReviewController;
 use App\Portals\Assistant\Http\Controllers\FashionAppLovinPerformanceReportController;
 use App\Portals\Assistant\Http\Controllers\FashionOperationReportController;
+use App\Portals\Assistant\Http\Controllers\FashionStoreAnalyticsController;
 use App\Portals\Assistant\Http\Controllers\OperationReportDashboardController;
 use App\Portals\Assistant\Http\Controllers\OperationReportReviewController;
 use App\Portals\Assistant\Http\Controllers\ShopifyAnalyticsController;
@@ -115,7 +116,7 @@ Route::prefix('finance')->name('finance.')->middleware(RedirectFinanceDomain::cl
     Route::get('/reports/{report}', 'report')->name('report');
     Route::get('/reports/paypal-settlement/records/{record}', 'paypalSettlementDetail')->whereNumber('record')->name('settlement.paypal.detail');
     Route::post('/reports/{report}/export-template/preview', 'previewExportTemplate')
-        ->whereIn('report', ['paypal-settlement', 'credit-settlement', 'ye-settlement', 'worldpay-settlement'])->name('settlement.export-template.preview');
+        ->whereIn('report', ['paypal-settlement', 'credit-settlement', 'ye-settlement', 'worldpay-settlement', 'xuzong-credit'])->name('settlement.export-template.preview');
     Route::post('/reports/{report}/save', 'saveSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement', 'ye-settlement', 'worldpay-settlement'])->name('settlement.save');
     Route::delete('/reports/{report}/records', 'deleteSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement', 'ye-settlement', 'worldpay-settlement'])->name('settlement.delete');
     Route::post('/reports/{report}/import', 'importSettlement')->whereIn('report', ['paypal-settlement', 'credit-settlement', 'ye-settlement', 'worldpay-settlement'])->name('settlement.import');
@@ -182,6 +183,7 @@ Route::delete('/domain-stores/{domainStore}', [DomainStoreController::class, 'de
 Route::get('/domain-stores/{domainStore}/history', [DomainStoreController::class, 'history'])->name('assistant.domain-stores.history');
 Route::patch('/domain-stores/{domainStore}/owner-histories/{ownerHistory}/effective-time', [DomainStoreController::class, 'updateOwnerHistoryEffectiveTime'])->name('assistant.domain-stores.owner-histories.effective-time');
 Route::get('/shopify-analytics', [ShopifyAnalyticsController::class, 'index'])->name('assistant.shopify-analytics.index');
+Route::get('/assistant/fashion-store-analytics', [FashionStoreAnalyticsController::class, 'index'])->name('assistant.fashion-store-analytics.index');
 Route::get('/shopify-analytics/export-orders', [ShopifyAnalyticsController::class, 'exportOrders'])->name('assistant.shopify-analytics.export-orders');
 Route::post('/shopify-analytics/refresh-batch', [ShopifyAnalyticsController::class, 'refreshBatch'])->name('assistant.shopify-analytics.refresh-batch');
 Route::get('/shopify-analytics/sync-batches/{batch}/progress', [ShopifyAnalyticsController::class, 'syncProgress'])->name('assistant.shopify-analytics.sync-progress');

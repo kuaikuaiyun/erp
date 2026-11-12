@@ -143,6 +143,7 @@ class FinanceLogisticsCreditOrders
         }
         if ($searchReference !== null) {
             $orders->where(fn ($order) => $order->where('f.reference', $searchReference)
+                ->orWhere('f.payload->_edited_platform_order_id', $searchReference)
                 ->orWhere('f.payload->_legacy_order_id', $searchReference)
                 ->orWhere('f.payload->_linked_platform_order_id', $searchReference)
                 ->orWhere('f.payload->交易流水号', $searchReference)
@@ -158,6 +159,7 @@ class FinanceLogisticsCreditOrders
         $orders->selectRaw("CASE
             WHEN {$refundFlag} = '是' OR UPPER(TRIM(f.status)) IN ('退款', '已退款', 'REFUNDED', 'PARTIALLY_REFUNDED') THEN '退款'
             WHEN UPPER(TRIM(f.status)) IN ('SUCCESS', 'SUCCEEDED', 'COMPLETED', 'PAID', '成功', '已付款', 'S') THEN '成功'
+            WHEN UPPER(TRIM(f.status)) IN ('PENDING', '待确认') THEN '待确认'
             ELSE '失败' END as match_status");
 
         return $orders;

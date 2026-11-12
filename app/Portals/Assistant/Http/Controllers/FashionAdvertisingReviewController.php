@@ -236,7 +236,8 @@ class FashionAdvertisingReviewController extends Controller
             'review_reason' => $data['decision'] === 'rejected' ? trim((string) $data['review_reason']) : null,
         ])->save();
 
-        return back()->with('success', $data['decision'] === 'approved' ? '报表已审核通过。' : '报表已审核不通过。');
+        return redirect()->route('assistant.fashion-advertising-reviews.index')
+            ->with('success', $data['decision'] === 'approved' ? '报表已审核通过。' : '报表已审核不通过。');
     }
 
     public function show(Request $request, FashionAdvertisingReport $report): Response|View

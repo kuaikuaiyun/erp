@@ -132,6 +132,17 @@ class FinanceWorkbookService
             $sheet = $this->importSheet($book, $sheetName);
             ['row' => $lastRow, 'column' => $lastColumn] = $sheet->getHighestRowAndColumn();
             $width = Coordinate::columnIndexFromString($lastColumn);
+            if ($width > 100) {
+                $width = 100;
+                foreach ($sheet->getCellCollection()->getCoordinates() as $address) {
+                    [$column] = Coordinate::coordinateFromString($address);
+                    $index = Coordinate::columnIndexFromString($column);
+                    if ($index > 100 && filled($sheet->getCell($address)->getValue())) {
+                        $width = $index;
+                        break;
+                    }
+                }
+            }
             if ($lastRow > $maxRows + 1 || $width > 100) {
                 throw ValidationException::withMessages(['file' => __('finance.errors.size', ['rows' => number_format($maxRows)])]);
             }

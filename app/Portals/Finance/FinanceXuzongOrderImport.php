@@ -56,7 +56,11 @@ class FinanceXuzongOrderImport
                 $headers = array_map(fn ($header) => FinanceCatalog::simplified(trim((string) $header)),
                     ($legacySheet ?? $book->getActiveSheet())->rangeToArray('A1:CV1')[0]);
                 $book->disconnectWorksheets();
-                if ($legacySheet !== null && ! array_diff(['商户订单号', '创建时间', '交易币种', '交易金额', '支付状态'], $headers)) {
+                $legacyRequired = ['商户订单号', '创建时间', '交易币种', '交易金额', '支付状态'];
+                $legacyOptional = ['消费者邮箱', '物流-元', '采购成本-元', '备注'];
+                $legacyFormat = ! array_diff($legacyRequired, $headers)
+                    && ! array_diff(array_filter($headers), [...$legacyRequired, ...$legacyOptional]);
+                if ($legacyFormat || ($legacySheet !== null && ! array_diff($legacyRequired, $headers))) {
                     return 'legacy_orders';
                 }
             } catch (\PhpOffice\PhpSpreadsheet\Exception | \ValueError) {
@@ -179,6 +183,11 @@ class FinanceXuzongOrderImport
         return [...array_values(self::STATEMENT_AMOUNTS), '应结算'];
     }
 
+    public const EDITABLE_ORDER_FIELDS = [
+        '商户名称', '商户订单号', '平台订单号', '交易流水号', '订单币种', '订单金额', '交易币种',
+        '交易金额', '支付状态', '支付方式', '是否3D', '发卡国家', '卡号', '消费者邮箱', '创建时间', '完成时间',
+    ];
+
     public function manageStatement(int $recordId, array $data): void
     {
         $this->workbooks->database()->transaction(function () use ($recordId, $data): void {
@@ -186,6 +195,31 @@ class FinanceXuzongOrderImport
                 ->lockForUpdate()->findOrFail($recordId);
             $payload = $order->payload;
             $existing = $payload['_xuzong_statement_import'] ?? [];
+            if ($data['action'] === 'edit_order') {
+                $fields = $data['order_fields'];
+                $this->guardStatementDates($order, []);
+                $created = \Carbon\CarbonImmutable::parse($fields['创建时间'], 'UTC');
+                app(FinanceAccountingService::class)->guardUnlocked($created->setTimezone('Asia/Shanghai')->format('Y-m'));
+                $fields['卡号'] = preg_match('/(\d{4})$/D', $fields['卡号'] ?? '', $lastFour) ? '****'.$lastFour[1] : '';
+                $platform = $fields['平台订单号'] ?? '';
+                unset($fields['平台订单号']);
+                $payload = array_replace($payload, array_map(fn ($value) => $value ?? '', $fields));
+                $payload['_edited_platform_order_id'] = $platform;
+                if (! empty($data['report_fields'])) {
+                    $current = app(FinanceXuzongCreditReport::class)->orderValues($order->id);
+                    foreach ($data['report_fields'] as $field => $value) {
+                        if ((string) $value !== (string) ($current[$field] ?? '')) {
+                            $payload['_edited_report_fields'][$field] = $value ?? '';
+                        }
+                    }
+                }
+                $order->update([
+                    'payload' => $payload, 'occurred_at' => $created,
+                    'currency' => strtoupper($fields['交易币种']), 'status' => $fields['支付状态'],
+                ]);
+
+                return;
+            }
             if ($data['action'] === 'handled') {
                 if (($existing['notice'] ?? null) !== $data['notice']) {
                     throw ValidationException::withMessages(['statement' => '结算明细刚有更新，请刷新后再确认。']);
@@ -404,12 +438,34 @@ class FinanceXuzongOrderImport
 
     public function import(UploadedFile $file, ?string $account, string $timezone, int $actor, bool $legacySheet = false): array
     {
+        if (! $legacySheet) {
+            return $this->importOrderSheet($file, $account, $timezone, $actor);
+        }
+
+        $result = $this->importOrderSheet($file, 'SHANGYUN', $timezone, $actor, self::LEGACY_ORDER_SHEET);
+        $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($file->getPathname());
+        foreach ($reader->listWorksheetNames($file->getPathname()) as $sheet) {
+            if (! in_array(trim($sheet), ['徐总2失败订单', '徐总2数据'], true)) {
+                continue;
+            }
+
+            $second = $this->importOrderSheet($file, 'SHANGYUN-v2', $timezone, $actor, $sheet);
+            foreach ($result as $key => $count) {
+                $result[$key] = $count + $second[$key];
+            }
+        }
+
+        return $result;
+    }
+
+    private function importOrderSheet(UploadedFile $file, ?string $account, string $timezone, int $actor, ?string $sheet = null): array
+    {
         $headers = [...array_values(FinanceXuzongCreditReport::headers()), ...array_keys(FinanceXuzongCreditReport::DISPLAY_HEADERS),
             FinanceXuzongCreditReport::PLATFORM_CODE, FinanceXuzongCreditReport::PLATFORM_MESSAGE, '是否 3D', '交易单号', '交易时间',
             'Source（域名）', '发行国', '邮箱', '退款', ...FinanceXuzongCreditMatches::EXCHANGE_HEADERS];
         $batches = in_array(strtolower($file->getClientOriginalExtension()), ['csv', 'tsv', 'txt'], true)
             ? $this->csvBatches($file, $headers)
-            : array_chunk($this->workbooks->read($file, $headers, $legacySheet ? self::LEGACY_ORDER_SHEET : null, $headers), 300, true);
+            : array_chunk($this->workbooks->read($file, $headers, $sheet, $headers), 300, true);
 
         $total = $matched = $saved = 0;
         foreach ($batches as $rows) {
@@ -499,11 +555,14 @@ class FinanceXuzongOrderImport
         if ($columns === []) {
             return [];
         }
-        $candidates = $db->table('logistics_orders')->where(function ($query) use ($rows, $columns): void {
-            foreach ($columns as $header => $column) {
-                $query->orWhereIn($column, collect($rows)->pluck($header)->filter()->unique()->values());
+        $candidates = collect();
+        foreach ($columns as $header => $column) {
+            $references = array_values(array_unique(array_filter(array_column($rows, $header))));
+            if ($references !== []) {
+                $candidates = $candidates->union($db->table('logistics_orders')->whereIn($column, $references)
+                    ->get(['id', ...array_values($columns)])->keyBy('id'));
             }
-        })->get(['id', ...array_values($columns)])->keyBy('id');
+        }
         if ($candidates->isEmpty()) {
             return [];
         }

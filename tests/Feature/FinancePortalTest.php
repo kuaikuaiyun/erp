@@ -973,7 +973,7 @@ class FinancePortalTest extends TestCase
             ]);
         }
         $activeCreditRows = $this->get($creditUrl)->assertOk()
-            ->assertSeeInOrder(['<th scope="col">运营所属部门</th>', '<th scope="col">地区</th>', '<th scope="col">通途订单</th>'], false)
+            ->assertSeeInOrder(['>运营所属部门</th>', '>地区</th>', '>通途订单</th>'], false)
             ->viewData('xuzongRows')->keyBy('平台订单号');
         $this->assertSame('张清洪', $activeCreditRows['NO-OWNER']['使用人']);
         $this->assertSame('郑州', $activeCreditRows['NO-OWNER']['区域']);
@@ -3014,6 +3014,11 @@ class FinancePortalTest extends TestCase
         $resultExport = $this->readDownload($this->get($report.'/export?reference=TXN-UNLINKED-FAIL&export_scope=filtered&report_columns[]=53')
             ->assertOk()->streamedContent());
         $this->assertSame([['平台返回结果'], ['卡号无效']], $resultExport->toArray());
+        $template = $this->readDownload($this->get($report.'/export?export_scope=filtered&export_template=1&report_columns[]=53&report_columns[]=52')
+            ->assertOk()->streamedContent());
+        $this->assertSame([['平台返回结果', '原始支付状态']], $template->toArray());
+        $this->postJson($report.'/export-template/preview', ['header_row' => 1, 'file' => $this->upload($template->getParent())])
+            ->assertOk()->assertJsonPath('fields', [53, 52]);
         $refundCsv = "退款单号,平台订单号,商户订单号,退款金额,退款币种,退款处理费,退款完成时间,状态\n"
             ."REFUND-1,TXN-UNLINKED-FAIL,MANUAL-FAILED,2.50,USD,1.00,2026-11-04 01:10:17,SUCCESS\n"
             ."REFUND-2,TXN-UNLINKED-FAIL,MANUAL-FAILED,7.00,USD,1.00,,REJECTED\n";
@@ -3053,6 +3058,9 @@ class FinancePortalTest extends TestCase
         $statementPath = $report.'/statement/'.$statementOrder->id;
         $this->get($report)->assertOk()->assertSee('待处理结算变动')->assertSee($statementPath);
         $this->get($statementPath)->assertOk()->assertSee('TXN-UNLINKED-FAIL')->assertSee('2026-11-05 01:10:17');
+        $this->get($statementPath, ['X-Requested-With' => 'XMLHttpRequest'])->assertOk()
+            ->assertSee('保存修改')->assertDontSee('返回徐总信用卡');
+        $this->assertNotEmpty($statementOrder->refresh()->payload['_xuzong_statement_import']['notice']);
         $time = '2026-11-06 01:10:17';
         $this->post($statementPath, ['action' => 'add', 'time' => $time, 'amounts' => ['应结算' => '1.50']])
             ->assertRedirect($statementPath)->assertSessionHasNoErrors();
@@ -3065,6 +3073,18 @@ class FinancePortalTest extends TestCase
         $this->post($statementPath, ['action' => 'delete', 'event' => $eventKey])->assertRedirect($statementPath)->assertSessionHasNoErrors();
         $this->assertSame('-3.50', $statementOrder->refresh()->payload['应结算']);
         $notice = $statementOrder->payload['_xuzong_statement_import']['notice'];
+        $this->postJson($statementPath, ['action' => 'edit_order', 'order_fields' => [
+            '商户名称' => '修正商户', '平台订单号' => 'CORRECTED-ID',
+            '创建时间' => '2026-11-03 17:01:00', '交易币种' => 'USD', '交易金额' => '9.51', '支付状态' => '失败',
+        ], 'report_fields' => ['汇率' => '1.25', '订阅类型' => '订阅复购1次', '备注' => '财务复核']])->assertOk()->assertJsonPath('handled', false);
+        $this->get($report.'?reference=TXN-UNLINKED-FAIL')->assertOk()
+            ->assertViewHas('xuzongRows', fn ($rows) => $rows->sole()['商户名称'] === '修正商户'
+                && $rows->sole()['平台订单号'] === 'CORRECTED-ID' && $rows->sole()['交易金额'] === '9.51'
+                && $rows->sole()['汇率'] === '1.25');
+        $this->assertSame($notice, $statementOrder->refresh()->payload['_xuzong_statement_import']['notice']);
+        $this->get($report.'?'.http_build_query(['reference' => 'CORRECTED-ID', 'order_fields' => ['subscription_type' => '订阅复购1次']]))
+            ->assertOk()->assertViewHas('xuzongRows', fn ($rows) => $rows->count() === 1
+                && $rows->sole()['备注'] === '失败；财务复核；系统无匹配订单');
         $this->post($statementPath, ['action' => 'handled', 'notice' => $notice])->assertRedirect($report);
         $append()->assertOk()->assertExactJson(['total' => 2, 'matched' => 1, 'saved' => 0]);
         $this->get($report)->assertOk()->assertDontSee('待处理结算变动');
@@ -3081,7 +3101,7 @@ class FinancePortalTest extends TestCase
         $lateId = DB::table('logistics_orders')->insertGetId($lateOrder);
         $this->get($report.'?reference=TXN-UNLINKED-FAIL')->assertOk()
             ->assertViewHas('xuzongRows', fn ($rows) => $rows->sole()['域名'] === 'late.example.com'
-                && $rows->sole()['备注'] === '失败' && $rows->sole()['原始支付状态'] === 'FAILED');
+                && $rows->sole()['备注'] === '失败；财务复核' && $rows->sole()['原始支付状态'] === 'FAILED');
         $lateExport = $this->readDownload($this->get($report.'/export?reference=TXN-UNLINKED-FAIL&export_scope=filtered')
             ->assertOk()->streamedContent())->toArray();
         $this->assertSame('late.example.com', $lateExport[1][array_search('域名', $lateExport[0], true)]);

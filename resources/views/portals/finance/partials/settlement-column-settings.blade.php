@@ -17,6 +17,12 @@
     data-template-url="{{ route('finance.records.export', ['dataset' => $report, 'export_layout' => 'page', 'export_scope' => 'filtered']) }}"
     data-legacy-preference-key="finance:paypal-orders:page-export-columns:v2"
     @endif
+    @if($report === 'xuzong-credit')
+    data-filter-form="finance-filters"
+    data-export-column-param="report_columns[]"
+    data-template-format-param="export_format"
+    data-template-url="{{ route('finance.reports.xuzong-credit.export', ['export_scope' => 'filtered']) }}"
+    @endif
     @isset($columnCardChannel)
     data-template-url="{{ route('finance.report', [$report, 'download' => 1, 'card_channel' => $columnCardChannel, ...$columnExceptionScope]) }}"
     @endisset
@@ -43,7 +49,7 @@
         <section data-column-panel="export">
             <div class="settlement-template-import">
                 <strong><i class="fa fa-upload" aria-hidden="true"></i> 从表格导入模板</strong>
-                <p>仅读取首个工作表指定行的表头和顺序。支持 XLSX、XLS、CSV{{ $report === 'paypal-orders' ? '、TSV' : '' }}。</p>
+                <p>仅读取首个工作表指定行的表头和顺序。支持 XLSX、XLS、CSV{{ in_array($report, ['paypal-orders', 'xuzong-credit'], true) ? '、TSV' : '' }}。</p>
                 <div class="settlement-template-file">
                     <input type="file" data-import-template-file accept=".xlsx,.xls,.csv{{ $report === 'paypal-orders' ? ',.tsv' : '' }}" aria-label="导出模板文件">
                     <label>表头行 <input class="form-control" type="number" data-import-template-row min="1" max="1000" step="1" value="1"></label>

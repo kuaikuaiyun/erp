@@ -14,6 +14,12 @@
             'report' => $dataset, 'orderView' => false, 'columns' => $orderColumns,
             'exportColumns' => $exportHeaders,
         ])
+    @elseif($xuzongReport)
+        <select class="form-control" data-active-export-template aria-label="本次使用的导出模板"><option value="">默认字段设置</option></select>
+        @include('portals.finance.partials.settlement-column-settings', [
+            'report' => 'xuzong-credit', 'orderView' => false, 'columns' => $exportHeaders,
+            'exportColumns' => $exportHeaders,
+        ])
     @else
     <details class="finance-export-columns">
         <summary class="btn btn-default btn-sm">选择导出列</summary>
