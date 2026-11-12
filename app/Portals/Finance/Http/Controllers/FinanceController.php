@@ -1202,7 +1202,7 @@ class FinanceController extends Controller
         if ($xuzongReport) {
             $report = app(FinanceXuzongCreditReport::class);
             $orders = app(FinanceLogisticsCreditOrders::class);
-            $rows = (clone $query)->reorder('id')->select('id')->cursor()->chunk(300)->flatMap(function ($batch) use ($orders, $report, $filters, $headers) {
+            $rows = (clone $query)->reorder('id')->select('id')->lazyById(300)->chunk(300)->flatMap(function ($batch) use ($orders, $report, $filters, $headers) {
                 $records = $orders->query(xuzongReport: true, ids: $batch->pluck('id')->all())->orderBy('id')->get();
 
                 return $report->rows($records, $filters['timezone'])->values()->map(fn ($values) =>
@@ -1220,7 +1220,7 @@ class FinanceController extends Controller
                 default => FinanceXuzongCreditReport::downloadXlsx($headers, $rows, $filename.'.xlsx',
                     fn () => FinanceXuzongCreditReport::statementExportRows(
                         (clone $query)->reorder('id')->where(fn ($records) => $records->whereNotNull('payload->_xuzong_statement_import')
-                            ->orWhereNotNull('payload->_edited_report_fields'))->cursor()
+                            ->orWhereNotNull('payload->_edited_report_fields'))->lazyById(500)
                     )),
             };
         }
@@ -1782,7 +1782,11 @@ class FinanceController extends Controller
                 }
             }
         }
-        $statementRows = fn () => app(FinanceConfluxSettlement::class)->unmatchedRows($filters);
+        if ($request->boolean('download') && ($filters['card_channel'] ?? null) === 'ye' && $request->has('selected_rows')) {
+            $selection = $request->validate(['export_record_ids' => 'sometimes|required|array|max:100', 'export_record_ids.*' => 'integer|min:1|distinct']);
+            $filters += $selection;
+        }
+        $statementRows = fn () => empty($filters['export_record_ids']) ? app(FinanceConfluxSettlement::class)->unmatchedRows($filters) : [];
         $resultBatches = function () use ($service, $channel, $filters, $statementRows): iterable {
             yield from $service->rowBatches($channel, $filters);
             foreach (collect()->lazy()->concat($statementRows())->chunk(500) as $batch) {
@@ -1791,14 +1795,20 @@ class FinanceController extends Controller
         };
         // Computed filters are evaluated in batches before counting and slicing the matches.
         $canPaginate = ! $request->boolean('download') && ! $request->has('suggestion_field')
-            && empty($filters['card_wallet']) && empty($filters['card_exceptions']) && empty($filters['card_match']) && empty($filters['ledger_settlement_type'])
+            && empty($filters['card_wallet']) && empty($filters['card_exceptions']) && empty($filters['ledger_settlement_type'])
             && ! filled($filters['team'] ?? null) && ! filled($filters['subscription'] ?? null)
             && ! filled($filters['domain'] ?? null) && empty($filters['conditions']);
         if ($orderView) {
             $pageSize = (int) ($filters['per_page'] ?? 10);
-            $pageOffset = $request->boolean('download') || $request->has('suggestion_field')
-                ? null : (max(1, (int) $request->query('page', 1)) - 1) * $pageSize;
-            $rows = app(\App\Portals\Finance\FinancePayPalSettlementOrders::class)->rows($filters, $pageOffset, $pageSize);
+            $paypalOrders = app(\App\Portals\Finance\FinancePayPalSettlementOrders::class);
+            if ($request->boolean('download') || $request->has('suggestion_field')) {
+                $rows = collect();
+            } else {
+                $page = max(1, (int) $request->query('page', 1));
+                [$rows, $total, $subscriptions] = $paypalOrders->page($filters, ($page - 1) * $pageSize, $pageSize);
+                $paginator = new \Illuminate\Pagination\LengthAwarePaginator($rows, $total, $pageSize, $page,
+                    ['path' => $request->url(), 'query' => $request->query()]);
+            }
         } elseif ($canPaginate) {
             $paginator = $service->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id')
                 ->paginate((int) ($filters['per_page'] ?? 10))->withQueryString();
@@ -1843,7 +1853,10 @@ class FinanceController extends Controller
             ]);
             $search = FinanceCatalog::simplified($suggestion['suggestion_q'] ?? '');
             $values = collect();
-            foreach ($orderView ? [$rows] : $resultBatches() as $batch) {
+            $suggestionBatches = $orderView
+                ? \Illuminate\Support\LazyCollection::make(fn () => $paypalOrders->exportRows($filters))->chunk(500)
+                : $resultBatches();
+            foreach ($suggestionBatches as $batch) {
                 $values = $values->concat($batch->pluck($suggestion['suggestion_field'])->filter(fn ($value) => $value !== null && $value !== ''
                     && ($search === '' || mb_stripos(FinanceCatalog::simplified((string) $value), $search) !== false)))
                     ->unique()->sort()->take(20)->values();
@@ -1854,7 +1867,14 @@ class FinanceController extends Controller
         if ($request->boolean('download')) {
             $format = $filters['format'] ?? 'xlsx';
             if ($orderView) {
-                $exportRows = \App\Portals\Finance\FinanceExportSelection::filter($request, $rows)->lazy();
+                $exportRows = \Illuminate\Support\LazyCollection::make(
+                    fn () => app(\App\Portals\Finance\FinancePayPalSettlementOrders::class)->exportRows($filters),
+                );
+                $selected = \App\Portals\Finance\FinanceExportSelection::keys($request);
+                if ($selected !== null) {
+                    $exportRows = \App\Portals\Finance\FinanceExportSelection::filter($request,
+                        $exportRows->filter(fn ($row) => in_array(\App\Portals\Finance\FinanceExportSelection::key($row), $selected, true))->take(count($selected))->all())->lazy();
+                }
             } else {
                 $exportRows = \Illuminate\Support\LazyCollection::make(function () use ($resultBatches): iterable {
                     foreach ($resultBatches() as $batch) {
@@ -2761,8 +2781,9 @@ class FinanceController extends Controller
         }
         $filterOptions = [];
         if ($includeOptions) {
+            $accountKeys = FinancePaymentAccount::query()->pluck('activity_account')->push(\App\Portals\Finance\FinanceWorldpayImport::SOURCE_ACCOUNT);
             $filterOptions = [
-                'account' => $rows->whereIn('account_key', FinancePaymentAccount::query()->pluck('activity_account'))
+                'account' => $rows->whereIn('account_key', $accountKeys)
                     ->unique('account_key')->map(fn ($row) => ['value' => $row['account_key'], 'label' => $row['account']])->values(),
             ];
             foreach (['owner', 'team', 'subscription', 'payment_method'] as $field) {

@@ -337,6 +337,25 @@ class FinanceConfluxSettlement
         return $entries;
     }
 
+    public function filterOrderMatch(\Illuminate\Database\Eloquent\Builder $query, bool $matched): void
+    {
+        $uniqueOrder = $this->orders(table: 'matched_order')->selectRaw('COUNT(*)')
+            ->whereColumn('matched_order.account', 'finance_records.account')
+            ->whereColumn('matched_order.reference', 'finance_records.reference');
+        $ledger = $this->workbooks->database()->table('finance_payment_accounts as matched_account')
+            ->where('matched_account.account_type', 'credit_card')->whereNull('matched_account.deleted_at')
+            ->whereColumn('matched_account.activity_account', 'finance_records.account')
+            ->where('finance_records.dataset', 'xuzong2-details')->where('finance_records.payload->_card_channel', 'ye')
+            ->whereExists(function ($entries): void {
+                $entries->selectRaw('1')->from(self::TABLE.' as matched_entry')
+                    ->where('matched_entry.platform', 'ye')
+                    ->whereColumn('matched_entry.payment_account_id', 'matched_account.id')
+                    ->whereColumn('matched_entry.reference', 'finance_records.reference');
+            })
+            ->where($uniqueOrder->toBase(), '=', 1);
+        $query->whereExists($ledger, not: ! $matched);
+    }
+
     public function feesFor(Collection $matchedEntries, ?\ArrayObject $reportFees = null): array
     {
         $fees = [];
@@ -731,12 +750,13 @@ class FinanceConfluxSettlement
         }
     }
 
-    private function orders(?string $account = null)
+    private function orders(?string $account = null, string $table = 'finance_records')
     {
-        return FinanceRecord::query()->where('dataset', 'xuzong2-details')->when($account !== null, fn ($query) => $query->where('account', $account))
-            ->where('payload->_card_channel', 'ye')->whereNotExists(function ($deleted): void {
+        return FinanceRecord::query()->from($table === 'finance_records' ? $table : 'finance_records as '.$table)
+            ->where($table.'.dataset', 'xuzong2-details')->when($account !== null, fn ($query) => $query->where($table.'.account', $account))
+            ->where($table.'.payload->_card_channel', 'ye')->whereNotExists(function ($deleted) use ($table): void {
                 $deleted->selectRaw('1')->from('finance_settlement_supplements')
-                    ->whereColumn('finance_record_id', 'finance_records.id')->whereNotNull('payload->_deleted_at');
+                    ->whereColumn('finance_record_id', $table.'.id')->whereNotNull('payload->_deleted_at');
             });
     }
 

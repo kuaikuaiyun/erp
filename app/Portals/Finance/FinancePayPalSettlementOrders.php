@@ -180,61 +180,87 @@ class FinancePayPalSettlementOrders
         return $amount === null ? '' : trim((is_string($currency) ? $currency : '').' '.FinanceCatalog::reportAmount($amount));
     }
 
-    public function rows(array $filters, ?int $pageOffset = null, int $pageLimit = 10, ?int $recordId = null): Collection
+    public function page(array $filters, int $offset, int $limit): array
     {
         $db = $this->workbooks->database();
-        $graph = $pageOffset !== null && $recordId === null && in_array($db->getDriverName(), ['mysql', 'mariadb'], true)
+        $graph = in_array($db->getDriverName(), ['mysql', 'mariadb'], true)
             ? Cache::remember(
                 $this->orderGraphCacheKey(),
                 15,
                 fn () => $this->orderGraph(null),
             )
-            : $this->orderGraph($recordId);
+            : $this->orderGraph(null);
         if ($graph === null) {
-            return collect();
+            return [collect(), 0, collect()];
         }
-        [$orders, $roots, $children, $conversions, $crossAccount, $ambiguous, $crossRates] = $graph;
+        $orders = $graph[0];
 
-        $total = null;
         $scope = array_intersect_key($filters, array_flip(['account', 'from', 'to', 'reference', 'team', 'domain', 'subscription', 'order_status', 'conditions']));
-        if ($pageOffset !== null && ! array_filter($scope)) {
-            $total = count($orders);
-            $orders = array_slice($orders, $pageOffset, $pageLimit);
+        if (! array_filter($scope)) {
+            $rows = collect($this->matchingRows($filters, array_slice($orders, $offset, $limit), $graph, false));
+            return [$rows, count($orders), $rows];
         }
-        $rows = collect($total === null ? [] : array_fill(0, min($total, $pageOffset), []));
-        $exportFields = $this->settlements->exportColumns('paypal') + ['gross' => '原币总额'];
+        $rows = collect();
+        $subscriptions = [];
+        $total = 0;
+        foreach ($this->matchingRows($filters, $orders, $graph, false) as $row) {
+            $subscription = $row['subscription'] ?? '';
+            $subscriptions[$subscription] = ['subscription' => $subscription];
+            if ($total >= $offset && $rows->count() < $limit) {
+                $rows->push($row);
+            }
+            $total++;
+        }
+        return [$rows, $total, collect($subscriptions)];
+    }
+
+    public function rows(array $filters, ?int $recordId = null): Collection
+    {
+        if ($recordId === null) {
+            return collect($this->exportRows($filters));
+        }
+        $graph = $this->orderGraph($recordId);
+        return $graph === null ? collect() : collect($this->matchingRows($filters, $graph[0], $graph, true));
+    }
+
+    public function exportRows(array $filters): iterable
+    {
+        $graph = $this->orderGraph(null);
+        if ($graph === null) {
+            return;
+        }
+        $fields = $this->settlements->exportColumns('paypal') + ['gross' => '原币总额'];
+        foreach ($this->matchingRows($filters, $graph[0], $graph, false) as $row) {
+            yield array_intersect_key($row, $fields);
+        }
+    }
+
+    private function matchingRows(array $filters, array $orders, array $graph, bool $includeDetails): iterable
+    {
+        [, $roots, $children, $conversions, $crossAccount, $ambiguous, $crossRates] = $graph;
         $numericConditionFields = $this->settlements->numericConditionFields('paypal');
-        foreach (array_chunk($orders, 250) as $batch) {
+        $count = count($orders);
+        for ($offset = 0; $offset < $count; $offset += 250) {
+            $batch = array_slice($orders, $offset, 250);
             $ids = array_column(array_filter($batch, fn ($row) => ! isset($row['event'])), 'id');
             $records = $this->settlements->query('paypal', [])->whereIntegerInRaw('id', $ids)
                 ->orderByDesc('occurred_at')->orderByDesc('id')->get();
             $payments = $this->settlements->rows('paypal', ['timezone' => $filters['timezone'], 'order_view' => true], $records)->keyBy('id');
             foreach ($batch as $order) {
                 if (isset($order['event'])) {
-                    $row = $this->unlinkedRow($order['event'], $filters['timezone'], $recordId !== null);
+                    $row = $this->unlinkedRow($order['event'], $filters['timezone'], $includeDetails);
                 } else {
                     $payment = $payments->get($order['id']);
                     if ($payment === null) {
                         continue;
                     }
-                    $row = $this->paymentRow($payment, $roots, $children, $conversions, $crossAccount, $ambiguous, $crossRates, $filters['timezone'], $recordId !== null);
+                    $row = $this->paymentRow($payment, $roots, $children, $conversions, $crossAccount, $ambiguous, $crossRates, $filters['timezone'], $includeDetails);
                 }
                 if ($this->matches($row, $filters, $children, $numericConditionFields)) {
-                    if ($recordId === null && $pageOffset === null) {
-                        $row = array_intersect_key($row, $exportFields);
-                        $row = array_combine(array_keys($row), array_values($row));
-                    } elseif ($pageOffset !== null && ($rows->count() < $pageOffset || $rows->count() >= $pageOffset + $pageLimit)) {
-                        // Off-page matches count toward pagination without retaining their summaries.
-                        $row = ['subscription' => $row['subscription'] ?? ''];
-                    }
-                    $rows->push($row);
+                    yield $row;
                 }
             }
         }
-        if ($total !== null && $rows->count() < $total) {
-            $rows = $rows->concat(array_fill(0, $total - $rows->count(), []));
-        }
-        return $rows;
     }
 
     public function forgetOrderGraph(): void

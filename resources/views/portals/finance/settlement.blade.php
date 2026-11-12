@@ -93,7 +93,7 @@
     $cardChannel = $channel === 'credit_card' ? ($filters['card_channel'] ?? null) : null;
 @endphp
 <div class="settlement-page">
-<div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}" id="settlement-filter">
+<div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}" id="settlement-filter" @if($cardChannel === 'ye') data-ye-export="1" @endif>
 <input type="hidden" name="per_page" value="{{ $rows->perPage() }}">
 <div class="settlement-filter">
 @if($fixedCardChannel === 'worldpay')

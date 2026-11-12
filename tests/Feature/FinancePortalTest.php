@@ -1427,6 +1427,12 @@ class FinancePortalTest extends TestCase
         $this->assertEquals(30, $dataRows[1][25]);
         $this->assertEquals(5, $dataRows[1][29]);
         $this->assertEquals(2, $dataRows[1][35]);
+        $selectedId = FinanceRecord::query()->where('reference', 'ORDER-1')->value('id');
+        $selection = http_build_query([...$scope, 'download' => 1, 'export_record_ids' => [$selectedId],
+            'selected_rows' => [\App\Portals\Finance\FinanceExportSelection::key(['id' => $selectedId])]]);
+        $selectedRows = $this->readDownload($this->get($url.'?'.$selection)->assertOk()->streamedContent())->toArray();
+        $this->assertCount(2, $selectedRows);
+        $this->assertSame('ORDER-1', $selectedRows[1][3]);
         $page = $this->get($url.'?card_channel=ye&card_exceptions=1')->assertOk()
             ->assertSee('退款与 RDR 同时存在')->assertSee('2026-11-09');
         $exceptionExport = $this->get($url.'?card_channel=ye&card_exceptions=1&download=1')->assertOk();
@@ -1505,6 +1511,11 @@ class FinancePortalTest extends TestCase
         $this->get($matchedUrl.'&card_wallet=1&card_exceptions=1')->assertOk()
             ->assertViewHas('rows', fn ($rows) => $rows->getCollection()->sole()['reference'] === 'BATCH-ORDER');
         $this->assertSame('25.19000000', $matched['payable']);
+        $summary = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $summaryRow = $summary->summaryRows('credit_card', ['reference' => 'BATCH-ORDER'])->sole();
+        $this->assertEquals([30.05, 3.01, 1.50, 0.35], [
+            $summaryRow['settlement'], $summaryRow['hold'], $summaryRow['fee'], $summaryRow['per_order_fee'],
+        ]);
         $this->assertNull($matched['nbc_fee']);
         $this->assertNull($matched['store_fee']);
         $export = $this->readDownload($this->get($matchedUrl.'&download=1')->assertOk()->streamedContent())->toArray();
@@ -1651,6 +1662,13 @@ class FinancePortalTest extends TestCase
         DB::table('logistics_orders')->insert(['bill_number' => 'wp-failed', 'source_shop_domain' => 'matched.example',
             'assigned_owner_name' => '订单运营', 'group_names' => '厦门团队']);
         $this->assertSame(3, FinanceRecord::query()->where('payload->_card_channel', 'worldpay')->count());
+        $summary = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $totals = $summary->totals($summary->summaryRows('credit_card', ['from' => '2026-11-01', 'to' => '2026-11-30']), 'account');
+        $this->assertCount(1, $totals);
+        $this->assertEquals(['Worldpay', 2, 1, 91.78, 4.14, 10, 0.90], [
+            $totals[0]['name'], $totals[0]['success_count'], $totals[0]['failed_count'], $totals[0]['settlement'],
+            $totals[0]['fee'], $totals[0]['refund'], $totals[0]['per_order_fee'],
+        ]);
         $this->get($report.'?worldpay_exception=yes')->assertOk()->assertSee('wp-1')->assertSee('wp-2')->assertDontSee('wp-failed');
         $this->get($report.'?worldpay_exception=no')->assertOk()->assertSee('wp-failed')->assertDontSee('wp-1')->assertDontSee('wp-2');
         $query = http_build_query(['month' => '2026-11', 'download' => 1,

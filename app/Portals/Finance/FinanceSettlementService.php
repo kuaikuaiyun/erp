@@ -161,6 +161,12 @@ class FinanceSettlementService
         if ($channel === 'credit_card' && filled($filters['card_channel'] ?? null)) {
             FinanceCreditSettlementLayout::filter($query, $filters['card_channel']);
         }
+        if (($filters['card_channel'] ?? null) === 'ye' && in_array($filters['card_match'] ?? null, ['matched', 'waiting'], true)) {
+            app(FinanceConfluxSettlement::class)->filterOrderMatch($query, $filters['card_match'] === 'matched');
+        }
+        if (! empty($filters['export_record_ids'])) {
+            $query->whereIntegerInRaw('finance_records.id', $filters['export_record_ids']);
+        }
         if (($filters['card_channel'] ?? null) === 'worldpay' && filled($filters['gateway'] ?? null)) {
             $query->where('payload->网关接入号', $filters['gateway']);
         }
@@ -244,9 +250,20 @@ class FinanceSettlementService
         $context = $this->rowContext($channel);
         $context['conflux_report_fees'] = new \ArrayObject;
         $query = $this->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id');
-        foreach ($query->lazy(500)->chunk(500) as $records) {
-            yield $this->rows($channel, $filters, new \Illuminate\Database\Eloquent\Collection($records->all()), $context);
-        }
+        $last = null;
+        do {
+            $page = clone $query;
+            if ($last !== null) {
+                $page->where(fn ($scope) => $scope->where('occurred_at', '<', $last->occurred_at)
+                    ->orWhere(fn ($tie) => $tie->where('occurred_at', $last->occurred_at)->where('id', '<', $last->id)));
+            }
+            $records = $page->limit(500)->get();
+            if ($records->isEmpty()) {
+                break;
+            }
+            $last = $records->last();
+            yield $this->rows($channel, $filters, $records, $context);
+        } while ($records->count() === 500);
     }
 
     public function rows(string $channel, array $filters, ?Collection $records = null, ?array $context = null): Collection
@@ -1321,15 +1338,68 @@ class FinanceSettlementService
         $ids = $this->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id')->pluck('id');
         $rows = collect();
         $context = $ids->isEmpty() ? null : $this->rowContext($channel);
+        if ($context !== null) {
+            $context['conflux_report_fees'] = new \ArrayObject;
+        }
+        $cardPlatforms = [];
+        if ($channel === 'credit_card' && empty($filters['card_channel'])) {
+            foreach (['worldpay', 'ye'] as $platform) {
+                $platformIds = $this->query($channel, [...$filters, 'card_channel' => $platform])->pluck('id');
+                $cardPlatforms += array_fill_keys($platformIds->all(), $platform);
+            }
+        }
         foreach ($ids->chunk(1500) as $batch) {
             $records = FinanceRecord::query()->whereIntegerInRaw('id', $batch->all())
                 ->orderByDesc('occurred_at')->orderByDesc('id')->get();
-            foreach ($this->rows($channel, $filters, $records, $context) as $row) {
-                $rows->push(array_intersect_key($row, $fields));
+            $resolved = [];
+            foreach ($records->groupBy(fn ($record) => $filters['card_channel'] ?? $cardPlatforms[$record->id] ?? '') as $platform => $group) {
+                $scope = filled($platform) ? [...$filters, 'card_channel' => $platform] : $filters;
+                $resolved += $this->summaryDetailRows($channel, $scope, $group, $context, $fields);
+            }
+            foreach ($batch as $id) {
+                if (isset($resolved[$id])) {
+                    $rows->push($resolved[$id]);
+                }
             }
         }
 
         return $rows;
+    }
+
+    private function summaryDetailRows(string $channel, array $filters, Collection $records, array $context, array $fields): array
+    {
+        $details = $this->rows($channel, $filters, $records, $context)->keyBy('id');
+        $platform = $filters['card_channel'] ?? null;
+        if (! in_array($platform, ['ye', 'worldpay'], true)) {
+            return $details->map(fn ($row) => array_intersect_key($row, $fields))->all();
+        }
+        $currencyField = $platform === 'worldpay' ? 'statement_currency' : 'settlement_currency';
+        $currencies = $details->map(fn ($row) => strtoupper(trim((string) ($row['card_layout'][$currencyField] ?? ''))));
+        $orders = $records->filter(fn ($record) => filled($currencies[$record->id] ?? null) && $currencies[$record->id] !== 'USD')
+            ->map(fn ($record) => (object) ['currency' => $currencies[$record->id], 'occurred_at' => $record->occurred_at, 'payload' => []]);
+        $usdRates = app(FinanceCreditUsdRates::class);
+        $rates = $usdRates->forOrders($orders);
+        $dates = $records->mapWithKeys(fn ($record) => [$record->id => $record->occurred_at->setTimezone('Asia/Shanghai')->toDateString()]);
+        $moneyFields = self::MONEY + ['settlement' => true];
+        return $details->map(function (array $row) use ($fields, $currencies, $usdRates, $rates, $dates, $moneyFields, $platform): array {
+            $layout = $row['card_layout'];
+            $currency = $currencies[$row['id']];
+            foreach (array_intersect_key($layout, $moneyFields) as $field => $value) {
+                $amount = $this->number($value);
+                if ($amount !== null && $currency !== '' && $currency !== 'USD' && ! in_array($field, ['logistics', 'purchase'], true)) {
+                    $amount = $this->number($usdRates->convert($rates, $currency, $dates[$row['id']], $amount));
+                }
+                $row[$field] = $amount;
+            }
+            if ($platform === 'ye' && $row['settlement'] === null) {
+                $row['settlement'] = $this->number($layout['source_settlement_usd'] ?? null);
+            }
+            if ($row['account_key'] === FinanceWorldpayImport::SOURCE_ACCOUNT) {
+                $row['account'] = 'Worldpay';
+            }
+            $row = array_replace($row, array_intersect_key($layout, array_flip(['domain', 'owner', 'team', 'payment_method'])));
+            return array_intersect_key($row, $fields);
+        })->all();
     }
 
     public function totals(Collection $rows, string $layer): array

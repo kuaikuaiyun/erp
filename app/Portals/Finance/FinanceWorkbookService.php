@@ -728,7 +728,7 @@ class FinanceWorkbookService
                     }
                     yield ['height' => 36, 'cells' => $cells];
                 }
-            }, plain: $plain, additionalSheets: $extraSheets);
+            }, plain: $plain, additionalSheets: $extraSheets, streamDirectly: true);
     }
 
     private function downloadColumnWidth(string $header, bool $plain): int

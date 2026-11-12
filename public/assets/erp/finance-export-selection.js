@@ -38,6 +38,9 @@
             if (source.hasAttribute('data-selection-records')) url.searchParams.set('export_scope', 'records');
             checked.forEach(function (row) {
                 url.searchParams.append(source.hasAttribute('data-selection-records') ? 'selected_ids[]' : 'selected_rows[]', row.value);
+                if (source.form?.dataset.yeExport === '1' && row.dataset.recordId) {
+                    url.searchParams.append('export_record_ids[]', row.dataset.recordId);
+                }
             });
             window.location.assign(url.toString());
         });

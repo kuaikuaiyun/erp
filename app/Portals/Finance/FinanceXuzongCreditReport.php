@@ -452,6 +452,6 @@ class FinanceXuzongCreditReport
                 array_map(fn ($header) => ['label' => $header, 'width' => max(16, mb_strwidth($header) + 4)],
                     ['收款账户', '交易流水号', '商户订单号', '结算时间', '结算币种', '记录类型', ...self::STATEMENT_EXPORT_AMOUNTS]),
                 $statementRows,
-            ]]);
+            ]], streamDirectly: true);
     }
 }
