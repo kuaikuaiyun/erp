@@ -1002,6 +1002,14 @@
                 target.html('<label><span>' + escapeHtml(paginationText.per_page) + '</span><select class="form-control input-sm" data-payment-detail-per-page><option value="50" ' + (detailState.perPage === 50 ? 'selected' : '') + '>50</option><option value="100" ' + (detailState.perPage === 100 ? 'selected' : '') + '>100</option></select></label><button type="button" class="btn btn-default btn-sm" data-payment-detail-page="' + (meta.current_page - 1) + '" ' + (meta.current_page <= 1 ? 'disabled' : '') + '>' + escapeHtml(detailText.previous) + '</button><span>' + escapeHtml(status) + '</span><button type="button" class="btn btn-default btn-sm" data-payment-detail-page="' + (meta.current_page + 1) + '" ' + (meta.current_page >= meta.last_page ? 'disabled' : '') + '>' + escapeHtml(detailText.next) + '</button><label><span>' + escapeHtml(paginationText.jump_to) + '</span><input class="form-control input-sm payment-page-jump-input" type="number" min="1" max="' + meta.last_page + '" placeholder="' + escapeHtml(paginationText.page_placeholder) + '" autocomplete="off" data-payment-detail-jump-input></label><button type="button" class="btn btn-primary btn-sm" data-payment-detail-jump>' + escapeHtml(paginationText.jump) + '</button>');
             }
 
+            function updateReasonSummary() {
+                var control = detailModal.find('[data-payment-reason-filter]');
+                var labels = control.find('[name="reasons"]:checked').map(function () {
+                    return $(this).next('span').text();
+                }).get();
+                control.find('[data-payment-reason-summary]').text(labels.length ? labels.join('、') : control.data('allReasons')).attr('title', labels.join('、'));
+            }
+
             function renderReasonFilter(payload) {
                 var target = detailModal.find('[data-payment-detail-extra-filters]');
                 var selected = target.find('[name="reasons"]:checked').map(function () { return this.value; }).get();
@@ -1011,12 +1019,14 @@
                 var groups = ['platform', 'manual'].map(function (group) {
                     var options = payload.reason_options[group] || [];
                     if (!options.length) return '';
-                    return '<fieldset><legend style="font-size:13px;margin-bottom:6px">' + escapeHtml(text[group]) + '</legend>' + options.map(function (option) {
-                        return '<label style="display:block;font-weight:normal;white-space:normal"><input type="checkbox" name="reasons" value="' + escapeHtml(option.value) + '"> ' + escapeHtml(option.label) + '</label>';
-                    }).join('') + '</fieldset>';
+                    return '<div class="payment-detail-reason-group"><div class="payment-detail-reason-group-title">' + escapeHtml(text[group]) + '</div>' + options.map(function (option) {
+                        return '<label><input type="checkbox" name="reasons" value="' + escapeHtml(option.value) + '"><span>' + escapeHtml(option.label) + '</span></label>';
+                    }).join('') + '</div>';
                 }).join('');
-                target.append('<details data-payment-reason-filter style="position:relative;min-width:180px"><summary class="form-control" style="cursor:pointer;height:auto">' + escapeHtml(text.title) + ' · ' + escapeHtml(selected.length ? selected.map(function (value) { return value.substring(value.indexOf(':') + 1); }).join('、') : text.all) + '</summary><div class="panel panel-default" style="position:absolute;z-index:1051;background:#fff;min-width:260px;max-width:420px;max-height:280px;overflow:auto;padding:12px">' + groups + '</div></details>');
+                target.append('<div class="payment-detail-reason-filter" data-payment-reason-filter><span class="payment-detail-reason-label">' + escapeHtml(text.title) + '</span><details class="payment-reason-multiselect"><summary><span data-payment-reason-summary></span><i class="fa fa-angle-down" aria-hidden="true"></i></summary><div class="payment-reason-multiselect-menu"><div class="payment-reason-multiselect-head"><strong>' + escapeHtml(text.heading) + '</strong><button type="button" data-payment-detail-reason-clear>' + escapeHtml(text.clear) + '</button></div><div class="payment-reason-multiselect-options">' + groups + '</div></div></details></div>');
+                target.find('[data-payment-reason-filter]').data('allReasons', text.all);
                 target.find('[name="reasons"]').each(function () { this.checked = selected.indexOf(this.value) !== -1; });
+                updateReasonSummary();
             }
 
             function renderDetailPayload(payload) {
@@ -1123,6 +1133,12 @@
                 detailState.sort = sort;
                 detailState.page = 1;
                 loadDetail();
+            });
+            detailModal.on('change', '[data-payment-reason-filter] [name="reasons"]', updateReasonSummary);
+            detailModal.on('click', '[data-payment-detail-reason-clear]', function (event) {
+                event.preventDefault();
+                detailModal.find('[data-payment-reason-filter] [name="reasons"]').prop('checked', false);
+                updateReasonSummary();
             });
             detailModal.on('submit', '[data-payment-detail-filter]', function (event) {
                 event.preventDefault();

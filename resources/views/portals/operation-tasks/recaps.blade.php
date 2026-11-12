@@ -14,8 +14,8 @@
     $savedAnswers = collect($formRecap?->question_answers ?? [])->keyBy('question_id');
     $initialMedia = old('media', collect($formRecap?->media_items ?? [])->values()->all());
     $workflowLabels = [
-        'pending_leader' => '待二级主管审核',
-        'pending_department' => '待一级主管审核',
+        'pending_leader' => __('operation_tasks.recap_review.pending'),
+        'pending_department' => __('operation_tasks.recap_review.pending'),
         'rejected' => '已驳回待修改',
         'approved' => '审核通过',
     ];
@@ -91,9 +91,7 @@
                             $status = $recap->workflow_status ?? 'approved';
                             $leaderStatus = $recap->leader_review_status ?? 'approved';
                             $departmentStatus = $recap->department_review_status ?? 'approved';
-                            $reviewChannel = $status === 'pending_leader' && $recap->can_leader_review
-                                ? 'leader'
-                                : ($status === 'pending_department' && $recap->can_department_review ? 'department' : null);
+                            $reviewChannel = $recap->review_channel;
                         @endphp
                         <tr>
                             <td><b>{{ $recap->data_date->format('Y-m-d') }}</b><small>v{{ $recap->version }}</small></td>
@@ -130,9 +128,7 @@
     @foreach($recaps as $recap)
         @php
             $status = $recap->workflow_status ?? 'approved';
-            $reviewChannel = $status === 'pending_leader' && $recap->can_leader_review
-                ? 'leader'
-                : ($status === 'pending_department' && $recap->can_department_review ? 'department' : null);
+            $reviewChannel = $recap->review_channel;
             $answers = collect($recap->question_answers ?? []);
         @endphp
         <div class="modal fade ot-modal ot-recap-detail-modal" id="ot-recap-detail-{{ $recap->id }}" tabindex="-1"><div class="modal-dialog"><div class="modal-content">

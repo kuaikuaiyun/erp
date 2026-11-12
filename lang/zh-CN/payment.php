@@ -258,6 +258,8 @@ $translations = [
 
 return array_replace_recursive($translations, [
     'account_reason_filter' => [
+        'heading' => '筛选原因',
+        'clear' => '清空',
         'title' => '原因',
         'platform' => '平台原因',
         'manual' => '人工原因',

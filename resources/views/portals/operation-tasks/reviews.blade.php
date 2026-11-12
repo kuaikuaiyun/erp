@@ -14,10 +14,13 @@
     <div class="ot-simple-page-head">
         <div>
             <h1>审核中心</h1>
-            <p>二级主管处理组长审核；一级部门主管处理部门审核。仅展示当前部门范围内的数据。</p>
+            <p>{{ __('operation_tasks.recap_review.independent_hint') }}</p>
         </div>
     </div>
 
+    @if((session('warning') || $errors->any()) && old('recap_id') && trim((string) old('opinion')) !== '')
+        <div class="alert alert-warning"><b>{{ __('operation_tasks.recap_review.retained_opinion', ['id' => old('recap_id'), 'version' => old('version')]) }}</b><pre style="margin:8px 0 0;white-space:pre-wrap">{{ old('opinion') }}</pre></div>
+    @endif
     <form class="ot-card ot-review-filters" method="get">
         <div class="ot-card-body">
             <div class="ot-filter-grid">
@@ -43,9 +46,9 @@
                 <tbody>
                 @forelse($recaps as $recap)
                     @php
-                        $recapChannel = $recap->workflow_status === 'pending_leader' ? 'leader' : 'department';
-                        $recapCanReview = $recapChannel === 'leader' ? $recap->can_leader_review : $recap->can_department_review;
-                        $recapChannelLabel = $recapChannel === 'leader' ? '二级主管审核' : '一级主管审核';
+                        $recapChannel = $recap->review_channel;
+                        $recapCanReview = $recapChannel && $recap->{$recapChannel.'_review_status'} === 'pending';
+                        $recapChannelLabel = __('operation_tasks.recap_review.'.$recapChannel);
                         $recapStatusLabel = fn ($status) => match ($status) { 'approved' => '已审核', 'rejected' => '已驳回', default => '待审核' };
                     @endphp
                     <tr>
@@ -79,15 +82,17 @@
 
         @foreach($recaps as $recap)
                 @php
-                    $recapChannel = $recap->workflow_status === 'pending_leader' ? 'leader' : 'department';
-                    $recapCanReview = $recapChannel === 'leader' ? $recap->can_leader_review : $recap->can_department_review;
-                    $recapChannelLabel = $recapChannel === 'leader' ? '二级主管审核' : '一级主管审核';
+                    $recapChannel = $recap->review_channel;
+                    $recapCanReview = $recapChannel && $recap->{$recapChannel.'_review_status'} === 'pending';
+                    $recapChannelLabel = __('operation_tasks.recap_review.'.$recapChannel);
                     $recapStatusLabel = fn ($status) => match ($status) { 'approved' => '已审核', 'rejected' => '已驳回', default => '待审核' };
                 @endphp
                 <div class="modal fade ot-modal" id="ot-recap-audit-current-{{ $recap->id }}" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><form method="post" action="{{ route('operation-tasks.recaps.reviews.store', $recap) }}">@csrf
                     <input type="hidden" name="channel" value="{{ $recapChannel }}">
+                    <input type="hidden" name="version" value="{{ $recap->version }}">
+                    <input type="hidden" name="recap_id" value="{{ $recap->id }}">
                     <div class="modal-header"><button type="button" class="close" data-dismiss="modal">&times;</button><h4 class="modal-title">审核每日复盘</h4><p>{{ $recap->data_date->format('Y-m-d') }} · {{ $recap->user_name }} · {{ $recapChannelLabel }}</p></div>
-                    <div class="modal-body"><div class="ot-modal-summary"><b>复盘经营汇总</b><div>营业额 ${{ number_format($recap->total_revenue_usd, 2) }} · 广告费 ${{ number_format($recap->total_spend_usd, 2) }} · 订单 {{ $recap->total_orders }}</div></div><h4 class="ot-modal-section-title">媒体经营数据</h4><div class="table-responsive"><table class="table ot-table"><thead><tr><th>媒体</th><th>花费</th><th>单量</th><th>营业额</th><th>ROI</th></tr></thead><tbody>@forelse($recap->media_items ?? [] as $item)<tr><td>{{ $item['name'] ?? '—' }}</td><td>${{ number_format((float)($item['spend'] ?? 0), 2) }}</td><td>{{ $item['orders'] ?? 0 }}</td><td>${{ number_format((float)($item['revenue'] ?? 0), 2) }}</td><td>{{ (float)($item['spend'] ?? 0) > 0 ? number_format((float)($item['revenue'] ?? 0)/(float)$item['spend'], 2) : '—' }}</td></tr>@empty<tr><td colspan="5" class="text-center text-muted">暂无媒体数据</td></tr>@endforelse</tbody></table></div><h4 class="ot-modal-section-title">复盘内容</h4><div class="ot-recap-review-answers">@foreach(collect($recap->question_answers ?? []) as $index => $answer)<div><b>问题{{ $index + 1 }}：{{ $answer['title'] ?? '复盘问题' }}</b><p>{{ $answer['answer'] ?? '—' }}</p></div>@endforeach</div><h4 class="ot-modal-section-title">审核处理</h4><div class="ot-recap-review-progress"><div><b>二级主管：{{ $recap->leader_reviewer_names }}</b><span>{{ $recapStatusLabel($recap->leader_review_status) }}</span></div><div><b>一级主管：{{ $recap->department_reviewer_names }}</b><span>{{ $recapStatusLabel($recap->department_review_status) }}</span></div></div><div class="form-group"><label>审核结果 *</label><select class="form-control" name="result"><option value="approved">通过</option><option value="rejected">驳回并要求修改</option></select></div><div class="form-group"><label>审核意见 <small>驳回时必填</small></label><textarea class="form-control" rows="4" name="opinion" placeholder="请填写具体修改意见"></textarea></div></div>
+                    <div class="modal-body"><div class="ot-modal-summary"><b>复盘经营汇总</b><div>营业额 ${{ number_format($recap->total_revenue_usd, 2) }} · 广告费 ${{ number_format($recap->total_spend_usd, 2) }} · 订单 {{ $recap->total_orders }}</div></div><h4 class="ot-modal-section-title">媒体经营数据</h4><div class="table-responsive"><table class="table ot-table"><thead><tr><th>媒体</th><th>花费</th><th>单量</th><th>营业额</th><th>ROI</th></tr></thead><tbody>@forelse($recap->media_items ?? [] as $item)<tr><td>{{ $item['name'] ?? '—' }}</td><td>${{ number_format((float)($item['spend'] ?? 0), 2) }}</td><td>{{ $item['orders'] ?? 0 }}</td><td>${{ number_format((float)($item['revenue'] ?? 0), 2) }}</td><td>{{ (float)($item['spend'] ?? 0) > 0 ? number_format((float)($item['revenue'] ?? 0)/(float)$item['spend'], 2) : '—' }}</td></tr>@empty<tr><td colspan="5" class="text-center text-muted">暂无媒体数据</td></tr>@endforelse</tbody></table></div><h4 class="ot-modal-section-title">复盘内容</h4><div class="ot-recap-review-answers">@foreach(collect($recap->question_answers ?? []) as $index => $answer)<div><b>问题{{ $index + 1 }}：{{ $answer['title'] ?? '复盘问题' }}</b><p>{{ $answer['answer'] ?? '—' }}</p></div>@endforeach</div><h4 class="ot-modal-section-title">审核处理</h4><div class="ot-recap-review-progress"><div><b>二级主管：{{ $recap->leader_reviewer_names }}</b><span>{{ $recapStatusLabel($recap->leader_review_status) }}</span></div><div><b>一级主管：{{ $recap->department_reviewer_names }}</b><span>{{ $recapStatusLabel($recap->department_review_status) }}</span></div></div><div class="form-group"><label>审核结果 *</label><select class="form-control" name="result"><option value="approved">通过</option><option value="rejected">驳回并要求修改</option></select></div><div class="form-group"><label>审核意见 <small>驳回时必填</small></label><textarea class="form-control" rows="4" name="opinion" placeholder="请填写具体修改意见">{{ (int) old('recap_id') === (int) $recap->id && (int) old('version') === (int) $recap->version ? old('opinion') : '' }}</textarea></div></div>
                     <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">取消</button><button class="btn ot-primary">保存审核结果</button></div>
                 </form></div></div></div>
         @endforeach
@@ -431,3 +436,13 @@
 })();
 </script>
 @endpush
+
+@if(session('warning'))
+@push('scripts')
+<script>
+(function (message) {
+    if (window.ErpAdminNotifier) window.ErpAdminNotifier.notify({type: 'warning', title: @json(__('operation_tasks.recap_review.notice_title')), message: message});
+})(@json(session('warning')));
+</script>
+@endpush
+@endif

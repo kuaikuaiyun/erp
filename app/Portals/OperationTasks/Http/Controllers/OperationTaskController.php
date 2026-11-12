@@ -79,6 +79,7 @@ class OperationTaskController extends Controller
             : 20;
         $recaps = $query->paginate($recapPerPage)->withQueryString();
         $recaps->getCollection()->each(function (OperationTaskRecap $recap) use ($user): void {
+            $recap->setAttribute('review_channel', $this->recapReviewChannel($user, $recap));
             $recap->setAttribute('can_leader_review', $this->canLeaderReviewRecap($user, $recap));
             $recap->setAttribute('can_department_review', $this->canDepartmentReviewRecap($user, $recap));
         });
@@ -162,43 +163,50 @@ class OperationTaskController extends Controller
             return back()->with('warning', '该复盘已提交审核，只有被驳回后才可以修改并重新提交。');
         }
 
-        $recap = null;
-        if ($existing) {
-            $history = $existing->version_history ?? [];
-            $history[] = [
-                'version' => $existing->version,
-                'snapshot' => $existing->only(array_merge(array_keys($payload), ['workflow_status', 'leader_review_status', 'department_review_status', 'last_rejection_channel', 'last_rejection_opinion'])),
-                'changed_by' => $this->userName($user),
-                'changed_at' => now()->toIso8601String(),
-            ];
-            $existing->update([...$payload,
-                'version' => $existing->version + 1, 'version_history' => $history,
-                'workflow_status' => 'pending_leader', 'leader_review_status' => 'pending', 'department_review_status' => 'pending',
-                'last_rejection_channel' => null, 'last_rejection_opinion' => null, 'last_rejected_at' => null, 'submitted_at' => now(),
-            ]);
-            $recap = $existing->fresh();
-        } else {
-            $recap = OperationTaskRecap::query()->create([...$payload,
-                'version' => 1, 'workflow_status' => 'pending_leader', 'leader_review_status' => 'pending', 'department_review_status' => 'pending',
-                'submitted_at' => now(),
-            ]);
-        }
+        $recap = DB::connection((new OperationTaskRecap())->getConnectionName())->transaction(function () use ($existing, $payload, $user): OperationTaskRecap {
+            if ($existing) {
+                $lockedExisting = OperationTaskRecap::query()->lockForUpdate()->findOrFail($existing->id);
+                if ((int) $lockedExisting->version !== (int) $existing->version || $lockedExisting->workflow_status !== 'rejected') {
+                    throw ValidationException::withMessages(['recap' => __('operation_tasks.recap_review.stale')]);
+                }
+                $existing = $lockedExisting;
+                $history = $existing->version_history ?? [];
+                $history[] = [
+                    'version' => $existing->version,
+                    'snapshot' => $existing->only(array_merge(array_keys($payload), ['workflow_status', 'leader_review_status', 'department_review_status', 'last_rejection_channel', 'last_rejection_opinion'])),
+                    'changed_by' => $this->userName($user),
+                    'changed_at' => now()->toIso8601String(),
+                ];
+                $existing->update([...$payload,
+                    'version' => $existing->version + 1, 'version_history' => $history,
+                    'workflow_status' => 'pending_leader', 'leader_review_status' => 'pending', 'department_review_status' => 'pending',
+                    'last_rejection_channel' => null, 'last_rejection_opinion' => null, 'last_rejected_at' => null, 'submitted_at' => now(),
+                ]);
+                $recap = $existing->fresh();
+            } else {
+                $recap = OperationTaskRecap::query()->create([...$payload,
+                    'version' => 1, 'workflow_status' => 'pending_leader', 'leader_review_status' => 'pending', 'department_review_status' => 'pending',
+                    'submitted_at' => now(),
+                ]);
+            }
 
-        OperationTaskReviewEvent::query()->create([
-            'review_id' => null,
-            'target_type' => 'recap',
-            'target_id' => $recap->id,
-            'target_version' => $recap->version,
-            'channel' => 'operation',
-            'result' => $existing ? 'resubmitted' : 'submitted',
-            'opinion' => null,
-            'rejection_scope' => null,
-            'reviewer_id' => $user->id,
-            'reviewer_name' => $this->userName($user),
-            'reviewed_at' => now(),
-        ]);
+            OperationTaskReviewEvent::query()->create([
+                'review_id' => null,
+                'target_type' => 'recap',
+                'target_id' => $recap->id,
+                'target_version' => $recap->version,
+                'channel' => 'operation',
+                'result' => $existing ? 'resubmitted' : 'submitted',
+                'opinion' => null,
+                'rejection_scope' => null,
+                'reviewer_id' => $user->id,
+                'reviewer_name' => $this->userName($user),
+                'reviewed_at' => now(),
+            ]);
 
-        $this->notifyRecapReviewers($recap, sprintf('%s 已提交 %s 的每日复盘，待二级主管审核。', $this->userName($user), $recap->data_date->format('Y-m-d')), $user, ['leader']);
+            $this->notifyRecapReviewers($recap, __('operation_tasks.recap_review.submitted_message', ['name' => $this->userName($user), 'date' => $recap->data_date->format('Y-m-d')]), $user, ['leader', 'department']);
+            return $recap;
+        });
 
         return back()->with('success', $existing ? '复盘已更新，旧版本已保留。' : '昨日复盘已保存。');
     }
@@ -206,31 +214,32 @@ class OperationTaskController extends Controller
     public function reviewRecap(Request $request, OperationTaskRecap $recap): RedirectResponse
     {
         $context = $this->authorized($request);
+        $request->merge(['recap_id' => $recap->id]);
         $data = $request->validate([
             'channel' => ['required', Rule::in(['leader', 'department'])],
+            'version' => ['required', 'integer', 'min:1'],
             'result' => ['required', Rule::in(['approved', 'rejected'])],
             'opinion' => ['nullable', 'string', 'max:5000'],
+        ], [
+            'version.required' => __('operation_tasks.recap_review.refresh_page'),
+            'version.integer' => __('operation_tasks.recap_review.refresh_page'),
+            'version.min' => __('operation_tasks.recap_review.refresh_page'),
         ]);
         if ($data['result'] === 'rejected' && trim((string) ($data['opinion'] ?? '')) === '') {
-            return back()->withInput()->withErrors(['opinion' => '驳回必须填写具体修改意见。']);
-        }
-        if ($data['result'] === 'rejected' && trim((string) ($data['opinion'] ?? '')) === '') {
-            throw ValidationException::withMessages([
-                'opinion' => '驳回必须填写具体修改意见。',
-            ]);
+            return back()->withInput()->withErrors(['opinion' => __('operation_tasks.recap_review.opinion_required')]);
         }
 
-        $expectedStatus = $data['channel'] === 'leader' ? 'pending_leader' : 'pending_department';
-        abort_unless(($recap->workflow_status ?? 'approved') === $expectedStatus, 422, '该复盘当前不在此审核环节。');
-        $allowed = $data['channel'] === 'leader'
-            ? $this->canLeaderReviewRecap($context['user'], $recap)
-            : $this->canDepartmentReviewRecap($context['user'], $recap);
-        abort_unless($allowed, 403);
+        $outcome = DB::connection($recap->getConnectionName())->transaction(function () use ($recap, $data, $context): string {
+            $locked = OperationTaskRecap::query()->lockForUpdate()->find($recap->id);
+            if (! $locked || (int) $locked->version !== (int) $data['version']) return 'stale';
+            abort_unless($this->recapReviewChannel($context['user'], $locked) === $data['channel'], 403);
+            $statusColumn = $data['channel'].'_review_status';
+            if ($locked->{$statusColumn} !== 'pending') return 'processed';
 
-        DB::connection(config('admin.database.connection') ?: config('database.default'))->transaction(function () use ($recap, $data, $context): void {
             $review = OperationTaskReview::query()->firstOrNew([
-                'target_type' => 'recap', 'target_id' => $recap->id, 'target_version' => $recap->version, 'channel' => $data['channel'],
+                'target_type' => 'recap', 'target_id' => $locked->id, 'target_version' => $locked->version, 'channel' => $data['channel'],
             ]);
+            if ($review->exists) return 'processed';
             $review->fill([
                 'result' => $data['result'], 'opinion' => trim((string) ($data['opinion'] ?? '')) ?: null,
                 'rejection_scope' => $data['result'] === 'rejected' ? 'recap' : null,
@@ -238,33 +247,39 @@ class OperationTaskController extends Controller
             ]);
             $review->save();
             OperationTaskReviewEvent::query()->create([
-                'review_id' => $review->id, 'target_type' => 'recap', 'target_id' => $recap->id, 'target_version' => $recap->version,
+                'review_id' => $review->id, 'target_type' => 'recap', 'target_id' => $locked->id, 'target_version' => $locked->version,
                 'channel' => $data['channel'], 'result' => $data['result'], 'opinion' => $review->opinion, 'rejection_scope' => $review->rejection_scope,
                 'reviewer_id' => $context['user']->id, 'reviewer_name' => $this->userName($context['user']), 'reviewed_at' => now(),
             ]);
-
+            $locked->{$statusColumn} = $data['result'];
             if ($data['result'] === 'rejected') {
-                $recap->update([
-                    'workflow_status' => 'rejected', $data['channel'].'_review_status' => 'rejected',
-                    'last_rejection_channel' => $data['channel'], 'last_rejection_opinion' => $review->opinion, 'last_rejected_at' => now(),
-                ]);
-            } elseif ($data['channel'] === 'leader') {
-                $recap->update(['leader_review_status' => 'approved', 'workflow_status' => 'pending_department']);
-            } else {
-                $recap->update(['department_review_status' => 'approved', 'workflow_status' => 'approved']);
+                $locked->last_rejection_channel = $data['channel'];
+                $locked->last_rejection_opinion = $review->opinion;
+                $locked->last_rejected_at = now();
             }
+            $locked->workflow_status = match (true) {
+                $locked->leader_review_status === 'rejected' || $locked->department_review_status === 'rejected' => 'rejected',
+                $locked->leader_review_status === 'approved' && $locked->department_review_status === 'approved' => 'approved',
+                $locked->leader_review_status === 'pending' => 'pending_leader',
+                default => 'pending_department',
+            };
+            $locked->save();
+            if ($data['result'] === 'rejected') {
+                $this->notifyUsers([$locked->user_id], $context['user'], __('operation_tasks.recap_review.rejected_title'), __('operation_tasks.recap_review.rejected_message', [
+                    'date' => $locked->data_date->format('Y-m-d'), 'name' => $locked->user_name,
+                    'channel' => __('operation_tasks.recap_review.'.$data['channel']), 'opinion' => $review->opinion,
+                ]));
+            } elseif ($locked->workflow_status === 'approved') {
+                $this->notifyUsers([$locked->user_id], $context['user'], __('operation_tasks.recap_review.approved_title'), __('operation_tasks.recap_review.approved_message', [
+                    'date' => $locked->data_date->format('Y-m-d'), 'name' => $locked->user_name,
+                ]));
+            }
+            return 'saved';
         });
-
-        $recap = $recap->fresh();
-        if ($data['result'] === 'rejected') {
-            $this->notifyUsers([$recap->user_id], $context['user'], '每日复盘被驳回', sprintf('%s 的 %s 每日复盘被%s驳回：%s', $recap->data_date->format('Y-m-d'), $recap->user_name, $data['channel'] === 'leader' ? '二级主管' : '一级主管', trim((string) $data['opinion'])),);
-        } elseif ($data['channel'] === 'leader') {
-            $this->notifyRecapReviewers($recap, sprintf('%s 的 %s 每日复盘已通过二级主管审核，待一级主管审核。', $recap->user_name, $recap->data_date->format('Y-m-d')), $context['user'], ['department']);
-        } else {
-            $this->notifyUsers([$recap->user_id], $context['user'], '每日复盘审核通过', sprintf('%s 的 %s 每日复盘已完成全部审核。', $recap->data_date->format('Y-m-d'), $recap->user_name));
+        if ($outcome !== 'saved') {
+            return back()->withInput()->with('warning', __('operation_tasks.recap_review.'.$outcome));
         }
-
-        return back()->with('success', '复盘审核结果已保存。');
+        return back()->with('success', __('operation_tasks.recap_review.saved'));
     }
 
     public function saveRecapQuestions(Request $request): RedirectResponse
@@ -723,22 +738,30 @@ class OperationTaskController extends Controller
             ->orderBy('reviewed_at')->orderBy('id')->get()->groupBy('target_id');
         $tasks->getCollection()->each(fn (OperationTestTask $task) => $task->setAttribute('review_flow_events', $taskFlowEvents->get($task->id, collect())));
 
-        $recapQuery = OperationTaskRecap::query()
-            ->whereIn('workflow_status', ['pending_leader', 'pending_department'])
-            ->orderByDesc('submitted_at')
-            ->orderByDesc('id');
-        if (! $context['user']->isAdministrator()) {
+        $recapQuery = OperationTaskRecap::query()->orderByDesc('submitted_at')->orderByDesc('id');
+        $recapStatus = match ($filters['status']) {
+            'approved' => 'approved',
+            'rectification' => null,
+            default => 'pending',
+        };
+        if ($context['user']->isAdministrator()) {
+            if ($recapStatus) $recapQuery->where('department_review_status', $recapStatus);
+        } else {
             $leaderIds = $this->leaderDepartmentIds($context['user']);
-            $departmentIds = $this->departmentReviewScopeIds($context['user']);
-            $recapQuery->where(function ($visibility) use ($leaderIds, $departmentIds): void {
-                if ($leaderIds !== []) $visibility->orWhere(function ($query) use ($leaderIds): void {
-                    $query->where('workflow_status', 'pending_leader')->whereIn('department_id', $leaderIds);
+            $departmentIds = array_values(array_diff($this->departmentReviewScopeIds($context['user']), $leaderIds));
+            $recapQuery->where(function ($visibility) use ($leaderIds, $departmentIds, $recapStatus): void {
+                $visibility->whereRaw('1 = 0');
+                if ($leaderIds !== []) $visibility->orWhere(function ($query) use ($leaderIds, $recapStatus): void {
+                    $query->whereIn('department_id', $leaderIds);
+                    if ($recapStatus) $query->where('leader_review_status', $recapStatus);
                 });
-                if ($departmentIds !== []) $visibility->orWhere(function ($query) use ($departmentIds): void {
-                    $query->where('workflow_status', 'pending_department')->whereIn('department_id', $departmentIds);
+                if ($departmentIds !== []) $visibility->orWhere(function ($query) use ($departmentIds, $recapStatus): void {
+                    $query->whereIn('department_id', $departmentIds);
+                    if ($recapStatus) $query->where('department_review_status', $recapStatus);
                 });
             });
         }
+        if ($filters['status'] === 'rectification') $recapQuery->where('workflow_status', 'rejected');
         if ($selectedTeamId) $recapQuery->where('department_id', $selectedTeamId);
         if ($submittedFrom) $recapQuery->where('submitted_at', '>=', $submittedFrom);
         if ($submittedUntil) $recapQuery->where('submitted_at', '<', $submittedUntil);
@@ -749,6 +772,7 @@ class OperationTaskController extends Controller
             ->get()
             ->keyBy('id');
         $recaps->each(function (OperationTaskRecap $recap) use ($context, $recapReviewerTeams): void {
+            $recap->setAttribute('review_channel', $this->recapReviewChannel($context['user'], $recap));
             $recap->setAttribute('can_leader_review', $this->canLeaderReviewRecap($context['user'], $recap));
             $recap->setAttribute('can_department_review', $this->canDepartmentReviewRecap($context['user'], $recap));
             $team = $recapReviewerTeams->get((int) $recap->department_id);
@@ -1391,9 +1415,16 @@ class OperationTaskController extends Controller
         return $user->isAdministrator() || (int) $task->owner_user_id === (int) $user->id || in_array((int) $task->department_id, $this->visibleDepartmentIds($user), true);
     }
 
+    private function recapReviewChannel(AdminUser $user, OperationTaskRecap $recap): ?string
+    {
+        if ($user->isAdministrator()) return 'department';
+        if ($this->canLeaderReviewRecap($user, $recap)) return 'leader';
+        return $this->canDepartmentReviewRecap($user, $recap) ? 'department' : null;
+    }
+
     private function canLeaderReviewRecap(AdminUser $user, OperationTaskRecap $recap): bool
     {
-        return $user->isAdministrator() || in_array((int) $recap->department_id, $this->leaderDepartmentIds($user), true);
+        return ! $user->isAdministrator() && in_array((int) $recap->department_id, $this->leaderDepartmentIds($user), true);
     }
 
     private function canDepartmentReviewRecap(AdminUser $user, OperationTaskRecap $recap): bool
@@ -1554,7 +1585,7 @@ class OperationTaskController extends Controller
 
     private function notifyRecapReviewers(OperationTaskRecap $recap, string $content, AdminUser $sender, ?array $channels = null): void
     {
-        $this->notifyUsers(array_values(array_diff($this->recapReviewerUserIds($recap, $channels), [(int) $sender->id])), $sender, '每日复盘待办提醒', $content);
+        $this->notifyUsers(array_values(array_diff($this->recapReviewerUserIds($recap, $channels), [(int) $sender->id])), $sender, __('operation_tasks.recap_review.pending_title'), $content);
     }
 
     private function notifyUsers(array $recipientIds, AdminUser $sender, string $title, string $content): void

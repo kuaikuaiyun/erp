@@ -1,6 +1,25 @@
 <?php
 
 return [
+    'recap_review' => [
+        'leader' => '二级主管审核',
+        'department' => '一级主管审核',
+        'pending' => '待主管审核',
+        'independent_hint' => '一级、二级主管独立审核；两级均通过后完成审核。仅展示当前部门范围内的数据。',
+        'opinion_required' => '驳回必须填写具体修改意见。',
+        'processed' => '该环节已由其他审核人处理，或本次审核已提交成功。你填写的意见已保留，请核对最新记录。',
+        'stale' => '复盘版本已更新，原审核意见已保留，请核对新版本后再审核。',
+        'saved' => '本次审核结果已保存。',
+        'refresh_page' => '审核页面已更新，请刷新页面后重新提交。',
+        'notice_title' => '审核提醒',
+        'retained_opinion' => '复盘 #:id · v:version 未提交的审核意见（请核对最新记录）',
+        'pending_title' => '每日复盘待办提醒',
+        'submitted_message' => ':name 已提交 :date 的每日复盘，待一级、二级主管分别审核。',
+        'rejected_title' => '每日复盘被驳回',
+        'rejected_message' => ':name 的 :date 每日复盘被:channel驳回：:opinion',
+        'approved_title' => '每日复盘审核通过',
+        'approved_message' => ':name 的 :date 每日复盘已完成全部审核。',
+    ],
     'reviews' => [
         'submitted_at' => '提交时间',
         'submitted_from' => '提交开始日期（北京时间）',

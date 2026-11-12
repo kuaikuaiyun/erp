@@ -138,6 +138,8 @@ class PayPalRiskAnalyticsService
             return $payload + [
                 'reason_options' => $options,
                 'reason_filter_text' => [
+                    'heading' => __('payment.account_reason_filter.heading'),
+                    'clear' => __('payment.account_reason_filter.clear'),
                     'title' => __('payment.account_reason_filter.title'),
                     'platform' => __('payment.account_reason_filter.platform'),
                     'manual' => __('payment.account_reason_filter.manual'),

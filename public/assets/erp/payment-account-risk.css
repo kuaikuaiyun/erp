@@ -545,3 +545,15 @@
     .payment-order-analysis-connector::before,
     .payment-order-analysis-connector::after { width: 22px; }
 }
+
+/* Account-detail reason picker shares the credit-card picker appearance. */
+.payment-account-detail-modal .payment-detail-reason-filter { width: 300px; max-width: 100%; min-width: 0; }
+.payment-account-detail-modal .payment-detail-reason-label { display: block; margin-bottom: 5px; color: #5d7790; font-size: 12px; font-weight: 600; }
+.payment-account-detail-modal .payment-detail-reason-filter summary { height: 34px; min-width: 0; font-size: 13px; }
+.payment-account-detail-modal .payment-detail-reason-filter summary > span { min-width: 0; }
+.payment-account-detail-modal .payment-detail-reason-filter .payment-reason-multiselect-menu { z-index: 1051; min-width: 0; }
+.payment-account-detail-modal .payment-detail-reason-filter .payment-reason-multiselect-head button { height: auto; font-size: 12px; }
+.payment-account-detail-modal .payment-detail-reason-group-title { padding: 7px 8px 5px; color: #7890a3; font-size: 12px; font-weight: 600; }
+.payment-account-detail-modal .payment-detail-reason-filter .payment-reason-multiselect-options label { min-width: 0; width: 100%; font-weight: 400; }
+.payment-account-detail-modal .payment-detail-reason-filter .payment-reason-multiselect-options label > span { display: inline; margin: 0; overflow-wrap: anywhere; }
+.payment-account-detail-modal .payment-detail-reason-filter .payment-reason-multiselect-options input { flex-shrink: 0; }
