@@ -71,6 +71,7 @@ class FashionAdvertisingReviewController extends Controller
     {
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
+        $visibleDepartmentIds = $this->visibleDepartmentIds($context['user']);
 
         $status = in_array($request->input('status'), ['pending', 'approved', 'rejected', 'deleted'], true) ? (string) $request->input('status') : '';
         $from = $this->date($request->input('from'));
@@ -84,6 +85,9 @@ class FashionAdvertisingReviewController extends Controller
         $accountNumber = trim((string) $request->input('account_number'));
 
         $reports = FashionAdvertisingReport::withTrashed()->with(['adSpendEntries', 'submitter.departments'])
+            ->when($visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
+                ? $query->whereRaw('1 = 0')
+                : $query->whereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $visibleDepartmentIds)))
             ->when($status === 'deleted', fn ($query) => $query->onlyTrashed())
             ->when(in_array($status, ['pending', 'approved', 'rejected'], true), fn ($query) => $query->whereNull('deleted_at')->where('status', $status))
             ->when($from, fn ($query) => $query->whereDate('report_date', '>=', $from))
@@ -103,6 +107,7 @@ class FashionAdvertisingReviewController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
+        $visibleDepartmentIds = $this->visibleDepartmentIds($context['user']);
 
         $departmentIds = collect($request->input('department_ids', []))
             ->push($request->input('department_id'))
@@ -120,6 +125,9 @@ class FashionAdvertisingReviewController extends Controller
         ];
 
         $reportSubmitterIds = FashionAdvertisingReport::withTrashed()
+            ->when($visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
+                ? $query->whereRaw('1 = 0')
+                : $query->whereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $visibleDepartmentIds)))
             ->whereNotNull('submitter_id')
             ->distinct()
             ->pluck('submitter_id');
@@ -129,11 +137,15 @@ class FashionAdvertisingReviewController extends Controller
             ->get(['id', 'name', 'username']);
         $departments = Department::business()
             ->whereHas('departmentMembers', fn ($query) => $query->whereIn('admin_users.id', $reportSubmitterIds))
+            ->when($visibleDepartmentIds !== null, fn ($query) => $query->whereIn('id', $visibleDepartmentIds))
             ->orderBy('sort')
             ->orderBy('name')
             ->get(['id', 'name']);
 
         $reports = FashionAdvertisingReport::withTrashed()->with(['performanceEntries', 'adSpendEntries', 'submitter.departments'])
+            ->when($visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
+                ? $query->whereRaw('1 = 0')
+                : $query->whereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $visibleDepartmentIds)))
             ->when($filters['status'] === 'deleted', fn ($query) => $query->onlyTrashed())
             ->when(in_array($filters['status'], ['pending', 'approved', 'rejected'], true), fn ($query) => $query->whereNull('deleted_at')->where('status', $filters['status']))
             ->when($filters['from'], fn ($query) => $query->whereDate('report_date', '>=', $filters['from']))
@@ -196,7 +208,11 @@ class FashionAdvertisingReviewController extends Controller
             'filters' => $filters,
             'departments' => $departments,
             'submitters' => $submitters,
-            'pendingCount' => FashionAdvertisingReport::query()->where('status', FashionAdvertisingReport::STATUS_PENDING)->count(),
+            'pendingCount' => FashionAdvertisingReport::query()
+                ->when($visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
+                    ? $query->whereRaw('1 = 0')
+                    : $query->whereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $visibleDepartmentIds)))
+                ->where('status', FashionAdvertisingReport::STATUS_PENDING)->count(),
         ]);
     }
 
@@ -206,6 +222,7 @@ class FashionAdvertisingReviewController extends Controller
         if ($context instanceof Response) {
             abort(403);
         }
+        $this->assertReportVisible($report, $context['user']);
         $data = $request->validate([
             'decision' => ['required', Rule::in(['approved', 'rejected'])],
             'review_reason' => ['nullable', 'string', 'max:1000', Rule::requiredIf($request->input('decision') === 'rejected')],
@@ -228,6 +245,7 @@ class FashionAdvertisingReviewController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
+        $this->assertReportVisible($report, $context['user']);
         $report->load(['adSpendEntries', 'submitter.departments']);
         $this->loadPerformanceMetrics($report);
         $context['portal']->loadMissing('menus');
@@ -239,6 +257,7 @@ class FashionAdvertisingReviewController extends Controller
     {
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
+        $this->assertReportVisible($report, $context['user']);
         abort_unless($report->status === FashionAdvertisingReport::STATUS_APPROVED, 422, '只有审核通过的报表可以重新编辑广告信息。');
         $report->load(['adSpendEntries', 'submitter.departments']);
 
@@ -249,6 +268,7 @@ class FashionAdvertisingReviewController extends Controller
     {
         $context = $this->context($request);
         if ($context instanceof Response) abort(403);
+        $this->assertReportVisible($report, $context['user']);
         abort_unless($report->status === FashionAdvertisingReport::STATUS_APPROVED, 422, '只有审核通过的报表可以重新编辑广告信息。');
         $report->load('adSpendEntries');
         $entryIds = $report->adSpendEntries->modelKeys();
@@ -337,7 +357,11 @@ class FashionAdvertisingReviewController extends Controller
             'review_reason' => ['nullable', 'string', 'max:1000', Rule::requiredIf($request->input('decision') === 'rejected')],
         ], ['report_ids.required' => '请至少选择一条待审核报表。', 'review_reason.required' => '批量审核不通过时请填写原因。']);
 
+        $visibleDepartmentIds = $this->visibleDepartmentIds($context['user']);
         $reports = FashionAdvertisingReport::query()->whereIn('id', $data['report_ids'])
+            ->when($visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
+                ? $query->whereRaw('1 = 0')
+                : $query->whereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $visibleDepartmentIds)))
             ->where('status', FashionAdvertisingReport::STATUS_PENDING)->get();
         abort_if($reports->isEmpty(), 422, '所选记录中没有可审核的待审核报表。');
         foreach ($reports as $report) {
@@ -359,6 +383,7 @@ class FashionAdvertisingReviewController extends Controller
         if ($context instanceof Response) {
             abort(403);
         }
+        $this->assertReportVisible($report, $context['user']);
 
         $report->forceFill([
             'deleted_by' => $context['user']->getKey(),
@@ -378,6 +403,7 @@ class FashionAdvertisingReviewController extends Controller
         $relation = $type === 'performance' ? 'performanceEntries' : ($type === 'advertising' ? 'adSpendEntries' : null);
         abort_unless($relation, 404);
         $report = FashionAdvertisingReport::withTrashed()->whereHas($relation, fn ($query) => $query->whereKey($entry))->firstOrFail();
+        $this->assertReportVisible($report, $context['user']);
         $item = $report->{$relation}()->whereKey($entry)->firstOrFail();
         abort_unless($item->screenshot_path && Storage::disk('local')->exists($item->screenshot_path), 404);
 
@@ -413,6 +439,22 @@ class FashionAdvertisingReviewController extends Controller
         }
 
         return $query->orderBy('name')->get(['id', 'name', 'username']);
+    }
+
+    /** @return list<int>|null null means unrestricted administrator access. */
+    private function visibleDepartmentIds(AdminUser $user): ?array
+    {
+        return $user->isAdministrator() ? null : $this->storeOwners->visibleOperationDepartmentIds($user);
+    }
+
+    private function assertReportVisible(FashionAdvertisingReport $report, AdminUser $user): void
+    {
+        $departmentIds = $this->visibleDepartmentIds($user);
+        if ($departmentIds === null) return;
+
+        abort_unless($departmentIds !== [] && $report->submitter()
+            ->whereHas('departments', fn ($departments) => $departments->whereIn('admin_roles.id', $departmentIds))
+            ->exists(), 403);
     }
 
     private function loadPerformanceMetrics(FashionAdvertisingReport $report): void

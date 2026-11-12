@@ -10,6 +10,7 @@ use App\Models\FashionAdvertisingReport;
 use App\Models\FashionLogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
+use App\Portals\Assistant\AssistantStoreOwnerService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -21,6 +22,7 @@ class FashionOperationReportController extends Controller
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
+        private readonly AssistantStoreOwnerService $storeOwners,
     ) {}
 
     public function index(Request $request): Response|View
@@ -30,6 +32,9 @@ class FashionOperationReportController extends Controller
             return $context;
         }
         $this->authorization->assertAssistantPortal($context['portal']);
+        $visibleDepartmentIds = $context['user']->isAdministrator()
+            ? null
+            : $this->storeOwners->visibleOperationDepartmentIds($context['user']);
 
         $timezones = $this->timezoneOptions();
         $validated = $request->validate([
@@ -73,7 +78,15 @@ class FashionOperationReportController extends Controller
             return (int) ($nameUsers->get(mb_strtolower(trim((string) $store->user_name)))?->getKey() ?? 0);
         })->forget(0);
         $operatorIds = $storesByOperator->keys()->map(fn ($id) => (int) $id)->values();
-        $operators = AdminUser::query()->with('departments')->whereIn('id', $operatorIds)->get()->keyBy('id');
+        $operators = AdminUser::query()->with('departments')->whereIn('id', $operatorIds)
+            ->when($visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
+                ? $query->whereRaw('1 = 0')
+                : $query->whereHas('departments', fn ($departments) => $departments->whereIn('admin_roles.id', $visibleDepartmentIds)))
+            ->get()->keyBy('id');
+        $operatorIds = $operators->keys()->map(fn ($id): int => (int) $id)->values();
+        $storesByOperator = $storesByOperator->only($operatorIds->all());
+        $stores = $stores->filter(fn (AssistantDomainStore $store): bool => $storesByOperator->has((int) ($store->owner_user_id
+            ?: ($nameUsers->get(mb_strtolower(trim((string) $store->user_name)))?->getKey() ?? 0))))->values();
         $departmentRows = Department::business()->get(['id', 'name', 'parent_id', 'sort']);
         $fashionDepartment = $departmentRows->firstWhere('name', '服装运营部门');
         $fashionDepartmentIds = collect($fashionDepartment ? [(int) $fashionDepartment->id] : []);
@@ -154,6 +167,7 @@ class FashionOperationReportController extends Controller
 
         $departmentOptions = $fashionDepartment
             ? $departmentRows->filter(fn (Department $department): bool => $fashionDepartmentIds->contains((int) $department->id))
+                ->when($visibleDepartmentIds !== null, fn ($departments) => $departments->whereIn('id', $visibleDepartmentIds))
                 ->sortBy(fn (Department $department): string => ((int) $department->id === $fashionRootDepartmentId ? '0' : '1')
                     .str_pad((string) ((int) $department->sort), 8, '0', STR_PAD_LEFT)
                     .mb_strtolower((string) $department->name))
