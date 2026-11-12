@@ -237,7 +237,7 @@
                             <div class="paypal-risk-sync-state sync-{{ $account['last_import_status'] }}" title="{{ $account['last_import_message'] }}">
                                 <i class="fa {{ $importIcons[$account['last_import_status']] ?? 'fa-clock-o' }}"></i>
                                 <span>{{ $importLabels[$account['last_import_status']] ?? $account['last_import_status'] }}</span>
-                                <small>{{ $account['last_imported_at'] }}</small>
+                                <small>{{ $model?->last_imported_at?->copy()->timezone('Asia/Shanghai')->format('Y-m-d H:i:s') ?? '-' }}</small>
                             </div>
                             <div class="paypal-risk-card-actions">
                                 <button type="button" class="btn btn-default btn-sm" data-paypal-detail="{{ $account['id'] }}"><i class="fa fa-bar-chart"></i> 查看</button>

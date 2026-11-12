@@ -101,30 +101,38 @@
     <div class="ot-card ot-test-review-card" data-review-panel="tests">
         <div class="ot-card-body ot-recap-review-table-wrap">
             <table class="ot-recap-review-table ot-test-review-table">
-                <thead><tr><th>任务编号</th><th>运营</th><th>团队</th><th>页面类型</th><th>提交时间</th><th>素材信息</th><th>二级主管审核</th><th>一级主管审核</th><th>审核阶段</th><th>操作</th></tr></thead>
+                <thead><tr><th>{{ __('operation_tasks.review_task.info') }}</th><th>提交时间</th><th>素材信息</th><th>二级主管审核</th><th>一级主管审核</th><th>审核阶段</th><th>操作</th></tr></thead>
                 <tbody>
             @forelse($tasks as $task)
                 @php
                     $taskReviews = $task->reviews->where('target_type', 'task')->where('target_version', $task->version)->keyBy('channel');
                     $taskPermissions = ['leader' => (bool) $task->can_leader_review, 'department' => (bool) $task->can_department_review];
-                    $taskActiveChannel = array_key_first($channels);
-                    $reviewedAssetCount = $task->assets->filter(function ($asset) use ($taskActiveChannel): bool {
-                        return $asset->reviews
-                            ->where('target_version', $asset->version)
-                            ->where('channel', $taskActiveChannel)
-                            ->whereIn('result', ['approved', 'rejected'])
-                            ->isNotEmpty();
-                    })->count();
                 @endphp
                 <tr>
-                    <td class="test-task-no"><b>{{ $task->task_no }}</b></td>
-                    <td class="test-owner"><b>{{ $task->owner_name }}</b></td>
-                    <td class="test-team">{{ $task->department_name ?: '未分配二级部门' }}</td>
-                    <td class="test-page-type"><span class="ot-badge {{ $task->page_type === 'category' ? 'orange' : '' }}">{{ $task->page_type === 'category' ? '类目页' : '单品页' }}</span></td>
-                    <td class="test-submitted-at">{{ \App\Portals\OperationTasks\Support\OperationTaskTime::format($task->created_at, 'Y-m-d H:i') }}</td>
+                    <td class="test-task-info">
+                        <div class="ot-review-task-info"><div><span>{{ __('operation_tasks.review_task.number') }}</span><b>{{ $task->task_no }}</b></div><div><span>{{ __('operation_tasks.review_task.owner') }}</span><span>{{ $task->owner_name }}</span></div><div><span>{{ __('operation_tasks.review_task.team') }}</span><span>{{ $task->department_name ?: __('operation_tasks.review_task.unassigned') }}</span></div></div>
+                    </td>
+                    <td class="test-submitted-at"><span>{{ \App\Portals\OperationTasks\Support\OperationTaskTime::format($task->created_at, 'Y-m-d') }}</span><small>{{ \App\Portals\OperationTasks\Support\OperationTaskTime::format($task->created_at, 'H:i') }}</small></td>
                     <td class="test-asset-info">
-                        <b>{{ $task->assets->count() }} 条素材</b>
-                        <small>审核进度 {{ $reviewedAssetCount }}/{{ $task->assets->count() }}</small>
+                        <div class="ot-review-material-grid">
+                            @foreach($task->assets->take($task->assets->count() >= 8 ? 7 : 8) as $asset)
+                                @php
+                                    $previewUrl = $asset->file_path ? route('operation-tasks.assets.file', $asset) : trim((string) $asset->external_url);
+                                    $previewName = $asset->original_name ?: __('operation_tasks.assets.link_name', ['id' => $asset->id]);
+                                    $previewMime = strtolower((string) $asset->mime_type);
+                                    $previewProbe = strtolower($previewName.' '.$previewUrl);
+                                    $isImage = str_starts_with($previewMime, 'image/') || preg_match('/\.(?:jpe?g|png|gif|webp|bmp|svg)(?:\?.*)?$/i', $previewProbe);
+                                    $isVideo = str_starts_with($previewMime, 'video/') || preg_match('/\.(?:mp4|webm|ogg|mov|m4v)(?:\?.*)?$/i', $previewProbe);
+                                    $previewType = $isImage ? 'image' : ($isVideo ? 'video' : 'link');
+                                @endphp
+                                <button type="button" class="ot-review-material-thumb" @if($previewUrl) data-asset-preview data-preview-type="{{ $previewType }}" data-preview-src="{{ $previewUrl }}" data-preview-name="{{ $previewName }}" @else disabled @endif title="{{ $previewName }}" aria-label="{{ __('operation_tasks.assets.preview_name', ['name' => $previewName]) }}">
+                                    @if($isImage && $previewUrl)<img src="{{ $previewUrl }}" loading="lazy" alt="{{ $previewName }}" width="64" height="48">@else<i class="fa {{ $isVideo ? 'fa-play-circle' : 'fa-external-link' }}" aria-hidden="true"></i>@endif
+                                </button>
+                            @endforeach
+                            @if($task->assets->count() >= 8)
+                                <button type="button" class="ot-review-material-thumb ot-review-material-more" data-toggle="modal" data-target="#ot-audit-{{ $task->id }}" title="{{ __('operation_tasks.assets.more_review', ['count' => $task->assets->count()]) }}" aria-label="{{ __('operation_tasks.assets.more_review', ['count' => $task->assets->count()]) }}" @disabled(!in_array(true, $taskPermissions, true))>{{ __('operation_tasks.assets.more_symbol') }}</button>
+                            @endif
+                        </div>
                     </td>
                     <td class="test-reviewer-cell">
                         <div class="ot-stage-status">
@@ -140,7 +148,7 @@
                     <td class="recap-actions"><div class="ot-review-actions"><a class="btn btn-info btn-sm" href="{{ $task->landing_url }}" target="_blank" rel="noopener">落地页</a><a class="btn btn-default btn-sm" href="{{ route('operation-tasks.tests.show', $task) }}">档案</a>@if(in_array(true, $taskPermissions, true))<button class="btn ot-primary btn-sm" type="button" data-toggle="modal" data-target="#ot-audit-{{ $task->id }}">审核</button>@endif</div></td>
                 </tr>
             @empty
-                <tr><td colspan="10"><div class="ot-empty-state"><i class="fa fa-check-circle"></i><b>当前筛选条件下暂无审核任务</b><span>调整筛选条件后再查看，或等待本部门成员提交新任务。</span></div></td></tr>
+                <tr><td colspan="7"><div class="ot-empty-state"><i class="fa fa-check-circle"></i><b>当前筛选条件下暂无审核任务</b><span>调整筛选条件后再查看，或等待本部门成员提交新任务。</span></div></td></tr>
             @endforelse
                 </tbody>
             </table>
@@ -244,7 +252,7 @@
                 <div class="modal-header"><button type="button" class="close" data-dismiss="modal">&times;</button><h4 class="modal-title" id="ot-asset-preview-title">素材预览</h4></div>
                 <div class="modal-body"><div class="ot-asset-preview-stage">
                     <img id="ot-asset-preview-image" alt="素材预览">
-                    <video id="ot-asset-preview-video" controls playsinline preload="metadata"></video>
+                    <video id="ot-asset-preview-video" controls playsinline preload="none"></video>
                     <div id="ot-asset-preview-link" class="ot-asset-preview-link"><i class="fa fa-external-link-square"></i><p>该素材不是可直接预览的图片或视频。</p><a class="btn ot-primary" target="_blank" rel="noopener">在新窗口打开</a></div>
                 </div></div>
                 <div class="modal-footer"><a id="ot-asset-preview-open" class="btn btn-default" target="_blank" rel="noopener"><i class="fa fa-external-link"></i> 新窗口打开</a><button type="button" class="btn btn-default" data-dismiss="modal">关闭</button></div>
@@ -310,6 +318,7 @@
             previewImage.src = source;
             previewImage.classList.add('is-active');
         } else if (type === 'video' && previewVideo) {
+            previewVideo.preload = 'metadata';
             previewVideo.src = source;
             previewVideo.classList.add('is-active');
             previewVideo.load();
@@ -413,9 +422,26 @@
             notify('选择驳回时，必须填写具体修改意见。');
         }
     });
+    function closeReviewHistories(except) {
+        document.querySelectorAll('.ot-review-page .ot-review-flow-history[open]').forEach(function (history) {
+            if (history !== except) history.open = false;
+        });
+    }
+    document.addEventListener('click', function (event) {
+        var history = event.target.closest && event.target.closest('.ot-review-page .ot-review-flow-history');
+        closeReviewHistories(history);
+    }, true);
+    document.addEventListener('toggle', function (event) {
+        var history = event.target;
+        if (history.matches && history.matches('.ot-review-page .ot-review-flow-history') && history.open) closeReviewHistories(history);
+    }, true);
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') closeReviewHistories();
+    });
     var tabButtons = document.querySelectorAll('[data-review-tab]');
     var tabPanels = document.querySelectorAll('[data-review-panel]');
     function activateReviewTab(name) {
+        closeReviewHistories();
         tabButtons.forEach(function (button) {
             button.classList.toggle('is-active', button.getAttribute('data-review-tab') === name);
         });
@@ -446,3 +472,33 @@
 </script>
 @endpush
 @endif
+
+@push('styles')
+<style>
+.ot-review-page .ot-test-review-card>.ot-card-body{container-type:inline-size}
+.ot-review-page .ot-test-review-table{width:100%;min-width:0!important;max-width:100%;table-layout:fixed!important}
+.ot-review-page .ot-test-review-table>thead>tr>th,.ot-review-page .ot-test-review-table>tbody>tr>td{min-width:0!important;padding:10px 6px!important;overflow-wrap:anywhere}
+.ot-review-page .ot-test-review-table>thead>tr>th:nth-child(1),.ot-review-page .ot-test-review-table>tbody>tr>td:nth-child(1){width:23%!important}
+.ot-review-page .ot-test-review-table>thead>tr>th:nth-child(2),.ot-review-page .ot-test-review-table>tbody>tr>td:nth-child(2){width:10%!important}
+.ot-review-page .ot-test-review-table>thead>tr>th:nth-child(3),.ot-review-page .ot-test-review-table>tbody>tr>td:nth-child(3){width:24%!important}
+.ot-review-page .ot-test-review-table>thead>tr>th:nth-child(4),.ot-review-page .ot-test-review-table>tbody>tr>td:nth-child(4){width:8%!important}
+.ot-review-page .ot-test-review-table>thead>tr>th:nth-child(5),.ot-review-page .ot-test-review-table>tbody>tr>td:nth-child(5){width:8%!important}
+.ot-review-page .ot-test-review-table>thead>tr>th:nth-child(6),.ot-review-page .ot-test-review-table>tbody>tr>td:nth-child(6){width:19%!important}
+.ot-review-page .ot-test-review-table>thead>tr>th:nth-child(7),.ot-review-page .ot-test-review-table>tbody>tr>td:nth-child(7){width:8%!important}
+.ot-review-task-info{display:grid;gap:5px;text-align:left;line-height:1.5}.ot-review-task-info>div{display:flex;align-items:baseline;gap:4px;min-width:0}.ot-review-task-info>div>span:first-child{flex:0 0 auto;color:#718692}.ot-review-task-info>div>span:last-child,.ot-review-task-info b{min-width:0;overflow-wrap:anywhere}.ot-review-task-info b{color:#173f5a}.ot-review-task-info>div>span:last-child{color:#536e7d}
+.ot-review-material-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;width:100%;max-width:274px;margin:0 auto}
+.ot-review-material-thumb{display:flex;width:100%;min-width:0;max-width:64px;height:auto;aspect-ratio:4/3;align-items:center;justify-content:center;padding:0;overflow:hidden;border:1px solid #d6e3e9;border-radius:5px;background:#edf4f7;color:#246c98;cursor:pointer}
+.ot-review-page .ot-test-review-table .test-submitted-at>span,.ot-review-page .ot-test-review-table .test-submitted-at>small{display:block;white-space:nowrap}
+.ot-review-page .ot-test-review-table .ot-review-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
+.ot-review-page .ot-test-review-table .ot-review-actions .btn{min-width:0;width:100%;padding:5px 2px;font-size:11px}
+.ot-review-page .ot-test-review-table .ot-review-actions>button{grid-column:1/-1}
+.ot-review-page .ot-test-review-table .ot-review-flow{min-width:0}
+.ot-review-page .ot-test-review-table .ot-review-flow-main{flex-wrap:wrap;white-space:normal;gap:3px 6px}
+.ot-review-page .ot-test-review-table .ot-review-flow-main b{white-space:normal;overflow-wrap:anywhere}
+.ot-review-page .ot-test-review-table .ot-review-flow-history{position:relative}
+.ot-review-page .ot-test-review-table .ot-review-flow-history>div{right:0;width:min(360px,75vw)}
+@container(max-width:1350px){.ot-review-material-grid{max-width:204px;gap:4px}.ot-review-material-thumb{max-width:48px}.ot-review-material-thumb i{font-size:20px}.ot-review-page .ot-test-review-table>thead>tr>th,.ot-review-page .ot-test-review-table>tbody>tr>td{padding:8px 4px!important}.ot-review-page .ot-test-review-table>thead>tr>th{white-space:normal}}
+@container(max-width:1050px){.ot-review-page .ot-test-review-table .ot-review-actions{grid-template-columns:1fr}}
+.ot-review-material-thumb img{display:block;width:100%;height:100%;object-fit:contain}.ot-review-material-thumb i{font-size:24px}.ot-review-material-thumb:focus{outline:2px solid #246c98;outline-offset:1px}.ot-review-material-thumb:disabled{cursor:default;opacity:.55}.ot-review-material-more{font-size:28px;font-weight:700;line-height:1}
+</style>
+@endpush

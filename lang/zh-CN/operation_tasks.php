@@ -1,6 +1,13 @@
 <?php
 
 return [
+    'review_task' => [
+        'info' => '任务信息',
+        'number' => '任务编号：',
+        'owner' => '运营人员：',
+        'team' => '运营团队：',
+        'unassigned' => '未分配二级部门',
+    ],
     'recap_review' => [
         'leader' => '二级主管审核',
         'department' => '一级主管审核',
@@ -26,6 +33,10 @@ return [
         'submitted_to' => '提交结束日期（北京时间）',
     ],
     'assets' => [
+        'link_name' => '链接素材 #:id',
+        'preview_name' => '预览 :name',
+        'more_review' => '共 :count 个素材，点击进入审核',
+        'more_symbol' => '…',
         'preview' => '预览素材 :number',
         'preview_title' => '素材预览',
         'open_link' => '打开外部素材',
