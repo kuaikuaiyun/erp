@@ -167,9 +167,9 @@ class OperationReportController extends Controller
                         ->filter(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? '其他'))) === mb_strtolower($media))
                         ->sum('first_total_orders');
                 })->all(),
-                'media_rois' => $mediaNames->map(function (string $media) use ($identityKey, $submittedMediaRoiByDate): ?float {
+                'media_spends' => $mediaNames->map(function (string $media) use ($identityKey, $submittedMediaRoiByDate): float {
                     $metric = $submittedMediaRoiByDate[$identityKey][mb_strtolower($media)] ?? null;
-                    return isset($metric['first_roi']) ? (float) $metric['first_roi'] : null;
+                    return (float) ($metric['actual_ad_spend'] ?? 0);
                 })->all(),
                 'media_accounts' => $mediaNames->map(
                     fn (string $media): array => $accountSpendsByMedia->get(mb_strtolower($media), collect())->values()->all()
