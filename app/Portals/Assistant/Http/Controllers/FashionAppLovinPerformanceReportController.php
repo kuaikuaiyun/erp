@@ -3,6 +3,7 @@
 namespace App\Portals\Assistant\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Models\AdminUser;
 use App\Models\AppLovinAccountStoreBinding;
 use App\Models\AppLovinSpendScreenshot;
 use App\Models\AssistantDomainStore;
@@ -11,6 +12,7 @@ use App\Models\FashionAdvertisingReport;
 use App\Models\FashionLogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
+use App\Portals\Assistant\AssistantStoreOwnerService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -23,6 +25,7 @@ class FashionAppLovinPerformanceReportController extends Controller
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
+        private readonly AssistantStoreOwnerService $storeOwners,
     ) {}
 
     public function index(Request $request): Response|View
@@ -34,10 +37,15 @@ class FashionAppLovinPerformanceReportController extends Controller
         $this->authorization->assertAssistantPortal($context['portal']);
         abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
 
+        $visibleDepartmentIds = $this->visibleDepartmentIds($context['user']);
         $submitterIds = FashionAdvertisingReport::query()->whereHas('adSpendEntries', fn ($query) => $query->whereRaw("LOWER(TRIM(media)) = 'applovin'"))
             ->whereIn('status', [FashionAdvertisingReport::STATUS_APPROVED, FashionAdvertisingReport::STATUS_REJECTED])
+            ->when($visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
+                ? $query->whereRaw('1 = 0')
+                : $query->whereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $visibleDepartmentIds)))
             ->pluck('submitter_id')->filter()->unique()->values();
         $departments = Department::business()->whereHas('departmentMembers', fn ($query) => $query->whereIn('admin_users.id', $submitterIds))
+            ->when($visibleDepartmentIds !== null, fn ($query) => $query->whereIn('id', $visibleDepartmentIds))
             ->orderBy('sort')->orderBy('name')->get(['id', 'parent_id', 'name']);
         $departmentIds = $departments->pluck('id')->map(fn ($id) => (int) $id)->all();
         $timezoneOptions = $this->timezoneOptions();
@@ -80,6 +88,9 @@ class FashionAppLovinPerformanceReportController extends Controller
             ->whereIn('status', [FashionAdvertisingReport::STATUS_APPROVED, FashionAdvertisingReport::STATUS_REJECTED])
             ->whereHas('adSpendEntries', fn ($query) => $query->whereRaw("LOWER(TRIM(media)) = 'applovin'"))
             ->with(['adSpendEntries' => fn ($query) => $query->whereRaw("LOWER(TRIM(media)) = 'applovin'"), 'submitter.departments'])
+            ->when($visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
+                ? $query->whereRaw('1 = 0')
+                : $query->whereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $visibleDepartmentIds)))
             ->when($selectedDepartmentIds !== [], fn ($query) => $query->whereHas('submitter.departments', fn ($department) => $department->whereKey($selectedDepartmentIds)))
             ->when($filters['operator'] ?? null, fn ($query, $name) => $query->where('submitter_name', 'like', '%'.$name.'%'));
         $accountSpendReports = (clone $reportQuery)->get();
@@ -234,6 +245,16 @@ class FashionAppLovinPerformanceReportController extends Controller
             'consumptionCustom' => $filters['consumption_custom'] ?? '', 'consumptionCustomMax' => $filters['consumption_custom_max'] ?? '',
             'selectedDepartmentIds' => $selectedDepartmentIds, 'departmentOptions' => $departments,
         ]);
+    }
+
+    /** @return list<int>|null null means unrestricted administrator or BOSS access. */
+    private function visibleDepartmentIds(AdminUser $user): ?array
+    {
+        if ($user->isAdministrator() || strcasecmp((string) $user->username, 'kky_boss') === 0) {
+            return null;
+        }
+
+        return $this->storeOwners->visibleOperationDepartmentIds($user);
     }
 
     /** @return array<string,string> */
