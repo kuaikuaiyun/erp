@@ -7,6 +7,7 @@ use App\Models\DailyAdvertisingAccountAuthorization;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
+use App\Portals\Assistant\DailyReportDepartmentScopeService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -18,6 +19,7 @@ class AdvertisingAccountAuthorizationReviewController extends Controller
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
         private readonly AssistantStoreOwnerService $storeOwners,
+        private readonly DailyReportDepartmentScopeService $departmentScopes,
     ) {}
 
     public function index(Request $request): Response|View
@@ -33,8 +35,8 @@ class AdvertisingAccountAuthorizationReviewController extends Controller
         $query = DailyAdvertisingAccountAuthorization::query();
         $allDepartments = $this->storeOwners->boundBusinessDepartments();
         $visibleIds = null;
-        if (! $context['user']->isAdministrator()) {
-            $visibleIds = $this->storeOwners->visibleOperationDepartmentIds($context['user']);
+        $visibleIds = $this->departmentScopes->visibleIdsForReview($context['user']);
+        if ($visibleIds !== null) {
             $visibleIds === [] ? $query->whereRaw('1=0') : $query->whereIn('operation_department_id', $visibleIds);
         }
         $departments = $visibleIds === null ? $allDepartments : $allDepartments->whereIn('id', $visibleIds)->values();
@@ -54,9 +56,8 @@ class AdvertisingAccountAuthorizationReviewController extends Controller
     {
         $context = $this->context($request);
         if ($context instanceof Response) abort($context->getStatusCode());
-        if (! $context['user']->isAdministrator()) {
-            abort_unless(in_array((int) $submission->operation_department_id, $this->storeOwners->visibleOperationDepartmentIds($context['user']), true), 403);
-        }
+        $visibleIds = $this->departmentScopes->visibleIdsForReview($context['user']);
+        if ($visibleIds !== null) abort_unless(in_array((int) $submission->operation_department_id, $visibleIds, true), 403);
         $data = $request->validate(['response_text' => ['required', 'string', 'max:5000']], ['response_text.required' => '请填写回复内容。']);
         $submission->update([
             'status' => DailyAdvertisingAccountAuthorization::STATUS_PROCESSED,

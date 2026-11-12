@@ -51,9 +51,11 @@
         || app(\App\Portals\Assistant\AssistantPortalAuthorizationService::class)->canViewShopifyAnalytics($user);
     $canAccessOperationTaskManagementMenu = ($canManageOperationTasks ?? false)
         || !in_array($menu->code, ['fashion_operation_task_reviews', 'fashion_operation_task_dashboard'], true);
+    $canAccessDailyReportDepartmentSettings = $menu->code !== 'assistant_daily_report_department_settings'
+        || app(\App\Portals\Assistant\DailyReportDepartmentScopeService::class)->canAccessSettings($user);
 @endphp
 
-@if ((!$isConfigurationMenu || $canManagePortalMenus) && $canAccessProductRequestMenu && $canAccessAssistantAnalyticsMenu && $canAccessOperationTaskManagementMenu)
+@if ((!$isConfigurationMenu || $canManagePortalMenus) && $canAccessProductRequestMenu && $canAccessAssistantAnalyticsMenu && $canAccessOperationTaskManagementMenu && $canAccessDailyReportDepartmentSettings)
     @if ($children->isEmpty())
     <li class="{{ $isCurrent ? 'active' : '' }}">
         <a href="{{ $href }}">
