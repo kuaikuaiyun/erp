@@ -161,6 +161,9 @@ class FinanceSettlementService
         if ($channel === 'credit_card' && filled($filters['card_channel'] ?? null)) {
             FinanceCreditSettlementLayout::filter($query, $filters['card_channel']);
         }
+        if (($filters['card_channel'] ?? null) === 'worldpay' && filled($filters['gateway'] ?? null)) {
+            $query->where('payload->网关接入号', $filters['gateway']);
+        }
         if ($channel === 'credit_card' && filled($filters['card_group'] ?? null)) {
             $query->whereIn('account', FinancePaymentAccount::query()->where('account_type', 'credit_card')
                 ->where('card_group_id', $filters['card_group'])->select('activity_account'));
@@ -247,8 +250,9 @@ class FinanceSettlementService
         ['accountModels' => $accountModels, 'accounts' => $accounts, 'accountsById' => $accountsById,
             'storesById' => $storesById, 'domains' => $domains, 'brushStores' => $brushStores, 'locks' => $locks] =
             $context ?? $this->rowContext($channel);
+        $worldpay = ($filters['card_channel'] ?? null) === 'worldpay';
         $metadata = $this->logisticsMetadata($records, $channel, withCustomReference: ! empty($filters['order_view']),
-            summaryOnly: ! empty($filters['summary_only']));
+            summaryOnly: ! empty($filters['summary_only']), includeOrder: $worldpay);
         $candidateOrders = $channel === 'paypal' && ! empty($filters['order_view'])
             ? app(FinancePayPalOrderCandidates::class)->suggestions($records, $metadata) : [];
         $departmentMembers = $channel === 'paypal' && ! empty($filters['order_view']) && $records->isNotEmpty()
@@ -264,7 +268,7 @@ class FinanceSettlementService
             ? $records->filter(fn ($record) => ($record->payload['_card_channel'] ?? null) === 'ye') : collect());
         $confluxOrderIds = $confluxOrders->pluck('id')->flip();
         $creditUsdRates = $usdRates->forOrders($confluxOrders);
-        return $records->map(function ($record) use ($channel, $filters, $supplements, $accounts, $owners, $accountsById, $domains, $storesById, $brushStores, $locks, $metadata, $candidateOrders, $membersById, $membersByName, $conflux, $ledger, $confluxFees, $usdRates, $confluxOrderIds, $creditUsdRates): array {
+        return $records->map(function ($record) use ($channel, $filters, $supplements, $accounts, $owners, $accountsById, $domains, $storesById, $brushStores, $locks, $metadata, $candidateOrders, $membersById, $membersByName, $conflux, $ledger, $confluxFees, $usdRates, $confluxOrderIds, $creditUsdRates, $worldpay): array {
             $owner = $accountsById->get($owners->get($record->id));
             $p = $record->payload;
             $definition = FinanceCatalog::dataset($record->dataset);
@@ -380,6 +384,9 @@ class FinanceSettlementService
                 $row['fee'] = $row['usd_rate'] === null ? null : bcmul($row['fee'], $row['usd_rate'], 8);
             }
             $order = $metadata[$record->id]['order'] ?? null;
+            if ($worldpay && $order !== null && filled($metadata[$record->id]['domain'])) {
+                $row['domain'] = $saved['domain'] ?? $metadata[$record->id]['domain'];
+            }
             $domain = strtolower(trim((string) ($saved['_edited_fields']['domain'] ?? $row['domain'])));
             $orderStore = $storesById->get($order->assistant_domain_store_id ?? null);
             $group = $orderStore?->domain === $domain ? $orderStore : $domains->get($domain);
@@ -388,7 +395,7 @@ class FinanceSettlementService
             }
             $ownership = $this->resolveOrderOwner($order, $orderStore, $group, $p);
             $ownerName = $ownership['ownerName'];
-            $team = $ownership['team'];
+            $team = $worldpay && blank($ownership['team']) ? ($group?->team ?? $p['团队'] ?? '') : $ownership['team'];
             $row['owner'] = filled($saved['owner'] ?? null) ? $saved['owner'] : $ownerName;
             $row['team'] = filled($saved['team'] ?? null) ? $saved['team'] : $team;
             $row = [...$row, ...($saved['_edited_fields'] ?? [])];
@@ -443,6 +450,9 @@ class FinanceSettlementService
                 $row['card_layout'] = FinanceCreditSettlementLayout::values(
                     $filters['card_channel'], $row, $p, $manual, $record->source_timezone ?: 'Asia/Shanghai',
                 );
+                if ($worldpay && $order !== null && filled($row['owner']) && ! array_key_exists('owner', $manual)) {
+                    $row['card_layout']['owner'] = $row['owner'];
+                }
                 if ($conflux !== null) {
                     $row['card_layout']['operation_region'] = self::operationRegion((string) $row['team']);
                 }
@@ -806,7 +816,7 @@ class FinanceSettlementService
     }
 
     /** Enrich settlements from a linked logistics order or a unique payment reference. */
-    public function logisticsMetadata(Collection $records, string $channel, bool $matchOnly = false, bool $withCustomReference = false, bool $summaryOnly = false): array
+    public function logisticsMetadata(Collection $records, string $channel, bool $matchOnly = false, bool $withCustomReference = false, bool $summaryOnly = false, bool $includeOrder = false): array
     {
         $db = $this->workbooks->database();
         if ($records->isEmpty() || ! $db->getSchemaBuilder()->hasTable('logistics_orders')) {
@@ -817,7 +827,9 @@ class FinanceSettlementService
             $channel === 'paypal' ? ['bill_number', 'transaction_id', 'payment_gateway_order_id'] : ['bill_number', 'transaction_id', 'payment_gateway_order_id', 'shopify_order_number'],
             $columns
         ));
-        if ($referenceFields === [] && ! ($channel === 'paypal' && $db->getSchemaBuilder()->hasTable('logistics_order_payment_references'))) {
+        $hasPaymentReferences = ($channel === 'paypal' || $includeOrder)
+            && $db->getSchemaBuilder()->hasTable('logistics_order_payment_references');
+        if ($referenceFields === [] && ! $hasPaymentReferences) {
             return [];
         }
         $summaryFields = ['assistant_domain_store_id', 'source_shop_domain', 'subscription_type', 'is_add_on', 'tongtu_order_number',
@@ -849,7 +861,7 @@ class FinanceSettlementService
         $paymentReferences = collect();
         $paymentTypes = [];
         $paymentReferenceColumns = [];
-        if ($channel === 'paypal' && $db->getSchemaBuilder()->hasTable('logistics_order_payment_references')) {
+        if ($hasPaymentReferences) {
             $paymentReferenceColumns = ['reference_number', 'logistics_order_id'];
             if (! $matchOnly && $db->getSchemaBuilder()->hasColumn('logistics_order_payment_references', 'reference_type')) {
                 $paymentReferenceColumns[] = 'reference_type';
@@ -942,8 +954,10 @@ class FinanceSettlementService
             $result[$record->id] = ['logistics_order_id' => $order->id, 'domain' => $stores->get($order->assistant_domain_store_id ?? null) ?: ($order->source_shop_domain ?? ''),
                 'payment_method' => $order->payment_method ?? '',
                 'subscription' => $order->subscription_type ?? '', 'upsell' => $order->is_add_on ?? '', 'erp_order' => $order->tongtu_order_number ?? ''];
-            if ($channel === 'paypal') {
+            if ($channel === 'paypal' || $includeOrder) {
                 $result[$record->id]['order'] = $order;
+            }
+            if ($channel === 'paypal') {
                 $result[$record->id]['payment_reference_type'] = $paymentTypes[$record->reference][$order->id]
                     ?? ($matchedCustomReference || (string) ($order->bill_number ?? '') === $record->reference
                         ? LogisticsOrderPaymentReference::TYPE_PRIMARY : null);

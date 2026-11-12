@@ -1676,6 +1676,7 @@ class FinanceController extends Controller
     {
         return [...$request->validate([
             'account' => 'nullable|string|max:191', 'reference' => 'nullable|string|max:191',
+            'gateway' => 'nullable|string|max:191',
             'from' => 'nullable|date_format:Y-m-d', 'to' => 'nullable|date_format:Y-m-d',
             'timezone' => ['nullable', Rule::in(FinanceWorkbookService::TIMEZONES)],
             'team' => 'nullable|string|max:100', 'subscription' => 'nullable|string|max:100', 'domain' => 'nullable|string|max:191',
@@ -1711,6 +1712,9 @@ class FinanceController extends Controller
         $filters = $this->settlementFilters($request, $conditionFields);
         if ($fixedCardChannel !== null) {
             $filters['card_channel'] = $fixedCardChannel;
+        }
+        if ($fixedCardChannel === 'worldpay') {
+            unset($filters['account'], $filters['card_group']);
         }
         $cardLayout = $channel === 'credit_card' ? FinanceCreditSettlementLayout::columns($filters['card_channel'] ?? null) : [];
         if ($channel !== 'credit_card' || ($filters['card_channel'] ?? null) !== 'ye') {
@@ -2040,6 +2044,9 @@ class FinanceController extends Controller
         $channel = $report === 'paypal-settlement' ? 'paypal' : 'credit_card';
         if ($fixedCardChannel = FinanceCreditSettlementLayout::REPORT_CHANNELS[$report] ?? null) {
             $request->merge(['card_channel' => $fixedCardChannel]);
+        }
+        if ($report === 'worldpay-settlement' && $request->hasFile('files')) {
+            return $this->importWorldpayFiles($request, $report, (int) $context['user']->getKey());
         }
         if ($channel === 'credit_card' && $request->input('card_channel') === 'ye' && $request->has('files')) {
             return $this->importConfluxFiles($request, $report, (int) $context['user']->getKey());
@@ -2515,19 +2522,31 @@ class FinanceController extends Controller
 
     private function importCreditChannelDetails(Request $request, string $report, int $actor): Response
     {
+        $directWorldpay = $report === 'worldpay-settlement';
         $data = $request->validate([
             'card_channel' => ['required', Rule::in(array_keys(FinanceCreditSettlementLayout::CHANNELS))],
             'card_group' => 'nullable|integer|min:1',
-            'account' => 'required|string|max:191',
+            'account' => $directWorldpay ? 'exclude' : 'required|string|max:191',
             'timezone' => ['required', Rule::in(FinanceWorkbookService::TIMEZONES)],
         ]);
         $file = $request->file('file');
+        $worldpay = $data['card_channel'] === 'worldpay' ? app(\App\Portals\Finance\FinanceWorldpayImport::class) : null;
+        $official = $worldpay?->read($file);
         try {
-            [$count, $total] = $this->workbooks->database()->transaction(function () use ($data, $file, $actor): array {
-                $account = $this->lockCreditImportAccount($data);
+            [$count, $total] = $this->workbooks->database()->transaction(function () use ($data, $file, $actor, $worldpay, $official, $directWorldpay): array {
+                if ($directWorldpay) {
+                    // Serialize direct uploads before resolving existing gateway/reference pairs.
+                    $this->workbooks->database()->table('portals')->where('code', 'caiwu')->lockForUpdate()->first();
+                }
+                $account = $directWorldpay ? \App\Portals\Finance\FinanceWorldpayImport::SOURCE_ACCOUNT
+                    : $this->lockCreditImportAccount($data)->activity_account;
+                if ($official !== null) {
+                    [$kind, $rows] = $official;
+                    return [$worldpay->import($kind, $rows, $account, $data['timezone'], $actor), count($rows)];
+                }
                 $count = $total = 0;
                 foreach ($this->creditChannelOrderBatches($file, $data['card_channel']) as $rows) {
-                    $count += $this->workbooks->importRecords('xuzong2-details', $rows, $account->activity_account,
+                    $count += $this->workbooks->importRecords('xuzong2-details', $rows, $account,
                         $data['timezone'], $actor, createOnly: true, guardSettlementMonth: true);
                     $total += count($rows);
                 }
@@ -2539,7 +2558,47 @@ class FinanceController extends Controller
         }
 
         return redirect()->route('finance.report', ['report' => $report, ...$data])
-            ->with('success', '已新增 '.$count.' 条信用卡明细，跳过重复 '.($total - $count).' 条。');
+            ->with('success', $official === null
+                ? '已新增 '.$count.' 条信用卡明细，跳过重复 '.($total - $count).' 条。'
+                : '已新增或更新 '.$count.' 条 Worldpay 明细，跳过无变化 '.($total - $count).' 条。');
+    }
+
+    private function importWorldpayFiles(Request $request, string $report, int $actor): Response
+    {
+        $data = $request->validate([
+            'files' => 'required|array|min:1|max:'.\App\Portals\Finance\FinanceWorldpayImport::MAX_UPLOAD_FILES,
+            'files.*' => 'required|file|mimes:csv,txt,xlsx|max:10240',
+        ]);
+        $worldpay = app(\App\Portals\Finance\FinanceWorldpayImport::class);
+        $sources = [];
+        $skipped = 0;
+        foreach ($data['files'] as $index => $file) {
+            if (in_array($file->getClientOriginalName(), ['保证金返还明细.csv', '扣返款明细.csv', '商户结算费用汇总.xlsx'], true)) {
+                $skipped++;
+                continue;
+            }
+            $source = $worldpay->read($file);
+            if ($source === null) {
+                throw ValidationException::withMessages(['files.'.$index => '无法识别文件「'.$file->getClientOriginalName().'」的 Worldpay 交易表头。']);
+            }
+            $sources[] = $source;
+        }
+        try {
+            [$count, $total] = $this->workbooks->database()->transaction(function () use ($sources, $worldpay, $actor): array {
+                $this->workbooks->database()->table('portals')->where('code', 'caiwu')->lockForUpdate()->first();
+                $count = $total = 0;
+                foreach ($sources as [$kind, $rows]) {
+                    $count += $worldpay->import($kind, $rows, \App\Portals\Finance\FinanceWorldpayImport::SOURCE_ACCOUNT, 'Asia/Shanghai', $actor);
+                    $total += count($rows);
+                }
+                return [$count, $total];
+            });
+        } catch (\App\Portals\Finance\FinanceRelayException $e) {
+            throw ValidationException::withMessages(['files' => $e->getMessage()]);
+        }
+        return redirect()->route('finance.report', $report)
+            ->with('success', '已处理 '.$total.' 条 Worldpay 记录，其中 '.$count.' 条新增或更新。'
+                .($skipped ? '已跳过 '.$skipped.' 份批次对账文件。' : ''));
     }
 
     private function creditImportMonths(?int $accountId = null, ?string $account = null): array

@@ -95,7 +95,9 @@
 <div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}" id="settlement-filter">
 <input type="hidden" name="per_page" value="{{ $rows->perPage() }}">
 <div class="settlement-filter">
-@if($channel === 'credit_card')
+@if($fixedCardChannel === 'worldpay')
+<div><label for="settlement-gateway">网关接入号</label><input id="settlement-gateway" class="form-control" name="gateway" value="{{ $filters['gateway'] ?? '' }}"></div>
+@elseif($channel === 'credit_card')
 <div>
     <label for="settlement-card-group">归属主体</label>
     <select id="settlement-card-group" name="card_group" class="form-control" onchange="this.form.elements.account.value='';this.form.requestSubmit()">
@@ -115,7 +117,9 @@
     </select>
 </div>
 @endif
+@if($fixedCardChannel !== 'worldpay')
 <div><label for="settlement-account">{{ $channel === 'credit_card' ? '商户账户' : '支付账户' }}</label><select id="settlement-account" name="account" class="form-control"><option value="">{{ $channel === 'credit_card' ? '全部商户' : '全部账户' }}</option>@foreach($filterAccounts as $account)<option value="{{ $account->activity_account }}" @selected(($filters['account'] ?? '') === $account->activity_account)>{{ $cardChannel === 'ye' && filled($account->card_merchant_key) ? $account->card_merchant_key : \App\Portals\Finance\FinanceCatalog::simplified($account->account_name) }}</option>@endforeach</select></div>
+@endif
 <div><label for="settlement-from">开始日期</label><input id="settlement-from" class="form-control" type="date" name="from" value="{{ $filters['from'] ?? '' }}"></div>
 <div><label for="settlement-to">结束日期</label><input id="settlement-to" class="form-control" type="date" name="to" value="{{ $filters['to'] ?? '' }}"></div>
 <div><label for="settlement-zone">时区</label><select id="settlement-zone" name="timezone" class="form-control">@include('portals.finance.partials.timezone-options', ['selectedTimezone' => $filters['timezone']])</select></div>
@@ -240,7 +244,7 @@
 @endif
 <footer><button class="btn btn-primary">保存</button><button type="button" class="btn btn-danger" id="settlement-editor-delete">删除</button><button type="button" class="btn btn-default" data-settlement-close>取消</button></footer></form></dialog>
 <dialog class="settlement-dialog" id="settlement-import"><header><h3>导入结算明细</h3><button type="button" data-settlement-close aria-label="关闭">×</button></header><form method="post" action="{{ route('finance.settlement.import', ['report' => $report, 'account' => $filters['account'] ?? null]) }}" enctype="multipart/form-data">@csrf
-@if($channel === 'credit_card')
+@if($channel === 'credit_card' && $fixedCardChannel !== 'worldpay')
 <div class="settlement-edit-grid">
     <div><label for="credit-import-group">归属主体</label><select id="credit-import-group" name="card_group" class="form-control">
         <option value="">全部主体</option>
@@ -286,16 +290,22 @@
 </div>
 <p class="settlement-note" style="padding:0 20px">新增结算明细时自动跳过重复交易。按通途订单导入成本时，物流费和采购成本只写入匹配到的主付款。</p>
 @endif
-<label class="settlement-import-drop"><i class="fa fa-cloud-upload" aria-hidden="true"></i><span data-upload-label>拖拽文件到这里，或点击选择文件</span><input type="file" name="file" accept=".xlsx,.csv" required></label>
+<label class="settlement-import-drop"><i class="fa fa-cloud-upload" aria-hidden="true"></i><span data-upload-label>拖拽文件到这里，或点击选择文件</span><input type="file" @if($fixedCardChannel === 'worldpay') name="files[]" multiple data-max-files="{{ \App\Portals\Finance\FinanceWorldpayImport::MAX_UPLOAD_FILES }}" @else name="file" @endif accept=".xlsx,.csv" required></label>
+@if($fixedCardChannel !== 'worldpay')
 <p style="padding:0 20px" data-order-template><a href="{{ route('finance.report', ['report' => $report, 'template' => 1, 'card_channel' => $cardChannel]) }}">下载导入模板（XLSX）</a></p>
+@endif
 @if($channel === 'paypal')
 <p style="padding:0 20px"><a href="{{ route('finance.report', ['report' => $report, 'template' => 1, 'import_kind' => 'tongtu_costs']) }}">下载通途成本模板（XLSX）</a></p>
 @endif
 <p class="settlement-note" style="padding:0 20px">
-@if($channel === 'credit_card')
+@if($cardChannel === 'worldpay')
+    直接上传 Worldpay 后台导出的文件。系统自动匹配订单明细并跳过批次对账文件。一次最多 {{ \App\Portals\Finance\FinanceWorldpayImport::MAX_UPLOAD_FILES }} 个文件，每个最大 10 MB。
+@elseif($channel === 'credit_card')
     ConfluxAPI 可一次选择最多 5 个文件，系统自动识别订单明细和结算报表。同批结算报表请选择相同的结算类型。
 @endif
+@if($cardChannel !== 'worldpay')
 支持 XLSX、CSV，最大 10 MB。
+@endif
 </p>
 <footer><button type="button" class="btn btn-default" data-settlement-close>取消</button><button class="btn btn-success">确认导入</button></footer></form></dialog>
 @endif
@@ -429,8 +439,10 @@ if(importPlatform){
 }
 if(editor&&deleteForm){document.getElementById('settlement-editor-delete').addEventListener('click',function(){var id=editor.querySelector('form').elements['id'].value;if(id)deleteSettlements([id]);});}
 document.querySelectorAll('.settlement-dialog input[type=file]').forEach(function(input){input.addEventListener('change',function(){
-    var files=Array.from(input.files), invalid=files.some(function(file){return !/\.(xlsx|csv)$/i.test(file.name)||file.size>10*1024*1024;});
-    input.setCustomValidity(files.length>5?'一次最多选择 5 个文件。':invalid?'请选择不超过 10 MB 的 XLSX 或 CSV 文件。':'');
+    var files=Array.from(input.files), maxFiles=Number(input.dataset.maxFiles || 5);
+    var extensions=input.accept.split(',');
+    var invalid=files.some(function(file){return !extensions.some(function(extension){return file.name.toLowerCase().endsWith(extension);})||file.size>10*1024*1024;});
+    input.setCustomValidity(files.length>maxFiles?'一次最多选择 '+maxFiles+' 个文件。':invalid?'请选择符合要求且不超过 10 MB 的文件。':'');
     var label=input.closest('label'),status=label.nextElementSibling;
     if(!status||!status.hasAttribute('data-file-status')){status=document.createElement('p');status.setAttribute('data-file-status','');status.setAttribute('role','status');status.style.cssText='padding:0 20px;color:#52748d;overflow-wrap:anywhere';label.after(status);}
     status.textContent=files.length?'已选择：'+files.map(function(file){return file.name;}).join('、'):'';

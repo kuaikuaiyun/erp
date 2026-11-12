@@ -157,7 +157,35 @@ class FinanceXuzongCreditReport
                     '发卡国家', '卡号', '消费者邮箱', '通途订单', '物流-元', '采购成本-元', '备注',
                 ])), fn ($value) => filled($value)));
                 $row['创建时间'] = $record->occurred_at?->setTimezone($timezone)->format('Y-m-d H:i:s') ?? '';
-                $row['平台订单号'] = ($record->payload['_platform_missing'] ?? false) ? ($order->payment_gateway_order_id ?? '') : $record->reference;
+                $missingPlatform = $record->payload['_platform_missing'] ?? false;
+                $sourceFlow = trim((string) ($record->payload['交易流水号'] ?? ''));
+                $linkedFlow = trim((string) ($order->bill_number ?? ''));
+                $canUsePaymentIds = ($sourceFlow !== '' && $sourceFlow === $linkedFlow)
+                    || ($sourceFlow === '' && FinanceSettlementService::isSuccessfulTransaction($record->status));
+                $row['平台订单号'] = $missingPlatform ? ($canUsePaymentIds ? ($order->payment_gateway_order_id ?? '') : '') : $record->reference;
+                if ($missingPlatform && ! $canUsePaymentIds) {
+                    $row['交易流水号'] = $sourceFlow;
+                }
+                if (blank($row['订单币种']) && blank($row['订单金额'])) {
+                    $shopify = json_decode($order->shopify_payload ?? '', true) ?? [];
+                    $shopMoney = data_get($shopify, 'totalPriceSet.presentmentMoney')
+                        ?? data_get($shopify, 'total_price_set.presentment_money');
+                    if ($shopMoney === null) {
+                        $current = data_get($shopify, 'currentTotalPriceSet.shopMoney');
+                        $shopAmount = $this->settlements->number($current['amount'] ?? null);
+                        $tradeAmount = $this->settlements->number($row['交易金额']);
+                        if (($current['currencyCode'] ?? null) === $row['交易币种']
+                            && $shopAmount !== null && $tradeAmount !== null && bccomp($shopAmount, $tradeAmount, 8) === 0) {
+                            $shopMoney = $current;
+                        }
+                    }
+                    $currency = $shopMoney['currencyCode'] ?? $shopMoney['currency_code'] ?? '';
+                    $amount = $shopMoney['amount'] ?? null;
+                    if (preg_match('/^[A-Z]{3}$/D', (string) $currency) && is_numeric($amount)) {
+                        $row['订单币种'] = $currency;
+                        $row['订单金额'] = $amount;
+                    }
+                }
                 $row['平台订单号'] = $record->payload['_edited_platform_order_id'] ?? $row['平台订单号'];
                 $completed = $record->payload['完成时间'] ?? '';
                 if ($completed !== '') {
