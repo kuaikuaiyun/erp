@@ -1594,6 +1594,57 @@ class FinancePortalTest extends TestCase
         $this->assertSame(2, FinanceRecord::query()->where('reference', $reference)->count());
     }
 
+    public function test_worldpay_official_csv_merges_order_and_bill_in_either_import_order(): void
+    {
+        (require database_path('migrations/2026_11_11_000001_split_finance_credit_settlement_menu.php'))->up();
+        $report = '/finance/reports/worldpay-settlement';
+        $this->get($report)->assertOk()->assertSee('name="gateway"', false)
+            ->assertSee('name="files[]"', false)->assertDontSee('id="credit-import-timezone"', false)
+            ->assertDontSee('id="credit-manual-account"', false)->assertDontSee('id="settlement-account"', false);
+        $date = '2026-11-07 15:03:27';
+        $general = "网关接入号,流水订单号,商户订单号,币种,交易金额,结单币种,结单金额,结单汇率,交易时间,交易状态,支付方式,HPP支付方式,卡种,交易网址,卡号,邮箱,收货人国家,划款状态\n";
+        $posted = "网关接入号,流水订单号,商户订单号,交易时间,记账时间,结算批次号,结算类型,交易币种,交易金额,结单币种,成功结单金额,交易手续费,单笔手续费,保证金扣取金额,应结算正交易金额,来源网址\n";
+        $event = "网关接入号,流水订单号,商户订单号,交易时间,记账时间,结算批次号,结算类型,结单币种,异常结单金额,处理费,应结算异常结单金额,Case ID\n";
+        $import = function (string ...$csvs) use ($report): void {
+            $this->post($report.'/import', ['files' => array_map(
+                fn ($csv) => \Illuminate\Http\UploadedFile::fake()->createWithContent('worldpay.csv', $csv), $csvs)])
+                ->assertSessionHasNoErrors()->assertRedirect();
+        };
+        foreach (['wp-1', 'wp-2'] as $reference) {
+            $order = $general."25,$reference,order-$reference,USD,45.89,USD,45.89,1,$date,成功,HPP,,Visa,example.com,,,US,未入账\n";
+            $bill = $posted."25,$reference,order-$reference,$date,$date,R161,成功,USD,45.89,USD,45.89,2.07,0.30,4.59,38.93,example.com\n";
+            $refund = $event."25,$reference,order-$reference,$date,$date,R161,退款,USD,5,0.30,-5.30,case-$reference\n";
+            $import(...($reference === 'wp-1' ? [$order, $bill, $refund] : [$refund, $bill, $order]));
+            $import(...array_fill(0, 20, $refund));
+        }
+        $import($general."25,wp-failed,order-failed,USD,45.89,USD,45.89,1,$date,失败,HPP,,Visa,example.com,,,US,未入账\n");
+        $import($posted."25,wp-failed,order-failed,$date,$date,R161,失败,USD,0,USD,0,0,0.30,0,-0.30,example.com\n");
+        Schema::create('logistics_orders', function (Blueprint $table): void {
+            $table->id();
+            $table->string('bill_number');
+            $table->string('source_shop_domain');
+            $table->string('assigned_owner_name');
+            $table->string('group_names');
+        });
+        DB::table('logistics_orders')->insert(['bill_number' => 'wp-failed', 'source_shop_domain' => 'matched.example',
+            'assigned_owner_name' => '订单运营', 'group_names' => '厦门团队']);
+        $this->assertSame(3, FinanceRecord::query()->where('payload->_card_channel', 'worldpay')->count());
+        $query = http_build_query(['month' => '2026-11', 'download' => 1,
+            'export_columns' => ['reference', 'gross', 'settlement', 'hold', 'fee', 'refund', 'refund_fee', 'payable']]);
+        $rows = $this->readDownload($this->get($report.'?'.$query)->assertOk()->streamedContent())->toArray();
+        $this->assertCount(4, $rows);
+        foreach (array_slice($rows, 1) as $row) {
+            $this->assertEquals($row[0] === 'wp-failed' ? [45.89, 0, 0, 0, null, null, -0.30]
+                : [45.89, 45.89, 4.59, 2.07, 5, 0.30, 33.63], array_slice($row, 1));
+        }
+        $attributionQuery = http_build_query(['month' => '2026-11', 'gateway' => '25', 'team' => '厦门团队', 'download' => 1,
+            'export_columns' => ['reference', 'domain', 'owner', 'team', 'per_order_fee']]);
+        $attribution = $this->readDownload($this->get($report.'?'.$attributionQuery)->assertOk()->streamedContent())->toArray();
+        $this->assertCount(2, $attribution);
+        $this->assertEquals(['wp-failed', 'matched.example', '订单运营', '厦门团队', 0.30], $attribution[1]);
+        $this->get($report.'?gateway=999')->assertOk()->assertDontSee('wp-failed');
+    }
+
     public function test_settlement_editor_saves_all_supplement_text_fields(): void
     {
         $this->workbooks->importRecords('paypal-orders', [2 => [

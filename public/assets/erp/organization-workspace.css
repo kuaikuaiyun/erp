@@ -113,21 +113,28 @@
 .organization-permission-tip { margin-bottom: 12px; }
 .organization-permission-tools { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 12px; }
 .organization-permission-tools .form-control { width: 180px; }
-.organization-permission-tree { border: 1px solid #f0f0f0; }
-.organization-native-tree-node { border-bottom: 1px solid #f4f4f4; }
+.organization-permission-tree { overflow: hidden; border: 1px solid #d9e5ec; border-radius: 9px; background: #fff; }
+.organization-native-tree-node { border-bottom: 1px solid #edf2f5; }
 .organization-native-tree-node:last-child { border-bottom: 0; }
-.organization-native-tree-row { display: flex; min-height: 40px; align-items: center; gap: 8px; padding: 6px 10px; }
-.organization-native-tree-node.has-children > .organization-native-tree-row { background: #f9f9f9; }
+.organization-native-tree-row { display: flex; min-height: 44px; align-items: center; gap: 8px; padding: 7px 12px; }
+.organization-native-tree-node.tree-level-1 > .organization-native-tree-row { min-height: 49px; border-left: 4px solid #318fc1; background: linear-gradient(90deg,#eaf5fb,#f8fbfd); color: #1f526f; }
+.organization-native-tree-node.tree-level-1 > .organization-native-tree-row strong,.organization-native-tree-node.tree-level-1 > .organization-native-tree-row .organization-native-page-choice { font-weight: 700; }
+.organization-native-tree-node.tree-level-2 > .organization-native-tree-row { border-left: 3px solid #9bcce4; background: #fff; }
+.organization-native-tree-node.tree-level-2 > .organization-native-tree-row:hover { background: #f5fafc; }
 .organization-native-tree-toggle,
 .organization-native-tree-toggle-placeholder { width: 18px; min-width: 18px; padding: 0; text-align: center; }
 .organization-native-tree-toggle[aria-expanded='false'] .fa { transform: rotate(-90deg); }
 .organization-native-tree-toggle .fa { transition: transform .15s ease; }
-.organization-native-tree-children { margin-left: 18px; border-left: 1px solid #eee; }
+.organization-native-tree-children { margin-left: 28px; border-left: 2px solid #d8e8f1; }
 .organization-native-tree-children.is-collapsed { display: none; }
 .organization-native-page-choice { min-width: 180px; flex: 1 1 230px; margin: 0; font-weight: 400; cursor: pointer; }
 .organization-native-page-choice input { margin: 0 6px 0 0; vertical-align: middle; }
 .organization-native-inherited-help { flex: 1 1 210px; margin: 0; }
 .organization-native-scope-select { width: 180px; }
+.organization-tree-level-badge { flex: 0 0 auto; padding: 3px 7px; border-radius: 10px; background: #e4f1f8; color: #397895; font-size: 11px; font-weight: 600; }
+.tree-level-2 > .organization-native-tree-row .organization-tree-level-badge { background: #f0f4f6; color: #71838e; }
+.organization-tree-group-actions { display: inline-flex; flex: 0 0 auto; gap: 5px; margin-left: 5px; }
+.organization-tree-group-actions .btn { border-radius: 5px; }
 
 /* Keep the package footer intact; only widen and align organization form actions. */
 form.organization-form-footer-right .box-footer > .col-md-2 {
@@ -168,5 +175,4 @@ form.organization-form-footer-right .box-footer .btn-group.pull-right {
     .organization-native-tree-row { flex-wrap: wrap; }
     .organization-native-inherited-help { margin-left: 26px; }
 }
-
 

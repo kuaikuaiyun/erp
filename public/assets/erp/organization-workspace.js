@@ -300,25 +300,46 @@
         }
 
         var selectAll = section.querySelector('[data-select-all]');
+        var invertAll = section.querySelector('[data-invert-all]');
         var clearAll = section.querySelector('[data-clear-all]');
+        function setCheckbox(checkbox, checked) {
+            checkbox.checked = checked;
+            var select = checkbox.closest('[data-permission-row]').parentElement.querySelector('[data-scope-select]');
+            if (select) { select.disabled = !checked; }
+        }
         if (selectAll) {
             selectAll.addEventListener('click', function () {
                 Array.prototype.forEach.call(tree.querySelectorAll('[data-permission-checkbox]:not(:disabled)'), function (checkbox) {
-                    checkbox.checked = true;
-                    var select = checkbox.closest('[data-permission-row]').parentElement.querySelector('[data-scope-select]');
-                    if (select) { select.disabled = false; }
+                    setCheckbox(checkbox, true);
+                });
+            });
+        }
+        if (invertAll) {
+            invertAll.addEventListener('click', function () {
+                Array.prototype.forEach.call(tree.querySelectorAll('[data-permission-checkbox]:not(:disabled)'), function (checkbox) {
+                    setCheckbox(checkbox, !checkbox.checked);
                 });
             });
         }
         if (clearAll) {
             clearAll.addEventListener('click', function () {
                 Array.prototype.forEach.call(tree.querySelectorAll('[data-permission-checkbox]:not(:disabled)'), function (checkbox) {
-                    checkbox.checked = false;
-                    var select = checkbox.closest('[data-permission-row]').parentElement.querySelector('[data-scope-select]');
-                    if (select) { select.disabled = true; }
+                    setCheckbox(checkbox, false);
                 });
             });
         }
+
+        tree.addEventListener('click', function (event) {
+            var button = event.target.closest('[data-select-group], [data-clear-group]');
+            if (!button) { return; }
+            event.preventDefault();
+            event.stopPropagation();
+            var node = button.closest('[data-tree-node]');
+            var checked = button.hasAttribute('data-select-group');
+            Array.prototype.forEach.call(node.querySelectorAll('[data-permission-checkbox]:not(:disabled)'), function (checkbox) {
+                setCheckbox(checkbox, checked);
+            });
+        });
 
         tree.addEventListener('change', function (event) {
             if (event.target.matches('[data-permission-checkbox]:not(:disabled)')) {
@@ -374,4 +395,3 @@
         window.jQuery(document).on('pjax:end', initialiseOrganizationWorkspace);
     }
 })();
-

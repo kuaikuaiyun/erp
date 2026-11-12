@@ -181,6 +181,9 @@ class FinanceCreditSettlementLayout
         }
 
         $values['completed_at'] = self::reportTimestamp($values['completed_at'] ?? null, $sourceTimezone, $row['timezone']);
+        if ($channel === 'worldpay') {
+            $values = FinanceWorldpayImport::settlementValues($values, $payload, $saved, $row['success'], $row['failed']);
+        }
 
         return $values;
     }

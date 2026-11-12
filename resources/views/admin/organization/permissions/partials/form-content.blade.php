@@ -5,11 +5,12 @@
         <button type="button" class="btn btn-default btn-sm" data-expand-all>{{ __('organization.page_permissions.expand_all') }}</button>
         <button type="button" class="btn btn-default btn-sm" data-collapse-all>{{ __('organization.page_permissions.collapse_all') }}</button>
         <button type="button" class="btn btn-default btn-sm" data-select-all>{{ __('organization.page_permissions.select_all') }}</button>
+        <button type="button" class="btn btn-warning btn-sm" data-invert-all>{{ __('organization.page_permissions.invert_all') }}</button>
         <button type="button" class="btn btn-default btn-sm" data-clear-all>{{ __('organization.page_permissions.clear_all') }}</button>
     </div>
     <div class="organization-permission-tree" data-page-tree>
         @forelse($pageTree as $node)
-            @include('admin.organization.permissions.partials.node', ['node' => $node, 'directPermissions' => $directPermissions, 'inheritedPermissionIds' => $inheritedPermissionIds])
+            @include('admin.organization.permissions.partials.node', ['node' => $node, 'directPermissions' => $directPermissions, 'inheritedPermissionIds' => $inheritedPermissionIds, 'depth' => 1])
         @empty
             <p class="text-center text-muted organization-form-empty">{{ __('organization.page_permissions.no_assignable_pages') }}</p>
         @endforelse
@@ -17,5 +18,4 @@
     <p class="help-block"><i class="fa fa-info-circle"></i> {{ __('organization.page_permissions.system_permissions_hidden') }}</p>
     @error('permissions')<span class="help-block text-danger">{{ $message }}</span>@enderror
 </div>
-
 

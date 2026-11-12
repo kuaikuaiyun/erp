@@ -9,12 +9,13 @@
 @endpush
 
 @section('content')
-<section class="content-header"><h1>广告费分析 <small>分析广告代理与媒体费用</small></h1></section>
+<section class="content-header"><h1>广告费分析 <small>分析 Shopify 订阅项目与服装项目的广告代理、媒体费用</small></h1></section>
 <section class="content">
     <div class="box analysis-filter"><div class="box-body">
         <form method="get" action="{{ route('assistant.advertising-spend-analysis.index') }}" class="analysis-toolbar">
             <div class="form-group"><label>开始日期</label><input class="form-control" type="date" name="date_from" value="{{ $dateFrom }}" required></div>
             <div class="form-group"><label>结束日期</label><input class="form-control" type="date" name="date_to" value="{{ $dateTo }}" required></div>
+            <div class="form-group"><label>项目类型</label><select class="form-control" name="project"><option value="">全部项目</option><option value="shopify" @selected($selectedProject === 'shopify')>Shopify订阅项目</option><option value="fashion" @selected($selectedProject === 'fashion')>服装项目</option></select></div>
             <div class="form-group"><label>广告代理</label><select class="form-control" name="agency"><option value="">全部代理</option>@foreach($agencyOptions as $agency)<option value="{{ $agency }}" @selected($selectedAgency === $agency)>{{ $agency }}</option>@endforeach</select></div>
             <div class="form-group"><label>广告媒体</label><select class="form-control" name="media"><option value="">全部媒体</option>@foreach($mediaOptions as $media)<option value="{{ $media }}" @selected($selectedMedia === $media)>{{ $media }}</option>@endforeach</select></div>
             <button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> 查询分析</button>
@@ -40,9 +41,9 @@
     </div>
 
     <div class="box analysis-panel"><div class="box-header with-border"><h3 class="box-title">代理与媒体费用明细</h3></div><div class="box-body no-padding table-responsive">
-        <table class="table table-bordered table-hover analysis-table"><thead><tr><th>日期</th><th>广告代理</th><th>广告媒体</th><th>账面广告费($)</th><th>实际广告费($)</th><th>费用占比</th></tr></thead><tbody>
-        @forelse($detailRows as $row)<tr><td>{{ $row['date'] }}</td><td>{{ $row['agency'] }}</td><td>{{ $row['media'] }}</td><td class="money">{{ number_format($row['book_spend'],2) }}</td><td class="money actual">{{ number_format($row['actual_spend'],2) }}</td><td class="money">{{ $totalSpend > 0 ? number_format($row['actual_spend']/$totalSpend*100,2) : '0.00' }}%</td></tr>@empty<tr><td colspan="6" class="analysis-empty">当前筛选范围暂无已审核的广告费数据</td></tr>@endforelse
-        </tbody>@if($detailRows->isNotEmpty())<tfoot><tr><td colspan="3">合计</td><td class="money">{{ number_format($totalBookSpend,2) }}</td><td class="money">{{ number_format($totalSpend,2) }}</td><td class="money">100.00%</td></tr></tfoot>@endif</table>
+        <table class="table table-bordered table-hover analysis-table"><thead><tr><th>项目类型</th><th>日期</th><th>广告代理</th><th>广告媒体</th><th>账面广告费($)</th><th>实际广告费($)</th><th>费用占比</th></tr></thead><tbody>
+        @forelse($detailRows as $row)<tr><td>{{ $row['project_label'] }}</td><td>{{ $row['date'] }}</td><td>{{ $row['agency'] }}</td><td>{{ $row['media'] }}</td><td class="money">{{ number_format($row['book_spend'],2) }}</td><td class="money actual">{{ number_format($row['actual_spend'],2) }}</td><td class="money">{{ $totalSpend > 0 ? number_format($row['actual_spend']/$totalSpend*100,2) : '0.00' }}%</td></tr>@empty<tr><td colspan="7" class="analysis-empty">当前筛选范围暂无已审核的广告费数据</td></tr>@endforelse
+        </tbody>@if($detailRows->isNotEmpty())<tfoot><tr><td colspan="4">合计</td><td class="money">{{ number_format($totalBookSpend,2) }}</td><td class="money">{{ number_format($totalSpend,2) }}</td><td class="money">100.00%</td></tr></tfoot>@endif</table>
     </div>@include('portals.assistant.partials.compact-pagination', ['paginator' => $detailRows])</div>
 </section>
 @endsection
