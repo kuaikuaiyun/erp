@@ -11,6 +11,8 @@
 @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
 @if($errors->any())<div class="alert alert-danger">{{ $errors->first() }}</div>@endif
 <div class="box spend-box"><div class="box-body"><form method="get" class="form-inline">
+    <div class="form-group"><label>广告账号&nbsp;</label><input class="form-control" name="account_name" value="{{ $accountName }}" placeholder="输入广告账号"></div>
+    <div class="form-group"><label>账号编号&nbsp;</label><input class="form-control" name="account_number" value="{{ $accountNumber }}" placeholder="输入账号编号"></div>
     <div class="form-group"><label>累计消耗&nbsp;</label><select class="form-control" name="over_threshold"><option value="">全部数据</option><option value="1" @selected($overThreshold==='1')>大于等于 $5,000</option></select></div>
     <button class="btn btn-primary"><i class="fa fa-search"></i> 筛选</button>
     <a class="btn btn-default" href="{{ route('fashion.applovin-spends.index') }}">重置</a>

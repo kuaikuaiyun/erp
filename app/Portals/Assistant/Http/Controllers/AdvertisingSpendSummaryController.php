@@ -113,9 +113,14 @@ class AdvertisingSpendSummaryController extends Controller
         $allRows = collect()
             ->when($selectedProject !== 'fashion', fn ($rows) => $rows->concat($shopifyRows))
             ->when($selectedProject !== 'shopify', fn ($rows) => $rows->concat($fashionRows))
-            ->sortBy(fn (array $row): string => implode('|', [
-            $row['date'], $row['operator_name'], $row['agency'], $row['media'], $row['account_name'], $row['account_number'],
-        ]))->values();
+            ->sortBy([
+                ['date', 'desc'],
+                ['operator_name', 'asc'],
+                ['agency', 'asc'],
+                ['media', 'asc'],
+                ['account_name', 'asc'],
+                ['account_number', 'asc'],
+            ])->values();
 
         $agencyOptions = $allRows->pluck('agency')->filter()->unique()->sort()->values();
         $mediaOptions = $allRows->pluck('media')->filter()->unique()->sort()->values();

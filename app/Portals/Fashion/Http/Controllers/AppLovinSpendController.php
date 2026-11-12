@@ -31,10 +31,22 @@ class AppLovinSpendController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
 
-        $filters = $request->validate(['over_threshold' => ['nullable', 'in:1']]);
+        $filters = $request->validate([
+            'over_threshold' => ['nullable', 'in:1'],
+            'account_name' => ['nullable', 'string', 'max:150'],
+            'account_number' => ['nullable', 'string', 'max:150'],
+        ]);
         $accounts = $this->withScreenshots($this->summarize($this->reportsFor($context['user'])));
         if (($filters['over_threshold'] ?? '') === '1') {
             $accounts = $accounts->where('total', '>=', self::GIFT_THRESHOLD)->values();
+        }
+        $accountName = trim((string) ($filters['account_name'] ?? ''));
+        $accountNumber = trim((string) ($filters['account_number'] ?? ''));
+        if ($accountName !== '') {
+            $accounts = $accounts->filter(fn (array $account): bool => mb_stripos((string) $account['account_name'], $accountName) !== false)->values();
+        }
+        if ($accountNumber !== '') {
+            $accounts = $accounts->filter(fn (array $account): bool => mb_stripos((string) $account['account_number'], $accountNumber) !== false)->values();
         }
 
         return view('portals.fashion.applovin-spend.index', [
@@ -43,6 +55,8 @@ class AppLovinSpendController extends Controller
             'accounts' => $this->paginate($accounts, $request),
             'threshold' => self::GIFT_THRESHOLD,
             'overThreshold' => $filters['over_threshold'] ?? '',
+            'accountName' => $accountName,
+            'accountNumber' => $accountNumber,
         ]);
     }
 
