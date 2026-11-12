@@ -108,7 +108,9 @@ class WarehouseWeightExceptionController extends Controller
             // 与运营报表保持一致：“域名与店铺信息管理”的 domain 是权威域名，订单字段仅作为未关联店铺时的兜底。
             $domainExpression = "COALESCE(NULLIF(TRIM({$storesTable}.domain), ''), NULLIF(TRIM({$ordersTable}.source_shop_domain), ''), NULLIF(TRIM({$ordersTable}.store_name), ''), '未知店铺')";
             $storeExpression = "COALESCE(NULLIF(TRIM({$storesTable}.shop_name), ''), NULLIF(TRIM({$ordersTable}.store_name), ''), {$domainExpression})";
-            $operatorExpression = "COALESCE(NULLIF(TRIM({$ordersTable}.operator_name), ''), '未分配运营')";
+            // 店铺归属以订单按下单时间解析出的真实归属快照为准；operator_name 是旧的
+            // 使用人/运营快照，仅供尚未生成归属快照的历史订单兜底。
+            $operatorExpression = "COALESCE(NULLIF(TRIM({$ordersTable}.assigned_owner_name), ''), NULLIF(TRIM({$ordersTable}.operator_name), ''), '未分配运营')";
             $teamExpression = "COALESCE(NULLIF(TRIM({$storesTable}.team), ''), NULLIF(TRIM({$ordersTable}.group_names), ''), NULLIF(TRIM({$ordersTable}.department_name), ''), '未填写团队')";
 
             $rows = \App\Models\LogisticsOrderItem::query()
