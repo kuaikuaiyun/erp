@@ -214,11 +214,7 @@ Route::prefix('fashion/operation-tasks')->name('operation-tasks.')->controller(O
     Route::post('/assets/{asset}/daily-records', 'storeAssetDaily')->whereNumber('asset')->name('assets.daily-records.store');
     Route::post('/daily-plans', 'storeDailyPlan')->name('daily-plans.store');
     Route::post('/tests/{task}/assets', 'appendAsset')->whereNumber('task')->name('tests.assets.store');
-    Route::post('/assets/{asset}/versions', 'replaceAsset')->whereNumber('asset')->name('assets.versions.store');
     Route::post('/assets/{asset}/retire', 'retireAsset')->whereNumber('asset')->name('assets.retire');
-    Route::post('/assets/{asset}/first-live', 'markAssetLive')->whereNumber('asset')->name('assets.first-live');
-    Route::post('/assets/{asset}/delivery-rounds', 'storeDeliveryRound')->whereNumber('asset')->name('assets.delivery-rounds.store');
-    Route::post('/delivery-rounds/{round}/stop', 'stopDeliveryRound')->whereNumber('round')->name('delivery-rounds.stop');
     Route::post('/rectifications/{rectification}/resubmit', 'resubmitRectification')->whereNumber('rectification')->name('rectifications.resubmit');
     Route::post('/rectifications/{rectification}/restore', 'restoreRectification')->whereNumber('rectification')->name('rectifications.restore');
     Route::get('/reviews', 'reviews')->name('reviews.index');

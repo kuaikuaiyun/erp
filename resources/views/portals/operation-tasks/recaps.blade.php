@@ -156,7 +156,7 @@
         <form class="ot-form" method="post" action="{{ route('operation-tasks.recaps.store') }}">@csrf
             <div class="modal-header"><button type="button" class="close" data-dismiss="modal">&times;</button><h4 class="modal-title">{{ $formRecap ? '编辑复盘' : '填写昨日复盘' }}</h4></div>
             <div class="modal-body">
-                <div class="form-group" style="max-width:260px"><label>数据日期 *</label><input class="form-control" type="date" name="data_date" value="{{ old('data_date', $formRecap?->data_date?->format('Y-m-d') ?: $yesterday) }}" required></div>
+                <div class="ot-fixed-business-date"><span>业务日期</span><b>{{ $yesterday }}</b><small>按北京时间自动取昨日，不需要手动选择</small></div>
                 <div class="form-group"><label>媒体经营数据 *</label><div id="ot-media-list"></div><button type="button" class="btn btn-default btn-sm" id="ot-add-media"><i class="fa fa-plus"></i> 添加媒体</button></div>
                 <div class="ot-grid">
                     @foreach($recapQuestions as $question)

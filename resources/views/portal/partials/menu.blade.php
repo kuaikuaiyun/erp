@@ -62,6 +62,9 @@
             @if($portal->code === 'fuzhuang' && $menu->code === 'fashion_operation_task_recaps' && ($operationTaskReviewCounts['rejected_recaps'] ?? 0) > 0)
             <span class="operation-rejected-count" title="复盘被驳回待修改">驳回 {{ $operationTaskReviewCounts['rejected_recaps'] }}</span>
             @endif
+            @if($portal->code === 'fuzhuang' && $menu->code === 'fashion_operation_task_tests' && ($operationTaskReviewCounts['rejected_tests'] ?? 0) > 0)
+            <span class="operation-rejected-count" title="测品任务被驳回待修改">驳回 {{ $operationTaskReviewCounts['rejected_tests'] }}</span>
+            @endif
             @if($portal->code === 'fuzhuang' && $menu->code === 'fashion_operation_task_reviews' && (($operationTaskReviewCounts['recaps'] ?? 0) > 0 || ($operationTaskReviewCounts['tests'] ?? 0) > 0))
             <span class="operation-review-counts" title="待审核：每日复盘 / 测品任务">
                 <span class="operation-review-count operation-review-count-recap">复 {{ $operationTaskReviewCounts['recaps'] ?? 0 }}</span>
@@ -99,8 +102,8 @@
             <i class="fa {{ $icon }}"></i>
             <span>{{ $label }}</span>
             @if($portal->code === 'fuzhuang' && $menu->code === 'fashion_operation_tasks')
-                @if(($operationTaskReviewCounts['rejected_recaps'] ?? 0) > 0)
-                    <span class="operation-rejected-count">驳回 {{ $operationTaskReviewCounts['rejected_recaps'] }}</span>
+                @if((($operationTaskReviewCounts['rejected_recaps'] ?? 0) + ($operationTaskReviewCounts['rejected_tests'] ?? 0)) > 0)
+                    <span class="operation-rejected-count">驳回 {{ ($operationTaskReviewCounts['rejected_recaps'] ?? 0) + ($operationTaskReviewCounts['rejected_tests'] ?? 0) }}</span>
                 @endif
             @endif
             <i class="fa fa-angle-left pull-right"></i>
@@ -113,7 +116,7 @@
                     'portalOrigin' => $portalOrigin,
                     'canManagePortalMenus' => $canManagePortalMenus,
                     'canManageOperationTasks' => $canManageOperationTasks,
-                    'operationTaskReviewCounts' => $operationTaskReviewCounts ?? ['recaps' => 0, 'tests' => 0, 'rejected_recaps' => 0],
+                    'operationTaskReviewCounts' => $operationTaskReviewCounts ?? ['recaps' => 0, 'tests' => 0, 'rejected_recaps' => 0, 'rejected_tests' => 0],
                 ])
             @endforeach
         </ul>
