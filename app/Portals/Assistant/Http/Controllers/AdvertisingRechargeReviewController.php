@@ -9,6 +9,7 @@ use App\Models\InternalMessageRecipient;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
+use App\Portals\Assistant\DailyReportDepartmentScopeService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -21,6 +22,7 @@ class AdvertisingRechargeReviewController extends Controller
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
         private readonly AssistantStoreOwnerService $assistantStoreOwners,
+        private readonly DailyReportDepartmentScopeService $departmentScopes,
     ) {}
 
     public function index(Request $request): Response|View
@@ -39,8 +41,8 @@ class AdvertisingRechargeReviewController extends Controller
         $query = DailyAdvertisingRecharge::query();
         $allDepartments = $this->assistantStoreOwners->boundBusinessDepartments();
         $departmentIds = null;
-        if (! $context['user']->isAdministrator()) {
-            $departmentIds = $this->assistantStoreOwners->visibleOperationDepartmentIds($context['user']);
+        $departmentIds = $this->departmentScopes->visibleIdsForReview($context['user']);
+        if ($departmentIds !== null) {
             $departmentIds === [] ? $query->whereRaw('1 = 0') : $query->whereIn('operation_department_id', $departmentIds);
         }
         $departmentOptions = $departmentIds === null
@@ -129,9 +131,8 @@ class AdvertisingRechargeReviewController extends Controller
     {
         $context = $this->context($request);
         if ($context instanceof Response) abort($context->getStatusCode());
-        if (! $context['user']->isAdministrator()) {
-            abort_unless(in_array((int) $submission->operation_department_id, $this->assistantStoreOwners->visibleOperationDepartmentIds($context['user']), true), 403);
-        }
+        $visibleDepartmentIds = $this->departmentScopes->visibleIdsForReview($context['user']);
+        if ($visibleDepartmentIds !== null) abort_unless(in_array((int) $submission->operation_department_id, $visibleDepartmentIds, true), 403);
 
         $validated = $request->validate([
             'entry_index' => ['required', 'integer', 'min:0'],
@@ -182,7 +183,7 @@ class AdvertisingRechargeReviewController extends Controller
         })->groupBy('submissionId');
         $processorId = (int) $context['user']->getKey();
         $processorName = (string) ($context['user']->name ?: $context['user']->username);
-        $visibleDepartmentIds = $context['user']->isAdministrator() ? null : $this->assistantStoreOwners->visibleOperationDepartmentIds($context['user']);
+        $visibleDepartmentIds = $this->departmentScopes->visibleIdsForReview($context['user']);
         $today = now('Asia/Shanghai')->toDateString();
 
         $processedCount = DB::connection((new DailyAdvertisingRecharge)->getConnectionName())->transaction(function () use ($selected, $processorId, $processorName, $visibleDepartmentIds, $today, $context): int {

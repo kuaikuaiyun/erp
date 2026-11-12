@@ -1680,12 +1680,8 @@ class ProductRequestController extends Controller
         ]);
         $normalizedUrl = $this->workflow->normalizeSupplierUrl($data['supplier_url']);
         $hash = $this->workflow->supplierUrlHash($normalizedUrl);
-        $skus = $this->splitSkus($this->linkSkuSet($hash, $data['current_id'] ?? null));
-        // 当前记录运营已填写的 SKU 已展示在左侧，右侧只展示链接上其余已录入的 SKU
-        if (!empty($data['current_id'])) {
-            $ownSkus = $this->splitSkus((string) ProductRequest::query()->whereKey($data['current_id'])->value('skus'));
-            $skus = array_values(array_diff($skus, $ownSkus));
-        }
+        // 右侧始终展示同链接 SKU 库的完整集合；即使与左侧运营 SKU 重复也保留。
+        $skus = $this->splitSkus($this->linkSkuSet($hash));
 
         // 同链接历史记录按 SKU 保存的采购价/重量（新记录覆盖旧记录），供右栏只读展示
         $skuValues = $skus === [] ? [] : array_intersect_key($this->linkSkuValues($hash), array_flip($skus));

@@ -24,8 +24,13 @@ class FinanceLogisticsCreditOrders
         ?string $searchReference = null,
         bool $includeReplaced = false,
         bool $indexOnly = false,
+        bool $includeSystemOrders = false,
     ): Builder
     {
+        if ($xuzongReport && ! $includeSystemOrders) {
+            return FinanceRecord::query()->fromSub($this->storedOrders($ids, $searchReference, $indexOnly), 'finance_records');
+        }
+
         $db = app(FinanceWorkbookService::class)->database();
         if (! $db->getSchemaBuilder()->hasTable('logistics_orders')) {
             return $xuzongReport
@@ -132,7 +137,7 @@ class FinanceLogisticsCreditOrders
     {
         $db = app(FinanceWorkbookService::class)->database();
         // Negative report keys avoid collisions with logistics IDs while supporting the same export selection.
-        $orders = $db->table('finance_records as f')->whereIn('f.dataset', [self::FAILED_DATASET, self::IMPORTED_DATASET]);
+        $orders = $db->table('finance_records as f')->where('f.dataset', self::IMPORTED_DATASET);
         if ($ids !== null) {
             $orders->whereIntegerInRaw('f.id', array_map('abs', array_filter($ids, fn ($id) => $id < 0)));
         }
@@ -144,28 +149,16 @@ class FinanceLogisticsCreditOrders
                 ->orWhere('f.payload->商户订单号', $searchReference)
                 ->orWhere('f.payload->通途订单', $searchReference));
         }
-        if ($db->getSchemaBuilder()->hasColumns('logistics_orders', ['source_shop_domain', 'shopify_order_id', 'paid_at', 'payment_gateway'])) {
-            $orders->whereNotExists(fn ($paid) => $paid->selectRaw('1')->from('logistics_orders as paid')
-                ->whereColumn('paid.source_shop_domain', 'f.payload->_source_shop_domain')
-                ->whereColumn('paid.shopify_order_id', 'f.payload->_shopify_order_id')
-                ->whereRaw('LOWER(TRIM(paid.payment_gateway)) IN (?, ?)', array_keys(self::XUZONG_MERCHANTS))
-                ->whereNotNull('paid.paid_at'));
-        }
         if ($indexOnly) {
             return $orders->selectRaw('-CAST(f.id AS SIGNED) as id, f.account, f.occurred_at');
         }
         $orders->selectRaw('-CAST(f.id AS SIGNED) as id, f.dataset, f.account, f.reference, f.occurred_at,
             f.currency, f.domain, f.raw_type, f.status, NULL as payment_transactions')->addSelect('f.payload');
-        $link = $db->getQueryGrammar()->wrap('f.payload->_linked_logistics_id');
-        $match = $db->getSchemaBuilder()->hasTable('logistics_orders')
-            ? "EXISTS (SELECT 1 FROM logistics_orders AS linked WHERE linked.id = CAST({$link} AS SIGNED))"
-            : '1 = 0';
         $refundFlag = $db->getQueryGrammar()->wrap('f.payload->退款');
-        $refund = $this->refundExists($db, "CAST({$link} AS SIGNED)");
-        $orders->selectRaw("CASE WHEN {$refundFlag} = '是'
-            OR UPPER(TRIM(f.status)) IN ('退款', '已退款', 'REFUNDED', 'PARTIALLY_REFUNDED')
-            OR (UPPER(TRIM(f.status)) IN ('SUCCESS', 'SUCCEEDED', 'PAID', '成功', '已付款') AND {$refund}) THEN '退款'
-            WHEN {$match} THEN '成功' ELSE '失败' END as match_status");
+        $orders->selectRaw("CASE
+            WHEN {$refundFlag} = '是' OR UPPER(TRIM(f.status)) IN ('退款', '已退款', 'REFUNDED', 'PARTIALLY_REFUNDED') THEN '退款'
+            WHEN UPPER(TRIM(f.status)) IN ('SUCCESS', 'SUCCEEDED', 'COMPLETED', 'PAID', '成功', '已付款', 'S') THEN '成功'
+            ELSE '失败' END as match_status");
 
         return $orders;
     }

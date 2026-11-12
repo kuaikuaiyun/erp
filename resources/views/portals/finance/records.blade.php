@@ -239,6 +239,23 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
 <datalist id="finance-categories">@foreach($categories as $category)<option value="{{ $category }}">@endforeach</datalist>
 
 @if(in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true))
+@if($xuzongReport && $xuzongStatementNotices->total() > 0)
+    <div class="box-body">
+        <div class="alert alert-warning">
+            <strong>待处理结算变动（{{ $xuzongStatementNotices->total() }} 条）</strong>
+            <ul>
+                @foreach($xuzongStatementNotices as $noticeOrder)
+                    <li>
+                        {{ $noticeOrder->account }}　
+                        <a href="{{ route('finance.reports.xuzong-credit.statement', $noticeOrder->id) }}">{{ $noticeOrder->reference }} · 查看结算明细</a>
+                        @if($canManage) @include('portals.finance.partials.xuzong-statement-handled') @endif
+                    </li>
+                @endforeach
+            </ul>
+            @if($xuzongStatementNotices->hasPages()) {{ $xuzongStatementNotices->links() }} @endif
+        </div>
+    </div>
+@endif
 @include('portals.finance.partials.paypal-order-list')
 @else
 <p>{{ __('finance.records.count', ['count' => $records->total()]) }}</p>

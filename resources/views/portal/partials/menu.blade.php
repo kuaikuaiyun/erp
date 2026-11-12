@@ -51,9 +51,11 @@
         || app(\App\Portals\Assistant\AssistantPortalAuthorizationService::class)->canViewShopifyAnalytics($user);
     $canAccessOperationTaskManagementMenu = ($canManageOperationTasks ?? false)
         || !in_array($menu->code, ['fashion_operation_task_reviews', 'fashion_operation_task_dashboard'], true);
+    $canAccessDailyReportDepartmentSettings = $menu->code !== 'assistant_daily_report_department_settings'
+        || app(\App\Portals\Assistant\DailyReportDepartmentScopeService::class)->canAccessSettings($user);
 @endphp
 
-@if ((!$isConfigurationMenu || $canManagePortalMenus) && $canAccessProductRequestMenu && $canAccessAssistantAnalyticsMenu && $canAccessOperationTaskManagementMenu)
+@if ((!$isConfigurationMenu || $canManagePortalMenus) && $canAccessProductRequestMenu && $canAccessAssistantAnalyticsMenu && $canAccessOperationTaskManagementMenu && $canAccessDailyReportDepartmentSettings)
     @if ($children->isEmpty())
     <li class="{{ $isCurrent ? 'active' : '' }}">
         <a href="{{ $href }}">
@@ -93,6 +95,8 @@
             <span id="operation-abnormal-order-badge" class="badge bg-yellow" style="margin-left:6px;">0</span>
             @elseif($menu->code === 'operation_daily_applovin_spends')
             <span id="operation-applovin-gift-badge" class="badge bg-yellow" style="margin-left:6px;display:none;" title="待上传礼金图数量">0</span>
+            @elseif($menu->code === 'fashion_applovin_spends')
+            <span id="fashion-applovin-gift-badge" class="badge bg-yellow" style="margin-left:6px;display:none;" title="待上传礼金图数量">0</span>
             @endif
         </a>
     </li>

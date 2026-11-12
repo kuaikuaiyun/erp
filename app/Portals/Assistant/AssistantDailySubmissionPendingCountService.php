@@ -12,14 +12,12 @@ use Illuminate\Database\Eloquent\Builder;
 
 class AssistantDailySubmissionPendingCountService
 {
-    public function __construct(private readonly AssistantStoreOwnerService $storeOwners) {}
+    public function __construct(private readonly DailyReportDepartmentScopeService $departmentScopes) {}
 
     /** @return array<string, int> */
     public function forUser(AdminUser $user): array
     {
-        $visibleDepartmentIds = $user->isAdministrator()
-            ? null
-            : $this->storeOwners->visibleOperationDepartmentIds($user);
+        $visibleDepartmentIds = $this->departmentScopes->visibleIdsForReview($user);
 
         return [
             'assistant_daily_advertising_recharges' => $this->count(DailyAdvertisingRecharge::query(), $visibleDepartmentIds),

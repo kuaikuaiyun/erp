@@ -14,6 +14,7 @@ use App\Portals\Assistant\Http\Controllers\AdvertisingAccountAuthorizationReview
 use App\Portals\Assistant\Http\Controllers\AdvertisingAgencyController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingMediaController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingRechargeReviewController;
+use App\Portals\Assistant\Http\Controllers\DailyReportDepartmentSettingController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingSpendAnalysisController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingSpendSummaryController;
 use App\Portals\Assistant\Http\Controllers\AppLovinPerformanceReportController;
@@ -109,6 +110,8 @@ Route::prefix('finance')->name('finance.')->middleware(RedirectFinanceDomain::cl
     Route::get('/reports/xuzong-credit', 'records')->defaults('dataset', 'xuzong2-orders')->name('reports.xuzong-credit');
     Route::get('/reports/xuzong-credit/export', 'exportRecords')->defaults('dataset', 'xuzong2-orders')->name('reports.xuzong-credit.export');
     Route::post('/reports/xuzong-credit/import', 'importXuzongCreditDetails')->name('reports.xuzong-credit.import');
+    Route::get('/reports/xuzong-credit/statement/{record}', 'xuzongStatement')->whereNumber('record')->name('reports.xuzong-credit.statement');
+    Route::post('/reports/xuzong-credit/statement/{record}', 'updateXuzongStatement')->whereNumber('record')->name('reports.xuzong-credit.statement.update');
     Route::get('/reports/{report}', 'report')->name('report');
     Route::get('/reports/paypal-settlement/records/{record}', 'paypalSettlementDetail')->whereNumber('record')->name('settlement.paypal.detail');
     Route::post('/reports/{report}/export-template/preview', 'previewExportTemplate')
@@ -225,6 +228,10 @@ Route::prefix('fashion/operation-tasks')->name('operation-tasks.')->controller(O
 });
 Route::get('/assistant/daily-submissions/advertising-recharges', [AdvertisingRechargeReviewController::class, 'index'])
     ->name('assistant.daily-submissions.advertising-recharges.index');
+Route::get('/assistant/daily-submission-departments', [DailyReportDepartmentSettingController::class, 'edit'])
+    ->name('assistant.daily-submission-departments.edit');
+Route::put('/assistant/daily-submission-departments', [DailyReportDepartmentSettingController::class, 'update'])
+    ->name('assistant.daily-submission-departments.update');
 Route::patch('/assistant/daily-submissions/advertising-recharges/{submission}/process', [AdvertisingRechargeReviewController::class, 'process'])
     ->whereNumber('submission')->name('assistant.daily-submissions.advertising-recharges.process');
 Route::post('/assistant/daily-submissions/advertising-recharges/process-selected', [AdvertisingRechargeReviewController::class, 'processSelected'])

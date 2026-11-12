@@ -270,7 +270,7 @@ class FinanceSettlementService
             $definition = FinanceCatalog::dataset($record->dataset);
             $headers = $definition['headers'];
             $value = static fn ($key) => $p[$headers[$definition[$key]]] ?? '';
-            $reportTimezone = $p['_report_timezone'] ?? ($filters['timezone'] ?? 'Asia/Shanghai');
+            $reportTimezone = $filters['timezone'] ?? $p['_report_timezone'] ?? 'Asia/Shanghai';
             $occurredAt = $record->occurred_at;
             $date = $occurredAt->setTimezone($reportTimezone);
             $beijingDate = $reportTimezone === 'Asia/Shanghai' ? $date : $occurredAt->setTimezone('Asia/Shanghai');
@@ -334,9 +334,14 @@ class FinanceSettlementService
             if ($channel === 'paypal') {
                 if (empty($filters['summary_only'])) {
                     foreach (array_slice($headers, 0, 15) as $index => $header) {
-                        $row['paypal_'.$index] = $index === 12 && filled($saved['paypal_12'] ?? null)
-                            ? $saved['paypal_12']
-                            : ($index === 4 ? FinancePayPalEventTypes::label((string) ($p[$header] ?? '')) : ($p[$header] ?? ''));
+                        $row['paypal_'.$index] = match ($index) {
+                            0 => $date->toDateString(),
+                            1 => $date->format('H:i:s'),
+                            2 => $reportTimezone,
+                            4 => FinancePayPalEventTypes::label((string) ($p[$header] ?? '')),
+                            12 => filled($saved['paypal_12'] ?? null) ? $saved['paypal_12'] : ($p[$header] ?? ''),
+                            default => $p[$header] ?? '',
+                        };
                     }
                 }
                 $net = $this->number($p[$headers[9]] ?? null);
@@ -436,7 +441,7 @@ class FinanceSettlementService
             if ($channel === 'credit_card' && filled($filters['card_channel'] ?? null)) {
                 $manual = [...$saved, ...($saved['_edited_fields'] ?? [])];
                 $row['card_layout'] = FinanceCreditSettlementLayout::values(
-                    $filters['card_channel'], $row, $p, $manual,
+                    $filters['card_channel'], $row, $p, $manual, $record->source_timezone ?: 'Asia/Shanghai',
                 );
                 if ($conflux !== null) {
                     $row['card_layout']['operation_region'] = self::operationRegion((string) $row['team']);
@@ -702,11 +707,21 @@ class FinanceSettlementService
         }
 
         $db = $this->workbooks->database();
-        $columns = $db->getSchemaBuilder()->getColumnListing('logistics_orders');
+        $schema = $db->getSchemaBuilder();
+        if (! $schema->hasTable('logistics_orders')) {
+            return collect();
+        }
+        $columns = $schema->getColumnListing('logistics_orders');
         $selected = array_intersect(['id', 'transaction_id', 'payment_gateway_order_id', 'bill_number', 'buyer_email', 'order_created_at', 'tongtu_order_number', 'shopify_payload', 'paid_amount_usd',
             'assistant_domain_store_id', 'assigned_owner_name', 'assigned_owner_user_id', 'operator_name', 'group_names', 'subscription_type', 'is_add_on'], $columns);
         $query = $db->table('logistics_orders')->whereIntegerInRaw('logistics_orders.id', $ids->all())
             ->select(array_map(fn ($column) => 'logistics_orders.'.$column, $selected));
+        $domain = in_array('source_shop_domain', $columns, true) ? "NULLIF(logistics_orders.source_shop_domain, '')" : 'NULL';
+        if (in_array('assistant_domain_store_id', $selected, true) && $schema->hasTable('assistant_domain_stores')) {
+            $query->leftJoin('assistant_domain_stores as report_store', 'report_store.id', '=', 'logistics_orders.assistant_domain_store_id');
+            $domain = "COALESCE(NULLIF(report_store.domain, ''), {$domain})";
+        }
+        $query->selectRaw($domain.' as report_domain');
         $this->joinOrderOwnerHistory($query, $selected);
 
         return $query->get()->keyBy('id');

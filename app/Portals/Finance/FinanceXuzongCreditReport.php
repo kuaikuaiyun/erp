@@ -54,6 +54,7 @@ class FinanceXuzongCreditReport
     public function __construct(
         private readonly FinanceSettlementService $settlements,
         private readonly FinanceXuzongCreditMatches $matches,
+        private readonly FinanceXuzongOrderImport $orderImport,
     ) {}
 
     public static function headers(): array
@@ -63,6 +64,7 @@ class FinanceXuzongCreditReport
         $ordered = [];
         foreach ($headers as $id => $header) {
             $columns = match ($header) {
+                '商户号' => [],
                 '平台订单号' => [$id => $header, 43 => '交易流水号'],
                 '结算-美元' => [$id => $header, 51 => FinanceSettlementService::SHOP_DIFFERENCE_LABEL, 49 => '汇率'],
                 '结算金额' => [50 => '结算币种', $id => $header],
@@ -87,6 +89,22 @@ class FinanceXuzongCreditReport
         $linked = $records->filter(fn ($record) => $record->dataset === FinanceLogisticsCreditOrders::IMPORTED_DATASET)
             ->mapWithKeys(fn ($record) => [$record->id => $record->payload['_linked_logistics_id'] ?? null])->filter();
         $orders = $this->settlements->liveCreditReportOrders($records->pluck('id')->filter(fn ($id) => $id > 0)->concat($linked)->unique());
+        $unlinked = $records->filter(fn ($record) => $record->dataset === FinanceLogisticsCreditOrders::IMPORTED_DATASET
+            && ! $orders->has($linked->get($record->id)))->groupBy('account');
+        $newLinks = collect();
+        foreach ($unlinked as $account => $group) {
+            $references = $group->mapWithKeys(fn ($record) => [$record->id => [
+                '交易流水号' => $record->payload['交易流水号'] ?? '',
+                '平台订单号' => ($record->payload['_platform_missing'] ?? false) ? '' : $record->reference,
+                '商户订单号' => $record->payload['商户订单号'] ?? '',
+                '通途订单' => $record->payload['通途订单'] ?? '',
+            ]]);
+            foreach ($this->orderImport->matches($references->all(), $account) as $id => $match) {
+                $newLinks->put($id, $match->id);
+            }
+        }
+        $orders = $orders->union($this->settlements->liveCreditReportOrders($newLinks->unique()));
+        $linked = $newLinks->union($linked);
         foreach ($linked as $id => $orderId) {
             if ($orders->has($orderId)) {
                 $orders->put($id, $orders->get($orderId));
@@ -103,7 +121,11 @@ class FinanceXuzongCreditReport
             if ($imported) {
                 $payment = ['currency' => $record->currency ?? '', 'amount' => $record->payload['交易金额'] ?? ''];
             }
-            $values = $this->values($record, $order, $attribution($record, $order), $timezone, $payment);
+            $displayRecord = clone $record;
+            if (blank($displayRecord->domain)) {
+                $displayRecord->domain = $order->report_domain ?? null;
+            }
+            $values = $this->values($displayRecord, $order, $attribution($displayRecord, $order), $timezone, $payment);
             $matches = array_diff_key($bill, array_filter($values, fn ($value) => filled($value)));
             if (! filled($matches['商户订单号'] ?? null)) {
                 $shopify = json_decode($order->shopify_payload ?? '', true) ?? [];
@@ -126,7 +148,6 @@ class FinanceXuzongCreditReport
                     $row['完成时间'] = CarbonImmutable::parse($completed, 'UTC')->setTimezone($timezone)->format('Y-m-d H:i:s');
                 }
             }
-            $row['商户号'] = $row['通途订单'] ?? '';
             $exchange = $matches['_usd_exchange'] ?? null;
             if (($exchange['currency'] ?? null) !== $payment['currency']) {
                 $exchange = $payment['usd_exchange'] ?? null;
@@ -143,12 +164,20 @@ class FinanceXuzongCreditReport
                 $row[$label] = $row[$field] ?? '';
             }
             $row['状态'] = $record->match_status;
-            $row['原始支付状态'] = $record->status ?? '';
+            $row['原始支付状态'] = $record->payload['_original_payment_status'] ?? ($record->status === '失败' ? 'FAILED' : ($record->status ?? ''));
             $row[self::PLATFORM_RESULT] = self::platformResult($record->payload);
             if ($record->match_status === '失败') {
                 $note = trim((string) ($row['备注'] ?? ''));
                 $row['备注'] = $note === '' ? '失败'
                     : ($note === '失败' || str_starts_with($note, '失败；') ? $note : '失败；'.$note);
+            }
+
+            if ($imported && $order === null) {
+                $notes = array_filter(explode('；', (string) $row['备注']), fn ($note) => trim($note) !== '');
+                if (! in_array('系统无匹配订单', $notes, true)) {
+                    $notes[] = '系统无匹配订单';
+                }
+                $row['备注'] = implode('；', $notes);
             }
 
             return [$record->id => $row];
@@ -247,7 +276,45 @@ class FinanceXuzongCreditReport
         return $value;
     }
 
-    public static function downloadXlsx(array $headers, iterable $rows, string $filename): StreamedResponse
+    private const STATEMENT_EXPORT_AMOUNTS = [
+        '结算金额', '退款金额', '退款费用', '拒付金额', '拒付费用', '拒付预警ethoca',
+        'RDR费用', 'CDRN费用', '保证金', '保证金返还', '拒付返还', '单笔费用', '交易手续费', '争议处理费', '应结算',
+    ];
+
+    public static function statementExportRows(iterable $records): iterable
+    {
+        foreach ($records as $record) {
+            $payload = $record->payload;
+            $statement = $payload['_xuzong_statement_import'] ?? null;
+            if (! $statement) {
+                continue;
+            }
+
+            $legacy = $statement['legacy'] ?? null;
+            if (! array_key_exists('events', $statement)) {
+                $legacy = ['times' => $statement['settlement_times'], 'amounts' => $payload];
+            }
+            $events = array_values($statement['events'] ?? []);
+            usort($events, fn ($left, $right) => strcmp($left['time'], $right['time']));
+            if ($legacy !== null) {
+                array_unshift($events, ['time' => implode('、', $legacy['times']), 'amounts' => $legacy['amounts'], 'legacy' => true]);
+            }
+            foreach ($events as $event) {
+                $cells = array_map(fn ($value) => ['value' => $value], [
+                    $record->account, $record->reference, $payload['商户订单号'] ?? '',
+                    $event['time'], 'USD', empty($event['legacy']) ? '逐笔' : '历史汇总',
+                ]);
+                foreach (self::STATEMENT_EXPORT_AMOUNTS as $field) {
+                    $value = $event['amounts'][$field] ?? '';
+                    $cells[] = ['value' => $value, 'type' => $value === '' ? 'text' : 'number'];
+                }
+                yield ['cells' => $cells];
+            }
+        }
+    }
+
+
+    public static function downloadXlsx(array $headers, iterable $rows, string $filename, ?callable $statementRows = null): StreamedResponse
     {
         $columns = array_map(static fn ($header) => [
             'label' => $header,
@@ -283,6 +350,11 @@ class FinanceXuzongCreditReport
                     }
                     yield ['cells' => $cells];
                 }
-            }, plain: true, fontName: '宋体');
+            }, plain: true, fontName: '宋体', additionalSheets: $statementRows === null ? [] : [[
+                '结算变动明细',
+                array_map(fn ($header) => ['label' => $header, 'width' => max(16, mb_strwidth($header) + 4)],
+                    ['收款账户', '交易流水号', '商户订单号', '结算时间', '结算币种', '记录类型', ...self::STATEMENT_EXPORT_AMOUNTS]),
+                $statementRows,
+            ]]);
     }
 }
