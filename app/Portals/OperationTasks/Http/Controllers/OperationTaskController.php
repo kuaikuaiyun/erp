@@ -348,6 +348,22 @@ class OperationTaskController extends Controller
             $base->whereHas('rectifications', fn ($query) => $query->where('status', 'required'));
         }
 
+        $dateFilters = $request->validate([
+            'submitted_from' => ['nullable', 'date_format:Y-m-d'],
+            'submitted_to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:submitted_from'],
+        ]);
+        $submittedFrom = (string) ($dateFilters['submitted_from'] ?? '');
+        $submittedTo = (string) ($dateFilters['submitted_to'] ?? '');
+
+        if ($submittedFrom !== '') {
+            $base->where('submitted_at', '>=', Carbon::createFromFormat('Y-m-d', $submittedFrom, 'Asia/Shanghai')
+                ->startOfDay()->utc());
+        }
+        if ($submittedTo !== '') {
+            $base->where('submitted_at', '<=', Carbon::createFromFormat('Y-m-d', $submittedTo, 'Asia/Shanghai')
+                ->endOfDay()->utc());
+        }
+
         return view('portals.operation-tasks.tests', [
             ...$context,
             'tasks' => (clone $base)->paginate($testPerPage)->withQueryString(),

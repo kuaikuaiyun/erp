@@ -49,7 +49,7 @@
                         $recapStatusLabel = fn ($status) => match ($status) { 'approved' => '已审核', 'rejected' => '已驳回', default => '待审核' };
                     @endphp
                     <tr>
-                        <td class="recap-date"><b>{{ $recap->data_date->format('Y-m-d') }}</b></td>
+                        <td class="recap-date"><b>{{ $recap->data_date->format('Y-m-d') }} {{ \App\Portals\OperationTasks\Support\OperationTaskTime::format($recap->submitted_at ?? $recap->created_at, 'H:i') }}</b></td>
                         <td class="recap-owner"><b>{{ $recap->user_name }}</b></td>
                         <td class="recap-team">{{ $recap->department_name ?: '未分配二级部门' }}</td>
                         <td class="recap-revenue"><b>${{ number_format($recap->total_revenue_usd, 2) }}</b></td>
@@ -59,13 +59,11 @@
                         <td class="test-reviewer-cell">
                             <div class="ot-stage-status">
                                 <span class="ot-status {{ $recap->leader_review_status === 'approved' ? 'approved' : ($recap->leader_review_status === 'rejected' ? 'rejected' : 'pending') }}">{{ $recap->leader_review_status === 'approved' ? '已通过' : ($recap->leader_review_status === 'rejected' ? '已驳回' : '待审核') }}</span>
-                                <small>{{ $recap->leader_reviewer_names ?: '未配置' }}</small>
                             </div>
                         </td>
                         <td class="test-reviewer-cell">
                             <div class="ot-stage-status">
                                 <span class="ot-status {{ $recap->department_review_status === 'approved' ? 'approved' : ($recap->department_review_status === 'rejected' ? 'rejected' : 'pending') }}">{{ $recap->department_review_status === 'approved' ? '已通过' : ($recap->department_review_status === 'rejected' ? '已驳回' : '待审核') }}</span>
-                                <small>{{ $recap->department_reviewer_names ?: '未配置' }}</small>
                             </div>
                         </td>
                         <td class="recap-stage">@include('portals.operation-tasks.partials.review-flow', ['record' => $recap])</td>

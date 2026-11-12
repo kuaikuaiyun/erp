@@ -32,15 +32,16 @@
 .ot-tests-page .table-responsive{margin:0;overflow-x:visible}
 .ot-tests-page .ot-test-table{width:100%;min-width:0;margin:0;border-collapse:collapse;table-layout:fixed}
 .ot-tests-page .ot-test-table thead th{height:46px;padding:9px 8px;border:0;border-bottom:1px solid #e1e9ed;background:#f8faf9;color:#536b78;font-weight:700;text-align:center;vertical-align:middle;white-space:nowrap}
-.ot-tests-page .ot-test-table thead th:nth-child(1){width:18%}
-.ot-tests-page .ot-test-table thead th:nth-child(2){width:9%}
-.ot-tests-page .ot-test-table thead th:nth-child(3){width:8%}
-.ot-tests-page .ot-test-table thead th:nth-child(4){width:9%}
+.ot-tests-page .ot-test-table thead th:nth-child(1){width:17%}
+.ot-tests-page .ot-test-table thead th:nth-child(2){width:8%}
+.ot-tests-page .ot-test-table thead th:nth-child(3){width:9%}
+.ot-tests-page .ot-test-table thead th:nth-child(4){width:6%}
 .ot-tests-page .ot-test-table thead th:nth-child(5){width:12%}
-.ot-tests-page .ot-test-table thead th:nth-child(6){width:10%}
-.ot-tests-page .ot-test-table thead th:nth-child(7){width:10%}
-.ot-tests-page .ot-test-table thead th:nth-child(8){width:14%}
-.ot-tests-page .ot-test-table thead th:nth-child(9){width:10%}
+.ot-tests-page .ot-test-table thead th:nth-child(6){width:9%}
+.ot-tests-page .ot-test-table thead th:nth-child(7){width:9%}
+.ot-tests-page .ot-test-table thead th:nth-child(8){width:9%}
+.ot-tests-page .ot-test-table thead th:nth-child(9){width:12%}
+.ot-tests-page .ot-test-table thead th:nth-child(10){width:9%}
 .ot-tests-page .ot-task-current-status small{display:block;margin-top:6px;color:#d45b55;line-height:1.45;overflow-wrap:anywhere}
 .ot-tests-page .ot-test-table tbody td{height:62px;padding:9px 8px;border:0;border-bottom:1px solid #e8eef1;background:#fff;text-align:center;vertical-align:middle;overflow-wrap:anywhere}
 .ot-tests-page .ot-test-table tbody tr:last-child td{border-bottom:0}

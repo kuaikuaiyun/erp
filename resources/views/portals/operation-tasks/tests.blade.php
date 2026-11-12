@@ -56,6 +56,24 @@
             <a class="btn btn-warning btn-sm" href="{{ request()->fullUrlWithQuery(['status' => 'rejected', 'page' => null]) }}">只看待修改</a>
         </div>
     @endif
+    <form class="ot-test-date-filter" method="get" action="{{ url()->current() }}">
+        @if(request()->filled('status'))
+            <input type="hidden" name="status" value="{{ request('status') }}">
+        @endif
+        <div class="ot-test-date-field">
+            <label for="ot-submitted-from">提交开始</label>
+            <input class="form-control" id="ot-submitted-from" type="date" name="submitted_from" value="{{ request('submitted_from') }}">
+        </div>
+        <div class="ot-test-date-field">
+            <label for="ot-submitted-to">提交结束</label>
+            <input class="form-control" id="ot-submitted-to" type="date" name="submitted_to" value="{{ request('submitted_to') }}">
+            @error('submitted_to')<span class="help-block">结束日期不能早于开始日期</span>@enderror
+        </div>
+        <div class="ot-test-date-actions">
+            <button class="btn ot-primary" type="submit"><i class="fa fa-search"></i> 查询</button>
+            <a class="btn btn-default" href="{{ request()->fullUrlWithoutQuery(['submitted_from', 'submitted_to', 'page']) }}"><i class="fa fa-refresh"></i> 重置</a>
+        </div>
+    </form>
     <div class="ot-test-goals">
         <div><small>今日测品计划</small><b>{{ $todayPlan ? ($todayProgress['label'] ?? '已确认') : '—' }}</b><strong>{{ $todayPlan ? '单品 '.$singleTarget.' 个 · 类目 '.$categoryTarget.' 个' : '等待主管确认' }}</strong><span>每日单独确认，混合计划同时核算两类目标</span></div>
         <div><small>今日计划完成</small><b>{{ $todayPlan ? ($singleDone + $categoryDone) : 0 }}</b><strong>{{ $todayPlan ? '单品 '.$singleDone.'/'.$singleTarget.' · 类目 '.$categoryDone.'/'.$categoryTarget : '尚未设置计划' }}</strong><span>单品至少 2 条、类目至少 3 条新素材</span></div>
@@ -65,7 +83,7 @@
         <div class="ot-card-head"><span>任务档案</span><span class="ot-hint">共 {{ $tasks->total() }} 条；点击任务详情可追加素材、填写日报和查看整改记录。</span></div>
         <div class="table-responsive">
             <table class="table ot-table ot-test-table">
-                <thead><tr><th>基础信息</th><th>任务类型</th><th>落地页</th><th>素材信息</th><th>投放媒体</th><th>二级主管审核</th><th>一级主管审核</th><th>当前状态 / 驳回意见</th><th>操作</th></tr></thead>
+                <thead><tr><th>基础信息</th><th>任务类型</th><th>提交时间</th><th>落地页</th><th>素材信息</th><th>投放媒体</th><th>二级主管审核</th><th>一级主管审核</th><th>当前状态 / 驳回意见</th><th>操作</th></tr></thead>
                 <tbody>
                 @forelse($tasks as $task)
                     @php
@@ -104,6 +122,7 @@
                     <tr>
                         <td class="ot-task-info"><b>{{ $task->task_no }}</b><span>运营：{{ $task->owner_name }}</span><small>团队：{{ $task->department_name ?: '未分配' }}</small></td>
                         <td><b>{{ $task->page_type === 'category' ? '类目页' : '单品页' }}</b><small>{{ $task->task_type === 'iteration' ? '已有测试迭代' : '新测试' }}</small></td>
+                        <td class="ot-test-submitted-at">{{ \App\Portals\OperationTasks\Support\OperationTaskTime::format($task->submitted_at, 'Y-m-d H:i') }}</td>
                         <td><a class="btn btn-info btn-xs ot-landing-button" href="{{ $task->landing_url }}" target="_blank" rel="noopener noreferrer">落地页</a></td>
                         <td class="test-asset-info">
                             <b>{{ $task->assets_count }} 条</b>
@@ -125,7 +144,7 @@
                         <td class="ot-task-action">@if($requiredRectifications->isNotEmpty() && (int) $task->owner_user_id === (int) $user->id)<button class="btn btn-warning btn-sm ot-edit-test-task" type="button" data-task-id="{{ $task->id }}">修改并重新提交</button>@else<a class="btn btn-default btn-sm" href="{{ route('operation-tasks.tests.show',$task) }}">查看详情</a>@endif</td>
                     </tr>
                 @empty
-                    <tr class="ot-test-empty-row"><td colspan="9"><div class="ot-test-empty-state"><i class="fa fa-flask"></i><b>当前暂无测品任务</b><span>请使用页面右上角的“新建任务”创建首个测试档案。</span></div></td></tr>
+                    <tr class="ot-test-empty-row"><td colspan="10"><div class="ot-test-empty-state"><i class="fa fa-flask"></i><b>当前暂无测品任务</b><span>请使用页面右上角的“新建任务”创建首个测试档案。</span></div></td></tr>
                 @endforelse
                 </tbody>
             </table>
@@ -177,6 +196,14 @@
     .ot-test-empty-state b{color:#294b5d;font-size:15px;font-weight:700}
     .ot-test-empty-state span{font-size:12px;line-height:1.6}
     .ot-test-rejected-alert{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:14px;padding:13px 16px;border:1px solid #f0c987;border-left:4px solid #e69b25;border-radius:8px;background:#fff9ed;color:#80550d}.ot-test-rejected-alert b,.ot-test-rejected-alert span{display:block}.ot-test-rejected-alert span{margin-top:3px;font-size:12px;color:#99733a}
+</style>
+@endpush
+@push('styles')
+<style>
+.ot-test-date-filter{display:flex;align-items:flex-end;gap:12px;margin:0 0 16px;padding:15px 18px;border:1px solid #d9e6eb;border-radius:10px;background:#fff;box-shadow:0 4px 16px rgba(25,57,73,.035)}
+.ot-test-date-field{width:220px}.ot-test-date-field label{display:block;margin-bottom:6px;color:#31566a;font-size:12px;font-weight:700}.ot-test-date-field .form-control{height:36px;border-color:#cfdee5;border-radius:4px}.ot-test-date-field .help-block{display:block;margin:5px 0 0;color:#d9534f;font-size:12px}
+.ot-test-date-actions{display:flex;align-items:center;gap:8px}.ot-test-date-actions .btn{height:36px;min-width:76px;display:inline-flex;align-items:center;justify-content:center;gap:5px}
+@media(max-width:700px){.ot-test-date-filter{align-items:stretch;flex-direction:column}.ot-test-date-field{width:100%}.ot-test-date-actions{justify-content:flex-end}}
 </style>
 @endpush
 @push('scripts')
