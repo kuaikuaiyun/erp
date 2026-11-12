@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AppLovinSpendScreenshot;
 use App\Models\FashionAdvertisingReport;
 use App\Portal\Http\Controllers\PortalEntryController;
+use App\Services\DepartmentAuthorizationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -22,7 +23,10 @@ class AppLovinSpendController extends Controller
     private const PORTAL_CODE = 'fuzhuang';
     private const GIFT_THRESHOLD = 5000;
 
-    public function __construct(private readonly PortalEntryController $portalEntries)
+    public function __construct(
+        private readonly PortalEntryController $portalEntries,
+        private readonly DepartmentAuthorizationService $departmentAuthorization,
+    )
     {
     }
 
@@ -69,7 +73,7 @@ class AppLovinSpendController extends Controller
             'screenshot' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
         ]);
 
-        $account = $this->summarize($this->reportsFor($context['user']))
+        $account = $this->summarize($this->reportsFor($context['user'], false))
             ->firstWhere('account_key', $validated['account_key']);
         if (! $account || $account['total'] < self::GIFT_THRESHOLD) {
             throw ValidationException::withMessages(['screenshot' => '只有累计消耗大于等于 $5,000 的账户可以上传礼金图。']);
@@ -109,19 +113,25 @@ class AppLovinSpendController extends Controller
     {
         $context = $this->context($request);
         if ($context instanceof Response) abort($context->getStatusCode());
-        abort_unless($this->canSeeAll($context['user']) || (int) $screenshot->operator_user_id === (int) $context['user']->getKey(), 403);
+        abort_unless($this->canViewOperator($context['user'], (int) $screenshot->operator_user_id), 403);
         abort_unless(Storage::disk('local')->exists($screenshot->screenshot_path), 404);
 
         return response()->file(Storage::disk('local')->path($screenshot->screenshot_path));
     }
 
-    private function reportsFor($user): Collection
+    private function reportsFor($user, bool $includeManaged = true): Collection
     {
-        return FashionAdvertisingReport::query()
+        $query = FashionAdvertisingReport::query()
             ->with(['adSpendEntries', 'submitter.departments'])
-            ->where('status', '!=', FashionAdvertisingReport::STATUS_REJECTED)
-            ->when(! $this->canSeeAll($user), fn ($query) => $query->where('submitter_id', $user->getKey()))
-            ->orderBy('report_date')->get();
+            ->where('status', '!=', FashionAdvertisingReport::STATUS_REJECTED);
+        if (! $this->canSeeAll($user)) {
+            $departmentIds = $includeManaged ? $this->departmentAuthorization->managedDepartmentIds($user) : collect();
+            $departmentIds->isNotEmpty()
+                ? $query->whereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $departmentIds->all()))
+                : $query->where('submitter_id', $user->getKey());
+        }
+
+        return $query->orderBy('report_date')->get();
     }
 
     private function summarize(Collection $reports): Collection
@@ -193,5 +203,15 @@ class AppLovinSpendController extends Controller
     private function canSeeAll($user): bool
     {
         return $user->isAdministrator() || strcasecmp((string) $user->username, 'kky_boss') === 0;
+    }
+
+    private function canViewOperator($user, int $operatorId): bool
+    {
+        if ($this->canSeeAll($user) || $operatorId === (int) $user->getKey()) return true;
+        $departmentIds = $this->departmentAuthorization->managedDepartmentIds($user);
+        return $departmentIds->isNotEmpty() && FashionAdvertisingReport::query()
+            ->where('submitter_id', $operatorId)
+            ->whereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $departmentIds->all()))
+            ->exists();
     }
 }

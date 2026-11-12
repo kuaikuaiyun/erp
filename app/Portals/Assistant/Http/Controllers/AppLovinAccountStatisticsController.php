@@ -13,6 +13,7 @@ use App\Models\OperationReport;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
+use App\Services\DepartmentAuthorizationService;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
@@ -26,6 +27,7 @@ class AppLovinAccountStatisticsController extends Controller
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
         private readonly AssistantStoreOwnerService $storeOwners,
+        private readonly DepartmentAuthorizationService $departmentAuthorization,
     ) {}
 
     public function index(Request $request): Response|View
@@ -33,7 +35,9 @@ class AppLovinAccountStatisticsController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
 
-        $allAccounts = $this->accounts($context['user']);
+        $project = $this->project($request);
+        $routes = $this->routeNames($project);
+        $allAccounts = $this->accounts($context['user'], $project);
         $availableDepartmentIds = $allAccounts->pluck('department_id')
             ->map(fn ($id): int => (int) $id)->filter()->unique()->values()->all();
         $filters = $request->validate([
@@ -86,6 +90,7 @@ class AppLovinAccountStatisticsController extends Controller
                 ->orderBy('sort')->orderBy('name')->get(['id', 'parent_id', 'name']),
             'filters' => ['department_ids' => $departmentIds, 'operator' => $operator, 'per_page' => $perPage],
             'spendBands' => $spendBands,
+            'statisticsRoutes' => $routes,
         ]);
     }
 
@@ -97,7 +102,9 @@ class AppLovinAccountStatisticsController extends Controller
         $filters = $request->validate([
             'spend_band' => ['nullable', Rule::in(['under_5000', 'between_5000_10000', 'over_10000'])],
         ]);
-        $accounts = $this->accounts($context['user'])->where('operator_user_id', $operator)->values();
+        $project = $this->project($request);
+        $routes = $this->routeNames($project);
+        $accounts = $this->accounts($context['user'], $project)->where('operator_user_id', $operator)->values();
         abort_if($accounts->isEmpty(), 404);
         $first = $accounts->first();
         $spendBand = (string) ($filters['spend_band'] ?? '');
@@ -119,8 +126,8 @@ class AppLovinAccountStatisticsController extends Controller
             'accounts' => $paginator, 'totalSpend' => (float) $accounts->sum('total_spend'),
             'spendBand' => $spendBand,
             'isGlobal' => false,
-            'backUrl' => route('assistant.applovin-account-statistics.index'),
-            'allAccountsUrl' => route('assistant.applovin-account-statistics.show', $operator),
+            'backUrl' => route($routes['index']),
+            'allAccountsUrl' => route($routes['show'], $operator),
             'spendBandLabel' => match ($spendBand) {
                 'under_5000' => '历史总消耗小于 $5,000',
                 'between_5000_10000' => '历史总消耗 $5,000–$10,000',
@@ -135,7 +142,9 @@ class AppLovinAccountStatisticsController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
 
-        $allAccounts = $this->accounts($context['user']);
+        $project = $this->project($request);
+        $routes = $this->routeNames($project);
+        $allAccounts = $this->accounts($context['user'], $project);
         $availableDepartmentIds = $allAccounts->pluck('department_id')
             ->map(fn ($id): int => (int) $id)->filter()->unique()->values()->all();
         $filters = $request->validate([
@@ -174,8 +183,8 @@ class AppLovinAccountStatisticsController extends Controller
                 : '全部团队',
             'accounts' => $paginator, 'totalSpend' => (float) $accounts->sum('total_spend'),
             'spendBand' => $spendBand, 'isGlobal' => true,
-            'backUrl' => route('assistant.applovin-account-statistics.index', $backQuery),
-            'allAccountsUrl' => route('assistant.applovin-account-statistics.index', $backQuery),
+            'backUrl' => route($routes['index'], $backQuery),
+            'allAccountsUrl' => route($routes['index'], $backQuery),
             'spendBandLabel' => match ($spendBand) {
                 'under_5000' => '历史总消耗小于 $5,000',
                 'between_5000_10000' => '历史总消耗 $5,000–$10,000',
@@ -184,14 +193,17 @@ class AppLovinAccountStatisticsController extends Controller
         ]);
     }
 
-    private function accounts(AdminUser $viewer): Collection
+    private function accounts(AdminUser $viewer, string $project): Collection
     {
-        $visibleIds = $this->visibleDepartmentIds($viewer);
+        $visibleIds = $this->visibleDepartmentIds($viewer, $project);
+        $operatorOnly = $project !== 'assistant' && ! $this->canSeeAll($viewer) && $visibleIds === [];
         $subscriptionQuery = OperationReport::query()->where('status', OperationReport::STATUS_APPROVED);
-        if (! $viewer->isAdministrator()) {
-            $visibleIds === [] ? $subscriptionQuery->whereRaw('1=0') : $subscriptionQuery->whereIn('operation_department_id', $visibleIds);
+        if (! $this->canSeeAll($viewer)) {
+            $operatorOnly
+                ? $subscriptionQuery->where('operator_user_id', $viewer->getKey())
+                : ($visibleIds === [] ? $subscriptionQuery->whereRaw('1=0') : $subscriptionQuery->whereIn('operation_department_id', $visibleIds));
         }
-        $subscription = $subscriptionQuery->get()->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])
+        $subscription = $project === 'fashion' ? collect() : $subscriptionQuery->get()->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])
             ->filter(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? ''))) === 'applovin')
             ->map(fn (array $row): array => [
                 'operator_user_id' => (int) $report->operator_user_id, 'operator_name' => (string) $report->operator_name,
@@ -201,12 +213,15 @@ class AppLovinAccountStatisticsController extends Controller
                 'date' => $report->report_date->format('Y-m-d'), 'source' => '订阅运营',
             ]));
 
-        $fashion = FashionAdvertisingReport::query()->where('status', FashionAdvertisingReport::STATUS_APPROVED)
+        $fashion = $project === 'operation' ? collect() : FashionAdvertisingReport::query()->where('status', FashionAdvertisingReport::STATUS_APPROVED)
             ->with(['adSpendEntries', 'submitter.departments'])->get()
-            ->flatMap(function (FashionAdvertisingReport $report) use ($viewer, $visibleIds): Collection {
-                $department = $report->submitter?->departments?->first(fn ($item) => (bool) ($item->pivot->is_primary ?? false))
-                    ?: $report->submitter?->departments?->first();
-                if (! $viewer->isAdministrator() && (! $department || ! in_array((int) $department->id, $visibleIds, true))) return collect();
+            ->flatMap(function (FashionAdvertisingReport $report) use ($viewer, $visibleIds, $operatorOnly): Collection {
+                $departments = $report->submitter?->departments ?? collect();
+                $department = ! $this->canSeeAll($viewer) && ! $operatorOnly
+                    ? $departments->first(fn ($item) => in_array((int) $item->id, $visibleIds, true))
+                    : ($departments->first(fn ($item) => (bool) ($item->pivot->is_primary ?? false)) ?: $departments->first());
+                if (! $this->canSeeAll($viewer)
+                    && ($operatorOnly ? (int) $report->submitter_id !== (int) $viewer->getKey() : (! $department || ! in_array((int) $department->id, $visibleIds, true)))) return collect();
                 return $report->adSpendEntries->filter(fn ($entry) => mb_strtolower(trim((string) $entry->media)) === 'applovin')
                     ->map(fn ($entry): array => [
                         'operator_user_id' => (int) $report->submitter_id, 'operator_name' => (string) $report->submitter_name,
@@ -239,9 +254,13 @@ class AppLovinAccountStatisticsController extends Controller
         });
     }
 
-    private function visibleDepartmentIds(AdminUser $user): array
+    private function visibleDepartmentIds(AdminUser $user, string $project): array
     {
-        return $user->isAdministrator()
+        if ($project !== 'assistant' && ! $this->canSeeAll($user)) {
+            return $this->departmentAuthorization->managedDepartmentIds($user)->map(fn ($id) => (int) $id)->all();
+        }
+
+        return $this->canSeeAll($user)
             ? $this->storeOwners->storeOwnershipOperationDepartments()->pluck('id')->map(fn ($id) => (int) $id)->all()
             : $this->storeOwners->visibleOperationDepartmentIds($user);
     }
@@ -250,8 +269,36 @@ class AppLovinAccountStatisticsController extends Controller
     {
         $context = $this->portalEntries->portalContext($request);
         if ($context instanceof Response) return $context;
-        $this->authorization->assertAssistantPortal($context['portal']);
-        abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
+        $project = $this->project($request);
+        if ($project === 'assistant') {
+            $this->authorization->assertAssistantPortal($context['portal']);
+            abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
+        } else {
+            abort_unless($context['portal']->code === ($project === 'fashion' ? 'fuzhuang' : 'yunying'), 404);
+        }
         return $context;
+    }
+
+    private function project(Request $request): string
+    {
+        if ($request->routeIs('operation.applovin-account-statistics.*')) return 'operation';
+        if ($request->routeIs('fashion.applovin-account-statistics.*')) return 'fashion';
+        return 'assistant';
+    }
+
+    /** @return array{index:string,show:string,spend_band:string} */
+    private function routeNames(string $project): array
+    {
+        $prefix = $project === 'assistant' ? 'assistant' : $project;
+        return [
+            'index' => $prefix.'.applovin-account-statistics.index',
+            'show' => $prefix.'.applovin-account-statistics.show',
+            'spend_band' => $prefix.'.applovin-account-statistics.spend-band',
+        ];
+    }
+
+    private function canSeeAll(AdminUser $user): bool
+    {
+        return $user->isAdministrator() || strcasecmp((string) $user->username, 'kky_boss') === 0;
     }
 }

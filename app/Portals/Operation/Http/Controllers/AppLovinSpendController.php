@@ -7,6 +7,7 @@ use App\Models\AppLovinSpendScreenshot;
 use App\Models\OperationReport;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\ProductRequests\ProductRequestAccessService;
+use App\Services\DepartmentAuthorizationService;
 use Illuminate\Http\Request;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
@@ -22,6 +23,7 @@ class AppLovinSpendController extends Controller
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly ProductRequestAccessService $access,
+        private readonly DepartmentAuthorizationService $departmentAuthorization,
     ) {}
 
     public function index(Request $request): Response|View
@@ -35,11 +37,7 @@ class AppLovinSpendController extends Controller
             'account_name' => ['nullable', 'string', 'max:150'],
             'account_number' => ['nullable', 'string', 'max:150'],
         ]);
-        $canSeeAll = $user->isAdministrator() || strcasecmp((string) $user->username, 'kky_boss') === 0;
-        $reports = OperationReport::query()
-            ->where('status', '!=', OperationReport::STATUS_REJECTED)
-            ->when(! $canSeeAll, fn ($query) => $query->where('operator_user_id', $user->getKey()))
-            ->orderBy('report_date')->get();
+        $reports = $this->reportsFor($user)->orderBy('report_date')->get();
 
         $accounts = $this->withScreenshots($this->summarize($reports));
         if (($filters['over_threshold'] ?? '') === '1') $accounts = $accounts->where('total', '>=', 5000)->values();
@@ -61,11 +59,7 @@ class AppLovinSpendController extends Controller
         $this->access->assertPortal($context['portal'], ProductRequestAccessService::OPERATION_PORTAL_CODE);
         $validated = $request->validate(['account_key' => ['required', 'string', 'size:64'], 'screenshot' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120']]);
         $user = $context['user'];
-        $canSeeAll = $user->isAdministrator() || strcasecmp((string) $user->username, 'kky_boss') === 0;
-        $reports = OperationReport::query()
-            ->where('status', '!=', OperationReport::STATUS_REJECTED)
-            ->when(! $canSeeAll, fn ($query) => $query->where('operator_user_id', $user->getKey()))
-            ->get();
+        $reports = $this->reportsFor($user, false)->get();
         $account = $this->summarize($reports)->firstWhere('account_key', $validated['account_key']);
         if (! $account || $account['total'] < 5000) throw ValidationException::withMessages(['screenshot' => '只有累计消耗大于等于 5000 的账户可以上传图片。']);
         $path = $validated['screenshot']->store('applovin-spend-screenshots', 'local');
@@ -87,11 +81,7 @@ class AppLovinSpendController extends Controller
 
         $this->access->assertPortal($context['portal'], ProductRequestAccessService::OPERATION_PORTAL_CODE);
         $user = $context['user'];
-        $canSeeAll = $user->isAdministrator() || strcasecmp((string) $user->username, 'kky_boss') === 0;
-        $reports = OperationReport::query()
-            ->where('status', '!=', OperationReport::STATUS_REJECTED)
-            ->when(! $canSeeAll, fn ($query) => $query->where('operator_user_id', $user->getKey()))
-            ->get();
+        $reports = $this->reportsFor($user)->get();
         $accounts = $this->summarize($reports)->where('total', '>=', 5000)->values();
         $uploadedKeys = AppLovinSpendScreenshot::query()
             ->whereIn('account_key', $accounts->pluck('account_key'))
@@ -108,8 +98,7 @@ class AppLovinSpendController extends Controller
         if ($context instanceof Response) abort($context->getStatusCode());
         $this->access->assertPortal($context['portal'], ProductRequestAccessService::OPERATION_PORTAL_CODE);
         $user=$context['user'];
-        $canSeeAll=$user->isAdministrator()||strcasecmp((string)$user->username,'kky_boss')===0;
-        abort_unless($canSeeAll||(int)$screenshot->operator_user_id===(int)$user->getKey(),403);
+        abort_unless($this->canViewOperator($user, (int) $screenshot->operator_user_id),403);
         abort_unless(Storage::disk('local')->exists($screenshot->screenshot_path),404);
         return response()->file(Storage::disk('local')->path($screenshot->screenshot_path));
     }
@@ -128,6 +117,30 @@ class AppLovinSpendController extends Controller
                 return ['account_key'=>AppLovinSpendScreenshot::accountKey((int)$first['operator_user_id'],$agency,$media,$name,$number),'operator_user_id'=>(int)$first['operator_user_id'],'operation_department_id'=>$first['operation_department_id'],'operator_name' => $first['operator_name'], 'department' => $first['department'], 'agency' => $agency, 'media' => $media, 'account_name' => $name, 'account_number' => $number,
                     'total' => (float) $rows->sum('actual_spend'), 'details' => $rows->values()];
             })->sortByDesc('total')->values();
+    }
+
+    private function reportsFor($user, bool $includeManaged = true)
+    {
+        $query = OperationReport::query()->where('status', '!=', OperationReport::STATUS_REJECTED);
+        if ($this->canSeeAll($user)) return $query;
+
+        $departmentIds = $includeManaged ? $this->departmentAuthorization->managedDepartmentIds($user) : collect();
+        return $departmentIds->isNotEmpty()
+            ? $query->whereIn('operation_department_id', $departmentIds->all())
+            : $query->where('operator_user_id', $user->getKey());
+    }
+
+    private function canViewOperator($user, int $operatorId): bool
+    {
+        if ($this->canSeeAll($user) || $operatorId === (int) $user->getKey()) return true;
+        $departmentIds = $this->departmentAuthorization->managedDepartmentIds($user);
+        return $departmentIds->isNotEmpty() && OperationReport::query()
+            ->where('operator_user_id', $operatorId)->whereIn('operation_department_id', $departmentIds->all())->exists();
+    }
+
+    private function canSeeAll($user): bool
+    {
+        return $user->isAdministrator() || strcasecmp((string) $user->username, 'kky_boss') === 0;
     }
 
     private function withScreenshots($accounts)

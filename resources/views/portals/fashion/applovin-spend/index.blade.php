@@ -18,12 +18,12 @@
     <a class="btn btn-default" href="{{ route('fashion.applovin-spends.index') }}">重置</a>
 </form></div></div>
 <div class="box spend-box"><div class="table-responsive"><table class="table table-bordered table-hover"><thead><tr><th>运营部门/人员</th><th>代理账号</th><th>广告社媒</th><th>广告账户</th><th>账户编号</th><th>累计实际消耗</th><th>是否有礼金</th></tr></thead><tbody>
-@forelse($accounts as $account)<tr>
+@forelse($accounts as $account)@php($canUpload = $user->isAdministrator() || strcasecmp((string)$user->username,'kky_boss')===0 || (int)$account['operator_user_id']===(int)$user->getKey())<tr>
     <td>{{ $account['department'] ?: '—' }}<br><small>{{ $account['operator_name'] }}</small></td><td><b>{{ $account['agency'] }}</b></td><td>{{ $account['media'] ?: '—' }}</td><td>{{ $account['account_name'] }}</td><td>{{ $account['account_number'] }}</td><td class="{{ $account['total'] >= $threshold ? 'spend-high' : '' }}">${{ number_format($account['total'],2) }}</td>
     <td>@if($account['total'] >= $threshold)
         @if($account['uploaded_screenshot'])<a target="_blank" href="{{ route('fashion.applovin-spends.screenshot',$account['uploaded_screenshot']) }}"><img class="gift-thumb" src="{{ route('fashion.applovin-spends.screenshot',$account['uploaded_screenshot']) }}" alt="礼金图"></a>@endif
-        <button type="button" class="btn btn-xs {{ $account['uploaded_screenshot'] ? 'btn-warning' : 'btn-info' }} js-upload-open" data-key="{{ $account['account_key'] }}" data-toggle="modal" data-target="#spend-upload-modal"><i class="fa fa-picture-o"></i> {{ $account['uploaded_screenshot'] ? '更换礼金图' : '上传礼金图' }}</button>
-        <button type="button" class="btn btn-xs btn-default" data-toggle="modal" data-target="#gift-example-modal"><i class="fa fa-question-circle"></i> 上传图片示例</button>
+        @if($canUpload)<button type="button" class="btn btn-xs {{ $account['uploaded_screenshot'] ? 'btn-warning' : 'btn-info' }} js-upload-open" data-key="{{ $account['account_key'] }}" data-toggle="modal" data-target="#spend-upload-modal"><i class="fa fa-picture-o"></i> {{ $account['uploaded_screenshot'] ? '更换礼金图' : '上传礼金图' }}</button>
+        <button type="button" class="btn btn-xs btn-default" data-toggle="modal" data-target="#gift-example-modal"><i class="fa fa-question-circle"></i> 上传图片示例</button>@elseif(!$account['uploaded_screenshot'])<span class="text-muted">待本人上传</span>@endif
         @if($account['uploaded_screenshot']) <span class="label label-success">已上传</span>@endif
     @else<span class="text-muted">—</span>@endif</td>
 </tr>@empty<tr><td colspan="7" class="text-center text-muted" style="padding:30px">暂无服装 AppLovin 广告费用数据</td></tr>@endforelse
