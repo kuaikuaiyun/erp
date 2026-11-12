@@ -257,6 +257,10 @@ $translations = [
 ];
 
 return array_replace_recursive($translations, [
+    'balance_display' => [
+        'expand' => '展开 :count 个零余额币种',
+        'collapse' => '收起零余额币种',
+    ],
     'balance_refresh_command' => [
         'description' => '刷新支付中台已启用且配置中转接口的 PayPal 账户余额',
         'running' => '支付中台余额刷新任务正在执行，本次跳过。',

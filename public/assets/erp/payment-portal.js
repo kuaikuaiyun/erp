@@ -390,10 +390,10 @@
             var summary = button.closest('.payment-account-balance-summary');
             var rows = summary.find('[data-payment-account-zero-balance]');
             var expanded = String(button.attr('data-expanded') || 'false') === 'true';
-            var count = String(button.data('hiddenCount') || rows.length || '');
             rows.prop('hidden', expanded);
             button.attr('data-expanded', expanded ? 'false' : 'true')
-                .html('<i class="fa ' + (expanded ? 'fa-angle-down' : 'fa-angle-up') + '" aria-hidden="true"></i> ' + (expanded ? '展开 ' + count + ' 个零余额币种' : '收起零余额币种'));
+                .attr('aria-expanded', expanded ? 'false' : 'true')
+                .html('<i class="fa ' + (expanded ? 'fa-angle-down' : 'fa-angle-up') + '" aria-hidden="true"></i> ' + escapeHtml(button.attr(expanded ? 'data-expand-label' : 'data-collapse-label') || ''));
         });
 
         page.find('[data-payment-filter-form]').each(function () {

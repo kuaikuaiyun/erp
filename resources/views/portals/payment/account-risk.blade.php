@@ -229,6 +229,6 @@
         pagination: @json(__('payment.common.pagination'))
     };</script>
     @if ($errors->any())<script>jQuery(function () { jQuery('#payment-account-create-modal').modal('show'); });</script>@endif
-    <script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261112-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261112-2"></script>
     <script>document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('.payment-reason-multiselect').forEach(function(menu){var summary=menu.querySelector('summary span'),boxes=menu.querySelectorAll('input[type="checkbox"]'),fallback=menu.closest('.payment-credit-card-reason-filter').querySelector('.payment-reason-legacy-select option').textContent;var refresh=function(){var labels=Array.prototype.map.call(boxes,function(box){return box.checked?box.parentNode.querySelector('span').textContent.trim():'';}).filter(Boolean);summary.textContent=labels.length?labels.join('、'):fallback;summary.title=labels.join('、');};boxes.forEach(function(box){box.addEventListener('change',refresh);});var clear=menu.querySelector('[data-payment-reason-clear]');clear.addEventListener('click',function(event){event.preventDefault();boxes.forEach(function(box){box.checked=false;});refresh();});refresh();});});</script>
 @endpush
