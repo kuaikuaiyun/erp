@@ -2591,19 +2591,25 @@ class FinanceController extends Controller
                 $skipped++;
                 continue;
             }
-            $source = $worldpay->read($file);
-            if ($source === null) {
-                throw ValidationException::withMessages(['files.'.$index => '无法识别文件「'.$file->getClientOriginalName().'」的 Worldpay 交易表头。']);
-            }
-            $sources[] = $source;
+            $sources[$index] = $file;
         }
         try {
             [$count, $total] = $this->workbooks->database()->transaction(function () use ($sources, $worldpay, $actor): array {
                 $this->workbooks->database()->table('portals')->where('code', 'caiwu')->lockForUpdate()->first();
                 $count = $total = 0;
-                foreach ($sources as [$kind, $rows]) {
-                    $count += $worldpay->import($kind, $rows, \App\Portals\Finance\FinanceWorldpayImport::SOURCE_ACCOUNT, 'Asia/Shanghai', $actor);
-                    $total += count($rows);
+                foreach ($sources as $index => $file) {
+                    try {
+                        $batches = $worldpay->readBatches($file);
+                        if (! $batches->valid()) {
+                            throw ValidationException::withMessages(['file' => '无法识别 Worldpay 交易表头。']);
+                        }
+                        foreach ($batches as [$kind, $rows]) {
+                            $count += $worldpay->import($kind, $rows, \App\Portals\Finance\FinanceWorldpayImport::SOURCE_ACCOUNT, 'Asia/Shanghai', $actor);
+                            $total += count($rows);
+                        }
+                    } catch (ValidationException|\App\Portals\Finance\FinanceRelayException $e) {
+                        throw ValidationException::withMessages(['files.'.$index => $file->getClientOriginalName().'：'.$e->getMessage()]);
+                    }
                 }
                 return [$count, $total];
             });

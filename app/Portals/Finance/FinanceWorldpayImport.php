@@ -12,6 +12,8 @@ class FinanceWorldpayImport
 
     public const MAX_UPLOAD_FILES = 20;
 
+    private const BATCH_SIZE = 500;
+
     private const GENERAL = ['网关接入号', '流水订单号', '商户订单号', '币种', '交易金额', '结单币种', '结单金额',
         '结单汇率', '交易时间', '交易状态', '支付方式', 'HPP支付方式', '卡种', '交易网址', '卡号', '邮箱', '收货人国家'];
 
@@ -28,8 +30,18 @@ class FinanceWorldpayImport
 
     public function read(UploadedFile $file): ?array
     {
+        $kind = null;
+        $rows = [];
+        foreach ($this->readBatches($file) as [$kind, $batch]) {
+            $rows += $batch;
+        }
+        return $kind === null ? null : [$kind, $rows];
+    }
+
+    public function readBatches(UploadedFile $file): \Generator
+    {
         if (strtolower($file->getClientOriginalExtension()) !== 'csv') {
-            return null;
+            return;
         }
         $contents = file_get_contents($file->getRealPath());
         if (! mb_check_encoding($contents, 'UTF-8')) {
@@ -48,22 +60,29 @@ class FinanceWorldpayImport
                 default => [null, []],
             };
             if ($kind === null) {
-                return null;
+                return;
             }
             if (array_diff($required, $headers) || count($headers) !== count(array_unique($headers))) {
                 throw ValidationException::withMessages(['file' => 'Worldpay 文件表头不完整或有重复。']);
             }
             $rows = [];
+            $count = 0;
             while (($values = fgetcsv($stream, escape: '')) !== false) {
                 if ($values === [null]) {
                     continue;
                 }
-                if (count($rows) >= 10000 || count($values) !== count($headers)) {
+                if ($count >= 10000 || count($values) !== count($headers)) {
                     throw ValidationException::withMessages(['file' => 'Worldpay 文件列数不一致或超过 10,000 行。']);
                 }
-                $rows[count($rows) + 2] = array_combine($headers, array_map('trim', $values));
+                $rows[++$count + 1] = array_combine($headers, array_map('trim', $values));
+                if (count($rows) === self::BATCH_SIZE) {
+                    yield [$kind, $rows];
+                    $rows = [];
+                }
             }
-            return [$kind, $rows];
+            if ($rows !== [] || $count === 0) {
+                yield [$kind, $rows];
+            }
         } finally {
             fclose($stream);
         }
@@ -74,6 +93,17 @@ class FinanceWorldpayImport
         if ($kind === 'release') {
             return $this->importReleases($rows);
         }
+        if ($rows === []) {
+            return 0;
+        }
+        $records = FinanceRecord::query()->where('dataset', 'xuzong2-details')
+            ->when($account !== self::SOURCE_ACCOUNT, fn ($query) => $query->where('account', $account))
+            ->where('payload->_card_channel', 'worldpay');
+        $matchesByKey = (clone $records)->whereIn('reference', array_unique(array_column($rows, '流水订单号')))
+            ->orderBy('id')->lockForUpdate()->get()
+            ->groupBy(fn (FinanceRecord $record) => $record->reference."\0".($record->payload['网关接入号'] ?? ''));
+        $createdKeys = [];
+        $pending = [];
         $count = 0;
         foreach ($rows as $line => $row) {
             $reference = $row['流水订单号'];
@@ -82,14 +112,22 @@ class FinanceWorldpayImport
                 || ($kind === 'event' && $row['Case ID'] === '')) {
                 throw ValidationException::withMessages(['file' => '第 '.$line.' 行缺少 Worldpay 订单、网关或账单标识。']);
             }
-            $matches = FinanceRecord::query()->where('dataset', 'xuzong2-details')
-                ->when($account !== self::SOURCE_ACCOUNT, fn ($query) => $query->where('account', $account))
-                ->where('reference', $reference)->where('payload->_card_channel', 'worldpay')
-                ->where('payload->网关接入号', $gateway)->lockForUpdate()->limit(2)->get();
-            if ($matches->count() > 1) {
+            $key = $reference."\0".$gateway;
+            $matches = $matchesByKey->get($key);
+            if (isset($createdKeys[$key]) && $matches === null) {
+                if ($pending !== []) {
+                    $count += $this->workbooks->importRecords('xuzong2-details', $pending, $account, $timezone,
+                        $actor, createOnly: true, guardSettlementMonth: true);
+                    $pending = [];
+                }
+                $matches = (clone $records)->where('reference', $reference)
+                    ->where('payload->网关接入号', $gateway)->lockForUpdate()->limit(2)->get();
+                $matchesByKey->put($key, $matches);
+            }
+            if ($matches?->count() > 1) {
                 throw ValidationException::withMessages(['file' => '第 '.$line.' 行网关和流水号对应多条已有明细。']);
             }
-            $record = $matches->first();
+            $record = $matches?->first();
             $payload = $record?->payload ?? [
                 '_card_channel' => 'worldpay', '网关接入号' => $gateway, '流水订单号' => $reference,
                 '平台订单号' => $reference, '商户订单号' => $row['商户订单号'], '创建时间' => $row['交易时间'],
@@ -122,8 +160,8 @@ class FinanceWorldpayImport
                 }
             }
             if ($record === null) {
-                $count += $this->workbooks->importRecords('xuzong2-details', [$line => $payload], $account, $timezone,
-                    $actor, createOnly: true, guardSettlementMonth: true);
+                $pending[$line] = $payload;
+                $createdKeys[$key] = true;
                 continue;
             }
             $record->fill(['payload' => $payload, 'status' => $payload['支付状态'] ?: null, 'currency' => $payload['交易币种']]);
@@ -133,7 +171,8 @@ class FinanceWorldpayImport
                 $count++;
             }
         }
-        return $count;
+        return $count + ($pending === [] ? 0 : $this->workbooks->importRecords('xuzong2-details', $pending, $account,
+            $timezone, $actor, createOnly: true, guardSettlementMonth: true));
     }
 
     private function importReleases(array $rows): int
