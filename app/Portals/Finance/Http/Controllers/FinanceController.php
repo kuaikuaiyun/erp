@@ -2395,11 +2395,19 @@ class FinanceController extends Controller
 
     private function importConfluxFiles(Request $request, string $report, int $actor): Response
     {
+        set_time_limit(180);
+        $memoryLimit = ini_parse_quantity((string) ini_get('memory_limit'));
+        if ($memoryLimit > 0 && $memoryLimit < 384 * 1024 ** 2) {
+            ini_set('memory_limit', '384M');
+        }
         $data = $request->validate([
             'timezone' => ['required', Rule::in(FinanceWorkbookService::TIMEZONES)],
             'settlement_type' => ['nullable', Rule::in(['正常结算', '停结算'])],
             'files' => 'required|array|list|min:1|max:5',
-            'files.*' => 'required|file|extensions:xlsx,csv,txt|max:10240',
+            'files.*' => 'required|file|extensions:xlsx,csv,txt|max:20480',
+        ], [
+            'files.*.uploaded' => '文件上传失败，当前服务器单文件上传限制为 '.ini_get('upload_max_filesize').'。',
+            'files.*.max' => '单个 ConfluxAPI 文件不得超过 20 MB。',
         ]);
         $files = $data['files'];
         unset($data['files']);

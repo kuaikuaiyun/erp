@@ -91,6 +91,10 @@ class FinanceConfluxSettlement
                     }
                     continue;
                 }
+                [$kind, $referenceHeader] = self::SHEETS[$prefix];
+                if ($kind === 'release' && $sheet->getHighestDataRow() === 1) {
+                    continue;
+                }
                 if ($merchant !== '') {
                     $merchants[mb_strtolower($merchant)] = true;
                 }
@@ -98,7 +102,6 @@ class FinanceConfluxSettlement
                 if ($lastRow > 10001 || $width > 100) {
                     throw ValidationException::withMessages(['file' => '结算报表每张工作表最多 10,000 行、100 列。']);
                 }
-                [$kind, $referenceHeader] = self::SHEETS[$prefix];
                 $headers = [];
                 for ($column = 1; $column <= $width; $column++) {
                     $header = trim((string) $sheet->getCell([$column, 1])->getValue());

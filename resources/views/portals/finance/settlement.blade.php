@@ -309,9 +309,9 @@
 @if($cardChannel === 'worldpay')
     直接上传 Worldpay 后台导出的文件。系统自动匹配订单明细、登记保证金返还，并跳过扣返款明细和商户结算费用汇总。一次最多 {{ \App\Portals\Finance\FinanceWorldpayImport::MAX_UPLOAD_FILES }} 个文件，每个最大 10 MB。
 @elseif($channel === 'credit_card')
-    ConfluxAPI 可一次选择多份文件，系统每批最多 5 份依次导入。正常结算和停结算请选择不同的队列。
+    ConfluxAPI 可一次选择多份文件，系统每批最多 5 份依次导入，单个文件最大 20 MB。正常结算和停结算请选择不同的队列。
 @endif
-@if($cardChannel !== 'worldpay')
+@if($cardChannel !== 'worldpay' && $channel !== 'credit_card')
 支持 XLSX、CSV，最大 10 MB。
 @endif
 </p>
@@ -408,6 +408,8 @@ if(importPlatform){
     var addMerchant=document.getElementById('credit-add-merchant'), merchantEmpty=document.getElementById('credit-merchant-empty');
     function updateImportScope(){
         var platform=importPlatform.value, isConflux=platform==='ye';
+        if(isConflux)importForm.setAttribute('data-loading','off');
+        else importForm.removeAttribute('data-loading');
         if(upload.multiple!==isConflux){
             upload.value='';
             upload.multiple=isConflux;
@@ -454,8 +456,9 @@ function queuedConflux(input) {
 document.querySelectorAll('.settlement-dialog input[type=file]').forEach(function(input){input.addEventListener('change',function(){
     var files=Array.from(input.files), maxFiles=Number(input.dataset.maxFiles || 5);
     var extensions=input.accept.split(',');
-    var invalid=files.some(function(file){return !extensions.some(function(extension){return file.name.toLowerCase().endsWith(extension);})||file.size>10*1024*1024;});
-    input.setCustomValidity(!queuedConflux(input)&&files.length>maxFiles?'一次最多选择 '+maxFiles+' 个文件。':invalid?'请选择符合要求且不超过 10 MB 的文件。':'');
+    var maxSize=queuedConflux(input)?20:10;
+    var invalid=files.some(function(file){return !extensions.some(function(extension){return file.name.toLowerCase().endsWith(extension);})||file.size>maxSize*1024*1024;});
+    input.setCustomValidity(!queuedConflux(input)&&files.length>maxFiles?'一次最多选择 '+maxFiles+' 个文件。':invalid?'请选择符合要求且不超过 '+maxSize+' MB 的文件。':'');
     var label=input.closest('label'),status=label.nextElementSibling;
     if(!status||!status.hasAttribute('data-file-status')){status=document.createElement('p');status.setAttribute('data-file-status','');status.setAttribute('role','status');status.style.cssText='padding:0 20px;color:#52748d;overflow-wrap:anywhere';label.after(status);}
     status.textContent=files.length?(queuedConflux(input)?'已选择 '+files.length+' 份文件，将按批次依次导入。':'已选择：'+files.map(function(file){return file.name;}).join('、')):'';
@@ -469,7 +472,7 @@ importUpload?.form.addEventListener('submit', async function (event) {
     var form = event.currentTarget, status = importer.querySelector('[data-file-status]');
     var files = Array.from(importUpload.files).sort(function (a, b) {
         var statement = function (file) { return /^Settlement_Report/i.test(file.name); };
-        return Number(statement(a)) - Number(statement(b));
+        return Number(statement(b)) - Number(statement(a));
     });
     var batches = [], batch = [], bytes = 0;
     for (var file of files) {
@@ -485,6 +488,9 @@ importUpload?.form.addEventListener('submit', async function (event) {
     var fields = new FormData(form);
     fields.delete('files[]');
     var controls = Array.from(form.querySelectorAll('button, input, select')).filter(function (control) { return !control.disabled; });
+    var submit = event.submitter || form.querySelector('footer .btn-success');
+    var submitLabel = submit.textContent;
+    submit.textContent = '正在导入…';
     controls.forEach(function (control) { control.disabled = true; });
     queueRunning = true;
     var completed = 0, redirect = '';
@@ -510,6 +516,7 @@ importUpload?.form.addEventListener('submit', async function (event) {
     } finally {
         queueRunning = false;
         controls.forEach(function (control) { control.disabled = false; });
+        submit.textContent = submitLabel;
     }
 });
 importer?.addEventListener('cancel', function (event) {

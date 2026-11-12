@@ -1468,6 +1468,8 @@ class FinancePortalTest extends TestCase
             ['流水订单号', '结算货币', '结算金额', '商户号', '账单描述符', '交易时间'],
             ['BATCH-ORDER', 'USD', 30.05, 'merchant-1', 'store-wallet', '2026-11-06 02:00:00'],
         ]);
+        $release = $statement->createSheet()->setTitle('释放保证金-ZZdanbao');
+        $release->fromArray(['流水订单号', '交易币种', '释放保证金']);
         $url = '/finance/reports/credit-settlement';
         $data = ['card_channel' => 'ye', 'timezone' => 'Asia/Shanghai'];
         $octetStreamUpload = function (Spreadsheet $book, string $filename = 'finance.xlsx'): UploadedFile {
