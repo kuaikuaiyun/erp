@@ -192,7 +192,8 @@ class FinanceXuzongCreditMatches
             ? $db->table('logistics_orders')->whereIntegerInRaw('id', $records->pluck('id')->filter(fn ($id) => $id > 0)->all())
                 ->get(['id', 'transaction_id', 'payment_gateway_order_id', 'bill_number', 'tongtu_order_number'])->keyBy('id')
             : collect();
-        [$details] = $this->linkedDetails($records, $orders);
+        $systemRecords = $records->where('dataset', '!=', FinanceLogisticsCreditOrders::IMPORTED_DATASET);
+        $details = $systemRecords->isEmpty() ? collect() : $this->linkedDetails($systemRecords, $orders)[0];
 
         return $records->mapWithKeys(fn (FinanceRecord $record) => [
             $record->id => $record->dataset === FinanceLogisticsCreditOrders::IMPORTED_DATASET ? $record->currency : ($this->statementPayment($details->get($record->id))

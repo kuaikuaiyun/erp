@@ -1161,12 +1161,22 @@ class FinanceController extends Controller
             'report_columns.*' => ['required', 'integer', 'distinct', Rule::in($xuzongReport
                 ? array_keys($xuzongHeaders) : range(0, $exportColumnCount - 1))],
         ], ['export_scope.required' => __('finance.records.selection_required')]);
-        if ($request->boolean('export_template')) {
+        if (! $xuzongReport && $request->boolean('export_template')) {
             abort_unless($pageLayout && $dataset === 'paypal-orders', 404);
             $headers = isset($selection['report_columns'])
                 ? array_map(fn ($index) => $pageHeaders[$index], $selection['report_columns']) : $pageHeaders;
 
             return $this->downloadRecords($headers, [], $dataset.'-export-template', $filters['export_format'] ?? 'xlsx', $pageLayout);
+        }
+        if ($xuzongReport) {
+            $headers = isset($selection['report_columns'])
+                ? array_map(fn ($id) => $xuzongHeaders[$id], $selection['report_columns'])
+                : array_values($xuzongHeaders);
+            if ($request->boolean('export_template')) {
+                $format = $filters['export_format'] ?? 'xlsx';
+
+                return $this->workbooks->download($headers, [], 'xuzong-credit-template.'.$format, $format, simplifyText: false);
+            }
         }
         $selected = $selection['export_scope'] === 'accounts' ? 'selected_accounts' : 'selected_ids';
         if ($selection['export_scope'] !== 'filtered' && empty($selection[$selected])) {
@@ -1190,10 +1200,6 @@ class FinanceController extends Controller
             throw ValidationException::withMessages(['export_format' => __('finance.records.xls_row_limit')]);
         }
         if ($xuzongReport) {
-            if (isset($selection['report_columns'])) {
-                $xuzongHeaders = array_intersect_key($xuzongHeaders, array_flip($selection['report_columns']));
-            }
-            $headers = array_values($xuzongHeaders);
             $report = app(FinanceXuzongCreditReport::class);
             $orders = app(FinanceLogisticsCreditOrders::class);
             $rows = (clone $query)->reorder('id')->select('id')->cursor()->chunk(300)->flatMap(function ($batch) use ($orders, $report, $filters, $headers) {
@@ -1909,8 +1915,8 @@ class FinanceController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
-        $formats = $report === 'paypal-orders' ? 'XLSX、XLS、CSV 或 TSV' : 'XLSX、XLS 或 CSV';
-        $extensions = $report === 'paypal-orders' ? 'xlsx,xls,csv,tsv' : 'xlsx,xls,csv';
+        $formats = in_array($report, ['paypal-orders', 'xuzong-credit'], true) ? 'XLSX、XLS、CSV 或 TSV' : 'XLSX、XLS 或 CSV';
+        $extensions = in_array($report, ['paypal-orders', 'xuzong-credit'], true) ? 'xlsx,xls,csv,tsv' : 'xlsx,xls,csv';
         $data = $request->validate([
             'file' => 'required|file|extensions:'.$extensions.'|max:5120',
             'header_row' => 'required|integer|min:1|max:1000',
@@ -1920,6 +1926,9 @@ class FinanceController extends Controller
             'file.max' => '模板文件不能超过 5 MB。',
             'header_row.*' => '表头行号必须在 1 到 1000 之间。',
         ]);
+        if ($report === 'xuzong-credit') {
+            return response()->json($this->workbooks->readExportTemplate($data['file'], (int) $data['header_row'], FinanceXuzongCreditReport::headers()));
+        }
         $channel = $report === 'paypal-settlement' ? 'paypal' : 'credit_card';
         $cardChannel = FinanceCreditSettlementLayout::REPORT_CHANNELS[$report] ?? ($channel === 'credit_card' && $report !== 'paypal-orders'
             ? ($request->validate([
@@ -2846,7 +2855,7 @@ class FinanceController extends Controller
                 $values = $values->merge($this->workbooks->database()->table('finance_transaction_types')->pluck('raw_type'))->unique();
             }
             if ($xuzongReport && $field === 'status') {
-                $values = collect(['成功', '失败', '退款']);
+                $values = collect(['成功', '失败', '待确认', '退款']);
             }
             $choices[$field] = $values->map(fn ($value) => [
                 'value' => (string) $value,

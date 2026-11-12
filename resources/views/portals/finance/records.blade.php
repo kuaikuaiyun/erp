@@ -86,7 +86,7 @@
 .paypal-order-toolbar>.btn,.paypal-order-toolbar .finance-export-columns>summary{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;height:32px;margin:0;padding:5px 12px;line-height:20px}
 .paypal-order-toolbar .finance-export-columns{align-self:center;margin:0}
 .paypal-order-toolbar [data-active-export-template]{width:auto;max-width:180px}
-.logistics-orders-table.paypal-order-table [data-settlement-column][hidden]{display:none}
+.logistics-orders-table.paypal-order-table [data-settlement-column][hidden],.xuzong-credit-table [data-settlement-column][hidden]{display:none}
 .finance-export-columns{position:relative}.finance-export-columns>summary{list-style:none}.finance-export-columns>summary::-webkit-details-marker{display:none}
 .finance-export-column-panel{position:absolute;right:0;top:38px;width:560px;max-width:calc(100vw - 40px);padding:16px;background:#fff;border:1px solid #dce6ef;border-radius:6px;box-shadow:0 8px 24px #17324d26;z-index:20}
 .finance-export-column-actions{display:flex;align-items:center;gap:8px;margin-bottom:12px}.finance-export-column-actions strong{margin-right:auto}

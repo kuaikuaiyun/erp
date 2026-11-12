@@ -973,7 +973,7 @@ class FinancePortalTest extends TestCase
             ]);
         }
         $activeCreditRows = $this->get($creditUrl)->assertOk()
-            ->assertSeeInOrder(['<th scope="col">运营所属部门</th>', '<th scope="col">地区</th>', '<th scope="col">通途订单</th>'], false)
+            ->assertSeeInOrder(['>运营所属部门</th>', '>地区</th>', '>通途订单</th>'], false)
             ->viewData('xuzongRows')->keyBy('平台订单号');
         $this->assertSame('张清洪', $activeCreditRows['NO-OWNER']['使用人']);
         $this->assertSame('郑州', $activeCreditRows['NO-OWNER']['区域']);
@@ -3014,6 +3014,11 @@ class FinancePortalTest extends TestCase
         $resultExport = $this->readDownload($this->get($report.'/export?reference=TXN-UNLINKED-FAIL&export_scope=filtered&report_columns[]=53')
             ->assertOk()->streamedContent());
         $this->assertSame([['平台返回结果'], ['卡号无效']], $resultExport->toArray());
+        $template = $this->readDownload($this->get($report.'/export?export_scope=filtered&export_template=1&report_columns[]=53&report_columns[]=52')
+            ->assertOk()->streamedContent());
+        $this->assertSame([['平台返回结果', '原始支付状态']], $template->toArray());
+        $this->postJson($report.'/export-template/preview', ['header_row' => 1, 'file' => $this->upload($template->getParent())])
+            ->assertOk()->assertJsonPath('fields', [53, 52]);
         $refundCsv = "退款单号,平台订单号,商户订单号,退款金额,退款币种,退款处理费,退款完成时间,状态\n"
             ."REFUND-1,TXN-UNLINKED-FAIL,MANUAL-FAILED,2.50,USD,1.00,2026-11-04 01:10:17,SUCCESS\n"
             ."REFUND-2,TXN-UNLINKED-FAIL,MANUAL-FAILED,7.00,USD,1.00,,REJECTED\n";
