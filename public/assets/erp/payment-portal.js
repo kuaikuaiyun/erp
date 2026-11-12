@@ -1002,7 +1002,25 @@
                 target.html('<label><span>' + escapeHtml(paginationText.per_page) + '</span><select class="form-control input-sm" data-payment-detail-per-page><option value="50" ' + (detailState.perPage === 50 ? 'selected' : '') + '>50</option><option value="100" ' + (detailState.perPage === 100 ? 'selected' : '') + '>100</option></select></label><button type="button" class="btn btn-default btn-sm" data-payment-detail-page="' + (meta.current_page - 1) + '" ' + (meta.current_page <= 1 ? 'disabled' : '') + '>' + escapeHtml(detailText.previous) + '</button><span>' + escapeHtml(status) + '</span><button type="button" class="btn btn-default btn-sm" data-payment-detail-page="' + (meta.current_page + 1) + '" ' + (meta.current_page >= meta.last_page ? 'disabled' : '') + '>' + escapeHtml(detailText.next) + '</button><label><span>' + escapeHtml(paginationText.jump_to) + '</span><input class="form-control input-sm payment-page-jump-input" type="number" min="1" max="' + meta.last_page + '" placeholder="' + escapeHtml(paginationText.page_placeholder) + '" autocomplete="off" data-payment-detail-jump-input></label><button type="button" class="btn btn-primary btn-sm" data-payment-detail-jump>' + escapeHtml(paginationText.jump) + '</button>');
             }
 
+            function renderReasonFilter(payload) {
+                var target = detailModal.find('[data-payment-detail-extra-filters]');
+                var selected = target.find('[name="reasons"]:checked').map(function () { return this.value; }).get();
+                target.find('[data-payment-reason-filter]').remove();
+                if (!payload.reason_options) return;
+                var text = payload.reason_filter_text || {};
+                var groups = ['platform', 'manual'].map(function (group) {
+                    var options = payload.reason_options[group] || [];
+                    if (!options.length) return '';
+                    return '<fieldset><legend style="font-size:13px;margin-bottom:6px">' + escapeHtml(text[group]) + '</legend>' + options.map(function (option) {
+                        return '<label style="display:block;font-weight:normal;white-space:normal"><input type="checkbox" name="reasons" value="' + escapeHtml(option.value) + '"> ' + escapeHtml(option.label) + '</label>';
+                    }).join('') + '</fieldset>';
+                }).join('');
+                target.append('<details data-payment-reason-filter style="position:relative;min-width:180px"><summary class="form-control" style="cursor:pointer;height:auto">' + escapeHtml(text.title) + ' · ' + escapeHtml(selected.length ? selected.map(function (value) { return value.substring(value.indexOf(':') + 1); }).join('、') : text.all) + '</summary><div class="panel panel-default" style="position:absolute;z-index:1051;background:#fff;min-width:260px;max-width:420px;max-height:280px;overflow:auto;padding:12px">' + groups + '</div></details>');
+                target.find('[name="reasons"]').each(function () { this.checked = selected.indexOf(this.value) !== -1; });
+            }
+
             function renderDetailPayload(payload) {
+                renderReasonFilter(payload);
                 var isDashboard = detailState.tab === 'overview' || detailState.tab === 'monthly_report' || detailState.tab === 'order_analysis' || detailState.tab === 'funding';
                 var rows = isDashboard ? [] : ((payload.rows || {}).data || []);
                 detailState.disputeRows = detailState.tab === 'disputes' ? rows : [];
@@ -1024,6 +1042,7 @@
                     period_start: page.find('[name="period_start"]').val(),
                     period_end: page.find('[name="period_end"]').val(),
                     date_mode: page.find('[name="date_mode"]').val(),
+                    reasons: detailModal.find('[name="reasons"]:checked').map(function () { return this.value; }).get(),
                     keyword: detailModal.find('[name="keyword"]').val(),
                     match_status: detailModal.find('[name="match_status"]').val(),
                     status: detailModal.find('[name="status"]').val(),

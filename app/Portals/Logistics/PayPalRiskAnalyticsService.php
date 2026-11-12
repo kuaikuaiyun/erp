@@ -116,6 +116,39 @@ class PayPalRiskAnalyticsService
             'tab' => $tab,
         ];
 
+        if (!empty($tabFilters['reason_filter_enabled']) && in_array($tab, ['refunds', 'disputes'], true)) {
+            $allRows = $tab === 'refunds'
+                ? $this->refundRows($account, $filters)
+                : $this->disputeRows($account, $filters, 1, '', '', PHP_INT_MAX)['data'];
+            $options = ['platform' => [], 'manual' => []];
+            foreach ($allRows as $row) {
+                foreach ($this->reasonValues($row) as $value) {
+                    [$group, $label] = explode(':', $value, 2);
+                    $options[$group][$value] = ['value' => $value, 'label' => $label];
+                }
+            }
+            foreach ($options as &$groupOptions) {
+                $groupOptions = array_values($groupOptions);
+                usort($groupOptions, static fn (array $a, array $b): int => strcmp($a['label'], $b['label']));
+            }
+            unset($groupOptions);
+            $rows = $this->filterRows($allRows, $tabFilters, $tab === 'refunds'
+                ? ['refund_id', 'order_number', 'bill_numbers', 'store_name', 'source_reason', 'manual_reason', 'linked_disputes']
+                : ['dispute_id', 'payment_transaction_id', 'order_number', 'bill_numbers', 'store_name', 'reason', 'stage', 'status', 'outcome', 'linked_refunds', 'match_status']);
+            return $payload + [
+                'reason_options' => $options,
+                'reason_filter_text' => [
+                    'title' => __('payment.account_reason_filter.title'),
+                    'platform' => __('payment.account_reason_filter.platform'),
+                    'manual' => __('payment.account_reason_filter.manual'),
+                    'all' => __('payment.account_reason_filter.all'),
+                ],
+                'rows' => $this->paginate($this->sortRows($rows, $sort, $direction, $tab === 'refunds'
+                    ? ['refund_id', 'order_number', 'store_name', 'source', 'amount', 'source_reason', 'manual_reason', 'status', 'linked_disputes', 'happened_at', 'match_status']
+                    : ['dispute_id', 'payment_transaction_id', 'match_status', 'order_number', 'bill_numbers', 'store_name', 'amount', 'reason', 'stage', 'status', 'happened_at', 'outcome', 'seller_response_due_at', 'updated_at', 'linked_refunds']), $page, $perPage),
+            ];
+        }
+
         return match ($tab) {
             'orders' => $payload + ['rows' => $this->orderRows($account, $filters, $page, $sort, $direction, $perPage, $tabFilters)],
             'products' => $payload + ['rows' => $this->productRows($account, $filters, $page, $sort, $direction, $perPage, $tabFilters)],
@@ -437,6 +470,8 @@ class PayPalRiskAnalyticsService
                     'amount' => round((float) ($dispute->dispute_amount_usd ?? $dispute->original_amount), 2),
                     'currency' => (string) ($dispute->currency_code ?: 'USD'),
                     'reason' => $dispute->reasonLabel(),
+                    'source_reason' => $dispute->reasonLabel(),
+                    'manual_reasons' => $dispute->refundLinks->map(fn ($link): string => trim((string) ($link->refund?->manual_reason ?? '')))->filter()->unique()->values()->all(),
                     'stage' => $dispute->typeLabel(),
                     'status' => $dispute->statusLabel(),
                     'happened_at' => $this->dateTime($dispute->dispute_created_at),
@@ -608,6 +643,19 @@ class PayPalRiskAnalyticsService
         return (string) $order->logistics_status === LogisticsOrder::LOGISTICS_DELIVERED;
     }
 
+    /** @return list<string> */
+    private function reasonValues(array $row): array
+    {
+        $values = [];
+        $platform = trim((string) ($row['source_reason'] ?? ''));
+        if ($platform !== '') $values[] = 'platform:'.$platform;
+        foreach (($row['manual_reasons'] ?? [$row['manual_reason'] ?? '']) as $reason) {
+            $reason = trim((string) $reason);
+            if ($reason !== '') $values[] = 'manual:'.$reason;
+        }
+        return array_values(array_unique($values));
+    }
+
     /** @param list<array<string,mixed>> $rows
      *  @param list<string> $keywordColumns
      *  @return list<array<string,mixed>>
@@ -624,7 +672,9 @@ class PayPalRiskAnalyticsService
             default => '',
         };
 
-        return array_values(array_filter($rows, static function (array $row) use ($keyword, $status, $type, $outcome, $matchStatus, $keywordColumns): bool {
+        $reasons = !empty($filters['reason_filter_enabled']) ? ($filters['reasons'] ?? []) : [];
+        return array_values(array_filter($rows, function (array $row) use ($keyword, $status, $type, $outcome, $matchStatus, $keywordColumns, $reasons): bool {
+            if ($reasons !== [] && array_intersect($reasons, $this->reasonValues($row)) === []) return false;
             if ($keyword !== '') {
                 $found = false;
                 foreach ($keywordColumns as $column) {

@@ -257,6 +257,12 @@ $translations = [
 ];
 
 return array_replace_recursive($translations, [
+    'account_reason_filter' => [
+        'title' => '原因',
+        'platform' => '平台原因',
+        'manual' => '人工原因',
+        'all' => '全部原因',
+    ],
     'account_risk' => [
         'filters' => [
             'deduction_pending' => '待订单扣款类型数据接入',

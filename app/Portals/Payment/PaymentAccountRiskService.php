@@ -144,7 +144,7 @@ class PaymentAccountRiskService
     /** @return array<string,mixed> */
     public function detail(LogisticsPayPalAccount $account, array $filters, string $tab, int $page, int $perPage, array $tabFilters): array
     {
-        $cacheKey = 'payment:account-risk-detail:v2:'.sha1((string) json_encode([
+        $cacheKey = 'payment:account-risk-detail:v3:'.sha1((string) json_encode([
             'account' => (int) $account->getKey(),
             'last_imported_at' => optional($account->last_imported_at)->format('Y-m-d H:i:s.u'),
             'updated_at' => optional($account->updated_at)->format('Y-m-d H:i:s.u'),

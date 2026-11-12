@@ -125,15 +125,26 @@
                         <td class="ot-test-submitted-at">{{ \App\Portals\OperationTasks\Support\OperationTaskTime::format($task->submitted_at, 'Y-m-d H:i') }}</td>
                         <td><a class="btn btn-info btn-xs ot-landing-button" href="{{ $task->landing_url }}" target="_blank" rel="noopener noreferrer">落地页</a></td>
                         <td class="test-asset-info">
-                            <b>{{ $task->assets_count }} 条</b>
-                            <small>审核进度 {{ $approvedAssets }}/{{ $task->assets_count }}</small>
-                            <div class="test-asset-daily-status">
+                            <div class="ot-list-assets">
                                 @foreach($task->assets->values() as $assetIndex => $asset)
-                                    @if($asset->dailyRecords->isNotEmpty())
-                                        <span class="is-filled">素材{{ $assetIndex + 1 }}：今日已填写</span>
-                                    @else
-                                        <span class="is-empty">素材{{ $assetIndex + 1 }}：今日未填写</span>
-                                    @endif
+                                    @php
+                                        $localAsset = (bool) $asset->file_path;
+                                        $assetUrl = $localAsset ? route('operation-tasks.assets.file', $asset) : $asset->external_url;
+                                        $assetVideo = $localAsset && str_starts_with((string) $asset->mime_type, 'video/');
+                                        $assetImage = $localAsset && str_starts_with((string) $asset->mime_type, 'image/');
+                                    @endphp
+                                    <div class="ot-list-asset-row">
+                                        @if($assetUrl && ($assetImage || $assetVideo))
+                                            <button type="button" class="ot-list-asset-thumb" data-toggle="modal" data-target="#ot-list-preview" data-preview-src="{{ $assetUrl }}" data-preview-type="{{ $assetVideo ? 'video' : 'image' }}" data-preview-name="{{ $asset->original_name }}" aria-label="{{ __('operation_tasks.assets.preview', ['number' => $assetIndex + 1]) }}">
+                                                @if($assetImage)<img src="{{ $assetUrl }}" loading="lazy" alt="{{ $asset->original_name }}">@else<i class="fa fa-play-circle" aria-hidden="true"></i>@endif
+                                            </button>
+                                        @elseif($assetUrl)
+                                            <a class="ot-list-asset-thumb" href="{{ $assetUrl }}" target="_blank" rel="noopener noreferrer" aria-label="{{ __('operation_tasks.assets.open_link') }}"><i class="fa fa-external-link" aria-hidden="true"></i></a>
+                                        @else
+                                            <span class="ot-list-asset-thumb"><i class="fa fa-file-o" aria-hidden="true"></i></span>
+                                        @endif
+                                        <span class="ot-list-daily-state {{ $asset->dailyRecords->isNotEmpty() ? 'is-filled' : 'is-empty' }}">{{ __($asset->dailyRecords->isNotEmpty() ? 'operation_tasks.assets.daily_filled' : 'operation_tasks.assets.daily_empty') }}</span>
+                                    </div>
                                 @endforeach
                             </div>
                         </td>
@@ -243,6 +254,11 @@
 })();
 </script>
 @endpush
+<div class="modal fade ot-modal" id="ot-list-preview" tabindex="-1" role="dialog" aria-labelledby="ot-list-preview-title"><div class="modal-dialog modal-lg"><div class="modal-content">
+<div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ __('operation_tasks.video.close') }}">&times;</button><h4 class="modal-title" id="ot-list-preview-title">{{ __('operation_tasks.assets.preview_title') }}</h4><p id="ot-list-preview-name"></p></div>
+<div class="modal-body"><img id="ot-list-preview-image" hidden alt=""><video id="ot-list-preview-video" hidden controls playsinline preload="none">{{ __('operation_tasks.video.unsupported') }}</video></div>
+<div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">{{ __('operation_tasks.video.close') }}</button></div>
+</div></div></div>
 @endsection
 @push('styles')<style>
 .ot-tests-page{max-width:1540px;margin:0 auto}.ot-tests-page .ot-head{margin-bottom:14px}.ot-test-goals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:16px}.ot-test-goals>div{position:relative;min-height:110px;padding:17px 20px;border:1px solid #dce8ed;border-radius:10px;background:#fff;box-shadow:0 4px 16px rgba(25,57,73,.035)}.ot-test-goals>div:before{content:'';position:absolute;left:0;top:15px;bottom:15px;width:3px;border-radius:3px;background:#258b78}.ot-test-goals small{display:block;color:#708796;font-size:12px}.ot-test-goals b{display:inline-block;margin:8px 12px 0 0;color:#163d54;font-size:28px;line-height:1}.ot-test-goals strong{display:inline-block;color:#2f657b;font-size:12px;font-weight:700}.ot-test-goals span{display:block;margin-top:8px;color:#81929a;font-size:11px}.ot-tests-page .ot-card-head{min-height:54px;padding:14px 20px}.ot-tests-page .ot-hint{margin:0;font-size:12px}@media(max-width:800px){.ot-test-goals{grid-template-columns:1fr}.ot-test-goals>div{min-height:92px}}
@@ -379,5 +395,51 @@
         invalid.scrollIntoView({behavior:'smooth',block:'center'});
     });
 })();
+</script>
+@endpush
+
+@push('styles')
+<style>
+.ot-tests-page .ot-test-table{min-width:1440px}.ot-tests-page .table-responsive{overflow-x:auto}
+.ot-tests-page .ot-test-table thead th:nth-child(1){width:220px}.ot-tests-page .ot-test-table thead th:nth-child(2){width:100px}.ot-tests-page .ot-test-table thead th:nth-child(3){width:140px}.ot-tests-page .ot-test-table thead th:nth-child(4){width:80px}.ot-tests-page .ot-test-table thead th:nth-child(5){width:220px}.ot-tests-page .ot-test-table thead th:nth-child(6){width:120px}.ot-tests-page .ot-test-table thead th:nth-child(7),.ot-tests-page .ot-test-table thead th:nth-child(8){width:115px}.ot-tests-page .ot-test-table thead th:nth-child(9){width:180px}.ot-tests-page .ot-test-table thead th:nth-child(10){width:110px}
+.ot-tests-page .ot-test-table thead th,.ot-tests-page .ot-test-table tbody td{padding:10px;border-right:1px solid #e0e8ed;border-bottom:1px solid #e0e8ed;vertical-align:middle}.ot-tests-page .ot-test-table thead th{border-top:1px solid #e0e8ed}.ot-tests-page .ot-test-table thead th:last-child,.ot-tests-page .ot-test-table tbody td:last-child{border-right:0}.ot-tests-page .ot-test-table tbody td.test-asset-info{padding:6px 10px;text-align:left}
+.ot-list-assets{display:grid;gap:0;margin:0}.ot-list-asset-row{display:flex;align-items:center;gap:8px;padding:6px 0;text-align:left}.ot-list-asset-row+.ot-list-asset-row{border-top:1px solid #e0e8ed}.ot-list-asset-thumb{display:flex;flex:0 0 64px;width:64px;height:48px;align-items:center;justify-content:center;padding:0;border:1px solid #d6e3e9;border-radius:5px;background:#edf4f7;color:#246c98;overflow:hidden}.ot-list-asset-thumb img{width:100%;height:100%;object-fit:contain}.ot-list-asset-thumb i{font-size:24px}.ot-list-daily-state{font-size:11px;white-space:nowrap}.ot-list-daily-state.is-filled{color:#218873}.ot-list-daily-state.is-empty{color:#b8751a}
+#ot-list-preview .modal-body{text-align:center}#ot-list-preview-image,#ot-list-preview-video{max-width:100%;max-height:65vh}#ot-list-preview-video{width:100%;background:#111}#ot-list-preview [hidden]{display:none!important}
+</style>
+@endpush
+@push('scripts')
+<script>
+(function () {
+    var modal = window.jQuery('#ot-list-preview');
+    var video = document.getElementById('ot-list-preview-video');
+    var image = document.getElementById('ot-list-preview-image');
+    function release() {
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+        video.hidden = true;
+        image.removeAttribute('src');
+        image.hidden = true;
+    }
+    modal.on('show.bs.modal', function (event) {
+        var trigger = event.relatedTarget;
+        if (!trigger) return;
+        release();
+        var name = trigger.getAttribute('data-preview-name') || '';
+        document.getElementById('ot-list-preview-name').textContent = name;
+        if (trigger.getAttribute('data-preview-type') === 'video') {
+            video.hidden = false;
+            video.src = trigger.getAttribute('data-preview-src');
+            video.preload = 'metadata';
+            video.load();
+        } else {
+            image.alt = name;
+            image.hidden = false;
+            image.src = trigger.getAttribute('data-preview-src');
+        }
+    });
+    modal.on('hide.bs.modal', release);
+    window.addEventListener('pagehide', release);
+}());
 </script>
 @endpush

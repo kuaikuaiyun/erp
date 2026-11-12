@@ -21,8 +21,8 @@
     <form class="ot-card ot-review-filters" method="get">
         <div class="ot-card-body">
             <div class="ot-filter-grid">
-                <div class="form-group"><label>开始日期</label><input class="form-control" type="date" name="from" value="{{ $reviewFilters['from'] ?? '' }}"></div>
-                <div class="form-group"><label>结束日期</label><input class="form-control" type="date" name="to" value="{{ $reviewFilters['to'] ?? '' }}"></div>
+                <div class="form-group"><label>{{ __('operation_tasks.reviews.submitted_from') }}</label><input class="form-control" type="date" name="from" value="{{ $reviewFilters['from'] ?? '' }}"></div>
+                <div class="form-group"><label>{{ __('operation_tasks.reviews.submitted_to') }}</label><input class="form-control" type="date" name="to" value="{{ $reviewFilters['to'] ?? '' }}"></div>
                 <div class="form-group"><label>二级团队</label><select class="form-control" name="department"><option value="">全部二级团队</option>@foreach($reviewTeams as $team)<option value="{{ $team->id }}" @selected((string) ($reviewFilters['department'] ?? '') === (string) $team->id)>{{ optional($team->parent)->name ? optional($team->parent)->name.' / ' : '' }}{{ $team->name }}</option>@endforeach</select></div>
                 <div class="form-group"><label>审核状态</label><select class="form-control" name="status"><option value="">全部</option><option value="pending" @selected(($reviewFilters['status'] ?? '') === 'pending')>待我审核</option><option value="rectification" @selected(($reviewFilters['status'] ?? '') === 'rectification')>整改处理中</option><option value="approved" @selected(($reviewFilters['status'] ?? '') === 'approved')>我负责通道已通过</option></select></div>
                 <div class="ot-filter-actions"><button class="btn ot-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{ route('operation-tasks.reviews.index') }}">重置</a></div>
@@ -39,7 +39,7 @@
     <div class="ot-card ot-recap-review-card" data-review-panel="recaps">
         <div class="ot-card-body ot-recap-review-table-wrap">
             <table class="ot-recap-review-table ot-daily-review-table">
-                <thead><tr><th>数据日期</th><th>运营</th><th>团队</th><th>营业额</th><th>广告费</th><th>订单量</th><th>ROI</th><th>二级主管审核</th><th>一级主管审核</th><th>审核阶段</th><th>操作</th></tr></thead>
+                <thead><tr><th>{{ __('operation_tasks.reviews.submitted_at') }}</th><th>运营</th><th>团队</th><th>营业额</th><th>广告费</th><th>订单量</th><th>ROI</th><th>二级主管审核</th><th>一级主管审核</th><th>审核阶段</th><th>操作</th></tr></thead>
                 <tbody>
                 @forelse($recaps as $recap)
                     @php
@@ -49,7 +49,7 @@
                         $recapStatusLabel = fn ($status) => match ($status) { 'approved' => '已审核', 'rejected' => '已驳回', default => '待审核' };
                     @endphp
                     <tr>
-                        <td class="recap-date"><b>{{ $recap->data_date->format('Y-m-d') }} {{ \App\Portals\OperationTasks\Support\OperationTaskTime::format($recap->submitted_at ?? $recap->created_at, 'H:i') }}</b></td>
+                        <td class="recap-date"><b>{{ \App\Portals\OperationTasks\Support\OperationTaskTime::format($recap->submitted_at) }}</b></td>
                         <td class="recap-owner"><b>{{ $recap->user_name }}</b></td>
                         <td class="recap-team">{{ $recap->department_name ?: '未分配二级部门' }}</td>
                         <td class="recap-revenue"><b>${{ number_format($recap->total_revenue_usd, 2) }}</b></td>

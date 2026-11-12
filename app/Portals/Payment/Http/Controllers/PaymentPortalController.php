@@ -143,6 +143,8 @@ class PaymentPortalController extends Controller
             'period_start' => ['nullable', 'date'],
             'period_end' => ['nullable', 'date', 'after_or_equal:period_start'],
             'date_mode' => ['nullable', Rule::in(['order', 'event'])],
+            'reasons' => ['nullable', 'array', 'max:50'],
+            'reasons.*' => ['string', 'max:2000'],
             'keyword' => ['nullable', 'string', 'max:191'],
             'sort' => ['nullable', 'string', 'max:64'],
             'direction' => ['nullable', Rule::in(['asc', 'desc'])],
@@ -212,6 +214,8 @@ class PaymentPortalController extends Controller
             (int) ($validated['page'] ?? 1),
             (int) ($validated['per_page'] ?? 50),
             [
+                'reason_filter_enabled' => true,
+                'reasons' => array_values(array_unique($validated['reasons'] ?? [])),
                 'keyword' => trim((string) ($validated['keyword'] ?? '')),
                 'sort' => trim((string) ($validated['sort'] ?? '')),
                 'direction' => (string) ($validated['direction'] ?? 'desc'),

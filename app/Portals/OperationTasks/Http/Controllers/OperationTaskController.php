@@ -611,6 +611,16 @@ class OperationTaskController extends Controller
         $taskPerPage = in_array((int) $request->input('task_per_page', 20), [20, 50, 100], true) ? (int) $request->input('task_per_page', 20) : 20;
         $recapPerPage = in_array((int) $request->input('recap_per_page', 20), [20, 50, 100], true) ? (int) $request->input('recap_per_page', 20) : 20;
         $filters = ['from' => (string) $request->input('from', ''), 'to' => (string) $request->input('to', ''), 'department' => $selectedTeamId ?: '', 'status' => (string) $request->input('status', '')];
+        $request->validate([
+            'from' => ['nullable', 'date_format:Y-m-d'],
+            'to' => ['nullable', 'date_format:Y-m-d'],
+        ]);
+        $submittedFrom = $filters['from'] !== ''
+            ? Carbon::parse($filters['from'], 'Asia/Shanghai')->startOfDay()->utc()
+            : null;
+        $submittedUntil = $filters['to'] !== ''
+            ? Carbon::parse($filters['to'], 'Asia/Shanghai')->startOfDay()->addDay()->utc()
+            : null;
         $channels = $this->reviewChannels($context['user']);
         $query = OperationTestTask::query()->with([
             'assets.reviews',
@@ -619,8 +629,8 @@ class OperationTaskController extends Controller
         ])->latest('submitted_at');
         if (! $context['user']->isAdministrator()) $query->whereIn('department_id', $this->visibleDepartmentIds($context['user']));
         if ($selectedTeamId) $query->where('department_id', $selectedTeamId);
-        if ($filters['from'] !== '') $query->whereDate('submitted_at', '>=', $filters['from']);
-        if ($filters['to'] !== '') $query->whereDate('submitted_at', '<=', $filters['to']);
+        if ($submittedFrom) $query->where('submitted_at', '>=', $submittedFrom);
+        if ($submittedUntil) $query->where('submitted_at', '<', $submittedUntil);
         if ($filters['status'] === 'pending') {
             $query->where(function ($taskQuery) use ($channels): void {
                 foreach (array_keys($channels) as $channel) {
@@ -730,8 +740,8 @@ class OperationTaskController extends Controller
             });
         }
         if ($selectedTeamId) $recapQuery->where('department_id', $selectedTeamId);
-        if ($filters['from'] !== '') $recapQuery->whereDate('data_date', '>=', $filters['from']);
-        if ($filters['to'] !== '') $recapQuery->whereDate('data_date', '<=', $filters['to']);
+        if ($submittedFrom) $recapQuery->where('submitted_at', '>=', $submittedFrom);
+        if ($submittedUntil) $recapQuery->where('submitted_at', '<', $submittedUntil);
         $recaps = $recapQuery->paginate($recapPerPage, ['*'], 'recap_page')->withQueryString();
         $recapReviewerTeams = Department::query()
             ->with(['departmentMembers:id,name,username', 'parent.departmentMembers:id,name,username'])
