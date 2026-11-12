@@ -746,7 +746,10 @@
                 field.placeholder = placeholder;
                 field.maxLength = 100;
                 field.setAttribute('data-sku-' + kind, 'true');
-                var initial = (skuValues[value] && skuValues[value][kind]) || (fetchedSkuValues[value] && fetchedSkuValues[value][kind]) || '';
+                var currentValue = skuValues[value] && skuValues[value][kind];
+                var systemValue = fetchedSkuValues[value] && fetchedSkuValues[value][kind];
+                // 左栏优先当前运营填写值，右栏优先链接 SKU 库值，两边互不覆盖。
+                var initial = editable ? (currentValue || '') : (systemValue || currentValue || '');
                 field.value = initial;
                 field.disabled = !checkbox.checked;
                 field.addEventListener('input', syncSkuValues);
@@ -881,29 +884,30 @@
             if (!map) { return; }
             Object.keys(map).forEach(function (sku) {
                 var row = map[sku] || {};
-                if (!skuValues[sku]) { skuValues[sku] = {}; }
-                if (row.price) { skuValues[sku].price = row.price; }
-                if (row.weight) { skuValues[sku].weight = row.weight; }
+                // 复用来源的数值只属于右侧系统 SKU，不能覆盖左侧运营填写值。
+                if (!fetchedSkuValues[sku]) { fetchedSkuValues[sku] = {}; }
+                if (row.price) { fetchedSkuValues[sku].price = row.price; }
+                if (row.weight) { fetchedSkuValues[sku].weight = row.weight; }
             });
-            panel.querySelectorAll('.sku-suggestion-item').forEach(function (rowEl) {
+            list.querySelectorAll('.sku-suggestion-item').forEach(function (rowEl) {
                 var cb = rowEl.querySelector('[data-sku-select]');
                 if (!cb) { return; }
-                var entry = skuValues[(cb.value || '').trim()];
+                var entry = fetchedSkuValues[(cb.value || '').trim()];
                 if (!entry) { return; }
                 var price = rowEl.querySelector('[data-sku-price]');
                 var weight = rowEl.querySelector('[data-sku-weight]');
                 if (price && entry.price) { price.value = entry.price; }
                 if (weight && entry.weight) { weight.value = entry.weight; }
             });
-            // 此处不能立即 syncSkuValues()：来源 SKU 行可能还没渲染进面板，
-            // 立刻回写会用「当前 DOM 行」重建 skuValues，把刚带入的价格/重量清空。
-            // 复用流程随后会 append + render，渲染时读取 skuValues，再由 updateSummary 统一回写。
+            // 此处不能立即 syncSkuValues()：来源 SKU 行可能还没渲染进右栏。
+            // 复用流程随后会 append + render，渲染时读取 fetchedSkuValues。
         };
 
         // 按名称匹配复用时，把来源记录的系统 SKU 并入右栏供勾选（与已有勾选项去重）
         form.erpSkuSuggestionsAppend = function (skus, reportNo) {
             var existing = [];
-            form.querySelectorAll('input[name="selected_skus[]"]').forEach(function (box) {
+            // 只与右侧系统 SKU 去重，不用左侧运营 SKU 过滤系统完整集合。
+            list.querySelectorAll('input[name="selected_skus[]"]').forEach(function (box) {
                 var value = (box.value || '').trim();
                 if (value !== '' && existing.indexOf(value) === -1) { existing.push(value); }
             });
