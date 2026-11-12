@@ -570,12 +570,12 @@ class FinanceWorkbookService
         });
     }
 
-    public function download(array $headers, iterable $rows, string $filename, string $format = 'xlsx', bool $plain = false, bool $simplifyText = true, string $sheetTitle = 'Sheet1'): StreamedResponse
+    public function download(array $headers, iterable $rows, string $filename, string $format = 'xlsx', bool $plain = false, bool $simplifyText = true, string $sheetTitle = 'Sheet1', array $additionalSheets = []): StreamedResponse
     {
         if ($format === 'xlsx') {
-            return $this->downloadStreamingXlsx($headers, $rows, $filename, $plain, $simplifyText, $sheetTitle);
+            return $this->downloadStreamingXlsx($headers, $rows, $filename, $plain, $simplifyText, $sheetTitle, $additionalSheets);
         }
-        return response()->streamDownload(function () use ($headers, $rows, $format, $plain, $simplifyText, $sheetTitle): void {
+        return response()->streamDownload(function () use ($headers, $rows, $format, $plain, $simplifyText, $sheetTitle, $additionalSheets): void {
             // Spreadsheet cells and ZIP compression coexist during export.
             // Keep the higher budget local to this download, not the whole PHP service.
             $previousLimit = ini_get('memory_limit');
@@ -643,6 +643,23 @@ class FinanceWorkbookService
                 }
             }
             try {
+                foreach ($additionalSheets as [$title, $extraHeaders, $extraRows]) {
+                    $extra = $book->createSheet()->setTitle($title);
+                    $extra->fromArray($extraHeaders, null, 'A1');
+                    $extra->freezePane('A2');
+                    $extra->getStyle('1:1')->getFont()->setBold(true);
+                    foreach ($extraHeaders as $index => $header) {
+                        $extra->getColumnDimensionByColumn($index + 1)->setWidth($this->downloadColumnWidth($header, $plain));
+                    }
+                    $extraRow = 2;
+                    foreach ($extraRows() as $values) {
+                        foreach ($values as $column => $value) {
+                            $extra->setCellValueExplicit([$column + 1, $extraRow], $value,
+                                is_int($value) || is_float($value) ? DataType::TYPE_NUMERIC : DataType::TYPE_STRING);
+                        }
+                        $extraRow++;
+                    }
+                }
                 $writer = $format === 'xls' ? new Xls($book) : new Xlsx($book);
                 $writer->setUseDiskCaching(true, sys_get_temp_dir());
                 $writer->setPreCalculateFormulas(false);
@@ -659,7 +676,7 @@ class FinanceWorkbookService
         }, $filename, ['Content-Type' => $format === 'xls' ? 'application/vnd.ms-excel' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
     }
 
-    private function downloadStreamingXlsx(array $headers, iterable $rows, string $filename, bool $plain, bool $simplifyText, string $sheetTitle): StreamedResponse
+    private function downloadStreamingXlsx(array $headers, iterable $rows, string $filename, bool $plain, bool $simplifyText, string $sheetTitle, array $additionalSheets): StreamedResponse
     {
         if ($simplifyText) {
             $headers = array_map(FinanceCatalog::simplified(...), $headers);
@@ -671,6 +688,17 @@ class FinanceWorkbookService
                 && preg_match('/金额|总额|净额|费用|手续费|余额|汇率|数量|条数|订单数|人民币|结算|应收|退款|冻结|解冻|保证金|成本|货款|运费|税额|保险|拒付|物流|采购|损耗|转换美元|争议费/u', $header);
             $columns[] = ['label' => $header, 'width' => $this->downloadColumnWidth($header, $plain)];
         }
+        $extraSheets = array_map(fn (array $sheet) => [$sheet[0], array_map(fn ($header) => [
+            'label' => $header, 'width' => $this->downloadColumnWidth($header, $plain),
+        ], $sheet[1]), function () use ($sheet): iterable {
+            foreach ($sheet[2]() as $row) {
+                yield ['cells' => array_map(fn ($value) => ['value' => $value, 'type' => match (true) {
+                    is_int($value) => 'quantity',
+                    is_float($value) => 'decimal',
+                    default => 'text',
+                }], $row)];
+            }
+        }], $additionalSheets);
         return app(\App\Portals\Logistics\StreamedXlsxWriter::class)->response($filename, $sheetTitle, $columns,
             function () use ($headers, $numeric, $rows, $simplifyText): iterable {
                 foreach ($rows as $row) {
@@ -688,7 +716,7 @@ class FinanceWorkbookService
                     }
                     yield ['height' => 36, 'cells' => $cells];
                 }
-            }, plain: $plain);
+            }, plain: $plain, additionalSheets: $extraSheets);
     }
 
     private function downloadColumnWidth(string $header, bool $plain): int

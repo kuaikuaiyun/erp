@@ -53,32 +53,42 @@ $(function(){
 });
 </script>
 @php
+    $imageRows = $rows->reject(fn (array $row): bool => abs((float) $row['revenue']) < 0.000001
+        && abs((float) $row['ad_spend']) < 0.000001)->values();
+    $imageRevenue = (float) $imageRows->sum('revenue');
+    $imageAdSpend = (float) $imageRows->sum('ad_spend');
+    $imageOrders = (int) $imageRows->sum('order_count');
+    $imageAov = $imageOrders > 0 ? $imageRevenue / $imageOrders : null;
+    $imageRoiRevenue = (float) $imageRows
+        ->filter(fn (array $row): bool => (float) $row['ad_spend'] > 0)
+        ->sum('revenue');
+    $imageRoi = $imageAdSpend > 0 ? $imageRoiRevenue / $imageAdSpend : null;
     $imageFilterSummary = '日期：'.$filters['date_from'].' 至 '.$filters['date_to']
         .'　时区：'.$timezoneOptions[$filters['timezone']]
         .'　运营部门：'.($departmentOptions->whereIn('id',$filters['department_ids']??[])->pluck('name')->implode('、') ?: '全部')
         .'　运营人员：'.(($filters['operator'] ?? '') !== '' ? $filters['operator'] : '全部');
-    $imageTotalSummary = '运营人数：'.$summary['people']
-        .'　订单量：'.$summary['orders']
-        .'　总业绩：$'.number_format($summary['revenue'], 2)
-        .'　客单价：'.($summary['aov'] !== null ? '$'.number_format($summary['aov'], 2) : '—')
-        .'　广告费：$'.number_format($summary['ad_spend'], 2)
-        .'　总 ROI：'.($summary['roi'] !== null ? number_format($summary['roi'], 2) : '—');
+    $imageTotalSummary = '运营人数：'.$imageRows->count()
+        .'　订单量：'.$imageOrders
+        .'　总业绩：$'.number_format($imageRevenue, 2)
+        .'　客单价：'.($imageAov !== null ? '$'.number_format($imageAov, 2) : '—')
+        .'　广告费：$'.number_format($imageAdSpend, 2)
+        .'　总 ROI：'.($imageRoi !== null ? number_format($imageRoi, 2) : '—');
     $imageTableTotal = [
         '合计',
         '',
-        (string) $summary['orders'],
-        '$'.number_format($summary['revenue'], 2),
-        $summary['aov'] !== null ? '$'.number_format($summary['aov'], 2) : '—',
+        (string) $imageOrders,
+        '$'.number_format($imageRevenue, 2),
+        $imageAov !== null ? '$'.number_format($imageAov, 2) : '—',
         '',
-        '$'.number_format($summary['ad_spend'], 2),
-        $summary['roi'] !== null ? number_format($summary['roi'], 2) : '—',
+        '$'.number_format($imageAdSpend, 2),
+        $imageRoi !== null ? number_format($imageRoi, 2) : '—',
     ];
 @endphp
 <script>
 (function(){
     var button=document.getElementById('fashionReportImageDownload');
     if(!button)return;
-    var rows=@json($rows->values());
+    var rows=@json($imageRows);
     var filterSummary={{ Illuminate\Support\Js::from($imageFilterSummary) }};
     var totalSummary={{ Illuminate\Support\Js::from($imageTotalSummary) }};
     var tableTotal={{ Illuminate\Support\Js::from($imageTableTotal) }};

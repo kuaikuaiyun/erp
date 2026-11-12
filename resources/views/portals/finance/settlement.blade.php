@@ -62,6 +62,7 @@
 @media(max-width:720px){.settlement-event-grid{grid-template-columns:minmax(0,1fr);gap:10px}.settlement-event-money{padding:10px 0 0;border-left:0;border-top:1px solid #e5edf3}.settlement-event-field-group dl{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(prefers-reduced-motion:reduce){.settlement-detail-state .fa-spin{animation:none}}
 .settlement-page td[data-settlement-column=order_status]{font-weight:600;white-space:normal;min-width:165px}
+.settlement-merchant-order{display:block;max-width:210px;margin-inline:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 .finance-delete-dialog{box-sizing:border-box;width:calc(100% - 32px);max-width:460px;max-height:calc(100vh - 32px);overflow:auto;padding:26px;border:1px solid #e4eaf0;border-radius:14px;background:#fff;color:#273849;box-shadow:0 20px 64px rgba(18,39,57,.22);font-family:inherit;font-size:14px;line-height:1.7}
 .finance-delete-dialog::backdrop{background:rgba(17,35,51,.42)}
@@ -97,6 +98,11 @@
 <div class="settlement-filter">
 @if($fixedCardChannel === 'worldpay')
 <div><label for="settlement-gateway">网关接入号</label><input id="settlement-gateway" class="form-control" name="gateway" value="{{ $filters['gateway'] ?? '' }}"></div>
+<div><label for="settlement-worldpay-exception">是否为异常交易订单</label><select id="settlement-worldpay-exception" name="worldpay_exception" class="form-control">
+    <option value="">全部</option>
+    <option value="yes" @selected(($filters['worldpay_exception'] ?? '') === 'yes')>是</option>
+    <option value="no" @selected(($filters['worldpay_exception'] ?? '') === 'no')>否</option>
+</select></div>
 @elseif($channel === 'credit_card')
 <div>
     <label for="settlement-card-group">归属主体</label>
@@ -140,7 +146,7 @@
         <option value="{{ $value }}" @selected(($filters['ledger_settlement_type'] ?? '') === $value)>{{ $label }}</option>
     @endforeach
 </select></div>
-@elseif($channel === 'credit_card')<div><label for="settlement-source">数据来源</label><select id="settlement-source" name="source" class="form-control"><option value="">合并去重</option>@foreach(['xuzong2-orders' => '信用卡订单', 'xuzong2-details' => '信用卡导入明细', 'xuzong1-details' => '历史信用卡明细'] as $source => $label)<option value="{{ $source }}" @selected(($filters['source'] ?? '') === $source)>{{ $label }}</option>@endforeach</select></div>@endif
+@elseif($channel === 'credit_card' && $fixedCardChannel !== 'worldpay')<div><label for="settlement-source">数据来源</label><select id="settlement-source" name="source" class="form-control"><option value="">合并去重</option>@foreach(['xuzong2-orders' => '信用卡订单', 'xuzong2-details' => '信用卡导入明细', 'xuzong1-details' => '历史信用卡明细'] as $source => $label)<option value="{{ $source }}" @selected(($filters['source'] ?? '') === $source)>{{ $label }}</option>@endforeach</select></div>@endif
 @if($cardChannel === 'ye')
 <div><label for="settlement-match">匹配状态</label><select id="settlement-match" name="card_match" class="form-control">
     <option value="">全部状态</option><option value="matched" @selected(($filters['card_match'] ?? '') === 'matched')>已匹配账单</option><option value="waiting" @selected(($filters['card_match'] ?? '') === 'waiting')>待匹配账单</option>
@@ -161,7 +167,7 @@
 </select></div>
 @endif
 </div>
-@include('portals.finance.partials.filter-conditions', ['enhancedConditions' => true, 'hideConditionOperator' => $channel === 'paypal'])
+@include('portals.finance.partials.filter-conditions', ['enhancedConditions' => true, 'hideConditionOperator' => true])
 <div class="settlement-actions"><button class="btn btn-primary">查询</button><a class="btn btn-default" href="{{ route('finance.report', $report) }}">重置</a><select class="form-control" name="format" aria-label="导出格式"><option value="xlsx" @selected(($filters['format'] ?? 'xlsx') === 'xlsx')>Excel (.xlsx)</option><option value="xls" @selected(($filters['format'] ?? 'xlsx') === 'xls')>Excel (.xls)</option></select><label class="settlement-template-toolbar">导出模板 <select class="form-control" data-active-export-template aria-label="本次使用的导出模板"><option value="">{{ $orderView ? '按当前列表导出' : '默认字段设置' }}</option></select></label><button type="button" data-finance-download  class="btn btn-default" >导出筛选结果</button>@if($canManage)<button type="button" class="btn btn-default" data-open-settlement-import>导入数据</button> <button type="button" class="btn btn-danger" data-delete-selected-settlements>删除所选</button> @endif</div>
 </form></div></div>
 <div class="box"><div class="box-body"><div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><span>共 {{ $rows->total() }} 条</span><div class="settlement-column-settings-trigger">@include('portals.finance.partials.settlement-column-settings', ['columnCardChannel' => $cardChannel])</div></div>
@@ -179,6 +185,8 @@
 <span @class(['label', 'label-success' => $row['ledger_matched'] ?? false, 'label-default' => empty($row['ledger_matched'])])>{{ $cellValue }}</span>
 @elseif(isset($moneyFields[$field]) || in_array($field, ['gross','settlement','source_settlement_usd','converted_usd','paypal_7','paypal_8','paypal_9','payable','open_hold'], true))
 {{ $cellValue === null ? ($orderView && in_array($field, ['payable','open_hold'], true) ? '待核对' : '') : \App\Portals\Finance\FinanceCatalog::reportAmount($cellValue) }}
+@elseif($cardChannel === 'worldpay' && $field === 'merchant_order')
+<span class="settlement-merchant-order">{{ $cellValue }}</span>
 @else{{ \Illuminate\Support\Str::limit(\App\Portals\Finance\FinanceCatalog::simplified((string) ($cellValue ?? '')), 40) }}@endif
 </td>
 @endforeach
@@ -299,7 +307,7 @@
 @endif
 <p class="settlement-note" style="padding:0 20px">
 @if($cardChannel === 'worldpay')
-    直接上传 Worldpay 后台导出的文件。系统自动匹配订单明细并跳过批次对账文件。一次最多 {{ \App\Portals\Finance\FinanceWorldpayImport::MAX_UPLOAD_FILES }} 个文件，每个最大 10 MB。
+    直接上传 Worldpay 后台导出的文件。系统自动匹配订单明细、登记保证金返还，并跳过扣返款明细和商户结算费用汇总。一次最多 {{ \App\Portals\Finance\FinanceWorldpayImport::MAX_UPLOAD_FILES }} 个文件，每个最大 10 MB。
 @elseif($channel === 'credit_card')
     ConfluxAPI 可一次选择最多 5 个文件，系统自动识别订单明细和结算报表。同批结算报表请选择相同的结算类型。
 @endif

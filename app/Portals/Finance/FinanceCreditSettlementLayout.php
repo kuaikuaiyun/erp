@@ -62,9 +62,16 @@ class FinanceCreditSettlementLayout
             $columns['website_name'] = '网站名称 / 账单描述符';
             $columns['order_refund'] = '订单退款金额';
             $columns['refund'] = '账单退款金额';
+        }
+        if (in_array($channel, ['ye', 'worldpay'], true)) {
             $afterTeam = array_search('team', array_keys($columns), true) + 1;
             $columns = array_slice($columns, 0, $afterTeam, true)
                 + ['operation_region' => '地区'] + array_slice($columns, $afterTeam, null, true);
+        }
+        if ($channel === 'worldpay') {
+            $afterStatus = array_search('status', array_keys($columns), true) + 1;
+            $columns = array_slice($columns, 0, $afterStatus, true)
+                + ['worldpay_exception' => '是否为异常交易订单'] + array_slice($columns, $afterStatus, null, true);
         }
 
         return $columns;
@@ -183,6 +190,7 @@ class FinanceCreditSettlementLayout
         $values['completed_at'] = self::reportTimestamp($values['completed_at'] ?? null, $sourceTimezone, $row['timezone']);
         if ($channel === 'worldpay') {
             $values = FinanceWorldpayImport::settlementValues($values, $payload, $saved, $row['success'], $row['failed']);
+            $values['worldpay_exception'] = isset($payload['_worldpay_events']) ? '是' : '否';
         }
 
         return $values;
