@@ -214,6 +214,10 @@ Route::prefix('fashion/operation-tasks')->name('operation-tasks.')->controller(O
     Route::post('/recaps/questions', 'saveRecapQuestions')->name('recaps.questions.store');
     Route::get('/tests', 'tests')->name('tests.index');
     Route::post('/tests', 'storeTest')->name('tests.store');
+    Route::post('/tests/uploads', 'beginAssetUpload')->name('tests.uploads.store');
+    Route::get('/tests/uploads/{token}', 'assetUploadStatus')->whereUuid('token')->name('tests.uploads.show');
+    Route::post('/tests/uploads/{token}/parts/{index}', 'uploadAssetPart')->whereUuid('token')->whereNumber('index')->name('tests.uploads.parts.store');
+    Route::post('/tests/uploads/{token}/complete', 'completeAssetUpload')->whereUuid('token')->name('tests.uploads.complete');
     Route::get('/tests/{task}', 'showTest')->whereNumber('task')->name('tests.show');
     Route::get('/assets/{asset}/file', 'assetFile')->whereNumber('asset')->name('assets.file');
     Route::post('/assets/{asset}/daily-records', 'storeAssetDaily')->whereNumber('asset')->name('assets.daily-records.store');

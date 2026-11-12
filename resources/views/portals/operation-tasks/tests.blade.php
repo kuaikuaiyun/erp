@@ -167,7 +167,7 @@
         ])
     </div>
 </section>
-<div class="modal fade ot-modal" id="ot-test-modal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><form class="ot-form" method="post" enctype="multipart/form-data" action="{{ route('operation-tasks.tests.store') }}">@csrf<div class="modal-header"><button type="button" class="close" data-dismiss="modal">×</button><h4 class="modal-title">新建测品任务</h4><p>明确选品理由、验证目标和对应素材后提交。</p></div><div class="modal-body"><div class="ot-grid"><div class="form-group"><label>落地页类型 *</label><select class="form-control" name="page_type" id="ot-page-type"><option value="single">单品页</option><option value="category">类目页</option></select></div><div class="form-group"><label>任务类型 *</label><select class="form-control" name="task_type"><option value="new">新测试</option><option value="iteration">已有测试迭代</option></select></div><div class="ot-full form-group"><label>落地页链接 *</label><input class="form-control" type="url" name="landing_url" value="{{ old('landing_url') }}" placeholder="https://..." required></div><div class="ot-full form-group"><label>选品理由与验证目标 *</label><textarea class="form-control" rows="4" name="selection_objective" required placeholder="卖给谁？为什么选这个品或类目？本次最想验证什么？">{{ old('selection_objective') }}</textarea></div></div><div class="form-group"><label>对应素材 *</label><div id="ot-assets"></div><button class="btn btn-default btn-sm" id="ot-add-asset" type="button"><i class="fa fa-plus"></i> 添加素材</button><p class="ot-hint" id="ot-asset-hint">单品至少 2 条素材；类目至少 3 条。</p></div></div><div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">取消</button><button class="btn ot-primary"><i class="fa fa-send"></i> 提交任务</button></div></form></div></div></div>
+<div class="modal fade ot-modal" id="ot-test-modal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><form class="ot-form" method="post" id="ot-create-test-form" action="{{ route('operation-tasks.tests.store') }}">@csrf<div class="modal-header"><button type="button" class="close" data-dismiss="modal">×</button><h4 class="modal-title">新建测品任务</h4><p>明确选品理由、验证目标和对应素材后提交。</p></div><div class="modal-body"><div class="ot-grid"><div class="form-group"><label>落地页类型 *</label><select class="form-control" name="page_type" id="ot-page-type"><option value="single" @selected(old('page_type', 'single') === 'single')>单品页</option><option value="category" @selected(old('page_type') === 'category')>类目页</option></select></div><div class="form-group"><label>任务类型 *</label><select class="form-control" name="task_type"><option value="new" @selected(old('task_type', 'new') === 'new')>新测试</option><option value="iteration" @selected(old('task_type') === 'iteration')>已有测试迭代</option></select></div><div class="ot-full form-group"><label>落地页链接 *</label><input class="form-control" type="url" name="landing_url" value="{{ old('landing_url') }}" placeholder="https://..." required></div><div class="ot-full form-group"><label>选品理由与验证目标 *</label><textarea class="form-control" rows="4" name="selection_objective" required placeholder="卖给谁？为什么选这个品或类目？本次最想验证什么？">{{ old('selection_objective') }}</textarea></div></div><div class="form-group"><label>对应素材 *</label><div id="ot-assets"></div><button class="btn btn-default btn-sm" id="ot-add-asset" type="button"><i class="fa fa-plus"></i> 添加素材</button><p class="ot-hint" id="ot-asset-hint">{{ __('operation_tasks.upload.single_hint') }}</p></div></div><div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">取消</button><button class="btn ot-primary"><i class="fa fa-send"></i> 提交任务</button></div></form></div></div></div>
 <div class="modal fade ot-modal" id="ot-test-edit-modal" tabindex="-1">
     <div class="modal-dialog modal-lg ot-test-edit-dialog">
         <div class="modal-content">
@@ -217,43 +217,7 @@
 @media(max-width:700px){.ot-test-date-filter{align-items:stretch;flex-direction:column}.ot-test-date-field{width:100%}.ot-test-date-actions{justify-content:flex-end}}
 </style>
 @endpush
-@push('scripts')
-<script>
-(function () {
-    var form = document.querySelector('#ot-test-modal form');
-    if (!form) return;
 
-    form.addEventListener('submit', function (event) {
-        var rows = form.querySelectorAll('.ot-asset-input');
-        var invalid = null;
-
-        Array.prototype.forEach.call(rows, function (row) {
-            if (invalid) return;
-            var file = row.querySelector('input[type="file"]');
-            var url = row.querySelector('input[name$="[url]"]');
-            var hasFile = !!(file && file.files && file.files.length);
-            var hasUrl = !!(url && url.value.trim());
-            if (!hasFile && !hasUrl) invalid = row;
-        });
-
-        if (!invalid) return;
-
-        event.preventDefault();
-        if (window.ErpAdminNotifier) {
-            window.ErpAdminNotifier.notify({
-                type: 'error',
-                title: '请补充素材',
-                message: '每条素材必须上传文件或填写素材链接。',
-            });
-        }
-
-        invalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        var target = invalid.querySelector('input[name$="[url]"]') || invalid.querySelector('input[type="file"]');
-        if (target) target.focus();
-    });
-})();
-</script>
-@endpush
 <div class="modal fade ot-modal" id="ot-list-preview" tabindex="-1" role="dialog" aria-labelledby="ot-list-preview-title"><div class="modal-dialog modal-lg"><div class="modal-content">
 <div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ __('operation_tasks.video.close') }}">&times;</button><h4 class="modal-title" id="ot-list-preview-title">{{ __('operation_tasks.assets.preview_title') }}</h4><p id="ot-list-preview-name"></p></div>
 <div class="modal-body"><img id="ot-list-preview-image" hidden alt=""><video id="ot-list-preview-video" hidden controls playsinline preload="none">{{ __('operation_tasks.video.unsupported') }}</video></div>
@@ -281,7 +245,23 @@
     document.body.appendChild(modal);
 })();
 </script>@endpush
-@push('scripts')<script>(function(){var list=document.getElementById('ot-assets'),add=document.getElementById('ot-add-asset'),type=document.getElementById('ot-page-type'),i=0;function row(){var n=i++,el=document.createElement('div');el.className='ot-asset-input';el.innerHTML='<div class="form-group"><label>表达卖点 / 测试目的 *</label><input class="form-control" name="assets['+n+'][selling_point]" required></div><div class="ot-source-choice"><b>素材标签 *</b><label><input type="radio" name="assets['+n+'][source_type]" value="ai_created" required> AI制作</label><label><input type="radio" name="assets['+n+'][source_type]" value="peer_copied" required> 同行搬运</label></div><div class="ot-grid"><div><label>素材文件</label><label class="ot-file-drop"><input type="file" name="assets['+n+'][file]" accept="image/*,video/*"><span class="ot-file-drop-icon"><i class="fa fa-cloud-upload"></i></span><span class="ot-file-drop-copy"><strong>点击选择或拖入素材文件</strong><small>支持图片和视频文件</small><em data-file-name>尚未选择文件</em></span><span class="btn btn-default btn-sm">选择文件</span></label></div><div><label>或素材链接</label><input class="form-control" type="url" name="assets['+n+'][url]" placeholder="https://..."></div></div>';list.appendChild(el)}add.onclick=row;type.onchange=function(){document.getElementById('ot-asset-hint').textContent=this.value==='category'?'类目页至少 3 条素材。':'单品页至少 2 条素材。'};row();row();@if(($errors->any() && old('form_mode') !== 'edit') || request()->boolean('new'))$('#ot-test-modal').modal('show');@endif})()</script>@endpush
+@push('scripts')
+@php
+    $operationTaskUploadConfig = [
+        'beginUrl' => route('operation-tasks.tests.uploads.store'),
+        'statusUrl' => route('operation-tasks.tests.uploads.show', ['token' => '__TOKEN__']),
+        'partUrl' => route('operation-tasks.tests.uploads.parts.store', ['token' => '__TOKEN__', 'index' => '__INDEX__']),
+        'completeUrl' => route('operation-tasks.tests.uploads.complete', ['token' => '__TOKEN__']),
+        'labels' => __('operation_tasks.upload'),
+        'initialAssets' => old('form_mode') === 'edit' ? [] : old('assets', []),
+    ];
+@endphp
+<script>window.OperationTaskAssetUploads = @json($operationTaskUploadConfig);</script>
+<script src="{{ asset('assets/erp/operation-task-asset-upload.js') }}?v=20261112-1"></script>
+@if(($errors->any() && old('form_mode') !== 'edit') || request()->boolean('new'))
+<script>jQuery(function () { jQuery('#ot-test-modal').modal('show'); });</script>
+@endif
+@endpush
 @push('styles')
 <style>
     .ot-test-edit-dialog{width:min(1120px,calc(100vw - 32px))}

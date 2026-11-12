@@ -18,6 +18,7 @@ use App\Models\OperationTaskReviewEvent;
 use App\Models\OperationTestTask;
 use App\Models\Portal;
 use App\Portal\Http\Controllers\PortalEntryController;
+use App\Portals\OperationTasks\OperationTaskAssetUploadService;
 use App\Services\DepartmentAuthorizationService;
 use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
@@ -395,7 +396,36 @@ class OperationTaskController extends Controller
         ]);
     }
 
-    public function storeTest(Request $request): RedirectResponse
+    public function beginAssetUpload(Request $request, OperationTaskAssetUploadService $uploads): JsonResponse
+    {
+        $context = $this->authorized($request);
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'size' => ['required', 'integer', 'min:1', 'max:'.OperationTaskAssetUploadService::MAX_SIZE],
+        ]);
+        return response()->json($uploads->begin((int) $context['user']->id, $data['name'], (int) $data['size']));
+    }
+
+    public function assetUploadStatus(Request $request, string $token, OperationTaskAssetUploadService $uploads): JsonResponse
+    {
+        $context = $this->authorized($request);
+        return response()->json($uploads->status((int) $context['user']->id, $token));
+    }
+
+    public function uploadAssetPart(Request $request, string $token, int $index, OperationTaskAssetUploadService $uploads): JsonResponse
+    {
+        $context = $this->authorized($request);
+        $request->validate(['file' => ['required', 'file', 'max:2048']]);
+        return response()->json($uploads->part((int) $context['user']->id, $token, $index, $request->file('file')));
+    }
+
+    public function completeAssetUpload(Request $request, string $token, OperationTaskAssetUploadService $uploads): JsonResponse
+    {
+        $context = $this->authorized($request);
+        return response()->json($uploads->complete((int) $context['user']->id, $token));
+    }
+
+    public function storeTest(Request $request, OperationTaskAssetUploadService $uploads): RedirectResponse
     {
         $context = $this->authorized($request);
         $user = $context['user'];
@@ -409,13 +439,14 @@ class OperationTaskController extends Controller
             'assets' => ['required', 'array', 'min:'.$minimum],
             'assets.*.selling_point' => ['required', 'string', 'max:1000'],
             'assets.*.source_type' => ['required', Rule::in(['ai_created', 'peer_copied'])],
-            'assets.*.file' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,gif,mp4,mov,webm', 'max:51200'],
+            'assets.*.file' => ['prohibited'],
+            'assets.*.upload_token' => ['nullable', 'uuid'],
             'assets.*.url' => ['nullable', 'url', 'max:2048'],
         ]);
         foreach ($data['assets'] as $index => $asset) {
-            if (! $request->hasFile("assets.$index.file") && empty($asset['url'])) {
+            if (empty($asset['upload_token']) && empty($asset['url'])) {
                 throw ValidationException::withMessages([
-                    "assets.$index.file" => '每条素材必须上传文件或填写素材链接。',
+                    "assets.$index.upload_token" => __('operation_tasks.upload.required'),
                 ]);
             }
         }
@@ -427,7 +458,7 @@ class OperationTaskController extends Controller
 
         $department = $this->departmentForPortal($user, $context['portal']);
         $connection = config('admin.database.connection') ?: config('database.default');
-        $task = DB::connection($connection)->transaction(function () use ($data, $request, $user, $department): OperationTestTask {
+        $task = DB::connection($connection)->transaction(function () use ($data, $uploads, $user, $department): OperationTestTask {
             $task = OperationTestTask::query()->create([
                 'task_no' => 'OT'.now()->format('YmdHis').str_pad((string) random_int(1, 999), 3, '0', STR_PAD_LEFT),
                 'owner_user_id' => $user->id,
@@ -441,17 +472,17 @@ class OperationTaskController extends Controller
                 'submitted_at' => now(),
             ]);
             foreach ($data['assets'] as $index => $asset) {
-                $file = $request->file("assets.$index.file");
+                $file = empty($asset['upload_token']) ? [] : $uploads->consume((int) $user->id, $asset['upload_token'], "assets.$index.upload_token");
                 OperationTaskAsset::query()->create([
                     'task_id' => $task->id,
                     'uploader_user_id' => $user->id,
                     'uploader_name' => $this->userName($user),
                     'selling_point' => trim($asset['selling_point']),
                     'source_type' => $asset['source_type'],
-                    'file_path' => $file?->store('operation-tasks/assets/'.now()->format('Y/m'), 'local'),
-                    'original_name' => $file?->getClientOriginalName(),
+                    'file_path' => $file['file_path'] ?? null,
+                    'original_name' => $file['original_name'] ?? null,
                     'external_url' => trim((string) ($asset['url'] ?? '')) ?: null,
-                    'mime_type' => $file?->getMimeType(),
+                    'mime_type' => $file['mime_type'] ?? null,
                     'ai_confirmed' => $asset['source_type'] === 'ai_created',
                     'version_history' => [['version' => 1, 'event' => 'created', 'changed_by' => $this->userName($user), 'changed_at' => now()->toIso8601String()]],
                 ]);

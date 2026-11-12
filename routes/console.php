@@ -21,6 +21,11 @@ if ($financeScheduleOnly) {
 
 require __DIR__.'/assistant_shopify_analytics_schedule.php';
 
+Schedule::command('operation-tasks:uploads:purge --limit=200')
+    ->hourly()
+    ->withoutOverlapping(10)
+    ->runInBackground();
+
 Schedule::command('logistics:tracking:process --limit=80')
     ->everyMinute()
     ->withoutOverlapping(10)
