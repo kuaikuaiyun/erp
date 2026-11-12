@@ -18,6 +18,7 @@ use Encore\Admin\Layout\Content;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -108,6 +109,13 @@ class DepartmentController extends Controller
             ->orderBy('sort')
             ->orderBy('name')
             ->get(['id', 'parent_id', 'name']);
+        $memberDepartmentGroups = $memberDepartmentOptions
+            ->filter(fn (Department $option): bool => ! $option->parent_id
+                || ! $memberDepartmentOptions->contains('id', (int) $option->parent_id))
+            ->map(fn (Department $option): array => [
+                'department' => $option,
+                'children' => $memberDepartmentOptions->where('parent_id', $option->getKey())->values(),
+            ])->values();
         $memberFilters = $request->validate([
             'search' => ['nullable', 'string', 'max:100'],
             'member_department_id' => ['nullable', 'integer', Rule::in($memberDepartmentOptions->pluck('id')->all())],
@@ -138,6 +146,7 @@ class DepartmentController extends Controller
                 'candidateUsers' => $candidateUsers,
                 'search' => $search,
                 'memberDepartmentOptions' => $memberDepartmentOptions,
+                'memberDepartmentGroups' => $memberDepartmentGroups,
                 'selectedMemberDepartmentId' => $selectedMemberDepartmentId,
                 'positions' => $this->organization->positionOptions(),
                 'canAddMembers' => $department->children->isEmpty(),
@@ -150,28 +159,43 @@ class DepartmentController extends Controller
         abort_if($department->children()->exists(), 422, '一级部门存在下级部门，请将人员添加到对应的末级部门。');
         $userModel = config('admin.database.users_model');
         $validated = $request->validate([
-            'user_id' => ['required', 'integer', Rule::exists((new $userModel())->getTable(), 'id')],
+            'user_ids' => ['required', 'array', 'min:1', 'max:100'],
+            'user_ids.*' => ['required', 'integer', 'distinct', Rule::exists((new $userModel())->getTable(), 'id')],
+            'return_to' => ['nullable', 'string', 'max:2000'],
         ]);
-        /** @var AdminUser $account */
-        $account = $userModel::query()->findOrFail((int) $validated['user_id']);
-        abort_if($account->isAdministrator(), 422, '系统管理员不能添加到业务部门。');
-
         $managedIds = $this->administrator()->isAdministrator()
             ? Department::business()->pluck('id')->map(fn ($id) => (int) $id)
             : $this->authorization->managedDepartmentIds($this->administrator());
-        $memberships = $this->organization->membershipsForAccount($account)
-            ->filter(fn ($membership) => $managedIds->contains((int) $membership->department_id))
-            ->map(fn ($membership): array => [
-                'department_id' => (int) $membership->department_id,
-                'position' => (string) $membership->position,
-            ])->values();
-        if (! $memberships->contains(fn (array $membership) => $membership['department_id'] === (int) $department->getKey())) {
-            $memberships->push(['department_id' => (int) $department->getKey(), 'position' => Department::POSITION_MEMBER]);
-        }
-        $this->organization->syncAccountMemberships($account, $memberships->all(), $this->administrator());
-        admin_success('部门成员', '人员已添加到当前部门。');
+        $accounts = $userModel::query()->whereKey($validated['user_ids'])->get();
+        abort_if($accounts->contains(fn (AdminUser $account): bool => $account->isAdministrator()), 422, '系统管理员不能添加到业务部门。');
 
-        return redirect(admin_url('organization/departments/'.$department->getKey().'/members'));
+        DB::transaction(function () use ($accounts, $managedIds, $department): void {
+            foreach ($accounts as $account) {
+                $memberships = $this->organization->membershipsForAccount($account)
+                    ->filter(fn ($membership) => $managedIds->contains((int) $membership->department_id))
+                    ->map(fn ($membership): array => [
+                        'department_id' => (int) $membership->department_id,
+                        'position' => (string) $membership->position,
+                    ])->values();
+                if (! $memberships->contains(fn (array $membership) => $membership['department_id'] === (int) $department->getKey())) {
+                    $memberships->push(['department_id' => (int) $department->getKey(), 'position' => Department::POSITION_MEMBER]);
+                }
+                $this->organization->syncAccountMemberships($account, $memberships->all(), $this->administrator());
+            }
+        });
+        admin_success('部门成员', $accounts->count().' 人已添加到当前部门。');
+
+        $defaultUrl = admin_url('organization/departments/'.$department->getKey().'/members');
+        $returnTo = (string) ($validated['return_to'] ?? '');
+        $returnParts = parse_url($returnTo);
+        $defaultParts = parse_url($defaultUrl);
+        if ($returnTo !== '' && is_array($returnParts) && is_array($defaultParts)
+            && ($returnParts['host'] ?? null) === ($defaultParts['host'] ?? null)
+            && ($returnParts['path'] ?? null) === ($defaultParts['path'] ?? null)) {
+            return redirect()->to($returnTo);
+        }
+
+        return redirect($defaultUrl);
     }
 
     private function bindableBusinessDepartments()
