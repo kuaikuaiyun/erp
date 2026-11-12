@@ -330,10 +330,13 @@ class OperationTaskController extends Controller
         })->get();
         $todayPlan = OperationTaskDailyPlan::query()->where('user_id', $user->id)->whereDate('plan_date', $today)->first();
         $todayProgress = $this->dailyPlanProgress($todayPlan, $todayTasks, $today->toDateString());
+        $testPerPage = in_array((int) $request->input('test_per_page', 20), [20, 50, 100], true)
+            ? (int) $request->input('test_per_page', 20)
+            : 20;
 
         return view('portals.operation-tasks.tests', [
             ...$context,
-            'tasks' => (clone $base)->paginate(18)->withQueryString(),
+            'tasks' => (clone $base)->paginate($testPerPage)->withQueryString(),
             'today' => $today->toDateString(),
             'todaySingle' => $todayTasks->where('page_type', 'single')->count(),
             'todayCategory' => $todayTasks->where('page_type', 'category')->count(),

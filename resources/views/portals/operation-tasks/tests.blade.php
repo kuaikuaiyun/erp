@@ -19,29 +19,63 @@
         <div class="ot-card-head"><span>任务档案</span><span class="ot-hint">共 {{ $tasks->total() }} 条；点击任务详情可追加素材、填写日报和查看整改记录。</span></div>
         <div class="table-responsive">
             <table class="table ot-table ot-test-table">
-                <thead><tr><th>任务历史 · 单品 / 类目</th><th>类型</th><th>平台</th><th>素材数</th><th>审核</th><th>操作</th></tr></thead>
+                <thead><tr><th>基础信息</th><th>任务类型</th><th>落地页</th><th>素材信息</th><th>投放媒体</th><th>二级主管审核</th><th>一级主管审核</th><th>当前状态 / 驳回意见</th><th>操作</th></tr></thead>
                 <tbody>
                 @forelse($tasks as $task)
                     @php
-                        $reviews = $task->reviews->where('target_version', $task->version);
-                        $state = $reviews->where('result','rejected')->isNotEmpty() ? '需整改' : ($reviews->count() >= 2 && $reviews->where('result','approved')->count() >= 2 ? '已通过' : '待审核');
+                        $reviews = $task->reviews->where('target_version', $task->version)->keyBy('channel');
+                        $reviewLabels = ['approved' => '已通过', 'rejected' => '已驳回', 'pending' => '待审核'];
+                        $leaderResult = optional($reviews->get('leader'))->result ?: 'pending';
+                        $departmentResult = optional($reviews->get('department'))->result ?: 'pending';
+                        $leaderLabel = $reviewLabels[$leaderResult] ?? '待审核';
+                        $departmentLabel = $reviewLabels[$departmentResult] ?? '待审核';
+                        $rejectedReview = $reviews->filter(fn ($review) => $review->result === 'rejected')->sortByDesc('updated_at')->first();
+                        if ($rejectedReview) {
+                            $currentStatusLabel = '已驳回待修改';
+                            $currentStatusClass = 'red';
+                            $currentRejectionOpinion = trim((string) $rejectedReview->opinion);
+                        } elseif ($leaderResult !== 'approved') {
+                            $currentStatusLabel = '待二级主管审核';
+                            $currentStatusClass = 'orange';
+                            $currentRejectionOpinion = '';
+                        } elseif ($departmentResult !== 'approved') {
+                            $currentStatusLabel = '待一级主管审核';
+                            $currentStatusClass = 'orange';
+                            $currentRejectionOpinion = '';
+                        } else {
+                            $currentStatusLabel = '审核通过';
+                            $currentStatusClass = '';
+                            $currentRejectionOpinion = '';
+                        }
                         $media = $task->assets->flatMap(fn ($asset) => $asset->dailyRecords->pluck('media'))->filter()->unique()->values();
+                        $approvedAssets = $task->assets->filter(function ($asset) {
+                            $assetReviews = $asset->reviews->where('target_version', $asset->version)->keyBy('channel');
+                            return optional($assetReviews->get('leader'))->result === 'approved'
+                                && optional($assetReviews->get('department'))->result === 'approved';
+                        })->count();
                     @endphp
                     <tr>
-                        <td class="ot-task-info"><b>{{ $task->task_no }}</b><span>{{ $task->selection_objective ?: '暂未填写任务摘要' }}</span><small>{{ $task->owner_name }} · {{ \App\Portals\OperationTasks\Support\OperationTaskTime::format($task->submitted_at, 'm/d H:i') }} 提交</small></td>
-                        <td><span>{{ $task->page_type === 'category' ? '类目页' : '单品页' }} · {{ $task->task_type === 'iteration' ? '迭代' : '新测试' }}</span></td>
-                        <td>{{ $media->isNotEmpty() ? $media->join(' / ') : '未填写' }}</td>
-                        <td><b>{{ $task->assets_count }}</b></td>
-                        <td><span class="ot-badge {{ $state === '需整改' ? 'red' : ($state === '待审核' ? 'orange' : '') }}">{{ $state }}</span></td>
-                        <td class="ot-task-action"><a class="btn btn-default btn-sm" href="{{ route('operation-tasks.tests.show',$task) }}"><i class="fa fa-eye"></i> 查看详情</a></td>
+                        <td class="ot-task-info"><b>{{ $task->task_no }}</b><span>运营：{{ $task->owner_name }}</span><small>团队：{{ $task->department_name ?: '未分配' }}</small></td>
+                        <td><b>{{ $task->page_type === 'category' ? '类目页' : '单品页' }}</b><small>{{ $task->task_type === 'iteration' ? '已有测试迭代' : '新测试' }}</small></td>
+                        <td><a class="btn btn-info btn-xs ot-landing-button" href="{{ $task->landing_url }}" target="_blank" rel="noopener noreferrer">落地页</a></td>
+                        <td><b>{{ $task->assets_count }} 条</b><small>审核进度 {{ $approvedAssets }}/{{ $task->assets_count }}</small></td>
+                        <td><b>{{ $media->isNotEmpty() ? $media->join(' / ') : '暂无' }}</b><small>{{ $media->isNotEmpty() ? '来自素材投放日报' : '尚无投放日报' }}</small></td>
+                        <td><span class="ot-badge {{ $leaderResult === 'rejected' ? 'red' : ($leaderResult === 'pending' ? 'orange' : '') }}">{{ $leaderLabel }}</span></td>
+                        <td><span class="ot-badge {{ $departmentResult === 'rejected' ? 'red' : ($departmentResult === 'pending' ? 'orange' : '') }}">{{ $departmentLabel }}</span></td>
+                        <td class="ot-task-current-status"><span class="ot-badge {{ $currentStatusClass }}">{{ $currentStatusLabel }}</span>@if($currentRejectionOpinion !== '')<small>{{ $currentRejectionOpinion }}</small>@endif</td>
+                        <td class="ot-task-action"><a class="btn btn-default btn-sm" href="{{ route('operation-tasks.tests.show',$task) }}">查看详情</a></td>
                     </tr>
                 @empty
-                    <tr class="ot-test-empty-row"><td colspan="6"><div class="ot-test-empty-state"><i class="fa fa-flask"></i><b>当前暂无测品任务</b><span>请使用页面右上角的“新建任务”创建首个测试档案。</span></div></td></tr>
+                    <tr class="ot-test-empty-row"><td colspan="9"><div class="ot-test-empty-state"><i class="fa fa-flask"></i><b>当前暂无测品任务</b><span>请使用页面右上角的“新建任务”创建首个测试档案。</span></div></td></tr>
                 @endforelse
                 </tbody>
             </table>
         </div>
-        @if($tasks->hasPages())<div class="box-footer text-center">{{ $tasks->links() }}</div>@endif
+        @include('portals.operation-tasks.partials.pagination', [
+            'paginator' => $tasks,
+            'perPageName' => 'test_per_page',
+            'activeTab' => 'tests',
+        ])
     </div>
 </section>
 <div class="modal fade ot-modal" id="ot-test-modal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><form class="ot-form" method="post" enctype="multipart/form-data" action="{{ route('operation-tasks.tests.store') }}">@csrf<div class="modal-header"><button type="button" class="close" data-dismiss="modal">×</button><h4 class="modal-title">新建测品任务</h4><p>明确选品理由、验证目标和对应素材后提交。</p></div><div class="modal-body"><div class="ot-grid"><div class="form-group"><label>落地页类型 *</label><select class="form-control" name="page_type" id="ot-page-type"><option value="single">单品页</option><option value="category">类目页</option></select></div><div class="form-group"><label>任务类型 *</label><select class="form-control" name="task_type"><option value="new">新测试</option><option value="iteration">已有测试迭代</option></select></div><div class="ot-full form-group"><label>落地页链接 *</label><input class="form-control" type="url" name="landing_url" value="{{ old('landing_url') }}" placeholder="https://..." required></div><div class="ot-full form-group"><label>选品理由与验证目标 *</label><textarea class="form-control" rows="4" name="selection_objective" required placeholder="卖给谁？为什么选这个品或类目？本次最想验证什么？">{{ old('selection_objective') }}</textarea></div></div><div class="form-group"><label>对应素材 *</label><div id="ot-assets"></div><button class="btn btn-default btn-sm" id="ot-add-asset" type="button"><i class="fa fa-plus"></i> 添加素材</button><p class="ot-hint" id="ot-asset-hint">单品至少 2 条素材；类目至少 3 条。</p></div></div><div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">取消</button><button class="btn ot-primary"><i class="fa fa-send"></i> 提交任务</button></div></form></div></div></div>
@@ -93,7 +127,7 @@
 @endpush
 @endsection
 @push('styles')<style>
-.ot-tests-page{max-width:1540px;margin:0 auto}.ot-tests-page .ot-head{margin-bottom:14px}.ot-test-goals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:16px}.ot-test-goals>div{position:relative;min-height:110px;padding:17px 20px;border:1px solid #dce8ed;border-radius:10px;background:#fff;box-shadow:0 4px 16px rgba(25,57,73,.035)}.ot-test-goals>div:before{content:'';position:absolute;left:0;top:15px;bottom:15px;width:3px;border-radius:3px;background:#258b78}.ot-test-goals small{display:block;color:#708796;font-size:12px}.ot-test-goals b{display:inline-block;margin:8px 12px 0 0;color:#163d54;font-size:28px;line-height:1}.ot-test-goals strong{display:inline-block;color:#2f657b;font-size:12px;font-weight:700}.ot-test-goals span{display:block;margin-top:8px;color:#81929a;font-size:11px}.ot-tests-page .ot-card-head{min-height:54px;padding:14px 20px}.ot-test-table{table-layout:fixed}.ot-test-table th{height:38px;padding:9px 14px;vertical-align:middle;white-space:nowrap}.ot-test-table td{height:78px;padding:11px 14px;vertical-align:middle;border-color:#e1eaee;color:#294c5d;font-size:13px}.ot-test-table th:nth-child(1){width:34%}.ot-test-table th:nth-child(2){width:16%}.ot-test-table th:nth-child(3){width:16%}.ot-test-table th:nth-child(4){width:12%;text-align:center}.ot-test-table th:nth-child(5){width:10%;text-align:center}.ot-test-table th:nth-child(6){width:12%;text-align:center}.ot-test-table td:nth-child(4),.ot-test-table td:nth-child(5),.ot-test-table td:nth-child(6){text-align:center}.ot-test-table td b{display:block;color:#133e59;font-size:13px}.ot-test-table .ot-task-info>span{display:block;overflow:hidden;max-width:100%;margin-top:5px;color:#436679;font-size:12px;line-height:1.45;text-overflow:ellipsis;white-space:nowrap}.ot-test-table td small{display:block;overflow:hidden;margin-top:4px;color:#758c99;font-size:11px;line-height:1.35;text-overflow:ellipsis;white-space:nowrap}.ot-test-table .ot-badge{margin:1px 0;padding:3px 7px}.ot-task-action{text-align:center}.ot-test-table .btn{min-width:88px}.ot-test-table tbody tr:nth-child(even) td{background:#fbfdfe}.ot-test-table tr:hover td{background:#f4fafb}.ot-tests-page .ot-hint{margin:0;font-size:12px}@media(max-width:1050px){.ot-test-table{min-width:880px}}@media(max-width:800px){.ot-test-goals{grid-template-columns:1fr}.ot-test-goals>div{min-height:92px}}
+.ot-tests-page{max-width:1540px;margin:0 auto}.ot-tests-page .ot-head{margin-bottom:14px}.ot-test-goals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:16px}.ot-test-goals>div{position:relative;min-height:110px;padding:17px 20px;border:1px solid #dce8ed;border-radius:10px;background:#fff;box-shadow:0 4px 16px rgba(25,57,73,.035)}.ot-test-goals>div:before{content:'';position:absolute;left:0;top:15px;bottom:15px;width:3px;border-radius:3px;background:#258b78}.ot-test-goals small{display:block;color:#708796;font-size:12px}.ot-test-goals b{display:inline-block;margin:8px 12px 0 0;color:#163d54;font-size:28px;line-height:1}.ot-test-goals strong{display:inline-block;color:#2f657b;font-size:12px;font-weight:700}.ot-test-goals span{display:block;margin-top:8px;color:#81929a;font-size:11px}.ot-tests-page .ot-card-head{min-height:54px;padding:14px 20px}.ot-tests-page .ot-hint{margin:0;font-size:12px}@media(max-width:800px){.ot-test-goals{grid-template-columns:1fr}.ot-test-goals>div{min-height:92px}}
 </style>@endpush
 @push('styles')<style>
 .ot-form-label-row{display:flex;align-items:center;justify-content:space-between;gap:10px}.ot-form-label-row label{margin:0}.ot-url-example-image{display:block;width:100%;height:auto;border:1px solid #dce7ec;border-radius:6px}
