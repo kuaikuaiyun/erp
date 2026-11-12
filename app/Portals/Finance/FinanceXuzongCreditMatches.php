@@ -120,7 +120,7 @@ class FinanceXuzongCreditMatches
                 ->orWhereIn('bill_number', $keys)->orWhereIn('transaction_id', $keys))
                 ->get(['id', 'payment_gateway_order_id', 'bill_number', 'transaction_id'])->keyBy('id');
         $orders = $orderKeys->isEmpty() ? collect() : app(FinanceLogisticsCreditOrders::class)
-            ->query(withPayload: false, xuzongReport: true, ids: $orderKeys->keys()->all())
+            ->query(withPayload: false, xuzongReport: true, ids: $orderKeys->keys()->all(), includeSystemOrders: true)
             ->where('account', $account)->get()->groupBy(fn ($order) => array_values(array_unique(array_filter([
                 $order->reference, $orderKeys[$order->id]->bill_number, $orderKeys[$order->id]->transaction_id,
             ]))));
@@ -159,10 +159,14 @@ class FinanceXuzongCreditMatches
 
     public function forOrders(Collection $records, Collection $orders): Collection
     {
-        [$details, $erpOrders] = $this->linkedDetails($records, $orders);
-        $details = $details->replace($records->filter(fn ($record) => $record->dataset === FinanceLogisticsCreditOrders::IMPORTED_DATASET)->keyBy('id'));
+        $systemRecords = $records->where('dataset', '!=', FinanceLogisticsCreditOrders::IMPORTED_DATASET);
+        $systemIds = $systemRecords->pluck('id');
+        [$details, $erpOrders] = $systemRecords->isEmpty()
+            ? [collect(), $orders]
+            : $this->linkedDetails($records, $orders);
+        $details = $details->replace($records->where('dataset', FinanceLogisticsCreditOrders::IMPORTED_DATASET)->keyBy('id'));
         $billing = $this->billingFields($details);
-        $refunds = $this->refunds($erpOrders->filter()->pluck('id')->unique());
+        $refunds = $this->refunds($erpOrders->only($systemIds->all())->filter()->pluck('id')->unique());
 
         return $records->mapWithKeys(function ($record) use ($erpOrders, $billing, $refunds): array {
             $order = $erpOrders->get($record->id);
@@ -170,7 +174,8 @@ class FinanceXuzongCreditMatches
             $currency = $bill['_settlement_currency'] ?? '';
             $calculatePayable = $bill['_calculate_payable'] ?? false;
             unset($bill['_settlement_currency'], $bill['_calculate_payable']);
-            $refund = $currency === '' || $currency === 'USD' ? $refunds->get($order?->id, []) : [];
+            $refund = $record->dataset !== FinanceLogisticsCreditOrders::IMPORTED_DATASET && ($currency === '' || $currency === 'USD')
+                ? $refunds->get($order?->id, []) : [];
             $values = $bill + $refund + ['结算币种' => $currency, '通途订单' => $order?->tongtu_order_number];
             if ($calculatePayable) {
                 $values['应结算'] = $this->payable($values);
@@ -307,7 +312,11 @@ class FinanceXuzongCreditMatches
         $db = $this->workbooks->database();
         $saved = $db->table('finance_settlement_supplements')->whereIn('finance_record_id', $details->pluck('id'))
             ->pluck('payload', 'finance_record_id');
-        $entries = $this->conflux->entriesFor($details->unique('id'), $this->accounts);
+        if ($this->accounts === null && $details->contains(fn ($detail) => ($detail->payload['_card_channel'] ?? null) === 'ye')) {
+            $this->accounts = FinancePaymentAccount::query()->where('account_type', 'credit_card')
+                ->get(['id', 'activity_account', 'account_name'])->keyBy('activity_account');
+        }
+        $entries = $this->conflux->entriesFor($details->unique('id'), $this->accounts ?? collect());
         $fees = $this->conflux->feesFor($entries);
 
         return $details->map(function (FinanceRecord $detail) use ($saved, $entries, $fees): array {

@@ -111,6 +111,8 @@ Route::prefix('finance')->name('finance.')->middleware(RedirectFinanceDomain::cl
     Route::get('/reports/xuzong-credit', 'records')->defaults('dataset', 'xuzong2-orders')->name('reports.xuzong-credit');
     Route::get('/reports/xuzong-credit/export', 'exportRecords')->defaults('dataset', 'xuzong2-orders')->name('reports.xuzong-credit.export');
     Route::post('/reports/xuzong-credit/import', 'importXuzongCreditDetails')->name('reports.xuzong-credit.import');
+    Route::get('/reports/xuzong-credit/statement/{record}', 'xuzongStatement')->whereNumber('record')->name('reports.xuzong-credit.statement');
+    Route::post('/reports/xuzong-credit/statement/{record}', 'updateXuzongStatement')->whereNumber('record')->name('reports.xuzong-credit.statement.update');
     Route::get('/reports/{report}', 'report')->name('report');
     Route::get('/reports/paypal-settlement/records/{record}', 'paypalSettlementDetail')->whereNumber('record')->name('settlement.paypal.detail');
     Route::post('/reports/{report}/export-template/preview', 'previewExportTemplate')
@@ -217,11 +219,7 @@ Route::prefix('fashion/operation-tasks')->name('operation-tasks.')->controller(O
     Route::post('/assets/{asset}/daily-records', 'storeAssetDaily')->whereNumber('asset')->name('assets.daily-records.store');
     Route::post('/daily-plans', 'storeDailyPlan')->name('daily-plans.store');
     Route::post('/tests/{task}/assets', 'appendAsset')->whereNumber('task')->name('tests.assets.store');
-    Route::post('/assets/{asset}/versions', 'replaceAsset')->whereNumber('asset')->name('assets.versions.store');
     Route::post('/assets/{asset}/retire', 'retireAsset')->whereNumber('asset')->name('assets.retire');
-    Route::post('/assets/{asset}/first-live', 'markAssetLive')->whereNumber('asset')->name('assets.first-live');
-    Route::post('/assets/{asset}/delivery-rounds', 'storeDeliveryRound')->whereNumber('asset')->name('assets.delivery-rounds.store');
-    Route::post('/delivery-rounds/{round}/stop', 'stopDeliveryRound')->whereNumber('round')->name('delivery-rounds.stop');
     Route::post('/rectifications/{rectification}/resubmit', 'resubmitRectification')->whereNumber('rectification')->name('rectifications.resubmit');
     Route::post('/rectifications/{rectification}/restore', 'restoreRectification')->whereNumber('rectification')->name('rectifications.restore');
     Route::get('/reviews', 'reviews')->name('reviews.index');

@@ -99,10 +99,11 @@ class FinanceXuzongOrderImport
                     || ! preg_match('/^\d{4}-(?:0[1-9]|1[0-2])-\d{2}\s\d{2}:\d{2}:\d{2}$/D', $time)) {
                     throw ValidationException::withMessages(['file' => '第'.$line.'行的订单号、结算币种、汇率、净额或结算时间无效。']);
                 }
-                $group = $groups[$reference] ?? ['merchant' => $merchant, 'amounts' => [], 'times' => [], 'lines' => 0, 'line' => $line];
+                $group = $groups[$reference] ?? ['merchant' => $merchant, 'events' => [], 'line' => $line];
                 if ($group['merchant'] !== $merchant) {
                     throw ValidationException::withMessages(['file' => '第'.$line.'行同一平台订单号对应多个商户订单号。']);
                 }
+                $amounts = [];
                 foreach (self::STATEMENT_AMOUNTS as $source => $field) {
                     $value = $numbers->number($row[$source] ?? null);
                     if ($value === null) {
@@ -110,11 +111,12 @@ class FinanceXuzongOrderImport
                     }
                     $sign = in_array($field, ['结算金额', '保证金返还', '拒付返还'], true) ? '1' : '-1';
                     $value = bcmul(bcmul($value, $rate, 12), $sign, 8);
-                    $group['amounts'][$field] = bcadd($group['amounts'][$field] ?? '0', $value, 8);
+                    $amounts[$field] = $value;
                 }
-                $group['amounts']['应结算'] = bcadd($group['amounts']['应结算'] ?? '0', $net, 2);
-                $group['times'][$time] = true;
-                $group['lines']++;
+                $amounts['应结算'] = bcadd($net, '0', 2);
+                $event = ['time' => $time, 'amounts' => $amounts];
+                $eventKey = $this->statementEventKey($event);
+                $group['events'][$eventKey] = $event;
                 $groups[$reference] = $group;
                 $total++;
             }
@@ -125,7 +127,6 @@ class FinanceXuzongOrderImport
 
         $hash = hash_file('sha256', $file->getPathname());
         $saved = $this->workbooks->database()->transaction(function () use ($groups, $account, $hash): int {
-            $accounting = app(FinanceAccountingService::class);
             $saved = 0;
             foreach (array_chunk($groups, 300, true) as $batch) {
                 $orders = FinanceRecord::query()->where('dataset', FinanceLogisticsCreditOrders::IMPORTED_DATASET)
@@ -139,23 +140,28 @@ class FinanceXuzongOrderImport
                     }
                     $order = $matches->sole();
                     $payload = $order->payload;
-                    $existing = $payload['_xuzong_statement_import'] ?? null;
-                    if (($existing && ($existing['sha256'] ?? null) !== $hash)
-                        || (! $existing && (filled($payload['结算金额'] ?? null) || filled($payload['应结算'] ?? null)))) {
-                        throw ValidationException::withMessages(['file' => '第'.$group['line'].'行已有其他结算数据，请核对重叠流水。']);
+                    $existing = $payload['_xuzong_statement_import'] ?? [];
+                    $fields = array_fill_keys(self::statementAmountFields(), true);
+                    if (! $existing && (filled($payload['结算金额'] ?? null) || filled($payload['应结算'] ?? null))) {
+                        throw ValidationException::withMessages(['file' => '第'.$group['line'].'行已有未标记来源的结算数据，请先核对原账单。']);
                     }
-                    $times = array_keys($group['times']);
-                    $next = [...$payload, ...$group['amounts'], '结算币种' => 'USD',
-                        '_xuzong_statement_import' => [
-                            'sha256' => $hash, 'lines' => $group['lines'], 'settlement_times' => $times,
-                            'prior_refund' => $existing['prior_refund'] ?? array_intersect_key($payload, array_flip(['退款金额', '退款费用'])),
-                        ]];
-                    if ($next == $payload) {
+                    $events = $existing['events'] ?? [];
+                    $legacy = $this->legacyStatement($payload, $existing);
+                    $incoming = array_diff_key($group['events'], $events, $existing['suppressed'] ?? []);
+                    $restoringLegacy = $legacy !== null && $legacy['sha256'] === $hash;
+                    if (! $restoringLegacy && $legacy !== null
+                        && array_intersect($legacy['times'], array_column($incoming, 'time')) !== []) {
+                        throw ValidationException::withMessages(['file' => '第'.$group['line'].'行与旧账单时间重叠，请先重传已入库的原账单以补齐逐笔明细。']);
+                    }
+                    if ($incoming === [] && ! $restoringLegacy) {
                         continue;
                     }
-                    $accounting->guardUnlocked($order->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'));
-                    foreach ($times as $time) {
-                        $accounting->guardUnlocked(substr($time, 0, 7));
+                    if (! $restoringLegacy && ($events !== [] || $legacy !== null || count($incoming) > 1)) {
+                        $existing['notice'] = (string) \Illuminate\Support\Str::uuid();
+                    }
+                    $next = $this->statementPayload($payload, $existing, $events + $incoming, $restoringLegacy ? null : $legacy);
+                    if (! $restoringLegacy || array_intersect_key($next, $fields) != array_intersect_key($payload, $fields)) {
+                        $this->guardStatementDates($order, array_column($incoming, 'time'));
                     }
                     $order->update(['payload' => $next]);
                     $saved++;
@@ -166,6 +172,152 @@ class FinanceXuzongOrderImport
         });
 
         return ['total' => $total, 'matched' => count($groups), 'saved' => $saved];
+    }
+
+    public static function statementAmountFields(): array
+    {
+        return [...array_values(self::STATEMENT_AMOUNTS), '应结算'];
+    }
+
+    public const EDITABLE_ORDER_FIELDS = [
+        '商户名称', '商户订单号', '平台订单号', '交易流水号', '订单币种', '订单金额', '交易币种',
+        '交易金额', '支付状态', '支付方式', '是否3D', '发卡国家', '卡号', '消费者邮箱', '创建时间', '完成时间',
+    ];
+
+    public function manageStatement(int $recordId, array $data): void
+    {
+        $this->workbooks->database()->transaction(function () use ($recordId, $data): void {
+            $order = FinanceRecord::query()->where('dataset', FinanceLogisticsCreditOrders::IMPORTED_DATASET)
+                ->lockForUpdate()->findOrFail($recordId);
+            $payload = $order->payload;
+            $existing = $payload['_xuzong_statement_import'] ?? [];
+            if ($data['action'] === 'edit_order') {
+                $fields = $data['order_fields'];
+                $this->guardStatementDates($order, []);
+                $created = \Carbon\CarbonImmutable::parse($fields['创建时间'], 'UTC');
+                app(FinanceAccountingService::class)->guardUnlocked($created->setTimezone('Asia/Shanghai')->format('Y-m'));
+                $fields['卡号'] = preg_match('/(\d{4})$/D', $fields['卡号'] ?? '', $lastFour) ? '****'.$lastFour[1] : '';
+                $platform = $fields['平台订单号'] ?? '';
+                unset($fields['平台订单号']);
+                $payload = array_replace($payload, array_map(fn ($value) => $value ?? '', $fields));
+                $payload['_edited_platform_order_id'] = $platform;
+                if (! empty($data['report_fields'])) {
+                    $current = app(FinanceXuzongCreditReport::class)->orderValues($order->id);
+                    foreach ($data['report_fields'] as $field => $value) {
+                        if ((string) $value !== (string) ($current[$field] ?? '')) {
+                            $payload['_edited_report_fields'][$field] = $value ?? '';
+                        }
+                    }
+                }
+                $order->update([
+                    'payload' => $payload, 'occurred_at' => $created,
+                    'currency' => strtoupper($fields['交易币种']), 'status' => $fields['支付状态'],
+                ]);
+
+                return;
+            }
+            if ($data['action'] === 'handled') {
+                if (($existing['notice'] ?? null) !== $data['notice']) {
+                    throw ValidationException::withMessages(['statement' => '结算明细刚有更新，请刷新后再确认。']);
+                }
+                unset($existing['notice']);
+                $payload['_xuzong_statement_import'] = $existing;
+                $order->update(['payload' => $payload]);
+
+                return;
+            }
+
+            if (! $existing && (filled($payload['结算金额'] ?? null) || filled($payload['应结算'] ?? null))) {
+                throw ValidationException::withMessages(['statement' => '该订单已有未标记来源的结算数据，请先核对原账单。']);
+            }
+            $events = $existing['events'] ?? [];
+            $legacy = $this->legacyStatement($payload, $existing);
+            $key = $data['event'] ?? null;
+            $original = $key === null ? null : ($events[$key] ?? null);
+            if (in_array($data['action'], ['update', 'delete'], true) && $original === null) {
+                throw ValidationException::withMessages(['statement' => '该结算明细已变化，请刷新后重试。']);
+            }
+
+            $replacement = null;
+            if ($data['action'] !== 'delete') {
+                $amounts = [];
+                foreach (self::statementAmountFields() as $field) {
+                    $amounts[$field] = bcadd((string) ($data['amounts'][$field] ?? '0'), '0', $field === '应结算' ? 2 : 8);
+                }
+                if (in_array($data['time'], $legacy['times'] ?? [], true)) {
+                    throw ValidationException::withMessages(['statement' => '该结算时间已有历史汇总，请先重新导入原结算文件。']);
+                }
+                $replacement = ['time' => $data['time'], 'amounts' => $amounts];
+            }
+            $dates = array_filter([$original['time'] ?? null, $replacement['time'] ?? null]);
+            $this->guardStatementDates($order, $dates);
+            if ($original !== null) {
+                unset($events[$key]);
+                $existing['suppressed'][$this->statementEventKey($original)] = true;
+            }
+            if ($replacement !== null) {
+                $newKey = $this->statementEventKey($replacement);
+                if (isset($events[$newKey])) {
+                    throw ValidationException::withMessages(['statement' => '已有相同的逐笔结算明细。']);
+                }
+                $events[$newKey] = $replacement;
+                unset($existing['suppressed'][$newKey]);
+            }
+
+            $existing['notice'] = (string) \Illuminate\Support\Str::uuid();
+            $order->update(['payload' => $this->statementPayload($payload, $existing, $events, $legacy)]);
+        });
+    }
+
+    private function statementEventKey(array $event): string
+    {
+        return hash('sha256', json_encode($event, JSON_THROW_ON_ERROR));
+    }
+
+    private function legacyStatement(array $payload, array $existing): ?array
+    {
+        if ($existing === [] || array_key_exists('events', $existing)) {
+            return $existing['legacy'] ?? null;
+        }
+
+        return [
+            'sha256' => $existing['sha256'], 'times' => $existing['settlement_times'],
+            'lines' => $existing['lines'], 'amounts' => array_intersect_key($payload, array_fill_keys(self::statementAmountFields(), true)),
+        ];
+    }
+
+    private function statementPayload(array $payload, array $existing, array $events, ?array $legacy): array
+    {
+        $amounts = $legacy['amounts'] ?? [];
+        foreach ($events as $event) {
+            foreach ($event['amounts'] as $field => $value) {
+                $amounts[$field] = bcadd($amounts[$field] ?? '0', $value, $field === '应结算' ? 2 : 8);
+            }
+        }
+        $priorRefund = $existing['prior_refund'] ?? array_intersect_key($payload, array_flip(['退款金额', '退款费用']));
+        if ($amounts === []) {
+            $payload = array_diff_key($payload, array_fill_keys([...self::statementAmountFields(), '结算币种'], true));
+            $amounts = $priorRefund;
+        } else {
+            $payload['结算币种'] = 'USD';
+        }
+
+        return [...$payload, ...$amounts, '_xuzong_statement_import' => [
+            ...array_intersect_key($existing, array_flip(['notice', 'suppressed'])),
+            'events' => $events, 'legacy' => $legacy, 'prior_refund' => $priorRefund,
+        ]];
+    }
+
+    private function guardStatementDates(FinanceRecord $order, array $dates): void
+    {
+        $accounting = app(FinanceAccountingService::class);
+        $months = [$order->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m')];
+        foreach ($dates as $time) {
+            $months[] = substr($time, 0, 7);
+        }
+        foreach (array_unique($months) as $month) {
+            $accounting->guardUnlocked($month);
+        }
     }
 
     public function importRefunds(UploadedFile $file, ?string $account): array
@@ -241,7 +393,11 @@ class FinanceXuzongOrderImport
                         $fee = bcadd($fee, $refund['fee'], 8);
                     }
                     $payload['_xuzong_refunds'] = $stored;
-                    if (empty($payload['_xuzong_statement_import']) && blank($payload['结算币种'] ?? null)
+                    $statement = $payload['_xuzong_statement_import'] ?? [];
+                    if (array_key_exists('events', $statement)) {
+                        $payload['_xuzong_statement_import']['prior_refund'] = ['退款金额' => $amount, '退款费用' => $fee];
+                    }
+                    if (blank($payload['结算币种'] ?? null)
                         && blank($payload['结算金额'] ?? null) && blank($payload['应结算'] ?? null)) {
                         $payload['退款金额'] = $amount;
                         $payload['退款费用'] = $fee;
@@ -305,6 +461,7 @@ class FinanceXuzongOrderImport
                     $row['交易流水号'] = ($row['交易流水号'] ?? '') ?: $row['平台订单号'];
                     $row['平台订单号'] = '';
                 }
+                $row['_original_payment_status'] = $row['支付状态'] ?? '';
                 if (FinanceSettlementService::transactionStatusCategory($row['支付状态'] ?? null) === 'failed') {
                     $row['支付状态'] = '失败';
                 }
@@ -372,15 +529,18 @@ class FinanceXuzongOrderImport
         if ($columns === []) {
             return [];
         }
-        $candidates = $db->table('logistics_orders')->where(function ($query) use ($rows, $columns): void {
-            foreach ($columns as $header => $column) {
-                $query->orWhereIn($column, collect($rows)->pluck($header)->filter()->unique()->values());
+        $candidates = collect();
+        foreach ($columns as $header => $column) {
+            $references = array_values(array_unique(array_filter(array_column($rows, $header))));
+            if ($references !== []) {
+                $candidates = $candidates->union($db->table('logistics_orders')->whereIn($column, $references)
+                    ->get(['id', ...array_values($columns)])->keyBy('id'));
             }
-        })->get(['id', ...array_values($columns)])->keyBy('id');
+        }
         if ($candidates->isEmpty()) {
             return [];
         }
-        $eligible = $this->creditOrders->query(withPayload: false, xuzongReport: true, withPayments: false, ids: $candidates->keys()->all(), includeReplaced: true)
+        $eligible = $this->creditOrders->query(withPayload: false, xuzongReport: true, withPayments: false, ids: $candidates->keys()->all(), includeReplaced: true, includeSystemOrders: true)
             ->when($account !== null, fn ($query) => $query->where('account', $account))->get()->keyBy('id');
         $byField = [];
         foreach ($columns as $header => $column) {

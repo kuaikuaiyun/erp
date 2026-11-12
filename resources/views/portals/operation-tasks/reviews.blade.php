@@ -39,7 +39,7 @@
     <div class="ot-card ot-recap-review-card" data-review-panel="recaps">
         <div class="ot-card-body ot-recap-review-table-wrap">
             <table class="ot-recap-review-table ot-daily-review-table">
-                <thead><tr><th>数据日期</th><th>运营</th><th>团队</th><th>营业额</th><th>广告费</th><th>订单量</th><th>ROI</th><th>审核阶段</th><th>操作</th></tr></thead>
+                <thead><tr><th>数据日期</th><th>运营</th><th>团队</th><th>营业额</th><th>广告费</th><th>订单量</th><th>ROI</th><th>二级主管审核</th><th>一级主管审核</th><th>审核阶段</th><th>操作</th></tr></thead>
                 <tbody>
                 @forelse($recaps as $recap)
                     @php
@@ -49,18 +49,28 @@
                         $recapStatusLabel = fn ($status) => match ($status) { 'approved' => '已审核', 'rejected' => '已驳回', default => '待审核' };
                     @endphp
                     <tr>
-                        <td class="recap-date"><b>{{ $recap->data_date->format('Y-m-d') }}</b></td>
+                        <td class="recap-date"><b>{{ $recap->data_date->format('Y-m-d') }} {{ \App\Portals\OperationTasks\Support\OperationTaskTime::format($recap->submitted_at ?? $recap->created_at, 'H:i') }}</b></td>
                         <td class="recap-owner"><b>{{ $recap->user_name }}</b></td>
                         <td class="recap-team">{{ $recap->department_name ?: '未分配二级部门' }}</td>
                         <td class="recap-revenue"><b>${{ number_format($recap->total_revenue_usd, 2) }}</b></td>
                         <td class="recap-spend"><b>${{ number_format($recap->total_spend_usd, 2) }}</b></td>
                         <td class="recap-orders"><b>{{ $recap->total_orders }}</b></td>
                         <td class="recap-roi"><b>{{ (float) $recap->total_spend_usd > 0 ? number_format((float) $recap->total_revenue_usd / (float) $recap->total_spend_usd, 2) : '—' }}</b></td>
+                        <td class="test-reviewer-cell">
+                            <div class="ot-stage-status">
+                                <span class="ot-status {{ $recap->leader_review_status === 'approved' ? 'approved' : ($recap->leader_review_status === 'rejected' ? 'rejected' : 'pending') }}">{{ $recap->leader_review_status === 'approved' ? '已通过' : ($recap->leader_review_status === 'rejected' ? '已驳回' : '待审核') }}</span>
+                            </div>
+                        </td>
+                        <td class="test-reviewer-cell">
+                            <div class="ot-stage-status">
+                                <span class="ot-status {{ $recap->department_review_status === 'approved' ? 'approved' : ($recap->department_review_status === 'rejected' ? 'rejected' : 'pending') }}">{{ $recap->department_review_status === 'approved' ? '已通过' : ($recap->department_review_status === 'rejected' ? '已驳回' : '待审核') }}</span>
+                            </div>
+                        </td>
                         <td class="recap-stage">@include('portals.operation-tasks.partials.review-flow', ['record' => $recap])</td>
                         <td class="recap-actions"><button type="button" class="btn ot-primary btn-sm" data-toggle="modal" data-target="#ot-recap-audit-current-{{ $recap->id }}" @disabled(! $recapCanReview)>审核</button></td>
                     </tr>
                 @empty
-                    <tr><td colspan="9"><div class="ot-empty-state"><i class="fa fa-check-circle"></i><b>当前没有待审核的每日复盘</b><span>新的复盘提交后，会出现在这里。</span></div></td></tr>
+                    <tr><td colspan="11"><div class="ot-empty-state"><i class="fa fa-check-circle"></i><b>当前没有待审核的每日复盘</b><span>新的复盘提交后，会出现在这里。</span></div></td></tr>
                 @endforelse
                 </tbody>
             </table>
@@ -86,7 +96,7 @@
     <div class="ot-card ot-test-review-card" data-review-panel="tests">
         <div class="ot-card-body ot-recap-review-table-wrap">
             <table class="ot-recap-review-table ot-test-review-table">
-                <thead><tr><th>任务编号</th><th>运营</th><th>团队</th><th>页面类型</th><th>版本</th><th>素材数</th><th>审核进度</th><th>审核阶段</th><th>操作</th></tr></thead>
+                <thead><tr><th>任务编号</th><th>运营</th><th>团队</th><th>页面类型</th><th>提交时间</th><th>素材信息</th><th>二级主管审核</th><th>一级主管审核</th><th>审核阶段</th><th>操作</th></tr></thead>
                 <tbody>
             @forelse($tasks as $task)
                 @php
@@ -106,14 +116,26 @@
                     <td class="test-owner"><b>{{ $task->owner_name }}</b></td>
                     <td class="test-team">{{ $task->department_name ?: '未分配二级部门' }}</td>
                     <td class="test-page-type"><span class="ot-badge {{ $task->page_type === 'category' ? 'orange' : '' }}">{{ $task->page_type === 'category' ? '类目页' : '单品页' }}</span></td>
-                    <td class="test-version">v{{ $task->version }}</td>
-                    <td class="test-asset-count"><b>{{ $task->assets->count() }}</b></td>
-                    <td class="test-review-progress"><b>{{ $reviewedAssetCount }}/{{ $task->assets->count() }}</b></td>
+                    <td class="test-submitted-at">{{ \App\Portals\OperationTasks\Support\OperationTaskTime::format($task->created_at, 'Y-m-d H:i') }}</td>
+                    <td class="test-asset-info">
+                        <b>{{ $task->assets->count() }} 条素材</b>
+                        <small>审核进度 {{ $reviewedAssetCount }}/{{ $task->assets->count() }}</small>
+                    </td>
+                    <td class="test-reviewer-cell">
+                        <div class="ot-stage-status">
+                            <span class="ot-status {{ $task->leader_review_status === 'approved' ? 'approved' : ($task->leader_review_status === 'rejected' ? 'rejected' : 'pending') }}">{{ $task->leader_review_status === 'approved' ? '已通过' : ($task->leader_review_status === 'rejected' ? '已驳回' : '待审核') }}</span>
+                        </div>
+                    </td>
+                    <td class="test-reviewer-cell">
+                        <div class="ot-stage-status">
+                            <span class="ot-status {{ $task->department_review_status === 'approved' ? 'approved' : ($task->department_review_status === 'rejected' ? 'rejected' : 'pending') }}">{{ $task->department_review_status === 'approved' ? '已通过' : ($task->department_review_status === 'rejected' ? '已驳回' : '待审核') }}</span>
+                        </div>
+                    </td>
                     <td class="recap-stage">@include('portals.operation-tasks.partials.review-flow', ['record' => $task])</td>
-                    <td class="recap-actions"><a class="btn btn-info btn-sm" href="{{ $task->landing_url }}" target="_blank" rel="noopener">落地页</a><a class="btn btn-default btn-sm" href="{{ route('operation-tasks.tests.show', $task) }}">档案</a>@if(in_array(true, $taskPermissions, true))<button class="btn ot-primary btn-sm" type="button" data-toggle="modal" data-target="#ot-audit-{{ $task->id }}">审核</button>@endif</td>
+                    <td class="recap-actions"><div class="ot-review-actions"><a class="btn btn-info btn-sm" href="{{ $task->landing_url }}" target="_blank" rel="noopener">落地页</a><a class="btn btn-default btn-sm" href="{{ route('operation-tasks.tests.show', $task) }}">档案</a>@if(in_array(true, $taskPermissions, true))<button class="btn ot-primary btn-sm" type="button" data-toggle="modal" data-target="#ot-audit-{{ $task->id }}">审核</button>@endif</div></td>
                 </tr>
             @empty
-                <tr><td colspan="9"><div class="ot-empty-state"><i class="fa fa-check-circle"></i><b>当前筛选条件下暂无审核任务</b><span>调整筛选条件后再查看，或等待本部门成员提交新任务。</span></div></td></tr>
+                <tr><td colspan="10"><div class="ot-empty-state"><i class="fa fa-check-circle"></i><b>当前筛选条件下暂无审核任务</b><span>调整筛选条件后再查看，或等待本部门成员提交新任务。</span></div></td></tr>
             @endforelse
                 </tbody>
             </table>
@@ -131,6 +153,7 @@
                         @php
                             $activeChannel = array_key_first($channels);
                             $activeLabel = $channels[$activeChannel] ?? '审核';
+                            $leaderTaskReview = $taskReviews->get('leader');
                         @endphp
                         <div class="ot-audit-overview">
                             <div class="ot-audit-overview-meta">
@@ -145,7 +168,18 @@
                             @csrf
                         <section class="ot-audit-section">
                             <div class="ot-audit-section-head"><div><span>01</span><h4>素材逐条审核</h4></div><small>{{ $task->assets->count() }} 条素材 · {{ $activeLabel }}</small></div>
-                            <input type="hidden" name="task_id" value="{{ $task->id }}"><input type="hidden" name="channel" value="{{ $activeChannel }}">
+                             <input type="hidden" name="task_id" value="{{ $task->id }}"><input type="hidden" name="channel" value="{{ $activeChannel }}">
+                            @if($activeChannel === 'department' && $leaderTaskReview)
+                                <div class="ot-prior-review">
+                                    <div class="ot-prior-review-title">二级主管任务审核记录</div>
+                                    <div class="ot-prior-review-meta">
+                                        <b>{{ $leaderTaskReview->reviewer_name ?: '二级主管' }}</b>
+                                        <span class="ot-badge {{ $leaderTaskReview->result === 'rejected' ? 'red' : '' }}">{{ $leaderTaskReview->result === 'rejected' ? '已驳回' : '已通过' }}</span>
+                                        <span>{{ \App\Portals\OperationTasks\Support\OperationTaskTime::format($leaderTaskReview->reviewed_at) }}</span>
+                                    </div>
+                                    <p>{{ $leaderTaskReview->opinion ?: '未填写审核意见' }}</p>
+                                </div>
+                            @endif
                             <div class="table-responsive ot-audit-table-wrap"><table class="table ot-audit-assets-table"><thead><tr><th>素材信息</th><th>表达卖点 / 测试目的</th><th>当前状态</th><th>审核结果</th><th>审核意见</th></tr></thead><tbody>
                                 @foreach($task->assets as $asset)
                                     @php
@@ -161,8 +195,9 @@
                                         $assetIsImage = str_starts_with($assetMime, 'image/') || preg_match('/\.(?:jpe?g|png|gif|webp|bmp|svg)(?:\?.*)?$/i', $assetPreviewProbe);
                                         $assetIsVideo = str_starts_with($assetMime, 'video/') || preg_match('/\.(?:mp4|webm|ogg|mov|m4v)(?:\?.*)?$/i', $assetPreviewProbe);
                                         $assetPreviewType = $assetIsImage ? 'image' : ($assetIsVideo ? 'video' : 'link');
+                                        $leaderAssetReview = $asset->reviews->where('target_version', $asset->version)->where('channel', 'leader')->first();
                                     @endphp
-                                    <tr><td><div class="ot-asset-info">@if($assetPreviewUrl)<button type="button" class="ot-asset-preview-trigger" data-asset-preview data-preview-type="{{ $assetPreviewType }}" data-preview-src="{{ $assetPreviewUrl }}" data-preview-name="{{ $assetPreviewName }}" aria-label="预览 {{ $assetPreviewName }}">@if($assetIsImage)<img src="{{ $assetPreviewUrl }}" loading="lazy" alt="">@elseif($assetIsVideo)<span class="ot-asset-thumb is-video"><i class="fa fa-play"></i></span>@else<span class="ot-asset-thumb is-link"><i class="fa fa-external-link"></i></span>@endif</button>@endif<div class="ot-asset-copy"><button type="button" class="ot-asset-name" @if($assetPreviewUrl) data-asset-preview data-preview-type="{{ $assetPreviewType }}" data-preview-src="{{ $assetPreviewUrl }}" data-preview-name="{{ $assetPreviewName }}" @else disabled @endif>{{ $assetPreviewName }}</button></div></div></td><td><span class="ot-badge">{{ $asset->source_type === 'ai_created' ? 'AI制作' : ($asset->source_type === 'peer_copied' ? '同行搬运' : '未标记') }}</span><div>{{ $asset->selling_point }}</div></td><td><span class="ot-badge {{ $assetBadgeClass }}">{{ $assetStatusText }}</span></td><td><select class="form-control" name="assets[{{ $asset->id }}][result]"><option value="approved" @selected($assetReviewResult === 'approved')>通过</option><option value="rejected" @selected($assetReviewResult === 'rejected')>驳回并整改</option></select></td><td><textarea class="form-control" rows="2" name="assets[{{ $asset->id }}][opinion]" placeholder="驳回时必须填写整改意见">{{ $assetReviewOpinion }}</textarea></td></tr>
+                                    <tr><td><div class="ot-asset-info">@if($assetPreviewUrl)<button type="button" class="ot-asset-preview-trigger" data-asset-preview data-preview-type="{{ $assetPreviewType }}" data-preview-src="{{ $assetPreviewUrl }}" data-preview-name="{{ $assetPreviewName }}" aria-label="预览 {{ $assetPreviewName }}">@if($assetIsImage)<img src="{{ $assetPreviewUrl }}" loading="lazy" alt="">@elseif($assetIsVideo)<span class="ot-asset-thumb is-video"><i class="fa fa-play"></i></span>@else<span class="ot-asset-thumb is-link"><i class="fa fa-external-link"></i></span>@endif</button>@endif<div class="ot-asset-copy"><button type="button" class="ot-asset-name" @if($assetPreviewUrl) data-asset-preview data-preview-type="{{ $assetPreviewType }}" data-preview-src="{{ $assetPreviewUrl }}" data-preview-name="{{ $assetPreviewName }}" @else disabled @endif>{{ $assetPreviewName }}</button></div></div></td><td><span class="ot-badge">{{ $asset->source_type === 'ai_created' ? 'AI制作' : ($asset->source_type === 'peer_copied' ? '同行搬运' : '未标记') }}</span><div>{{ $asset->selling_point }}</div></td><td><span class="ot-badge {{ $assetBadgeClass }}">{{ $assetStatusText }}</span>@if($activeChannel === 'department' && $leaderAssetReview)<div class="ot-prior-asset-review"><b>二级主管：{{ $leaderAssetReview->reviewer_name ?: '未记录' }}</b><span>{{ $leaderAssetReview->result === 'rejected' ? '驳回' : '通过' }} · {{ \App\Portals\OperationTasks\Support\OperationTaskTime::format($leaderAssetReview->reviewed_at) }}</span>@if($leaderAssetReview->opinion)<p>{{ $leaderAssetReview->opinion }}</p>@endif</div>@endif</td><td><select class="form-control" name="assets[{{ $asset->id }}][result]"><option value="approved" @selected($assetReviewResult === 'approved')>通过</option><option value="rejected" @selected($assetReviewResult === 'rejected')>驳回该素材</option></select></td><td><textarea class="form-control" rows="2" name="assets[{{ $asset->id }}][opinion]" placeholder="驳回该素材时必须填写整改意见">{{ $assetReviewOpinion }}</textarea></td></tr>
                                 @endforeach
                             </tbody></table></div>
                             <div class="ot-batch-audit-footer"><span><i class="fa fa-info-circle"></i> 请确认每条素材的结果；选择驳回时必须填写具体整改意见。</span></div>
@@ -179,8 +214,12 @@
                                         <select class="form-control" name="task_result"><option value="approved" @selected($review?->result === 'approved')>通过</option><option value="rejected" @selected($review?->result === 'rejected')>驳回并整改</option></select>
                                     </div>
                                     <div class="ot-task-audit-field">
-                                        <label>驳回范围</label>
-                                        <select class="form-control" name="task_rejection_scope"><option value="task">整个任务及相关广告</option><option value="asset">指定素材对应广告</option></select>
+                                        <label>驳回对象</label>
+                                        <div class="ot-rejection-scopes">
+                                            <label><input type="checkbox" name="rejection_scopes[]" value="task"> 落地页</label>
+                                            <label><input type="checkbox" name="rejection_scopes[]" value="asset"> 素材问题</label>
+                                            <small>驳回时至少选择一项；选择素材问题时还需驳回至少一条素材。</small>
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="ot-task-audit-opinion">
@@ -214,10 +253,12 @@
 <style>
 .ot-review-tabs{display:inline-flex;gap:0!important;margin:0 0 14px;border:1px solid #cbdce8;border-radius:3px;background:#fff;overflow:hidden}.ot-review-tabs button{display:flex;align-items:center;justify-content:center;gap:7px;min-width:190px;height:38px;padding:0 20px;border:0!important;border-right:1px solid #cbdce8!important;border-bottom:0!important;background:#fff!important;color:#49667c!important;font-size:13px;font-weight:400!important;text-align:center;cursor:pointer;transition:background .16s ease,color .16s ease}.ot-review-tabs button:last-child{border-right:0!important}.ot-review-tabs button:hover{background:#eef7fc!important;color:#247fae!important}.ot-review-tabs button.is-active{background:#3292c5!important;color:#fff!important}.ot-review-tabs button em{display:inline;color:inherit;font-size:12px;font-style:normal;font-weight:400}.ot-review-pagination{padding:10px 0 18px;text-align:center}.ot-review-pagination .pagination{margin:0}
 .ot-test-audit-modal .modal-dialog{width:min(1080px,calc(100% - 36px))!important}.ot-test-audit-modal .modal-header{padding:18px 24px}.ot-test-audit-modal .modal-body{padding:18px 22px 24px;background:#f4f7f9!important}.ot-test-audit-modal .modal-footer{padding:11px 22px}.ot-audit-overview,.ot-audit-section{border:1px solid #dbe6eb;border-radius:8px;background:#fff;box-shadow:0 2px 8px rgba(35,67,83,.035)}.ot-audit-overview{margin-bottom:16px;overflow:hidden}.ot-audit-overview-meta{display:grid;grid-template-columns:1fr 1.25fr 1fr auto;gap:0;align-items:center;border-bottom:1px solid #e4ecef}.ot-audit-overview-meta>div{min-height:68px;padding:13px 16px;border-right:1px solid #e4ecef}.ot-audit-overview-meta small,.ot-audit-overview-meta b{display:block}.ot-audit-overview-meta small,.ot-audit-overview-objective small{margin-bottom:5px;color:#7a8d98;font-size:11px}.ot-audit-overview-meta b{color:#27495b;font-size:13px;line-height:1.45}.ot-audit-overview-meta>a{margin:0 16px;white-space:nowrap}.ot-audit-overview-objective{padding:14px 16px}.ot-audit-overview-objective p{margin:0;color:#405f70;line-height:1.65;white-space:pre-wrap}.ot-audit-section{margin-top:16px;overflow:hidden}.ot-audit-section-head{display:flex;align-items:center;justify-content:space-between;min-height:48px;padding:0 16px;border-bottom:1px solid #dfe9ed;background:#f7fafb}.ot-audit-section-head>div{display:flex;align-items:center;gap:9px}.ot-audit-section-head span{display:inline-flex;width:25px;height:25px;align-items:center;justify-content:center;border-radius:5px;background:#e5f4ef;color:#21806e;font-size:11px;font-weight:700}.ot-audit-section-head h4{margin:0;color:#244657;font-size:15px;font-weight:700}.ot-audit-section-head small{color:#718690}.ot-audit-table-wrap{margin:0;overflow-x:auto}.ot-test-audit-modal .ot-audit-assets-table{margin:0}.ot-test-audit-modal .ot-audit-assets-table thead th{padding:10px 12px;border:0;border-bottom:1px solid #dfe8ec;background:#edf4f7;color:#49697a;font-size:12px;vertical-align:middle}.ot-test-audit-modal .ot-audit-assets-table td{padding:12px;border:0;border-bottom:1px solid #e6edef;vertical-align:middle}.ot-test-audit-modal .ot-audit-assets-table tbody tr:last-child td{border-bottom:0}.ot-test-audit-modal .ot-audit-assets-table tbody tr:nth-child(even){background:#fafcfd}.ot-test-audit-modal .ot-audit-assets-table td:first-child b,.ot-test-audit-modal .ot-audit-assets-table td:first-child small{display:block}.ot-test-audit-modal .ot-audit-assets-table td:first-child b{color:#244657;line-height:1.45}.ot-test-audit-modal .ot-audit-assets-table td:first-child small{margin-top:5px;color:#7c8e98}.ot-test-audit-modal .ot-audit-assets-table .form-control{border-color:#cad9e1;border-radius:4px;box-shadow:none}.ot-test-audit-modal .ot-audit-assets-table select.form-control{height:36px}.ot-test-audit-modal .ot-audit-assets-table textarea.form-control{min-height:58px;resize:vertical}.ot-test-audit-modal .ot-batch-audit-footer{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:13px 16px!important;border-top:1px solid #dfe9ed!important;background:#f8fbfc}.ot-test-audit-modal .ot-batch-audit-footer span{max-width:none!important;color:#677f8c;font-size:12px}.ot-test-audit-modal .ot-batch-audit-footer i{margin-right:5px;color:#2d8b79}.ot-task-audit-section{padding-bottom:0}.ot-task-audit-section .ot-audit-form-card{margin:0;padding:16px;border:0;border-radius:0;background:#fff}.ot-task-audit-section .ot-audit-form-card>b,.ot-task-audit-section .ot-audit-form-card>small{display:none}.ot-task-audit-section .ot-audit-form-card form{display:grid;grid-template-columns:180px 220px minmax(260px,1fr) auto;gap:10px;align-items:end}.ot-task-audit-section .ot-audit-form-card textarea{min-height:70px;resize:vertical}.ot-task-audit-section .ot-audit-form-card .btn{height:34px;white-space:nowrap}.ot-test-audit-modal .modal-footer .btn{min-width:72px}
-.ot-task-audit-grid{display:grid;grid-template-columns:360px minmax(0,1fr);gap:18px;align-items:start;padding:16px}.ot-task-audit-grid label{display:block;margin:0 0 6px;color:#496575;font-size:12px;font-weight:700;line-height:18px}.ot-task-audit-fields{display:grid;grid-template-columns:1fr;gap:12px}.ot-task-audit-field{min-width:0}.ot-task-audit-fields .form-control{width:100%;height:38px}.ot-task-audit-opinion{min-width:0}.ot-task-audit-opinion textarea{width:100%;height:112px;min-height:112px;resize:vertical}.ot-task-audit-grid .form-control{border-color:#cad9e1;border-radius:4px;box-shadow:none}.ot-unified-audit-actions{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:16px;padding:14px 16px;border:1px solid #dbe6eb;border-radius:8px;background:#fff}.ot-unified-audit-actions span{color:#687f8c;font-size:12px}.ot-unified-audit-actions span i{margin-right:5px;color:#258573}.ot-unified-audit-actions .btn{min-width:180px;height:38px}
+.ot-task-audit-grid{display:grid;grid-template-columns:360px minmax(0,1fr);gap:18px;align-items:stretch;padding:16px}.ot-task-audit-grid label{display:block;margin:0 0 6px;color:#496575;font-size:12px;font-weight:700;line-height:18px}.ot-task-audit-fields{display:grid;grid-template-columns:1fr;gap:12px}.ot-task-audit-field{min-width:0}.ot-task-audit-fields .form-control{width:100%;height:38px}.ot-task-audit-opinion{display:flex;min-width:0;flex-direction:column}.ot-task-audit-opinion textarea{width:100%;height:auto;min-height:0;flex:1;resize:vertical}.ot-task-audit-grid .form-control{border-color:#cad9e1;border-radius:4px;box-shadow:none}.ot-unified-audit-actions{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:16px;padding:14px 16px;border:1px solid #dbe6eb;border-radius:8px;background:#fff}.ot-unified-audit-actions span{color:#687f8c;font-size:12px}.ot-unified-audit-actions span i{margin-right:5px;color:#258573}.ot-unified-audit-actions .btn{min-width:180px;height:38px}
+.ot-review-target{display:flex;min-height:38px;align-items:center;gap:10px;padding:7px 11px;border:1px solid #cad9e1;border-radius:4px;background:#f7fafb}.ot-review-target b{color:#244657}.ot-review-target span{color:#718690;font-size:11px}.ot-prior-review{margin:14px 16px 0;padding:12px 14px;border:1px solid #cfe1ea;border-left:3px solid #3292c5;border-radius:5px;background:#f5fafc}.ot-prior-review-title{margin-bottom:7px;color:#244657;font-weight:700}.ot-prior-review-meta{display:flex;align-items:center;gap:9px;color:#728691;font-size:12px}.ot-prior-review p{margin:7px 0 0;color:#496575;white-space:pre-wrap}.ot-prior-asset-review{margin-top:8px;padding-top:7px;border-top:1px dashed #d5e2e7;color:#647c88;font-size:11px;line-height:1.5}.ot-prior-asset-review b,.ot-prior-asset-review span{display:block}.ot-prior-asset-review p{margin:4px 0 0;color:#8a5b45;white-space:pre-wrap}
 .ot-test-audit-modal .modal-dialog{width:min(1280px,calc(100% - 36px))!important}.ot-test-audit-modal .ot-audit-assets-table{min-width:1080px;table-layout:fixed}.ot-test-audit-modal .ot-audit-assets-table th:nth-child(1){width:27%}.ot-test-audit-modal .ot-audit-assets-table th:nth-child(2){width:20%}.ot-test-audit-modal .ot-audit-assets-table th:nth-child(3){width:10%}.ot-test-audit-modal .ot-audit-assets-table th:nth-child(4){width:15%}.ot-test-audit-modal .ot-audit-assets-table th:nth-child(5){width:28%}.ot-asset-info{display:flex;align-items:center;gap:12px;min-width:0}.ot-asset-preview-trigger{display:flex;flex:0 0 76px;width:76px;height:58px;align-items:center;justify-content:center;padding:0;overflow:hidden;border:1px solid #d4e1e7;border-radius:6px;background:#edf4f7;cursor:pointer}.ot-asset-preview-trigger img{width:100%;height:100%;object-fit:cover;transition:transform .18s ease}.ot-asset-preview-trigger:hover img{transform:scale(1.06)}.ot-asset-thumb{display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#fff;font-size:18px}.ot-asset-thumb.is-video{background:linear-gradient(135deg,#224c61,#29947e)}.ot-asset-thumb.is-link{background:linear-gradient(135deg,#617889,#87a0ae)}.ot-asset-copy{min-width:0}.ot-asset-copy small{display:block;margin-top:4px;color:#7c8e98}.ot-asset-name{display:block;max-width:100%;padding:0;border:0;background:transparent;color:#244657;font-weight:700;line-height:1.45;text-align:left;word-break:break-word;cursor:pointer}.ot-asset-name:hover{color:#2587b5;text-decoration:underline}.ot-asset-name:disabled{color:#244657;cursor:default;text-decoration:none}.ot-asset-copy .ot-asset-preview-hint{color:#2587b5;font-size:11px}.ot-asset-preview-modal{z-index:1070}.ot-asset-preview-modal .modal-dialog{width:min(1120px,calc(100% - 36px))!important}.ot-asset-preview-modal .modal-body{padding:16px;background:#18232a!important}.ot-asset-preview-stage{display:flex;min-height:420px;max-height:72vh;align-items:center;justify-content:center;overflow:auto;border-radius:4px;background:#111a1f}.ot-asset-preview-stage img,.ot-asset-preview-stage video{display:none;max-width:100%;max-height:70vh}.ot-asset-preview-stage img.is-active,.ot-asset-preview-stage video.is-active{display:block}.ot-asset-preview-link{display:none;color:#d8e3e8;text-align:center}.ot-asset-preview-link.is-active{display:block}.ot-asset-preview-link i{display:block;margin-bottom:12px;font-size:44px}.ot-asset-preview-link p{margin-bottom:16px}.ot-asset-preview-modal .modal-footer{display:flex;justify-content:flex-end;gap:8px}
-@media(max-width:900px){.ot-audit-overview-meta{grid-template-columns:1fr 1fr}.ot-audit-overview-meta>div{border-bottom:1px solid #e4ecef}.ot-audit-overview-meta>a{margin:12px 16px}.ot-task-audit-grid{grid-template-columns:1fr}}@media(max-width:767px){.ot-review-tabs{display:flex;width:100%}.ot-review-tabs button{flex:1;min-width:0;padding:0 10px}.ot-test-audit-modal .modal-dialog{width:auto!important;margin:10px!important}.ot-test-audit-modal .modal-body{padding:12px}.ot-audit-overview-meta{grid-template-columns:1fr}.ot-audit-overview-meta>div{border-right:0}.ot-task-audit-fields{grid-template-columns:1fr}.ot-unified-audit-actions{align-items:flex-start;flex-direction:column}.ot-unified-audit-actions .btn{width:100%}}
+@media(max-width:900px){.ot-audit-overview-meta{grid-template-columns:1fr 1fr}.ot-audit-overview-meta>div{border-bottom:1px solid #e4ecef}.ot-audit-overview-meta>a{margin:12px 16px}.ot-task-audit-grid{grid-template-columns:1fr}.ot-task-audit-opinion textarea{min-height:112px}}@media(max-width:767px){.ot-review-tabs{display:flex;width:100%}.ot-review-tabs button{flex:1;min-width:0;padding:0 10px}.ot-test-audit-modal .modal-dialog{width:auto!important;margin:10px!important}.ot-test-audit-modal .modal-body{padding:12px}.ot-audit-overview-meta{grid-template-columns:1fr}.ot-audit-overview-meta>div{border-right:0}.ot-task-audit-fields{grid-template-columns:1fr}.ot-unified-audit-actions{align-items:flex-start;flex-direction:column}.ot-unified-audit-actions .btn{width:100%}}
 .ot-asset-name,.ot-asset-copy{display:none!important}.ot-asset-info{justify-content:center}.ot-test-audit-modal .ot-audit-assets-table th:nth-child(1){width:13%}.ot-test-audit-modal .ot-audit-assets-table th:nth-child(2){width:27%}.ot-test-audit-modal .ot-audit-assets-table th:nth-child(3){width:10%}.ot-test-audit-modal .ot-audit-assets-table th:nth-child(4){width:16%}.ot-test-audit-modal .ot-audit-assets-table th:nth-child(5){width:34%}
+.ot-rejection-scopes{display:flex;min-height:90px;align-content:flex-start;align-items:center;flex-wrap:wrap;gap:10px 18px;padding:12px 14px;border:1px solid #d2dfe5;border-radius:5px;background:#f8fbfc}.ot-rejection-scopes label{display:inline-flex;align-items:center;gap:6px;margin:0;color:#264b5e;font-weight:600;cursor:pointer}.ot-rejection-scopes input{margin:0}.ot-rejection-scopes small{flex-basis:100%;color:#788d98;line-height:1.5}.ot-stage-status{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;white-space:nowrap}.ot-current-review-state{text-align:center!important;vertical-align:middle!important}.ot-workflow-state{display:inline-flex;align-items:center;justify-content:center;min-height:24px;padding:3px 9px;border-radius:12px;font-weight:600;line-height:1.35;white-space:nowrap}.ot-workflow-state.is-pending,.ot-workflow-state.is-warning{background:#fff3df;color:#b36b13}.ot-workflow-state.is-rejected{background:#fdeaea;color:#c64a4a}.ot-workflow-state.is-approved{background:#e7f5ef;color:#168262}.ot-rejection-note{width:100%;max-width:230px;margin:7px auto 0;padding-top:7px;border-top:1px dashed #d7e1e6;text-align:left}.ot-rejection-note b,.ot-rejection-note span,.ot-rejection-note small{display:block}.ot-rejection-note b{margin-bottom:3px;color:#a74444;font-size:11px}.ot-rejection-note span{color:#6f4545;font-size:12px;line-height:1.45;white-space:normal;word-break:break-word}.ot-rejection-note small{margin-top:4px;color:#8a9aa2;font-size:10px;line-height:1.35}
 </style>
 @endpush
 
@@ -299,6 +340,20 @@
                 taskOpinion.classList.add('has-error');
                 if (!invalidMessage) taskOpinion.focus();
                 invalidMessage = '驳回任务时必须填写具体整改意见。';
+            }
+            if (taskResult && taskResult.value === 'rejected') {
+                var checkedScopes = form.querySelectorAll('input[name="rejection_scopes[]"]:checked');
+                if (!checkedScopes.length) {
+                    invalidMessage = invalidMessage || '驳回任务时请至少选择一个驳回对象。';
+                }
+                var assetScope = form.querySelector('input[name="rejection_scopes[]"][value="asset"]:checked');
+                var hasRejectedAsset = Array.prototype.some.call(
+                    form.querySelectorAll('select[name$="[result]"]'),
+                    function (select) { return select.value === 'rejected'; }
+                );
+                if (assetScope && !hasRejectedAsset) {
+                    invalidMessage = invalidMessage || '选择“素材问题”后，请至少驳回一条素材。';
+                }
             }
             if (invalidMessage) {
                 notify(invalidMessage);

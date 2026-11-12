@@ -139,7 +139,7 @@ class FinanceCreditSettlementLayout
             '拒付预警ethoca' => $values['ethoca_fee'], 'ethoca预警退款' => $values['ethoca_refund'] ?? ''];
     }
 
-    public static function values(string $channel, array $row, array $payload, array $saved): array
+    public static function values(string $channel, array $row, array $payload, array $saved, string $sourceTimezone): array
     {
         $aliases = [
             'website_name' => $payload['商户名称'] ?? $payload['店铺名称'] ?? null,
@@ -180,6 +180,25 @@ class FinanceCreditSettlementLayout
                 : (filled($raw) ? $raw : $fallback);
         }
 
+        $values['completed_at'] = self::reportTimestamp($values['completed_at'] ?? null, $sourceTimezone, $row['timezone']);
+
         return $values;
+    }
+
+    public static function reportTimestamp(mixed $value, string $sourceTimezone, string $timezone): mixed
+    {
+        if (blank($value)) {
+            return $value;
+        }
+
+        if (is_numeric($value)) {
+            $value = Date::excelToDateTimeObject((float) $value)->format('Y-m-d H:i:s');
+        }
+
+        try {
+            return \Carbon\CarbonImmutable::parse($value, $sourceTimezone)->setTimezone($timezone)->toDateTimeString();
+        } catch (\Carbon\Exceptions\InvalidFormatException) {
+            return $value;
+        }
     }
 }

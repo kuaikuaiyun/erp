@@ -12,7 +12,7 @@
             <span data-xuzong-filename style="display:block;white-space:pre-line;overflow-wrap:anywhere;max-height:9em;overflow:auto">点击选择或拖入多个文件</span>
             <input type="file" id="xuzong-import-file" name="file" accept=".xlsx,.csv,.tsv,.txt" multiple required>
         </label>
-        <p class="settlement-note" style="padding:0 20px">支持订单、退款明细和逐笔结算账单。退款明细按平台订单号匹配，仅计入成功退款。默认按北京时间读取。</p>
+        <p class="settlement-note" style="padding:0 20px">支持订单、退款明细和逐笔结算账单。退款明细按平台订单号匹配，仅计入成功退款。文件时间默认按 UTC（+0）读取。</p>
         <p id="xuzong-credit-import-progress" style="padding:0 20px;white-space:pre-line;overflow-wrap:anywhere" role="status" aria-live="polite"></p>
         <footer>
             <button type="button" class="btn btn-default" data-xuzong-import-close>取消</button>

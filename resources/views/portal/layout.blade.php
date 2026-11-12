@@ -41,7 +41,7 @@
         : [];
     $operationTaskReviewCounts = $portal->code === 'fuzhuang'
         ? app(\App\Services\OperationTaskPendingCountService::class)->forUser($user)
-        : ['recaps' => 0, 'tests' => 0, 'rejected_recaps' => 0];
+        : ['recaps' => 0, 'tests' => 0, 'rejected_recaps' => 0, 'rejected_tests' => 0];
     // Review and dashboard navigation is reserved for department managers; routes remain protected separately.
     $canManageOperationTasks = $user->isAdministrator()
         || app(\App\Services\DepartmentAuthorizationService::class)->managedDepartmentIds($user)->isNotEmpty();

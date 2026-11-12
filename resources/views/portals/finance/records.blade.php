@@ -157,6 +157,9 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
 </style>
 <style>.finance-system .finance-records-panel .finance-condition{grid-template-columns:minmax(160px,1fr) minmax(180px,2fr) 60px}.finance-system .finance-records-data .finance-table th:first-child,.finance-system .finance-records-data .finance-table td:first-child{width:auto;min-width:120px;max-width:240px;padding:10px 12px;text-align:left}.finance-system .finance-records-data .finance-table th:nth-child(2),.finance-system .finance-records-data .finance-table td:nth-child(2){position:static;box-shadow:none}@media(max-width:650px){.finance-system .finance-records-panel .finance-condition{grid-template-columns:minmax(0,1fr) 60px}.finance-condition [data-filter-field]{grid-column:1/-1}}</style>
 @endpush
+@include('portals.finance.partials.xuzong-statement-notices')
+@if($xuzongReport) @include('portals.finance.partials.xuzong-statement-dialog') @endif
+
 @section('finance_content')
 @if($xuzongReport)
 <p class="finance-note">订单和支付状态来自 Shopify 与物流系统。导入账单用于补充已匹配订单的结算字段。</p>

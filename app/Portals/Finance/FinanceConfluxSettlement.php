@@ -712,6 +712,11 @@ class FinanceConfluxSettlement
                         ? Date::excelToDateTimeObject((float) $time)->format('Y-m-d H:i:s') : $time;
                 }
             }
+            foreach (['initiated_at', 'completed_at'] as $field) {
+                $layout[$field] = FinanceCreditSettlementLayout::reportTimestamp(
+                    $layout[$field] ?? null, 'Asia/Shanghai', $filters['timezone'] ?? 'Asia/Shanghai',
+                );
+            }
             $layout = $this->storeFees($layout, $group);
             $wallet = $this->isWallet($layout['website_name'] ?? null, $group);
             $layout = array_replace($layout, $this->exceptionColumns($layout, $group, $wallet));

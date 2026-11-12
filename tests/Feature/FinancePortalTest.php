@@ -893,20 +893,9 @@ class FinancePortalTest extends TestCase
         DB::table('logistics_orders')->update(['payment_gateway_order_id' => DB::raw('bill_number'), 'payment_gateway' => 'FintrixV2']);
         (require database_path('migrations/2026_11_10_000003_add_xuzong_credit_orders_report_menu.php'))->up();
         $creditUrl = '/finance/reports/xuzong-credit';
-        $creditRows = $this->get($creditUrl)->assertOk()->viewData('xuzongRows')->keyBy('平台订单号');
-        foreach (['BEFORE-TRANSFER', 'AT-TRANSFER'] as $reference) {
-            $this->assertSame($rows[$reference]['owner'], $creditRows[$reference]['使用人']);
-            $this->assertSame($rows[$reference]['team'], $creditRows[$reference]['运营所属部门']);
-            $this->assertSame($rows[$reference]['operation_region'], $creditRows[$reference]['区域']);
-        }
-        $this->assertSame(['备用曾11', '厦门运营部', '厦门'], [
-            $creditRows['UNASSIGNED']['使用人'], $creditRows['UNASSIGNED']['运营所属部门'], $creditRows['UNASSIGNED']['区域'],
-        ]);
-        $creditExport = $this->readDownload($this->get($creditUrl.'/export?export_scope=filtered&report_columns[]=3&report_columns[]=39&report_columns[]=40&report_columns[]=48')
-            ->assertOk()->streamedContent())->toArray();
-        $this->assertSame(['平台订单号', '使用人', '运营所属部门', '地区'], $creditExport[0]);
-        $this->assertSame(['BEFORE-TRANSFER', '张清洪', '郑州运营部', '郑州'], collect($creditExport)->slice(1)->keyBy(0)->get('BEFORE-TRANSFER'));
-        $this->assertSame(['UNASSIGNED', '备用曾11', '厦门运营部', '厦门'], collect($creditExport)->slice(1)->keyBy(0)->get('UNASSIGNED'));
+        $this->get($creditUrl)->assertOk()->assertViewHas('records', fn ($rows) => $rows->total() === 0);
+        $this->get($creditUrl.'/export?export_scope=filtered&report_columns[]=3')
+            ->assertRedirect()->assertSessionHasErrors('selected_ids');
 
         DB::table($roles)->insert(['id' => 25, 'name' => '杭州市运营一部', 'slug' => 'test-operations-hz', 'parent_id' => 21]);
         DB::table($memberships)->where('user_id', 11)->update(['role_id' => 25]);
@@ -973,6 +962,16 @@ class FinancePortalTest extends TestCase
 
         // An active store can also have an empty initial row followed by an assigned owner.
         DB::table('assistant_domain_stores')->where('id', 1)->update(['shop_status' => 'in_use']);
+        foreach (DB::table('logistics_orders')->whereIn('bill_number', ['NO-OWNER', 'UNASSIGNED'])->get() as $source) {
+            FinanceRecord::query()->create([
+                'dataset' => \App\Portals\Finance\FinanceLogisticsCreditOrders::IMPORTED_DATASET,
+                'account' => 'SHANGYUN-v2', 'reference' => $source->bill_number,
+                'occurred_at' => $source->order_created_at, 'source_timezone' => 'UTC',
+                'currency' => 'USD', 'status' => 'SUCCESS', 'domain' => $source->source_shop_domain,
+                'fingerprint' => hash('sha256', $source->bill_number),
+                'payload' => ['_linked_logistics_id' => $source->id, '交易金额' => '10'],
+            ]);
+        }
         $activeCreditRows = $this->get($creditUrl)->assertOk()
             ->assertSeeInOrder(['<th scope="col">运营所属部门</th>', '<th scope="col">地区</th>', '<th scope="col">通途订单</th>'], false)
             ->viewData('xuzongRows')->keyBy('平台订单号');
@@ -1749,7 +1748,9 @@ class FinancePortalTest extends TestCase
         $this->assertNotContains('商品大类', $headers);
         $this->assertSame('0000123', $sheet->getCell('B2')->getValue());
         $this->assertEquals(FinanceRecord::sole()->id, $sheet->getCell('I2')->getValue());
-        $this->assertSame('2026-09-08', $sheet->getCell('J2')->getValue());
+        $this->assertSame('2026-09-09', $sheet->getCell('J2')->getValue());
+        $utcSheet = $this->readDownload($this->get('/finance/reports/paypal-settlement?download=1&timezone=UTC')->assertOk()->streamedContent());
+        $this->assertSame('2026-09-08', $utcSheet->getCell('J2')->getValue());
         $this->assertSame(1, $sheet->getParent()->getSheetCount());
         $legacyContent = $this->get('/finance/reports/paypal-settlement?download=1&format=xls')->assertOk()->streamedContent();
         $legacy = $this->readDownload($legacyContent);
@@ -2292,6 +2293,9 @@ class FinancePortalTest extends TestCase
         $success = $rows['TEMPLATE-0'];
         $this->assertSame('2026-10', $success['month']);
         $this->assertSame('-08:00', $success['timezone']);
+        $converted = app(\App\Portals\Finance\FinanceSettlementService::class)->rows('credit_card', ['timezone' => 'Asia/Shanghai'])->keyBy('reference')['TEMPLATE-0'];
+        $this->assertSame('2026-11-01 08:30:00', $converted['date']);
+        $this->assertSame('Asia/Shanghai', $converted['timezone']);
         $this->assertEquals(80, $success['source_settlement_usd']);
         $this->assertEquals(10, $success['settlement']);
         $this->assertStringContainsString('HKD', $success['currency_warning']);
@@ -2969,253 +2973,10 @@ class FinancePortalTest extends TestCase
             'code' => 'finance_xuzong-credit', 'title' => '徐总信用卡', 'path' => $report,
             'parent_id' => DB::table('portal_menus')->where('code', 'finance_reports')->value('id'),
         ]);
-        $creditPage = $this->get($report.'?'.http_build_query($query))->assertOk()
-            ->assertSee('徐总信用卡')->assertSee('8851033722824594636885')
-            ->assertSeeInOrder(['商户名称', '商户号', '商户订单号', '平台订单号'])
-            ->assertSee($report.'/export?', false)->assertSee($report.'?order_detail=', false)
-            ->assertViewHas('records', fn ($rows) => $rows->total() === 1)
-            ->assertViewHas('xuzongRows', fn ($rows) => $rows[$id]['交易金额'] === '14.75'
-                && $rows[$id]['结算-美元'] === '14.75' && $rows[$id]['汇率'] === '1'
-                && $rows[$id]['应结算（USD）'] === '' && $rows[$id]['备注'] === '');
-        $this->get($report.'?reference=8851033722824594636885&order_fields[currency]=USD')->assertOk()
-            ->assertViewHas('records', fn ($rows) => $rows->total() === 1);
-        $this->get($report.'?order_fields[currency]=EUR')->assertOk()
+        $this->get($report.'?'.http_build_query($query))->assertOk()->assertSee('徐总信用卡')
             ->assertViewHas('records', fn ($rows) => $rows->total() === 0);
-        $exportUrl = $report.'/export?'.http_build_query([...$query, 'export_scope' => 'records', 'selected_ids' => [$id]]);
-        $creditSheet = $this->readDownload($this->get($exportUrl)->assertOk()->streamedContent());
-        $this->assertSame('徐总支付2明细表', $creditSheet->getTitle());
-        $this->assertSame('BA', $creditSheet->getHighestColumn());
-        $this->assertSame('A1:BA2', $creditSheet->getAutoFilter()->getRange());
-        $this->assertSame('宋体', $creditSheet->getStyle('A1')->getFont()->getName());
-        $this->assertSame('FFFFC000', $creditSheet->getStyle('R1')->getFill()->getStartColor()->getARGB());
-        $exportedHeaders = $creditSheet->rangeToArray('A1:BA1')[0];
-        $document = new \DOMDocument;
-        @$document->loadHTML($creditPage->getContent());
-        $xpath = new \DOMXPath($document);
-        $pageHeaders = $xpath->query('//table[contains(@class, "xuzong-credit-table")]/thead/tr/th');
-        $this->assertSame($exportedHeaders, array_slice(array_map(fn ($cell) => trim($cell->textContent), iterator_to_array($pageHeaders)), 1, -1));
-        $this->assertNotContains('拒付RDR+CDRN费用', $exportedHeaders);
-        $this->assertSame([['平台订单号', '交易 ID', '订单币种']], $creditSheet->rangeToArray('D1:F1'));
-        $this->assertSame([['货币', '总额', '状态']], $creditSheet->rangeToArray('H1:J1'));
-        $this->assertSame([['收款金额-美元', \App\Portals\Finance\FinanceSettlementService::SHOP_DIFFERENCE_LABEL, '汇率', '结算币种', '结算金额']], $creditSheet->rangeToArray('W1:AA1'));
-        $this->assertSame([['拒付RDR金额', 'RDR费用', 'CDRN费用', '拒付返还', '争议费', '保证金返还', '应结算（USD）']], $creditSheet->rangeToArray('AK1:AQ1'));
-        $this->assertSame([['运营所属部门', '地区', '通途订单']], $creditSheet->rangeToArray('AV1:AX1'));
-        $this->assertSame('MERCHANT-ORDER-1', $creditSheet->getCell('C2')->getValue());
-        $this->assertSame('8851033722824594636885', $creditSheet->getCell('D2')->getValue());
-        $this->assertSame('USD', $creditSheet->getCell('H2')->getValue());
-        $this->assertEquals(14.75, $creditSheet->getCell('I2')->getValue());
-        $this->assertSame('成功', $creditSheet->getCell('J2')->getValue());
-        $this->assertSame('buyer@example.com', $creditSheet->getCell('O2')->getValue());
-        $this->assertSame('2026/11/4 01:00:00', $creditSheet->getCell('S2')->getFormattedValue());
-        $this->assertEquals(14.75, $creditSheet->getCell('W2')->getValue());
-        $this->assertSame('ERP-CARD', $creditSheet->getCell('AX2')->getValue());
-
-        $orderQuery = DB::table('logistics_orders')->where('id', $id);
-        $originalPayload = $orderQuery->value('shopify_payload');
-        $duplicateReferencePayload = json_decode($originalPayload, true);
-        $duplicateReferencePayload['customAttributes'][0]['value'] = '8851033722824594636885';
-        $orderQuery->update(['shopify_payload' => json_encode($duplicateReferencePayload)]);
-        $this->get($report.'?'.http_build_query($query))->assertOk()
-            ->assertViewHas('xuzongRows', fn ($rows) => $rows[$id]['商户订单号'] === '8851033722824594636885'
-                && $rows[$id]['平台订单号'] === '8851033722824594636885');
-        $duplicateReferenceSheet = $this->readDownload($this->get($exportUrl)->assertOk()->streamedContent());
-        $this->assertSame([['8851033722824594636885', '8851033722824594636885']], $duplicateReferenceSheet->rangeToArray('C2:D2'));
-
-        $legacyOrderId = '7048025759034184499251';
-        $orderQuery->update(['transaction_id' => $legacyOrderId, 'shopify_payload' => $originalPayload]);
-        $this->get($report.'?reference='.$legacyOrderId)->assertOk()
-            ->assertViewHas('records', fn ($rows) => $rows->total() === 1)
-            ->assertSee('8851033722824594636885');
-        $account = $this->financePayPalAccount('SHANGYUN-v2', ['account_type' => 'credit_card', 'activity_account' => 'internal-credit-account']);
-        $uploadBill = function (array $extra) use ($account, $report, $legacyOrderId) {
-            $book = new Spreadsheet;
-            $sheet = $book->getActiveSheet()->setTitle('徐总支付1明细表');
-            $headers = [...FinanceCatalog::dataset('xuzong1-details')['headers'], '商户号', '是否3D', '卡号'];
-            $bill = [...[
-                '交易单号' => 'LEGACY-BILL-1', '商户订单号' => $legacyOrderId, '通途订单' => 'ERP-CARD',
-                '商户名称' => 'SHANGYUN-v2', '交易币种' => 'USD', '交易金额' => '15',
-                '支付状态' => 'Success', '交易时间' => '2026-11-03 17:00:00', '结算金额' => '15', '保证金' => '0',
-                '交易手续费' => '1.50', '退款金额' => '2',
-            ], ...$extra];
-            $sheet->fromArray($headers);
-            foreach ($headers as $index => $header) {
-                $sheet->setCellValueExplicit([$index + 1, 2], $bill[$header] ?? '', DataType::TYPE_STRING);
-            }
-            $sheet->setCellValue('AD2', '=Q2-SUM(R2:AB2)+AC2');
-
-            return $this->from($report)->post($report.'/import', [
-                'source' => 'xuzong1-details', 'account' => $account->activity_account, 'source_timezone' => 'UTC', 'file' => $this->upload($book),
-            ]);
-        };
-        $this->get($report)->assertOk()->assertSee('导入账单');
-        $uploadBill([])->assertRedirect($report)->assertSessionHasNoErrors()->assertSessionHas('success', fn ($message) => str_contains($message, '补齐 1 条'));
-        $extra = ['商户号' => '00023', '是否3D' => '否', '发行国' => 'US', '卡号' => '4111111111111234', '交易手续费' => '9'];
-        $uploadBill($extra)->assertRedirect($report)->assertSessionHasNoErrors()->assertSessionHas('success', fn ($message) => str_contains($message, '补齐 1 条'));
-        $uploadBill($extra)->assertRedirect($report)->assertSessionHasNoErrors()->assertSessionHas('success', fn ($message) => str_contains($message, '跳过 1 条'));
-        $imported = FinanceRecord::query()->where('dataset', 'xuzong-credit-source-1')->sole();
-        $this->assertSame('1.50', $imported->payload['交易手续费']);
-        $this->assertSame('****1234', $imported->payload['卡号']);
-        $this->assertFalse(app(\App\Portals\Finance\FinanceSettlementService::class)->query('credit_card', [])->whereKey($imported->id)->exists());
-        $this->workbooks->importRecords('xuzong2-details', [2 => [
-            '平台订单号' => '8851033722824594636885', '商户名称' => '其他商户', '商户号' => '99999',
-            '交易币种' => 'USD', '支付状态' => 'SUCCESS', '创建时间' => '2026-11-03 17:00:00',
-        ]], 'unrelated-credit-account', 'UTC', 1);
-        Schema::create('logistics_credit_card_refunds', function (Blueprint $table): void {
-            $table->unsignedBigInteger('logistics_order_id');
-            $table->decimal('refund_amount_usd');
-            $table->string('refund_reason');
-            $table->string('refund_reference');
-        });
-        DB::table('logistics_credit_card_refunds')->insert([
-            ['logistics_order_id' => $id, 'refund_amount_usd' => 2, 'refund_reason' => '取消订单', 'refund_reference' => 'CARD-REFUND-1'],
-            ['logistics_order_id' => $id, 'refund_amount_usd' => 3, 'refund_reason' => 'RDR', 'refund_reference' => 'CARD-REFUND-2'],
-        ]);
-        $refundFilter = 'order_fields[refund_number]=CARD-REFUND-1';
-        $this->get($report.'?'.$refundFilter)->assertOk()->assertViewHas('records', fn ($rows) => $rows->total() === 1);
-        $refundSheet = $this->readDownload($this->get($report.'/export?export_scope=filtered&report_columns[]=3&'.$refundFilter)
-            ->assertOk()->streamedContent());
-        $this->assertSame('8851033722824594636885', $refundSheet->getCell('A2')->getValue());
-        Schema::create('logistics_tongtu_sku_mappings', function (Blueprint $table): void {
-            $table->id();
-            $table->decimal('product_guide_cost_cny');
-            $table->decimal('goods_weight_gram');
-        });
-        Schema::create('logistics_order_items', function (Blueprint $table): void {
-            $table->unsignedBigInteger('logistics_order_id');
-            $table->unsignedBigInteger('tongtu_sku_mapping_id');
-            $table->decimal('quantity');
-        });
-        DB::table('logistics_tongtu_sku_mappings')->insert(['id' => 1, 'product_guide_cost_cny' => 12, 'goods_weight_gram' => 250]);
-        DB::table('logistics_order_items')->insert(['logistics_order_id' => $id, 'tongtu_sku_mapping_id' => 1, 'quantity' => 2]);
-        $this->get($report.'?'.http_build_query($query))->assertOk()
-            ->assertViewHas('xuzongRows', fn ($rows) => $rows[$id]['商户号'] === 'ERP-CARD'
-                && blank($rows[$id]['物流-元'] ?? null) && blank($rows[$id]['采购成本-元'] ?? null))
-            ->assertSee('****1234');
-        $mergedSheet = $this->readDownload($this->get($exportUrl)->assertOk()->streamedContent());
-        foreach (['B' => 'ERP-CARD', 'L' => '否', 'M' => 'US', 'N' => '****1234'] as $column => $expected) {
-            $this->assertSame($expected, $mergedSheet->getCell($column.'2')->getValue());
-        }
-        foreach (['AA' => 15, 'AB' => 0, 'AC' => 1.5, 'AE' => 2, 'AK' => 3, 'AQ' => 8.5] as $column => $expected) {
-            $this->assertEquals($expected, $mergedSheet->getCell($column.'2')->getValue());
-        }
-        $this->assertSame([['', '']], $mergedSheet->rangeToArray('AR2:AS2'));
-        DB::table('logistics_orders')->where('id', $id)->update([
-            'transaction_id' => 'LIVE-CARD-1', 'bill_number' => 'TXN26011000001',
-        ]);
-        $txnBook = new Spreadsheet;
-        $txnSheet = $txnBook->getActiveSheet()->setTitle('徐总支付2明细表');
-        $txnValues = ['平台订单号' => '8851033722824594636885', '商户订单号' => 'BILL-MERCHANT-ORDER',
-            '交易币种' => 'EUR', '交易金额' => '13.50',
-            '物流-元' => '28', '采购成本-元' => '0',
-            '交易本金' => '12.25', '退款本金' => '1.25', '交易处理费' => '0.25', '保证金扣除' => '2',
-            '保证金返还' => '1', '拒付返还' => '0.50', '争议处理费' => '0.75', 'RDR' => '1', 'CDRN' => '2',
-            '结算币种' => 'USD', '记账币种' => 'EUR', '原币种净额' => '10.00', '折算后结算金额' => '12.00'];
-        $txnSheet->fromArray([array_keys($txnValues), array_values($txnValues)]);
-        $txnSheet->setCellValueExplicit('A2', $txnValues['平台订单号'], DataType::TYPE_STRING);
-        $this->from($report)->post($report.'/import', [
-            'source' => 'xuzong2-details', 'account' => $account->activity_account, 'source_timezone' => 'UTC', 'file' => $this->upload($txnBook),
-        ])->assertRedirect($report)->assertSessionHasNoErrors();
-        $txnExport = $this->readDownload($this->get($exportUrl)->assertOk()->streamedContent());
-        $this->assertSame('BILL-MERCHANT-ORDER', $txnExport->getCell('C2')->getValue());
-        $this->assertSame('8851033722824594636885', $txnExport->getCell('D2')->getValue());
-        $this->assertSame('TXN26011000001', $txnExport->getCell('E2')->getValue());
-        $this->get($report.'?'.http_build_query($query))->assertOk()
-            ->assertSeeInOrder(['<th scope="col">平台订单号</th>', '<th scope="col">交易 ID</th>'], false)
-            ->assertViewHas('conditionChoices', fn ($choices) => in_array('EUR', array_column($choices['currency'], 'value'), true))
-            ->assertSeeInOrder(['<th scope="col">RDR费用</th>', '<th scope="col">CDRN费用</th>', '<th scope="col">保证金返还</th>'], false)
-            ->assertDontSee('拒付RDR+CDRN费用')
-            ->assertSee('TXN26011000001');
-        $this->assertEquals(12.25, $txnExport->getCell('AA2')->getValue());
-        $this->assertSame([[16.2, 1.2, 1.2, 'USD']], $txnExport->rangeToArray('W2:Z2', formatData: false));
-        $this->assertEquals(12, $txnExport->getCell('AQ2')->getValue());
-        $this->assertSame([[1, 2, 0.5, 0.75]], $txnExport->rangeToArray('AL2:AO2', formatData: false));
-        $this->assertSame([[28, 0]], $txnExport->rangeToArray('AR2:AS2', formatData: false));
-        $feesOnly = $this->readDownload($this->get($exportUrl.'&report_columns[]=47&report_columns[]=46')
-            ->assertOk()->streamedContent());
-        $this->assertSame([['RDR费用', 'CDRN费用'], [1, 2]], $feesOnly->rangeToArray('A1:B2', formatData: false));
-
-        DB::table('logistics_orders')->where('id', $id)->update([
-            'transaction_id' => null, 'tongtu_order_number' => null, 'bill_number' => 'BILL-CARD',
-        ]);
-        $linkedId = DB::table('logistics_orders')->insertGetId([
-            'transaction_id' => '8851033722824594636885', 'collection_account' => 'SHANGYUN-v2', 'tongtu_order_number' => 'MATCHED-ERP',
-            'payment_gateway' => 'PayPal', 'shopify_payload' => '{}',
-        ]);
-        $matchedSheet = $this->readDownload($this->get($exportUrl)->assertOk()->streamedContent());
-        $this->assertSame('MATCHED-ERP', $matchedSheet->getCell('AX2')->getValue());
-        $this->assertSame('MATCHED-ERP', $matchedSheet->getCell('B2')->getValue());
-        DB::table('logistics_orders')->where('id', $linkedId)->delete();
-
-        DB::table('logistics_orders')->where('id', $id)->update(['payment_status' => 'FAIL']);
-        $selectedSheet = $this->readDownload($this->get($exportUrl.'&report_columns[]=8&report_columns[]=21')->assertOk()->streamedContent());
-        $this->assertSame([['状态', '收款金额-美元'], ['退款', '']], $selectedSheet->rangeToArray('A1:B2'));
-        $this->get($report.'?order_fields[status]='.urlencode('退款'))->assertOk()
-            ->assertViewHas('records', fn ($rows) => $rows->total() === 1);
-        $this->get($report.'?order_fields[status]='.urlencode('失败'))->assertOk()
-            ->assertViewHas('records', fn ($rows) => $rows->total() === 0);
-
-        $excludedIds = [];
-        foreach ([
-            ['Spreedly', 'acdc (3-嘉匯環球貿易pp)'],
-            ['FintrixV2', '尚雲科技有限公司pp的钱包'],
-            ['PayPal', 'SHANGYUN-v2'],
-            ['manual', null],
-        ] as [$gateway, $merchant]) {
-            $excludedIds[] = DB::table('logistics_orders')->insertGetId([
-                'transaction_id' => 'EXCLUDED-'.$gateway, 'payment_gateway' => $gateway, 'collection_account' => $merchant,
-                'order_created_at' => '2026-11-03 17:00:00', 'payment_method' => 'cc',
-                'shopify_payload' => json_encode(['tags' => ['CreditCardBy'.$gateway]]),
-            ]);
-        }
-        $legacyId = DB::table('logistics_orders')->insertGetId([
-            'transaction_id' => 'LEGACY-CARD', 'payment_gateway' => 'Fintrix',
-            'order_created_at' => '2026-11-03 16:00:00', 'shopify_payload' => '{}',
-        ]);
-        $this->get($report)->assertOk()->assertViewHas('accounts', fn ($accounts) => $accounts->all() === ['SHANGYUN', 'SHANGYUN-v2'])
-            ->assertViewHas('accountLabels', fn ($labels) => $labels->get('SHANGYUN') === '徐总1' && $labels->get('SHANGYUN-v2') === '徐总2')
-            ->assertViewHas('records', fn ($rows) => $rows->total() === 2 && $rows->pluck('id')->all() === [$id, $legacyId])
-            ->assertViewHas('xuzongRows', fn ($rows) => $rows[$legacyId]['平台订单号'] === ''
-                && $rows[$legacyId]['交易币种'] === '' && $rows[$legacyId]['交易金额'] === '' && $rows[$legacyId]['结算-美元'] === '');
-        $this->get($report.'?order_detail='.$excludedIds[0])->assertNotFound();
-        $reportExport = $this->readDownload($this->get($report.'/export?export_scope=filtered&report_columns[]=3')
-            ->assertOk()->streamedContent());
-        $this->assertSame([['8851033722824594636885'], ['']], $reportExport->rangeToArray('A2:A3'));
-        DB::table('logistics_orders')->whereIn('id', [...$excludedIds, $legacyId])->delete();
-
-        DB::table('logistics_orders')->where('id', $id)->update([
-            'payment_status' => 'paid',
-            'shopify_payload' => json_encode(['transactions' => [[
-                'status' => 'SUCCESS', 'kind' => 'SALE', 'amountSet' => [
-                    'shopMoney' => ['currencyCode' => 'USD', 'amount' => '14.75'],
-                    'presentmentMoney' => ['currencyCode' => 'EUR', 'amount' => '13.50'],
-                ],
-            ]]]),
-        ]);
-        $this->get($report.'?order_fields[currency]=EUR')->assertOk()
-            ->assertViewHas('xuzongRows', fn ($rows) => $rows[$id]['交易币种'] === 'EUR'
-                && $rows[$id]['交易金额'] === '13.50' && $rows[$id]['结算-美元'] === '14.75000000'
-                && $rows[$id]['汇率'] === '1.09259259');
-        $foreignSheet = $this->readDownload($this->get($exportUrl.'&report_columns[]=6&report_columns[]=7&report_columns[]=21&report_columns[]=42')
-            ->assertOk()->streamedContent());
-        $this->assertSame([['EUR', 13.5, 14.75, '']], $foreignSheet->rangeToArray('A2:D2', formatData: false));
-        DB::table('logistics_orders')->where('id', $id)->update([
-            'bill_number' => 'TXN26011000001', 'shopify_payload' => $originalPayload,
-        ]);
-        $this->get($report.'?order_fields[currency]=EUR')->assertOk()
-            ->assertViewHas('xuzongRows', fn ($rows) => $rows[$id]['交易币种'] === 'EUR' && $rows[$id]['汇率'] === '1.20000000'
-                && $rows[$id]['结算-美元'] === '16.20000000');
-        $this->get($report.'?order_fields[currency]=USD')->assertOk()
-            ->assertViewHas('records', fn ($rows) => $rows->total() === 0);
-        $convertedSheet = $this->readDownload($this->get($exportUrl.'&report_columns[]=21&report_columns[]=49')
-            ->assertOk()->streamedContent());
-        $this->assertSame([[16.2, 1.2]], $convertedSheet->rangeToArray('A2:B2', formatData: false));
-        $statement = FinanceRecord::where('dataset', 'xuzong-credit-source-2')->sole();
-        $statement->update(['payload' => array_diff_key($statement->payload, ['结算金额' => true])]);
-        $payableRow = $this->get($report.'?order_fields[currency]=EUR')->assertOk()->viewData('xuzongRows')[$id];
-        $this->assertEquals(12, $payableRow['应结算（USD）']);
-        $this->assertSame('', $payableRow['备注']);
-        $payableSheet = $this->readDownload($this->get($exportUrl.'&report_columns[]=35')->assertOk()->streamedContent());
-        $this->assertEquals(12, $payableSheet->getCell('A2')->getValue());
+        $this->get($report.'?order_detail='.$id)->assertNotFound();
+        DB::table('logistics_orders')->where('id', $id)->update(['bill_number' => 'TXN26011000001']);
 
         $csv = "商户名称,商户订单号,交易 ID,货币,总额,平台返回code,状态,是否 3D,创建时间\n"
             .",MANUAL-ORDER,TXN26011000001,USD,18.25,,SUCCESS,YES,2026-11-03 17:00:00\n"
@@ -3227,6 +2988,10 @@ class FinancePortalTest extends TestCase
         $uploadOrders()->assertRedirect($report)->assertSessionHasNoErrors()
             ->assertSessionHas('success', fn ($message) => str_contains($message, '关联到系统订单 1 条'));
         $uploadOrders(['Accept' => 'application/json'])->assertOk()->assertExactJson(['total' => 3, 'matched' => 1, 'saved' => 0]);
+        $importedOrder = FinanceRecord::where('dataset', \App\Portals\Finance\FinanceLogisticsCreditOrders::IMPORTED_DATASET)
+            ->where('reference', 'TXN26011000001')->sole();
+        $this->assertSame('UTC', $importedOrder->source_timezone);
+        $this->assertSame('2026-11-03 17:00:00', $importedOrder->occurred_at->utc()->toDateTimeString());
         $this->assertSame(['SHANGYUN', 'SHANGYUN-v2'], FinanceRecord::where('dataset',
             \App\Portals\Finance\FinanceLogisticsCreditOrders::IMPORTED_DATASET)->distinct()->orderBy('account')->pluck('account')->all());
         $this->get($report.'?reference=8851033722824594636885')->assertOk()
@@ -3235,7 +3000,17 @@ class FinancePortalTest extends TestCase
         $this->get($report.'?reference=TXN-UNLINKED-FAIL')->assertOk()
             ->assertSee('平台返回结果')->assertSee('卡号无效')->assertDontSee('平台返回code')->assertDontSee('平台返回message')
             ->assertViewHas('xuzongRows', fn ($rows) => $rows->count() === 1 && $rows->first()['支付状态'] === '失败'
-                && $rows->first()['备注'] === '失败' && $rows->first()['平台订单号'] === '');
+                && $rows->first()['备注'] === '失败；系统无匹配订单' && $rows->first()['平台订单号'] === '');
+        $this->get($report.'/export?export_scope=records&selected_ids[]='.$id)
+            ->assertRedirect()->assertSessionHasErrors('selected_ids');
+        $importedSheet = $this->readDownload($this->get($report.'/export?reference=8851033722824594636885&export_scope=filtered')
+            ->assertOk()->streamedContent());
+        $this->assertSame('徐总支付2明细表', $importedSheet->getTitle());
+        $this->assertSame('A1:AZ2', $importedSheet->getAutoFilter()->getRange());
+        $this->assertSame('MANUAL-ORDER', $importedSheet->getCell('B2')->getValue());
+        $this->assertEquals(18.25, $importedSheet->getCell('H2')->getValue());
+        $this->assertSame('成功', $importedSheet->getCell('I2')->getValue());
+        $this->assertSame('ERP-CARD', $importedSheet->getCell('AW2')->getValue());
         $resultExport = $this->readDownload($this->get($report.'/export?reference=TXN-UNLINKED-FAIL&export_scope=filtered&report_columns[]=53')
             ->assertOk()->streamedContent());
         $this->assertSame([['平台返回结果'], ['卡号无效']], $resultExport->toArray());
@@ -3258,15 +3033,81 @@ class FinancePortalTest extends TestCase
         $uploadStatement()->assertOk()->assertExactJson(['total' => 1, 'matched' => 1, 'saved' => 0]);
         $this->get($report.'?reference=TXN-UNLINKED-FAIL')->assertOk()
             ->assertViewHas('xuzongRows', fn ($rows) => $rows->sole()['应结算（USD）'] === '-1.00');
-        $this->get($report.'?reference=LEGACY-GATEWAY&order_fields[status]='.urlencode('失败'))->assertOk()
+        $original = explode("\n", trim($statement));
+        $later = "TXN-UNLINKED-FAIL,MANUAL-FAILED,USD,1.000000,-2.50,2026-11-05 01:10:17,-,0,-2.50,0,0,0,0,0,0,0,0,0,0,0,0";
+        $overlapping = implode("\n", [...$original, $later])."\n";
+        $append = fn () => $this->post($report.'/import', [
+            'file' => UploadedFile::fake()->createWithContent('overlapping.csv', $overlapping),
+        ], ['Accept' => 'application/json']);
+        $append()->assertOk()->assertExactJson(['total' => 2, 'matched' => 1, 'saved' => 1]);
+        $append()->assertOk()->assertExactJson(['total' => 2, 'matched' => 1, 'saved' => 0]);
+        $this->get($report.'?reference=TXN-UNLINKED-FAIL')->assertOk()
+            ->assertViewHas('xuzongRows', fn ($rows) => $rows->sole()['应结算（USD）'] === '-3.50');
+        $workbook = $this->readDownload($this->get($report.'/export?reference=TXN-UNLINKED-FAIL&export_scope=filtered')
+            ->assertOk()->streamedContent())->getParent();
+        $statementSheet = $workbook->getSheetByName('结算变动明细');
+        $this->assertNotNull($statementSheet);
+        $this->assertSame([['2026-11-04 01:10:17'], ['2026-11-05 01:10:17']], $statementSheet->rangeToArray('D2:D3'));
+        $this->assertSame([[-1], [-2.5]], $statementSheet->rangeToArray('U2:U3', formatData: false));
+        $statementOrder = FinanceRecord::where('reference', 'TXN-UNLINKED-FAIL')->sole();
+        $statementPath = $report.'/statement/'.$statementOrder->id;
+        $this->get($report)->assertOk()->assertSee('待处理结算变动')->assertSee($statementPath);
+        $this->get($statementPath)->assertOk()->assertSee('TXN-UNLINKED-FAIL')->assertSee('2026-11-05 01:10:17');
+        $this->get($statementPath, ['X-Requested-With' => 'XMLHttpRequest'])->assertOk()
+            ->assertSee('保存修改')->assertDontSee('返回徐总信用卡');
+        $this->assertNotEmpty($statementOrder->refresh()->payload['_xuzong_statement_import']['notice']);
+        $time = '2026-11-06 01:10:17';
+        $this->post($statementPath, ['action' => 'add', 'time' => $time, 'amounts' => ['应结算' => '1.50']])
+            ->assertRedirect($statementPath)->assertSessionHasNoErrors();
+        $this->assertSame('-2.00', $statementOrder->refresh()->payload['应结算']);
+        $eventKey = array_search($time, array_map(fn ($event) => $event['time'], $statementOrder->payload['_xuzong_statement_import']['events']), true);
+        $this->post($statementPath, ['action' => 'update', 'event' => $eventKey, 'time' => $time, 'amounts' => ['应结算' => '2.00']])
+            ->assertRedirect($statementPath)->assertSessionHasNoErrors();
+        $this->assertSame('-1.50', $statementOrder->refresh()->payload['应结算']);
+        $eventKey = array_search($time, array_map(fn ($event) => $event['time'], $statementOrder->payload['_xuzong_statement_import']['events']), true);
+        $this->post($statementPath, ['action' => 'delete', 'event' => $eventKey])->assertRedirect($statementPath)->assertSessionHasNoErrors();
+        $this->assertSame('-3.50', $statementOrder->refresh()->payload['应结算']);
+        $notice = $statementOrder->payload['_xuzong_statement_import']['notice'];
+        $this->postJson($statementPath, ['action' => 'edit_order', 'order_fields' => [
+            '商户名称' => '修正商户', '平台订单号' => 'CORRECTED-ID',
+            '创建时间' => '2026-11-03 17:01:00', '交易币种' => 'USD', '交易金额' => '9.51', '支付状态' => '失败',
+        ], 'report_fields' => ['汇率' => '1.25', '订阅类型' => '订阅复购1次', '备注' => '财务复核']])->assertOk()->assertJsonPath('handled', false);
+        $this->get($report.'?reference=TXN-UNLINKED-FAIL')->assertOk()
+            ->assertViewHas('xuzongRows', fn ($rows) => $rows->sole()['商户名称'] === '修正商户'
+                && $rows->sole()['平台订单号'] === 'CORRECTED-ID' && $rows->sole()['交易金额'] === '9.51'
+                && $rows->sole()['汇率'] === '1.25');
+        $this->assertSame($notice, $statementOrder->refresh()->payload['_xuzong_statement_import']['notice']);
+        $this->get($report.'?'.http_build_query(['reference' => 'CORRECTED-ID', 'order_fields' => ['subscription_type' => '订阅复购1次']]))
+            ->assertOk()->assertViewHas('xuzongRows', fn ($rows) => $rows->count() === 1
+                && $rows->sole()['备注'] === '失败；财务复核；系统无匹配订单');
+        $this->post($statementPath, ['action' => 'handled', 'notice' => $notice])->assertRedirect($report);
+        $append()->assertOk()->assertExactJson(['total' => 2, 'matched' => 1, 'saved' => 0]);
+        $this->get($report)->assertOk()->assertDontSee('待处理结算变动');
+        $this->get($report.'?reference=LEGACY-GATEWAY&order_fields[status]='.urlencode('成功'))->assertOk()
             ->assertViewHas('xuzongRows', fn ($rows) => $rows->count() === 1 && $rows->first()['支付状态'] === 'SUCCESS'
-                && $rows->first()['状态'] === '失败');
+                && $rows->first()['状态'] === '成功');
+        $lateOrder = (array) DB::table('logistics_orders')->where('id', $id)->first();
+        unset($lateOrder['id']);
+        $lateOrder['transaction_id'] = 'MANUAL-FAILED';
+        $lateOrder['bill_number'] = 'TXN-UNLINKED-FAIL';
+        $lateOrder['payment_gateway_order_id'] = 'LATE-PLATFORM-ID';
+        $lateOrder['source_shop_domain'] = 'late.example.com';
+        $lateOrder['tongtu_order_number'] = 'LATE-TONGTU';
+        $lateId = DB::table('logistics_orders')->insertGetId($lateOrder);
+        $this->get($report.'?reference=TXN-UNLINKED-FAIL')->assertOk()
+            ->assertViewHas('xuzongRows', fn ($rows) => $rows->sole()['域名'] === 'late.example.com'
+                && $rows->sole()['备注'] === '失败；财务复核' && $rows->sole()['原始支付状态'] === 'FAILED');
+        $lateExport = $this->readDownload($this->get($report.'/export?reference=TXN-UNLINKED-FAIL&export_scope=filtered')
+            ->assertOk()->streamedContent())->toArray();
+        $this->assertSame('late.example.com', $lateExport[1][array_search('域名', $lateExport[0], true)]);
+        $this->assertSame('FAILED', $lateExport[1][array_search('原始支付状态', $lateExport[0], true)]);
+        DB::table('logistics_orders')->where('id', $lateId)->delete();
         FinanceRecord::where('dataset', \App\Portals\Finance\FinanceLogisticsCreditOrders::IMPORTED_DATASET)->delete();
 
         $migration->down();
         $this->get($report)->assertForbidden();
 
-        $this->assertDatabaseCount('finance_records', 3);
+        $this->assertDatabaseCount('finance_records', 0);
         DB::table('logistics_orders')->where('id', $id)->delete();
         $this->get('/finance/records/xuzong2-orders')->assertOk()->assertViewHas('records', fn ($rows) => $rows->total() === 0);
         DB::table('logistics_orders')->insert([
@@ -3277,7 +3118,7 @@ class FinancePortalTest extends TestCase
             ->assertViewHas('records', fn ($rows) => $rows->total() === 1 && $rows->first()->reference === 'OTHER-GATEWAY');
     }
 
-    public function test_shopify_failed_credit_payment_appears_only_in_the_finance_report(): void
+    public function test_shopify_failed_credit_payment_is_excluded_from_imported_finance_report(): void
     {
         Schema::create('logistics_orders', function (Blueprint $table): void {
             $table->id();
@@ -3319,28 +3160,8 @@ class FinancePortalTest extends TestCase
         $url = '/finance/reports/xuzong-credit';
         $filters = http_build_query(['order_fields' => ['status' => '失败', 'shopify_order_number' => '101']]);
         $this->get($url.'?'.$filters)->assertOk()
-            ->assertViewHas('records', fn ($rows) => $rows->total() === 1)
-            ->assertViewHas('xuzongRows', fn ($rows) => $rows[$key]['平台订单号'] === 'CARD-FAIL-1'
-                && $rows[$key]['支付状态'] === '失败' && $rows[$key]['备注'] === '失败'
-                && $rows[$key]['交易金额'] === '' && $rows[$key]['结算-美元'] === '');
-        $this->get($url.'?order_detail='.$key)->assertOk()->assertSee('失败');
-        $download = $this->readDownload($this->get($url.'/export?'.http_build_query([
-            'export_scope' => 'records', 'selected_ids' => [$key], 'report_columns' => [3, 8, 21, 42],
-        ]))->assertOk()->streamedContent());
-        $this->assertSame([['CARD-FAIL-1', '失败', '', '失败']], $download->rangeToArray('A2:D2'));
-        $failed->update(['payload' => [...$failed->payload, '备注' => '銀行拒絕']]);
-        $this->get($url.'?'.$filters)->assertOk()->assertSee('失败；銀行拒絕');
-        $noteExportUrl = $url.'/export?'.http_build_query([
-            'export_scope' => 'records', 'selected_ids' => [$key], 'report_columns' => [3, 42],
-        ]);
-        $xls = $this->readDownload($this->get($noteExportUrl.'&export_format=xls')->assertOk()->streamedContent());
-        $this->assertSame([['平台订单号', '备注'], ['CARD-FAIL-1', '失败；銀行拒絕']], $xls->rangeToArray('A1:B2'));
-        foreach (['csv' => ',', 'tsv' => "\t"] as $format => $delimiter) {
-            $content = $this->get($noteExportUrl.'&export_format='.$format)->assertOk()->streamedContent();
-            $lines = preg_split('/\r?\n/', rtrim(substr($content, 3), "\r\n"));
-            $this->assertSame([['平台订单号', '备注'], ['CARD-FAIL-1', '失败；銀行拒絕']],
-                array_map(fn ($line) => str_getcsv($line, $delimiter, '"', ''), $lines));
-        }
+            ->assertViewHas('records', fn ($rows) => $rows->total() === 0);
+        $this->get($url.'?order_detail='.$key)->assertNotFound();
         $this->get('/finance/records/xuzong2-orders')->assertOk()->assertViewHas('records', fn ($rows) => $rows->total() === 0);
 
         DB::table('logistics_orders')->insert([

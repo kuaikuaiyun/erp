@@ -13,7 +13,7 @@
 @endpush
 
 @section('content')
-<section class="content-header"><h1>{{ $title }} <small>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($portal->name)) }}</small></h1></section>
+<section class="content-header">@yield('finance_header_actions')<h1>{{ $title }} <small>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($portal->name)) }}</small></h1></section>
 <section class="content">
     @if(session('success'))<div class="alert alert-success" role="status" data-finance-notice>{{ session('success') }}</div>@endif
     @if(session('syncResults'))<div class="finance-status" role="status" data-finance-notice>@foreach(session('syncResults') as $result)<p>{{ $result['account'] }}：{{ $result['ok'] ? __('finance.sync.success', ['count' => $result['count']]) : $result['error'].' '.__('finance.sync.partial', ['count' => $result['count']]) }}</p>@endforeach</div>@endif
@@ -29,8 +29,9 @@ document.addEventListener('change', function (event) {
     var select = event.target;
     if (!select.matches('select[data-finance-page-size]')) return;
     var url = new window.URL(window.location.href);
-    url.searchParams.set('per_page', select.value);
-    url.searchParams.delete('page');
+    url.searchParams.set(select.dataset.financePageSize, select.value);
+    if (select.dataset.financePageName === 'page') url.searchParams.delete('page');
+    else url.searchParams.set(select.dataset.financePageName, '1');
     window.location.assign(url.toString());
 });
 document.addEventListener('click', function (event) {

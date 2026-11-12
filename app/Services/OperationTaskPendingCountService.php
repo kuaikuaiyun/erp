@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AdminUser;
 use App\Models\Department;
 use App\Models\OperationTaskRecap;
+use App\Models\OperationTaskRectification;
 use App\Models\OperationTestTask;
 
 class OperationTaskPendingCountService
@@ -13,7 +14,13 @@ class OperationTaskPendingCountService
     {
         $rejectedRecaps = OperationTaskRecap::query()->where('user_id', $user->id)->where('workflow_status', 'rejected')->count();
         [$channel, $departmentIds] = $this->reviewScope($user);
-        if ($channel === null || $departmentIds === []) return ['recaps' => 0, 'tests' => 0, 'rejected_recaps' => $rejectedRecaps];
+        $rejectedTests = $channel === null
+            ? OperationTaskRectification::query()
+                ->where('status', 'required')
+                ->whereHas('task', fn ($query) => $query->where('owner_user_id', $user->id))
+                ->distinct('task_id')->count('task_id')
+            : 0;
+        if ($channel === null || $departmentIds === []) return ['recaps' => 0, 'tests' => 0, 'rejected_recaps' => $rejectedRecaps, 'rejected_tests' => $rejectedTests];
 
         $recaps = OperationTaskRecap::query()
             ->where('workflow_status', $channel === 'leader' ? 'pending_leader' : 'pending_department')
@@ -27,7 +34,7 @@ class OperationTaskPendingCountService
                 ->where('channel', $channel))
             ->count();
 
-        return ['recaps' => $recaps, 'tests' => $tests, 'rejected_recaps' => $rejectedRecaps];
+        return ['recaps' => $recaps, 'tests' => $tests, 'rejected_recaps' => $rejectedRecaps, 'rejected_tests' => $rejectedTests];
     }
 
     private function reviewScope(AdminUser $user): array

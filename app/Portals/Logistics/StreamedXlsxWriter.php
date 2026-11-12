@@ -20,23 +20,31 @@ class StreamedXlsxWriter
         bool $showGridlines = true,
         bool $plain = false,
         string $fontName = 'Calibri',
+        array $additionalSheets = [],
     ): StreamedResponse {
         $headerFills = array_values(array_unique(array_filter(array_column($columns, 'headerFill'), fn ($color) => preg_match('/^[0-9A-F]{6}$/D', $color))));
 
-        return response()->streamDownload(function () use ($sheetName, $columns, $rows, $showGridlines, $plain, $fontName, $headerFills): void {
+        return response()->streamDownload(function () use ($sheetName, $columns, $rows, $showGridlines, $plain, $fontName, $headerFills, $additionalSheets): void {
             if (function_exists('set_time_limit')) {
                 @set_time_limit(0);
             }
 
-            $sheetPath = tempnam(sys_get_temp_dir(), 'erp-sheet-');
             $xlsxPath = tempnam(sys_get_temp_dir(), 'erp-xlsx-');
-            if ($sheetPath === false || $xlsxPath === false) {
+            if ($xlsxPath === false) {
                 throw new RuntimeException('无法创建 Excel 临时文件。');
             }
-
+            $paths = [];
             try {
-                $this->writeSheet($sheetPath, $columns, $rows, $showGridlines, $plain, $headerFills);
-                $this->writeWorkbook($xlsxPath, $sheetPath, $sheetName, $fontName, $headerFills);
+                $sheets = [[$sheetName, $columns, $rows], ...$additionalSheets];
+                foreach ($sheets as [$name, $sheetColumns, $sheetRows]) {
+                    $path = tempnam(sys_get_temp_dir(), 'erp-sheet-');
+                    if ($path === false) {
+                        throw new RuntimeException('无法创建 Excel 临时文件。');
+                    }
+                    $paths[] = $path;
+                    $this->writeSheet($path, $sheetColumns, $sheetRows, $showGridlines, $plain, $headerFills);
+                }
+                $this->writeWorkbook($xlsxPath, $paths, array_column($sheets, 0), $fontName, $headerFills);
 
                 $handle = fopen($xlsxPath, 'rb');
                 if ($handle === false) {
@@ -45,7 +53,9 @@ class StreamedXlsxWriter
                 fpassthru($handle);
                 fclose($handle);
             } finally {
-                @unlink($sheetPath);
+                foreach ($paths as $path) {
+                    @unlink($path);
+                }
                 @unlink($xlsxPath);
             }
         }, $filename, [
@@ -160,7 +170,7 @@ class StreamedXlsxWriter
         return $lastRow;
     }
 
-    private function writeWorkbook(string $xlsxPath, string $sheetPath, string $sheetName, string $fontName, array $headerFills): void
+    private function writeWorkbook(string $xlsxPath, array $sheetPaths, array $sheetNames, string $fontName, array $headerFills): void
     {
         $zip = new ZipArchive();
         $opened = $zip->open($xlsxPath, ZipArchive::CREATE | ZipArchive::OVERWRITE);
@@ -168,16 +178,17 @@ class StreamedXlsxWriter
             throw new RuntimeException('无法创建 Excel 压缩文件。');
         }
 
-        $safeSheetName = mb_substr(preg_replace('/[\\\\\/\?\*\[\]:]/u', ' ', $sheetName) ?: 'Sheet1', 0, 31);
         $createdAt = now()->utc()->format('Y-m-d\TH:i:s\Z');
-        $zip->addFromString('[Content_Types].xml', $this->contentTypes());
+        $zip->addFromString('[Content_Types].xml', $this->contentTypes(count($sheetPaths)));
         $zip->addFromString('_rels/.rels', $this->rootRelationships());
         $zip->addFromString('docProps/app.xml', $this->appProperties());
         $zip->addFromString('docProps/core.xml', $this->coreProperties($createdAt));
-        $zip->addFromString('xl/workbook.xml', $this->workbookXml($safeSheetName));
-        $zip->addFromString('xl/_rels/workbook.xml.rels', $this->workbookRelationships());
+        $zip->addFromString('xl/workbook.xml', $this->workbookXml($sheetNames));
+        $zip->addFromString('xl/_rels/workbook.xml.rels', $this->workbookRelationships(count($sheetPaths)));
         $zip->addFromString('xl/styles.xml', $this->stylesXml($fontName, $headerFills));
-        $zip->addFile($sheetPath, 'xl/worksheets/sheet1.xml');
+        foreach ($sheetPaths as $index => $path) {
+            $zip->addFile($path, 'xl/worksheets/sheet'.($index + 1).'.xml');
+        }
         $zip->close();
     }
 
@@ -254,14 +265,14 @@ class StreamedXlsxWriter
         return $name;
     }
 
-    private function contentTypes(): string
+    private function contentTypes(int $sheetCount): string
     {
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             .'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
             .'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
             .'<Default Extension="xml" ContentType="application/xml"/>'
             .'<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-            .'<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            .implode('', array_map(fn ($id) => '<Override PartName="/xl/worksheets/sheet'.$id.'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>', range(1, $sheetCount)))
             .'<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
             .'<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
             .'<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>'
@@ -278,21 +289,28 @@ class StreamedXlsxWriter
             .'</Relationships>';
     }
 
-    private function workbookRelationships(): string
+    private function workbookRelationships(int $sheetCount): string
     {
+        $sheets = implode('', array_map(fn ($id) => '<Relationship Id="rId'.$id.'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'.$id.'.xml"/>', range(1, $sheetCount)));
+
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             .'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            .'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
-            .'<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+            .$sheets.'<Relationship Id="rId'.($sheetCount + 1).'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
             .'</Relationships>';
     }
 
-    private function workbookXml(string $sheetName): string
+    private function workbookXml(array $sheetNames): string
     {
+        $sheets = '';
+        foreach ($sheetNames as $index => $name) {
+            $id = $index + 1;
+            $safeName = mb_substr(preg_replace('/[\\\\\/\?\*\[\]:]/u', ' ', $name) ?: 'Sheet'.$id, 0, 31);
+            $sheets .= '<sheet name="'.$this->xml($safeName).'" sheetId="'.$id.'" r:id="rId'.$id.'"/>';
+        }
+
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             .'<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-            .'<bookViews><workbookView/></bookViews><sheets><sheet name="'.$this->xml($sheetName).'" sheetId="1" r:id="rId1"/></sheets>'
-            .'</workbook>';
+            .'<bookViews><workbookView/></bookViews><sheets>'.$sheets.'</sheets></workbook>';
     }
 
     private function appProperties(): string

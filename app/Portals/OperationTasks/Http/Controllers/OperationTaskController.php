@@ -10,7 +10,6 @@ use App\Models\InternalMessageRecipient;
 use App\Models\OperationAssetDailyRecord;
 use App\Models\OperationTaskAsset;
 use App\Models\OperationTaskDailyPlan;
-use App\Models\OperationTaskDeliveryRound;
 use App\Models\OperationTaskRecap;
 use App\Models\OperationTaskRecapQuestion;
 use App\Models\OperationTaskRectification;
@@ -102,8 +101,8 @@ class OperationTaskController extends Controller
     {
         $context = $this->authorized($request);
         $user = $context['user'];
+        $businessDate = now('Asia/Shanghai')->subDay()->toDateString();
         $data = $request->validate([
-            'data_date' => ['required', 'date', 'before_or_equal:'.now('Asia/Shanghai')->toDateString()],
             'media' => ['required', 'array', 'min:1'],
             'media.*.name' => ['required', Rule::in(self::MEDIA)],
             'media.*.custom_name' => ['nullable', 'string', 'max:100'],
@@ -142,7 +141,7 @@ class OperationTaskController extends Controller
             'answer' => trim((string) ($data['answers'][$question->id] ?? '')),
         ])->values()->all();
         $payload = [
-            'data_date' => $data['data_date'],
+            'data_date' => $businessDate,
             'user_id' => $user->id,
             'user_name' => $this->userName($user),
             'department_id' => $department?->id,
@@ -158,7 +157,7 @@ class OperationTaskController extends Controller
             'question_answers' => $questionAnswers,
         ];
 
-        $existing = OperationTaskRecap::query()->where('user_id', $user->id)->whereDate('data_date', $data['data_date'])->first();
+        $existing = OperationTaskRecap::query()->where('user_id', $user->id)->whereDate('data_date', $businessDate)->first();
         if ($existing && ($existing->workflow_status ?? 'approved') !== 'rejected') {
             return back()->with('warning', '该复盘已提交审核，只有被驳回后才可以修改并重新提交。');
         }
@@ -310,9 +309,15 @@ class OperationTaskController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
         $user = $context['user'];
+        $todayBeijing = now('Asia/Shanghai')->toDateString();
         $base = OperationTestTask::query()
             ->withCount('assets')
-            ->with(['reviews', 'assets.reviews', 'assets.dailyRecords', 'assets.deliveryRounds'])
+            ->with([
+                'reviews',
+                'assets.reviews',
+                'assets.dailyRecords' => fn ($dailyRecords) => $dailyRecords->whereDate('data_date', $todayBeijing),
+                'rectifications' => fn ($query) => $query->latest('id'),
+            ])
             ->latest('submitted_at');
         if (! $this->canManage($user)) {
             $base->where('owner_user_id', $user->id);
@@ -333,6 +338,31 @@ class OperationTaskController extends Controller
         $testPerPage = in_array((int) $request->input('test_per_page', 20), [20, 50, 100], true)
             ? (int) $request->input('test_per_page', 20)
             : 20;
+        $rejectedTestCount = ! $this->canManage($user)
+            ? OperationTaskRectification::query()
+                ->where('status', 'required')
+                ->whereHas('task', fn ($query) => $query->where('owner_user_id', $user->id))
+                ->distinct('task_id')->count('task_id')
+            : 0;
+        if ($request->input('status') === 'rejected') {
+            $base->whereHas('rectifications', fn ($query) => $query->where('status', 'required'));
+        }
+
+        $dateFilters = $request->validate([
+            'submitted_from' => ['nullable', 'date_format:Y-m-d'],
+            'submitted_to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:submitted_from'],
+        ]);
+        $submittedFrom = (string) ($dateFilters['submitted_from'] ?? '');
+        $submittedTo = (string) ($dateFilters['submitted_to'] ?? '');
+
+        if ($submittedFrom !== '') {
+            $base->where('submitted_at', '>=', Carbon::createFromFormat('Y-m-d', $submittedFrom, 'Asia/Shanghai')
+                ->startOfDay()->utc());
+        }
+        if ($submittedTo !== '') {
+            $base->where('submitted_at', '<=', Carbon::createFromFormat('Y-m-d', $submittedTo, 'Asia/Shanghai')
+                ->endOfDay()->utc());
+        }
 
         return view('portals.operation-tasks.tests', [
             ...$context,
@@ -346,6 +376,7 @@ class OperationTaskController extends Controller
             'todayPassed' => $todayTasks->filter(fn (OperationTestTask $task) => $this->taskDoubleApproved($task))->count(),
             'todayPlan' => $todayPlan,
             'todayProgress' => $todayProgress,
+            'rejectedTestCount' => $rejectedTestCount,
         ]);
     }
 
@@ -423,8 +454,8 @@ class OperationTaskController extends Controller
         if ($context instanceof Response) return $context;
         $this->authorizeTask($context['user'], $task);
         $task->load([
-            'assets.dailyRecords', 'assets.reviews', 'assets.deliveryRounds', 'reviews',
-            'rectifications.asset', 'rectifications.sourceReview', 'rectifications.resubmittedAsset', 'deliveryRounds',
+            'assets.dailyRecords', 'assets.reviews', 'reviews',
+            'rectifications.asset', 'rectifications.sourceReview', 'rectifications.resubmittedAsset',
         ]);
         $events = OperationTaskReviewEvent::query()
             ->where(function ($query) use ($task): void {
@@ -523,39 +554,6 @@ class OperationTaskController extends Controller
         return back()->with('success', '已追加一条新素材；该素材将独立进入审核与每日数据跟进。');
     }
 
-    public function replaceAsset(Request $request, OperationTaskAsset $asset): RedirectResponse
-    {
-        $context = $this->authorized($request);
-        $asset->loadMissing('task');
-        $this->authorizeTaskOwner($context['user'], $asset->task);
-        $data = $request->validate([
-            'selling_point' => ['required', 'string', 'max:1000'],
-            'source_type' => ['required', Rule::in(['ai_created', 'peer_copied'])],
-            'file' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,gif,mp4,mov,webm', 'max:51200'],
-            'url' => ['nullable', 'url', 'max:2048'],
-        ]);
-        abort_if(! $request->hasFile('file') && empty($data['url']), 422, '请上传新版本文件或填写新版本链接。');
-        $user = $context['user'];
-        $file = $request->file('file');
-        $newAsset = DB::connection(config('admin.database.connection') ?: config('database.default'))->transaction(function () use ($asset, $data, $file, $user): OperationTaskAsset {
-            $history = $asset->version_history ?? [];
-            $history[] = ['version' => $asset->version, 'event' => 'superseded', 'changed_by' => $this->userName($user), 'changed_at' => now()->toIso8601String()];
-            $asset->update(['version_history' => $history, 'retired_at' => now(), 'retired_by' => $user->id, 'retired_reason' => '已创建素材新版本']);
-            return OperationTaskAsset::query()->create([
-                'task_id' => $asset->task_id, 'uploader_user_id' => $user->id, 'uploader_name' => $this->userName($user),
-                'selling_point' => trim($data['selling_point']),
-                'source_type' => $data['source_type'],
-                'file_path' => $file?->store('operation-tasks/assets/'.now()->format('Y/m'), 'local'),
-                'original_name' => $file?->getClientOriginalName(), 'external_url' => trim((string) ($data['url'] ?? '')) ?: null,
-                'mime_type' => $file?->getMimeType(), 'ai_confirmed' => $data['source_type'] === 'ai_created',
-                'parent_asset_id' => $asset->id, 'version' => $asset->version + 1,
-                'version_history' => [['version' => $asset->version + 1, 'event' => 'created_from_previous_version', 'previous_asset_id' => $asset->id, 'changed_by' => $this->userName($user), 'changed_at' => now()->toIso8601String()]],
-            ]);
-        });
-        $this->notifyReviewers($asset->task, '任务 '.$asset->task->task_no.' 的素材已提交新版本，待重新审核。', $user);
-        return back()->with('success', '素材新版本已创建；旧版本已退役保留，新版本需独立审核。');
-    }
-
     public function retireAsset(Request $request, OperationTaskAsset $asset): RedirectResponse
     {
         $context = $this->authorized($request);
@@ -563,63 +561,8 @@ class OperationTaskController extends Controller
         $this->authorizeTaskOwner($context['user'], $asset->task);
         abort_if($asset->retired_at, 422, '该素材已退役，无需重复操作。');
         $data = $request->validate(['retired_reason' => ['nullable', 'string', 'max:5000']]);
-        DB::connection(config('admin.database.connection') ?: config('database.default'))->transaction(function () use ($asset, $data, $context): void {
-            $asset->update(['retired_at' => now(), 'retired_by' => $context['user']->id, 'retired_reason' => trim((string) ($data['retired_reason'] ?? '')) ?: null]);
-            OperationTaskDeliveryRound::query()->where('asset_id', $asset->id)->whereNull('stopped_at')->update([
-                'stopped_at' => now(), 'stopped_by' => $context['user']->id, 'stopped_by_name' => $this->userName($context['user']), 'updated_at' => now(),
-            ]);
-        });
-        return back()->with('success', '素材已退役；历史文件、审核、投放轮次和每日数据均已保留。');
-    }
-
-    public function markAssetLive(Request $request, OperationTaskAsset $asset): RedirectResponse
-    {
-        $context = $this->authorized($request);
-        $asset->loadMissing('task');
-        $this->authorizeTaskOwner($context['user'], $asset->task);
-        abort_if($asset->retired_at, 422, '已退役素材不能登记上线。');
-        $data = $request->validate(['first_live_at' => ['required', 'date', 'before_or_equal:now']]);
-        $already = (bool) $asset->first_live_at;
-        $asset->update(['first_live_at' => $asset->first_live_at ?: $data['first_live_at']]);
-        return back()->with('success', $already ? '首次上线时间已存在，未覆盖原始记录。' : '已登记素材首次上线时间。');
-    }
-
-    public function storeDeliveryRound(Request $request, OperationTaskAsset $asset): RedirectResponse
-    {
-        $context = $this->authorized($request);
-        $asset->loadMissing('task');
-        $this->authorizeTaskOwner($context['user'], $asset->task);
-        abort_if($asset->retired_at, 422, '已退役素材不能新增投放轮次。');
-        $data = $request->validate([
-            'media' => ['required', Rule::in(self::MEDIA)], 'custom_media' => ['nullable', 'string', 'max:100'],
-            'ad_identifier' => ['nullable', 'string', 'max:191'], 'delivery_purpose' => ['nullable', 'string', 'max:5000'],
-            'launched_at' => ['required', 'date', 'before_or_equal:now'], 'notes' => ['nullable', 'string', 'max:5000'],
-        ]);
-        $media = $data['media'] === '其他' ? trim((string) ($data['custom_media'] ?? '')) : $data['media'];
-        abort_if($media === '', 422, '选择“其他”时必须填写媒体名称。');
-        OperationTaskDeliveryRound::query()->create([
-            'task_id' => $asset->task_id, 'asset_id' => $asset->id, 'media' => $media,
-            'ad_identifier' => trim((string) ($data['ad_identifier'] ?? '')) ?: null,
-            'delivery_purpose' => trim((string) ($data['delivery_purpose'] ?? '')) ?: null,
-            'launched_at' => $data['launched_at'], 'notes' => trim((string) ($data['notes'] ?? '')) ?: null,
-            'created_by' => $context['user']->id, 'created_by_name' => $this->userName($context['user']),
-        ]);
-        if (! $asset->first_live_at) $asset->update(['first_live_at' => $data['launched_at']]);
-        return back()->with('success', '投放轮次已登记；系统不会调用任何广告平台接口。');
-    }
-
-    public function stopDeliveryRound(Request $request, OperationTaskDeliveryRound $round): RedirectResponse
-    {
-        $context = $this->authorized($request);
-        $round->loadMissing(['task', 'asset']);
-        $this->authorizeTaskOwner($context['user'], $round->task);
-        abort_if($round->stopped_at, 422, '该投放轮次已停止。');
-        $data = $request->validate(['stopped_at' => ['required', 'date', 'before_or_equal:now'], 'notes' => ['nullable', 'string', 'max:5000']]);
-        $round->update([
-            'stopped_at' => $data['stopped_at'], 'stopped_by' => $context['user']->id, 'stopped_by_name' => $this->userName($context['user']),
-            'notes' => trim((string) ($data['notes'] ?? '')) ?: $round->notes,
-        ]);
-        return back()->with('success', '投放轮次已停止并保留历史。');
+        $asset->update(['retired_at' => now(), 'retired_by' => $context['user']->id, 'retired_reason' => trim((string) ($data['retired_reason'] ?? '')) ?: null]);
+        return back()->with('success', '素材已退役；历史文件、审核和每日数据均已保留。');
     }
 
     public function storeDailyPlan(Request $request): RedirectResponse
@@ -669,7 +612,11 @@ class OperationTaskController extends Controller
         $recapPerPage = in_array((int) $request->input('recap_per_page', 20), [20, 50, 100], true) ? (int) $request->input('recap_per_page', 20) : 20;
         $filters = ['from' => (string) $request->input('from', ''), 'to' => (string) $request->input('to', ''), 'department' => $selectedTeamId ?: '', 'status' => (string) $request->input('status', '')];
         $channels = $this->reviewChannels($context['user']);
-        $query = OperationTestTask::query()->with(['assets.reviews', 'reviews', 'rectifications'])->latest('submitted_at');
+        $query = OperationTestTask::query()->with([
+            'assets.reviews',
+            'reviews',
+            'rectifications',
+        ])->latest('submitted_at');
         if (! $context['user']->isAdministrator()) $query->whereIn('department_id', $this->visibleDepartmentIds($context['user']));
         if ($selectedTeamId) $query->where('department_id', $selectedTeamId);
         if ($filters['from'] !== '') $query->whereDate('submitted_at', '>=', $filters['from']);
@@ -681,7 +628,7 @@ class OperationTaskController extends Controller
                 }
             });
         } elseif ($filters['status'] === 'rectification') {
-            $query->whereHas('rectifications', fn ($rectifications) => $rectifications->whereIn('status', ['required', 'resubmitted', 'restore_required']));
+            $query->whereHas('rectifications', fn ($rectifications) => $rectifications->whereIn('status', ['required', 'restore_required']));
         } elseif ($filters['status'] === 'approved') {
             foreach (array_keys($channels) as $channel) {
                 $query->whereHas('reviews', fn ($reviews) => $reviews->where('target_type', 'task')->whereColumn('target_version', 'operation_test_tasks.version')->where('channel', $channel)->where('result', 'approved'));
@@ -703,14 +650,62 @@ class OperationTaskController extends Controller
             $departmentNames = $team?->parent?->departmentMembers
                 ?->filter(fn (AdminUser $member) => $member->pivot?->position === Department::POSITION_MANAGER)
                 ->map(fn (AdminUser $member) => $this->userName($member))->unique()->values()->implode('、');
-            $taskReviews = $task->reviews
-                ->where('target_type', 'task')
+            $allTaskReviews = $task->reviews->where('target_type', 'task');
+            $taskReviews = $allTaskReviews
                 ->where('target_version', $task->version)
                 ->keyBy('channel');
-            $task->setAttribute('leader_reviewer_names', $leaderNames ?: '未配置');
-            $task->setAttribute('department_reviewer_names', $departmentNames ?: '未配置');
-            $task->setAttribute('leader_review_status', optional($taskReviews->get('leader'))->result ?: 'pending');
-            $task->setAttribute('department_review_status', optional($taskReviews->get('department'))->result ?: 'pending');
+            $leaderReview = $taskReviews->get('leader');
+            $departmentReview = $taskReviews->get('department');
+            $task->setAttribute('leader_reviewer_names', trim((string) optional($leaderReview)->reviewer_name) ?: ($leaderNames ?: '未配置'));
+            $task->setAttribute('department_reviewer_names', trim((string) optional($departmentReview)->reviewer_name) ?: ($departmentNames ?: '未配置'));
+            $leaderStatus = optional($leaderReview)->result ?: 'pending';
+            $departmentStatus = optional($departmentReview)->result ?: 'pending';
+            $lastRejectedReview = $allTaskReviews->filter(fn ($review) => $review->result === 'rejected')
+                ->sortByDesc(fn ($review) => $review->reviewed_at ?: $review->updated_at)
+                ->first();
+            $lastRejectedRectification = $task->rectifications
+                ->filter(fn (OperationTaskRectification $rectification) => trim((string) $rectification->rejection_opinion) !== '')
+                ->sortByDesc('id')
+                ->first();
+            $requiresChanges = $task->rectifications->contains(
+                fn (OperationTaskRectification $rectification) => $rectification->status === 'required'
+            );
+            $requiresRestore = $task->rectifications->contains(
+                fn (OperationTaskRectification $rectification) => $rectification->status === 'restore_required'
+            );
+            $workflowStatus = match (true) {
+                $requiresChanges, $leaderStatus === 'rejected', $departmentStatus === 'rejected' => 'rectification',
+                $requiresRestore => 'restore_required',
+                $departmentStatus === 'approved' => 'approved',
+                $leaderStatus === 'approved' => 'pending_department',
+                default => 'pending_leader',
+            };
+            $lastRejectionOpinion = trim((string) (
+                optional($lastRejectedRectification)->rejection_opinion
+                ?: optional($lastRejectedReview)->opinion
+            )) ?: null;
+            $lastRejectionReviewer = trim((string) (
+                optional($lastRejectedRectification)->reviewer_name
+                ?: optional($lastRejectedReview)->reviewer_name
+            )) ?: null;
+            $lastRejectionChannel = (string) (
+                optional($lastRejectedRectification)->review_channel
+                ?: optional($lastRejectedReview)->channel
+                ?: ''
+            );
+            $lastRejectionAt = optional($lastRejectedRectification)->created_at
+                ?: optional($lastRejectedRectification)->updated_at
+                ?: optional($lastRejectedReview)->reviewed_at
+                ?: optional($lastRejectedReview)->updated_at;
+            $task->setAttribute('leader_review_status', $leaderStatus);
+            $task->setAttribute('department_review_status', $departmentStatus);
+            $task->setAttribute('workflow_status', $workflowStatus);
+            $task->setAttribute('last_rejection_opinion', $lastRejectionOpinion);
+            $task->setAttribute('last_rejection_reviewer', $lastRejectionReviewer);
+            $task->setAttribute('last_rejection_channel', $lastRejectionChannel);
+            $task->setAttribute('last_rejection_at', $lastRejectionAt
+                ? \App\Portals\OperationTasks\Support\OperationTaskTime::format($lastRejectionAt, 'm-d H:i', '')
+                : null);
         });
         $taskFlowEvents = OperationTaskReviewEvent::query()
             ->where('target_type', 'task')
@@ -902,8 +897,9 @@ class OperationTaskController extends Controller
             'assets.*.result' => ['required', Rule::in(['approved', 'rejected'])],
             'assets.*.opinion' => ['nullable', 'string', 'max:5000'],
             'task_result' => ['required', Rule::in(['approved', 'rejected'])],
-            'task_rejection_scope' => ['nullable', Rule::in(['task', 'asset'])],
             'task_opinion' => ['nullable', 'string', 'max:5000'],
+            'rejection_scopes' => ['nullable', 'array'],
+            'rejection_scopes.*' => ['required', Rule::in(['task', 'asset'])],
         ]);
 
         $task = OperationTestTask::query()->with('assets')->findOrFail((int) $data['task_id']);
@@ -924,9 +920,17 @@ class OperationTaskController extends Controller
         if ($data['task_result'] === 'rejected' && trim((string) ($data['task_opinion'] ?? '')) === '') {
             throw ValidationException::withMessages(['task_opinion' => '驳回任务时必须填写具体整改意见。']);
         }
+        $rejectionScopes = array_values(array_unique($data['rejection_scopes'] ?? []));
+        if ($data['task_result'] === 'rejected' && $rejectionScopes === []) {
+            throw ValidationException::withMessages(['rejection_scopes' => '驳回任务时请至少选择一个驳回对象。']);
+        }
+        if ($data['task_result'] === 'rejected' && in_array('asset', $rejectionScopes, true)
+            && collect($data['assets'])->where('result', 'rejected')->isEmpty()) {
+            throw ValidationException::withMessages(['rejection_scopes' => '选择“素材问题”后，请至少驳回一条素材。']);
+        }
 
         $connection = config('admin.database.connection') ?: config('database.default');
-        DB::connection($connection)->transaction(function () use ($task, $data, $assets, $context): void {
+        DB::connection($connection)->transaction(function () use ($task, $data, $assets, $context, $rejectionScopes): void {
             foreach ($data['assets'] as $assetId => $assetData) {
                 $this->storeTaskReview(
                     $task,
@@ -946,7 +950,7 @@ class OperationTaskController extends Controller
                 $data['channel'],
                 $data['task_result'],
                 $data['task_opinion'] ?? null,
-                $data['task_rejection_scope'] ?? 'task',
+                $data['task_result'] === 'rejected' ? implode(',', $rejectionScopes) : 'task',
                 $context['user']
             );
             $freshTask = $task->fresh(['reviews', 'assets.reviews', 'rectifications']);
@@ -977,6 +981,7 @@ class OperationTaskController extends Controller
         string $rejectionScope,
         AdminUser $reviewer
     ): void {
+        $rejectionScopes = array_values(array_filter(explode(',', $rejectionScope)));
         $version = (int) $target->version;
         $review = OperationTaskReview::query()->firstOrNew([
             'target_type' => $targetType,
@@ -1006,7 +1011,9 @@ class OperationTaskController extends Controller
             'reviewer_name' => $this->userName($reviewer),
             'reviewed_at' => now(),
         ]);
-        if ($result === 'rejected') {
+        $shouldCreateRectification = $result === 'rejected'
+            && ($targetType === 'asset' || in_array('task', $rejectionScopes, true));
+        if ($shouldCreateRectification) {
             OperationTaskRectification::query()->updateOrCreate(['source_review_id' => $review->id], [
                 'task_id' => $task->id,
                 'asset_id' => $targetType === 'asset' ? $target->id : null,
@@ -1014,7 +1021,7 @@ class OperationTaskController extends Controller
                 'target_id' => $target->id,
                 'target_version' => $version,
                 'review_channel' => $channel,
-                'rejection_scope' => $rejectionScope,
+                'rejection_scope' => $targetType === 'asset' ? 'asset' : 'task',
                 'rejection_opinion' => $review->opinion ?: '审核驳回，待整改。',
                 'reviewer_id' => $reviewer->id,
                 'reviewer_name' => $this->userName($reviewer),
@@ -1031,65 +1038,146 @@ class OperationTaskController extends Controller
     public function resubmitRectification(Request $request, OperationTaskRectification $rectification): RedirectResponse
     {
         $context = $this->authorized($request);
-        $rectification->loadMissing(['task', 'asset']);
+        $rectification->loadMissing(['task.assets', 'asset']);
         $this->authorizeTaskOwner($context['user'], $rectification->task);
         abort_unless($rectification->status === 'required', 422, '该整改事项当前不可再次提交。');
+        $minimum = $request->input('page_type') === 'category' ? 3 : 2;
         $data = $request->validate([
-            'stop_confirmed' => ['accepted'], 'stop_media' => ['nullable', 'string', 'max:100'], 'stop_ad_identifier' => ['nullable', 'string', 'max:191'],
-            'stop_notes' => ['nullable', 'string', 'max:5000'], 'rectification_content' => ['required', 'string', 'max:10000'],
-            'selling_point' => ['nullable', 'string', 'max:1000'], 'file' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,gif,mp4,mov,webm', 'max:51200'],
-            'url' => ['nullable', 'url', 'max:2048'], 'ai_confirmed' => ['nullable', 'accepted'],
-            'source_type' => ['nullable', Rule::in(['ai_created', 'peer_copied'])],
+            'page_type' => ['required', Rule::in(['single', 'category'])],
+            'task_type' => ['required', Rule::in(['new', 'iteration'])],
+            'landing_url' => ['required', 'url', 'max:2048'],
+            'selection_objective' => ['required', 'string', 'max:10000'],
+            'assets' => ['required', 'array', 'min:'.$minimum],
+            'assets.*.id' => ['nullable', 'integer'],
+            'assets.*.selling_point' => ['required', 'string', 'max:1000'],
+            'assets.*.source_type' => ['required', Rule::in(['ai_created', 'peer_copied'])],
+            'assets.*.file' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,gif,mp4,mov,webm', 'max:51200'],
+            'assets.*.url' => ['nullable', 'url', 'max:2048'],
         ]);
-        abort_if(($request->hasFile('file') || filled($data['url'] ?? null)) && empty($data['source_type']) && ! $request->boolean('ai_confirmed'), 422, '上传或替换素材时，请选择素材标签。');
-        $user = $context['user'];
-        DB::connection(config('admin.database.connection') ?: config('database.default'))->transaction(function () use ($rectification, $data, $request, $user): void {
-            $task = $rectification->task->fresh();
-            $history = $task->version_history ?? [];
-            $history[] = ['version' => $task->version, 'reason' => 'rectification_resubmitted', 'rectification_id' => $rectification->id, 'changed_by' => $this->userName($user), 'changed_at' => now()->toIso8601String()];
-            $nextVersion = (int) $task->version + 1;
-            $task->update(['version' => $nextVersion, 'version_history' => $history, 'rectification_status' => 'resubmitted', 'delivery_status' => 'manual_stop_confirmed']);
-            $file = $request->file('file');
-            $newAssetId = null;
-            if ($rectification->asset_id) {
-                $source = OperationTaskAsset::query()->findOrFail($rectification->asset_id);
-                $sourceHistory = $source->version_history ?? [];
-                $sourceHistory[] = ['version' => $source->version, 'event' => 'rectification_replaced', 'rectification_id' => $rectification->id, 'changed_by' => $this->userName($user), 'changed_at' => now()->toIso8601String()];
-                $source->update(['version_history' => $sourceHistory, 'retired_at' => now(), 'retired_by' => $user->id, 'retired_reason' => '整改后提交新版本']);
-                $asset = OperationTaskAsset::query()->create([
-                    'task_id' => $task->id, 'uploader_user_id' => $user->id, 'uploader_name' => $this->userName($user),
-                    'selling_point' => trim((string) ($data['selling_point'] ?? '')) ?: $source->selling_point,
-                    'source_type' => $data['source_type'] ?? ($request->boolean('ai_confirmed') ? 'ai_created' : $source->source_type),
-                    'file_path' => $file ? $file->store('operation-tasks/assets/'.now()->format('Y/m'), 'local') : $source->file_path,
-                    'original_name' => $file ? $file->getClientOriginalName() : $source->original_name,
-                    'external_url' => trim((string) ($data['url'] ?? '')) ?: $source->external_url, 'mime_type' => $file ? $file->getMimeType() : $source->mime_type,
-                    'ai_confirmed' => ($data['source_type'] ?? ($request->boolean('ai_confirmed') ? 'ai_created' : $source->source_type)) === 'ai_created',
-                    'parent_asset_id' => $source->id, 'version' => $source->version + 1,
-                    'version_history' => [['version' => $source->version + 1, 'event' => 'rectification_resubmitted', 'rectification_id' => $rectification->id, 'changed_by' => $this->userName($user), 'changed_at' => now()->toIso8601String()]],
-                ]);
-                $newAssetId = $asset->id;
-            } elseif ($file || filled($data['url'] ?? null)) {
-                $asset = OperationTaskAsset::query()->create([
-                    'task_id' => $task->id, 'uploader_user_id' => $user->id, 'uploader_name' => $this->userName($user),
-                    'selling_point' => trim((string) ($data['selling_point'] ?? '')) ?: '任务整改补充素材',
-                    'source_type' => $data['source_type'] ?? 'ai_created',
-                    'file_path' => $file ? $file->store('operation-tasks/assets/'.now()->format('Y/m'), 'local') : null,
-                    'original_name' => $file ? $file->getClientOriginalName() : null, 'external_url' => trim((string) ($data['url'] ?? '')) ?: null,
-                    'mime_type' => $file ? $file->getMimeType() : null, 'ai_confirmed' => ($data['source_type'] ?? 'ai_created') === 'ai_created',
-                    'version_history' => [['version' => 1, 'event' => 'rectification_supplement', 'rectification_id' => $rectification->id, 'changed_by' => $this->userName($user), 'changed_at' => now()->toIso8601String()]],
-                ]);
-                $newAssetId = $asset->id;
+
+        $activeAssets = $rectification->task->assets->whereNull('retired_at')->keyBy('id');
+        $submittedIds = collect($data['assets'])->pluck('id')->filter()->map(fn ($id) => (int) $id);
+        if ($submittedIds->duplicates()->isNotEmpty() || $submittedIds->sort()->values()->all() !== $activeAssets->keys()->map(fn ($id) => (int) $id)->sort()->values()->all()) {
+            throw ValidationException::withMessages(['assets' => '原有素材必须全部保留；如需替换文件，请在对应素材中选择新文件。']);
+        }
+        foreach ($data['assets'] as $index => $assetData) {
+            $existingAsset = ! empty($assetData['id']) ? $activeAssets->get((int) $assetData['id']) : null;
+            if (! $existingAsset && ! $request->hasFile("assets.$index.file") && blank($assetData['url'] ?? null)) {
+                throw ValidationException::withMessages(["assets.$index.file" => '新增素材必须上传文件或填写素材链接。']);
             }
-            $rectification->update([
-                'status' => 'resubmitted', 'stop_confirmed_at' => now(), 'stop_confirmed_by' => $user->id, 'stop_confirmed_by_name' => $this->userName($user),
-                'stop_media' => trim((string) ($data['stop_media'] ?? '')) ?: null, 'stop_ad_identifier' => trim((string) ($data['stop_ad_identifier'] ?? '')) ?: null,
-                'stop_notes' => trim((string) ($data['stop_notes'] ?? '')) ?: null, 'rectification_content' => trim($data['rectification_content']),
-                'resubmitted_at' => now(), 'resubmitted_by' => $user->id, 'resubmitted_by_name' => $this->userName($user),
-                'resubmitted_task_version' => $nextVersion, 'resubmitted_asset_id' => $newAssetId,
+            if ($existingAsset && ! $existingAsset->file_path && blank($assetData['url'] ?? null) && ! $request->hasFile("assets.$index.file")) {
+                throw ValidationException::withMessages(["assets.$index.file" => '该素材没有可保留的原文件，请上传文件或填写素材链接。']);
+            }
+        }
+
+        $user = $context['user'];
+        $requiredRectifications = OperationTaskRectification::query()
+            ->where('task_id', $rectification->task_id)->where('status', 'required')->get();
+        $resetLeaderReview = $requiredRectifications->contains(fn (OperationTaskRectification $item) => $item->review_channel === 'leader');
+
+        DB::connection(config('admin.database.connection') ?: config('database.default'))->transaction(function () use ($rectification, $requiredRectifications, $resetLeaderReview, $activeAssets, $data, $request, $user): void {
+            $task = $rectification->task->fresh(['assets']);
+            $previousTaskVersion = (int) $task->version;
+            $history = $task->version_history ?? [];
+            $history[] = [
+                'version' => $previousTaskVersion,
+                'reason' => 'rectification_resubmitted',
+                'snapshot' => $task->only(['page_type', 'task_type', 'landing_url', 'selection_objective']),
+                'changed_by' => $this->userName($user),
+                'changed_at' => now()->toIso8601String(),
+            ];
+            $nextVersion = (int) $task->version + 1;
+            $task->update([
+                'page_type' => $data['page_type'], 'task_type' => $data['task_type'],
+                'landing_url' => trim($data['landing_url']), 'selection_objective' => trim($data['selection_objective']),
+                'version' => $nextVersion, 'version_history' => $history, 'rectification_status' => 'resubmitted',
+                'submitted_at' => now(),
+            ]);
+
+            foreach ($data['assets'] as $index => $assetData) {
+                $file = $request->file("assets.$index.file");
+                if (! empty($assetData['id'])) {
+                    /** @var OperationTaskAsset $asset */
+                    $asset = $activeAssets->get((int) $assetData['id']);
+                    $previousAssetVersion = (int) $asset->version;
+                    $assetHistory = $asset->version_history ?? [];
+                    $assetHistory[] = [
+                        'version' => $previousAssetVersion, 'event' => 'rectification_resubmitted',
+                        'snapshot' => $asset->only(['selling_point', 'source_type', 'file_path', 'original_name', 'external_url', 'mime_type']),
+                        'changed_by' => $this->userName($user), 'changed_at' => now()->toIso8601String(),
+                    ];
+                    $assetValues = [
+                        'selling_point' => trim($assetData['selling_point']), 'source_type' => $assetData['source_type'],
+                        'external_url' => trim((string) ($assetData['url'] ?? '')) ?: null,
+                        'ai_confirmed' => $assetData['source_type'] === 'ai_created',
+                        'version' => $previousAssetVersion + 1, 'version_history' => $assetHistory,
+                    ];
+                    if ($file) {
+                        $assetValues['file_path'] = $file->store('operation-tasks/assets/'.now()->format('Y/m'), 'local');
+                        $assetValues['original_name'] = $file->getClientOriginalName();
+                        $assetValues['mime_type'] = $file->getMimeType();
+                    }
+                    $asset->update($assetValues);
+
+                    if (! $resetLeaderReview) {
+                        $leaderReview = OperationTaskReview::query()->where([
+                            'target_type' => 'asset', 'target_id' => $asset->id,
+                            'target_version' => $previousAssetVersion, 'channel' => 'leader', 'result' => 'approved',
+                        ])->first();
+                        if ($leaderReview) {
+                            OperationTaskReview::query()->create([
+                                'target_type' => 'asset', 'target_id' => $asset->id, 'target_version' => $previousAssetVersion + 1,
+                                'channel' => 'leader', 'result' => 'approved', 'opinion' => $leaderReview->opinion,
+                                'reviewer_id' => $leaderReview->reviewer_id, 'reviewer_name' => $leaderReview->reviewer_name,
+                                'reviewed_at' => $leaderReview->reviewed_at,
+                            ]);
+                        }
+                    }
+                } else {
+                    OperationTaskAsset::query()->create([
+                        'task_id' => $task->id, 'uploader_user_id' => $user->id, 'uploader_name' => $this->userName($user),
+                        'selling_point' => trim($assetData['selling_point']), 'source_type' => $assetData['source_type'],
+                        'file_path' => $file?->store('operation-tasks/assets/'.now()->format('Y/m'), 'local'),
+                        'original_name' => $file?->getClientOriginalName(), 'mime_type' => $file?->getMimeType(),
+                        'external_url' => trim((string) ($assetData['url'] ?? '')) ?: null,
+                        'ai_confirmed' => $assetData['source_type'] === 'ai_created',
+                        'version_history' => [['version' => 1, 'event' => 'added_during_rectification', 'changed_by' => $this->userName($user), 'changed_at' => now()->toIso8601String()]],
+                    ]);
+                }
+            }
+
+            if (! $resetLeaderReview) {
+                $leaderReview = OperationTaskReview::query()->where([
+                    'target_type' => 'task', 'target_id' => $task->id,
+                    'target_version' => $previousTaskVersion, 'channel' => 'leader', 'result' => 'approved',
+                ])->first();
+                if ($leaderReview) {
+                    OperationTaskReview::query()->create([
+                        'target_type' => 'task', 'target_id' => $task->id, 'target_version' => $nextVersion,
+                        'channel' => 'leader', 'result' => 'approved', 'opinion' => $leaderReview->opinion,
+                        'reviewer_id' => $leaderReview->reviewer_id, 'reviewer_name' => $leaderReview->reviewer_name,
+                        'reviewed_at' => $leaderReview->reviewed_at,
+                    ]);
+                }
+            }
+
+            foreach ($requiredRectifications as $requiredRectification) {
+                $requiredRectification->update([
+                    'status' => 'resubmitted', 'rectification_content' => '已完成任务资料与素材修改并重新提交审核。',
+                    'resubmitted_at' => now(), 'resubmitted_by' => $user->id, 'resubmitted_by_name' => $this->userName($user),
+                    'resubmitted_task_version' => $nextVersion,
+                    'resubmitted_asset_id' => $requiredRectification->asset_id,
+                ]);
+            }
+            OperationTaskReviewEvent::query()->create([
+                'review_id' => null, 'target_type' => 'task', 'target_id' => $task->id, 'target_version' => $nextVersion,
+                'channel' => 'operation', 'result' => 'resubmitted', 'opinion' => null, 'rejection_scope' => null,
+                'reviewer_id' => $user->id, 'reviewer_name' => $this->userName($user), 'reviewed_at' => now(),
             ]);
         });
-        $this->notifyReviewers($rectification->task, '任务 '.$rectification->task->task_no.' 已提交整改新版本，请复审。', $user);
-        return back()->with('success', '整改已提交为新版本；历史审核结论已保留，新版本需重新审核。');
+        $reviewChannels = $resetLeaderReview ? ['leader'] : ['department'];
+        $this->notifyReviewers($rectification->task, '任务 '.$rectification->task->task_no.' 已提交整改新版本，请复审。', $user, $reviewChannels);
+        return back()->with('success', $resetLeaderReview ? '修改已重新提交，将返回二级主管复审。' : '修改已重新提交，将直接返回一级主管复审。');
     }
 
     public function restoreRectification(Request $request, OperationTaskRectification $rectification): RedirectResponse

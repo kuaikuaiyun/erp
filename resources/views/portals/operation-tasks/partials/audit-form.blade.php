@@ -8,7 +8,8 @@
             <input type="hidden" name="target_id" value="{{ $targetId }}">
             <input type="hidden" name="channel" value="{{ $channel }}">
             <select class="form-control" name="result"><option value="approved" @selected($review?->result === 'approved')>通过</option><option value="rejected" @selected($review?->result === 'rejected')>驳回并整改</option></select>
-            @if($isAsset)<input type="hidden" name="rejection_scope" value="asset">@else<select class="form-control" name="rejection_scope"><option value="task">整个任务及相关广告</option><option value="asset">指定素材对应广告</option></select>@endif
+            <input type="hidden" name="rejection_scope" value="{{ $isAsset ? 'asset' : 'task' }}">
+            <div class="form-control-static"><b>{{ $isAsset ? '对应素材' : '落地页' }}</b></div>
             <textarea class="form-control" rows="3" name="opinion" placeholder="通过意见选填；驳回必须填写具体整改意见">{{ $review?->opinion }}</textarea>
             <button class="btn {{ $channel === 'department' ? 'btn-default' : 'ot-primary' }} btn-sm">保存{{ $label }}</button>
         </form>
