@@ -1096,7 +1096,9 @@ class FinancePortalTest extends TestCase
         $this->assertSame($target->activity_account, $updated->account);
         $this->assertSame('2026-11-07 02:00:00', $updated->occurred_at->format('Y-m-d H:i:s'));
         $row = $service->rows('paypal', ['reference' => 'EDITED-ID'])->sole();
-        foreach (array_diff_key($values, ['id' => true, 'paypal_4' => true]) as $field => $value) {
+        $this->assertSame('10:00:00', $row['paypal_1']);
+        $this->assertSame('Asia/Shanghai', $row['paypal_2']);
+        foreach (array_diff_key($values, ['id' => true, 'paypal_1' => true, 'paypal_2' => true, 'paypal_4' => true]) as $field => $value) {
             $this->assertEquals($value ?? '', $row[$field] ?? '', $field);
         }
         $this->assertDatabaseHas('finance_payment_transactions', ['finance_record_id' => $record->id, 'payment_account_id' => $target->id, 'transaction_id' => 'EDITED-ID']);
@@ -1146,7 +1148,13 @@ class FinancePortalTest extends TestCase
         $account = $this->financePayPalAccount('叶总支付', ['account_type' => 'credit_card']);
         $payload = ['平台订单号' => 'YE-ORDER', '创建时间' => '2026-11-06 02:00:00',
             '交易币种' => 'USD', '交易金额' => '10', '支付状态' => 'SUCCESS',
-            '订单退款金额' => '2', '退款金额' => '3'];
+            '订单退款金额' => '2', '退款金额' => '3', '结算-美元' => '9', '结算金额' => '8', '结算币种' => 'USD'];
+        Schema::create('logistics_orders', function (Blueprint $table): void {
+            $table->id();
+            $table->string('bill_number');
+            $table->decimal('paid_amount_usd');
+        });
+        DB::table('logistics_orders')->insert(['bill_number' => 'YE-ORDER', 'paid_amount_usd' => 7]);
         $this->workbooks->importRecords('xuzong2-details', [
             2 => $payload,
             3 => [...$payload, '平台订单号' => 'WP-ORDER', '网关接入号' => '123', '预仲裁金额' => '4'],
@@ -1154,8 +1162,8 @@ class FinancePortalTest extends TestCase
 
         $report = '/finance/reports/credit-settlement';
         $ye = $this->get($report.'?card_channel=ye')->assertOk();
-        $ye->assertSeeInOrder(['>网站名称</th>', '>交易 ID</th>', '>退款状态</th>', '>退款金额</th>',
-            '>单笔费用</th>', '>退款金额</th>', '>应结算</th>', '>备注</th>'], false)
+        $ye->assertSeeInOrder(['>网站名称 / 账单描述符</th>', '>交易 ID</th>', '>退款状态</th>', '>订单退款金额</th>',
+            '>单笔费用</th>', '>账单退款金额</th>', '>应结算</th>', '>备注</th>'], false)
             ->assertSee('YE-ORDER')->assertDontSee('WP-ORDER')->assertDontSee('>预仲裁金额</th>', false);
         $worldpay = $this->get($report.'?card_channel=worldpay')->assertOk();
         $worldpay->assertSeeInOrder(['>网关接入号</th>', '>交易 ID</th>', '>结单汇率</th>', '>预仲裁金额</th>',
@@ -1169,22 +1177,23 @@ class FinancePortalTest extends TestCase
             ->assertSee('WP-ORDER')->assertDontSee('YE-ORDER');
 
         $yeExport = $this->readDownload($this->get('/finance/reports/ye-settlement?download=1')->assertOk()->streamedContent())->toArray();
-        $this->assertCount(49, $yeExport[0]);
-        $this->assertSame('退款金额', $yeExport[0][18]);
-        $this->assertSame('退款金额', $yeExport[0][29]);
+        $this->assertCount(53, $yeExport[0]);
+        $this->assertSame('订单退款金额', $yeExport[0][18]);
+        $this->assertSame('账单退款金额', $yeExport[0][29]);
         $this->assertEquals(2, $yeExport[1][18]);
         $this->assertEquals(3, $yeExport[1][29]);
+        $this->assertEquals(2, array_combine($yeExport[0], $yeExport[1])['与店铺差额（美元）']);
         $this->assertCount(2, $yeExport);
         $worldpayExport = $this->readDownload($this->get('/finance/reports/worldpay-settlement?download=1')->assertOk()->streamedContent())->toArray();
-        $this->assertCount(43, $worldpayExport[0]);
+        $this->assertCount(45, $worldpayExport[0]);
         $this->assertSame('网关接入号', $worldpayExport[0][0]);
-        $this->assertSame('预仲裁金额', $worldpayExport[0][30]);
-        $this->assertEquals(4, $worldpayExport[1][30]);
+        $this->assertSame('预仲裁金额', $worldpayExport[0][31]);
+        $this->assertEquals(4, $worldpayExport[1][31]);
         $this->assertCount(2, $worldpayExport);
 
         $template = $this->readDownload($this->get($report.'?card_channel=ye&download=1&export_template=1')
             ->assertOk()->streamedContent());
-        $this->assertSame([$yeExport[0]], $template->toArray());
+        $this->assertSame([array_slice($yeExport[0], 0, count($template->toArray()[0]))], $template->toArray());
         $this->postJson($report.'/export-template/preview?card_channel=ye', [
             'file' => $this->upload($template->getParent()), 'header_row' => 1,
         ])->assertOk()->assertJsonPath('fields.18', 'order_refund')->assertJsonPath('fields.29', 'refund')
@@ -1588,7 +1597,7 @@ class FinancePortalTest extends TestCase
                 $this->assertEquals(3, $export[1][29]);
                 $this->assertSame('example.com', $export[1][42]);
             } else {
-                $this->assertEquals(4, $export[1][30]);
+                $this->assertEquals(4, array_combine($export[0], $export[1])['预仲裁金额']);
             }
         }
         $this->assertSame(2, FinanceRecord::query()->where('reference', $reference)->count());
@@ -1597,10 +1606,17 @@ class FinancePortalTest extends TestCase
     public function test_worldpay_official_csv_merges_order_and_bill_in_either_import_order(): void
     {
         (require database_path('migrations/2026_11_11_000001_split_finance_credit_settlement_menu.php'))->up();
+        (require database_path('migrations/2026_11_12_000007_create_finance_worldpay_releases.php'))->up();
         $report = '/finance/reports/worldpay-settlement';
         $this->get($report)->assertOk()->assertSee('name="gateway"', false)
             ->assertSee('name="files[]"', false)->assertDontSee('id="credit-import-timezone"', false)
             ->assertDontSee('id="credit-manual-account"', false)->assertDontSee('id="settlement-account"', false);
+        $this->post($report.'/import')->assertSessionHasErrors(['files' => '没有收到 Worldpay 文件，请重新选择文件上传。']);
+        $oversize = new \Illuminate\Http\UploadedFile('', 'worldpay.csv', error: UPLOAD_ERR_INI_SIZE, test: true);
+        $this->post($report.'/import', ['files' => [$oversize]])->assertSessionHasErrors([
+            'files.0' => 'Worldpay 文件上传失败，请检查文件大小是否超过服务器的上传限制。',
+        ]);
+        session()->forget('errors');
         $date = '2026-11-07 15:03:27';
         $general = "网关接入号,流水订单号,商户订单号,币种,交易金额,结单币种,结单金额,结单汇率,交易时间,交易状态,支付方式,HPP支付方式,卡种,交易网址,卡号,邮箱,收货人国家,划款状态\n";
         $posted = "网关接入号,流水订单号,商户订单号,交易时间,记账时间,结算批次号,结算类型,交易币种,交易金额,结单币种,成功结单金额,交易手续费,单笔手续费,保证金扣取金额,应结算正交易金额,来源网址\n";
@@ -1629,20 +1645,97 @@ class FinancePortalTest extends TestCase
         DB::table('logistics_orders')->insert(['bill_number' => 'wp-failed', 'source_shop_domain' => 'matched.example',
             'assigned_owner_name' => '订单运营', 'group_names' => '厦门团队']);
         $this->assertSame(3, FinanceRecord::query()->where('payload->_card_channel', 'worldpay')->count());
+        $this->get($report.'?worldpay_exception=yes')->assertOk()->assertSee('wp-1')->assertSee('wp-2')->assertDontSee('wp-failed');
+        $this->get($report.'?worldpay_exception=no')->assertOk()->assertSee('wp-failed')->assertDontSee('wp-1')->assertDontSee('wp-2');
         $query = http_build_query(['month' => '2026-11', 'download' => 1,
-            'export_columns' => ['reference', 'gross', 'settlement', 'hold', 'fee', 'refund', 'refund_fee', 'payable']]);
-        $rows = $this->readDownload($this->get($report.'?'.$query)->assertOk()->streamedContent())->toArray();
+            'export_columns' => ['reference', 'gross', 'settlement', 'hold', 'fee', 'refund', 'refund_fee', 'payable', 'worldpay_exception']]);
+        $sheet = $this->readDownload($this->get($report.'?'.$query)->assertOk()->streamedContent());
+        $rows = $sheet->toArray();
+        $allocation = $sheet->getParent()->getSheetByName('失败单分摊');
+        $this->assertNotNull($allocation);
+        $this->assertEquals(['2026-11', '未归属', 2, 1, 2, '100.00%', 1, 0.30], $allocation->toArray()[1]);
+        $xls = $this->readDownload($this->get($report.'?'.$query.'&format=xls')->assertOk()->streamedContent());
+        $this->assertEquals($allocation->toArray(null, true, false),
+            $xls->getParent()->getSheetByName('失败单分摊')->toArray(null, true, false));
         $this->assertCount(4, $rows);
         foreach (array_slice($rows, 1) as $row) {
-            $this->assertEquals($row[0] === 'wp-failed' ? [45.89, 0, 0, 0, null, null, -0.30]
-                : [45.89, 45.89, 4.59, 2.07, 5, 0.30, 33.63], array_slice($row, 1));
+            $this->assertEquals($row[0] === 'wp-failed' ? [45.89, 0, 0, 0, null, null, -0.30, '否']
+                : [45.89, 45.89, 4.59, 2.07, 5, 0.30, 33.63, '是'], array_slice($row, 1));
         }
         $attributionQuery = http_build_query(['month' => '2026-11', 'gateway' => '25', 'team' => '厦门团队', 'download' => 1,
-            'export_columns' => ['reference', 'domain', 'owner', 'team', 'per_order_fee']]);
+            'export_columns' => ['reference', 'transaction_url', 'domain', 'owner', 'team', 'per_order_fee']]);
         $attribution = $this->readDownload($this->get($report.'?'.$attributionQuery)->assertOk()->streamedContent())->toArray();
         $this->assertCount(2, $attribution);
-        $this->assertEquals(['wp-failed', 'matched.example', '订单运营', '厦门团队', 0.30], $attribution[1]);
+        $this->assertEquals(['wp-failed', 'example.com', 'matched.example', '订单运营', '厦门团队', 0.30], $attribution[1]);
         $this->get($report.'?gateway=999')->assertOk()->assertDontSee('wp-failed');
+        Schema::table('logistics_orders', fn (Blueprint $table) => $table->string('tongtu_product_name')->nullable());
+        $orderId = DB::table('logistics_orders')->insertGetId(['bill_number' => 'wp-1', 'source_shop_domain' => 'matched.example',
+            'assigned_owner_name' => '订单运营', 'group_names' => '厦门团队', 'tongtu_product_name' => "Men's thermal underwear set"]);
+        Schema::create('assistant_domain_stores', function (Blueprint $table): void {
+            $table->id();
+            $table->string('domain');
+            $table->string('user_name');
+            $table->string('team');
+            $table->string('site_builder');
+        });
+        DB::table('assistant_domain_stores')->insert(['domain' => 'matched.example', 'user_name' => '订单运营',
+            'team' => '厦门团队', 'site_builder' => 'xshoppy']);
+        Schema::create('fashion_logistics_orders', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('assistant_domain_store_id');
+            $table->string('source_domain');
+            $table->string('transaction_id');
+            $table->string('currency');
+            $table->decimal('total_amount');
+            $table->dateTime('order_created_at_utc')->nullable();
+            $table->dateTime('order_created_at');
+        });
+        DB::table('fashion_logistics_orders')->insert(['assistant_domain_store_id' => 1,
+            'source_domain' => 'source.example', 'transaction_id' => 'wp-2', 'currency' => 'USD', 'total_amount' => 45,
+            'order_created_at_utc' => null, 'order_created_at' => '2026-11-07 15:03:27']);
+        (require database_path('migrations/2026_10_30_000003_create_assistant_domain_store_owner_histories.php'))->up();
+        DB::table('assistant_domain_store_owner_histories')->insert([
+            ['assistant_domain_store_id' => 1, 'owner_name_snapshot' => '历史使用人', 'event' => 'assigned',
+                'effective_from' => '2026-11-01 00:00:00', 'effective_to' => '2026-11-07 08:00:00'],
+            ['assistant_domain_store_id' => 1, 'owner_name_snapshot' => '后续使用人', 'event' => 'transferred',
+                'effective_from' => '2026-11-07 08:00:00', 'effective_to' => null],
+        ]);
+        Schema::create('fashion_logistics_order_items', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('fashion_logistics_order_id');
+            $table->string('product_name');
+            $table->decimal('total');
+        });
+        DB::table('fashion_logistics_order_items')->insert(['fashion_logistics_order_id' => 1,
+            'product_name' => "Women's Casual Contrast Web Sports Suit", 'total' => 36]);
+        $fashionQuery = http_build_query(['domain' => 'matched.example', 'reference' => 'wp-2', 'download' => 1,
+            'export_columns' => ['reference', 'transaction_url', 'domain', 'owner', 'team', 'operation_region', 'product_name', 'shop_difference_usd']]);
+        $fashionExport = $this->readDownload($this->get($report.'?'.$fashionQuery)->assertOk()->streamedContent())->toArray();
+        $this->assertEquals(['wp-2', 'example.com', 'matched.example', '历史使用人', '厦门团队', '厦门', '撞色运动套装', 9.89], $fashionExport[1]);
+        Schema::create('logistics_tongtu_sku_mappings', function (Blueprint $table): void {
+            $table->id();
+            $table->decimal('product_guide_cost_cny');
+            $table->decimal('goods_weight_gram');
+        });
+        Schema::create('logistics_order_items', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('logistics_order_id');
+            $table->unsignedBigInteger('tongtu_sku_mapping_id');
+            $table->decimal('quantity');
+        });
+        DB::table('logistics_tongtu_sku_mappings')->insert(['id' => 1, 'product_guide_cost_cny' => 12, 'goods_weight_gram' => 250]);
+        DB::table('logistics_order_items')->insert(['logistics_order_id' => $orderId, 'tongtu_sku_mapping_id' => 1, 'quantity' => 2]);
+        $orderQuery = http_build_query(['reference' => 'wp-1', 'download' => 1,
+            'export_columns' => ['reference', 'logistics', 'store_platform', 'product_name', 'payable']]);
+        $orderExport = $this->readDownload($this->get($report.'?'.$orderQuery)->assertOk()->streamedContent())->toArray();
+        $this->assertEquals(['wp-1', 60, '索引', '保暖内衣套装', 33.63], $orderExport[1]);
+        $release = "商户号,结单币种,成功结单金额,保证金扣取日期,保证金扣取批次号,保证金返还日期,保证金返还批次号,保证金返还金额\n"
+            .'888999,USD,"80,709.64",2026-05-12,R135,2026-11-10,R161,"8,076.25"';
+        $import($release);
+        $import($release);
+        $this->assertDatabaseCount('finance_worldpay_releases', 1);
+        $this->get($report)->assertOk()->assertSee('data-settlement-column="release"', false)
+            ->assertDontSee('保证金返还批次');
     }
 
     public function test_settlement_editor_saves_all_supplement_text_fields(): void

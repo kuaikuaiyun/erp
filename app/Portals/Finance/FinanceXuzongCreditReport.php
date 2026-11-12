@@ -428,14 +428,6 @@ class FinanceXuzongCreditReport
                 '创建时间', '完成时间', '时间点', '域名', '通途订单' => 23,
                 default => max(11, mb_strwidth($header) + 5),
             },
-            'headerFill' => match ($header) {
-                '商户订单号' => 'F5B482',
-                '域名', '通途订单' => 'FFFF00',
-                '年月', '时间点' => 'FFC000',
-                '订阅类型' => 'EF949E',
-                '应结算（USD）' => 'EE822F',
-                default => '',
-            },
         ], $headers);
 
         return app(StreamedXlsxWriter::class)->response($filename, '徐总支付2明细表', $columns,

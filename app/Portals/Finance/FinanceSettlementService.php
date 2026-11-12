@@ -164,6 +164,13 @@ class FinanceSettlementService
         if (($filters['card_channel'] ?? null) === 'worldpay' && filled($filters['gateway'] ?? null)) {
             $query->where('payload->网关接入号', $filters['gateway']);
         }
+        if (($filters['card_channel'] ?? null) === 'worldpay') {
+            match ($filters['worldpay_exception'] ?? null) {
+                'yes' => $query->whereNotNull('payload->_worldpay_events'),
+                'no' => $query->whereNull('payload->_worldpay_events'),
+                default => null,
+            };
+        }
         if ($channel === 'credit_card' && filled($filters['card_group'] ?? null)) {
             $query->whereIn('account', FinancePaymentAccount::query()->where('account_type', 'credit_card')
                 ->where('card_group_id', $filters['card_group'])->select('activity_account'));
@@ -220,6 +227,8 @@ class FinanceSettlementService
         $domains = $channel === 'paypal'
             ? $domainGroups->groupBy('domain')->filter(fn ($groups) => $groups->count() === 1)->map(fn ($groups) => $groups->first())
             : $domainGroups->keyBy('domain');
+        $uniqueDomains = $domainGroups->groupBy(fn ($store) => strtolower(trim($store->domain)))
+            ->filter(fn ($stores) => $stores->count() === 1)->map(fn ($stores) => $stores->first());
         $brushStores = $channel === 'paypal' ? $domainGroups
             ->filter(fn ($group) => filled($group->shop_name ?? null))
             ->groupBy(fn ($group) => trim($group->shop_name))
@@ -227,7 +236,7 @@ class FinanceSettlementService
             ->map(fn ($groups) => $groups->first()) : collect();
         $locks = $this->workbooks->database()->table('finance_period_locks')->whereNotNull('report_snapshot')->pluck('month')->all();
 
-        return compact('accountModels', 'accounts', 'accountsById', 'storesById', 'domains', 'brushStores', 'locks');
+        return compact('accountModels', 'accounts', 'accountsById', 'storesById', 'domains', 'uniqueDomains', 'brushStores', 'locks');
     }
 
     public function rowBatches(string $channel, array $filters): iterable
@@ -248,11 +257,15 @@ class FinanceSettlementService
         $owners = $db->table('finance_payment_transactions')->whereIntegerInRaw('finance_record_id', $records->modelKeys())
             ->pluck('payment_account_id', 'finance_record_id');
         ['accountModels' => $accountModels, 'accounts' => $accounts, 'accountsById' => $accountsById,
-            'storesById' => $storesById, 'domains' => $domains, 'brushStores' => $brushStores, 'locks' => $locks] =
+            'storesById' => $storesById, 'domains' => $domains, 'uniqueDomains' => $uniqueDomains, 'brushStores' => $brushStores, 'locks' => $locks] =
             $context ?? $this->rowContext($channel);
         $worldpay = ($filters['card_channel'] ?? null) === 'worldpay';
+        $ye = ($filters['card_channel'] ?? null) === 'ye';
         $metadata = $this->logisticsMetadata($records, $channel, withCustomReference: ! empty($filters['order_view']),
-            summaryOnly: ! empty($filters['summary_only']), includeOrder: $worldpay);
+            summaryOnly: ! empty($filters['summary_only']), includeOrder: $worldpay || ($ye && empty($filters['summary_only'])));
+        if ($worldpay) {
+            $metadata += $this->worldpayFashionOrderMetadata($records->reject(fn ($record) => isset($metadata[$record->id])), $domains);
+        }
         $candidateOrders = $channel === 'paypal' && ! empty($filters['order_view'])
             ? app(FinancePayPalOrderCandidates::class)->suggestions($records, $metadata) : [];
         $departmentMembers = $channel === 'paypal' && ! empty($filters['order_view']) && $records->isNotEmpty()
@@ -268,7 +281,7 @@ class FinanceSettlementService
             ? $records->filter(fn ($record) => ($record->payload['_card_channel'] ?? null) === 'ye') : collect());
         $confluxOrderIds = $confluxOrders->pluck('id')->flip();
         $creditUsdRates = $usdRates->forOrders($confluxOrders);
-        return $records->map(function ($record) use ($channel, $filters, $supplements, $accounts, $owners, $accountsById, $domains, $storesById, $brushStores, $locks, $metadata, $candidateOrders, $membersById, $membersByName, $conflux, $ledger, $confluxFees, $usdRates, $confluxOrderIds, $creditUsdRates, $worldpay): array {
+        $rows = $records->map(function ($record) use ($channel, $filters, $supplements, $accounts, $owners, $accountsById, $domains, $uniqueDomains, $storesById, $brushStores, $locks, $metadata, $candidateOrders, $membersById, $membersByName, $conflux, $ledger, $confluxFees, $usdRates, $confluxOrderIds, $creditUsdRates, $worldpay, $ye): array {
             $owner = $accountsById->get($owners->get($record->id));
             $p = $record->payload;
             $definition = FinanceCatalog::dataset($record->dataset);
@@ -293,7 +306,7 @@ class FinanceSettlementService
                 if (in_array($field, ['order', 'payment_reference_type'], true)) {
                     continue;
                 }
-                if ($field === 'logistics_order_id' && empty($filters['logistics_costs'])) {
+                if ($field === 'logistics_order_id' && ! $worldpay && empty($filters['logistics_costs'])) {
                     continue;
                 }
                 if (blank($row[$field] ?? null)) {
@@ -383,18 +396,33 @@ class FinanceSettlementService
             if ($channel === 'paypal' && ! array_key_exists('fee', $saved) && $row['fee'] !== null) {
                 $row['fee'] = $row['usd_rate'] === null ? null : bcmul($row['fee'], $row['usd_rate'], 8);
             }
-            $order = $metadata[$record->id]['order'] ?? null;
+            $matchedOrder = $metadata[$record->id]['order'] ?? null;
+            $order = $ye ? null : $matchedOrder;
             if ($worldpay && $order !== null && filled($metadata[$record->id]['domain'])) {
                 $row['domain'] = $saved['domain'] ?? $metadata[$record->id]['domain'];
             }
+            $websiteStore = null;
+            if ($worldpay && blank($row['domain']) && ! array_key_exists('domain', $saved)
+                && ! array_key_exists('domain', $saved['_edited_fields'] ?? [])) {
+                $url = trim((string) ($p['交易网址'] ?? ''));
+                if ($url !== '') {
+                    $host = parse_url(str_contains($url, '://') ? $url : 'https://'.ltrim($url, '/'), PHP_URL_HOST);
+                    $websiteStore = $uniqueDomains->get(strtolower((string) $host));
+                    $row['domain'] = $websiteStore?->domain ?? $row['domain'];
+                }
+            }
             $domain = strtolower(trim((string) ($saved['_edited_fields']['domain'] ?? $row['domain'])));
             $orderStore = $storesById->get($order->assistant_domain_store_id ?? null);
-            $group = $orderStore?->domain === $domain ? $orderStore : $domains->get($domain);
+            $group = $websiteStore ?? ($orderStore?->domain === $domain ? $orderStore : $domains->get($domain));
             if ($group === null && $isConflux && str_starts_with($domain, 'www.')) {
                 $group = $domains->get(substr($domain, 4));
             }
             $ownership = $this->resolveOrderOwner($order, $orderStore, $group, $p);
-            $ownerName = $ownership['ownerName'];
+            $ownerName = $worldpay
+                ? (isset($order->owner_history_id)
+                    ? ($order->historical_owner_name ?? '')
+                    : ($order->assigned_owner_name ?? $order->operator_name ?? ''))
+                : $ownership['ownerName'];
             $team = $worldpay && blank($ownership['team']) ? ($group?->team ?? $p['团队'] ?? '') : $ownership['team'];
             $row['owner'] = filled($saved['owner'] ?? null) ? $saved['owner'] : $ownerName;
             $row['team'] = filled($saved['team'] ?? null) ? $saved['team'] : $team;
@@ -443,6 +471,7 @@ class FinanceSettlementService
             if ($confluxOrderIds->has($record->id) && $row['gross'] !== null && filled($row['currency']) && ! isset($p['_manual_import_month'])) {
                 $tradeDate = $beijingDate->toDateString();
                 $row['source_settlement_usd'] = $saved['_edited_fields']['source_settlement_usd'] ?? $saved['source_settlement_usd']
+                    ?? ($ye ? $this->number($p['结算-美元'] ?? null) : null)
                     ?? $usdRates->convert($creditUsdRates, $row['currency'], $tradeDate, $row['gross']);
             }
             if ($channel === 'credit_card' && filled($filters['card_channel'] ?? null)) {
@@ -450,10 +479,21 @@ class FinanceSettlementService
                 $row['card_layout'] = FinanceCreditSettlementLayout::values(
                     $filters['card_channel'], $row, $p, $manual, $record->source_timezone ?: 'Asia/Shanghai',
                 );
-                if ($worldpay && $order !== null && filled($row['owner']) && ! array_key_exists('owner', $manual)) {
+                if ($worldpay && ! array_key_exists('owner', $manual)) {
                     $row['card_layout']['owner'] = $row['owner'];
                 }
-                if ($conflux !== null) {
+                if ($worldpay && $order !== null) {
+                    $builder = trim((string) ($group->site_builder ?? ''));
+                    $product = trim((string) ($order->tongtu_product_name ?? ''));
+                    foreach (['store_platform' => strcasecmp($builder, 'xshoppy') === 0 ? '索引' : $builder,
+                        'product_name' => FinanceProductNames::worldpayShortName($product)] as $field => $value) {
+                        if (filled($value) && blank($row['card_layout'][$field]) && ! array_key_exists($field, $manual)) {
+                            $row['card_layout'][$field] = $value;
+                        }
+                    }
+                    $row['worldpay_logistics_manual'] = array_key_exists('logistics', $manual);
+                }
+                if ($worldpay || $conflux !== null) {
                     $row['card_layout']['operation_region'] = self::operationRegion((string) $row['team']);
                 }
                 if (isset($tradeDate)) {
@@ -494,17 +534,23 @@ class FinanceSettlementService
             }
 
             if (empty($filters['summary_only'])) {
-                $shopPaid = $order->paid_amount_usd ?? null;
+                $shopPaid = $matchedOrder->paid_amount_usd ?? null;
                 if ($channel === 'paypal') {
                     $row['shop_paid_usd'] = $shopPaid;
                 } else {
                     $layout = $row['card_layout'] ?? [];
-                    $layoutCurrency = strtoupper(trim((string) ($layout['settlement_currency'] ?? '')));
+                    $layoutCurrency = strtoupper(trim((string) ($worldpay
+                        ? ($layout['statement_currency'] ?? '') : ($layout['settlement_currency'] ?? ''))));
                     $channelAmount = ($layoutCurrency === 'USD' || (! $isConflux && $layoutCurrency === ''))
                         ? $this->number($layout['settlement'] ?? null) : null;
-                    $row['shop_difference_usd'] = $this->shopDifference(
-                        $channelAmount ?? $row['source_settlement_usd'] ?? ($isConflux ? null : $row['settlement']), $shopPaid,
-                    );
+                    $comparisonAmount = match (true) {
+                        $worldpay => $success && ($layoutCurrency === 'USD' || ($layoutCurrency === '' && $row['currency'] === 'USD'))
+                            ? $channelAmount : null,
+                        $ye => $this->number($saved['_edited_fields']['source_settlement_usd'] ?? $saved['source_settlement_usd'] ?? $p['结算-美元'] ?? null)
+                            ?? $this->number($layout['source_settlement_usd'] ?? null) ?? $channelAmount,
+                        default => $channelAmount ?? $row['source_settlement_usd'] ?? ($isConflux ? null : $row['settlement']),
+                    };
+                    $row['shop_difference_usd'] = $this->shopDifference($comparisonAmount, $shopPaid);
                     if (isset($row['card_layout'])) {
                         $row['card_layout']['shop_difference_usd'] = $row['shop_difference_usd'];
                     }
@@ -512,7 +558,16 @@ class FinanceSettlementService
             }
 
             return $row;
-        })->filter(fn ($row) => (! filled($filters['team'] ?? null) || $row['team'] === $filters['team'])
+        });
+        if ($worldpay) {
+            $rows = $this->withLogisticsCosts($rows)->map(function (array $row): array {
+                if (empty($row['worldpay_logistics_manual']) && blank($row['card_layout']['logistics']) && filled($row['logistics'])) {
+                    $row['card_layout']['logistics'] = $row['logistics'];
+                }
+                return $row;
+            });
+        }
+        return $rows->filter(fn ($row) => (! filled($filters['team'] ?? null) || $row['team'] === $filters['team'])
             && (! filled($filters['subscription'] ?? null) || $row['subscription'] === self::subscriptionLabel($filters['subscription']))
             && (! filled($filters['domain'] ?? null) || str_contains((string) $row['domain'], $filters['domain']))
             && (empty($filters['card_exceptions']) || filled($row['card_layout']['ledger_exceptions'] ?? null))
@@ -737,27 +792,39 @@ class FinanceSettlementService
         return $query->get()->keyBy('id');
     }
 
-    private function joinOrderOwnerHistory(\Illuminate\Database\Query\Builder $orderQuery, array $selected): void
+    private function joinOrderOwnerHistory(\Illuminate\Database\Query\Builder $orderQuery, array $selected, string $orderTable = 'logistics_orders', string $timeColumn = 'order_created_at', bool $includeBeforeHistory = true): void
     {
         $db = $orderQuery->getConnection();
-        if (in_array('order_created_at', $selected, true)
+        if (in_array($timeColumn, $selected, true)
             && in_array('assistant_domain_store_id', $selected, true)
             && $db->getSchemaBuilder()->hasTable('assistant_domain_store_owner_histories')
         ) {
+            $orderTime = $orderTable.'.'.$timeColumn;
+            if ($timeColumn === 'order_created_at_utc' && in_array('order_created_at', $selected, true)) {
+                // Legacy fashion orders saved their creation time in Beijing time only.
+                $legacyTime = $orderTable.'.order_created_at';
+                $legacyUtc = $db->getDriverName() === 'sqlite'
+                    ? "datetime({$legacyTime}, '-8 hours')"
+                    : "DATE_SUB({$legacyTime}, INTERVAL 8 HOUR)";
+                $orderTime = $db->raw("COALESCE({$orderTime}, {$legacyUtc})");
+            }
             $historyId = $db->table('assistant_domain_store_owner_histories')
                 ->select('id')
-                ->whereColumn('assistant_domain_store_id', 'logistics_orders.assistant_domain_store_id')
-                ->whereNotNull('logistics_orders.order_created_at')
-                ->where(function ($query) use ($db): void {
+                ->whereColumn('assistant_domain_store_id', $orderTable.'.assistant_domain_store_id')
+                ->whereNotNull($orderTime)
+                ->where(function ($query) use ($db, $orderTable, $orderTime, $includeBeforeHistory): void {
+                    $query->whereColumn('effective_from', '<=', $orderTime);
+                    if (! $includeBeforeHistory) {
+                        return;
+                    }
                     // The first recorded owner also covers orders placed before the first boundary.
                     $firstEffectiveFrom = $db->table('assistant_domain_store_owner_histories')
                         ->selectRaw('MIN(effective_from)')
-                        ->whereColumn('assistant_domain_store_id', 'logistics_orders.assistant_domain_store_id');
-                    $query->whereColumn('effective_from', '<=', 'logistics_orders.order_created_at')
-                        ->orWhere('effective_from', '=', $firstEffectiveFrom);
+                        ->whereColumn('assistant_domain_store_id', $orderTable.'.assistant_domain_store_id');
+                    $query->orWhere('effective_from', '=', $firstEffectiveFrom);
                 })
                 ->where(fn ($query) => $query->whereNull('effective_to')
-                    ->orWhereColumn('effective_to', '>', 'logistics_orders.order_created_at'))
+                    ->orWhereColumn('effective_to', '>', $orderTime))
                 ->orderByDesc('effective_from')->orderByDesc('id')->limit(1);
             $initialOwnerId = $db->table('assistant_domain_store_owner_histories as next_history')
                 ->select('next_history.id')
@@ -816,6 +883,47 @@ class FinanceSettlementService
     }
 
     /** Enrich settlements from a linked logistics order or a unique payment reference. */
+    private function worldpayFashionOrderMetadata(Collection $records, Collection $domains): array
+    {
+        $db = $this->workbooks->database();
+        if ($records->isEmpty() || ! $db->getSchemaBuilder()->hasTable('fashion_logistics_orders')) {
+            return [];
+        }
+        $stores = $domains->keyBy('id');
+        $table = 'fashion_logistics_orders';
+        $selected = ['id', 'assistant_domain_store_id', 'source_domain', 'transaction_id', 'currency', 'total_amount',
+            'order_created_at_utc', 'order_created_at'];
+        $query = $db->table($table)->select(array_map(fn ($field) => $table.'.'.$field, $selected));
+        $this->joinOrderOwnerHistory($query, $selected, $table, 'order_created_at_utc', includeBeforeHistory: false);
+        $orders = $records->pluck('reference')->filter()->unique()->chunk(500)
+            ->flatMap(fn ($references) => (clone $query)->whereIn($table.'.transaction_id', $references->values()->all())->get())
+            ->groupBy('transaction_id');
+        $orderIds = $orders->filter(fn ($matches) => $matches->count() === 1)->map(fn ($matches) => $matches->first()->id);
+        $products = $db->getSchemaBuilder()->hasTable('fashion_logistics_order_items')
+            ? $orderIds->chunk(500)->flatMap(fn ($ids) => $db->table('fashion_logistics_order_items')
+                ->whereIntegerInRaw('fashion_logistics_order_id', $ids->values()->all())
+                ->orderBy('id')->get(['fashion_logistics_order_id', 'product_name', 'total']))->groupBy('fashion_logistics_order_id')
+            : collect();
+        $metadata = [];
+        foreach ($records as $record) {
+            $matches = $orders->get($record->reference);
+            if ($matches?->count() !== 1) {
+                continue;
+            }
+            $order = $matches->first();
+            $items = $products->get($order->id, collect());
+            $order->tongtu_product_name = $items->pluck('product_name')->filter()->unique()->implode("\n");
+            $order->paid_amount_usd = strtoupper(trim((string) $order->currency)) === 'USD' && $items->isNotEmpty()
+                && $items->every(fn ($item) => $this->number($item->total) !== null)
+                ? $items->reduce(fn ($sum, $item) => bcadd($sum, $this->number($item->total), 4), '0') : null;
+            $metadata[$record->id] = [
+                'order' => $order,
+                'domain' => $stores->get($order->assistant_domain_store_id)?->domain ?: ($order->source_domain ?? ''),
+            ];
+        }
+        return $metadata;
+    }
+
     public function logisticsMetadata(Collection $records, string $channel, bool $matchOnly = false, bool $withCustomReference = false, bool $summaryOnly = false, bool $includeOrder = false): array
     {
         $db = $this->workbooks->database();
@@ -839,6 +947,9 @@ class FinanceSettlementService
             'tongtu_sku', 'tongtu_product_name', 'sale_quantity', 'sale_product_weight', 'payment_gateway',
             ...array_keys(FinancePayPalOrderExport::COLUMNS), 'created_at', 'buyer_name', 'buyer_email', 'destination',
         ];
+        if ($includeOrder) {
+            $detailFields[] = 'paid_amount_usd';
+        }
         $selected = $matchOnly ? ['id', ...$referenceFields] : array_values(array_unique(array_intersect(
             ['id', ...$referenceFields, ...$summaryFields, ...($summaryOnly ? [] : $detailFields)], $columns,
         )));
@@ -886,8 +997,8 @@ class FinanceSettlementService
         $linkedIds = $linkedIds->unique();
         $orderQuery = $db->table('logistics_orders')->whereIntegerInRaw('logistics_orders.id', $linkedIds->all())
             ->select(array_map(fn ($column) => 'logistics_orders.'.$column, $selected));
-        if ($channel === 'paypal') {
-            $this->joinOrderOwnerHistory($orderQuery, $selected);
+        if ($channel === 'paypal' || $includeOrder) {
+            $this->joinOrderOwnerHistory($orderQuery, $selected, includeBeforeHistory: $channel === 'paypal');
         }
         $orders = $orderQuery->get()->keyBy('id');
         $stores = ! $matchOnly && $db->getSchemaBuilder()->hasTable('assistant_domain_stores')

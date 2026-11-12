@@ -1677,6 +1677,7 @@ class FinanceController extends Controller
         return [...$request->validate([
             'account' => 'nullable|string|max:191', 'reference' => 'nullable|string|max:191',
             'gateway' => 'nullable|string|max:191',
+            'worldpay_exception' => ['nullable', Rule::in(['yes', 'no'])],
             'from' => 'nullable|date_format:Y-m-d', 'to' => 'nullable|date_format:Y-m-d',
             'timezone' => ['nullable', Rule::in(FinanceWorkbookService::TIMEZONES)],
             'team' => 'nullable|string|max:100', 'subscription' => 'nullable|string|max:100', 'domain' => 'nullable|string|max:191',
@@ -1714,7 +1715,10 @@ class FinanceController extends Controller
             $filters['card_channel'] = $fixedCardChannel;
         }
         if ($fixedCardChannel === 'worldpay') {
-            unset($filters['account'], $filters['card_group']);
+            unset($filters['account'], $filters['card_group'], $filters['source']);
+        }
+        if ($channel === 'credit_card' && isset($filters['conditions'])) {
+            $filters['conditions'] = array_map(fn ($condition) => [...$condition, 'operator' => 'equals'], $filters['conditions']);
         }
         $cardLayout = $channel === 'credit_card' ? FinanceCreditSettlementLayout::columns($filters['card_channel'] ?? null) : [];
         if ($channel !== 'credit_card' || ($filters['card_channel'] ?? null) !== 'ye') {
@@ -1866,6 +1870,12 @@ class FinanceController extends Controller
             if ($format === 'xls' && $exportRows->take(65536)->count() > 65535) {
                 throw ValidationException::withMessages(['format' => 'XLS最多65535条，请使用XLSX。']);
             }
+            $additionalSheets = [];
+            if ($fixedCardChannel === 'worldpay') {
+                $allocation = new \App\Portals\Finance\FinanceWorldpayAllocation;
+                $exportRows = $exportRows->map($allocation->add(...));
+                $additionalSheets[] = ['失败单分摊', $allocation::HEADERS, $allocation->rows(...)];
+            }
             return $this->workbooks->download($downloadHeaders, $exportRows->map(fn ($row) => array_map(
                 fn ($field) => match (true) {
                     ! $orderView => ($row['card_layout'] ?? $row)[$field] ?? '',
@@ -1875,7 +1885,7 @@ class FinanceController extends Controller
                 },
                 $requestedColumns,
             )), $report.'.'.$format, $format, plain: $orderView,
-                sheetTitle: empty($filters['card_exceptions']) ? 'Sheet1' : '异常汇总');
+                sheetTitle: empty($filters['card_exceptions']) ? 'Sheet1' : '异常汇总', additionalSheets: $additionalSheets);
         }
         $perPage = (int) ($filters['per_page'] ?? 10);
         $page = max(1, (int) $request->query('page', 1));
@@ -2045,7 +2055,7 @@ class FinanceController extends Controller
         if ($fixedCardChannel = FinanceCreditSettlementLayout::REPORT_CHANNELS[$report] ?? null) {
             $request->merge(['card_channel' => $fixedCardChannel]);
         }
-        if ($report === 'worldpay-settlement' && $request->hasFile('files')) {
+        if ($report === 'worldpay-settlement' && ($request->has('files') || ! $request->hasFile('file'))) {
             return $this->importWorldpayFiles($request, $report, (int) $context['user']->getKey());
         }
         if ($channel === 'credit_card' && $request->input('card_channel') === 'ye' && $request->has('files')) {
@@ -2567,13 +2577,17 @@ class FinanceController extends Controller
     {
         $data = $request->validate([
             'files' => 'required|array|min:1|max:'.\App\Portals\Finance\FinanceWorldpayImport::MAX_UPLOAD_FILES,
-            'files.*' => 'required|file|mimes:csv,txt,xlsx|max:10240',
+            'files.*' => 'required|file|max:10240',
+        ], [
+            'files.required' => '没有收到 Worldpay 文件，请重新选择文件上传。',
+            'files.*.uploaded' => 'Worldpay 文件上传失败，请检查文件大小是否超过服务器的上传限制。',
+            'files.*.max' => 'Worldpay 单个文件不得超过 10 MB。',
         ]);
         $worldpay = app(\App\Portals\Finance\FinanceWorldpayImport::class);
         $sources = [];
         $skipped = 0;
         foreach ($data['files'] as $index => $file) {
-            if (in_array($file->getClientOriginalName(), ['保证金返还明细.csv', '扣返款明细.csv', '商户结算费用汇总.xlsx'], true)) {
+            if (in_array($file->getClientOriginalName(), ['扣返款明细.csv', '商户结算费用汇总.xlsx'], true)) {
                 $skipped++;
                 continue;
             }

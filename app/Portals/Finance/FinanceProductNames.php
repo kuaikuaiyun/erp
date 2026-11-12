@@ -137,6 +137,81 @@ class FinanceProductNames
         return implode("\n", array_map(self::category(...), preg_split('/\R/u', $value) ?: [$value]));
     }
 
+    public static function worldpayShortName(string $value): string
+    {
+        $patterns = [
+            '冰丝内裤套装' => 'ice silk.*underwear set|ice silk.*boxer shorts',
+            '保暖内衣套装' => 'thermal underwear|long johns',
+            '保暖套装' => 'thermal.*sets?',
+            '华夫格亨利领保暖衫' => 'waffle.knit.*henley',
+            '华夫格保暖衫' => 'waffle.knit.*thermal',
+            '防晒衫' => '\bsun shirts?\b',
+            '撞色运动套装' => 'contrast web sports suit',
+            '工装阔腿裤' => 'wide.leg cargo pants',
+            '加绒工装裤' => 'fleece.lined.*cargo pants',
+            '工装套装' => 'workwear suit',
+            '工装短裤' => 'cargo shorts?',
+            '工装裤' => 'work pants?|cargo pants|utility pants|tactical pants',
+            '木珠手链' => 'wooden beaded bracelet',
+            '手链' => 'bracelets?',
+            '吊坠项链' => 'pendant|necklace',
+            '帆布托特包' => 'canvas tote bag',
+            '晚宴包' => 'evening bag',
+            '阔腿运动裤' => 'wide.leg sweatpants',
+            '背带工装裤' => 'bib overalls',
+            '直筒牛仔裤' => 'straight leg denim|straight leg jeans',
+            '牛仔裤' => '\bjeans?\b',
+            '针织开衫' => 'cardigan|knit.*sweater jacket',
+            '连帽卫衣套装' => 'hoodie.*(?:set|leggings)|hooded.*(?:suit|track suit)',
+            '连帽休闲外套' => 'hooded.*(?:jacket|coat)',
+            '卫衣套装' => 'sweatshirt.*(?:set|leggings)',
+            '休闲三件套' => 'three[ -]piece',
+            '家居套装' => 'lounge set|pajama set',
+            '休闲两件套' => '(?:two|2)[ -]piece|casual suit',
+            '运动套装' => 'sports suit|track suit',
+            '加绒中长外套' => 'fleece.*coat|fur length coat',
+            '无钢圈文胸' => 'wireless bra',
+            '中筒袜' => 'mid.calf socks',
+            '加绒打底裤' => 'fleece lined leggings',
+            '打底裤' => 'leggings',
+            '连帽针织衫' => 'hooded sweater',
+            '针织衫' => 'sweater|knit(?: cotton)? pullover',
+            '抓绒马甲' => 'fleece vest',
+            '连帽斗篷' => 'hooded cape',
+            '连帽卫衣' => 'hoodie',
+            '卫衣' => 'sweatshirt',
+            '运动裤' => 'sweatpants|joggers',
+            '保暖棉外套' => 'puffer coat|down jacket|parka',
+            '休闲外套' => 'jacket|\bcoat\b',
+            '连衣裙' => 'casual dress|\bdress\b',
+            '连体裤' => 'jumpsuit',
+            '长袖T恤' => 'long.sleeve.*t.shirt',
+            '长款圆领上衣' => 'long.length casual top.*crew neck',
+            'T恤' => '\bt.shirts?\b',
+            '法兰绒衬衫' => 'flannel.*shirts?',
+            '衬衫' => '\bshirts?\b',
+            '阔腿裤' => 'wide.leg.*trousers',
+            '针织裤' => 'knit pants',
+            '休闲裤' => 'casual pants',
+            'Polo衫' => '\bpolo\b',
+            '休闲鞋' => 'sneakers|casual shoes',
+            '帽子' => '\bhat\b',
+        ];
+        foreach (preg_split('/\R/u', $value) ?: [] as $title) {
+            $name = self::line($title);
+            if (preg_match('/\p{Han}/u', $name)
+                && ! preg_match('/\b[A-Za-z]{2,}(?:\s+[A-Za-z]{2,}){2}\b/', $name)) {
+                return $name;
+            }
+            foreach ($patterns as $shortName => $pattern) {
+                if (preg_match('/'.$pattern.'/i', $title)) {
+                    return $shortName;
+                }
+            }
+        }
+        return '';
+    }
+
     private static function category(string $value): string
     {
         if (trim($value) === '') {
