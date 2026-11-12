@@ -768,7 +768,7 @@ class FinanceController extends Controller
             : $this->recordsQuery($dataset, $filters, $xuzongReport, lightweight: $xuzongReport);
         $perPage = (int) ($filters['per_page'] ?? 10);
         if ($indexOnly && $xuzongReport && in_array($query->getConnection()->getDriverName(), ['mysql', 'mariadb'], true)) {
-            $orderIndex = Cache::remember($this->filterCacheKey('xuzong-credit:page-index'), 15, fn () => $query
+            $orderIndex = Cache::remember($this->filterCacheKey('xuzong-credit:imported-page-index'), 15, fn () => $query
                 ->orderByDesc('occurred_at')->orderByDesc('id')->toBase()->get(['id', 'account']));
             $exportAccounts = $orderIndex->countBy('account')->sortKeys()
                 ->map(fn ($total, $account) => (object) ['account' => $account, 'total' => $total])->values();
@@ -869,6 +869,11 @@ class FinanceController extends Controller
         return response()->view('portals.finance.records', [
             ...$context, ...compact('dataset', 'definition', 'filters', 'records', 'types', 'groups', 'xuzongReport'),
             'xuzongRows' => $xuzongReport ? app(FinanceXuzongCreditReport::class)->rows($records->getCollection(), $filters['timezone']) : collect(),
+            'xuzongStatementNotices' => $xuzongReport ? FinanceRecord::query()
+                ->where('dataset', FinanceLogisticsCreditOrders::IMPORTED_DATASET)
+                ->whereNotNull('payload->_xuzong_statement_import->notice')
+                ->latest('updated_at')->orderByDesc('id')->paginate(10, ['id', 'account', 'reference', 'payload'], 'statement_notice_page')
+                ->withQueryString() : null,
             'accounts' => $accounts,
             'accountLabels' => $accountLabels,
             'refreshablePayPalAccounts' => $dataset === 'paypal-orders' && $context['canManage']
@@ -907,6 +912,49 @@ class FinanceController extends Controller
         return redirect('/finance/records/'.$dataset)->with('success', __('finance.imported', ['count' => $count]));
     }
 
+    public function xuzongStatement(Request $request, int $record): Response
+    {
+        $context = $this->context($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        $order = FinanceRecord::query()->where('dataset', FinanceLogisticsCreditOrders::IMPORTED_DATASET)->findOrFail($record);
+
+        return response()->view('portals.finance.xuzong-statement', [
+            ...$context, 'title' => '结算变动明细', 'order' => $order, 'statement' => $order->payload['_xuzong_statement_import'] ?? [],
+            'amountFields' => \App\Portals\Finance\FinanceXuzongOrderImport::statementAmountFields(),
+        ]);
+    }
+
+    public function updateXuzongStatement(Request $request, int $record): Response
+    {
+        $context = $this->context($request, true);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        $fields = \App\Portals\Finance\FinanceXuzongOrderImport::statementAmountFields();
+        $data = $request->validate([
+            'action' => ['required', Rule::in(['add', 'update', 'delete', 'handled'])],
+            'notice' => 'required_if:action,handled|nullable|uuid',
+            'event' => ['required_if:action,update,delete', 'nullable', 'regex:/^[a-f0-9]{64}$/D'],
+            'time' => 'required_if:action,add,update|nullable|date_format:Y-m-d H:i:s',
+            'amounts' => ['nullable', 'array:'.implode(',', $fields)],
+            'amounts.应结算' => ['required_if:action,add,update', 'nullable', 'regex:/^-?\d{1,18}(?:\.\d{1,2})?$/D'],
+            'amounts.*' => ['nullable', 'regex:/^-?\d{1,18}(?:\.\d{1,8})?$/D'],
+        ]);
+        try {
+            app(\App\Portals\Finance\FinanceXuzongOrderImport::class)->manageStatement($record, $data);
+        } catch (\App\Portals\Finance\FinanceRelayException $exception) {
+            throw ValidationException::withMessages(['statement' => $exception->getMessage()]);
+        }
+
+        if ($data['action'] === 'handled') {
+            return redirect()->route('finance.reports.xuzong-credit')->with('success', '该结算变动已处理。');
+        }
+
+        return redirect()->route('finance.reports.xuzong-credit.statement', $record)->with('success', '结算明细已更新。');
+    }
+
     public function importXuzongCreditDetails(Request $request): Response
     {
         $context = $this->context($request, true);
@@ -921,7 +969,7 @@ class FinanceController extends Controller
             'import_kind' => ['nullable', Rule::in(['orders', 'statement'])],
         ]);
         $source = $data['source'] ?? null;
-        $timezone = $data['source_timezone'] ?? 'Asia/Shanghai';
+        $timezone = $data['source_timezone'] ?? 'UTC';
         $account = $data['account'] ?? null;
         $reportAccount = $account;
         if ($account !== null && ! isset(FinanceLogisticsCreditOrders::ACCOUNT_LABELS[$account])) {
@@ -963,7 +1011,7 @@ class FinanceController extends Controller
             ));
             Cache::forget($this->filterCacheKey('xuzong-credit:payment-currencies'));
             Cache::forget($this->filterCacheKey('xuzong-credit:order-options'));
-            Cache::forget($this->filterCacheKey('xuzong-credit:page-index'));
+            Cache::forget($this->filterCacheKey('xuzong-credit:imported-page-index'));
 
             if ($request->expectsJson()) {
                 return response()->json($result);
@@ -1041,7 +1089,7 @@ class FinanceController extends Controller
         });
 
         Cache::forget($this->filterCacheKey('xuzong-credit:payment-currencies'));
-        Cache::forget($this->filterCacheKey('xuzong-credit:page-index'));
+        Cache::forget($this->filterCacheKey('xuzong-credit:imported-page-index'));
 
         if ($request->expectsJson()) {
             return response()->json(['total' => count($rows), 'saved' => $affected]);
@@ -1120,7 +1168,7 @@ class FinanceController extends Controller
             $headers = array_values($xuzongHeaders);
             $report = app(FinanceXuzongCreditReport::class);
             $orders = app(FinanceLogisticsCreditOrders::class);
-            $rows = $query->reorder('id')->select('id')->cursor()->chunk(300)->flatMap(function ($batch) use ($orders, $report, $filters, $headers) {
+            $rows = (clone $query)->reorder('id')->select('id')->cursor()->chunk(300)->flatMap(function ($batch) use ($orders, $report, $filters, $headers) {
                 $records = $orders->query(xuzongReport: true, ids: $batch->pluck('id')->all())->orderBy('id')->get();
 
                 return $report->rows($records, $filters['timezone'])->values()->map(fn ($values) =>
@@ -1135,7 +1183,10 @@ class FinanceController extends Controller
                 'csv', 'tsv' => $this->workbooks->downloadDelimited(
                     $headers, $rows, $filename.'.'.$format, $format === 'tsv' ? "\t" : ',', simplifyText: false,
                 ),
-                default => FinanceXuzongCreditReport::downloadXlsx($headers, $rows, $filename.'.xlsx'),
+                default => FinanceXuzongCreditReport::downloadXlsx($headers, $rows, $filename.'.xlsx',
+                    fn () => FinanceXuzongCreditReport::statementExportRows(
+                        (clone $query)->reorder('id')->whereNotNull('payload->_xuzong_statement_import')->cursor()
+                    )),
             };
         }
         $types = $this->workbooks->database()->table('finance_transaction_types')->pluck('category', 'raw_type');
@@ -2254,7 +2305,12 @@ class FinanceController extends Controller
                             throw ValidationException::withMessages(['file' => '第'.$index.'行'.FinanceCatalog::simplified($field).'必须填写有效金额。']);
                         }
                     }
-                    $zone = $payload['時區'] ?: 'UTC';
+                    $zone = match (strtoupper(trim($payload['時區']))) {
+                        '' => 'Asia/Shanghai',
+                        'PDT' => '-07:00',
+                        'PST' => '-08:00',
+                        default => trim($payload['時區']),
+                    };
                     $count = $this->workbooks->importRecords('paypal-orders', [$index => $payload], $account->activity_account, $zone, $actor, true);
                     if ($count === 0) {
                         $duplicates++;
@@ -2715,7 +2771,7 @@ class FinanceController extends Controller
         $definition = FinanceCatalog::dataset($dataset);
         $choices = [];
         $creditOptions = $dataset === 'xuzong2-orders'
-            ? Cache::remember($this->filterCacheKey(($xuzongReport ? 'xuzong-credit' : $dataset).':order-options'), 60, fn () =>
+            ? Cache::remember($this->filterCacheKey(($xuzongReport ? 'xuzong-credit-imported' : $dataset).':order-options'), 60, fn () =>
                 app(FinanceLogisticsCreditOrders::class)->query(withPayload: false, xuzongReport: $xuzongReport, withPayments: false)
                     ->distinct()->toBase()->get(['account', 'currency', 'status']))
             : null;
@@ -3011,12 +3067,7 @@ class FinanceController extends Controller
         }
 
         if ($xuzongReport && filled($filters['order_fields']['currency'] ?? null)) {
-            $currency = strtoupper($filters['order_fields']['currency']);
-            $matches = app(FinanceXuzongCreditMatches::class);
-            $ids = (clone $query)->select(['id', 'dataset', 'account', 'reference', 'status', 'currency', 'payment_transactions'])->cursor()->chunk(500)
-                ->flatMap(fn ($batch) => $matches->paymentCurrencies(collect($batch->all()))
-                    ->filter(fn ($paymentCurrency) => $paymentCurrency === $currency)->keys())->all();
-            $query->whereIntegerInRaw('id', $ids);
+            $query->where('currency', strtoupper($filters['order_fields']['currency']));
         }
 
         return $query;

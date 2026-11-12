@@ -110,6 +110,8 @@ Route::prefix('finance')->name('finance.')->middleware(RedirectFinanceDomain::cl
     Route::get('/reports/xuzong-credit', 'records')->defaults('dataset', 'xuzong2-orders')->name('reports.xuzong-credit');
     Route::get('/reports/xuzong-credit/export', 'exportRecords')->defaults('dataset', 'xuzong2-orders')->name('reports.xuzong-credit.export');
     Route::post('/reports/xuzong-credit/import', 'importXuzongCreditDetails')->name('reports.xuzong-credit.import');
+    Route::get('/reports/xuzong-credit/statement/{record}', 'xuzongStatement')->whereNumber('record')->name('reports.xuzong-credit.statement');
+    Route::post('/reports/xuzong-credit/statement/{record}', 'updateXuzongStatement')->whereNumber('record')->name('reports.xuzong-credit.statement.update');
     Route::get('/reports/{report}', 'report')->name('report');
     Route::get('/reports/paypal-settlement/records/{record}', 'paypalSettlementDetail')->whereNumber('record')->name('settlement.paypal.detail');
     Route::post('/reports/{report}/export-template/preview', 'previewExportTemplate')
