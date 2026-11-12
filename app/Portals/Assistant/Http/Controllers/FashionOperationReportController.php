@@ -123,7 +123,7 @@ class FashionOperationReportController extends Controller
         $fashionRootDepartmentId = (int) ($fashionDepartment?->id ?? 0);
         $selectedDepartmentIds = $request->has('department_ids')
             ? collect($validated['department_ids'] ?? [])->map(fn ($id) => (int) $id)->intersect($fashionDepartmentIds)->unique()->values()->all()
-            : array_values(array_filter([$fashionRootDepartmentId]));
+            : [];
         $allRows = $storesByOperator->map(function ($operatorStores, int $operatorId) use ($operators, $orderMetrics, $reports, $dateTo, $fashionDepartmentIds, $fashionRootDepartmentId): ?array {
             $operator = $operators->get($operatorId);
             if (! $operator) {
@@ -169,10 +169,10 @@ class FashionOperationReportController extends Controller
         })->filter()->values();
 
         $departmentOptions = $fashionDepartment
-            ? $departmentRows->filter(fn (Department $department): bool => $fashionDepartmentIds->contains((int) $department->id))
+            ? $departmentRows->filter(fn (Department $department): bool => $fashionDepartmentIds->contains((int) $department->id)
+                && (int) $department->id !== $fashionRootDepartmentId)
                 ->when($visibleDepartmentIds !== null, fn ($departments) => $departments->whereIn('id', $visibleDepartmentIds))
-                ->sortBy(fn (Department $department): string => ((int) $department->id === $fashionRootDepartmentId ? '0' : '1')
-                    .str_pad((string) ((int) $department->sort), 8, '0', STR_PAD_LEFT)
+                ->sortBy(fn (Department $department): string => str_pad((string) ((int) $department->sort), 8, '0', STR_PAD_LEFT)
                     .mb_strtolower((string) $department->name))
                 ->values()
             : collect();
