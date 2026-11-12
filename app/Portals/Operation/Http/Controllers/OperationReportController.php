@@ -149,6 +149,9 @@ class OperationReportController extends Controller
             $actualAdSpend = (float) ($submittedReportsByDate->get($identityKey)?->actual_ad_spend ?? 0);
             $firstProfit = $firstRevenue - $actualAdSpend - $firstCost;
             $mediaNames = $dateRows->pluck('media_source')->map(fn ($media) => trim((string) $media) ?: '其他')->unique()->values();
+            $accountSpendsByMedia = collect($this->advertisingAccountSpendSummary(
+                $submittedReportsByDate->get($identityKey)?->advertising_rows ?? []
+            ))->groupBy(fn (array $account) => mb_strtolower($account['media_source']));
 
             return [
                 'first_total_orders' => (int) $dateRows->sum('first_total_orders'),
@@ -168,6 +171,9 @@ class OperationReportController extends Controller
                     $metric = $submittedMediaRoiByDate[$identityKey][mb_strtolower($media)] ?? null;
                     return isset($metric['first_roi']) ? (float) $metric['first_roi'] : null;
                 })->all(),
+                'media_accounts' => $mediaNames->map(
+                    fn (string $media): array => $accountSpendsByMedia->get(mb_strtolower($media), collect())->values()->all()
+                )->all(),
                 'first_roi' => $actualAdSpend > 0 ? $firstRevenue / $actualAdSpend : null,
                 'actual_ad_spend' => $actualAdSpend,
                 'renewal_orders' => (int) $dateRows->sum('renewal_orders'),
@@ -321,9 +327,13 @@ class OperationReportController extends Controller
                 $advertisingRows = $reports->flatMap(fn (OperationReport $report) => $report->advertising_rows ?? [])->values()->all();
                 $mediaOrderCounts = collect($rows)->groupBy(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? '其他'))))
                     ->map(fn ($mediaRows) => (int) $mediaRows->sum('first_total_orders'));
+                $accountSpendsByMedia = collect($this->advertisingAccountSpendSummary($advertisingRows))
+                    ->groupBy(fn (array $account) => mb_strtolower($account['media_source']));
                 $mediaSummary = collect($this->metrics->mediaRoiSummary($rows, $advertisingRows))
-                    ->map(function (array $media) use ($mediaOrderCounts): array {
+                    ->map(function (array $media) use ($mediaOrderCounts, $accountSpendsByMedia): array {
                         $media['first_orders'] = (int) ($mediaOrderCounts[mb_strtolower(trim($media['media_source']))] ?? 0);
+                        $media['accounts'] = $accountSpendsByMedia
+                            ->get(mb_strtolower(trim($media['media_source'])), collect())->values()->all();
                         return $media;
                     })->values()->all();
 
@@ -1125,6 +1135,41 @@ class OperationReportController extends Controller
     {
         $fields = ['first_subscription_orders','first_subscription_revenue','first_normal_orders','first_normal_revenue','first_total_orders','first_total_revenue','first_purchase_cost','first_shipping_cost','first_return_fee','renewal_orders','renewal_revenue','renewal_cost','total_orders','total_revenue'];
         return collect($fields)->mapWithKeys(fn ($field) => [$field => collect($rows)->sum($field)])->all();
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $advertisingRows
+     * @return list<array{media_source:string,account_name:string,account_number:string,actual_ad_spend:float}>
+     */
+    private function advertisingAccountSpendSummary(array $advertisingRows): array
+    {
+        return collect($advertisingRows)
+            ->groupBy(fn (array $row): string => implode("\x1F", [
+                mb_strtolower(trim((string) ($row['media_source'] ?? ''))),
+                mb_strtolower(trim((string) ($row['account_name'] ?? ''))),
+                mb_strtolower(trim((string) ($row['account_number'] ?? ''))),
+            ]))
+            ->map(function ($rows): array {
+                $first = $rows->first();
+
+                return [
+                    'media_source' => trim((string) ($first['media_source'] ?? '')) ?: '其他',
+                    'account_name' => trim((string) ($first['account_name'] ?? '')),
+                    'account_number' => trim((string) ($first['account_number'] ?? '')),
+                    'actual_ad_spend' => (float) $rows->sum(function (array $row): float {
+                        $bookSpend = (float) ($row['book_spend'] ?? 0);
+                        $handlingFee = (float) ($row['handling_fee']
+                            ?? ($bookSpend * (float) ($row['settlement_coefficient'] ?? 0)));
+
+                        return (float) ($row['actual_spend'] ?? ($bookSpend + $handlingFee));
+                    }),
+                ];
+            })
+            ->sortBy(fn (array $account): string => mb_strtolower(
+                $account['media_source'].'|'.$account['account_name'].'|'.$account['account_number']
+            ))
+            ->values()
+            ->all();
     }
 
     private function withFirstOrderProfitability(array $rows, array $mediaRoiByDate): array
