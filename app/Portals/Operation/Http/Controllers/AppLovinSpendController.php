@@ -30,7 +30,11 @@ class AppLovinSpendController extends Controller
         if ($context instanceof Response) return $context;
         $this->access->assertPortal($context['portal'], ProductRequestAccessService::OPERATION_PORTAL_CODE);
         $user = $context['user'];
-        $filters = $request->validate(['over_threshold' => ['nullable', 'in:1']]);
+        $filters = $request->validate([
+            'over_threshold' => ['nullable', 'in:1'],
+            'account_name' => ['nullable', 'string', 'max:150'],
+            'account_number' => ['nullable', 'string', 'max:150'],
+        ]);
         $canSeeAll = $user->isAdministrator() || strcasecmp((string) $user->username, 'kky_boss') === 0;
         $reports = OperationReport::query()
             ->where('status', '!=', OperationReport::STATUS_REJECTED)
@@ -39,9 +43,14 @@ class AppLovinSpendController extends Controller
 
         $accounts = $this->withScreenshots($this->summarize($reports));
         if (($filters['over_threshold'] ?? '') === '1') $accounts = $accounts->where('total', '>=', 5000)->values();
+        $accountName = trim((string) ($filters['account_name'] ?? ''));
+        $accountNumber = trim((string) ($filters['account_number'] ?? ''));
+        if ($accountName !== '') $accounts = $accounts->filter(fn (array $account) => mb_stripos((string) $account['account_name'], $accountName) !== false)->values();
+        if ($accountNumber !== '') $accounts = $accounts->filter(fn (array $account) => mb_stripos((string) $account['account_number'], $accountNumber) !== false)->values();
         return view('portals.operation.daily-submissions.applovin-spend', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
             'accounts' => $this->paginate($accounts, $request), 'threshold' => 5000, 'overThreshold' => $filters['over_threshold'] ?? '',
+            'accountName' => $accountName, 'accountNumber' => $accountNumber,
         ]);
     }
 
