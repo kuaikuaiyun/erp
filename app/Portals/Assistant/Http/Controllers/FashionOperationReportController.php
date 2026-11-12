@@ -84,7 +84,10 @@ class FashionOperationReportController extends Controller
                 : $query->whereHas('departments', fn ($departments) => $departments->whereIn('admin_roles.id', $visibleDepartmentIds)))
             ->get()->keyBy('id');
         $operatorIds = $operators->keys()->map(fn ($id): int => (int) $id)->values();
-        $storesByOperator = $storesByOperator->only($operatorIds->all());
+        // groupBy 后每个值都是一个店铺集合，不是 Eloquent 模型；按分组键过滤，
+        // 避免 Eloquent Collection::only() 把子集合当模型调用 getKey()。
+        $storesByOperator = $storesByOperator
+            ->filter(fn ($operatorStores, $operatorId): bool => $operatorIds->contains((int) $operatorId));
         $stores = $stores->filter(fn (AssistantDomainStore $store): bool => $storesByOperator->has((int) ($store->owner_user_id
             ?: ($nameUsers->get(mb_strtolower(trim((string) $store->user_name)))?->getKey() ?? 0))))->values();
         $departmentRows = Department::business()->get(['id', 'name', 'parent_id', 'sort']);
