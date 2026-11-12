@@ -1,4 +1,5 @@
 @once
+@include('portals.assistant.partials.daily-submission-pagination-styles')
 @push('styles')
 <link rel="stylesheet" href="{{ asset('vendor/laravel-admin/AdminLTE/plugins/select2/select2.min.css') }}">
 <style>

@@ -15,12 +15,13 @@
 @endpush
 
 @section('content')
-<section class="content-header"><h1>广告费汇总 <small>统计审核通过的运营广告费提报</small></h1></section>
+<section class="content-header"><h1>广告费汇总 <small>统计 Shopify 订阅项目与服装项目审核通过的广告费提报</small></h1></section>
 <section class="content">
     <div class="box ad-summary-filter"><div class="box-body">
         <form method="get" action="{{ route('assistant.advertising-spend-summary.index') }}" class="ad-summary-toolbar" id="ad-summary-filter">
             <div class="form-group"><label>开始日期</label><input class="form-control" type="date" name="date_from" value="{{ $dateFrom }}" required></div>
             <div class="form-group"><label>结束日期</label><input class="form-control" type="date" name="date_to" value="{{ $dateTo }}" required></div>
+            <div class="form-group"><label>项目类型</label><select class="form-control" name="project"><option value="">全部项目</option><option value="shopify" @selected($filters['project'] === 'shopify')>Shopify订阅项目</option><option value="fashion" @selected($filters['project'] === 'fashion')>服装项目</option></select></div>
             <div class="form-group"><label>广告代理</label><select class="form-control" name="agency"><option value="">全部代理</option>@foreach($agencyOptions as $agency)<option value="{{ $agency }}" @selected($filters['agency'] === $agency)>{{ $agency }}</option>@endforeach</select></div>
             <div class="form-group"><label>广告媒体</label><select class="form-control" name="media"><option value="">全部媒体</option>@foreach($mediaOptions as $media)<option value="{{ $media }}" @selected($filters['media'] === $media)>{{ $media }}</option>@endforeach</select></div>
             <div class="form-group"><label>运营</label><input class="form-control" type="text" name="operator" value="{{ $filters['operator'] }}" placeholder="输入运营姓名"></div>
@@ -33,18 +34,18 @@
     </div></div>
 
     <div class="box ad-summary-box">
-        <div class="box-header with-border"><h3 class="box-title">每日代理与渠道消耗</h3><p class="ad-summary-note">逐条显示每个运营提交的广告明细；待审核和审核不通过的数据不参与统计。</p></div>
+        <div class="box-header with-border"><h3 class="box-title">每日代理与渠道消耗</h3><p class="ad-summary-note">逐条显示 Shopify 订阅项目与服装项目的广告明细；待审核和审核不通过的数据不参与统计。</p></div>
         <div class="box-body no-padding table-responsive">
             <table class="table table-bordered table-hover ad-summary-table">
-                <thead><tr><th>日期</th><th>运营名称</th><th>广告代理</th><th>广告社媒</th><th>账户名称</th><th>账户编号</th><th>账面广告费($)</th><th>结算系数</th><th>手续费($)</th><th>实际广告费($)</th><th>广告消耗截图</th></tr></thead>
+                <thead><tr><th>项目类型</th><th>日期</th><th>运营名称</th><th>广告代理</th><th>广告社媒</th><th>账户名称</th><th>账户编号</th><th>账面广告费($)</th><th>结算系数</th><th>手续费($)</th><th>实际广告费($)</th><th>广告消耗截图</th></tr></thead>
                 <tbody>
                 @forelse($rows as $row)
-                    <tr><td class="identity">{{ $row['date'] }}</td><td><span class="operator-name-tag">{{ $row['operator_name'] }}</span></td><td class="identity">{{ $row['agency'] }}</td><td>{{ $row['media'] }}</td><td class="ad-account">{{ $row['account_name'] ?: '—' }}</td><td class="ad-account">{{ $row['account_number'] ?: '—' }}</td><td class="money">{{ number_format($row['book_spend'], 2) }}</td><td class="money">{{ number_format($row['settlement_coefficient'], 4) }}</td><td class="money">{{ number_format($row['handling_fee'], 2) }}</td><td class="money actual">{{ number_format($row['actual_spend'], 2) }}</td><td class="text-center">@if($row['screenshot'])<img class="ad-screenshot" src="{{ route('assistant.operation-report-reviews.screenshot', ['report_id' => $row['report_id'], 'path' => $row['screenshot']]) }}" alt="广告消耗截图" onclick="window.erpZoomOpen&&window.erpZoomOpen(this.src)">@else<span class="text-muted">未上传</span>@endif</td></tr>
+                    <tr><td><span class="operator-name-tag">{{ $row['project_label'] }}</span></td><td class="identity">{{ $row['date'] }}</td><td><span class="operator-name-tag">{{ $row['operator_name'] }}</span></td><td class="identity">{{ $row['agency'] }}</td><td>{{ $row['media'] }}</td><td class="ad-account">{{ $row['account_name'] ?: '—' }}</td><td class="ad-account">{{ $row['account_number'] ?: '—' }}</td><td class="money">{{ number_format($row['book_spend'], 2) }}</td><td class="money">{{ number_format($row['settlement_coefficient'], 4) }}</td><td class="money">{{ number_format($row['handling_fee'], 2) }}</td><td class="money actual">{{ number_format($row['actual_spend'], 2) }}</td><td class="text-center">@if($row['screenshot'])<img class="ad-screenshot" src="{{ $row['project'] === 'fashion' ? route('assistant.fashion-advertising-reviews.screenshot', ['type' => 'advertising', 'entry' => $row['entry_id']]) : route('assistant.operation-report-reviews.screenshot', ['report_id' => $row['report_id'], 'path' => $row['screenshot']]) }}" alt="广告消耗截图" onclick="window.erpZoomOpen&&window.erpZoomOpen(this.src)">@else<span class="text-muted">未上传</span>@endif</td></tr>
                 @empty
-                    <tr><td colspan="11" class="ad-empty">当前时间范围内暂无已审核的广告费数据</td></tr>
+                    <tr><td colspan="12" class="ad-empty">当前时间范围内暂无已审核的广告费数据</td></tr>
                 @endforelse
                 </tbody>
-                @if($rows->isNotEmpty())<tfoot><tr><td colspan="6">合计</td><td class="money">{{ number_format($totals['book_spend'], 2) }}</td><td class="text-center">—</td><td class="money">{{ number_format($totals['handling_fee'], 2) }}</td><td class="money">{{ number_format($totals['actual_spend'], 2) }}</td><td>—</td></tr></tfoot>@endif
+                @if($rows->isNotEmpty())<tfoot><tr><td colspan="7">合计</td><td class="money">{{ number_format($totals['book_spend'], 2) }}</td><td class="text-center">—</td><td class="money">{{ number_format($totals['handling_fee'], 2) }}</td><td class="money">{{ number_format($totals['actual_spend'], 2) }}</td><td>—</td></tr></tfoot>@endif
             </table>
         </div>
         @include('portals.assistant.partials.compact-pagination', ['paginator' => $rows])
