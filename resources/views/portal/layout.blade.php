@@ -148,8 +148,11 @@
         $.get(@json(route('operation.abnormal-orders.pending-count'))).done(function(response){badge.text(response.count||0);});
     }
     function updateAppLovinGiftBadge(){
-        var badge=$('#operation-applovin-gift-badge');if(!badge.length)return;
-        $.get(@json(route('operation.applovin-spends.pending-count'))).done(function(response){
+        var badge=$('#operation-applovin-gift-badge, #fashion-applovin-gift-badge').first();if(!badge.length)return;
+        var pendingUrl=badge.is('#fashion-applovin-gift-badge')
+            ? @json(route('fashion.applovin-spends.pending-count'))
+            : @json(route('operation.applovin-spends.pending-count'));
+        $.get(pendingUrl).done(function(response){
             var count=parseInt(response.count,10)||0;
             badge.text(count).toggle(count>0);
         });
