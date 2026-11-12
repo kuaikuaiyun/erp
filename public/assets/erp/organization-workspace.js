@@ -273,6 +273,10 @@
             }
             children.classList.toggle('is-collapsed', !expanded);
             toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+            var icon = toggle.querySelector('.fa');
+            if (icon) {
+                icon.className = expanded ? 'fa fa-angle-down' : 'fa fa-angle-right';
+            }
         }
 
         Array.prototype.forEach.call(tree.querySelectorAll('[data-tree-toggle]'), function (button) {
@@ -370,5 +374,4 @@
         window.jQuery(document).on('pjax:end', initialiseOrganizationWorkspace);
     }
 })();
-
 

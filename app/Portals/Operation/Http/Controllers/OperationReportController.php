@@ -903,7 +903,7 @@ class OperationReportController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) abort($context->getStatusCode());
         return redirect()->route('operation.reports.show', $report)
-            ->with('error', '审核流程已迁移到助理系统，请在“运营报表审核”菜单中操作。');
+            ->with('error', '审核流程已迁移到助理系统，请在“Shopify订阅广告费审核”菜单中操作。');
     }
 
     public function export(Request $request): Response

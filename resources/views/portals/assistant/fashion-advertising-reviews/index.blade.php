@@ -1,6 +1,6 @@
 @extends('portal.layout')
 
-@section('page_title', '运营广告费审核')
+@section('page_title', '服装项目广告费审核')
 
 @push('styles')
 <link rel="stylesheet" href="{{ asset('vendor/laravel-admin/AdminLTE/plugins/select2/select2.min.css') }}">
@@ -22,7 +22,7 @@
 @endpush
 
 @section('content')
-<section class="content-header"><h1>运营广告费审核 <small>审核服装运营系统提交的营业额和广告费用</small></h1></section>
+<section class="content-header"><h1>服装项目广告费审核 <small>审核服装运营系统提交的营业额和广告费用</small></h1></section>
 <section class="content fashion-review-page">
     @if(session('success'))<div class="alert alert-success"><i class="fa fa-check-circle"></i> {{ session('success') }}</div>@endif
     @if($errors->any())<div class="alert alert-danger"><i class="fa fa-warning"></i> {{ $errors->first() }}</div>@endif

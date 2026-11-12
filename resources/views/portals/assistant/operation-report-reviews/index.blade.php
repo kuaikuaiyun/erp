@@ -1,5 +1,5 @@
 @extends('portal.layout')
-@section('page_title', '运营报表审核')
+@section('page_title', 'Shopify订阅广告费审核')
 @push('styles')
 <link rel="stylesheet" href="{{ asset('vendor/laravel-admin/AdminLTE/plugins/select2/select2.min.css') }}">
 <style>
@@ -9,7 +9,7 @@
 </style>
 @endpush
 @section('content')
-<section class="content-header"><h1>运营报表审核 <small>审核运营系统提交的报表数据</small></h1></section>
+<section class="content-header"><h1>Shopify订阅广告费审核 <small>审核运营系统提交的报表数据</small></h1></section>
 <section class="content report-review-page">
     @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
     @if($errors->any())<div class="alert alert-danger"><ul style="margin:0;padding-left:20px">@foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>@endif
@@ -43,7 +43,7 @@
                         @foreach([20,50,100] as $size)<option value="{{ $size }}" @selected($reports->perPage()===$size)>{{ $size }}</option>@endforeach
                     </select> 份
                 </label>
-                @if($reports->lastPage() > 1)<nav class="review-pages" aria-label="运营广告费审核分页">
+                @if($reports->lastPage() > 1)<nav class="review-pages" aria-label="Shopify订阅广告费审核分页">
                     <a class="review-page {{ $reports->onFirstPage() ? 'disabled' : '' }}" href="{{ $reports->previousPageUrl() ?: '#' }}" title="上一页"><i class="fa fa-angle-left"></i></a>
                     @if($pageStart > 1)<a class="review-page" href="{{ $reports->url(1) }}">1</a>@if($pageStart > 2)<span class="review-page-gap">…</span>@endif @endif
                     @for($page=$pageStart;$page<=$pageEnd;$page++)<a class="review-page {{ $page===$reports->currentPage() ? 'active' : '' }}" href="{{ $reports->url($page) }}">{{ $page }}</a>@endfor

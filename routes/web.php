@@ -26,6 +26,7 @@ use App\Portals\Assistant\Http\Controllers\DomainStoreController;
 use App\Portals\Assistant\Http\Controllers\FashionAdvertisingReviewController;
 use App\Portals\Assistant\Http\Controllers\FashionAppLovinPerformanceReportController;
 use App\Portals\Assistant\Http\Controllers\FashionOperationReportController;
+use App\Portals\Assistant\Http\Controllers\FashionStoreAnalyticsController;
 use App\Portals\Assistant\Http\Controllers\OperationReportDashboardController;
 use App\Portals\Assistant\Http\Controllers\OperationReportReviewController;
 use App\Portals\Assistant\Http\Controllers\ShopifyAnalyticsController;
@@ -180,6 +181,7 @@ Route::delete('/domain-stores/{domainStore}', [DomainStoreController::class, 'de
 Route::get('/domain-stores/{domainStore}/history', [DomainStoreController::class, 'history'])->name('assistant.domain-stores.history');
 Route::patch('/domain-stores/{domainStore}/owner-histories/{ownerHistory}/effective-time', [DomainStoreController::class, 'updateOwnerHistoryEffectiveTime'])->name('assistant.domain-stores.owner-histories.effective-time');
 Route::get('/shopify-analytics', [ShopifyAnalyticsController::class, 'index'])->name('assistant.shopify-analytics.index');
+Route::get('/assistant/fashion-store-analytics', [FashionStoreAnalyticsController::class, 'index'])->name('assistant.fashion-store-analytics.index');
 Route::get('/shopify-analytics/export-orders', [ShopifyAnalyticsController::class, 'exportOrders'])->name('assistant.shopify-analytics.export-orders');
 Route::post('/shopify-analytics/refresh-batch', [ShopifyAnalyticsController::class, 'refreshBatch'])->name('assistant.shopify-analytics.refresh-batch');
 Route::get('/shopify-analytics/sync-batches/{batch}/progress', [ShopifyAnalyticsController::class, 'syncProgress'])->name('assistant.shopify-analytics.sync-progress');
