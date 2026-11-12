@@ -159,10 +159,13 @@ class FinanceXuzongCreditMatches
 
     public function forOrders(Collection $records, Collection $orders): Collection
     {
-        [$details, $erpOrders] = $this->linkedDetails($records, $orders);
-        $details = $details->replace($records->filter(fn ($record) => $record->dataset === FinanceLogisticsCreditOrders::IMPORTED_DATASET)->keyBy('id'));
+        $systemRecords = $records->where('dataset', '!=', FinanceLogisticsCreditOrders::IMPORTED_DATASET);
+        $systemIds = $systemRecords->pluck('id');
+        [$details, $erpOrders] = $systemRecords->isEmpty()
+            ? [collect(), $orders]
+            : $this->linkedDetails($records, $orders);
+        $details = $details->replace($records->where('dataset', FinanceLogisticsCreditOrders::IMPORTED_DATASET)->keyBy('id'));
         $billing = $this->billingFields($details);
-        $systemIds = $records->where('dataset', '!=', FinanceLogisticsCreditOrders::IMPORTED_DATASET)->pluck('id');
         $refunds = $this->refunds($erpOrders->only($systemIds->all())->filter()->pluck('id')->unique());
 
         return $records->mapWithKeys(function ($record) use ($erpOrders, $billing, $refunds): array {
@@ -309,7 +312,11 @@ class FinanceXuzongCreditMatches
         $db = $this->workbooks->database();
         $saved = $db->table('finance_settlement_supplements')->whereIn('finance_record_id', $details->pluck('id'))
             ->pluck('payload', 'finance_record_id');
-        $entries = $this->conflux->entriesFor($details->unique('id'), $this->accounts);
+        if ($this->accounts === null && $details->contains(fn ($detail) => ($detail->payload['_card_channel'] ?? null) === 'ye')) {
+            $this->accounts = FinancePaymentAccount::query()->where('account_type', 'credit_card')
+                ->get(['id', 'activity_account', 'account_name'])->keyBy('activity_account');
+        }
+        $entries = $this->conflux->entriesFor($details->unique('id'), $this->accounts ?? collect());
         $fees = $this->conflux->feesFor($entries);
 
         return $details->map(function (FinanceRecord $detail) use ($saved, $entries, $fees): array {

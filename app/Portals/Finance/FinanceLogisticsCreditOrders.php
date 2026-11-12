@@ -143,6 +143,7 @@ class FinanceLogisticsCreditOrders
         }
         if ($searchReference !== null) {
             $orders->where(fn ($order) => $order->where('f.reference', $searchReference)
+                ->orWhere('f.payload->_edited_platform_order_id', $searchReference)
                 ->orWhere('f.payload->_legacy_order_id', $searchReference)
                 ->orWhere('f.payload->_linked_platform_order_id', $searchReference)
                 ->orWhere('f.payload->交易流水号', $searchReference)

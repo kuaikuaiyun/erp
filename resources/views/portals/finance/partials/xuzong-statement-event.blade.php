@@ -1,5 +1,5 @@
 @if($canManage)
-    <form method="post" action="{{ route('finance.reports.xuzong-credit.statement.update', $order->id) }}">
+    <form method="post" data-loading="off" action="{{ route('finance.reports.xuzong-credit.statement.update', $order->id) }}">
         @csrf
         <input type="hidden" name="action" value="{{ $editing ? 'update' : 'add' }}">
         @if($editing)<input type="hidden" name="event" value="{{ $key }}">@endif
@@ -16,7 +16,7 @@
         <button class="btn btn-primary btn-sm" type="submit">{{ $editing ? '保存修改' : '新增' }}</button>
     </form>
     @if($editing)
-        <form method="post" action="{{ route('finance.reports.xuzong-credit.statement.update', $order->id) }}" onsubmit="return confirm('确定删除这条结算明细？')">
+        <form method="post" data-loading="off" action="{{ route('finance.reports.xuzong-credit.statement.update', $order->id) }}" onsubmit="return confirm('确定删除这条结算明细？')">
             @csrf
             <input type="hidden" name="action" value="delete">
             <input type="hidden" name="event" value="{{ $key }}">
