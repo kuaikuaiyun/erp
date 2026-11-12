@@ -2493,6 +2493,10 @@ class FinanceController extends Controller
 
         unset($data['settlement_type']);
 
+        if ($request->expectsJson()) {
+            return response()->json(['message' => $message, 'redirect' => route('finance.report', ['report' => $report, ...$data])]);
+        }
+
         return redirect()->route('finance.report', ['report' => $report, ...$data])->with('success', $message);
     }
 

@@ -1509,6 +1509,10 @@ class FinancePortalTest extends TestCase
         $this->assertEquals(25.19, $export[1][array_search('应结算', $export[0], true)]);
         $submit()->assertSessionHasNoErrors()
             ->assertSessionHas('success', '新增订单 0 笔，跳过重复订单 2 笔。识别结算报表 1 份，新增账单流水 0 条，跳过重复报表 1 份。');
+        $this->post($url.'/import', [...$data, 'settlement_type' => '正常结算', 'files' => [$octetStreamUpload($orders)]],
+            ['Accept' => 'application/json'])->assertOk()
+            ->assertJsonPath('message', '新增订单 0 笔，跳过重复订单 2 笔。')
+            ->assertJsonStructure(['redirect']);
 
         $otherAccount = $this->financePayPalAccount('西安单包', [
             'account_type' => 'credit_card', 'card_platform' => 'ye', 'card_merchant_key' => 'XAdanbao',
