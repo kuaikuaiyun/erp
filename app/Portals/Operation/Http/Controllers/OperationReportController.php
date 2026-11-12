@@ -61,16 +61,18 @@ class OperationReportController extends Controller
         $dateTo = (string) ($validated['date_to'] ?? $reportNow->copy()->endOfMonth()->format('Y-m-d'));
         abort_if($dateFrom > $dateTo, 422, '开始日期不能晚于结束日期。');
         $operationDepartmentIds = $this->assistantStoreOwners->operationDepartments()->pluck('id');
-        $operationDepartments = $isBoss
-            ? Department::business()->whereIn('id', $operationDepartmentIds->all())
+        $managedOperationDepartmentIds = $this->departmentAuthorization->managedDepartmentIds($user)
+            ->intersect($operationDepartmentIds)->values();
+        $isReportDepartmentLeader = ! $isBoss && $managedOperationDepartmentIds->isNotEmpty();
+        $visibleOperationDepartmentIds = $isBoss ? $operationDepartmentIds : $managedOperationDepartmentIds;
+        $operationDepartments = ($isBoss || $isReportDepartmentLeader)
+            ? Department::business()->whereIn('id', $visibleOperationDepartmentIds->all())
                 ->orderBy('sort')->orderBy('name')->get(['id', 'name', 'sort'])
             : collect();
         $viewerOperationDepartment = $isBoss
             ? null
             : $this->assistantStoreOwners->operationDepartmentForUser($user);
-        $isReportDepartmentLeader = ! $isBoss
-            && $this->departmentAuthorization->managedDepartmentIds($user)->isNotEmpty();
-        $selectedDepartmentId = $isBoss && isset($validated['operation_department_id'])
+        $selectedDepartmentId = ($isBoss || $isReportDepartmentLeader) && isset($validated['operation_department_id'])
             ? (int) $validated['operation_department_id']
             : null;
         if ($selectedDepartmentId !== null) {
@@ -80,7 +82,7 @@ class OperationReportController extends Controller
         }
         $operatorOptions = $isBoss
             ? $this->bossReportOperatorOptions($operationDepartments, $selectedDepartmentId)
-            : $this->reportOperatorOptions($user);
+            : $this->reportOperatorOptions($user, $selectedDepartmentId);
         $canSelectOperator = $isBoss || $operatorOptions->count() > 1;
         $selectAllOperators = ($validated['operator_user_id'] ?? null) === 'all';
         $defaultOperatorId = $operatorOptions->contains('id', $user->getKey())
@@ -245,16 +247,18 @@ class OperationReportController extends Controller
         $dateTo = $rangeEnd->format('Y-m-d');
 
         $operationDepartmentIds = $this->assistantStoreOwners->operationDepartments()->pluck('id');
-        $operationDepartments = $isBoss
-            ? Department::business()->whereIn('id', $operationDepartmentIds->all())
+        $managedOperationDepartmentIds = $this->departmentAuthorization->managedDepartmentIds($user)
+            ->intersect($operationDepartmentIds)->values();
+        $isReportDepartmentLeader = ! $isBoss && $managedOperationDepartmentIds->isNotEmpty();
+        $visibleOperationDepartmentIds = $isBoss ? $operationDepartmentIds : $managedOperationDepartmentIds;
+        $operationDepartments = ($isBoss || $isReportDepartmentLeader)
+            ? Department::business()->whereIn('id', $visibleOperationDepartmentIds->all())
                 ->orderBy('sort')->orderBy('name')->get(['id', 'name', 'sort'])
             : collect();
         $viewerOperationDepartment = $isBoss
             ? null
             : $this->assistantStoreOwners->operationDepartmentForUser($user);
-        $isReportDepartmentLeader = ! $isBoss
-            && $this->departmentAuthorization->managedDepartmentIds($user)->isNotEmpty();
-        $selectedDepartmentId = $isBoss && isset($validated['operation_department_id'])
+        $selectedDepartmentId = ($isBoss || $isReportDepartmentLeader) && isset($validated['operation_department_id'])
             ? (int) $validated['operation_department_id']
             : null;
 
@@ -266,7 +270,7 @@ class OperationReportController extends Controller
 
         $operatorOptions = $isBoss
             ? $this->bossReportOperatorOptions($operationDepartments, $selectedDepartmentId)
-            : $this->reportOperatorOptions($user);
+            : $this->reportOperatorOptions($user, $selectedDepartmentId);
         $canSelectOperator = $isBoss || $operatorOptions->count() > 1;
         $selectAllOperators = ($validated['operator_user_id'] ?? 'all') === 'all';
         $defaultOperatorId = $operatorOptions->contains('id', $user->getKey())
@@ -988,7 +992,7 @@ class OperationReportController extends Controller
      * managers can select active users within their existing management scope.
      * Ordinary operators remain limited to their own data.
      */
-    private function reportOperatorOptions(AdminUser $user)
+    private function reportOperatorOptions(AdminUser $user, ?int $selectedDepartmentId = null)
     {
         if ($this->isBoss($user)) {
             return $this->operatorOptions();
@@ -997,6 +1001,11 @@ class OperationReportController extends Controller
         $departmentIds = $this->departmentAuthorization->managedDepartmentIds($user);
         if ($departmentIds->isEmpty()) {
             return collect([$user]);
+        }
+
+        if ($selectedDepartmentId !== null) {
+            abort_unless($departmentIds->contains($selectedDepartmentId), 403);
+            $departmentIds = collect([$selectedDepartmentId]);
         }
 
         $rolesTable = config('admin.database.roles_table');
