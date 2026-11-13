@@ -114,6 +114,7 @@
         });
     })();
     </script>
+    @endif
     <script>
     (function(){
         var forms=document.querySelectorAll('.reference-upload'),progress=document.querySelector('[data-upload-progress]'),status=document.querySelector('[data-upload-status]'),percent=document.querySelector('[data-upload-percent]'),bar=document.querySelector('[data-upload-bar]'),frame=document.getElementById('aikaipin-reference-frame');
@@ -123,6 +124,5 @@
         forms.forEach(function(form){var input=form.querySelector('input[type="file"]');if(!input)return;input.addEventListener('change',function(){var file=input.files&&input.files[0];if(!file)return;forms.forEach(function(item){item.classList.add('is-uploading');var field=item.querySelector('input[type="file"]');if(field&&field!==input)field.disabled=true;});setProgress(0,'准备上传：'+file.name);var xhr=new XMLHttpRequest();xhr.open('POST',form.action,true);xhr.setRequestHeader('Accept','application/json');xhr.setRequestHeader('X-Requested-With','XMLHttpRequest');xhr.upload.addEventListener('progress',function(event){if(event.lengthComputable)setProgress(event.loaded/event.total*100,'正在上传：'+file.name);});xhr.addEventListener('load',function(){var data={};try{data=JSON.parse(xhr.responseText||'{}');}catch(error){}if(xhr.status>=200&&xhr.status<300){setProgress(100,'上传完成：'+(data.file_name||file.name));input.value='';resetForms();if(frame)frame.src=frame.src;}else{var message=data.message||(data.errors&&data.errors.video&&data.errors.video[0])||'上传失败，请重试。';setProgress(0,message);resetForms();}});xhr.addEventListener('error',function(){setProgress(0,'网络异常，上传失败，请重试。');resetForms();});xhr.addEventListener('abort',function(){setProgress(0,'上传已取消。');resetForms();});xhr.send(new FormData(form));});});
     })();
     </script>
-    @endif
 </body>
 </html>
