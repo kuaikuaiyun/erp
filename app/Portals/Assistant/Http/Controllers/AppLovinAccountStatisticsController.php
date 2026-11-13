@@ -196,12 +196,20 @@ class AppLovinAccountStatisticsController extends Controller
     private function accounts(AdminUser $viewer, string $project): Collection
     {
         $visibleIds = $this->visibleDepartmentIds($viewer, $project);
-        $operatorOnly = $project !== 'assistant' && ! $this->canSeeAll($viewer) && $visibleIds === [];
         $subscriptionQuery = OperationReport::query()->where('status', OperationReport::STATUS_APPROVED);
         if (! $this->canSeeAll($viewer)) {
-            $operatorOnly
-                ? $subscriptionQuery->where('operator_user_id', $viewer->getKey())
-                : ($visibleIds === [] ? $subscriptionQuery->whereRaw('1=0') : $subscriptionQuery->whereIn('operation_department_id', $visibleIds));
+            if ($project !== 'assistant') {
+                $subscriptionQuery->where(function ($scope) use ($viewer, $visibleIds): void {
+                    $scope->where('operator_user_id', $viewer->getKey());
+                    if ($visibleIds !== []) {
+                        $scope->orWhereIn('operation_department_id', $visibleIds);
+                    }
+                });
+            } else {
+                $visibleIds === []
+                    ? $subscriptionQuery->whereRaw('1=0')
+                    : $subscriptionQuery->whereIn('operation_department_id', $visibleIds);
+            }
         }
         $subscription = $project === 'fashion' ? collect() : $subscriptionQuery->get()->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])
             ->filter(fn (array $row) => mb_strtolower(trim((string) ($row['media_source'] ?? ''))) === 'applovin')
@@ -215,13 +223,14 @@ class AppLovinAccountStatisticsController extends Controller
 
         $fashion = $project === 'operation' ? collect() : FashionAdvertisingReport::query()->where('status', FashionAdvertisingReport::STATUS_APPROVED)
             ->with(['adSpendEntries', 'submitter.departments'])->get()
-            ->flatMap(function (FashionAdvertisingReport $report) use ($viewer, $visibleIds, $operatorOnly): Collection {
+            ->flatMap(function (FashionAdvertisingReport $report) use ($viewer, $visibleIds): Collection {
                 $departments = $report->submitter?->departments ?? collect();
-                $department = ! $this->canSeeAll($viewer) && ! $operatorOnly
-                    ? $departments->first(fn ($item) => in_array((int) $item->id, $visibleIds, true))
-                    : ($departments->first(fn ($item) => (bool) ($item->pivot->is_primary ?? false)) ?: $departments->first());
-                if (! $this->canSeeAll($viewer)
-                    && ($operatorOnly ? (int) $report->submitter_id !== (int) $viewer->getKey() : (! $department || ! in_array((int) $department->id, $visibleIds, true)))) return collect();
+                $isOwnReport = (int) $report->submitter_id === (int) $viewer->getKey();
+                $managedDepartment = $departments->first(fn ($item) => in_array((int) $item->id, $visibleIds, true));
+                $department = $isOwnReport || $this->canSeeAll($viewer)
+                    ? ($departments->first(fn ($item) => (bool) ($item->pivot->is_primary ?? false)) ?: $departments->first())
+                    : $managedDepartment;
+                if (! $this->canSeeAll($viewer) && ! $isOwnReport && ! $managedDepartment) return collect();
                 return $report->adSpendEntries->filter(fn ($entry) => mb_strtolower(trim((string) $entry->media)) === 'applovin')
                     ->map(fn ($entry): array => [
                         'operator_user_id' => (int) $report->submitter_id, 'operator_name' => (string) $report->submitter_name,
