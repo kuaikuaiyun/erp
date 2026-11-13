@@ -11,6 +11,8 @@
 @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
 @if($errors->any())<div class="alert alert-danger">{{ $errors->first() }}</div>@endif
 <div class="box spend-box"><div class="box-body"><form method="get" class="form-inline">
+    <div class="form-group"><label>运营部门&nbsp;</label><select class="form-control" name="department_id"><option value="">全部部门</option>@foreach($departments as $id => $name)<option value="{{ $id }}" @selected($departmentId===$id)>{{ $name }}</option>@endforeach</select></div>
+    <div class="form-group"><label>运营人员&nbsp;</label><select class="form-control" name="operator_id"><option value="">全部人员</option>@foreach($operators as $id => $name)<option value="{{ $id }}" @selected($operatorId===$id)>{{ $name }}</option>@endforeach</select></div>
     <div class="form-group"><label>广告账号&nbsp;</label><input class="form-control" name="account_name" value="{{ $accountName }}" placeholder="输入广告账号"></div>
     <div class="form-group"><label>账号编号&nbsp;</label><input class="form-control" name="account_number" value="{{ $accountNumber }}" placeholder="输入账号编号"></div>
     <div class="form-group"><label>累计消耗&nbsp;</label><select class="form-control" name="over_threshold"><option value="">全部数据</option><option value="1" @selected($overThreshold==='1')>大于等于 $5,000</option></select></div>

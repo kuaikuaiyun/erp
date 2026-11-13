@@ -39,8 +39,24 @@ class AppLovinSpendController extends Controller
             'over_threshold' => ['nullable', 'in:1'],
             'account_name' => ['nullable', 'string', 'max:150'],
             'account_number' => ['nullable', 'string', 'max:150'],
+            'department_id' => ['nullable', 'integer'],
+            'operator_id' => ['nullable', 'integer'],
         ]);
         $accounts = $this->withScreenshots($this->summarize($this->reportsFor($context['user'])));
+        $departmentId = (int) ($filters['department_id'] ?? 0);
+        $operatorId = (int) ($filters['operator_id'] ?? 0);
+        $departments = $accounts->filter(fn (array $account): bool => ! empty($account['operation_department_id']))
+            ->mapWithKeys(fn (array $account): array => [(int) $account['operation_department_id'] => (string) ($account['department'] ?: '未命名部门')])
+            ->sort();
+        $operators = $accounts->filter(fn (array $account): bool => ! $departmentId || (int) $account['operation_department_id'] === $departmentId)
+            ->mapWithKeys(fn (array $account): array => [(int) $account['operator_user_id'] => (string) $account['operator_name']])
+            ->sort();
+        if ($departmentId) {
+            $accounts = $accounts->where('operation_department_id', $departmentId)->values();
+        }
+        if ($operatorId) {
+            $accounts = $accounts->where('operator_user_id', $operatorId)->values();
+        }
         if (($filters['over_threshold'] ?? '') === '1') {
             $accounts = $accounts->where('total', '>=', self::GIFT_THRESHOLD)->values();
         }
@@ -61,6 +77,10 @@ class AppLovinSpendController extends Controller
             'overThreshold' => $filters['over_threshold'] ?? '',
             'accountName' => $accountName,
             'accountNumber' => $accountNumber,
+            'departments' => $departments,
+            'operators' => $operators,
+            'departmentId' => $departmentId,
+            'operatorId' => $operatorId,
         ]);
     }
 

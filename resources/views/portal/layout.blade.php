@@ -39,6 +39,9 @@
     $assistantDailyPendingCounts = $portal->code === 'zhuli'
         ? app(\App\Portals\Assistant\AssistantDailySubmissionPendingCountService::class)->forUser($user)
         : [];
+    $assistantAdvertisingReviewPendingCounts = $portal->code === 'zhuli'
+        ? app(\App\Portals\Assistant\AssistantAdvertisingReviewPendingCountService::class)->forUser($user)
+        : [];
     $operationTaskReviewCounts = $portal->code === 'fuzhuang'
         ? app(\App\Services\OperationTaskPendingCountService::class)->forUser($user)
         : ['recaps' => 0, 'tests' => 0, 'rejected_recaps' => 0, 'rejected_tests' => 0];
@@ -89,6 +92,7 @@
                         'canManagePortalMenus' => $user->isAdministrator(),
                         'canManageOperationTasks' => $canManageOperationTasks,
                         'operationTaskReviewCounts' => $operationTaskReviewCounts,
+                        'assistantAdvertisingReviewPendingCounts' => $assistantAdvertisingReviewPendingCounts,
                     ])
                 @endforeach
             </ul>
