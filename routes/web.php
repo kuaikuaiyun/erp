@@ -350,6 +350,9 @@ Route::get('/operation/ai-product-library/{product}/shopify-images/{imageIndex}'
 Route::get('/operation/ai-product-library/{product}/detail', [OperationAiProductLibraryController::class, 'detail'])->name('operation.ai-product-library.detail');
 Route::get('/operation/ai-product-library/{product}/reference-preview', [OperationAiProductLibraryController::class, 'referencePreview'])->name('operation.ai-product-library.reference-preview');
 Route::get('/operation/ai-product-library/{product}/reference-preview/content', [OperationAiProductLibraryController::class, 'referencePreviewContent'])->name('operation.ai-product-library.reference-preview.content');
+Route::post('/operation/ai-product-library/{product}/reference-videos', [OperationAiProductLibraryController::class, 'uploadReferenceVideo'])->name('operation.ai-product-library.reference-videos.upload');
+Route::get('/operation/ai-product-library/{product}/reference-videos/{video}/preview', [OperationAiProductLibraryController::class, 'previewReferenceVideo'])->whereNumber('video')->name('operation.ai-product-library.reference-videos.preview');
+Route::get('/operation/ai-product-library/{product}/reference-videos/{video}/download', [OperationAiProductLibraryController::class, 'downloadReferenceVideo'])->whereNumber('video')->name('operation.ai-product-library.reference-videos.download');
 Route::get('/operation/ai-product-library/{product}/images/{imageIndex}', [OperationAiProductLibraryController::class, 'image'])->whereNumber('imageIndex')->name('operation.ai-product-library.images.show');
 Route::get('/operation/ai-product-library/{product}/package', [OperationAiProductLibraryController::class, 'downloadPackage'])->name('operation.ai-product-library.package.download');
 Route::get('/operation/existing-product-library', [ProductRequestController::class, 'existingProductLibraryIndex'])->name('product-requests.operation.existing-product-library');
@@ -482,6 +485,9 @@ Route::post('/product-library/visibility', [ProductLibraryController::class, 'up
 Route::get('/product-library/{product}/images/{imageIndex}', [ProductLibraryController::class, 'showProductImage'])->whereNumber('imageIndex')->name('aikaipin.product-library.images.show');
 Route::get('/product-library/{product}/reference-preview', [ProductLibraryController::class, 'showProductReferencePreview'])->name('aikaipin.product-library.reference-preview');
 Route::get('/product-library/{product}/reference-preview/content', [ProductLibraryController::class, 'showProductReferencePreviewContent'])->name('aikaipin.product-library.reference-preview.content');
+Route::post('/product-library/{product}/reference-videos', [ProductLibraryController::class, 'uploadReferenceVideo'])->name('aikaipin.product-library.reference-videos.upload');
+Route::get('/product-library/{product}/reference-videos/{video}/preview', [ProductLibraryController::class, 'previewReferenceVideo'])->whereNumber('video')->name('aikaipin.product-library.reference-videos.preview');
+Route::get('/product-library/{product}/reference-videos/{video}/download', [ProductLibraryController::class, 'downloadReferenceVideo'])->whereNumber('video')->name('aikaipin.product-library.reference-videos.download');
 Route::get('/product-library/{product}/files/{kind}', [ProductLibraryController::class, 'showProductFile'])->whereIn('kind', ['reference', 'package'])->name('aikaipin.product-library.files.show');
 Route::get('/selection-proposals', [ProductLibraryController::class, 'selectionProposal'])->name('aikaipin.selection-proposals.index');
 Route::post('/selection-proposals', [ProductLibraryController::class, 'storeSelectionProposal'])->name('aikaipin.selection-proposals.store');
