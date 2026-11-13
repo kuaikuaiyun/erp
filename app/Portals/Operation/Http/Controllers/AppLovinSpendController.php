@@ -139,9 +139,14 @@ class AppLovinSpendController extends Controller
         if ($this->canSeeAll($user)) return $query;
 
         $departmentIds = $includeManaged ? $this->departmentAuthorization->managedDepartmentIds($user) : collect();
-        return $departmentIds->isNotEmpty()
-            ? $query->whereIn('operation_department_id', $departmentIds->all())
-            : $query->where('operator_user_id', $user->getKey());
+        if ($departmentIds->isEmpty()) {
+            return $query->where('operator_user_id', $user->getKey());
+        }
+
+        return $query->where(function ($scope) use ($user, $departmentIds): void {
+            $scope->where('operator_user_id', $user->getKey())
+                ->orWhereIn('operation_department_id', $departmentIds->all());
+        });
     }
 
     private function canViewOperator($user, int $operatorId): bool
