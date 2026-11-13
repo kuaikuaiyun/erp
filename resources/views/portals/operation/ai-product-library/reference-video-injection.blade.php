@@ -88,12 +88,25 @@
         }
         return historicalProductCode+'-AI-'+date;
     }
+    function legacyVideoNameNode(player,figure){
+        var caption=figure&&figure.querySelector('figcaption');if(caption)return caption;
+        var candidates=[],node=player.nextSibling,steps=0;
+        while(node&&steps++<4){candidates.push(node);node=node.nextSibling;}
+        node=player.previousSibling;steps=0;
+        while(node&&steps++<3){candidates.push(node);node=node.previousSibling;}
+        return candidates.find(function(item){
+            if(item.nodeType===3)return /^\s*[^\r\n<>]+\.(mp4|mov|avi|webm|mkv|m4v)\s*$/i.test(item.nodeValue||'');
+            if(item.nodeType!==1||/^(VIDEO|SOURCE|A|BUTTON)$/i.test(item.tagName))return false;
+            return /^\s*[^\r\n<>]+\.(mp4|mov|avi|webm|mkv|m4v)\s*$/i.test(item.textContent||'');
+        })||null;
+    }
     function normalizeHistoricalVideos(){
         var sequence=0,prefix=historicalPrefix();
         var players=Array.prototype.slice.call(document.querySelectorAll('video')).filter(function(player){return !(player.closest&&player.closest('.erp-reference-video'));});
         players.forEach(function(player,index){
                 var historyIndex=index;
                 var figure=player.closest&&player.closest('figure');
+                var legacyName=legacyVideoNameNode(player,figure);
                 var removable=figure;
                 if(!removable){
                     removable=document.createElement('span');
@@ -104,16 +117,16 @@
                 removable.setAttribute('data-history-video-index',historyIndex);
                 if(hiddenHistoryVideoIndexes.indexOf(historyIndex)!==-1){removable.remove();return;}
                 sequence++;
-                var caption=figure&&figure.querySelector('figcaption');
-                var oldName=caption?caption.textContent:'';
+                var oldName=legacyName?(legacyName.nodeValue||legacyName.textContent||''):'';
                 var match=String(oldName).match(/\.([A-Za-z0-9]{2,5})\s*$/),extension=match?match[1].toLowerCase():'mp4';
                 var fileName=prefix+'-'+String(sequence).padStart(3,'0')+'.'+extension;
-                if(caption){caption.textContent=fileName;caption.classList.add('erp-history-video-name');}
+                var caption=figure&&figure.querySelector('figcaption');
+                if(!caption){caption=document.createElement('span');caption.className='erp-history-video-name';if(figure)figure.appendChild(caption);else removable.appendChild(caption);}
+                caption.textContent=fileName;caption.classList.add('erp-history-video-name');
+                if(legacyName&&legacyName!==caption){if(legacyName.nodeType===3)legacyName.nodeValue='';else legacyName.style.display='none';}
                 var link=document.createElement('a');link.className='erp-history-video-download';link.href=player.currentSrc||player.src;link.download=fileName;link.textContent='下载';
                 var remove=document.createElement('button');remove.type='button';remove.className='erp-reference-video__delete';remove.setAttribute('data-history-video-index',historyIndex);remove.textContent='删除视频';
-                if(caption){caption.insertAdjacentElement('afterend',link);link.insertAdjacentElement('afterend',remove);}
-                else if(figure){figure.appendChild(link);figure.appendChild(remove);}
-                else {removable.appendChild(link);removable.appendChild(remove);}
+                caption.insertAdjacentElement('afterend',link);link.insertAdjacentElement('afterend',remove);
         });
     }
     function render(){

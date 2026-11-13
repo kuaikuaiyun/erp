@@ -31,6 +31,8 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
+use Intervention\Image\Drivers\Gd\Driver as GdDriver;
+use Intervention\Image\ImageManager;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
@@ -865,10 +867,31 @@ class ProductLibraryController extends Controller
         $file = $product->imageFiles()[$imageIndex] ?? null;
         abort_unless($file !== null, 404);
 
+        if ($request->boolean('thumb')) {
+            try {
+                $cacheKey = $file['sha256'] ?: sha1($file['path'].'|'.$file['size'].'|'.($product->updated_at?->getTimestamp() ?? 0));
+                $thumbnailPath = 'aikaipin/product-thumbnails/'.$product->getKey().'/'.$imageIndex.'-'.$cacheKey.'.webp';
+                $thumbnailDisk = Storage::disk('local');
+                if (! $thumbnailDisk->exists($thumbnailPath)) {
+                    $source = Storage::disk($file['disk'])->get($file['path']);
+                    $image = (new ImageManager(new GdDriver()))->read($source);
+                    $image->scaleDown(width: 180, height: 180);
+                    $thumbnailDisk->put($thumbnailPath, (string) $image->toWebp(78));
+                }
+
+                return response($thumbnailDisk->get($thumbnailPath), 200, [
+                    'Content-Type' => 'image/webp',
+                    'Cache-Control' => 'private, max-age=604800, immutable',
+                    'ETag' => '"'.$cacheKey.'"',
+                    'X-Content-Type-Options' => 'nosniff',
+                ]);
+            } catch (Throwable $exception) {
+                report($exception);
+            }
+        }
+
         $response = $this->serveProductFile($file, false);
-        $response->headers->set('Cache-Control', 'private, no-store, no-cache, must-revalidate, max-age=0');
-        $response->headers->set('Pragma', 'no-cache');
-        $response->headers->set('Expires', '0');
+        $response->headers->set('Cache-Control', 'private, max-age=86400');
 
         return $response;
     }

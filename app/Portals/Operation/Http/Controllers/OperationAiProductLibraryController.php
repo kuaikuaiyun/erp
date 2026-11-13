@@ -138,29 +138,31 @@ class OperationAiProductLibraryController extends Controller
         $data = $request->validate([
             'test_started_on' => ['required', 'date'],
             'data_ended_on' => ['required', 'date', 'after_or_equal:test_started_on'],
-            'platform' => ['required', Rule::in(['facebook', 'google', 'tiktok', 'mediago', 'newsbreak', 'applovin'])],
-            'currency' => ['required', Rule::in(['usd', 'eur', 'cny'])],
-            'actual_spend' => ['required', 'numeric', 'min:0', 'max:99999999999999.99'],
-            'orders' => ['required', 'integer', 'min:0', 'max:4294967295'],
+            'records' => ['required', 'array', 'min:1', 'max:6'],
+            'records.*.platform' => ['required', 'distinct', Rule::in(['facebook', 'google', 'tiktok', 'mediago', 'newsbreak', 'applovin'])],
+            'records.*.currency' => ['required', Rule::in(['usd', 'eur', 'cny'])],
+            'records.*.actual_spend' => ['required', 'numeric', 'min:0', 'max:99999999999999.99'],
+            'records.*.orders' => ['required', 'integer', 'min:0', 'max:4294967295'],
             'material_name' => ['required', 'string', 'max:191'],
             'video' => ['required', 'file', 'mimes:mp4,mov,avi,webm,mkv,m4v', 'max:307200'],
             'remark' => ['nullable', 'string', 'max:2000'],
         ], [
             'material_name.required' => '请填写素材名称。',
-            'video.required' => '请选择需要上传的素材视频。',
+            'video.required' => '请选择投放视频。',
             'video.mimes' => '仅支持 MP4、MOV、AVI、WEBM、MKV、M4V 视频。',
             'video.max' => '单个视频不能超过 300MB。',
         ]);
 
-        $file = $request->file('video');
         $date = now('Asia/Shanghai');
         $productCode = trim((string) preg_replace('/[^A-Za-z0-9_-]+/', '-', (string) $product->product_code), '-_') ?: 'product-'.$product->getKey();
-        $extension = strtolower($file->getClientOriginalExtension() ?: $file->extension() ?: 'mp4');
-        $fileName = $productCode.'-'.$this->departmentCode($context['user']).'-'.$date->format('ymd').'-placement-'.Str::lower(Str::random(6)).'.'.$extension;
-        $path = $file->storeAs('aikaipin/placement-evaluations/'.$context['user']->getKey().'/'.$product->getKey(), $fileName, 'local');
+        $path = null;
         $connection = config('admin.database.connection') ?: config('database.default');
 
         try {
+            $file = $request->file('video');
+            $extension = strtolower($file->getClientOriginalExtension() ?: $file->extension() ?: 'mp4');
+            $fileName = $productCode.'-'.$this->departmentCode($context['user']).'-'.$date->format('ymd').'-placement-'.Str::lower(Str::random(6)).'.'.$extension;
+            $path = $file->storeAs('aikaipin/placement-evaluations/'.$context['user']->getKey().'/'.$product->getKey(), $fileName, 'local');
             DB::connection($connection)->transaction(function () use ($context, $product, $data, $file, $fileName, $path): void {
                 $evaluation = AikaipinPlacementEvaluation::query()->create([
                     'evaluation_code' => $this->nextPlacementEvaluationCode(),
@@ -175,16 +177,22 @@ class OperationAiProductLibraryController extends Controller
                     'updated_by' => $context['user']->getKey(),
                     'updated_by_name' => $context['user']->name ?: $context['user']->username,
                 ]);
-                $evaluation->records()->create([
-                    'platform' => $data['platform'], 'currency' => $data['currency'],
-                    'actual_spend' => $data['actual_spend'], 'orders' => $data['orders'], 'sort' => 0,
-                    'material_name' => $data['material_name'], 'video_disk' => 'local', 'video_path' => $path,
-                    'video_name' => $fileName, 'video_mime_type' => $file->getMimeType(), 'video_size' => $file->getSize(),
-                ]);
+                foreach ($data['records'] as $index => $recordData) {
+                    $evaluation->records()->create([
+                        'platform' => $recordData['platform'], 'currency' => $recordData['currency'],
+                        'actual_spend' => $recordData['actual_spend'], 'orders' => $recordData['orders'], 'sort' => $index,
+                        'material_name' => $data['material_name'], 'video_disk' => 'local', 'video_path' => $path,
+                        'video_name' => $fileName, 'video_mime_type' => $file->getMimeType(), 'video_size' => $file->getSize(),
+                    ]);
+                }
             });
         } catch (Throwable $exception) {
-            Storage::disk('local')->delete($path);
+            if ($path) Storage::disk('local')->delete($path);
             throw $exception;
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json(['message' => '投放测评已保存。', 'redirect_url' => route('operation.ai-product-library.index')]);
         }
 
         return redirect()->route('operation.ai-product-library.index')->with('success', '投放测评已保存。');
