@@ -156,7 +156,6 @@ class FashionAdvertisingReviewController extends Controller
                 ->where('media', 'like', '%'.$filters['media'].'%')))
             ->when($filters['account_number'] !== '', fn ($query) => $query->whereHas('adSpendEntries', fn ($entryQuery) => $entryQuery
                 ->where('account_number', 'like', '%'.$filters['account_number'].'%')))
-            ->orderByRaw("CASE status WHEN 'pending' THEN 0 WHEN 'rejected' THEN 1 ELSE 2 END")
             ->orderByDesc('report_date')->orderByDesc('id')->paginate($filters['per_page'])->withQueryString();
 
         $performanceCache = [];
