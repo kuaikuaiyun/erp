@@ -46,6 +46,7 @@ class FashionOperationReportController extends Controller
             'operator' => ['nullable', 'string', 'max:100'],
             'sort_by' => ['nullable', Rule::in(['order_count', 'revenue'])],
             'sort_order' => ['nullable', Rule::in(['asc', 'desc'])],
+            'display_mode' => ['nullable', Rule::in(['performance', 'team'])],
         ]);
         $timezone = (string) ($validated['timezone'] ?? '-08:00');
         $month = now($timezone);
@@ -155,11 +156,14 @@ class FashionOperationReportController extends Controller
                 ? 'not_submitted'
                 : ($operatorReports->contains('status', FashionAdvertisingReport::STATUS_PENDING) ? 'pending' : 'submitted');
             $hireDays = $operator->hired_at ? max(1, $operator->hired_at->diffInDays(CarbonImmutable::parse($dateTo)) + 1) : null;
+            $position = (string) ($department?->pivot?->position ?: Department::POSITION_MEMBER);
 
             return ['department' => (string) ($department?->name ?: '未分配部门'), 'department_id' => (int) ($department?->id ?? 0), 'operator' => (string) ($operator->name ?: $operator->username),
+                'team_position' => $position, 'team_rank' => match ($position) { Department::POSITION_MANAGER => 0, Department::POSITION_DEPUTY => 1, default => 2 },
                 'hired_at' => $operator->hired_at?->format('Y-m-d'), 'hire_days' => $hireDays, 'stores' => $storeRows,
                 'order_count' => $orderCount, 'revenue' => $revenue, 'aov' => $orderCount > 0 ? $revenue / $orderCount : null,
                 'media' => $media, 'ad_spend' => $totalSpend, 'roi' => $totalSpend > 0 ? $revenue / $totalSpend : null,
+                'roi_class' => $this->roiClass($totalSpend > 0 ? $revenue / $totalSpend : null),
                 'submission_status' => $submissionStatus,
                 'submission_label' => match ($submissionStatus) {
                     'pending' => '已提报·待审核',
@@ -188,7 +192,12 @@ class FashionOperationReportController extends Controller
         });
         $sortBy = (string) ($validated['sort_by'] ?? 'order_count');
         $sortOrder = (string) ($validated['sort_order'] ?? 'desc');
-        $rows = $rows->sort(function (array $left, array $right) use ($sortBy, $sortOrder): int {
+        $displayMode = (string) ($validated['display_mode'] ?? 'performance');
+        $rows = $rows->sort(function (array $left, array $right) use ($sortBy, $sortOrder, $displayMode): int {
+                if ($displayMode === 'team') {
+                    return [$left['department'], $left['team_rank'], $left['operator']]
+                        <=> [$right['department'], $right['team_rank'], $right['operator']];
+                }
                 $comparison = ((float) $left[$sortBy]) <=> ((float) $right[$sortBy]);
                 if ($comparison === 0) {
                     $comparison = [$left['department'], $left['operator']] <=> [$right['department'], $right['operator']];
@@ -202,16 +211,27 @@ class FashionOperationReportController extends Controller
         $roiRevenue = (float) $rows
             ->filter(fn (array $row): bool => (float) ($row['ad_spend'] ?? 0) > 0)
             ->sum('revenue');
+        $summaryRoi = $summarySpend > 0 ? $roiRevenue / $summarySpend : null;
         return view('portals.assistant.fashion-operation-reports.index', [
             ...$context, 'rows' => $rows, 'timezoneOptions' => $timezones,
             'departmentOptions' => $departmentOptions,
             'filters' => [...$validated, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'timezone' => $timezone,
-                'department_ids' => $selectedDepartmentIds, 'sort_by' => $sortBy, 'sort_order' => $sortOrder],
+                'department_ids' => $selectedDepartmentIds, 'sort_by' => $sortBy, 'sort_order' => $sortOrder, 'display_mode' => $displayMode],
             'summary' => ['people' => $rows->count(), 'stores' => $rows->sum(fn ($row) => count($row['stores'])),
                 'orders' => $rows->sum('order_count'), 'revenue' => $summaryRevenue, 'ad_spend' => $summarySpend,
                 'aov' => $rows->sum('order_count') > 0 ? $summaryRevenue / $rows->sum('order_count') : null,
-                'roi' => $summarySpend > 0 ? $roiRevenue / $summarySpend : null],
+                'roi' => $summaryRoi, 'roi_class' => $this->roiClass($summaryRoi)],
         ]);
+    }
+
+    private function roiClass(?float $roi): string
+    {
+        if ($roi === null) return '';
+        if ($roi > 1.8) return 'roi-excellent';
+        if ($roi >= 1.6) return 'roi-good';
+        if ($roi >= 1.4) return 'roi-warning';
+        if ($roi >= 1.2) return 'roi-poor';
+        return 'roi-danger';
     }
 
     private function timezoneOptions(): array
