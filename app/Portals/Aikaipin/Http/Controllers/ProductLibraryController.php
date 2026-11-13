@@ -899,7 +899,7 @@ class ProductLibraryController extends Controller
         return view('portals.aikaipin.product-library.reference-preview', $viewData);
     }
 
-    public function uploadReferenceVideo(Request $request, AikaipinProduct $product): RedirectResponse|Response
+    public function uploadReferenceVideo(Request $request, AikaipinProduct $product): JsonResponse|RedirectResponse|Response
     {
         $context = $this->pageContext($request);
         if ($context instanceof Response) return $context;
@@ -935,6 +935,13 @@ class ProductLibraryController extends Controller
         } catch (Throwable $exception) {
             Storage::disk('local')->delete($path);
             throw $exception;
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'message' => '视频上传成功。',
+                'file_name' => $fileName,
+            ]);
         }
 
         return redirect()
@@ -984,6 +991,9 @@ class ProductLibraryController extends Controller
         abort_unless($this->canViewProduct($context['user'], $product), 403);
         $file = $this->referencePreviewFile($product);
         $content = Storage::disk($file['disk'])->get($file['path']);
+        $content = preg_replace('/<video\b(?![^>]*\bpreload\s*=)/i', '<video preload="none"', $content) ?? $content;
+        $content = preg_replace('/<img\b(?![^>]*\bloading\s*=)/i', '<img loading="lazy"', $content) ?? $content;
+        $content = preg_replace('/<img\b(?![^>]*\bdecoding\s*=)/i', '<img decoding="async"', $content) ?? $content;
         $editsPath = $file['path'].'.erp-edits.json';
         $referenceEdits = Storage::disk($file['disk'])->exists($editsPath)
             ? (json_decode(Storage::disk($file['disk'])->get($editsPath), true) ?: []) : [];

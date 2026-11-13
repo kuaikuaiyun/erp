@@ -313,6 +313,9 @@ class OperationAiProductLibraryController extends Controller
         }
         $file = $this->referencePreviewFile($product);
         $content = Storage::disk($file['disk'])->get($file['path']);
+        $content = preg_replace('/<video\b(?![^>]*\bpreload\s*=)/i', '<video preload="none"', $content) ?? $content;
+        $content = preg_replace('/<img\b(?![^>]*\bloading\s*=)/i', '<img loading="lazy"', $content) ?? $content;
+        $content = preg_replace('/<img\b(?![^>]*\bdecoding\s*=)/i', '<img decoding="async"', $content) ?? $content;
         $editsPath = $file['path'].'.erp-edits.json';
         $referenceEdits = Storage::disk($file['disk'])->exists($editsPath)
             ? (json_decode(Storage::disk($file['disk'])->get($editsPath), true) ?: []) : [];

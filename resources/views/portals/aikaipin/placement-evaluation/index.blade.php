@@ -71,7 +71,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-submissions.css?v=20261023-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-submissions.css?v=20261113-2">
 @endpush
 
 @push('scripts')
@@ -105,18 +105,13 @@
                 <i class="fa fa-line-chart" aria-hidden="true"></i>
                 <span>共 {{ $products->total() }} 个产品</span>
             </div>
-            <div class="aikaipin-submission-list-toolbar-actions">
-                <button class="btn btn-primary btn-sm" type="button" data-aikaipin-open-placement-modal>
-                    <i class="fa fa-plus" aria-hidden="true"></i> {{ $t('placement_evaluation.actions.new') }}
-                </button>
-            </div>
         </div>
         <div class="box-body no-padding">
             <div class="table-responsive">
                 <table class="table table-hover aikaipin-submission-table aikaipin-placement-evaluation-table">
                     <thead>
                     <tr>
-                        <th>产品图片</th><th>产品编号</th><th>产品名称 / SKU</th><th>产品分类</th>
+                        <th>产品图片</th><th>产品编号</th><th>产品名称</th><th>产品分类</th>
                         <th>来源平台 / 类型</th><th>投放总数据</th><th>测评人数</th><th>更新时间</th><th>测评状态</th><th>操作</th>
                     </tr>
                     </thead>
@@ -127,12 +122,12 @@
                             $records = $evaluations->flatMap->records;
                             $evaluatorCount = $evaluations->pluck('created_by')->unique()->count();
                             $updatedAt = $evaluations->max('updated_at') ?: $product->updated_at;
-                            $images = $product->imageFiles(); $skus = $product->skuValues();
+                            $images = $product->imageFiles();
                         @endphp
                         <tr data-aikaipin-list-row>
                             <td>@if($images !== [])<img src="{{ route('aikaipin.product-library.images.show', [$product, 0]) }}" style="width:52px;height:52px;object-fit:cover;border-radius:6px">@else — @endif</td>
                             <td><code>{{ $product->product_code }}</code></td>
-                            <td><strong>{{ $product->name }}</strong><br><small class="text-muted">{{ implode('、', array_slice($skus, 0, 3)) }}@if(count($skus)>3) +{{ count($skus)-3 }}@endif</small></td>
+                            <td><strong>{{ $product->name }}</strong></td>
                             <td>@foreach($product->categoryValues() as $category)<span class="label label-default">{{ $category }}</span> @endforeach</td>
                             <td>{{ trans('aikaipin.upload.source_options.'.$product->source_platform) }}<br><small>{{ trans('aikaipin.upload.type_options.'.$product->product_type) }}</small></td>
                             <td>@forelse($records->groupBy(fn($r) => $r->currency) as $currency => $currencyRecords)<div>{{ strtoupper($currency) }} {{ number_format($currencyRecords->sum('actual_spend'),2) }} · {{ $currencyRecords->sum('orders') }} 单</div>@empty — @endforelse</td>
@@ -154,8 +149,10 @@
                 </table>
             </div>
         </div>
-        @if ($products->hasPages())
-            <div class="box-footer clearfix aikaipin-submission-pagination"><div class="pull-right">{{ $products->links() }}</div></div>
+        @if ($products->isNotEmpty())
+            <div class="box-footer aikaipin-submission-pagination">
+                @include('portals.aikaipin.product-library.partials.pagination', ['products' => $products])
+            </div>
         @endif
     </div>
 </section>

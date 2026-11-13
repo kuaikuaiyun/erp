@@ -354,7 +354,99 @@ button.aikaipin-selection-list-image:focus {
 }
 
 .aikaipin-submission-pagination {
-    min-height: 50px;
+    background: linear-gradient(180deg, #fbfdff 0%, #f3f8fc 100%);
+    border-top: 1px solid #dce7ef;
+    min-height: 58px;
+    padding: 12px 16px;
+}
+
+.aikaipin-submission-pagination .aikaipin-pagination-control {
+    align-items: center;
+    display: flex;
+    gap: 16px;
+    justify-content: space-between;
+    min-height: 32px;
+}
+
+.aikaipin-submission-pagination .aikaipin-pagination-summary {
+    color: #657b8c;
+    font-size: 13px;
+}
+
+.aikaipin-submission-pagination .aikaipin-pagination-actions,
+.aikaipin-submission-pagination .aikaipin-page-jump {
+    align-items: center;
+    display: flex;
+    gap: 10px;
+}
+
+.aikaipin-submission-pagination .pagination {
+    display: flex;
+    gap: 5px;
+    margin: 0;
+}
+
+.aikaipin-submission-pagination .pagination > li > a,
+.aikaipin-submission-pagination .pagination > li > span {
+    align-items: center;
+    background: #fff;
+    border: 1px solid #d5e1e9;
+    border-radius: 6px;
+    color: #476477;
+    display: inline-flex;
+    height: 30px;
+    justify-content: center;
+    min-width: 30px;
+    padding: 4px 9px;
+}
+
+.aikaipin-submission-pagination .pagination > .active > a,
+.aikaipin-submission-pagination .pagination > .active > a:hover,
+.aikaipin-submission-pagination .pagination > .active > a:focus {
+    background: #2d91c8;
+    border-color: #2d91c8;
+    box-shadow: 0 3px 8px rgba(45, 145, 200, .2);
+    color: #fff;
+}
+
+.aikaipin-submission-pagination .pagination > li:not(.active):not(.disabled) > a:hover {
+    background: #edf7fc;
+    border-color: #8bc6e5;
+    color: #187bad;
+}
+
+.aikaipin-submission-pagination .pagination > .disabled > a,
+.aikaipin-submission-pagination .pagination > .disabled > span {
+    background: #f5f7f9;
+    color: #a8b5bd;
+}
+
+.aikaipin-submission-pagination .aikaipin-page-jump {
+    color: #657b8c;
+    font-size: 12px;
+    font-weight: 400;
+    margin: 0;
+}
+
+.aikaipin-submission-pagination .aikaipin-page-jump .form-control {
+    border-color: #d5e1e9;
+    border-radius: 6px;
+    height: 30px;
+    padding: 4px 24px 4px 9px;
+    width: 92px;
+}
+
+@media (max-width: 767px) {
+    .aikaipin-submission-pagination .aikaipin-pagination-control,
+    .aikaipin-submission-pagination .aikaipin-pagination-actions {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .aikaipin-submission-pagination .aikaipin-pagination-actions {
+        gap: 8px;
+        width: 100%;
+    }
 }
 
 .aikaipin-placement-evaluation-table {
