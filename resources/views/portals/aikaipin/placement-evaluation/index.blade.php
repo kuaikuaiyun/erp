@@ -76,7 +76,7 @@
 
 @push('scripts')
     <script>window.ErpAikaipinSubmissionConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-placement-evaluation.js?v=20261020-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-placement-evaluation.js?v=20261113-2"></script>
 @endpush
 
 @section('content')
@@ -103,7 +103,7 @@
         <div class="box-header with-border aikaipin-submission-list-toolbar">
             <div class="aikaipin-submission-list-toolbar-summary">
                 <i class="fa fa-line-chart" aria-hidden="true"></i>
-                <span>{{ trans_choice('aikaipin.placement_evaluation.list.record_count', $evaluations->total(), ['count' => $evaluations->total()]) }}</span>
+                <span>共 {{ $products->total() }} 个产品</span>
             </div>
             <div class="aikaipin-submission-list-toolbar-actions">
                 <button class="btn btn-primary btn-sm" type="button" data-aikaipin-open-placement-modal>
@@ -116,70 +116,34 @@
                 <table class="table table-hover aikaipin-submission-table aikaipin-placement-evaluation-table">
                     <thead>
                     <tr>
-                        <th class="aikaipin-placement-code-column">{{ $t('placement_evaluation.table.evaluation_code') }}</th>
-                        <th class="aikaipin-placement-product-column">{{ $t('placement_evaluation.table.related_product') }}</th>
-                        <th class="aikaipin-placement-period-column">{{ $t('placement_evaluation.table.test_period') }}</th>
-                        <th class="aikaipin-placement-data-column">{{ $t('placement_evaluation.table.placement_data') }}</th>
-                        <th class="aikaipin-placement-remark-column">{{ $t('placement_evaluation.fields.remark') }}</th>
-                        @if ($canReviewAllPlacementEvaluations)
-                            <th class="aikaipin-placement-submitter-column">{{ $t('placement_evaluation.table.submitter') }}</th>
-                        @endif
-                        <th class="aikaipin-placement-updated-at-column">{{ $t('placement_evaluation.table.updated_at') }}</th>
-                        <th class="aikaipin-submission-operation-column">{{ $t('placement_evaluation.table.operation') }}</th>
+                        <th>产品图片</th><th>产品编号</th><th>产品名称 / SKU</th><th>产品分类</th>
+                        <th>来源平台 / 类型</th><th>投放总数据</th><th>测评人数</th><th>更新时间</th><th>测评状态</th><th>操作</th>
                     </tr>
                     </thead>
                     <tbody>
-                    @foreach ($evaluations as $evaluation)
+                    @foreach ($products as $product)
                         @php
-                            $keywords = strtolower($evaluation->evaluation_code.' '.$evaluation->product_code.' '.$evaluation->product_name);
-                            $updatedAt = $evaluation->updated_at?->timezone(config('app.timezone'))->format('Y-m-d H:i');
-                            $canEditEvaluation = (int) $evaluation->created_by === (int) $user->getKey();
+                            $evaluations = $product->placementEvaluations;
+                            $records = $evaluations->flatMap->records;
+                            $evaluatorCount = $evaluations->pluck('created_by')->unique()->count();
+                            $updatedAt = $evaluations->max('updated_at') ?: $product->updated_at;
+                            $images = $product->imageFiles(); $skus = $product->skuValues();
                         @endphp
-                        <tr data-aikaipin-list-row data-keyword="{{ $keywords }}">
-                            <td class="aikaipin-placement-code-cell"><span class="aikaipin-submission-code">{{ $evaluation->evaluation_code }}</span></td>
-                            <td class="aikaipin-placement-product-cell">
-                                <strong class="aikaipin-submission-product-name">{{ $evaluation->product_name }}</strong>
-                                <span class="aikaipin-submission-product-code">{{ $evaluation->product_code }}</span>
-                            </td>
-                            <td class="aikaipin-placement-period-cell"><span class="aikaipin-submission-date-range">{{ $evaluation->test_started_on?->format('Y-m-d') }} <i class="fa fa-long-arrow-right" aria-hidden="true"></i> {{ $evaluation->data_ended_on?->format('Y-m-d') }}</span></td>
-                            <td class="aikaipin-placement-data-cell">
-                                <div class="aikaipin-placement-summary">
-                                    @foreach ($evaluation->records as $record)
-                                        <span>{{ $t('placement_evaluation.table.record_summary', [
-                                            'platform' => $t('placement_evaluation.platform_options.'.$record->platform),
-                                            'currency' => $t('placement_evaluation.currency_options.'.$record->currency),
-                                            'spend' => number_format((float) $record->actual_spend, 2, '.', ''),
-                                            'orders' => (int) $record->orders,
-                                        ]) }}</span>
-                                    @endforeach
-                                </div>
-                            </td>
-                            <td class="aikaipin-placement-remark-cell">
-                                <span class="aikaipin-submission-list-remark" @if ($evaluation->remark) title="{{ $evaluation->remark }}" @endif>{{ $evaluation->remark ?: $t('placement_evaluation.fields.no_value') }}</span>
-                            </td>
-                            @if ($canReviewAllPlacementEvaluations)
-                                <td class="aikaipin-placement-submitter-cell">{{ $evaluation->created_by_name }}</td>
-                            @endif
-                            <td class="aikaipin-placement-updated-at-cell"><time datetime="{{ $evaluation->updated_at?->toAtomString() }}">{{ $updatedAt }}</time></td>
-                            <td class="aikaipin-submission-operation-cell">
-                                <div class="btn-group btn-group-sm" role="group" aria-label="{{ $t('placement_evaluation.table.operation') }}">
-                                    <button class="btn btn-default" type="button" data-aikaipin-placement-view data-aikaipin-evaluation-id="{{ $evaluation->getKey() }}">
-                                        <i class="fa fa-eye" aria-hidden="true"></i> {{ $t('placement_evaluation.actions.view') }}
-                                    </button>
-                                    @if ($canEditEvaluation)
-                                        <button class="btn btn-primary" type="button" data-aikaipin-placement-edit data-aikaipin-evaluation-id="{{ $evaluation->getKey() }}">
-                                            <i class="fa fa-pencil" aria-hidden="true"></i> {{ $t('placement_evaluation.actions.edit') }}
-                                        </button>
-                                        <button class="btn btn-default" type="button" data-aikaipin-placement-delete data-aikaipin-evaluation-id="{{ $evaluation->getKey() }}">
-                                            <i class="fa fa-trash-o" aria-hidden="true"></i> {{ $t('placement_evaluation.actions.delete') }}
-                                        </button>
-                                    @endif
-                                </div>
-                            </td>
+                        <tr data-aikaipin-list-row>
+                            <td>@if($images !== [])<img src="{{ route('aikaipin.product-library.images.show', [$product, 0]) }}" style="width:52px;height:52px;object-fit:cover;border-radius:6px">@else — @endif</td>
+                            <td><code>{{ $product->product_code }}</code></td>
+                            <td><strong>{{ $product->name }}</strong><br><small class="text-muted">{{ implode('、', array_slice($skus, 0, 3)) }}@if(count($skus)>3) +{{ count($skus)-3 }}@endif</small></td>
+                            <td>@foreach($product->categoryValues() as $category)<span class="label label-default">{{ $category }}</span> @endforeach</td>
+                            <td>{{ trans('aikaipin.upload.source_options.'.$product->source_platform) }}<br><small>{{ trans('aikaipin.upload.type_options.'.$product->product_type) }}</small></td>
+                            <td>@forelse($records->groupBy(fn($r) => $r->currency) as $currency => $currencyRecords)<div>{{ strtoupper($currency) }} {{ number_format($currencyRecords->sum('actual_spend'),2) }} · {{ $currencyRecords->sum('orders') }} 单</div>@empty — @endforelse</td>
+                            <td><span class="badge bg-light-blue">{{ $evaluatorCount }}</span></td>
+                            <td>{{ $updatedAt?->timezone(config('app.timezone'))->format('Y-m-d H:i') }}</td>
+                            <td>@if($evaluations->isNotEmpty())<span class="label label-success">已测评</span>@else<span class="label label-danger">未测评</span>@endif</td>
+                            <td><button class="btn btn-default btn-sm" type="button" data-aikaipin-product-placement-view data-url="{{ route('aikaipin.placement-evaluations.products.show', $product) }}"><i class="fa fa-eye"></i> 查看详情</button></td>
                         </tr>
                     @endforeach
-                    <tr data-aikaipin-list-empty-row @if ($evaluations->isNotEmpty()) hidden @endif>
-                        <td colspan="{{ $canReviewAllPlacementEvaluations ? 8 : 7 }}">
+                    <tr data-aikaipin-list-empty-row @if ($products->isNotEmpty()) hidden @endif>
+                        <td colspan="10">
                             <div class="aikaipin-submission-empty-state">
                                 <i class="fa fa-search" aria-hidden="true"></i>
                                 <p data-aikaipin-list-empty-message>{{ $t('placement_evaluation.messages.no_records') }}</p>
@@ -190,8 +154,8 @@
                 </table>
             </div>
         </div>
-        @if ($evaluations->hasPages())
-            <div class="box-footer clearfix aikaipin-submission-pagination"><div class="pull-right">{{ $evaluations->links() }}</div></div>
+        @if ($products->hasPages())
+            <div class="box-footer clearfix aikaipin-submission-pagination"><div class="pull-right">{{ $products->links() }}</div></div>
         @endif
     </div>
 </section>

@@ -885,7 +885,7 @@ class ProductLibraryController extends Controller
 
         $viewData = [
             'product' => $product,
-            'contentUrl' => route('aikaipin.product-library.reference-preview.content', ['product' => $product]),
+            'contentUrl' => route('aikaipin.product-library.reference-preview.content', ['product' => $product, 'embedded' => 1]),
             'libraryUrl' => route('aikaipin.product-library.index'),
         ];
         if ($this->authorization->canManageProductLibrary($context['user'])) {
@@ -935,7 +935,9 @@ class ProductLibraryController extends Controller
             throw $exception;
         }
 
-        return back()->with('success', '视频上传成功，文件名：'.$fileName);
+        return redirect()
+            ->route('aikaipin.product-library.reference-preview', ['product' => $product])
+            ->with('success', '视频上传成功，文件名：'.$fileName);
     }
 
     public function previewReferenceVideo(Request $request, AikaipinProduct $product, OperationAiProductReferenceVideo $video): Response
@@ -969,6 +971,9 @@ class ProductLibraryController extends Controller
 
     public function showProductReferencePreviewContent(Request $request, AikaipinProduct $product): Response
     {
+        if (! $request->boolean('embedded')) {
+            return redirect()->route('aikaipin.product-library.reference-preview', ['product' => $product]);
+        }
         $context = $this->pageContext($request);
         if ($context instanceof Response) {
             return $context;
@@ -1373,13 +1378,59 @@ class ProductLibraryController extends Controller
         $canReviewAllPlacementEvaluations = $this->authorization->canManageProductLibrary($context['user']);
         $filters = $this->placementEvaluationFilters($request);
 
+        $products = $this->productQuery($context['user'], $canReviewAllPlacementEvaluations, [
+            'keyword' => $filters['keyword'], 'category' => '', 'source' => '', 'type' => '',
+        ])->with(['placementEvaluations' => fn ($query) => $query->with('records')
+            ->when(! $canReviewAllPlacementEvaluations, fn ($evaluations) => $evaluations->where('created_by', $context['user']->getKey()))
+            ->latest('updated_at')])
+            ->latest('updated_at')->paginate(15)->withQueryString();
+
         return view('portals.aikaipin.placement-evaluation.index', [
             ...$context,
-            'evaluations' => $this->placementEvaluationQuery($context['user'], $canReviewAllPlacementEvaluations, $filters)
-                ->paginate(15)
-                ->withQueryString(),
+            'products' => $products,
             'filters' => $filters,
             'canReviewAllPlacementEvaluations' => $canReviewAllPlacementEvaluations,
+        ]);
+    }
+
+    public function showProductPlacementEvaluations(Request $request, AikaipinProduct $product): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) return $context;
+        abort_unless($this->canViewProduct($context['user'], $product), 403);
+        $canReviewAll = $this->authorization->canManageProductLibrary($context['user']);
+        $evaluations = AikaipinPlacementEvaluation::query()->with('records')
+            ->where('product_id', $product->getKey())
+            ->when(! $canReviewAll, fn ($query) => $query->where('created_by', $context['user']->getKey()))
+            ->latest('updated_at')->get();
+
+        return response()->json([
+            'product' => ['code' => $product->product_code, 'name' => $product->name, 'skus' => $product->skuValues()],
+            'evaluations' => $evaluations->map(fn ($evaluation): array => [
+                'code' => $evaluation->evaluation_code,
+                'submitter' => $evaluation->created_by_name,
+                'period' => $evaluation->test_started_on?->format('Y-m-d').' 至 '.$evaluation->data_ended_on?->format('Y-m-d'),
+                'records' => $evaluation->records->map(fn ($record): array => [
+                    'platform' => $record->platform, 'currency' => $record->currency,
+                    'spend' => (string) $record->actual_spend, 'orders' => (int) $record->orders,
+                    'material_name' => $record->material_name,
+                    'video_url' => $record->video_path ? route('aikaipin.placement-evaluations.records.video', [$evaluation, $record]) : null,
+                ])->values(),
+            ])->values(),
+        ]);
+    }
+
+    public function placementEvaluationRecordVideo(Request $request, AikaipinPlacementEvaluation $evaluation, AikaipinPlacementEvaluationRecord $record): Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) return $context;
+        abort_unless($this->canViewPlacementEvaluation($context['user'], $evaluation), 403);
+        abort_unless((int) $record->evaluation_id === (int) $evaluation->getKey(), 404);
+        abort_unless($record->video_path && Storage::disk($record->video_disk ?: 'local')->exists($record->video_path), 404);
+
+        return response()->file(Storage::disk($record->video_disk ?: 'local')->path($record->video_path), [
+            'Content-Type' => $record->video_mime_type ?: 'video/mp4',
+            'Content-Disposition' => 'inline; filename="'.$record->video_name.'"',
         ]);
     }
 

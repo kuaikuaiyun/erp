@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class AikaipinProduct extends Model
 {
@@ -114,6 +115,11 @@ class AikaipinProduct extends Model
     public function updater(): BelongsTo
     {
         return $this->belongsTo(AdminUser::class, 'updated_by');
+    }
+
+    public function placementEvaluations(): HasMany
+    {
+        return $this->hasMany(AikaipinPlacementEvaluation::class, 'product_id');
     }
 
     /** @param iterable<mixed> $values

@@ -348,6 +348,9 @@ Route::get('/operation/ai-product-library/{product}/publish', [OperationAiProduc
 Route::post('/operation/ai-product-library/{product}/publish', [OperationAiProductLibraryController::class, 'publish'])->name('operation.ai-product-library.publish');
 Route::get('/operation/ai-product-library/{product}/shopify-images/{imageIndex}', [OperationAiProductLibraryController::class, 'shopifyImage'])->whereNumber('imageIndex')->name('operation.ai-product-library.shopify-image');
 Route::get('/operation/ai-product-library/{product}/detail', [OperationAiProductLibraryController::class, 'detail'])->name('operation.ai-product-library.detail');
+Route::get('/operation/ai-product-library/{product}/placement-evaluations', [OperationAiProductLibraryController::class, 'placementEvaluationForm'])->name('operation.ai-product-library.placement-evaluations.form');
+Route::post('/operation/ai-product-library/{product}/placement-evaluations', [OperationAiProductLibraryController::class, 'storePlacementEvaluation'])->name('operation.ai-product-library.placement-evaluations.store');
+Route::get('/operation/ai-product-library/placement-evaluations/{evaluation}/records/{record}/video', [OperationAiProductLibraryController::class, 'placementEvaluationVideo'])->whereNumber('evaluation')->whereNumber('record')->name('operation.ai-product-library.placement-evaluations.video');
 Route::get('/operation/ai-product-library/{product}/reference-preview', [OperationAiProductLibraryController::class, 'referencePreview'])->name('operation.ai-product-library.reference-preview');
 Route::get('/operation/ai-product-library/{product}/reference-preview/content', [OperationAiProductLibraryController::class, 'referencePreviewContent'])->name('operation.ai-product-library.reference-preview.content');
 Route::post('/operation/ai-product-library/{product}/reference-videos', [OperationAiProductLibraryController::class, 'uploadReferenceVideo'])->name('operation.ai-product-library.reference-videos.upload');
@@ -497,6 +500,8 @@ Route::post('/selection-proposals/{proposal}/withdraw', [ProductLibraryControlle
 Route::get('/selection-proposals/{proposal}/images/{image}', [ProductLibraryController::class, 'showSelectionProposalImage'])->name('aikaipin.selection-proposals.images.show');
 Route::get('/placement-evaluations', [ProductLibraryController::class, 'placementEvaluation'])->name('aikaipin.placement-evaluations.index');
 Route::get('/placement-evaluations/product-options', [ProductLibraryController::class, 'placementEvaluationProductOptions'])->name('aikaipin.placement-evaluations.product-options');
+Route::get('/placement-evaluations/products/{product}', [ProductLibraryController::class, 'showProductPlacementEvaluations'])->name('aikaipin.placement-evaluations.products.show');
+Route::get('/placement-evaluations/{evaluation}/records/{record}/video', [ProductLibraryController::class, 'placementEvaluationRecordVideo'])->whereNumber('evaluation')->whereNumber('record')->name('aikaipin.placement-evaluations.records.video');
 Route::post('/placement-evaluations', [ProductLibraryController::class, 'storePlacementEvaluation'])->name('aikaipin.placement-evaluations.store');
 Route::get('/placement-evaluations/{evaluation}', [ProductLibraryController::class, 'showPlacementEvaluation'])->name('aikaipin.placement-evaluations.show');
 Route::put('/placement-evaluations/{evaluation}', [ProductLibraryController::class, 'updatePlacementEvaluation'])->name('aikaipin.placement-evaluations.update');

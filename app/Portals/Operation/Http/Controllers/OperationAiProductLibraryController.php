@@ -5,6 +5,8 @@ namespace App\Portals\Operation\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
 use App\Models\AikaipinProduct;
+use App\Models\AikaipinPlacementEvaluation;
+use App\Models\AikaipinPlacementEvaluationRecord;
 use App\Models\AiProductShopifyPublication;
 use App\Models\AssistantDomainStore;
 use App\Models\OperationAiProductReferenceVideo;
@@ -112,6 +114,97 @@ class OperationAiProductLibraryController extends Controller
         ]);
     }
 
+    public function placementEvaluationForm(Request $request, AikaipinProduct $product): Response|View
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) return $context;
+        abort_unless((bool) $product->is_published, 404);
+
+        return view('portals.operation.ai-product-library.placement-evaluation-form', [
+            'product' => $product,
+            'evaluations' => AikaipinPlacementEvaluation::query()
+                ->with('records')
+                ->where('product_id', $product->getKey())
+                ->where('created_by', $context['user']->getKey())
+                ->latest('updated_at')->limit(20)->get(),
+        ]);
+    }
+
+    public function storePlacementEvaluation(Request $request, AikaipinProduct $product): RedirectResponse|Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) return $context;
+        abort_unless((bool) $product->is_published, 404);
+        $data = $request->validate([
+            'test_started_on' => ['required', 'date'],
+            'data_ended_on' => ['required', 'date', 'after_or_equal:test_started_on'],
+            'platform' => ['required', Rule::in(['facebook', 'google', 'tiktok', 'mediago', 'newsbreak', 'applovin'])],
+            'currency' => ['required', Rule::in(['usd', 'eur', 'cny'])],
+            'actual_spend' => ['required', 'numeric', 'min:0', 'max:99999999999999.99'],
+            'orders' => ['required', 'integer', 'min:0', 'max:4294967295'],
+            'material_name' => ['required', 'string', 'max:191'],
+            'video' => ['required', 'file', 'mimes:mp4,mov,avi,webm,mkv,m4v', 'max:307200'],
+            'remark' => ['nullable', 'string', 'max:2000'],
+        ], [
+            'material_name.required' => '请填写素材名称。',
+            'video.required' => '请选择需要上传的素材视频。',
+            'video.mimes' => '仅支持 MP4、MOV、AVI、WEBM、MKV、M4V 视频。',
+            'video.max' => '单个视频不能超过 300MB。',
+        ]);
+
+        $file = $request->file('video');
+        $date = now('Asia/Shanghai');
+        $productCode = trim((string) preg_replace('/[^A-Za-z0-9_-]+/', '-', (string) $product->product_code), '-_') ?: 'product-'.$product->getKey();
+        $extension = strtolower($file->getClientOriginalExtension() ?: $file->extension() ?: 'mp4');
+        $fileName = $productCode.'-'.$this->departmentCode($context['user']).'-'.$date->format('ymd').'-placement-'.Str::lower(Str::random(6)).'.'.$extension;
+        $path = $file->storeAs('aikaipin/placement-evaluations/'.$context['user']->getKey().'/'.$product->getKey(), $fileName, 'local');
+        $connection = config('admin.database.connection') ?: config('database.default');
+
+        try {
+            DB::connection($connection)->transaction(function () use ($context, $product, $data, $file, $fileName, $path): void {
+                $evaluation = AikaipinPlacementEvaluation::query()->create([
+                    'evaluation_code' => $this->nextPlacementEvaluationCode(),
+                    'product_id' => $product->getKey(),
+                    'product_code' => $product->product_code,
+                    'product_name' => $product->name,
+                    'test_started_on' => $data['test_started_on'],
+                    'data_ended_on' => $data['data_ended_on'],
+                    'remark' => ($data['remark'] ?? null) ?: null,
+                    'created_by' => $context['user']->getKey(),
+                    'created_by_name' => $context['user']->name ?: $context['user']->username,
+                    'updated_by' => $context['user']->getKey(),
+                    'updated_by_name' => $context['user']->name ?: $context['user']->username,
+                ]);
+                $evaluation->records()->create([
+                    'platform' => $data['platform'], 'currency' => $data['currency'],
+                    'actual_spend' => $data['actual_spend'], 'orders' => $data['orders'], 'sort' => 0,
+                    'material_name' => $data['material_name'], 'video_disk' => 'local', 'video_path' => $path,
+                    'video_name' => $fileName, 'video_mime_type' => $file->getMimeType(), 'video_size' => $file->getSize(),
+                ]);
+            });
+        } catch (Throwable $exception) {
+            Storage::disk('local')->delete($path);
+            throw $exception;
+        }
+
+        return redirect()->route('operation.ai-product-library.index')->with('success', '投放测评已保存。');
+    }
+
+    public function placementEvaluationVideo(Request $request, AikaipinPlacementEvaluation $evaluation, AikaipinPlacementEvaluationRecord $record): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) return $context;
+        abort_unless((int) $evaluation->created_by === (int) $context['user']->getKey(), 403);
+        abort_unless((int) $record->evaluation_id === (int) $evaluation->getKey(), 404);
+        abort_unless($record->video_path && Storage::disk($record->video_disk ?: 'local')->exists($record->video_path), 404);
+
+        return response()->file(Storage::disk($record->video_disk ?: 'local')->path($record->video_path), [
+            'Content-Type' => $record->video_mime_type ?: 'video/mp4',
+            'Content-Disposition' => 'inline; filename="'.$record->video_name.'"',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
     public function referencePreview(Request $request, AikaipinProduct $product): Response|View
     {
         $context = $this->portalContext($request);
@@ -123,7 +216,7 @@ class OperationAiProductLibraryController extends Controller
 
         return view('portals.aikaipin.product-library.reference-preview', [
             'product' => $product,
-            'contentUrl' => route('operation.ai-product-library.reference-preview.content', ['product' => $product]),
+            'contentUrl' => route('operation.ai-product-library.reference-preview.content', ['product' => $product, 'embedded' => 1]),
             'libraryUrl' => route('operation.ai-product-library.index'),
             'referenceVideos' => $this->referenceVideos($product),
             'referenceVideoUploadUrl' => route('operation.ai-product-library.reference-videos.upload', $product),
@@ -175,7 +268,9 @@ class OperationAiProductLibraryController extends Controller
             throw $exception;
         }
 
-        return back()->with('success', '视频上传成功，文件名：'.$fileName);
+        return redirect()
+            ->route('operation.ai-product-library.reference-preview', ['product' => $product])
+            ->with('success', '视频上传成功，文件名：'.$fileName);
     }
 
     public function previewReferenceVideo(Request $request, AikaipinProduct $product, OperationAiProductReferenceVideo $video): Response
@@ -209,6 +304,9 @@ class OperationAiProductLibraryController extends Controller
 
     public function referencePreviewContent(Request $request, AikaipinProduct $product): Response
     {
+        if (! $request->boolean('embedded')) {
+            return redirect()->route('operation.ai-product-library.reference-preview', ['product' => $product]);
+        }
         $context = $this->portalContext($request);
         if ($context instanceof Response) {
             return $context;
@@ -466,6 +564,19 @@ class OperationAiProductLibraryController extends Controller
         $code ??= $query->orderBy($rolesTable.'.id')->value($rolesTable.'.short_name');
 
         return $this->sanitizeDepartmentCode((string) ($code ?: 'AI'));
+    }
+
+    private function nextPlacementEvaluationCode(): string
+    {
+        $connection = config('admin.database.connection') ?: config('database.default');
+        $period = now('Asia/Shanghai')->format('Ym');
+        $sequences = DB::connection($connection)->table('aikaipin_placement_evaluation_code_sequences');
+        $sequences->insertOrIgnore(['period' => $period, 'last_number' => 0, 'updated_at' => now()]);
+        $sequence = $sequences->where('period', $period)->lockForUpdate()->first();
+        $next = (int) ($sequence->last_number ?? 0) + 1;
+        $sequences->where('period', $period)->update(['last_number' => $next, 'updated_at' => now()]);
+
+        return 'ATE-'.$period.'-'.str_pad((string) $next, 6, '0', STR_PAD_LEFT);
     }
 
     private function sanitizeDepartmentCode(string $code): string

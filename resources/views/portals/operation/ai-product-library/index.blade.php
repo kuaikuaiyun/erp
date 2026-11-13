@@ -169,6 +169,10 @@
                                     data-detail-url="{{ route('operation.ai-product-library.detail', ['product' => $product]) }}">
                                     <i class="fa fa-eye"></i> {{ __('aikaipin.operation_library.detail') }}
                                 </button>
+                                <button type="button" class="btn btn-warning btn-sm" data-operation-ai-placement
+                                    data-placement-url="{{ route('operation.ai-product-library.placement-evaluations.form', $product) }}">
+                                    <i class="fa fa-line-chart"></i> 投放测评
+                                </button>
                                 <button type="button" class="btn btn-success btn-sm" data-operation-ai-publish
                                     data-publish-url="{{ route('operation.ai-product-library.publish.form', $product) }}">
                                     <i class="fa fa-cloud-upload"></i> 上架
@@ -213,6 +217,13 @@
     <div class="modal-dialog" role="document"><div class="modal-content">
         <div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title"><i class="fa fa-cloud-upload"></i> 上架到 Shopify</h4></div>
         <div class="modal-body" data-operation-ai-publish-content><div class="text-center text-muted"><i class="fa fa-spinner fa-spin"></i> 正在加载店铺信息...</div></div>
+    </div></div>
+</div>
+
+<div class="modal fade" id="operation-ai-placement-modal" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document"><div class="modal-content">
+        <div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title"><i class="fa fa-line-chart"></i> 投放测评</h4></div>
+        <div class="modal-body" data-operation-ai-placement-content><div class="text-center text-muted"><i class="fa fa-spinner fa-spin"></i> 正在加载...</div></div>
     </div></div>
 </div>
 
@@ -294,6 +305,21 @@
         window.jQuery(modal).modal('show');
         fetch(button.getAttribute('data-publish-url'), {headers:{'X-Requested-With':'XMLHttpRequest'}})
             .then(function (response) { if (!response.ok) throw new Error('店铺信息加载失败'); return response.text(); })
+            .then(function (html) { content.innerHTML = html; })
+            .catch(function (error) { content.innerHTML = '<div class="alert alert-danger">' + error.message + '</div>'; });
+    });
+})();
+(function () {
+    var modal = document.getElementById('operation-ai-placement-modal');
+    if (!modal) return;
+    var content = modal.querySelector('[data-operation-ai-placement-content]');
+    document.addEventListener('click', function (event) {
+        var button = event.target.closest('[data-operation-ai-placement]');
+        if (!button) return;
+        content.innerHTML = '<div class="text-center text-muted"><i class="fa fa-spinner fa-spin"></i> 正在加载投放测评...</div>';
+        window.jQuery(modal).modal('show');
+        fetch(button.getAttribute('data-placement-url'), {headers:{'X-Requested-With':'XMLHttpRequest'}})
+            .then(function (response) { if (!response.ok) throw new Error('投放测评加载失败'); return response.text(); })
             .then(function (html) { content.innerHTML = html; })
             .catch(function (error) { content.innerHTML = '<div class="alert alert-danger">' + error.message + '</div>'; });
     });

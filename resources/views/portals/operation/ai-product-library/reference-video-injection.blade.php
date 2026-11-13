@@ -1,5 +1,5 @@
 <style id="erp-reference-video-style">
-.erp-reference-videos{display:flex!important;flex-wrap:wrap!important;gap:16px!important;align-items:flex-start!important;margin:4px 0!important}.erp-reference-video{width:300px!important;max-width:100%!important;margin:0!important}.erp-reference-video video{display:block!important;width:300px!important;max-width:100%!important;height:auto!important;max-height:400px!important;border-radius:4px!important;background:#111!important;object-fit:contain!important}.erp-reference-video__foot{display:flex!important;align-items:center!important;gap:7px!important;width:300px!important;max-width:100%!important;margin-top:5px!important;font:12px/1.4 Arial,sans-serif!important}.erp-reference-video__name{min-width:0!important;overflow:hidden!important;color:#334155!important;text-overflow:ellipsis!important;white-space:nowrap!important}.erp-reference-video__download,.erp-history-video-download{display:inline-block!important;flex:0 0 auto!important;border-radius:4px!important;padding:3px 7px!important;background:#1686c4!important;color:#fff!important;font:11px/1.4 Arial,sans-serif!important;text-decoration:none!important}.erp-reference-video__download:hover,.erp-history-video-download:hover{background:#0f6e9f!important}.erp-reference-video__size{color:#94a3b8!important;font-size:10px!important}.erp-history-video-download{margin:5px 0 12px!important}.erp-history-video-name{display:block!important;width:100%!important;margin-top:5px!important;color:#334155!important;font:12px/1.4 Arial,sans-serif!important}
+.erp-reference-videos{display:flex!important;flex-wrap:wrap!important;gap:16px!important;align-items:flex-start!important;margin:4px 0!important}.erp-reference-generated-sections{display:block!important;width:100%!important;margin:16px 0!important}.erp-reference-generated-section{display:grid!important;grid-template-columns:140px minmax(0,1fr)!important;gap:16px!important;width:100%!important;margin:0!important;padding:12px 0!important;border-top:1px solid #e5e7eb!important}.erp-reference-generated-title{color:#475569!important;font:13px/1.5 Arial,sans-serif!important}.erp-reference-video{width:300px!important;max-width:100%!important;margin:0!important}.erp-reference-video video{display:block!important;width:300px!important;max-width:100%!important;height:auto!important;max-height:400px!important;border-radius:4px!important;background:#111!important;object-fit:contain!important}.erp-reference-video__foot{display:flex!important;align-items:center!important;gap:7px!important;width:300px!important;max-width:100%!important;margin-top:5px!important;font:12px/1.4 Arial,sans-serif!important}.erp-reference-video__name{min-width:0!important;overflow:hidden!important;color:#334155!important;text-overflow:ellipsis!important;white-space:nowrap!important}.erp-reference-video__download,.erp-history-video-download{display:inline-block!important;flex:0 0 auto!important;border-radius:4px!important;padding:3px 7px!important;background:#1686c4!important;color:#fff!important;font:11px/1.4 Arial,sans-serif!important;text-decoration:none!important}.erp-reference-video__download:hover,.erp-history-video-download:hover{background:#0f6e9f!important}.erp-reference-video__size{color:#94a3b8!important;font-size:10px!important}.erp-history-video-download{margin:5px 0 12px!important}.erp-history-video-name{display:block!important;width:100%!important;margin-top:5px!important;color:#334155!important;font:12px/1.4 Arial,sans-serif!important}
 </style>
 <script>
 (function(){
@@ -37,6 +37,20 @@
             if(parent.nextElementSibling)return parent.nextElementSibling;
         }
         return labelElement;
+    }
+    function generatedTarget(type){
+        var existing=document.querySelector('.erp-reference-videos[data-type="'+type+'"]');if(existing)return existing;
+        var root=document.querySelector('.erp-reference-generated-sections');
+        if(!root){
+            root=document.createElement('div');root.className='erp-reference-generated-sections';
+            var anchor=labelNode('视频附件')||labelNode('1688产品链接')||labelNode('采购链接（1688产品链接）');
+            var host=anchor?targetBox(anchor):document.body;
+            host.appendChild(root);
+        }
+        var section=document.createElement('div');section.className='erp-reference-generated-section';section.setAttribute('data-generated-type',type);
+        var title=document.createElement('div');title.className='erp-reference-generated-title';title.textContent=(labels[type]||[type])[0];
+        var box=document.createElement('div');box.className='erp-reference-videos';box.setAttribute('data-type',type);
+        section.appendChild(title);section.appendChild(box);root.appendChild(section);return box;
     }
     function card(video){
         var article=document.createElement('div');article.className='erp-reference-video';
@@ -77,9 +91,11 @@
         normalizeHistoricalVideos();
         Object.keys(labels).forEach(function(type){
             var items=videos.filter(function(video){return video.type===type;});if(!items.length)return;
-            var label=labelForType(type);if(!label)return;
-            var target=targetBox(label),box=target.querySelector('.erp-reference-videos[data-type="'+type+'"]');
-            if(!box){box=document.createElement('div');box.className='erp-reference-videos';box.setAttribute('data-type',type);target.appendChild(box);}
+            var label=labelForType(type),box;
+            if(label){
+                var target=targetBox(label);box=target.querySelector('.erp-reference-videos[data-type="'+type+'"]');
+                if(!box){box=document.createElement('div');box.className='erp-reference-videos';box.setAttribute('data-type',type);target.appendChild(box);}
+            }else box=generatedTarget(type);
             items.forEach(function(video){box.appendChild(card(video));});
         });
     }
