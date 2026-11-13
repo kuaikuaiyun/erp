@@ -399,7 +399,7 @@ class OperationReportDashboardController extends Controller
             'totals' => $totals,
             'identityRowspans' => $this->identityRowspans($rows),
             'reportRowspans' => $this->reportRowspans($rows),
-            'reportBands' => $this->reportBands($rows),
+            'reportBands' => $this->reportBands($rows, $displayMode),
             'reportIndexUrl' => $this->isDashboard($context)
                 ? route('operation-dashboard.operation-reports.index')
                 : route('assistant.operation-reports.index'),
@@ -739,10 +739,9 @@ class OperationReportDashboardController extends Controller
     private function roiClass(?float $roi): string
     {
         if ($roi === null) return '';
-        if ($roi > 1.8) return 'roi-excellent';
-        if ($roi >= 1.6) return 'roi-good';
-        if ($roi >= 1.4) return 'roi-warning';
-        if ($roi >= 1.2) return 'roi-poor';
+        if ($roi > 1.6) return 'roi-excellent';
+        if ($roi >= 1.3) return 'roi-good';
+        if ($roi >= 1.1) return 'roi-warning';
         return 'roi-danger';
     }
 
@@ -756,16 +755,18 @@ class OperationReportDashboardController extends Controller
         return $this->rowspans($rows, fn (array $row) => (string) $row['_report_id']);
     }
 
-    private function reportBands(array $rows): array
+    private function reportBands(array $rows, string $displayMode = 'performance'): array
     {
         $bands = [];
-        $lastReport = null;
+        $lastGroup = null;
         $band = 1;
         foreach ($rows as $index => $row) {
-            $report = (string) $row['_report_id'];
-            if ($report !== $lastReport) {
+            $group = $displayMode === 'team'
+                ? 'department:'.((int) ($row['operation_department_id'] ?? 0)).'|'.(string) ($row['operation_department_name'] ?? '')
+                : (string) $row['_report_id'];
+            if ($group !== $lastGroup) {
                 $band = $band === 0 ? 1 : 0;
-                $lastReport = $report;
+                $lastGroup = $group;
             }
             $bands[$index] = $band;
         }
