@@ -97,9 +97,9 @@
             @elseif($menu->code === 'operation_abnormal_orders')
             <span id="operation-abnormal-order-badge" class="badge bg-yellow" style="margin-left:6px;">0</span>
             @elseif($menu->code === 'operation_daily_applovin_spends')
-            <span id="operation-applovin-gift-badge" class="badge bg-yellow" style="margin-left:6px;display:none;" title="待上传礼金图数量">0</span>
+            <span class="badge bg-gray operation-applovin-gift-badge" style="margin-left:6px;" title="待上传礼金图数量">0</span>
             @elseif($menu->code === 'fashion_applovin_spends')
-            <span id="fashion-applovin-gift-badge" class="badge bg-yellow" style="margin-left:6px;display:none;" title="待上传礼金图数量">0</span>
+            <span class="badge bg-gray fashion-applovin-gift-badge" style="margin-left:6px;" title="待上传礼金图数量">0</span>
             @endif
         </a>
     </li>
@@ -108,6 +108,11 @@
         <a href="#">
             <i class="fa {{ $icon }}"></i>
             <span>{{ $label }}</span>
+            @if($menu->code === 'operation_applovin_data')
+            <span class="badge bg-gray pull-right operation-applovin-gift-badge" style="margin-right:18px" title="待上传礼金图数量">0</span>
+            @elseif($menu->code === 'fashion_applovin_data')
+            <span class="badge bg-gray pull-right fashion-applovin-gift-badge" style="margin-right:18px" title="待上传礼金图数量">0</span>
+            @endif
             @if(array_key_exists($menu->code, $assistantAdvertisingReviewPendingCounts ?? []))
             <span class="badge {{ $assistantAdvertisingReviewPendingCounts[$menu->code] > 0 ? 'bg-yellow' : 'bg-gray' }} pull-right" style="margin-right:18px" title="待审核数量">{{ $assistantAdvertisingReviewPendingCounts[$menu->code] }}</span>
             @endif

@@ -146,9 +146,12 @@ class AppLovinSpendController extends Controller
             ->where('status', '!=', FashionAdvertisingReport::STATUS_REJECTED);
         if (! $this->canSeeAll($user)) {
             $departmentIds = $includeManaged ? $this->departmentAuthorization->managedDepartmentIds($user) : collect();
-            $departmentIds->isNotEmpty()
-                ? $query->whereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $departmentIds->all()))
-                : $query->where('submitter_id', $user->getKey());
+            $query->where(function ($scope) use ($user, $departmentIds): void {
+                $scope->where('submitter_id', $user->getKey());
+                if ($departmentIds->isNotEmpty()) {
+                    $scope->orWhereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $departmentIds->all()));
+                }
+            });
         }
 
         return $query->orderBy('report_date')->get();

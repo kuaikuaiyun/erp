@@ -152,13 +152,14 @@
         $.get(@json(route('operation.abnormal-orders.pending-count'))).done(function(response){badge.text(response.count||0);});
     }
     function updateAppLovinGiftBadge(){
-        var badge=$('#operation-applovin-gift-badge, #fashion-applovin-gift-badge').first();if(!badge.length)return;
-        var pendingUrl=badge.is('#fashion-applovin-gift-badge')
+        var fashionBadges=$('.fashion-applovin-gift-badge'),operationBadges=$('.operation-applovin-gift-badge');
+        var badges=fashionBadges.length?fashionBadges:operationBadges;if(!badges.length)return;
+        var pendingUrl=fashionBadges.length
             ? @json(route('fashion.applovin-spends.pending-count'))
             : @json(route('operation.applovin-spends.pending-count'));
         $.get(pendingUrl).done(function(response){
             var count=parseInt(response.count,10)||0;
-            badge.text(count).toggle(count>0);
+            badges.text(count).show().toggleClass('bg-yellow',count>0).toggleClass('bg-gray',count===0);
         });
     }
     function show(){
