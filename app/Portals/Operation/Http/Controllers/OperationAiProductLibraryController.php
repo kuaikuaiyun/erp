@@ -312,10 +312,6 @@ class OperationAiProductLibraryController extends Controller
             return $context;
         }
         $file = $this->referencePreviewFile($product);
-        $content = Storage::disk($file['disk'])->get($file['path']);
-        $content = preg_replace('/<video\b(?![^>]*\bpreload\s*=)/i', '<video preload="none"', $content) ?? $content;
-        $content = preg_replace('/<img\b(?![^>]*\bloading\s*=)/i', '<img loading="lazy"', $content) ?? $content;
-        $content = preg_replace('/<img\b(?![^>]*\bdecoding\s*=)/i', '<img decoding="async"', $content) ?? $content;
         $editsPath = $file['path'].'.erp-edits.json';
         $referenceEdits = Storage::disk($file['disk'])->exists($editsPath)
             ? (json_decode(Storage::disk($file['disk'])->get($editsPath), true) ?: []) : [];
@@ -325,7 +321,7 @@ class OperationAiProductLibraryController extends Controller
         $layoutPath = $file['path'].'.erp-layout.json';
         $referenceLayouts = Storage::disk($file['disk'])->exists($layoutPath)
             ? (json_decode(Storage::disk($file['disk'])->get($layoutPath), true) ?: []) : [];
-        $historicalCount = substr_count(strtolower($content), '<video');
+        $historicalCount = $this->countReferenceHtmlVideos($file['disk'], $file['path']);
         $videos = $this->normalizeUploadedReferenceVideos($product, $historicalCount)
             ->map(fn (OperationAiProductReferenceVideo $video): array => [
                 'id' => (int) $video->getKey(),
@@ -347,12 +343,20 @@ class OperationAiProductLibraryController extends Controller
             'referenceHiddenVideos' => $referenceHiddenVideos,
             'referenceLayouts' => $referenceLayouts,
         ])->render();
-        $bodyPosition = strripos($content, '</body>');
-        $content = $bodyPosition === false
-            ? $content.$injection
-            : substr($content, 0, $bodyPosition).$injection.substr($content, $bodyPosition);
-
-        return response($content, 200, [
+        return response()->stream(function () use ($file, $injection): void {
+            $stream = Storage::disk($file['disk'])->readStream($file['path']);
+            abort_unless(is_resource($stream), 404);
+            try {
+                while (! feof($stream)) {
+                    echo fread($stream, 1024 * 1024);
+                    if (function_exists('ob_flush')) @ob_flush();
+                    flush();
+                }
+                echo $injection;
+            } finally {
+                fclose($stream);
+            }
+        }, 200, [
             'Content-Type' => 'text/html; charset=UTF-8',
             'Content-Disposition' => 'inline; filename="preview.html"',
             'Cache-Control' => 'private, no-store, max-age=0',
@@ -363,6 +367,27 @@ class OperationAiProductLibraryController extends Controller
             'X-Robots-Tag' => 'noindex, nofollow, noarchive',
             'Content-Security-Policy' => "sandbox allow-scripts allow-modals allow-downloads; default-src 'none'; base-uri 'none'; object-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https:; style-src 'unsafe-inline' https:; img-src data: blob: https:; font-src data: https:; media-src data: blob: https: http:; connect-src https: http:; frame-src https:; worker-src blob:; form-action 'none'; frame-ancestors 'self'",
         ]);
+    }
+
+    private function countReferenceHtmlVideos(string $disk, string $path): int
+    {
+        $stream = Storage::disk($disk)->readStream($path);
+        abort_unless(is_resource($stream), 404);
+        $count = 0;
+        $carry = '';
+        try {
+            while (! feof($stream)) {
+                $chunk = fread($stream, 1024 * 1024);
+                if ($chunk === false || $chunk === '') continue;
+                $buffer = $carry.$chunk;
+                $count += substr_count(strtolower($buffer), '<video');
+                $carry = substr($buffer, -5);
+            }
+        } finally {
+            fclose($stream);
+        }
+
+        return $count;
     }
 
     public function publishForm(Request $request, AikaipinProduct $product): Response|View
