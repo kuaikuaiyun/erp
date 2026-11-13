@@ -1669,6 +1669,17 @@ class FinancePortalTest extends TestCase
             $totals[0]['name'], $totals[0]['success_count'], $totals[0]['failed_count'], $totals[0]['settlement'],
             $totals[0]['fee'], $totals[0]['refund'], $totals[0]['per_order_fee'],
         ]);
+        $this->get('/finance/reports/summary?view=transactions&month=2026-11&channel=worldpay')
+            ->assertOk()->assertViewHas('items', fn ($items) => array_sum(array_column($items, 'orders')) === 2);
+        $this->get('/finance/reports/summary?view=transactions&month=2026-11&channel=credit_card')
+            ->assertOk()->assertViewHas('items', []);
+        $this->get('/finance/reports/summary?view=settlement&month=2026-11&channel=worldpay')
+            ->assertOk()->assertViewHas('groups', fn ($groups) => count($groups) === 1
+                && $groups[0]['channel'] === 'worldpay' && $groups[0]['success_count'] === 2);
+        $this->get('/finance/reports/losses?month_from=2026-11&month_to=2026-11&channel=credit_card')
+            ->assertOk()->assertViewHas('groups', fn ($groups) => collect($groups)->contains(
+                fn ($group) => $group['channel'] === 'worldpay' && $group['success_count'] === 2
+            ));
         $this->get($report.'?worldpay_exception=yes')->assertOk()->assertSee('wp-1')->assertSee('wp-2')->assertDontSee('wp-failed');
         $this->get($report.'?worldpay_exception=no')->assertOk()->assertSee('wp-failed')->assertDontSee('wp-1')->assertDontSee('wp-2');
         $query = http_build_query(['month' => '2026-11', 'download' => 1,
@@ -2549,7 +2560,7 @@ class FinancePortalTest extends TestCase
         $filtered = $url.'&'.http_build_query(['conditions' => [['field' => 'settlement', 'operator' => 'equals', 'value' => '19.5']]]);
         $this->get($filtered)->assertOk()->assertViewHas('items', fn ($items) => count($items) === 1 && $items[0]['settlement'] === '19.50000000');
         $sheet = $this->readDownload($this->get($filtered.'&download=1')->assertOk()->streamedContent());
-        $this->assertEquals(19.5, $sheet->getCell('H2')->getValue());
+        $this->assertEquals(19.5, $sheet->getCell('I2')->getValue());
         $overview = '/finance/reports/summary?view=settlement&channel=credit_card&layer=project';
         $this->get($overview)->assertOk()->assertViewHas('creditMonths', ['2026-11'])
             ->assertViewHas('groups', fn ($groups) => count($groups) === 1
@@ -2605,10 +2616,10 @@ class FinancePortalTest extends TestCase
         $selection = http_build_query(['selected_rows' => [\App\Portals\Finance\FinanceExportSelection::key($item)]]);
         $sheet = $this->readDownload($this->get($url.'&download=1&'.$selection)->assertOk()->streamedContent());
         $this->assertCount(2, $sheet->toArray());
-        $this->assertSame('加购', $sheet->toArray()[1][3]);
+        $this->assertSame('加购', $sheet->toArray()[1][4]);
         $lossUrl = '/finance/reports/losses?month_from=2026-11&month_to=2026-11';
         $loss = $this->get($lossUrl)->assertOk();
-        foreach (['Shopify', 'PayPal', '信用卡'] as $scope) {
+        foreach (['Shopify', 'PayPal', '徐总信用卡'] as $scope) {
             $this->assertNotNull(collect($loss->viewData('groups'))->first(fn ($group) => $group['scope'] === $scope && $group['category'] === '加购'));
         }
         $panel = collect($loss->viewData('groups'))->first(fn ($group) => $group['scope'] === 'Shopify' && $group['category'] === '加购');
@@ -2862,14 +2873,15 @@ class FinancePortalTest extends TestCase
 
     public function test_transaction_summary_uses_each_channel_template_for_display_and_export(): void
     {
-        foreach (['paypal' => 21, 'credit_card' => 23, 'combined' => 24] as $channel => $count) {
+        foreach (['paypal' => 22, 'credit_card' => 24, 'ye' => 24, 'worldpay' => 24, 'combined' => 25] as $channel => $count) {
             $url = '/finance/reports/summary?view=transactions&month=2026-10&channel='.$channel;
             $response = $this->get($url)->assertOk()->assertViewHas('tab', $channel);
             $columns = $response->viewData('columns');
             $this->assertCount($count, $columns);
             $this->assertSame('手续费', $columns['fee']);
             $this->assertSame('货币', $columns['currency']);
-            $this->assertSame($channel !== 'credit_card', isset($columns['dispute_hold']));
+            $this->assertSame('支付账户', $columns['account']);
+            $this->assertSame(in_array($channel, ['paypal', 'combined'], true), isset($columns['dispute_hold']));
             $sheet = $this->readDownload($this->get($url.'&download=1')->assertOk()->streamedContent());
             $this->assertSame(array_values($columns), $sheet->toArray()[0]);
         }
@@ -2945,26 +2957,26 @@ class FinancePortalTest extends TestCase
         $channelDocument = new \DOMDocument;
         @$channelDocument->loadHTML($channelView->getContent());
         $channelXpath = new \DOMXPath($channelDocument);
-        $this->assertSame(0, $channelXpath->query('//nav[@aria-label="损耗报表项目"]/a[normalize-space(.)="Shopify"]')->length);
-        $this->assertSame(1, $channelXpath->query('//nav[@aria-label="损耗报表项目"]/a[@aria-current="page" and normalize-space(.)="信用卡"]')->length);
+        $this->assertSame(1, $channelXpath->query('//nav[@aria-label="损耗报表项目"]/a[normalize-space(.)="Shopify"]')->length);
+        $this->assertSame(1, $channelXpath->query('//nav[@aria-label="损耗报表项目"]/a[@aria-current="page" and normalize-space(.)="Shopify"]')->length);
 
         $classifiedRows = $businessRows->map(fn ($row) => [...$row, 'team' => '正常团队', 'subscription' => $row['success'] ? '订阅复购2次' : '']);
         $classified = collect($service->totals($classifiedRows, 'business'));
         $this->assertTrue($classified->contains(fn ($group) => $group['scope'] === 'Shopify' && $group['category'] === '订阅复购2次'));
         $this->assertFalse($classified->contains(fn ($group) => $group['category'] === '未分类'));
-        $switched = $this->get('/finance/reports/losses?month=2026-11&loss_scope=信用卡&loss_category=总计')->assertOk();
+        $switched = $this->get('/finance/reports/losses?month=2026-11&loss_scope=徐总信用卡&loss_category=总计')->assertOk();
         $document = new \DOMDocument;
         @$document->loadHTML($switched->getContent());
         $xpath = new \DOMXPath($document);
         $this->assertSame(1, $xpath->query('//div[contains(concat(" ", normalize-space(@class), " "), " loss-month-panel ")]')->length);
-        $this->assertSame(1, $xpath->query('//nav[@aria-label="损耗报表项目"]/a[@aria-current="page" and normalize-space(.)="信用卡"]')->length);
+        $this->assertSame(1, $xpath->query('//nav[@aria-label="损耗报表项目"]/a[@aria-current="page" and normalize-space(.)="徐总信用卡"]')->length);
         $payload = json_decode($xpath->query('//script[@data-loss-panels]')->item(0)->textContent, true, 512, JSON_THROW_ON_ERROR);
         $this->assertNotEmpty($payload);
         $categoryOptions = json_decode($xpath->query('//script[@data-loss-categories]')->item(0)->textContent, true, 512, JSON_THROW_ON_ERROR);
-        $this->assertNotContains('刷单', $categoryOptions['信用卡']);
+        $this->assertNotContains('刷单', $categoryOptions['徐总信用卡']);
         $this->assertNotContains('未分类', $categoryOptions['Shopify']);
-        $this->assertContains('订阅复购1次', $categoryOptions['信用卡']);
-        $this->assertContains('订阅复购2次', $categoryOptions['信用卡']);
+        $this->assertContains('订阅复购1次', $categoryOptions['徐总信用卡']);
+        $this->assertContains('订阅复购2次', $categoryOptions['徐总信用卡']);
 
         foreach ($payload as $cachedPanel) {
             $this->assertSame(1, $xpath->query('//template[@id="'.$cachedPanel['template'].'"]')->length);

@@ -27,7 +27,9 @@
             var checked = rows().filter(function (row) { return row.checked; });
             if (!checked.length) return;
             var url;
-            if (source.form) {
+            if (source.dataset.financeExportUrl) {
+                url = new URL(source.dataset.financeExportUrl, window.location.href);
+            } else if (source.form) {
                 if (!source.form.reportValidity()) return;
                 url = new URL(source.form.action || window.location.href, window.location.href);
                 url.search = new URLSearchParams(new FormData(source.form)).toString();

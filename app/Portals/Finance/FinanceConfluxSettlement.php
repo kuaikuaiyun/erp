@@ -325,9 +325,10 @@ class FinanceConfluxSettlement
             foreach ($byReference->keys()->map(fn ($reference) => (string) $reference)->chunk(500) as $references) {
                 $unique = $this->orders($key)->whereIn('reference', $references)->select('reference')
                     ->groupBy('reference')->havingRaw('COUNT(*) = 1');
-                $items = $this->workbooks->database()->table(self::TABLE)
-                    ->where('platform', 'ye')->where('payment_account_id', $account->id)
-                    ->whereIn('reference', $unique)->orderBy('settlement_date')->orderBy('id')->get()->groupBy('reference');
+                $items = $this->workbooks->database()->table(self::TABLE.' as entry')
+                    ->joinSub($unique, 'unique_orders', 'unique_orders.reference', '=', 'entry.reference')
+                    ->where('entry.platform', 'ye')->where('entry.payment_account_id', $account->id)
+                    ->orderBy('entry.settlement_date')->orderBy('entry.id')->get(['entry.*'])->groupBy('reference');
                 foreach ($items as $reference => $item) {
                     $entries->put($byReference->get($reference)->first()->id, $item);
                 }
@@ -363,7 +364,6 @@ class FinanceConfluxSettlement
         $reportFees ??= new \ArrayObject;
         foreach ($batches as $key => $entries) {
             $report = $entries->first();
-            $wanted = $entries->pluck('id')->flip()->all();
             if (! $reportFees->offsetExists($key)) {
                 $bill = $this->workbooks->database()->table(self::TABLE)->where([
                     'payment_account_id' => $report->payment_account_id, 'settlement_date' => $report->settlement_date,
@@ -374,7 +374,12 @@ class FinanceConfluxSettlement
                 }
                 $reportFees[$key] = $this->statementFees($bill, $report->settlement_date);
             }
-            $fees += array_intersect_key($reportFees[$key], $wanted);
+            $statementFees = $reportFees[$key];
+            foreach ($entries as $entry) {
+                if (isset($statementFees[$entry->id])) {
+                    $fees[$entry->id] = $statementFees[$entry->id];
+                }
+            }
         }
 
         return $fees;
@@ -698,7 +703,8 @@ class FinanceConfluxSettlement
         foreach ($groups as $group) {
             $entry = $group->first();
             $group = $group->collect();
-            $details = $this->details($group);
+            $details = $this->details($group, ! empty($filters['summary_only'])
+                ? $this->feesFor(collect([$group]), $filters['conflux_report_fees']) : []);
 
             $filterType = $filters['ledger_settlement_type'] ?? '';
             if (filled($filterType) && $filterType !== 'waiting'
@@ -745,7 +751,10 @@ class FinanceConfluxSettlement
             if ((empty($filters['card_wallet']) || $wallet)
                 && (empty($filters['card_exceptions']) || filled($layout['ledger_exceptions']))
                 && $service->matches($layout, $filters['conditions'] ?? [])) {
-                yield ['statement_only' => true, 'card_layout' => $layout];
+                yield ['statement_only' => true, 'card_layout' => $layout] + (! empty($filters['summary_only']) ? [
+                    'entry_id' => $entry->id, 'payment_account_id' => $entry->payment_account_id,
+                    'settlement_date' => $entry->settlement_date,
+                ] : []);
             }
         }
     }
