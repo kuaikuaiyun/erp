@@ -140,6 +140,61 @@
     white-space: nowrap;
 }
 
+.aikaipin-placement-platform-summary {
+    align-items: stretch;
+    background: #f8fbfd;
+    border: 1px solid #dbe7ef;
+    border-radius: 5px;
+    display: flex;
+    font-size: 11px;
+    max-width: 210px;
+    min-width: 190px;
+    overflow: hidden;
+}
+
+.aikaipin-placement-platform-summary + .aikaipin-placement-platform-summary {
+    margin-top: 5px;
+}
+
+.aikaipin-placement-platform-name {
+    align-items: center;
+    background: #eef6fb;
+    color: #315d78;
+    display: flex;
+    flex: 0 0 64px;
+    font-weight: 600;
+    gap: 3px;
+    padding: 5px 6px;
+}
+
+.aikaipin-placement-platform-metrics {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.aikaipin-placement-platform-metric {
+    align-items: center;
+    display: grid;
+    grid-template-columns: minmax(78px, 1fr) 42px;
+    min-height: 28px;
+}
+
+.aikaipin-placement-platform-metric + .aikaipin-placement-platform-metric {
+    border-top: 1px solid #e4edf3;
+}
+
+.aikaipin-placement-platform-spend,
+.aikaipin-placement-platform-orders {
+    color: #38566b;
+    padding: 4px 6px;
+    white-space: nowrap;
+}
+
+.aikaipin-placement-platform-orders {
+    border-left: 1px solid #e4edf3;
+    text-align: center;
+}
+
 .aikaipin-submission-operation-column,
 .aikaipin-submission-operation-cell {
     text-align: right;
