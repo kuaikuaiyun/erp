@@ -49,6 +49,7 @@ class OperationReportDashboardController extends Controller
             'scope_user_id' => ['nullable', 'integer'],
             'sort_by' => ['nullable', Rule::in(['first_subscription_orders', 'first_total_orders'])],
             'sort_direction' => ['nullable', Rule::in(['asc', 'desc'])],
+            'display_mode' => ['nullable', Rule::in(['performance', 'team'])],
         ]);
         $timezone = (string) ($validated['timezone'] ?? OperationReportMetricsService::REPORT_TIMEZONE);
         $reportNow = Carbon::now($timezone);
@@ -91,6 +92,7 @@ class OperationReportDashboardController extends Controller
             ->get();
         $operatorDepartmentIds = $selectedDepartmentIds->isNotEmpty() ? $selectedDepartmentIds->all() : $visibleDepartmentIds;
         $operators = AdminUser::query()
+            ->with('departments')
             ->where('status', AdminUser::STATUS_ACTIVE)
             ->whereHas('departments', fn ($query) => $query->whereIn('admin_roles.id', $operatorDepartmentIds))
             ->orderBy('name')->orderBy('username')
@@ -304,6 +306,8 @@ class OperationReportDashboardController extends Controller
                     'operator_name' => (string) ($operator->name ?: $operator->username),
                     'hired_at' => $operator->hired_at?->format('Y-m-d'),
                     'operation_department_name' => (string) ($operationDepartment?->name ?: $report?->operation_department_name ?: '未填写部门'),
+                    'operation_department_id' => (int) ($operationDepartment?->getKey() ?? $report?->operation_department_id ?? 0),
+                    'team_position' => (string) ($operator->departments->firstWhere('id', $operationDepartment?->getKey())?->pivot?->position ?: Department::POSITION_MEMBER),
                     'media_roi' => $mediaMetrics->get($mediaKey)['first_roi'] ?? null,
                     'allocated_actual_ad_spend' => $allocatedSpend,
                     'first_total_cost' => $totalCost,
@@ -320,9 +324,24 @@ class OperationReportDashboardController extends Controller
             }
         }
         $rows = $this->aggregateRangeRows($rows, $dateFrom, $dateTo);
+        $rows = array_map(function (array $row): array {
+            $row['daily_first_roi_class'] = $this->roiClass($row['daily_first_roi'] ?? null);
+            $row['daily_media_roi_classes'] = array_map(fn ($roi): string => $this->roiClass($roi), $row['daily_media_rois'] ?? []);
+            return $row;
+        }, $rows);
         $sortBy = $validated['sort_by'] ?? null;
         $sortDirection = (string) ($validated['sort_direction'] ?? 'desc');
-        usort($rows, function (array $a, array $b) use ($sortBy, $sortDirection): int {
+        $displayMode = (string) ($validated['display_mode'] ?? 'performance');
+        usort($rows, function (array $a, array $b) use ($sortBy, $sortDirection, $displayMode): int {
+            if ($displayMode === 'team') {
+                $rank = static fn (array $row): int => match ($row['team_position'] ?? Department::POSITION_MEMBER) {
+                    Department::POSITION_MANAGER => 0,
+                    Department::POSITION_DEPUTY => 1,
+                    default => 2,
+                };
+                return [$a['operation_department_name'], $rank($a), $a['operator_name'], $a['shop_domain']]
+                    <=> [$b['operation_department_name'], $rank($b), $b['operator_name'], $b['shop_domain']];
+            }
             if ($sortBy !== null) {
                 $valueKey = $sortBy === 'first_subscription_orders'
                     ? 'daily_first_subscription_orders'
@@ -339,6 +358,7 @@ class OperationReportDashboardController extends Controller
 
         $approvedAdSpend = (float) $allReports->where('status', OperationReport::STATUS_APPROVED)->sum('actual_ad_spend');
         $totals = $this->totals($rows, $approvedAdSpend);
+        $totals['first_roi_class'] = $this->roiClass($totals['first_roi'] ?? null);
 
         $canManageDashboardScope = $this->isDashboard($context) && $this->isBoss($context['user']);
         $dashboardScopeUsers = collect();
@@ -374,6 +394,7 @@ class OperationReportDashboardController extends Controller
             'selectedOperatorId' => $selectedOperatorId,
             'sortBy' => $sortBy,
             'sortDirection' => $sortDirection,
+            'displayMode' => $displayMode,
             'rows' => $rows,
             'totals' => $totals,
             'identityRowspans' => $this->identityRowspans($rows),
@@ -637,6 +658,8 @@ class OperationReportDashboardController extends Controller
                 'hired_at' => $first['hired_at'] ?? null,
                 'calculation_days' => $calculationDays,
                 'operation_department_name' => (string) $first['operation_department_name'],
+                'operation_department_id' => (int) ($first['operation_department_id'] ?? 0),
+                'team_position' => (string) ($first['team_position'] ?? Department::POSITION_MEMBER),
                 'shop_domains' => $shopDomains,
                 'daily_first_total_orders' => (int) $row['first_total_orders'],
                 'daily_first_subscription_orders' => (int) $row['first_subscription_orders'],
@@ -711,6 +734,16 @@ class OperationReportDashboardController extends Controller
                 ->sortBy('shop_domain', SORT_NATURAL | SORT_FLAG_CASE)
                 ->values();
         })->values()->all();
+    }
+
+    private function roiClass(?float $roi): string
+    {
+        if ($roi === null) return '';
+        if ($roi > 1.8) return 'roi-excellent';
+        if ($roi >= 1.6) return 'roi-good';
+        if ($roi >= 1.4) return 'roi-warning';
+        if ($roi >= 1.2) return 'roi-poor';
+        return 'roi-danger';
     }
 
     private function identityRowspans(array $rows): array
