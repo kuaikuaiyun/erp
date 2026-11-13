@@ -10,14 +10,14 @@ return new class extends Migration
     {
         $db = DB::connection(config('admin.database.connection') ?: config('database.default'));
         $schema = $db->getSchemaBuilder();
-        $schema->create('finance_summary_periods', function (Blueprint $table): void {
+        if (! $schema->hasTable('finance_summary_periods')) $schema->create('finance_summary_periods', function (Blueprint $table): void {
             $table->string('month', 7);
             $table->string('channel', 12);
             $table->unsignedBigInteger('revision')->default(1);
             $table->unsignedBigInteger('published')->default(0);
             $table->primary(['month', 'channel']);
         });
-        $schema->create('finance_summary_rows', function (Blueprint $table): void {
+        if (! $schema->hasTable('finance_summary_rows')) $schema->create('finance_summary_rows', function (Blueprint $table): void {
             $table->string('month', 7);
             $table->string('channel', 12);
             $table->unsignedBigInteger('revision');
@@ -47,7 +47,7 @@ return new class extends Migration
                         WHERE {$record}.dataset IN ('paypal-orders','xuzong2-orders','xuzong2-details','xuzong1-details','xuzong-credit-source-1','xuzong-credit-source-2','xuzong-credit-imported-orders'){$where}
                         ON DUPLICATE KEY UPDATE revision = revision + 1";
                 }
-                $db->unprepared("CREATE TRIGGER finance_summary_{$name}_{$event} AFTER {$event} ON {$table} FOR EACH ROW BEGIN ".implode('; ', $statements)."; END");
+                \App\Portals\Finance\FinanceSummaryTriggers::install($db, "CREATE TRIGGER finance_summary_{$name}_{$event} AFTER {$event} ON {$table} FOR EACH ROW BEGIN ".implode('; ', $statements)."; END");
             }
             $statements = [];
             foreach ($images as $image) {
@@ -59,7 +59,7 @@ return new class extends Migration
                         AND (f.reference = {$image}.reference OR {$image}.kind = 'summary')
                     )";
             }
-            $db->unprepared("CREATE TRIGGER finance_summary_ledger_{$event} AFTER {$event} ON finance_credit_settlement_entries
+            \App\Portals\Finance\FinanceSummaryTriggers::install($db, "CREATE TRIGGER finance_summary_ledger_{$event} AFTER {$event} ON finance_credit_settlement_entries
                 FOR EACH ROW BEGIN ".implode('; ', $statements)."; END");
             foreach ([
                 'finance_payment_accounts' => ['account', "channel IN (".implode(',', array_map(fn ($image) => "{$image}.account_type", $images)).")"],
@@ -68,7 +68,7 @@ return new class extends Migration
                     fn ($image) => "month BETWEEN DATE_FORMAT({$image}.starts_on, '%Y-%m') AND DATE_FORMAT({$image}.ends_on, '%Y-%m')", $images
                 )).")"],
             ] as $table => [$name, $condition]) {
-                $db->unprepared("CREATE TRIGGER finance_summary_{$name}_{$event} AFTER {$event} ON {$table}
+                \App\Portals\Finance\FinanceSummaryTriggers::install($db, "CREATE TRIGGER finance_summary_{$name}_{$event} AFTER {$event} ON {$table}
                     FOR EACH ROW UPDATE finance_summary_periods SET revision = revision + 1 WHERE {$condition}");
             }
         }

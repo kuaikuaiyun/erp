@@ -57,7 +57,7 @@ class FinanceReportSnapshots
             return [json_decode($saved->payload, true, 512, JSON_THROW_ON_ERROR), $id];
         }
 
-        $mysql = in_array($db->getDriverName(), ['mysql', 'mariadb'], true);
+        $mysql = FinanceSummaryTriggers::available($db);
         $revision = null;
         if ($mysql && ! $db->table('finance_summary_changes')->exists()) {
             $channel = $filters['channel'] ?? null;

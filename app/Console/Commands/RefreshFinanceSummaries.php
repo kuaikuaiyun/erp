@@ -19,7 +19,7 @@ class RefreshFinanceSummaries extends Command
     public function handle(FinanceWorkbookService $workbooks, FinanceSummaryProjection $projection, FinanceSummaryDependencies $dependencies, FinanceReportSnapshots $reports, FinanceController $controller): int
     {
         $db = $workbooks->database();
-        if (! in_array($db->getDriverName(), ['mysql', 'mariadb'], true)) {
+        if (! \App\Portals\Finance\FinanceSummaryTriggers::available($db)) {
             return self::SUCCESS;
         }
 

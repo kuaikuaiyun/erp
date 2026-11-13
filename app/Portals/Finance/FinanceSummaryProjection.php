@@ -20,7 +20,7 @@ class FinanceSummaryProjection
     {
         $db = $this->workbooks->database();
         // Worldpay allocates costs within the account-filtered source batches.
-        if (! in_array($db->getDriverName(), ['mysql', 'mariadb'], true)
+        if (! FinanceSummaryTriggers::available($db)
             || ($channel === 'credit_card' && filled($filters['account'] ?? null))) {
             return null;
         }

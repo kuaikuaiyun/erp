@@ -16,7 +16,7 @@ return new class extends Migration
                 SELECT DATE_FORMAT({$image}.settlement_date, '%Y-%m'), 'credit_card'
                 WHERE {$image}.platform = 'ye'
                 ON DUPLICATE KEY UPDATE revision = revision + 1", $images);
-            $db->unprepared("CREATE TRIGGER finance_summary_statement_{$event} AFTER {$event} ON finance_credit_settlement_entries
+            \App\Portals\Finance\FinanceSummaryTriggers::install($db, "CREATE TRIGGER finance_summary_statement_{$event} AFTER {$event} ON finance_credit_settlement_entries
                 FOR EACH ROW BEGIN ".implode('; ', $writes)."; END");
         }
         $db->statement("INSERT INTO finance_summary_periods (month, channel)

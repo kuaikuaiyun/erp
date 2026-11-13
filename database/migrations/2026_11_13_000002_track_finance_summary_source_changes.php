@@ -23,7 +23,7 @@ return new class extends Migration
         if (! in_array($db->getDriverName(), ['mysql', 'mariadb'], true)) {
             return;
         }
-        $db->getSchemaBuilder()->create('finance_summary_changes', function (Blueprint $table): void {
+        if (! $db->getSchemaBuilder()->hasTable('finance_summary_changes')) $db->getSchemaBuilder()->create('finance_summary_changes', function (Blueprint $table): void {
             $table->id();
             $table->string('source', 20);
             $table->json('payload');
@@ -55,7 +55,7 @@ return new class extends Migration
                     $pairs = implode(', ', array_map(fn ($column) => "'{$column}', {$image}.`{$column}`", $columns));
                     $writes[] = "INSERT INTO finance_summary_changes (source, payload) VALUES ('{$source}', JSON_OBJECT({$pairs}))";
                 }
-                $db->unprepared("CREATE TRIGGER finance_summary_dependency_{$source}_{$event} AFTER {$event} ON {$table}
+                \App\Portals\Finance\FinanceSummaryTriggers::install($db, "CREATE TRIGGER finance_summary_dependency_{$source}_{$event} AFTER {$event} ON {$table}
                     FOR EACH ROW BEGIN IF {$changed} THEN ".implode('; ', $writes)."; END IF; END");
             }
         }
