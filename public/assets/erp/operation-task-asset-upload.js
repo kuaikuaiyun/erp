@@ -262,6 +262,6 @@
         var create = window.OperationTaskAssetUploader({form:form, list:list, type:document.getElementById('ot-page-type'), hint:document.getElementById('ot-asset-hint'), addButton:document.getElementById('ot-add-asset')});
         var initial = config.initialAssets || [];
         Object.keys(initial).forEach(function (key) { create.addRow(initial[key]); });
-        for (var count = Object.keys(initial).length; count < 2; count++) create.addRow();
+        for (var count = Object.keys(initial).length; count < 1; count++) create.addRow();
     }
 })();

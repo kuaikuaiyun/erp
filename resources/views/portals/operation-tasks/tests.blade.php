@@ -276,7 +276,7 @@
     ];
 @endphp
 <script>window.OperationTaskAssetUploads = @json($operationTaskUploadConfig);</script>
-<script src="{{ asset('assets/erp/operation-task-asset-upload.js') }}?v=20261113-2"></script>
+<script src="{{ asset('assets/erp/operation-task-asset-upload.js') }}?v=20261113-3"></script>
 @if(($errors->any() && old('form_mode') !== 'edit') || request()->boolean('new'))
 <script>jQuery(function () { jQuery('#ot-test-modal').modal('show'); });</script>
 @endif

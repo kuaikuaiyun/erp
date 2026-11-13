@@ -71,7 +71,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-submissions.css?v=20261113-2">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-submissions.css?v=20261113-4">
 @endpush
 
 @push('scripts')
@@ -131,18 +131,29 @@
                             <td>@foreach($product->categoryValues() as $category)<span class="label label-default">{{ $category }}</span> @endforeach</td>
                             <td>{{ trans('aikaipin.upload.source_options.'.$product->source_platform) }}<br><small>{{ trans('aikaipin.upload.type_options.'.$product->product_type) }}</small></td>
                             <td>
-                                @forelse($records->groupBy(fn($r) => $r->currency) as $currency => $currencyRecords)
-                                    <div>{{ strtoupper($currency) }} {{ number_format($currencyRecords->sum('actual_spend'),2) }} · {{ $currencyRecords->sum('orders') }} 单</div>
+                                @forelse($records->groupBy(fn($record) => strtolower((string) $record->platform)) as $platform => $platformRecords)
+                                    @php
+                                        $platformTranslationKey = 'aikaipin.placement_evaluation.platform_options.'.$platform;
+                                        $platformTranslation = trans($platformTranslationKey);
+                                        $platformLabel = $platformTranslation !== $platformTranslationKey ? $platformTranslation : ucfirst($platform);
+                                    @endphp
+                                    <div class="aikaipin-placement-platform-summary">
+                                        <div class="aikaipin-placement-platform-name">
+                                            <i class="fa fa-bullhorn" aria-hidden="true"></i>
+                                            <span>{{ $platformLabel }}</span>
+                                        </div>
+                                        <div class="aikaipin-placement-platform-metrics">
+                                            @foreach($platformRecords->groupBy(fn($record) => strtoupper((string) $record->currency)) as $currency => $currencyRecords)
+                                                <div class="aikaipin-placement-platform-metric">
+                                                    <span class="aikaipin-placement-platform-spend">{{ $currency }} {{ number_format($currencyRecords->sum('actual_spend'), 2) }}</span>
+                                                    <span class="aikaipin-placement-platform-orders">{{ $currencyRecords->sum('orders') }} 单</span>
+                                                </div>
+                                            @endforeach
+                                        </div>
+                                    </div>
                                 @empty
                                     —
                                 @endforelse
-                                @if($records->isNotEmpty())
-                                    <div style="margin-top:4px;padding-top:4px;border-top:1px dashed #dbe5ec;color:#607d8b;font-size:11px;line-height:1.6">
-                                        @foreach($records->groupBy(fn($r) => strtolower((string) $r->platform)) as $platform => $platformRecords)
-                                            <div><i class="fa fa-bullhorn" aria-hidden="true"></i> {{ trans('aikaipin.placement_evaluation.platform_options.'.$platform) !== 'aikaipin.placement_evaluation.platform_options.'.$platform ? trans('aikaipin.placement_evaluation.platform_options.'.$platform) : ucfirst($platform) }}：{{ $platformRecords->sum('orders') }} 单</div>
-                                        @endforeach
-                                    </div>
-                                @endif
                             </td>
                             <td><span class="badge bg-light-blue">{{ $evaluatorCount }}</span></td>
                             <td>{{ $updatedAt?->timezone(config('app.timezone'))->format('Y-m-d H:i') }}</td>

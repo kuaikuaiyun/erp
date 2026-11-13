@@ -71,6 +71,7 @@ class FashionAppLovinPerformanceReportController extends Controller
             'department_ids' => ['nullable', 'array'],
             'department_ids.*' => ['integer', 'distinct', Rule::in($departmentIds)],
             'operator' => ['nullable', 'string', 'max:100'],
+            'display_mode' => ['nullable', Rule::in(['performance', 'team'])],
             'store_domain' => ['nullable', 'string', 'max:191'],
             'gift_status' => ['nullable', Rule::in(['yes', 'no'])],
             'consumption_range' => ['nullable', Rule::in(['lt_5000', '5000_10000', 'gt_10000', 'custom'])],
@@ -136,7 +137,9 @@ class FashionAppLovinPerformanceReportController extends Controller
             'spend' => (float) $entry->actual_spend_usd,
         ]))->groupBy('account_key')->map(fn ($items) => (float) $items->sum('spend'));
         $giftScreenshots = AppLovinSpendScreenshot::query()->whereIn('account_key', $accountSpendTotals->keys())->get()->keyBy('account_key');
-        $dailyRows = $reports->flatMap(function (FashionAdvertisingReport $report) use ($stores, $accountBindings, $accountSpendTotals, $accountIdentity, $bindingByIdentity, $timezone): array {
+        $dailyRows = $reports->flatMap(function (FashionAdvertisingReport $report) use ($stores, $accountBindings, $accountSpendTotals, $accountIdentity, $bindingByIdentity, $timezone, $departments): array {
+            $reportDepartment = $report->submitter?->departments?->first(fn ($department) => $departments->contains('id', $department->id))
+                ?: $report->submitter?->departments?->first();
             return $report->adSpendEntries->map(function ($entry) use ($report, $accountBindings, $accountIdentity, $bindingByIdentity) {
                 $accountKey = AppLovinSpendScreenshot::accountKey((int) $report->submitter_id, (string) $entry->agency, (string) $entry->media, (string) $entry->account_name, (string) $entry->account_number);
                 $identity = $accountIdentity((int) $report->submitter_id, (string) $entry->agency, (string) $entry->account_number);
@@ -146,7 +149,7 @@ class FashionAppLovinPerformanceReportController extends Controller
                 $entry->setAttribute('resolved_group_key', $storeId > 0 ? 'store:'.$storeId : 'account:'.$accountKey);
 
                 return $entry;
-            })->groupBy('resolved_group_key')->map(function ($entries) use ($report, $stores, $accountSpendTotals, $timezone): array {
+            })->groupBy('resolved_group_key')->map(function ($entries) use ($report, $stores, $accountSpendTotals, $timezone, $reportDepartment): array {
                 $storeId = (int) $entries->first()->resolved_store_id;
                 $store = $stores->get((int) $storeId);
                 $from = CarbonImmutable::parse($report->report_date->format('Y-m-d').' 00:00:00', $timezone)->utc();
@@ -160,7 +163,9 @@ class FashionAppLovinPerformanceReportController extends Controller
 
                 return [
                     'date' => $report->report_date->format('Y-m-d'),
-                    'department' => $report->submitter?->departments?->pluck('name')->filter()->unique()->implode('、') ?: '—',
+                    'department_id' => (int) ($reportDepartment?->id ?? 0),
+                    'department' => (string) ($reportDepartment?->name ?: '—'),
+                    'team_position' => (string) ($reportDepartment?->pivot?->position ?: Department::POSITION_MEMBER),
                     'operator_id' => (int) $report->submitter_id,
                     'operator' => (string) $report->submitter_name,
                     'store_id' => (int) $storeId,
@@ -223,12 +228,21 @@ class FashionAppLovinPerformanceReportController extends Controller
             $rows = $rows->filter(fn (array $row): bool => (float) $row['total_consumption'] >= $minimumConsumption
                 && (float) $row['total_consumption'] <= $maximumConsumption)->values();
         }
-        $rows = $rows->sort(function (array $left, array $right): int {
+        $displayMode = (string) ($filters['display_mode'] ?? 'performance');
+        $rows = $rows->sort(function (array $left, array $right) use ($displayMode): int {
+            if ($displayMode === 'team') {
+                $rank = static fn (array $row): int => match ($row['team_position'] ?? Department::POSITION_MEMBER) {
+                    Department::POSITION_MANAGER => 0,
+                    Department::POSITION_DEPUTY => 1,
+                    default => 2,
+                };
+
+                return [$left['department'], $rank($left), $left['operator'], $left['store_domain']]
+                    <=> [$right['department'], $rank($right), $right['operator'], $right['store_domain']];
+            }
             $orderComparison = (int) $right['orders'] <=> (int) $left['orders'];
 
-            return $orderComparison !== 0
-                ? $orderComparison
-                : ((float) $right['ad_spend'] <=> (float) $left['ad_spend']);
+            return $orderComparison !== 0 ? $orderComparison : ((float) $right['ad_spend'] <=> (float) $left['ad_spend']);
         })->values();
         $totalAccountKeys = $rows->pluck('account_keys')->flatten()->filter()->unique()->values();
         $totals = ['stores' => $rows->pluck('store_id')->filter(fn ($id) => (int) $id > 0)->unique()->count(), 'orders' => (int) $rows->sum('orders'),
@@ -254,6 +268,7 @@ class FashionAppLovinPerformanceReportController extends Controller
         return view('portals.assistant.fashion-applovin-performance-reports.index', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'], 'rows' => $rows, 'exportRows' => $exportRows, 'totals' => $totals,
             'dateFrom' => $dateFrom, 'dateTo' => $dateTo, 'operator' => $filters['operator'] ?? '',
+            'displayMode' => $displayMode,
             'timezone' => $timezone, 'timezoneOptions' => $timezoneOptions,
             'dateRange' => $dateRange, 'selectedStoreDomain' => $filters['store_domain'] ?? '', 'domainOptions' => $domainOptions,
             'selectedGiftStatus' => $filters['gift_status'] ?? '', 'selectedConsumptionRange' => $filters['consumption_range'] ?? '',

@@ -15,6 +15,7 @@ class AdminUser extends Administrator
 
     protected $casts = [
         'hired_at' => 'date',
+        'resigned_at' => 'date',
     ];
 
     public function roles(): BelongsToMany

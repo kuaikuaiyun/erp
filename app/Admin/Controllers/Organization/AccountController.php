@@ -66,6 +66,8 @@ class AccountController extends Controller
                 'status' => (int) ($payload['status'] ?? 1),
                 'hired_at' => $payload['hired_at'] ?? null,
             ]);
+            $account->employment_status = $payload['employment_status'];
+            $account->resigned_at = $payload['resigned_at'] ?? null;
             $account->save();
             $this->organization->syncAccountMemberships($account, $memberships, $this->administrator());
         });
@@ -93,6 +95,8 @@ class AccountController extends Controller
         DB::connection($this->connectionName())->transaction(function () use ($request, $payload, $account): void {
             $account->name = $payload['name'];
             $account->hired_at = $payload['hired_at'] ?? null;
+            $account->resigned_at = $payload['resigned_at'] ?? null;
+            $account->employment_status = $payload['employment_status'];
 
             if (!$account->isAdministrator()) {
                 $account->username = $payload['username'];
@@ -338,6 +342,16 @@ class AccountController extends Controller
         $form->date('hired_at', __('organization.accounts.hired_at'))
             ->rules('nullable|date')
             ->help(__('organization.accounts.hired_at_help'));
+        $form->date('resigned_at', __('organization.accounts.resigned_at'))
+            ->rules('nullable|date')
+            ->help(__('organization.accounts.resigned_at_help'));
+        $form->radio('employment_status', __('organization.accounts.employment_status'))
+            ->options([
+                'employed' => __('organization.accounts.employment_employed'),
+                'resigned' => __('organization.accounts.employment_resigned'),
+            ])
+            ->default('employed')
+            ->rules('required|in:employed,resigned');
         $form->password('password', __('organization.accounts.password'))
             ->rules($account ? 'nullable|min:8|confirmed' : 'required|min:8|confirmed')
             ->help($account ? __('organization.accounts.password_hint_update') : __('organization.accounts.password_hint_create'))
@@ -390,6 +404,8 @@ class AccountController extends Controller
             'username' => [$account?->isAdministrator() ? 'nullable' : 'required', 'string', 'max:190', $usernameRule],
             'name' => ['required', 'string', 'max:255'],
             'hired_at' => ['nullable', 'date'],
+            'resigned_at' => ['nullable', 'date'],
+            'employment_status' => ['required', Rule::in(['employed', 'resigned'])],
             'password' => [$account ? 'nullable' : 'required', 'string', 'min:8', 'confirmed'],
             'status' => ['nullable', 'boolean'],
             'memberships' => $account?->isAdministrator()
@@ -404,6 +420,9 @@ class AccountController extends Controller
     {
         return [
             'username.required' => __('organization.validation.username_required'),
+            'resigned_at.date' => __('organization.accounts.resigned_at_invalid'),
+            'employment_status.required' => __('organization.accounts.employment_status_required'),
+            'employment_status.in' => __('organization.accounts.employment_status_invalid'),
             'username.max' => __('organization.validation.username_max'),
             'username.unique' => __('organization.accounts.username_exists'),
             'name.required' => __('organization.validation.name_account_required'),
