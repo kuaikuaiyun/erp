@@ -313,9 +313,16 @@ class OperationAiProductLibraryController extends Controller
         }
         $file = $this->referencePreviewFile($product);
         $content = Storage::disk($file['disk'])->get($file['path']);
+        $editsPath = $file['path'].'.erp-edits.json';
+        $referenceEdits = Storage::disk($file['disk'])->exists($editsPath)
+            ? (json_decode(Storage::disk($file['disk'])->get($editsPath), true) ?: []) : [];
+        $hiddenVideosPath = $file['path'].'.erp-hidden-videos.json';
+        $referenceHiddenVideos = Storage::disk($file['disk'])->exists($hiddenVideosPath)
+            ? (json_decode(Storage::disk($file['disk'])->get($hiddenVideosPath), true) ?: []) : [];
         $historicalCount = substr_count(strtolower($content), '<video');
         $videos = $this->normalizeUploadedReferenceVideos($product, $historicalCount)
             ->map(fn (OperationAiProductReferenceVideo $video): array => [
+                'id' => (int) $video->getKey(),
                 'type' => $video->type,
                 'name' => $video->file_name,
                 'size' => number_format($video->size / 1048576, 2).' MB',
@@ -330,6 +337,8 @@ class OperationAiProductLibraryController extends Controller
             'videos' => $videos,
             'historicalProductCode' => trim((string) preg_replace('/[^A-Za-z0-9_-]+/', '-', (string) $product->product_code), '-_') ?: 'product-'.$product->getKey(),
             'historicalFallbackDate' => $product->created_at?->copy()->timezone('Asia/Shanghai')->format('ymd') ?: now('Asia/Shanghai')->format('ymd'),
+            'referenceEdits' => $referenceEdits,
+            'referenceHiddenVideos' => $referenceHiddenVideos,
         ])->render();
         $bodyPosition = strripos($content, '</body>');
         $content = $bodyPosition === false

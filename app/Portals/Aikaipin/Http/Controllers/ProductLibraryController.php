@@ -892,6 +892,8 @@ class ProductLibraryController extends Controller
             $viewData['referenceVideos'] = $this->referenceVideos($product);
             $viewData['referenceVideoUploadUrl'] = route('aikaipin.product-library.reference-videos.upload', $product);
             $viewData['referenceVideoNamingHint'] = '上传后自动命名：产品编号-AI-日期-递增编号';
+            $viewData['referenceEditable'] = true;
+            $viewData['referenceContentUpdateUrl'] = route('aikaipin.product-library.reference-preview.content.update', $product);
         }
 
         return view('portals.aikaipin.product-library.reference-preview', $viewData);
@@ -982,8 +984,15 @@ class ProductLibraryController extends Controller
         abort_unless($this->canViewProduct($context['user'], $product), 403);
         $file = $this->referencePreviewFile($product);
         $content = Storage::disk($file['disk'])->get($file['path']);
+        $editsPath = $file['path'].'.erp-edits.json';
+        $referenceEdits = Storage::disk($file['disk'])->exists($editsPath)
+            ? (json_decode(Storage::disk($file['disk'])->get($editsPath), true) ?: []) : [];
+        $hiddenVideosPath = $file['path'].'.erp-hidden-videos.json';
+        $referenceHiddenVideos = Storage::disk($file['disk'])->exists($hiddenVideosPath)
+            ? (json_decode(Storage::disk($file['disk'])->get($hiddenVideosPath), true) ?: []) : [];
         $historicalCount = substr_count(strtolower($content), '<video');
         $videos = $this->normalizeReferenceVideos($product, $historicalCount)->map(fn ($video): array => [
+            'id' => (int) $video->getKey(),
             'type' => $video->type,
             'name' => $video->file_name,
             'size' => number_format($video->size / 1048576, 2).' MB',
@@ -994,6 +1003,8 @@ class ProductLibraryController extends Controller
             'videos' => $videos,
             'historicalProductCode' => trim((string) preg_replace('/[^A-Za-z0-9_-]+/', '-', (string) $product->product_code), '-_') ?: 'product-'.$product->getKey(),
             'historicalFallbackDate' => $product->created_at?->copy()->timezone('Asia/Shanghai')->format('ymd') ?: now('Asia/Shanghai')->format('ymd'),
+            'referenceEdits' => $referenceEdits,
+            'referenceHiddenVideos' => $referenceHiddenVideos,
         ])->render();
         $bodyPosition = strripos($content, '</body>');
         $content = $bodyPosition === false
@@ -1011,6 +1022,43 @@ class ProductLibraryController extends Controller
             'X-Robots-Tag' => 'noindex, nofollow, noarchive',
             'Content-Security-Policy' => "sandbox allow-scripts allow-modals allow-downloads; default-src 'none'; base-uri 'none'; object-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https:; style-src 'unsafe-inline' https:; img-src data: blob: https:; font-src data: https:; media-src data: blob: https: http:; connect-src https: http:; frame-src https:; worker-src blob:; form-action 'none'; frame-ancestors 'self'",
         ]);
+    }
+
+    public function updateProductReferencePreviewContent(Request $request, AikaipinProduct $product): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) return $context;
+        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
+        abort_unless($this->canViewProduct($context['user'], $product), 403);
+        $data = $request->validate([
+            'patches' => ['present', 'array', 'max:5000'],
+            'patches.*.index' => ['required', 'integer', 'min:0'],
+            'patches.*.value' => ['nullable', 'string', 'max:20000'],
+            'deleted_video_ids' => ['sometimes', 'array', 'max:200'],
+            'deleted_video_ids.*' => ['integer', 'min:1'],
+            'deleted_history_video_indexes' => ['sometimes', 'array', 'max:500'],
+            'deleted_history_video_indexes.*' => ['integer', 'min:0'],
+        ]);
+        $file = $this->referencePreviewFile($product);
+        $disk = Storage::disk($file['disk']);
+        $disk->put($file['path'].'.erp-edits.json', json_encode($data['patches'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        $hiddenVideoIndexes = array_values(array_unique(array_map('intval', $data['deleted_history_video_indexes'] ?? [])));
+        sort($hiddenVideoIndexes);
+        $disk->put($file['path'].'.erp-hidden-videos.json', json_encode($hiddenVideoIndexes));
+        $videos = OperationAiProductReferenceVideo::query()
+            ->where('aikaipin_product_id', $product->getKey())
+            ->whereIn('id', array_values(array_unique(array_map('intval', $data['deleted_video_ids'] ?? []))))
+            ->get();
+        foreach ($videos as $video) {
+            Storage::disk($video->disk)->delete($video->path);
+            $video->delete();
+        }
+        $product->forceFill([
+            'updated_by' => $context['user']->getKey(),
+            'updated_by_name' => $context['user']->name ?: $context['user']->username,
+        ])->save();
+
+        return response()->json(['message' => '参考页内容已保存。']);
     }
 
     public function showProductFile(Request $request, AikaipinProduct $product, string $kind): Response

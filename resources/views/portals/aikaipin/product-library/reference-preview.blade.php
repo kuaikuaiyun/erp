@@ -18,6 +18,11 @@
         .aikaipin-reference-preview__notice { margin: 3px 0 0; color: #94a3b8; font-size: 12px; line-height: 1.4; }
         .aikaipin-reference-preview__back { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; min-height: 34px; border: 1px solid #3a4a64; border-radius: 7px; padding: 0 12px; background: #162136; color: #f8fafc; font: inherit; font-size: 13px; font-weight: 700; text-decoration: none; cursor: pointer; }
         .aikaipin-reference-preview__back:hover { border-color: #64748b; background: #1e293b; }
+        .reference-edit-actions { display:flex; gap:7px; }
+        .reference-edit-actions [hidden] { display:none!important; }
+        .reference-edit-button { display:inline-flex; align-items:center; min-height:34px; border:1px solid #3977a7; border-radius:7px; padding:0 12px; background:#176b9d; color:#fff; font-size:12px; font-weight:700; cursor:pointer; }
+        .reference-edit-button.is-save { border-color:#16865c; background:#0f9f69; }
+        .reference-edit-button.is-cancel { border-color:#64748b; background:#334155; }
         .reference-assets { border-bottom: 1px solid #26354d; padding: 10px 18px 12px; background: #111c30; }
         .reference-assets__top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         .reference-assets__title { margin-right: 4px; color: #e2e8f0; font-size: 13px; font-weight: 800; }
@@ -45,6 +50,13 @@
                 <h1 class="aikaipin-reference-preview__title">{{ $product->name }}</h1>
                 <p class="aikaipin-reference-preview__notice">{{ __('aikaipin.reference_preview.notice') }}</p>
             </div>
+            @if(!empty($referenceEditable))
+            <div class="reference-edit-actions">
+                <button class="reference-edit-button" type="button" data-reference-edit-start>编辑内容</button>
+                <button class="reference-edit-button is-save" type="button" data-reference-edit-save hidden>保存</button>
+                <button class="reference-edit-button is-cancel" type="button" data-reference-edit-cancel hidden>取消</button>
+            </div>
+            @endif
             <a class="aikaipin-reference-preview__back" href="{{ $libraryUrl }}">{{ __('aikaipin.reference_preview.back_to_library') }}</a>
         </header>
         @isset($referenceVideos)
@@ -65,6 +77,7 @@
         </section>
         @endisset
         <iframe
+            id="aikaipin-reference-frame"
             class="aikaipin-reference-preview__frame"
             src="{{ $contentUrl }}"
             title="{{ __('aikaipin.reference_preview.frame_title', ['name' => $product->name]) }}"
@@ -72,5 +85,28 @@
             referrerpolicy="no-referrer"
         ></iframe>
     </main>
+    @if(!empty($referenceEditable))
+    <script>
+    (function(){
+        var frame=document.getElementById('aikaipin-reference-frame'),start=document.querySelector('[data-reference-edit-start]'),save=document.querySelector('[data-reference-edit-save]'),cancel=document.querySelector('[data-reference-edit-cancel]');
+        if(!frame||!start)return;
+        function state(editing,busy){start.hidden=editing;save.hidden=!editing;cancel.hidden=!editing;save.disabled=!!busy;cancel.disabled=!!busy;save.textContent=busy?'保存中...':'保存';}
+        function send(action){if(frame.contentWindow)frame.contentWindow.postMessage({type:'erp-reference-edit',action:action},'*');}
+        start.addEventListener('click',function(){state(true,false);send('start');window.setTimeout(function(){send('start');},150);});
+        cancel.addEventListener('click',function(){frame.src=frame.src;state(false,false);});
+        save.addEventListener('click',function(){state(true,true);send('serialize');});
+        window.addEventListener('message',function(event){
+            if(event.source!==frame.contentWindow||!event.data)return;
+            if(event.data.type==='erp-reference-edit-ready'){start.textContent='编辑内容';return;}
+            if(event.data.type==='erp-reference-edit-started'){save.textContent='保存';return;}
+            if(event.data.type!=='erp-reference-edit-content')return;
+            fetch(@json($referenceContentUpdateUrl),{method:'PUT',credentials:'same-origin',headers:{'Accept':'application/json','Content-Type':'application/json','X-CSRF-TOKEN':@json(csrf_token())},body:JSON.stringify({patches:event.data.patches||[],deleted_video_ids:event.data.deleted_video_ids||[],deleted_history_video_indexes:event.data.deleted_history_video_indexes||[]})})
+                .then(function(response){return response.json().then(function(data){if(!response.ok)throw new Error(data.message||'保存失败');return data;});})
+                .then(function(){frame.src=frame.src;state(false,false);})
+                .catch(function(error){alert(error.message||'保存失败');state(true,false);});
+        });
+    })();
+    </script>
+    @endif
 </body>
 </html>

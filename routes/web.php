@@ -488,6 +488,7 @@ Route::post('/product-library/visibility', [ProductLibraryController::class, 'up
 Route::get('/product-library/{product}/images/{imageIndex}', [ProductLibraryController::class, 'showProductImage'])->whereNumber('imageIndex')->name('aikaipin.product-library.images.show');
 Route::get('/product-library/{product}/reference-preview', [ProductLibraryController::class, 'showProductReferencePreview'])->name('aikaipin.product-library.reference-preview');
 Route::get('/product-library/{product}/reference-preview/content', [ProductLibraryController::class, 'showProductReferencePreviewContent'])->name('aikaipin.product-library.reference-preview.content');
+Route::put('/product-library/{product}/reference-preview/content', [ProductLibraryController::class, 'updateProductReferencePreviewContent'])->name('aikaipin.product-library.reference-preview.content.update');
 Route::post('/product-library/{product}/reference-videos', [ProductLibraryController::class, 'uploadReferenceVideo'])->name('aikaipin.product-library.reference-videos.upload');
 Route::get('/product-library/{product}/reference-videos/{video}/preview', [ProductLibraryController::class, 'previewReferenceVideo'])->whereNumber('video')->name('aikaipin.product-library.reference-videos.preview');
 Route::get('/product-library/{product}/reference-videos/{video}/download', [ProductLibraryController::class, 'downloadReferenceVideo'])->whereNumber('video')->name('aikaipin.product-library.reference-videos.download');
