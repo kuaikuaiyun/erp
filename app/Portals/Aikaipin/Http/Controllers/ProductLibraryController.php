@@ -1000,6 +1000,9 @@ class ProductLibraryController extends Controller
         $hiddenVideosPath = $file['path'].'.erp-hidden-videos.json';
         $referenceHiddenVideos = Storage::disk($file['disk'])->exists($hiddenVideosPath)
             ? (json_decode(Storage::disk($file['disk'])->get($hiddenVideosPath), true) ?: []) : [];
+        $layoutPath = $file['path'].'.erp-layout.json';
+        $referenceLayouts = Storage::disk($file['disk'])->exists($layoutPath)
+            ? (json_decode(Storage::disk($file['disk'])->get($layoutPath), true) ?: []) : [];
         $historicalCount = substr_count(strtolower($content), '<video');
         $videos = $this->normalizeReferenceVideos($product, $historicalCount)->map(fn ($video): array => [
             'id' => (int) $video->getKey(),
@@ -1015,6 +1018,7 @@ class ProductLibraryController extends Controller
             'historicalFallbackDate' => $product->created_at?->copy()->timezone('Asia/Shanghai')->format('ymd') ?: now('Asia/Shanghai')->format('ymd'),
             'referenceEdits' => $referenceEdits,
             'referenceHiddenVideos' => $referenceHiddenVideos,
+            'referenceLayouts' => $referenceLayouts,
         ])->render();
         $bodyPosition = strripos($content, '</body>');
         $content = $bodyPosition === false
@@ -1044,6 +1048,13 @@ class ProductLibraryController extends Controller
             'patches' => ['present', 'array', 'max:5000'],
             'patches.*.index' => ['required', 'integer', 'min:0'],
             'patches.*.value' => ['nullable', 'string', 'max:20000'],
+            'video_layout' => ['sometimes', 'array', 'max:200'],
+            'video_layout.*.id' => ['required', 'integer', 'min:1', 'distinct'],
+            'video_layout.*.type' => ['required', Rule::in([OperationAiProductReferenceVideo::TYPE_FLOW, OperationAiProductReferenceVideo::TYPE_TRAFFIC, OperationAiProductReferenceVideo::TYPE_REMIX])],
+            'element_layout' => ['sometimes', 'array', 'max:2000'],
+            'element_layout.*.key' => ['required', 'string', 'max:80', 'distinct'],
+            'element_layout.*.x' => ['required', 'numeric', 'between:-5000,5000'],
+            'element_layout.*.y' => ['required', 'numeric', 'between:-5000,5000'],
             'deleted_video_ids' => ['sometimes', 'array', 'max:200'],
             'deleted_video_ids.*' => ['integer', 'min:1'],
             'deleted_history_video_indexes' => ['sometimes', 'array', 'max:500'],
@@ -1055,6 +1066,12 @@ class ProductLibraryController extends Controller
         $hiddenVideoIndexes = array_values(array_unique(array_map('intval', $data['deleted_history_video_indexes'] ?? [])));
         sort($hiddenVideoIndexes);
         $disk->put($file['path'].'.erp-hidden-videos.json', json_encode($hiddenVideoIndexes));
+        $elementLayout = collect($data['element_layout'] ?? [])->map(fn (array $item): array => [
+            'key' => (string) $item['key'],
+            'x' => round((float) $item['x'], 1),
+            'y' => round((float) $item['y'], 1),
+        ])->values()->all();
+        $disk->put($file['path'].'.erp-layout.json', json_encode($elementLayout, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         $videos = OperationAiProductReferenceVideo::query()
             ->where('aikaipin_product_id', $product->getKey())
             ->whereIn('id', array_values(array_unique(array_map('intval', $data['deleted_video_ids'] ?? []))))
@@ -1062,6 +1079,22 @@ class ProductLibraryController extends Controller
         foreach ($videos as $video) {
             Storage::disk($video->disk)->delete($video->path);
             $video->delete();
+        }
+        $layout = collect($data['video_layout'] ?? []);
+        if ($layout->isNotEmpty()) {
+            $layoutVideos = OperationAiProductReferenceVideo::query()
+                ->where('aikaipin_product_id', $product->getKey())
+                ->whereIn('id', $layout->pluck('id')->map(fn ($id) => (int) $id))
+                ->get()->keyBy('id');
+            $temporaryBase = (int) OperationAiProductReferenceVideo::query()
+                ->where('aikaipin_product_id', $product->getKey())->max('sequence') + $layout->count() + 1000;
+            DB::transaction(function () use ($layout, $layoutVideos, $temporaryBase): void {
+                foreach ($layout->values() as $index => $item) {
+                    $video = $layoutVideos->get((int) $item['id']);
+                    if ($video) $video->update(['type' => $item['type'], 'sequence' => $temporaryBase + $index]);
+                }
+            }, 3);
+            $this->normalizeReferenceVideos($product, $this->historicalReferenceVideoCount($product));
         }
         $product->forceFill([
             'updated_by' => $context['user']->getKey(),
@@ -1142,20 +1175,43 @@ class ProductLibraryController extends Controller
 
     private function normalizeReferenceVideos(AikaipinProduct $product, int $historicalCount): Collection
     {
-        $productCode = $this->referenceProductCode($product);
-        foreach ($this->referenceVideos($product)->values() as $index => $video) {
-            $sequence = $historicalCount + $index + 1;
-            $extension = strtolower(pathinfo($video->file_name, PATHINFO_EXTENSION) ?: pathinfo($video->path, PATHINFO_EXTENSION) ?: 'mp4');
-            $date = $video->file_date?->format('ymd') ?: $video->created_at?->copy()->timezone('Asia/Shanghai')->format('ymd') ?: now('Asia/Shanghai')->format('ymd');
-            $code = trim((string) preg_replace('/[^A-Za-z0-9_-]+/', '-', strtoupper((string) ($video->department_code ?: 'AI'))), '-_') ?: 'AI';
-            $fileName = $productCode.'-'.$code.'-'.$date.'-'.str_pad((string) $sequence, 3, '0', STR_PAD_LEFT).'.'.$extension;
-            $directory = trim(str_replace('\\', '/', dirname($video->path)), '.');
-            $path = ($directory !== '' ? $directory.'/' : '').$fileName;
-            if ($path !== $video->path && Storage::disk($video->disk)->exists($video->path)) Storage::disk($video->disk)->move($video->path, $path);
-            if ($sequence !== (int) $video->sequence || $fileName !== $video->file_name || $path !== $video->path) {
-                $video->update(['sequence' => $sequence, 'file_name' => $fileName, 'path' => $path]);
+        DB::transaction(function () use ($product, $historicalCount): void {
+            $productCode = $this->referenceProductCode($product);
+            $videos = OperationAiProductReferenceVideo::query()
+                ->where('aikaipin_product_id', $product->getKey())
+                ->orderByRaw("CASE type WHEN 'flow' THEN 1 WHEN 'traffic' THEN 2 WHEN 'remix' THEN 3 ELSE 4 END")
+                ->orderBy('sequence')->orderBy('id')->lockForUpdate()->get()->values();
+            if ($videos->isEmpty()) return;
+
+            $temporaryBase = (int) $videos->max('sequence') + $videos->count() + $historicalCount + 1000;
+            $renames = [];
+            foreach ($videos as $index => $video) {
+                $sequence = $historicalCount + $index + 1;
+                $extension = strtolower(pathinfo($video->file_name, PATHINFO_EXTENSION) ?: pathinfo($video->path, PATHINFO_EXTENSION) ?: 'mp4');
+                $date = $video->file_date?->format('ymd') ?: $video->created_at?->copy()->timezone('Asia/Shanghai')->format('ymd') ?: now('Asia/Shanghai')->format('ymd');
+                $code = trim((string) preg_replace('/[^A-Za-z0-9_-]+/', '-', strtoupper((string) ($video->department_code ?: 'AI'))), '-_') ?: 'AI';
+                $fileName = $productCode.'-'.$code.'-'.$date.'-'.str_pad((string) $sequence, 3, '0', STR_PAD_LEFT).'.'.$extension;
+                $directory = trim(str_replace('\\', '/', dirname($video->path)), '.');
+                $path = ($directory !== '' ? $directory.'/' : '').$fileName;
+                $temporaryPath = ($directory !== '' ? $directory.'/' : '').'.renumber-'.$video->getKey().'-'.Str::uuid().'.'.$extension;
+                $renames[] = compact('video', 'sequence', 'fileName', 'path', 'temporaryPath');
+                $video->update(['sequence' => $temporaryBase + $index]);
             }
-        }
+
+            foreach ($renames as &$rename) {
+                $video = $rename['video'];
+                if ($rename['path'] !== $video->path && Storage::disk($video->disk)->exists($video->path)) {
+                    Storage::disk($video->disk)->move($video->path, $rename['temporaryPath']);
+                    $rename['moved'] = true;
+                }
+            }
+            unset($rename);
+            foreach ($renames as $rename) {
+                $video = $rename['video'];
+                if (! empty($rename['moved'])) Storage::disk($video->disk)->move($rename['temporaryPath'], $rename['path']);
+                $video->update(['sequence' => $rename['sequence'], 'file_name' => $rename['fileName'], 'path' => $rename['path']]);
+            }
+        }, 3);
 
         return $this->referenceVideos($product);
     }

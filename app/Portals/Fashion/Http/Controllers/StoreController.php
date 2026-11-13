@@ -5,6 +5,7 @@ namespace App\Portals\Fashion\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
 use App\Models\AssistantDomainStore;
+use App\Models\Department;
 use App\Portal\Http\Controllers\PortalEntryController;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
@@ -25,18 +26,36 @@ class StoreController extends Controller
         $validated = $request->validate([
             'keyword' => ['nullable', 'string', 'max:191'],
             'platform' => ['nullable', 'in:xshoppy,shopline'],
+            'department_id' => ['nullable', 'integer'],
             'operator_id' => ['nullable', 'integer'],
             'per_page' => ['nullable', 'integer', 'in:20,50,100'],
         ]);
         $user = $context['user'];
 
-        $query = $this->accessibleStores($user)->with('ownerUser:id,name,username');
+        $storeOperators = $user->isAdministrator()
+            ? $this->storeOperators()
+            : AdminUser::query()->with('departments:id,name,parent_id')->whereKey($user->getKey())->get(['id', 'name', 'username']);
+        $operatorLookup = $storeOperators->flatMap(fn (AdminUser $operator) => collect([$operator->name, $operator->username])
+            ->filter()->mapWithKeys(fn ($name) => [mb_strtolower(trim((string) $name)) => $operator]));
+        $query = $this->accessibleStores($user)->with('ownerUser.departments:id,name,parent_id');
         $keyword = trim((string) ($validated['keyword'] ?? ''));
         if ($keyword !== '') $query->where(fn ($q) => $q->where('assistant_domain_stores.shop_name', 'like', "%{$keyword}%")->orWhere('assistant_domain_stores.domain', 'like', "%{$keyword}%"));
         if (($validated['platform'] ?? '') === 'shopline') {
             $query->whereRaw("LOWER(TRIM(assistant_domain_stores.site_builder)) = 'shopline'");
         } elseif (($validated['platform'] ?? '') === 'xshoppy') {
             $query->whereRaw("LOWER(TRIM(assistant_domain_stores.site_builder)) IN ('xshoppy','xshopy')");
+        }
+        if (! empty($validated['department_id'])) {
+            $department = Department::business()->find((int) $validated['department_id']);
+            $memberIds = $department?->departmentMembers()->pluck('admin_users.id')->map(fn ($id) => (int) $id)->all() ?? [];
+            $memberNames = AdminUser::query()->whereIn('id', $memberIds)->get(['name', 'username'])
+                ->flatMap(fn (AdminUser $member) => [$member->name, $member->username])->filter()
+                ->map(fn ($name) => trim((string) $name))->unique()->values()->all();
+            $query->where(function (Builder $stores) use ($memberIds, $memberNames): void {
+                if ($memberIds !== []) $stores->whereIn('assistant_domain_stores.owner_user_id', $memberIds);
+                if ($memberNames !== []) $stores->{$memberIds !== [] ? 'orWhereIn' : 'whereIn'}('assistant_domain_stores.user_name', $memberNames);
+                if ($memberIds === [] && $memberNames === []) $stores->whereRaw('1=0');
+            });
         }
         if ($user->isAdministrator() && ! empty($validated['operator_id'])) {
             $operator = AdminUser::query()->find((int) $validated['operator_id']);
@@ -49,12 +68,17 @@ class StoreController extends Controller
             ->when(($validated['platform'] ?? '') === 'xshoppy', fn ($stores) => $stores->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy')"))
             ->orderBy('shop_name')->orderBy('domain')
             ->get(['shop_name', 'domain']);
+        $departmentOptions = Department::business()
+            ->whereHas('departmentMembers', fn (Builder $members) => $members->whereIn('admin_users.id', $storeOperators->pluck('id')))
+            ->with('parent:id,name')->orderBy('sort')->orderBy('name')->get(['id', 'name', 'parent_id']);
 
         return view('portals.fashion.stores.index', [
             ...$context,
             'stores' => $stores,
             'storeOptions' => $storeOptions,
-            'operators' => $user->isAdministrator() ? $this->storeOperators() : collect(),
+            'operators' => $user->isAdministrator() ? $storeOperators : collect(),
+            'operatorLookup' => $operatorLookup,
+            'departmentOptions' => $departmentOptions,
             'filters' => [...$validated, 'per_page' => (int) ($validated['per_page'] ?? 20)],
         ]);
     }
@@ -114,7 +138,7 @@ class StoreController extends Controller
         $stores = AssistantDomainStore::query()->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')")->get(['owner_user_id', 'user_name']);
         $ids = $stores->pluck('owner_user_id')->filter()->unique();
         $names = $stores->pluck('user_name')->filter()->unique();
-        return AdminUser::query()->where(function ($q) use ($ids, $names): void {
+        return AdminUser::query()->with('departments:id,name,parent_id')->where(function ($q) use ($ids, $names): void {
             if ($ids->isNotEmpty()) $q->whereIn('id', $ids);
             if ($names->isNotEmpty()) $q->{$ids->isNotEmpty() ? 'orWhereIn' : 'whereIn'}('name', $names)->orWhereIn('username', $names);
             if ($ids->isEmpty() && $names->isEmpty()) $q->whereRaw('1=0');

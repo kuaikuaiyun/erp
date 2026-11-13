@@ -107,7 +107,7 @@
             if(event.data.type==='erp-reference-edit-ready'){start.textContent='编辑内容';return;}
             if(event.data.type==='erp-reference-edit-started'){save.textContent='保存';return;}
             if(event.data.type!=='erp-reference-edit-content')return;
-            fetch(@json($referenceContentUpdateUrl),{method:'PUT',credentials:'same-origin',headers:{'Accept':'application/json','Content-Type':'application/json','X-CSRF-TOKEN':@json(csrf_token())},body:JSON.stringify({patches:event.data.patches||[],deleted_video_ids:event.data.deleted_video_ids||[],deleted_history_video_indexes:event.data.deleted_history_video_indexes||[]})})
+            fetch(@json($referenceContentUpdateUrl),{method:'PUT',credentials:'same-origin',headers:{'Accept':'application/json','Content-Type':'application/json','X-CSRF-TOKEN':@json(csrf_token())},body:JSON.stringify({patches:event.data.patches||[],video_layout:event.data.video_layout||[],element_layout:event.data.element_layout||[],deleted_video_ids:event.data.deleted_video_ids||[],deleted_history_video_indexes:event.data.deleted_history_video_indexes||[]})})
                 .then(function(response){return response.json().then(function(data){if(!response.ok)throw new Error(data.message||'保存失败');return data;});})
                 .then(function(){frame.src=frame.src;state(false,false);})
                 .catch(function(error){alert(error.message||'保存失败');state(true,false);});
