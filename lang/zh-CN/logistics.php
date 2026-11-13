@@ -628,6 +628,8 @@ return [
     ],
     'paypal_dispute_analysis' => [
         'menu' => 'Paypal争议分析',
+        'note_filter' => '备注',
+        'note_placeholder' => '输入最新处理备注关键词',
     ],
     'refund_import' => [
         'title' => '导入真实退款记录',

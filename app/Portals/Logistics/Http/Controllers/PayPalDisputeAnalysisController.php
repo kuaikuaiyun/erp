@@ -114,6 +114,22 @@ class PayPalDisputeAnalysisController extends Controller
         if ($filters['add_on_cancelled'] !== '') $query->where('add_on_cancelled', $filters['add_on_cancelled'] === 'yes');
 
         $this->filterOrder($query, $filters);
+        if ($filters['note'] !== '') {
+            $query->whereHas('operations', function (Builder $operation) use ($filters): void {
+                // Match the latest non-empty note, just as the list displays it.
+                $latest = LogisticsPayPalDisputeOperation::query()
+                    ->from('logistics_paypal_dispute_operations as latest_note_operation')
+                    ->select('latest_note_operation.id')
+                    ->whereNotNull('latest_note_operation.payload->note')
+                    ->whereColumn('latest_note_operation.logistics_paypal_dispute_id', 'logistics_paypal_dispute_operations.logistics_paypal_dispute_id');
+                $grammar = $operation->getQuery()->getGrammar();
+                $latest->whereRaw("TRIM(COALESCE(".$grammar->wrap('latest_note_operation.payload->note').", '')) <> ''")
+                    ->orderByDesc('latest_note_operation.id')->limit(1);
+                $like = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $filters['note']).'%';
+                $operation->where('logistics_paypal_dispute_operations.id', '=', $latest)
+                    ->whereRaw($grammar->wrap('logistics_paypal_dispute_operations.payload->note')." LIKE ? ESCAPE '!'", [$like]);
+            });
+        }
         if ($filters['keyword'] !== '') { $like = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $filters['keyword']).'%'; $query->where(fn (Builder $item) => $item->where('dispute_id', 'like', $like)->orWhere('disputed_transaction_id', 'like', $like)->orWhereHas('account', fn (Builder $account) => $account->where('account_name', 'like', $like))); }
         return $query;
     }
@@ -165,7 +181,7 @@ class PayPalDisputeAnalysisController extends Controller
         $choice = static fn (string $key, array $allowed): string => in_array($request->input($key), $allowed, true) ? (string) $request->input($key) : '';
 
         return [
-            'account_id' => $text('account_id'), 'keyword' => $text('keyword'), 'customer_email' => $text('customer_email'),
+            'account_id' => $text('account_id'), 'keyword' => $text('keyword'), 'customer_email' => $text('customer_email'), 'note' => $text('note'),
             'status' => $text('status'), 'matched' => $choice('matched', ['yes', 'no']), 'handled' => $choice('handled', ['yes', 'no']),
             'date_from' => $text('date_from'), 'date_to' => $text('date_to'), 'handled_from' => $text('handled_from'), 'handled_to' => $text('handled_to'),
             'order_from' => $text('order_from'), 'order_to' => $text('order_to'), 'dispute_amount_min' => $text('dispute_amount_min'), 'dispute_amount_max' => $text('dispute_amount_max'), 'refund_amount_min' => $text('refund_amount_min'), 'refund_amount_max' => $text('refund_amount_max'),
