@@ -95,15 +95,11 @@ class FinanceXuzongCreditReport
         return $this->rows($records, 'UTC')->get(-$id, []);
     }
 
-    public function rows(Collection $records, string $timezone): Collection
+    public function linkedOrders(Collection $records): Collection
     {
-        if ($records->isEmpty()) {
-            return collect();
-        }
-
         $linked = $records->filter(fn ($record) => $record->dataset === FinanceLogisticsCreditOrders::IMPORTED_DATASET)
             ->mapWithKeys(fn ($record) => [$record->id => $record->payload['_linked_logistics_id'] ?? null])->filter();
-        $orders = $this->settlements->liveCreditReportOrders($records->pluck('id')->filter(fn ($id) => $id > 0)->concat($linked)->unique());
+        $orders = $this->settlements->liveCreditReportOrders($records->reject(fn ($record) => $record->dataset === FinanceLogisticsCreditOrders::IMPORTED_DATASET)->pluck('id')->filter(fn ($id) => $id > 0)->concat($linked)->unique());
         $unlinked = $records->filter(fn ($record) => $record->dataset === FinanceLogisticsCreditOrders::IMPORTED_DATASET
             && ! $orders->has($linked->get($record->id)))->groupBy('account');
         $newLinks = collect();
@@ -125,6 +121,16 @@ class FinanceXuzongCreditReport
                 $orders->put($id, $orders->get($orderId));
             }
         }
+        return $orders;
+    }
+
+    public function rows(Collection $records, string $timezone): Collection
+    {
+        if ($records->isEmpty()) {
+            return collect();
+        }
+
+        $orders = $this->linkedOrders($records);
         $attribution = $this->attribution ??= $this->settlements->liveOrderAttributionResolver();
         $matched = $this->matches->forOrders($records, $orders);
 

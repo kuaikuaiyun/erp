@@ -424,6 +424,37 @@
         });
     }
 
+    function showProductPlacementDetails(button) {
+        window.fetch(button.getAttribute('data-url'), {credentials: 'same-origin', headers: {'Accept': 'application/json'}})
+            .then(responsePayload).then(function (payload) {
+                var wrapper = document.createElement('div');
+                var title = document.createElement('h4');
+                var table = document.createElement('table');
+                var head = document.createElement('thead');
+                var body = document.createElement('tbody');
+                title.textContent = (payload.product.code || '') + ' · ' + (payload.product.name || '');
+                table.className = 'table table-bordered table-striped';
+                head.innerHTML = '<tr><th>测评人</th><th>测试周期</th><th>平台</th><th>消耗</th><th>出单量</th><th>素材名称</th><th>视频</th></tr>';
+                (payload.evaluations || []).forEach(function (evaluation) {
+                    (evaluation.records || []).forEach(function (record) {
+                        var row = document.createElement('tr');
+                        [evaluation.submitter, evaluation.period, record.platform, String(record.currency || '').toUpperCase() + ' ' + record.spend, record.orders, record.material_name || '—'].forEach(function (value) {
+                            var cell = document.createElement('td'); cell.textContent = value == null ? '' : String(value); row.appendChild(cell);
+                        });
+                        var videoCell = document.createElement('td');
+                        if (record.video_url) {
+                            var link = document.createElement('a'); link.className = 'btn btn-xs btn-info'; link.target = '_blank'; link.href = record.video_url; link.textContent = '播放视频'; videoCell.appendChild(link);
+                        } else videoCell.textContent = '—';
+                        row.appendChild(videoCell); body.appendChild(row);
+                    });
+                });
+                if (!body.children.length) { var empty = document.createElement('tr'); empty.innerHTML = '<td colspan="7" class="text-center text-muted">暂无投放测评数据</td>'; body.appendChild(empty); }
+                table.appendChild(head); table.appendChild(body); wrapper.appendChild(title); wrapper.appendChild(table);
+                detailBody.innerHTML = ''; detailBody.appendChild(wrapper);
+                if (detailModal && window.jQuery) window.jQuery(detailModal).modal('show');
+            }).catch(function (error) { notify('error', placementConfig.saveFailedTitle, error.message || placementConfig.saveFailedMessage); });
+    }
+
     function validPlacementRecords() {
         return placementRows.length > 0 && placementRows.every(function (row) {
             var spend = String(row.actual_spend || '').trim();
@@ -599,6 +630,12 @@
         var viewButton = event.target.closest('[data-aikaipin-placement-view]');
         if (viewButton) {
             showEvaluationDetail(Number(viewButton.getAttribute('data-aikaipin-evaluation-id')));
+            return;
+        }
+
+        var productViewButton = event.target.closest('[data-aikaipin-product-placement-view]');
+        if (productViewButton) {
+            showProductPlacementDetails(productViewButton);
             return;
         }
 

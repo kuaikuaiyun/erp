@@ -10,6 +10,9 @@ class FinanceExportSelection
 {
     public static function key(array $row): string
     {
+        if (isset($row['account_group'])) {
+            return hash('sha256', json_encode([$row['channel'], $row['account_group']], JSON_THROW_ON_ERROR));
+        }
         $fields = isset($row['id']) ? ['id'] : (isset($row['raw_type']) ? ['raw_type'] : (isset($row['name']) ? ['name', 'channel'] : ['channel', 'currency', 'team', 'subscription', 'month']));
         return hash('sha256', json_encode(array_map(fn ($field) => $row[$field] ?? null, $fields), JSON_THROW_ON_ERROR));
     }

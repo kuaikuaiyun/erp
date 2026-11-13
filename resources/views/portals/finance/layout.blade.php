@@ -23,7 +23,7 @@
 @endsection
 
 @push('scripts')
-<script src="{{ asset('assets/erp/finance-export-selection.js') }}?v=3"></script>
+<script src="{{ asset('assets/erp/finance-export-selection.js') }}?v=4"></script>
 <script>
 document.addEventListener('change', function (event) {
     var select = event.target;
@@ -37,6 +37,7 @@ document.addEventListener('change', function (event) {
 document.addEventListener('click', function (event) {
     var button = event.target.closest('[data-finance-download]');
     if (!button) return;
+    if (button.dataset.financeExportUrl) { window.location.assign(button.dataset.financeExportUrl); return; }
     var form = button.form;
     if (!form || !form.reportValidity()) return;
     var url = new URL(form.action || window.location.href, window.location.href);

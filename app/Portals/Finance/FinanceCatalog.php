@@ -22,7 +22,7 @@ class FinanceCatalog
         };
     }
 
-    public static function reportAmount(mixed $value): string
+    public static function reportAmount(mixed $value, ?int $decimals = null): string
     {
         if ($value === null) {
             return '待配置';
@@ -30,6 +30,9 @@ class FinanceCatalog
         $text = (string) $value;
         if (! preg_match('/^(-?\d+)(?:\.(\d+))?$/', $text, $parts)) {
             return $text;
+        }
+        if ($decimals !== null) {
+            return number_format((float) $text, $decimals);
         }
         $whole = preg_replace('/\B(?=(\d{3})+(?!\d))/', ',', $parts[1]);
         $fraction = str_pad(rtrim($parts[2] ?? '', '0'), 2, '0');

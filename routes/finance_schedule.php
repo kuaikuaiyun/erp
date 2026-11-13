@@ -11,7 +11,11 @@ $balanceRefresh = Schedule::command('finance:paypal-balances:refresh')->hourly()
 $orderWorker = Schedule::command('queue:work finance_orders --queue=finance-orders --stop-when-empty --tries=1 --timeout=900')
     ->everyMinute()->withoutOverlapping(20);
 
+$summaryRefresh = Schedule::command('finance:summaries:refresh')->everyMinute()->withoutOverlapping(60)
+    ->sendOutputTo(storage_path('logs/finance-summaries-schedule.log'));
+
 if (! $financeScheduleOnly) {
     $balanceRefresh->runInBackground();
     $orderWorker->runInBackground();
+    $summaryRefresh->runInBackground();
 }

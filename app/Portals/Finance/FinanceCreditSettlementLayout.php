@@ -89,10 +89,9 @@ class FinanceCreditSettlementLayout
         ], $columns));
     }
 
-    public static function filter(Builder $query, string $channel): void
+    public static function filter(Builder $query, string $channel, ?\Illuminate\Support\Collection $accountModels = null): void
     {
-        $accounts = FinancePaymentAccount::query()->where('account_type', 'credit_card')
-            ->get()
+        $accounts = ($accountModels ?? FinancePaymentAccount::query()->where('account_type', 'credit_card')->get())
             ->filter(fn (FinancePaymentAccount $account) => self::accountPlatform($account) === $channel)
             ->pluck('activity_account');
         [$sourceField, $otherField] = $channel === 'ye' ? ['网站名称', '网关接入号'] : ['网关接入号', '网站名称'];

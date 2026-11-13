@@ -15,6 +15,8 @@ use Illuminate\Support\Collection;
 
 class FinanceSettlementService
 {
+    public const REPORT_CHANNELS = ['paypal' => 'PayPal', 'xuzong' => '徐总支付', 'xuzong1' => '徐总支付 1', 'xuzong2' => '徐总支付 2',
+        'ye' => '叶总支付', 'worldpay' => 'Worldpay', 'credit_card' => '信用卡合计', 'combined' => '全部通道'];
     public const PAYPAL_COST_HEADERS = ['通途订单', '物流-元', '采购成本-元'];
 
     public const OPERATION_DEPARTMENT = '运营所属部门';
@@ -130,7 +132,11 @@ class FinanceSettlementService
 
     public function query(string $channel, array $filters)
     {
-        $query = FinanceRecord::query()->whereIn('dataset', $channel === 'paypal' ? ['paypal-orders'] : ['xuzong2-orders', 'xuzong2-details', 'xuzong1-details']);
+        $creditSources = ['xuzong2-orders', 'xuzong2-details', 'xuzong1-details'];
+        if (! empty($filters['summary_only'])) {
+            $creditSources = [...$creditSources, ...array_values(FinanceCatalog::XUZONG_REPORT_IMPORTS), FinanceLogisticsCreditOrders::IMPORTED_DATASET];
+        }
+        $query = FinanceRecord::query()->whereIn('dataset', $channel === 'paypal' ? ['paypal-orders'] : $creditSources);
         $query->whereNotExists(function ($deleted): void {
             $deleted->selectRaw('1')->from('finance_settlement_supplements as removed_settlement')
                 ->whereColumn('removed_settlement.finance_record_id', 'finance_records.id')
@@ -146,7 +152,7 @@ class FinanceSettlementService
         } else {
             // Imported current-card details take precedence over an order with the same account/reference.
             $query->where(function ($query): void {
-                $query->where('dataset', '!=', 'xuzong2-orders')->orWhereNotExists(function ($sub): void {
+                $query->whereNotIn('dataset', ['xuzong2-orders', FinanceLogisticsCreditOrders::IMPORTED_DATASET])->orWhereNotExists(function ($sub): void {
                     $sub->selectRaw('1')->from('finance_records as detail')->where('detail.dataset', 'xuzong2-details')
                         ->whereColumn('detail.account', 'finance_records.account')->whereColumn('detail.reference', 'finance_records.reference')
                         ->where(function ($match): void {
@@ -280,6 +286,20 @@ class FinanceSettlementService
         $ye = ($filters['card_channel'] ?? null) === 'ye';
         $metadata = $this->logisticsMetadata($records, $channel, withCustomReference: ! empty($filters['order_view']),
             summaryOnly: ! empty($filters['summary_only']), includeOrder: $worldpay || ($ye && empty($filters['summary_only'])));
+        if ($channel === 'credit_card' && ! empty($filters['summary_only']) && ! $worldpay && ! $ye) {
+            $imported = $records->where('dataset', FinanceLogisticsCreditOrders::IMPORTED_DATASET);
+            if ($imported->isNotEmpty()) {
+                $linked = app(FinanceXuzongCreditReport::class)->linkedOrders($imported);
+                foreach ($imported as $record) {
+                    unset($metadata[$record->id]);
+                    if ($order = $linked->get($record->id)) {
+                        $metadata[$record->id] = ['order' => $order, 'logistics_order_id' => $order->id,
+                            'domain' => $order->report_domain ?? '', 'subscription' => $order->subscription_type ?? '',
+                            'upsell' => $order->is_add_on ?? '', 'erp_order' => $order->tongtu_order_number ?? ''];
+                    }
+                }
+            }
+        }
         if ($worldpay) {
             $metadata += $this->worldpayFashionOrderMetadata($records->reject(fn ($record) => isset($metadata[$record->id])), $domains);
         }
@@ -583,6 +603,9 @@ class FinanceSettlementService
                 }
                 return $row;
             });
+        }
+        if (! empty($filters['summary_projection'])) {
+            $rows = $rows->map(fn ($row) => $row + ['_summary_team' => $row['team']]);
         }
         return $rows->filter(fn ($row) => (! filled($filters['team'] ?? null) || $row['team'] === $filters['team'])
             && (! filled($filters['subscription'] ?? null) || $row['subscription'] === self::subscriptionLabel($filters['subscription']))
@@ -970,9 +993,14 @@ class FinanceSettlementService
         $selected = $matchOnly ? ['id', ...$referenceFields] : array_values(array_unique(array_intersect(
             ['id', ...$referenceFields, ...$summaryFields, ...($summaryOnly ? [] : $detailFields)], $columns,
         )));
-        $referenceValues = fn ($record) => $channel === 'paypal' ? [$record->reference, trim((string) ($record->payload['帳單號碼'] ?? ''))]
-            : [$record->reference, $record->payload['商户订单号'] ?? '', $record->payload['Shopify订单号'] ?? ''];
-        $references = $records->flatMap($referenceValues)->filter()->unique()->all();
+        $referencesByRecord = $records->mapWithKeys(function ($record) use ($channel): array {
+            $payload = $record->payload;
+
+            return [$record->id => $channel === 'paypal'
+                ? [$record->reference, trim((string) ($payload['帳單號碼'] ?? ''))]
+                : [$record->reference, $payload['商户订单号'] ?? '', $payload['Shopify订单号'] ?? '']];
+        });
+        $references = $referencesByRecord->collapse()->filter()->unique()->all();
         $customReferences = collect();
         if ($channel === 'paypal' && $withCustomReference && ! $matchOnly
             && in_array('transaction_id', $columns, true) && in_array('paid_amount_usd', $columns, true)) {
@@ -1051,7 +1079,7 @@ class FinanceSettlementService
         $result = [];
         foreach ($records as $record) {
             $candidates = [];
-            foreach (array_filter($referenceValues($record), fn ($value) => trim((string) $value) !== '') as $reference) {
+            foreach (array_filter($referencesByRecord[$record->id], fn ($value) => trim((string) $value) !== '') as $reference) {
                 foreach ($index[(string) $reference] ?? [] as $id => $order) {
                     $candidates[$id] = $order;
                 }
@@ -1245,6 +1273,93 @@ class FinanceSettlementService
             ->map(self::subscriptionLabel(...))->filter(fn ($value) => $value !== '')->unique()->sort()->values();
     }
 
+    public function logisticsCostStream(iterable $rows): iterable
+    {
+        $db = $this->workbooks->database();
+        $mysql = in_array($db->getDriverName(), ['mysql', 'mariadb'], true);
+        $table = $mysql ? 'finance_report_order_costs' : 'finance_cost_orders_'.bin2hex(random_bytes(8));
+        $runId = (string) \Illuminate\Support\Str::uuid();
+        if ($mysql) {
+            // The scratch rows live only until this transaction or savepoint is rolled back.
+            $db->beginTransaction();
+        } else {
+            $db->getSchemaBuilder()->create($table, function (\Illuminate\Database\Schema\Blueprint $table): void {
+                $table->temporary();
+                $table->bigIncrements('id');
+                $table->uuid('run_id');
+                $table->unsignedBigInteger('order_id')->unique();
+                $table->text('payment')->nullable();
+                $table->string('purchase')->nullable();
+                $table->string('logistics')->nullable();
+            });
+        }
+        try {
+            yield from $this->aggregateLogisticsCosts($rows, $db, $table, $runId);
+        } finally {
+            if ($mysql) {
+                $db->rollBack();
+            } else {
+                $db->getSchemaBuilder()->dropIfExists($table);
+            }
+        }
+    }
+
+    private function aggregateLogisticsCosts(iterable $rows, \Illuminate\Database\Connection $db, string $table, string $runId): iterable
+    {
+        // Keep the first successful payment and first known cost per order across all batches.
+        $mysql = in_array($db->getDriverName(), ['mysql', 'mariadb'], true);
+        $orderKey = $mysql ? ['run_id', 'order_id'] : ['order_id'];
+        $update = [];
+        foreach (['payment', 'purchase', 'logistics'] as $field) {
+            $incoming = $mysql
+                ? ($db->getConfig('use_upsert_alias') ? 'laravel_upsert_alias.'.$field : 'VALUES('.$field.')')
+                : 'excluded.'.$field;
+            $update[$field] = $db->raw('COALESCE('.$db->getQueryGrammar()->wrapTable($table).'.'.$field.', '.$incoming.')');
+        }
+        $orders = [];
+        foreach ($rows as $row) {
+            $id = $row['logistics_order_id'] ?? null;
+            if (filled($id)) {
+                $orders[$id] ??= ['run_id' => $runId, 'order_id' => $id, 'payment' => null, 'purchase' => null, 'logistics' => null];
+                $orders[$id]['payment'] ??= $row['success'] ? json_encode(array_intersect_key($row, array_fill_keys(
+                    ['id', 'channel', 'payment_channel', 'account', 'account_key', 'team', 'owner', 'subscription', 'payment_method', 'currency', 'month'], true
+                )), JSON_THROW_ON_ERROR) : null;
+                $orders[$id]['purchase'] ??= $row['purchase'];
+                $orders[$id]['logistics'] ??= $row['logistics'];
+                if (count($orders) === 100) {
+                    $db->table($table)->upsert(array_values($orders), $orderKey, $update);
+                    $orders = [];
+                }
+            }
+            yield $row;
+        }
+        if ($orders !== []) {
+            $db->table($table)->upsert(array_values($orders), $orderKey, $update);
+        }
+        $missing = $db->table($table)->useWritePdo()->where('run_id', $runId)->whereNotNull('payment')
+            ->where(fn ($query) => $query->whereNull('purchase')->orWhereNull('logistics'));
+        foreach ($missing->lazyById(500)->chunk(500) as $batch) {
+            $payments = $batch->map(fn ($order) => json_decode($order->payment, true, 512, JSON_THROW_ON_ERROR) + [
+                'logistics_order_id' => $order->order_id, 'success' => true,
+                'purchase' => $order->purchase, 'logistics' => $order->logistics,
+            ])->values()->collect();
+            foreach ($this->withLogisticsCosts($payments) as $index => $payment) {
+                $original = $payments[$index];
+                $adjustment = ['id' => $payment['id']];
+                foreach (['purchase', 'logistics'] as $field) {
+                    if ($original[$field] === null && $payment[$field] !== null) {
+                        $adjustment[$field] = $payment[$field];
+                    }
+                }
+                if (count($adjustment) > 1) {
+                    yield ['_cost_adjustment' => true] + $adjustment + array_diff_key($original, [
+                        'purchase' => true, 'logistics' => true, 'success' => true,
+                    ]);
+                }
+            }
+        }
+    }
+
     public function withLogisticsCosts(Collection $rows): Collection
     {
         $db = $this->workbooks->database();
@@ -1328,42 +1443,109 @@ class FinanceSettlementService
 
     public function summaryRows(string $channel, array $filters, bool $transactions = false): Collection
     {
+        return collect(iterator_to_array($this->summaryRowStream($channel, $filters, $transactions), false));
+    }
+
+    public function summaryRowStream(string $channel, array $filters, bool $transactions = false): iterable
+    {
         $filters['summary_only'] = true;
         $fields = self::MONEY + array_fill_keys(['id', 'logistics_order_id', 'channel', 'account', 'account_key',
             'owner', 'team', 'subscription', 'payment_method', 'success', 'failed', 'settlement'], true);
         if ($transactions) {
             $fields += self::CONDITION_FIELDS + array_fill_keys(['currency', 'month'], true);
         }
-        // Keep the original date order for grouping and for assigning costs to the first successful payment.
-        $ids = $this->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id')->pluck('id');
-        $rows = collect();
-        $context = $ids->isEmpty() ? null : $this->rowContext($channel);
-        if ($context !== null) {
-            $context['conflux_report_fees'] = new \ArrayObject;
+        if (! empty($filters['summary_projection'])) {
+            $fields['_summary_team'] = true;
         }
-        $cardPlatforms = [];
+        // Keep the original date order for grouping and for assigning costs to the first successful payment.
+        $query = $this->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id');
         if ($channel === 'credit_card' && empty($filters['card_channel'])) {
+            $query->select('finance_records.*');
+            $accounts = FinancePaymentAccount::query()->where('account_type', 'credit_card')->get();
             foreach (['worldpay', 'ye'] as $platform) {
-                $platformIds = $this->query($channel, [...$filters, 'card_channel' => $platform])->pluck('id');
-                $cardPlatforms += array_fill_keys($platformIds->all(), $platform);
+                $match = FinanceRecord::query();
+                FinanceCreditSettlementLayout::filter($match, $platform, $accounts);
+                $predicate = substr($match->getQuery()->getGrammar()->compileWheres($match->getQuery()), strlen('where '));
+                $query->selectRaw('CASE WHEN '.$predicate.' THEN 1 ELSE 0 END as matches_'.$platform, $match->getBindings());
             }
         }
-        foreach ($ids->chunk(1500) as $batch) {
-            $records = FinanceRecord::query()->whereIntegerInRaw('id', $batch->all())
-                ->orderByDesc('occurred_at')->orderByDesc('id')->get();
+        $batchSize = 500;
+        $context = null;
+        $last = null;
+        do {
+            $page = clone $query;
+            if ($last !== null) {
+                $page->where(fn ($scope) => $scope->where('occurred_at', '<', $last->getRawOriginal('occurred_at'))
+                    ->orWhere(fn ($tie) => $tie->where('occurred_at', $last->getRawOriginal('occurred_at'))->where('id', '<', $last->id)));
+            }
+            $records = $page->limit($batchSize)->get();
+            if ($records->isEmpty()) {
+                break;
+            }
+            $last = $records->last();
+            $context ??= $this->rowContext($channel) + ['conflux_report_fees' => new \ArrayObject];
             $resolved = [];
-            foreach ($records->groupBy(fn ($record) => $filters['card_channel'] ?? $cardPlatforms[$record->id] ?? '') as $platform => $group) {
+            foreach ($records->groupBy(fn ($record) => $filters['card_channel'] ?? match (true) {
+                (bool) $record->matches_worldpay => 'worldpay',
+                (bool) $record->matches_ye => 'ye',
+                default => '',
+            }) as $platform => $group) {
                 $scope = filled($platform) ? [...$filters, 'card_channel' => $platform] : $filters;
                 $resolved += $this->summaryDetailRows($channel, $scope, $group, $context, $fields);
+                foreach ($group as $record) {
+                    if (isset($resolved[$record->id])) {
+                        $resolved[$record->id]['payment_channel'] = $channel === 'paypal' ? 'paypal' : ($platform ?: (
+                            in_array($record->dataset, ['xuzong1-details', FinanceCatalog::XUZONG_REPORT_IMPORTS['xuzong1-details']], true)
+                                ? 'xuzong1' : 'xuzong2'
+                        ));
+                    }
+                }
             }
-            foreach ($batch as $id) {
-                if (isset($resolved[$id])) {
-                    $rows->push($resolved[$id]);
+            foreach ($records as $record) {
+                if (isset($resolved[$record->id])) {
+                    yield $resolved[$record->id] + (! empty($filters['summary_projection'])
+                        ? ['_summary_source_account' => $record->account] : []);
+                }
+            }
+        } while ($records->count() === $batchSize);
+        if ($channel === 'credit_card' && ! empty($filters['include_unmatched_fees'])) {
+            $accounts = FinancePaymentAccount::query()->where('account_type', 'credit_card')->get()->keyBy('id');
+            $conflux = app(FinanceConfluxSettlement::class);
+            $rates = app(FinanceCreditUsdRates::class);
+            $statements = $conflux->unmatchedRows([...$filters, 'card_channel' => 'ye', 'conflux_report_fees' => new \ArrayObject]);
+            foreach (\Illuminate\Support\LazyCollection::make(fn () => $statements)->chunk(500) as $batch) {
+                $orders = $batch->map(fn ($row) => (object) [
+                    'currency' => strtoupper(trim((string) ($row['card_layout']['settlement_currency'] ?? ''))),
+                    'occurred_at' => CarbonImmutable::parse($row['settlement_date'], 'Asia/Shanghai'), 'payload' => [],
+                ])->collect();
+                $exchange = $rates->forOrders($orders);
+                foreach ($batch as $key => $statement) {
+                    $account = $accounts->get($statement['payment_account_id']);
+                    if (! $account || $orders[$key]->currency === '') {
+                        continue;
+                    }
+                    $amounts = array_fill_keys(array_keys(self::MONEY), null);
+                    foreach (['fee', 'per_order_fee', 'refund', 'refund_fee', 'chargeback', 'chargeback_fee', 'ethoca_refund', 'ethoca_fee', 'rdr_refund', 'rdr_fee'] as $field) {
+                        $amount = $this->number($statement['card_layout'][$field] ?? null);
+                        if ($amount !== null) {
+                            $amounts[$field] = $this->number($rates->convert($exchange, $orders[$key]->currency, $statement['settlement_date'], $amount));
+                        }
+                    }
+                    if (count(array_filter($amounts, fn ($amount) => $amount !== null)) === 0) {
+                        continue;
+                    }
+                    yield $amounts + [
+                        'id' => -$statement['entry_id'], 'channel' => 'credit_card', 'payment_channel' => 'ye',
+                        'account' => $account->account_name, 'account_key' => $account->activity_account,
+                        '_summary_source_account' => $account->activity_account, '_summary_team' => '',
+                        'owner' => '', 'team' => '', 'subscription' => '', 'payment_method' => '',
+                        'currency' => $orders[$key]->currency, 'month' => substr($statement['settlement_date'], 0, 7),
+                        'gross' => null, 'settlement' => null, 'success' => false, 'failed' => false,
+                        'reference' => $statement['card_layout']['reference'], 'statement_only' => true,
+                    ];
                 }
             }
         }
-
-        return $rows;
     }
 
     private function summaryDetailRows(string $channel, array $filters, Collection $records, array $context, array $fields): array
@@ -1402,8 +1584,36 @@ class FinanceSettlementService
         })->all();
     }
 
-    public function totals(Collection $rows, string $layer): array
+    public function totals(iterable $rows, string $layer): array
     {
+        if (! $rows instanceof Collection && in_array($layer, ['business', 'classification', 'project_classification', 'payment_method'], true)) {
+            $groups = [];
+            foreach (\Illuminate\Support\LazyCollection::make(fn () => $rows)->chunk(500) as $batch) {
+                foreach ($this->totals(collect($batch->all()), $layer) as $group) {
+                    $key = json_encode([$group['name'], $group['channel'], $group['scope'] ?? null, $group['category'] ?? null]);
+                    if (! isset($groups[$key])) {
+                        $groups[$key] = $group;
+                        continue;
+                    }
+                    foreach (['count', 'success_count', 'failed_count'] as $field) {
+                        $groups[$key][$field] += $group[$field];
+                    }
+                    foreach (['settlement', ...array_keys(self::MONEY)] as $field) {
+                        if ($group[$field] !== null) {
+                            $groups[$key][$field] = bcadd($groups[$key][$field] ?? '0', $group[$field], 8);
+                        }
+                    }
+                }
+            }
+            $result = array_values($groups);
+            usort($result, fn ($a, $b) => [
+                $layer === 'business' && $a['scope'] !== 'Shopify', ($a['category'] ?? '') !== '总计' && empty($a['is_total']),
+            ] <=> [
+                $layer === 'business' && $b['scope'] !== 'Shopify', ($b['category'] ?? '') !== '总计' && empty($b['is_total']),
+            ]);
+
+            return $result;
+        }
         if ($layer === 'business') {
             $classifiedRows = $rows->map(function ($row) {
                 $isFake = $row['channel'] === 'paypal' && str_contains(($row['team'] ?? '').' '.($row['owner'] ?? ''), '刷单');
@@ -1413,7 +1623,10 @@ class FinanceSettlementService
             });
             $groups = [];
             foreach ([['Shopify', 'project_classification'], ['通道', 'classification']] as [$scope, $classification]) {
-                foreach ($this->totals($classifiedRows, $classification) as $group) {
+                $scopeRows = $scope === 'Shopify'
+                    ? $classifiedRows->filter(fn ($row) => self::isShopifySummaryChannel($row['payment_channel'] ?? $row['channel']))
+                    : $classifiedRows;
+                foreach ($this->totals($scopeRows, $classification) as $group) {
                     [$channelName, $category] = explode(' / ', $group['name'], 2);
                     $isTotal = $group['is_total'] ?? false;
                     $group['scope'] = $scope === '通道' ? $channelName : $scope;
@@ -1427,6 +1640,9 @@ class FinanceSettlementService
             return $groups;
         }
         if (in_array($layer, ['classification', 'project_classification', 'payment_method'], true)) {
+            if ($layer === 'project_classification') {
+                $rows = $rows->filter(fn ($row) => self::isShopifySummaryChannel($row['payment_channel'] ?? $row['channel']));
+            }
             $baseLayer = $layer === 'project_classification' ? 'project' : 'channel';
             $totals = $this->totals($rows, $baseLayer);
             foreach ($totals as &$total) {
@@ -1454,9 +1670,12 @@ class FinanceSettlementService
         $amountFields = ['settlement', ...array_keys(self::MONEY)];
         $emptyAmounts = array_replace(array_fill_keys($amountFields, '0'), ['logistics' => null, 'purchase' => null]);
         foreach ($rows as $row) {
+            if ($layer === 'project' && ! self::isShopifySummaryChannel($row['payment_channel'] ?? $row['channel'])) {
+                continue;
+            }
             $name = match ($layer) {
                 'project' => 'Shopify',
-                'channel' => $row['channel'] === 'paypal' ? 'PayPal' : '信用卡',
+                'channel' => match ($row['channel']) { 'credit_card' => '信用卡', 'xuzong' => '徐总信用卡', default => self::REPORT_CHANNELS[$row['channel']] ?? '信用卡' },
                 'team' => $row['team'] ?: '未分组',
                 'subscription' => $row['subscription'] ?: '未分类',
                 'detail' => $row['account'].' / '.($row['team'] ?: '未分组').' / '.($row['subscription'] ?: '未分类'),
@@ -1465,6 +1684,12 @@ class FinanceSettlementService
             $channel = $layer === 'project' ? 'combined' : $row['channel'];
             $key = json_encode([$name, $channel]);
             $groups[$key] ??= ['name' => $name, 'channel' => $channel, 'count' => 0, 'success_count' => 0, 'failed_count' => 0] + $emptyAmounts;
+            if (! empty($row['_cost_adjustment'])) {
+                foreach (array_intersect_key($row, ['purchase' => true, 'logistics' => true]) as $field => $value) {
+                    $groups[$key][$field] = bcadd($groups[$key][$field] ?? '0', $value, 8);
+                }
+                continue;
+            }
             $groups[$key]['count']++;
             $groups[$key]['success_count'] += $row['success'] ? 1 : 0;
             $groups[$key]['failed_count'] += $row['failed'] ? 1 : 0;
@@ -1481,6 +1706,11 @@ class FinanceSettlementService
         }
 
         return array_values($groups);
+    }
+
+    public static function isShopifySummaryChannel(string $channel): bool
+    {
+        return in_array($channel, ['paypal', 'xuzong1', 'xuzong2', 'xuzong', 'credit_card'], true);
     }
 
     public static function refundIncludingSplit(array $row): ?string

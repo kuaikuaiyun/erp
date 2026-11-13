@@ -10,6 +10,9 @@
 </style>
 @endpush
 @section('finance_content')
+@if($reportStatus['state'] !== 'ready' || isset($reportStatus['updated_at']))
+    @include('portals.finance.partials.report-snapshot-status', ['status' => $reportStatus])
+@endif
 <div class="finance-report">
 @include('portals.finance.partials.summary-tabs', ['activeTab' => 'transactions'])
 <div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}" class="finance-filter">
@@ -17,15 +20,21 @@
     <input type="hidden" name="per_page" value="{{ $paginator->perPage() }}">
     <div class="form-group"><label>会计月份（北京时间）</label><input type="month" name="month" value="{{ $filters['month'] }}" class="form-control" required></div>
     <div class="form-group"><label>支付账户</label><select name="payment_account_id" class="form-control"><option value="">全部账户</option>@foreach($reportAccounts as $account)<option value="{{ $account->id }}" @selected(($filters['payment_account_id'] ?? '') == $account->id)>{{ \App\Portals\Finance\FinanceCatalog::simplified((string) ($account->account_name)) }}</option>@endforeach</select></div>
-    <div class="form-group"><label>支付大类</label><select name="channel" class="form-control">@foreach($summaryTabs as $key => $label)<option value="{{ $key }}" @selected($tab === $key)>{{ $label }}</option>@endforeach</select></div>
+    <input type="hidden" name="channel" value="{{ $tab }}">
     <div class="form-group"><label for="report-currency">货币</label><input id="report-currency" name="currency" list="report-currencies" value="{{ $filters['currency'] ?? '' }}" class="form-control" placeholder="全部货币，可输入或选择" maxlength="3" pattern="[A-Z]{3}"><datalist id="report-currencies">@foreach($currencyOptions as $currency)<option value="{{ $currency }}">@endforeach</datalist></div>
-    <div class="form-group"><label>区域</label><input name="team" value="{{ $filters['team'] ?? '' }}" class="form-control" maxlength="100"></div>
+    <div class="form-group"><label for="report-team">区域</label><input id="report-team" list="report-teams" name="team" value="{{ $filters['team'] ?? '' }}" class="form-control" placeholder="全部区域，可输入或选择" maxlength="100"><datalist id="report-teams">@foreach($teamOptions as $team)<option value="{{ $team }}">@endforeach</datalist></div>
     <div class="form-group"><label>订阅类型</label><input list="report-subscriptions" name="subscription" value="{{ $filters['subscription'] ?? '' }}" class="form-control" maxlength="100"><datalist id="report-subscriptions">@foreach($subscriptionOptions as $type)<option value="{{ $type }}">@endforeach</datalist></div>
     @include('portals.finance.partials.filter-conditions')
-    <div class="form-group finance-report-actions"><button class="btn btn-primary"><i class="fa fa-search" aria-hidden="true"></i> 查询</button><a class="btn btn-default" href="{{ route('finance.report', ['report' => $report, 'view' => 'transactions', 'channel' => $tab]) }}">重置</a><button type="button" class="btn btn-default" id="settlement-add-condition">添加筛选条件</button><button type="button" data-finance-download  class="btn btn-default" ><i class="fa fa-download" aria-hidden="true"></i> 导出 Excel</button><span @class(['finance-report-status', 'is-locked' => $isLocked])>{{ $isLocked ? '已锁定' : '未锁定' }}</span></div>
+    <div class="form-group finance-report-actions"><button class="btn btn-primary"><i class="fa fa-search" aria-hidden="true"></i> 查询</button><a class="btn btn-default" href="{{ route('finance.report', ['report' => $report, 'view' => 'transactions', 'channel' => $tab]) }}">重置</a><button type="button" class="btn btn-default" id="settlement-add-condition">添加筛选条件</button>
+        @if($reportStatus['state'] === 'ready' || $reportSnapshot !== null)
+            <button type="button" data-finance-download data-finance-export-url="{{ route('finance.report', ['report' => $report, ...$filters, 'view' => 'transactions', 'channel' => $tab, 'page' => null, 'report_snapshot' => $reportSnapshot, 'download' => 1]) }}" class="btn btn-default"><i class="fa fa-download" aria-hidden="true"></i> 导出 Excel</button>
+        @else
+            <button type="button" class="btn btn-default" disabled>导出 Excel</button>
+        @endif
+        <span @class(['finance-report-status', 'is-locked' => $isLocked])>{{ $isLocked ? '已锁定' : '未锁定' }}</span></div>
 </form></div></div>
 @if($tab === 'credit_card')
-    <p class="finance-report-help">信用卡数据来自「信用卡结算明细」导入记录。
+    <p class="finance-report-help">徐总信用卡汇总使用徐总支付 1、2 的结算明细和已导入订单。
         @if($creditMonths)
             已导入月份：
             @foreach($creditMonths as $month)
@@ -49,7 +58,7 @@
             <tbody>
                 @forelse($items as $item)
                     <tr><td class="finance-selection"><input type="checkbox" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($item) }}" aria-label="选择此行"></td>@foreach($columns as $field => $label)
-                        <td>{{ ($item[$field] ?? null) === null ? '' : ($loop->index < 6 ? $item[$field] : \App\Portals\Finance\FinanceCatalog::reportAmount($item[$field])) }}</td>
+                        <td>{{ ($item[$field] ?? null) === null ? '' : (in_array($field, ['channel', 'account', 'currency', 'team', 'subscription', 'month'], true) ? $item[$field] : \App\Portals\Finance\FinanceCatalog::reportAmount($item[$field], $field === 'orders' ? 0 : 3)) }}</td>
                     @endforeach</tr>
                 @empty
                     <tr><td colspan="{{ count($columns) + 1 }}">无符合条件的记录</td></tr>

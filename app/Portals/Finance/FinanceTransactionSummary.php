@@ -2,13 +2,11 @@
 
 namespace App\Portals\Finance;
 
-use Illuminate\Support\Collection;
-
 class FinanceTransactionSummary
 {
-    public const VIEWS = ['paypal' => 'PayPal', 'credit_card' => '信用卡', 'combined' => 'Shopify'];
+    public const VIEWS = ['paypal' => 'PayPal', 'credit_card' => '徐总信用卡', 'ye' => '叶总支付', 'worldpay' => 'Worldpay', 'combined' => 'Shopify'];
 
-    private const COMMON = ['channel' => '通道', 'currency' => '货币', 'team' => '区域', 'subscription' => '订阅类型',
+    private const COMMON = ['channel' => '通道', 'account' => '支付账户', 'currency' => '货币', 'team' => '区域', 'subscription' => '订阅类型',
         'month' => '年月', 'orders' => '订单数', 'amount' => '金额', 'settlement' => '结算金额'];
 
     private const PAYPAL = ['fee' => FinanceSettlementService::MONEY['fee'], 'hold' => '冻结金额', 'dispute_hold' => '争议冻结金额', 'refund' => '退款金额',
@@ -23,21 +21,27 @@ class FinanceTransactionSummary
     {
         return [...self::COMMON, ...match ($tab) {
             'paypal' => self::PAYPAL,
-            'credit_card' => ['hold' => '保证金', ...self::CARD],
+            'credit_card', 'ye', 'worldpay' => ['hold' => '保证金', ...self::CARD],
             'combined' => ['hold' => '保证金', 'dispute_hold' => '争议冻结金额', ...self::CARD],
         }, 'payable' => '应结算', 'logistics' => '物流-元', 'purchase' => '采购成本-元'];
     }
 
-    public function summarize(Collection $rows, string $tab): array
+    public function summarize(iterable $rows, string $tab): array
     {
         $groups = [];
         foreach ($rows as $row) {
-            $dimensions = array_intersect_key($row, array_flip(['currency', 'team', 'subscription', 'month']));
-            $key = json_encode($dimensions, JSON_THROW_ON_ERROR);
+            $dimensions = ['account' => $row['account'], 'currency' => $row['currency'], 'team' => $row['team'],
+                'subscription' => $row['subscription'], 'month' => $row['month']];
+            $key = json_encode([$row['payment_channel'] ?? $row['channel'], $row['account_key'] ?? $row['account'], $dimensions], JSON_THROW_ON_ERROR);
             $group = &$groups[$key];
-            $group ??= [...$dimensions, 'channel' => match ($tab) {
-                'paypal' => 'PayPal', 'credit_card' => '徐总支付', 'combined' => 'Shopify',
-            }, 'orders' => 0];
+            $group ??= [...$dimensions, 'channel' => self::VIEWS[$tab], 'orders' => 0, 'account_group' => $key];
+            if (! empty($row['_cost_adjustment'])) {
+                foreach (array_intersect_key($row, ['purchase' => true, 'logistics' => true]) as $field => $value) {
+                    $group[$field] = bcadd($group[$field] ?? '0', $value, 8);
+                }
+                unset($group);
+                continue;
+            }
             $group['orders'] += (int) $row['success'];
             $paypal = $row['channel'] === 'paypal';
             $values = array_intersect_key($row, [...self::PAYPAL, ...self::CARD, 'logistics' => true, 'purchase' => true]);
@@ -48,7 +52,7 @@ class FinanceTransactionSummary
                 $values['fee'] = $this->difference($row['fee'], $row['fee_return']);
                 $values['dispute_hold'] = $this->difference($row['dispute_hold'], $row['dispute_release']);
                 $values['ethoca_refund'] = $row['dispute_refund'];
-                $values['ethoca_fee'] = $row['dispute_fee'];
+                $values['ethoca_fee'] = self::shopifyPayPalDisputeFee($row['dispute_fee'], $row['month']);
             }
             foreach ($values as $field => $value) {
                 if ($value !== null) {
@@ -59,7 +63,7 @@ class FinanceTransactionSummary
         }
         $deductions = match ($tab) {
             'paypal' => ['fee', 'hold', 'dispute_hold', 'refund', 'refund_fee', 'dispute_refund', 'dispute_fee'],
-            'credit_card' => ['hold', ...array_diff(array_keys(self::CARD), ['release'])],
+            'credit_card', 'ye', 'worldpay' => ['hold', ...array_diff(array_keys(self::CARD), ['release'])],
             'combined' => ['hold', 'dispute_hold', ...array_diff(array_keys(self::CARD), ['release'])],
         };
         foreach ($groups as &$group) {
@@ -81,6 +85,12 @@ class FinanceTransactionSummary
         unset($group);
 
         return array_values($groups);
+    }
+
+    public static function shopifyPayPalDisputeFee(?string $fee, string $month): ?string
+    {
+        // Finance workbook, 再汇总 R16:R18: August subtracts PayPal dispute fees.
+        return $fee !== null && $month === '2026-08' ? bcsub('0', $fee, 8) : $fee;
     }
 
     private function difference(?string $amount, ?string $return): ?string

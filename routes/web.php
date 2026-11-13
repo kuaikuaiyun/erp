@@ -351,8 +351,14 @@ Route::get('/operation/ai-product-library/{product}/publish', [OperationAiProduc
 Route::post('/operation/ai-product-library/{product}/publish', [OperationAiProductLibraryController::class, 'publish'])->name('operation.ai-product-library.publish');
 Route::get('/operation/ai-product-library/{product}/shopify-images/{imageIndex}', [OperationAiProductLibraryController::class, 'shopifyImage'])->whereNumber('imageIndex')->name('operation.ai-product-library.shopify-image');
 Route::get('/operation/ai-product-library/{product}/detail', [OperationAiProductLibraryController::class, 'detail'])->name('operation.ai-product-library.detail');
+Route::get('/operation/ai-product-library/{product}/placement-evaluations', [OperationAiProductLibraryController::class, 'placementEvaluationForm'])->name('operation.ai-product-library.placement-evaluations.form');
+Route::post('/operation/ai-product-library/{product}/placement-evaluations', [OperationAiProductLibraryController::class, 'storePlacementEvaluation'])->name('operation.ai-product-library.placement-evaluations.store');
+Route::get('/operation/ai-product-library/placement-evaluations/{evaluation}/records/{record}/video', [OperationAiProductLibraryController::class, 'placementEvaluationVideo'])->whereNumber('evaluation')->whereNumber('record')->name('operation.ai-product-library.placement-evaluations.video');
 Route::get('/operation/ai-product-library/{product}/reference-preview', [OperationAiProductLibraryController::class, 'referencePreview'])->name('operation.ai-product-library.reference-preview');
 Route::get('/operation/ai-product-library/{product}/reference-preview/content', [OperationAiProductLibraryController::class, 'referencePreviewContent'])->name('operation.ai-product-library.reference-preview.content');
+Route::post('/operation/ai-product-library/{product}/reference-videos', [OperationAiProductLibraryController::class, 'uploadReferenceVideo'])->name('operation.ai-product-library.reference-videos.upload');
+Route::get('/operation/ai-product-library/{product}/reference-videos/{video}/preview', [OperationAiProductLibraryController::class, 'previewReferenceVideo'])->whereNumber('video')->name('operation.ai-product-library.reference-videos.preview');
+Route::get('/operation/ai-product-library/{product}/reference-videos/{video}/download', [OperationAiProductLibraryController::class, 'downloadReferenceVideo'])->whereNumber('video')->name('operation.ai-product-library.reference-videos.download');
 Route::get('/operation/ai-product-library/{product}/images/{imageIndex}', [OperationAiProductLibraryController::class, 'image'])->whereNumber('imageIndex')->name('operation.ai-product-library.images.show');
 Route::get('/operation/ai-product-library/{product}/package', [OperationAiProductLibraryController::class, 'downloadPackage'])->name('operation.ai-product-library.package.download');
 Route::get('/operation/existing-product-library', [ProductRequestController::class, 'existingProductLibraryIndex'])->name('product-requests.operation.existing-product-library');
@@ -485,6 +491,10 @@ Route::post('/product-library/visibility', [ProductLibraryController::class, 'up
 Route::get('/product-library/{product}/images/{imageIndex}', [ProductLibraryController::class, 'showProductImage'])->whereNumber('imageIndex')->name('aikaipin.product-library.images.show');
 Route::get('/product-library/{product}/reference-preview', [ProductLibraryController::class, 'showProductReferencePreview'])->name('aikaipin.product-library.reference-preview');
 Route::get('/product-library/{product}/reference-preview/content', [ProductLibraryController::class, 'showProductReferencePreviewContent'])->name('aikaipin.product-library.reference-preview.content');
+Route::put('/product-library/{product}/reference-preview/content', [ProductLibraryController::class, 'updateProductReferencePreviewContent'])->name('aikaipin.product-library.reference-preview.content.update');
+Route::post('/product-library/{product}/reference-videos', [ProductLibraryController::class, 'uploadReferenceVideo'])->name('aikaipin.product-library.reference-videos.upload');
+Route::get('/product-library/{product}/reference-videos/{video}/preview', [ProductLibraryController::class, 'previewReferenceVideo'])->whereNumber('video')->name('aikaipin.product-library.reference-videos.preview');
+Route::get('/product-library/{product}/reference-videos/{video}/download', [ProductLibraryController::class, 'downloadReferenceVideo'])->whereNumber('video')->name('aikaipin.product-library.reference-videos.download');
 Route::get('/product-library/{product}/files/{kind}', [ProductLibraryController::class, 'showProductFile'])->whereIn('kind', ['reference', 'package'])->name('aikaipin.product-library.files.show');
 Route::get('/selection-proposals', [ProductLibraryController::class, 'selectionProposal'])->name('aikaipin.selection-proposals.index');
 Route::post('/selection-proposals', [ProductLibraryController::class, 'storeSelectionProposal'])->name('aikaipin.selection-proposals.store');
@@ -494,6 +504,8 @@ Route::post('/selection-proposals/{proposal}/withdraw', [ProductLibraryControlle
 Route::get('/selection-proposals/{proposal}/images/{image}', [ProductLibraryController::class, 'showSelectionProposalImage'])->name('aikaipin.selection-proposals.images.show');
 Route::get('/placement-evaluations', [ProductLibraryController::class, 'placementEvaluation'])->name('aikaipin.placement-evaluations.index');
 Route::get('/placement-evaluations/product-options', [ProductLibraryController::class, 'placementEvaluationProductOptions'])->name('aikaipin.placement-evaluations.product-options');
+Route::get('/placement-evaluations/products/{product}', [ProductLibraryController::class, 'showProductPlacementEvaluations'])->name('aikaipin.placement-evaluations.products.show');
+Route::get('/placement-evaluations/{evaluation}/records/{record}/video', [ProductLibraryController::class, 'placementEvaluationRecordVideo'])->whereNumber('evaluation')->whereNumber('record')->name('aikaipin.placement-evaluations.records.video');
 Route::post('/placement-evaluations', [ProductLibraryController::class, 'storePlacementEvaluation'])->name('aikaipin.placement-evaluations.store');
 Route::get('/placement-evaluations/{evaluation}', [ProductLibraryController::class, 'showPlacementEvaluation'])->name('aikaipin.placement-evaluations.show');
 Route::put('/placement-evaluations/{evaluation}', [ProductLibraryController::class, 'updatePlacementEvaluation'])->name('aikaipin.placement-evaluations.update');
