@@ -47,6 +47,11 @@
 @section('finance_content')
 <div @class(['settlement-overview', 'overview-summary' => $report === 'summary'])>
 @if($report === 'summary')@include('portals.finance.partials.summary-tabs', ['activeTab' => 'settlement'])@endif
+@foreach($reportStatuses as $period => $status)
+    @if($status['state'] !== 'ready' || isset($status['updated_at']))
+        @include('portals.finance.partials.report-snapshot-status', ['period' => $period, 'status' => $status])
+    @endif
+@endforeach
 <div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}">@if($report === 'summary')<input type="hidden" name="view" value="settlement">@endif
 @if($report === 'losses')<input type="hidden" name="loss_scope" value="{{ request('loss_scope', 'Shopify') }}"><input type="hidden" name="loss_category" value="{{ request('loss_category', '总计') }}">@endif
 @if($report === 'losses')
@@ -101,7 +106,13 @@ document.getElementById('overview-channel').addEventListener('change', function 
     $switchFilters = request()->except(['loss_scope', 'loss_category', 'download', 'page']);
 @endphp
 @endif
-<div class="overview-actions"><button class="btn btn-primary"><i class="fa fa-search" aria-hidden="true"></i> 查询</button><a class="btn btn-default" href="{{ route('finance.report', ['report' => $report, 'month' => $filters['month'], ...($report === 'losses' ? ['month_from' => $filters['month_from'], 'month_to' => $filters['month_to']] : [])]) }}">重置</a><button type="button" data-finance-download data-finance-export-url="{{ route('finance.report', ['report' => $report, ...$filters, 'view' => 'settlement', ...($report === 'losses' ? ['loss_scope' => $selectedScope, 'loss_category' => $selectedCategory] : []), 'report_versions' => array_filter($reportSnapshots), 'download' => 1]) }}" class="btn btn-default"><i class="fa fa-download" aria-hidden="true"></i> 导出 Excel</button></div>@if(($filters['channel'] ?? '') === 'credit_card')
+<div class="overview-actions"><button class="btn btn-primary"><i class="fa fa-search" aria-hidden="true"></i> 查询</button><a class="btn btn-default" href="{{ route('finance.report', ['report' => $report, 'month' => $filters['month'], ...($report === 'losses' ? ['month_from' => $filters['month_from'], 'month_to' => $filters['month_to']] : [])]) }}">重置</a>
+@if(collect($reportStatuses)->every(fn ($status) => $status['state'] === 'ready' || isset($status['updated_at'])))
+    <button type="button" data-finance-download data-finance-export-url="{{ route('finance.report', ['report' => $report, ...$filters, 'view' => 'settlement', ...($report === 'losses' ? ['loss_scope' => $selectedScope, 'loss_category' => $selectedCategory] : []), 'report_versions' => array_filter($reportSnapshots), 'download' => 1]) }}" class="btn btn-default"><i class="fa fa-download" aria-hidden="true"></i> 导出 Excel</button>
+@else
+    <button type="button" class="btn btn-default" disabled>导出 Excel</button>
+@endif
+</div>@if(($filters['channel'] ?? '') === 'credit_card')
     <p class="overview-rate">信用卡数据来自「信用卡结算明细」导入记录。
         @if($creditMonths)
             已导入月份：
@@ -154,5 +165,5 @@ document.getElementById('overview-channel').addEventListener('change', function 
 @endsection
 
 @push('scripts')
-@if($report === 'losses')<script src="{{ asset('assets/erp/finance-loss-switcher.js') }}?v=3"></script>@endif
+@if($report === 'losses')<script src="{{ asset('assets/erp/finance-loss-switcher.js') }}?v=4"></script>@endif
 @endpush

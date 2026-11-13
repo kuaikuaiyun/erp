@@ -10,6 +10,9 @@
 </style>
 @endpush
 @section('finance_content')
+@if($reportStatus['state'] !== 'ready' || isset($reportStatus['updated_at']))
+    @include('portals.finance.partials.report-snapshot-status', ['status' => $reportStatus])
+@endif
 <div class="finance-report">
 @include('portals.finance.partials.summary-tabs', ['activeTab' => 'transactions'])
 <div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}" class="finance-filter">
@@ -22,7 +25,13 @@
     <div class="form-group"><label for="report-team">区域</label><input id="report-team" list="report-teams" name="team" value="{{ $filters['team'] ?? '' }}" class="form-control" placeholder="全部区域，可输入或选择" maxlength="100"><datalist id="report-teams">@foreach($teamOptions as $team)<option value="{{ $team }}">@endforeach</datalist></div>
     <div class="form-group"><label>订阅类型</label><input list="report-subscriptions" name="subscription" value="{{ $filters['subscription'] ?? '' }}" class="form-control" maxlength="100"><datalist id="report-subscriptions">@foreach($subscriptionOptions as $type)<option value="{{ $type }}">@endforeach</datalist></div>
     @include('portals.finance.partials.filter-conditions')
-    <div class="form-group finance-report-actions"><button class="btn btn-primary"><i class="fa fa-search" aria-hidden="true"></i> 查询</button><a class="btn btn-default" href="{{ route('finance.report', ['report' => $report, 'view' => 'transactions', 'channel' => $tab]) }}">重置</a><button type="button" class="btn btn-default" id="settlement-add-condition">添加筛选条件</button><button type="button" data-finance-download data-finance-export-url="{{ route('finance.report', ['report' => $report, ...$filters, 'view' => 'transactions', 'channel' => $tab, 'page' => null, 'report_snapshot' => $reportSnapshot, 'download' => 1]) }}" class="btn btn-default" ><i class="fa fa-download" aria-hidden="true"></i> 导出 Excel</button><span @class(['finance-report-status', 'is-locked' => $isLocked])>{{ $isLocked ? '已锁定' : '未锁定' }}</span></div>
+    <div class="form-group finance-report-actions"><button class="btn btn-primary"><i class="fa fa-search" aria-hidden="true"></i> 查询</button><a class="btn btn-default" href="{{ route('finance.report', ['report' => $report, 'view' => 'transactions', 'channel' => $tab]) }}">重置</a><button type="button" class="btn btn-default" id="settlement-add-condition">添加筛选条件</button>
+        @if($reportStatus['state'] === 'ready' || $reportSnapshot !== null)
+            <button type="button" data-finance-download data-finance-export-url="{{ route('finance.report', ['report' => $report, ...$filters, 'view' => 'transactions', 'channel' => $tab, 'page' => null, 'report_snapshot' => $reportSnapshot, 'download' => 1]) }}" class="btn btn-default"><i class="fa fa-download" aria-hidden="true"></i> 导出 Excel</button>
+        @else
+            <button type="button" class="btn btn-default" disabled>导出 Excel</button>
+        @endif
+        <span @class(['finance-report-status', 'is-locked' => $isLocked])>{{ $isLocked ? '已锁定' : '未锁定' }}</span></div>
 </form></div></div>
 @if($tab === 'credit_card')
     <p class="finance-report-help">徐总信用卡汇总使用徐总支付 1、2 的结算明细和已导入订单。

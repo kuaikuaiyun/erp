@@ -2568,6 +2568,44 @@ class FinancePortalTest extends TestCase
         $this->get($overview.'&month=2026-12')->assertOk()->assertViewHas('groups', [])->assertSee('2026-11');
     }
 
+    public function test_report_snapshots_serve_the_previous_version_and_retry_background_failures(): void
+    {
+        (require database_path('migrations/2026_11_13_000004_create_finance_report_snapshots.php'))->up();
+        (require database_path('migrations/2026_11_13_000006_track_finance_report_refresh_attempts.php'))->up();
+        $snapshots = Mockery::mock(\App\Portals\Finance\FinanceReportSnapshots::class, [$this->workbooks])->makePartial();
+        $snapshots->shouldReceive('runsInBackground')->andReturn(true);
+        \Illuminate\Support\Facades\Cache::shouldReceive('store')->with('redis')->andThrow(new \RuntimeException('Redis unavailable'));
+        $buildOnRequest = fn () => $this->fail('The page must not calculate a report.');
+        $filters = ['layer' => 'business', '_include_options' => true];
+        $read = fn (?string $id = null) => $snapshots->result('losses', '2026-11', $filters, $buildOnRequest, $id);
+        $controller = Mockery::mock(\App\Portals\Finance\Http\Controllers\FinanceController::class);
+        $first = [[['name' => 'Previous report']], [], null];
+        $second = [[['name' => 'Updated report']], [], null];
+        $controller->shouldReceive('buildSettlementOverviewMonth')->once()->ordered()->andReturn($first);
+        $controller->shouldReceive('buildSettlementOverviewMonth')->once()->ordered()->andThrow(new \RuntimeException('Build failed'));
+        $controller->shouldReceive('buildSettlementOverviewMonth')->once()->ordered()->andReturn($second);
+
+        try {
+            $this->freezeTime();
+            $this->assertSame('pending', $read()[2]['state']);
+            $this->assertTrue($snapshots->refresh($controller, false));
+            [$result, $firstId, $status] = $read();
+            $this->assertSame($first, $result);
+            $this->assertSame('ready', $status['state']);
+
+            $this->travel(6)->minutes();
+            $this->assertSame('updating', $read()[2]['state']);
+            $this->assertFalse($snapshots->refresh($controller, false));
+            $this->assertSame('failed', $read()[2]['state']);
+            $this->assertSame($first, $read()[0]);
+            $this->assertTrue($snapshots->refresh($controller, false));
+            $this->assertSame($second, $read()[0]);
+            $this->assertSame($first, $read($firstId)[0]);
+        } finally {
+            $this->travelBack();
+        }
+    }
+
     public function test_loss_report_fills_missing_costs_from_a_matched_logistics_order_only_once(): void
     {
         Schema::create('logistics_orders', function (Blueprint $table): void {

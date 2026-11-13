@@ -1615,10 +1615,11 @@ class FinanceController extends Controller
         $scope = \Illuminate\Support\Arr::except($filters, ['page', 'per_page', 'download']);
         ksort($scope);
         $snapshots = app(\App\Portals\Finance\FinanceReportSnapshots::class);
-        [[$items, $subscriptionOptions], $reportSnapshot] = $snapshots->result('transactions', $filters['month'], [...$scope, 'channel' => $tab],
+        [[$items, $subscriptionOptions], $reportSnapshot, $reportStatus] = $snapshots->result('transactions', $filters['month'], [...$scope, 'channel' => $tab],
             fn () => $this->buildTransactionReport($tab, $scope, $month, $account),
             $request->boolean('download') ? $request->query('report_snapshot') : null);
         if ($request->boolean('download')) {
+            abort_if($snapshots->runsInBackground() && $reportSnapshot === null, 409, '报表正在生成，请稍后重新查询。');
             $export = \App\Portals\Finance\FinanceExportSelection::filter($request, $items)->map(fn ($row) => array_map(fn ($field) => $row[$field] ?? null, array_keys($columns)));
 
             return $this->workbooks->download(array_values($columns), $export, 'finance-transactions-'.$tab.'-'.$filters['month'].'.xlsx');
@@ -1646,7 +1647,7 @@ class FinanceController extends Controller
 
         return response()->view('portals.finance.report', [
             ...$context, 'report' => $report, 'filters' => $filters, 'columns' => $columns, 'items' => $items, 'paginator' => $paginator,
-            'reportSnapshot' => $reportSnapshot, 'tab' => $tab, 'tabUrls' => $tabUrls, 'summaryTabs' => \App\Portals\Finance\FinanceTransactionSummary::VIEWS,
+            'reportSnapshot' => $reportSnapshot, 'reportStatus' => $reportStatus, 'tab' => $tab, 'tabUrls' => $tabUrls, 'summaryTabs' => \App\Portals\Finance\FinanceTransactionSummary::VIEWS,
             'creditMonths' => $creditMonths,
             'currencyOptions' => FinanceRecord::query()->whereIn('dataset', ['paypal-orders', 'xuzong2-orders', 'xuzong2-details', 'xuzong1-details'])
                 ->whereNotNull('currency')->distinct()->pluck('currency')
@@ -2760,20 +2761,28 @@ class FinanceController extends Controller
         $monthlyLossGroups = [];
         $scope = \Illuminate\Support\Arr::except($data, ['month', 'month_from', 'month_to']);
         ksort($scope);
-        $cacheOverview = ! $request->boolean('download')
-            && in_array($this->workbooks->database()->getDriverName(), ['mysql', 'mariadb'], true);
+        $snapshots = app(\App\Portals\Finance\FinanceReportSnapshots::class);
         $reportSnapshots = [];
+        $reportStatuses = [];
+        $versions = $request->boolean('download')
+            ? $request->validate(['report_versions' => 'sometimes|array', 'report_versions.*' => 'required|uuid'])['report_versions'] ?? []
+            : [];
         foreach ($comparisonMonths as $comparisonMonth) {
             $includeOptions = $comparisonMonth === $month;
-            $build = fn () => $this->buildSettlementOverviewMonth($comparisonMonth, $report, $scope, $includeOptions, $metrics, reuse: $cacheOverview);
-            [[$groups, $options, $rate], $reportSnapshots[$comparisonMonth]] = app(\App\Portals\Finance\FinanceReportSnapshots::class)
-                ->result($report, $comparisonMonth, [...$scope, '_include_options' => $includeOptions], $build,
-                    $request->boolean('download') ? ($request->query('report_versions', [])[$comparisonMonth] ?? null) : null);
+            if ($versions !== [] && ! isset($versions[$comparisonMonth])) {
+                throw ValidationException::withMessages(['report_versions' => '报表版本不完整，请重新查询后导出。']);
+            }
+            [[$groups, $options, $rate], $reportSnapshots[$comparisonMonth], $reportStatuses[$comparisonMonth]] = $snapshots
+                ->result($report, $comparisonMonth, [...$scope, '_include_options' => $includeOptions],
+                    fn () => $this->buildSettlementOverviewMonth($comparisonMonth, $report, $scope, $includeOptions, reuse: false),
+                    $versions[$comparisonMonth] ?? null);
             $monthlyLossGroups[$comparisonMonth] = $groups;
             if ($includeOptions) {
                 $filterOptions = $options;
             }
         }
+        abort_if($request->boolean('download') && $snapshots->runsInBackground() && in_array(null, $reportSnapshots, true),
+            409, '报表正在生成，请稍后重新查询。');
         if ($request->boolean('download') && $report === 'losses') {
             $export = [];
             $selectionKeys = \App\Portals\Finance\FinanceExportSelection::keys($request);
@@ -2813,10 +2822,10 @@ class FinanceController extends Controller
             return $this->workbooks->download($headers, $export, 'finance-'.$report.'-'.$month.'.xlsx');
         }
 
-        return response()->view('portals.finance.settlement-overview', [...$context, 'report' => $report, 'filters' => [...$data, 'month' => $month], 'groups' => $groups, 'monthlyLossGroups' => $monthlyLossGroups, 'rate' => $rate, 'creditMonths' => $creditMonths, 'filterOptions' => $filterOptions, 'metrics' => [...$service::MONEY, ...$metrics], 'reportSnapshots' => $reportSnapshots, 'reportTabUrls' => $this->reportTabUrls([...$data, 'month' => $month])]);
+        return response()->view('portals.finance.settlement-overview', [...$context, 'report' => $report, 'filters' => [...$data, 'month' => $month], 'groups' => $groups, 'monthlyLossGroups' => $monthlyLossGroups, 'rate' => $rate, 'creditMonths' => $creditMonths, 'filterOptions' => $filterOptions, 'metrics' => [...$service::MONEY, ...$metrics], 'reportSnapshots' => $reportSnapshots, 'reportStatuses' => $reportStatuses, 'reportTabUrls' => $this->reportTabUrls([...$data, 'month' => $month])]);
     }
 
-    public function buildSettlementOverviewMonth(string $comparisonMonth, string $report, array $data, bool $includeOptions, array $metrics, bool $reuse): array
+    public function buildSettlementOverviewMonth(string $comparisonMonth, string $report, array $data, bool $includeOptions, bool $reuse): array
     {
         $start = CarbonImmutable::parse($comparisonMonth.'-01', 'Asia/Shanghai');
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);

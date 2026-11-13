@@ -19,7 +19,7 @@ class RefreshFinanceSummaries extends Command
     public function handle(FinanceWorkbookService $workbooks, FinanceSummaryProjection $projection, FinanceSummaryDependencies $dependencies, FinanceReportSnapshots $reports, FinanceController $controller): int
     {
         $db = $workbooks->database();
-        if (! \App\Portals\Finance\FinanceSummaryTriggers::available($db)) {
+        if (! $reports->runsInBackground()) {
             return self::SUCCESS;
         }
 
@@ -28,18 +28,25 @@ class RefreshFinanceSummaries extends Command
             return self::SUCCESS;
         }
         try {
-            $dependencies->resolve($db);
-            $periods = $db->table('finance_summary_periods')->whereColumn('published', '<', 'revision')->orderByDesc('month')->get();
-            foreach ($periods as $period) {
-                $projection->refresh($period);
+            $tracksRevisions = \App\Portals\Finance\FinanceSummaryTriggers::available($db);
+            $failed = false;
+            if ($tracksRevisions) {
+                try {
+                    $dependencies->resolve($db);
+                    $periods = $db->table('finance_summary_periods')->whereColumn('published', '<', 'revision')->orderByDesc('month')->get();
+                    foreach ($periods as $period) {
+                        $projection->refresh($period);
+                    }
+                } catch (\Throwable $exception) {
+                    report($exception);
+                    $failed = true;
+                }
             }
-            foreach ($periods->pluck('month')->unique() as $month) {
-                $reports->refreshMonth($month, $controller);
-            }
+            $reportsRefreshed = $reports->refresh($controller, $tracksRevisions);
+
+            return $reportsRefreshed && ! $failed ? self::SUCCESS : self::FAILURE;
         } finally {
             $lock->release();
         }
-
-        return self::SUCCESS;
     }
 }

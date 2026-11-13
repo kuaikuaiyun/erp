@@ -1275,29 +1275,74 @@ class FinanceSettlementService
 
     public function logisticsCostStream(iterable $rows): iterable
     {
-        // Costs are assigned across the entire filtered set, even across source batches.
+        $db = $this->workbooks->database();
+        $mysql = in_array($db->getDriverName(), ['mysql', 'mariadb'], true);
+        $table = $mysql ? 'finance_report_order_costs' : 'finance_cost_orders_'.bin2hex(random_bytes(8));
+        $runId = (string) \Illuminate\Support\Str::uuid();
+        if ($mysql) {
+            // The scratch rows live only until this transaction or savepoint is rolled back.
+            $db->beginTransaction();
+        } else {
+            $db->getSchemaBuilder()->create($table, function (\Illuminate\Database\Schema\Blueprint $table): void {
+                $table->temporary();
+                $table->bigIncrements('id');
+                $table->uuid('run_id');
+                $table->unsignedBigInteger('order_id')->unique();
+                $table->text('payment')->nullable();
+                $table->string('purchase')->nullable();
+                $table->string('logistics')->nullable();
+            });
+        }
+        try {
+            yield from $this->aggregateLogisticsCosts($rows, $db, $table, $runId);
+        } finally {
+            if ($mysql) {
+                $db->rollBack();
+            } else {
+                $db->getSchemaBuilder()->dropIfExists($table);
+            }
+        }
+    }
+
+    private function aggregateLogisticsCosts(iterable $rows, \Illuminate\Database\Connection $db, string $table, string $runId): iterable
+    {
+        // Keep the first successful payment and first known cost per order across all batches.
+        $mysql = in_array($db->getDriverName(), ['mysql', 'mariadb'], true);
+        $orderKey = $mysql ? ['run_id', 'order_id'] : ['order_id'];
+        $update = [];
+        foreach (['payment', 'purchase', 'logistics'] as $field) {
+            $incoming = $mysql
+                ? ($db->getConfig('use_upsert_alias') ? 'laravel_upsert_alias.'.$field : 'VALUES('.$field.')')
+                : 'excluded.'.$field;
+            $update[$field] = $db->raw('COALESCE('.$db->getQueryGrammar()->wrapTable($table).'.'.$field.', '.$incoming.')');
+        }
         $orders = [];
         foreach ($rows as $row) {
             $id = $row['logistics_order_id'] ?? null;
             if (filled($id)) {
-                $state = $orders[$id] ?? [null, null, null];
-                $state[0] ??= $row['success'] ? array_intersect_key($row, array_fill_keys(
+                $orders[$id] ??= ['run_id' => $runId, 'order_id' => $id, 'payment' => null, 'purchase' => null, 'logistics' => null];
+                $orders[$id]['payment'] ??= $row['success'] ? json_encode(array_intersect_key($row, array_fill_keys(
                     ['id', 'channel', 'payment_channel', 'account', 'account_key', 'team', 'owner', 'subscription', 'payment_method', 'currency', 'month'], true
-                )) : null;
-                $state[1] ??= $row['purchase'];
-                $state[2] ??= $row['logistics'];
-                $orders[$id] = $state;
+                )), JSON_THROW_ON_ERROR) : null;
+                $orders[$id]['purchase'] ??= $row['purchase'];
+                $orders[$id]['logistics'] ??= $row['logistics'];
+                if (count($orders) === 100) {
+                    $db->table($table)->upsert(array_values($orders), $orderKey, $update);
+                    $orders = [];
+                }
             }
             yield $row;
         }
-        foreach (array_chunk($orders, 500, true) as $batch) {
-            $payments = collect();
-            foreach ($batch as $orderId => [$payment, $purchase, $logistics]) {
-                if ($payment !== null && ($purchase === null || $logistics === null)) {
-                    $payments->push($payment + ['logistics_order_id' => $orderId,
-                        'success' => true, 'purchase' => $purchase, 'logistics' => $logistics]);
-                }
-            }
+        if ($orders !== []) {
+            $db->table($table)->upsert(array_values($orders), $orderKey, $update);
+        }
+        $missing = $db->table($table)->useWritePdo()->where('run_id', $runId)->whereNotNull('payment')
+            ->where(fn ($query) => $query->whereNull('purchase')->orWhereNull('logistics'));
+        foreach ($missing->lazyById(500)->chunk(500) as $batch) {
+            $payments = $batch->map(fn ($order) => json_decode($order->payment, true, 512, JSON_THROW_ON_ERROR) + [
+                'logistics_order_id' => $order->order_id, 'success' => true,
+                'purchase' => $order->purchase, 'logistics' => $order->logistics,
+            ])->values()->collect();
             foreach ($this->withLogisticsCosts($payments) as $index => $payment) {
                 $original = $payments[$index];
                 $adjustment = ['id' => $payment['id']];
@@ -1424,15 +1469,16 @@ class FinanceSettlementService
                 $query->selectRaw('CASE WHEN '.$predicate.' THEN 1 ELSE 0 END as matches_'.$platform, $match->getBindings());
             }
         }
+        $batchSize = 500;
         $context = null;
         $last = null;
         do {
             $page = clone $query;
             if ($last !== null) {
-                $page->where(fn ($scope) => $scope->where('occurred_at', '<', $last->occurred_at)
-                    ->orWhere(fn ($tie) => $tie->where('occurred_at', $last->occurred_at)->where('id', '<', $last->id)));
+                $page->where(fn ($scope) => $scope->where('occurred_at', '<', $last->getRawOriginal('occurred_at'))
+                    ->orWhere(fn ($tie) => $tie->where('occurred_at', $last->getRawOriginal('occurred_at'))->where('id', '<', $last->id)));
             }
-            $records = $page->limit(1500)->get();
+            $records = $page->limit($batchSize)->get();
             if ($records->isEmpty()) {
                 break;
             }
@@ -1461,7 +1507,7 @@ class FinanceSettlementService
                         ? ['_summary_source_account' => $record->account] : []);
                 }
             }
-        } while ($records->count() === 1500);
+        } while ($records->count() === $batchSize);
         if ($channel === 'credit_card' && ! empty($filters['include_unmatched_fees'])) {
             $accounts = FinancePaymentAccount::query()->where('account_type', 'credit_card')->get()->keyBy('id');
             $conflux = app(FinanceConfluxSettlement::class);

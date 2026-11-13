@@ -62,6 +62,13 @@
         }
         document.querySelector('[name="loss_scope"]').value = scope;
         document.querySelector('[name="loss_category"]').value = category;
+        var download = document.querySelector('[data-finance-export-url]');
+        if (download) {
+            var exportUrl = new URL(download.dataset.financeExportUrl);
+            exportUrl.searchParams.set('loss_scope', scope);
+            exportUrl.searchParams.set('loss_category', category);
+            download.dataset.financeExportUrl = exportUrl.href;
+        }
         if (push) window.history.pushState(null, '', url);
     }
 
