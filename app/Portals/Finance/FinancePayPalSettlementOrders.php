@@ -238,6 +238,8 @@ class FinancePayPalSettlementOrders
     private function matchingRows(array $filters, array $orders, array $graph, bool $includeDetails): iterable
     {
         [, $roots, $children, $conversions, $crossAccount, $ambiguous, $crossRates] = $graph;
+        $lockedMonths = $this->workbooks->database()->table('finance_period_locks')
+            ->whereNotNull('report_snapshot')->pluck('month')->all();
         $numericConditionFields = $this->settlements->numericConditionFields('paypal');
         $count = count($orders);
         for ($offset = 0; $offset < $count; $offset += 250) {
@@ -248,7 +250,7 @@ class FinancePayPalSettlementOrders
             $payments = $this->settlements->rows('paypal', ['timezone' => $filters['timezone'], 'order_view' => true], $records)->keyBy('id');
             foreach ($batch as $order) {
                 if (isset($order['event'])) {
-                    $row = $this->unlinkedRow($order['event'], $filters['timezone'], $includeDetails);
+                    $row = $this->unlinkedRow($order['event'], $filters['timezone'], $includeDetails, $lockedMonths);
                 } else {
                     $payment = $payments->get($order['id']);
                     if ($payment === null) {
@@ -268,6 +270,11 @@ class FinancePayPalSettlementOrders
         if (in_array($this->workbooks->database()->getDriverName(), ['mysql', 'mariadb'], true)) {
             Cache::forget($this->orderGraphCacheKey());
         }
+    }
+
+    public function isUnlinkedSettlement(int $recordId): bool
+    {
+        return isset($this->orderGraph($recordId)[0]['event:'.$recordId]);
     }
 
     private function orderGraphCacheKey(): string
@@ -309,8 +316,10 @@ class FinancePayPalSettlementOrders
                 });
         }
         $index = $invoiceRoots = $events = $extraEvents = $crossAccount = [];
-        $removed = $db->table('finance_settlement_supplements')->whereNotNull('payload->_deleted_at')
+        $removedSettlements = $db->table('finance_settlement_supplements')->whereNotNull('payload->_deleted_at');
+        $removedEvents = (clone $removedSettlements)->where('payload->_deleted_unlinked_event', true)
             ->pluck('finance_record_id')->flip()->all();
+        $removed = array_diff_key($removedSettlements->pluck('finance_record_id')->flip()->all(), $removedEvents);
         $transactions = $db->table('finance_payment_transactions as txn')
             ->join('finance_records as record', 'record.id', '=', 'txn.finance_record_id')
             ->join('finance_payment_accounts as account', 'account.id', '=', 'txn.payment_account_id')
@@ -357,6 +366,9 @@ class FinancePayPalSettlementOrders
             $transactions->addSelect('event_type.category as configured_category');
         }
         foreach ($transactions->lazyById(1500, 'txn.id', 'id') as $txn) {
+            if (isset($removedEvents[(int) $txn->finance_record_id])) {
+                continue;
+            }
             $payment = isset($byId[(int) $txn->finance_record_id]);
             $deleted = isset($removed[(int) $txn->finance_record_id]);
             $settlementEvent = in_array($txn->event_code, $settlementCodes, true);
@@ -503,7 +515,7 @@ class FinancePayPalSettlementOrders
         return $result;
     }
 
-    private function unlinkedRow(array $event, string $zone, bool $includeDetails): array
+    private function unlinkedRow(array $event, string $zone, bool $includeDetails, array $lockedMonths): array
     {
         $date = CarbonImmutable::createFromTimestamp($event['time'], 'UTC')->setTimezone($zone);
         $accountReserve = in_array($event['code'], ['T2103', 'T2104'], true)
@@ -517,7 +529,8 @@ class FinancePayPalSettlementOrders
             'order_status' => '待关联交易',
             'review' => $accountReserve ? self::ACCOUNT_RESERVE_NOTE : '未找到唯一的原付款，未计入应结算',
             ...($includeDetails ? ['events' => [$this->detail($event, $zone)]] : []),
-            'payments' => [], 'locked' => true,
+            'payments' => [],
+            'locked' => in_array($date->setTimezone('Asia/Shanghai')->format('Y-m'), $lockedMonths, true),
             'unlinked_account' => $event['account_key'], 'unlinked_date' => $date,
         ];
     }

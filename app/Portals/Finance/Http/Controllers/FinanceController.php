@@ -2088,11 +2088,27 @@ class FinanceController extends Controller
         try {
             $this->workbooks->database()->transaction(function () use ($data, $service, $channel, $scope, $context): void {
                 $records = $service->query($channel, $scope)->whereIn('id', $data['ids'])->lockForUpdate()->get();
+                $unlinkedIds = [];
+                if ($channel === 'paypal' && $records->count() !== count($data['ids'])) {
+                    $missing = array_diff($data['ids'], $records->modelKeys());
+                    $orders = app(FinancePayPalSettlementOrders::class);
+                    foreach (FinanceRecord::query()->whereIn('id', $missing)->lockForUpdate()->get() as $record) {
+                        if ($orders->isUnlinkedSettlement($record->id)) {
+                            $records->push($record);
+                            $unlinkedIds[$record->id] = true;
+                        }
+                    }
+                }
                 if ($records->count() !== count($data['ids'])) {
                     throw ValidationException::withMessages(['ids' => '部分记录不存在、已删除或不属于当前结算明细，请刷新后重试。']);
                 }
                 foreach ($records as $record) {
-                    $service->save($record, ['_deleted_at' => now()->toIso8601String(), '_deleted_by' => (int) $context['user']->getKey()], (int) $context['user']->getKey());
+                    $actor = (int) $context['user']->getKey();
+                    $values = ['_deleted_at' => now()->toIso8601String(), '_deleted_by' => $actor];
+                    if (isset($unlinkedIds[$record->id])) {
+                        $values['_deleted_unlinked_event'] = true;
+                    }
+                    $service->save($record, $values, $actor);
                 }
             });
         } catch (\App\Portals\Finance\FinanceRelayException $e) {

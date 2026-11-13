@@ -81,7 +81,7 @@ document.getElementById('overview-channel').addEventListener('change', function 
     document.getElementById('overview-xuzong-source').hidden = this.value !== 'xuzong';
 });
 </script>
-@foreach(['account' => '支付账户', 'team' => '团队', 'owner' => '使用人', 'subscription' => '订阅类型'] as $field => $label)<div><label for="overview-{{ $field }}">{{ $label }}</label><input id="overview-{{ $field }}" name="{{ $field }}" value="{{ $filters[$field] ?? '' }}" list="overview-options-{{ $field }}" class="form-control" placeholder="输入或选择"><datalist id="overview-options-{{ $field }}">@foreach($filterOptions[$field] as $option)<option value="{{ $option['value'] }}">{{ $option['label'] }}</option>@endforeach</datalist></div>@endforeach
+@foreach(['account' => '支付账户', 'team' => '团队', 'owner' => '使用人', 'subscription' => '订阅类型'] as $field => $label)<div><label for="overview-{{ $field }}">{{ $label }}</label><input id="overview-{{ $field }}" name="{{ $field }}" value="{{ $filters[$field] ?? '' }}" list="overview-options-{{ $field }}" class="form-control" placeholder="输入或选择"><datalist id="overview-options-{{ $field }}">@foreach(($filterOptions[$field] ?? []) as $option)<option value="{{ $option['value'] }}">{{ $option['label'] }}</option>@endforeach</datalist></div>@endforeach
 @if($report === 'losses')
 @php
     $comparison = $monthlyLossGroups ?? [$filters['month'] => $groups];
