@@ -434,7 +434,7 @@
                 var body = document.createElement('tbody');
                 title.textContent = (payload.product.code || '') + ' · ' + (payload.product.name || '');
                 table.className = 'table table-bordered table-striped';
-                head.innerHTML = '<tr><th>测评人</th><th>测试周期</th><th>平台</th><th>消耗</th><th>出单量</th><th>素材名称</th><th>视频</th></tr>';
+                head.innerHTML = '<tr><th>测评人</th><th>测试周期</th><th>平台</th><th>消耗</th><th>出单量</th><th>素材名称</th><th>投放视频</th></tr>';
                 (payload.evaluations || []).forEach(function (evaluation) {
                     (evaluation.records || []).forEach(function (record) {
                         var row = document.createElement('tr');
@@ -443,7 +443,7 @@
                         });
                         var videoCell = document.createElement('td');
                         if (record.video_url) {
-                            var link = document.createElement('a'); link.className = 'btn btn-xs btn-info'; link.target = '_blank'; link.href = record.video_url; link.textContent = '播放视频'; videoCell.appendChild(link);
+                            var link = document.createElement('a'); link.className = 'btn btn-xs btn-info'; link.target = '_blank'; link.href = record.video_url; link.textContent = '投放视频'; videoCell.appendChild(link);
                         } else videoCell.textContent = '—';
                         row.appendChild(videoCell); body.appendChild(row);
                     });

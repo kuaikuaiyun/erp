@@ -76,7 +76,7 @@
 
 @push('scripts')
     <script>window.ErpAikaipinSubmissionConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-placement-evaluation.js?v=20261113-2"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-placement-evaluation.js?v=20261113-3"></script>
 @endpush
 
 @section('content')
@@ -125,12 +125,25 @@
                             $images = $product->imageFiles();
                         @endphp
                         <tr data-aikaipin-list-row>
-                            <td>@if($images !== [])<img src="{{ route('aikaipin.product-library.images.show', [$product, 0]) }}" style="width:52px;height:52px;object-fit:cover;border-radius:6px">@else — @endif</td>
+                            <td>@if($images !== [])<img src="{{ route('aikaipin.product-library.images.show', [$product, 0, 'thumb' => 1, 'v' => $product->updated_at?->getTimestamp()]) }}" loading="lazy" decoding="async" width="52" height="52" style="width:52px;height:52px;object-fit:cover;border-radius:6px">@else — @endif</td>
                             <td><code>{{ $product->product_code }}</code></td>
                             <td><strong>{{ $product->name }}</strong></td>
                             <td>@foreach($product->categoryValues() as $category)<span class="label label-default">{{ $category }}</span> @endforeach</td>
                             <td>{{ trans('aikaipin.upload.source_options.'.$product->source_platform) }}<br><small>{{ trans('aikaipin.upload.type_options.'.$product->product_type) }}</small></td>
-                            <td>@forelse($records->groupBy(fn($r) => $r->currency) as $currency => $currencyRecords)<div>{{ strtoupper($currency) }} {{ number_format($currencyRecords->sum('actual_spend'),2) }} · {{ $currencyRecords->sum('orders') }} 单</div>@empty — @endforelse</td>
+                            <td>
+                                @forelse($records->groupBy(fn($r) => $r->currency) as $currency => $currencyRecords)
+                                    <div>{{ strtoupper($currency) }} {{ number_format($currencyRecords->sum('actual_spend'),2) }} · {{ $currencyRecords->sum('orders') }} 单</div>
+                                @empty
+                                    —
+                                @endforelse
+                                @if($records->isNotEmpty())
+                                    <div style="margin-top:4px;padding-top:4px;border-top:1px dashed #dbe5ec;color:#607d8b;font-size:11px;line-height:1.6">
+                                        @foreach($records->groupBy(fn($r) => strtolower((string) $r->platform)) as $platform => $platformRecords)
+                                            <div><i class="fa fa-bullhorn" aria-hidden="true"></i> {{ trans('aikaipin.placement_evaluation.platform_options.'.$platform) !== 'aikaipin.placement_evaluation.platform_options.'.$platform ? trans('aikaipin.placement_evaluation.platform_options.'.$platform) : ucfirst($platform) }}：{{ $platformRecords->sum('orders') }} 单</div>
+                                        @endforeach
+                                    </div>
+                                @endif
+                            </td>
                             <td><span class="badge bg-light-blue">{{ $evaluatorCount }}</span></td>
                             <td>{{ $updatedAt?->timezone(config('app.timezone'))->format('Y-m-d H:i') }}</td>
                             <td>@if($evaluations->isNotEmpty())<span class="label label-success">已测评</span>@else<span class="label label-danger">未测评</span>@endif</td>

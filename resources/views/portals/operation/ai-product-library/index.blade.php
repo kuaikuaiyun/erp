@@ -313,6 +313,16 @@
     var modal = document.getElementById('operation-ai-placement-modal');
     if (!modal) return;
     var content = modal.querySelector('[data-operation-ai-placement-content]');
+    function initializePlacementRecords() {
+        var container=content.querySelector('[data-placement-records]'),template=content.querySelector('#placement-record-template'),add=content.querySelector('[data-add-placement-record]');
+        if(!container||!template||!add)return;
+        function renumber(){var rows=container.querySelectorAll('[data-placement-record]');rows.forEach(function(row,index){row.querySelector('[data-record-title]').textContent='投放平台 '+(index+1);row.querySelectorAll('[data-field]').forEach(function(field){field.name='records['+index+']['+field.getAttribute('data-field')+']';});row.querySelector('[data-remove-placement-record]').disabled=rows.length===1;});add.disabled=rows.length>=6;}
+        function append(){if(container.querySelectorAll('[data-placement-record]').length>=6)return;container.appendChild(template.content.cloneNode(true));renumber();}
+        add.addEventListener('click',append);container.addEventListener('click',function(event){var button=event.target.closest('[data-remove-placement-record]');if(!button||container.querySelectorAll('[data-placement-record]').length===1)return;button.closest('[data-placement-record]').remove();renumber();});append();
+        var form=content.querySelector('form'),progress=content.querySelector('[data-placement-upload-progress]'),status=content.querySelector('[data-placement-upload-status]'),percent=content.querySelector('[data-placement-upload-percent]'),bar=content.querySelector('[data-placement-upload-bar]'),submit=form&&form.querySelector('[type="submit"]');
+        function setProgress(value,message,error){value=Math.max(0,Math.min(100,Math.round(value)));progress.hidden=false;status.textContent=message;percent.textContent=value+'%';bar.style.width=value+'%';bar.classList.toggle('progress-bar-danger',!!error);bar.classList.toggle('progress-bar-info',!error);}
+        if(form&&progress)form.addEventListener('submit',function(event){event.preventDefault();if(!form.reportValidity())return;submit.disabled=true;add.disabled=true;setProgress(0,'准备上传投放视频...',false);var xhr=new XMLHttpRequest();xhr.open('POST',form.action,true);xhr.setRequestHeader('Accept','application/json');xhr.setRequestHeader('X-Requested-With','XMLHttpRequest');xhr.upload.addEventListener('progress',function(uploadEvent){if(uploadEvent.lengthComputable)setProgress(uploadEvent.loaded/uploadEvent.total*100,'正在上传投放视频...',false);});xhr.addEventListener('load',function(){var data={};try{data=JSON.parse(xhr.responseText||'{}');}catch(ignore){}if(xhr.status>=200&&xhr.status<300){setProgress(100,'上传完成，正在刷新列表...',false);window.location.assign(data.redirect_url||window.location.href);return;}var errors=data.errors||{},firstKey=Object.keys(errors)[0],message=(firstKey&&errors[firstKey]&&errors[firstKey][0])||data.message||'保存失败，请重试。';setProgress(0,message,true);submit.disabled=false;renumber();});xhr.addEventListener('error',function(){setProgress(0,'网络异常，上传失败，请重试。',true);submit.disabled=false;renumber();});xhr.send(new FormData(form));});
+    }
     document.addEventListener('click', function (event) {
         var button = event.target.closest('[data-operation-ai-placement]');
         if (!button) return;
@@ -320,7 +330,7 @@
         window.jQuery(modal).modal('show');
         fetch(button.getAttribute('data-placement-url'), {headers:{'X-Requested-With':'XMLHttpRequest'}})
             .then(function (response) { if (!response.ok) throw new Error('投放测评加载失败'); return response.text(); })
-            .then(function (html) { content.innerHTML = html; })
+            .then(function (html) { content.innerHTML = html; initializePlacementRecords(); })
             .catch(function (error) { content.innerHTML = '<div class="alert alert-danger">' + error.message + '</div>'; });
     });
 })();

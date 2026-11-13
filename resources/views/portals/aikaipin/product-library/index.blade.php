@@ -216,6 +216,12 @@
                                         'imageIndex' => $index,
                                         'v' => $product->updated_at?->getTimestamp() ?? time(),
                                     ]),
+                                    'thumbnail_url' => route('aikaipin.product-library.images.show', [
+                                        'product' => $product,
+                                        'imageIndex' => $index,
+                                        'thumb' => 1,
+                                        'v' => $product->updated_at?->getTimestamp() ?? time(),
+                                    ]),
                                 ],
                                 $imageFiles,
                                 array_keys($imageFiles),
@@ -244,7 +250,7 @@
                                     data-aikaipin-preview-title="{{ $productName }}"
                                     data-aikaipin-preview-images='@json($previewImages)'>
                                     @if ($imageCount > 0)
-                                        <img src="{{ $previewImages[0]['url'] }}" alt="{{ $productName }}" loading="lazy" decoding="async">
+                                        <img src="{{ $previewImages[0]['thumbnail_url'] }}" alt="{{ $productName }}" loading="lazy" decoding="async" width="64" height="64">
                                     @else
                                         <i class="fa fa-picture-o" aria-hidden="true"></i>
                                     @endif
