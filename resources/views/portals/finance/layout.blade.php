@@ -23,7 +23,7 @@
 @endsection
 
 @push('scripts')
-<script src="{{ asset('assets/erp/finance-export-selection.js') }}?v=2"></script>
+<script src="{{ asset('assets/erp/finance-export-selection.js') }}?v=3"></script>
 <script>
 document.addEventListener('change', function (event) {
     var select = event.target;

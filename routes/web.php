@@ -63,6 +63,10 @@ Route::get('/fashion/applovin-spends', [FashionAppLovinSpendController::class, '
 Route::get('/fashion/applovin-spends/pending-count', [FashionAppLovinSpendController::class, 'pendingCount'])->name('fashion.applovin-spends.pending-count');
 Route::post('/fashion/applovin-spends/screenshot', [FashionAppLovinSpendController::class, 'uploadScreenshot'])->name('fashion.applovin-spends.screenshot.upload');
 Route::get('/fashion/applovin-spends/screenshots/{screenshot}', [FashionAppLovinSpendController::class, 'screenshot'])->whereNumber('screenshot')->name('fashion.applovin-spends.screenshot');
+Route::get('/fashion/applovin-account-statistics', [AppLovinAccountStatisticsController::class, 'index'])->name('fashion.applovin-account-statistics.index');
+Route::get('/fashion/applovin-account-statistics/accounts', [AppLovinAccountStatisticsController::class, 'spendBand'])->name('fashion.applovin-account-statistics.spend-band');
+Route::get('/fashion/applovin-account-statistics/{operator}', [AppLovinAccountStatisticsController::class, 'show'])->whereNumber('operator')->name('fashion.applovin-account-statistics.show');
+Route::get('/fashion/applovin-performance-reports', [FashionAppLovinPerformanceReportController::class, 'index'])->name('fashion.applovin-performance-reports.index');
 Route::get('/fashion/performance-report', [PerformanceReportController::class, 'index'])->name('fashion.performance-report.index');
 Route::get('/fashion/performance-report/orders', [PerformanceReportController::class, 'orders'])->name('fashion.performance-report.orders');
 Route::get('/fashion/stores', [FashionStoreController::class, 'index'])->name('fashion.stores.index');
@@ -272,6 +276,10 @@ Route::post('/operation/daily-submissions/applovin-spends/screenshot', [AppLovin
     ->name('operation.applovin-spends.screenshot.upload');
 Route::get('/operation/daily-submissions/applovin-spends/screenshots/{screenshot}', [AppLovinSpendController::class, 'screenshot'])
     ->whereNumber('screenshot')->name('operation.applovin-spends.screenshot');
+Route::get('/operation/applovin-account-statistics', [AppLovinAccountStatisticsController::class, 'index'])->name('operation.applovin-account-statistics.index');
+Route::get('/operation/applovin-account-statistics/accounts', [AppLovinAccountStatisticsController::class, 'spendBand'])->name('operation.applovin-account-statistics.spend-band');
+Route::get('/operation/applovin-account-statistics/{operator}', [AppLovinAccountStatisticsController::class, 'show'])->whereNumber('operator')->name('operation.applovin-account-statistics.show');
+Route::get('/operation/applovin-performance-reports', [AppLovinPerformanceReportController::class, 'index'])->name('operation.applovin-performance-reports.index');
 Route::get('/assistant/daily-submissions/applovin-spends', [AppLovinSpendReviewController::class, 'index'])
     ->name('assistant.applovin-spends.index');
 Route::get('/assistant/applovin-account-statistics', [AppLovinAccountStatisticsController::class, 'index'])

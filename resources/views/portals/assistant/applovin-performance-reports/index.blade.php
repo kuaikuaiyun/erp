@@ -22,7 +22,7 @@
     <div class="form-group"><label>账号历史总消耗</label><select class="form-control" name="consumption_range" id="ap-consumption-range"><option value="" @selected($selectedConsumptionRange==='')>全部</option><option value="lt_5000" @selected($selectedConsumptionRange==='lt_5000')>小于 $5,000</option><option value="5000_10000" @selected($selectedConsumptionRange==='5000_10000')>$5,000 - $10,000</option><option value="gt_10000" @selected($selectedConsumptionRange==='gt_10000')>大于 $10,000</option><option value="custom" @selected($selectedConsumptionRange==='custom')>自定义</option></select></div>
     <div class="form-group ap-consumption-custom-field"><label>自定义最低消耗($)</label><input type="number" min="0" step="0.01" class="form-control" name="consumption_custom" value="{{$consumptionCustom}}" placeholder="最低消耗金额"></div>
     <div class="form-group ap-consumption-custom-field"><label>自定义最高消耗($)</label><input type="number" min="0" step="0.01" class="form-control" name="consumption_custom_max" value="{{$consumptionCustomMax}}" placeholder="最高消耗金额"></div>
-    <button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{route('assistant.applovin-performance-reports.index')}}">重置</a><button type="button" class="btn btn-success" id="apReportImageDownload"><i class="fa fa-picture-o"></i> <span>下载列表图片</span></button>
+    <button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{route($performanceResetRoute)}}">重置</a><button type="button" class="btn btn-success" id="apReportImageDownload"><i class="fa fa-picture-o"></i> <span>下载列表图片</span></button>
 </form></div></div>
 <div class="ap-kpis">
     <div class="ap-kpi"><span>绑定店铺数</span><strong>{{$totals['stores']}}</strong></div>

@@ -11,6 +11,8 @@
 @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
 @if($errors->any())<div class="alert alert-danger">{{ $errors->first() }}</div>@endif
 <div class="box spend-box"><div class="box-body"><form method="get" class="form-inline">
+    <div class="form-group"><label>运营部门&nbsp;</label><select class="form-control" name="department_id"><option value="">全部部门</option>@foreach($departments as $id => $name)<option value="{{ $id }}" @selected($departmentId===$id)>{{ $name }}</option>@endforeach</select></div>
+    <div class="form-group"><label>运营人员&nbsp;</label><select class="form-control" name="operator_id"><option value="">全部人员</option>@foreach($operators as $id => $name)<option value="{{ $id }}" @selected($operatorId===$id)>{{ $name }}</option>@endforeach</select></div>
     <div class="form-group"><label>广告账号&nbsp;</label><input class="form-control" name="account_name" value="{{ $accountName }}" placeholder="输入广告账号"></div>
     <div class="form-group"><label>账号编号&nbsp;</label><input class="form-control" name="account_number" value="{{ $accountNumber }}" placeholder="输入账号编号"></div>
     <div class="form-group"><label>累计消耗&nbsp;</label><select class="form-control" name="over_threshold"><option value="">全部数据</option><option value="1" @selected($overThreshold==='1')>大于等于 $5,000</option></select></div>
@@ -18,12 +20,12 @@
     <a class="btn btn-default" href="{{ route('fashion.applovin-spends.index') }}">重置</a>
 </form></div></div>
 <div class="box spend-box"><div class="table-responsive"><table class="table table-bordered table-hover"><thead><tr><th>运营部门/人员</th><th>代理账号</th><th>广告社媒</th><th>广告账户</th><th>账户编号</th><th>累计实际消耗</th><th>是否有礼金</th></tr></thead><tbody>
-@forelse($accounts as $account)<tr>
+@forelse($accounts as $account)@php($canUpload = $user->isAdministrator() || strcasecmp((string)$user->username,'kky_boss')===0 || (int)$account['operator_user_id']===(int)$user->getKey())<tr>
     <td>{{ $account['department'] ?: '—' }}<br><small>{{ $account['operator_name'] }}</small></td><td><b>{{ $account['agency'] }}</b></td><td>{{ $account['media'] ?: '—' }}</td><td>{{ $account['account_name'] }}</td><td>{{ $account['account_number'] }}</td><td class="{{ $account['total'] >= $threshold ? 'spend-high' : '' }}">${{ number_format($account['total'],2) }}</td>
     <td>@if($account['total'] >= $threshold)
         @if($account['uploaded_screenshot'])<a target="_blank" href="{{ route('fashion.applovin-spends.screenshot',$account['uploaded_screenshot']) }}"><img class="gift-thumb" src="{{ route('fashion.applovin-spends.screenshot',$account['uploaded_screenshot']) }}" alt="礼金图"></a>@endif
-        <button type="button" class="btn btn-xs {{ $account['uploaded_screenshot'] ? 'btn-warning' : 'btn-info' }} js-upload-open" data-key="{{ $account['account_key'] }}" data-toggle="modal" data-target="#spend-upload-modal"><i class="fa fa-picture-o"></i> {{ $account['uploaded_screenshot'] ? '更换礼金图' : '上传礼金图' }}</button>
-        <button type="button" class="btn btn-xs btn-default" data-toggle="modal" data-target="#gift-example-modal"><i class="fa fa-question-circle"></i> 上传图片示例</button>
+        @if($canUpload)<button type="button" class="btn btn-xs {{ $account['uploaded_screenshot'] ? 'btn-warning' : 'btn-info' }} js-upload-open" data-key="{{ $account['account_key'] }}" data-toggle="modal" data-target="#spend-upload-modal"><i class="fa fa-picture-o"></i> {{ $account['uploaded_screenshot'] ? '更换礼金图' : '上传礼金图' }}</button>
+        <button type="button" class="btn btn-xs btn-default" data-toggle="modal" data-target="#gift-example-modal"><i class="fa fa-question-circle"></i> 上传图片示例</button>@elseif(!$account['uploaded_screenshot'])<span class="text-muted">待本人上传</span>@endif
         @if($account['uploaded_screenshot']) <span class="label label-success">已上传</span>@endif
     @else<span class="text-muted">—</span>@endif</td>
 </tr>@empty<tr><td colspan="7" class="text-center text-muted" style="padding:30px">暂无服装 AppLovin 广告费用数据</td></tr>@endforelse

@@ -11,6 +11,7 @@ use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Operation\OperationReportMetricsService;
+use App\Services\DepartmentAuthorizationService;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Validation\Rule;
@@ -24,6 +25,7 @@ class AppLovinPerformanceReportController extends Controller
         private readonly AssistantPortalAuthorizationService $authorization,
         private readonly AssistantStoreOwnerService $storeOwners,
         private readonly OperationReportMetricsService $metrics,
+        private readonly DepartmentAuthorizationService $departmentAuthorization,
     ) {}
 
     public function index(Request $request): Response|View
@@ -32,10 +34,21 @@ class AppLovinPerformanceReportController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
-        $this->authorization->assertAssistantPortal($context['portal']);
-        abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
+        $isOperationPortal = $request->routeIs('operation.applovin-performance-reports.*');
+        if ($isOperationPortal) {
+            abort_unless($context['portal']->code === 'yunying', 404);
+        } else {
+            $this->authorization->assertAssistantPortal($context['portal']);
+            abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
+        }
 
-        $visibleIds = $this->storeOwners->visibleOperationDepartmentIds($context['user']);
+        $canSeeAll = $context['user']->isAdministrator() || strcasecmp((string) $context['user']->username, 'kky_boss') === 0;
+        $managedIds = $this->departmentAuthorization->managedDepartmentIds($context['user'])
+            ->intersect($this->storeOwners->operationDepartments()->pluck('id'))->map(fn ($id) => (int) $id)->values()->all();
+        $operatorOnly = $isOperationPortal && ! $canSeeAll && $managedIds === [];
+        $visibleIds = $isOperationPortal
+            ? ($canSeeAll ? $this->storeOwners->operationDepartments()->pluck('id')->map(fn ($id) => (int) $id)->all() : $managedIds)
+            : $this->storeOwners->visibleOperationDepartmentIds($context['user']);
         $timezoneOptions = $this->timezoneOptions();
         $filters = $request->validate([
             'date_from' => ['nullable', 'date_format:Y-m-d'],
@@ -76,8 +89,10 @@ class AppLovinPerformanceReportController extends Controller
         }
 
         $query = OperationReport::query()->where('status', OperationReport::STATUS_APPROVED);
-        if (! $context['user']->isAdministrator()) {
-            $visibleIds === [] ? $query->whereRaw('1=0') : $query->whereIn('operation_department_id', $visibleIds);
+        if (! $canSeeAll) {
+            $operatorOnly
+                ? $query->where('operator_user_id', $context['user']->getKey())
+                : ($visibleIds === [] ? $query->whereRaw('1=0') : $query->whereIn('operation_department_id', $visibleIds));
         }
         $selectedDepartmentIds = collect($filters['department_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->values()->all();
         $query->when($selectedDepartmentIds !== [], fn ($q) => $q->whereIn('operation_department_id', $selectedDepartmentIds))
@@ -298,6 +313,9 @@ class AppLovinPerformanceReportController extends Controller
             'consumptionCustom' => $filters['consumption_custom'] ?? '',
             'consumptionCustomMax' => $filters['consumption_custom_max'] ?? '',
             'departmentOptions' => $this->storeOwners->operationDepartments()->whereIn('id', $visibleIds)->values(),
+            'performanceResetRoute' => $isOperationPortal
+                ? 'operation.applovin-performance-reports.index'
+                : 'assistant.applovin-performance-reports.index',
         ]);
     }
 

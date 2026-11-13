@@ -35,7 +35,7 @@
         fn ($child): bool => $matchesCurrentPath(trim((string) $child->path))
     );
     $isDefaultExpanded = $portal->code === 'zhuli'
-        && $menu->code === 'assistant_daily_submissions';
+        && in_array($menu->code, ['assistant_advertising_expenses', 'assistant_daily_submissions'], true);
     $isExpanded = $hasActiveChild || $isDefaultExpanded;
     $label = $menu->title ?: __($menu->title_key);
     $canAccessProductRequestMenu = match ($menu->code) {
@@ -76,6 +76,9 @@
             @if(array_key_exists($menu->code, $assistantDailyPendingCounts ?? []))
             <span class="badge {{ $assistantDailyPendingCounts[$menu->code] > 0 ? 'bg-yellow' : 'bg-gray' }} pull-right" title="待处理任务数">{{ $assistantDailyPendingCounts[$menu->code] }}</span>
             @endif
+            @if(array_key_exists($menu->code, $assistantAdvertisingReviewPendingCounts ?? []))
+            <span class="badge {{ $assistantAdvertisingReviewPendingCounts[$menu->code] > 0 ? 'bg-yellow' : 'bg-gray' }} pull-right" title="待审核数量">{{ $assistantAdvertisingReviewPendingCounts[$menu->code] }}</span>
+            @endif
             @if($menu->code === 'ai_product_requests')
             <i class="fa fa-question-circle" style="margin-left:4px;color:#f39c12;font-size:14px;cursor:pointer;" data-toggle="tooltip" data-placement="right" title="{{ __('ai_products.menus.request_hint') }}"></i>
             @endif
@@ -105,6 +108,12 @@
         <a href="#">
             <i class="fa {{ $icon }}"></i>
             <span>{{ $label }}</span>
+            @if(array_key_exists($menu->code, $assistantAdvertisingReviewPendingCounts ?? []))
+            <span class="badge {{ $assistantAdvertisingReviewPendingCounts[$menu->code] > 0 ? 'bg-yellow' : 'bg-gray' }} pull-right" style="margin-right:18px" title="待审核数量">{{ $assistantAdvertisingReviewPendingCounts[$menu->code] }}</span>
+            @endif
+            @if(array_key_exists($menu->code, $assistantDailyPendingCounts ?? []))
+            <span class="badge {{ $assistantDailyPendingCounts[$menu->code] > 0 ? 'bg-yellow' : 'bg-gray' }} pull-right" style="margin-right:18px" title="待处理任务总数">{{ $assistantDailyPendingCounts[$menu->code] }}</span>
+            @endif
             @if($portal->code === 'fuzhuang' && $menu->code === 'fashion_operation_tasks')
                 @if((($operationTaskReviewCounts['rejected_recaps'] ?? 0) + ($operationTaskReviewCounts['rejected_tests'] ?? 0)) > 0)
                     <span class="operation-rejected-count">驳回 {{ ($operationTaskReviewCounts['rejected_recaps'] ?? 0) + ($operationTaskReviewCounts['rejected_tests'] ?? 0) }}</span>
@@ -121,6 +130,8 @@
                     'canManagePortalMenus' => $canManagePortalMenus,
                     'canManageOperationTasks' => $canManageOperationTasks,
                     'operationTaskReviewCounts' => $operationTaskReviewCounts ?? ['recaps' => 0, 'tests' => 0, 'rejected_recaps' => 0, 'rejected_tests' => 0],
+                    'assistantDailyPendingCounts' => $assistantDailyPendingCounts ?? [],
+                    'assistantAdvertisingReviewPendingCounts' => $assistantAdvertisingReviewPendingCounts ?? [],
                 ])
             @endforeach
         </ul>

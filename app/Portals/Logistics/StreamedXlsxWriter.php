@@ -2,9 +2,11 @@
 
 namespace App\Portals\Logistics;
 
+use GuzzleHttp\Psr7\PumpStream;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use ZipArchive;
+use ZipStream\ZipStream;
 
 class StreamedXlsxWriter
 {
@@ -21,21 +23,26 @@ class StreamedXlsxWriter
         bool $plain = false,
         string $fontName = 'Calibri',
         array $additionalSheets = [],
+        bool $streamDirectly = false,
     ): StreamedResponse {
         $headerFills = array_values(array_unique(array_filter(array_column($columns, 'headerFill'), fn ($color) => preg_match('/^[0-9A-F]{6}$/D', $color))));
 
-        return response()->streamDownload(function () use ($sheetName, $columns, $rows, $showGridlines, $plain, $fontName, $headerFills, $additionalSheets): void {
+        return response()->streamDownload(function () use ($sheetName, $columns, $rows, $showGridlines, $plain, $fontName, $headerFills, $additionalSheets, $streamDirectly): void {
             if (function_exists('set_time_limit')) {
                 @set_time_limit(0);
             }
 
+            $sheets = [[$sheetName, $columns, $rows], ...$additionalSheets];
+            if ($streamDirectly) {
+                $this->streamWorkbook($sheets, $showGridlines, $plain, $fontName, $headerFills);
+                return;
+            }
             $xlsxPath = tempnam(sys_get_temp_dir(), 'erp-xlsx-');
             if ($xlsxPath === false) {
                 throw new RuntimeException('无法创建 Excel 临时文件。');
             }
             $paths = [];
             try {
-                $sheets = [[$sheetName, $columns, $rows], ...$additionalSheets];
                 foreach ($sheets as [$name, $sheetColumns, $sheetRows]) {
                     $path = tempnam(sys_get_temp_dir(), 'erp-sheet-');
                     if ($path === false) {
@@ -61,42 +68,53 @@ class StreamedXlsxWriter
         }, $filename, [
             'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             'Cache-Control' => 'private, no-store, no-cache, must-revalidate',
-        ]);
+        ] + ($streamDirectly ? ['X-Accel-Buffering' => 'no'] : []));
     }
 
     /**
      * @param list<array{label:string,width:float|int,headerFill?:string}> $columns
      * @param callable():iterable<array{kind?:string,height?:float|int,outline?:int,mergeDown?:array<int,int>,mergeAcross?:array<int,int>,cells:list<array{value:mixed,type?:string,align?:string,wrap?:bool}>}> $rows
      */
-    private function writeSheet(string $path, array $columns, callable $rows, bool $showGridlines, bool $plain, array $headerFills): int
+    private function writeSheet(string $path, array $columns, callable $rows, bool $showGridlines, bool $plain, array $headerFills): void
     {
         $handle = fopen($path, 'wb');
         if ($handle === false) {
             throw new RuntimeException('无法写入 Excel 工作表临时文件。');
         }
 
-        fwrite($handle, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>');
-        fwrite($handle, '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">');
-        if (! $plain) {
-            fwrite($handle, '<sheetViews><sheetView workbookViewId="0" showGridLines="'.($showGridlines ? '1' : '0').'">');
-            fwrite($handle, '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>');
-            fwrite($handle, '</sheetView></sheetViews>');
+        try {
+            foreach ($this->sheetXml($columns, $rows, $showGridlines, $plain, $headerFills) as $xml) {
+                fwrite($handle, $xml);
+            }
+        } finally {
+            fclose($handle);
         }
-        fwrite($handle, '<cols>');
+    }
+
+    private function sheetXml(array $columns, callable $rows, bool $showGridlines, bool $plain, array $headerFills): \Generator
+    {
+        yield '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        yield '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+        if (! $plain) {
+            yield '<sheetViews><sheetView workbookViewId="0" showGridLines="'.($showGridlines ? '1' : '0').'">';
+            yield '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>';
+            yield '</sheetView></sheetViews>';
+        }
+        yield '<cols>';
         foreach ($columns as $index => $column) {
             $number = $index + 1;
             $width = max(1, (float) $column['width']);
-            fwrite($handle, '<col min="'.$number.'" max="'.$number.'" width="'.$width.'" customWidth="1"/>');
+            yield '<col min="'.$number.'" max="'.$number.'" width="'.$width.'" customWidth="1"/>';
         }
-        fwrite($handle, '</cols>');
+        yield '</cols>';
 
-        fwrite($handle, $plain ? '<sheetData><row r="1">' : '<sheetData><row r="1" ht="26" customHeight="1">');
+        yield $plain ? '<sheetData><row r="1">' : '<sheetData><row r="1" ht="26" customHeight="1">';
         foreach ($columns as $index => $column) {
             $fillIndex = array_search($column['headerFill'] ?? '', $headerFills, true);
             $style = $fillIndex === false ? ($plain ? 0 : 1) : 19 + $fillIndex;
-            fwrite($handle, $this->stringCell($this->columnName($index + 1).'1', (string) $column['label'], $style));
+            yield $this->stringCell($this->columnName($index + 1).'1', (string) $column['label'], $style);
         }
-        fwrite($handle, '</row>');
+        yield '</row>';
 
         $rowNumber = 2;
         $mergedRanges = [];
@@ -148,26 +166,44 @@ class StreamedXlsxWriter
                     $rowXml .= $this->stringCell($reference, $this->displayValue($value), $style);
                 }
             }
-            fwrite($handle, $rowXml.'</row>');
+            yield $rowXml.'</row>';
             $rowNumber++;
         }
 
         $lastRow = max(1, $rowNumber - 1);
         $lastColumn = $this->columnName(count($columns));
-        fwrite($handle, '</sheetData>');
+        yield '</sheetData>';
         if ($mergedRanges !== []) {
-            fwrite($handle, '<mergeCells count="'.count($mergedRanges).'">');
+            yield '<mergeCells count="'.count($mergedRanges).'">';
             foreach ($mergedRanges as $range) {
-                fwrite($handle, '<mergeCell ref="'.$range.'"/>');
+                yield '<mergeCell ref="'.$range.'"/>';
             }
-            fwrite($handle, '</mergeCells>');
+            yield '</mergeCells>';
         }
-        fwrite($handle, '<autoFilter ref="A1:'.$lastColumn.$lastRow.'"/>');
-        fwrite($handle, '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>');
-        fwrite($handle, '</worksheet>');
-        fclose($handle);
+        yield '<autoFilter ref="A1:'.$lastColumn.$lastRow.'"/>';
+        yield '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>';
+        yield '</worksheet>';
+    }
 
-        return $lastRow;
+    private function streamWorkbook(array $sheets, bool $showGridlines, bool $plain, string $fontName, array $headerFills): void
+    {
+        $zip = new ZipStream(sendHttpHeaders: false, flushOutput: PHP_SAPI !== 'cli');
+        foreach ($this->workbookParts(array_column($sheets, 0), $fontName, $headerFills) as $path => $data) {
+            $zip->addFile($path, $data);
+        }
+        foreach ($sheets as $index => [, $columns, $rows]) {
+            $xml = $this->sheetXml($columns, $rows, $showGridlines, $plain, $headerFills);
+            $started = false;
+            $stream = new PumpStream(function () use ($xml, &$started): string|false {
+                if ($started) {
+                    $xml->next();
+                }
+                $started = true;
+                return $xml->valid() ? $xml->current() : false;
+            });
+            $zip->addFileFromPsr7Stream('xl/worksheets/sheet'.($index + 1).'.xml', $stream);
+        }
+        $zip->finish();
     }
 
     private function writeWorkbook(string $xlsxPath, array $sheetPaths, array $sheetNames, string $fontName, array $headerFills): void
@@ -178,18 +214,26 @@ class StreamedXlsxWriter
             throw new RuntimeException('无法创建 Excel 压缩文件。');
         }
 
-        $createdAt = now()->utc()->format('Y-m-d\TH:i:s\Z');
-        $zip->addFromString('[Content_Types].xml', $this->contentTypes(count($sheetPaths)));
-        $zip->addFromString('_rels/.rels', $this->rootRelationships());
-        $zip->addFromString('docProps/app.xml', $this->appProperties());
-        $zip->addFromString('docProps/core.xml', $this->coreProperties($createdAt));
-        $zip->addFromString('xl/workbook.xml', $this->workbookXml($sheetNames));
-        $zip->addFromString('xl/_rels/workbook.xml.rels', $this->workbookRelationships(count($sheetPaths)));
-        $zip->addFromString('xl/styles.xml', $this->stylesXml($fontName, $headerFills));
+        foreach ($this->workbookParts($sheetNames, $fontName, $headerFills) as $path => $data) {
+            $zip->addFromString($path, $data);
+        }
         foreach ($sheetPaths as $index => $path) {
             $zip->addFile($path, 'xl/worksheets/sheet'.($index + 1).'.xml');
         }
         $zip->close();
+    }
+
+    private function workbookParts(array $sheetNames, string $fontName, array $headerFills): array
+    {
+        return [
+            '[Content_Types].xml' => $this->contentTypes(count($sheetNames)),
+            '_rels/.rels' => $this->rootRelationships(),
+            'docProps/app.xml' => $this->appProperties(),
+            'docProps/core.xml' => $this->coreProperties(now()->utc()->format('Y-m-d\TH:i:s\Z')),
+            'xl/workbook.xml' => $this->workbookXml($sheetNames),
+            'xl/_rels/workbook.xml.rels' => $this->workbookRelationships(count($sheetNames)),
+            'xl/styles.xml' => $this->stylesXml($fontName, $headerFills),
+        ];
     }
 
     private function styleIndex(string $kind, string $type, string $align, bool $wrap): int

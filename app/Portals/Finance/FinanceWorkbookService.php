@@ -159,51 +159,38 @@ class FinanceWorkbookService
 
     public function readConfluxOrderBatches(UploadedFile $file, array $headers, string $sheetName, array $optionalHeaders): \Generator
     {
-        $maxRows = 20000;
-        $batchSize = 5000;
-        $reader = IOFactory::createReader(IOFactory::READER_XLSX);
-        $reader->setReadDataOnly(true);
-        $path = $file->getRealPath();
-        try {
-            $info = array_column($reader->listWorksheetInfo($path), null, 'worksheetName');
-            $selected = $info[$sheetName] ?? (count($info) === 1 ? reset($info) : null);
-            $hasRows = false;
-            for ($first = 2; $first === 2 || $first <= $selected['totalRows']; $first += $batchSize) {
-                $last = $first + $batchSize - 1;
-                if ($selected) {
-                    $reader->setLoadSheetsOnly($selected['worksheetName']);
-                }
-                $reader->setReadFilter(new class($first, $last) implements IReadFilter {
-                    public function __construct(private int $first, private int $last) {}
-
-                    public function readCell(string $columnAddress, int $row, string $worksheetName = ''): bool
-                    {
-                        return ($row === 1 || ($row >= $this->first && $row <= $this->last))
-                            && Coordinate::columnIndexFromString($columnAddress) <= 100;
-                    }
-                });
-                $book = $reader->load($path);
-                try {
-                    $sheet = $this->importSheet($book, $selected['worksheetName'] ?? $sheetName);
-                    $selected = $info[$sheet->getTitle()];
-                    if ($selected['totalRows'] > $maxRows + 1 || $selected['totalColumns'] > 100) {
-                        throw ValidationException::withMessages(['file' => __('finance.errors.size', ['rows' => number_format($maxRows)])]);
-                    }
-                    $rows = $this->readRows($sheet, $headers, $optionalHeaders, true, $selected['totalColumns'],
-                        $first, min($last, $selected['totalRows']));
-                } finally {
-                    $book->disconnectWorksheets();
-                }
-                if ($rows !== []) {
-                    $hasRows = true;
-                    yield $rows;
-                }
+        $columns = null;
+        $batch = [];
+        $hasRows = false;
+        foreach (app(FinanceConfluxOrderReader::class)->rows($file, $sheetName) as $line => [$cells, $formulas]) {
+            if ($line === 1) {
+                $columns = $this->importColumns($cells, $headers, $optionalHeaders, true);
+                continue;
             }
-            if (! $hasRows) {
-                throw ValidationException::withMessages(['file' => __('finance.errors.empty')]);
+            if ($columns === null) {
+                throw ValidationException::withMessages(['file' => __('finance.errors.file')]);
             }
-        } catch (Exception $e) {
-            throw ValidationException::withMessages(['file' => __('finance.errors.file')]);
+            $row = [];
+            foreach ($columns as $field => $column) {
+                if (isset($formulas[$column])) {
+                    throw ValidationException::withMessages(['file' => __('finance.errors.formula', ['row' => $line])]);
+                }
+                $row[$field] = trim($cells[$column] ?? '');
+            }
+            if (count(array_filter($row, static fn ($value) => $value !== '')) > 0) {
+                $hasRows = true;
+                $batch[$line] = $row;
+            }
+            if (count($batch) === 5000) {
+                yield $batch;
+                $batch = [];
+            }
+        }
+        if ($batch !== []) {
+            yield $batch;
+        }
+        if (! $hasRows) {
+            throw ValidationException::withMessages(['file' => __('finance.errors.empty')]);
         }
     }
 
@@ -217,12 +204,12 @@ class FinanceWorkbookService
         return $book->getSheetByName($sheetName) ?? $book->getSheetByName($legacyName) ?? $book->getActiveSheet();
     }
 
-    private function readRows(Worksheet $sheet, array $headers, array $optionalHeaders, bool $keyedHeaders, int $width, int $firstRow, int $lastRow): array
+    private function importColumns(array $headerCells, array $headers, array $optionalHeaders, bool $keyedHeaders): array
     {
         $positions = [];
         $expected = array_count_values(array_map(FinanceCatalog::simplified(...), $headers));
-        for ($column = 1; $column <= $width; $column++) {
-            $name = trim(ltrim((string) $sheet->getCell([$column, 1])->getValue(), "\xEF\xBB\xBF"));
+        foreach ($headerCells as $column => $value) {
+            $name = trim(ltrim((string) $value, "\xEF\xBB\xBF"));
             $name = FinanceCatalog::simplified($name);
             if ($name !== '') {
                 if (count($positions[$name] ?? []) >= ($keyedHeaders ? ($expected[$name] ?? 1) : 1)) {
@@ -243,6 +230,16 @@ class FinanceWorkbookService
             $occurrences[$name] = $occurrence + 1;
             $columns[$keyedHeaders ? $key : $header] = $column;
         }
+        return $columns;
+    }
+
+    private function readRows(Worksheet $sheet, array $headers, array $optionalHeaders, bool $keyedHeaders, int $width, int $firstRow, int $lastRow): array
+    {
+        $headerCells = [];
+        for ($column = 1; $column <= $width; $column++) {
+            $headerCells[$column] = $sheet->getCell([$column, 1])->getValue();
+        }
+        $columns = $this->importColumns($headerCells, $headers, $optionalHeaders, $keyedHeaders);
         $rows = [];
         for ($row = $firstRow; $row <= $lastRow; $row++) {
             $values = [];
@@ -440,6 +437,10 @@ class FinanceWorkbookService
         if ($dataset === FinanceLogisticsCreditOrders::IMPORTED_DATASET && $createOnly && $fillMissing && ! $guardSettlementMonth) {
             return $this->saveImportedCreditOrders($records);
         }
+        if ($dataset === 'xuzong2-details' && $createOnly && $guardSettlementMonth && ! $fillMissing
+            && ($records[0]['payload']['_card_channel'] ?? null) === 'ye') {
+            return $this->saveImportedCreditOrders($records, fillMissing: false, guardSettlementMonth: true);
+        }
 
         return $this->database()->transaction(function () use ($records, $createOnly, $guardSettlementMonth, $fillMissing): int {
             $affected = 0;
@@ -483,22 +484,33 @@ class FinanceWorkbookService
         });
     }
 
-    private function saveImportedCreditOrders(array $records): int
+    private function saveImportedCreditOrders(array $records, bool $fillMissing = true, bool $guardSettlementMonth = false): int
     {
-        return $this->database()->transaction(function () use ($records): int {
+        return $this->database()->transaction(function () use ($records, $fillMissing, $guardSettlementMonth): int {
             $existing = FinanceRecord::query()->whereIn('fingerprint', array_column($records, 'fingerprint'))
                 ->lockForUpdate()->get()->keyBy('fingerprint');
             $inserts = [];
             $updated = 0;
             $now = now();
+            $checkedMonths = [];
             foreach ($records as $record) {
                 $fingerprint = $record['fingerprint'];
                 $model = $existing->get($fingerprint);
                 if ($model === null) {
+                    if ($guardSettlementMonth) {
+                        $month = CarbonImmutable::parse($record['occurred_at'], 'UTC')->setTimezone('Asia/Shanghai')->format('Y-m');
+                        if (! isset($checkedMonths[$month])) {
+                            app(FinanceAccountingService::class)->guardUnlocked($month);
+                            $checkedMonths[$month] = true;
+                        }
+                    }
                     $inserts[$fingerprint] ??= [
                         ...$record, 'payload' => json_encode($record['payload'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
                         'created_at' => $now, 'updated_at' => $now,
                     ];
+                    continue;
+                }
+                if (! $fillMissing) {
                     continue;
                 }
                 $payload = $model->payload;
@@ -716,7 +728,7 @@ class FinanceWorkbookService
                     }
                     yield ['height' => 36, 'cells' => $cells];
                 }
-            }, plain: $plain, additionalSheets: $extraSheets);
+            }, plain: $plain, additionalSheets: $extraSheets, streamDirectly: true);
     }
 
     private function downloadColumnWidth(string $header, bool $plain): int

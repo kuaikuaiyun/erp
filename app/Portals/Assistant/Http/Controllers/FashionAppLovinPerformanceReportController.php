@@ -13,6 +13,7 @@ use App\Models\FashionLogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
+use App\Services\DepartmentAuthorizationService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -26,6 +27,7 @@ class FashionAppLovinPerformanceReportController extends Controller
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
         private readonly AssistantStoreOwnerService $storeOwners,
+        private readonly DepartmentAuthorizationService $departmentAuthorization,
     ) {}
 
     public function index(Request $request): Response|View
@@ -34,18 +36,30 @@ class FashionAppLovinPerformanceReportController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
-        $this->authorization->assertAssistantPortal($context['portal']);
-        abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
+        $isFashionPortal = $request->routeIs('fashion.applovin-performance-reports.*');
+        if ($isFashionPortal) {
+            abort_unless($context['portal']->code === 'fuzhuang', 404);
+        } else {
+            $this->authorization->assertAssistantPortal($context['portal']);
+            abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
+        }
 
-        $visibleDepartmentIds = $this->visibleDepartmentIds($context['user']);
+        $canSeeAll = $context['user']->isAdministrator() || strcasecmp((string) $context['user']->username, 'kky_boss') === 0;
+        $managedDepartmentIds = $this->departmentAuthorization->managedDepartmentIds($context['user'])
+            ->map(fn ($id) => (int) $id)->values()->all();
+        $operatorOnly = $isFashionPortal && ! $canSeeAll && $managedDepartmentIds === [];
+        $visibleDepartmentIds = $isFashionPortal
+            ? ($canSeeAll ? null : $managedDepartmentIds)
+            : $this->visibleDepartmentIds($context['user']);
         $submitterIds = FashionAdvertisingReport::query()->whereHas('adSpendEntries', fn ($query) => $query->whereRaw("LOWER(TRIM(media)) = 'applovin'"))
             ->whereIn('status', [FashionAdvertisingReport::STATUS_APPROVED, FashionAdvertisingReport::STATUS_REJECTED])
-            ->when($visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
+            ->when($operatorOnly, fn ($query) => $query->where('submitter_id', $context['user']->getKey()))
+            ->when(! $operatorOnly && $visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
                 ? $query->whereRaw('1 = 0')
                 : $query->whereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $visibleDepartmentIds)))
             ->pluck('submitter_id')->filter()->unique()->values();
         $departments = Department::business()->whereHas('departmentMembers', fn ($query) => $query->whereIn('admin_users.id', $submitterIds))
-            ->when($visibleDepartmentIds !== null, fn ($query) => $query->whereIn('id', $visibleDepartmentIds))
+            ->when(! $operatorOnly && $visibleDepartmentIds !== null, fn ($query) => $query->whereIn('id', $visibleDepartmentIds))
             ->orderBy('sort')->orderBy('name')->get(['id', 'parent_id', 'name']);
         $departmentIds = $departments->pluck('id')->map(fn ($id) => (int) $id)->all();
         $timezoneOptions = $this->timezoneOptions();
@@ -88,7 +102,8 @@ class FashionAppLovinPerformanceReportController extends Controller
             ->whereIn('status', [FashionAdvertisingReport::STATUS_APPROVED, FashionAdvertisingReport::STATUS_REJECTED])
             ->whereHas('adSpendEntries', fn ($query) => $query->whereRaw("LOWER(TRIM(media)) = 'applovin'"))
             ->with(['adSpendEntries' => fn ($query) => $query->whereRaw("LOWER(TRIM(media)) = 'applovin'"), 'submitter.departments'])
-            ->when($visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
+            ->when($operatorOnly, fn ($query) => $query->where('submitter_id', $context['user']->getKey()))
+            ->when(! $operatorOnly && $visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
                 ? $query->whereRaw('1 = 0')
                 : $query->whereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $visibleDepartmentIds)))
             ->when($selectedDepartmentIds !== [], fn ($query) => $query->whereHas('submitter.departments', fn ($department) => $department->whereKey($selectedDepartmentIds)))
@@ -244,6 +259,9 @@ class FashionAppLovinPerformanceReportController extends Controller
             'selectedGiftStatus' => $filters['gift_status'] ?? '', 'selectedConsumptionRange' => $filters['consumption_range'] ?? '',
             'consumptionCustom' => $filters['consumption_custom'] ?? '', 'consumptionCustomMax' => $filters['consumption_custom_max'] ?? '',
             'selectedDepartmentIds' => $selectedDepartmentIds, 'departmentOptions' => $departments,
+            'performanceResetRoute' => $isFashionPortal
+                ? 'fashion.applovin-performance-reports.index'
+                : 'assistant.fashion-applovin-performance-reports.index',
         ]);
     }
 

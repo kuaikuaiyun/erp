@@ -1427,6 +1427,12 @@ class FinancePortalTest extends TestCase
         $this->assertEquals(30, $dataRows[1][25]);
         $this->assertEquals(5, $dataRows[1][29]);
         $this->assertEquals(2, $dataRows[1][35]);
+        $selectedId = FinanceRecord::query()->where('reference', 'ORDER-1')->value('id');
+        $selection = http_build_query([...$scope, 'download' => 1, 'export_record_ids' => [$selectedId],
+            'selected_rows' => [\App\Portals\Finance\FinanceExportSelection::key(['id' => $selectedId])]]);
+        $selectedRows = $this->readDownload($this->get($url.'?'.$selection)->assertOk()->streamedContent())->toArray();
+        $this->assertCount(2, $selectedRows);
+        $this->assertSame('ORDER-1', $selectedRows[1][3]);
         $page = $this->get($url.'?card_channel=ye&card_exceptions=1')->assertOk()
             ->assertSee('退款与 RDR 同时存在')->assertSee('2026-11-09');
         $exceptionExport = $this->get($url.'?card_channel=ye&card_exceptions=1&download=1')->assertOk();
@@ -1468,6 +1474,8 @@ class FinancePortalTest extends TestCase
             ['流水订单号', '结算货币', '结算金额', '商户号', '账单描述符', '交易时间'],
             ['BATCH-ORDER', 'USD', 30.05, 'merchant-1', 'store-wallet', '2026-11-06 02:00:00'],
         ]);
+        $release = $statement->createSheet()->setTitle('释放保证金-ZZdanbao');
+        $release->fromArray(['流水订单号', '交易币种', '释放保证金']);
         $url = '/finance/reports/credit-settlement';
         $data = ['card_channel' => 'ye', 'timezone' => 'Asia/Shanghai'];
         $octetStreamUpload = function (Spreadsheet $book, string $filename = 'finance.xlsx'): UploadedFile {
@@ -1503,12 +1511,21 @@ class FinancePortalTest extends TestCase
         $this->get($matchedUrl.'&card_wallet=1&card_exceptions=1')->assertOk()
             ->assertViewHas('rows', fn ($rows) => $rows->getCollection()->sole()['reference'] === 'BATCH-ORDER');
         $this->assertSame('25.19000000', $matched['payable']);
+        $summary = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $summaryRow = $summary->summaryRows('credit_card', ['reference' => 'BATCH-ORDER'])->sole();
+        $this->assertEquals([30.05, 3.01, 1.50, 0.35], [
+            $summaryRow['settlement'], $summaryRow['hold'], $summaryRow['fee'], $summaryRow['per_order_fee'],
+        ]);
         $this->assertNull($matched['nbc_fee']);
         $this->assertNull($matched['store_fee']);
         $export = $this->readDownload($this->get($matchedUrl.'&download=1')->assertOk()->streamedContent())->toArray();
         $this->assertEquals(25.19, $export[1][array_search('应结算', $export[0], true)]);
         $submit()->assertSessionHasNoErrors()
             ->assertSessionHas('success', '新增订单 0 笔，跳过重复订单 2 笔。识别结算报表 1 份，新增账单流水 0 条，跳过重复报表 1 份。');
+        $this->post($url.'/import', [...$data, 'settlement_type' => '正常结算', 'files' => [$octetStreamUpload($orders)]],
+            ['Accept' => 'application/json'])->assertOk()
+            ->assertJsonPath('message', '新增订单 0 笔，跳过重复订单 2 笔。')
+            ->assertJsonStructure(['redirect']);
 
         $otherAccount = $this->financePayPalAccount('西安单包', [
             'account_type' => 'credit_card', 'card_platform' => 'ye', 'card_merchant_key' => 'XAdanbao',
@@ -1645,6 +1662,13 @@ class FinancePortalTest extends TestCase
         DB::table('logistics_orders')->insert(['bill_number' => 'wp-failed', 'source_shop_domain' => 'matched.example',
             'assigned_owner_name' => '订单运营', 'group_names' => '厦门团队']);
         $this->assertSame(3, FinanceRecord::query()->where('payload->_card_channel', 'worldpay')->count());
+        $summary = app(\App\Portals\Finance\FinanceSettlementService::class);
+        $totals = $summary->totals($summary->summaryRows('credit_card', ['from' => '2026-11-01', 'to' => '2026-11-30']), 'account');
+        $this->assertCount(1, $totals);
+        $this->assertEquals(['Worldpay', 2, 1, 91.78, 4.14, 10, 0.90], [
+            $totals[0]['name'], $totals[0]['success_count'], $totals[0]['failed_count'], $totals[0]['settlement'],
+            $totals[0]['fee'], $totals[0]['refund'], $totals[0]['per_order_fee'],
+        ]);
         $this->get($report.'?worldpay_exception=yes')->assertOk()->assertSee('wp-1')->assertSee('wp-2')->assertDontSee('wp-failed');
         $this->get($report.'?worldpay_exception=no')->assertOk()->assertSee('wp-failed')->assertDontSee('wp-1')->assertDontSee('wp-2');
         $query = http_build_query(['month' => '2026-11', 'download' => 1,
