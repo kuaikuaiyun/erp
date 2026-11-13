@@ -253,7 +253,7 @@
         var pageType = form.querySelector('[name="page_type"]');
         if (pageType) {
             var rows = form.querySelectorAll(form.id === 'ot-create-test-form' ? '.ot-asset-input' : '.ot-edit-asset-row');
-            var minimum = pageType.value === 'category' ? 3 : 2;
+            var minimum = 1;
             if (rows.length < minimum) add(pageType,text('asset_count',{type:text(pageType.value === 'category' ? 'category' : 'single'),min:minimum,count:rows.length}));
             rows.forEach(function (row,index) {
                 var file = row.querySelector('input[type="file"]'), url = row.querySelector('input[name$="[url]"]'), token = row.querySelector('input[name$="[upload_token]"]');

@@ -488,7 +488,7 @@ class OperationTaskController extends Controller
         ]);
         if ($response = $this->completedSubmission($submission['submission_token'], (int) $user->id)) return $response;
         $pageType = (string) $request->input('page_type');
-        $minimum = $pageType === 'category' ? 3 : 2;
+        $minimum = 1;
         $data = $this->validateTask($request, [
             'page_type' => ['required', Rule::in(['single', 'category'])],
             'task_type' => ['required', Rule::in(['new', 'iteration'])],
@@ -1199,7 +1199,7 @@ class OperationTaskController extends Controller
         $this->authorizeTaskOwner($context['user'], $targetTask);
         $pendingEdit = $rectification === null;
         if (! $pendingEdit && $rectification->status !== 'required') return back()->withInput()->with('warning', __('operation_tasks.upload.edit_processed'));
-        $minimum = $request->input('page_type') === 'category' ? 3 : 2;
+        $minimum = 1;
         $data = $this->validateTask($request, [
             'task_version' => ['required', 'integer', 'min:1'],
             'page_type' => ['required', Rule::in(['single', 'category'])],
@@ -1736,7 +1736,7 @@ class OperationTaskController extends Controller
         $qualified = function (string $pageType, int $minimum) use ($dayTasks, $date): int {
             return $dayTasks->where('page_type', $pageType)->filter(fn (OperationTestTask $task) => $task->assets->filter(fn (OperationTaskAsset $asset) => optional($asset->created_at)->timezone('Asia/Shanghai')->toDateString() === $date)->count() >= $minimum)->count();
         };
-        $singleDone = $qualified('single', 2); $categoryDone = $qualified('category', 3);
+        $singleDone = $qualified('single', 1); $categoryDone = $qualified('category', 1);
         $complete = $singleDone >= (int) $plan->single_target && $categoryDone >= (int) $plan->category_target;
         return ['date' => $date, 'has_plan' => true, 'complete' => $complete, 'label' => $plan->plan_mode === 'single' ? '单品' : ($plan->plan_mode === 'category' ? '类目' : '混合'), 'single_target' => (int) $plan->single_target, 'category_target' => (int) $plan->category_target, 'single_done' => $singleDone, 'category_done' => $categoryDone, 'note' => $plan->plan_note];
     }

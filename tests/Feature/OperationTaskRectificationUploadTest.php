@@ -208,7 +208,7 @@ class OperationTaskRectificationUploadTest extends TestCase
 
     public function test_category_minimum_and_a_new_asset_without_a_file_or_link_are_rejected(): void
     {
-        $payload = $this->payload(); $payload['page_type'] = 'category';
+        $payload = $this->payload(); $payload['page_type'] = 'category'; $payload['assets'] = [];
         $this->submit($payload)->assertSessionHasErrors('assets');
         $payload = $this->payload(); $payload['assets'][] = ['selling_point' => '新增素材', 'source_type' => 'ai_created'];
         $this->submit($payload)->assertSessionHasErrors('assets.2.upload_token');

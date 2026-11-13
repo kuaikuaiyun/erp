@@ -71,7 +71,7 @@
     </form>
     <div class="ot-test-goals">
         <div><small>今日测品计划</small><b>{{ $todayPlan ? ($todayProgress['label'] ?? '已确认') : '—' }}</b><strong>{{ $todayPlan ? '单品 '.$singleTarget.' 个 · 类目 '.$categoryTarget.' 个' : '等待主管确认' }}</strong><span>每日单独确认，混合计划同时核算两类目标</span></div>
-        <div><small>今日计划完成</small><b>{{ $todayPlan ? ($singleDone + $categoryDone) : 0 }}</b><strong>{{ $todayPlan ? '单品 '.$singleDone.'/'.$singleTarget.' · 类目 '.$categoryDone.'/'.$categoryTarget : '尚未设置计划' }}</strong><span>单品至少 2 条、类目至少 3 条新素材</span></div>
+        <div><small>今日计划完成</small><b>{{ $todayPlan ? ($singleDone + $categoryDone) : 0 }}</b><strong>{{ $todayPlan ? '单品 '.$singleDone.'/'.$singleTarget.' · 类目 '.$categoryDone.'/'.$categoryTarget : '尚未设置计划' }}</strong><span>{{ __('operation_tasks.upload.plan_asset_hint') }}</span></div>
         <div><small>今日任务已双通过</small><b>{{ $todayPassed }}</b><strong>{{ __('operation_tasks.management.task_hint') }}</strong><span>审核记录绑定当前版本</span></div>
     </div>
     <div class="ot-card">
@@ -276,7 +276,7 @@
     ];
 @endphp
 <script>window.OperationTaskAssetUploads = @json($operationTaskUploadConfig);</script>
-<script src="{{ asset('assets/erp/operation-task-asset-upload.js') }}?v=20261113-1"></script>
+<script src="{{ asset('assets/erp/operation-task-asset-upload.js') }}?v=20261113-2"></script>
 @if(($errors->any() && old('form_mode') !== 'edit') || request()->boolean('new'))
 <script>jQuery(function () { jQuery('#ot-test-modal').modal('show'); });</script>
 @endif

@@ -214,7 +214,7 @@
         }
         if (options.addButton) options.addButton.addEventListener('click', function () { addRow(); });
         function hint() {
-            var minimum = type.value === 'category' ? 3 : 2;
+            var minimum = 1;
             options.hint.textContent = states.length < minimum
                 ? validationText('asset_count', { type: validationText(type.value === 'category' ? 'category' : 'single'), min: minimum, count: states.length })
                 : t(options.edit ? (type.value === 'category' ? 'edit_category_hint' : 'edit_single_hint') : (type.value === 'category' ? 'category_hint' : 'single_hint'));
@@ -223,7 +223,7 @@
         form.addEventListener('submit', function (event) {
             if (event.defaultPrevented) return;
             if (submitting) { event.preventDefault(); return; }
-            var minimum = type.value === 'category' ? 3 : 2;
+            var minimum = 1;
             if (states.length < minimum) {
                 event.preventDefault();
                 var message = validationText('asset_count', { type: validationText(type.value === 'category' ? 'category' : 'single'), min: minimum, count: states.length });

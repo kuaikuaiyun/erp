@@ -120,13 +120,13 @@ class OperationTaskSubmissionTest extends TestCase
 
     public function test_insufficient_category_assets_returns_chinese_feedback_and_preserves_input(): void
     {
-        $payload = $this->payload(); $payload['page_type'] = 'category';
+        $payload = $this->payload(); $payload['page_type'] = 'category'; $payload['assets'] = [];
         $this->from(route('operation-tasks.tests.index'))->post(route('operation-tasks.tests.store'), $payload)
             ->assertRedirect(route('operation-tasks.tests.index'))->assertSessionHasErrors('assets')
             ->assertSessionHasInput('submission_token', $payload['submission_token']);
         $message = session('errors')->first('assets');
-        self::assertStringContainsString('类目页', $message);
-        self::assertStringContainsString('3', $message);
+        self::assertNotSame('', $message);
+        self::assertStringNotContainsString('至少 3', $message);
         self::assertStringNotContainsString('validation.', $message);
         self::assertSame(0, OperationTestTask::query()->count());
     }
@@ -136,6 +136,30 @@ class OperationTaskSubmissionTest extends TestCase
         $payload = $this->payload(); $payload['landing_url'] = 'invalid-url'; $payload['selection_objective'] = '   ';
         $this->post(route('operation-tasks.tests.store'), $payload)->assertSessionHasErrors(['landing_url', 'selection_objective']);
         self::assertStringContainsString('落地页链接', session('errors')->first('landing_url'));
+        self::assertSame(0, OperationTestTask::query()->count());
+    }
+
+    public function test_one_asset_is_sufficient_for_both_page_types_and_plan_completion(): void
+    {
+        foreach (['single', 'category'] as $type) {
+            $payload = $this->payload(); $payload['page_type'] = $type;
+            $payload['assets'] = array_slice($payload['assets'], 0, 1);
+            $this->post(route('operation-tasks.tests.store'), $payload)->assertSessionHasNoErrors()->assertSessionHas('success');
+        }
+        self::assertSame(2, OperationTestTask::query()->count());
+        self::assertSame(2, OperationTaskAsset::query()->count());
+        $plan = (new OperationTaskDailyPlan())->forceFill(['single_target' => 1, 'category_target' => 1]);
+        $method = new \ReflectionMethod(OperationTaskController::class, 'dailyPlanProgress');
+        $progress = $method->invoke(app(OperationTaskController::class), $plan, OperationTestTask::query()->with('assets')->get(), now('Asia/Shanghai')->toDateString());
+        self::assertSame(1, $progress['single_done']);
+        self::assertSame(1, $progress['category_done']);
+        self::assertTrue($progress['complete']);
+    }
+
+    public function test_zero_assets_cannot_create_a_single_page_task(): void
+    {
+        $payload = $this->payload(); $payload['assets'] = [];
+        $this->post(route('operation-tasks.tests.store'), $payload)->assertSessionHasErrors('assets');
         self::assertSame(0, OperationTestTask::query()->count());
     }
 }
