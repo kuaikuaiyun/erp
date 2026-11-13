@@ -206,6 +206,18 @@ class FashionOperationReportController extends Controller
                 return $sortOrder === 'desc' ? -$comparison : $comparison;
             })->values();
 
+        $teamBands = [];
+        if ($displayMode === 'team') {
+            $departmentBands = [];
+            foreach ($rows as $index => $row) {
+                $departmentKey = (string) ($row['department_id'] ?? 0).'|'.(string) ($row['department'] ?? '');
+                if (! array_key_exists($departmentKey, $departmentBands)) {
+                    $departmentBands[$departmentKey] = count($departmentBands) % 2;
+                }
+                $teamBands[$index] = $departmentBands[$departmentKey];
+            }
+        }
+
         $summaryRevenue = (float) $rows->sum('revenue');
         $summarySpend = (float) $rows->sum('ad_spend');
         $roiRevenue = (float) $rows
@@ -213,7 +225,7 @@ class FashionOperationReportController extends Controller
             ->sum('revenue');
         $summaryRoi = $summarySpend > 0 ? $roiRevenue / $summarySpend : null;
         return view('portals.assistant.fashion-operation-reports.index', [
-            ...$context, 'rows' => $rows, 'timezoneOptions' => $timezones,
+            ...$context, 'rows' => $rows, 'teamBands' => $teamBands, 'timezoneOptions' => $timezones,
             'departmentOptions' => $departmentOptions,
             'filters' => [...$validated, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'timezone' => $timezone,
                 'department_ids' => $selectedDepartmentIds, 'sort_by' => $sortBy, 'sort_order' => $sortOrder, 'display_mode' => $displayMode],
