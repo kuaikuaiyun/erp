@@ -36,7 +36,7 @@ class OperationTaskFiltersAndTimezoneTest extends TestCase
     public function test_operation_task_templates_compile_to_valid_php(): void
     {
         $compiler = app('blade.compiler');
-        foreach (['tests', 'reviews', 'dashboard', 'recaps', 'partials.search-filters'] as $view) {
+        foreach (['tests', 'reviews', 'dashboard', 'recaps', 'partials.search-filters', 'partials.date-filters', 'partials.delete-confirm', 'test-detail'] as $view) {
             $source = file_get_contents(resource_path('views/portals/operation-tasks/'.str_replace('.', '/', $view).'.blade.php'));
             $compiled = $compiler->compileString($source);
             self::assertNotEmpty(token_get_all($compiled, TOKEN_PARSE), $view);

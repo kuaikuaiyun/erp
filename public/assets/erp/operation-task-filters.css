@@ -5,3 +5,7 @@
 .ot-review-filters,.ot-dashboard-filter,.ot-dashboard-filter>.ot-card-body{overflow:visible}.ot-review-filters .form-control,.ot-dashboard-filter .form-control,.ot-test-date-filter .form-control{height:36px}
 
 .ot-search-options[hidden],.ot-search-options [hidden]{display:none!important}
+
+.ot-date-field{min-width:160px;flex:1}.ot-date-field label{display:block;margin-bottom:6px}.ot-date-shortcuts{display:flex;align-items:center;flex-wrap:wrap;gap:5px;align-self:end;padding-bottom:1px}.ot-date-shortcuts>span{color:#78909d;font-size:12px;margin-right:3px}.ot-activity-task{display:inline-flex;flex-direction:column;align-items:flex-start;margin:3px 8px 5px 0;max-width:100%}.ot-activity-task small{margin-top:3px;color:#668590}.ot-activity-tasks{max-width:340px}.ot-activity-task a{overflow-wrap:anywhere}.ot-test-date-filter{flex-wrap:wrap}.ot-review-filters .ot-date-shortcuts{grid-column:1/-1;grid-row:2}.ot-dashboard-actions{flex-wrap:wrap}
+
+.ot-date-shortcuts{grid-column:1/-1;order:10}.ot-review-filters .ot-date-shortcuts{grid-row:auto}.ot-date-field{min-width:0}.ot-date-field .form-control{min-width:0;width:100%}@media(max-width:480px){.ot-review-filters .ot-filter-grid,.ot-dashboard-filter #ot-dashboard-form,.ot-recap-page .ot-search-filter-form,.ot-tests-page .ot-test-date-filter{grid-template-columns:minmax(0,1fr)}}

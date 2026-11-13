@@ -215,6 +215,7 @@ Route::prefix('fashion/operation-tasks')->name('operation-tasks.')->controller(O
     Route::get('/recaps', 'recaps')->name('recaps.index');
     Route::post('/recaps', 'storeRecap')->name('recaps.store');
     Route::get('/recaps/{recap}/edit', 'editRecap')->whereNumber('recap')->name('recaps.edit');
+    Route::delete('/recaps/{recap}', 'deleteRecap')->whereNumber('recap')->name('recaps.destroy');
     Route::post('/recaps/{recap}/resubmit', 'resubmitRecap')->whereNumber('recap')->name('recaps.resubmit');
     Route::post('/recaps/{recap}/reviews', 'reviewRecap')->name('recaps.reviews.store');
     Route::post('/recaps/questions', 'saveRecapQuestions')->name('recaps.questions.store');
@@ -224,6 +225,8 @@ Route::prefix('fashion/operation-tasks')->name('operation-tasks.')->controller(O
     Route::get('/tests/uploads/{token}', 'assetUploadStatus')->whereUuid('token')->name('tests.uploads.show');
     Route::post('/tests/uploads/{token}/parts/{index}', 'uploadAssetPart')->whereUuid('token')->whereNumber('index')->name('tests.uploads.parts.store');
     Route::post('/tests/uploads/{token}/complete', 'completeAssetUpload')->whereUuid('token')->name('tests.uploads.complete');
+    Route::post('/tests/{task}/edit', 'updatePendingTest')->whereNumber('task')->name('tests.update');
+    Route::delete('/tests/{task}', 'deleteTest')->whereNumber('task')->name('tests.destroy');
     Route::get('/tests/{task}', 'showTest')->whereNumber('task')->name('tests.show');
     Route::get('/assets/{asset}/file', 'assetFile')->whereNumber('asset')->name('assets.file');
     Route::post('/assets/{asset}/daily-records', 'storeAssetDaily')->whereNumber('asset')->name('assets.daily-records.store');

@@ -346,6 +346,7 @@ return [
 
         'export' => [
             'title' => '导出域名与店铺信息',
+            'owner_user' => '真实归属人',
             'notice' => '导出文件包含全部业务字段，请仅在受控环境中使用和保管。',
             'scope' => '导出范围',
             'selected_title' => '导出当前页已选记录',

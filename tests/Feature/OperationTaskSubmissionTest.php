@@ -27,7 +27,7 @@ class OperationTaskSubmissionTest extends TestCase
         app()->setLocale('zh-CN');
         $this->travelTo(now()->setDate(2026, 11, 12)->setTime(12, 0));
         Schema::create('operation_test_tasks', function (Blueprint $table): void {
-            $table->id(); $table->string('task_no')->unique(); $table->unsignedInteger('owner_user_id');
+            $table->id(); $table->softDeletes(); $table->unsignedInteger('deleted_by')->nullable(); $table->string('task_no')->unique(); $table->unsignedInteger('owner_user_id');
             $table->string('owner_name'); $table->unsignedInteger('department_id')->nullable(); $table->string('department_name')->nullable();
             $table->string('page_type'); $table->string('task_type'); $table->string('landing_url'); $table->text('selection_objective');
             $table->dateTime('submitted_at'); $table->unsignedInteger('version')->default(1); $table->timestamps();

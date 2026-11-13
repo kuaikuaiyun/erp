@@ -34,7 +34,7 @@ class OperationTaskRectificationUploadTest extends TestCase
         Storage::fake('local');
         (require database_path('migrations/2026_11_12_000100_create_operation_task_asset_uploads.php'))->up();
         Schema::create('operation_test_tasks', function (Blueprint $table): void {
-            $table->id(); $table->string('task_no'); $table->unsignedInteger('owner_user_id'); $table->string('owner_name');
+            $table->id(); $table->softDeletes(); $table->unsignedInteger('deleted_by')->nullable(); $table->string('task_no'); $table->unsignedInteger('owner_user_id'); $table->string('owner_name');
             $table->unsignedInteger('department_id')->nullable(); $table->string('department_name')->nullable();
             $table->string('page_type'); $table->string('task_type'); $table->string('landing_url'); $table->text('selection_objective');
             $table->unsignedInteger('version')->default(1); $table->json('version_history')->nullable();
@@ -226,5 +226,91 @@ class OperationTaskRectificationUploadTest extends TestCase
         }
         $this->submit($this->payload())->assertSessionHasNoErrors()->assertSessionHas('success');
         self::assertSame(3, OperationTaskReview::query()->where('target_version', 2)->where('channel', 'leader')->where('result', 'approved')->count());
+    }
+
+    private function makePending(): void
+    {
+        $this->rectification->delete();
+        $this->task->update(['rectification_status' => 'none']);
+    }
+
+    public function test_pending_task_edit_preserves_id_first_submission_and_files(): void
+    {
+        $this->makePending();
+        $createdAt = $this->task->created_at->toDateTimeString();
+        $this->post(route('operation-tasks.tests.update', $this->task->id), $this->payload())->assertSessionHasNoErrors()->assertSessionHas('success');
+        self::assertSame(1, OperationTestTask::query()->count());
+        self::assertSame(2, (int) $this->task->fresh()->version);
+        self::assertSame($createdAt, $this->task->fresh()->created_at->toDateTimeString());
+        self::assertSame('none', $this->task->fresh()->rectification_status);
+        self::assertSame(2, OperationTaskAsset::query()->count());
+        Storage::disk('local')->assertExists('original/0.png');
+    }
+
+    public function test_task_or_asset_review_prevents_pending_edit_and_delete(): void
+    {
+        $this->makePending();
+        $asset = $this->task->assets()->first();
+        OperationTaskReview::query()->create([
+            'target_type' => 'asset', 'target_id' => $asset->id, 'target_version' => 1, 'channel' => 'leader',
+            'result' => 'approved', 'reviewer_id' => 9, 'reviewer_name' => '组长', 'reviewed_at' => now(),
+        ]);
+        $this->post(route('operation-tasks.tests.update', $this->task->id), $this->payload())->assertSessionHas('warning');
+        $this->delete(route('operation-tasks.tests.destroy', $this->task->id), ['version' => 1])->assertSessionHas('warning');
+        self::assertSame(1, (int) $this->task->fresh()->version);
+        self::assertFalse($this->task->fresh()->trashed());
+    }
+
+    public function test_pending_task_delete_keeps_archived_task_assets_and_files(): void
+    {
+        $this->makePending();
+        $this->delete(route('operation-tasks.tests.destroy', $this->task->id), ['version' => 1])->assertSessionHas('success');
+        self::assertNull(OperationTestTask::query()->find($this->task->id));
+        self::assertTrue(OperationTestTask::withTrashed()->findOrFail($this->task->id)->trashed());
+        self::assertSame(0, OperationTaskAsset::query()->count());
+        self::assertSame(2, OperationTaskAsset::withoutGlobalScope('active_task')->count());
+        Storage::disk('local')->assertExists('original/0.png');
+        $this->get(route('operation-tasks.assets.file', 1))->assertNotFound();
+    }
+
+    public function test_daily_requires_common_approved_channel_and_no_current_rejection(): void
+    {
+        $this->makePending();
+        $asset = $this->task->assets()->first();
+        $policy = \App\Portals\OperationTasks\Support\OperationTaskRules::class;
+        self::assertFalse($policy::dailyAllowed($this->task->fresh(), $asset->fresh()));
+        $review = ['target_type' => 'task', 'target_id' => $this->task->id, 'target_version' => 1,
+            'channel' => 'leader', 'result' => 'approved', 'reviewer_id' => 9, 'reviewer_name' => '组长', 'reviewed_at' => now()];
+        OperationTaskReview::query()->create($review);
+        self::assertFalse($policy::dailyAllowed($this->task->fresh(), $asset->fresh()));
+        OperationTaskReview::query()->create(array_replace($review, ['target_type' => 'asset', 'target_id' => $asset->id, 'channel' => 'department']));
+        self::assertFalse($policy::dailyAllowed($this->task->fresh(), $asset->fresh()));
+        OperationTaskReview::query()->create(array_replace($review, ['target_type' => 'asset', 'target_id' => $asset->id]));
+        self::assertTrue($policy::dailyAllowed($this->task->fresh(), $asset->fresh()));
+        OperationTaskReview::query()->create(array_replace($review, ['channel' => 'department', 'result' => 'rejected']));
+        self::assertFalse($policy::dailyAllowed($this->task->fresh(), $asset->fresh()));
+    }
+
+    public function test_daily_endpoint_blocks_direct_post_until_leader_approves_task_and_asset(): void
+    {
+        $this->makePending();
+        Schema::create('operation_asset_daily_records', function (Blueprint $table): void {
+            $table->id(); $table->unsignedBigInteger('asset_id'); $table->string('media'); $table->date('data_date');
+            $table->decimal('spend_usd'); $table->unsignedInteger('orders'); $table->decimal('roi')->nullable();
+            $table->text('analysis'); $table->text('next_action'); $table->unsignedInteger('version')->default(1);
+            $table->json('version_history')->nullable(); $table->unsignedInteger('created_by');
+            $table->unsignedInteger('updated_by'); $table->string('updated_by_name'); $table->timestamps();
+        });
+        $asset = $this->task->assets()->first();
+        $payload = ['media' => 'Google', 'data_date' => now('Asia/Shanghai')->toDateString(), 'spend_usd' => 10, 'orders' => 2, 'analysis' => '分析', 'next_action' => '继续测试'];
+        $url = route('operation-tasks.assets.daily-records.store', $asset->id);
+        $this->from(route('operation-tasks.tests.show', $this->task->id))->post($url, $payload)->assertSessionHasErrors('asset');
+        self::assertSame(0, DB::table('operation_asset_daily_records')->count());
+        foreach (['task' => $this->task->id, 'asset' => $asset->id] as $type => $id) {
+            OperationTaskReview::query()->create(['target_type' => $type, 'target_id' => $id, 'target_version' => 1,
+                'channel' => 'leader', 'result' => 'approved', 'reviewer_id' => 9, 'reviewer_name' => '组长', 'reviewed_at' => now()]);
+        }
+        $this->post($url, $payload)->assertSessionHasNoErrors()->assertSessionHas('success');
+        self::assertSame(1, DB::table('operation_asset_daily_records')->count());
     }
 }

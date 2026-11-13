@@ -35,8 +35,24 @@ function init(){
  window.addEventListener('resize',function(){combos.forEach(function(combo){combo.position();});});
  document.addEventListener('scroll',function(event){combos.forEach(function(combo){if(!combo.list.contains(event.target))combo.position();});},true);
  window.addEventListener('pagehide',function(){combos.forEach(function(combo){combo.close();});});
+
+ document.querySelectorAll('[data-date-shortcuts]').forEach(function(shortcuts){
+   var form=shortcuts.closest('form'),from=form.elements[shortcuts.dataset.fromName],to=form.elements[shortcuts.dataset.toName];
+   shortcuts.querySelectorAll('[data-date-range]').forEach(function(button){
+     button.addEventListener('click',function(){
+       var fields={};new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()).forEach(function(part){fields[part.type]=part.value;});
+       var today=new Date(fields.year+'-'+fields.month+'-'+fields.day+'T12:00:00Z'),start=new Date(today),key=button.dataset.dateRange;
+       if(key==='yesterday'){today.setUTCDate(today.getUTCDate()-1);start=new Date(today);}
+       if(key==='week')start.setUTCDate(start.getUTCDate()-6);
+       from.value=key==='all'?'':start.toISOString().slice(0,10);to.value=key==='all'?'':today.toISOString().slice(0,10);
+       var all=form.querySelector('[name="all_time"]')||document.createElement('input');all.type='hidden';all.name='all_time';all.value=key==='all'?'1':'0';form.appendChild(all);
+       form.querySelectorAll('input[name$="_page"],input[name="page"]').forEach(function(input){input.remove();});
+       form.requestSubmit();
+     });
+   });
+ });
  var dashboard=document.getElementById('ot-dashboard-form');
- document.querySelectorAll('form[method="get"]').forEach(function(form){var key=dashboard&&form===dashboard?'dashboard_tab':'review_tab';if(!dashboard&&!document.querySelector('[data-review-tab]'))return;var hidden=form.querySelector('input[name="'+key+'"]')||document.createElement('input');hidden.type='hidden';hidden.name=key;hidden.value=new URL(location.href).searchParams.get(key)||(dashboard?'tests':'recaps');form.appendChild(hidden);document.querySelectorAll(dashboard?'[data-dashboard-tab]':'[data-review-tab]').forEach(function(button){button.addEventListener('click',function(){hidden.value=button.getAttribute(dashboard?'data-dashboard-tab':'data-review-tab');var url=new URL(location.href);url.searchParams.set(key,hidden.value);history.replaceState({},'',url);});});});
+ document.querySelectorAll('form[method="get"]').forEach(function(form){var key=dashboard&&form===dashboard?'dashboard_tab':'review_tab';if(!dashboard&&!document.querySelector('[data-review-tab]'))return;var hidden=form.querySelector('input[name="'+key+'"]')||document.createElement('input');hidden.type='hidden';hidden.name=key;hidden.value=new URL(location.href).searchParams.get(key)||'tests';form.appendChild(hidden);document.querySelectorAll(dashboard?'[data-dashboard-tab]':'[data-review-tab]').forEach(function(button){button.addEventListener('click',function(){hidden.value=button.getAttribute(dashboard?'data-dashboard-tab':'data-review-tab');var url=new URL(location.href);url.searchParams.set(key,hidden.value);history.replaceState({},'',url);});});});
  if(dashboard){var current=new URL(location.href).searchParams.get('dashboard_tab')==='recaps'?'recaps':'tests';var button=document.querySelector('[data-dashboard-tab="'+(current==='recaps'?'recaps':'tests')+'"]');document.querySelectorAll('[data-dashboard-tab]').forEach(function(node){node.classList.toggle('is-active',node.getAttribute('data-dashboard-tab')===current);});document.querySelectorAll('[data-dashboard-pane]').forEach(function(node){node.classList.toggle('is-active',node.getAttribute('data-dashboard-pane')===current);});}
  document.addEventListener('click',function(event){var anchor=event.target.closest('a');if(!anchor||!anchor.closest('.ot-filter-shortcuts,.ot-filter-actions'))return;var url=new URL(anchor.href,location.href);if(url.pathname!==location.pathname)return;var tab=new URL(location.href).searchParams.get('review_tab');if(tab)url.searchParams.set('review_tab',tab);anchor.href=url.toString();});
  try{var message=JSON.parse(sessionStorage.getItem('operation-task-review-success')||'null');if(message){sessionStorage.removeItem('operation-task-review-success');if(window.ErpAdminNotifier)window.ErpAdminNotifier.notify({type:'success',title:message.title,message:message.message});}}catch(_){}

@@ -41,6 +41,7 @@ class AssistantDomainStoreSpreadsheetService
         'email_purchased',
         'team',
         'project',
+        'owner_user',
         'user_name',
         'erp',
         'credit_card',
@@ -102,7 +103,12 @@ class AssistantDomainStoreSpreadsheetService
     /** @return list<string> */
     private function exportHeaders(): array
     {
-        return array_map(fn (string $field): string => $this->importHeaderLabel($field), self::EXPORT_FIELDS);
+        return array_map(
+            fn (string $field): string => $field === 'owner_user'
+                ? __('assistant.domain_stores.export.owner_user')
+                : $this->importHeaderLabel($field),
+            self::EXPORT_FIELDS,
+        );
     }
 
     public function exportResponse(iterable $stores): StreamedResponse
@@ -220,6 +226,7 @@ class AssistantDomainStoreSpreadsheetService
             $store->email_purchased ? __('assistant.domain_stores.common.yes') : __('assistant.domain_stores.common.no'),
             AssistantDomainStore::displayMultiValue($store->team),
             $store->project,
+            $store->ownerUser?->name ?: $store->ownerUser?->username ?: '',
             $store->user_name,
             AssistantDomainStore::displayMultiValue($store->erp),
             $store->credit_card,

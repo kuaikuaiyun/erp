@@ -176,7 +176,7 @@ class DomainStoreController extends Controller
             $query->whereKey($validated['selected_ids'] ?? []);
         }
 
-        $stores = $query->orderByDesc('created_at')->orderByDesc('id')->get();
+        $stores = $query->with('ownerUser:id,name,username')->orderByDesc('created_at')->orderByDesc('id')->get();
 
         if ($stores->isEmpty()) {
             throw ValidationException::withMessages([

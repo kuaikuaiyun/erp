@@ -26,18 +26,16 @@
         <div class="ot-card-body">
             <div class="ot-filter-grid">
                 @include('portals.operation-tasks.partials.search-filters')
-                <div class="form-group"><label>{{ __('operation_tasks.reviews.submitted_from') }}</label><input class="form-control" type="date" name="from" value="{{ $reviewFilters['from'] ?? '' }}"></div>
-                <div class="form-group"><label>{{ __('operation_tasks.reviews.submitted_to') }}</label><input class="form-control" type="date" name="to" value="{{ $reviewFilters['to'] ?? '' }}"></div>
+                @include('portals.operation-tasks.partials.date-filters', ['dateFrom' => $reviewFilters['from'], 'dateTo' => $reviewFilters['to']])
                 <div class="form-group"><label>审核状态</label><select class="form-control" name="status"><option value="">全部</option><option value="pending" @selected(($reviewFilters['status'] ?? '') === 'pending')>待我审核</option><option value="rectification" @selected(($reviewFilters['status'] ?? '') === 'rectification')>整改处理中</option><option value="approved" @selected(($reviewFilters['status'] ?? '') === 'approved')>我负责通道已通过</option></select></div>
                 <div class="ot-filter-actions"><button class="btn ot-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{ route('operation-tasks.reviews.index') }}">重置</a></div>
             </div>
-            <div class="ot-filter-shortcuts"><span>快捷选择</span><a href="{{ route('operation-tasks.reviews.index', ['from' => now('Asia/Shanghai')->format('Y-m-d'), 'to' => now('Asia/Shanghai')->format('Y-m-d')]) }}">今天</a><a href="{{ route('operation-tasks.reviews.index', ['from' => now('Asia/Shanghai')->subDay()->format('Y-m-d'), 'to' => now('Asia/Shanghai')->subDay()->format('Y-m-d')]) }}">昨天</a><a href="{{ route('operation-tasks.reviews.index', ['from' => now('Asia/Shanghai')->subDays(6)->format('Y-m-d'), 'to' => now('Asia/Shanghai')->format('Y-m-d')]) }}">近7天</a><a href="{{ route('operation-tasks.reviews.index') }}">全部时间</a></div>
         </div>
     </form>
 
     <div class="ot-review-tabs" role="tablist">
-        <button type="button" class="is-active" data-review-tab="recaps">每日复盘审核 <em>{{ $recaps->total() }}</em></button>
-        <button type="button" data-review-tab="tests">测品任务审核 <em>{{ $tasks->total() }}</em></button>
+        <button type="button" class="is-active" data-review-tab="tests">测品任务审核 <em>{{ $tasks->total() }}</em></button>
+        <button type="button" data-review-tab="recaps">每日复盘审核 <em>{{ $recaps->total() }}</em></button>
     </div>
 
     <div class="ot-card ot-recap-review-card" data-review-panel="recaps">
@@ -182,7 +180,8 @@
                             @csrf
                         <section class="ot-audit-section">
                             <div class="ot-audit-section-head"><div><span>01</span><h4>素材逐条审核</h4></div><small>{{ $task->assets->count() }} 条素材 · {{ $activeLabel }}</small></div>
-                             <input type="hidden" name="task_id" value="{{ $task->id }}"><input type="hidden" name="channel" value="{{ $activeChannel }}">
+                             <input type="hidden" name="task_id" value="{{ $task->id }}"><input type="hidden" name="task_version" value="{{ $task->version }}">
+                             @foreach($task->assets as $versionAsset)<input type="hidden" name="asset_versions[{{ $versionAsset->id }}]" value="{{ $versionAsset->version }}">@endforeach<input type="hidden" name="channel" value="{{ $activeChannel }}">
                             @if($activeChannel === 'department' && $leaderTaskReview)
                                 <div class="ot-prior-review">
                                     <div class="ot-prior-review-title">二级主管任务审核记录</div>
@@ -455,7 +454,7 @@
     tabButtons.forEach(function (button) {
         button.addEventListener('click', function () { activateReviewTab(button.getAttribute('data-review-tab')); });
     });
-    activateReviewTab(@json(request('review_tab') === 'tests' ? 'tests' : 'recaps'));
+    activateReviewTab(@json(request('review_tab') === 'recaps' ? 'recaps' : 'tests'));
     @if($errors->any())
     notify(@json($errors->first()));
     @endif

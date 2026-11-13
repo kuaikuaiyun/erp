@@ -10,7 +10,7 @@
     $editableTestTasks = $tasks->getCollection()->mapWithKeys(function ($task) use ($user) {
         $requiredRectifications = $task->rectifications->where('status', 'required')->values();
         $required = $requiredRectifications->first();
-        if (! $required || (int) $task->owner_user_id !== (int) $user->id) {
+        if ((! $required && ! \App\Portals\OperationTasks\Support\OperationTaskRules::taskUntouched($task)) || (int) $task->owner_user_id !== (int) $user->id) {
             return [];
         }
 
@@ -24,7 +24,8 @@
         };
 
         return [(string) $task->id => [
-            'action' => route('operation-tasks.rectifications.resubmit', $required),
+            'action' => $required ? route('operation-tasks.rectifications.resubmit', $required) : route('operation-tasks.tests.update', ['task' => $task->id]),
+            'pending_edit' => ! $required,
             'version' => (int) $task->version,
             'page_type' => $task->page_type,
             'task_type' => $task->task_type,
@@ -50,7 +51,7 @@
     })->all();
 @endphp
 <section class="content ot-page ot-tests-page">
-    <div class="ot-simple-page-head"><div><h1>测品任务</h1><p>提交后允许先投放，组长与审核部门当天独立审核</p></div><button type="button" class="btn ot-primary" data-toggle="modal" data-target="#ot-test-modal"><i class="fa fa-plus"></i> 新建任务</button></div>
+    <div class="ot-simple-page-head"><div><h1>测品任务</h1><p>{{ __('operation_tasks.management.task_hint') }}</p></div><button type="button" class="btn ot-primary" data-toggle="modal" data-target="#ot-test-modal"><i class="fa fa-plus"></i> 新建任务</button></div>
     @if(($rejectedTestCount ?? 0) > 0)
         <div class="ot-test-rejected-alert">
             <div><b>有 {{ $rejectedTestCount }} 个测品任务被驳回，等待修改后重新提交。</b><span>只需修改审核指出的落地页或对应素材，已通过内容不会受影响。</span></div>
@@ -62,15 +63,7 @@
         @if(request()->filled('status'))
             <input type="hidden" name="status" value="{{ request('status') }}">
         @endif
-        <div class="ot-test-date-field">
-            <label for="ot-submitted-from">提交开始</label>
-            <input class="form-control" id="ot-submitted-from" type="date" name="submitted_from" value="{{ request('submitted_from') }}">
-        </div>
-        <div class="ot-test-date-field">
-            <label for="ot-submitted-to">提交结束</label>
-            <input class="form-control" id="ot-submitted-to" type="date" name="submitted_to" value="{{ request('submitted_to') }}">
-            @error('submitted_to')<span class="help-block">结束日期不能早于开始日期</span>@enderror
-        </div>
+        @include('portals.operation-tasks.partials.date-filters', ['dateFromName' => 'submitted_from', 'dateToName' => 'submitted_to'])
         <div class="ot-test-date-actions">
             <button class="btn ot-primary" type="submit"><i class="fa fa-search"></i> 查询</button>
             <a class="btn btn-default" href="{{ request()->fullUrlWithoutQuery(['submitted_from', 'submitted_to', 'page']) }}"><i class="fa fa-refresh"></i> 重置</a>
@@ -79,7 +72,7 @@
     <div class="ot-test-goals">
         <div><small>今日测品计划</small><b>{{ $todayPlan ? ($todayProgress['label'] ?? '已确认') : '—' }}</b><strong>{{ $todayPlan ? '单品 '.$singleTarget.' 个 · 类目 '.$categoryTarget.' 个' : '等待主管确认' }}</strong><span>每日单独确认，混合计划同时核算两类目标</span></div>
         <div><small>今日计划完成</small><b>{{ $todayPlan ? ($singleDone + $categoryDone) : 0 }}</b><strong>{{ $todayPlan ? '单品 '.$singleDone.'/'.$singleTarget.' · 类目 '.$categoryDone.'/'.$categoryTarget : '尚未设置计划' }}</strong><span>单品至少 2 条、类目至少 3 条新素材</span></div>
-        <div><small>今日任务已双通过</small><b>{{ $todayPassed }}</b><strong>待审核不影响先投放</strong><span>审核记录绑定当前版本</span></div>
+        <div><small>今日任务已双通过</small><b>{{ $todayPassed }}</b><strong>{{ __('operation_tasks.management.task_hint') }}</strong><span>审核记录绑定当前版本</span></div>
     </div>
     <div class="ot-card">
         <div class="ot-card-head"><span>任务档案</span><span class="ot-hint">共 {{ $tasks->total() }} 条；点击任务详情可追加素材、填写日报和查看整改记录。</span></div>
@@ -154,7 +147,11 @@
                         <td><span class="ot-badge {{ $leaderResult === 'rejected' ? 'red' : ($leaderResult === 'pending' ? 'orange' : '') }}">{{ $leaderLabel }}</span></td>
                         <td><span class="ot-badge {{ $departmentResult === 'rejected' ? 'red' : ($departmentResult === 'pending' ? 'orange' : '') }}">{{ $departmentLabel }}</span></td>
                         <td class="ot-task-current-status"><span class="ot-badge {{ $requiredRectifications->isNotEmpty() ? 'red' : $currentStatusClass }}">{{ $requiredRectifications->isNotEmpty() ? '已驳回待修改' : $currentStatusLabel }}</span>@if($requiredRectifications->isNotEmpty())<small>{{ $requiredRectifications->first()->rejection_opinion }}</small>@elseif($currentRejectionOpinion !== '')<small>{{ $currentRejectionOpinion }}</small>@endif</td>
-                        <td class="ot-task-action">@if($requiredRectifications->isNotEmpty() && (int) $task->owner_user_id === (int) $user->id)<button class="btn btn-warning btn-sm ot-edit-test-task" type="button" data-task-id="{{ $task->id }}">修改并重新提交</button>@else<a class="btn btn-default btn-sm" href="{{ route('operation-tasks.tests.show',$task) }}">查看详情</a>@endif</td>
+                        <td class="ot-task-action">@if($requiredRectifications->isNotEmpty() && (int) $task->owner_user_id === (int) $user->id)<button class="btn btn-warning btn-sm ot-edit-test-task" type="button" data-task-id="{{ $task->id }}">修改并重新提交</button>@else<a class="btn btn-default btn-sm" href="{{ route('operation-tasks.tests.show',$task) }}">查看详情</a>@endif
+                        @if((int) $task->owner_user_id === (int) $user->id && \App\Portals\OperationTasks\Support\OperationTaskRules::taskUntouched($task))
+                            <button class="btn btn-default btn-sm ot-edit-test-task" type="button" data-task-id="{{ $task->id }}">{{ __('operation_tasks.management.edit') }}</button>
+                            <form method="post" action="{{ route('operation-tasks.tests.destroy', ['task' => $task->id]) }}" data-delete-form style="display:inline">@csrf @method('DELETE')<input type="hidden" name="version" value="{{ $task->version }}"><button class="btn btn-danger btn-sm">{{ __('operation_tasks.management.delete') }}</button></form>
+                        @endif</td>
                     </tr>
                 @empty
                     <tr class="ot-test-empty-row"><td colspan="10"><div class="ot-test-empty-state"><i class="fa fa-flask"></i><b>当前暂无测品任务</b><span>请使用页面右上角的“新建任务”创建首个测试档案。</span></div></td></tr>
@@ -169,6 +166,7 @@
         ])
     </div>
 </section>
+@include('portals.operation-tasks.partials.delete-confirm')
 <div class="modal fade ot-modal" id="ot-test-modal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><form class="ot-form ot-task-asset-upload-form" method="post" id="ot-create-test-form" action="{{ route('operation-tasks.tests.store') }}">@csrf<input type="hidden" name="submission_token" value="{{ old('submission_token', (string) \Illuminate\Support\Str::uuid()) }}"><div class="modal-header"><button type="button" class="close" data-dismiss="modal">×</button><h4 class="modal-title">新建测品任务</h4><p>明确选品理由、验证目标和对应素材后提交。</p></div><div class="modal-body"><div class="ot-grid"><div class="form-group"><label>落地页类型 *</label><select class="form-control" name="page_type" id="ot-page-type"><option value="single" @selected(old('page_type', 'single') === 'single')>单品页</option><option value="category" @selected(old('page_type') === 'category')>类目页</option></select></div><div class="form-group"><label>任务类型 *</label><select class="form-control" name="task_type"><option value="new" @selected(old('task_type', 'new') === 'new')>新测试</option><option value="iteration" @selected(old('task_type') === 'iteration')>已有测试迭代</option></select></div><div class="ot-full form-group"><label>落地页链接 *</label><input class="form-control" type="url" name="landing_url" value="{{ old('landing_url') }}" placeholder="https://..." required></div><div class="ot-full form-group"><label>选品理由与验证目标 *</label><textarea class="form-control" rows="4" name="selection_objective" required placeholder="卖给谁？为什么选这个品或类目？本次最想验证什么？">{{ old('selection_objective') }}</textarea></div></div><div class="form-group"><label>对应素材 *</label><div id="ot-assets"></div><button class="btn btn-default btn-sm" id="ot-add-asset" type="button"><i class="fa fa-plus"></i> 添加素材</button><p class="ot-hint" id="ot-asset-hint">{{ __('operation_tasks.upload.single_hint') }}</p></div></div><div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">取消</button><button class="btn ot-primary"><i class="fa fa-send"></i> 提交任务</button></div></form></div></div></div>
 <div class="modal fade ot-modal" id="ot-test-edit-modal" tabindex="-1">
     <div class="modal-dialog modal-lg ot-test-edit-dialog">
@@ -178,7 +176,7 @@
                 <input type="hidden" name="form_mode" value="edit"><input type="hidden" name="task_id" value=""><input type="hidden" name="task_version" value="">
                 <div class="modal-header">
                     <button type="button" class="close" data-dismiss="modal">×</button>
-                    <h4 class="modal-title">修改测品任务并重新提交</h4>
+                    <h4 class="modal-title" id="ot-task-edit-title">{{ __('operation_tasks.management.resubmit_title') }}</h4>
                     <p>{{ __('operation_tasks.upload.edit_description') }}</p>
                 </div>
                 <div class="modal-body">
@@ -352,6 +350,7 @@
     function openEdit(task, id, previous) {
         var values = previous || task;
         form.action = task.action;
+        document.getElementById('ot-task-edit-title').textContent = task.pending_edit ? @json(__('operation_tasks.management.edit_title')) : @json(__('operation_tasks.management.resubmit_title'));
         form.elements.task_id.value = id;
         form.elements.task_version.value = values.task_version || task.version;
         form.elements.page_type.value = values.page_type;

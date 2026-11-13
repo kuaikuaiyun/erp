@@ -1,6 +1,35 @@
 <?php
 
 return [
+    'dates' => [
+        'from' => '提交开始日期（北京时间）', 'to' => '提交结束日期（北京时间）',
+        'quick' => '快捷选择', 'today' => '今天', 'yesterday' => '昨天', 'week' => '近7天', 'all' => '全部时间',
+        'invalid' => '结束日期不能早于开始日期。', 'by_submission' => '按北京时间提交时间统计',
+        'submission_hint' => ':from 至 :to · 按提交日期归类，保留原业务数据日期。',
+        'business_date' => '业务数据日期', 'submitted_at' => '提交时间（北京时间）',
+    ],
+    'management' => [
+        'edit' => '编辑', 'delete' => '删除', 'cancel' => '取消', 'confirm_delete' => '确认删除',
+        'delete_title' => '删除未审核记录', 'delete_hint' => '确认删除这条记录？删除后将退出列表、审核和统计，后台保留历史记录和素材文件。',
+        'deleted' => '记录已删除，历史记录及素材文件已保留。',
+        'changed' => '记录已被审核、修改或删除，本次未保存，请刷新后查看。',
+        'saved' => '测品任务已更新，等待审核。',
+        'edit_title' => '编辑未审核测品任务', 'resubmit_title' => '修改测品任务并重新提交',
+        'daily_locked' => '任务及对应素材需在同一级审核中均通过，且没有驳回，才能填写日报。',
+        'daily_button' => '填写每日数据', 'daily_waiting' => '审核通过后可填日报',
+        'task_hint' => '任务及对应素材在同一级审核均通过后可填写日报；存在驳回时暂停填写。',
+    ],
+    'activity' => [
+        'member_role' => '成员 / 角色', 'member' => '成员', 'plan_completion' => '每日计划完成', 'archive' => '任务档案',
+        'metric_initial' => '新任务', 'metric_supplement' => '历史补充', 'supplement_tag' => '补充 :count 条',
+        'unit_day' => '天', 'unit_task' => '个', 'unit_asset' => '条', 'empty' => '—',
+        'new_single' => '新增单品', 'new_category' => '新增类目', 'assets' => '素材新增',
+        'initial' => '新任务素材：:count 条', 'supplement' => '历史补充：:count 条',
+        'new_task' => '新增测品', 'resubmitted' => '历史重提', 'added' => '本期追加 :count 条',
+        'view_all' => '查看全部 :count 个任务', 'task_records' => '任务活动明细',
+        'first_at' => '首次提交', 'latest_at' => '最近提交', 'number' => '任务编号',
+        'no_records' => '暂无任务活动', 'open' => '查看详情', 'new_count' => '本期新增测品',
+    ],
     'recap_form' => [
         'edit_button' => '修改并重提',
         'edit_title' => '修改 :date 复盘 · v:version',
@@ -21,7 +50,7 @@ return [
         'login_expired' => '登录状态已失效，请刷新页面重新登录。',
         'forbidden' => '当前账号没有执行此操作的权限，请刷新页面核对。',
         'missing_record' => '当前任务或素材已不存在，请刷新页面。',
-        'attributes' => ['recap_mode' => '复盘操作类型', 'recap_id' => '复盘记录', 'recap_version' => '复盘版本',
+        'attributes' => ['asset_versions' => '素材版本', 'recap_mode' => '复盘操作类型', 'recap_id' => '复盘记录', 'recap_version' => '复盘版本',
             'submission_token' => '本次提交标识',
             'task_version' => '任务版本',
             'page_type' => '落地页类型',

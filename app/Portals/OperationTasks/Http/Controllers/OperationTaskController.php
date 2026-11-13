@@ -19,6 +19,7 @@ use App\Models\OperationTestTask;
 use App\Models\Portal;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\OperationTasks\OperationTaskAssetUploadService;
+use App\Portals\OperationTasks\Support\OperationTaskRules;
 use App\Services\DepartmentAuthorizationService;
 use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
@@ -56,12 +57,13 @@ class OperationTaskController extends Controller
         if ($context instanceof Response) return $context;
 
         $user = $context['user'];
+        $canSearchRecapPeople = $this->canManage($user);
         $yesterday = now('Asia/Shanghai')->subDay()->toDateString();
         $yesterdayRecap = OperationTaskRecap::query()
             ->where('user_id', $user->id)->whereDate('data_date', $yesterday)->first();
 
-        $query = OperationTaskRecap::query()->orderByDesc('data_date')->orderByDesc('id');
-        if (! $this->canManage($user)) {
+        $query = OperationTaskRecap::query()->orderByDesc('submitted_at')->orderByDesc('id');
+        if (! $canSearchRecapPeople) {
             $query->where('user_id', $user->id);
         } elseif (! $user->isAdministrator()) {
             $query->where(function ($visibility) use ($user): void {
@@ -70,11 +72,20 @@ class OperationTaskController extends Controller
             });
         }
 
-        $searchTeamOptions = (clone $query)->reorder()->setEagerLoads([])->select('department_name')->distinct()->pluck('department_name');
-        $searchPersonOptions = (clone $query)->reorder()->setEagerLoads([])->select('user_name')->distinct()->pluck('user_name');
-        foreach (['team_search' => 'department_name', 'person_search' => 'user_name'] as $parameter => $column) {
-            if ($request->filled($parameter)) $query->where($column, 'like', '%'.trim((string) $request->input($parameter)).'%');
+        $searchTeamOptions = collect();
+        $searchPersonOptions = collect();
+        if ($canSearchRecapPeople) {
+            $searchTeamOptions = (clone $query)->reorder()->setEagerLoads([])->select('department_name')->distinct()->pluck('department_name');
+            $searchPersonOptions = (clone $query)->reorder()->setEagerLoads([])->select('user_name')->distinct()->pluck('user_name');
+            foreach (['team_search' => 'department_name', 'person_search' => 'user_name'] as $parameter => $column) {
+                if ($request->filled($parameter)) $query->where($column, 'like', '%'.trim((string) $request->input($parameter)).'%');
+            }
+
         }
+
+        [$recapFrom, $recapTo, $recapStart, $recapUntil] = $this->submissionRange($request);
+        if ($recapStart) $query->where('submitted_at', '>=', $recapStart);
+        if ($recapUntil) $query->where('submitted_at', '<', $recapUntil);
 
         // Only the dedicated edit endpoint may bind an editable record.
         if ($request->has('edit') && ! $request->attributes->has('editing_recap')) {
@@ -100,7 +111,8 @@ class OperationTaskController extends Controller
 
         return view('portals.operation-tasks.recaps', [
             ...$context, 'searchTeamOptions' => $searchTeamOptions, 'searchPersonOptions' => $searchPersonOptions,
-            'recaps' => $recaps,
+            'canSearchRecapPeople' => $canSearchRecapPeople,
+            'recaps' => $recaps, 'recapFrom' => $recapFrom, 'recapTo' => $recapTo,
             'recapQuestions' => OperationTaskRecapQuestion::query()->where('is_enabled', true)->orderBy('sort')->orderBy('id')->get(),
             'allRecapQuestions' => $user->isAdministrator() ? OperationTaskRecapQuestion::query()->orderBy('sort')->orderBy('id')->get() : collect(),
             'canManageRecapQuestions' => $user->isAdministrator(),
@@ -116,7 +128,7 @@ class OperationTaskController extends Controller
     {
         $context = $this->authorized($request);
         $record = OperationTaskRecap::query()->where('user_id', $context['user']->id)->find($recap);
-        if (! $record || $record->workflow_status !== 'rejected') {
+        if (! $record || (! OperationTaskRules::recapUntouched($record) && $record->workflow_status !== 'rejected')) {
             return redirect()->route('operation-tasks.recaps.index')->with('warning', __('operation_tasks.recap_form.unavailable'));
         }
         $request->attributes->set('editing_recap', $record);
@@ -158,7 +170,7 @@ class OperationTaskController extends Controller
         $context = $this->authorized($request);
         $user = $context['user'];
         $record = OperationTaskRecap::query()->where('user_id', $user->id)->find($recap);
-        if (! $record || $record->workflow_status !== 'rejected') {
+        if (! $record || (! OperationTaskRules::recapUntouched($record) && $record->workflow_status !== 'rejected')) {
             return redirect()->route('operation-tasks.recaps.index')->with('warning', __('operation_tasks.recap_form.unavailable'));
         }
         $identity = $this->validateTask($request, [
@@ -170,7 +182,7 @@ class OperationTaskController extends Controller
         $payload = $this->recapSubmissionPayload($request, $user, $context['portal'], $record->data_date->format('Y-m-d'));
         $saved = DB::connection($record->getConnectionName())->transaction(function () use ($recap, $user, $identity, $payload): OperationTaskRecap {
             $existing = OperationTaskRecap::query()->where('user_id', $user->id)->lockForUpdate()->find($recap);
-            if (! $existing || $existing->workflow_status !== 'rejected' || (int) $existing->version !== (int) $identity['recap_version']) {
+            if (! $existing || (! OperationTaskRules::recapUntouched($existing) && $existing->workflow_status !== 'rejected') || (int) $existing->version !== (int) $identity['recap_version']) {
                 throw ValidationException::withMessages(['recap' => __('operation_tasks.recap_form.stale')]);
             }
             $payload['data_date'] = $existing->data_date->format('Y-m-d');
@@ -400,12 +412,8 @@ class OperationTaskController extends Controller
         }
 
         $today = now('Asia/Shanghai')->startOfDay();
-        $todayEnd = $today->copy()->endOfDay()->utc();
         $todayStart = $today->copy()->utc();
-        $todayTasks = (clone $base)->where(function ($query) use ($todayStart, $todayEnd): void {
-            $query->whereBetween('submitted_at', [$todayStart, $todayEnd])
-                ->orWhereHas('assets', fn ($assets) => $assets->whereBetween('created_at', [$todayStart, $todayEnd]));
-        })->get();
+        $todayTasks = (clone $base)->where('created_at', '>=', $todayStart)->where('created_at', '<', $today->copy()->addDay()->utc())->get();
         $todayPlan = OperationTaskDailyPlan::query()->where('user_id', $user->id)->whereDate('plan_date', $today)->first();
         $todayProgress = $this->dailyPlanProgress($todayPlan, $todayTasks, $today->toDateString());
         $testPerPage = in_array((int) $request->input('test_per_page', 20), [20, 50, 100], true)
@@ -421,21 +429,9 @@ class OperationTaskController extends Controller
             $base->whereHas('rectifications', fn ($query) => $query->where('status', 'required'));
         }
 
-        $dateFilters = $this->validateTask($request, [
-            'submitted_from' => ['nullable', 'date_format:Y-m-d'],
-            'submitted_to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:submitted_from'],
-        ]);
-        $submittedFrom = (string) ($dateFilters['submitted_from'] ?? '');
-        $submittedTo = (string) ($dateFilters['submitted_to'] ?? '');
-
-        if ($submittedFrom !== '') {
-            $base->where('submitted_at', '>=', Carbon::createFromFormat('Y-m-d', $submittedFrom, 'Asia/Shanghai')
-                ->startOfDay()->utc());
-        }
-        if ($submittedTo !== '') {
-            $base->where('submitted_at', '<=', Carbon::createFromFormat('Y-m-d', $submittedTo, 'Asia/Shanghai')
-                ->endOfDay()->utc());
-        }
+        [, , $submittedStart, $submittedUntil] = $this->submissionRange($request, 'submitted_from', 'submitted_to');
+        if ($submittedStart) $base->where('submitted_at', '>=', $submittedStart);
+        if ($submittedUntil) $base->where('submitted_at', '<', $submittedUntil);
 
         return view('portals.operation-tasks.tests', [
             ...$context, 'searchTeamOptions' => $searchTeamOptions, 'searchPersonOptions' => $searchPersonOptions,
@@ -566,6 +562,7 @@ class OperationTaskController extends Controller
             'assets.dailyRecords', 'assets.reviews', 'reviews',
             'rectifications.asset', 'rectifications.sourceReview', 'rectifications.resubmittedAsset',
         ]);
+        $task->assets->each(fn ($asset) => $asset->setAttribute('daily_allowed', OperationTaskRules::dailyAllowed($task, $asset)));
         $events = OperationTaskReviewEvent::query()
             ->where(function ($query) use ($task): void {
                 $query->where('target_type', 'task')->where('target_id', $task->id)
@@ -614,26 +611,32 @@ class OperationTaskController extends Controller
         ]);
         $media = $data['media'] === '其他' ? trim((string) ($data['custom_media'] ?? '')) : $data['media'];
         $this->rejectWhen($media === '', 'custom_media', __('operation_tasks.messages.custom_media_required'));
-        $operatorName = $this->userName($context['user']);
-        $record = OperationAssetDailyRecord::query()->where(['asset_id' => $asset->id, 'media' => $media])->whereDate('data_date', $data['data_date'])->first();
-        $payload = [
-            'asset_id' => $asset->id, 'media' => $media, 'data_date' => $data['data_date'],
-            'spend_usd' => $data['spend_usd'], 'orders' => $data['orders'], 'roi' => $data['roi'] ?? null,
-            'analysis' => trim($data['analysis']), 'next_action' => trim($data['next_action']),
-            'created_by' => $record?->created_by ?: $context['user']->id,
-            'updated_by' => $context['user']->id, 'updated_by_name' => $operatorName,
-        ];
-        if ($record) {
-            $history = $record->version_history ?? [];
-            $history[] = [
-                'version' => $record->version,
-                'snapshot' => $record->only(['media', 'data_date', 'spend_usd', 'orders', 'roi', 'analysis', 'next_action']),
-                'changed_by' => $operatorName, 'changed_by_id' => $context['user']->id, 'changed_at' => now()->toIso8601String(),
+        DB::connection($asset->getConnectionName())->transaction(function () use ($asset, $context, $data, $media): void {
+            $task = OperationTestTask::query()->lockForUpdate()->find($asset->task_id);
+            $lockedAsset = OperationTaskAsset::query()->lockForUpdate()->find($asset->id);
+            $this->rejectWhen(! $task || ! $lockedAsset || ! OperationTaskRules::dailyAllowed($task, $lockedAsset), 'asset', __('operation_tasks.management.daily_locked'));
+            $asset = $lockedAsset;
+            $operatorName = $this->userName($context['user']);
+            $record = OperationAssetDailyRecord::query()->where(['asset_id' => $asset->id, 'media' => $media])->whereDate('data_date', $data['data_date'])->first();
+            $payload = [
+                'asset_id' => $asset->id, 'media' => $media, 'data_date' => $data['data_date'],
+                'spend_usd' => $data['spend_usd'], 'orders' => $data['orders'], 'roi' => $data['roi'] ?? null,
+                'analysis' => trim($data['analysis']), 'next_action' => trim($data['next_action']),
+                'created_by' => $record?->created_by ?: $context['user']->id,
+                'updated_by' => $context['user']->id, 'updated_by_name' => $operatorName,
             ];
-            $record->update([...$payload, 'version' => $record->version + 1, 'version_history' => $history]);
-        } else {
-            OperationAssetDailyRecord::query()->create($payload);
-        }
+            if ($record) {
+                $history = $record->version_history ?? [];
+                $history[] = [
+                    'version' => $record->version,
+                    'snapshot' => $record->only(['media', 'data_date', 'spend_usd', 'orders', 'roi', 'analysis', 'next_action']),
+                    'changed_by' => $operatorName, 'changed_by_id' => $context['user']->id, 'changed_at' => now()->toIso8601String(),
+                ];
+                $record->update([...$payload, 'version' => $record->version + 1, 'version_history' => $history]);
+            } else {
+                OperationAssetDailyRecord::query()->create($payload);
+            }
+        });
         return back()->with('success', __('operation_tasks.messages.daily_saved'));
     }
 
@@ -650,15 +653,19 @@ class OperationTaskController extends Controller
         $this->rejectWhen(! $request->hasFile('file') && empty($data['url']), 'file', __('operation_tasks.messages.asset_required'));
         $user = $context['user'];
         $file = $request->file('file');
-        $asset = OperationTaskAsset::query()->create([
-            'task_id' => $task->id, 'uploader_user_id' => $user->id, 'uploader_name' => $this->userName($user),
-            'selling_point' => trim($data['selling_point']),
-            'source_type' => $data['source_type'],
-            'file_path' => $file?->store('operation-tasks/assets/'.now()->format('Y/m'), 'local'),
-            'original_name' => $file?->getClientOriginalName(), 'external_url' => trim((string) ($data['url'] ?? '')) ?: null,
-            'mime_type' => $file?->getMimeType(), 'ai_confirmed' => $data['source_type'] === 'ai_created',
-            'version_history' => [['version' => 1, 'event' => 'created', 'changed_by' => $this->userName($user), 'changed_at' => now()->toIso8601String()]],
-        ]);
+        $asset = DB::connection($task->getConnectionName())->transaction(function () use ($task, $user, $data, $file) {
+            $active = OperationTestTask::query()->lockForUpdate()->find($task->id);
+            $this->rejectWhen(! $active, 'task', __('operation_tasks.management.changed'));
+            return OperationTaskAsset::query()->create([
+                'task_id' => $task->id, 'uploader_user_id' => $user->id, 'uploader_name' => $this->userName($user),
+                'selling_point' => trim($data['selling_point']),
+                'source_type' => $data['source_type'],
+                'file_path' => $file?->store('operation-tasks/assets/'.now()->format('Y/m'), 'local'),
+                'original_name' => $file?->getClientOriginalName(), 'external_url' => trim((string) ($data['url'] ?? '')) ?: null,
+                'mime_type' => $file?->getMimeType(), 'ai_confirmed' => $data['source_type'] === 'ai_created',
+                'version_history' => [['version' => 1, 'event' => 'created', 'changed_by' => $this->userName($user), 'changed_at' => now()->toIso8601String()]],
+            ]);
+        });
         $this->notifyReviewers($task, __('operation_tasks.messages.asset_pending', ['number' => $task->task_no, 'name' => $asset->original_name ?: __('operation_tasks.messages.link_asset')]), $user);
         return back()->with('success', __('operation_tasks.messages.asset_appended'));
     }
@@ -720,16 +727,7 @@ class OperationTaskController extends Controller
         $taskPerPage = in_array((int) $request->input('task_per_page', 20), [20, 50, 100], true) ? (int) $request->input('task_per_page', 20) : 20;
         $recapPerPage = in_array((int) $request->input('recap_per_page', 20), [20, 50, 100], true) ? (int) $request->input('recap_per_page', 20) : 20;
         $filters = ['from' => (string) $request->input('from', ''), 'to' => (string) $request->input('to', ''), 'department' => $selectedTeamId ?: '', 'status' => (string) $request->input('status', '')];
-        $this->validateTask($request, [
-            'from' => ['nullable', 'date_format:Y-m-d'],
-            'to' => ['nullable', 'date_format:Y-m-d'],
-        ]);
-        $submittedFrom = $filters['from'] !== ''
-            ? Carbon::parse($filters['from'], 'Asia/Shanghai')->startOfDay()->utc()
-            : null;
-        $submittedUntil = $filters['to'] !== ''
-            ? Carbon::parse($filters['to'], 'Asia/Shanghai')->startOfDay()->addDay()->utc()
-            : null;
+        [, , $submittedFrom, $submittedUntil] = $this->submissionRange($request);
         $channels = $this->reviewChannels($context['user']);
         $query = OperationTestTask::query()->with([
             'assets.reviews',
@@ -916,6 +914,9 @@ class OperationTaskController extends Controller
 
         $connection = config('admin.database.connection') ?: config('database.default');
         DB::connection($connection)->transaction(function () use ($target, $task, $data, $context): void {
+            $lockedTask = OperationTestTask::query()->lockForUpdate()->find($task->id);
+            $this->rejectWhen(! $lockedTask || (int) $lockedTask->version !== (int) $task->version, 'task_id', __('operation_tasks.management.changed'));
+
             $version = (int) $target->version;
             $review = OperationTaskReview::query()->firstOrNew([
                 'target_type' => $data['target_type'], 'target_id' => $target->id, 'target_version' => $version, 'channel' => $data['channel'],
@@ -989,6 +990,9 @@ class OperationTaskController extends Controller
 
         $connection = config('admin.database.connection') ?: config('database.default');
         DB::connection($connection)->transaction(function () use ($task, $data, $assets, $context): void {
+            $lockedTask = OperationTestTask::query()->lockForUpdate()->find($task->id);
+            $this->rejectWhen(! $lockedTask || (int) $lockedTask->version !== (int) $task->version, 'task_id', __('operation_tasks.management.changed'));
+
             foreach ($data['assets'] as $assetId => $assetData) {
                 /** @var OperationTaskAsset $asset */
                 $asset = $assets->get((int) $assetId);
@@ -1028,6 +1032,9 @@ class OperationTaskController extends Controller
         $context = $this->authorized($request);
         $data = $this->validateTask($request, [
             'task_id' => ['required', 'integer'],
+            'task_version' => ['required', 'integer', 'min:1'],
+            'asset_versions' => ['required', 'array', 'min:1'],
+            'asset_versions.*' => ['required', 'integer', 'min:1'],
             'channel' => ['required', Rule::in(['leader', 'department'])],
             'assets' => ['required', 'array', 'min:1'],
             'assets.*.result' => ['required', Rule::in(['approved', 'rejected'])],
@@ -1067,6 +1074,14 @@ class OperationTaskController extends Controller
 
         $connection = config('admin.database.connection') ?: config('database.default');
         DB::connection($connection)->transaction(function () use ($task, $data, $assets, $context, $rejectionScopes): void {
+            $lockedTask = OperationTestTask::query()->lockForUpdate()->find($task->id);
+            $this->rejectWhen(! $lockedTask || (int) $lockedTask->version !== (int) $task->version, 'task_id', __('operation_tasks.management.changed'));
+            $this->rejectWhen((int) $lockedTask->version !== (int) $data['task_version'], 'task_id', __('operation_tasks.management.changed'));
+            $currentAssets = OperationTaskAsset::query()->where('task_id', $task->id)->lockForUpdate()->get()->keyBy('id');
+            $currentVersions = $currentAssets->map(fn ($asset) => (int) $asset->version)->sortKeys()->all();
+            $sentVersions = collect($data['asset_versions'])->map(fn ($version) => (int) $version)->sortKeys()->all();
+            $this->rejectWhen($currentVersions !== $sentVersions, 'assets', __('operation_tasks.management.changed'));
+
             foreach ($data['assets'] as $assetId => $assetData) {
                 $this->storeTaskReview(
                     $task,
@@ -1173,10 +1188,17 @@ class OperationTaskController extends Controller
 
     public function resubmitRectification(Request $request, OperationTaskRectification $rectification, OperationTaskAssetUploadService $uploads): RedirectResponse
     {
-        $context = $this->authorized($request);
         $rectification->loadMissing('task');
-        $this->authorizeTaskOwner($context['user'], $rectification->task);
-        if ($rectification->status !== 'required') return back()->withInput()->with('warning', __('operation_tasks.upload.edit_processed'));
+        abort_unless($rectification->task, 404);
+        return $this->submitTestRevision($request, $rectification->task, $uploads, $rectification);
+    }
+
+    private function submitTestRevision(Request $request, OperationTestTask $targetTask, OperationTaskAssetUploadService $uploads, ?OperationTaskRectification $rectification = null): RedirectResponse
+    {
+        $context = $this->authorized($request);
+        $this->authorizeTaskOwner($context['user'], $targetTask);
+        $pendingEdit = $rectification === null;
+        if (! $pendingEdit && $rectification->status !== 'required') return back()->withInput()->with('warning', __('operation_tasks.upload.edit_processed'));
         $minimum = $request->input('page_type') === 'category' ? 3 : 2;
         $data = $this->validateTask($request, [
             'task_version' => ['required', 'integer', 'min:1'],
@@ -1197,11 +1219,13 @@ class OperationTaskController extends Controller
             'task_version.min' => __('operation_tasks.upload.edit_refresh'),
         ]);
         $user = $context['user'];
-        $outcome = DB::connection($rectification->getConnectionName())->transaction(function () use ($rectification, $data, $uploads, $user): array {
+        $outcome = DB::connection($targetTask->getConnectionName())->transaction(function () use ($targetTask, $rectification, $data, $uploads, $user, $pendingEdit): array {
             // Serialize re-submissions before consuming any upload or advancing versions.
-            $task = OperationTestTask::query()->lockForUpdate()->findOrFail($rectification->task_id);
-            $current = OperationTaskRectification::query()->lockForUpdate()->findOrFail($rectification->id);
-            if ($current->status !== 'required') return ['status' => 'edit_processed'];
+            $task = OperationTestTask::query()->lockForUpdate()->find($targetTask->id);
+            if (! $task) return ['status' => 'edit_processed'];
+            $current = $pendingEdit ? null : OperationTaskRectification::query()->lockForUpdate()->find($rectification->id);
+            if ($pendingEdit && ! OperationTaskRules::taskUntouched($task)) return ['status' => 'edit_processed'];
+            if (! $pendingEdit && (! $current || $current->status !== 'required')) return ['status' => 'edit_processed'];
             if ((int) $task->version !== (int) $data['task_version']) return ['status' => 'edit_stale'];
             $task->load('assets');
             $activeAssets = $task->assets->whereNull('retired_at')->keyBy('id');
@@ -1216,12 +1240,12 @@ class OperationTaskController extends Controller
                 }
             }
             $requiredRectifications = OperationTaskRectification::query()->where('task_id', $task->id)->where('status', 'required')->lockForUpdate()->get();
-            $resetLeaderReview = $requiredRectifications->contains(fn (OperationTaskRectification $item) => $item->review_channel === 'leader');
+            $resetLeaderReview = $pendingEdit || $requiredRectifications->contains(fn (OperationTaskRectification $item) => $item->review_channel === 'leader');
             $previousTaskVersion = (int) $task->version;
             $history = $task->version_history ?? [];
             $history[] = [
                 'version' => $previousTaskVersion,
-                'reason' => 'rectification_resubmitted',
+                'reason' => $pendingEdit ? 'pending_edited' : 'rectification_resubmitted',
                 'snapshot' => $task->only(['page_type', 'task_type', 'landing_url', 'selection_objective']),
                 'changed_by' => $this->userName($user),
                 'changed_at' => now()->toIso8601String(),
@@ -1230,7 +1254,7 @@ class OperationTaskController extends Controller
             $task->update([
                 'page_type' => $data['page_type'], 'task_type' => $data['task_type'],
                 'landing_url' => trim($data['landing_url']), 'selection_objective' => trim($data['selection_objective']),
-                'version' => $nextVersion, 'version_history' => $history, 'rectification_status' => 'resubmitted',
+                'version' => $nextVersion, 'version_history' => $history, 'rectification_status' => $pendingEdit ? 'none' : 'resubmitted',
                 'submitted_at' => now(),
             ]);
 
@@ -1317,9 +1341,13 @@ class OperationTaskController extends Controller
             return ['status' => 'saved', 'reset_leader' => $resetLeaderReview];
         });
         if ($outcome['status'] !== 'saved') return back()->withInput()->with('warning', __('operation_tasks.upload.'.$outcome['status']));
+        if ($pendingEdit) {
+            $this->notifyReviewers($targetTask->fresh(), __('operation_tasks.messages.test_pending'), $user, ['leader', 'department']);
+            return back()->with('success', __('operation_tasks.management.saved'));
+        }
         $resetLeaderReview = $outcome['reset_leader'];
         $reviewChannels = $resetLeaderReview ? ['leader'] : ['department'];
-        $this->notifyReviewers($rectification->task, __('operation_tasks.messages.resubmitted', ['number' => $rectification->task->task_no]), $user, $reviewChannels);
+        $this->notifyReviewers($targetTask->fresh(), __('operation_tasks.messages.resubmitted', ['number' => $targetTask->task_no]), $user, $reviewChannels);
         return back()->with('success', $resetLeaderReview ? __('operation_tasks.messages.resubmit_leader') : __('operation_tasks.messages.resubmit_department'));
     }
 
@@ -1344,11 +1372,13 @@ class OperationTaskController extends Controller
         $context = $this->context($request);
         if ($context instanceof Response) return $context;
         abort_unless($this->canManage($context['user']), 403);
-        $today = now('Asia/Shanghai')->startOfDay();
-        $from = $request->date('from')?->format('Y-m-d') ?? $today->copy()->subDays(6)->toDateString();
-        $to = $request->date('to')?->format('Y-m-d') ?? $today->toDateString();
-        if ($from > $to) [$from, $to] = [$to, $from];
-
+        [$from, $to, $rangeStart, $rangeUntil] = $this->submissionRange($request, 'from', 'to', true);
+        $withinRange = static fn ($date): bool => $date !== null
+            && (! $rangeStart || $date->gte($rangeStart)) && (! $rangeUntil || $date->lt($rangeUntil));
+        $applyRange = static function ($query, string $column) use ($rangeStart, $rangeUntil): void {
+            if ($rangeStart) $query->where($column, '>=', $rangeStart);
+            if ($rangeUntil) $query->where($column, '<', $rangeUntil);
+        };
         $allTeams = $this->visibleSecondaryDepartments($context['user'], $context['portal']);
         $selectedTeamId = (int) $request->input('department', 0);
         if ($selectedTeamId && ! $allTeams->contains('id', $selectedTeamId)) $selectedTeamId = 0;
@@ -1357,59 +1387,73 @@ class OperationTaskController extends Controller
         if ($request->filled('team_search')) $teams = $teams->filter(fn ($team) => str_contains(mb_strtolower($team->name), mb_strtolower(trim((string) $request->input('team_search')))));
         $teamIds = $teams->modelKeys();
         $memberIds = $teams->flatMap(fn (Department $team) => $team->departmentMembers->pluck('id'))->map(fn ($id) => (int) $id)->unique()->values()->all();
-        $rangeStart = Carbon::parse($from, 'Asia/Shanghai')->startOfDay()->utc();
-        $rangeEnd = Carbon::parse($to, 'Asia/Shanghai')->endOfDay()->utc();
-        $recaps = OperationTaskRecap::query()->whereBetween('data_date', [$from, $to])
-            ->where(function ($query) use ($teamIds, $memberIds): void {
-                $query->whereIn('department_id', $teamIds)->orWhereIn('user_id', $memberIds);
-            })->get();
-        $tasks = OperationTestTask::query()->with(['assets' => fn ($query) => $query->whereBetween('created_at', [$rangeStart, $rangeEnd])])
+        $recapQuery = OperationTaskRecap::query()->where(function ($query) use ($teamIds, $memberIds): void {
+            $query->whereIn('department_id', $teamIds)->orWhereIn('user_id', $memberIds);
+        });
+        $applyRange($recapQuery, 'submitted_at');
+        $recaps = $recapQuery->get();
+        // Include historical activity for its own column, never as a new product.
+        $tasks = OperationTestTask::query()->with(['assets' => fn ($query) => $applyRange($query, 'created_at')])
             ->where(function ($query) use ($teamIds, $memberIds): void {
                 $query->whereIn('department_id', $teamIds)->orWhereIn('owner_user_id', $memberIds);
-            })
-            ->where(function ($query) use ($rangeStart, $rangeEnd): void {
-                $query->whereBetween('submitted_at', [$rangeStart, $rangeEnd])
-                    ->orWhereHas('assets', fn ($assets) => $assets->whereBetween('created_at', [$rangeStart, $rangeEnd]));
+            })->where(function ($query) use ($applyRange, $rangeStart, $rangeUntil): void {
+                if (! $rangeStart && ! $rangeUntil) return;
+                $query->where(fn ($created) => $applyRange($created, 'created_at'))
+                    ->orWhere(fn ($submitted) => $applyRange($submitted, 'submitted_at'))
+                    ->orWhereHas('assets', fn ($assets) => $applyRange($assets, 'created_at'));
             })->get();
-        $plans = OperationTaskDailyPlan::query()->whereBetween('plan_date', [$from, $to])
-            ->where(function ($query) use ($teamIds, $memberIds): void {
-                $query->whereIn('department_id', $teamIds)->orWhereIn('user_id', $memberIds);
-            })->get()
-            ->keyBy(fn (OperationTaskDailyPlan $plan) => $plan->user_id.'|'.$plan->plan_date->format('Y-m-d'));
-        $days = collect();
-        for ($day = Carbon::parse($from, 'Asia/Shanghai'); $day->lte(Carbon::parse($to, 'Asia/Shanghai')); $day->addDay()) $days->push($day->toDateString());
-
         if ($filters['owner'] !== '') {
-            $selectedUsers = AdminUser::query()->whereIn('id', $memberIds)->get()->filter(fn ($member) => str_contains(mb_strtolower($this->userName($member)), mb_strtolower($filters['owner'])))->pluck('id');
+            $selectedUsers = AdminUser::query()->whereIn('id', $memberIds)->get()
+                ->filter(fn ($member) => str_contains(mb_strtolower($this->userName($member)), mb_strtolower($filters['owner'])))->pluck('id');
             $recaps = $recaps->whereIn('user_id', $selectedUsers);
             $tasks = $tasks->whereIn('owner_user_id', $selectedUsers);
         }
-        $teamRows = $teams->map(function (Department $team) use ($recaps, $tasks, $plans, $days, $filters) {
+        // Blank bounds mean all dates. Derive calendar bounds from real activity rather than year 2000.
+        $activityDates = $recaps->pluck('submitted_at')->merge($tasks->pluck('created_at'))
+            ->merge($tasks->flatMap(fn ($task) => $task->assets->pluck('created_at')))
+            ->filter()->map(fn ($date) => $date->copy()->timezone('Asia/Shanghai')->toDateString());
+        $calendarFrom = $from ?: ($activityDates->min() ?: now('Asia/Shanghai')->toDateString());
+        $calendarTo = $to ?: max($calendarFrom, $activityDates->max() ?: now('Asia/Shanghai')->toDateString());
+        $days = collect();
+        for ($day = Carbon::parse($calendarFrom, 'Asia/Shanghai'); $day->lte(Carbon::parse($calendarTo, 'Asia/Shanghai')); $day->addDay()) $days->push($day->toDateString());
+        $plans = OperationTaskDailyPlan::query()->whereBetween('plan_date', [$calendarFrom, $calendarTo])
+            ->where(function ($query) use ($teamIds, $memberIds): void {
+                $query->whereIn('department_id', $teamIds)->orWhereIn('user_id', $memberIds);
+            })->get()->keyBy(fn ($plan) => $plan->user_id.'|'.$plan->plan_date->format('Y-m-d'));
+        $teamRows = $teams->map(function (Department $team) use ($recaps, $tasks, $plans, $days, $filters, $withinRange) {
             $members = collect($team->departmentMembers->all())->filter(fn (AdminUser $member) => $filters['owner'] === '' || str_contains(mb_strtolower($this->userName($member)), mb_strtolower($filters['owner'])));
-            $rows = $members->map(function (AdminUser $member) use ($recaps, $tasks, $plans, $days) {
+            $rows = $members->map(function (AdminUser $member) use ($recaps, $tasks, $plans, $days, $withinRange) {
                 $memberRecaps = $recaps->where('user_id', $member->id);
                 $memberTasks = $tasks->where('owner_user_id', $member->id);
-                $progresses = $days->map(function (string $date) use ($member, $memberTasks, $plans) {
-                    $plan = $plans->get($member->id.'|'.$date);
-                    return $this->dailyPlanProgress($plan, $memberTasks, $date);
-                });
-                $recapByDate = $memberRecaps->keyBy(fn (OperationTaskRecap $recap) => $recap->data_date->format('Y-m-d'));
-                $recapRecords = $memberRecaps->sortByDesc('data_date')->map(fn (OperationTaskRecap $recap) => $this->recapPayload($recap))->values()->all();
-                $recapDayRecords = $days->sortDesc()->map(function (string $date) use ($recapByDate): array {
-                    $recap = $recapByDate->get($date);
-                    return $recap ? $this->recapPayload($recap) : ['date' => $date, 'missing' => true];
+                $newTasks = $memberTasks->filter(fn ($task) => $withinRange($task->created_at));
+                $historical = static fn ($asset, $task): bool => $asset->created_at->copy()->timezone('Asia/Shanghai')->toDateString()
+                    > $task->created_at->copy()->timezone('Asia/Shanghai')->toDateString();
+                $initialCount = (int) $memberTasks->sum(fn ($task) => $task->assets->reject(fn ($asset) => $historical($asset, $task))->count());
+                $supplementCount = (int) $memberTasks->sum(fn ($task) => $task->assets->filter(fn ($asset) => $historical($asset, $task))->count());
+                $progresses = $days->map(fn (string $date) => $this->dailyPlanProgress($plans->get($member->id.'|'.$date), $memberTasks, $date));
+                $recapRecords = $memberRecaps->sortByDesc('submitted_at')->map(fn ($recap) => $this->recapPayload($recap))->values()->all();
+                $bySubmissionDay = $memberRecaps->groupBy(fn ($recap) => $recap->submitted_at?->copy()->timezone('Asia/Shanghai')->toDateString());
+                $recapDayRecords = $days->sortDesc()->flatMap(function (string $date) use ($bySubmissionDay) {
+                    $records = $bySubmissionDay->get($date, collect());
+                    return $records->isEmpty() ? [['date' => $date, 'missing' => true]]
+                        : $records->sortByDesc('submitted_at')->map(fn ($recap) => $this->recapPayload($recap))->values()->all();
                 })->values()->all();
-                $taskRecords = $memberTasks->sortByDesc('submitted_at')->map(fn (OperationTestTask $task) => [
+                $taskRecords = $memberTasks->sortByDesc('created_at')->map(fn ($task) => [
                     'id' => $task->id, 'task_no' => $task->task_no, 'objective' => $task->selection_objective,
                     'page_type' => $task->page_type, 'submitted_at' => \App\Portals\OperationTasks\Support\OperationTaskTime::format($task->submitted_at),
+                    'new_task' => $withinRange($task->created_at),
+                    'supplement_count' => $task->assets->filter(fn ($asset) => $historical($asset, $task))->count(),
                     'asset_count' => $task->assets->count(), 'url' => route('operation-tasks.tests.show', $task),
                 ])->values()->all();
                 return (object) [
                     'id' => (int) $member->id, 'name' => $this->userName($member), 'position' => $this->departmentPositionLabel($member->pivot?->position),
-                    'recap_days' => $memberRecaps->map(fn (OperationTaskRecap $recap) => $recap->data_date->format('Y-m-d'))->unique()->count(), 'expected_days' => $days->count(),
+                    'recap_days' => $bySubmissionDay->keys()->filter()->count(), 'expected_days' => $days->count(),
                     'revenue' => (float) $memberRecaps->sum('total_revenue_usd'), 'spend' => (float) $memberRecaps->sum('total_spend_usd'), 'orders' => (int) $memberRecaps->sum('total_orders'),
-                    'single_count' => $memberTasks->where('page_type', 'single')->count(), 'single_assets' => (int) $memberTasks->where('page_type', 'single')->sum(fn ($task) => $task->assets->count()),
-                    'category_count' => $memberTasks->where('page_type', 'category')->count(), 'category_assets' => (int) $memberTasks->where('page_type', 'category')->sum(fn ($task) => $task->assets->count()),
+                    'single_count' => $newTasks->where('page_type', 'single')->count(),
+                    'single_assets' => (int) $memberTasks->where('page_type', 'single')->sum(fn ($task) => $task->assets->count()),
+                    'category_count' => $newTasks->where('page_type', 'category')->count(),
+                    'category_assets' => (int) $memberTasks->where('page_type', 'category')->sum(fn ($task) => $task->assets->count()),
+                    'initial_assets' => $initialCount, 'supplement_assets' => $supplementCount,
                     'planned_days' => $progresses->where('has_plan', true)->count(), 'completed_days' => $progresses->where('complete', true)->count(),
                     'missing_plan_days' => $progresses->where('has_plan', false)->count(), 'daily_progress' => $progresses->values()->all(),
                     'task_records' => $taskRecords, 'recap_records' => $recapRecords, 'recap_day_records' => $recapDayRecords,
@@ -1417,13 +1461,68 @@ class OperationTaskController extends Controller
             })->values();
             return (object) ['id' => (int) $team->id, 'name' => $team->name, 'parent_name' => $team->parent?->name, 'members' => $rows, 'member_count' => $rows->count()];
         })->values();
-        $operators = $teamRows->flatMap(fn ($team) => $team->members)->pluck('name')->unique()->sort()->values();
-        $visibleMemberCount = $teamRows->sum(fn ($team) => $team->member_count);
         return view('portals.operation-tasks.dashboard', [
             ...$context, 'from' => $from, 'to' => $to, 'recaps' => $recaps, 'tasks' => $tasks, 'teamRows' => $teamRows,
-            'searchTeamOptions' => $allTeams->pluck('name'), 'searchPersonOptions' => $allTeams->flatMap(fn ($team) => $team->departmentMembers)->map(fn ($member) => $this->userName($member))->unique(), 'operators' => $operators, 'teams' => $allTeams, 'visibleMemberCount' => $visibleMemberCount,
+            'searchTeamOptions' => $allTeams->pluck('name'),
+            'searchPersonOptions' => $allTeams->flatMap(fn ($team) => $team->departmentMembers)->map(fn ($member) => $this->userName($member))->unique(),
+            'operators' => $teamRows->flatMap(fn ($team) => $team->members)->pluck('name')->unique()->sort()->values(),
+            'teams' => $allTeams, 'visibleMemberCount' => $teamRows->sum(fn ($team) => $team->member_count),
             'dashboardFilters' => $filters, 'canManagePlans' => true,
         ]);
+    }
+
+    private function submissionRange(Request $request, string $fromName = 'from', string $toName = 'to', bool $defaultWeek = false): array
+    {
+        $data = $this->validateTask($request, [
+            $fromName => ['nullable', 'date_format:Y-m-d'], $toName => ['nullable', 'date_format:Y-m-d'],
+        ]);
+        $from = (string) ($data[$fromName] ?? '');
+        $to = (string) ($data[$toName] ?? '');
+        if ($defaultWeek && ! $request->has($fromName) && ! $request->has($toName) && ! $request->boolean('all_time')) {
+            $from = now('Asia/Shanghai')->subDays(6)->toDateString();
+            $to = now('Asia/Shanghai')->toDateString();
+        }
+        $this->rejectWhen($from !== '' && $to !== '' && $from > $to, $toName, __('operation_tasks.dates.invalid'));
+        return [$from, $to,
+            $from !== '' ? Carbon::parse($from, 'Asia/Shanghai')->startOfDay()->utc() : null,
+            $to !== '' ? Carbon::parse($to, 'Asia/Shanghai')->startOfDay()->addDay()->utc() : null,
+        ];
+    }
+
+    public function updatePendingTest(Request $request, int $task, OperationTaskAssetUploadService $uploads): RedirectResponse
+    {
+        $context = $this->authorized($request);
+        $record = OperationTestTask::query()->where('owner_user_id', $context['user']->id)->find($task);
+        if (! $record || ! OperationTaskRules::taskUntouched($record)) return back()->withInput()->with('warning', __('operation_tasks.management.changed'));
+        return $this->submitTestRevision($request, $record, $uploads);
+    }
+
+    public function deleteRecap(Request $request, int $recap): RedirectResponse
+    {
+        $user = $this->authorized($request)['user'];
+        $data = $this->validateTask($request, ['version' => ['required', 'integer', 'min:1']]);
+        $deleted = DB::connection((new OperationTaskRecap())->getConnectionName())->transaction(function () use ($recap, $user, $data): bool {
+            $record = OperationTaskRecap::query()->where('user_id', $user->id)->lockForUpdate()->find($recap);
+            if (! $record || ! OperationTaskRules::recapUntouched($record) || (int) $record->version !== (int) $data['version']) return false;
+            $record->update(['deleted_by' => $user->id, 'active_slot' => null]);
+            $record->delete();
+            return true;
+        });
+        return redirect()->route('operation-tasks.recaps.index')->with($deleted ? 'success' : 'warning', __('operation_tasks.management.'.($deleted ? 'deleted' : 'changed')));
+    }
+
+    public function deleteTest(Request $request, int $task): RedirectResponse
+    {
+        $user = $this->authorized($request)['user'];
+        $data = $this->validateTask($request, ['version' => ['required', 'integer', 'min:1']]);
+        $deleted = DB::connection((new OperationTestTask())->getConnectionName())->transaction(function () use ($task, $user, $data): bool {
+            $record = OperationTestTask::query()->where('owner_user_id', $user->id)->lockForUpdate()->find($task);
+            if (! $record || ! OperationTaskRules::taskUntouched($record) || (int) $record->version !== (int) $data['version']) return false;
+            $record->update(['deleted_by' => $user->id]);
+            $record->delete();
+            return true;
+        });
+        return redirect()->route('operation-tasks.tests.index')->with($deleted ? 'success' : 'warning', __('operation_tasks.management.'.($deleted ? 'deleted' : 'changed')));
     }
 
     private function rejectWhen(mixed $condition, string $field, string $message): void
@@ -1631,9 +1730,8 @@ class OperationTaskController extends Controller
     {
         if (! $plan) return ['date' => $date, 'has_plan' => false, 'complete' => false, 'label' => '未设置计划', 'single_target' => 0, 'category_target' => 0, 'single_done' => 0, 'category_done' => 0];
         $dayTasks = $memberTasks->filter(function (OperationTestTask $task) use ($date): bool {
-            $submitted = optional($task->submitted_at)->timezone('Asia/Shanghai')->toDateString() === $date;
-            $hasNewAsset = $task->assets->contains(fn (OperationTaskAsset $asset) => optional($asset->created_at)->timezone('Asia/Shanghai')->toDateString() === $date);
-            return $submitted || $hasNewAsset;
+            $submitted = optional($task->created_at)->timezone('Asia/Shanghai')->toDateString() === $date;
+            return $submitted;
         });
         $qualified = function (string $pageType, int $minimum) use ($dayTasks, $date): int {
             return $dayTasks->where('page_type', $pageType)->filter(fn (OperationTestTask $task) => $task->assets->filter(fn (OperationTaskAsset $asset) => optional($asset->created_at)->timezone('Asia/Shanghai')->toDateString() === $date)->count() >= $minimum)->count();
@@ -1651,6 +1749,7 @@ class OperationTaskController extends Controller
             ['title' => '广告计划', 'answer' => $recap->advertising_plan], ['title' => '未完成事项与支持', 'answer' => $recap->support_needed],
         ])->filter(fn (array $item) => filled($item['answer']))->values()->all();
         return [
+            'submitted_at' => \App\Portals\OperationTasks\Support\OperationTaskTime::format($recap->submitted_at),
             'date' => $recap->data_date->format('Y-m-d'), 'version' => (int) $recap->version, 'updated_at' => \App\Portals\OperationTasks\Support\OperationTaskTime::format($recap->updated_at),
             'workflow_status' => (string) ($recap->workflow_status ?? 'approved'),
             'leader_review_status' => (string) ($recap->leader_review_status ?? 'approved'),

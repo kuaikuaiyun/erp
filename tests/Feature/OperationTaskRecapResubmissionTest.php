@@ -24,7 +24,7 @@ class OperationTaskRecapResubmissionTest extends TestCase
         DB::purge('sqlite'); app()->setLocale('zh-CN');
         $this->travelTo(now('UTC')->setDate(2026, 11, 13)->setTime(4, 0));
         Schema::create('operation_task_recaps', function (Blueprint $table): void {
-            $table->id(); $table->unsignedInteger('user_id'); $table->date('data_date'); $table->string('user_name');
+            $table->id(); $table->softDeletes(); $table->unsignedInteger('deleted_by')->nullable(); $table->unsignedTinyInteger('active_slot')->nullable()->default(1); $table->unsignedInteger('user_id'); $table->date('data_date'); $table->string('user_name');
             $table->unsignedInteger('department_id')->nullable(); $table->string('department_name')->nullable();
             $table->json('media_items')->nullable(); $table->json('question_answers')->nullable(); $table->json('version_history')->nullable();
             foreach (['finding_answer', 'action_answer', 'advertising_plan', 'support_needed', 'last_rejection_opinion'] as $column) $table->text($column)->nullable();
@@ -33,7 +33,7 @@ class OperationTaskRecapResubmissionTest extends TestCase
             $table->string('workflow_status')->default('rejected'); $table->string('leader_review_status')->default('approved');
             $table->string('department_review_status')->default('rejected'); $table->string('last_rejection_channel')->nullable();
             $table->dateTime('last_rejected_at')->nullable(); $table->dateTime('submitted_at')->nullable(); $table->timestamps();
-            $table->unique(['user_id', 'data_date']);
+            $table->unique(['user_id', 'data_date', 'active_slot']);
         });
         Schema::create('operation_task_recap_questions', function (Blueprint $table): void {
             $table->id(); $table->string('code')->nullable(); $table->string('title'); $table->text('description')->nullable();
@@ -104,7 +104,7 @@ class OperationTaskRecapResubmissionTest extends TestCase
     {
         $old = $this->record('2026-11-10');
         $current = $this->record('2026-11-12', ['workflow_status' => 'pending_leader', 'total_revenue_usd' => 333]);
-        $before = $current->getRawOriginal();
+        $before = $current->refresh()->getRawOriginal();
         $this->submit($this->payload($old))->assertSessionHas('success');
         self::assertSame($before, $current->fresh()->getRawOriginal());
         self::assertSame(2, OperationTaskRecap::query()->count());
@@ -131,7 +131,7 @@ class OperationTaskRecapResubmissionTest extends TestCase
         $this->submit($payload)->assertSessionHasErrors('recap');
         self::assertSame(2, (int) $old->fresh()->version);
         $payload = $this->payload($old); $this->submit($payload)->assertSessionHas('success');
-        $this->submit($payload)->assertSessionHas('warning');
+        $this->submit($payload)->assertSessionHasErrors('recap');
         self::assertSame(3, (int) $old->fresh()->version);
         $foreign = $this->record('2026-11-09', ['user_id' => 8]);
         $this->submit($this->payload($foreign))->assertSessionHas('warning');
@@ -154,8 +154,8 @@ class OperationTaskRecapResubmissionTest extends TestCase
         $oldest = $this->record('2026-11-09', ['total_revenue_usd' => 109]);
         $middle = $this->record('2026-11-10', ['total_revenue_usd' => 110]);
         $latest = $this->record('2026-11-12', ['total_revenue_usd' => 112]);
-        $oldestBefore = $oldest->getRawOriginal();
-        $latestBefore = $latest->getRawOriginal();
+        $oldestBefore = $oldest->refresh()->getRawOriginal();
+        $latestBefore = $latest->refresh()->getRawOriginal();
 
         $this->submit($this->payload($middle))->assertSessionHasNoErrors()
             ->assertSessionHas('success', __('operation_tasks.recap_form.updated', ['date' => '2026-11-10', 'version' => 2]));
@@ -189,7 +189,7 @@ class OperationTaskRecapResubmissionTest extends TestCase
     public function test_old_shared_submission_endpoint_rejects_edit_payload_instead_of_creating_yesterday(): void
     {
         $old = $this->record('2026-11-10');
-        $before = $old->getRawOriginal();
+        $before = $old->refresh()->getRawOriginal();
         $this->from(route('operation-tasks.recaps.index'))
             ->post(route('operation-tasks.recaps.store'), $this->payload($old))
             ->assertSessionHasErrors('recap_mode');
@@ -227,7 +227,7 @@ class OperationTaskRecapResubmissionTest extends TestCase
     public function test_missing_foreign_and_pending_edit_pages_redirect_without_binding_another_record(): void
     {
         $foreign = $this->record('2026-11-09', ['user_id' => 8]);
-        $pending = $this->record('2026-11-11', ['workflow_status' => 'pending_leader']);
+        $pending = $this->record('2026-11-11', ['workflow_status' => 'pending_leader', 'leader_review_status' => 'approved']);
         $this->record('2026-11-12');
         foreach ([999, $foreign->id, $pending->id] as $id) {
             $this->get(route('operation-tasks.recaps.edit', ['recap' => $id]))
@@ -243,5 +243,51 @@ class OperationTaskRecapResubmissionTest extends TestCase
         $old = $this->record('2026-11-10');
         $this->get(route('operation-tasks.recaps.index', ['edit' => $old->id]))
             ->assertRedirect(route('operation-tasks.recaps.edit', ['recap' => $old->id]));
+    }
+
+    public function test_pending_recap_can_be_edited_on_its_own_id_and_cannot_be_deleted_after_one_review(): void
+    {
+        $record = $this->record('2026-11-10', ['workflow_status' => 'pending_leader', 'leader_review_status' => 'pending', 'department_review_status' => 'pending']);
+        $this->submit($this->payload($record))->assertSessionHasNoErrors()->assertSessionHas('success');
+        self::assertSame('2026-11-10', $record->fresh()->data_date->format('Y-m-d'));
+        self::assertSame(2, (int) $record->fresh()->version);
+        $record->refresh()->update(['leader_review_status' => 'approved']);
+        $this->delete(route('operation-tasks.recaps.destroy', $record->id), ['version' => 2])->assertSessionHas('warning');
+        self::assertFalse($record->fresh()->trashed());
+    }
+
+    public function test_deleted_recap_is_retained_and_the_same_business_date_can_be_filled_again(): void
+    {
+        $record = $this->record('2026-11-12', ['workflow_status' => 'pending_leader', 'leader_review_status' => 'pending', 'department_review_status' => 'pending']);
+        $this->delete(route('operation-tasks.recaps.destroy', $record->id), ['version' => 1])->assertSessionHas('success');
+        self::assertNull(OperationTaskRecap::query()->find($record->id));
+        $archived = OperationTaskRecap::withTrashed()->findOrFail($record->id);
+        self::assertTrue($archived->trashed());
+        self::assertSame(7, (int) $archived->deleted_by);
+        self::assertSame('2026-11-12', $archived->data_date->format('Y-m-d'));
+        $this->submit($this->payload())->assertSessionHasNoErrors()->assertSessionHas('success');
+        self::assertSame(1, OperationTaskRecap::query()->count());
+        self::assertSame(2, OperationTaskRecap::withTrashed()->count());
+    }
+
+    public function test_recap_date_filter_uses_beijing_submission_day_not_business_date(): void
+    {
+        $before = $this->record('2026-11-09', ['submitted_at' => '2026-11-12 15:59:59']);
+        $start = $this->record('2026-11-10', ['submitted_at' => '2026-11-12 16:00:00']);
+        $end = $this->record('2026-11-11', ['submitted_at' => '2026-11-13 15:59:59']);
+        $after = $this->record('2026-11-12', ['submitted_at' => '2026-11-13 16:00:00']);
+        $request = Request::create(route('operation-tasks.recaps.index'), 'GET', ['from' => '2026-11-13', 'to' => '2026-11-13']);
+        $request->setLaravelSession(app('session.store'));
+        $view = app(OperationTaskController::class)->recaps($request);
+        self::assertSame([$end->id, $start->id], $view->getData()['recaps']->getCollection()->pluck('id')->all());
+    }
+
+    public function test_pending_recap_delete_rejects_a_stale_version_and_a_foreign_owner(): void
+    {
+        $record = $this->record('2026-11-12', ['workflow_status' => 'pending_leader', 'leader_review_status' => 'pending', 'department_review_status' => 'pending']);
+        $this->delete(route('operation-tasks.recaps.destroy', $record->id), ['version' => 9])->assertSessionHas('warning');
+        $foreign = $this->record('2026-11-11', ['user_id' => 8]);
+        $this->delete(route('operation-tasks.recaps.destroy', $foreign->id), ['version' => 1])->assertSessionHas('warning');
+        self::assertSame(2, OperationTaskRecap::query()->count());
     }
 }

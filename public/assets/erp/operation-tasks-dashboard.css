@@ -1,2 +1,35 @@
 .ot-dashboard-page{max-width:none!important;margin:0!important}.ot-dashboard-page .ot-simple-page-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 18px}.ot-dashboard-page .ot-simple-page-head h1{display:inline;margin:0;color:#173f58;font-size:25px;font-weight:700;line-height:36px}.ot-dashboard-page .ot-simple-page-head p{display:inline;margin:0 0 0 10px;color:#758996;font-size:14px}.ot-dashboard-page .ot-simple-page-head .btn{min-width:122px}.ot-dashboard-filter .ot-card-body{padding:16px 18px}.ot-dashboard-filter .ot-filters{align-items:flex-end}.ot-dashboard-filter label{display:block;margin:0 0 6px;color:#557287;font-size:12px;font-weight:700}.ot-dashboard-actions{min-width:260px!important}.ot-dashboard-actions span{display:flex;gap:6px;flex-wrap:wrap}.ot-dashboard-actions .btn{height:34px;padding:6px 10px}.ot-filter-submit{min-width:auto!important}.ot-dashboard-stats{grid-template-columns:repeat(6,minmax(150px,1fr));margin-bottom:18px}.ot-dashboard-tabs{display:flex;gap:4px;margin:0 0 14px;border-bottom:1px solid #dce6ea}.ot-dashboard-tabs button{border:0;background:transparent;padding:11px 18px;color:#627989;font-weight:700}.ot-dashboard-tabs button.is-active{color:#16806f;border-bottom:3px solid #16806f}.ot-dashboard-pane{display:none}.ot-dashboard-pane.is-active{display:block}.ot-team-panel{margin-bottom:14px}.ot-team-panel .ot-card-head{align-items:center}.ot-team-panel .ot-card-head strong{font-size:16px;color:#143d5a}.ot-dashboard-table{margin:0}.ot-dashboard-table th{white-space:nowrap}.ot-dashboard-table td{vertical-align:middle}.ot-dashboard-table td small{display:block;margin-top:3px;color:#6f8595}.ot-task-link{display:inline-flex;margin:2px 5px 2px 0;padding:3px 7px;border:1px solid #cfe1e7;border-radius:5px;background:#f7fbfc;color:#18688f;font-size:12px}.ot-empty{padding:38px;text-align:center;color:#7e93a1}@media(max-width:1280px){.ot-dashboard-stats{grid-template-columns:repeat(3,minmax(150px,1fr))}}@media(max-width:760px){.ot-dashboard-page .ot-simple-page-head{align-items:flex-start;flex-direction:column}.ot-dashboard-page .ot-simple-page-head p{display:block;margin:3px 0 0}.ot-dashboard-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.ot-dashboard-actions{min-width:100%!important}}@media(max-width:520px){.ot-dashboard-stats{grid-template-columns:1fr}.ot-dashboard-tabs{overflow:auto}.ot-dashboard-tabs button{white-space:nowrap}}
 .ot-dashboard-recap-history td{vertical-align:middle}.ot-dashboard-recap-history td small{display:block;margin-top:4px;color:#738793;font-size:11px}.ot-dashboard-recap-history .is-missing td{color:#89979e;background:#fcfcfa}.ot-dashboard-rejection{max-width:240px;color:#ad5650!important;white-space:normal}
+
+/* Compact activity table, scoped to the test-task pane. */
+.ot-dashboard-page .ot-dashboard-activity-table{width:100%;min-width:800px;table-layout:fixed}
+.ot-dashboard-activity-table .ot-col-member{width:16%}.ot-dashboard-activity-table .ot-col-plan{width:13%}.ot-dashboard-activity-table .ot-col-count{width:9%}.ot-dashboard-activity-table .ot-col-assets{width:21%}.ot-dashboard-activity-table .ot-col-tasks{width:32%}
+.ot-dashboard-page .ot-dashboard-activity-table>thead>tr>th{padding:12px 14px;vertical-align:middle;border-bottom:1px solid #e5edf1;font-weight:600}
+.ot-dashboard-page .ot-dashboard-activity-table>tbody>tr>td{padding:14px;vertical-align:middle;border-top:1px solid #edf2f5;line-height:1.6}
+.ot-dashboard-page .ot-dashboard-activity-table>tbody>tr:first-child>td{border-top:0}
+.ot-dashboard-page .ot-dashboard-activity-table>tbody>tr:hover{background:#f8fbfc}
+.ot-dashboard-page .ot-dashboard-activity-table th:nth-child(2),.ot-dashboard-page .ot-dashboard-activity-table th:nth-child(3),.ot-dashboard-page .ot-dashboard-activity-table th:nth-child(4),.ot-dashboard-page .ot-dashboard-activity-table .ot-activity-number{text-align:center}
+.ot-dashboard-activity-table .ot-member-cell b{display:block;font-weight:600;overflow-wrap:anywhere}
+.ot-dashboard-activity-table .ot-member-cell small{margin-top:3px;font-size:11px}
+.ot-dashboard-activity-table .ot-activity-number{white-space:nowrap;font-variant-numeric:tabular-nums}
+.ot-dashboard-activity-table .ot-count-positive{color:#207968;font-weight:600}
+.ot-dashboard-activity-table .ot-is-zero,.ot-dashboard-activity-table .ot-activity-empty{color:#8b9ba7;font-weight:400}
+.ot-dashboard-activity-table .ot-count-divider,.ot-dashboard-activity-table .ot-count-unit{font-size:12px;font-weight:400}
+.ot-dashboard-activity-table .ot-count-divider{color:#9aa8b1;margin:0 3px}
+.ot-dashboard-activity-table .ot-asset-metrics{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.ot-dashboard-activity-table .ot-asset-metric{display:inline-flex;align-items:center;gap:4px;padding:3px 6px;border:1px solid #e8eef2;border-radius:4px;background:#f8fafb;font-size:11px;white-space:nowrap}
+.ot-dashboard-activity-table .ot-asset-metric b{font-weight:inherit;font-variant-numeric:tabular-nums}
+.ot-dashboard-activity-table .ot-asset-metric.is-new{color:#207968;background:#f0f8f5;border-color:#d9ebe3}
+.ot-dashboard-activity-table .ot-asset-metric.is-supplement{color:#276d96;background:#f0f7fc;border-color:#dbe9f3}
+.ot-dashboard-activity-table .ot-asset-metric.is-new b,.ot-dashboard-activity-table .ot-asset-metric.is-supplement b{font-weight:600}
+.ot-dashboard-page .ot-dashboard-activity-table .ot-activity-tasks{max-width:none}
+.ot-dashboard-activity-table .ot-activity-task-list{display:flex;flex-direction:column;gap:7px}
+.ot-dashboard-page .ot-dashboard-activity-table .ot-activity-task{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:6px 8px;max-width:100%;margin:0;padding:0}
+.ot-dashboard-activity-table .ot-activity-task .ot-task-link{min-width:0;margin:0;padding:0;border:0;border-radius:0;background:transparent;color:#276d96;font-size:12px;font-weight:500;line-height:1.6;overflow-wrap:anywhere}
+.ot-dashboard-activity-table .ot-task-link:hover{color:#1b5679;text-decoration:underline}
+.ot-dashboard-activity-table .ot-task-link:focus-visible{outline:2px solid #3c8dbc;outline-offset:3px}
+.ot-dashboard-activity-table .ot-task-activity-badge{display:inline-flex;align-items:center;padding:1px 6px;border-radius:4px;background:#f1f4f6;color:#738692;font-size:11px;font-weight:400;line-height:1.7;white-space:nowrap}
+.ot-dashboard-activity-table .ot-task-activity-badge.is-new{color:#207968;background:#edf7f2}
+.ot-dashboard-activity-table .ot-task-activity-badge.is-supplement{color:#276d96;background:#edf5fb}
+.ot-dashboard-activity-table .ot-activity-view-all{margin-top:7px;padding:0;font-size:12px;color:#276d96}
+@media(max-width:1100px){.ot-dashboard-page .ot-dashboard-activity-table>thead>tr>th,.ot-dashboard-page .ot-dashboard-activity-table>tbody>tr>td{padding-left:10px;padding-right:10px}}

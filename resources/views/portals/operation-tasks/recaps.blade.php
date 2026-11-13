@@ -4,6 +4,11 @@
 
 @include('portals.operation-tasks.partials.head')
 
+@unless($canSearchRecapPeople)
+@push('styles')<link rel="stylesheet" href="{{ asset('assets/erp/operation-task-filters.css') }}?v=20261113-5">@endpush
+@push('scripts')<script src="{{ asset('assets/erp/operation-task-filters.js') }}?v=20261113-5"></script>@endpush
+@endunless
+
 @section('content')
 
 @php
@@ -77,7 +82,10 @@
         </div>
     </div>
 
-    <form method="get" class="ot-filters ot-search-filter-form">@include('portals.operation-tasks.partials.search-filters')<button class="btn ot-primary">{{ __('operation_tasks.filters.search') }}</button></form>
+    <form method="get" class="ot-filters ot-search-filter-form">@if($canSearchRecapPeople)
+        @include('portals.operation-tasks.partials.search-filters')
+        @endif
+        @include('portals.operation-tasks.partials.date-filters', ['dateFrom' => $recapFrom, 'dateTo' => $recapTo])<button class="btn ot-primary">{{ __('operation_tasks.filters.search') }}</button></form>
     <div class="ot-card">
         <div class="ot-card-head"><span>复盘记录</span><span class="ot-badge">{{ $recaps->total() }} 条</span></div>
         <div class="table-responsive">
@@ -94,7 +102,7 @@
                             $reviewChannel = $recap->review_channel;
                         @endphp
                         <tr>
-                            <td><b>{{ $recap->data_date->format('Y-m-d') }}</b><small>v{{ $recap->version }}</small></td>
+                            <td><b>{{ $recap->data_date->format('Y-m-d') }}</b><small>v{{ $recap->version }}</small><small>{{ __('operation_tasks.dates.submitted_at') }} {{ \App\Portals\OperationTasks\Support\OperationTaskTime::format($recap->submitted_at) }}</small></td>
                             <td><b>{{ $recap->user_name }}</b><small>{{ collect($recap->media_items)->pluck('name')->filter()->implode('、') }}</small></td>
                             <td><b>${{ number_format($recap->total_revenue_usd, 2) }}</b><small>单量 {{ $recap->total_orders }} · 广告费 ${{ number_format($recap->total_spend_usd, 2) }} · ROI {{ $recap->total_spend_usd > 0 ? number_format($recap->total_revenue_usd / $recap->total_spend_usd, 2) : '—' }}</small></td>
                             <td><span class="ot-badge {{ $leaderStatus === 'approved' ? '' : ($leaderStatus === 'rejected' ? 'red' : 'orange') }}">{{ $leaderStatus === 'approved' ? '已通过' : ($leaderStatus === 'rejected' ? '已驳回' : '待审核') }}</span></td>
@@ -107,6 +115,9 @@
                                 <button type="button" class="btn btn-default btn-xs" data-toggle="modal" data-target="#ot-recap-detail-{{ $recap->id }}">查看详情</button>
                                 @if((int) $recap->user_id === (int) $user->id && $status === 'rejected')
                                     <a class="btn btn-default btn-xs" href="{{ route('operation-tasks.recaps.edit', ['recap' => $recap->id]) }}">{{ __('operation_tasks.recap_form.edit_button') }}</a>
+                                @elseif((int) $recap->user_id === (int) $user->id && \App\Portals\OperationTasks\Support\OperationTaskRules::recapUntouched($recap))
+                                    <a class="btn btn-default btn-xs" href="{{ route('operation-tasks.recaps.edit', ['recap' => $recap->id]) }}">{{ __('operation_tasks.management.edit') }}</a>
+                                    <form method="post" action="{{ route('operation-tasks.recaps.destroy', ['recap' => $recap->id]) }}" data-delete-form style="display:inline">@csrf @method('DELETE')<input type="hidden" name="version" value="{{ $recap->version }}"><button type="submit" class="btn btn-danger btn-xs">{{ __('operation_tasks.management.delete') }}</button></form>
                                 @elseif((int) $recap->user_id === (int) $user->id)
                                     <button type="button" class="btn btn-default btn-xs ot-recap-edit-locked" aria-disabled="true" data-recap-edit-locked>{{ __('operation_tasks.recap_edit.button') }}</button>
                                 @endif
@@ -135,7 +146,7 @@
             <div class="modal-header"><button type="button" class="close" data-dismiss="modal">&times;</button><h4 class="modal-title">{{ $recap->data_date->format('Y-m-d') }} 复盘 · {{ $recap->user_name }}</h4></div>
             <div class="modal-body">
                 <table class="table ot-table"><thead><tr><th>媒体</th><th>花费</th><th>单量</th><th>营业额</th><th>ROI</th></tr></thead><tbody>
-                    @foreach($recap->media_items as $item)
+                    @foreach($recap->media_items ?? [] as $item)
                         <tr><td>{{ $item['name'] ?? '—' }}</td><td>${{ number_format((float) ($item['spend'] ?? 0), 2) }}</td><td>{{ $item['orders'] ?? 0 }}</td><td>${{ number_format((float) ($item['revenue'] ?? 0), 2) }}</td><td>{{ (float) ($item['spend'] ?? 0) > 0 ? number_format((float) ($item['revenue'] ?? 0) / (float) $item['spend'], 2) : '—' }}</td></tr>
                     @endforeach
                 </tbody></table>
@@ -181,6 +192,7 @@
             </form>
         </div></div></div>
     @endif
+@include('portals.operation-tasks.partials.delete-confirm')
 </section>
 @endsection
 
