@@ -210,6 +210,8 @@ Route::post('/operation/daily-submissions/account-store-transfer', [DailySubmiss
 Route::prefix('fashion/operation-tasks')->name('operation-tasks.')->controller(OperationTaskController::class)->group(function (): void {
     Route::get('/recaps', 'recaps')->name('recaps.index');
     Route::post('/recaps', 'storeRecap')->name('recaps.store');
+    Route::get('/recaps/{recap}/edit', 'editRecap')->whereNumber('recap')->name('recaps.edit');
+    Route::post('/recaps/{recap}/resubmit', 'resubmitRecap')->whereNumber('recap')->name('recaps.resubmit');
     Route::post('/recaps/{recap}/reviews', 'reviewRecap')->name('recaps.reviews.store');
     Route::post('/recaps/questions', 'saveRecapQuestions')->name('recaps.questions.store');
     Route::get('/tests', 'tests')->name('tests.index');

@@ -24,6 +24,7 @@ use Carbon\Carbon;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -69,10 +70,22 @@ class OperationTaskController extends Controller
             });
         }
 
-        $editingRecap = $yesterdayRecap && ($yesterdayRecap->workflow_status ?? 'approved') === 'rejected' ? $yesterdayRecap : null;
-        if ($request->filled('edit')) {
-            $candidate = OperationTaskRecap::query()->find((int) $request->input('edit'));
-            if ($candidate && (int) $candidate->user_id === (int) $user->id && ($candidate->workflow_status ?? 'approved') === 'rejected') $editingRecap = $candidate;
+        $searchTeamOptions = (clone $query)->reorder()->setEagerLoads([])->select('department_name')->distinct()->pluck('department_name');
+        $searchPersonOptions = (clone $query)->reorder()->setEagerLoads([])->select('user_name')->distinct()->pluck('user_name');
+        foreach (['team_search' => 'department_name', 'person_search' => 'user_name'] as $parameter => $column) {
+            if ($request->filled($parameter)) $query->where($column, 'like', '%'.trim((string) $request->input($parameter)).'%');
+        }
+
+        // Only the dedicated edit endpoint may bind an editable record.
+        if ($request->has('edit') && ! $request->attributes->has('editing_recap')) {
+            $id = (string) $request->input('edit');
+            return ctype_digit($id) && (int) $id > 0
+                ? redirect()->route('operation-tasks.recaps.edit', ['recap' => $id])
+                : redirect()->route('operation-tasks.recaps.index')->with('warning', __('operation_tasks.recap_form.unavailable'));
+        }
+        $editingRecap = $request->attributes->get('editing_recap');
+        if (old('recap_mode') && (old('recap_mode') !== ($editingRecap ? 'edit' : 'new') || ($editingRecap && (int) old('recap_id') !== (int) $editingRecap->id))) {
+            $request->session()->forget('_old_input');
         }
 
         $recapPerPage = in_array((int) $request->input('recap_per_page', 20), [20, 50, 100], true)
@@ -86,7 +99,7 @@ class OperationTaskController extends Controller
         });
 
         return view('portals.operation-tasks.recaps', [
-            ...$context,
+            ...$context, 'searchTeamOptions' => $searchTeamOptions, 'searchPersonOptions' => $searchPersonOptions,
             'recaps' => $recaps,
             'recapQuestions' => OperationTaskRecapQuestion::query()->where('is_enabled', true)->orderBy('sort')->orderBy('id')->get(),
             'allRecapQuestions' => $user->isAdministrator() ? OperationTaskRecapQuestion::query()->orderBy('sort')->orderBy('id')->get() : collect(),
@@ -95,16 +108,94 @@ class OperationTaskController extends Controller
             'yesterday' => $yesterday,
             'yesterdayRecap' => $yesterdayRecap,
             'editingRecap' => $editingRecap,
-            'openRecapModal' => $request->boolean('new') || ($request->filled('edit') && $editingRecap),
+            'openRecapModal' => $request->boolean('new') || $editingRecap !== null,
         ]);
+    }
+
+    public function editRecap(Request $request, int $recap): Response|View
+    {
+        $context = $this->authorized($request);
+        $record = OperationTaskRecap::query()->where('user_id', $context['user']->id)->find($recap);
+        if (! $record || $record->workflow_status !== 'rejected') {
+            return redirect()->route('operation-tasks.recaps.index')->with('warning', __('operation_tasks.recap_form.unavailable'));
+        }
+        $request->attributes->set('editing_recap', $record);
+        return $this->recaps($request);
     }
 
     public function storeRecap(Request $request): RedirectResponse
     {
         $context = $this->authorized($request);
         $user = $context['user'];
+        $this->validateTask($request, [
+            'recap_mode' => ['required', Rule::in(['new'])],
+            'recap_id' => ['prohibited'], 'recap_version' => ['prohibited'],
+        ], ['recap_mode.required' => __('operation_tasks.recap_form.refresh'), 'recap_mode.in' => __('operation_tasks.recap_form.refresh')]);
         $businessDate = now('Asia/Shanghai')->subDay()->toDateString();
-        $data = $request->validate([
+        if (OperationTaskRecap::query()->where('user_id', $user->id)->whereDate('data_date', $businessDate)->exists()) {
+            return back()->withInput()->with('warning', __('operation_tasks.recap_form.exists'));
+        }
+        $payload = $this->recapSubmissionPayload($request, $user, $context['portal'], $businessDate);
+        try {
+            $saved = DB::connection((new OperationTaskRecap())->getConnectionName())->transaction(function () use ($payload, $user): OperationTaskRecap {
+                $record = OperationTaskRecap::query()->create([...$payload,
+                    'version' => 1, 'workflow_status' => 'pending_leader', 'leader_review_status' => 'pending', 'department_review_status' => 'pending', 'submitted_at' => now(),
+                ]);
+                $this->recordRecapSubmission($record, $user, false);
+                return $record;
+            });
+        } catch (UniqueConstraintViolationException $exception) {
+            if (OperationTaskRecap::query()->where('user_id', $user->id)->whereDate('data_date', $businessDate)->exists()) {
+                return back()->withInput()->with('warning', __('operation_tasks.recap_form.exists'));
+            }
+            throw $exception;
+        }
+        return redirect()->route('operation-tasks.recaps.index')->with('success', __('operation_tasks.recap_form.created', ['date' => $saved->data_date->format('Y-m-d')]));
+    }
+
+    public function resubmitRecap(Request $request, int $recap): RedirectResponse
+    {
+        $context = $this->authorized($request);
+        $user = $context['user'];
+        $record = OperationTaskRecap::query()->where('user_id', $user->id)->find($recap);
+        if (! $record || $record->workflow_status !== 'rejected') {
+            return redirect()->route('operation-tasks.recaps.index')->with('warning', __('operation_tasks.recap_form.unavailable'));
+        }
+        $identity = $this->validateTask($request, [
+            'recap_mode' => ['required', Rule::in(['edit'])], 'recap_id' => ['required', 'integer', 'min:1'], 'recap_version' => ['required', 'integer', 'min:1'],
+        ], ['recap_mode.required' => __('operation_tasks.recap_form.refresh'), 'recap_mode.in' => __('operation_tasks.recap_form.refresh')]);
+        if ((int) $identity['recap_id'] !== $recap) {
+            return back()->withInput()->with('warning', __('operation_tasks.recap_form.target_mismatch'));
+        }
+        $payload = $this->recapSubmissionPayload($request, $user, $context['portal'], $record->data_date->format('Y-m-d'));
+        $saved = DB::connection($record->getConnectionName())->transaction(function () use ($recap, $user, $identity, $payload): OperationTaskRecap {
+            $existing = OperationTaskRecap::query()->where('user_id', $user->id)->lockForUpdate()->find($recap);
+            if (! $existing || $existing->workflow_status !== 'rejected' || (int) $existing->version !== (int) $identity['recap_version']) {
+                throw ValidationException::withMessages(['recap' => __('operation_tasks.recap_form.stale')]);
+            }
+            $payload['data_date'] = $existing->data_date->format('Y-m-d');
+            $history = $existing->version_history ?? [];
+            $history[] = [
+                'version' => $existing->version,
+                'snapshot' => $existing->only(array_merge(array_keys($payload), ['workflow_status', 'leader_review_status', 'department_review_status', 'last_rejection_channel', 'last_rejection_opinion'])),
+                'changed_by' => $this->userName($user),
+                'changed_at' => now()->toIso8601String(),
+            ];
+            $existing->update([...$payload,
+                'version' => $existing->version + 1, 'version_history' => $history,
+                'workflow_status' => 'pending_leader', 'leader_review_status' => 'pending', 'department_review_status' => 'pending',
+                'last_rejection_channel' => null, 'last_rejection_opinion' => null, 'last_rejected_at' => null, 'submitted_at' => now(),
+            ]);
+            $saved = $existing->fresh();
+            $this->recordRecapSubmission($saved, $user, true);
+            return $saved;
+        });
+        return redirect()->route('operation-tasks.recaps.index')->with('success', __('operation_tasks.recap_form.updated', ['date' => $saved->data_date->format('Y-m-d'), 'version' => $saved->version]));
+    }
+
+    private function recapSubmissionPayload(Request $request, AdminUser $user, Portal $portal, string $businessDate): array
+    {
+        $data = $this->validateTask($request, [
             'media' => ['required', 'array', 'min:1'],
             'media.*.name' => ['required', Rule::in(self::MEDIA)],
             'media.*.custom_name' => ['nullable', 'string', 'max:100'],
@@ -117,12 +208,12 @@ class OperationTaskController extends Controller
 
         $questions = OperationTaskRecapQuestion::query()->where('is_enabled', true)->orderBy('sort')->orderBy('id')->get();
         foreach ($questions->where('is_required', true) as $question) {
-            abort_if(trim((string) ($data['answers'][$question->id] ?? '')) === '', 422, '请填写：'.$question->title);
+            $this->rejectWhen(trim((string) ($data['answers'][$question->id] ?? '')) === '', 'answers.'.$question->id, __('operation_tasks.messages.answer_required', ['title' => $question->title]));
         }
 
         $items = collect($data['media'])->map(function (array $row): array {
             $name = $row['name'] === '其他' ? trim((string) ($row['custom_name'] ?? '')) : $row['name'];
-            abort_if($name === '', 422, '选择“其他”时必须填写媒体名称。');
+            $this->rejectWhen($name === '', 'custom_media', __('operation_tasks.messages.custom_media_required'));
             return [
                 'name' => $name,
                 'spend' => (float) $row['spend'],
@@ -131,10 +222,10 @@ class OperationTaskController extends Controller
                 'roi' => (float) $row['spend'] > 0 ? (float) $row['revenue'] / (float) $row['spend'] : null,
             ];
         });
-        abort_if($items->pluck('name')->map(fn ($value) => mb_strtolower(trim($value)))->duplicates()->isNotEmpty(), 422, '同一份复盘中不能重复添加相同媒体。');
+        $this->rejectWhen($items->pluck('name')->map(fn ($value) => mb_strtolower(trim($value)))->duplicates()->isNotEmpty(), 'media', __('operation_tasks.messages.duplicate_media'));
 
         $answerFor = fn (string $code): string => trim((string) ($data['answers'][$questions->firstWhere('code', $code)?->id] ?? ''));
-        $department = $this->departmentForPortal($user, $context['portal']);
+        $department = $this->departmentForPortal($user, $portal);
         $questionAnswers = $questions->map(fn (OperationTaskRecapQuestion $question): array => [
             'question_id' => $question->id,
             'title' => $question->title,
@@ -142,7 +233,7 @@ class OperationTaskController extends Controller
             'is_required' => $question->is_required,
             'answer' => trim((string) ($data['answers'][$question->id] ?? '')),
         ])->values()->all();
-        $payload = [
+        return [
             'data_date' => $businessDate,
             'user_id' => $user->id,
             'user_name' => $this->userName($user),
@@ -159,64 +250,23 @@ class OperationTaskController extends Controller
             'question_answers' => $questionAnswers,
         ];
 
-        $existing = OperationTaskRecap::query()->where('user_id', $user->id)->whereDate('data_date', $businessDate)->first();
-        if ($existing && ($existing->workflow_status ?? 'approved') !== 'rejected') {
-            return back()->with('warning', '该复盘已提交审核，只有被驳回后才可以修改并重新提交。');
-        }
+    }
 
-        $recap = DB::connection((new OperationTaskRecap())->getConnectionName())->transaction(function () use ($existing, $payload, $user): OperationTaskRecap {
-            if ($existing) {
-                $lockedExisting = OperationTaskRecap::query()->lockForUpdate()->findOrFail($existing->id);
-                if ((int) $lockedExisting->version !== (int) $existing->version || $lockedExisting->workflow_status !== 'rejected') {
-                    throw ValidationException::withMessages(['recap' => __('operation_tasks.recap_review.stale')]);
-                }
-                $existing = $lockedExisting;
-                $history = $existing->version_history ?? [];
-                $history[] = [
-                    'version' => $existing->version,
-                    'snapshot' => $existing->only(array_merge(array_keys($payload), ['workflow_status', 'leader_review_status', 'department_review_status', 'last_rejection_channel', 'last_rejection_opinion'])),
-                    'changed_by' => $this->userName($user),
-                    'changed_at' => now()->toIso8601String(),
-                ];
-                $existing->update([...$payload,
-                    'version' => $existing->version + 1, 'version_history' => $history,
-                    'workflow_status' => 'pending_leader', 'leader_review_status' => 'pending', 'department_review_status' => 'pending',
-                    'last_rejection_channel' => null, 'last_rejection_opinion' => null, 'last_rejected_at' => null, 'submitted_at' => now(),
-                ]);
-                $recap = $existing->fresh();
-            } else {
-                $recap = OperationTaskRecap::query()->create([...$payload,
-                    'version' => 1, 'workflow_status' => 'pending_leader', 'leader_review_status' => 'pending', 'department_review_status' => 'pending',
-                    'submitted_at' => now(),
-                ]);
-            }
-
-            OperationTaskReviewEvent::query()->create([
-                'review_id' => null,
-                'target_type' => 'recap',
-                'target_id' => $recap->id,
-                'target_version' => $recap->version,
-                'channel' => 'operation',
-                'result' => $existing ? 'resubmitted' : 'submitted',
-                'opinion' => null,
-                'rejection_scope' => null,
-                'reviewer_id' => $user->id,
-                'reviewer_name' => $this->userName($user),
-                'reviewed_at' => now(),
-            ]);
-
-            $this->notifyRecapReviewers($recap, __('operation_tasks.recap_review.submitted_message', ['name' => $this->userName($user), 'date' => $recap->data_date->format('Y-m-d')]), $user, ['leader', 'department']);
-            return $recap;
-        });
-
-        return back()->with('success', $existing ? '复盘已更新，旧版本已保留。' : '昨日复盘已保存。');
+    private function recordRecapSubmission(OperationTaskRecap $recap, AdminUser $user, bool $resubmitted): void
+    {
+        OperationTaskReviewEvent::query()->create([
+            'review_id' => null, 'target_type' => 'recap', 'target_id' => $recap->id, 'target_version' => $recap->version,
+            'channel' => 'operation', 'result' => $resubmitted ? 'resubmitted' : 'submitted', 'opinion' => null, 'rejection_scope' => null,
+            'reviewer_id' => $user->id, 'reviewer_name' => $this->userName($user), 'reviewed_at' => now(),
+        ]);
+        $this->notifyRecapReviewers($recap, __('operation_tasks.recap_review.submitted_message', ['name' => $this->userName($user), 'date' => $recap->data_date->format('Y-m-d')]), $user, ['leader', 'department']);
     }
 
     public function reviewRecap(Request $request, OperationTaskRecap $recap): RedirectResponse
     {
         $context = $this->authorized($request);
         $request->merge(['recap_id' => $recap->id]);
-        $data = $request->validate([
+        $data = $this->validateTask($request, [
             'channel' => ['required', Rule::in(['leader', 'department'])],
             'version' => ['required', 'integer', 'min:1'],
             'result' => ['required', Rule::in(['approved', 'rejected'])],
@@ -287,7 +337,7 @@ class OperationTaskController extends Controller
     {
         $context = $this->authorized($request);
         abort_unless($context['user']->isAdministrator(), 403);
-        $data = $request->validate([
+        $data = $this->validateTask($request, [
             'questions' => ['nullable', 'array'],
             'questions.*.id' => ['nullable', 'integer'],
             'questions.*.title' => ['required', 'string', 'max:500'],
@@ -317,7 +367,7 @@ class OperationTaskController extends Controller
         if ($keptIds !== []) $delete->whereNotIn('id', $keptIds);
         $delete->delete();
 
-        return back()->with('success', '复盘问题模板已保存；历史复盘仍保留提交当时的问题与答案。');
+        return back()->with('success', __('operation_tasks.messages.questions_saved'));
     }
 
     public function tests(Request $request): Response|View
@@ -343,11 +393,18 @@ class OperationTaskController extends Controller
             });
         }
 
+        $searchTeamOptions = (clone $base)->reorder()->setEagerLoads([])->select('department_name')->distinct()->pluck('department_name');
+        $searchPersonOptions = (clone $base)->reorder()->setEagerLoads([])->select('owner_name')->distinct()->pluck('owner_name');
+        foreach (['team_search' => 'department_name', 'person_search' => 'owner_name'] as $parameter => $column) {
+            if ($request->filled($parameter)) $base->where($column, 'like', '%'.trim((string) $request->input($parameter)).'%');
+        }
+
         $today = now('Asia/Shanghai')->startOfDay();
-        $todayEnd = $today->copy()->endOfDay();
-        $todayTasks = (clone $base)->where(function ($query) use ($today, $todayEnd): void {
-            $query->whereBetween('submitted_at', [$today, $todayEnd])
-                ->orWhereHas('assets', fn ($assets) => $assets->whereBetween('created_at', [$today, $todayEnd]));
+        $todayEnd = $today->copy()->endOfDay()->utc();
+        $todayStart = $today->copy()->utc();
+        $todayTasks = (clone $base)->where(function ($query) use ($todayStart, $todayEnd): void {
+            $query->whereBetween('submitted_at', [$todayStart, $todayEnd])
+                ->orWhereHas('assets', fn ($assets) => $assets->whereBetween('created_at', [$todayStart, $todayEnd]));
         })->get();
         $todayPlan = OperationTaskDailyPlan::query()->where('user_id', $user->id)->whereDate('plan_date', $today)->first();
         $todayProgress = $this->dailyPlanProgress($todayPlan, $todayTasks, $today->toDateString());
@@ -364,7 +421,7 @@ class OperationTaskController extends Controller
             $base->whereHas('rectifications', fn ($query) => $query->where('status', 'required'));
         }
 
-        $dateFilters = $request->validate([
+        $dateFilters = $this->validateTask($request, [
             'submitted_from' => ['nullable', 'date_format:Y-m-d'],
             'submitted_to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:submitted_from'],
         ]);
@@ -381,7 +438,7 @@ class OperationTaskController extends Controller
         }
 
         return view('portals.operation-tasks.tests', [
-            ...$context,
+            ...$context, 'searchTeamOptions' => $searchTeamOptions, 'searchPersonOptions' => $searchPersonOptions,
             'tasks' => (clone $base)->paginate($testPerPage)->withQueryString(),
             'today' => $today->toDateString(),
             'todaySingle' => $todayTasks->where('page_type', 'single')->count(),
@@ -399,7 +456,7 @@ class OperationTaskController extends Controller
     public function beginAssetUpload(Request $request, OperationTaskAssetUploadService $uploads): JsonResponse
     {
         $context = $this->authorized($request);
-        $data = $request->validate([
+        $data = $this->validateTask($request, [
             'name' => ['required', 'string', 'max:255'],
             'size' => ['required', 'integer', 'min:1', 'max:'.OperationTaskAssetUploadService::MAX_SIZE],
         ]);
@@ -415,7 +472,7 @@ class OperationTaskController extends Controller
     public function uploadAssetPart(Request $request, string $token, int $index, OperationTaskAssetUploadService $uploads): JsonResponse
     {
         $context = $this->authorized($request);
-        $request->validate(['file' => ['required', 'file', 'max:2048']]);
+        $this->validateTask($request, ['file' => ['required', 'file', 'max:2048']]);
         return response()->json($uploads->part((int) $context['user']->id, $token, $index, $request->file('file')));
     }
 
@@ -429,9 +486,14 @@ class OperationTaskController extends Controller
     {
         $context = $this->authorized($request);
         $user = $context['user'];
+        $submission = $this->validateTask($request, ['submission_token' => ['required', 'uuid']], [
+            'submission_token.required' => __('operation_tasks.validation.refresh_submission'),
+            'submission_token.uuid' => __('operation_tasks.validation.refresh_submission'),
+        ]);
+        if ($response = $this->completedSubmission($submission['submission_token'], (int) $user->id)) return $response;
         $pageType = (string) $request->input('page_type');
         $minimum = $pageType === 'category' ? 3 : 2;
-        $data = $request->validate([
+        $data = $this->validateTask($request, [
             'page_type' => ['required', Rule::in(['single', 'category'])],
             'task_type' => ['required', Rule::in(['new', 'iteration'])],
             'landing_url' => ['required', 'url', 'max:2048'],
@@ -450,48 +512,49 @@ class OperationTaskController extends Controller
                 ]);
             }
         }
-        $existing = OperationTestTask::query()->where('owner_user_id', $user->id)->where('landing_url', $data['landing_url'])->first();
-        if ($existing) {
-            return redirect()->route('operation-tasks.tests.show', $existing)
-                ->with('warning', '该落地页已有任务档案，请在原任务内追加素材或创建素材新版本。');
-        }
-
         $department = $this->departmentForPortal($user, $context['portal']);
         $connection = config('admin.database.connection') ?: config('database.default');
-        $task = DB::connection($connection)->transaction(function () use ($data, $uploads, $user, $department): OperationTestTask {
-            $task = OperationTestTask::query()->create([
-                'task_no' => 'OT'.now()->format('YmdHis').str_pad((string) random_int(1, 999), 3, '0', STR_PAD_LEFT),
-                'owner_user_id' => $user->id,
-                'owner_name' => $this->userName($user),
-                'department_id' => $department?->id,
-                'department_name' => $department?->name,
-                'page_type' => $data['page_type'],
-                'task_type' => $data['task_type'],
-                'landing_url' => $data['landing_url'],
-                'selection_objective' => trim($data['selection_objective']),
-                'submitted_at' => now(),
-            ]);
-            foreach ($data['assets'] as $index => $asset) {
-                $file = empty($asset['upload_token']) ? [] : $uploads->consume((int) $user->id, $asset['upload_token'], "assets.$index.upload_token");
-                OperationTaskAsset::query()->create([
-                    'task_id' => $task->id,
-                    'uploader_user_id' => $user->id,
-                    'uploader_name' => $this->userName($user),
-                    'selling_point' => trim($asset['selling_point']),
-                    'source_type' => $asset['source_type'],
-                    'file_path' => $file['file_path'] ?? null,
-                    'original_name' => $file['original_name'] ?? null,
-                    'external_url' => trim((string) ($asset['url'] ?? '')) ?: null,
-                    'mime_type' => $file['mime_type'] ?? null,
-                    'ai_confirmed' => $asset['source_type'] === 'ai_created',
-                    'version_history' => [['version' => 1, 'event' => 'created', 'changed_by' => $this->userName($user), 'changed_at' => now()->toIso8601String()]],
+        try {
+            $task = DB::connection($connection)->transaction(function () use ($data, $submission, $uploads, $user, $department): OperationTestTask {
+                $task = OperationTestTask::query()->create([
+                    'submission_token' => $submission['submission_token'],
+                    'task_no' => 'OT'.now()->format('YmdHis').str_pad((string) random_int(1, 999), 3, '0', STR_PAD_LEFT),
+                    'owner_user_id' => $user->id,
+                    'owner_name' => $this->userName($user),
+                    'department_id' => $department?->id,
+                    'department_name' => $department?->name,
+                    'page_type' => $data['page_type'],
+                    'task_type' => $data['task_type'],
+                    'landing_url' => $data['landing_url'],
+                    'selection_objective' => trim($data['selection_objective']),
+                    'submitted_at' => now(),
                 ]);
-            }
-            return $task;
-        });
-        $this->notifyReviewers($task, '有新的测品任务待审核，请在审核中心处理。', $user);
+                foreach ($data['assets'] as $index => $asset) {
+                    $file = empty($asset['upload_token']) ? [] : $uploads->consume((int) $user->id, $asset['upload_token'], "assets.$index.upload_token");
+                    OperationTaskAsset::query()->create([
+                        'task_id' => $task->id,
+                        'uploader_user_id' => $user->id,
+                        'uploader_name' => $this->userName($user),
+                        'selling_point' => trim($asset['selling_point']),
+                        'source_type' => $asset['source_type'],
+                        'file_path' => $file['file_path'] ?? null,
+                        'original_name' => $file['original_name'] ?? null,
+                        'external_url' => trim((string) ($asset['url'] ?? '')) ?: null,
+                        'mime_type' => $file['mime_type'] ?? null,
+                        'ai_confirmed' => $asset['source_type'] === 'ai_created',
+                        'version_history' => [['version' => 1, 'event' => 'created', 'changed_by' => $this->userName($user), 'changed_at' => now()->toIso8601String()]],
+                    ]);
+                }
+                return $task;
+            });
+        } catch (UniqueConstraintViolationException $exception) {
+            // A concurrent retry may have committed while this request was saving.
+            if ($response = $this->completedSubmission($submission['submission_token'], (int) $user->id)) return $response;
+            throw $exception;
+        }
+        $this->notifyReviewers($task, __('operation_tasks.messages.test_pending'), $user);
 
-        return redirect()->route('operation-tasks.tests.show', $task)->with('success', '测品任务已提交；待审核期间仍可人工登记投放与每日数据。');
+        return redirect()->route('operation-tasks.tests.show', $task)->with('success', __('operation_tasks.messages.test_saved'));
     }
 
     public function showTest(Request $request, OperationTestTask $task): Response|View
@@ -538,8 +601,8 @@ class OperationTaskController extends Controller
         $context = $this->authorized($request);
         $asset->loadMissing('task');
         $this->authorizeTaskOwner($context['user'], $asset->task);
-        abort_if($asset->retired_at, 422, '已退役素材不能继续填写数据。');
-        $data = $request->validate([
+        $this->rejectWhen($asset->retired_at, 'asset', __('operation_tasks.messages.asset_retired_daily'));
+        $data = $this->validateTask($request, [
             'media' => ['required', Rule::in(self::MEDIA)],
             'custom_media' => ['nullable', 'string', 'max:100'],
             'data_date' => ['required', 'date', 'before_or_equal:'.now('Asia/Shanghai')->toDateString()],
@@ -550,7 +613,7 @@ class OperationTaskController extends Controller
             'next_action' => ['required', 'string', 'max:5000'],
         ]);
         $media = $data['media'] === '其他' ? trim((string) ($data['custom_media'] ?? '')) : $data['media'];
-        abort_if($media === '', 422, '选择“其他”时必须填写媒体名称。');
+        $this->rejectWhen($media === '', 'custom_media', __('operation_tasks.messages.custom_media_required'));
         $operatorName = $this->userName($context['user']);
         $record = OperationAssetDailyRecord::query()->where(['asset_id' => $asset->id, 'media' => $media])->whereDate('data_date', $data['data_date'])->first();
         $payload = [
@@ -571,20 +634,20 @@ class OperationTaskController extends Controller
         } else {
             OperationAssetDailyRecord::query()->create($payload);
         }
-        return back()->with('success', '素材每日数据已保存，并保留修改人与历史版本。');
+        return back()->with('success', __('operation_tasks.messages.daily_saved'));
     }
 
     public function appendAsset(Request $request, OperationTestTask $task): RedirectResponse
     {
         $context = $this->authorized($request);
         $this->authorizeTaskOwner($context['user'], $task);
-        $data = $request->validate([
+        $data = $this->validateTask($request, [
             'selling_point' => ['required', 'string', 'max:1000'],
             'source_type' => ['required', Rule::in(['ai_created', 'peer_copied'])],
             'file' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,gif,mp4,mov,webm', 'max:51200'],
             'url' => ['nullable', 'url', 'max:2048'],
         ]);
-        abort_if(! $request->hasFile('file') && empty($data['url']), 422, '请上传素材文件或填写可访问的素材链接。');
+        $this->rejectWhen(! $request->hasFile('file') && empty($data['url']), 'file', __('operation_tasks.messages.asset_required'));
         $user = $context['user'];
         $file = $request->file('file');
         $asset = OperationTaskAsset::query()->create([
@@ -596,8 +659,8 @@ class OperationTaskController extends Controller
             'mime_type' => $file?->getMimeType(), 'ai_confirmed' => $data['source_type'] === 'ai_created',
             'version_history' => [['version' => 1, 'event' => 'created', 'changed_by' => $this->userName($user), 'changed_at' => now()->toIso8601String()]],
         ]);
-        $this->notifyReviewers($task, '任务 '.$task->task_no.' 新增了待审核素材：'.($asset->original_name ?: '链接素材').'。', $user);
-        return back()->with('success', '已追加一条新素材；该素材将独立进入审核与每日数据跟进。');
+        $this->notifyReviewers($task, __('operation_tasks.messages.asset_pending', ['number' => $task->task_no, 'name' => $asset->original_name ?: __('operation_tasks.messages.link_asset')]), $user);
+        return back()->with('success', __('operation_tasks.messages.asset_appended'));
     }
 
     public function retireAsset(Request $request, OperationTaskAsset $asset): RedirectResponse
@@ -605,17 +668,17 @@ class OperationTaskController extends Controller
         $context = $this->authorized($request);
         $asset->loadMissing('task');
         $this->authorizeTaskOwner($context['user'], $asset->task);
-        abort_if($asset->retired_at, 422, '该素材已退役，无需重复操作。');
-        $data = $request->validate(['retired_reason' => ['nullable', 'string', 'max:5000']]);
+        $this->rejectWhen($asset->retired_at, 'asset', __('operation_tasks.messages.asset_already_retired'));
+        $data = $this->validateTask($request, ['retired_reason' => ['nullable', 'string', 'max:5000']]);
         $asset->update(['retired_at' => now(), 'retired_by' => $context['user']->id, 'retired_reason' => trim((string) ($data['retired_reason'] ?? '')) ?: null]);
-        return back()->with('success', '素材已退役；历史文件、审核和每日数据均已保留。');
+        return back()->with('success', __('operation_tasks.messages.asset_retired'));
     }
 
     public function storeDailyPlan(Request $request): RedirectResponse
     {
         $context = $this->authorized($request);
         abort_unless($this->canManage($context['user']), 403);
-        $data = $request->validate([
+        $data = $this->validateTask($request, [
             'plan_date' => ['required', 'date'], 'department_id' => ['required', 'integer'], 'user_id' => ['required', 'integer'],
             'plan_mode' => ['required', Rule::in(['single', 'category', 'mixed'])],
             'single_target' => ['nullable', 'integer', 'min:0', 'max:30'], 'category_target' => ['nullable', 'integer', 'min:0', 'max:30'],
@@ -625,13 +688,13 @@ class OperationTaskController extends Controller
         $team = $teams->firstWhere('id', (int) $data['department_id']);
         abort_unless($team, 403);
         $member = $team->departmentMembers->firstWhere('id', (int) $data['user_id']);
-        abort_unless($member, 422, '所选成员不属于当前二级部门。');
+        $this->rejectWhen(! ($member), 'user_id', __('operation_tasks.messages.wrong_member'));
 
         [$singleTarget, $categoryTarget] = match ($data['plan_mode']) {
             'single' => [2, 0], 'category' => [0, 1],
             default => [(int) ($data['single_target'] ?? 0), (int) ($data['category_target'] ?? 0)],
         };
-        abort_if($data['plan_mode'] === 'mixed' && ($singleTarget < 1 || $categoryTarget < 1), 422, '混合计划必须同时填写单品与类目目标。');
+        $this->rejectWhen($data['plan_mode'] === 'mixed' && ($singleTarget < 1 || $categoryTarget < 1), 'single_target', __('operation_tasks.messages.mixed_required'));
 
         $plan = OperationTaskDailyPlan::query()->updateOrCreate(
             ['plan_date' => $data['plan_date'], 'user_id' => $member->id],
@@ -642,8 +705,8 @@ class OperationTaskController extends Controller
                 'confirmed_by' => $context['user']->id, 'confirmed_by_name' => $this->userName($context['user']), 'confirmed_at' => now(),
             ]
         );
-        $this->notifyUsers([$member->id], $context['user'], '测品日计划已确认', sprintf('%s 已确认你 %s 的计划：单品 %d 个，类目 %d 个。', $this->userName($context['user']), $plan->plan_date->format('Y-m-d'), $singleTarget, $categoryTarget));
-        return back()->with('success', '成员每日测品计划已确认并保存。');
+        $this->notifyUsers([$member->id], $context['user'], __('operation_tasks.messages.plan_title'), sprintf(__('operation_tasks.messages.plan_confirmed'), $this->userName($context['user']), $plan->plan_date->format('Y-m-d'), $singleTarget, $categoryTarget));
+        return back()->with('success', __('operation_tasks.messages.plan_saved'));
     }
 
     public function reviews(Request $request): Response|View
@@ -657,7 +720,7 @@ class OperationTaskController extends Controller
         $taskPerPage = in_array((int) $request->input('task_per_page', 20), [20, 50, 100], true) ? (int) $request->input('task_per_page', 20) : 20;
         $recapPerPage = in_array((int) $request->input('recap_per_page', 20), [20, 50, 100], true) ? (int) $request->input('recap_per_page', 20) : 20;
         $filters = ['from' => (string) $request->input('from', ''), 'to' => (string) $request->input('to', ''), 'department' => $selectedTeamId ?: '', 'status' => (string) $request->input('status', '')];
-        $request->validate([
+        $this->validateTask($request, [
             'from' => ['nullable', 'date_format:Y-m-d'],
             'to' => ['nullable', 'date_format:Y-m-d'],
         ]);
@@ -677,6 +740,12 @@ class OperationTaskController extends Controller
         if ($selectedTeamId) $query->where('department_id', $selectedTeamId);
         if ($submittedFrom) $query->where('submitted_at', '>=', $submittedFrom);
         if ($submittedUntil) $query->where('submitted_at', '<', $submittedUntil);
+        $searchTeamOptions = (clone $query)->reorder()->setEagerLoads([])->select('department_name')->distinct()->pluck('department_name');
+        $searchPersonOptions = (clone $query)->reorder()->setEagerLoads([])->select('owner_name')->distinct()->pluck('owner_name');
+        foreach (['team_search' => 'department_name', 'person_search' => 'owner_name'] as $parameter => $column) {
+            if ($request->filled($parameter)) $query->where($column, 'like', '%'.trim((string) $request->input($parameter)).'%');
+        }
+
         if ($filters['status'] === 'pending') {
             $query->where(function ($taskQuery) use ($channels): void {
                 foreach (array_keys($channels) as $channel) {
@@ -796,6 +865,8 @@ class OperationTaskController extends Controller
         if ($selectedTeamId) $recapQuery->where('department_id', $selectedTeamId);
         if ($submittedFrom) $recapQuery->where('submitted_at', '>=', $submittedFrom);
         if ($submittedUntil) $recapQuery->where('submitted_at', '<', $submittedUntil);
+        if ($request->filled('team_search')) $recapQuery->where('department_name', 'like', '%'.trim((string) $request->input('team_search')).'%');
+        if ($request->filled('person_search')) $recapQuery->where('user_name', 'like', '%'.trim((string) $request->input('person_search')).'%');
         $recaps = $recapQuery->paginate($recapPerPage, ['*'], 'recap_page')->withQueryString();
         $recapReviewerTeams = Department::query()
             ->with(['departmentMembers:id,name,username', 'parent.departmentMembers:id,name,username'])
@@ -822,13 +893,13 @@ class OperationTaskController extends Controller
             ->orderBy('reviewed_at')->orderBy('id')->get()->groupBy('target_id');
         $recaps->getCollection()->each(fn (OperationTaskRecap $recap) => $recap->setAttribute('review_flow_events', $recapFlowEvents->get($recap->id, collect())));
 
-        return view('portals.operation-tasks.reviews', [...$context, 'tasks' => $tasks, 'recaps' => $recaps, 'reviewFilters' => $filters, 'reviewChannels' => $channels, 'reviewTeams' => $teams]);
+        return view('portals.operation-tasks.reviews', [...$context, 'searchTeamOptions' => $searchTeamOptions, 'searchPersonOptions' => $searchPersonOptions, 'tasks' => $tasks, 'recaps' => $recaps, 'reviewFilters' => $filters, 'reviewChannels' => $channels, 'reviewTeams' => $teams]);
     }
 
     public function review(Request $request): RedirectResponse
     {
         $context = $this->authorized($request);
-        $data = $request->validate([
+        $data = $this->validateTask($request, [
             'target_type' => ['required', Rule::in(['task', 'asset'])], 'target_id' => ['required', 'integer'],
             'channel' => ['required', Rule::in(['leader', 'department'])], 'result' => ['required', Rule::in(['approved', 'rejected'])],
             'opinion' => ['nullable', 'string', 'max:5000'], 'rejection_scope' => ['nullable', Rule::in(['task', 'asset'])],
@@ -883,15 +954,15 @@ class OperationTaskController extends Controller
         });
 
         $resultLabel = $data['result'] === 'approved' ? '通过' : '驳回并要求整改';
-        $this->notifyUsers([$task->owner_user_id], $context['user'], '测品任务审核结果', sprintf('任务 %s 已完成%s：%s。', $task->task_no, $data['channel'] === 'leader' ? '组长审核' : '部门审核', $resultLabel));
-        if ($data['result'] === 'approved' && $data['channel'] === 'leader') $this->notifyReviewers($task, '任务 '.$task->task_no.' 已通过组长审核，仍待部门审核。', $context['user'], ['department']);
-        return back()->with('success', '审核结果已保存，并保留本次操作历史。');
+        $this->notifyUsers([$task->owner_user_id], $context['user'], __('operation_tasks.messages.task_review_title'), sprintf(__('operation_tasks.messages.task_review_result'), $task->task_no, $data['channel'] === 'leader' ? '组长审核' : '部门审核', $resultLabel));
+        if ($data['result'] === 'approved' && $data['channel'] === 'leader') $this->notifyReviewers($task, __('operation_tasks.messages.leader_passed', ['number' => $task->task_no]), $context['user'], ['department']);
+        return back()->with('success', __('operation_tasks.messages.review_saved'));
     }
 
     public function reviewAssets(Request $request): RedirectResponse
     {
         $context = $this->authorized($request);
-        $data = $request->validate([
+        $data = $this->validateTask($request, [
             'task_id' => ['required', 'integer'],
             'channel' => ['required', Rule::in(['leader', 'department'])],
             'assets' => ['required', 'array', 'min:1'],
@@ -908,7 +979,7 @@ class OperationTaskController extends Controller
         $assets = $task->assets->keyBy('id');
         foreach ($data['assets'] as $assetId => $assetData) {
             $asset = $assets->get((int) $assetId);
-            abort_unless($asset, 422, '提交的素材不属于当前任务。');
+            $this->rejectWhen(! ($asset), 'assets', __('operation_tasks.messages.wrong_asset'));
             if ($assetData['result'] === 'rejected' && trim((string) ($assetData['opinion'] ?? '')) === '') {
                 throw ValidationException::withMessages([
                     "assets.$assetId.opinion" => '驳回素材必须填写具体整改意见。',
@@ -948,14 +1019,14 @@ class OperationTaskController extends Controller
             $this->synchronizeTaskRectificationState($task->fresh());
         });
 
-        $this->notifyUsers([$task->owner_user_id], $context['user'], '测品素材审核结果', sprintf('任务 %s 的素材已完成%s批量审核。', $task->task_no, $data['channel'] === 'leader' ? '组长' : '部门'));
-        return back()->with('success', '全部素材审核结果已一次性保存。');
+        $this->notifyUsers([$task->owner_user_id], $context['user'], __('operation_tasks.messages.asset_review_title'), sprintf(__('operation_tasks.messages.asset_review_result'), $task->task_no, $data['channel'] === 'leader' ? '组长' : '部门'));
+        return back()->with('success', __('operation_tasks.messages.assets_review_saved'));
     }
 
     public function reviewBatch(Request $request): JsonResponse|RedirectResponse
     {
         $context = $this->authorized($request);
-        $data = $request->validate([
+        $data = $this->validateTask($request, [
             'task_id' => ['required', 'integer'],
             'channel' => ['required', Rule::in(['leader', 'department'])],
             'assets' => ['required', 'array', 'min:1'],
@@ -976,22 +1047,22 @@ class OperationTaskController extends Controller
         $assets = $task->assets->keyBy('id');
         foreach ($data['assets'] as $assetId => $assetData) {
             if (! $assets->has((int) $assetId)) {
-                throw ValidationException::withMessages(["assets.$assetId.result" => '提交的素材不属于当前任务。']);
+                throw ValidationException::withMessages(["assets.$assetId.result" => __('operation_tasks.messages.wrong_asset')]);
             }
             if ($assetData['result'] === 'rejected' && trim((string) ($assetData['opinion'] ?? '')) === '') {
-                throw ValidationException::withMessages(["assets.$assetId.opinion" => '驳回素材时必须填写具体整改意见。']);
+                throw ValidationException::withMessages(["assets.$assetId.opinion" => __('operation_tasks.messages.asset_opinion_required')]);
             }
         }
         if ($data['task_result'] === 'rejected' && trim((string) ($data['task_opinion'] ?? '')) === '') {
-            throw ValidationException::withMessages(['task_opinion' => '驳回任务时必须填写具体整改意见。']);
+            throw ValidationException::withMessages(['task_opinion' => __('operation_tasks.messages.task_opinion_required')]);
         }
         $rejectionScopes = array_values(array_unique($data['rejection_scopes'] ?? []));
         if ($data['task_result'] === 'rejected' && $rejectionScopes === []) {
-            throw ValidationException::withMessages(['rejection_scopes' => '驳回任务时请至少选择一个驳回对象。']);
+            throw ValidationException::withMessages(['rejection_scopes' => __('operation_tasks.messages.scope_required')]);
         }
         if ($data['task_result'] === 'rejected' && in_array('asset', $rejectionScopes, true)
             && collect($data['assets'])->where('result', 'rejected')->isEmpty()) {
-            throw ValidationException::withMessages(['rejection_scopes' => '选择“素材问题”后，请至少驳回一条素材。']);
+            throw ValidationException::withMessages(['rejection_scopes' => __('operation_tasks.messages.reject_asset_required')]);
         }
 
         $connection = config('admin.database.connection') ?: config('database.default');
@@ -1025,15 +1096,15 @@ class OperationTaskController extends Controller
 
         $resultLabel = $data['task_result'] === 'approved' ? '通过' : '驳回并要求整改';
         $channelLabel = $data['channel'] === 'leader' ? '组长审核' : '部门审核';
-        $this->notifyUsers([$task->owner_user_id], $context['user'], '测品任务审核结果', sprintf('任务 %s 已完成%s：%s。', $task->task_no, $channelLabel, $resultLabel));
+        $this->notifyUsers([$task->owner_user_id], $context['user'], __('operation_tasks.messages.task_review_title'), sprintf(__('operation_tasks.messages.task_review_result'), $task->task_no, $channelLabel, $resultLabel));
         if ($data['task_result'] === 'approved' && $data['channel'] === 'leader') {
-            $this->notifyReviewers($task, '任务 '.$task->task_no.' 已通过组长审核，仍待部门审核。', $context['user'], ['department']);
+            $this->notifyReviewers($task, __('operation_tasks.messages.leader_passed', ['number' => $task->task_no]), $context['user'], ['department']);
         }
 
         if ($request->expectsJson()) {
-            return response()->json(['ok' => true, 'message' => '素材和任务审核结果已统一保存。']);
+            return response()->json(['ok' => true, 'message' => __('operation_tasks.messages.batch_review_saved')]);
         }
-        return back()->with('success', '素材和任务审核结果已统一保存。');
+        return back()->with('success', __('operation_tasks.messages.batch_review_saved'));
     }
 
     private function storeTaskReview(
@@ -1100,14 +1171,15 @@ class OperationTaskController extends Controller
         }
     }
 
-    public function resubmitRectification(Request $request, OperationTaskRectification $rectification): RedirectResponse
+    public function resubmitRectification(Request $request, OperationTaskRectification $rectification, OperationTaskAssetUploadService $uploads): RedirectResponse
     {
         $context = $this->authorized($request);
-        $rectification->loadMissing(['task.assets', 'asset']);
+        $rectification->loadMissing('task');
         $this->authorizeTaskOwner($context['user'], $rectification->task);
-        abort_unless($rectification->status === 'required', 422, '该整改事项当前不可再次提交。');
+        if ($rectification->status !== 'required') return back()->withInput()->with('warning', __('operation_tasks.upload.edit_processed'));
         $minimum = $request->input('page_type') === 'category' ? 3 : 2;
-        $data = $request->validate([
+        $data = $this->validateTask($request, [
+            'task_version' => ['required', 'integer', 'min:1'],
             'page_type' => ['required', Rule::in(['single', 'category'])],
             'task_type' => ['required', Rule::in(['new', 'iteration'])],
             'landing_url' => ['required', 'url', 'max:2048'],
@@ -1116,32 +1188,35 @@ class OperationTaskController extends Controller
             'assets.*.id' => ['nullable', 'integer'],
             'assets.*.selling_point' => ['required', 'string', 'max:1000'],
             'assets.*.source_type' => ['required', Rule::in(['ai_created', 'peer_copied'])],
-            'assets.*.file' => ['nullable', 'file', 'mimes:jpg,jpeg,png,webp,gif,mp4,mov,webm', 'max:51200'],
+            'assets.*.file' => ['prohibited'],
+            'assets.*.upload_token' => ['nullable', 'uuid'],
             'assets.*.url' => ['nullable', 'url', 'max:2048'],
+        ], [
+            'task_version.required' => __('operation_tasks.upload.edit_refresh'),
+            'task_version.integer' => __('operation_tasks.upload.edit_refresh'),
+            'task_version.min' => __('operation_tasks.upload.edit_refresh'),
         ]);
-
-        $activeAssets = $rectification->task->assets->whereNull('retired_at')->keyBy('id');
-        $submittedIds = collect($data['assets'])->pluck('id')->filter()->map(fn ($id) => (int) $id);
-        if ($submittedIds->duplicates()->isNotEmpty() || $submittedIds->sort()->values()->all() !== $activeAssets->keys()->map(fn ($id) => (int) $id)->sort()->values()->all()) {
-            throw ValidationException::withMessages(['assets' => '原有素材必须全部保留；如需替换文件，请在对应素材中选择新文件。']);
-        }
-        foreach ($data['assets'] as $index => $assetData) {
-            $existingAsset = ! empty($assetData['id']) ? $activeAssets->get((int) $assetData['id']) : null;
-            if (! $existingAsset && ! $request->hasFile("assets.$index.file") && blank($assetData['url'] ?? null)) {
-                throw ValidationException::withMessages(["assets.$index.file" => '新增素材必须上传文件或填写素材链接。']);
-            }
-            if ($existingAsset && ! $existingAsset->file_path && blank($assetData['url'] ?? null) && ! $request->hasFile("assets.$index.file")) {
-                throw ValidationException::withMessages(["assets.$index.file" => '该素材没有可保留的原文件，请上传文件或填写素材链接。']);
-            }
-        }
-
         $user = $context['user'];
-        $requiredRectifications = OperationTaskRectification::query()
-            ->where('task_id', $rectification->task_id)->where('status', 'required')->get();
-        $resetLeaderReview = $requiredRectifications->contains(fn (OperationTaskRectification $item) => $item->review_channel === 'leader');
-
-        DB::connection(config('admin.database.connection') ?: config('database.default'))->transaction(function () use ($rectification, $requiredRectifications, $resetLeaderReview, $activeAssets, $data, $request, $user): void {
-            $task = $rectification->task->fresh(['assets']);
+        $outcome = DB::connection($rectification->getConnectionName())->transaction(function () use ($rectification, $data, $uploads, $user): array {
+            // Serialize re-submissions before consuming any upload or advancing versions.
+            $task = OperationTestTask::query()->lockForUpdate()->findOrFail($rectification->task_id);
+            $current = OperationTaskRectification::query()->lockForUpdate()->findOrFail($rectification->id);
+            if ($current->status !== 'required') return ['status' => 'edit_processed'];
+            if ((int) $task->version !== (int) $data['task_version']) return ['status' => 'edit_stale'];
+            $task->load('assets');
+            $activeAssets = $task->assets->whereNull('retired_at')->keyBy('id');
+            $submittedIds = collect($data['assets'])->pluck('id')->filter()->map(fn ($id) => (int) $id);
+            if ($submittedIds->duplicates()->isNotEmpty() || $submittedIds->sort()->values()->all() !== $activeAssets->keys()->map(fn ($id) => (int) $id)->sort()->values()->all()) {
+                throw ValidationException::withMessages(['assets' => __('operation_tasks.messages.retain_assets')]);
+            }
+            foreach ($data['assets'] as $index => $assetData) {
+                $existingAsset = ! empty($assetData['id']) ? $activeAssets->get((int) $assetData['id']) : null;
+                if (! ($existingAsset && $existingAsset->file_path) && empty($assetData['upload_token']) && blank($assetData['url'] ?? null)) {
+                    throw ValidationException::withMessages(["assets.$index.upload_token" => __('operation_tasks.messages.retained_asset_required')]);
+                }
+            }
+            $requiredRectifications = OperationTaskRectification::query()->where('task_id', $task->id)->where('status', 'required')->lockForUpdate()->get();
+            $resetLeaderReview = $requiredRectifications->contains(fn (OperationTaskRectification $item) => $item->review_channel === 'leader');
             $previousTaskVersion = (int) $task->version;
             $history = $task->version_history ?? [];
             $history[] = [
@@ -1160,7 +1235,7 @@ class OperationTaskController extends Controller
             ]);
 
             foreach ($data['assets'] as $index => $assetData) {
-                $file = $request->file("assets.$index.file");
+                $file = empty($assetData['upload_token']) ? [] : $uploads->consume((int) $user->id, $assetData['upload_token'], "assets.$index.upload_token");
                 if (! empty($assetData['id'])) {
                     /** @var OperationTaskAsset $asset */
                     $asset = $activeAssets->get((int) $assetData['id']);
@@ -1178,9 +1253,9 @@ class OperationTaskController extends Controller
                         'version' => $previousAssetVersion + 1, 'version_history' => $assetHistory,
                     ];
                     if ($file) {
-                        $assetValues['file_path'] = $file->store('operation-tasks/assets/'.now()->format('Y/m'), 'local');
-                        $assetValues['original_name'] = $file->getClientOriginalName();
-                        $assetValues['mime_type'] = $file->getMimeType();
+                        $assetValues['file_path'] = $file['file_path'];
+                        $assetValues['original_name'] = $file['original_name'];
+                        $assetValues['mime_type'] = $file['mime_type'];
                     }
                     $asset->update($assetValues);
 
@@ -1202,8 +1277,8 @@ class OperationTaskController extends Controller
                     OperationTaskAsset::query()->create([
                         'task_id' => $task->id, 'uploader_user_id' => $user->id, 'uploader_name' => $this->userName($user),
                         'selling_point' => trim($assetData['selling_point']), 'source_type' => $assetData['source_type'],
-                        'file_path' => $file?->store('operation-tasks/assets/'.now()->format('Y/m'), 'local'),
-                        'original_name' => $file?->getClientOriginalName(), 'mime_type' => $file?->getMimeType(),
+                        'file_path' => $file['file_path'] ?? null,
+                        'original_name' => $file['original_name'] ?? null, 'mime_type' => $file['mime_type'] ?? null,
                         'external_url' => trim((string) ($assetData['url'] ?? '')) ?: null,
                         'ai_confirmed' => $assetData['source_type'] === 'ai_created',
                         'version_history' => [['version' => 1, 'event' => 'added_during_rectification', 'changed_by' => $this->userName($user), 'changed_at' => now()->toIso8601String()]],
@@ -1228,7 +1303,7 @@ class OperationTaskController extends Controller
 
             foreach ($requiredRectifications as $requiredRectification) {
                 $requiredRectification->update([
-                    'status' => 'resubmitted', 'rectification_content' => '已完成任务资料与素材修改并重新提交审核。',
+                    'status' => 'resubmitted', 'rectification_content' => __('operation_tasks.upload.rectification_content'),
                     'resubmitted_at' => now(), 'resubmitted_by' => $user->id, 'resubmitted_by_name' => $this->userName($user),
                     'resubmitted_task_version' => $nextVersion,
                     'resubmitted_asset_id' => $requiredRectification->asset_id,
@@ -1239,10 +1314,13 @@ class OperationTaskController extends Controller
                 'channel' => 'operation', 'result' => 'resubmitted', 'opinion' => null, 'rejection_scope' => null,
                 'reviewer_id' => $user->id, 'reviewer_name' => $this->userName($user), 'reviewed_at' => now(),
             ]);
+            return ['status' => 'saved', 'reset_leader' => $resetLeaderReview];
         });
+        if ($outcome['status'] !== 'saved') return back()->withInput()->with('warning', __('operation_tasks.upload.'.$outcome['status']));
+        $resetLeaderReview = $outcome['reset_leader'];
         $reviewChannels = $resetLeaderReview ? ['leader'] : ['department'];
-        $this->notifyReviewers($rectification->task, '任务 '.$rectification->task->task_no.' 已提交整改新版本，请复审。', $user, $reviewChannels);
-        return back()->with('success', $resetLeaderReview ? '修改已重新提交，将返回二级主管复审。' : '修改已重新提交，将直接返回一级主管复审。');
+        $this->notifyReviewers($rectification->task, __('operation_tasks.messages.resubmitted', ['number' => $rectification->task->task_no]), $user, $reviewChannels);
+        return back()->with('success', $resetLeaderReview ? __('operation_tasks.messages.resubmit_leader') : __('operation_tasks.messages.resubmit_department'));
     }
 
     public function restoreRectification(Request $request, OperationTaskRectification $rectification): RedirectResponse
@@ -1250,15 +1328,15 @@ class OperationTaskController extends Controller
         $context = $this->authorized($request);
         $rectification->loadMissing('task');
         $this->authorizeTaskOwner($context['user'], $rectification->task);
-        abort_unless(in_array($rectification->status, ['resubmitted', 'completed', 'restore_required'], true), 422, '当前整改事项不需要登记恢复投放。');
-        $data = $request->validate(['restore_confirmed' => ['accepted'], 'restored_media' => ['nullable', 'string', 'max:100'], 'restored_ad_identifier' => ['nullable', 'string', 'max:191'], 'restored_notes' => ['nullable', 'string', 'max:5000']]);
+        $this->rejectWhen(! (in_array($rectification->status, ['resubmitted', 'completed', 'restore_required'], true)), 'restore_confirmed', __('operation_tasks.messages.restore_unavailable'));
+        $data = $this->validateTask($request, ['restore_confirmed' => ['accepted'], 'restored_media' => ['nullable', 'string', 'max:100'], 'restored_ad_identifier' => ['nullable', 'string', 'max:191'], 'restored_notes' => ['nullable', 'string', 'max:5000']]);
         $rectification->update([
             'status' => 'restored', 'restored_at' => now(), 'restored_by' => $context['user']->id, 'restored_by_name' => $this->userName($context['user']),
             'restored_media' => trim((string) ($data['restored_media'] ?? '')) ?: null, 'restored_ad_identifier' => trim((string) ($data['restored_ad_identifier'] ?? '')) ?: null,
             'restored_notes' => trim((string) ($data['restored_notes'] ?? '')) ?: null,
         ]);
         $this->synchronizeTaskRectificationState($rectification->task->fresh());
-        return back()->with('success', '已记录人工恢复投放确认；系统未调用任何广告平台接口。');
+        return back()->with('success', __('operation_tasks.messages.restore_saved'));
     }
 
     public function dashboard(Request $request): Response|View
@@ -1275,11 +1353,12 @@ class OperationTaskController extends Controller
         $selectedTeamId = (int) $request->input('department', 0);
         if ($selectedTeamId && ! $allTeams->contains('id', $selectedTeamId)) $selectedTeamId = 0;
         $teams = $selectedTeamId ? $allTeams->where('id', $selectedTeamId)->values() : $allTeams;
-        $filters = ['department' => $selectedTeamId ?: '', 'owner' => trim((string) $request->input('owner', ''))];
+        $filters = ['department' => $selectedTeamId ?: '', 'owner' => trim((string) $request->input('person_search', $request->input('owner', '')))];
+        if ($request->filled('team_search')) $teams = $teams->filter(fn ($team) => str_contains(mb_strtolower($team->name), mb_strtolower(trim((string) $request->input('team_search')))));
         $teamIds = $teams->modelKeys();
         $memberIds = $teams->flatMap(fn (Department $team) => $team->departmentMembers->pluck('id'))->map(fn ($id) => (int) $id)->unique()->values()->all();
-        $rangeStart = $from.' 00:00:00';
-        $rangeEnd = $to.' 23:59:59';
+        $rangeStart = Carbon::parse($from, 'Asia/Shanghai')->startOfDay()->utc();
+        $rangeEnd = Carbon::parse($to, 'Asia/Shanghai')->endOfDay()->utc();
         $recaps = OperationTaskRecap::query()->whereBetween('data_date', [$from, $to])
             ->where(function ($query) use ($teamIds, $memberIds): void {
                 $query->whereIn('department_id', $teamIds)->orWhereIn('user_id', $memberIds);
@@ -1300,6 +1379,11 @@ class OperationTaskController extends Controller
         $days = collect();
         for ($day = Carbon::parse($from, 'Asia/Shanghai'); $day->lte(Carbon::parse($to, 'Asia/Shanghai')); $day->addDay()) $days->push($day->toDateString());
 
+        if ($filters['owner'] !== '') {
+            $selectedUsers = AdminUser::query()->whereIn('id', $memberIds)->get()->filter(fn ($member) => str_contains(mb_strtolower($this->userName($member)), mb_strtolower($filters['owner'])))->pluck('id');
+            $recaps = $recaps->whereIn('user_id', $selectedUsers);
+            $tasks = $tasks->whereIn('owner_user_id', $selectedUsers);
+        }
         $teamRows = $teams->map(function (Department $team) use ($recaps, $tasks, $plans, $days, $filters) {
             $members = collect($team->departmentMembers->all())->filter(fn (AdminUser $member) => $filters['owner'] === '' || str_contains(mb_strtolower($this->userName($member)), mb_strtolower($filters['owner'])));
             $rows = $members->map(function (AdminUser $member) use ($recaps, $tasks, $plans, $days) {
@@ -1337,9 +1421,41 @@ class OperationTaskController extends Controller
         $visibleMemberCount = $teamRows->sum(fn ($team) => $team->member_count);
         return view('portals.operation-tasks.dashboard', [
             ...$context, 'from' => $from, 'to' => $to, 'recaps' => $recaps, 'tasks' => $tasks, 'teamRows' => $teamRows,
-            'operators' => $operators, 'teams' => $allTeams, 'visibleMemberCount' => $visibleMemberCount,
+            'searchTeamOptions' => $allTeams->pluck('name'), 'searchPersonOptions' => $allTeams->flatMap(fn ($team) => $team->departmentMembers)->map(fn ($member) => $this->userName($member))->unique(), 'operators' => $operators, 'teams' => $allTeams, 'visibleMemberCount' => $visibleMemberCount,
             'dashboardFilters' => $filters, 'canManagePlans' => true,
         ]);
+    }
+
+    private function rejectWhen(mixed $condition, string $field, string $message): void
+    {
+        if ($condition) throw ValidationException::withMessages([$field => $message]);
+    }
+
+    private function completedSubmission(string $token, int $userId): ?RedirectResponse
+    {
+        $task = OperationTestTask::query()->where('submission_token', $token)->first();
+        if (! $task) return null;
+        if ((int) $task->owner_user_id !== $userId) {
+            throw ValidationException::withMessages(['submission_token' => __('operation_tasks.validation.refresh_submission')]);
+        }
+        return redirect()->route('operation-tasks.tests.show', $task)
+            ->with('warning', __('operation_tasks.messages.already_submitted', ['number' => $task->task_no]));
+    }
+
+    private function validateTask(Request $request, array $rules, array $messages = []): array
+    {
+        $messages += [
+            'assets.*.upload_token.uuid' => __('operation_tasks.upload.invalid_token'),
+            'assets.*.file.prohibited' => __('operation_tasks.validation.direct_file'),
+            'size.min' => __('operation_tasks.upload.too_large'),
+            'size.max' => __('operation_tasks.upload.too_large'),
+        ];
+        if (isset($rules['assets']) && in_array($request->input('page_type'), ['single', 'category'], true)) {
+            $messages['assets.min'] ??= __('operation_tasks.validation.asset_min', [
+                'type' => __('operation_tasks.validation.'.($request->input('page_type') === 'category' ? 'category' : 'single')),
+            ]);
+        }
+        return $request->validate($rules, $messages, __('operation_tasks.validation.attributes'));
     }
 
     private function context(Request $request): array|Response
@@ -1347,6 +1463,7 @@ class OperationTaskController extends Controller
         $context = $this->portalEntries->portalContext($request);
         if ($context instanceof Response) return $context;
         abort_unless($context['portal']->code === self::PORTAL_CODE, 404);
+        app()->setLocale('zh-CN');
         return $context;
     }
 
@@ -1591,7 +1708,7 @@ class OperationTaskController extends Controller
 
     private function notifyReviewers(OperationTestTask $task, string $content, AdminUser $sender, ?array $channels = null): void
     {
-        $this->notifyUsers(array_values(array_diff($this->reviewerUserIds($task, $channels), [(int) $sender->id])), $sender, '运营任务待办提醒', $content);
+        $this->notifyUsers(array_values(array_diff($this->reviewerUserIds($task, $channels), [(int) $sender->id])), $sender, __('operation_tasks.messages.pending_title'), $content);
     }
 
     private function recapReviewerUserIds(OperationTaskRecap $recap, ?array $channels = null): array

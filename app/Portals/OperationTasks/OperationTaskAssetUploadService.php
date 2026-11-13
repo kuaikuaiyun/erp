@@ -14,10 +14,11 @@ use Illuminate\Validation\ValidationException;
 class OperationTaskAssetUploadService
 {
     public const CHUNK_SIZE = 2 * 1024 * 1024;
-    public const MAX_SIZE = 50 * 1024 * 1024;
+    public const MAX_SIZE = 100 * 1024 * 1024;
 
     public function begin(int $userId, string $name, int $size): array
     {
+        if ($size <= 0 || $size > self::MAX_SIZE) $this->invalid('too_large', 'size');
         $token = (string) Str::uuid();
         $upload = OperationTaskAssetUpload::query()->create([
             'token' => $token, 'user_id' => $userId, 'original_name' => basename(str_replace('\\', '/', $name)),
@@ -85,7 +86,7 @@ class OperationTaskAssetUploadService
             $file = new File($disk->path($upload->file_path));
             if ($file->getSize() !== $upload->size) $this->invalid('incomplete');
             $validator = Validator::make(['file' => $file], [
-                'file' => ['required', 'file', 'mimes:jpg,jpeg,png,webp,gif,mp4,mov,webm', 'max:51200'],
+                'file' => ['required', 'file', 'mimes:jpg,jpeg,png,webp,gif,mp4,mov,webm', 'max:'.intdiv(self::MAX_SIZE, 1024)],
             ]);
             if ($validator->fails()) {
                 $disk->delete($upload->file_path);

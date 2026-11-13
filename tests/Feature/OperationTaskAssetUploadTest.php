@@ -64,6 +64,34 @@ class OperationTaskAssetUploadTest extends TestCase
         self::assertSame('uploading', $this->uploads->status(7, $session['token'])['status']);
     }
 
+    public function test_a_hundred_megabyte_image_can_complete_using_two_megabyte_parts(): void
+    {
+        $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aH0sAAAAASUVORK5CYII=');
+        $size = 100 * 1024 * 1024;
+        $session = $this->uploads->begin(7, 'large-creative.png', $size);
+        self::assertSame(2 * 1024 * 1024, $session['chunk_size']);
+        $partCount = (int) ceil($size / $session['chunk_size']);
+        for ($index = 0; $index < $partCount; $index++) {
+            $prefix = $index === 0 ? $png : '';
+            $contents = $prefix.str_repeat("\0", $session['chunk_size'] - strlen($prefix));
+            $this->uploads->part(7, $session['token'], $index, UploadedFile::fake()->createWithContent('part', $contents));
+        }
+        self::assertSame('ready', $this->uploads->complete(7, $session['token'])['status']);
+        $file = DB::transaction(fn () => $this->uploads->consume(7, $session['token'], 'assets.0.upload_token'));
+        self::assertSame($size, Storage::disk('local')->size($file['file_path']));
+    }
+
+    public function test_over_a_hundred_megabytes_is_rejected_before_creating_an_upload(): void
+    {
+        try {
+            $this->uploads->begin(7, 'oversized.mp4', 100 * 1024 * 1024 + 1);
+            self::fail('Oversized file was accepted.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('size', $exception->errors());
+        }
+        self::assertSame(0, OperationTaskAssetUpload::query()->count());
+    }
+
     public function test_missing_chunks_and_forged_image_contents_are_rejected(): void
     {
         $session = $this->uploads->begin(7, 'creative.png', 4);

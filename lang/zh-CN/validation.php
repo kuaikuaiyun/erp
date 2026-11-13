@@ -1,6 +1,23 @@
 <?php
 
 return [
+    'accepted' => '请确认:attribute。',
+    'after_or_equal' => ':attribute不得早于 :date。',
+    'before_or_equal' => ':attribute不得晚于 :date。',
+    'boolean' => ':attribute必须为是或否。',
+    'date' => ':attribute必须为有效日期。',
+    'date_format' => ':attribute必须使用 :format 格式。',
+    'file' => ':attribute必须为有效文件。',
+    'numeric' => ':attribute必须为数值。',
+    'prohibited' => ':attribute不允许填写。',
+    'uploaded' => ':attribute上传失败，请重新选择文件或稍后重试。',
+    'uuid' => ':attribute必须为有效标识。',
+    'min' => [
+        'array' => ':attribute至少需要 :min 项。',
+        'file' => ':attribute不得小于 :min KB。',
+        'numeric' => ':attribute不得小于 :min。',
+        'string' => ':attribute至少需要 :min 个字符。',
+    ],
     'required' => ':attribute为必填项。',
     'required_if' => ':attribute为必填项。',
     'required_with' => ':attribute为必填项。',

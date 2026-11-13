@@ -80,25 +80,14 @@
 
 @php
     $operationTaskNotification = null;
-
-    if (session('success')) {
-        $operationTaskNotification = [
-            'type' => 'success',
-            'title' => '操作成功',
-            'message' => (string) session('success'),
-        ];
+    if ($errors->any()) {
+        $operationTaskNotification = ['type' => 'error', 'title' => __('operation_tasks.validation.failed_title'), 'message' => (string) $errors->first()];
     } elseif (session('error')) {
-        $operationTaskNotification = [
-            'type' => 'error',
-            'title' => '操作失败',
-            'message' => (string) session('error'),
-        ];
-    } elseif ($errors->any()) {
-        $operationTaskNotification = [
-            'type' => 'error',
-            'title' => '操作未完成',
-            'message' => (string) $errors->first(),
-        ];
+        $operationTaskNotification = ['type' => 'error', 'title' => __('operation_tasks.validation.error_title'), 'message' => (string) session('error')];
+    } elseif (session('warning')) {
+        $operationTaskNotification = ['type' => 'warning', 'title' => __('operation_tasks.validation.warning_title'), 'message' => (string) session('warning')];
+    } elseif (session('success')) {
+        $operationTaskNotification = ['type' => 'success', 'title' => __('operation_tasks.validation.success_title'), 'message' => (string) session('success')];
     }
 @endphp
 
@@ -108,6 +97,8 @@
             (function (notification) {
                 if (window.ErpAdminNotifier) {
                     window.ErpAdminNotifier.notify(notification);
+                } else {
+                    window.alert(notification.message);
                 }
             })({!! json_encode($operationTaskNotification, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) !!});
         </script>
@@ -160,6 +151,189 @@
         updateDrop(zone, input);
         input.dispatchEvent(new Event('change', { bubbles: true }));
     });
+})();
+</script>
+@endpush
+
+@push('styles')
+<style>
+.ot-field-error{display:block;margin:5px 0;color:#b63c35;font-size:12px;grid-column:1/-1;line-height:1.5}.ot-form-invalid{border-color:#d76960!important}.ot-form-validation-summary{margin:12px 16px;white-space:pre-wrap}.ot-form-validation-summary[hidden]{display:none!important}
+</style>
+@endpush
+@push('scripts')
+<script>
+(function () {
+    'use strict';
+    var copy = @json(__('operation_tasks.validation'));
+    var messages = @json(__('operation_tasks.messages'));
+    var serial = 0;
+    var limits = {
+        landing_url:2048, selection_objective:10000, 'assets.*.selling_point':1000, 'assets.*.url':2048,
+        selling_point:1000, url:2048, analysis:5000, next_action:5000, retired_reason:5000,
+        opinion:5000, task_opinion:5000, 'assets.*.opinion':5000, plan_note:5000,
+        restored_media:100, restored_ad_identifier:191, restored_notes:5000, custom_media:100,
+        'media.*.custom_name':100, 'answers.*':10000, 'questions.*.title':500, 'questions.*.description':10000
+    };
+    function text(key, values, source) {
+        var value = (source || copy)[key] || '';
+        Object.keys(values || {}).forEach(function (token) { value = value.split(':' + token).join(String(values[token])); });
+        return value;
+    }
+    function key(field) { return String(field.name || '').replace(/\[([^\]]*)\]/g, '.$1').replace(/\.\d+(?=\.|$)/g, '.*'); }
+    function label(field) { return (copy.attributes || {})[key(field)] || copy.field; }
+    function belongs(form) { return form && form.tagName === 'FORM' && (form.matches('.ot-form,.ot-unified-audit-form') || String(form.action).indexOf('/fashion/operation-tasks/') !== -1); }
+    function controls(form) { return Array.prototype.slice.call(form.elements).filter(function (field) { return !field.disabled && field.matches('input,select,textarea') && field.type !== 'hidden' && ['button','submit','reset'].indexOf(field.type) === -1; }); }
+    function clear(field) {
+        field.classList.remove('ot-form-invalid');
+        field.removeAttribute('aria-invalid');
+        if (field.otError) {
+            var described = (field.getAttribute('aria-describedby') || '').split(' ').filter(function (id) { return id && id !== field.otError.id; });
+            if (described.length) field.setAttribute('aria-describedby', described.join(' ')); else field.removeAttribute('aria-describedby');
+            field.otError.remove(); field.otError = null;
+        }
+    }
+    function show(field, message) {
+        clear(field);
+        field.classList.add('ot-form-invalid');
+        field.setAttribute('aria-invalid','true');
+        var error = document.createElement('span');
+        error.className = 'ot-field-error'; error.id = 'ot-field-error-' + (++serial); error.textContent = message;
+        field.insertAdjacentElement('afterend',error); field.otError = error;
+        field.setAttribute('aria-describedby', ((field.getAttribute('aria-describedby') || '') + ' ' + error.id).trim());
+    }
+    function fail(form, field, message) {
+        if (field) show(field,message);
+        var summary = form.querySelector('.ot-form-validation-summary');
+        if (!summary) { summary = document.createElement('div'); summary.className = 'alert alert-danger ot-form-validation-summary'; summary.setAttribute('role','alert'); form.insertBefore(summary,form.firstChild); }
+        summary.hidden = false; summary.textContent = message;
+        if (field) {
+            if (!field.matches('input,select,textarea,button')) field.tabIndex = -1;
+            field.scrollIntoView({behavior:'smooth',block:'center'});
+            field.focus({preventScroll:true});
+        }
+        if (window.ErpAdminNotifier) window.ErpAdminNotifier.notify({type:'error',title:copy.notice,message:message});
+    }
+    function controlError(field, form) {
+        var value = String(field.value || '').trim(), name = key(field), attribute = label(field);
+        var group = (field.type === 'radio' || field.type === 'checkbox') ? controls(form).filter(function (item) { return item.name === field.name; }) : [];
+        if (field.required && ((group.length && !group.some(function (item) { return item.checked; })) || (!group.length && !value && !(field.files && field.files.length)))) return text(field.matches('select') || group.length ? 'choose' : 'required',{attribute:attribute});
+        if (field.type === 'file') {
+            var maximum = form.id === 'ot-create-test-form' ? 100 : 50;
+            for (var i=0;i<(field.files || []).length;i++) {
+                var file = field.files[i];
+                if (file.size <= 0 || file.size > maximum * 1024 * 1024) return text('file_size',{max:maximum});
+                if (!/\.(jpe?g|png|webp|gif|mp4|mov|webm)$/i.test(file.name)) return copy.file_type;
+            }
+            return '';
+        }
+        if (field.validity && field.validity.badInput) return text(field.type === 'date' ? 'date' : 'numeric',{attribute:attribute});
+        if (!value || group.length) return '';
+        var maximumLength = limits[name];
+        if (maximumLength && Array.from(value).length > maximumLength) return text('max',{attribute:attribute,max:maximumLength});
+        if (field.type === 'url' && field.validity.typeMismatch) return text('url',{attribute:attribute});
+        if (field.type === 'number') {
+            var number = Number(value);
+            if (!Number.isFinite(number)) return text('numeric',{attribute:attribute});
+            if ((name === 'orders' || name === 'media.*.orders' || name === 'single_target' || name === 'category_target') && (!/^[+-]?(0|[1-9]\d*)$/.test(value) || !Number.isInteger(number))) return text('integer',{attribute:attribute});
+            if (field.min !== '' && number < Number(field.min)) return text('minimum',{attribute:attribute,min:field.min});
+            if (field.max !== '' && number > Number(field.max)) return text('maximum',{attribute:attribute,max:field.max});
+            if ((name === 'single_target' || name === 'category_target') && number > 30) return text('maximum',{attribute:attribute,max:30});
+            if (field.validity.stepMismatch) return text('step',{attribute:attribute});
+        }
+        if (field.type === 'date') {
+            if (field.max && value > field.max) return text('date_before',{attribute:attribute,date:field.max});
+            if (field.min && value < field.min) return text('date_after',{attribute:attribute,date:field.min});
+        }
+        return '';
+    }
+    function check(form) {
+        var first = null;
+        controls(form).forEach(function (field) { clear(field); var message = controlError(field,form); if (message) { show(field,message); first = first || {field:field,message:message}; } });
+        function add(field,message) { if (!field) return; show(field,message); first = first || {field:field,message:message}; }
+        var pageType = form.querySelector('[name="page_type"]');
+        if (pageType) {
+            var rows = form.querySelectorAll(form.id === 'ot-create-test-form' ? '.ot-asset-input' : '.ot-edit-asset-row');
+            var minimum = pageType.value === 'category' ? 3 : 2;
+            if (rows.length < minimum) add(pageType,text('asset_count',{type:text(pageType.value === 'category' ? 'category' : 'single'),min:minimum,count:rows.length}));
+            rows.forEach(function (row,index) {
+                var file = row.querySelector('input[type="file"]'), url = row.querySelector('input[name$="[url]"]'), token = row.querySelector('input[name$="[upload_token]"]');
+                var uploaded = form.id === 'ot-create-test-form' ? !!(token && token.value) : (row.getAttribute('data-has-file') === '1' || !!(file && file.files && file.files.length));
+                if (!uploaded && !(url && url.value.trim())) add(url || file,text('asset_required',{number:index+1}));
+            });
+        }
+        var directFile = form.querySelector('input[type="file"][name="file"]'), directUrl = form.querySelector('input[name="url"]');
+        if (directFile && directUrl && !(directFile.files && directFile.files.length) && !directUrl.value.trim()) add(directUrl,copy.direct_asset_required);
+        var custom = form.querySelector('[name="custom_media"]'), media = form.querySelector('[name="media"]');
+        if (custom && media && media.value === '其他' && !custom.value.trim()) add(custom,text('custom_media_required',{},messages));
+        var mediaRows = form.querySelectorAll('.ot-media-row'), seen = {};
+        mediaRows.forEach(function (row) {
+            var mediaSelect = row.querySelector('select'), customName = row.querySelector('input[name$="[custom_name]"]');
+            if (!mediaSelect) return;
+            var name = mediaSelect.value === '其他' ? String(customName ? customName.value : '').trim() : mediaSelect.value.trim();
+            if (mediaSelect.value === '其他' && !name) add(customName || mediaSelect,text('custom_media_required',{},messages));
+            name = name.toLowerCase();
+            if (name && Object.prototype.hasOwnProperty.call(seen,name)) add(mediaSelect,text('duplicate_media',{},messages));
+            if (name) seen[name] = true;
+        });
+        var plan = form.querySelector('[name="plan_mode"]');
+        if (plan && plan.value === 'mixed') ['single_target','category_target'].forEach(function (name) { var target = form.querySelector('[name="'+name+'"]'); if (target && Number(target.value) < 1) add(target,text('mixed_required',{},messages)); });
+        var taskResult = form.querySelector('[name="task_result"]'), taskOpinion = form.querySelector('[name="task_opinion"]');
+        if (taskResult && taskResult.value === 'rejected') {
+            if (taskOpinion && !taskOpinion.value.trim()) add(taskOpinion,text('task_opinion_required',{},messages));
+            var scopes = form.querySelectorAll('[name="rejection_scopes[]"]:checked');
+            if (!scopes.length) add(form.querySelector('[name="rejection_scopes[]"]') || taskResult,text('scope_required',{},messages));
+            var assetScope = form.querySelector('[name="rejection_scopes[]"][value="asset"]:checked');
+            if (assetScope && !Array.prototype.some.call(form.querySelectorAll('select[name$="[result]"]'),function (item) { return item.value === 'rejected'; })) add(assetScope,text('reject_asset_required',{},messages));
+        }
+        form.querySelectorAll('select[name$="[result]"]').forEach(function (result) {
+            var name = result.name.replace(/\[result\]$/,'[opinion]');
+            var opinion = Array.prototype.find.call(form.elements,function (field) { return field.name === name; });
+            if (result.value === 'rejected' && opinion && !opinion.value.trim()) add(opinion,text('asset_opinion_required',{},messages));
+        });
+        var result = form.querySelector('[name="result"]'), opinion = form.querySelector('[name="opinion"]');
+        if (result && result.value === 'rejected' && opinion && !opinion.value.trim()) add(opinion,text('task_opinion_required',{},messages));
+        var accepted = form.querySelector('[name="restore_confirmed"]');
+        if (accepted && !accepted.checked) add(accepted,text('choose',{attribute:label(accepted)}));
+        [['submitted_from','submitted_to'],['from','to']].forEach(function (names) {
+            if (names[0] === 'from' && /\/dashboard(?:\?|$)/.test(form.action)) return;
+            var from = form.querySelector('[name="'+names[0]+'"]'), to = form.querySelector('[name="'+names[1]+'"]');
+            if (from && to && from.value && to.value && from.value > to.value) add(to,copy.date_range);
+        });
+        return first;
+    }
+    function conditions(form) {
+        var media = form.querySelector('[name="media"]'), custom = form.querySelector('[name="custom_media"]');
+        if (media && custom) custom.required = media.value === '其他';
+        var result = form.querySelector('[name="result"]'), opinion = form.querySelector('[name="opinion"]');
+        if (result && opinion) opinion.required = result.value === 'rejected';
+        var taskResult = form.querySelector('[name="task_result"]'), taskOpinion = form.querySelector('[name="task_opinion"]');
+        if (taskResult && taskOpinion) taskOpinion.required = taskResult.value === 'rejected';
+        form.querySelectorAll('select[name$="[result]"]').forEach(function (select) {
+            var opinionName = select.name.replace(/\[result\]$/,'[opinion]');
+            var target = Array.prototype.find.call(form.elements,function (field) { return field.name === opinionName; });
+            if (target) target.required = select.value === 'rejected';
+        });
+    }
+    function bind() { document.querySelectorAll('form').forEach(function (form) { if (belongs(form)) { form.noValidate = true; conditions(form); } }); }
+    document.addEventListener('submit',function (event) {
+        if (!belongs(event.target)) return;
+        var error = check(event.target);
+        if (error) { event.preventDefault(); event.stopImmediatePropagation(); fail(event.target,error.field,error.message); }
+    },true);
+    document.addEventListener('input',function (event) {
+        var field = event.target, form = field.form;
+        if (!belongs(form) || !field.matches('input,textarea,select')) return;
+        var message = controlError(field,form);
+        if (message) show(field,message); else clear(field);
+        var summary = form.querySelector('.ot-form-validation-summary'); if (summary) summary.hidden = true;
+    });
+    document.addEventListener('change',function (event) {
+        var field = event.target, form = field.form;
+        if (belongs(form)) conditions(form);
+        if (belongs(form) && field.matches('input[type="file"]')) { var message = controlError(field,form); if (message) show(field,message); else clear(field); }
+    });
+    window.OperationTaskForms = {text:text,fail:fail,check:check,clear:clear};
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded',bind); else bind();
 })();
 </script>
 @endpush

@@ -33,9 +33,8 @@
             <p>填写昨日数据，再明确今天的动作。</p>
         </div>
         @if(! $yesterdayRecap || ($yesterdayRecap->workflow_status ?? 'approved') === 'rejected')
-            <button type="button" class="btn ot-primary" id="ot-open-recap">
-                <i class="fa fa-plus"></i> {{ $yesterdayRecap ? '修改并重新提交' : '填写昨日复盘' }}
-            </button>
+            <a class="btn ot-primary" href="{{ $yesterdayRecap ? route('operation-tasks.recaps.edit', ['recap' => $yesterdayRecap->id]) : route('operation-tasks.recaps.index', ['new' => 1]) }}"><i class="fa fa-plus"></i> {{ __($yesterdayRecap ? 'operation_tasks.recap_form.edit' : 'operation_tasks.recap_form.new') }}</a>
+
         @endif
     </div>
 
@@ -78,6 +77,7 @@
         </div>
     </div>
 
+    <form method="get" class="ot-filters ot-search-filter-form">@include('portals.operation-tasks.partials.search-filters')<button class="btn ot-primary">{{ __('operation_tasks.filters.search') }}</button></form>
     <div class="ot-card">
         <div class="ot-card-head"><span>复盘记录</span><span class="ot-badge">{{ $recaps->total() }} 条</span></div>
         <div class="table-responsive">
@@ -106,7 +106,7 @@
                             <td>
                                 <button type="button" class="btn btn-default btn-xs" data-toggle="modal" data-target="#ot-recap-detail-{{ $recap->id }}">查看详情</button>
                                 @if((int) $recap->user_id === (int) $user->id && $status === 'rejected')
-                                    <a class="btn btn-default btn-xs" href="{{ route('operation-tasks.recaps.index', ['edit' => $recap->id]) }}">修改并重提</a>
+                                    <a class="btn btn-default btn-xs" href="{{ route('operation-tasks.recaps.edit', ['recap' => $recap->id]) }}">{{ __('operation_tasks.recap_form.edit_button') }}</a>
                                 @elseif((int) $recap->user_id === (int) $user->id)
                                     <button type="button" class="btn btn-default btn-xs ot-recap-edit-locked" aria-disabled="true" data-recap-edit-locked>{{ __('operation_tasks.recap_edit.button') }}</button>
                                 @endif
@@ -149,10 +149,13 @@
     @endforeach
 
     <div class="modal fade ot-modal" id="ot-recap-modal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
-        <form class="ot-form" method="post" action="{{ route('operation-tasks.recaps.store') }}">@csrf
-            <div class="modal-header"><button type="button" class="close" data-dismiss="modal">&times;</button><h4 class="modal-title">{{ $formRecap ? '编辑复盘' : '填写昨日复盘' }}</h4></div>
+        <form class="ot-form" method="post" action="{{ $formRecap ? route('operation-tasks.recaps.resubmit', ['recap' => $formRecap->id]) : route('operation-tasks.recaps.store') }}">@csrf
+            <input type="hidden" name="recap_mode" value="{{ $formRecap ? 'edit' : 'new' }}">
+            <input type="hidden" name="recap_id" value="{{ $formRecap?->id }}">
+            <input type="hidden" name="recap_version" value="{{ $formRecap ? old('recap_version', $formRecap->version) : '' }}">
+            <div class="modal-header"><button type="button" class="close" data-dismiss="modal">&times;</button><h4 class="modal-title">{{ $formRecap ? __('operation_tasks.recap_form.edit_title', ['date' => $formRecap->data_date->format('Y-m-d'), 'version' => $formRecap->version]) : __('operation_tasks.recap_form.new') }}</h4></div>
             <div class="modal-body">
-                <div class="ot-fixed-business-date"><span>业务日期</span><b>{{ $yesterday }}</b><small>按北京时间自动取昨日，不需要手动选择</small></div>
+                <div class="ot-fixed-business-date"><span>{{ __('operation_tasks.recap_form.date') }}</span><b>{{ $formRecap ? $formRecap->data_date->format('Y-m-d') : $yesterday }}</b><small>{{ __($formRecap ? 'operation_tasks.recap_form.edit_hint' : 'operation_tasks.recap_form.new_hint') }}</small></div>
                 <div class="form-group"><label>媒体经营数据 *</label><div id="ot-media-list"></div><button type="button" class="btn btn-default btn-sm" id="ot-add-media"><i class="fa fa-plus"></i> 添加媒体</button></div>
                 <div class="ot-grid">
                     @foreach($recapQuestions as $question)
@@ -195,7 +198,16 @@
         var options = mediaOptions.map(function (name) { return '<option value="' + escapeHtml(name) + '" ' + (name === data.name ? 'selected' : '') + '>' + escapeHtml(name) + '</option>'; }).join('');
         var row = document.createElement('div');
         row.className = 'ot-media-row';
-        row.innerHTML = '<select class="form-control" name="media[' + i + '][name]" required><option value="">选择媒体</option>' + options + '</select><input class="form-control" type="number" min="0" step="0.01" name="media[' + i + '][spend]" value="' + escapeHtml(data.spend || '') + '" placeholder="广告费" required><input class="form-control" type="number" min="0" step="1" name="media[' + i + '][orders]" value="' + escapeHtml(data.orders || '') + '" placeholder="单量" required><input class="form-control" type="number" min="0" step="0.01" name="media[' + i + '][revenue]" value="' + escapeHtml(data.revenue || '') + '" placeholder="营业额" required>';
+        row.innerHTML = '<select class="form-control" name="media[' + i + '][name]" required><option value="">选择媒体</option>' + options + '</select><input class="form-control" type="number" min="0" step="0.01" name="media[' + i + '][spend]" value="' + escapeHtml(data.spend == null ? '' : data.spend) + '" placeholder="广告费" required><input class="form-control" type="number" min="0" step="1" name="media[' + i + '][orders]" value="' + escapeHtml(data.orders == null ? '' : data.orders) + '" placeholder="单量" required><input class="form-control" type="number" min="0" step="0.01" name="media[' + i + '][revenue]" value="' + escapeHtml(data.revenue == null ? '' : data.revenue) + '" placeholder="营业额" required>';
+        var custom = document.createElement('input');
+        custom.className = 'form-control'; custom.name = 'media[' + i + '][custom_name]';
+        custom.placeholder = window.OperationTaskForms.text('custom_media_required', {}, @json(__('operation_tasks.messages')));
+        custom.value = data.custom_name || (data.name === '其他' ? '' : ''); custom.style.gridColumn = '1 / -1';
+        row.appendChild(custom);
+        var select = row.querySelector('select');
+        if (data.name && mediaOptions.indexOf(data.name) === -1) { select.value = '其他'; custom.value = data.name; }
+        function customMedia() { var other = select.value === '其他'; custom.required = other; custom.hidden = !other; custom.style.display = other ? '' : 'none'; }
+        select.addEventListener('change',customMedia); customMedia();
         list.appendChild(row);
     }
     (initialMedia.length ? initialMedia : [{}]).forEach(addMedia);

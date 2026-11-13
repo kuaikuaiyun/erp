@@ -22,11 +22,12 @@
         <div class="alert alert-warning"><b>{{ __('operation_tasks.recap_review.retained_opinion', ['id' => old('recap_id'), 'version' => old('version')]) }}</b><pre style="margin:8px 0 0;white-space:pre-wrap">{{ old('opinion') }}</pre></div>
     @endif
     <form class="ot-card ot-review-filters" method="get">
+
         <div class="ot-card-body">
             <div class="ot-filter-grid">
+                @include('portals.operation-tasks.partials.search-filters')
                 <div class="form-group"><label>{{ __('operation_tasks.reviews.submitted_from') }}</label><input class="form-control" type="date" name="from" value="{{ $reviewFilters['from'] ?? '' }}"></div>
                 <div class="form-group"><label>{{ __('operation_tasks.reviews.submitted_to') }}</label><input class="form-control" type="date" name="to" value="{{ $reviewFilters['to'] ?? '' }}"></div>
-                <div class="form-group"><label>二级团队</label><select class="form-control" name="department"><option value="">全部二级团队</option>@foreach($reviewTeams as $team)<option value="{{ $team->id }}" @selected((string) ($reviewFilters['department'] ?? '') === (string) $team->id)>{{ optional($team->parent)->name ? optional($team->parent)->name.' / ' : '' }}{{ $team->name }}</option>@endforeach</select></div>
                 <div class="form-group"><label>审核状态</label><select class="form-control" name="status"><option value="">全部</option><option value="pending" @selected(($reviewFilters['status'] ?? '') === 'pending')>待我审核</option><option value="rectification" @selected(($reviewFilters['status'] ?? '') === 'rectification')>整改处理中</option><option value="approved" @selected(($reviewFilters['status'] ?? '') === 'approved')>我负责通道已通过</option></select></div>
                 <div class="ot-filter-actions"><button class="btn ot-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{ route('operation-tasks.reviews.index') }}">重置</a></div>
             </div>
@@ -92,7 +93,7 @@
                     <input type="hidden" name="version" value="{{ $recap->version }}">
                     <input type="hidden" name="recap_id" value="{{ $recap->id }}">
                     <div class="modal-header"><button type="button" class="close" data-dismiss="modal">&times;</button><h4 class="modal-title">审核每日复盘</h4><p>{{ $recap->data_date->format('Y-m-d') }} · {{ $recap->user_name }} · {{ $recapChannelLabel }}</p></div>
-                    <div class="modal-body"><div class="ot-modal-summary"><b>复盘经营汇总</b><div>营业额 ${{ number_format($recap->total_revenue_usd, 2) }} · 广告费 ${{ number_format($recap->total_spend_usd, 2) }} · 订单 {{ $recap->total_orders }}</div></div><h4 class="ot-modal-section-title">媒体经营数据</h4><div class="table-responsive"><table class="table ot-table"><thead><tr><th>媒体</th><th>花费</th><th>单量</th><th>营业额</th><th>ROI</th></tr></thead><tbody>@forelse($recap->media_items ?? [] as $item)<tr><td>{{ $item['name'] ?? '—' }}</td><td>${{ number_format((float)($item['spend'] ?? 0), 2) }}</td><td>{{ $item['orders'] ?? 0 }}</td><td>${{ number_format((float)($item['revenue'] ?? 0), 2) }}</td><td>{{ (float)($item['spend'] ?? 0) > 0 ? number_format((float)($item['revenue'] ?? 0)/(float)$item['spend'], 2) : '—' }}</td></tr>@empty<tr><td colspan="5" class="text-center text-muted">暂无媒体数据</td></tr>@endforelse</tbody></table></div><h4 class="ot-modal-section-title">复盘内容</h4><div class="ot-recap-review-answers">@foreach(collect($recap->question_answers ?? []) as $index => $answer)<div><b>问题{{ $index + 1 }}：{{ $answer['title'] ?? '复盘问题' }}</b><p>{{ $answer['answer'] ?? '—' }}</p></div>@endforeach</div><h4 class="ot-modal-section-title">审核处理</h4><div class="ot-recap-review-progress"><div><b>二级主管：{{ $recap->leader_reviewer_names }}</b><span>{{ $recapStatusLabel($recap->leader_review_status) }}</span></div><div><b>一级主管：{{ $recap->department_reviewer_names }}</b><span>{{ $recapStatusLabel($recap->department_review_status) }}</span></div></div><div class="form-group"><label>审核结果 *</label><select class="form-control" name="result"><option value="approved">通过</option><option value="rejected">驳回并要求修改</option></select></div><div class="form-group"><label>审核意见 <small>驳回时必填</small></label><textarea class="form-control" rows="4" name="opinion" placeholder="请填写具体修改意见">{{ (int) old('recap_id') === (int) $recap->id && (int) old('version') === (int) $recap->version ? old('opinion') : '' }}</textarea></div></div>
+                    <div class="modal-body"><div class="ot-modal-summary"><b>复盘经营汇总</b><div>营业额 ${{ number_format($recap->total_revenue_usd, 2) }} · 广告费 ${{ number_format($recap->total_spend_usd, 2) }} · 订单 {{ $recap->total_orders }}</div></div><h4 class="ot-modal-section-title">媒体经营数据</h4><div class="table-responsive"><table class="table ot-table"><thead><tr><th>媒体</th><th>花费</th><th>单量</th><th>营业额</th><th>ROI</th></tr></thead><tbody>@forelse($recap->media_items ?? [] as $item)<tr><td>{{ $item['name'] ?? '—' }}</td><td>${{ number_format((float)($item['spend'] ?? 0), 2) }}</td><td>{{ $item['orders'] ?? 0 }}</td><td>${{ number_format((float)($item['revenue'] ?? 0), 2) }}</td><td>{{ (float)($item['spend'] ?? 0) > 0 ? number_format((float)($item['revenue'] ?? 0)/(float)$item['spend'], 2) : '—' }}</td></tr>@empty<tr><td colspan="5" class="text-center text-muted">暂无媒体数据</td></tr>@endforelse</tbody></table></div><h4 class="ot-modal-section-title">复盘内容</h4><div class="ot-recap-review-answers">@foreach(collect($recap->question_answers ?? []) as $index => $answer)<div><b>问题{{ $index + 1 }}：{{ $answer['title'] ?? '复盘问题' }}</b><p>{{ $answer['answer'] ?? '—' }}</p></div>@endforeach</div><h4 class="ot-modal-section-title">审核处理</h4><div class="ot-recap-review-progress"><div><b>二级主管：{{ $recap->leader_reviewer_names }}</b><span>{{ $recapStatusLabel($recap->leader_review_status) }}</span></div><div><b>一级主管：{{ $recap->department_reviewer_names }}</b><span>{{ $recapStatusLabel($recap->department_review_status) }}</span></div></div><div class="form-group"><label>审核结果 *</label><select class="form-control" name="result"><option value="approved">通过</option><option value="rejected">驳回并要求修改</option></select></div><div class="form-group"><label>审核意见 <small>驳回时必填</small></label><textarea class="form-control" rows="4" name="opinion" maxlength="5000" placeholder="请填写具体修改意见">{{ (int) old('recap_id') === (int) $recap->id && (int) old('version') === (int) $recap->version ? old('opinion') : '' }}</textarea></div></div>
                     <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">取消</button><button class="btn ot-primary">保存审核结果</button></div>
                 </form></div></div></div>
         @endforeach
@@ -175,7 +176,7 @@
                                 <div><small>当前审核</small><b>{{ $activeLabel }} · {{ $task->assets->count() }} 条素材</b></div>
                                 <a class="btn btn-default btn-sm" href="{{ route('operation-tasks.tests.show', $task) }}" target="_blank"><i class="fa fa-folder-open-o"></i> 查看完整档案</a>
                             </div>
-                            <div class="ot-audit-overview-objective"><small>选品理由与验证目标</small><p>{{ $task->selection_objective }}</p></div>
+                            <div class="ot-audit-landing"><small>{{ __('operation_tasks.filters.landing') }}</small><div class="ot-audit-landing-body"><a class="ot-audit-landing-url" href="{{ $task->landing_url }}" target="_blank" rel="noopener">{{ $task->landing_url }}</a><a class="btn btn-info btn-sm" href="{{ $task->landing_url }}" target="_blank" rel="noopener"><i class="fa fa-external-link" aria-hidden="true"></i> {{ __('operation_tasks.filters.open_landing') }}</a></div></div><div class="ot-audit-overview-objective"><small>选品理由与验证目标</small><p>{{ $task->selection_objective }}</p></div>
                         </div>
                         <form class="ot-unified-audit-form" method="post" action="{{ route('operation-tasks.reviews.batch.store') }}">
                             @csrf
@@ -210,7 +211,7 @@
                                         $assetPreviewType = $assetIsImage ? 'image' : ($assetIsVideo ? 'video' : 'link');
                                         $leaderAssetReview = $asset->reviews->where('target_version', $asset->version)->where('channel', 'leader')->first();
                                     @endphp
-                                    <tr><td><div class="ot-asset-info">@if($assetPreviewUrl)<button type="button" class="ot-asset-preview-trigger" data-asset-preview data-preview-type="{{ $assetPreviewType }}" data-preview-src="{{ $assetPreviewUrl }}" data-preview-name="{{ $assetPreviewName }}" aria-label="预览 {{ $assetPreviewName }}">@if($assetIsImage)<img src="{{ $assetPreviewUrl }}" loading="lazy" alt="">@elseif($assetIsVideo)<span class="ot-asset-thumb is-video"><i class="fa fa-play"></i></span>@else<span class="ot-asset-thumb is-link"><i class="fa fa-external-link"></i></span>@endif</button>@endif<div class="ot-asset-copy"><button type="button" class="ot-asset-name" @if($assetPreviewUrl) data-asset-preview data-preview-type="{{ $assetPreviewType }}" data-preview-src="{{ $assetPreviewUrl }}" data-preview-name="{{ $assetPreviewName }}" @else disabled @endif>{{ $assetPreviewName }}</button></div></div></td><td><span class="ot-badge">{{ $asset->source_type === 'ai_created' ? 'AI制作' : ($asset->source_type === 'peer_copied' ? '同行搬运' : '未标记') }}</span><div>{{ $asset->selling_point }}</div></td><td><span class="ot-badge {{ $assetBadgeClass }}">{{ $assetStatusText }}</span>@if($activeChannel === 'department' && $leaderAssetReview)<div class="ot-prior-asset-review"><b>二级主管：{{ $leaderAssetReview->reviewer_name ?: '未记录' }}</b><span>{{ $leaderAssetReview->result === 'rejected' ? '驳回' : '通过' }} · {{ \App\Portals\OperationTasks\Support\OperationTaskTime::format($leaderAssetReview->reviewed_at) }}</span>@if($leaderAssetReview->opinion)<p>{{ $leaderAssetReview->opinion }}</p>@endif</div>@endif</td><td><select class="form-control" name="assets[{{ $asset->id }}][result]"><option value="approved" @selected($assetReviewResult === 'approved')>通过</option><option value="rejected" @selected($assetReviewResult === 'rejected')>驳回该素材</option></select></td><td><textarea class="form-control" rows="2" name="assets[{{ $asset->id }}][opinion]" placeholder="驳回该素材时必须填写整改意见">{{ $assetReviewOpinion }}</textarea></td></tr>
+                                    <tr><td><div class="ot-asset-info">@if($assetPreviewUrl)<button type="button" class="ot-asset-preview-trigger" data-asset-preview data-preview-type="{{ $assetPreviewType }}" data-preview-src="{{ $assetPreviewUrl }}" data-preview-name="{{ $assetPreviewName }}" aria-label="预览 {{ $assetPreviewName }}">@if($assetIsImage)<img src="{{ $assetPreviewUrl }}" loading="lazy" alt="">@elseif($assetIsVideo)<span class="ot-asset-thumb is-video"><i class="fa fa-play"></i></span>@else<span class="ot-asset-thumb is-link"><i class="fa fa-external-link"></i></span>@endif</button>@endif<div class="ot-asset-copy"><button type="button" class="ot-asset-name" @if($assetPreviewUrl) data-asset-preview data-preview-type="{{ $assetPreviewType }}" data-preview-src="{{ $assetPreviewUrl }}" data-preview-name="{{ $assetPreviewName }}" @else disabled @endif>{{ $assetPreviewName }}</button></div></div></td><td><span class="ot-badge">{{ $asset->source_type === 'ai_created' ? 'AI制作' : ($asset->source_type === 'peer_copied' ? '同行搬运' : '未标记') }}</span><div>{{ $asset->selling_point }}</div></td><td><span class="ot-badge {{ $assetBadgeClass }}">{{ $assetStatusText }}</span>@if($activeChannel === 'department' && $leaderAssetReview)<div class="ot-prior-asset-review"><b>二级主管：{{ $leaderAssetReview->reviewer_name ?: '未记录' }}</b><span>{{ $leaderAssetReview->result === 'rejected' ? '驳回' : '通过' }} · {{ \App\Portals\OperationTasks\Support\OperationTaskTime::format($leaderAssetReview->reviewed_at) }}</span>@if($leaderAssetReview->opinion)<p>{{ $leaderAssetReview->opinion }}</p>@endif</div>@endif</td><td><select class="form-control" name="assets[{{ $asset->id }}][result]"><option value="approved" @selected($assetReviewResult === 'approved')>通过</option><option value="rejected" @selected($assetReviewResult === 'rejected')>驳回该素材</option></select></td><td><textarea class="form-control" rows="2" name="assets[{{ $asset->id }}][opinion]" maxlength="5000" placeholder="驳回该素材时必须填写整改意见">{{ $assetReviewOpinion }}</textarea></td></tr>
                                 @endforeach
                             </tbody></table></div>
                             <div class="ot-batch-audit-footer"><span><i class="fa fa-info-circle"></i> 请确认每条素材的结果；选择驳回时必须填写具体整改意见。</span></div>
@@ -237,7 +238,7 @@
                                 </div>
                                 <div class="ot-task-audit-opinion">
                                     <label>审核意见</label>
-                                    <textarea class="form-control" name="task_opinion" placeholder="通过时选填；驳回时必须填写具体整改意见">{{ $review?->opinion }}</textarea>
+                                    <textarea class="form-control" name="task_opinion" maxlength="5000" placeholder="通过时选填；驳回时必须填写具体整改意见">{{ $review?->opinion }}</textarea>
                                 </div>
                             </div>
                         </section>
@@ -278,9 +279,11 @@
 @push('scripts')
 <script>
 (function () {
+    var operationMessages = @json(__('operation_tasks.messages'));
+    var operationCopy = @json(__('operation_tasks.validation'));
     function notify(message, type, title) {
         if (window.ErpAdminNotifier && typeof window.ErpAdminNotifier.notify === 'function') {
-            window.ErpAdminNotifier.notify({type: type || 'warning', title: title || '提交前请检查', message: message});
+            window.ErpAdminNotifier.notify({type: type || 'warning', title: title || operationCopy.notice, message: message});
         } else {
             window.alert(message);
         }
@@ -345,7 +348,7 @@
                 if (opinion && !opinion.value.trim()) {
                     opinion.classList.add('has-error');
                     if (!invalidMessage) opinion.focus();
-                    invalidMessage = '驳回素材时必须填写具体整改意见。';
+                    invalidMessage = window.OperationTaskForms.text('asset_opinion_required', {}, operationMessages);
                 }
             });
             var taskResult = form.querySelector('[name="task_result"]');
@@ -353,12 +356,12 @@
             if (taskResult && taskResult.value === 'rejected' && taskOpinion && !taskOpinion.value.trim()) {
                 taskOpinion.classList.add('has-error');
                 if (!invalidMessage) taskOpinion.focus();
-                invalidMessage = '驳回任务时必须填写具体整改意见。';
+                invalidMessage = window.OperationTaskForms.text('task_opinion_required', {}, operationMessages);
             }
             if (taskResult && taskResult.value === 'rejected') {
                 var checkedScopes = form.querySelectorAll('input[name="rejection_scopes[]"]:checked');
                 if (!checkedScopes.length) {
-                    invalidMessage = invalidMessage || '驳回任务时请至少选择一个驳回对象。';
+                    invalidMessage = invalidMessage || window.OperationTaskForms.text('scope_required', {}, operationMessages);
                 }
                 var assetScope = form.querySelector('input[name="rejection_scopes[]"][value="asset"]:checked');
                 var hasRejectedAsset = Array.prototype.some.call(
@@ -366,7 +369,7 @@
                     function (select) { return select.value === 'rejected'; }
                 );
                 if (assetScope && !hasRejectedAsset) {
-                    invalidMessage = invalidMessage || '选择“素材问题”后，请至少驳回一条素材。';
+                    invalidMessage = invalidMessage || window.OperationTaskForms.text('reject_asset_required', {}, operationMessages);
                 }
             }
             if (invalidMessage) {
@@ -377,7 +380,7 @@
             var originalHtml = submitButton ? submitButton.innerHTML : '';
             if (submitButton) {
                 submitButton.disabled = true;
-                submitButton.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 正在保存';
+                submitButton.innerHTML = '<i class="fa fa-spinner fa-spin"></i> ' + operationCopy.saving;
             }
             fetch(form.action, {
                 method: 'POST',
@@ -386,24 +389,21 @@
                 credentials: 'same-origin'
             }).then(function (response) {
                 return response.json().catch(function () { return {}; }).then(function (body) {
-                    if (!response.ok) throw body;
+                    if (!response.ok) {
+                        if (body.errors) throw body;
+                        throw {message: [401,419].indexOf(response.status) !== -1 ? operationCopy.login_expired : (response.status === 403 ? operationCopy.forbidden : (response.status === 404 ? operationCopy.missing_record : operationCopy.save_failed))};
+                    }
+                    if (response.redirected || body.ok !== true) throw {message: response.redirected ? operationCopy.login_expired : operationCopy.save_failed};
                     return body;
                 });
             }).then(function (body) {
-                var modal = form.closest('.modal');
-                var modalId = modal ? modal.id : '';
-                var trigger = modalId ? document.querySelector('[data-target="#' + modalId + '"]') : null;
-                var row = trigger ? trigger.closest('tr') : null;
-                if (modal && window.jQuery) window.jQuery(modal).modal('hide');
-                if (row) row.parentNode.removeChild(row);
-                var count = document.querySelector('[data-review-tab="tests"] em');
-                if (count) count.textContent = String(Math.max(0, (parseInt(count.textContent, 10) || 0) - 1));
-                notify(body.message || '审核结果已保存。', 'success', '保存成功');
+                try { sessionStorage.setItem('operation-task-review-success', JSON.stringify({message:body.message || operationMessages.review_saved,title:operationCopy.save_success})); } catch (_) {}
+                window.location.reload();
             }).catch(function (error) {
                 var errors = error && error.errors ? error.errors : null;
                 var firstKey = errors ? Object.keys(errors)[0] : null;
-                var message = firstKey && errors[firstKey] ? errors[firstKey][0] : (error.message || '保存失败，请稍后重试。');
-                notify(message, 'error', '保存失败');
+                var message = firstKey && errors[firstKey] ? errors[firstKey][0] : (error.message || operationCopy.save_failed);
+                notify(message, 'error', operationCopy.error_title);
             }).then(function () {
                 if (submitButton) {
                     submitButton.disabled = false;
@@ -419,7 +419,7 @@
             event.preventDefault();
             opinion.classList.add('has-error');
             opinion.focus();
-            notify('选择驳回时，必须填写具体修改意见。');
+            notify(operationMessages.task_opinion_required);
         }
     });
     function closeReviewHistories(except) {

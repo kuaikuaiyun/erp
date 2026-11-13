@@ -25,6 +25,7 @@
 
         return [(string) $task->id => [
             'action' => route('operation-tasks.rectifications.resubmit', $required),
+            'version' => (int) $task->version,
             'page_type' => $task->page_type,
             'task_type' => $task->task_type,
             'landing_url' => $task->landing_url,
@@ -57,6 +58,7 @@
         </div>
     @endif
     <form class="ot-test-date-filter" method="get" action="{{ url()->current() }}">
+        @include('portals.operation-tasks.partials.search-filters')
         @if(request()->filled('status'))
             <input type="hidden" name="status" value="{{ request('status') }}">
         @endif
@@ -167,17 +169,17 @@
         ])
     </div>
 </section>
-<div class="modal fade ot-modal" id="ot-test-modal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><form class="ot-form" method="post" id="ot-create-test-form" action="{{ route('operation-tasks.tests.store') }}">@csrf<div class="modal-header"><button type="button" class="close" data-dismiss="modal">×</button><h4 class="modal-title">新建测品任务</h4><p>明确选品理由、验证目标和对应素材后提交。</p></div><div class="modal-body"><div class="ot-grid"><div class="form-group"><label>落地页类型 *</label><select class="form-control" name="page_type" id="ot-page-type"><option value="single" @selected(old('page_type', 'single') === 'single')>单品页</option><option value="category" @selected(old('page_type') === 'category')>类目页</option></select></div><div class="form-group"><label>任务类型 *</label><select class="form-control" name="task_type"><option value="new" @selected(old('task_type', 'new') === 'new')>新测试</option><option value="iteration" @selected(old('task_type') === 'iteration')>已有测试迭代</option></select></div><div class="ot-full form-group"><label>落地页链接 *</label><input class="form-control" type="url" name="landing_url" value="{{ old('landing_url') }}" placeholder="https://..." required></div><div class="ot-full form-group"><label>选品理由与验证目标 *</label><textarea class="form-control" rows="4" name="selection_objective" required placeholder="卖给谁？为什么选这个品或类目？本次最想验证什么？">{{ old('selection_objective') }}</textarea></div></div><div class="form-group"><label>对应素材 *</label><div id="ot-assets"></div><button class="btn btn-default btn-sm" id="ot-add-asset" type="button"><i class="fa fa-plus"></i> 添加素材</button><p class="ot-hint" id="ot-asset-hint">{{ __('operation_tasks.upload.single_hint') }}</p></div></div><div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">取消</button><button class="btn ot-primary"><i class="fa fa-send"></i> 提交任务</button></div></form></div></div></div>
+<div class="modal fade ot-modal" id="ot-test-modal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><form class="ot-form ot-task-asset-upload-form" method="post" id="ot-create-test-form" action="{{ route('operation-tasks.tests.store') }}">@csrf<input type="hidden" name="submission_token" value="{{ old('submission_token', (string) \Illuminate\Support\Str::uuid()) }}"><div class="modal-header"><button type="button" class="close" data-dismiss="modal">×</button><h4 class="modal-title">新建测品任务</h4><p>明确选品理由、验证目标和对应素材后提交。</p></div><div class="modal-body"><div class="ot-grid"><div class="form-group"><label>落地页类型 *</label><select class="form-control" name="page_type" id="ot-page-type"><option value="single" @selected(old('page_type', 'single') === 'single')>单品页</option><option value="category" @selected(old('page_type') === 'category')>类目页</option></select></div><div class="form-group"><label>任务类型 *</label><select class="form-control" name="task_type"><option value="new" @selected(old('task_type', 'new') === 'new')>新测试</option><option value="iteration" @selected(old('task_type') === 'iteration')>已有测试迭代</option></select></div><div class="ot-full form-group"><label>落地页链接 *</label><input class="form-control" type="url" name="landing_url" value="{{ old('landing_url') }}" placeholder="https://..." required></div><div class="ot-full form-group"><label>选品理由与验证目标 *</label><textarea class="form-control" rows="4" name="selection_objective" required placeholder="卖给谁？为什么选这个品或类目？本次最想验证什么？">{{ old('selection_objective') }}</textarea></div></div><div class="form-group"><label>对应素材 *</label><div id="ot-assets"></div><button class="btn btn-default btn-sm" id="ot-add-asset" type="button"><i class="fa fa-plus"></i> 添加素材</button><p class="ot-hint" id="ot-asset-hint">{{ __('operation_tasks.upload.single_hint') }}</p></div></div><div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">取消</button><button class="btn ot-primary"><i class="fa fa-send"></i> 提交任务</button></div></form></div></div></div>
 <div class="modal fade ot-modal" id="ot-test-edit-modal" tabindex="-1">
     <div class="modal-dialog modal-lg ot-test-edit-dialog">
         <div class="modal-content">
-            <form class="ot-form" id="ot-test-edit-form" method="post" enctype="multipart/form-data">
+            <form class="ot-form ot-task-asset-upload-form" id="ot-test-edit-form" method="post">
                 @csrf
-                <input type="hidden" name="form_mode" value="edit">
+                <input type="hidden" name="form_mode" value="edit"><input type="hidden" name="task_id" value=""><input type="hidden" name="task_version" value="">
                 <div class="modal-header">
                     <button type="button" class="close" data-dismiss="modal">×</button>
                     <h4 class="modal-title">修改测品任务并重新提交</h4>
-                    <p>可修改全部任务资料与素材；原文件默认保留，只有主动选择新文件时才会替换。</p>
+                    <p>{{ __('operation_tasks.upload.edit_description') }}</p>
                 </div>
                 <div class="modal-body">
                     <div class="ot-edit-rejection-summary" id="ot-edit-rejection-summary"></div>
@@ -188,7 +190,7 @@
                         <div class="ot-full form-group"><label>选品理由与验证目标 *</label><textarea class="form-control" rows="4" name="selection_objective" required></textarea></div>
                     </div>
                     <div class="form-group">
-                        <div class="ot-edit-assets-head"><label>对应素材 *</label><span>已有文件无需重复选择；选择新文件才会替换原文件。</span></div>
+                        <div class="ot-edit-assets-head"><label>对应素材 *</label><span>{{ __('operation_tasks.upload.retained_hint') }}</span></div>
                         <div id="ot-edit-assets"></div>
                         <button class="btn btn-default btn-sm" id="ot-edit-add-asset" type="button"><i class="fa fa-plus"></i> 添加素材</button>
                         <p class="ot-hint" id="ot-edit-asset-hint"></p>
@@ -201,6 +203,24 @@
 </div>
 @push('styles')
 <style>
+    .ot-task-asset-upload-form .ot-upload-box{display:block!important;min-height:106px;overflow:hidden;padding:13px 15px;cursor:default;isolation:isolate;background:#f8fcff;transition:border-color .16s ease,box-shadow .16s ease}
+    .ot-task-asset-upload-form .ot-upload-progress{position:absolute;inset:0 auto 0 0;width:0;z-index:-1;pointer-events:none;background:#d3ebdf;transition:width .15s linear,background-color .16s ease}
+    .ot-task-asset-upload-form .ot-upload-content{display:flex;align-items:center;gap:13px;min-width:0}
+    .ot-task-asset-upload-form .ot-upload-copy{flex:1;min-width:0}
+    .ot-task-asset-upload-form .ot-upload-copy .ot-file-drop-copy{margin:0;cursor:pointer}
+    .ot-task-asset-upload-form .ot-upload-copy strong{font-weight:600}
+    .ot-task-asset-upload-form .ot-upload-message{display:block;margin-top:4px;color:#28745f;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+    .ot-task-asset-upload-form .ot-upload-message:empty{display:none}
+    .ot-task-asset-upload-form .ot-upload-actions{display:flex;flex:0 0 auto;align-items:flex-end;flex-direction:column;gap:6px}
+    .ot-task-asset-upload-form .ot-upload-actions .btn{margin:0;cursor:pointer;white-space:nowrap}
+    .ot-task-asset-upload-form .ot-upload-percentage{color:#23704f;font-size:17px;font-variant-numeric:tabular-nums;line-height:1.2}
+    .ot-task-asset-upload-form .ot-upload-box[data-upload-status="queued"],.ot-task-asset-upload-form .ot-upload-box[data-upload-status="checking"]{border-color:#91b3cc;background:#f3f7fa}
+    .ot-task-asset-upload-form .ot-upload-box[data-upload-status="verifying"] .ot-upload-progress{background:#d7e9f4}
+    .ot-task-asset-upload-form .ot-upload-box[data-upload-status="failed"]{border-color:#d87c7c;background:#fff6f5}
+    .ot-task-asset-upload-form .ot-upload-box[data-upload-status="failed"] .ot-upload-progress{background:#f5d9d7}
+    .ot-task-asset-upload-form .ot-upload-box[data-upload-status="failed"] .ot-upload-message,.ot-task-asset-upload-form .ot-upload-box[data-upload-status="failed"] .ot-upload-percentage{color:#b13b36}
+    .ot-task-asset-upload-form .ot-upload-box [hidden]{display:none!important}
+    @media(max-width:600px){.ot-task-asset-upload-form .ot-upload-content{gap:9px}.ot-task-asset-upload-form .ot-upload-content>.ot-file-drop-icon{width:32px;height:32px;flex-basis:32px;font-size:15px}.ot-task-asset-upload-form .ot-upload-box{padding:11px}.ot-task-asset-upload-form .ot-upload-actions .btn{font-size:11px;padding:4px 7px}}
     .ot-test-empty-row td{height:220px!important;padding:0!important;text-align:center!important;vertical-align:middle!important}
     .ot-test-empty-state{display:flex;min-height:220px;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:#738793}
     .ot-test-empty-state i{display:grid;width:34px;height:34px;place-items:center;border-radius:50%;background:#e8f5f0;color:#24947d;font-size:17px}
@@ -253,11 +273,12 @@
         'partUrl' => route('operation-tasks.tests.uploads.parts.store', ['token' => '__TOKEN__', 'index' => '__INDEX__']),
         'completeUrl' => route('operation-tasks.tests.uploads.complete', ['token' => '__TOKEN__']),
         'labels' => __('operation_tasks.upload'),
+        'validation' => __('operation_tasks.validation'),
         'initialAssets' => old('form_mode') === 'edit' ? [] : old('assets', []),
     ];
 @endphp
 <script>window.OperationTaskAssetUploads = @json($operationTaskUploadConfig);</script>
-<script src="{{ asset('assets/erp/operation-task-asset-upload.js') }}?v=20261112-1"></script>
+<script src="{{ asset('assets/erp/operation-task-asset-upload.js') }}?v=20261113-1"></script>
 @if(($errors->any() && old('form_mode') !== 'edit') || request()->boolean('new'))
 <script>jQuery(function () { jQuery('#ot-test-modal').modal('show'); });</script>
 @endif
@@ -276,13 +297,14 @@
 <script>
 (function () {
     var tasks = @json($editableTestTasks);
+    var previousEdit = @json(old('form_mode') === 'edit' ? old() : null);
     var modal = document.getElementById('ot-test-edit-modal');
     var form = document.getElementById('ot-test-edit-form');
     var list = document.getElementById('ot-edit-assets');
     var addButton = document.getElementById('ot-edit-add-asset');
     var pageType = document.getElementById('ot-edit-page-type');
     var rejectionSummary = document.getElementById('ot-edit-rejection-summary');
-    var assetIndex = 0;
+
     if (!modal || !form || !list || !window.jQuery) return;
 
     function escapeHtml(value) {
@@ -311,69 +333,55 @@
         rejectionSummary.classList.add('is-visible');
     }
 
-    function addAsset(asset) {
-        asset = asset || {};
-        var index = assetIndex++;
-        var hasFile = !!asset.has_file;
-        var row = document.createElement('div');
-        row.className = 'ot-edit-asset-row';
-        row.setAttribute('data-has-file', hasFile ? '1' : '0');
-        var retained = hasFile
-            ? '<div class="ot-edit-retained-file"><i class="fa fa-check-circle"></i><span>已保留原文件：'+escapeHtml(asset.original_name || '已上传素材')+'</span><small>不选择新文件则不会重复上传</small></div>'
-            : '<div class="ot-edit-retained-file ot-edit-new-file"><i class="fa fa-info-circle"></i><span>暂无可保留文件，请上传文件或填写素材链接</span></div>';
-        var assetRejections = (asset.rejections || []).length
-            ? '<div class="ot-edit-asset-rejections"><strong>该素材驳回原因</strong>'+rejectionItems(asset.rejections)+'</div>'
-            : '';
-        row.innerHTML = '<div class="ot-edit-asset-title"><b>素材 '+(index + 1)+'</b><span class="ot-badge">'+(asset.id ? '已有素材' : '新增素材')+'</span></div>'+
-            assetRejections+
-            (asset.id ? '<input type="hidden" name="assets['+index+'][id]" value="'+Number(asset.id)+'">' : '')+
-            '<div class="form-group"><label>表达卖点 / 测试目的 *</label><input class="form-control" name="assets['+index+'][selling_point]" value="'+escapeHtml(asset.selling_point || '')+'" required></div>'+
-            '<div class="ot-source-choice"><b>素材标签 *</b><label><input type="radio" name="assets['+index+'][source_type]" value="ai_created" '+(asset.source_type === 'ai_created' ? 'checked' : '')+' required> AI制作</label><label><input type="radio" name="assets['+index+'][source_type]" value="peer_copied" '+(asset.source_type === 'peer_copied' ? 'checked' : '')+' required> 同行搬运</label></div>'+
-            '<div class="ot-grid"><div><label>'+(hasFile ? '替换素材文件（可选）' : '素材文件')+'</label><label class="ot-file-drop"><input type="file" name="assets['+index+'][file]" accept="image/*,video/*"><span class="ot-file-drop-icon"><i class="fa fa-cloud-upload"></i></span><span class="ot-file-drop-copy"><strong>'+(hasFile ? '需要替换时再选择新文件' : '点击选择或拖入素材文件')+'</strong><small>支持图片和视频文件</small><em data-file-name>尚未选择文件</em></span><span class="btn btn-default btn-sm">选择文件</span></label>'+retained+'</div><div><label>或素材链接</label><input class="form-control" type="url" name="assets['+index+'][url]" value="'+escapeHtml(asset.external_url || '')+'" placeholder="https://..."></div></div>';
-        list.appendChild(row);
+    function uploadText(key, values) {
+        var text = (window.OperationTaskAssetUploads.labels || {})[key] || '';
+        Object.keys(values || {}).forEach(function (name) { text = text.split(':' + name).join(String(values[name])); });
+        return text;
     }
+    var editUploads = window.OperationTaskAssetUploader({
+        form: form, list: list, type: pageType, edit: true,
+        hint: document.getElementById('ot-edit-asset-hint'),
+        renderHeader: function (asset, index) {
+            var rejections = (asset.rejections || []).length
+                ? '<div class="ot-edit-asset-rejections"><strong>'+escapeHtml(uploadText('asset_rejections'))+'</strong>'+rejectionItems(asset.rejections)+'</div>' : '';
+            return '<div class="ot-edit-asset-title"><b>'+escapeHtml(uploadText('asset_number', {number:index + 1}))+'</b><span class="ot-badge">'+escapeHtml(uploadText(asset.id ? 'existing_asset' : 'new_asset'))+'</span></div>'+rejections;
+        }
+    });
+    function addAsset(asset) { editUploads.addRow(asset); }
 
-    function updateHint() {
-        document.getElementById('ot-edit-asset-hint').textContent = pageType.value === 'category' ? '类目页至少保留 3 条素材。' : '单品页至少保留 2 条素材。';
+    function openEdit(task, id, previous) {
+        var values = previous || task;
+        form.action = task.action;
+        form.elements.task_id.value = id;
+        form.elements.task_version.value = values.task_version || task.version;
+        form.elements.page_type.value = values.page_type;
+        form.elements.task_type.value = values.task_type;
+        form.elements.landing_url.value = values.landing_url || '';
+        form.elements.selection_objective.value = values.selection_objective || '';
+        renderTaskRejections(task);
+        editUploads.reset();
+        var assets = task.assets || [];
+        if (previous) assets = Object.keys(previous.assets || {}).map(function (key) {
+            var saved = previous.assets[key]; saved = saved && typeof saved === 'object' ? saved : {};
+            var original = (task.assets || []).filter(function (asset) { return String(asset.id) === String(saved.id); })[0] || {};
+            return Object.assign({},original,{selling_point:saved.selling_point || '',source_type:saved.source_type || '',external_url:saved.url || '',upload_token:saved.upload_token || ''});
+        });
+        assets.forEach(addAsset);
+        window.jQuery(modal).modal('show');
     }
 
     Array.prototype.forEach.call(document.querySelectorAll('.ot-edit-test-task'), function (button) {
         button.addEventListener('click', function () {
             var task = tasks[String(button.getAttribute('data-task-id'))];
             if (!task) return;
-            form.action = task.action;
-            form.elements.page_type.value = task.page_type;
-            form.elements.task_type.value = task.task_type;
-            form.elements.landing_url.value = task.landing_url || '';
-            form.elements.selection_objective.value = task.selection_objective || '';
-            renderTaskRejections(task);
-            list.innerHTML = '';
-            assetIndex = 0;
-            (task.assets || []).forEach(addAsset);
-            updateHint();
-            window.jQuery(modal).modal('show');
+            openEdit(task,button.getAttribute('data-task-id'));
         });
     });
 
+    if (previousEdit && tasks[String(previousEdit.task_id)]) openEdit(tasks[String(previousEdit.task_id)],previousEdit.task_id,previousEdit);
     addButton.addEventListener('click', function () { addAsset({}); });
-    pageType.addEventListener('change', updateHint);
+    window.jQuery(modal).on('hide.bs.modal', function () { editUploads.pause(); });
 
-    form.addEventListener('submit', function (event) {
-        var rows = form.querySelectorAll('.ot-edit-asset-row');
-        var minimum = pageType.value === 'category' ? 3 : 2;
-        var invalid = rows.length < minimum ? list : null;
-        Array.prototype.forEach.call(rows, function (row) {
-            if (invalid) return;
-            var file = row.querySelector('input[type="file"]');
-            var url = row.querySelector('input[name$="[url]"]');
-            var hasRetainedFile = row.getAttribute('data-has-file') === '1';
-            if (!hasRetainedFile && !(file && file.files && file.files.length) && !(url && url.value.trim())) invalid = row;
-        });
-        if (!invalid) return;
-        event.preventDefault();
-        if (window.ErpAdminNotifier) window.ErpAdminNotifier.notify({type:'error',title:'请检查素材',message: rows.length < minimum ? '素材数量未达到当前落地页类型的最低要求。' : '没有原文件的素材必须上传文件或填写素材链接。'});
-        invalid.scrollIntoView({behavior:'smooth',block:'center'});
-    });
 })();
 </script>
 @endpush

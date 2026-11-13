@@ -19,27 +19,11 @@
 
     <div class="ot-card ot-dashboard-filter">
         <div class="ot-card-body">
-            <form class="ot-filters" id="ot-dashboard-form" method="get">
-                <div><label>开始日期</label><input class="form-control" type="date" name="from" value="{{ $from }}"></div>
-                <div><label>结束日期</label><input class="form-control" type="date" name="to" value="{{ $to }}"></div>
-                <div>
-                    <label>团队</label>
-                    <select class="form-control" name="department">
-                        <option value="">全部团队</option>
-                        <?php foreach ($teams as $team): ?>
-                            <option value="{{ $team->id }}" <?php echo (string) $dashboardFilters['department'] === (string) $team->id ? 'selected' : ''; ?>>{{ $team->name }}</option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div>
-                    <label>运营</label>
-                    <select class="form-control" name="owner">
-                        <option value="">全部运营</option>
-                        <?php foreach ($operators as $operator): ?>
-                            <option value="{{ $operator }}" <?php echo $dashboardFilters['owner'] === $operator ? 'selected' : ''; ?>>{{ $operator }}</option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
+            <form class="ot-filters ot-search-filter-form" id="ot-dashboard-form" method="get">
+@include('portals.operation-tasks.partials.search-filters')
+
+                <div><label>{{ __('operation_tasks.filters.from') }}</label><input class="form-control" type="date" name="from" value="{{ $from }}"></div>
+                <div><label>{{ __('operation_tasks.filters.to') }}</label><input class="form-control" type="date" name="to" value="{{ $to }}"></div>
                 <div class="ot-dashboard-actions"><label>快捷日期</label><span><button class="btn btn-default" type="button" data-range="today">今天</button><button class="btn btn-default" type="button" data-range="yesterday">昨天</button><button class="btn btn-default" type="button" data-range="week">近7天</button><button class="btn btn-default" type="button" data-range="all">全部时间</button></span></div>
                 <div class="ot-filter-submit"><button class="btn ot-primary" type="submit"><i class="fa fa-search"></i> 查询</button></div>
             </form>
@@ -55,9 +39,9 @@
         <div class="ot-stat"><span>整体 ROI</span><b>{{ $recaps->sum('total_spend_usd') > 0 ? number_format($recaps->sum('total_revenue_usd') / $recaps->sum('total_spend_usd'), 2) : '—' }}</b><small>营业额 / 广告费</small></div>
     </div>
 
-    <div class="ot-dashboard-tabs"><button type="button" class="is-active" data-dashboard-tab="recaps">每日复盘</button><button type="button" data-dashboard-tab="tests">测品任务</button></div>
+    <div class="ot-dashboard-tabs"><button type="button" class="is-active" data-dashboard-tab="tests">测品任务</button><button type="button" data-dashboard-tab="recaps">每日复盘</button></div>
 
-    <div class="ot-dashboard-pane is-active" data-dashboard-pane="recaps">
+    <div class="ot-dashboard-pane" data-dashboard-pane="recaps">
         <?php if ($teamRows->isEmpty()): ?>
             <div class="ot-card"><div class="ot-empty">当前权限范围内没有可查看的二级部门。</div></div>
         <?php else: ?>
@@ -79,7 +63,7 @@
         <?php endif; ?>
     </div>
 
-    <div class="ot-dashboard-pane" data-dashboard-pane="tests">
+    <div class="ot-dashboard-pane is-active" data-dashboard-pane="tests">
         <?php if ($teamRows->isEmpty()): ?>
             <div class="ot-card"><div class="ot-empty">当前权限范围内没有可查看的二级部门。</div></div>
         <?php else: ?>
