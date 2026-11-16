@@ -117,7 +117,7 @@ class PortalDomainService
 
     public function mainLoginUrl(): string
     {
-        return $this->mainAdminUrl('auth/login');
+        return app(\App\Services\DingTalk\LoginEntryService::class)->url(request());
     }
 
     public function currentPortalPath(Request $request): string

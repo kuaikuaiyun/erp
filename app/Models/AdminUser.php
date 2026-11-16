@@ -23,6 +23,11 @@ class AdminUser extends Administrator
         return parent::roles()->withPivot(['position', 'position_slot', 'is_primary'])->withTimestamps();
     }
 
+    public function dingTalkBindings(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(DingTalkBinding::class, 'account_id');
+    }
+
     public function departments(): BelongsToMany
     {
         return $this->roles()->where('slug', '!=', Department::SYSTEM_SLUG);

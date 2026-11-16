@@ -3,20 +3,16 @@
 namespace App\Admin\Controllers;
 
 use App\Admin\Form\Field\ProfileAvatar;
-use App\Http\Middleware\EnforceAdminLoginExpiration;
-use App\Models\AdminUser;
 use App\Portal\Services\PortalReturnUrlService;
 use App\Services\LoginCaptchaService;
+use App\Services\DingTalk\LoginService;
 use App\Services\SystemSettingService;
 use Encore\Admin\Controllers\AuthController as BaseAuthController;
 use Encore\Admin\Form;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\RateLimiter;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Str;
-use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class AuthController extends BaseAuthController
 {
@@ -40,27 +36,49 @@ class AuthController extends BaseAuthController
         return $form;
     }
 
-    public function getLogin()
+    public function getLogin(?string $slug = null)
     {
         if ($this->guard()->check()) {
             if ($portalReturnUrl = app(PortalReturnUrlService::class)->pull(request())) return redirect()->to($portalReturnUrl);
             return redirect($this->redirectPath());
         }
-        return view($this->loginView, ['captcha' => $this->captcha->publicConfiguration()]);
+        $entries = app(\App\Services\DingTalk\LoginEntryService::class);
+        $data = $entries->viewData(request(), null, false);
+        // The public endpoint never uses session hints to enumerate or select companies.
+        $data = array_merge($data, ['brandName' => config('admin.name'), 'brandLogo' => null,
+            'pageTitle' => __('dingtalk.login.title').' · '.config('admin.name'), 'welcome' => __('dingtalk.entry.public_hint'),
+            'entryUrl' => null, 'flow' => null, 'loginError' => null, 'entryClosed' => true]);
+        try {
+            if (app(\App\Services\Authentication\ModeService::class)->current()->mode === 'password') {
+                if ($slug !== null) return redirect()->to($entries->url(request()));
+                return response()->view('admin.auth.password', ['captcha' => $this->captcha->publicConfiguration()])->header('Cache-Control', 'no-store');
+            }
+            if ($slug !== null) {
+                $company = app(\App\Services\DingTalk\CompanyService::class)->forLoginSlug($slug);
+                $entries->remember(request(), $company);
+                $data = array_merge($data, $entries->viewData(request(), $company), ['entryClosed' => false]);
+                $data['flow'] = app(LoginService::class)->start(request(), (int) $company->id);
+            }
+            return response()->view($this->loginView, $data)->header('Cache-Control', 'no-store')->header('Referrer-Policy', 'no-referrer');
+        } catch (HttpException $exception) {
+            $data['loginError'] = $exception->getMessage();
+            return response()->view($this->loginView, $data, $exception->getStatusCode())
+                ->header('Cache-Control', 'no-store')->header('Referrer-Policy', 'no-referrer');
+        }
+    }
+
+    public function getLogout(Request $request)
+    {
+        $url = app(\App\Services\DingTalk\LoginEntryService::class)->url($request);
+        $this->guard()->logout();
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+        return redirect()->to($url);
     }
 
     public function postLogin(Request $request)
     {
-        $this->ensureIsNotRateLimited($request); $this->loginValidator($request->all())->validate();
-        if (!$this->captcha->verify($request)) { $this->hitRateLimiter($request); throw ValidationException::withMessages(['captcha' => __('configuration.login.captcha_failed')]); }
-        $guard = $this->guard();
-        if (method_exists($guard, 'setRememberDuration')) $guard->setRememberDuration($this->settings->loginExpirationMinutes());
-        if ($guard->attempt($request->only([$this->username(), 'password']), $request->boolean('remember'))) {
-            $user = $guard->user();
-            if ($user && isset($user->status) && (int) $user->status !== AdminUser::STATUS_ACTIVE) { $guard->logout(); $this->hitRateLimiter($request); return back()->withInput()->withErrors([$this->username() => trans('admin.login_banned')]); }
-            $request->session()->put(EnforceAdminLoginExpiration::LOGIN_ISSUED_AT_KEY, now()->timestamp); RateLimiter::clear($this->throttleKey($request)); return $this->sendLoginResponse($request);
-        }
-        $this->hitRateLimiter($request); return back()->withInput()->withErrors([$this->username() => $this->getFailedLoginMessage()]);
+        return redirect()->to(app(\App\Services\Authentication\PasswordLoginService::class)->login($request));
     }
 
     public function tencentCaptchaOptions(): JsonResponse
@@ -69,14 +87,4 @@ class AuthController extends BaseAuthController
         return response()->json($options)->header('Cache-Control', 'no-store, private, max-age=0')->header('Pragma', 'no-cache');
     }
 
-    protected function sendLoginResponse(Request $request)
-    {
-        admin_toastr(trans('admin.login_successful')); $request->session()->regenerate();
-        if ($portalReturnUrl = app(PortalReturnUrlService::class)->pull($request)) return redirect()->to($portalReturnUrl);
-        return redirect()->intended($this->redirectPath());
-    }
-    protected function loginValidator(array $data) { return Validator::make($data, [$this->username() => ['required','string','max:190'], 'password' => ['required','string','max:255']], [$this->username().'.required' => __('configuration.login.username_required'), 'password.required' => __('configuration.login.password_required')]); }
-    private function ensureIsNotRateLimited(Request $request): void { $key=$this->throttleKey($request); if (RateLimiter::tooManyAttempts($key,$this->captcha->maxAttempts())) throw ValidationException::withMessages([$this->username()=>__('configuration.login.rate_limited',['seconds'=>RateLimiter::availableIn($key)])]); }
-    private function hitRateLimiter(Request $request): void { RateLimiter::hit($this->throttleKey($request), $this->captcha->decaySeconds()); }
-    private function throttleKey(Request $request): string { return 'admin-login:'.sha1(Str::lower((string)$request->input($this->username())).'|'.$request->ip()); }
 }

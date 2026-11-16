@@ -36,7 +36,8 @@ class AccountController extends Controller
         return $content
             ->title(__('organization.accounts.title'))
             ->description(__('organization.accounts.description'))
-            ->body($this->grid());
+            ->body($this->grid())
+            ->body($this->dingtalkModals());
     }
 
     public function create(Content $content): Content
@@ -165,7 +166,7 @@ class AccountController extends Controller
 
         $grid->setName('organization-accounts');
         $grid->setActionClass(OrganizationActions::class);
-        $grid->model()->with('departments')->orderBy('id');
+        $grid->model()->with(['departments','dingTalkBindings.identity'])->orderBy('id');
         if (!$actor->isAdministrator()) {
             $managedDepartmentIds = $this->authorization->managedDepartmentIds($actor);
             $departmentsTable = (new Department())->getTable();
@@ -257,11 +258,8 @@ class AccountController extends Controller
                 return '<span class="text-muted">'.e(__('organization.accounts.no_membership')).'</span>';
             }
 
-            return $memberships->map(function (Department $department): string {
-                $position = __('organization.positions.'.$department->pivot->position);
-
-                return '<span class="label label-default">'.e($department->name).' · '.e($position).'</span>';
-            })->implode(' ');
+            $labels=$memberships->map(fn (Department $department)=>$department->name.' · '.__('organization.positions.'.$department->pivot->position))->all();
+            return AccountController::accountLabels($labels,__('organization.accounts.department_summary'));
         });
         $grid->column('status', __('organization.common.status'))->display(function ($status): string {
             $enabled = (int) $status === 1;
@@ -279,12 +277,24 @@ class AccountController extends Controller
         });
 
         $isSystemAdministrator = $actor->isAdministrator();
-        $grid->actions(function (OrganizationActions $actions) use ($isSystemAdministrator): void {
+        $bindingAccess = app(\App\Services\DingTalk\BindingAccessService::class);
+        $canManageBindings = $bindingAccess->canAccess($actor);
+        $bindingAccountIds = $canManageBindings && !$bindingAccess->isOwner($actor) ? $bindingAccess->accounts()->pluck('id')->all() : null;
+        $companyNames=\App\Models\DingTalkCompany::withTrashed()->pluck('name','corp_id');
+        $grid->column('dingtalk_binding',__('dingtalk.labels.binding'))->display(function () use ($companyNames) {
+            $labels=$this->dingTalkBindings->filter(fn ($b)=>$b->active && $b->identity && $b->identity->active)
+                ->map(fn ($b)=>($companyNames->get($b->identity->corp_id) ?? $b->identity->corp_id).' * '.$b->identity->name)->values()->all();
+            return '<span data-binding-labels="'.(int)$this->id.'">'.AccountController::accountLabels($labels,__('dingtalk.labels.binding')).'</span>';
+        });
+        $grid->actions(function (OrganizationActions $actions) use ($isSystemAdministrator, $canManageBindings, $bindingAccountIds): void {
             $actions->disableView();
             $actions->disableEdit();
             $actions->disableDelete();
             $account = $actions->row;
             $actions->append($actions->editButton());
+            if ($canManageBindings && ($bindingAccountIds === null || in_array((int)$account->id, $bindingAccountIds, true))) {
+                $actions->append('<button type="button" class="btn btn-xs btn-default organization-grid-action" data-ding-account="'.(int)$account->id.'">'.e(__('dingtalk.mode.binding')).'</button>');
+            }
 
             if (!$account->isAdministrator()) {
                 if ($isSystemAdministrator) {
@@ -295,13 +305,30 @@ class AccountController extends Controller
             }
         });
 
-        $grid->tools(function (Tools $tools): void {
+        $grid->tools(function (Tools $tools) use ($bindingAccess): void {
+            if ($bindingAccess->isOwner()) $tools->append('<button type="button" class="btn btn-sm btn-default" data-ding-grants>'.e(__('dingtalk.company.assign')).'</button>');
             $tools->batch(function (Tools\BatchActions $actions): void {
                 $actions->disableDelete();
             });
         });
 
         return $grid;
+    }
+
+    public static function accountLabels(array $labels,string $title): string
+    {
+        if (!$labels) return '<span class="text-muted">'.e(__('dingtalk.labels.none')).'</span>';
+        $html='<span class="erp-account-tags" data-account-tags="'.e(json_encode($labels,JSON_UNESCAPED_UNICODE)).'" data-tag-title="'.e($title).'">';
+        foreach (array_slice($labels,0,2) as $label) $html.='<button type="button" class="erp-account-tag" title="'.e($label).'">'.e($label).'</button>';
+        if (count($labels)>2) $html.='<button type="button" class="erp-account-more">＋'.(count($labels)-2).'</button>';
+        return $html.'</span>';
+    }
+    private function dingtalkModals(): string
+    {
+        $owner=app(\App\Services\DingTalk\BindingAccessService::class)->isOwner();
+        $options=['base'=>admin_url('organization/accounts'),'owner'=>$owner,'csrf'=>csrf_token()];
+        $messages=array_merge(__('dingtalk.manage'),__('dingtalk.workspace'),__('dingtalk.company'),__('dingtalk.labels'));
+        return view('admin.organization.dingtalk-modals',compact('owner','options','messages'))->render();
     }
 
     private function form(?AdminUser $account = null): Form

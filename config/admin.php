@@ -143,6 +143,7 @@ return [
         // The URIs that should be excluded from authorization.
         'excepts' => [
             'auth/login',
+            'auth/login/*',
             'auth/logout',
             'auth/tencent-captcha/options',
         ],
@@ -231,6 +232,7 @@ return [
          */
         'except' => [
             env('ADMIN_ROUTE_PREFIX', 'admin') . '/auth/logs*',
+            'post:' . env('ADMIN_ROUTE_PREFIX', 'kky') . '/configuration/dingtalk/companies',
         ],
     ],
 

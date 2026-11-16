@@ -42,10 +42,11 @@ class EnforceAdminLoginExpiration
             $guard->logout();
         }
 
+        $loginUrl = app(\App\Services\DingTalk\LoginEntryService::class)->url($request);
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
-        return redirect(admin_url('auth/login'))->withErrors([
+        return redirect($loginUrl)->withErrors([
             'login_expired' => __('configuration.basic.login.expired'),
         ]);
     }

@@ -21,6 +21,9 @@ if ($financeScheduleOnly) {
 
 require __DIR__.'/assistant_shopify_analytics_schedule.php';
 
+Schedule::command('dingtalk:reconcile')->everyMinute()->withoutOverlapping(10);
+Schedule::command('dingtalk:directory-sync')->everyMinute()->withoutOverlapping(10);
+
 Schedule::command('operation-tasks:uploads:purge --limit=200')
     ->hourly()
     ->withoutOverlapping(10)

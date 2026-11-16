@@ -1,0 +1,16 @@
+:root{color-scheme:dark;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;background:#171919;color:#f4f5f6}
+*{box-sizing:border-box}body{margin:0}a{color:#89b6ff;text-decoration:none}a:hover{text-decoration:underline}a:focus-visible,button:focus-visible{outline:3px solid #a8cbff;outline-offset:4px}
+.ding-login-page{min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:32px 16px;background:radial-gradient(ellipse at 50% 35%,#242929 0,#171919 70%)}
+.ding-login-card{width:100%;max-width:510px;text-align:center;padding:30px 32px;border:1px solid #2e3232;border-radius:25px;background:#181b1b;box-shadow:0 16px 60px #0003}
+.ding-brand{display:flex;align-items:center;justify-content:center;width:50px;height:50px;margin:5px auto 12px;border-radius:13px;background:#087cff;color:#fff}.ding-brand svg{width:36px;height:36px}
+.ding-company{font-size:13px;color:#a8b1b5;margin:0 0 22px}h1{font-size:21px;line-height:1.5;margin:0 0 8px}.ding-description{font-size:14px;line-height:1.8;color:#b3bbbf;margin:0 0 20px}
+.ding-frame-shell{max-width:360px;overflow:hidden;background:#fff;border-radius:14px;margin:22px auto 18px}.ding-frame-shell iframe{display:block;width:100%;max-width:360px;border:0;background:#fff}
+.ding-message{padding:12px 14px;border:1px solid #8b5344;border-radius:8px;background:#442f2a;color:#ffccb8;font-size:14px;line-height:1.7}.ding-message[hidden]{display:none}
+.ding-primary-link{display:inline-block;padding:10px 18px;border:1px solid #385a84;border-radius:8px;font-size:14px}footer{margin-top:25px;font-size:13px}footer a{color:#b3bbbf}
+.ding-account-list{display:grid;gap:14px;margin-top:24px}.ding-account{display:grid;grid-template-columns:1fr auto;gap:7px 12px;align-items:center;text-align:left;background:#242929;border:1px solid #3b4242;border-radius:12px;padding:16px}.ding-account strong{font-size:17px;overflow-wrap:anywhere}.ding-account span{font-size:13px;color:#b3bbbf;grid-column:1;overflow-wrap:anywhere}.ding-account small{font-size:12px;grid-column:1;color:#b3bbbf}.ding-account small.ding-admin{color:#ffd28a}.ding-account button{grid-column:2;grid-row:1/4;border:0;border-radius:7px;padding:12px;background:#087cff;color:#fff;font:inherit;font-size:13px;cursor:pointer}
+@media(max-width:480px){.ding-login-page{padding:16px 8px}.ding-login-card{padding:24px 12px;border-radius:18px}h1{font-size:19px}.ding-account{grid-template-columns:1fr}.ding-account button{grid-column:1;grid-row:auto;margin-top:5px}}
+
+.ding-mode{font-size:12px;color:#b3bbbf}
+
+
+.ding-company-logo{display:block;max-width:180px;max-height:88px;object-fit:contain;margin:5px auto 16px}.ding-system-brand{font-size:20px;margin:5px auto 16px;overflow-wrap:anywhere}.ding-system-brand img{max-width:180px;max-height:88px;object-fit:contain}.ding-company,.ding-description,h1{overflow-wrap:anywhere}.ding-description{white-space:pre-line}

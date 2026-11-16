@@ -1,0 +1,82 @@
+.erp-account-tags {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-width: 270px;
+    vertical-align: middle;
+}
+.erp-account-tag,
+.erp-account-more {
+    border: 0;
+    border-radius: 4px;
+    padding: 3px 7px;
+    line-height: 1.5;
+    font-size: 11px;
+    background: #edf2f7;
+    color: #4d6578;
+    max-width: 155px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+}
+.erp-account-tag:hover,
+.erp-account-more:hover {
+    background: #dceef9;
+    color: #256b96;
+}
+.erp-account-more {
+    background: #e4f3fd;
+    color: #277ba8;
+    flex-shrink: 0;
+}
+.erp-account-label-dialog {
+    border: 1px solid #dbe5ed;
+    border-radius: 10px;
+    padding: 0;
+    width: 520px;
+    max-width: calc(100vw - 24px);
+    max-height: 80vh;
+    overflow: auto;
+    box-shadow: 0 20px 80px #16395140;
+}
+.erp-account-label-dialog::backdrop {
+    background: #18314466;
+}
+.erp-account-label-dialog header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 17px 20px;
+    border-bottom: 1px solid #e4edf4;
+    background: #f8fbfd;
+}
+.erp-account-label-dialog h4 {
+    margin: 0;
+    font-size: 17px;
+    color: #31546c;
+}
+.erp-account-label-dialog header button {
+    border: 0;
+    background: none;
+    font-size: 23px;
+    color: #7e92a0;
+}
+.erp-account-label-dialog ul {
+    margin: 0;
+    padding: 16px 38px;
+    color: #435d70;
+}
+.erp-account-label-dialog li {
+    padding: 9px 0;
+    line-height: 1.7;
+    overflow-wrap: anywhere;
+}
+.table td:has(.erp-account-tags) {
+    max-width: 285px;
+    white-space: normal !important;
+}
+
+[data-ding-grants] {
+    margin-right: 6px;
+}

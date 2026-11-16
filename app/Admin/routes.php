@@ -21,6 +21,18 @@ Route::group([
     'middleware' => config('admin.route.middleware'),
     'as' => config('admin.route.prefix').'.',
 ], function (Router $router): void {
+    $router->get('organization/accounts/{account}/dingtalk', [\App\Admin\Controllers\DingTalkBindingController::class,'options'])->whereNumber('account')->middleware(['admin.permission:check,organization.accounts',\App\Http\Middleware\RequireDingTalkBindingAccess::class]);
+    $router->post('organization/accounts/dingtalk/bindings', [\App\Admin\Controllers\DingTalkBindingController::class,'store'])->middleware(['admin.permission:check,organization.accounts',\App\Http\Middleware\RequireDingTalkBindingAccess::class,'throttle:10,1']);
+    $router->delete('organization/accounts/dingtalk/bindings/{binding}', [\App\Admin\Controllers\DingTalkBindingController::class,'destroy'])->whereNumber('binding')->middleware(['admin.permission:check,organization.accounts',\App\Http\Middleware\RequireDingTalkBindingAccess::class]);
+    $router->get('organization/accounts/dingtalk/directory', [\App\Admin\Controllers\DingTalkBindingController::class,'directory'])->middleware(['admin.permission:check,organization.accounts',\App\Http\Middleware\RequireDingTalkBindingAccess::class,'throttle:60,1']);
+    $router->get('organization/accounts/dingtalk/audits', [\App\Admin\Controllers\DingTalkBindingController::class,'audits'])->middleware(['admin.permission:check,organization.accounts',\App\Http\Middleware\RequireDingTalkBindingAccess::class]);
+    $router->get('organization/accounts/dingtalk/company-grants', [\App\Admin\Controllers\DingTalkCompanyGrantController::class,'index'])->middleware(\App\Http\Middleware\RequireDingTalkBindingOwner::class);
+    $router->post('organization/accounts/dingtalk/company-grants', [\App\Admin\Controllers\DingTalkCompanyGrantController::class,'store'])->middleware([\App\Http\Middleware\RequireDingTalkBindingOwner::class,'throttle:10,1']);
+    $router->get('configuration/dingtalk', [\App\Admin\Controllers\ConfigurationCenter\DingTalkCompanyController::class,'index'])->middleware('admin.permission:check,configuration.dingtalk');
+    $router->post('configuration/dingtalk/companies', [\App\Admin\Controllers\ConfigurationCenter\DingTalkCompanyController::class,'save'])->middleware('admin.permission:check,configuration.dingtalk');
+    $router->delete('configuration/dingtalk/companies/{company}', [\App\Admin\Controllers\ConfigurationCenter\DingTalkCompanyController::class,'destroy'])->whereNumber('company')->middleware('admin.permission:check,configuration.dingtalk');
+    $router->post('configuration/dingtalk/companies/{company}/sync', [\App\Admin\Controllers\ConfigurationCenter\DingTalkCompanyController::class,'sync'])->whereNumber('company')->middleware(['admin.permission:check,configuration.dingtalk','throttle:60,1']);
+    $router->get('configuration/dingtalk/companies/{company}/directory', [\App\Admin\Controllers\ConfigurationCenter\DingTalkCompanyController::class,'directory'])->whereNumber('company')->middleware(['admin.permission:check,configuration.dingtalk','throttle:60,1']);
     $router->resource('organization/accounts', AccountController::class)->except(['show'])->middleware('admin.permission:check,organization.accounts')->names('organization.accounts');
     $router->get('organization/accounts/{account}/permissions', [AccountPermissionController::class, 'edit'])->whereNumber('account')->middleware(['admin.permission:check,organization.accounts', RequireSystemAdministrator::class])->name('organization.accounts.permissions.edit');
     $router->put('organization/accounts/{account}/permissions', [AccountPermissionController::class, 'update'])->whereNumber('account')->middleware(['admin.permission:check,organization.accounts', RequireSystemAdministrator::class])->name('organization.accounts.permissions.update');
@@ -47,8 +59,9 @@ Route::group([
     $router->get('_handle_renderable_', [HandleController::class, 'handleRenderable'])->name('handle-renderable');
 
     $authController = config('admin.auth.controller', AuthController::class);
-    $router->get('auth/login', [$authController, 'getLogin'])->name('login');
-    $router->post('auth/login', [$authController, 'postLogin']);
+    $router->get('auth/login', [$authController, 'getLogin'])->middleware('throttle:'.config('dingtalk.login_rate').',1')->name('login');
+    $router->get('auth/login/{slug}', [$authController, 'getLogin'])->where('slug', '[a-z0-9]+(?:-[a-z0-9]+)*')->middleware('throttle:'.config('dingtalk.login_rate').',1')->name('login.company');
+    $router->post('auth/login', [$authController, 'postLogin'])->middleware('throttle:10,1');
     $router->get('auth/logout', [$authController, 'getLogout'])->name('logout');
     $router->get('auth/setting', [$authController, 'getSetting'])->name('setting');
     $router->put('auth/setting', [$authController, 'putSetting']);
