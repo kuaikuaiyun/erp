@@ -52,14 +52,15 @@ class FinancePayPalSyncService
         });
     }
 
-    public function refreshOrders(FinancePaymentAccount $account, int $actor): array
+    public function refreshOrders(FinancePaymentAccount $account, int $actor, bool $backfill = false): array
     {
         $db = $this->workbooks->database();
         $to = CarbonImmutable::now('UTC')->startOfSecond();
         $last = $db->table('finance_sync_logs')->where('payment_account_id', $account->id)
             ->where('operation', 'transaction_search')->where('status', 'success')->max('range_to');
         $initialMonths = max(1, min(12, (int) config('finance.relay.initial_months', 6)));
-        $lookbackHours = max(1, min(168, (int) config('finance.relay.incremental_hours', 5)));
+        // PayPal can add dispute events to a previously successful search window.
+        $lookbackHours = max(1, min(168, (int) config('finance.relay.incremental_hours', 72)));
         $from = $last ? CarbonImmutable::parse($last, 'UTC')->min($to->subHours($lookbackHours))
             : $to->subMonthsNoOverflow($initialMonths);
         // A later manual sync must not hide an earlier failed or interrupted window.
@@ -97,7 +98,7 @@ class FinancePayPalSyncService
             }
             if ($cursor->lessThanOrEqualTo($until)) $from = $from->min($cursor);
         }
-        $from = $from->min($to);
+        $from = $backfill ? $to->subMonthsNoOverflow(6) : $from->min($to);
         $count = 0;
         $lockedGaps = [];
         // Closed accounting months retain their saved transactions.
@@ -112,7 +113,7 @@ class FinancePayPalSyncService
                     $lockedCursor = $coveredTo->addSecond();
                     if ($lockedCursor->greaterThan($end)) break;
                 }
-                if ($lockedCursor->lessThanOrEqualTo($end)) $lockedGaps[] = $month;
+                if ($backfill || $lockedCursor->lessThanOrEqualTo($end)) $lockedGaps[] = $month;
                 continue;
             }
             $result = $this->transactions($account, $start, $end, $actor);

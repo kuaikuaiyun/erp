@@ -9,7 +9,8 @@ $balanceRefresh = Schedule::command('finance:paypal-balances:refresh')->hourly()
     ->onOneServer()->sendOutputTo(storage_path('logs/finance-paypal-balances-schedule.log'));
 
 $orderWorker = Schedule::command('queue:work finance_orders --queue=finance-orders --stop-when-empty --tries=1 --timeout=900')
-    ->everyMinute()->withoutOverlapping(20);
+    ->everyMinute()->withoutOverlapping(20)
+    ->appendOutputTo(storage_path('logs/finance-order-worker.log'));
 
 $summaryRefresh = Schedule::command('finance:summaries:refresh')->everyMinute()->withoutOverlapping(60)
     ->sendOutputTo(storage_path('logs/finance-summaries-schedule.log'));

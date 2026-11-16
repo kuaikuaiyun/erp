@@ -49,7 +49,7 @@
 @if($report === 'summary')@include('portals.finance.partials.summary-tabs', ['activeTab' => 'settlement'])@endif
 @foreach($reportStatuses as $period => $status)
     @if($status['state'] !== 'ready' || isset($status['updated_at']))
-        @include('portals.finance.partials.report-snapshot-status', ['period' => $period, 'status' => $status])
+        @include('portals.finance.partials.report-snapshot-status', ['period' => $period, 'status' => $status, 'watchSnapshot' => $report === 'summary'])
     @endif
 @endforeach
 <div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}">@if($report === 'summary')<input type="hidden" name="view" value="settlement">@endif

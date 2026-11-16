@@ -279,6 +279,13 @@
     <form method="post" action="{{ route('finance.orders.paypal.refresh') }}" data-loading="off">
         @csrf
         <h3 style="font-size:18px;margin:0 0 18px">刷新 PayPal 订单</h3>
+        <div class="form-group">
+            <label for="finance-order-refresh-mode">同步方式</label>
+            <select id="finance-order-refresh-mode" name="backfill" class="form-control">
+                <option value="0">常规刷新</option>
+                <option value="1">补录近半年</option>
+            </select>
+        </div>
         <fieldset data-order-refresh-accounts style="border:0;padding:0;margin:0">
             <legend style="font-size:14px;border:0;margin:0 0 8px">选择更新账户（可多选）</legend>
             <label style="display:block"><input type="checkbox" data-order-refresh-all checked> 全选账户</label>
@@ -295,5 +302,5 @@
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px"><button type="button" class="btn btn-default" data-order-refresh-close>关闭</button><button type="submit" class="btn btn-primary">加入更新队列</button></div>
     </form>
 </dialog>
-<script src="{{ asset('assets/erp/finance-order-refresh.js') }}?v=5"></script>
+<script src="{{ asset('assets/erp/finance-order-refresh.js') }}?v=6"></script>
 @endif

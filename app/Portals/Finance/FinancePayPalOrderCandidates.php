@@ -12,7 +12,7 @@ class FinancePayPalOrderCandidates
 
     public function __construct(private readonly FinanceWorkbookService $workbooks) {}
 
-    /** @return array<int, string> */
+    /** @return array<int, object> */
     public function suggestions(Collection $records, array $matched): array
     {
         $payments = $records->filter(fn ($record) => ! isset($matched[$record->id]) && $record->currency === 'USD'
@@ -49,7 +49,8 @@ class FinancePayPalOrderCandidates
                 ->whereColumn('logistics_order_id', 'logistics_orders.id')
                 ->where('reference_type', LogisticsOrderPaymentReference::TYPE_PRIMARY));
         }
-        $orders = $orders->get($orderFields);
+        $optionalFields = ['assistant_domain_store_id', 'source_shop_domain', 'shopify_order_number'];
+        $orders = $orders->get([...$orderFields, ...array_intersect($optionalFields, $schema->getColumnListing('logistics_orders'))]);
         $items = $db->table('logistics_order_items')->whereIntegerInRaw('logistics_order_id', $orders->pluck('id')->all())
             ->get($itemFields)->groupBy('logistics_order_id');
         $ordersByEmail = $orders->groupBy(fn ($order) => strtolower(trim($order->buyer_email)));
@@ -74,7 +75,7 @@ class FinancePayPalOrderCandidates
                         && $this->sameItems($cart, $items->get($order->id, collect()));
                 });
             if ($candidates->count() === 1) {
-                $suggestions[$payment->id] = $candidates->first()->tongtu_order_number;
+                $suggestions[$payment->id] = $candidates->first();
             }
         }
 

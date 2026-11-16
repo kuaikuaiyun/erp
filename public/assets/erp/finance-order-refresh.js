@@ -6,6 +6,7 @@
     var form = dialog.querySelector('form');
     var submit = form.querySelector('[type="submit"]');
     var account = form.querySelector('[data-order-refresh-accounts]');
+    var mode = form.elements.backfill;
     var checks = Array.from(account.querySelectorAll('[name="accounts[]"]'));
     var all = account.querySelector('[data-order-refresh-all]');
     function selection() {
@@ -15,13 +16,17 @@
     }
     all.addEventListener('change', function () { checks.forEach(function (c) { c.checked = all.checked; }); selection(); });
     checks.forEach(function (c) { c.addEventListener('change', selection); });
+    mode.addEventListener('change', function () {
+        if (mode.value === '1') checks.forEach(function (c) { c.checked = false; });
+        selection();
+    });
     var message = dialog.querySelector('[data-order-refresh-message]');
     var results = dialog.querySelector('[data-order-refresh-results]');
     var busy = false, submitting = false, polling = false, restoring = false, timer = null, batch = null;
     var failedSubmissions = [];
     var labels = {queued:'排队中', running:'同步中', success:'成功', failed:'失败', skipped:'已跳过'};
     function controls() {
-        submit.disabled = submitting || restoring; account.disabled = submitting;
+        submit.disabled = submitting || restoring; account.disabled = submitting; mode.disabled = submitting;
         open.innerHTML = '<i class="fa fa-refresh" aria-hidden="true"></i> '+(busy ? '订单更新中（查看进度）' : '刷新订单');
     }
     function render(rows) {

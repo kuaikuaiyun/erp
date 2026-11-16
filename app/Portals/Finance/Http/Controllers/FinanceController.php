@@ -177,6 +177,7 @@ class FinanceController extends Controller
         $data = $request->validate([
             'account' => ['nullable', 'string', 'regex:/^(all|[1-9][0-9]*)$/'],
             'accounts' => 'nullable|array|min:1|max:100', 'accounts.*' => 'required|integer|min:1|distinct',
+            'backfill' => 'sometimes|boolean',
         ]);
         $ids = $data['accounts'] ?? (isset($data['account']) && $data['account'] !== 'all' ? [(int) $data['account']] : []);
         $all = ($data['account'] ?? '') === 'all';
@@ -192,7 +193,9 @@ class FinanceController extends Controller
         $failed = [];
         foreach ($accounts as $account) {
             try {
-                $taskIds[] = app(\App\Portals\Finance\FinanceOrderRefreshProgress::class)->enqueue($account, (int) $context['user']->getKey());
+                $taskIds[] = app(\App\Portals\Finance\FinanceOrderRefreshProgress::class)->enqueue(
+                    $account, (int) $context['user']->getKey(), (bool) ($data['backfill'] ?? false)
+                );
                 $queued[] = FinanceCatalog::simplified($account->account_name);
             } catch (\Throwable $e) {
                 report($e);
@@ -1615,9 +1618,14 @@ class FinanceController extends Controller
         $scope = \Illuminate\Support\Arr::except($filters, ['page', 'per_page', 'download']);
         ksort($scope);
         $snapshots = app(\App\Portals\Finance\FinanceReportSnapshots::class);
-        [[$items, $subscriptionOptions], $reportSnapshot, $reportStatus] = $snapshots->result('transactions', $filters['month'], [...$scope, 'channel' => $tab],
+        $statusOnly = $request->boolean('snapshot_status') && ! $request->boolean('download');
+        [$result, $reportSnapshot, $reportStatus] = $snapshots->result('transactions', $filters['month'], [...$scope, 'channel' => $tab],
             fn () => $this->buildTransactionReport($tab, $scope, $month, $account),
-            $request->boolean('download') ? $request->query('report_snapshot') : null);
+            $request->boolean('download') ? $request->query('report_snapshot') : null, statusOnly: $statusOnly);
+        if ($statusOnly) {
+            return response()->json($reportStatus)->header('Cache-Control', 'no-store');
+        }
+        [$items, $subscriptionOptions] = $result;
         if ($request->boolean('download')) {
             abort_if($snapshots->runsInBackground() && $reportSnapshot === null, 409, '报表正在生成，请稍后重新查询。');
             $export = \App\Portals\Finance\FinanceExportSelection::filter($request, $items)->map(fn ($row) => array_map(fn ($field) => $row[$field] ?? null, array_keys($columns)));
@@ -2778,6 +2786,12 @@ class FinanceController extends Controller
         $scope = \Illuminate\Support\Arr::except($data, ['month', 'month_from', 'month_to']);
         ksort($scope);
         $snapshots = app(\App\Portals\Finance\FinanceReportSnapshots::class);
+        if ($report === 'summary' && $request->boolean('snapshot_status') && ! $request->boolean('download')) {
+            [, , $status] = $snapshots->result($report, $month, [...$scope, '_include_options' => true],
+                fn () => $this->buildSettlementOverviewMonth($month, $report, $scope, true, reuse: false), statusOnly: true);
+
+            return response()->json($status)->header('Cache-Control', 'no-store');
+        }
         $reportSnapshots = [];
         $reportStatuses = [];
         $versions = $request->boolean('download')

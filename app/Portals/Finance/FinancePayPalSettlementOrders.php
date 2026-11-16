@@ -217,25 +217,25 @@ class FinancePayPalSettlementOrders
     public function rows(array $filters, ?int $recordId = null): Collection
     {
         if ($recordId === null) {
-            return collect($this->exportRows($filters));
+            return collect($this->exportRows($filters, matchCandidateDomains: false));
         }
         $graph = $this->orderGraph($recordId);
         return $graph === null ? collect() : collect($this->matchingRows($filters, $graph[0], $graph, true));
     }
 
-    public function exportRows(array $filters): iterable
+    public function exportRows(array $filters, bool $matchCandidateDomains = true): iterable
     {
         $graph = $this->orderGraph(null);
         if ($graph === null) {
             return;
         }
         $fields = $this->settlements->exportColumns('paypal') + ['gross' => '原币总额'];
-        foreach ($this->matchingRows($filters, $graph[0], $graph, false) as $row) {
+        foreach ($this->matchingRows($filters, $graph[0], $graph, false, $matchCandidateDomains) as $row) {
             yield array_intersect_key($row, $fields);
         }
     }
 
-    private function matchingRows(array $filters, array $orders, array $graph, bool $includeDetails): iterable
+    private function matchingRows(array $filters, array $orders, array $graph, bool $includeDetails, bool $matchCandidateDomains = false): iterable
     {
         [, $roots, $children, $conversions, $crossAccount, $ambiguous, $crossRates] = $graph;
         $lockedMonths = $this->workbooks->database()->table('finance_period_locks')
@@ -247,7 +247,9 @@ class FinancePayPalSettlementOrders
             $ids = array_column(array_filter($batch, fn ($row) => ! isset($row['event'])), 'id');
             $records = $this->settlements->query('paypal', [])->whereIntegerInRaw('id', $ids)
                 ->orderByDesc('occurred_at')->orderByDesc('id')->get();
-            $payments = $this->settlements->rows('paypal', ['timezone' => $filters['timezone'], 'order_view' => true], $records)->keyBy('id');
+            $payments = $this->settlements->rows('paypal', [
+                'timezone' => $filters['timezone'], 'order_view' => true, 'match_candidate_domains' => $matchCandidateDomains,
+            ], $records)->keyBy('id');
             foreach ($batch as $order) {
                 if (isset($order['event'])) {
                     $row = $this->unlinkedRow($order['event'], $filters['timezone'], $includeDetails, $lockedMonths);
@@ -799,7 +801,9 @@ class FinancePayPalSettlementOrders
         if ($duplicate) {
             $review['duplicate'] = '跨账户存在相同交易号，待核对是否重复入账';
         }
-        if ($payment['business_order_id'] === null) {
+        if ($payment['candidate_domain_matched']) {
+            $review['order'] = '已按域名匹配候选通途订单 '.$payment['candidate_order'];
+        } elseif ($payment['business_order_id'] === null) {
             $review['order'] = $payment['candidate_order'] === null
                 ? '未匹配物流订单' : '未匹配物流订单，候选通途订单 '.$payment['candidate_order'].'，待人工确认';
         }

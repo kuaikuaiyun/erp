@@ -397,6 +397,10 @@ class AssistantDomainStore extends Model
             return null;
         }
 
+        if (strcasecmp($prefix, 'aeriojkea') === 0 && preg_match('/^[A-Z]+([0-9]+)$/iD', $orderNumber, $matches)) {
+            $orderNumber = $matches[1];
+        }
+
         return $prefix.'-'.$orderNumber;
     }
 

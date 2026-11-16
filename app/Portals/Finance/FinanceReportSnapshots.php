@@ -86,7 +86,7 @@ class FinanceReportSnapshots
         return $controller->buildSettlementOverviewMonth($scope->month, $scope->report, $filters, $filters['_include_options'], reuse: true);
     }
 
-    public function result(string $report, string $month, array $filters, callable $build, ?string $id = null): array
+    public function result(string $report, string $month, array $filters, callable $build, ?string $id = null, bool $statusOnly = false): array
     {
         $filters = array_filter($filters, fn ($value) => $value !== null && $value !== '');
         if (isset($filters['payment_account_id'])) {
@@ -96,6 +96,9 @@ class FinanceReportSnapshots
         $scope = hash('sha256', json_encode([$report, $month, $filters], JSON_THROW_ON_ERROR));
         $db = $this->workbooks->database();
 
+        if ($statusOnly && ! $this->runsInBackground()) {
+            return [null, null, ['state' => 'ready']];
+        }
         if (! $this->runsInBackground() && ! $db->getSchemaBuilder()->hasTable('finance_report_snapshots')) {
             return [$build(), null, ['state' => 'ready']];
         }
@@ -129,6 +132,9 @@ class FinanceReportSnapshots
             'state' => $current ? 'ready' : ($failed ? 'failed' : ($saved ? 'updating' : 'pending')),
             'updated_at' => $saved?->created_at,
         ];
+        if ($statusOnly) {
+            return [null, $saved?->id, $status];
+        }
         Log::debug('Finance report snapshot read', [
             'report' => $report, 'month' => $month, 'scope' => $scope,
             'state' => $status['state'], 'snapshot_id' => $saved?->id,
