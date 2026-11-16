@@ -98,7 +98,7 @@ class FinancePayPalOrderExport
                     $lines = 1;
                     $cells = [];
                     foreach (array_values($row) as $index => $value) {
-                        $text = FinanceCatalog::simplified((string) ($value ?? ''));
+                        $text = FinanceCatalog::simplified(FinanceCatalog::exportCell($headers[$index] ?? '', $value));
                         $lines = max($lines, substr_count($text, "\n") + 1);
                         $numeric = preg_match('/金额|运费|净额|手续费|^余额$/u', $headers[$index])
                             && is_numeric($text) && strlen(str_replace(['-', '.'], '', $text)) <= 15;

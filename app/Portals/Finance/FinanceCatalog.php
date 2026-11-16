@@ -186,10 +186,22 @@ class FinanceCatalog
         return $cache[$key] = $fields;
     }
 
+    public static function displayTongtuOrder(mixed $value): string
+    {
+        return preg_replace('/^(.+)-[A-Z]+([0-9]+)$/D', '$1-$2', (string) ($value ?? ''));
+    }
+
+    public static function exportCell(string $header, mixed $value): string
+    {
+        return in_array(self::simplified($header), ['通途订单', '通途订单号', '通途单号'], true)
+            ? self::displayTongtuOrder($value)
+            : (string) ($value ?? '');
+    }
+
     public static function displayValue(string $dataset, int $index, mixed $value): string
     {
-        $text = (string) ($value ?? '');
         $definition = self::dataset($dataset);
+        $text = self::exportCell($definition['headers'][$index], $value);
         if (self::simplified($definition['headers'][$index]) === '团队') {
             return self::teamLabel($value);
         }

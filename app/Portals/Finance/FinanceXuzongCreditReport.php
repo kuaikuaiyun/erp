@@ -337,6 +337,10 @@ class FinanceXuzongCreditReport
     public static function formatCell(string $header, mixed $value): mixed
     {
         $field = array_search($header, self::DISPLAY_HEADERS, true) ?: $header;
+        if ($field === '通途订单') {
+            return FinanceCatalog::displayTongtuOrder($value);
+        }
+
         if (is_numeric($value) && (FinanceXuzongCreditMatches::isAmount($field)
             || in_array($field, ['订单金额', '交易金额', '结算-美元', '应结算（USD）', FinanceSettlementService::SHOP_DIFFERENCE_LABEL], true))) {
             $amount = trim((string) $value);

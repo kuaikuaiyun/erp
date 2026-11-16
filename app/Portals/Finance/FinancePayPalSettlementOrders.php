@@ -801,11 +801,12 @@ class FinancePayPalSettlementOrders
         if ($duplicate) {
             $review['duplicate'] = '跨账户存在相同交易号，待核对是否重复入账';
         }
+        $candidateOrder = FinanceCatalog::displayTongtuOrder($payment['candidate_order']);
         if ($payment['candidate_domain_matched']) {
-            $review['order'] = '已按域名匹配候选通途订单 '.$payment['candidate_order'];
+            $review['order'] = '已按域名匹配候选通途订单 '.$candidateOrder;
         } elseif ($payment['business_order_id'] === null) {
             $review['order'] = $payment['candidate_order'] === null
-                ? '未匹配物流订单' : '未匹配物流订单，候选通途订单 '.$payment['candidate_order'].'，待人工确认';
+                ? '未匹配物流订单' : '未匹配物流订单，候选通途订单 '.$candidateOrder.'，待人工确认';
         }
         if ($crossRateSource !== null) {
             $review['rate'] = $crossRateSource;

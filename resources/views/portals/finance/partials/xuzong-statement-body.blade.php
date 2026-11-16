@@ -35,7 +35,7 @@
                         @foreach(\App\Portals\Finance\FinanceXuzongCreditReport::additionalEditableHeaders() as $field)
                             @php($locked = in_array($field, \App\Portals\Finance\FinanceXuzongCostEligibility::FIELDS, true) && ! ($reportValues['_cost_editable'] ?? false))
                             <label class="col-sm-4">{{ $field }}
-                                <input class="form-control" name="report_fields[{{ $field }}]" value="{{ $reportValues[$field] ?? '' }}" @disabled($locked) placeholder="{{ $locked ? '不可填写' : '' }}">
+                                <input class="form-control" name="report_fields[{{ $field }}]" value="{{ \App\Portals\Finance\FinanceCatalog::exportCell($field, $reportValues[$field] ?? '') }}" @disabled($locked) placeholder="{{ $locked ? '不可填写' : '' }}">
                             </label>
                         @endforeach
                     </div>

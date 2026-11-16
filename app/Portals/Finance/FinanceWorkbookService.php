@@ -632,7 +632,7 @@ class FinanceWorkbookService
                         $sheet->getStyle([$column + 1, $rowIndex])->getProtection()->setLocked('unprotected');
                     }
                     // Financial references and literal text must survive export without formula execution.
-                    $value = (string) ($value ?? '');
+                    $value = FinanceCatalog::exportCell($headers[$column] ?? '', $value);
                     if ($simplifyText) {
                         $value = FinanceCatalog::simplified($value);
                     }
@@ -732,7 +732,7 @@ class FinanceWorkbookService
                 foreach ($rows as $row) {
                     $cells = [];
                     foreach (array_values($row) as $column => $raw) {
-                        $value = (string) ($raw ?? '');
+                        $value = FinanceCatalog::exportCell($headers[$column] ?? '', $raw);
                         if ($simplifyText) {
                             $value = FinanceCatalog::simplified($value);
                         }
@@ -777,14 +777,15 @@ class FinanceWorkbookService
             fwrite($stream, "\xEF\xBB\xBF");
             fputcsv($stream, $simplifyText ? array_map(FinanceCatalog::simplified(...), $headers) : $headers, $delimiter, '"', '');
             foreach ($rows as $row) {
-                $values = array_map(static function ($value) use ($simplifyText): string {
-                    $value = (string) ($value ?? '');
+                $row = array_values($row);
+                $values = array_map(static function ($value, $column) use ($headers, $simplifyText): string {
+                    $value = FinanceCatalog::exportCell($headers[$column] ?? '', $value);
                     if ($simplifyText) {
                         $value = FinanceCatalog::simplified($value);
                     }
 
                     return ! is_numeric($value) && preg_match('/^[=+\-@\t\r]/', $value) ? "'".$value : $value;
-                }, array_values($row));
+                }, $row, array_keys($row));
                 fputcsv($stream, $values, $delimiter, '"', '');
             }
             fclose($stream);

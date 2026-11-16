@@ -14,7 +14,7 @@
         </dl>
         <dl class="settlement-detail-identifiers">
             @foreach(['shopify_order_number' => 'Shopify订单号', 'reference' => '交易 ID', 'account' => '支付账户'] as $field => $label)
-                <div><dt>{{ $label }}</dt><dd>{{ $row[$field] ?? '' }}</dd></div>
+                <div><dt>{{ $label }}</dt><dd>{{ $field === 'erp_order' ? \App\Portals\Finance\FinanceCatalog::displayTongtuOrder($row[$field] ?? '') : ($row[$field] ?? '') }}</dd></div>
             @endforeach
         </dl>
         @if(! empty($row['review']))<p class="settlement-detail-review"><i class="fa fa-info-circle" aria-hidden="true"></i> {{ $row['review'] }}</p>@endif

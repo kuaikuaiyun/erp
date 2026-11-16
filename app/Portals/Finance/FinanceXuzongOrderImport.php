@@ -210,7 +210,7 @@ class FinanceXuzongOrderImport
                 if (! empty($data['report_fields'])) {
                     $current = app(FinanceXuzongCreditReport::class)->orderValues($order->id);
                     foreach ($data['report_fields'] as $field => $value) {
-                        if ((string) $value !== (string) ($current[$field] ?? '')) {
+                        if ((string) $value !== FinanceCatalog::exportCell($field, $current[$field] ?? '')) {
                             $costChanged = $costChanged || in_array($field, FinanceXuzongCostEligibility::FIELDS, true);
                             $payload['_edited_report_fields'][$field] = $value ?? '';
                         }

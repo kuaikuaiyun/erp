@@ -82,7 +82,7 @@
             }
             $blocks = [
                 ['编号' => $order?->shopify_order_number ?? null, 'ID' => $order?->shopify_order_id ?? null,
-                    '通途' => $metadata['erp_order'] ?? ($record->payload['通途订单'] ?? null), '交易号' => $record->reference,
+                    '通途' => $catalog::displayTongtuOrder($metadata['erp_order'] ?? ($record->payload['通途订单'] ?? null)), '交易号' => $record->reference,
                     '账单号' => $fields[13], '关联状态' => $order ? null : '未匹配物流订单'],
                 ['店铺名称' => $order?->store_name ?? null, '店铺域名' => $domain, '登录地址' => $order?->source_shop_domain ?? null,
                     '使用人' => $group?->owner, '所属团队' => $group?->team],
