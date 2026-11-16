@@ -505,6 +505,8 @@ Route::put('/product-library/{product}', [ProductLibraryController::class, 'upda
 Route::patch('/product-library/{product}/publication', [ProductLibraryController::class, 'updatePublication'])->name('aikaipin.product-library.publication.update');
 Route::post('/product-library/{product}/shopify-import/preview', [ProductLibraryController::class, 'previewShopifyImport'])->name('aikaipin.product-library.shopify-import.preview');
 Route::post('/product-library/{product}/shopify-import', [ProductLibraryController::class, 'importShopifyCsv'])->name('aikaipin.product-library.shopify-import.store');
+Route::patch('/product-library/{product}/product-pages/{page}', [ProductLibraryController::class, 'updateProductPage'])->name('aikaipin.product-library.product-pages.update');
+Route::delete('/product-library/{product}/product-pages/{page}', [ProductLibraryController::class, 'destroyProductPage'])->name('aikaipin.product-library.product-pages.destroy');
 Route::delete('/product-library/{product}', [ProductLibraryController::class, 'destroyProduct'])->name('aikaipin.product-library.destroy');
 Route::post('/product-library/package-uploads', [ProductLibraryController::class, 'initializePackageUpload'])->name('aikaipin.product-library.package-uploads.initialize');
 Route::post('/product-library/package-uploads/{uploadToken}/parts/{chunkIndex}', [ProductLibraryController::class, 'storePackageUploadPart'])->whereNumber('chunkIndex')->name('aikaipin.product-library.package-uploads.parts.store');

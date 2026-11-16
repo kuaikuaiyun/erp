@@ -7,6 +7,7 @@ use App\Models\AdminUser;
 use App\Models\AikaipinPlacementEvaluation;
 use App\Models\AikaipinPlacementEvaluationRecord;
 use App\Models\AikaipinProduct;
+use App\Models\AikaipinProductPage;
 use App\Models\AikaipinProductUploadSession;
 use App\Models\AikaipinSelectionProposal;
 use App\Models\AikaipinSelectionProposalImage;
@@ -558,6 +559,66 @@ class ProductLibraryController extends Controller
             'shopify_data' => $shopify,
             'product_page_id' => $productPage?->getKey(),
             'product_page_count' => $updated->productPages->count(),
+        ]);
+    }
+
+    public function updateProductPage(Request $request, AikaipinProduct $product, AikaipinProductPage $page): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
+        abort_unless((int) $page->aikaipin_product_id === (int) $product->getKey(), 404);
+
+        $data = $request->validate([
+            'landing_page_url' => ['nullable', 'url', 'max:2048'],
+        ]);
+        $landingPageUrl = trim((string) ($data['landing_page_url'] ?? '')) ?: null;
+
+        $page->forceFill(['landing_page_url' => $landingPageUrl])->save();
+
+        return response()->json([
+            'message' => '产品页落地页链接已保存。',
+            'product_page' => [
+                'id' => (int) $page->getKey(),
+                'landing_page_url' => $page->landing_page_url,
+            ],
+        ]);
+    }
+
+    public function destroyProductPage(Request $request, AikaipinProduct $product, AikaipinProductPage $page): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
+        abort_unless((int) $page->aikaipin_product_id === (int) $product->getKey(), 404);
+
+        DB::connection($product->getConnectionName())->transaction(function () use ($product, $page): void {
+            $page->delete();
+
+            $replacement = $product->productPages()->first();
+            if ($replacement instanceof AikaipinProductPage) {
+                $product->productPages()->update(['is_default' => false]);
+                $replacement->forceFill(['is_default' => true])->save();
+                $product->forceFill(['shopify_data' => $replacement->shopifyData()])->save();
+            } else {
+                $product->forceFill(['shopify_data' => null])->save();
+            }
+        });
+
+        $product->refresh()->load('productPages');
+        $payload = $this->productEditPayload($product);
+
+        return response()->json([
+            'message' => '产品 CSV 及其对应的产品页资料已删除。',
+            'product_page_count' => $product->productPages->count(),
+            'product_pages' => $payload['product_pages'],
+            'shopify_data' => $payload['shopify_data'],
         ]);
     }
 
@@ -1888,6 +1949,7 @@ class ProductLibraryController extends Controller
 
         return [
             'id' => (int) $product->getKey(),
+            'product_code' => (string) $product->product_code,
             'name' => (string) $product->name,
             'source_platform' => (string) $product->source_platform,
             'product_type' => (string) $product->product_type,

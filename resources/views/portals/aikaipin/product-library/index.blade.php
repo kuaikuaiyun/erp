@@ -49,6 +49,8 @@
         'productDeleteUrlTemplate' => route('aikaipin.product-library.destroy', ['product' => '__product__']),
         'shopifyImportPreviewUrlTemplate' => route('aikaipin.product-library.shopify-import.preview', ['product' => '__product__']),
         'shopifyImportStoreUrlTemplate' => route('aikaipin.product-library.shopify-import.store', ['product' => '__product__']),
+        'productPageUpdateUrlTemplate' => route('aikaipin.product-library.product-pages.update', ['product' => '__product__', 'page' => '__page__']),
+        'productPageDeleteUrlTemplate' => route('aikaipin.product-library.product-pages.destroy', ['product' => '__product__', 'page' => '__page__']),
         'packageUploadInitializeUrl' => route('aikaipin.product-library.package-uploads.initialize'),
         'packageUploadPartUrlTemplate' => route('aikaipin.product-library.package-uploads.parts.store', ['uploadToken' => '__token__', 'chunkIndex' => '__chunk__']),
         'packageUploadCompleteUrlTemplate' => route('aikaipin.product-library.package-uploads.complete', ['uploadToken' => '__token__']),
@@ -94,12 +96,12 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261116-4">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261116-5">
 @endpush
 
 @push('scripts')
     <script>window.ErpAikaipinProductLibraryConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261116-4"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261116-5"></script>
 @endpush
 
 @section('content')
