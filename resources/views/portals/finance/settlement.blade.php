@@ -174,7 +174,7 @@
 <div class="finance-table-wrap"><table class="table finance-table"><thead><tr><th class="finance-selection"><input type="checkbox" data-export-all aria-label="全选当前页"></th>@foreach($columns as $field => $label)<th data-settlement-column="{{ $field }}">{{ $label }}</th>@endforeach @if($hasOperations)<th class="{{ $operationClass }}">操作</th>@endif</tr></thead><tbody>
 @forelse($rows as $row)
 @php($editable = $orderView ? ($row['payments'][0] ?? null) : (empty($row['statement_only']) ? $row : null))
-<tr><td class="finance-selection">@if(empty($row['statement_only']))<input type="checkbox" data-record-id="{{ $row['id'] }}" @if($orderView) data-payment-ids="{{ json_encode(array_column($row['payments'], 'id')) }}" @endif data-locked="{{ $row['locked'] ? '1' : '0' }}" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($row) }}" aria-label="选择此行">@endif</td>
+<tr><td class="finance-selection">@if(empty($row['statement_only']))<input type="checkbox" data-record-id="{{ $row['id'] }}" @if($orderView && ! empty($row['payments'])) data-payment-ids="{{ json_encode(array_column($row['payments'], 'id')) }}" @endif data-locked="{{ $row['locked'] ? '1' : '0' }}" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($row) }}" aria-label="选择此行">@endif</td>
 @foreach($columns as $field => $label)
 @php($splitRefundNote = $orderView ? \App\Portals\Finance\FinancePayPalSettlementOrders::splitRefundNote($row, $field) : null)
 @php($cellValue = ($row['card_layout'] ?? $row)[$field] ?? null)

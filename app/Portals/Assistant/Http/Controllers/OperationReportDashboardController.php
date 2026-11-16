@@ -46,6 +46,7 @@ class OperationReportDashboardController extends Controller
             'operation_department_ids' => ['nullable', 'array'],
             'operation_department_ids.*' => ['integer', 'distinct'],
             'operator_user_id' => ['nullable', 'integer'],
+            'exclude_resigned' => ['nullable', 'boolean'],
             'scope_user_id' => ['nullable', 'integer'],
             'sort_by' => ['nullable', Rule::in(['first_subscription_orders', 'first_total_orders'])],
             'sort_direction' => ['nullable', Rule::in(['asc', 'desc'])],
@@ -54,7 +55,7 @@ class OperationReportDashboardController extends Controller
         $timezone = (string) ($validated['timezone'] ?? OperationReportMetricsService::REPORT_TIMEZONE);
         $reportNow = Carbon::now($timezone);
         $dateRange = (string) ($validated['date_range'] ?? (
-            $request->filled('date_from') || $request->filled('date_to') ? 'custom' : 'this_month'
+            $request->filled('date_from') || $request->filled('date_to') ? 'custom' : 'yesterday'
         ));
         [$dateFrom, $dateTo] = match ($dateRange) {
             'today' => [$reportNow->format('Y-m-d'), $reportNow->format('Y-m-d')],
@@ -82,6 +83,7 @@ class OperationReportDashboardController extends Controller
             ->orderBy('sort')->orderBy('name')->get();
         $selectedDepartmentIds = collect($validated['operation_department_ids'] ?? [])
             ->map(fn ($id) => (int) $id)->unique()->values();
+        $excludeResigned = (bool) ($validated['exclude_resigned'] ?? false);
         abort_unless($selectedDepartmentIds->diff($visibleDepartmentIds)->isEmpty(), 403);
 
         $allReports = OperationReport::query()
@@ -93,7 +95,13 @@ class OperationReportDashboardController extends Controller
         $operatorDepartmentIds = $selectedDepartmentIds->isNotEmpty() ? $selectedDepartmentIds->all() : $visibleDepartmentIds;
         $operators = AdminUser::query()
             ->with('departments')
-            ->where('status', AdminUser::STATUS_ACTIVE)
+            ->where(function ($accounts) {
+                $accounts->where('status', AdminUser::STATUS_ACTIVE)
+                    ->orWhere('employment_status', 'resigned');
+            })
+            ->when($excludeResigned, fn ($query) => $query->where(function ($employment) {
+                $employment->whereNull('employment_status')->orWhere('employment_status', '!=', 'resigned');
+            }))
             ->whereHas('departments', fn ($query) => $query->whereIn('admin_roles.id', $operatorDepartmentIds))
             ->orderBy('name')->orderBy('username')
             ->get()
@@ -304,6 +312,7 @@ class OperationReportDashboardController extends Controller
                     'operator_user_id' => (int) $operator->getKey(),
                     'date' => (string) $rowDate,
                     'operator_name' => (string) ($operator->name ?: $operator->username),
+                    'is_resigned' => (string) $operator->employment_status === 'resigned',
                     'hired_at' => $operator->hired_at?->format('Y-m-d'),
                     'operation_department_name' => (string) ($operationDepartment?->name ?: $report?->operation_department_name ?: '未填写部门'),
                     'operation_department_id' => (int) ($operationDepartment?->getKey() ?? $report?->operation_department_id ?? 0),
@@ -392,6 +401,7 @@ class OperationReportDashboardController extends Controller
             'selectedDepartmentIds' => $selectedDepartmentIds->all(),
             'operatorOptions' => $operatorOptions,
             'selectedOperatorId' => $selectedOperatorId,
+            'excludeResigned' => $excludeResigned,
             'sortBy' => $sortBy,
             'sortDirection' => $sortDirection,
             'displayMode' => $displayMode,
@@ -655,6 +665,7 @@ class OperationReportDashboardController extends Controller
                 'date_from' => $dateFrom,
                 'date_to' => $dateTo,
                 'operator_name' => (string) $first['operator_name'],
+                'is_resigned' => (bool) ($first['is_resigned'] ?? false),
                 'hired_at' => $first['hired_at'] ?? null,
                 'calculation_days' => $calculationDays,
                 'operation_department_name' => (string) $first['operation_department_name'],

@@ -2092,6 +2092,12 @@ class FinancePortalTest extends TestCase
         $this->assertDatabaseHas('finance_payment_transactions', ['transaction_id' => 'WITHDRAWAL']);
         $this->assertDatabaseHas('finance_payment_transactions', ['transaction_id' => 'FX-WITHDRAWAL-USD']);
 
+        $this->delete($allUrl.'/records', ['ids' => [$unlinkedId]])
+            ->assertRedirect(route('finance.report', 'paypal-settlement'))->assertSessionHasNoErrors();
+        $this->get($allUrl.'?reference=UNLINKED-REFUND')->assertViewHas('rows', fn ($rows) => $rows->total() === 0);
+        $this->assertDatabaseHas('finance_payment_transactions', ['finance_record_id' => $unlinkedId]);
+        $this->delete($allUrl.'/records', ['ids' => [$unlinkedId]])->assertSessionHasErrors('ids');
+
         $this->get($url.'&reference=REFUND')->assertOk()->assertViewHas('rows', fn ($rows) => $rows->total() === 1);
         $sheet = $this->readDownload($this->get($url.'&download=1&reference=REFUND')->assertOk()->streamedContent())->toArray();
         $this->assertCount(2, $sheet);

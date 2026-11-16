@@ -8,6 +8,7 @@ use App\Models\Department;
 use App\Models\FashionAdvertisingReport;
 use App\Models\FashionLogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
+use App\Services\DepartmentAuthorizationService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,7 +21,10 @@ class PerformanceReportController extends Controller
 {
     private const PORTAL_CODE = 'fuzhuang';
 
-    public function __construct(private readonly PortalEntryController $portalEntries) {}
+    public function __construct(
+        private readonly PortalEntryController $portalEntries,
+        private readonly DepartmentAuthorizationService $departmentAuthorization,
+    ) {}
 
     public function index(Request $request): Response|View
     {
@@ -58,6 +62,16 @@ class PerformanceReportController extends Controller
         // Both platforms store their China-normalized payment time in this legacy
         // column. The selected report timezone is applied below for date grouping.
         $orderTimestampSql = 'orders.paid_at_utc';
+        $managedDepartmentIds = $this->departmentAuthorization->managedDepartmentIds($user)
+            ->intersect($this->fashionDepartmentIds())->values();
+        $canSelectOperator = $user->isAdministrator() || $managedDepartmentIds->isNotEmpty();
+        $operators = $this->reportOperators($user, $managedDepartmentIds);
+        $selectedOperatorId = ! empty($validated['operator_id']) ? (int) $validated['operator_id'] : null;
+        if ($selectedOperatorId !== null) {
+            abort_unless($canSelectOperator && $operators->contains(
+                fn (AdminUser $operator): bool => (int) $operator->getKey() === $selectedOperatorId
+            ), 403, '无权查看该运营人员的业绩数据。');
+        }
 
         $base = DB::connection($connection)->table($orderTable.' as orders')
             ->join($storeTable.' as stores', 'stores.id', '=', 'orders.assistant_domain_store_id')
@@ -82,23 +96,21 @@ class PerformanceReportController extends Controller
                 ->where('orders.source_platform', 'shopline');
         }
 
-        if (! $user->isAdministrator()) {
-            $ownerNames = collect([$user->name, $user->username])
+        if (! $user->isAdministrator() || $selectedOperatorId !== null) {
+            $scopeOperators = $selectedOperatorId !== null
+                ? $operators->filter(fn (AdminUser $operator): bool => (int) $operator->getKey() === $selectedOperatorId)
+                : $operators;
+            $ownerIds = $scopeOperators->pluck('id')->map(fn ($id): int => (int) $id)->values()->all();
+            $ownerNames = $scopeOperators->flatMap(fn (AdminUser $operator) => [$operator->name, $operator->username])
                 ->filter()->map(fn ($name): string => trim((string) $name))->unique()->values()->all();
-            $base->where(function ($binding) use ($user, $ownerNames): void {
-                $binding->where('stores.owner_user_id', $user->getKey());
+            $base->where(function ($binding) use ($ownerIds, $ownerNames): void {
+                if ($ownerIds !== []) {
+                    $binding->whereIn('stores.owner_user_id', $ownerIds);
+                } else {
+                    $binding->whereRaw('1 = 0');
+                }
                 if ($ownerNames !== []) {
                     $binding->orWhereIn('stores.user_name', $ownerNames);
-                }
-            });
-        } elseif (! empty($validated['operator_id'])) {
-            $operator = AdminUser::query()->find((int) $validated['operator_id']);
-            $operatorNames = collect([$operator?->name, $operator?->username])
-                ->filter()->map(fn ($name): string => trim((string) $name))->unique()->values()->all();
-            $base->where(function ($binding) use ($validated, $operatorNames): void {
-                $binding->where('stores.owner_user_id', (int) $validated['operator_id']);
-                if ($operatorNames !== []) {
-                    $binding->orWhereIn('stores.user_name', $operatorNames);
                 }
             });
         }
@@ -166,20 +178,6 @@ class PerformanceReportController extends Controller
             return $row;
         }));
 
-        $operators = collect();
-        if ($user->isAdministrator()) {
-            $storeOperators = DB::connection($connection)->table($storeTable.' as stores')
-                ->join($userTable.' as owners', 'owners.id', '=', 'stores.owner_user_id')
-                ->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy','shopline')")
-                ->select(['owners.id', 'owners.name', 'owners.username'])
-                ->distinct()->orderBy('owners.name')->get();
-            $operators = $this->fashionOperators()
-                ->concat($storeOperators)
-                ->unique(fn ($operator) => (int) $operator->id)
-                ->sortBy(fn ($operator) => mb_strtolower((string) ($operator->name ?: $operator->username)))
-                ->values();
-        }
-
         $orderCount = (int) ($summary->order_count ?? 0);
         $revenue = (float) ($summary->revenue ?? 0);
         $summaryAdSpend = round((float) $approvedReports->flatMap->adSpendEntries->sum('actual_spend_usd'), 2);
@@ -188,13 +186,14 @@ class PerformanceReportController extends Controller
             ...$context,
             'rows' => $rows,
             'operators' => $operators,
+            'canSelectOperator' => $canSelectOperator,
             'timezoneOptions' => $timezoneOptions,
             'filters' => [
                 'date_from' => $dateFrom,
                 'date_to' => $dateTo,
                 'timezone' => $timezone,
                 'site_builder' => $validated['site_builder'] ?? '',
-                'operator_id' => $validated['operator_id'] ?? '',
+                'operator_id' => $selectedOperatorId ?? '',
                 'per_page' => (int) ($validated['per_page'] ?? 20),
             ],
             'summary' => [
@@ -225,16 +224,27 @@ class PerformanceReportController extends Controller
         $storageFrom = CarbonImmutable::parse($validated['date'].' 00:00:00', $timezone)->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
         $storageTo = CarbonImmutable::parse($validated['date'].' 23:59:59', $timezone)->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
         $user = $context['user'];
+        $visibleOperators = $this->reportOperators(
+            $user,
+            $this->departmentAuthorization->managedDepartmentIds($user)
+                ->intersect($this->fashionDepartmentIds())->values()
+        );
+        $visibleOperatorIds = $visibleOperators->pluck('id')->map(fn ($id): int => (int) $id)->values()->all();
+        $visibleOperatorNames = $visibleOperators->flatMap(fn (AdminUser $operator) => [$operator->name, $operator->username])
+            ->filter()->map(fn ($name): string => trim((string) $name))->unique()->values()->all();
         $store = DB::connection(config('admin.database.connection') ?: config('database.default'))
             ->table('assistant_domain_stores')
             ->where('id', (int) $validated['store_id'])
             ->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')")
-            ->when(! $user->isAdministrator(), function ($query) use ($user): void {
-                $names = collect([$user->name, $user->username])->filter()->map(fn ($name) => trim((string) $name))->unique()->values()->all();
-                $query->where(function ($binding) use ($user, $names): void {
-                    $binding->where('owner_user_id', $user->getKey());
-                    if ($names !== []) {
-                        $binding->orWhereIn('user_name', $names);
+            ->when(! $user->isAdministrator(), function ($query) use ($visibleOperatorIds, $visibleOperatorNames): void {
+                $query->where(function ($binding) use ($visibleOperatorIds, $visibleOperatorNames): void {
+                    if ($visibleOperatorIds !== []) {
+                        $binding->whereIn('owner_user_id', $visibleOperatorIds);
+                    } else {
+                        $binding->whereRaw('1 = 0');
+                    }
+                    if ($visibleOperatorNames !== []) {
+                        $binding->orWhereIn('user_name', $visibleOperatorNames);
                     }
                 });
             })->first();
@@ -301,7 +311,51 @@ class PerformanceReportController extends Controller
         }
     }
 
+    private function reportOperators(AdminUser $user, $managedDepartmentIds)
+    {
+        if ($user->isAdministrator()) {
+            $storeOperatorIds = DB::connection(config('admin.database.connection') ?: config('database.default'))
+                ->table('assistant_domain_stores')
+                ->whereNotNull('owner_user_id')
+                ->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')")
+                ->distinct()->pluck('owner_user_id')->map(fn ($id): int => (int) $id);
+            $operatorIds = $storeOperatorIds
+                ->merge($this->fashionOperators()->pluck('id')->map(fn ($id): int => (int) $id))
+                ->unique()->values();
+
+            return AdminUser::query()->whereIn('id', $operatorIds)
+                ->orderBy('name')->orderBy('username')->get(['id', 'name', 'username']);
+        }
+
+        if ($managedDepartmentIds->isEmpty()) {
+            return collect([$user]);
+        }
+
+        return AdminUser::query()
+            ->where('status', AdminUser::STATUS_ACTIVE)
+            ->whereHas('departments', fn ($query) => $query->whereIn(
+                config('admin.database.roles_table').'.id',
+                $managedDepartmentIds->all()
+            ))
+            ->orderBy('name')->orderBy('username')
+            ->get(['id', 'name', 'username'])
+            ->unique('id')->values();
+    }
+
     private function fashionOperators()
+    {
+        $departmentIds = $this->fashionDepartmentIds();
+        if ($departmentIds->isEmpty()) {
+            return collect();
+        }
+
+        return AdminUser::query()
+            ->where('status', AdminUser::STATUS_ACTIVE)
+            ->whereHas('departments', fn ($query) => $query->whereIn('id', $departmentIds->all()))
+            ->get(['id', 'name', 'username']);
+    }
+
+    private function fashionDepartmentIds()
     {
         $root = Department::business()->where('name', '服装运营部门')->first(['id']);
         if (! $root) {
@@ -309,19 +363,16 @@ class PerformanceReportController extends Controller
         }
 
         $departments = Department::business()->get(['id', 'parent_id']);
-        $departmentIds = [(int) $root->id];
+        $departmentIds = collect([(int) $root->id]);
         do {
             $children = $departments->whereIn('parent_id', $departmentIds)
                 ->pluck('id')->map(fn ($id): int => (int) $id)
-                ->diff($departmentIds)->values()->all();
-            $before = count($departmentIds);
-            $departmentIds = array_values(array_unique([...$departmentIds, ...$children]));
-        } while (count($departmentIds) > $before);
+                ->diff($departmentIds)->values();
+            $before = $departmentIds->count();
+            $departmentIds = $departmentIds->merge($children)->unique()->values();
+        } while ($departmentIds->count() > $before);
 
-        return AdminUser::query()
-            ->where('status', AdminUser::STATUS_ACTIVE)
-            ->whereHas('departments', fn ($query) => $query->whereIn('id', $departmentIds))
-            ->get(['id', 'name', 'username']);
+        return $departmentIds;
     }
 
     /** @return array<string,string> */

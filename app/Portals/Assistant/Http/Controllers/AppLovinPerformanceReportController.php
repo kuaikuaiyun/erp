@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AppLovinAccountStoreBinding;
 use App\Models\AppLovinSpendScreenshot;
 use App\Models\AssistantDomainStore;
+use App\Models\Department;
 use App\Models\OperationReport;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
@@ -58,6 +59,7 @@ class AppLovinPerformanceReportController extends Controller
             'department_ids' => ['nullable', 'array'],
             'department_ids.*' => ['integer', 'distinct', Rule::in($visibleIds)],
             'operator' => ['nullable', 'string', 'max:100'],
+            'display_mode' => ['nullable', Rule::in(['performance', 'team'])],
             'store_domain' => ['nullable', 'string', 'max:191'],
             'gift_status' => ['nullable', Rule::in(['yes', 'no'])],
             'consumption_range' => ['nullable', Rule::in(['lt_5000', '5000_10000', 'gt_10000', 'custom'])],
@@ -101,7 +103,7 @@ class AppLovinPerformanceReportController extends Controller
         $query->when($dateFrom !== '', fn ($q) => $q->whereDate('report_date', '>=', $dateFrom))
             ->when($dateTo !== '', fn ($q) => $q->whereDate('report_date', '<=', $dateTo));
 
-        $reports = $query->orderBy('report_date')->orderBy('operator_name')->get();
+        $reports = $query->with('operator.departments')->orderBy('report_date')->orderBy('operator_name')->get();
         $calculatedByOperator = $this->metrics->buildRangeForOperators(
             $dateFrom,
             $dateTo,
@@ -174,6 +176,7 @@ class AppLovinPerformanceReportController extends Controller
                     'department' => (string) $report->operation_department_name,
                     'operator_user_id' => (int) $report->operator_user_id,
                     'operator' => (string) $report->operator_name,
+                    'team_position' => (string) ($report->operator?->departments?->firstWhere('id', $report->operation_department_id)?->pivot?->position ?: Department::POSITION_MEMBER),
                     'store_id' => (int) $storeAds->first()['resolved_store_id'],
                     'store_domain' => $domain,
                     'account_names' => $storeAds->pluck('account_name')->map(fn ($name) => trim((string) $name))->filter()->unique()->values()->all(),
@@ -210,8 +213,11 @@ class AppLovinPerformanceReportController extends Controller
                 $accountKeys = $group->pluck('account_keys')->flatten()->filter()->unique()->values();
 
                 return [
+                    'department_id' => (int) $first['department_id'],
                     'department' => $first['department'],
+                    'operator_user_id' => (int) $first['operator_user_id'],
                     'operator' => $first['operator'],
+                    'team_position' => (string) $first['team_position'],
                     'store_domain' => $first['store_domain'],
                     'date_label' => $group->min('date') === $group->max('date') ? $group->min('date') : $group->min('date').' 至 '.$group->max('date'),
                     'account_names' => $group->pluck('account_names')->flatten()->filter()->unique()->implode('、'),
@@ -236,12 +242,7 @@ class AppLovinPerformanceReportController extends Controller
                         return $detail;
                     })->values()->all(),
                 ];
-            })
-            ->sortBy([
-                ['first_orders', 'desc'],
-                ['ad_spend', 'desc'],
-            ])
-            ->values();
+            })->values();
 
         if (($filters['gift_status'] ?? '') === 'yes') {
             $rows = $rows->where('gift_status', 'available')->values();
@@ -266,6 +267,22 @@ class AppLovinPerformanceReportController extends Controller
                 && (float) $row['total_consumption'] <= $maximumConsumption)->values();
         }
 
+        $displayMode = (string) ($filters['display_mode'] ?? 'performance');
+        $rows = $rows->sort(function (array $left, array $right) use ($displayMode): int {
+            if ($displayMode === 'team') {
+                $rank = static fn (array $row): int => match ($row['team_position'] ?? Department::POSITION_MEMBER) {
+                    Department::POSITION_MANAGER => 0,
+                    Department::POSITION_DEPUTY => 1,
+                    default => 2,
+                };
+
+                return [$left['department'], $rank($left), $left['operator'], $left['store_domain']]
+                    <=> [$right['department'], $rank($right), $right['operator'], $right['store_domain']];
+            }
+
+            return [(int) $right['first_orders'], (float) $right['ad_spend']]
+                <=> [(int) $left['first_orders'], (float) $left['ad_spend']];
+        })->values();
         $totals = [
             'stores' => $rows->pluck('store_domain')->unique()->count(),
             'subscription_orders' => (int) $rows->sum('first_subscription_orders'),
@@ -300,6 +317,7 @@ class AppLovinPerformanceReportController extends Controller
         return view('portals.assistant.applovin-performance-reports.index', [
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'], 'rows' => $paginator, 'exportRows' => $exportRows, 'totals' => $totals,
             'operator' => $filters['operator'] ?? '',
+            'displayMode' => $displayMode,
             'dateFrom' => $dateFrom,
             'dateTo' => $dateTo,
             'timezone' => $timezone,

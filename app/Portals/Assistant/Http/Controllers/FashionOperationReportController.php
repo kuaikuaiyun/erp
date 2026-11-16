@@ -38,20 +38,43 @@ class FashionOperationReportController extends Controller
 
         $timezones = $this->timezoneOptions();
         $validated = $request->validate([
+            'date_range' => ['nullable', Rule::in(['today', 'yesterday', 'last_7_days', 'last_15_days', 'last_30_days', 'this_month', 'last_month', 'custom'])],
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
             'timezone' => ['nullable', Rule::in(array_keys($timezones))],
             'department_ids' => ['nullable', 'array'],
             'department_ids.*' => ['integer', 'distinct'],
             'operator' => ['nullable', 'string', 'max:100'],
+            'exclude_resigned' => ['nullable', 'boolean'],
             'sort_by' => ['nullable', Rule::in(['order_count', 'revenue'])],
             'sort_order' => ['nullable', Rule::in(['asc', 'desc'])],
             'display_mode' => ['nullable', Rule::in(['performance', 'team'])],
         ]);
         $timezone = (string) ($validated['timezone'] ?? '-08:00');
-        $month = now($timezone);
-        $dateFrom = $validated['date_from'] ?? $month->copy()->startOfMonth()->toDateString();
-        $dateTo = $validated['date_to'] ?? $month->copy()->endOfMonth()->toDateString();
+        $excludeResigned = (bool) ($validated['exclude_resigned'] ?? false);
+        $reportNow = now($timezone);
+        $dateRange = (string) ($validated['date_range'] ?? (
+            $request->filled('date_from') || $request->filled('date_to') ? 'custom' : 'yesterday'
+        ));
+        [$dateFrom, $dateTo] = match ($dateRange) {
+            'today' => [$reportNow->toDateString(), $reportNow->toDateString()],
+            'yesterday' => [$reportNow->copy()->subDay()->toDateString(), $reportNow->copy()->subDay()->toDateString()],
+            'last_7_days' => [$reportNow->copy()->subDays(6)->toDateString(), $reportNow->toDateString()],
+            'last_15_days' => [$reportNow->copy()->subDays(14)->toDateString(), $reportNow->toDateString()],
+            'last_30_days' => [$reportNow->copy()->subDays(29)->toDateString(), $reportNow->toDateString()],
+            'last_month' => [
+                $reportNow->copy()->subMonthNoOverflow()->startOfMonth()->toDateString(),
+                $reportNow->copy()->subMonthNoOverflow()->endOfMonth()->toDateString(),
+            ],
+            'custom' => [
+                (string) ($validated['date_from'] ?? $reportNow->copy()->startOfMonth()->toDateString()),
+                (string) ($validated['date_to'] ?? $reportNow->copy()->endOfMonth()->toDateString()),
+            ],
+            default => [
+                $reportNow->copy()->startOfMonth()->toDateString(),
+                $reportNow->copy()->endOfMonth()->toDateString(),
+            ],
+        };
         if ($dateFrom > $dateTo) {
             [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
         }
@@ -80,6 +103,9 @@ class FashionOperationReportController extends Controller
         })->forget(0);
         $operatorIds = $storesByOperator->keys()->map(fn ($id) => (int) $id)->values();
         $operators = AdminUser::query()->with('departments')->whereIn('id', $operatorIds)
+            ->when($excludeResigned, fn ($query) => $query->where(function ($employment) {
+                $employment->whereNull('employment_status')->orWhere('employment_status', '!=', 'resigned');
+            }))
             ->when($visibleDepartmentIds !== null, fn ($query) => $visibleDepartmentIds === []
                 ? $query->whereRaw('1 = 0')
                 : $query->whereHas('departments', fn ($departments) => $departments->whereIn('admin_roles.id', $visibleDepartmentIds)))
@@ -159,6 +185,7 @@ class FashionOperationReportController extends Controller
             $position = (string) ($department?->pivot?->position ?: Department::POSITION_MEMBER);
 
             return ['department' => (string) ($department?->name ?: '未分配部门'), 'department_id' => (int) ($department?->id ?? 0), 'operator' => (string) ($operator->name ?: $operator->username),
+                'is_resigned' => (string) $operator->employment_status === 'resigned',
                 'team_position' => $position, 'team_rank' => match ($position) { Department::POSITION_MANAGER => 0, Department::POSITION_DEPUTY => 1, default => 2 },
                 'hired_at' => $operator->hired_at?->format('Y-m-d'), 'hire_days' => $hireDays, 'stores' => $storeRows,
                 'order_count' => $orderCount, 'revenue' => $revenue, 'aov' => $orderCount > 0 ? $revenue / $orderCount : null,
@@ -227,7 +254,8 @@ class FashionOperationReportController extends Controller
         return view('portals.assistant.fashion-operation-reports.index', [
             ...$context, 'rows' => $rows, 'teamBands' => $teamBands, 'timezoneOptions' => $timezones,
             'departmentOptions' => $departmentOptions,
-            'filters' => [...$validated, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'timezone' => $timezone,
+            'filters' => [...$validated, 'date_range' => $dateRange, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'timezone' => $timezone,
+                'exclude_resigned' => $excludeResigned,
                 'department_ids' => $selectedDepartmentIds, 'sort_by' => $sortBy, 'sort_order' => $sortOrder, 'display_mode' => $displayMode],
             'summary' => ['people' => $rows->count(), 'stores' => $rows->sum(fn ($row) => count($row['stores'])),
                 'orders' => $rows->sum('order_count'), 'revenue' => $summaryRevenue, 'ad_spend' => $summarySpend,

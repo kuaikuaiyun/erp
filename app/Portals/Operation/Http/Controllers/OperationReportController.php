@@ -490,7 +490,7 @@ class OperationReportController extends Controller
         $submittedMetricRows = $report?->metric_rows ?: [];
         $submittedAdvertisingRows = $report?->advertising_rows ?: [];
         $history = OperationReport::query()
-            ->when(! $isBoss && ! $canReview, fn ($query) => $query->where('operator_user_id', $user->getKey()))
+            ->when(! $isBoss, fn ($query) => $query->where('operator_user_id', $user->getKey()))
             ->orderByDesc('report_date')
             ->orderByDesc('id')
             ->paginate(20, ['*'], 'history_page')
