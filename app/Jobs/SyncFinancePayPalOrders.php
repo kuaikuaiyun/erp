@@ -18,9 +18,12 @@ class SyncFinancePayPalOrders implements ShouldQueue
     public int $tries = 1;
     public ?string $progressId = null;
 
-    public function __construct(public int $accountId, public int $actorId, ?string $progressId = null)
+    public bool $backfill = false;
+
+    public function __construct(public int $accountId, public int $actorId, ?string $progressId = null, bool $backfill = false)
     {
         $this->progressId = $progressId;
+        $this->backfill = $backfill;
         $this->onConnection('finance_orders')->onQueue('finance-orders');
     }
 
@@ -38,7 +41,9 @@ class SyncFinancePayPalOrders implements ShouldQueue
             $progress->update($this->progressId, ['status' => 'running', 'baseline' => $baseline, 'started_at' => time()]);
         }
         try {
-            $result = $sync->refreshOrders($account, $this->actorId);
+            $result = $this->backfill
+                ? $sync->refreshOrders($account, $this->actorId, backfill: true)
+                : $sync->refreshOrders($account, $this->actorId);
             if ($this->progressId) $progress->update($this->progressId, [
                 'status' => $result['ok'] ? 'success' : 'failed', 'count' => $result['count'] ?? 0, 'error' => $result['error'] ?? null,
             ]);

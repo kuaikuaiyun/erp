@@ -305,6 +305,27 @@ class FinanceSettlementService
         }
         $candidateOrders = $channel === 'paypal' && ! empty($filters['order_view'])
             ? app(FinancePayPalOrderCandidates::class)->suggestions($records, $metadata) : [];
+        if ($candidateOrders !== [] && ! empty($filters['match_candidate_domains'])) {
+            $domainsByPrefix = $storesById->filter(fn ($store) => filled($store->domain))
+                ->groupBy(fn ($store) => explode('.', strtolower(trim($store->domain)), 2)[0]);
+            foreach ($candidateOrders as $recordId => $candidate) {
+                $sourceDomain = strtolower(trim((string) ($candidate->source_shop_domain ?? '')));
+                $store = $storesById->get($candidate->assistant_domain_store_id ?? null)
+                    ?? $uniqueDomains->get($sourceDomain);
+                if (blank($store?->domain) && $sourceDomain === ''
+                    && preg_match('/^#?(.+)-\d+$/D', $candidate->tongtu_order_number, $parts)) {
+                    $matches = $domainsByPrefix->get(strtolower($parts[1]));
+                    $store = $matches?->count() === 1 ? $matches->first() : null;
+                }
+                if (filled($store?->domain)) {
+                    $metadata[$recordId] = [
+                        'domain' => $store->domain,
+                        'erp_order' => $candidate->tongtu_order_number,
+                        'order' => $candidate,
+                    ];
+                }
+            }
+        }
         $departmentMembers = $channel === 'paypal' && ! empty($filters['order_view']) && $records->isNotEmpty()
             ? $this->operationDepartmentMembers() : collect();
         $membersById = $departmentMembers->keyBy('id');
@@ -494,7 +515,8 @@ class FinanceSettlementService
                 $row['paypal_18'] ??= FinanceProductNames::display($metadata[$record->id]['order']->tongtu_product_name ?? '');
                 $row['source_added_date'] = $p['新增日期'] ?? '';
                 $row['business_order_id'] = $metadata[$record->id]['logistics_order_id'] ?? null;
-                $row['candidate_order'] = $candidateOrders[$record->id] ?? null;
+                $row['candidate_order'] = $candidateOrders[$record->id]->tongtu_order_number ?? null;
+                $row['candidate_domain_matched'] = isset($candidateOrders[$record->id], $metadata[$record->id]);
                 $row['shopify_order_number'] = $metadata[$record->id]['order']->shopify_order_number ?? '';
                 $row['source_account_key'] = $owner?->activity_account ?? $record->account;
                 $row['source_date'] = $occurredAt;

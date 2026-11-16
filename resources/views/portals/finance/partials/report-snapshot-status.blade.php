@@ -1,4 +1,5 @@
-<p role="status">
+@php($watch = ($watchSnapshot ?? false) && $status['state'] !== 'ready')
+<p role="status" @if($watch) data-finance-snapshot-status="{{ $status['state'] }}" @endif>
     @if(isset($period)){{ $period }} · @endif
     @switch($status['state'])
         @case('pending') 报表已登记，等待后台生成。 @break
@@ -9,3 +10,6 @@
         快照时间 {{ \Illuminate\Support\Carbon::parse($status['updated_at'])->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s') }}（北京时间）
     @endif
 </p>
+@if($watch)
+    <script src="{{ asset('assets/erp/finance-snapshot-status.js') }}" defer></script>
+@endif

@@ -9,7 +9,7 @@ return [
         'max_pages' => 1000,
         'segment_days' => 7,
         'initial_months' => 6,
-        'incremental_hours' => 5,
+        'incremental_hours' => 72,
         'page_size' => 500,
     ],
 ];

@@ -11,7 +11,7 @@
 @endpush
 @section('finance_content')
 @if($reportStatus['state'] !== 'ready' || isset($reportStatus['updated_at']))
-    @include('portals.finance.partials.report-snapshot-status', ['status' => $reportStatus])
+    @include('portals.finance.partials.report-snapshot-status', ['status' => $reportStatus, 'watchSnapshot' => true])
 @endif
 <div class="finance-report">
 @include('portals.finance.partials.summary-tabs', ['activeTab' => 'transactions'])

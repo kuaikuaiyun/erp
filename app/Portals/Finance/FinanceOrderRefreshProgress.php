@@ -30,18 +30,24 @@ class FinanceOrderRefreshProgress
         });
     }
 
-    public function enqueue(FinancePaymentAccount $account, int $actor): string
+    public function enqueue(FinancePaymentAccount $account, int $actor, bool $backfill = false): string
     {
-        return Cache::lock('finance:orders:enqueue:'.$account->id, 10)->block(5, function () use ($account, $actor) {
+        return Cache::lock('finance:orders:enqueue:'.$account->id, 10)->block(5, function () use ($account, $actor, $backfill) {
             $active = Cache::get('finance:orders:active:'.$account->id);
-            if ($active && in_array($this->get($active)['status'] ?? '', ['queued', 'running'], true)) return $active;
+            $task = $active ? $this->get($active) : null;
+            if (in_array($task['status'] ?? '', ['queued', 'running'], true)) {
+                if ($backfill && empty($task['backfill'])) {
+                    throw new \DomainException('该账户正在刷新订单，请在刷新完成后提交历史补录。');
+                }
+                return $active;
+            }
             $id = (string) Str::uuid();
             Cache::put('finance:orders:task:'.$id, ['id' => $id, 'account_id' => $account->id,
                 'account' => FinanceCatalog::simplified($account->account_name), 'status' => 'queued', 'count' => 0,
-                'error' => null, 'baseline' => null, 'started_at' => null, 'queued_at' => time()], now()->addDay());
+                'error' => null, 'baseline' => null, 'started_at' => null, 'queued_at' => time(), 'backfill' => $backfill], now()->addDay());
             Cache::put('finance:orders:active:'.$account->id, $id, now()->addDay());
             try {
-                SyncFinancePayPalOrders::dispatch($account->id, $actor, $id);
+                SyncFinancePayPalOrders::dispatch($account->id, $actor, $id, $backfill);
             } catch (\Throwable $e) {
                 $this->update($id, ['status' => 'failed', 'error' => '后台任务提交失败，请稍后重试。']);
                 throw $e;
