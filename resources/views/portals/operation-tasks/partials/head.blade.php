@@ -182,6 +182,33 @@
     function key(field) { return String(field.name || '').replace(/\[([^\]]*)\]/g, '.$1').replace(/\.\d+(?=\.|$)/g, '.*'); }
     function label(field) { return (copy.attributes || {})[key(field)] || copy.field; }
     function belongs(form) { return form && form.tagName === 'FORM' && (form.matches('.ot-form,.ot-unified-audit-form') || String(form.action).indexOf('/fashion/operation-tasks/') !== -1); }
+
+    function restoreSubmission(form) {
+        if (!belongs(form)) return;
+        if (window.ErpInteractionLoading) window.ErpInteractionLoading.endForm(form);
+        (form.otSubmitSnapshot || []).forEach(function (entry) {
+            entry.button.innerHTML = entry.html;
+            entry.button.disabled = entry.disabled;
+        });
+        delete form.otSubmitSnapshot;
+        form.dispatchEvent(new Event('ot:submission-reset'));
+    }
+    // Run before the shared document-level loader, so snapshots never contain a spinner.
+    window.addEventListener('submit', function (event) {
+        var form = event.target;
+        if (!belongs(form)) return;
+        if (form.dataset.otRequestPending === '1') {
+            event.preventDefault(); event.stopImmediatePropagation(); return;
+        }
+        if (!form.otSubmitSnapshot) form.otSubmitSnapshot = Array.from(form.querySelectorAll('button[type="submit"],button:not([type]),input[type="submit"]')).map(function (button) {
+            return {button:button,html:button.innerHTML,disabled:button.disabled};
+        });
+    }, true);
+    window.addEventListener('pageshow', function () {
+        document.querySelectorAll('form').forEach(function (form) {
+            if (belongs(form) && form.dataset.otRequestPending !== '1') restoreSubmission(form);
+        });
+    });
     function controls(form) { return Array.prototype.slice.call(form.elements).filter(function (field) { return !field.disabled && field.matches('input,select,textarea') && field.type !== 'hidden' && ['button','submit','reset'].indexOf(field.type) === -1; }); }
     function clear(field) {
         field.classList.remove('ot-form-invalid');
@@ -202,6 +229,7 @@
         field.setAttribute('aria-describedby', ((field.getAttribute('aria-describedby') || '') + ' ' + error.id).trim());
     }
     function fail(form, field, message) {
+        restoreSubmission(form);
         if (field) show(field,message);
         var summary = form.querySelector('.ot-form-validation-summary');
         if (!summary) { summary = document.createElement('div'); summary.className = 'alert alert-danger ot-form-validation-summary'; summary.setAttribute('role','alert'); form.insertBefore(summary,form.firstChild); }
@@ -314,7 +342,7 @@
             if (target) target.required = select.value === 'rejected';
         });
     }
-    function bind() { document.querySelectorAll('form').forEach(function (form) { if (belongs(form)) { form.noValidate = true; conditions(form); } }); }
+    function bind() { document.querySelectorAll('form').forEach(function (form) { if (belongs(form)) { form.noValidate = true; if (form.matches('.ot-unified-audit-form')) form.setAttribute('data-loading', 'off'); conditions(form); } }); }
     document.addEventListener('submit',function (event) {
         if (!belongs(event.target)) return;
         var error = check(event.target);
@@ -332,7 +360,7 @@
         if (belongs(form)) conditions(form);
         if (belongs(form) && field.matches('input[type="file"]')) { var message = controlError(field,form); if (message) show(field,message); else clear(field); }
     });
-    window.OperationTaskForms = {text:text,fail:fail,check:check,clear:clear};
+    window.OperationTaskForms = {text:text,fail:fail,check:check,clear:clear,restoreSubmission:restoreSubmission};
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded',bind); else bind();
 })();
 </script>

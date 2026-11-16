@@ -372,21 +372,27 @@
                 }
             }
             if (invalidMessage) {
+                window.OperationTaskForms.restoreSubmission(form);
                 notify(invalidMessage);
                 return;
             }
+            window.OperationTaskForms.restoreSubmission(form);
+            form.dataset.otRequestPending = '1';
+            var abortController = new AbortController();
+            var timedOut = false;
+            var timeout = window.setTimeout(function () { timedOut = true; abortController.abort(); }, 30000);
             var submitButton = form.querySelector('[type="submit"]');
             var originalHtml = submitButton ? submitButton.innerHTML : '';
             if (submitButton) {
                 submitButton.disabled = true;
                 submitButton.innerHTML = '<i class="fa fa-spinner fa-spin"></i> ' + operationCopy.saving;
             }
-            fetch(form.action, {
+            Promise.resolve().then(function () { return fetch(form.action, {
                 method: 'POST',
                 body: new FormData(form),
                 headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
-                credentials: 'same-origin'
-            }).then(function (response) {
+                credentials: 'same-origin', signal: abortController.signal
+            }); }).then(function (response) {
                 return response.json().catch(function () { return {}; }).then(function (body) {
                     if (!response.ok) {
                         if (body.errors) throw body;
@@ -401,9 +407,12 @@
             }).catch(function (error) {
                 var errors = error && error.errors ? error.errors : null;
                 var firstKey = errors ? Object.keys(errors)[0] : null;
-                var message = firstKey && errors[firstKey] ? errors[firstKey][0] : (error.message || operationCopy.save_failed);
+                var message = firstKey && errors[firstKey] ? errors[firstKey][0] : (timedOut ? operationCopy.request_timeout : (error && error.message || operationCopy.save_failed));
                 notify(message, 'error', operationCopy.error_title);
-            }).then(function () {
+            }).finally(function () {
+                window.clearTimeout(timeout);
+                delete form.dataset.otRequestPending;
+                window.OperationTaskForms.restoreSubmission(form);
                 if (submitButton) {
                     submitButton.disabled = false;
                     submitButton.innerHTML = originalHtml;

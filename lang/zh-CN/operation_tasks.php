@@ -163,6 +163,7 @@ return [
         'error_title' => '操作失败',
         'warning_title' => '操作提醒',
         'saving' => '正在保存',
+        'request_timeout' => '请求等待超时，提交结果尚未确认。请先刷新核对是否已保存，再决定是否重新提交。',
         'save_failed' => '保存失败，请稍后重试。',
         'save_success' => '保存成功',
         'retained_asset_required' => '没有原文件的素材必须上传文件或填写素材链接。',

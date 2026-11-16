@@ -12,6 +12,7 @@
         var queue = Promise.resolve();
         var states = [];
         var submitting = false;
+        form.addEventListener('ot:submission-reset', function () { submitting = false; refresh(); });
 
         function t(key, values) {
             var value = labels[key] || '';
@@ -232,7 +233,7 @@
             }
             var incomplete = states.some(function (state) { return ['empty', 'ready'].indexOf(state.status) === -1; });
             var invalid = states.some(function (state) { return !state.retained && !state.token.value && !state.row.querySelector('input[name$="[url]"]').value.trim(); });
-            if (incomplete || invalid) { event.preventDefault(); notify(t(incomplete ? 'wait' : 'required')); return; }
+            if (incomplete || invalid) { event.preventDefault(); if (window.OperationTaskForms) window.OperationTaskForms.restoreSubmission(form); notify(t(incomplete ? 'wait' : 'required')); return; }
             submitting = true;
             submit.disabled = true;
         });
