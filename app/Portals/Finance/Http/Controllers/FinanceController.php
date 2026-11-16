@@ -1644,10 +1644,7 @@ class FinanceController extends Controller
         $tabUrls = [];
         foreach (\App\Portals\Finance\FinanceTransactionSummary::VIEWS as $key => $label) {
             $query = \Illuminate\Support\Arr::except($filters, ['download', 'channel', 'page']);
-            if ($key === 'credit_card' && ! $request->filled('month')) {
-                unset($query['month']);
-            }
-            if ($account && ! $accountMatchesTab($account, $key)) {
+            if (! $account || ! $accountMatchesTab($account, $key)) {
                 unset($query['payment_account_id']);
             }
             $tabUrls[$key] = route('finance.report', ['report' => $report, ...$query, 'view' => 'transactions', 'channel' => $key]);

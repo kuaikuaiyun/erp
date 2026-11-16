@@ -2712,10 +2712,16 @@ class FinancePortalTest extends TestCase
         $this->assertCount(5, $last->viewData('items'));
         parse_str(parse_url($last->viewData('tabUrls')['combined'], PHP_URL_QUERY), $tabQuery);
         $this->assertArrayNotHasKey('page', $tabQuery);
+        $this->assertSame('2026-11', $tabQuery['month']);
+        $this->assertSame('USD', $tabQuery['currency']);
+        $defaultMonth = $this->get('/finance/reports/summary?view=transactions&channel=paypal')->assertOk();
+        parse_str(parse_url($defaultMonth->viewData('tabUrls')['credit_card'], PHP_URL_QUERY), $creditQuery);
+        $this->assertSame($defaultMonth->viewData('filters')['month'], $creditQuery['month']);
         $larger = $this->get(str_replace('per_page=10', 'per_page=20', $url))->assertOk();
         $this->assertCount(20, $larger->viewData('items'));
         $filtered = $this->get($url.'&subscription='.urlencode('订阅复购1次'))->assertOk();
         $this->assertSame(1, $filtered->viewData('paginator')->total());
+        $this->assertSame('10.00000000', $filtered->viewData('items')[0]['settlement']);
         $sheet = $this->readDownload($this->get($url.'&page=3&download=1')->assertOk()->streamedContent());
         $this->assertCount(26, $sheet->toArray());
         $this->get($url.'&page=0')->assertSessionHasErrors('page');

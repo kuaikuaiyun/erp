@@ -7,6 +7,7 @@
 .finance-report .finance-table{border:1px solid #dce6ef;border-collapse:collapse}
 .finance-report .finance-table th,.finance-report .finance-table td,.finance-report .finance-table th:nth-child(n+4),.finance-report .finance-table td:nth-child(n+4){text-align:center;vertical-align:middle!important;border:1px solid #dce6ef}
 .finance-report .finance-table.summary-grid{table-layout:auto}.finance-report .summary-grid th,.finance-report .summary-grid td{width:auto;white-space:nowrap}.finance-report .finance-table-wrap{overflow-x:auto}
+.finance-report .finance-channel-tabs{margin:0;overflow-x:auto;white-space:nowrap}
 </style>
 @endpush
 @section('finance_content')
@@ -47,11 +48,11 @@
 @endif
 <p class="finance-report-help">按币种、区域和订阅类型汇总。结算相关金额以美元计，物流和采购成本以人民币计。物流、采购未录入时，匹配到的物流订单按商品重量估算运费，按 SKU 指导价估算采购成本。缺少匹配或成本资料时留空。</p>
 <div class="box">
-    <ul class="nav nav-tabs" aria-label="交易汇总通道">
+    <nav class="finance-summary-tabs finance-channel-tabs" aria-label="交易汇总通道">
         @foreach($summaryTabs as $key => $label)
-            <li @class(['active' => $tab === $key])><a href="{{ $tabUrls[$key] }}" @if($tab === $key) aria-current="page" @endif>{{ $label }}</a></li>
+            <a href="{{ $tabUrls[$key] }}" @class(['is-active' => $tab === $key]) @if($tab === $key) aria-current="page" @endif>{{ $label }}</a>
         @endforeach
-    </ul>
+    </nav>
     <div class="box-body finance-table-wrap">
         <table class="table finance-table summary-grid">
             <thead><tr><th class="finance-selection"><input type="checkbox" data-export-all aria-label="全选当前页"></th>@foreach($columns as $label)<th scope="col">{{ $label }}</th>@endforeach</tr></thead>
@@ -61,7 +62,7 @@
                         <td>{{ ($item[$field] ?? null) === null ? '' : (in_array($field, ['channel', 'account', 'currency', 'team', 'subscription', 'month'], true) ? $item[$field] : \App\Portals\Finance\FinanceCatalog::reportAmount($item[$field], $field === 'orders' ? 0 : 3)) }}</td>
                     @endforeach</tr>
                 @empty
-                    <tr><td colspan="{{ count($columns) + 1 }}">无符合条件的记录</td></tr>
+                    <tr><td colspan="{{ count($columns) + 1 }}">{{ $reportSnapshot === null && $reportStatus['state'] !== 'ready' ? '当前筛选的报表尚未生成' : '无符合条件的记录' }}</td></tr>
                 @endforelse
             </tbody>
         </table>

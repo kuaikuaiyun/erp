@@ -78,6 +78,15 @@
 #finance-filters .paypal-date-filters .logistics-date-range>div{display:grid;grid-template-columns:minmax(0,1fr) 14px minmax(0,1fr);gap:8px;align-items:center}
 #finance-filters .paypal-date-filters .logistics-date-range>div>span{text-align:center}
 @media(max-width:600px){#finance-filters .paypal-date-filters .logistics-date-range{flex-basis:355px}}
+#finance-filters .xuzong-date-filters{flex-wrap:wrap;overflow:visible;row-gap:12px}
+#finance-filters .xuzong-date-filters .logistics-date-range{flex:0 1 355px;min-width:0;max-width:100%}
+#finance-filters .xuzong-date-filters .logistics-date-range:not(.paypal-extra-filter){order:-1}
+#finance-filters:not(.paypal-filters-expanded) .xuzong-date-filters .paypal-extra-filter{display:none}
+.xuzong-date-filters .xuzong-date-timezone{flex-basis:100%;margin:0}
+@media(max-width:600px){
+    #finance-filters .xuzong-date-filters .logistics-date-range{grid-template-columns:minmax(0,1fr);gap:5px}
+    #finance-filters .xuzong-date-filters .logistics-date-range>label{text-align:left}
+}
 .paypal-order-toolbar select[name=export_format]{width:155px;height:32px;flex:0 0 155px;margin:0}
 .finance-system .paypal-order-toolbar{align-items:center;gap:12px}
 .finance-system .paypal-order-toolbar.has-order-refresh .box-title{margin-right:0}
@@ -208,8 +217,11 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
         @if(! in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true))<div class="form-group finance-date-range"><label for="filter-from">日期区间</label><div class="finance-date-inputs"><input id="filter-from" type="date" class="form-control" name="from" value="{{ $filters['from'] ?? '' }}" aria-label="{{ __('finance.fields.from') }}"><span aria-hidden="true">—</span><input id="filter-to" type="date" class="form-control" name="to" value="{{ $filters['to'] ?? '' }}" aria-label="{{ __('finance.fields.to') }}"></div></div>@endif
     </div>
     @if(in_array($dataset, ['paypal-orders', 'xuzong2-orders'], true))
-        <div class="logistics-filter-date-row paypal-date-filters">
-            @foreach(['refunded'=>'实际退款时间','ordered'=>'下单时间','paid'=>'付款时间'] as $prefix => $label)
+        <div class="logistics-filter-date-row paypal-date-filters{{ $xuzongReport ? ' xuzong-date-filters' : '' }}">
+            @if($xuzongReport)
+                <p class="finance-note xuzong-date-timezone paypal-extra-filter">订单下单、订单付款和实际退款日期均按北京时间筛选。</p>
+            @endif
+            @foreach($xuzongReport ? ['ordered'=>'订单下单日期','paid'=>'订单付款日期','refunded'=>'实际退款日期'] : ['refunded'=>'实际退款时间','ordered'=>'下单时间','paid'=>'付款时间'] as $prefix => $label)
                 <div class="logistics-filter-field logistics-date-range paypal-extra-filter"><label>{{ $label }}</label><div>
                     <input type="date" class="form-control" name="order_fields[{{ $prefix }}_from]" value="{{ $filters['order_fields'][$prefix.'_from'] ?? '' }}">
                     <span>—</span>
@@ -217,7 +229,7 @@ button.finance-record-cell:focus-visible{outline:2px solid #338dc7;outline-offse
                 </div></div>
             @endforeach
 
-            <div class="logistics-filter-field logistics-date-range"><label for="filter-from">日期区间</label><div ><input id="filter-from" type="date" class="form-control" name="from" value="{{ $filters['from'] ?? '' }}" aria-label="{{ __('finance.fields.from') }}"><span aria-hidden="true">—</span><input id="filter-to" type="date" class="form-control" name="to" value="{{ $filters['to'] ?? '' }}" aria-label="{{ __('finance.fields.to') }}"></div></div>
+            <div class="logistics-filter-field logistics-date-range"><label for="filter-from">{{ $xuzongReport ? '交易创建日期' : '日期区间' }}</label><div ><input id="filter-from" type="date" class="form-control" name="from" value="{{ $filters['from'] ?? '' }}" aria-label="{{ __('finance.fields.from') }}"><span aria-hidden="true">—</span><input id="filter-to" type="date" class="form-control" name="to" value="{{ $filters['to'] ?? '' }}" aria-label="{{ __('finance.fields.to') }}"></div></div>
         </div>
         <div class="paypal-filter-extra">
     @endif
