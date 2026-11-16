@@ -108,7 +108,8 @@ class AppLovinPerformanceReportController extends Controller
             $dateFrom,
             $dateTo,
             $reports->pluck('operator_user_id')->map(fn ($id) => (int) $id)->filter()->unique()->values()->all(),
-            $timezone
+            $timezone,
+            requireBothSubscriptionTags: true,
         );
         $bindings = AppLovinAccountStoreBinding::query()->pluck('assistant_domain_store_id', 'account_key');
         $storeIds = $bindings->values()->merge(

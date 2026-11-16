@@ -311,7 +311,7 @@ class OperationReportMetricsService
     /** @param list<int> $operatorUserIds
      *  @return array<int,array{rows:list<array<string,mixed>>,totals:array<string,float|int>,warnings:list<string>}>
      */
-    public function buildRangeForOperators(string $dateFrom, string $dateTo, array $operatorUserIds, string $timezone = self::REPORT_TIMEZONE): array
+    public function buildRangeForOperators(string $dateFrom, string $dateTo, array $operatorUserIds, string $timezone = self::REPORT_TIMEZONE, bool $requireBothSubscriptionTags = false): array
     {
         $operatorUserIds = collect($operatorUserIds)->map(fn ($id) => (int) $id)->filter()->unique()->values()->all();
         if ($operatorUserIds === []) return [];
@@ -364,6 +364,20 @@ class OperationReportMetricsService
             $isSubscriptionFirst = $order->subscription_type === '订阅首次购买';
             $isNormalFirst = $order->subscription_type === '无订阅';
             $isRenewal = str_starts_with((string) $order->subscription_type, '订阅复购');
+            if ($requireBothSubscriptionTags) {
+                $payload = $order->shopify_payload;
+                if (is_string($payload)) $payload = json_decode($payload, true);
+                $rawTags = is_array($payload) ? ($payload['tags'] ?? []) : [];
+                $rawTags = is_string($rawTags) ? explode(',', $rawTags) : $rawTags;
+                $tags = collect(is_array($rawTags) ? $rawTags : [])
+                    ->filter(fn ($tag) => is_scalar($tag))
+                    ->map(fn ($tag) => mb_strtolower(trim((string) $tag)));
+                $isRenewal = $isRenewal || $tags->contains('ouyicart subscription recurring order');
+                $isSubscriptionFirst = ! $isRenewal
+                    && $tags->contains('subscription')
+                    && $tags->contains('subscription first order');
+                $isNormalFirst = ! $isRenewal && ! $isSubscriptionFirst && $isNormalFirst;
+            }
             if ($isSubscriptionFirst) { $row['first_subscription_orders']++; $row['first_subscription_revenue'] += $amount; }
             elseif ($isNormalFirst) { $row['first_normal_orders']++; $row['first_normal_revenue'] += $amount; }
             elseif ($isRenewal) { $row['renewal_orders']++; $row['renewal_revenue'] += $amount; }
