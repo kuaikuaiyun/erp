@@ -327,8 +327,22 @@ Route::get('/operation-dashboard/operation-reports', [OperationReportDashboardCo
 Route::get('/operation-dashboard/operation-reports/order-details', [OperationReportDashboardController::class, 'orderDetails'])->name('operation-dashboard.operation-reports.order-details');
 Route::post('/operation-dashboard/operation-reports/department-scope', [OperationReportDashboardController::class, 'updateDepartmentScope'])->name('operation-dashboard.operation-reports.department-scope.update');
 Route::get('/operation-dashboard/applovin-spends', [AppLovinSpendReviewController::class, 'index'])->name('operation-dashboard.applovin-spends.index');
+Route::post('/operation-dashboard/applovin-spends/store-binding', [AppLovinSpendReviewController::class, 'bindStore'])
+    ->name('operation-dashboard.applovin-spends.store-binding');
 Route::get('/operation-dashboard/applovin-spends/screenshots/{screenshot}', [AppLovinSpendReviewController::class, 'screenshot'])
     ->whereNumber('screenshot')->name('operation-dashboard.applovin-spends.screenshot');
+Route::get('/operation-dashboard/fashion-operation-reports', [FashionOperationReportController::class, 'index'])
+    ->name('operation-dashboard.fashion-operation-reports.index');
+Route::get('/operation-dashboard/applovin-account-statistics', [AppLovinAccountStatisticsController::class, 'index'])
+    ->name('operation-dashboard.applovin-account-statistics.index');
+Route::get('/operation-dashboard/applovin-account-statistics/accounts', [AppLovinAccountStatisticsController::class, 'spendBand'])
+    ->name('operation-dashboard.applovin-account-statistics.spend-band');
+Route::get('/operation-dashboard/applovin-account-statistics/{operator}', [AppLovinAccountStatisticsController::class, 'show'])
+    ->whereNumber('operator')->name('operation-dashboard.applovin-account-statistics.show');
+Route::get('/operation-dashboard/applovin-performance-reports', [AppLovinPerformanceReportController::class, 'index'])
+    ->name('operation-dashboard.applovin-performance-reports.index');
+Route::get('/operation-dashboard/fashion-applovin-performance-reports', [FashionAppLovinPerformanceReportController::class, 'index'])
+    ->name('operation-dashboard.fashion-applovin-performance-reports.index');
 Route::get('/assistant/advertising-spend-summary', [AdvertisingSpendSummaryController::class, 'index'])->name('assistant.advertising-spend-summary.index');
 Route::get('/assistant/advertising-spend-analysis', [AdvertisingSpendAnalysisController::class, 'index'])->name('assistant.advertising-spend-analysis.index');
 Route::get('/assistant/fashion-advertising-reviews', [FashionAdvertisingReviewController::class, 'index'])->name('assistant.fashion-advertising-reviews.index');

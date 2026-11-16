@@ -31,8 +31,13 @@ class FashionOperationReportController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
-        $this->authorization->assertAssistantPortal($context['portal']);
-        $visibleDepartmentIds = $context['user']->isAdministrator()
+        $isDashboard = $request->routeIs('operation-dashboard.fashion-operation-reports.*');
+        if ($isDashboard) {
+            abort_unless($context['portal']->code === 'yunying-kanban', 404);
+        } else {
+            $this->authorization->assertAssistantPortal($context['portal']);
+        }
+        $visibleDepartmentIds = $isDashboard || $context['user']->isAdministrator()
             ? null
             : $this->storeOwners->visibleOperationDepartmentIds($context['user']);
 
@@ -253,6 +258,9 @@ class FashionOperationReportController extends Controller
         $summaryRoi = $summarySpend > 0 ? $roiRevenue / $summarySpend : null;
         return view('portals.assistant.fashion-operation-reports.index', [
             ...$context, 'rows' => $rows, 'teamBands' => $teamBands, 'timezoneOptions' => $timezones,
+            'fashionReportIndexRoute' => $isDashboard
+                ? 'operation-dashboard.fashion-operation-reports.index'
+                : 'assistant.fashion-operation-reports.index',
             'departmentOptions' => $departmentOptions,
             'filters' => [...$validated, 'date_range' => $dateRange, 'date_from' => $dateFrom, 'date_to' => $dateTo, 'timezone' => $timezone,
                 'exclude_resigned' => $excludeResigned,
