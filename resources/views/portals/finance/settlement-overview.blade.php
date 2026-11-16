@@ -10,6 +10,8 @@
 .overview-summary label { margin-bottom: 4px; }
 .overview-summary .form-control,
 .overview-summary .overview-actions .btn { height: 32px; }
+.settlement-overview .overview-import-months { grid-column: 1 / -1; display: block; margin: 0; }
+.overview-import-months a { white-space: nowrap; }
 .overview-summary .overview-actions { padding-top: 8px; flex-wrap: wrap; }
 .overview-summary .overview-rate { margin: 8px 0 0; }
 .overview-summary .overview-method { margin-top: 12px; }
@@ -46,6 +48,10 @@
 @endpush
 @section('finance_content')
 <div @class(['settlement-overview', 'overview-summary' => $report === 'summary'])>
+@php
+    $summaryStatus = $reportStatuses[$filters['month']] ?? [];
+    $summaryAwaitingResult = ($summaryStatus['state'] ?? 'ready') !== 'ready' && ! isset($summaryStatus['updated_at']);
+@endphp
 @if($report === 'summary')@include('portals.finance.partials.summary-tabs', ['activeTab' => 'settlement'])@endif
 @foreach($reportStatuses as $period => $status)
     @if($status['state'] !== 'ready' || isset($status['updated_at']))
@@ -113,7 +119,7 @@ document.getElementById('overview-channel').addEventListener('change', function 
     <button type="button" class="btn btn-default" disabled>导出 Excel</button>
 @endif
 </div>@if(($filters['channel'] ?? '') === 'credit_card')
-    <p class="overview-rate">信用卡数据来自「信用卡结算明细」导入记录。
+    <p class="overview-rate overview-import-months">信用卡数据来自「信用卡结算明细」导入记录。
         @if($creditMonths)
             已导入月份：
             @foreach($creditMonths as $month)
@@ -128,7 +134,7 @@ document.getElementById('overview-channel').addEventListener('change', function 
 <p class="overview-rate {{ $rate === null ? 'is-missing' : '' }}"><i class="fa fa-info-circle" aria-hidden="true"></i>{{ $rate === null ? '本月美元兑人民币汇率未配置，物流和采购损耗占比暂不能计算。' : '本月汇率：1 USD = '.\App\Portals\Finance\FinanceCatalog::reportAmount($rate).' CNY' }}</p>
 </div></div>
 @if($report === 'summary')
-<div class="box"><header class="overview-results-head"><h2>汇总结果</h2><span>{{ count($groups) }} 组</span></header><div class="box-body finance-table-wrap"><table class="table finance-table"><thead><tr><th class="finance-selection"><input type="checkbox" data-export-all aria-label="全选当前页"></th><th>项目</th><th>支付通道</th><th>成功订单数</th><th>失败交易数</th><th>结算金额（美元）</th></tr></thead><tbody>@forelse($groups as $group)<tr><td class="finance-selection"><input type="checkbox" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($group) }}" aria-label="选择此行"></td><td>{{ $group['name'] }}</td><td>{{ \App\Portals\Finance\FinanceSettlementService::REPORT_CHANNELS[$group['channel']] }}</td><td>{{ number_format($group['success_count']) }}</td><td>{{ number_format($group['failed_count']) }}</td><td>{{ $group['settlement'] === null ? '' : \App\Portals\Finance\FinanceCatalog::reportAmount($group['settlement'], 3) }}</td></tr>@empty<tr><td colspan="6">无符合条件的记录</td></tr>@endforelse</tbody></table></div></div>
+<div class="box"><header class="overview-results-head"><h2>汇总结果</h2><span>{{ $summaryAwaitingResult ? '待生成' : count($groups).' 组' }}</span></header><div class="box-body finance-table-wrap"><table class="table finance-table"><thead><tr><th class="finance-selection"><input type="checkbox" data-export-all aria-label="全选当前页"></th><th>项目</th><th>支付通道</th><th>成功订单数</th><th>失败交易数</th><th>结算金额（美元）</th></tr></thead><tbody>@forelse($groups as $group)<tr><td class="finance-selection"><input type="checkbox" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($group) }}" aria-label="选择此行"></td><td>{{ $group['name'] }}</td><td>{{ \App\Portals\Finance\FinanceSettlementService::REPORT_CHANNELS[$group['channel']] }}</td><td>{{ number_format($group['success_count']) }}</td><td>{{ number_format($group['failed_count']) }}</td><td>{{ $group['settlement'] === null ? '' : \App\Portals\Finance\FinanceCatalog::reportAmount($group['settlement'], 3) }}</td></tr>@empty<tr><td colspan="6">{{ $summaryAwaitingResult ? ($summaryStatus['state'] === 'failed' ? '报表生成失败，后台将重试。' : '报表正在生成，请稍候。') : '无符合条件的记录' }}</td></tr>@endforelse</tbody></table></div></div>
 @else
 @php
     $overallGroups = array_values(array_filter($groups, fn ($group) => $group['is_total'] ?? false));

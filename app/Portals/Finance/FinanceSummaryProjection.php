@@ -16,7 +16,7 @@ class FinanceSummaryProjection
         return $rows === null ? null : collect(iterator_to_array($rows, false));
     }
 
-    public function stream(string $channel, array $filters, bool $transactions, ?string $currency = null): ?iterable
+    public function stream(string $channel, array $filters, bool $transactions, ?string $currency = null, array $paymentChannels = []): ?iterable
     {
         $db = $this->workbooks->database();
         // Worldpay allocates costs within the account-filtered source batches.
@@ -26,7 +26,7 @@ class FinanceSummaryProjection
         }
 
         $month = substr($filters['from'], 0, 7);
-        return $db->transaction(function () use ($db, $month, $channel, $filters, $transactions, $currency): ?iterable {
+        return $db->transaction(function () use ($db, $month, $channel, $filters, $transactions, $currency, $paymentChannels): ?iterable {
             if ($db->table('finance_summary_changes')->exists()) {
                 return null;
             }
@@ -44,6 +44,16 @@ class FinanceSummaryProjection
             $first = (clone $rows)->value('payload');
             if ($first !== null && ! isset(json_decode($first, true, 512, JSON_THROW_ON_ERROR)['payment_channel'])) {
                 return null;
+            }
+
+            if ($paymentChannels !== []) {
+                $rows->whereIn('payload->payment_channel', $paymentChannels);
+            }
+            if (filled($filters['team'] ?? null)) {
+                $rows->where('payload->_summary_team', $filters['team']);
+            }
+            if (filled($filters['subscription'] ?? null)) {
+                $rows->where('payload->subscription', FinanceSettlementService::subscriptionLabel($filters['subscription']));
             }
 
             return $rows->lazyById(500, 'position')->map(fn ($row) => json_decode($row->payload, true, 512, JSON_THROW_ON_ERROR))

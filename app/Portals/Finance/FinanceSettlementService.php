@@ -1300,11 +1300,13 @@ class FinanceSettlementService
     {
         $db = $this->workbooks->database();
         $mysql = in_array($db->getDriverName(), ['mysql', 'mariadb'], true);
-        $table = $mysql ? 'finance_report_order_costs' : 'finance_cost_orders_'.bin2hex(random_bytes(8));
+        $table = 'finance_cost_orders_'.bin2hex(random_bytes(8));
         $runId = (string) \Illuminate\Support\Str::uuid();
         if ($mysql) {
-            // The scratch rows live only until this transaction or savepoint is rolled back.
-            $db->beginTransaction();
+            $grammar = $db->getQueryGrammar();
+            $temporary = $grammar->wrapTable($table);
+            $template = $grammar->wrapTable('finance_report_order_costs');
+            $db->statement("CREATE TEMPORARY TABLE {$temporary} LIKE {$template}");
         } else {
             $db->getSchemaBuilder()->create($table, function (\Illuminate\Database\Schema\Blueprint $table): void {
                 $table->temporary();
@@ -1320,7 +1322,7 @@ class FinanceSettlementService
             yield from $this->aggregateLogisticsCosts($rows, $db, $table, $runId);
         } finally {
             if ($mysql) {
-                $db->rollBack();
+                $db->statement("DROP TEMPORARY TABLE IF EXISTS {$temporary}");
             } else {
                 $db->getSchemaBuilder()->dropIfExists($table);
             }
@@ -1731,9 +1733,11 @@ class FinanceSettlementService
         return array_values($groups);
     }
 
+    public const SHOPIFY_SUMMARY_CHANNELS = ['paypal', 'xuzong1', 'xuzong2', 'xuzong', 'credit_card'];
+
     public static function isShopifySummaryChannel(string $channel): bool
     {
-        return in_array($channel, ['paypal', 'xuzong1', 'xuzong2', 'xuzong', 'credit_card'], true);
+        return in_array($channel, self::SHOPIFY_SUMMARY_CHANNELS, true);
     }
 
     public static function refundIncludingSplit(array $row): ?string

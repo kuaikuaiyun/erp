@@ -67,7 +67,7 @@
             </tbody>
         </table>
     </div>
-    <div class="box-body">@include('portals.finance.pagination', ['paginator' => $paginator])</div>
+    <div class="box-body">@include('portals.finance.pagination', ['paginator' => $paginator, 'pageSizeUrl' => $reportSnapshot ? $paginator->url(1) : null])</div>
 </div>
 </div>
 @endsection

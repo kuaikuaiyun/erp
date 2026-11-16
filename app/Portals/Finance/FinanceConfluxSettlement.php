@@ -328,6 +328,7 @@ class FinanceConfluxSettlement
                 $items = $this->workbooks->database()->table(self::TABLE.' as entry')
                     ->joinSub($unique, 'unique_orders', 'unique_orders.reference', '=', 'entry.reference')
                     ->where('entry.platform', 'ye')->where('entry.payment_account_id', $account->id)
+                    ->whereIn('entry.reference', $references)
                     ->orderBy('entry.settlement_date')->orderBy('entry.id')->get(['entry.*'])->groupBy('reference');
                 foreach ($items as $reference => $item) {
                     $entries->put($byReference->get($reference)->first()->id, $item);

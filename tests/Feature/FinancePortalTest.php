@@ -2691,6 +2691,8 @@ class FinancePortalTest extends TestCase
 
     public function test_transaction_summary_paginates_groups_preserves_filters_and_exports_all_groups(): void
     {
+        (require database_path('migrations/2026_11_13_000004_create_finance_report_snapshots.php'))->up();
+
         $rows = [];
         for ($index = 1; $index <= 25; $index++) {
             $rows[$index + 1] = [...$this->recordRow(), '日期' => '2026-11-02', '交易 ID' => 'PAGE-'.$index, '订阅类型' => '订阅复购'.$index.'次'];
@@ -2705,7 +2707,10 @@ class FinancePortalTest extends TestCase
         $this->assertSame('transactions', $query['view']);
         $this->assertSame('USD', $query['currency']);
         $this->assertSame('2026-11', $query['month']);
+        $this->assertNotNull($first->viewData('reportSnapshot'));
+        $this->assertSame($first->viewData('reportSnapshot'), $query['report_snapshot']);
         $second = $this->get($nextUrl)->assertOk();
+        $this->assertSame($first->viewData('reportSnapshot'), $second->viewData('reportSnapshot'));
         $this->assertCount(10, $second->viewData('items'));
         $this->assertEmpty(array_intersect(array_column($first->viewData('items'), 'subscription'), array_column($second->viewData('items'), 'subscription')));
         $last = $this->get($url.'&page=3')->assertOk();
@@ -2893,7 +2898,7 @@ class FinancePortalTest extends TestCase
         $this->assertSame('', $service->rows('credit_card', [])->first()['domain']);
     }
 
-    public function test_both_summary_tabs_check_the_submitted_filters_until_the_snapshot_is_ready(): void
+    public function test_transaction_summary_runs_live_while_settlement_summary_checks_the_snapshot(): void
     {
         (require database_path('migrations/2026_11_13_000004_create_finance_report_snapshots.php'))->up();
         (require database_path('migrations/2026_11_13_000006_track_finance_report_refresh_attempts.php'))->up();
@@ -2904,10 +2909,12 @@ class FinancePortalTest extends TestCase
         $transactions = '/finance/reports/summary?view=transactions&month=2026-10&channel=paypal&currency=USD';
         $this->freezeTime();
 
-        foreach ([$settlement, $transactions] as $url) {
-            $this->get($url)->assertOk()->assertSee('data-finance-snapshot-status="pending"', false);
-            $this->getJson($url.'&snapshot_status=1')->assertOk()->assertJsonPath('state', 'pending');
-        }
+        $this->get($settlement)->assertOk()->assertSee('data-finance-snapshot-status="pending"', false);
+        $this->getJson($settlement.'&snapshot_status=1')->assertOk()->assertJsonPath('state', 'pending');
+        $first = $this->get($transactions)->assertOk()->viewData('reportSnapshot');
+        $second = $this->get($transactions)->assertOk()->viewData('reportSnapshot');
+        $this->assertNotNull($first);
+        $this->assertNotSame($first, $second);
 
         $this->assertTrue($snapshots->refresh(app(\App\Portals\Finance\Http\Controllers\FinanceController::class), false));
         foreach ([$settlement, $transactions] as $url) {
@@ -2916,7 +2923,7 @@ class FinancePortalTest extends TestCase
         $this->getJson(str_replace('team=North', 'team=South', $settlement).'&snapshot_status=1')
             ->assertOk()->assertJsonPath('state', 'pending');
         $this->getJson(str_replace('currency=USD', 'currency=EUR', $transactions).'&snapshot_status=1')
-            ->assertOk()->assertJsonPath('state', 'pending');
+            ->assertOk()->assertJsonPath('state', 'ready');
     }
 
     public function test_report_queries_and_reset_preserve_the_selected_tab(): void

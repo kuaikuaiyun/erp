@@ -31,8 +31,12 @@ class RefreshFinanceSummaries extends Command
             $tracksRevisions = \App\Portals\Finance\FinanceSummaryTriggers::available($db);
             $failed = false;
             if ($tracksRevisions) {
+                $dependencies->resolve($db);
+            }
+            // Publish requested reports before rebuilding historical projections.
+            $reportsRefreshed = $reports->refresh($controller, $tracksRevisions);
+            if ($tracksRevisions) {
                 try {
-                    $dependencies->resolve($db);
                     $periods = $db->table('finance_summary_periods')->whereColumn('published', '<', 'revision')->orderByDesc('month')->get();
                     foreach ($periods as $period) {
                         $projection->refresh($period);
@@ -42,8 +46,6 @@ class RefreshFinanceSummaries extends Command
                     $failed = true;
                 }
             }
-            $reportsRefreshed = $reports->refresh($controller, $tracksRevisions);
-
             return $reportsRefreshed && ! $failed ? self::SUCCESS : self::FAILURE;
         } finally {
             $lock->release();
