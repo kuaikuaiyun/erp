@@ -291,8 +291,8 @@ class OperationAiProductLibraryController extends Controller
                     'imported_at' => (string) data_get($shopify, 'imported_at', ''),
                 ];
             })->values()->all(),
-            'created_at' => $product->created_at?->timezone(config('app.timezone'))->format('Y-m-d H:i:s'),
-            'updated_at' => $product->updated_at?->timezone(config('app.timezone'))->format('Y-m-d H:i:s'),
+            'created_at' => $product->created_at?->copy()->timezone('Asia/Shanghai')->format('Y-m-d H:i:s'),
+            'updated_at' => $product->updated_at?->copy()->timezone('Asia/Shanghai')->format('Y-m-d H:i:s'),
         ]);
     }
 

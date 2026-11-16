@@ -230,7 +230,7 @@
                             );
                             $referenceFile = $product->referenceFilePayload();
                             $packageFile = $product->packageFilePayload();
-                            $updatedAt = $product->updated_at?->timezone(config('app.timezone'))->format('Y-m-d H:i');
+                            $updatedAt = $product->updated_at?->copy()->timezone('Asia/Shanghai');
                         @endphp
                         <tr data-aikaipin-product
                             data-keyword="{{ strtolower($product->product_code.' '.$productName.' '.$allSkus) }}"
@@ -301,7 +301,7 @@
                                 <span class="aikaipin-source">{{ trans('aikaipin.upload.source_options.'.$product->source_platform) }}</span>
                                 <span class="aikaipin-type">{{ trans('aikaipin.upload.type_options.'.$product->product_type) }}</span>
                             </td>
-                            <td class="aikaipin-updated-cell"><time datetime="{{ $product->updated_at?->toAtomString() }}">{{ $updatedAt }}</time></td>
+                            <td class="aikaipin-updated-cell"><time datetime="{{ $updatedAt?->toAtomString() }}" title="北京时间">{{ $updatedAt?->format('Y-m-d H:i') }}</time></td>
                             <td style="text-align:center;">
                                 @if($product->is_published)
                                     <span class="label label-success"><i class="fa fa-arrow-up"></i> 已上架</span>

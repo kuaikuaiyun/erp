@@ -177,6 +177,7 @@
                         @php
                             $images = $product->imageFiles();
                             $skus = $product->skuValues();
+                            $beijingUpdatedAt = $product->updated_at?->copy()->timezone('Asia/Shanghai');
                         @endphp
                         <tr>
                             <td class="aikaipin-image-cell">
@@ -220,7 +221,7 @@
                                 <span class="aikaipin-source">{{ trans('aikaipin.upload.source_options.'.$product->source_platform) }}</span>
                                 <span class="aikaipin-type">{{ trans('aikaipin.upload.type_options.'.$product->product_type) }}</span>
                             </td>
-                            <td class="aikaipin-updated-cell"><time datetime="{{ $product->updated_at?->toAtomString() }}">{{ $product->updated_at?->timezone(config('app.timezone'))->format('Y-m-d H:i') }}</time></td>
+                            <td class="aikaipin-updated-cell"><time datetime="{{ $beijingUpdatedAt?->toAtomString() }}" title="北京时间">{{ $beijingUpdatedAt?->format('Y-m-d H:i') }}</time></td>
                             <td class="aikaipin-operation-cell">
                                 @if($product->referenceFilePayload())
                                     <a class="btn btn-primary btn-sm" href="{{ route('operation.ai-product-library.reference-preview', ['product' => $product]) }}" target="_blank" rel="noopener noreferrer">
