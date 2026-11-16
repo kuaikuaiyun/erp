@@ -584,13 +584,13 @@ class OperationTaskController extends Controller
         ]);
     }
 
-    public function assetFile(Request $request, OperationTaskAsset $asset): BinaryFileResponse
+    public function assetFile(Request $request, OperationTaskAsset $asset, \App\Portals\OperationTasks\OperationTaskVideoService $videos): Response
     {
         $context = $this->authorized($request);
         $asset->loadMissing('task');
         $this->authorizeTask($context['user'], $asset->task);
         abort_unless($asset->file_path && Storage::disk('local')->exists($asset->file_path), 404);
-        return response()->file(Storage::disk('local')->path($asset->file_path));
+        return $videos->fileResponse($asset->file_path);
     }
 
     public function storeAssetDaily(Request $request, OperationTaskAsset $asset): RedirectResponse

@@ -1,6 +1,19 @@
 <?php
 
 return [
+    'video_processing' => [
+        'ready' => '播放索引已在文件开头，无需处理。',
+        'needs_faststart' => '播放索引在文件末尾，可使用 --apply 优化。',
+        'optimized' => '已优化播放结构，音视频数据校验一致。',
+        'invalid' => '文件结构异常，原文件未修改。',
+        'unsupported' => '暂不支持此文件类型，原文件未修改。',
+        'fragmented' => '已分片的 MP4，跳过处理。',
+        'busy' => '文件正在处理中，本次跳过。',
+        'failed' => '处理或校验失败，原文件未替换。',
+        'no_space' => '临时磁盘空间不足，原文件未修改。',
+        'empty' => '没有找到对应的 MP4 素材。',
+        'invalid_id' => '请提供有效的素材 ID。',
+    ],
     'dates' => [
         'from' => '提交开始日期（北京时间）', 'to' => '提交结束日期（北京时间）',
         'quick' => '快捷选择', 'today' => '今天', 'yesterday' => '昨天', 'week' => '近7天', 'all' => '全部时间',
