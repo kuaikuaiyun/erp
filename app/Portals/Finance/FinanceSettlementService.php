@@ -816,7 +816,8 @@ class FinanceSettlementService
                 : $this->departmentForOrderOwner($order, $ownership, $owner, $membersById, $membersByName);
             $department = $resolveDepartment($department)
                 ?: $resolveDepartment($ownership['team'])
-                ?: $resolveDepartment($group?->team ?? '');
+                ?: $resolveDepartment($group?->team ?? '')
+                ?: trim((string) ($group?->team ?? ''));
 
             return [
                 // The report's usage label can come from the store profile even when its formal owner was cleared.

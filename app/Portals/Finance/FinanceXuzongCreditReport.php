@@ -133,8 +133,9 @@ class FinanceXuzongCreditReport
         $orders = $this->linkedOrders($records);
         $attribution = $this->attribution ??= $this->settlements->liveOrderAttributionResolver();
         $matched = $this->matches->forOrders($records, $orders);
+        $costEditable = app(FinanceXuzongCostEligibility::class)->editable($records, $orders);
 
-        return $records->mapWithKeys(function (FinanceRecord $record) use ($orders, $attribution, $timezone, $matched): array {
+        return $records->mapWithKeys(function (FinanceRecord $record) use ($orders, $attribution, $timezone, $matched, $costEditable): array {
             $order = $orders->get($record->id);
             $bill = $matched->get($record->id, []);
             $payment = $bill['_statement_payment'] ?? FinanceLogisticsCreditOrders::actualPayment($record->payment_transactions);
@@ -255,7 +256,7 @@ class FinanceXuzongCreditReport
                 $row['备注'] = implode('；', $notes);
             }
 
-            return [$record->id => array_replace($row, $overrides)];
+            return [$record->id => ['_cost_editable' => $costEditable->get($record->id), ...array_replace($row, $overrides)]];
         });
     }
 
@@ -438,7 +439,7 @@ class FinanceXuzongCreditReport
 
         return app(StreamedXlsxWriter::class)->response($filename, '徐总支付2明细表', $columns,
             function () use ($headers, $rows): iterable {
-                foreach ($rows as $row) {
+                foreach ($rows as ['values' => $row, 'costEditable' => $costEditable]) {
                     $cells = [];
                     foreach ($row as $index => $value) {
                         $header = $headers[$index];
@@ -450,6 +451,7 @@ class FinanceXuzongCreditReport
                         } else {
                             $cells[] = ['value' => $value];
                         }
+                        $cells[$index]['unlocked'] = $costEditable || ! in_array($header, FinanceXuzongCostEligibility::FIELDS, true);
                     }
                     yield ['cells' => $cells];
                 }
@@ -458,6 +460,6 @@ class FinanceXuzongCreditReport
                 array_map(fn ($header) => ['label' => $header, 'width' => max(16, mb_strwidth($header) + 4)],
                     ['收款账户', '交易流水号', '商户订单号', '结算时间', '结算币种', '记录类型', ...self::STATEMENT_EXPORT_AMOUNTS]),
                 $statementRows,
-            ]], streamDirectly: true);
+            ]], streamDirectly: true, protectSheet: (bool) array_intersect($headers, FinanceXuzongCostEligibility::FIELDS));
     }
 }

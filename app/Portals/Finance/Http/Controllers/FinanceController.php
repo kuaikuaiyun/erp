@@ -22,6 +22,7 @@ use App\Portals\Finance\FinanceSettlementService;
 use App\Portals\Finance\FinanceWorkbookService;
 use App\Portals\Finance\FinanceXuzongCreditMatches;
 use App\Portals\Finance\FinanceXuzongCreditReport;
+use App\Portals\Finance\FinanceXuzongCostEligibility;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
@@ -1205,18 +1206,25 @@ class FinanceController extends Controller
         if ($xuzongReport) {
             $report = app(FinanceXuzongCreditReport::class);
             $orders = app(FinanceLogisticsCreditOrders::class);
-            $rows = (clone $query)->reorder('id')->select('id')->lazyById(300)->chunk(300)->flatMap(function ($batch) use ($orders, $report, $filters, $headers) {
+            $format = $filters['export_format'] ?? 'xlsx';
+            $rows = (clone $query)->reorder('id')->select('id')->lazyById(300)->chunk(300)->flatMap(function ($batch) use ($orders, $report, $filters, $headers, $format) {
                 $records = $orders->query(xuzongReport: true, ids: $batch->pluck('id')->all())->orderBy('id')->get();
 
-                return $report->rows($records, $filters['timezone'])->values()->map(fn ($values) =>
-                    array_map(fn ($header) => FinanceXuzongCreditReport::formatCell($header, $values[$header] ?? ''), $headers));
+                return $report->rows($records, $filters['timezone'])->values()->map(function ($values) use ($headers, $format) {
+                    $editable = $values['_cost_editable'];
+                    $cells = array_map(fn ($header) => ! $editable && in_array($header, FinanceXuzongCostEligibility::FIELDS, true)
+                        ? FinanceXuzongCostEligibility::LOCKED_LABEL
+                        : FinanceXuzongCreditReport::formatCell($header, $values[$header] ?? ''), $headers);
+
+                    return in_array($format, ['csv', 'tsv'], true) ? $cells : ['values' => $cells, 'costEditable' => $editable];
+                });
             });
 
             $filename = 'xuzong-credit-'.now()->format('Ymd-His');
-            $format = $filters['export_format'] ?? 'xlsx';
 
             return match ($format) {
-                'xls' => $this->workbooks->download($headers, $rows, $filename.'.xls', 'xls', simplifyText: false),
+                'xls' => $this->workbooks->download($headers, $rows, $filename.'.xls', 'xls', simplifyText: false,
+                    protectedCostRows: true),
                 'csv', 'tsv' => $this->workbooks->downloadDelimited(
                     $headers, $rows, $filename.'.'.$format, $format === 'tsv' ? "\t" : ',', simplifyText: false,
                 ),

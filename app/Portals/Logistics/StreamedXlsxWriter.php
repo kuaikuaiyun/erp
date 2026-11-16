@@ -24,17 +24,18 @@ class StreamedXlsxWriter
         string $fontName = 'Calibri',
         array $additionalSheets = [],
         bool $streamDirectly = false,
+        bool $protectSheet = false,
     ): StreamedResponse {
         $headerFills = array_values(array_unique(array_filter(array_column($columns, 'headerFill'), fn ($color) => preg_match('/^[0-9A-F]{6}$/D', $color))));
 
-        return response()->streamDownload(function () use ($sheetName, $columns, $rows, $showGridlines, $plain, $fontName, $headerFills, $additionalSheets, $streamDirectly): void {
+        return response()->streamDownload(function () use ($sheetName, $columns, $rows, $showGridlines, $plain, $fontName, $headerFills, $additionalSheets, $streamDirectly, $protectSheet): void {
             if (function_exists('set_time_limit')) {
                 @set_time_limit(0);
             }
 
             $sheets = [[$sheetName, $columns, $rows], ...$additionalSheets];
             if ($streamDirectly) {
-                $this->streamWorkbook($sheets, $showGridlines, $plain, $fontName, $headerFills);
+                $this->streamWorkbook($sheets, $showGridlines, $plain, $fontName, $headerFills, $protectSheet);
                 return;
             }
             $xlsxPath = tempnam(sys_get_temp_dir(), 'erp-xlsx-');
@@ -43,13 +44,13 @@ class StreamedXlsxWriter
             }
             $paths = [];
             try {
-                foreach ($sheets as [$name, $sheetColumns, $sheetRows]) {
+                foreach ($sheets as $index => [$name, $sheetColumns, $sheetRows]) {
                     $path = tempnam(sys_get_temp_dir(), 'erp-sheet-');
                     if ($path === false) {
                         throw new RuntimeException('无法创建 Excel 临时文件。');
                     }
                     $paths[] = $path;
-                    $this->writeSheet($path, $sheetColumns, $sheetRows, $showGridlines, $plain, $headerFills);
+                    $this->writeSheet($path, $sheetColumns, $sheetRows, $showGridlines, $plain, $headerFills, $protectSheet && $index === 0);
                 }
                 $this->writeWorkbook($xlsxPath, $paths, array_column($sheets, 0), $fontName, $headerFills);
 
@@ -75,7 +76,7 @@ class StreamedXlsxWriter
      * @param list<array{label:string,width:float|int,headerFill?:string}> $columns
      * @param callable():iterable<array{kind?:string,height?:float|int,outline?:int,mergeDown?:array<int,int>,mergeAcross?:array<int,int>,cells:list<array{value:mixed,type?:string,align?:string,wrap?:bool}>}> $rows
      */
-    private function writeSheet(string $path, array $columns, callable $rows, bool $showGridlines, bool $plain, array $headerFills): void
+    private function writeSheet(string $path, array $columns, callable $rows, bool $showGridlines, bool $plain, array $headerFills, bool $protectSheet): void
     {
         $handle = fopen($path, 'wb');
         if ($handle === false) {
@@ -83,7 +84,7 @@ class StreamedXlsxWriter
         }
 
         try {
-            foreach ($this->sheetXml($columns, $rows, $showGridlines, $plain, $headerFills) as $xml) {
+            foreach ($this->sheetXml($columns, $rows, $showGridlines, $plain, $headerFills, $protectSheet) as $xml) {
                 fwrite($handle, $xml);
             }
         } finally {
@@ -91,7 +92,7 @@ class StreamedXlsxWriter
         }
     }
 
-    private function sheetXml(array $columns, callable $rows, bool $showGridlines, bool $plain, array $headerFills): \Generator
+    private function sheetXml(array $columns, callable $rows, bool $showGridlines, bool $plain, array $headerFills, bool $protectSheet): \Generator
     {
         yield '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
         yield '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
@@ -159,6 +160,9 @@ class StreamedXlsxWriter
                     (string) ($cell['align'] ?? 'left'),
                     (bool) ($cell['wrap'] ?? false),
                 ));
+                if ($protectSheet && ($cell['unlocked'] ?? false)) {
+                    $style = 19 + count($headerFills) + ($type === 'datetime' ? 1 : 0);
+                }
                 $value = $cell['value'] ?? null;
                 if (in_array($type, ['money', 'rate', 'number', 'decimal', 'quantity', 'datetime'], true) && $value !== null && $value !== '' && is_numeric($value)) {
                     $rowXml .= '<c r="'.$reference.'" s="'.$style.'" t="n"><v>'.(string) ((float) $value).'</v></c>';
@@ -173,6 +177,9 @@ class StreamedXlsxWriter
         $lastRow = max(1, $rowNumber - 1);
         $lastColumn = $this->columnName(count($columns));
         yield '</sheetData>';
+        if ($protectSheet) {
+            yield '<sheetProtection sheet="1" autoFilter="0"/>';
+        }
         if ($mergedRanges !== []) {
             yield '<mergeCells count="'.count($mergedRanges).'">';
             foreach ($mergedRanges as $range) {
@@ -185,14 +192,14 @@ class StreamedXlsxWriter
         yield '</worksheet>';
     }
 
-    private function streamWorkbook(array $sheets, bool $showGridlines, bool $plain, string $fontName, array $headerFills): void
+    private function streamWorkbook(array $sheets, bool $showGridlines, bool $plain, string $fontName, array $headerFills, bool $protectSheet): void
     {
         $zip = new ZipStream(sendHttpHeaders: false, flushOutput: PHP_SAPI !== 'cli');
         foreach ($this->workbookParts(array_column($sheets, 0), $fontName, $headerFills) as $path => $data) {
             $zip->addFile($path, $data);
         }
         foreach ($sheets as $index => [, $columns, $rows]) {
-            $xml = $this->sheetXml($columns, $rows, $showGridlines, $plain, $headerFills);
+            $xml = $this->sheetXml($columns, $rows, $showGridlines, $plain, $headerFills, $protectSheet && $index === 0);
             $started = false;
             $stream = new PumpStream(function () use ($xml, &$started): string|false {
                 if ($started) {
@@ -402,7 +409,7 @@ class StreamedXlsxWriter
             .'<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>'
             .'<border><left/><right/><top style="thin"><color rgb="FFBDD8F1"/></top><bottom/><diagonal/></border></borders>'
             .'<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-            .'<cellXfs count="'.(19 + count($headerFills)).'">'
+            .'<cellXfs count="'.(21 + count($headerFills)).'">'
             .$this->xf(0, 0, 0, 0, $alignLeft).$this->xf(0, 1, 2, 0, $alignCenter)
             .$this->xf(164, 0, 0, 0, $alignRight).$this->xf(165, 0, 0, 0, $alignRight)
             .$this->xf(0, 0, 0, 0, $alignWrap).$this->xf(0, 0, 0, 0, $alignCenter)
@@ -412,6 +419,8 @@ class StreamedXlsxWriter
             .$this->xf(164, 3, 4, 0, $alignRight).$this->xf(165, 3, 4, 0, $alignRight).$this->xf(0, 3, 4, 0, $alignWrap)
             .$this->xf(166, 0, 0, 0, $alignRight).$this->xf(167, 0, 0, 0, $alignRight)
             .$this->xf(168, 0, 0, 0, $alignRight).$extraStyles
+            .'<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyProtection="1"><protection locked="0"/></xf>'
+            .'<xf numFmtId="168" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyProtection="1"><protection locked="0"/></xf>'
             .'</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
             .'</styleSheet>';
     }

@@ -343,7 +343,7 @@ class FinanceWorkbookService
         }
     }
 
-    public function importRecords(string $dataset, array $rows, string $account, string $timezone, int $actor, bool $createOnly = false, bool $guardSettlementMonth = false, bool $fillMissing = false): int
+    public function importRecords(string $dataset, array $rows, string $account, string $timezone, int $actor, bool $createOnly = false, bool $guardSettlementMonth = false, bool $fillMissing = false, ?\Illuminate\Support\Collection $costFingerprints = null): int
     {
         if (! in_array($timezone, self::TIMEZONES, true)) {
             throw ValidationException::withMessages(['source_timezone' => __('finance.errors.timezone')]);
@@ -382,13 +382,13 @@ class FinanceWorkbookService
                 $payload['_report_timezone'] = $rowTimezone;
             }
             if (is_numeric($date)) {
-                $date = Date::excelToDateTimeObject((float) $date)->format('Y-m-d H:i:s');
+                $date = gmdate('Y-m-d H:i:s', Date::excelToTimestamp((float) $date, 'UTC'));
                 if ($time !== '') {
                     $date = substr($date, 0, 10);
                 }
             }
             if ($time !== '' && is_numeric($time)) {
-                $time = Date::excelToDateTimeObject((float) $time)->format('H:i:s');
+                $time = gmdate('H:i:s', Date::excelToTimestamp((float) $time, 'UTC'));
             }
             try {
                 if (! preg_match('/^\d{4}[-\/]\d{1,2}[-\/]\d{1,2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?$/', $date)) {
@@ -435,6 +435,14 @@ class FinanceWorkbookService
         }
 
         if ($dataset === FinanceLogisticsCreditOrders::IMPORTED_DATASET && $createOnly && $fillMissing && ! $guardSettlementMonth) {
+            foreach ($records as $record) {
+                foreach (FinanceXuzongCostEligibility::FIELDS as $field) {
+                    if (filled($record['payload'][$field] ?? null)) {
+                        $costFingerprints?->push($record['fingerprint']);
+                        break;
+                    }
+                }
+            }
             return $this->saveImportedCreditOrders($records);
         }
         if ($dataset === 'xuzong2-details' && $createOnly && $guardSettlementMonth && ! $fillMissing
@@ -582,12 +590,12 @@ class FinanceWorkbookService
         });
     }
 
-    public function download(array $headers, iterable $rows, string $filename, string $format = 'xlsx', bool $plain = false, bool $simplifyText = true, string $sheetTitle = 'Sheet1', array $additionalSheets = []): StreamedResponse
+    public function download(array $headers, iterable $rows, string $filename, string $format = 'xlsx', bool $plain = false, bool $simplifyText = true, string $sheetTitle = 'Sheet1', array $additionalSheets = [], bool $protectedCostRows = false): StreamedResponse
     {
         if ($format === 'xlsx') {
             return $this->downloadStreamingXlsx($headers, $rows, $filename, $plain, $simplifyText, $sheetTitle, $additionalSheets);
         }
-        return response()->streamDownload(function () use ($headers, $rows, $format, $plain, $simplifyText, $sheetTitle, $additionalSheets): void {
+        return response()->streamDownload(function () use ($headers, $rows, $format, $plain, $simplifyText, $sheetTitle, $additionalSheets, $protectedCostRows): void {
             // Spreadsheet cells and ZIP compression coexist during export.
             // Keep the higher budget local to this download, not the whole PHP service.
             $previousLimit = ini_get('memory_limit');
@@ -603,6 +611,9 @@ class FinanceWorkbookService
                 $book->getDefaultStyle()->getFont()->setName('Microsoft YaHei')->setSize(10);
             }
             $sheet = $book->getActiveSheet()->setTitle($sheetTitle);
+            if ($protectedCostRows && array_intersect($headers, FinanceXuzongCostEligibility::FIELDS)) {
+                $sheet->getProtection()->setSheet(true)->setAutoFilter(false);
+            }
             if ($simplifyText) {
                 $headers = array_map(FinanceCatalog::simplified(...), $headers);
             }
@@ -614,7 +625,12 @@ class FinanceWorkbookService
             }
             $rowIndex = 2;
             foreach ($rows as $row) {
+                $editable = $protectedCostRows && $row['costEditable'];
+                $row = $protectedCostRows ? $row['values'] : $row;
                 foreach (array_values($row) as $column => $value) {
+                    if ($protectedCostRows && ($editable || ! in_array($headers[$column], FinanceXuzongCostEligibility::FIELDS, true))) {
+                        $sheet->getStyle([$column + 1, $rowIndex])->getProtection()->setLocked('unprotected');
+                    }
                     // Financial references and literal text must survive export without formula execution.
                     $value = (string) ($value ?? '');
                     if ($simplifyText) {
