@@ -30,7 +30,7 @@ Ladmin\Admin::css('/assets/erp/portal-workspace.css?v=20261106-3');
 Ladmin\Admin::css('/assets/erp/interaction-loading-20261011-1.css?v=20261011-3');
 // Load scoped styles with the admin shell so PJAX navigation needs no head replacement.
 Ladmin\Admin::css(asset('css/erp-account-labels.css').'?v=20261116-1');
-Ladmin\Admin::css(asset('css/dingtalk-bindings.css').'?v=20261116-2');
+Ladmin\Admin::css(asset('css/dingtalk-bindings.css').'?v=20261116-5');
 Ladmin\Admin::css(asset('css/dingtalk-companies.css').'?v=20261116-4');
 Ladmin\Admin::headerJs('/assets/erp/admin-notifications.js?v=20260929-2');
 Ladmin\Admin::js('/assets/erp/organization-workspace.js?v=20261112-1');

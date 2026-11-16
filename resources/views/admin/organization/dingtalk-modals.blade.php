@@ -1,6 +1,6 @@
 <div class="dg-workspace" data-ding-accounts>
 <dialog class="dg-modal" data-modal="binding" aria-labelledby="dg-bind-title"><header><div><h4 id="dg-bind-title">{{ __('dingtalk.mode.binding') }}</h4><p data-account-name></p></div><button class="dg-close" type="button" data-close aria-label="{{ __('dingtalk.workspace.close') }}">×</button></header>
-<form data-binding-form data-loading="off"><div class="dg-modal-body"><div class="dg-banner" data-status role="status" aria-live="polite" hidden></div>
+<form data-binding-form data-loading="off"><div class="dg-modal-body">
 <div class="dg-existing" data-existing></div><label class="dg-field">{{ __('dingtalk.manage.company') }}<select class="form-control" data-company required></select></label>
 <section class="dg-selection" data-selection-panel aria-labelledby="dg-selection-title">
 <div class="dg-selection-heading"><strong id="dg-selection-title">{{ __('dingtalk.workspace.selection_heading') }}</strong><button type="button" class="btn btn-default btn-sm" data-clear-selection disabled hidden>{{ __('dingtalk.manage.clear') }}</button></div>
@@ -8,7 +8,7 @@
 <p class="dg-help" data-selection-hint hidden>{{ __('dingtalk.workspace.selection_pending') }}</p>
 </section>
 <div data-directory></div><p class="dg-help">{{ __('dingtalk.workspace.binding_review') }}</p>
-</div><footer><button class="btn btn-default" type="button" data-logs="login">{{ __('dingtalk.workspace.login_logs') }}</button><button class="btn btn-default" type="button" data-logs="operation">{{ __('dingtalk.workspace.operation_logs') }}</button><button class="btn btn-default" type="button" data-close>{{ __('dingtalk.workspace.close') }}</button><button type="submit" class="btn btn-primary" data-save disabled>{{ __('dingtalk.workspace.save') }}</button></footer></form></dialog>
+</div><footer class="dg-binding-footer"><div class="dg-banner dg-binding-result" data-status role="status" aria-live="polite" hidden></div><button class="btn btn-default" type="button" data-logs="login">{{ __('dingtalk.workspace.login_logs') }}</button><button class="btn btn-default" type="button" data-logs="operation">{{ __('dingtalk.workspace.operation_logs') }}</button><button class="btn btn-default" type="button" data-close>{{ __('dingtalk.workspace.close') }}</button><button type="submit" class="btn btn-primary" data-save disabled>{{ __('dingtalk.workspace.save') }}</button></footer></form></dialog>
 @if($owner)
 <dialog class="dg-modal dg-modal-medium" data-modal="grants" aria-labelledby="dg-grants-title"><header><h4 id="dg-grants-title">{{ __('dingtalk.company.assign') }}</h4><button type="button" class="dg-close" data-close aria-label="{{ __('dingtalk.workspace.close') }}">×</button></header>
 <form data-grants-form data-loading="off"><div class="dg-modal-body"><div class="dg-banner" data-status role="status" aria-live="polite" hidden></div><p class="dg-help">{{ __('dingtalk.company.assign_hint') }}</p>

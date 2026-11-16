@@ -377,3 +377,7 @@
         grid-template-columns: 1fr;
     }
 }
+
+.dg-modal .dg-binding-footer { flex-wrap: wrap; }
+.dg-binding-footer .dg-binding-result { flex: 0 0 100%; min-width: 0; margin: 0; text-align: left; }
+.dg-binding-result[data-error="0"] { background: #eef9f1; border-color: #b8ddc3; color: #286b3d; }
