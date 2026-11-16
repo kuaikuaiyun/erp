@@ -45,6 +45,8 @@ class AppLovinAccountStatisticsController extends Controller
             'department_ids.*' => ['integer', 'distinct', Rule::in($availableDepartmentIds)],
             'operator' => ['nullable', 'string', 'max:100'],
             'per_page' => ['nullable', 'integer', Rule::in([20, 50, 100])],
+            'sort_by' => ['nullable', Rule::in(['department', 'operator_name', 'hire_days', 'account_count', 'under_5000_count', 'between_5000_10000_count', 'over_10000_count', 'total_spend'])],
+            'sort_direction' => ['nullable', Rule::in(['asc', 'desc'])],
         ]);
         $operator = trim((string) ($filters['operator'] ?? ''));
         $departmentIds = collect($filters['department_ids'] ?? [])
@@ -59,11 +61,20 @@ class AppLovinAccountStatisticsController extends Controller
             'over_10000' => $accounts->where('total_spend', '>', 10000)->count(),
         ];
 
-        $operators = $accounts->groupBy('operator_user_id')->map(function (Collection $rows): array {
+        $sortBy = (string) ($filters['sort_by'] ?? 'total_spend');
+        $sortDirection = (string) ($filters['sort_direction'] ?? 'desc');
+        $profiles = AdminUser::query()->whereIn('id', $accounts->pluck('operator_user_id')->unique())
+            ->get(['id', 'hired_at'])->keyBy('id');
+        $today = now('Asia/Shanghai')->startOfDay();
+        $operators = $accounts->groupBy('operator_user_id')->map(function (Collection $rows) use ($profiles, $today): array {
             $first = $rows->first();
+            $hiredAt = $profiles->get((int) $first['operator_user_id'])?->hired_at;
+            $hireDate = $hiredAt ? \Carbon\CarbonImmutable::parse($hiredAt->format('Y-m-d'), 'Asia/Shanghai') : null;
+            $hireDays = $hireDate ? ($hireDate->gt($today) ? 0 : (int) $hireDate->diffInDays($today) + 1) : null;
             return [
                 'operator_user_id' => (int) $first['operator_user_id'],
                 'operator_name' => $first['operator_name'],
+                'hire_days' => $hireDays,
                 'department_id' => (int) $first['department_id'],
                 'department' => $first['department'],
                 'account_count' => $rows->count(),
@@ -72,9 +83,19 @@ class AppLovinAccountStatisticsController extends Controller
                 'over_10000_count' => $rows->where('total_spend', '>', 10000)->count(),
                 'total_spend' => (float) $rows->sum('total_spend'),
             ];
-        })->sort(function (array $left, array $right): int {
-            return $right['total_spend'] <=> $left['total_spend']
-                ?: strnatcasecmp($left['operator_name'], $right['operator_name']);
+        })->sort(function (array $left, array $right) use ($sortBy, $sortDirection): int {
+            $leftValue = $left[$sortBy];
+            $rightValue = $right[$sortBy];
+            if ($leftValue === null || $rightValue === null) {
+                $comparison = ($leftValue === null) <=> ($rightValue === null);
+            } else {
+                $comparison = in_array($sortBy, ['department', 'operator_name'], true)
+                    ? strnatcasecmp((string) $leftValue, (string) $rightValue)
+                    : $leftValue <=> $rightValue;
+                if ($sortDirection === 'desc') $comparison = -$comparison;
+            }
+            return $comparison ?: strnatcasecmp($left['operator_name'], $right['operator_name'])
+                ?: $left['operator_user_id'] <=> $right['operator_user_id'];
         })->values();
 
         $perPage = (int) ($filters['per_page'] ?? 20);
@@ -88,7 +109,8 @@ class AppLovinAccountStatisticsController extends Controller
             'operators' => $operators,
             'departmentOptions' => Department::business()->whereIn('id', $availableDepartmentIds)
                 ->orderBy('sort')->orderBy('name')->get(['id', 'parent_id', 'name']),
-            'filters' => ['department_ids' => $departmentIds, 'operator' => $operator, 'per_page' => $perPage],
+            'filters' => ['department_ids' => $departmentIds, 'operator' => $operator, 'per_page' => $perPage,
+                'sort_by' => $sortBy, 'sort_direction' => $sortDirection],
             'spendBands' => $spendBands,
             'statisticsRoutes' => $routes,
         ]);

@@ -49,6 +49,7 @@
             shopifySection.prop('hidden', value !== 'shopify');
             xshoppySection.prop('hidden', value !== 'xshoppy' && value !== 'xshopy');
             shoplineSection.prop('hidden', value !== 'shopline');
+            $('#assistant-nbc-app-section').prop('hidden', value !== 'nbc');
         }
 
         siteBuilder.on('input change', syncVisibility);

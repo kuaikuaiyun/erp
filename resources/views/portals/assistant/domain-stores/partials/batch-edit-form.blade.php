@@ -24,7 +24,7 @@
     ];
     $presetFields = ['site_builder', 'credit_card', 'wallet', 'paypal', 'other_payment'];
     $multiFields = ['team', 'erp'];
-    $requiredFields = ['shop_name', 'domain', 'domain_check_status', 'email_bound', 'shop_status'];
+    $requiredFields = ['shop_name', 'domain', 'domain_check_status', 'email_bound', 'shop_status', 'team', 'project'];
     $fullWidthFields = ['team', 'erp', 'remark'];
     $textFields = [
         'shop_name' => ['type' => 'text', 'maxlength' => 100, 'required' => true],
@@ -67,7 +67,7 @@
                             $label = $t('fields.'.$field);
                             $columnClass = in_array($field, $fullWidthFields, true) ? 'col-md-12' : 'col-md-6';
                         @endphp
-                        <div class="form-group {{ $columnClass }}" data-batch-field="{{ $field }}">
+                        <div class="form-group {{ $columnClass }}" data-batch-field="{{ $field }}" @if (in_array($field, ['team', 'project'], true)) data-store-required-field="{{ $field }}" data-store-required-message="{{ $t('validation.required_field', ['field' => $label]) }}" @endif>
                             <label for="assistant-batch-value-{{ $field }}">
                                 {{ $label }}
                                 @if (in_array($field, $requiredFields, true))

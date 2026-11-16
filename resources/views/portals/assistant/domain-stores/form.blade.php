@@ -144,8 +144,8 @@
             <div class="box box-solid assistant-form-section assistant-form-team-section">
                 <div class="box-header with-border"><h3 class="box-title">{{ $t('sections.team_usage') }}</h3></div>
                 <div class="box-body row assistant-form-grid">
-                    <div class="form-group col-md-4 @error('team') has-error @enderror">
-                        <label for="team">{{ $t('fields.team') }}</label>
+                    <div class="form-group col-md-4 @error('team') has-error @enderror" data-store-required-field="team" data-store-required-message="{{ $t('validation.required_field', ['field' => $t('fields.team')]) }}">
+                        <label for="team">{{ $t('fields.team') }} <span class="text-red">*</span></label>
                         <div class="assistant-quick-option-group assistant-tag-input-group" data-tag-input-group data-team-quick-option-group data-quick-option-field="team">
                             <div class="assistant-quick-option-input-row assistant-tag-editor-row">
                                 <div class="assistant-tag-editor" data-tag-editor data-field-name="team[]">
@@ -176,8 +176,8 @@
                         @error('team')<span class="help-block">{{ $message }}</span>@enderror
                         @error('team.*')<span class="help-block">{{ $message }}</span>@enderror
                     </div>
-                    <div class="form-group col-md-4 @error('project') has-error @enderror">
-                        <label for="project">{{ $t('fields.project') }}</label>
+                    <div class="form-group col-md-4 @error('project') has-error @enderror" data-store-required-field="project" data-store-required-message="{{ $t('validation.required_field', ['field' => $t('fields.project')]) }}">
+                        <label for="project">{{ $t('fields.project') }} <span class="text-red">*</span></label>
                         <div class="assistant-quick-option-group assistant-project-option-group" data-project-quick-option-group data-quick-option-field="project">
                             <div class="assistant-quick-option-input-row">
                                 <input id="project" name="project" class="form-control" value="{{ $value('project') }}" maxlength="100" @readonly(! $canManageQuickOptions)>
@@ -472,6 +472,17 @@
                 </div>
             </div>
 
+            <div id="assistant-nbc-app-section" class="box box-solid assistant-form-section assistant-form-shopify-section" @if (strtolower(trim((string) $value('site_builder'))) !== 'nbc') hidden @endif>
+                <div class="box-header with-border"><h3 class="box-title">{{ $t('nbc_app.title') }}</h3></div>
+                <div class="box-body row assistant-form-grid">
+                    <div class="form-group col-md-6 @error('nbc_app_token') has-error @enderror">
+                        <label for="nbc_app_token">{{ $t('nbc_app.token') }}</label>
+                        <input id="nbc_app_token" name="nbc_app_token" type="password" class="form-control" value="{{ $value('nbc_app_token') }}" maxlength="65535" autocomplete="new-password">
+                        @error('nbc_app_token')<span class="help-block">{{ $message }}</span>@enderror
+                    </div>
+                </div>
+            </div>
+
             <div id="assistant-shopline-app-section" class="box box-solid assistant-form-section assistant-form-shopify-section" @if (strtolower((string) $value('site_builder')) !== 'shopline') hidden @endif>
                 <div class="box-header with-border"><h3 class="box-title">Shopline App 应用</h3></div>
                 <div class="box-body row assistant-form-grid">
@@ -602,6 +613,7 @@
 @endsection
 
 @push('scripts')
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-required-fields.js?v=20261116-1"></script>
     <script>
         window.ErpAssistantDomainStoreTagTranslations = @json($tagJavascriptTranslations);
         window.ErpAssistantDomainStoreQuickOptionConfig = @json($quickOptionJavascriptConfig);
@@ -609,7 +621,7 @@
         window.ErpAssistantDomainStoreOwnerForm = @json($ownerAssignmentJavascriptConfig);
     </script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-tags-20261007-3.js"></script>
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-form-20261008-1.js?v=20261106-1"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-form-20261008-1.js?v=20261116-2"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-access-guide-20261009-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-quick-options-20261008-2.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-team-project-options-20261009-1.js"></script>

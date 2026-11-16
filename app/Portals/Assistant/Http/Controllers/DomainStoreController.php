@@ -238,7 +238,7 @@ class DomainStoreController extends Controller
                 $webhookCandidates = [];
 
                 foreach ($rows as $row) {
-                    $validator = Validator::make($row['data'], $this->storeRules());
+                    $validator = Validator::make($row['data'], $this->importRules());
 
                     if ($validator->fails()) {
                         $errors[] = [
@@ -1703,7 +1703,7 @@ class DomainStoreController extends Controller
             'site_builder', 'shop_name', 'domain', 'email', 'project', 'user_name',
             'credit_card', 'wallet', 'paypal', 'other_payment', 'shop_login_url', 'store_prefix',
             'tongtu_prefix',
-            'shopify_client_id', 'shopify_client_secret', 'xshoppy_api_key', 'xshoppy_password', 'shopline_app_token', 'payment_card', 'remark',
+            'shopify_client_id', 'shopify_client_secret', 'xshoppy_api_key', 'xshoppy_password', 'shopline_app_token', 'nbc_app_token', 'payment_card', 'remark',
         ] as $field) {
             if ($request->has($field)) {
                 $request->merge([$field => trim((string) $request->input($field))]);
@@ -2097,6 +2097,14 @@ class DomainStoreController extends Controller
     }
 
     /** @return array<string, array<int, string>> */
+    private function importRules(): array
+    {
+        return array_replace($this->storeRules(), [
+            'team' => ['required', 'array', 'min:1', 'max:20'],
+            'project' => ['required', 'string', 'max:100'],
+        ]);
+    }
+
     private function storeRules(): array
     {
         return [
@@ -2125,6 +2133,7 @@ class DomainStoreController extends Controller
             'xshoppy_api_key' => ['nullable', 'string', 'max:255'],
             'xshoppy_password' => ['nullable', 'string', 'max:255'],
             'shopline_app_token' => ['nullable', 'string', 'max:65535'],
+            'nbc_app_token' => ['nullable', 'string', 'max:65535'],
             'shop_status' => ['required', 'in:'.implode(',', array_keys(AssistantDomainStore::shopStatusLabels()))],
             'plan_expires_at' => ['nullable', 'date'],
             'payment_card' => ['nullable', 'string', 'max:255'],

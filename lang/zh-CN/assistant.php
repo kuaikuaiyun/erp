@@ -1,7 +1,25 @@
 <?php
 
 return [
+    'applovin_account_statistics' => [
+        'columns' => [
+            'department' => '运营团队',
+            'operator_name' => '运营名称',
+            'hire_days' => '入职天数',
+            'account_count' => 'AppLovin 户数',
+            'under_5000_count' => '< $5,000',
+            'between_5000_10000_count' => '$5,000–$10,000',
+            'over_10000_count' => '> $10,000',
+            'total_spend' => '累计消耗($)',
+            'actions' => '操作',
+        ],
+        'sort_asc' => '按:column升序排列',
+        'sort_desc' => '按:column降序排列',
+        'days' => ':count 天',
+        'empty' => '—',
+    ],
     'domain_stores' => [
+        'nbc_app' => ['title' => 'NBC App 应用', 'token' => 'Token'],
         'menu' => '域名与店铺信息管理',
         'title' => '域名与店铺信息管理',
         'subtitle' => '助理系统',
@@ -412,6 +430,7 @@ return [
         ],
 
         'validation' => [
+            'required_field' => '请填写或选择:field。',
             'required' => '该字段不能为空。',
             'email' => '邮箱格式不正确。',
             'url' => '不是有效的网址。',

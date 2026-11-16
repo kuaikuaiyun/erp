@@ -87,6 +87,8 @@ class AssistantDomainStoreSpreadsheetService
     ];
 
     private const REQUIRED_IMPORT_FIELDS = [
+        'team',
+        'project',
         'shop_name',
         'domain',
         'domain_check_status',
@@ -106,7 +108,9 @@ class AssistantDomainStoreSpreadsheetService
         return array_map(
             fn (string $field): string => $field === 'owner_user'
                 ? __('assistant.domain_stores.export.owner_user')
-                : $this->importHeaderLabel($field),
+                : (in_array($field, ['team', 'project'], true)
+                    ? AssistantDomainStore::fieldLabel($field)
+                    : $this->importHeaderLabel($field)),
             self::EXPORT_FIELDS,
         );
     }
@@ -320,6 +324,9 @@ class AssistantDomainStoreSpreadsheetService
 
         foreach (self::IMPORT_FIELDS as $field) {
             $headers[$this->importHeaderLabel($field)] = $field;
+            if (in_array($field, ['team', 'project'], true)) {
+                $headers[AssistantDomainStore::fieldLabel($field)] = $field;
+            }
         }
 
         return $headers;

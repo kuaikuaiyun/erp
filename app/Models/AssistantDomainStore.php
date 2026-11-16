@@ -112,6 +112,7 @@ class AssistantDomainStore extends Model
         'xshoppy_api_key',
         'xshoppy_password',
         'shopline_app_token',
+        'nbc_app_token',
         'shop_status',
         'plan_expires_at',
         'payment_card',
