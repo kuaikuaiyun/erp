@@ -5502,10 +5502,15 @@ class FinancePortalTest extends TestCase
             return $this->signedRelayResponse($request, $account, ['page' => 1, 'total_pages' => 0, 'total_items' => 0]);
         });
 
+        $this->postJson('/finance/orders/paypal/refresh', ['accounts' => [$account->id]])->assertStatus(202);
+        $this->postJson('/finance/orders/paypal/refresh', ['accounts' => [$account->id], 'backfill' => true])
+            ->assertStatus(202)->assertJsonPath('results.0.backfill', true);
         $this->postJson('/finance/orders/paypal/refresh', ['accounts' => [$account->id], 'backfill' => true])
             ->assertStatus(202)->assertJsonPath('results.0.backfill', true);
         $queue = \Illuminate\Support\Facades\Queue::getFacadeRoot();
-        $job = $queue->pushed(\App\Jobs\SyncFinancePayPalOrders::class)->sole();
+        $jobs = $queue->pushed(\App\Jobs\SyncFinancePayPalOrders::class);
+        $this->assertCount(2, $jobs);
+        $job = $jobs->sole(fn ($job) => $job->backfill);
         $this->assertSame($account->id, $job->accountId);
         $job->handle(app(\App\Portals\Finance\FinancePayPalSyncService::class));
 

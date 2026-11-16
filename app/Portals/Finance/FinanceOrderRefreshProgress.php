@@ -35,10 +35,8 @@ class FinanceOrderRefreshProgress
         return Cache::lock('finance:orders:enqueue:'.$account->id, 10)->block(5, function () use ($account, $actor, $backfill) {
             $active = Cache::get('finance:orders:active:'.$account->id);
             $task = $active ? $this->get($active) : null;
-            if (in_array($task['status'] ?? '', ['queued', 'running'], true)) {
-                if ($backfill && empty($task['backfill'])) {
-                    throw new \DomainException('该账户正在刷新订单，请在刷新完成后提交历史补录。');
-                }
+            $inProgress = in_array($task['status'] ?? '', ['queued', 'running'], true);
+            if ($inProgress && (! $backfill || ! empty($task['backfill']))) {
                 return $active;
             }
             $id = (string) Str::uuid();
@@ -50,6 +48,7 @@ class FinanceOrderRefreshProgress
                 SyncFinancePayPalOrders::dispatch($account->id, $actor, $id, $backfill);
             } catch (\Throwable $e) {
                 $this->update($id, ['status' => 'failed', 'error' => '后台任务提交失败，请稍后重试。']);
+                if ($inProgress) Cache::put('finance:orders:active:'.$account->id, $active, now()->addDay());
                 throw $e;
             }
             return $id;
