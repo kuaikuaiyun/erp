@@ -8,7 +8,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('dingtalk_identities', function (Blueprint $table): void {
+        if (! Schema::hasTable('dingtalk_identities')) Schema::create('dingtalk_identities', function (Blueprint $table): void {
             $table->id();
             $table->string('corp_id', 128);
             $table->string('user_id', 128);
@@ -22,7 +22,7 @@ return new class extends Migration
             $table->timestamps();
             $table->unique(['corp_id', 'user_id']);
         });
-        Schema::create('dingtalk_bindings', function (Blueprint $table): void {
+        if (! Schema::hasTable('dingtalk_bindings')) Schema::create('dingtalk_bindings', function (Blueprint $table): void {
             $table->id();
             $table->foreignId('identity_id')->constrained('dingtalk_identities');
             // The existing admin user table is configurable; retain historical records on deletion.
@@ -32,7 +32,7 @@ return new class extends Migration
             $table->timestamps();
             $table->unique(['identity_id', 'account_id']);
         });
-        Schema::create('dingtalk_challenges', function (Blueprint $table): void {
+        if (! Schema::hasTable('dingtalk_challenges')) Schema::create('dingtalk_challenges', function (Blueprint $table): void {
             $table->id();
             $table->char('token_hash', 64)->unique();
             $table->char('browser_hash', 64);
@@ -42,18 +42,18 @@ return new class extends Migration
             $table->json('payload')->nullable();
             $table->timestamp('expires_at')->index();
             $table->timestamp('consumed_at')->nullable();
-            $table->timestamp('created_at');
+                $table->timestamp('created_at')->useCurrent();
         });
-        Schema::create('dingtalk_events', function (Blueprint $table): void {
+        if (! Schema::hasTable('dingtalk_events')) Schema::create('dingtalk_events', function (Blueprint $table): void {
             $table->id();
             $table->char('event_key', 64)->unique();
             $table->string('event_type', 64);
             $table->string('corp_id', 128);
             $table->json('user_ids');
             $table->unsignedBigInteger('event_at')->default(0);
-            $table->timestamp('created_at');
+                $table->timestamp('created_at')->useCurrent();
         });
-        Schema::create('dingtalk_audits', function (Blueprint $table): void {
+        if (! Schema::hasTable('dingtalk_audits')) Schema::create('dingtalk_audits', function (Blueprint $table): void {
             $table->id();
             $table->string('action', 64)->index();
             $table->unsignedBigInteger('identity_id')->nullable()->index();
@@ -64,7 +64,7 @@ return new class extends Migration
             $table->char('session_hash', 64)->nullable();
             $table->string('ip', 45)->nullable();
             $table->json('metadata')->nullable();
-            $table->timestamp('created_at')->index();
+                $table->timestamp('created_at')->useCurrent()->index();
         });
     }
 

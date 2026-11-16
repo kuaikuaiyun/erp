@@ -13,6 +13,7 @@ class AikaipinPlacementEvaluationRecord extends Model
         'currency',
         'actual_spend',
         'orders',
+        'roi',
         'material_name',
         'video_disk',
         'video_path',
@@ -25,6 +26,7 @@ class AikaipinPlacementEvaluationRecord extends Model
     protected $casts = [
         'actual_spend' => 'decimal:2',
         'orders' => 'integer',
+        'roi' => 'decimal:4',
         'video_size' => 'integer',
         'sort' => 'integer',
     ];

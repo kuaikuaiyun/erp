@@ -2,7 +2,10 @@
 
 namespace App\Portals\Operation;
 
+use App\Models\AdminUser;
 use App\Models\AikaipinProduct;
+use App\Models\AikaipinProductPage;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 class ShopifyProductCsvImporter
@@ -124,7 +127,15 @@ class ShopifyProductCsvImporter
     }
 
     /** @param array<string, mixed> $payload */
-    public function supplement(AikaipinProduct $product, array $payload, string $sourceFile, ?string $sourceName = null): AikaipinProduct
+    public function supplement(
+        AikaipinProduct $product,
+        array $payload,
+        string $sourceFile,
+        ?string $sourceName = null,
+        ?string $pageName = null,
+        ?AdminUser $actor = null,
+        ?string $landingPageUrl = null,
+    ): AikaipinProduct
     {
         $existingSkus = $product->skuValues();
         $csvSkus = collect($payload['variants'] ?? [])->pluck('sku')->filter()->map(fn ($sku) => trim((string) $sku))->all();
@@ -137,12 +148,28 @@ class ShopifyProductCsvImporter
         $payload['source_file'] = basename($sourceName ?: $sourceFile);
         $payload['imported_at'] = now()->toIso8601String();
 
-        $product->forceFill([
-            'sku' => implode(',', $skus),
-            'shopify_data' => $payload,
-        ])->save();
+        DB::connection($product->getConnectionName())->transaction(function () use ($product, $payload, $skus, $pageName, $actor, $landingPageUrl): void {
+            $product->productPages()->update(['is_default' => false]);
+            AikaipinProductPage::query()->create([
+                'aikaipin_product_id' => $product->getKey(),
+                'name' => trim((string) $pageName) ?: trim((string) ($payload['title'] ?? '')) ?: basename((string) ($payload['source_file'] ?? 'products.csv')),
+                'source_file' => basename((string) ($payload['source_file'] ?? 'products.csv')),
+                'landing_page_url' => trim((string) $landingPageUrl) ?: null,
+                'shopify_data' => $payload,
+                'is_default' => true,
+                'created_by' => $actor?->getKey(),
+                'created_by_name' => $actor?->name ?: $actor?->username,
+            ]);
 
-        return $product->refresh();
+            // Keep the legacy column synchronized with the default page so older
+            // integrations and command-line imports continue to work unchanged.
+            $product->forceFill([
+                'sku' => implode(',', $skus),
+                'shopify_data' => $payload,
+            ])->save();
+        });
+
+        return $product->refresh()->load('productPages');
     }
 
     /** @param array<string, mixed> $payload */

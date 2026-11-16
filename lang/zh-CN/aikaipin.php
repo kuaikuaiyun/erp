@@ -302,7 +302,7 @@ return [
             'submitter' => '提报人',
             'updated_at' => '更新时间',
             'operation' => '操作',
-            'record_summary' => ':platform · :currency :spend · :orders 单',
+            'record_summary' => ':platform · :currency :spend · :orders 单 · ROI :roi',
         ],
         'actions' => [
             'new' => '新增测评',
@@ -345,6 +345,8 @@ return [
             'actual_spend_placeholder' => '填写金额',
             'orders' => '出单量',
             'orders_placeholder' => '填写数量',
+            'roi' => 'ROI',
+            'roi_placeholder' => '填写 ROI',
             'data_row_title' => '投放数据 :number',
         ],
         'platform_options' => [

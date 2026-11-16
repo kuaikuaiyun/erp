@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class InternalMessageRecipient extends Model
 {
@@ -28,5 +29,15 @@ class InternalMessageRecipient extends Model
     public function recipientUser(): BelongsTo
     {
         return $this->belongsTo(AdminUser::class, 'recipient_user_id');
+    }
+
+    public function managerListingTask(): HasOne
+    {
+        return $this->hasOne(AiProductListingTask::class, 'manager_recipient_id');
+    }
+
+    public function assigneeListingTask(): HasOne
+    {
+        return $this->hasOne(AiProductListingTask::class, 'assignee_recipient_id');
     }
 }

@@ -31,6 +31,17 @@
         .operation-ai-detail-image img { display:block; width:100%; height:112px; object-fit:cover; transition:transform .18s ease; }
         .operation-ai-detail-image:hover img { transform:scale(1.04); }
         .operation-ai-detail-link { display:inline-flex; align-items:center; gap:6px; color:#2786bd; }
+        .operation-ai-detail-pages { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+        .operation-ai-detail-page { min-width:0; padding:13px 14px; border:1px solid #dce7ef; border-radius:8px; background:#f9fcfe; }
+        .operation-ai-detail-page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; margin-bottom:8px; }
+        .operation-ai-detail-page-name { min-width:0; color:#285d7d; font-weight:700; word-break:break-word; }
+        .operation-ai-detail-page-name .label { margin-left:5px; font-size:9px; }
+        .operation-ai-detail-page-file { margin-bottom:8px; color:#8493a0; font-size:11px; word-break:break-all; }
+        .operation-ai-detail-page-stats { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:9px; }
+        .operation-ai-detail-page-stats span { padding:3px 7px; border-radius:9px; background:#edf3f7; color:#607487; font-size:11px; }
+        .operation-ai-detail-page-url { display:flex; align-items:center; gap:5px; min-width:0; color:#2786bd; font-size:12px; }
+        .operation-ai-detail-page-url span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .operation-ai-detail-page-empty { color:#9aa6b2; font-size:12px; }
         .operation-ai-product-page .aikaipin-pagination-control { display:flex; align-items:center; justify-content:space-between; gap:16px; min-height:48px; }
         .operation-ai-product-page .aikaipin-pagination-summary { color:#7c8998; font-size:12px; }
         .operation-ai-product-page .pagination > li > a,
@@ -48,7 +59,46 @@
         .operation-ai-store-card span { display:grid; grid-template-columns:minmax(140px,1fr) minmax(180px,1.3fr); gap:4px 18px; width:100%; }
         .operation-ai-store-card strong { color:#1f5270; }
         .operation-ai-store-card small { color:#708294; }
-        @media (max-width:767px) { .operation-ai-detail-grid { grid-template-columns:1fr; } .operation-ai-detail-item.is-wide { grid-column:auto; } }
+        .operation-ai-publish-dialog { width:980px; max-width:94vw; margin:3vh auto; }
+        #operation-ai-product-publish-modal .modal-content { max-height:94vh; overflow:hidden; border:0; border-radius:10px; box-shadow:0 15px 45px rgba(17,38,58,.28); }
+        #operation-ai-product-publish-modal .modal-header { padding:15px 20px; border-bottom:1px solid #dfe8ef; background:#f7fafc; }
+        #operation-ai-product-publish-modal .modal-body { padding:0; overflow:hidden; }
+        .operation-ai-publish-form { display:flex; flex-direction:column; max-height:calc(94vh - 64px); }
+        .operation-ai-publish-scroll { min-height:0; padding:16px 20px 12px; overflow-y:auto; overscroll-behavior:contain; }
+        .operation-ai-store-heading { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:10px; }
+        .operation-ai-store-heading h5 { margin:0; }
+        .operation-ai-store-heading .badge { margin-left:5px; background:#3c8dbc; }
+        .operation-ai-store-search { display:flex; width:390px; max-width:58%; }
+        .operation-ai-store-search input { min-width:0; flex:1; height:34px; padding:6px 12px; border:1px solid #d6e1ea; border-right:0; border-radius:17px 0 0 17px; outline:none; }
+        .operation-ai-store-search input:focus { border-color:#69a9cf; box-shadow:0 0 0 2px rgba(60,141,188,.12); }
+        .operation-ai-store-search button { display:inline-flex; flex:0 0 auto; align-items:center; justify-content:center; gap:5px; min-width:76px; height:34px; padding:0 15px; border:1px solid #2385bd; border-radius:0 17px 17px 0; color:#fff; font-weight:600; background:linear-gradient(135deg,#43a7dc,#2385bd); box-shadow:0 2px 6px rgba(35,133,189,.24); cursor:pointer; transition:background .15s ease,box-shadow .15s ease,transform .15s ease; }
+        .operation-ai-store-search button:hover,.operation-ai-store-search button:focus { background:linear-gradient(135deg,#3198cf,#1e76a7); border-color:#1e76a7; box-shadow:0 3px 9px rgba(35,133,189,.32); outline:none; }
+        .operation-ai-store-search button:active { transform:translateY(1px); box-shadow:0 1px 3px rgba(35,133,189,.24); }
+        .operation-ai-store-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; max-height:270px; padding:2px 4px 2px 2px; overflow-y:auto; }
+        .operation-ai-store-card[hidden] { display:none !important; }
+        .operation-ai-store-card { min-width:0; margin:0; padding:10px 12px; }
+        .operation-ai-store-card:has(input:checked) { border-color:#3c8dbc; background:#edf7fd; box-shadow:0 0 0 1px rgba(60,141,188,.12); }
+        .operation-ai-store-card span { grid-template-columns:minmax(115px,.8fr) minmax(145px,1.2fr); gap:3px 12px; }
+        .operation-ai-store-card strong,.operation-ai-store-card small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .operation-ai-store-empty { padding:22px; border:1px dashed #cfdce6; border-radius:7px; color:#8799a8; text-align:center; }
+        .operation-ai-product-page-picker { margin-bottom:14px; padding:13px 15px; border:1px solid #cfe1ed; border-radius:8px; background:#f5fafd; }
+        .operation-ai-product-page-picker > label { display:block; margin-bottom:7px; color:#285d7d; }
+        .operation-ai-product-page-picker .help-block { margin:6px 0 0; }
+        .operation-ai-product-page-summary { margin-bottom:10px; }
+        .operation-ai-product-pages { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; max-width:330px; }
+        .operation-ai-product-pages a,.operation-ai-product-pages span { display:inline-flex; align-items:center; gap:4px; max-width:150px; padding:3px 7px; border:1px solid #cfe2ef; border-radius:10px; background:#f3f9fc; color:#287eaf; font-size:11px; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .operation-ai-product-pages a:hover { border-color:#5aa7d3; background:#e8f5fb; text-decoration:none; }
+        .operation-ai-product-pages span { border-color:#e1e5e9; background:#f7f8f9; color:#8794a1; }
+        .operation-ai-product-pages em { align-self:center; color:#8898a8; font-size:11px; font-style:normal; }
+        .operation-ai-product-page-link { display:inline-block; margin-top:7px; font-size:12px; }
+        .operation-ai-variant-preview { max-height:230px; overflow:auto; border:1px solid #dce5ec; border-radius:6px; }
+        .operation-ai-variant-preview .table { margin:0; }
+        .operation-ai-variant-preview thead th { position:sticky; top:0; z-index:1; background:#edf5fa; }
+        .operation-ai-publish-actions { display:flex; flex:0 0 auto; align-items:center; justify-content:space-between; gap:16px; padding:12px 20px; border-top:1px solid #dfe8ef; background:#fff; box-shadow:0 -5px 14px rgba(35,65,88,.07); }
+        .operation-ai-publish-actions > span { color:#7a8d9d; font-size:12px; }
+        .operation-ai-publish-actions .btn { min-width:92px; }
+        @media (max-width:767px) { .operation-ai-store-options { grid-template-columns:1fr; max-height:220px; } .operation-ai-store-heading { align-items:flex-start; flex-direction:column; } .operation-ai-store-search { width:100%; max-width:none; } .operation-ai-publish-actions > span { display:none; } .operation-ai-publish-actions { justify-content:flex-end; } }
+        @media (max-width:767px) { .operation-ai-detail-grid,.operation-ai-detail-pages { grid-template-columns:1fr; } .operation-ai-detail-item.is-wide { grid-column:auto; } }
     </style>
 @endpush
 
@@ -148,7 +198,19 @@
                                     </span>
                                 @endif
                                 @if($product->hasShopifyData())
-                                    <span class="label label-success" style="display:inline-block;margin-top:5px;">Shopify 完整资料</span>
+                                    <span class="label label-success" style="display:inline-block;margin-top:5px;">产品页资料 {{ max(1, (int) ($product->product_pages_count ?? 0)) }} 份</span>
+                                @endif
+                                @if($product->productPages->isNotEmpty())
+                                    <div class="operation-ai-product-pages">
+                                        @foreach($product->productPages->take(3) as $page)
+                                            @if($page->landing_page_url)
+                                                <a href="{{ $page->landing_page_url }}" target="_blank" rel="noopener noreferrer" title="{{ $page->name }}：{{ $page->landing_page_url }}"><i class="fa fa-external-link"></i>{{ \Illuminate\Support\Str::limit($page->name, 16) }}</a>
+                                            @else
+                                                <span title="{{ $page->name }}（未设置落地页）"><i class="fa fa-file-text-o"></i>{{ \Illuminate\Support\Str::limit($page->name, 16) }}</span>
+                                            @endif
+                                        @endforeach
+                                        @if($product->productPages->count() > 3)<em>+{{ $product->productPages->count() - 3 }}</em>@endif
+                                    </div>
                                 @endif
                             </td>
                             <td class="aikaipin-category-cell">
@@ -214,7 +276,7 @@
 </div>
 
 <div class="modal fade" id="operation-ai-product-publish-modal" tabindex="-1" role="dialog" aria-hidden="true">
-    <div class="modal-dialog" role="document"><div class="modal-content">
+    <div class="modal-dialog operation-ai-publish-dialog" role="document"><div class="modal-content">
         <div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title"><i class="fa fa-cloud-upload"></i> 上架到 Shopify</h4></div>
         <div class="modal-body" data-operation-ai-publish-content><div class="text-center text-muted"><i class="fa fa-spinner fa-spin"></i> 正在加载店铺信息...</div></div>
     </div></div>
@@ -252,6 +314,20 @@
         return '<div class="operation-ai-detail-item' + (wide ? ' is-wide' : '') + '"><span class="operation-ai-detail-label">' +
             escapeHtml(label) + '</span><div class="operation-ai-detail-value">' + body + '</div></div>';
     }
+    function productPages(pages) {
+        if (!Array.isArray(pages) || !pages.length) return escapeHtml(labels.empty);
+        return '<div class="operation-ai-detail-pages">' + pages.map(function (page) {
+            var landing = page.landing_page_url
+                ? '<a class="operation-ai-detail-page-url" href="' + escapeHtml(page.landing_page_url) + '" target="_blank" rel="noopener noreferrer"><i class="fa fa-external-link"></i><span>' + escapeHtml(page.landing_page_url) + '</span></a>'
+                : '<span class="operation-ai-detail-page-empty"><i class="fa fa-exclamation-circle"></i> 未设置落地页</span>';
+            return '<div class="operation-ai-detail-page"><div class="operation-ai-detail-page-head"><div class="operation-ai-detail-page-name">' +
+                escapeHtml(page.name || '未命名产品页') + (page.is_default ? '<span class="label label-primary">默认</span>' : '') +
+                '</div></div><div class="operation-ai-detail-page-file"><i class="fa fa-file-excel-o"></i> ' + escapeHtml(page.source_file || '—') +
+                '</div><div class="operation-ai-detail-page-stats"><span>' + escapeHtml(page.variant_count || 0) + ' 个规格</span><span>' +
+                escapeHtml(page.image_count || 0) + ' 张图片</span>' + (page.vendor ? '<span>' + escapeHtml(page.vendor) + '</span>' : '') +
+                '</div>' + landing + '</div>';
+        }).join('') + '</div>';
+    }
     function render(data) {
         var landing = data.landing_page_url
             ? '<a class="operation-ai-detail-link" href="' + escapeHtml(data.landing_page_url) + '" target="_blank" rel="noopener noreferrer"><i class="fa fa-external-link"></i>' + escapeHtml(data.landing_page_url) + '</a>'
@@ -275,7 +351,8 @@
         content.innerHTML =
             hero + item(labels.sku, value(data.skus), true) + item(labels.category, value(data.categories), true) +
             item(labels.source_type, value(data.source_label) + ' / ' + value(data.type_label)) + item(labels.landing_page, landing) +
-            item('Shopify 完整资料', shopifyData, true) +
+            item('产品页 / 对应落地页', productPages(data.product_pages), true) +
+            (!data.product_pages || !data.product_pages.length ? item('Shopify 完整资料', shopifyData, true) : '') +
             item(labels.images, images, true) + item(labels.reference_file, value(data.reference_file_name)) +
             item(labels.package_file, packageFile) + item(labels.creator, value(data.created_by_name)) +
             item(labels.updater, value(data.updated_by_name)) + item(labels.created_at, value(data.created_at)) +
@@ -305,7 +382,61 @@
         window.jQuery(modal).modal('show');
         fetch(button.getAttribute('data-publish-url'), {headers:{'X-Requested-With':'XMLHttpRequest'}})
             .then(function (response) { if (!response.ok) throw new Error('店铺信息加载失败'); return response.text(); })
-            .then(function (html) { content.innerHTML = html; })
+            .then(function (html) {
+                content.innerHTML = html;
+                var search = content.querySelector('[data-publish-store-search]');
+                var searchButton = content.querySelector('[data-publish-store-search-button]');
+                var filterStores = function () {
+                    var keyword = search.value.trim().toLocaleLowerCase(), visible = 0;
+                    content.querySelectorAll('[data-publish-store-card]').forEach(function (card) {
+                        var matched = !keyword || (card.getAttribute('data-search-text') || '').indexOf(keyword) !== -1;
+                        card.hidden = !matched;
+                        if (matched) visible++;
+                    });
+                    var empty = content.querySelector('[data-publish-store-empty]');
+                    var resultCount = content.querySelector('[data-publish-store-result-count]');
+                    var storeOptions = content.querySelector('[data-publish-store-options]');
+                    if (empty) empty.hidden = visible > 0;
+                    if (resultCount) resultCount.textContent = visible;
+                    if (storeOptions) storeOptions.scrollTop = 0;
+                };
+                if (search && searchButton) {
+                    searchButton.addEventListener('click', filterStores);
+                    search.addEventListener('search', filterStores);
+                    search.addEventListener('keydown', function (event) {
+                        if (event.key === 'Enter') {
+                            event.preventDefault();
+                            filterStores();
+                        }
+                    });
+                }
+                var productPageSelect = content.querySelector('[data-product-page-select]');
+                if (productPageSelect) {
+                    var switchProductPage = function () {
+                        var selected = productPageSelect.options[productPageSelect.selectedIndex];
+                        var pageId = productPageSelect.value;
+                        content.querySelectorAll('[data-product-page-panel]').forEach(function (panel) {
+                            panel.hidden = panel.getAttribute('data-product-page-panel') !== pageId;
+                        });
+                        var titleInput = content.querySelector('input[name="title"]');
+                        var statusInput = content.querySelector('select[name="status"]');
+                        var skuInput = content.querySelector('[data-product-page-sku]');
+                        var priceInput = content.querySelector('[data-product-page-price]');
+                        var landingLink = content.querySelector('[data-product-page-landing-link]');
+                        if (titleInput) titleInput.value = selected.getAttribute('data-title') || '';
+                        if (statusInput) statusInput.value = selected.getAttribute('data-status') || 'DRAFT';
+                        if (skuInput) skuInput.value = selected.getAttribute('data-sku') || '';
+                        if (priceInput) priceInput.value = selected.getAttribute('data-price') || '0';
+                        if (landingLink) {
+                            var landingUrl = selected.getAttribute('data-landing-page-url') || '';
+                            landingLink.hidden = !landingUrl;
+                            landingLink.href = landingUrl || '#';
+                        }
+                    };
+                    productPageSelect.addEventListener('change', switchProductPage);
+                    switchProductPage();
+                }
+            })
             .catch(function (error) { content.innerHTML = '<div class="alert alert-danger">' + error.message + '</div>'; });
     });
 })();

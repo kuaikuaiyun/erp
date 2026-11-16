@@ -21,6 +21,7 @@
     var draggedVideo=null;
     var movingElement=null;
     var labels = {flow:['Flow素材'],traffic:['扒的素材','引流素材'],remix:['混剪素材']};
+    var fileTypeCodes = {flow:'flow',traffic:'spy',remix:'mix'};
     function normalized(value){return String(value||'').replace(/\s+/g,'').replace(/[：:]+$/,'');}
     function labelNode(label){
         var walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
@@ -80,13 +81,27 @@
         var remove=document.createElement('button');remove.type='button';remove.className='erp-reference-video__delete';remove.textContent='删除视频';
         foot.appendChild(info);foot.appendChild(size);foot.appendChild(download);foot.appendChild(remove);article.appendChild(freeDrag);article.appendChild(drag);article.appendChild(player);article.appendChild(foot);return article;
     }
-    function historicalPrefix(){
+    function historicalDate(){
         var label=labelNode('登记日期'),date=historicalFallbackDate;
         if(label){
             var text=targetBox(label).textContent||'',match=text.match(/(20\d{2})\D?(\d{1,2})\D?(\d{1,2})/);
             if(match)date=match[1].slice(-2)+String(match[2]).padStart(2,'0')+String(match[3]).padStart(2,'0');
         }
-        return historicalProductCode+'-AI-'+date;
+        return date;
+    }
+    function historicalVideoType(player){
+        var matchedType='flow',matchedLabel=null;
+        Object.keys(labels).forEach(function(type){
+            (labels[type]||[]).forEach(function(text){
+                var label=labelNode(text);if(!label)return;
+                var position=label.compareDocumentPosition(player);
+                if(!(position&Node.DOCUMENT_POSITION_FOLLOWING))return;
+                if(!matchedLabel||(matchedLabel.compareDocumentPosition(label)&Node.DOCUMENT_POSITION_FOLLOWING)){
+                    matchedLabel=label;matchedType=type;
+                }
+            });
+        });
+        return matchedType;
     }
     function legacyVideoNameNode(player,figure){
         var caption=figure&&figure.querySelector('figcaption');if(caption)return caption;
@@ -101,7 +116,7 @@
         })||null;
     }
     function normalizeHistoricalVideos(){
-        var sequence=0,prefix=historicalPrefix();
+        var date=historicalDate();
         var players=Array.prototype.slice.call(document.querySelectorAll('video')).filter(function(player){return !(player.closest&&player.closest('.erp-reference-video'));});
         players.forEach(function(player,index){
                 var historyIndex=index;
@@ -116,10 +131,11 @@
                 }else removable.classList.add('erp-history-video-item');
                 removable.setAttribute('data-history-video-index',historyIndex);
                 if(hiddenHistoryVideoIndexes.indexOf(historyIndex)!==-1){removable.remove();return;}
-                sequence++;
+                var sequence=historyIndex+1;
                 var oldName=legacyName?(legacyName.nodeValue||legacyName.textContent||''):'';
                 var match=String(oldName).match(/\.([A-Za-z0-9]{2,5})\s*$/),extension=match?match[1].toLowerCase():'mp4';
-                var fileName=prefix+'-'+String(sequence).padStart(3,'0')+'.'+extension;
+                var typeCode=fileTypeCodes[historicalVideoType(player)]||'video';
+                var fileName=historicalProductCode+'-'+typeCode+'-'+date+'-'+String(sequence).padStart(3,'0')+'.'+extension;
                 var caption=figure&&figure.querySelector('figcaption');
                 if(!caption){caption=document.createElement('span');caption.className='erp-history-video-name';if(figure)figure.appendChild(caption);else removable.appendChild(caption);}
                 caption.textContent=fileName;caption.classList.add('erp-history-video-name');

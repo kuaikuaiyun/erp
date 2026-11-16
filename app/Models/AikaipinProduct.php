@@ -100,8 +100,15 @@ class AikaipinProduct extends Model
 
     public function hasShopifyData(): bool
     {
+        if (array_key_exists('product_pages_count', $this->attributes) && (int) $this->attributes['product_pages_count'] > 0) {
+            return true;
+        }
         if (array_key_exists('has_shopify_data', $this->attributes)) {
             return (bool) $this->attributes['has_shopify_data'];
+        }
+
+        if ($this->relationLoaded('productPages') && $this->productPages->isNotEmpty()) {
+            return true;
         }
 
         return $this->shopifyData() !== [];
@@ -120,6 +127,18 @@ class AikaipinProduct extends Model
     public function placementEvaluations(): HasMany
     {
         return $this->hasMany(AikaipinPlacementEvaluation::class, 'product_id');
+    }
+
+    public function productPages(): HasMany
+    {
+        return $this->hasMany(AikaipinProductPage::class, 'aikaipin_product_id')
+            ->orderByDesc('is_default')
+            ->latest('id');
+    }
+
+    public function defaultProductPage(): ?AikaipinProductPage
+    {
+        return $this->productPages()->first();
     }
 
     /** @param iterable<mixed> $values

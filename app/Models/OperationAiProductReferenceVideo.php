@@ -11,6 +11,25 @@ class OperationAiProductReferenceVideo extends Model
     public const TYPE_TRAFFIC = 'traffic';
     public const TYPE_REMIX = 'remix';
 
+    public static function fileTypeCode(string $type): string
+    {
+        return match ($type) {
+            self::TYPE_FLOW => 'flow',
+            self::TYPE_TRAFFIC => 'spy',
+            self::TYPE_REMIX => 'mix',
+            default => 'video',
+        };
+    }
+
+    public static function fileNumber(?string $fileName, int $fallback = 0): int
+    {
+        if (preg_match('/-(\d+)\.[A-Za-z0-9]{2,5}$/', (string) $fileName, $matches) === 1) {
+            return (int) $matches[1];
+        }
+
+        return $fallback;
+    }
+
     protected $fillable = [
         'aikaipin_product_id', 'type', 'sequence', 'file_date', 'disk', 'path',
         'file_name', 'original_name', 'mime_type', 'size', 'department_code',

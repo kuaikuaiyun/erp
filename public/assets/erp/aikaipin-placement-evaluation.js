@@ -75,7 +75,8 @@
             platform: 'facebook',
             currency: 'usd',
             actual_spend: '',
-            orders: ''
+            orders: '',
+            roi: ''
         };
     }
 
@@ -116,7 +117,7 @@
         var group = document.createElement('div');
         var label = document.createElement('label');
 
-        column.className = 'col-sm-3';
+        column.className = 'col-sm-2';
         group.className = 'form-group';
         label.textContent = labelText;
         group.appendChild(label);
@@ -167,6 +168,10 @@
             controls.appendChild(createField(
                 placementConfig.ordersLabel,
                 createInput('orders', rowData.orders, index, placementConfig.ordersPlaceholder, '1')
+            ));
+            controls.appendChild(createField(
+                placementConfig.roiLabel,
+                createInput('roi', rowData.roi, index, placementConfig.roiPlaceholder, '0.01')
             ));
             row.appendChild(header);
             row.appendChild(controls);
@@ -326,7 +331,8 @@
                         platform: record.platform || 'facebook',
                         currency: record.currency || 'usd',
                         actual_spend: record.actual_spend || '',
-                        orders: record.orders === 0 ? '0' : (record.orders || '')
+                        orders: record.orders === 0 ? '0' : (record.orders || ''),
+                        roi: record.roi === null || record.roi === undefined ? '' : record.roi
                     };
                 })
                 : [defaultPlacementRow()];
@@ -367,7 +373,8 @@
             platform: (placementConfig.platformOptions || {})[record.platform] || record.platform,
             currency: (placementConfig.currencyOptions || {})[record.currency] || record.currency,
             spend: record.actual_spend,
-            orders: record.orders
+            orders: record.orders,
+            roi: record.roi === null || record.roi === undefined ? '—' : Number(record.roi).toFixed(2)
         });
     }
 
@@ -434,11 +441,11 @@
                 var body = document.createElement('tbody');
                 title.textContent = (payload.product.code || '') + ' · ' + (payload.product.name || '');
                 table.className = 'table table-bordered table-striped';
-                head.innerHTML = '<tr><th>测评人</th><th>测试周期</th><th>平台</th><th>消耗</th><th>出单量</th><th>素材名称</th><th>投放视频</th></tr>';
+                head.innerHTML = '<tr><th>测评人</th><th>测试周期</th><th>平台</th><th>消耗</th><th>出单量</th><th>ROI</th><th>素材名称</th><th>投放视频</th></tr>';
                 (payload.evaluations || []).forEach(function (evaluation) {
                     (evaluation.records || []).forEach(function (record) {
                         var row = document.createElement('tr');
-                        [evaluation.submitter, evaluation.period, record.platform, String(record.currency || '').toUpperCase() + ' ' + record.spend, record.orders, record.material_name || '—'].forEach(function (value) {
+                        [evaluation.submitter, evaluation.period, record.platform, String(record.currency || '').toUpperCase() + ' ' + record.spend, record.orders, record.roi == null ? '—' : Number(record.roi).toFixed(2), record.material_name || '—'].forEach(function (value) {
                             var cell = document.createElement('td'); cell.textContent = value == null ? '' : String(value); row.appendChild(cell);
                         });
                         var videoCell = document.createElement('td');
@@ -448,7 +455,7 @@
                         row.appendChild(videoCell); body.appendChild(row);
                     });
                 });
-                if (!body.children.length) { var empty = document.createElement('tr'); empty.innerHTML = '<td colspan="7" class="text-center text-muted">暂无投放测评数据</td>'; body.appendChild(empty); }
+                if (!body.children.length) { var empty = document.createElement('tr'); empty.innerHTML = '<td colspan="8" class="text-center text-muted">暂无投放测评数据</td>'; body.appendChild(empty); }
                 table.appendChild(head); table.appendChild(body); wrapper.appendChild(title); wrapper.appendChild(table);
                 detailBody.innerHTML = ''; detailBody.appendChild(wrapper);
                 if (detailModal && window.jQuery) window.jQuery(detailModal).modal('show');
@@ -459,10 +466,12 @@
         return placementRows.length > 0 && placementRows.every(function (row) {
             var spend = String(row.actual_spend || '').trim();
             var orders = String(row.orders || '').trim();
+            var roi = String(row.roi || '').trim();
 
-            return spend !== '' && orders !== ''
+            return spend !== '' && orders !== '' && roi !== ''
                 && isFinite(Number(spend)) && Number(spend) >= 0
-                && isFinite(Number(orders)) && Number(orders) >= 0 && Number(orders) % 1 === 0;
+                && isFinite(Number(orders)) && Number(orders) >= 0 && Number(orders) % 1 === 0
+                && isFinite(Number(roi)) && Number(roi) >= 0;
         });
     }
 

@@ -140,6 +140,7 @@ Route::post('/internal-messages/{message}/read', [InternalMessageController::cla
 Route::get('/internal-messages/{message}/images/{image}', [InternalMessageController::class, 'image'])->whereNumber(['message', 'image'])->name('internal-messages.images.show');
 Route::get('/operation/internal-messages', [InternalMessageController::class, 'receivedIndex'])->name('operation.internal-messages.index');
 Route::post('/operation/internal-messages/{message}/process', [InternalMessageController::class, 'markProcessed'])->whereNumber('message')->name('operation.internal-messages.process');
+Route::post('/operation/internal-messages/listing-tasks/{task}/assign', [InternalMessageController::class, 'assignListingTask'])->whereNumber('task')->name('operation.internal-messages.listing-tasks.assign');
 Route::get('/api/operation/internal-messages/pending-count', [InternalMessageController::class, 'pendingCount'])->name('operation.internal-messages.pending-count');
 Route::get('/domain-stores', [DomainStoreController::class, 'index'])->name('assistant.domain-stores.index');
 Route::get('/advertising-media', [AdvertisingMediaController::class, 'index'])->name('assistant.advertising-media.index');
@@ -196,6 +197,13 @@ Route::get('/product-requests', [ProductRequestController::class, 'operationInde
 Route::get('/product-request-dedupe', [ProductRequestController::class, 'operationDedupeIndex'])->name('product-requests.operation.dedupe');
 Route::get('/operation/domain-stores', [OperationDomainStoreController::class, 'index'])->name('operation.domain-stores.index');
 Route::get('/operation/ai-product-library', [OperationAiProductLibraryController::class, 'index'])->name('operation.ai-product-library.index');
+Route::get('/operation/ai-product-library/placement-evaluations', [OperationAiProductLibraryController::class, 'placementEvaluationsIndex'])->name('operation.ai-product-library.placement-evaluations.index');
+Route::get('/operation/ai-product-library/placement-evaluations/product-options', [OperationAiProductLibraryController::class, 'placementEvaluationProductOptions'])->name('operation.ai-product-library.placement-evaluations.product-options');
+Route::get('/operation/ai-product-library/placement-evaluations/products/{product}', [OperationAiProductLibraryController::class, 'placementEvaluationProductDetails'])->name('operation.ai-product-library.placement-evaluations.products.show');
+Route::post('/operation/ai-product-library/placement-evaluations', [OperationAiProductLibraryController::class, 'storeStandalonePlacementEvaluation'])->name('operation.ai-product-library.placement-evaluations.standalone.store');
+Route::get('/operation/ai-product-library/placement-evaluations/{evaluation}', [OperationAiProductLibraryController::class, 'showStandalonePlacementEvaluation'])->whereNumber('evaluation')->name('operation.ai-product-library.placement-evaluations.show');
+Route::put('/operation/ai-product-library/placement-evaluations/{evaluation}', [OperationAiProductLibraryController::class, 'updateStandalonePlacementEvaluation'])->whereNumber('evaluation')->name('operation.ai-product-library.placement-evaluations.update');
+Route::delete('/operation/ai-product-library/placement-evaluations/{evaluation}', [OperationAiProductLibraryController::class, 'destroyStandalonePlacementEvaluation'])->whereNumber('evaluation')->name('operation.ai-product-library.placement-evaluations.destroy');
 Route::get('/operation/reports', [OperationReportController::class, 'index'])->name('operation.reports.index');
 Route::get('/operation/weekly-reports', [OperationReportController::class, 'weekly'])->name('operation.weekly-reports.index');
 Route::get('/operation/daily-submissions/{type}', [DailySubmissionController::class, 'index'])
