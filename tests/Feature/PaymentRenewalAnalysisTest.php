@@ -221,6 +221,10 @@ class PaymentRenewalAnalysisTest extends TestCase
         self::assertStringContainsString('payment-stage-start', $html);
         self::assertStringContainsString('payment-method-rate-grid', $html);
         self::assertStringContainsString('支付方式', $html);
+        foreach (['苹果支付','谷歌支付','PayPal支付','信用卡支付'] as $name) self::assertStringContainsString($name, $html);
+        self::assertStringNotContainsString('<th>渠道</th>', $html);
+        self::assertStringNotContainsString('>PayPal</', $html);
+        self::assertStringNotContainsString('>信用卡</', $html);
         self::assertStringNotContainsString('payment.renewal_two_sections.', $html);
         self::assertStringContainsString('2 ÷ 2 × 100%', $html);
         self::assertStringContainsString('name="initial_store" value="Test"', $html);
@@ -237,14 +241,14 @@ class PaymentRenewalAnalysisTest extends TestCase
             $book = IOFactory::load($path);
             self::assertSame(4, $book->getSheetCount());
             self::assertSame('UTC-05:00', $book->getSheet(0)->getCell('B1')->getValue());
-            self::assertSame(29, $book->getSheet(1)->getHighestRow());
-            self::assertSame('支付方式', $book->getSheet(1)->getCell('B5')->getValue());
-            self::assertSame('ap', $book->getSheet(1)->getCell('B12')->getValue());
+            self::assertSame(23, $book->getSheet(1)->getHighestRow());
+            self::assertSame('支付方式', $book->getSheet(1)->getCell('A5')->getValue());
+            self::assertSame('苹果支付', $book->getSheet(1)->getCell('A9')->getValue());
             self::assertSame('UTC+08:00', $book->getSheet(2)->getCell('B1')->getValue());
             self::assertSame('总体', $book->getSheet(2)->getCell('B7')->getValue());
-            self::assertSame('PayPal', $book->getSheet(2)->getCell('B8')->getValue());
-            self::assertSame('ap', $book->getSheet(2)->getCell('C9')->getValue());
-            self::assertSame('信用卡', $book->getSheet(2)->getCell('B12')->getValue());
+            self::assertSame('苹果支付', $book->getSheet(2)->getCell('B8')->getValue());
+            self::assertSame('谷歌支付', $book->getSheet(2)->getCell('B9')->getValue());
+            self::assertSame('信用卡支付', $book->getSheet(2)->getCell('B11')->getValue());
             $book->disconnectWorksheets();
         } finally { @unlink($path); }
     }

@@ -259,9 +259,10 @@ $translations = [
 return array_replace_recursive($translations, [
     'renewal_two_sections' => [
         'payment_method' => '支付方式',
+        'method_names' => ['ap'=>'苹果支付', 'gp'=>'谷歌支付', 'pp'=>'PayPal支付', 'cc'=>'信用卡支付'],
         'method_all' => '全部方式',
         'unknown' => '未识别',
-        'method_rule' => '按订单支付方式归类：ap、gp、pp 属于 PayPal，cc 属于信用卡；空值及其他值单列未识别。各方式续费率 = 本期该方式本次续费订单数 ÷ 前推 30 天区间该方式上一阶段订单数 × 100%。渠道汇总包含其下支付方式明细，请勿重复相加。',
+        'method_rule' => '总体等于苹果支付、谷歌支付、PayPal支付、信用卡支付及未识别之和。各方式续费率 = 本期该方式本次续费订单数 ÷ 前推 30 天区间该方式上一阶段订单数 × 100%。',
         'subscription_hint' => '本区独立筛选，查看首单订阅与首购退款。',
         'renewal_hint' => '本区独立筛选，按续费次数核对前推基数、本期订单及退款。',
         'method_subscription' => '支付方式订阅率',

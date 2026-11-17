@@ -27,9 +27,8 @@
     $stageName = static fn (int $number) => __($t.'.funnel.stage_name',['number'=>$number]);
     $stageNumber = static fn (string $key) => (int) str_replace('renewal_', '', $key);
     $channels = ['total'=>$text('total'),'paypal'=>__($t.'.channels.paypal'),'credit_card'=>__($t.'.channels.credit_card'),'unknown'=>$text('unknown')];
-    $groups = \App\Portals\Payment\PaymentRenewalAnalysisService::breakdownGroups();
-    $groupLabel = static fn (array $group) => $channels[$group['channel']];
-    $methodLabel = static fn (array $group) => $group['method'] === 'all' ? $text('method_all') : ($group['method'] === 'unknown' ? $text('unknown') : $group['method']);
+    $groups = array_filter(\App\Portals\Payment\PaymentRenewalAnalysisService::breakdownGroups(), static fn ($group, $key) => !in_array($key, ['paypal','credit_card'], true), ARRAY_FILTER_USE_BOTH);
+    $methodLabel = static fn (array $group) => $group['method'] === 'all' ? $text('total') : ($group['method'] === 'unknown' ? $text('unknown') : $text('method_names.'.$group['method']));
     $period = $audit('first_period',['from'=>$calc['period_from'],'to'=>$calc['period_to']]);
     $comparison = $audit('cohort_period',['from'=>$calc['comparison_from'],'to'=>$calc['comparison_to']]);
     $utcPeriod = $audit('utc_period',['from'=>$calc['utc_period_from'],'to'=>$calc['utc_period_to']]);
@@ -40,7 +39,7 @@
 @section('page_title', __($t.'.page_title'))
 @push('styles')
 <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261104-2">
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261117-8">
+<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261117-9">
 @endpush
 
 @section('content')
@@ -65,7 +64,7 @@
         <p class="payment-renewal-compact-context">{{ $text('context',['from'=>$filters['initial_date_from'],'to'=>$filters['initial_date_to'],'timezone'=>$firstCalc['timezone'],'generated'=>$firstCalc['generated_at']]) }}</p>
 
         <div class="payment-kpi-grid payment-kpi-grid-three payment-renewal-kpis">
-            @foreach($channels as $channel=>$label)
+            @foreach(['total'=>$text('total')] as $channel=>$label)
             @php
                 $rate = $summary['subscription_rate'][$channel];
             @endphp
@@ -79,7 +78,7 @@
                 @if($group['level'] === 'method' || $key === 'unknown')
                     @php $rate = $summary['subscription_rate'][$key]; @endphp
                     <div class="payment-method-rate" data-payment-method="{{ $group['method'] }}">
-                        <span>{{ $groupLabel($group) }} / <b>{{ $methodLabel($group) }}</b></span>
+                        <span><b>{{ $methodLabel($group) }}</b></span>
                         <strong>{{ number_format($rate['rate'],2) }}%</strong>
                         <small>{{ $text('subscription_orders') }} {{ number_format($rate['subscription_orders']) }} / {{ $text('qualified_orders') }} {{ number_format($rate['total_orders']) }}</small>
                         <small class="payment-inline-formula">{{ $inlineRatio($rate['subscription_orders'],$rate['total_orders']) }}</small>
@@ -91,18 +90,19 @@
         <p class="payment-renewal-scope-note">{{ $text('method_rule') }}</p>
         <p class="payment-renewal-scope-note">{{ $text('first_scope') }}</p>
         <div class="table-responsive"><table class="table payment-data-table payment-subscription-refunds"><caption>{{ $text('first_refunds') }}</caption><thead><tr>
-            <th>{{ $text('channel') }}</th><th>{{ $text('payment_method') }}</th><th>{{ $text('purchase_type') }}</th><th>{{ $text('refund_base') }}<small class="payment-inline-formula">{{ $text('refund_base_hint') }}</small></th><th>{{ $text('revenue') }}</th><th>{{ $text('refund_orders') }}</th><th>{{ $text('refund_amount') }}</th><th>{{ $text('refund_count_rate') }}</th><th>{{ $text('refund_amount_rate') }}</th>
+            <th>{{ $text('payment_method') }}</th><th>{{ $text('purchase_type') }}</th><th>{{ $text('refund_base') }}<small class="payment-inline-formula">{{ $text('refund_base_hint') }}</small></th><th>{{ $text('revenue') }}</th><th>{{ $text('refund_orders') }}</th><th>{{ $text('refund_amount') }}</th><th>{{ $text('refund_count_rate') }}</th><th>{{ $text('refund_amount_rate') }}</th>
         </tr></thead><tbody>
         @foreach($groups as $channel=>$group)
             @foreach(['all','subscription','non_subscription'] as $type)
                 @php $refund = $dashboard['initial_refunds_by_type'][$channel][$type]; @endphp
-                <tr class="payment-refund-row payment-level-{{ $group['level'] }} {{ $type === 'all' ? 'payment-group-start' : 'payment-type-detail' }}"><td>{{ $groupLabel($group) }}</td><td><span class="payment-method-badge">{{ $methodLabel($group) }}</span></td><td>{{ $text('purchase_'.$type) }}</td><td>{{ number_format($refund['orders']) }}</td><td>{{ $money($refund['revenue']) }}</td><td>{{ number_format($refund['refund_order_count']) }}</td><td>{{ $money($refund['refund_amount']) }}</td><td>{{ number_format($refund['refund_count_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($refund['refund_order_count'],$refund['orders']) }}</small></td><td>{{ number_format($refund['refund_amount_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($refund['refund_amount'],$refund['revenue'],true) }}</small></td></tr>
+                <tr class="payment-refund-row payment-level-{{ $group['level'] }} {{ $type === 'all' ? 'payment-group-start' : 'payment-type-detail' }}"><td><span class="payment-method-badge">{{ $methodLabel($group) }}</span></td><td>{{ $text('purchase_'.$type) }}</td><td>{{ number_format($refund['orders']) }}</td><td>{{ $money($refund['revenue']) }}</td><td>{{ number_format($refund['refund_order_count']) }}</td><td>{{ $money($refund['refund_amount']) }}</td><td>{{ number_format($refund['refund_count_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($refund['refund_order_count'],$refund['orders']) }}</small></td><td>{{ number_format($refund['refund_amount_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($refund['refund_amount'],$refund['revenue'],true) }}</small></td></tr>
             @endforeach
         @endforeach
         </tbody></table></div>
         <details class="payment-calculation-details"><summary>{{ $text('view_calculation') }}</summary>
             {{ $notes([$audit('first_period',['from'=>$firstCalc['period_from'],'to'=>$firstCalc['period_to']]),$audit('utc_period',['from'=>$firstCalc['utc_period_from'],'to'=>$firstCalc['utc_period_to']]),$audit('subscription_scope'),$audit('fixed_scope'),$text('first_source_scope'),$text('channel_rule')]) }}
-            @foreach($channels as $channel=>$label)
+            @foreach($groups as $channel=>$group)
+                @php $label = $methodLabel($group); @endphp
                 @php
                     $rate = $summary['subscription_rate'][$channel];
                     $refund = $dashboard['initial_refunds'][$channel];
@@ -137,15 +137,15 @@
 
         <p class="payment-renewal-scope-note">{{ $text('stage_note') }}</p>
         <div class="table-responsive"><table class="table payment-data-table"><thead>
-            <tr class="payment-column-groups"><th colspan="3">{{ $text('renewal_stage') }}</th><th colspan="3">{{ $text('renewal_group') }}</th><th>{{ $text('payment_group') }}</th><th colspan="4">{{ $text('refund_group') }}</th></tr>
-            <tr><th>{{ $text('renewal_stage') }}</th><th>{{ $text('channel') }}</th><th>{{ $text('payment_method') }}</th><th>{{ $text('previous_orders') }}</th><th>{{ $text('current_renewal_orders') }}</th><th>{{ __($t.'.funnel.renewal_rate') }}</th><th>{{ $text('revenue') }}</th><th>{{ $text('refund_orders') }}</th><th>{{ $text('refund_amount') }}</th><th>{{ $text('refund_count_rate') }}</th><th>{{ $text('refund_amount_rate') }}</th></tr>
+            <tr class="payment-column-groups"><th colspan="2">{{ $text('renewal_stage') }}</th><th colspan="3">{{ $text('renewal_group') }}</th><th>{{ $text('payment_group') }}</th><th colspan="4">{{ $text('refund_group') }}</th></tr>
+            <tr><th>{{ $text('renewal_stage') }}</th><th>{{ $text('payment_method') }}</th><th>{{ $text('previous_orders') }}</th><th>{{ $text('current_renewal_orders') }}</th><th>{{ __($t.'.funnel.renewal_rate') }}</th><th>{{ $text('revenue') }}</th><th>{{ $text('refund_orders') }}</th><th>{{ $text('refund_amount') }}</th><th>{{ $text('refund_count_rate') }}</th><th>{{ $text('refund_amount_rate') }}</th></tr>
         </thead><tbody>
         @forelse($dashboard['stages'] as $stage)
             @foreach($groups as $key=>$group)
                 @php $part = $key === 'total' ? $stage : $stage['by_channel'][$key]; @endphp
                 <tr class="payment-level-{{ $group['level'] }} {{ $key === 'total' ? 'payment-stage-start' : '' }}" @if($key === 'total') data-payment-renewal-number="{{ $stage['number'] }}" @endif data-payment-method="{{ $group['method'] }}">
                     <td>{{ $stageName($stage['number']) }}</td>
-                    <td>{{ $groupLabel($group) }}</td><td><span class="payment-method-badge">{{ $methodLabel($group) }}</span></td>
+                    <td><span class="payment-method-badge">{{ $methodLabel($group) }}</span></td>
                     <td>{{ number_format($part['previous_orders']) }}@if($key === 'total')<small class="payment-inline-formula payment-period-note">{{ $inlinePeriod($stage['number'] === 1 ? __($t.'.funnel.initial_stage') : $stageName($stage['number']-1),$calc['comparison_from'],$calc['comparison_to']) }}</small>@endif</td>
                     <td>{{ number_format($part['orders']) }}@if($key === 'total')<small class="payment-inline-formula payment-period-note">{{ $inlinePeriod($stageName($stage['number']),$calc['period_from'],$calc['period_to']) }}</small>@endif</td>
                     <td class="payment-rate-cell"><strong>{{ $part['rate'] === null ? __($t.'.funnel.not_applicable') : number_format($part['rate'],2).'%' }}</strong><small class="payment-inline-formula">{{ $part['rate'] === null ? $text('inline_no_base') : $inlineRatio($part['orders'],$part['previous_orders']) }}</small></td>
@@ -154,7 +154,7 @@
                     <td class="payment-refund-rate">{{ number_format($part['refund_amount_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($part['refund_amount'],$part['revenue'],true) }}</small></td>
                 </tr>
             @endforeach
-            <tr class="payment-calculation-row"><td colspan="11">
+            <tr class="payment-calculation-row"><td colspan="10">
                 <details class="payment-calculation-details"><summary>{{ $text('stage_calculation',['number'=>$stage['number']]) }}</summary>
                     {{ $notes([$audit('base',['number'=>$stage['number'],'previous'=>$stage['number'] === 1 ? __($t.'.funnel.initial_stage') : $stageName($stage['number']-1),'count'=>$stage['previous_orders']]),
                         $audit('completed',['number'=>$stage['number'],'count'=>$stage['orders']]),$period,$comparison]) }}
@@ -170,7 +170,7 @@
                     {{ $notes([$stage['paid_from'] === null ? $audit('no_payments') : $audit('actual_period',['from'=>$stage['paid_from'],'to'=>$stage['paid_to']]),$audit('stage_number',['number'=>$stage['number']])]) }}
                 </details>
             </td></tr>
-        @empty<tr><td colspan="11" class="payment-product-empty">{{ __($t.'.funnel.empty') }}</td></tr>@endforelse
+        @empty<tr><td colspan="10" class="payment-product-empty">{{ __($t.'.funnel.empty') }}</td></tr>@endforelse
         </tbody></table></div>
         @php
             $p = $dashboard['stage_pagination'];

@@ -1124,7 +1124,7 @@
 .payment-renewal-two-sections .payment-section-hint { margin: 0; padding: 0 20px 16px 60px; background: #f5f9fd; color: #546c82; font-size: 12px; }
 .payment-renewal-two-sections .payment-renewal-filter { margin: 16px 18px 10px; padding: 16px; background: #f7f9fc; border: 1px solid #e3eaf1; border-radius: 8px; box-shadow: none; }
 .payment-renewal-two-sections .payment-renewal-compact-context { margin: 0 20px 12px; padding: 9px 12px; border-left: 3px solid #95bbd9; background: #f8fbfd; }
-.payment-renewal-two-sections .payment-renewal-kpis { grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; padding: 8px 18px; }
+.payment-renewal-two-sections .payment-renewal-kpis { grid-template-columns: minmax(0,1fr); gap: 12px; padding: 8px 18px; }
 .payment-renewal-two-sections .payment-renewal-kpi { box-shadow: none; border: 1px solid #dce7f0; border-top: 3px solid #5b92bc; border-radius: 8px; }
 .payment-renewal-two-sections .payment-renewal-kpi strong { font-size: 28px; color: #194e76; }
 .payment-renewal-two-sections .payment-method-rates { margin: 12px 18px; padding: 14px; border: 1px solid #e4eaf1; border-radius: 8px; }
@@ -1140,15 +1140,15 @@
 .payment-renewal-two-sections .payment-level-channel.payment-group-start > td, .payment-renewal-two-sections .payment-renewal-funnel .payment-level-channel > td { background: #f2f6fa; font-weight: 600; }
 .payment-renewal-two-sections .payment-group-start > td { border-top: 2px solid #d3e1ed; }
 .payment-renewal-two-sections .payment-type-detail > td { font-weight: 400; background: #fff; }
-.payment-renewal-two-sections .payment-type-detail > td:nth-child(3) { padding-left: 25px; color: #586e80; }
-.payment-renewal-two-sections .payment-level-method > td:nth-child(2) { padding-left: 24px; }
+.payment-renewal-two-sections .payment-type-detail > td:nth-child(2) { padding-left: 25px; color: #586e80; }
+.payment-renewal-two-sections .payment-level-method > td:first-child { padding-left: 24px; }
 .payment-renewal-two-sections .payment-stage-start > td { border-top: 5px solid #fff; padding-top: 18px; padding-bottom: 18px; font-size: 14px; }
 .payment-renewal-two-sections .payment-renewal-funnel table { min-width: 1550px; }
 .payment-renewal-two-sections .payment-subscription-refunds { min-width: 1150px; }
 .payment-renewal-two-sections .payment-column-groups > th { text-align: center; background: #e0ebf5 !important; border-right: 2px solid #fff; font-size: 12px; }
-.payment-renewal-two-sections .payment-renewal-funnel tr:not(.payment-column-groups):not(.payment-calculation-row) > :nth-child(7),
-.payment-renewal-two-sections .payment-subscription-refunds tr > :nth-child(6) { border-left: 2px solid #d8e3ed; }
-.payment-renewal-two-sections .payment-renewal-funnel tr:not(.payment-column-groups):not(.payment-calculation-row) > :nth-child(8) { border-left: 2px solid #d8e3ed; }
+.payment-renewal-two-sections .payment-renewal-funnel tr:not(.payment-column-groups):not(.payment-calculation-row) > :nth-child(6),
+.payment-renewal-two-sections .payment-subscription-refunds tr > :nth-child(5) { border-left: 2px solid #d8e3ed; }
+.payment-renewal-two-sections .payment-renewal-funnel tr:not(.payment-column-groups):not(.payment-calculation-row) > :nth-child(7) { border-left: 2px solid #d8e3ed; }
 .payment-renewal-two-sections .payment-rate-cell > strong { color: #066952; font-size: 16px; }
 .payment-renewal-two-sections .payment-refund-rate { font-weight: 600; }
 .payment-renewal-two-sections .payment-inline-formula { max-width: 230px; color: #50677b; font-size: 11px; font-weight: 400; background: rgba(235,241,247,.65); padding: 3px 5px; border-radius: 4px; line-height: 1.55; }
@@ -1173,3 +1173,6 @@
 
 .payment-product-alerts-page .payment-alert-product-information { display:flex; flex-direction:column; align-items:flex-start; gap:7px; width:180px; white-space:normal; overflow-wrap:anywhere; }
 .payment-product-alerts-page .payment-alert-product-information img { width:72px; height:72px; object-fit:contain; border:1px solid #d5e5ef; border-radius:5px; background:#fff; }
+
+.payment-renewal-two-sections .payment-renewal-kpis { grid-template-columns: minmax(0, 1fr); }
+.payment-renewal-two-sections .payment-renewal-kpi { max-width: 520px; }

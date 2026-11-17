@@ -20,8 +20,8 @@ class PaymentRenewalAnalysisExportService
         $book = new Spreadsheet();
         $text = static fn (string $key): string => __('payment.renewal_two_sections.'.$key);
         $channels = ['total'=>$text('total'),'paypal'=>__('payment.renewal_analysis.channels.paypal'),'credit_card'=>__('payment.renewal_analysis.channels.credit_card'),'unknown'=>$text('unknown')];
-        $groups = PaymentRenewalAnalysisService::breakdownGroups();
-        $methodLabel = static fn (array $group) => $group['method'] === 'all' ? $text('method_all') : ($group['method'] === 'unknown' ? $text('unknown') : $group['method']);
+        $groups = array_filter(PaymentRenewalAnalysisService::breakdownGroups(), static fn ($group, $key) => !in_array($key, ['paypal','credit_card'], true), ARRAY_FILTER_USE_BOTH);
+        $methodLabel = static fn (array $group) => $group['method'] === 'all' ? $text('total') : ($group['method'] === 'unknown' ? $text('unknown') : $text('method_names.'.$group['method']));
         $first = $book->getActiveSheet();
         $first->setTitle($text('first_sheet'));
         $first->fromArray([
@@ -33,13 +33,13 @@ class PaymentRenewalAnalysisExportService
             [$text('first_scope')],
             [__('payment.renewal_analysis.filters.store'), $filters['initial_store'] ?? $filters['store'] ?? ''],
         ]);
-        $firstKeys = ['channel','payment_method','subscription_orders','qualified_orders','subscription_rate'];
+        $firstKeys = ['payment_method','subscription_orders','qualified_orders','subscription_rate'];
         $first->fromArray([array_map($text, $firstKeys)], null, 'A8');
         $rowNumber = 9;
         foreach ($groups as $channel=>$group) {
             $rate = $data['summary']['subscription_rate'][$channel];
             $first->fromArray([[
-                $channels[$group['channel']], $methodLabel($group), $rate['subscription_orders'], $rate['total_orders'], $rate['rate'].'%',
+                $methodLabel($group), $rate['subscription_orders'], $rate['total_orders'], $rate['rate'].'%',
             ]], null, 'A'.$rowNumber++);
         }
 
@@ -50,12 +50,12 @@ class PaymentRenewalAnalysisExportService
             [__('payment.renewal_analysis.export.period'), $data['initial_calculation']['period_from'].' ~ '.$data['initial_calculation']['period_to']],
             [__('payment.renewal_analysis.filters.store'), $filters['initial_store'] ?? $filters['store'] ?? ''],
         ]);
-        $refunds->fromArray([array_map($text, ['channel','payment_method','purchase_type','refund_base','revenue','refund_orders','refund_amount','refund_count_rate','refund_amount_rate'])], null, 'A5');
+        $refunds->fromArray([array_map($text, ['payment_method','purchase_type','refund_base','revenue','refund_orders','refund_amount','refund_count_rate','refund_amount_rate'])], null, 'A5');
         $refundRow = 6;
         foreach ($groups as $channel => $group) {
             foreach (['all', 'subscription', 'non_subscription'] as $type) {
                 $refund = $data['initial_refunds_by_type'][$channel][$type];
-                $refunds->fromArray([[$channels[$group['channel']], $methodLabel($group), $text('purchase_'.$type), $refund['orders'], $refund['revenue'],
+                $refunds->fromArray([[$methodLabel($group), $text('purchase_'.$type), $refund['orders'], $refund['revenue'],
                     $refund['refund_order_count'], $refund['refund_amount'], $refund['refund_count_rate'].'%', $refund['refund_amount_rate'].'%']], null, 'A'.$refundRow++);
             }
         }
@@ -69,7 +69,7 @@ class PaymentRenewalAnalysisExportService
             [__('payment.renewal_analysis.filters.store'), $filters['renewal_store'] ?? $filters['store'] ?? ''],
         ]);
         $renewals->fromArray([[
-            $text('renewal_stage'), $text('channel'), $text('payment_method'), $text('previous_orders'), $text('current_renewal_orders'),
+            $text('renewal_stage'), $text('payment_method'), $text('previous_orders'), $text('current_renewal_orders'),
             __('payment.renewal_analysis.funnel.renewal_rate'), $text('revenue'),
             $text('refund_orders'), $text('refund_amount'), $text('refund_count_rate'), $text('refund_amount_rate'),
         ]], null, 'A6');
@@ -78,7 +78,7 @@ class PaymentRenewalAnalysisExportService
             foreach ($groups as $channel => $group) {
                 $values = $channel === 'total' ? $stage : $stage['by_channel'][$channel];
                 $renewals->fromArray([[
-                    __('payment.renewal_analysis.funnel.stage_name',['number'=>$stage['number']]), $channels[$group['channel']], $methodLabel($group),
+                    __('payment.renewal_analysis.funnel.stage_name',['number'=>$stage['number']]), $methodLabel($group),
                     $values['previous_orders'], $values['orders'],
                     $values['rate'] === null ? __('payment.renewal_analysis.funnel.not_applicable') : $values['rate'].'%',
                     $values['revenue'], $values['refund_order_count'], $values['refund_amount'],
@@ -98,7 +98,7 @@ class PaymentRenewalAnalysisExportService
                 $channels[$row['initial_channel']], $channels[$row['actual_channel']],
                 $row['initial_order'], $row['renewal_order'], $row['store_name'], $row['transaction_id'],
                 $row['paid_at'], $row['amount'], $row['refund_count'], $row['refund_amount'],
-                $row['dispute_count'], $row['dispute_amount'], $row['payment_method'] === 'unknown' ? $text('unknown') : $row['payment_method'],
+                $row['dispute_count'], $row['dispute_amount'], $row['payment_method'] === 'unknown' ? $text('unknown') : $text('method_names.'.$row['payment_method']),
             ]], null, 'A'.$rowNumber++);
         }
         foreach ([[$first,8],[$refunds,5],[$renewals,6],[$detail,1]] as [$sheet,$headerRow]) {
