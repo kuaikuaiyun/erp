@@ -6,6 +6,7 @@
     $filters = $dashboard['filters'];
     $summary = $dashboard['summary'];
     $calc = $dashboard['calculation'];
+    $firstCalc = $dashboard['initial_calculation'];
     $text = static fn (string $key, array $values = []) => __('payment.renewal_two_sections.'.$key, $values);
     $audit = static fn (string $key, array $values = []) => __('payment.renewal_audit.'.$key, $values);
     $money = static fn ($value) => '$'.number_format((float) $value, 2);
@@ -36,24 +37,29 @@
 @section('page_title', __($t.'.page_title'))
 @push('styles')
 <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261104-2">
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261117-6">
+<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261117-7">
 @endpush
 
 @section('content')
 <section class="content payment-portal-page payment-renewal-page payment-renewal-two-sections">
     <header class="payment-page-heading"><div><h1>{{ __($t.'.page_title') }}</h1><p>{{ $text('subtitle') }}</p></div></header>
-    <form class="payment-renewal-filter" method="get" action="{{ route('payment.renewal-analysis.index') }}">
-        <label class="payment-renewal-cohort"><span>{{ __($t.'.filters.cohort_period') }}</span><span class="payment-operation-date-range"><input class="form-control" type="date" name="date_from" value="{{ $filters['date_from'] }}"><b>{{ __('payment.common.range_to') }}</b><input class="form-control" type="date" name="date_to" value="{{ $filters['date_to'] }}"></span></label>
-        <label class="payment-renewal-timezone"><span>{{ __($t.'.filters.timezone') }}</span><select class="form-control" name="timezone">@foreach(\App\Portals\Payment\PaymentRenewalAnalysisService::timezones() as $offset=>$label)<option value="{{ $offset }}" @selected($filters['timezone']===$offset)>{{ $label }}</option>@endforeach</select></label>
-        <label><span>{{ __($t.'.filters.channel') }}</span><select class="form-control" name="channel"><option value="">{{ __($t.'.filters.all_channels') }}</option>@foreach(['paypal','credit_card'] as $channel)<option value="{{ $channel }}" @selected($filters['channel']===$channel)>{{ __($t.'.channels.'.$channel) }}</option>@endforeach</select></label>
-        <label><span>{{ $text('renewal_stage') }}</span><select class="form-control" name="stage"><option value="">{{ $text('all_renewals') }}</option>@foreach($dashboard['stage_options'] as $key)<option value="{{ $key }}" @selected($filters['stage']===$key)>{{ $stageName($stageNumber($key)) }}</option>@endforeach</select></label>
-        <label><span>{{ __($t.'.filters.store') }}</span><select class="form-control" name="store"><option value="">{{ __($t.'.filters.all_stores') }}</option>@foreach($dashboard['stores'] as $store)<option value="{{ $store }}" @selected($filters['store']===$store)>{{ $store }}</option>@endforeach</select></label>
-        <div class="payment-renewal-filter-actions"><button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> {{ __('payment.common.query') }}</button><a class="btn btn-default" href="{{ route('payment.renewal-analysis.index') }}">{{ __('payment.common.reset') }}</a><a class="btn btn-success" href="{{ route('payment.renewal-analysis.export', $exportQuery) }}"><i class="fa fa-file-excel-o"></i> {{ __($t.'.export.button') }}</a></div>
-    </form>
-    <p class="payment-renewal-compact-context">{{ $text('context',['from'=>$filters['date_from'],'to'=>$filters['date_to'],'timezone'=>$calc['timezone'],'generated'=>$calc['generated_at']]) }}</p>
-
     <article class="payment-panel payment-subscription-block" data-payment-analysis-section="subscription">
         <h2>{{ __($t.'.sections.subscription_rate') }}</h2>
+        @php $moduleReset = array_diff_key($filters, array_flip(['initial_date_from','initial_date_to','initial_timezone','initial_store'])); @endphp
+        <form method="get" action="{{ route('payment.renewal-analysis.index') }}" class="payment-renewal-filter" data-renewal-module="initial">
+            @foreach($filters as $name=>$value)
+                @if(str_starts_with($name, 'renewal_') || in_array($name,['stage','stage_page'],true))<input type="hidden" name="{{ $name }}" value="{{ $value }}">@endif
+            @endforeach
+            <label class="payment-renewal-cohort"><span>{{ __($t.'.filters.cohort_period') }}</span><span class="payment-renewal-date-range"><input class="form-control" type="date" name="initial_date_from" value="{{ $filters['initial_date_from'] }}" required><b>{{ __('payment.common.range_to') }}</b><input class="form-control" type="date" name="initial_date_to" value="{{ $filters['initial_date_to'] }}" required></span></label>
+            <label><span>{{ __($t.'.filters.timezone') }}</span><select class="form-control" name="initial_timezone">@foreach(\App\Portals\Payment\PaymentRenewalAnalysisService::timezones() as $offset=>$label)<option value="{{ $offset }}" @selected($filters['initial_timezone']===$offset)>{{ $label }}</option>@endforeach</select></label>
+            <label><span>{{ __($t.'.filters.store') }}</span><select class="form-control" name="initial_store"><option value="">{{ __($t.'.filters.all_stores') }}</option>@foreach($dashboard['initial_stores'] as $store)<option value="{{ $store }}" @selected($filters['initial_store']===$store)>{{ $store }}</option>@endforeach</select></label>
+
+            <div class="payment-renewal-filter-actions"><button class="btn btn-primary" type="submit">{{ __('payment.common.query') }}</button><a class="btn btn-default" href="{{ route('payment.renewal-analysis.index',$moduleReset) }}">{{ __('payment.common.reset') }}</a><a class="btn btn-success" href="{{ route('payment.renewal-analysis.export', $exportQuery) }}">{{ __($t.'.export.button') }}</a></div>
+            @foreach(['initial_date_from','initial_date_to','initial_timezone','initial_store'] as $field)@error($field)<p class="text-danger">{{ $message }}</p>@enderror
+            @endforeach
+        </form>
+        <p class="payment-renewal-compact-context">{{ $text('context',['from'=>$filters['initial_date_from'],'to'=>$filters['initial_date_to'],'timezone'=>$firstCalc['timezone'],'generated'=>$firstCalc['generated_at']]) }}</p>
+
         <div class="payment-kpi-grid payment-kpi-grid-three payment-renewal-kpis">
             @foreach($channels as $channel=>$label)
             @php
@@ -64,17 +70,17 @@
         </div>
         <p class="payment-renewal-scope-note">{{ $text('first_scope') }}</p>
         <div class="table-responsive"><table class="table payment-data-table payment-subscription-refunds"><caption>{{ $text('first_refunds') }}</caption><thead><tr>
-            <th>{{ $text('channel') }}</th><th>{{ $text('refund_base') }}</th><th>{{ $text('revenue') }}</th><th>{{ $text('refund_orders') }}</th><th>{{ $text('refund_amount') }}</th><th>{{ $text('refund_count_rate') }}</th><th>{{ $text('refund_amount_rate') }}</th>
+            <th>{{ $text('channel') }}</th><th>{{ $text('purchase_type') }}</th><th>{{ $text('refund_base') }}</th><th>{{ $text('revenue') }}</th><th>{{ $text('refund_orders') }}</th><th>{{ $text('refund_amount') }}</th><th>{{ $text('refund_count_rate') }}</th><th>{{ $text('refund_amount_rate') }}</th>
         </tr></thead><tbody>
         @foreach($channels as $channel=>$label)
-            @php
-                $refund = $dashboard['initial_refunds'][$channel];
-            @endphp
-            <tr><td>{{ $label }}</td><td>{{ number_format($refund['orders']) }}</td><td>{{ $money($refund['revenue']) }}</td><td>{{ number_format($refund['refund_order_count']) }}</td><td>{{ $money($refund['refund_amount']) }}</td><td>{{ number_format($refund['refund_count_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($refund['refund_order_count'],$refund['orders']) }}</small></td><td>{{ number_format($refund['refund_amount_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($refund['refund_amount'],$refund['revenue'],true) }}</small></td></tr>
+            @foreach(['all','subscription','non_subscription'] as $type)
+                @php $refund = $dashboard['initial_refunds_by_type'][$channel][$type]; @endphp
+                <tr @if($type === 'all') style="font-weight:700" @endif><td>{{ $label }}</td><td>{{ $text('purchase_'.$type) }}</td><td>{{ number_format($refund['orders']) }}</td><td>{{ $money($refund['revenue']) }}</td><td>{{ number_format($refund['refund_order_count']) }}</td><td>{{ $money($refund['refund_amount']) }}</td><td>{{ number_format($refund['refund_count_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($refund['refund_order_count'],$refund['orders']) }}</small></td><td>{{ number_format($refund['refund_amount_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($refund['refund_amount'],$refund['revenue'],true) }}</small></td></tr>
+            @endforeach
         @endforeach
         </tbody></table></div>
         <details class="payment-calculation-details"><summary>{{ $text('view_calculation') }}</summary>
-            {{ $notes([$period,$utcPeriod,$audit('subscription_scope'),$audit('fixed_scope'),$audit('source_scope'),$audit('channel_rule')]) }}
+            {{ $notes([$audit('first_period',['from'=>$firstCalc['period_from'],'to'=>$firstCalc['period_to']]),$audit('utc_period',['from'=>$firstCalc['utc_period_from'],'to'=>$firstCalc['utc_period_to']]),$audit('subscription_scope'),$audit('fixed_scope'),$text('first_source_scope'),$text('channel_rule')]) }}
             @foreach($channels as $channel=>$label)
                 @php
                     $rate = $summary['subscription_rate'][$channel];
@@ -92,13 +98,32 @@
 
     <article class="payment-panel payment-renewal-funnel" data-payment-analysis-section="renewals">
         <h2>{{ $text('renewal_title') }}</h2>
+        @php $moduleReset = array_diff_key($filters, array_flip(['renewal_date_from','renewal_date_to','renewal_timezone','renewal_store','stage','stage_page'])); @endphp
+        <form method="get" action="{{ route('payment.renewal-analysis.index') }}" class="payment-renewal-filter" data-renewal-module="renewal">
+            @foreach($filters as $name=>$value)
+                @if(str_starts_with($name, 'initial_'))<input type="hidden" name="{{ $name }}" value="{{ $value }}">@endif
+            @endforeach
+            <label class="payment-renewal-cohort"><span>{{ __($t.'.filters.cohort_period') }}</span><span class="payment-renewal-date-range"><input class="form-control" type="date" name="renewal_date_from" value="{{ $filters['renewal_date_from'] }}" required><b>{{ __('payment.common.range_to') }}</b><input class="form-control" type="date" name="renewal_date_to" value="{{ $filters['renewal_date_to'] }}" required></span></label>
+            <label><span>{{ __($t.'.filters.timezone') }}</span><select class="form-control" name="renewal_timezone">@foreach(\App\Portals\Payment\PaymentRenewalAnalysisService::timezones() as $offset=>$label)<option value="{{ $offset }}" @selected($filters['renewal_timezone']===$offset)>{{ $label }}</option>@endforeach</select></label>
+            <label><span>{{ __($t.'.filters.store') }}</span><select class="form-control" name="renewal_store"><option value="">{{ __($t.'.filters.all_stores') }}</option>@foreach($dashboard['renewal_stores'] as $store)<option value="{{ $store }}" @selected($filters['renewal_store']===$store)>{{ $store }}</option>@endforeach</select></label>
+            <label><span>{{ $text('renewal_stage') }}</span><select class="form-control" name="stage"><option value="">{{ $text('all_renewals') }}</option>@foreach($dashboard['stage_options'] as $key)<option value="{{ $key }}" @selected($filters['stage']===$key)>{{ $stageName($stageNumber($key)) }}</option>@endforeach</select></label>
+            <div class="payment-renewal-filter-actions"><button class="btn btn-primary" type="submit">{{ __('payment.common.query') }}</button><a class="btn btn-default" href="{{ route('payment.renewal-analysis.index',$moduleReset) }}">{{ __('payment.common.reset') }}</a><a class="btn btn-success" href="{{ route('payment.renewal-analysis.export', $exportQuery) }}">{{ __($t.'.export.button') }}</a></div>
+            @foreach(['renewal_date_from','renewal_date_to','renewal_timezone','renewal_store'] as $field)@error($field)<p class="text-danger">{{ $message }}</p>@enderror
+            @endforeach
+        </form>
+        <p class="payment-renewal-compact-context">{{ $text('context',['from'=>$filters['renewal_date_from'],'to'=>$filters['renewal_date_to'],'timezone'=>$calc['timezone'],'generated'=>$calc['generated_at']]) }}</p>
+
         <p class="payment-renewal-scope-note">{{ $text('stage_note') }}</p>
         <div class="table-responsive"><table class="table payment-data-table"><thead><tr>
             <th>{{ $text('renewal_stage') }}</th><th>{{ $text('previous_orders') }}</th><th>{{ $text('current_renewal_orders') }}</th><th>{{ __($t.'.funnel.renewal_rate') }}</th>
             <th>{{ $text('revenue') }}</th><th>{{ $text('refund_orders') }}</th><th>{{ $text('refund_amount') }}</th><th>{{ $text('refund_count_rate') }}</th><th>{{ $text('refund_amount_rate') }}</th>
         </tr></thead><tbody>
         @forelse($dashboard['stages'] as $stage)
-            <tr data-payment-renewal-number="{{ $stage['number'] }}"><td><strong>{{ $stageName($stage['number']) }}</strong></td><td>{{ number_format($stage['previous_orders']) }}<small class="payment-inline-formula">{{ $inlinePeriod($stage['number'] === 1 ? __($t.'.funnel.initial_stage') : $stageName($stage['number']-1),$calc['comparison_from'],$calc['comparison_to']) }}</small></td><td>{{ number_format($stage['orders']) }}<small class="payment-inline-formula">{{ $inlinePeriod($stageName($stage['number']),$calc['period_from'],$calc['period_to']) }}</small></td><td><strong>{{ $stage['rate'] === null ? __($t.'.funnel.not_applicable') : number_format($stage['rate'],2).'%' }}</strong><small class="payment-inline-formula">{{ $stage['rate'] === null ? $text('inline_no_base') : $inlineRatio($stage['orders'],$stage['previous_orders']) }}</small></td><td>{{ $money($stage['revenue']) }}</td><td>{{ number_format($stage['refund_order_count']) }}</td><td>{{ $money($stage['refund_amount']) }}</td><td>{{ number_format($stage['refund_count_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($stage['refund_order_count'],$stage['orders']) }}</small></td><td>{{ number_format($stage['refund_amount_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($stage['refund_amount'],$stage['revenue'],true) }}</small></td></tr>
+            <tr data-payment-renewal-number="{{ $stage['number'] }}"><td><strong>{{ $stageName($stage['number']) }} · {{ $text('total') }}</strong></td><td>{{ number_format($stage['previous_orders']) }}<small class="payment-inline-formula">{{ $inlinePeriod($stage['number'] === 1 ? __($t.'.funnel.initial_stage') : $stageName($stage['number']-1),$calc['comparison_from'],$calc['comparison_to']) }}</small></td><td>{{ number_format($stage['orders']) }}<small class="payment-inline-formula">{{ $inlinePeriod($stageName($stage['number']),$calc['period_from'],$calc['period_to']) }}</small></td><td><strong>{{ $stage['rate'] === null ? __($t.'.funnel.not_applicable') : number_format($stage['rate'],2).'%' }}</strong><small class="payment-inline-formula">{{ $stage['rate'] === null ? $text('inline_no_base') : $inlineRatio($stage['orders'],$stage['previous_orders']) }}</small></td><td>{{ $money($stage['revenue']) }}</td><td>{{ number_format($stage['refund_order_count']) }}</td><td>{{ $money($stage['refund_amount']) }}</td><td>{{ number_format($stage['refund_count_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($stage['refund_order_count'],$stage['orders']) }}</small></td><td>{{ number_format($stage['refund_amount_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($stage['refund_amount'],$stage['revenue'],true) }}</small></td></tr>
+            @foreach(['paypal','credit_card'] as $channel)
+                @php $part = $stage['by_channel'][$channel]; @endphp
+                <tr><td>{{ __($t.'.channels.'.$channel) }}</td><td>{{ number_format($part['previous_orders']) }}</td><td>{{ number_format($part['orders']) }}</td><td>{{ $part['rate'] === null ? __($t.'.funnel.not_applicable') : number_format($part['rate'],2).'%' }}<small class="payment-inline-formula">{{ $part['rate'] === null ? $text('inline_no_base') : $inlineRatio($part['orders'],$part['previous_orders']) }}</small></td><td>{{ $money($part['revenue']) }}</td><td>{{ number_format($part['refund_order_count']) }}</td><td>{{ $money($part['refund_amount']) }}</td><td>{{ number_format($part['refund_count_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($part['refund_order_count'],$part['orders']) }}</small></td><td>{{ number_format($part['refund_amount_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($part['refund_amount'],$part['revenue'],true) }}</small></td></tr>
+            @endforeach
             <tr class="payment-calculation-row"><td colspan="9">
                 <details class="payment-calculation-details"><summary>{{ $text('stage_calculation',['number'=>$stage['number']]) }}</summary>
                     {{ $notes([$audit('base',['number'=>$stage['number'],'previous'=>$stage['number'] === 1 ? __($t.'.funnel.initial_stage') : $stageName($stage['number']-1),'count'=>$stage['previous_orders']]),
@@ -138,7 +163,7 @@
         <details class="payment-calculation-details"><summary>{{ $text('view_calculation') }}</summary>
             {{ $notes([$period,$comparison,$utcPeriod,$audit('utc_comparison',['from'=>$calc['utc_comparison_from'],'to'=>$calc['utc_comparison_to']]),
                 $audit('time',['timezone'=>$calc['timezone'],'generated'=>$calc['generated_at'],'expires'=>$calc['expires_at']]),
-                $audit('source_scope'),$audit('channel_rule'),$audit('refund_rule'),$riskTime,$audit('rounding')]) }}
+                $audit('source_scope'),$text('channel_rule'),$audit('refund_rule'),$riskTime,$audit('rounding')]) }}
         </details>
     </article>
 </section>
@@ -146,4 +171,14 @@
 
 @push('scripts')
 <script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261117-1"></script>
+<script>
+(function () {
+    var message = @json(__('payment.renewal_two_sections.date_range_error'));
+    document.querySelectorAll('[data-renewal-module]').forEach(function (form) {
+        var dates = form.querySelectorAll('input[type="date"]');
+        function check() { dates[1].setCustomValidity(dates[0].value && dates[1].value && dates[1].value < dates[0].value ? message : ''); }
+        dates.forEach(function (field) { field.addEventListener('input',check); }); check();
+    });
+})();
+</script>
 @endpush

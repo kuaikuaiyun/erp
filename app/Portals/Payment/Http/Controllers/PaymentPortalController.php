@@ -638,28 +638,44 @@ class PaymentPortalController extends Controller
     /** @return array<string,mixed> */
     private function renewalAnalysisFilters(Request $request): array
     {
-        $validated = $request->validate([
+        $rules = [
+            'date_from' => ['nullable', 'date_format:Y-m-d'],
+            'date_to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:date_from'],
             'timezone' => ['nullable', Rule::in(array_keys(PaymentRenewalAnalysisService::timezones()))],
-            'date_from' => ['nullable', 'date'],
-            'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
-            'channel' => ['nullable', Rule::in(['', 'paypal', 'credit_card'])],
-            'stage' => ['nullable', 'regex:/^(initial|renewal_[1-9]\d*)?$/'],
             'store' => ['nullable', 'string', 'max:191'],
+            'stage' => ['nullable', 'regex:/^(initial|renewal_[1-9]\d*)?$/'],
             'stage_page' => ['nullable', 'integer', 'min:1'],
-        ]);
-        $timezone = (string) ($validated['timezone'] ?? '+08:00');
-        $today = now($timezone);
-
-        return [
-            'timezone' => $timezone,
-            'date_from' => (string) ($validated['date_from'] ?? $today->copy()->subDays(89)->format('Y-m-d')),
-            'date_to' => (string) ($validated['date_to'] ?? $today->format('Y-m-d')),
-            'risk_date_mode' => 'payment',
-            'channel' => (string) ($validated['channel'] ?? ''),
-            'stage' => (string) ($validated['stage'] ?? ''),
-            'store' => trim((string) ($validated['store'] ?? '')),
-            'stage_page' => max(1, (int) ($validated['stage_page'] ?? 1)),
         ];
+        foreach (['initial', 'renewal'] as $module) {
+            $rules[$module.'_date_from'] = ['nullable', 'date_format:Y-m-d'];
+            $rules[$module.'_date_to'] = ['nullable', 'date_format:Y-m-d', 'after_or_equal:'.$module.'_date_from'];
+            $rules[$module.'_timezone'] = ['nullable', Rule::in(array_keys(PaymentRenewalAnalysisService::timezones()))];
+            $rules[$module.'_store'] = ['nullable', 'string', 'max:191'];
+        }
+        $attributes = [];
+        foreach (['initial', 'renewal'] as $module) {
+            $label = $module === 'initial' ? __('payment.renewal_analysis.sections.subscription_rate') : __('payment.renewal_two_sections.renewal_title');
+            $attributes[$module.'_date_from'] = $label.' '.__('payment.renewal_two_sections.start_date');
+            $attributes[$module.'_date_to'] = $label.' '.__('payment.renewal_two_sections.end_date');
+            $attributes[$module.'_timezone'] = $label.' '.__('payment.renewal_analysis.filters.timezone');
+            $attributes[$module.'_store'] = $label.' '.__('payment.renewal_analysis.filters.store');
+        }
+        $validated = $request->validate($rules, [], $attributes);
+        $filters = ['risk_date_mode' => 'payment',
+            'stage' => (string) ($validated['stage'] ?? ''),
+            'stage_page' => max(1, (int) ($validated['stage_page'] ?? 1))];
+        foreach (['initial', 'renewal'] as $module) {
+            $timezone = (string) ($validated[$module.'_timezone'] ?? $validated['timezone'] ?? '+08:00');
+            $today = now($timezone);
+            $filters[$module.'_timezone'] = $timezone;
+            $filters[$module.'_date_from'] = (string) ($validated[$module.'_date_from'] ?? $validated['date_from'] ?? $today->copy()->subDays(89)->format('Y-m-d'));
+            $filters[$module.'_date_to'] = (string) ($validated[$module.'_date_to'] ?? $validated['date_to'] ?? $today->format('Y-m-d'));
+            $filters[$module.'_store'] = trim((string) ($validated[$module.'_store'] ?? $validated['store'] ?? ''));
+            if ($filters[$module.'_date_to'] < $filters[$module.'_date_from']) {
+                throw \Illuminate\Validation\ValidationException::withMessages([$module.'_date_to' => __('payment.renewal_two_sections.date_range_error')]);
+            }
+        }
+        return $filters;
     }
 
     /** @return array<string,mixed> */

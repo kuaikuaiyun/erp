@@ -23,42 +23,66 @@ class PaymentRenewalAnalysisExportService
         $first = $book->getActiveSheet();
         $first->setTitle($text('first_sheet'));
         $first->fromArray([
-            [__('payment.renewal_analysis.export.timezone'), $data['calculation']['timezone']],
-            [__('payment.renewal_analysis.export.period'), $data['calculation']['period_from'].' ~ '.$data['calculation']['period_to']],
-            [__('payment.renewal_analysis.export.comparison_period'), $data['calculation']['comparison_from'].' ~ '.$data['calculation']['comparison_to']],
-            [__('payment.renewal_analysis.export.utc_period'), $data['calculation']['utc_period_from'].' ~ '.$data['calculation']['utc_period_to']],
-            [__('payment.renewal_analysis.export.utc_comparison'), $data['calculation']['utc_comparison_from'].' ~ '.$data['calculation']['utc_comparison_to']],
+            [__('payment.renewal_analysis.export.timezone'), $data['initial_calculation']['timezone']],
+            [__('payment.renewal_analysis.export.period'), $data['initial_calculation']['period_from'].' ~ '.$data['initial_calculation']['period_to']],
+            [__('payment.renewal_analysis.export.comparison_period'), $data['initial_calculation']['comparison_from'].' ~ '.$data['initial_calculation']['comparison_to']],
+            [__('payment.renewal_analysis.export.utc_period'), $data['initial_calculation']['utc_period_from'].' ~ '.$data['initial_calculation']['utc_period_to']],
+            [__('payment.renewal_analysis.export.utc_comparison'), $data['initial_calculation']['utc_comparison_from'].' ~ '.$data['initial_calculation']['utc_comparison_to']],
             [$text('first_scope')],
+            [__('payment.renewal_analysis.filters.store'), $filters['initial_store'] ?? $filters['store'] ?? ''],
         ]);
-        $firstKeys = ['channel','subscription_orders','qualified_orders','subscription_rate','refund_base','revenue','refund_orders','refund_amount','refund_count_rate','refund_amount_rate'];
+        $firstKeys = ['channel','subscription_orders','qualified_orders','subscription_rate'];
         $first->fromArray([array_map($text, $firstKeys)], null, 'A8');
         $rowNumber = 9;
         foreach ($channels as $channel=>$label) {
             $rate = $data['summary']['subscription_rate'][$channel];
-            $refund = $data['initial_refunds'][$channel];
             $first->fromArray([[
                 $label, $rate['subscription_orders'], $rate['total_orders'], $rate['rate'].'%',
-                $refund['orders'], $refund['revenue'], $refund['refund_order_count'], $refund['refund_amount'],
-                $refund['refund_count_rate'].'%', $refund['refund_amount_rate'].'%',
             ]], null, 'A'.$rowNumber++);
+        }
+
+        $refunds = $book->createSheet();
+        $refunds->setTitle($text('refund_sheet'));
+        $refunds->fromArray([
+            [__('payment.renewal_analysis.export.timezone'), $data['initial_calculation']['timezone']],
+            [__('payment.renewal_analysis.export.period'), $data['initial_calculation']['period_from'].' ~ '.$data['initial_calculation']['period_to']],
+            [__('payment.renewal_analysis.filters.store'), $filters['initial_store'] ?? $filters['store'] ?? ''],
+        ]);
+        $refunds->fromArray([array_map($text, ['channel','purchase_type','refund_base','revenue','refund_orders','refund_amount','refund_count_rate','refund_amount_rate'])], null, 'A5');
+        $refundRow = 6;
+        foreach ($channels as $channel => $label) {
+            foreach (['all', 'subscription', 'non_subscription'] as $type) {
+                $refund = $data['initial_refunds_by_type'][$channel][$type];
+                $refunds->fromArray([[$label, $text('purchase_'.$type), $refund['orders'], $refund['revenue'],
+                    $refund['refund_order_count'], $refund['refund_amount'], $refund['refund_count_rate'].'%', $refund['refund_amount_rate'].'%']], null, 'A'.$refundRow++);
+            }
         }
 
         $renewals = $book->createSheet();
         $renewals->setTitle($text('renewal_sheet'));
+        $renewals->fromArray([
+            [__('payment.renewal_analysis.export.timezone'), $data['calculation']['timezone']],
+            [__('payment.renewal_analysis.export.period'), $data['calculation']['period_from'].' ~ '.$data['calculation']['period_to']],
+            [__('payment.renewal_analysis.export.comparison_period'), $data['calculation']['comparison_from'].' ~ '.$data['calculation']['comparison_to']],
+            [__('payment.renewal_analysis.filters.store'), $filters['renewal_store'] ?? $filters['store'] ?? ''],
+        ]);
         $renewals->fromArray([[
-            $text('renewal_stage'), $text('previous_orders'), $text('current_renewal_orders'),
+            $text('renewal_stage'), $text('channel'), $text('previous_orders'), $text('current_renewal_orders'),
             __('payment.renewal_analysis.funnel.renewal_rate'), $text('revenue'),
             $text('refund_orders'), $text('refund_amount'), $text('refund_count_rate'), $text('refund_amount_rate'),
-        ]], null, 'A1');
-        $rowNumber = 2;
+        ]], null, 'A6');
+        $rowNumber = 7;
         foreach ($data['stages'] as $stage) {
-            $renewals->fromArray([[
-                __('payment.renewal_analysis.funnel.stage_name',['number'=>$stage['number']]),
-                $stage['previous_orders'], $stage['orders'],
-                $stage['rate'] === null ? __('payment.renewal_analysis.funnel.not_applicable') : $stage['rate'].'%',
-                $stage['revenue'], $stage['refund_order_count'], $stage['refund_amount'],
-                $stage['refund_count_rate'].'%', $stage['refund_amount_rate'].'%',
-            ]], null, 'A'.$rowNumber++);
+            foreach ($channels as $channel => $label) {
+                $values = $channel === 'total' ? $stage : $stage['by_channel'][$channel];
+                $renewals->fromArray([[
+                    __('payment.renewal_analysis.funnel.stage_name',['number'=>$stage['number']]), $label,
+                    $values['previous_orders'], $values['orders'],
+                    $values['rate'] === null ? __('payment.renewal_analysis.funnel.not_applicable') : $values['rate'].'%',
+                    $values['revenue'], $values['refund_order_count'], $values['refund_amount'],
+                    $values['refund_count_rate'].'%', $values['refund_amount_rate'].'%',
+                ]], null, 'A'.$rowNumber++);
+            }
         }
 
         // Keep the existing export-only payment trace for reconciliation.
@@ -68,14 +92,14 @@ class PaymentRenewalAnalysisExportService
         $rowNumber = 2;
         foreach (array_merge($data['initial_rows'], $data['rows']) as $row) {
             $detail->fromArray([[
-                $row['stage_number'] === 0 ? __('payment.renewal_analysis.funnel.initial_stage') : __('payment.renewal_analysis.funnel.stage_name',['number'=>$row['stage_number']]),
+                $row['stage_number'] === 0 ? $text('purchase_'.$row['purchase_type']) : __('payment.renewal_analysis.funnel.stage_name',['number'=>$row['stage_number']]),
                 __('payment.renewal_analysis.channels.'.$row['initial_channel']), __('payment.renewal_analysis.channels.'.$row['actual_channel']),
                 $row['initial_order'], $row['renewal_order'], $row['store_name'], $row['transaction_id'],
                 $row['paid_at'], $row['amount'], $row['refund_count'], $row['refund_amount'],
                 $row['dispute_count'], $row['dispute_amount'],
             ]], null, 'A'.$rowNumber++);
         }
-        foreach ([[$first,8],[$renewals,1],[$detail,1]] as [$sheet,$headerRow]) {
+        foreach ([[$first,8],[$refunds,1],[$renewals,1],[$detail,1]] as [$sheet,$headerRow]) {
             $range = 'A'.$headerRow.':'.$sheet->getHighestColumn().$headerRow;
             $sheet->getStyle($range)->getFont()->setBold(true)->getColor()->setARGB('FFFFFFFF');
             $sheet->getStyle($range)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF287FBD');
