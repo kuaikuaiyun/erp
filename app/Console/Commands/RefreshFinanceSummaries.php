@@ -23,8 +23,21 @@ class RefreshFinanceSummaries extends Command
             return self::SUCCESS;
         }
 
-        $lock = Cache::lock('finance:summaries:refresh:'.$db->getDatabaseName(), 3600);
-        if (! $lock->get()) {
+        $lockName = 'finance:summaries:refresh:'.$db->getDatabaseName();
+        $mysql = in_array($db->getDriverName(), ['mysql', 'mariadb'], true);
+        $lock = $mysql ? null : Cache::lock($lockName, 300);
+        $pdo = $mysql ? $db->getPdo() : null;
+        $sessionLock = hash('sha256', $lockName);
+        if ($pdo !== null) {
+            // A session lock disappears when the worker or MySQL connection exits.
+            $acquire = $pdo->prepare('SELECT GET_LOCK(?, 0)');
+            $acquire->execute([$sessionLock]);
+            $acquired = (int) $acquire->fetchColumn() === 1;
+            $acquire->closeCursor();
+        } else {
+            $acquired = $lock->get();
+        }
+        if (! $acquired) {
             return self::SUCCESS;
         }
         try {
@@ -48,7 +61,17 @@ class RefreshFinanceSummaries extends Command
             }
             return $reportsRefreshed && ! $failed ? self::SUCCESS : self::FAILURE;
         } finally {
-            $lock->release();
+            if ($pdo !== null) {
+                try {
+                    $release = $pdo->prepare('SELECT RELEASE_LOCK(?)');
+                    $release->execute([$sessionLock]);
+                    $release->closeCursor();
+                } catch (\PDOException $exception) {
+                    report($exception);
+                }
+            } else {
+                $lock->release();
+            }
         }
     }
 }

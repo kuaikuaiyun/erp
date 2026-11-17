@@ -555,6 +555,11 @@ class FinanceSettlementService
                 if ($worldpay || $conflux !== null) {
                     $row['card_layout']['operation_region'] = self::operationRegion((string) $row['team']);
                 }
+                if ($worldpay && $row['failed']) {
+                    $row['team'] = '';
+                    $row['card_layout']['team'] = '';
+                    $row['card_layout']['operation_region'] = '';
+                }
                 if (isset($tradeDate)) {
                     $row['card_layout']['source_settlement_usd'] = $row['source_settlement_usd'];
                     $row['card_layout']['calendar_date'] = $tradeDate;
@@ -1303,10 +1308,8 @@ class FinanceSettlementService
         $table = 'finance_cost_orders_'.bin2hex(random_bytes(8));
         $runId = (string) \Illuminate\Support\Str::uuid();
         if ($mysql) {
-            $grammar = $db->getQueryGrammar();
-            $temporary = $grammar->wrapTable($table);
-            $template = $grammar->wrapTable('finance_report_order_costs');
-            $db->statement("CREATE TEMPORARY TABLE {$temporary} LIKE {$template}");
+            // MySQL 5.7 can crash when dropping the temporary InnoDB cost table.
+            $table = 'finance_report_order_costs';
         } else {
             $db->getSchemaBuilder()->create($table, function (\Illuminate\Database\Schema\Blueprint $table): void {
                 $table->temporary();
@@ -1322,7 +1325,7 @@ class FinanceSettlementService
             yield from $this->aggregateLogisticsCosts($rows, $db, $table, $runId);
         } finally {
             if ($mysql) {
-                $db->statement("DROP TEMPORARY TABLE IF EXISTS {$temporary}");
+                $db->table($table)->where('run_id', $runId)->delete();
             } else {
                 $db->getSchemaBuilder()->dropIfExists($table);
             }

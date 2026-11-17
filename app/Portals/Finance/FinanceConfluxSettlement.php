@@ -323,12 +323,14 @@ class FinanceConfluxSettlement
             }
             $byReference = $orders->groupBy('reference');
             foreach ($byReference->keys()->map(fn ($reference) => (string) $reference)->chunk(500) as $references) {
-                $unique = $this->orders($key)->whereIn('reference', $references)->select('reference')
-                    ->groupBy('reference')->havingRaw('COUNT(*) = 1');
+                $unique = $this->orders($key)->whereIn('reference', $references)
+                    ->groupBy('reference')->havingRaw('COUNT(*) = 1')->pluck('reference');
+                if ($unique->isEmpty()) {
+                    continue;
+                }
                 $items = $this->workbooks->database()->table(self::TABLE.' as entry')
-                    ->joinSub($unique, 'unique_orders', 'unique_orders.reference', '=', 'entry.reference')
                     ->where('entry.platform', 'ye')->where('entry.payment_account_id', $account->id)
-                    ->whereIn('entry.reference', $references)
+                    ->whereIn('entry.reference', $unique)
                     ->orderBy('entry.settlement_date')->orderBy('entry.id')->get(['entry.*'])->groupBy('reference');
                 foreach ($items as $reference => $item) {
                     $entries->put($byReference->get($reference)->first()->id, $item);
@@ -370,10 +372,19 @@ class FinanceConfluxSettlement
                     'payment_account_id' => $report->payment_account_id, 'settlement_date' => $report->settlement_date,
                     'platform' => 'ye', 'report_hash' => $report->report_hash,
                 ])->whereIn('kind', ['summary', 'sale', 'failed', ...array_keys(self::EVENT_FEES)])->get(['id', 'kind', 'payload']);
-                if ($reportFees->count() >= 8) {
-                    unset($reportFees[array_key_first($reportFees->getArrayCopy())]);
+                $calculated = $this->statementFees($bill, $report->settlement_date);
+                $cachedEntries = array_sum(array_map('count', $reportFees->getArrayCopy()));
+                while ($reportFees->count() > 0 && ($reportFees->count() >= 64 || $cachedEntries + count($calculated) > 40000)) {
+                    $oldest = array_key_first($reportFees->getArrayCopy());
+                    $cachedEntries -= count($reportFees[$oldest]);
+                    unset($reportFees[$oldest]);
                 }
-                $reportFees[$key] = $this->statementFees($bill, $report->settlement_date);
+                $reportFees[$key] = $calculated;
+            } else {
+                // Order the cache by use so recurring bills survive across adjacent batches.
+                $cached = $reportFees[$key];
+                unset($reportFees[$key]);
+                $reportFees[$key] = $cached;
             }
             $statementFees = $reportFees[$key];
             foreach ($entries as $entry) {
@@ -696,8 +707,11 @@ class FinanceConfluxSettlement
 
     private function statementRows(\Illuminate\Database\Query\Builder $query, array $filters): iterable
     {
-        $entries = $query->orderBy('entry.payment_account_id')->orderBy('entry.reference')
-            ->orderByDesc('entry.settlement_date')->orderByDesc('entry.id')->lazy(500);
+        $query->orderBy('entry.payment_account_id')->orderBy('entry.reference')
+            ->orderByDesc('entry.settlement_date')->orderByDesc('entry.id');
+        $entries = ! empty($filters['stream_statement_export'])
+            ? \Illuminate\Support\LazyCollection::make(fn () => $this->streamExportEntries($query))
+            : $query->cursor();
         $service = app(FinanceSettlementService::class);
         $groups = $entries->chunkWhile(fn ($entry, $key, $group) =>
             $entry->payment_account_id === $group->first()->payment_account_id && $entry->reference === $group->first()->reference);
@@ -757,6 +771,26 @@ class FinanceConfluxSettlement
                     'settlement_date' => $entry->settlement_date,
                 ] : []);
             }
+        }
+    }
+
+    private function streamExportEntries(\Illuminate\Database\Query\Builder $query): iterable
+    {
+        $source = $query->getConnection();
+        if (! in_array($source->getDriverName(), ['mysql', 'mariadb'], true)) {
+            yield from $query->cursor();
+            return;
+        }
+
+        // Keep the cursor on a separate connection so lookups can still query the main connection.
+        $config = $source->getConfig();
+        $config['options'][\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY] = false;
+        $config['options'][\PDO::ATTR_PERSISTENT] = false;
+        $reader = app('db.factory')->make($config, 'finance_statement_export');
+        try {
+            yield from $reader->cursor($query->toSql(), $query->getBindings(), false);
+        } finally {
+            $reader->disconnect();
         }
     }
 

@@ -161,20 +161,27 @@ class FinanceReportSnapshots
 
     private function revision(Connection $db, string $report, string $month, array $filters, bool $tracksRevisions): string
     {
+        $channel = $filters['channel'] ?? null;
+        $transactionVersion = $channel === 'worldpay' ? 9 : 8;
         // Installations without trigger privileges still generate reports in the background.
         if (! $tracksRevisions) {
             $bucket = (string) intdiv(now()->timestamp, 300);
 
-            return hash('sha256', $report === 'transactions' ? 'transactions:'.$bucket : $bucket);
+            $prefix = 'transactions:'.$transactionVersion.':';
+
+            return hash('sha256', match ($report) {
+                'transactions' => $prefix.$bucket,
+                'summary' => 'summary:4:'.$bucket,
+                default => $bucket,
+            });
         }
-        $channel = $filters['channel'] ?? null;
         $periods = $db->table('finance_summary_periods')->where('month', $month)
             ->when($channel === 'paypal', fn ($query) => $query->where('channel', 'paypal'))
             ->when(filled($channel) && ! in_array($channel, ['paypal', 'combined'], true), fn ($query) => $query->where('channel', 'credit_card'))
             ->orderBy('channel')->get(['channel', 'revision']);
         $rate = $db->table('finance_monthly_exchange_rates')->where(['month' => $month, 'currency' => 'USD'])->value('cny_rate');
 
-        return hash('sha256', json_encode([$report === 'transactions' ? 6 : ($report === 'losses' ? 4 : 3), $periods, $rate], JSON_THROW_ON_ERROR));
+        return hash('sha256', json_encode([$report === 'transactions' ? $transactionVersion : 4, $periods, $rate], JSON_THROW_ON_ERROR));
     }
 
     private function publish(Connection $db, string $scope, string $revision, array $result): string

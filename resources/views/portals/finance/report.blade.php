@@ -32,6 +32,8 @@
         @else
             <button type="button" class="btn btn-default" disabled>导出 Excel</button>
         @endif
+        <button type="button" data-finance-month-export="{{ route('finance.report', ['report' => $report, 'view' => 'transactions', 'download_missing' => 1]) }}" class="btn btn-default"><i class="fa fa-download" aria-hidden="true"></i> 导出整月缺失明细 (Excel)</button>
+        <button type="button" data-finance-month-export="{{ route('finance.report', ['report' => $report, 'view' => 'transactions', 'download_missing' => 1, 'missing_format' => 'csv']) }}" class="btn btn-default">整月缺失明细 CSV</button>
         <span @class(['finance-report-status', 'is-locked' => $isLocked])>{{ $isLocked ? '已锁定' : '未锁定' }}</span></div>
 </form></div></div>
 @if($tab === 'credit_card')
@@ -59,7 +61,7 @@
             <tbody>
                 @forelse($items as $item)
                     <tr><td class="finance-selection"><input type="checkbox" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($item) }}" aria-label="选择此行"></td>@foreach($columns as $field => $label)
-                        <td>{{ ($item[$field] ?? null) === null ? '' : (in_array($field, ['channel', 'account', 'currency', 'team', 'subscription', 'month'], true) ? $item[$field] : \App\Portals\Finance\FinanceCatalog::reportAmount($item[$field], $field === 'orders' ? 0 : 3)) }}</td>
+                        <td>{{ ($item[$field] ?? null) === null ? '' : (in_array($field, ['channel', 'account', 'currency', 'team', 'subscription', 'month'], true) ? $item[$field] : \App\Portals\Finance\FinanceCatalog::reportAmount($item[$field], in_array($field, ['orders', 'failed_orders'], true) ? 0 : 3)) }}</td>
                     @endforeach</tr>
                 @empty
                     <tr><td colspan="{{ count($columns) + 1 }}">{{ $reportSnapshot === null && $reportStatus['state'] !== 'ready' ? '当前筛选的报表尚未生成' : '无符合条件的记录' }}</td></tr>

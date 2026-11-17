@@ -223,14 +223,22 @@ class FinancePayPalSettlementOrders
         return $graph === null ? collect() : collect($this->matchingRows($filters, $graph[0], $graph, true));
     }
 
-    public function exportRows(array $filters, bool $matchCandidateDomains = true): iterable
+    public function exportRows(array $filters, bool $matchCandidateDomains = true, ?array $recordIds = null): iterable
     {
+        if ($recordIds === []) {
+            return;
+        }
         $graph = $this->orderGraph(null);
         if ($graph === null) {
             return;
         }
-        $fields = $this->settlements->exportColumns('paypal') + ['gross' => '原币总额'];
-        foreach ($this->matchingRows($filters, $graph[0], $graph, false, $matchCandidateDomains) as $row) {
+        $fields = $this->settlements->exportColumns('paypal') + ['gross' => '原币总额', 'success' => true];
+        $orders = $graph[0];
+        if ($recordIds !== null) {
+            $selected = array_fill_keys($recordIds, true);
+            $orders = array_values(array_filter($orders, fn ($order) => ! isset($order['event']) && isset($selected[$order['id']])));
+        }
+        foreach ($this->matchingRows($filters, $orders, $graph, false, $matchCandidateDomains) as $row) {
             yield array_intersect_key($row, $fields);
         }
     }

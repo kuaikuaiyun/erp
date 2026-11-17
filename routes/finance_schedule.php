@@ -12,7 +12,7 @@ $orderWorker = Schedule::command('queue:work finance_orders --queue=finance-orde
     ->everyMinute()->withoutOverlapping(20)
     ->appendOutputTo(storage_path('logs/finance-order-worker.log'));
 
-$summaryRefresh = Schedule::command('finance:summaries:refresh')->everyMinute()->withoutOverlapping(60)
+$summaryRefresh = Schedule::command('finance:summaries:refresh')->everyMinute()
     ->sendOutputTo(storage_path('logs/finance-summaries-schedule.log'));
 
 if (! $financeScheduleOnly) {

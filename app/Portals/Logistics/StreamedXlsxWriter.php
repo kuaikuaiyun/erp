@@ -25,17 +25,18 @@ class StreamedXlsxWriter
         array $additionalSheets = [],
         bool $streamDirectly = false,
         bool $protectSheet = false,
+        int $compressionLevel = 6,
     ): StreamedResponse {
         $headerFills = array_values(array_unique(array_filter(array_column($columns, 'headerFill'), fn ($color) => preg_match('/^[0-9A-F]{6}$/D', $color))));
 
-        return response()->streamDownload(function () use ($sheetName, $columns, $rows, $showGridlines, $plain, $fontName, $headerFills, $additionalSheets, $streamDirectly, $protectSheet): void {
+        return response()->streamDownload(function () use ($sheetName, $columns, $rows, $showGridlines, $plain, $fontName, $headerFills, $additionalSheets, $streamDirectly, $protectSheet, $compressionLevel): void {
             if (function_exists('set_time_limit')) {
                 @set_time_limit(0);
             }
 
             $sheets = [[$sheetName, $columns, $rows], ...$additionalSheets];
             if ($streamDirectly) {
-                $this->streamWorkbook($sheets, $showGridlines, $plain, $fontName, $headerFills, $protectSheet);
+                $this->streamWorkbook($sheets, $showGridlines, $plain, $fontName, $headerFills, $protectSheet, $compressionLevel);
                 return;
             }
             $xlsxPath = tempnam(sys_get_temp_dir(), 'erp-xlsx-');
@@ -94,6 +95,10 @@ class StreamedXlsxWriter
 
     private function sheetXml(array $columns, callable $rows, bool $showGridlines, bool $plain, array $headerFills, bool $protectSheet): \Generator
     {
+        $columnNames = [];
+        foreach ($columns as $index => $column) {
+            $columnNames[$index] = $this->columnName($index + 1);
+        }
         yield '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
         yield '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
         if (! $plain) {
@@ -113,7 +118,7 @@ class StreamedXlsxWriter
         foreach ($columns as $index => $column) {
             $fillIndex = array_search($column['headerFill'] ?? '', $headerFills, true);
             $style = $fillIndex === false ? ($plain ? 0 : 1) : 19 + $fillIndex;
-            yield $this->stringCell($this->columnName($index + 1).'1', (string) $column['label'], $style);
+            yield $this->stringCell($columnNames[$index].'1', (string) $column['label'], $style);
         }
         yield '</row>';
 
@@ -150,9 +155,10 @@ class StreamedXlsxWriter
                 $mergedRanges[] = $startColumn.$rowNumber.':'.$endColumn.$rowNumber;
             }
             $rowXml = '<row'.$attributes.'>';
-            foreach ($columns as $index => $_column) {
+            $cellColumns = ! empty($row['omitEmptyCells']) ? $row['cells'] : $columns;
+            foreach ($cellColumns as $index => $_column) {
                 $cell = $row['cells'][$index] ?? ['value' => ''];
-                $reference = $this->columnName($index + 1).$rowNumber;
+                $reference = $columnNames[$index].$rowNumber;
                 $type = (string) ($cell['type'] ?? 'text');
                 $style = $type === 'datetime' ? 18 : ($plain ? 0 : $this->styleIndex(
                     $kind,
@@ -192,9 +198,9 @@ class StreamedXlsxWriter
         yield '</worksheet>';
     }
 
-    private function streamWorkbook(array $sheets, bool $showGridlines, bool $plain, string $fontName, array $headerFills, bool $protectSheet): void
+    private function streamWorkbook(array $sheets, bool $showGridlines, bool $plain, string $fontName, array $headerFills, bool $protectSheet, int $compressionLevel): void
     {
-        $zip = new ZipStream(sendHttpHeaders: false, flushOutput: PHP_SAPI !== 'cli');
+        $zip = new ZipStream(defaultDeflateLevel: $compressionLevel, sendHttpHeaders: false, flushOutput: PHP_SAPI !== 'cli');
         foreach ($this->workbookParts(array_column($sheets, 0), $fontName, $headerFills) as $path => $data) {
             $zip->addFile($path, $data);
         }
