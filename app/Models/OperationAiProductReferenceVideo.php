@@ -11,6 +11,10 @@ class OperationAiProductReferenceVideo extends Model
     public const TYPE_TRAFFIC = 'traffic';
     public const TYPE_REMIX = 'remix';
 
+    public const SOURCE_UPLOAD = 'upload';
+
+    public const SOURCE_HISTORICAL_HTML = 'historical_html';
+
     public static function fileTypeCode(string $type): string
     {
         return match ($type) {
@@ -33,6 +37,7 @@ class OperationAiProductReferenceVideo extends Model
     protected $fillable = [
         'aikaipin_product_id', 'type', 'sequence', 'file_date', 'disk', 'path',
         'file_name', 'original_name', 'mime_type', 'size', 'department_code',
+        'source_kind', 'source_reference_index', 'source_url',
         'uploaded_by', 'uploaded_by_name',
     ];
 
@@ -40,6 +45,7 @@ class OperationAiProductReferenceVideo extends Model
         'sequence' => 'integer',
         'file_date' => 'date',
         'size' => 'integer',
+        'source_reference_index' => 'integer',
     ];
 
     public function __construct(array $attributes = [])
