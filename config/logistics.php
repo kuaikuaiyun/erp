@@ -18,6 +18,7 @@ return [
         'app_token_url' => 'https://open.tongtool.com/open-platform-service/devApp/appToken',
         'partner_list_url' => 'https://open.tongtool.com/open-platform-service/partnerOpenInfo/getAppBuyerList',
         'shopify_order_query_url' => 'https://open.tongtool.com/api-service/openapi/tongtool/shopifyOrderQuery',
+        'orders_query_url' => 'https://open.tongtool.com/api-service/openapi/tongtool/ordersQuery',
         'goods_query_url' => 'https://open.tongtool.com/api-service/openapi/tongtool/goodsQuery',
     ],
     'sku_database' => [

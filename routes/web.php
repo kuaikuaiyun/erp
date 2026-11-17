@@ -469,6 +469,7 @@ Route::post('/shopify-stores/{domainStore}/sync', [ShopifyStoreController::class
 Route::post('/shopify-stores/{domainStore}/register-webhooks', [ShopifyStoreController::class, 'registerWebhooks'])->name('logistics.shopify-stores.register-webhooks');
 Route::post('/shopify/webhooks/orders', ShopifyWebhookController::class)->name('logistics.shopify.webhooks.orders');
 Route::get('/orders', [LogisticsOrderController::class, 'index'])->name('logistics.orders.index');
+Route::get('/missing-tongtu-orders', [LogisticsOrderController::class, 'missingTongtu'])->name('logistics.orders.missing-tongtu');
 Route::post('/orders/export', [LogisticsOrderController::class, 'export'])->name('logistics.orders.export');
 Route::get('/orders/refund-import-template', [LogisticsOrderController::class, 'refundImportTemplate'])->name('logistics.orders.refund-import-template');
 Route::post('/orders/import-refunds', [LogisticsOrderController::class, 'importRefunds'])->name('logistics.orders.import-refunds');
