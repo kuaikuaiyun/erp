@@ -1176,3 +1176,7 @@
 
 .payment-renewal-two-sections .payment-renewal-kpis { grid-template-columns: minmax(0, 1fr); }
 .payment-renewal-two-sections .payment-renewal-kpi { max-width: 520px; }
+
+/* First-purchase refund subtotal rows. */
+.payment-renewal-two-sections .payment-data-table.payment-subscription-refunds tbody tr.payment-refund-row.payment-group-start > td { background-color: #fff3e2; font-weight: 700; border-top-color: #efd8b5; }
+.payment-renewal-two-sections .payment-data-table.payment-subscription-refunds tbody tr.payment-refund-row.payment-group-start:hover > td { background-color: #ffe8c7; }
