@@ -41,6 +41,13 @@ use Symfony\Component\HttpFoundation\Response;
 
 class LogisticsOrderController extends Controller
 {
+    private const EXCLUDED_TONGTU_RECONCILIATION_DOMAINS = [
+        'demihin.com',
+        'asbaght.com',
+        'soremina.com',
+        'kyfren.com',
+    ];
+
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly LogisticsPortalService $logistics,
@@ -216,6 +223,9 @@ class LogisticsOrderController extends Controller
         $domainsByPrefix = $this->tongtuDomainsByPrefix();
         foreach ($query->cursor() as $order) {
             $order = $this->resolveTongtuDomain($order, $domainsByPrefix);
+            if ($order->domain !== null && in_array(strtolower($order->domain), self::EXCLUDED_TONGTU_RECONCILIATION_DOMAINS, true)) {
+                continue;
+            }
             if ($storeDomain === '' || ($order->domain !== null && mb_stripos($order->domain, $storeDomain) !== false)) {
                 yield $order;
             }
