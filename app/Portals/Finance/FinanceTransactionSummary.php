@@ -11,6 +11,25 @@ class FinanceTransactionSummary
         return ! in_array($tab, ['ye', 'worldpay'], true);
     }
 
+    public function reallocateUnassignedFailures(array $items, string $tab): array
+    {
+        if (self::requiresSubscription($tab)) {
+            return $items;
+        }
+
+        $groups = array_column($items, null, 'account_group');
+        $failedByMonth = [];
+        foreach ($groups as $key => $group) {
+            if ($group['team'] === '未分配' && $group['subscription'] === '未分配' && blank($group['account'])) {
+                $month = $group['month'];
+                $failedByMonth[$month] = ($failedByMonth[$month] ?? 0) + $group['failed_orders'];
+                unset($groups[$key]);
+            }
+        }
+
+        return $failedByMonth === [] ? $items : $this->allocateFailures($groups, $failedByMonth, $tab);
+    }
+
     private const COMMON = ['channel' => '通道', 'account' => '支付账户', 'currency' => '货币', 'team' => '区域', 'subscription' => '订阅类型',
         'month' => '年月', 'orders' => '订单数', 'amount' => '金额', 'settlement' => '结算金额'];
 
@@ -100,7 +119,7 @@ class FinanceTransactionSummary
     {
         $teams = [];
         foreach ($groups as $key => &$group) {
-            $group['failed_orders'] = 0;
+            $group['failed_orders'] ??= 0;
             if ($group['orders'] > 0 && filled($group['team'])
                 && (! self::requiresSubscription($tab) || filled($group['subscription']))) {
                 $teams[$group['month']][$group['team']][$key] = $group['orders'];

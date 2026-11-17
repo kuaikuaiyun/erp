@@ -3032,6 +3032,10 @@ class FinancePortalTest extends TestCase
         $this->assertSame(5, array_sum(array_column($items, 'failed_orders')));
         $items = $summary->summarize(array_slice($rows, 0, 13), 'worldpay');
         $this->assertSame(['A' => 2, 'B' => 1, 'C' => 0, '' => 0], array_column($items, 'failed_orders', 'team'));
+        $legacyItems = $summary->summarize($rows, 'credit_card');
+        $this->assertContains('未分配', array_column($legacyItems, 'team'));
+        $items = $summary->reallocateUnassignedFailures($legacyItems, 'worldpay');
+        $this->assertSame(['A' => 3, 'B' => 1, 'C' => 1, '' => 0], array_column($items, 'failed_orders', 'team'));
     }
 
     public function test_transaction_summary_uses_each_channel_template_for_display_and_export(): void

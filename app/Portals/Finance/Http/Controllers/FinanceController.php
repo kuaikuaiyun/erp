@@ -1672,6 +1672,7 @@ class FinanceController extends Controller
             return response()->json($reportStatus)->header('Cache-Control', 'no-store');
         }
         [$items, $subscriptionOptions] = $result;
+        $items = $summary->reallocateUnassignedFailures($items, $tab);
         $items = array_values(array_filter($items, fn (array $row) => filled($row['team'])
             && (! $summary::requiresSubscription($tab) || filled($row['subscription']))));
         if ($request->boolean('download')) {
