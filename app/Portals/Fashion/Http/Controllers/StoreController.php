@@ -11,6 +11,7 @@ use App\Portals\Fashion\OperationProjectCatalog;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -169,7 +170,7 @@ class StoreController extends Controller
         if ($this->project['code'] === 'fuzhuang') {
             $query->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')");
         } else {
-            $query->whereRaw('TRIM(project) = ?', [$this->project['name']]);
+            $query->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($this->project));
         }
         if ($user->isAdministrator()) {
             return $query;
@@ -190,7 +191,7 @@ class StoreController extends Controller
         if ($this->project['code'] === 'fuzhuang') {
             $storesQuery->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')");
         } else {
-            $storesQuery->whereRaw('TRIM(project) = ?', [$this->project['name']]);
+            $storesQuery->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($this->project));
         }
         $stores = $storesQuery->get(['owner_user_id', 'user_name']);
         $ids = $stores->pluck('owner_user_id')->filter()->unique();

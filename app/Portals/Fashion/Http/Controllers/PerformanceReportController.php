@@ -124,7 +124,7 @@ class PerformanceReportController extends Controller
                 });
             });
         } else {
-            $base->whereRaw('TRIM(stores.project) = ?', [$this->project['name']]);
+            $base->whereIn(DB::raw('TRIM(stores.project)'), OperationProjectCatalog::storeProjectNames($this->project));
             $base->whereRaw("LOWER(TRIM(orders.source_platform)) = CASE WHEN LOWER(TRIM(stores.site_builder)) = 'xshopy' THEN 'xshoppy' ELSE LOWER(TRIM(stores.site_builder)) END");
             $base->where(function ($paid): void {
                 $paid->whereNotIn(DB::raw('LOWER(TRIM(orders.source_platform))'), ['nbc', 'shopyy'])
@@ -279,7 +279,7 @@ class PerformanceReportController extends Controller
             ->join($storeTable.' as stores', 'stores.id', '=', 'orders.assistant_domain_store_id')
             ->leftJoinSub($identityMap, 'owner_identity', fn ($join) => $join->on('owner_identity.identity', '=', DB::raw('LOWER(TRIM(stores.user_name))')))
             ->leftJoin($userTable.' as owners', 'owners.id', '=', DB::raw($resolvedOwnerSql))
-            ->whereRaw('TRIM(stores.project) = ?', [$this->project['name']])
+            ->whereIn(DB::raw('TRIM(stores.project)'), OperationProjectCatalog::storeProjectNames($this->project))
             ->whereRaw("LOWER(TRIM(stores.site_builder)) = 'shopify'")
             ->where('orders.is_test', false)
             ->whereIn(DB::raw('UPPER(orders.financial_status)'), AssistantShopifyStoreOrder::successfulFinancialStatuses())
@@ -448,7 +448,7 @@ class PerformanceReportController extends Controller
                 $this->project['code'] === 'fuzhuang',
                 fn ($query) => $query->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')")
             )
-            ->when($this->project['code'] !== 'fuzhuang', fn ($query) => $query->whereRaw('TRIM(project) = ?', [$this->project['name']]))
+            ->when($this->project['code'] !== 'fuzhuang', fn ($query) => $query->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($this->project)))
             ->when(! $user->isAdministrator(), function ($query) use ($visibleOperatorIds, $visibleOperatorNames): void {
                 $query->where(function ($binding) use ($visibleOperatorIds, $visibleOperatorNames): void {
                     if ($visibleOperatorIds !== []) {
@@ -529,7 +529,7 @@ class PerformanceReportController extends Controller
             ->table('assistant_domain_stores')
             ->where('id', (int) $validated['store_id'])
             ->whereRaw("LOWER(TRIM(site_builder)) = 'shopify'")
-            ->whereRaw('TRIM(project) = ?', [$this->project['name']])
+            ->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($this->project))
             ->when(! $user->isAdministrator(), function ($query) use ($visibleOperatorIds, $visibleOperatorNames): void {
                 $query->where(function ($binding) use ($visibleOperatorIds, $visibleOperatorNames): void {
                     if ($visibleOperatorIds !== []) {
@@ -672,7 +672,7 @@ class PerformanceReportController extends Controller
     {
         $stores = DB::connection(config('admin.database.connection') ?: config('database.default'))
             ->table('assistant_domain_stores')
-            ->whereRaw('TRIM(project) = ?', [$this->project['name']])
+            ->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($this->project))
             ->get(['owner_user_id', 'user_name']);
         $ids = $stores->pluck('owner_user_id')->filter()->map(fn ($id): int => (int) $id)->unique()->values();
         $names = $stores->pluck('user_name')->filter()->map(fn ($name): string => trim((string) $name))->unique()->values();
@@ -700,7 +700,7 @@ class PerformanceReportController extends Controller
 
         return DB::connection(config('admin.database.connection') ?: config('database.default'))
             ->table('assistant_domain_stores')
-            ->whereRaw('TRIM(project) = ?', [$this->project['name']])
+            ->whereIn(DB::raw('TRIM(project)'), OperationProjectCatalog::storeProjectNames($this->project))
             ->whereNotNull('site_builder')
             ->pluck('site_builder')
             ->map(function ($platform): string {

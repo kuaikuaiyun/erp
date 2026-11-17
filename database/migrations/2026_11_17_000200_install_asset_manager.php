@@ -15,7 +15,10 @@ return new class extends Migration
         $schema = Schema::connection($connection);
         $portal = $db->table('portals')->where('code', 'asset-manager')->value('id');
         if (! $portal) {
-            throw new RuntimeException(__('asset_manager.missing_portal', [], 'zh-CN'));
+            // The asset-manager portal is optional. When it has been retired or was
+            // never installed, mark this migration as completed without creating
+            // its tables, permissions or menus.
+            return;
         }
         foreach (AssetManagerCatalog::MODELS as $kind => $class) {
             $table = (new $class)->getTable();

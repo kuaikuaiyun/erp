@@ -12,6 +12,7 @@ use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
 use App\Portals\Fashion\FashionAdvertisingReportBulkImportService;
+use App\Portals\Fashion\OperationProjectCatalog;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -282,6 +283,7 @@ class FashionAdvertisingReviewController extends Controller
             'entries.*.store_domain' => ['nullable', 'string', 'max:191'],
             'entries.*.book_spend_usd' => ['required', 'numeric', 'min:0'],
             'entries.*.settlement_coefficient' => ['required', 'numeric', 'min:0'],
+            'entries.*.misc_fee_rmb' => ['nullable', 'numeric', 'min:0'],
             'entries.*.screenshot' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
             'deleted_entry_ids' => ['nullable', 'array'],
             'deleted_entry_ids.*' => ['integer', 'distinct', Rule::in($entryIds)],
@@ -313,6 +315,9 @@ class FashionAdvertisingReviewController extends Controller
                     'book_spend_usd' => $bookSpend,
                     'settlement_coefficient' => $coefficient,
                     'actual_spend_usd' => round($bookSpend * (1 + $coefficient), 2),
+                    'misc_fee_rmb' => OperationProjectCatalog::supportsMiscFeeRmb((string) $report->project_code)
+                        ? round((float) ($row['misc_fee_rmb'] ?? 0), 2)
+                        : 0,
                 ];
                 if ($file = $request->file('entries.'.$index.'.screenshot')) {
                     $values['screenshot_path'] = $file->storeAs('fashion-advertising/'.now()->format('Ym'), Str::uuid().'.'.$file->extension(), 'local');

@@ -1841,7 +1841,7 @@ class OperationTaskController extends Controller
         if ($recipientIds->isEmpty()) return;
         $message = InternalMessage::query()->create([
             'title' => $title, 'content' => $content, 'sender_user_id' => $sender->id, 'sender_name' => $this->userName($sender),
-            'sender_portal_code' => self::PORTAL_CODE, 'sender_portal_name' => '服装运营系统', 'published_at' => now(),
+            'sender_portal_code' => self::PORTAL_CODE, 'sender_portal_name' => '单包服装运营系统', 'published_at' => now(),
         ]);
         $now = now();
         InternalMessageRecipient::query()->insert($recipientIds->map(fn (int $id) => ['internal_message_id' => $message->id, 'recipient_user_id' => $id, 'created_at' => $now, 'updated_at' => $now])->all());

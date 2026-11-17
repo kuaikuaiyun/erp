@@ -7,19 +7,42 @@ use Illuminate\Support\Collection;
 
 final class OperationProjectCatalog
 {
-    /** @return array<string, array{name:string,route:string,path:string,departments:list<string>}> */
+    /** @return array<string, array{name:string,route:string,path:string,departments:list<string>,store_projects:list<string>}> */
     public static function all(): array
     {
         return [
-            'fuzhuang' => ['name' => '服装运营系统', 'route' => 'fashion', 'path' => 'fashion', 'departments' => ['服装运营部门']],
-            'baokuan-fashion' => ['name' => '爆款服装项目', 'route' => 'baokuan-fashion', 'path' => 'baokuan-fashion', 'departments' => ['爆款服装项目', '爆款服装运营部门']],
-            'baokuan-general' => ['name' => '爆款百货项目', 'route' => 'baokuan-general', 'path' => 'baokuan-general', 'departments' => ['爆款百货项目', '爆款百货运营部门']],
-            'kunpeng-shopify' => ['name' => '鲲鹏shopify项目', 'route' => 'kunpeng-shopify', 'path' => 'kunpeng-shopify', 'departments' => ['鲲鹏shopify项目', '鲲鹏Shopify项目', '鲲鹏Shopify运营部门']],
-            'kunpeng-general' => ['name' => '鲲鹏百货项目', 'route' => 'kunpeng-general', 'path' => 'kunpeng-general', 'departments' => ['鲲鹏百货项目', '鲲鹏百货运营部门']],
+            'fuzhuang' => [
+                'name' => '单包服装运营系统',
+                'route' => 'fashion',
+                'path' => 'fashion',
+                'departments' => ['服装运营部门', '单包服装运营部门', '单包服装运营系统'],
+                'store_projects' => [],
+            ],
+            'baokuan-fashion' => [
+                'name' => '爆款服装运营系统',
+                'route' => 'baokuan-fashion',
+                'path' => 'baokuan-fashion',
+                'departments' => ['爆款服装项目', '爆款服装运营部门', '爆款服装运营系统'],
+                'store_projects' => ['爆款服装项目', '爆款服装运营系统'],
+            ],
+            'baokuan-general' => [
+                'name' => '爆款百货运营系统',
+                'route' => 'baokuan-general',
+                'path' => 'baokuan-general',
+                'departments' => ['爆款百货项目', '爆款百货运营部门', '爆款百货运营系统'],
+                'store_projects' => ['爆款百货项目', '爆款百货运营系统'],
+            ],
+            'danbao-general' => [
+                'name' => '单包百货运营系统',
+                'route' => 'danbao-general',
+                'path' => 'danbao-general',
+                'departments' => ['单包百货项目', '单包百货', '单包百货运营部门', '单包百货运营系统'],
+                'store_projects' => ['单包百货项目', '单包百货', '单包百货运营系统'],
+            ],
         ];
     }
 
-    /** @return array{code:string,name:string,route:string,path:string,departments:list<string>} */
+    /** @return array{code:string,name:string,route:string,path:string,departments:list<string>,store_projects:list<string>} */
     public static function get(string $code): array
     {
         $project = self::all()[$code] ?? null;
@@ -50,5 +73,19 @@ final class OperationProjectCatalog
     public static function route(array $project, string $page): string
     {
         return $project['route'].'.'.$page;
+    }
+
+    public static function supportsMiscFeeRmb(string $code): bool
+    {
+        return $code !== 'fuzhuang' && array_key_exists($code, self::all());
+    }
+
+    /** @return list<string> */
+    public static function storeProjectNames(array $project): array
+    {
+        return array_values(array_unique(array_filter(array_map(
+            fn ($name): string => trim((string) $name),
+            $project['store_projects'] ?? [$project['name']]
+        ))));
     }
 }

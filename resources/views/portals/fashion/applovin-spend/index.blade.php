@@ -6,7 +6,7 @@
 </style>
 @endpush
 @section('content')
-<section class="content-header"><h1>AppLovin账号消耗 <small>汇总服装运营系统已提交的 AppLovin 广告费用</small></h1></section>
+<section class="content-header"><h1>AppLovin账号消耗 <small>汇总单包服装运营系统已提交的 AppLovin 广告费用</small></h1></section>
 <section class="content">
 @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
 @if($errors->any())<div class="alert alert-danger">{{ $errors->first() }}</div>@endif

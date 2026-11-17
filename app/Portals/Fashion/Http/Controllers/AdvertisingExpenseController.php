@@ -94,6 +94,7 @@ class AdvertisingExpenseController extends Controller
             'selectedOperator' => $selectedOperator,
             'operatorStores' => $operatorStores,
             'operationProject' => $this->project,
+            'supportsMiscFeeRmb' => OperationProjectCatalog::supportsMiscFeeRmb($this->project['code']),
         ]);
     }
 
@@ -194,6 +195,7 @@ class AdvertisingExpenseController extends Controller
             'advertising.*.book_spend_usd' => ['required', 'numeric', 'min:0'],
             'advertising.*.settlement_coefficient' => ['required', 'numeric', 'min:0'],
             'advertising.*.actual_spend_usd' => ['required', 'numeric', 'min:0'],
+            'advertising.*.misc_fee_rmb' => ['nullable', 'numeric', 'min:0'],
             'advertising.*.remark' => ['nullable', 'string', 'max:1000'],
             'advertising.*.existing_screenshot' => ['nullable', 'string', 'max:500'],
             'advertising.*.remove_screenshot' => ['nullable', 'boolean'],
@@ -291,8 +293,11 @@ class AdvertisingExpenseController extends Controller
                 $bookSpend = round((float) ($row['book_spend_usd'] ?? 0), 2);
                 $row['settlement_coefficient'] = $coefficient;
                 $row['actual_spend_usd'] = round($bookSpend + ($bookSpend * $coefficient), 2);
+                $row['misc_fee_rmb'] = OperationProjectCatalog::supportsMiscFeeRmb($this->project['code'])
+                    ? round((float) ($row['misc_fee_rmb'] ?? 0), 2)
+                    : 0;
             }
-            foreach (['revenue_usd', 'book_spend_usd', 'actual_spend_usd'] as $field) {
+            foreach (['revenue_usd', 'book_spend_usd', 'actual_spend_usd', 'misc_fee_rmb'] as $field) {
                 if (array_key_exists($field, $row)) {
                     $row[$field] = round((float) $row[$field], 2);
                 }
@@ -315,15 +320,27 @@ class AdvertisingExpenseController extends Controller
         $ownerNames = collect([$owner?->name, $owner?->username])
             ->filter()->map(fn ($name): string => trim((string) $name))->unique()->values()->all();
 
-        return DB::connection($connection)->table($orderTable.' as orders')
+        $query = DB::connection($connection)->table($orderTable.' as orders')
             ->join('assistant_domain_stores as stores', 'stores.id', '=', 'orders.assistant_domain_store_id')
             ->where(function ($binding) use ($ownerUserId, $ownerNames): void {
                 $binding->where('stores.owner_user_id', $ownerUserId);
                 if ($ownerNames !== []) {
                     $binding->orWhereIn('stores.user_name', $ownerNames);
                 }
-            })
-            ->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy')")
+            });
+
+        if ($this->project['code'] === 'fuzhuang') {
+            $query->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy')");
+        } else {
+            $query->whereIn(DB::raw('TRIM(stores.project)'), OperationProjectCatalog::storeProjectNames($this->project))
+                ->whereRaw("LOWER(TRIM(orders.source_platform)) = CASE WHEN LOWER(TRIM(stores.site_builder)) = 'xshopy' THEN 'xshoppy' ELSE LOWER(TRIM(stores.site_builder)) END")
+                ->where(function ($paid): void {
+                    $paid->whereNotIn(DB::raw('LOWER(TRIM(orders.source_platform))'), ['nbc', 'shopyy'])
+                        ->orWhere('orders.payment_status', '230');
+                });
+        }
+
+        return $query
             ->whereBetween('orders.order_created_at', [$reportDate.' 00:00:00', $reportDate.' 23:59:59'])
             ->where(function ($paid): void {
                 $paid->whereNotNull('orders.paid_at')
@@ -340,7 +357,7 @@ class AdvertisingExpenseController extends Controller
                 'revenue_usd' => round((float) $row->revenue_usd, 2),
                 'order_count' => (int) $row->order_count,
                 'screenshot_path' => null,
-                'remark' => '系统根据 XShoppy 已支付订单自动统计',
+                'remark' => '系统根据店铺已支付订单自动统计',
             ])->values()->all();
     }
 
