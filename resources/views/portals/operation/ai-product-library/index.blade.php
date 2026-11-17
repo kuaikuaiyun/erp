@@ -42,6 +42,21 @@
         .operation-ai-detail-page-url { display:flex; align-items:center; gap:5px; min-width:0; color:#2786bd; font-size:12px; }
         .operation-ai-detail-page-url span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .operation-ai-detail-page-empty { color:#9aa6b2; font-size:12px; }
+        .operation-ai-detail-videos { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+        .operation-ai-detail-video { overflow:hidden; border:1px solid #dce6ed; border-radius:7px; background:#f9fbfc; }
+        .operation-ai-detail-video video { display:block; width:100%; height:190px; background:#111; object-fit:contain; }
+        .operation-ai-detail-video-info { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:3px 8px; padding:8px 10px; }
+        .operation-ai-detail-video-code { overflow:hidden; color:#285d7d; font-family:Consolas,monospace; font-size:12px; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }
+        .operation-ai-detail-video-info small { color:#8998a6; font-size:10px; }
+        .operation-ai-detail-video-groups { display:grid; gap:14px; }
+        .operation-ai-detail-video-group { overflow:hidden; border:1px solid #dbe6ed; border-radius:8px; background:#f8fbfd; }
+        .operation-ai-detail-video-group-head { display:flex; align-items:center; justify-content:space-between; padding:9px 12px; border-bottom:1px solid #dbe6ed; color:#285d7d; background:#eef6fa; font-weight:700; }
+        .operation-ai-detail-video-group-head .badge { background:#3c8dbc; }
+        .operation-ai-detail-video-group .operation-ai-detail-videos { padding:12px; }
+        .operation-ai-detail-video-empty { padding:18px; color:#91a0ac; text-align:center; }
+        .operation-ai-detail-video-actions { display:flex; align-items:center; justify-content:space-between; gap:8px; grid-column:1 / -1; margin-top:4px; }
+        .operation-ai-detail-video-download { display:inline-flex; align-items:center; gap:4px; padding:3px 8px; border-radius:4px; color:#fff; background:#3c8dbc; font-size:11px; text-decoration:none; }
+        .operation-ai-detail-video-download:hover,.operation-ai-detail-video-download:focus { color:#fff; background:#2f7399; text-decoration:none; }
         .operation-ai-product-page .aikaipin-pagination-control { display:flex; align-items:center; justify-content:space-between; gap:16px; min-height:48px; }
         .operation-ai-product-page .aikaipin-pagination-summary { color:#7c8998; font-size:12px; }
         .operation-ai-product-page .pagination > li > a,
@@ -98,7 +113,8 @@
         .operation-ai-publish-actions > span { color:#7a8d9d; font-size:12px; }
         .operation-ai-publish-actions .btn { min-width:92px; }
         @media (max-width:767px) { .operation-ai-store-options { grid-template-columns:1fr; max-height:220px; } .operation-ai-store-heading { align-items:flex-start; flex-direction:column; } .operation-ai-store-search { width:100%; max-width:none; } .operation-ai-publish-actions > span { display:none; } .operation-ai-publish-actions { justify-content:flex-end; } }
-        @media (max-width:767px) { .operation-ai-detail-grid,.operation-ai-detail-pages { grid-template-columns:1fr; } .operation-ai-detail-item.is-wide { grid-column:auto; } }
+        .operation-ai-material-upload-progress { height:9px; margin:12px 0 5px; }
+        @media (max-width:767px) { .operation-ai-detail-grid,.operation-ai-detail-pages,.operation-ai-detail-videos { grid-template-columns:1fr; } .operation-ai-detail-item.is-wide { grid-column:auto; } }
     </style>
 @endpush
 
@@ -232,6 +248,12 @@
                                     data-detail-url="{{ route('operation.ai-product-library.detail', ['product' => $product]) }}">
                                     <i class="fa fa-eye"></i> {{ __('aikaipin.operation_library.detail') }}
                                 </button>
+                                <button type="button" class="btn btn-info btn-sm" data-operation-ai-material-upload-trigger
+                                    data-upload-url="{{ route('operation.ai-product-library.reference-videos.upload', absolute: false) }}"
+                                    data-product-id="{{ $product->getKey() }}"
+                                    data-product-label="{{ $product->product_code }} · {{ $product->name }}">
+                                    <i class="fa fa-upload"></i> 上传素材
+                                </button>
                                 <button type="button" class="btn btn-warning btn-sm" data-operation-ai-placement
                                     data-placement-url="{{ route('operation.ai-product-library.placement-evaluations.form', $product) }}">
                                     <i class="fa fa-line-chart"></i> 投放测评
@@ -283,6 +305,24 @@
     </div></div>
 </div>
 
+<div class="modal fade" id="operation-ai-material-upload-modal" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog" role="document"><div class="modal-content">
+        <form method="post" enctype="multipart/form-data" data-operation-ai-material-upload-form>
+            @csrf
+            <input type="hidden" name="product_id" data-operation-ai-material-product-id>
+            <div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title"><i class="fa fa-upload"></i> 上传素材视频</h4></div>
+            <div class="modal-body">
+                <div class="alert alert-info" data-operation-ai-material-product></div>
+                <div class="form-group"><label>素材类型</label><select class="form-control" name="type" required><option value="flow">Flow素材</option><option value="traffic">扒的素材</option><option value="remix">混剪素材</option></select></div>
+                <div class="form-group"><label>选择视频</label><input class="form-control" type="file" name="video" accept="video/mp4,video/quicktime,video/x-msvideo,video/webm,video/x-matroska,.m4v" required><p class="help-block">单个视频最大 300MB；上传后仅本人和 AI 产品资料库可见。</p></div>
+                <div class="alert alert-danger" data-operation-ai-material-error hidden></div>
+                <div data-operation-ai-material-progress hidden><div class="progress operation-ai-material-upload-progress"><div class="progress-bar progress-bar-info progress-bar-striped active" style="width:0%" data-operation-ai-material-progress-bar></div></div><small class="text-muted" data-operation-ai-material-progress-text>准备上传...</small></div>
+            </div>
+            <div class="modal-footer"><button type="button" class="btn btn-default" data-dismiss="modal">取消</button><button type="submit" class="btn btn-primary"><i class="fa fa-upload"></i> 开始上传</button></div>
+        </form>
+    </div></div>
+</div>
+
 <div class="modal fade" id="operation-ai-placement-modal" tabindex="-1" role="dialog" aria-hidden="true">
     <div class="modal-dialog modal-lg" role="document"><div class="modal-content">
         <div class="modal-header"><button type="button" class="close" data-dismiss="modal"><span>&times;</span></button><h4 class="modal-title"><i class="fa fa-line-chart"></i> 投放测评</h4></div>
@@ -329,6 +369,21 @@
                 '</div>' + landing + '</div>';
         }).join('') + '</div>';
     }
+    function materialVideos(data) {
+        var videos = Array.isArray(data.material_videos) ? data.material_videos : [];
+        var groups = [
+            {type:'flow', label:'Flow素材', icon:'fa-random'},
+            {type:'traffic', label:'扒的素材', icon:'fa-cloud-download'},
+            {type:'remix', label:'混剪素材', icon:'fa-film'}
+        ];
+        return '<div class="operation-ai-detail-video-groups">' + groups.map(function (group) {
+            var groupVideos = videos.filter(function (video) { return video.type === group.type; });
+            var cards = groupVideos.length ? '<div class="operation-ai-detail-videos">' + groupVideos.map(function (video) {
+                return '<article class="operation-ai-detail-video"><video controls preload="metadata" src="' + escapeHtml(video.preview_url) + '"></video><div class="operation-ai-detail-video-info"><strong class="operation-ai-detail-video-code" title="' + escapeHtml(video.video_code) + '">' + escapeHtml(video.video_code) + '</strong><span class="label label-info">' + escapeHtml(video.type_label) + '</span><small>' + escapeHtml(video.size) + '</small><small>' + escapeHtml(video.uploaded_by_name) + '</small><div class="operation-ai-detail-video-actions"><span class="text-muted"><i class="fa fa-file-video-o"></i> ' + escapeHtml(video.file_name) + '</span><a class="operation-ai-detail-video-download" href="' + escapeHtml(video.download_url) + '"><i class="fa fa-download"></i> 下载</a></div></div></article>';
+            }).join('') + '</div>' : '<div class="operation-ai-detail-video-empty"><i class="fa fa-inbox"></i> 暂无' + group.label + '</div>';
+            return '<section class="operation-ai-detail-video-group"><div class="operation-ai-detail-video-group-head"><span><i class="fa ' + group.icon + '"></i> ' + group.label + '</span><span class="badge">' + groupVideos.length + '</span></div>' + cards + '</section>';
+        }).join('') + '</div>';
+    }
     function render(data) {
         var landing = data.landing_page_url
             ? '<a class="operation-ai-detail-link" href="' + escapeHtml(data.landing_page_url) + '" target="_blank" rel="noopener noreferrer"><i class="fa fa-external-link"></i>' + escapeHtml(data.landing_page_url) + '</a>'
@@ -355,21 +410,119 @@
             item('产品页 / 对应落地页', productPages(data.product_pages), true) +
             (!data.product_pages || !data.product_pages.length ? item('Shopify 完整资料', shopifyData, true) : '') +
             item(labels.images, images, true) + item(labels.reference_file, value(data.reference_file_name)) +
+            item('素材视频 / 视频编号', materialVideos(data), true) +
             item(labels.package_file, packageFile) + item(labels.creator, value(data.created_by_name)) +
             item(labels.updater, value(data.updated_by_name)) + item(labels.created_at, value(data.created_at)) +
             item(labels.updated_at, value(data.updated_at));
         loading.hidden = true; error.hidden = true; content.hidden = false;
     }
+    function loadDetail(url) {
+        loading.hidden = false; error.hidden = true; content.hidden = true; content.innerHTML = '';
+        return fetch(url, {headers:{'X-Requested-With':'XMLHttpRequest','Accept':'application/json'}})
+            .then(function (response) { return response.json().then(function (data) { if (!response.ok) throw new Error(data.message || labels.load_failed); return data; }); })
+            .then(render)
+            .catch(function (exception) { loading.hidden = true; error.textContent = exception.message || labels.load_failed; error.hidden = false; });
+    }
     document.addEventListener('click', function (event) {
         var button = event.target.closest('[data-operation-ai-detail]');
         if (!button) return;
         event.preventDefault();
-        loading.hidden = false; error.hidden = true; content.hidden = true; content.innerHTML = '';
         window.jQuery(modal).modal('show');
-        fetch(button.getAttribute('data-detail-url'), {headers:{'X-Requested-With':'XMLHttpRequest'}})
-            .then(function (response) { return response.json().then(function (data) { if (!response.ok) throw new Error(data.message || labels.load_failed); return data; }); })
-            .then(render)
-            .catch(function (exception) { loading.hidden = true; error.textContent = exception.message || labels.load_failed; error.hidden = false; });
+        loadDetail(button.getAttribute('data-detail-url'));
+    });
+})();
+(function () {
+    var modal = document.getElementById('operation-ai-material-upload-modal');
+    if (!modal) return;
+    var form = modal.querySelector('[data-operation-ai-material-upload-form]');
+    var product = modal.querySelector('[data-operation-ai-material-product]');
+    var productId = modal.querySelector('[data-operation-ai-material-product-id]');
+    var error = modal.querySelector('[data-operation-ai-material-error]');
+    var progress = modal.querySelector('[data-operation-ai-material-progress]');
+    var progressBar = modal.querySelector('[data-operation-ai-material-progress-bar]');
+    var progressText = modal.querySelector('[data-operation-ai-material-progress-text]');
+    var submit = form.querySelector('[type="submit"]');
+
+    function setProgress(percent, text) {
+        progress.hidden = false;
+        progressBar.style.width = percent + '%';
+        progressBar.textContent = percent + '%';
+        progressText.textContent = text;
+    }
+    function reset() {
+        form.reset();
+        error.hidden = true;
+        error.textContent = '';
+        progress.hidden = true;
+        progressBar.style.width = '0%';
+        progressBar.textContent = '';
+        progressText.textContent = '准备上传...';
+        submit.disabled = false;
+        submit.innerHTML = '<i class="fa fa-upload"></i> 开始上传';
+    }
+    document.addEventListener('click', function (event) {
+        var trigger = event.target.closest('[data-operation-ai-material-upload-trigger]');
+        if (!trigger) return;
+        reset();
+        form.action = trigger.getAttribute('data-upload-url');
+        productId.value = trigger.getAttribute('data-product-id') || '';
+        product.textContent = '当前产品：' + (trigger.getAttribute('data-product-label') || '—');
+        window.jQuery(modal).modal('show');
+    });
+    form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        if (!form.reportValidity()) return;
+        error.hidden = true;
+        submit.disabled = true;
+        submit.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 上传中...';
+        setProgress(0, '正在上传素材视频...');
+
+        var request = new XMLHttpRequest();
+        request.open('POST', form.action, true);
+        request.setRequestHeader('Accept', 'application/json');
+        request.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+        request.setRequestHeader('X-CSRF-TOKEN', (document.querySelector('meta[name="csrf-token"]') || {}).content || '');
+        request.upload.onprogress = function (uploadEvent) {
+            if (!uploadEvent.lengthComputable) return;
+            var percent = Math.min(99, Math.round(uploadEvent.loaded / uploadEvent.total * 100));
+            setProgress(percent, '正在上传素材视频...');
+        };
+        function uploadErrorMessage(payload, status) {
+            if (payload && payload.message) return payload.message;
+            if (payload && payload.errors) {
+                var fields = Object.keys(payload.errors);
+                if (fields.length && payload.errors[fields[0]] && payload.errors[fields[0]][0]) {
+                    return payload.errors[fields[0]][0];
+                }
+            }
+            if (status === 413) return '视频文件超过服务器允许的上传大小，请压缩后重试。';
+            if (status === 419) return '登录状态或页面令牌已过期，请刷新页面后重新上传。';
+            if (status === 422) return '视频文件校验未通过，请检查格式和文件大小。';
+            return '视频上传失败（HTTP ' + status + '），请重试或联系管理员查看服务器日志。';
+        }
+        request.onload = function () {
+            var payload = {};
+            try { payload = JSON.parse(request.responseText || '{}'); } catch (ignore) {}
+            if (request.status < 200 || request.status >= 300) {
+                error.textContent = uploadErrorMessage(payload, request.status);
+                error.hidden = false;
+                submit.disabled = false;
+                submit.innerHTML = '<i class="fa fa-upload"></i> 重新上传';
+                setProgress(0, '上传失败');
+                return;
+            }
+            setProgress(100, '上传完成：' + ((payload.video && payload.video.video_code) || '素材视频'));
+            submit.innerHTML = '<i class="fa fa-check"></i> 上传成功';
+            window.setTimeout(function () { window.jQuery(modal).modal('hide'); }, 700);
+        };
+        request.onerror = function () {
+            error.textContent = '网络异常，视频上传失败，请重试。';
+            error.hidden = false;
+            submit.disabled = false;
+            submit.innerHTML = '<i class="fa fa-upload"></i> 重新上传';
+            setProgress(0, '上传失败');
+        };
+        request.send(new FormData(form));
     });
 })();
 (function () {
@@ -448,6 +601,44 @@
     function initializePlacementRecords() {
         var container=content.querySelector('[data-placement-records]'),template=content.querySelector('#placement-record-template'),add=content.querySelector('[data-add-placement-record]');
         if(!container||!template||!add)return;
+        if (window.jQuery && window.jQuery.fn.popover) {
+            window.jQuery(content).find('[data-toggle="popover"]').popover({container:'body'});
+        }
+        var picker=content.querySelector('[data-placement-material-picker]'),materialInput=content.querySelector('[data-placement-material-search]'),materialId=content.querySelector('[data-placement-material-video-id]'),materialResults=content.querySelector('[data-placement-material-results]'),materialSelected=content.querySelector('[data-placement-material-selected]'),searchTimer=null,searchController=null;
+        function escapeMaterialHtml(value){return String(value==null?'':value).replace(/[&<>"']/g,function(character){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[character];});}
+        function hideMaterialResults(){if(materialResults){materialResults.style.display='none';materialResults.innerHTML='';}}
+        function renderMaterialResults(items){
+            if(!materialResults)return;
+            if(!items.length){materialResults.innerHTML='<div class="list-group-item text-muted">未找到匹配的素材视频，请关闭弹窗并点击产品列表中的“上传素材”，上传后再返回搜索选择。</div>';materialResults.style.display='block';return;}
+            materialResults.innerHTML=items.map(function(item){return '<div class="list-group-item" style="display:flex;align-items:center;gap:8px;padding:8px 10px"><button type="button" class="btn btn-link" style="min-width:0;padding:0;text-align:left;flex:1;overflow:hidden" data-select-material-video="'+Number(item.id)+'" data-material-name="'+escapeMaterialHtml(item.name)+'"><strong style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeMaterialHtml(item.name)+'</strong><small class="text-muted">'+escapeMaterialHtml(item.type)+' · '+escapeMaterialHtml(item.size)+(item.original_name?' · 原文件：'+escapeMaterialHtml(item.original_name):'')+'</small></button><a class="btn btn-info btn-xs" href="'+escapeMaterialHtml(item.preview_url)+'" target="_blank" rel="noopener noreferrer"><i class="fa fa-play"></i> 预览</a></div>';}).join('');
+            materialResults.style.display='block';
+        }
+        if(picker&&materialInput&&materialId&&materialResults){
+            materialInput.addEventListener('input',function(){
+                materialId.value='';
+                materialSelected.className='help-block';
+                materialSelected.textContent='输入关键词并选择素材，系统会自动关联对应视频，无需再次上传。';
+                window.clearTimeout(searchTimer);
+                var keyword=materialInput.value.trim();
+                if(!keyword){hideMaterialResults();return;}
+                searchTimer=window.setTimeout(function(){
+                    if(searchController)searchController.abort();
+                    searchController=new AbortController();
+                    materialResults.innerHTML='<div class="list-group-item text-muted"><i class="fa fa-spinner fa-spin"></i> 正在搜索素材...</div>';materialResults.style.display='block';
+                    fetch(picker.getAttribute('data-search-url')+'?keyword='+encodeURIComponent(keyword),{headers:{'X-Requested-With':'XMLHttpRequest','Accept':'application/json'},signal:searchController.signal})
+                        .then(function(response){if(!response.ok)throw new Error('素材搜索失败');return response.json();})
+                        .then(function(data){renderMaterialResults(Array.isArray(data.items)?data.items:[]);})
+                        .catch(function(error){if(error.name==='AbortError')return;materialResults.innerHTML='<div class="list-group-item text-danger">'+escapeMaterialHtml(error.message||'素材搜索失败，请重试。')+'</div>';materialResults.style.display='block';});
+                },250);
+            });
+            materialResults.addEventListener('click',function(event){
+                var option=event.target.closest('[data-select-material-video]');if(!option)return;
+                materialId.value=option.getAttribute('data-select-material-video');materialInput.value=option.getAttribute('data-material-name');
+                materialSelected.className='help-block text-success';materialSelected.innerHTML='<i class="fa fa-check-circle"></i> 已选择素材库视频：'+escapeMaterialHtml(materialInput.value)+'，提交时将自动关联该视频。';hideMaterialResults();
+            });
+            materialInput.addEventListener('focus',function(){if(materialResults.innerHTML)materialResults.style.display='block';});
+            document.addEventListener('click',function(event){if(!picker.contains(event.target))hideMaterialResults();});
+        }
         function renumber(){var rows=container.querySelectorAll('[data-placement-record]');rows.forEach(function(row,index){row.querySelector('[data-record-title]').textContent='投放平台 '+(index+1);row.querySelectorAll('[data-field]').forEach(function(field){field.name='records['+index+']['+field.getAttribute('data-field')+']';});row.querySelector('[data-remove-placement-record]').disabled=rows.length===1;});add.disabled=rows.length>=6;}
         function append(){if(container.querySelectorAll('[data-placement-record]').length>=6)return;container.appendChild(template.content.cloneNode(true));renumber();}
         add.addEventListener('click',append);container.addEventListener('click',function(event){var button=event.target.closest('[data-remove-placement-record]');if(!button||container.querySelectorAll('[data-placement-record]').length===1)return;button.closest('[data-placement-record]').remove();renumber();});append();

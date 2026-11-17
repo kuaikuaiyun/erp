@@ -252,6 +252,9 @@ class ProductLibraryController extends Controller
             'images.*' => ['file', 'image', 'max:20480'],
             'reference_file' => ['nullable', 'file', 'extensions:html,htm', 'max:'.self::REFERENCE_FILE_MAX_KILOBYTES],
             'reference_upload_token' => ['nullable', 'uuid'],
+            'material_videos' => ['nullable', 'array'],
+            'material_videos.*' => ['nullable', 'array', 'max:20'],
+            'material_videos.*.*' => ['file', 'mimes:mp4,mov,avi,webm,mkv,m4v', 'max:307200'],
             'shopify_csvs' => ['required', 'array', 'min:1', 'max:10'],
             'shopify_csvs.*' => ['required', 'file', 'mimes:csv,txt', 'max:20480'],
             'shopify_landing_page_urls' => ['required', 'array', 'min:1', 'max:10'],
@@ -402,6 +405,8 @@ class ProductLibraryController extends Controller
                     );
                 }
 
+                $this->storeMaterialVideos($product, (array) ($data['material_videos'] ?? []), $context['user'], $createdPaths);
+
                 if ($session !== null) {
                     $session->forceFill([
                         'status' => AikaipinProductUploadSession::STATUS_CONSUMED,
@@ -466,6 +471,25 @@ class ProductLibraryController extends Controller
         abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
 
         return response()->json($this->productEditPayload($product));
+    }
+
+    public function viewProduct(Request $request, AikaipinProduct $product): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->canViewProduct($context['user'], $product), 403);
+
+        return response()->json([
+            'id' => (int) $product->getKey(),
+            'product_code' => (string) $product->product_code,
+            'name' => (string) $product->name,
+            'reference_url' => $product->referenceFilePayload()
+                ? route('aikaipin.product-library.reference-preview', ['product' => $product]) : null,
+            'material_videos' => $this->materialVideoPayloads($product),
+        ]);
     }
 
     public function previewShopifyImport(Request $request, AikaipinProduct $product): JsonResponse|Response
@@ -647,6 +671,13 @@ class ProductLibraryController extends Controller
             'remove_image_indexes.*' => ['integer', 'min:0', 'distinct'],
             'reference_file' => ['nullable', 'file', 'extensions:html,htm', 'max:'.self::REFERENCE_FILE_MAX_KILOBYTES],
             'reference_upload_token' => ['nullable', 'uuid'],
+            'material_videos' => ['nullable', 'array'],
+            'material_videos.*' => ['nullable', 'array', 'max:20'],
+            'material_videos.*.*' => ['file', 'mimes:mp4,mov,avi,webm,mkv,m4v', 'max:307200'],
+            'remove_material_video_ids' => ['nullable', 'array', 'max:200'],
+            'remove_material_video_ids.*' => ['integer', 'min:1', 'distinct'],
+            'remove_history_video_indexes' => ['nullable', 'array', 'max:500'],
+            'remove_history_video_indexes.*' => ['integer', 'min:0', 'distinct'],
             'package_upload_token' => ['nullable', 'uuid'],
             'authorized_department_ids' => ['nullable', 'array'],
             'authorized_department_ids.*' => ['integer', 'distinct'],
@@ -657,6 +688,8 @@ class ProductLibraryController extends Controller
         $skuValues = $this->normalizeProductValues($data['skus'] ?? []);
         $categories = $this->normalizeProductValues($data['categories'] ?? []);
         $removedImageIndexes = collect($data['remove_image_indexes'] ?? [])->map(static fn ($id): int => (int) $id)->unique()->sort()->values()->all();
+        $removedMaterialVideoIds = collect($data['remove_material_video_ids'] ?? [])->map(static fn ($id): int => (int) $id)->unique()->values()->all();
+        $removedHistoryVideoIndexes = collect($data['remove_history_video_indexes'] ?? [])->map(static fn ($index): int => (int) $index)->unique()->sort()->values()->all();
 
         $availableDepartments = collect($this->authorization->quickAuthorizationDepartments())->keyBy('id');
         if (collect($departmentIds)->diff($availableDepartments->keys())->isNotEmpty()) {
@@ -670,6 +703,16 @@ class ProductLibraryController extends Controller
             throw ValidationException::withMessages([
                 'remove_image_indexes' => __('aikaipin.messages.product_image_invalid_message'),
             ]);
+        }
+        if ($removedHistoryVideoIndexes !== []) {
+            $visibleHistoryIndexes = collect($this->historicalReferenceVideoPayloads($product))
+                ->pluck('history_index')
+                ->map(static fn ($index): int => (int) $index);
+            if (collect($removedHistoryVideoIndexes)->diff($visibleHistoryIndexes)->isNotEmpty()) {
+                throw ValidationException::withMessages([
+                    'remove_history_video_indexes' => '存在无效的历史视频，请刷新页面后重试。',
+                ]);
+            }
         }
 
         $remainingImageCount = count($existingImages) - count($removedImageIndexes);
@@ -687,7 +730,7 @@ class ProductLibraryController extends Controller
 
         try {
             $connection = config('admin.database.connection') ?: config('database.default');
-            DB::connection($connection)->transaction(function () use ($context, $product, $data, $categories, $departmentIds, $skuValues, $removedImageIndexes, $newImages, &$createdPaths, &$obsoletePaths, &$completedSession, &$completedReferenceSession): void {
+            DB::connection($connection)->transaction(function () use ($context, $product, $data, $categories, $departmentIds, $skuValues, $removedImageIndexes, $removedMaterialVideoIds, $newImages, &$createdPaths, &$obsoletePaths, &$completedSession, &$completedReferenceSession): void {
                 $images = $product->imageFiles();
                 foreach (array_reverse($removedImageIndexes) as $index) {
                     $removedFile = $images[$index] ?? null;
@@ -778,6 +821,28 @@ class ProductLibraryController extends Controller
                     'updated_by' => (int) $context['user']->getKey(),
                     'updated_by_name' => (string) ($context['user']->name ?: $context['user']->username),
                 ])->save();
+
+                // Store newly selected files before deleting existing rows so the
+                // filename sequence never reuses a number that was already shown.
+                $this->storeMaterialVideos($product, (array) ($data['material_videos'] ?? []), $context['user'], $createdPaths);
+
+                if ($removedMaterialVideoIds !== []) {
+                    $removedVideos = OperationAiProductReferenceVideo::query()
+                        ->where('aikaipin_product_id', $product->getKey())
+                        ->whereIn('id', $removedMaterialVideoIds)
+                        ->lockForUpdate()
+                        ->get();
+                    if ($removedVideos->count() !== count($removedMaterialVideoIds)) {
+                        throw ValidationException::withMessages([
+                            'remove_material_video_ids' => '存在无效的素材视频，请刷新页面后重试。',
+                        ]);
+                    }
+                    foreach ($removedVideos as $removedVideo) {
+                        $obsoletePaths[] = $removedVideo->path;
+                        $removedVideo->delete();
+                    }
+                }
+
             });
         } catch (ValidationException $exception) {
             throw $exception;
@@ -797,6 +862,19 @@ class ProductLibraryController extends Controller
                 $this->storage->deleteFile($path);
             } catch (\Throwable $exception) {
                 report($exception);
+            }
+        }
+        if ($removedHistoryVideoIndexes !== []
+            && ! ($data['reference_upload_token'] ?? null)
+            && ! (($data['reference_file'] ?? null) instanceof UploadedFile)) {
+            try {
+                $this->hideHistoricalReferenceVideos($product, $removedHistoryVideoIndexes);
+            } catch (\Throwable $exception) {
+                report($exception);
+
+                return response()->json([
+                    'message' => '产品已保存，但历史 HTML 视频隐藏失败，请刷新后重试。',
+                ], 500);
             }
         }
         if ($completedSession !== null) {
@@ -1025,9 +1103,6 @@ class ProductLibraryController extends Controller
             'libraryUrl' => route('aikaipin.product-library.index'),
         ];
         if ($this->authorization->canManageProductLibrary($context['user'])) {
-            $viewData['referenceVideos'] = $this->referenceVideos($product);
-            $viewData['referenceVideoUploadUrl'] = route('aikaipin.product-library.reference-videos.upload', $product);
-            $viewData['referenceVideoNamingHint'] = '上传后自动命名：产品编号-flow/spy/mix-日期-递增编号';
             $viewData['referenceEditable'] = true;
             $viewData['referenceContentUpdateUrl'] = route('aikaipin.product-library.reference-preview.content.update', $product);
         }
@@ -1147,6 +1222,10 @@ class ProductLibraryController extends Controller
         $referenceLayouts = Storage::disk($file['disk'])->exists($layoutPath)
             ? (json_decode(Storage::disk($file['disk'])->get($layoutPath), true) ?: []) : [];
         $historicalCount = $this->countReferenceHtmlVideos($file['disk'], $file['path']);
+        $historicalPreviewIndex = $request->query('history_video');
+        $historicalPreviewIndex = is_numeric($historicalPreviewIndex) && (int) $historicalPreviewIndex >= 0
+            ? (int) $historicalPreviewIndex
+            : null;
         $videos = $this->normalizeReferenceVideos($product, $historicalCount)->map(fn ($video): array => [
             'id' => (int) $video->getKey(),
             'type' => $video->type,
@@ -1162,6 +1241,7 @@ class ProductLibraryController extends Controller
             'referenceEdits' => $referenceEdits,
             'referenceHiddenVideos' => $referenceHiddenVideos,
             'referenceLayouts' => $referenceLayouts,
+            'historicalPreviewIndex' => $historicalPreviewIndex,
         ])->render();
         return response()->stream(function () use ($file, $injection): void {
             $stream = Storage::disk($file['disk'])->readStream($file['path']);
@@ -1702,6 +1782,7 @@ class ProductLibraryController extends Controller
                     'spend' => (string) $record->actual_spend, 'orders' => (int) $record->orders,
                     'roi' => $record->roi !== null ? (string) $record->roi : null,
                     'material_name' => $record->material_name,
+                    'video_code' => $record->video_name ? pathinfo((string) $record->video_name, PATHINFO_FILENAME) : null,
                     'video_url' => $record->video_path ? route('aikaipin.placement-evaluations.records.video', [$evaluation, $record]) : null,
                 ])->values(),
             ])->values(),
@@ -1979,7 +2060,156 @@ class ProductLibraryController extends Controller
                 'landing_page_url' => $page->landing_page_url,
                 'shopify_data' => $this->shopifyImportPayload($page->shopifyData()),
             ])->values()->all(),
+            'reference_url' => $product->referenceFilePayload()
+                ? route('aikaipin.product-library.reference-preview', ['product' => $product]) : null,
+            'material_videos' => $this->materialVideoPayloads($product),
         ];
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function materialVideoPayloads(AikaipinProduct $product): array
+    {
+        return [
+            ...$this->historicalReferenceVideoPayloads($product),
+            ...$this->referenceVideos($product)->map(fn (OperationAiProductReferenceVideo $video): array => [
+                'id' => (int) $video->getKey(),
+                'type' => (string) $video->type,
+                'name' => (string) $video->file_name,
+                'historical' => false,
+                'size' => number_format(((int) $video->size) / 1048576, 2).' MB',
+                'preview_url' => URL::temporarySignedRoute('aikaipin.product-library.reference-videos.preview', now()->addHours(12), [$product, $video]),
+            ])->all(),
+        ];
+    }
+
+    /** @param array<string, mixed> $groups @param list<string> $createdPaths */
+    private function storeMaterialVideos(AikaipinProduct $product, array $groups, AdminUser $user, array &$createdPaths): void
+    {
+        $allowedTypes = [
+            OperationAiProductReferenceVideo::TYPE_FLOW,
+            OperationAiProductReferenceVideo::TYPE_TRAFFIC,
+            OperationAiProductReferenceVideo::TYPE_REMIX,
+        ];
+        $filesByType = collect($allowedTypes)->mapWithKeys(fn (string $type): array => [
+            $type => array_values(array_filter((array) ($groups[$type] ?? []), fn ($file): bool => $file instanceof UploadedFile)),
+        ]);
+        if ($filesByType->flatten(1)->isEmpty()) return;
+
+        $historicalCount = $product->referenceFilePayload() ? $this->historicalReferenceVideoCount($product) : 0;
+        $existing = OperationAiProductReferenceVideo::query()
+            ->where('aikaipin_product_id', $product->getKey())->lockForUpdate()->get();
+        $sequence = max($historicalCount, (int) $existing->max('sequence'));
+        $fileNumber = $existing->reduce(fn (int $carry, OperationAiProductReferenceVideo $video): int => max(
+            $carry,
+            OperationAiProductReferenceVideo::fileNumber($video->file_name, (int) $video->sequence),
+        ), $historicalCount);
+        $date = now('Asia/Shanghai');
+
+        foreach ($allowedTypes as $type) {
+            foreach ($filesByType->get($type, []) as $file) {
+                ++$sequence;
+                ++$fileNumber;
+                $extension = strtolower($file->getClientOriginalExtension() ?: $file->extension() ?: 'mp4');
+                $fileName = $this->referenceProductCode($product).'-'.OperationAiProductReferenceVideo::fileTypeCode($type).'-'.$date->format('ymd').'-'.str_pad((string) $fileNumber, 3, '0', STR_PAD_LEFT).'.'.$extension;
+                $path = $file->storeAs('aikaipin/reference-videos/'.$product->getKey(), $fileName, 'local');
+                $createdPaths[] = $path;
+                OperationAiProductReferenceVideo::query()->create([
+                    'aikaipin_product_id' => $product->getKey(), 'type' => $type,
+                    'sequence' => $sequence, 'file_date' => $date->toDateString(), 'disk' => 'local',
+                    'path' => $path, 'file_name' => $fileName, 'original_name' => $file->getClientOriginalName(),
+                    'mime_type' => $file->getMimeType(), 'size' => $file->getSize(), 'department_code' => 'AI',
+                    'uploaded_by' => $user->getKey(), 'uploaded_by_name' => $user->name ?: $user->username,
+                ]);
+            }
+        }
+    }
+
+    /** @return list<array{id:null,type:string,name:string,historical:true,size:string,preview_url:string}> */
+    private function historicalReferenceVideoPayloads(AikaipinProduct $product): array
+    {
+        $file = $product->referenceFilePayload();
+        if ($file === null || ! Storage::disk($file['disk'])->exists($file['path'])) return [];
+
+        $hiddenPath = $file['path'].'.erp-hidden-videos.json';
+        $hidden = Storage::disk($file['disk'])->exists($hiddenPath)
+            ? array_map('intval', (array) (json_decode(Storage::disk($file['disk'])->get($hiddenPath), true) ?: [])) : [];
+        $stream = Storage::disk($file['disk'])->readStream($file['path']);
+        if (! is_resource($stream)) return [];
+
+        $items = [];
+        $historyIndex = 0;
+        $type = OperationAiProductReferenceVideo::TYPE_FLOW;
+        $tail = '';
+        $absolute = 0;
+        $lastEventEnd = -1;
+        $date = $product->created_at?->copy()->timezone('Asia/Shanghai')->format('ymd') ?: now('Asia/Shanghai')->format('ymd');
+        try {
+            while (! feof($stream)) {
+                $chunk = fread($stream, 1024 * 1024);
+                if ($chunk === false || $chunk === '') continue;
+                $buffer = $tail.$chunk;
+                $base = $absolute - strlen($tail);
+                // Chunk boundaries can split a UTF-8 character. Do not use the
+                // UTF-8 regex modifier here, otherwise one incomplete boundary
+                // makes preg_match_all return no historical videos at all.
+                preg_match_all('/Flow\s*素材|扒的素材|引流素材|混剪素材|<video\b/i', $buffer, $matches, PREG_OFFSET_CAPTURE);
+                foreach ($matches[0] as [$token, $offset]) {
+                    $eventStart = $base + $offset;
+                    $eventEnd = $eventStart + strlen($token);
+                    if ($eventEnd <= $lastEventEnd) continue;
+                    $lastEventEnd = $eventEnd;
+                    if (stripos($token, '<video') === 0) {
+                        $number = ++$historyIndex;
+                        if (! in_array($number - 1, $hidden, true)) {
+                            $items[] = [
+                                'id' => null, 'history_index' => $number - 1, 'type' => $type,
+                                'name' => $this->referenceProductCode($product).'-'.OperationAiProductReferenceVideo::fileTypeCode($type).'-'.$date.'-'.str_pad((string) $number, 3, '0', STR_PAD_LEFT).'.mp4',
+                                'historical' => true, 'size' => '历史 HTML',
+                                'preview_url' => route('aikaipin.product-library.reference-preview.content', [
+                                    'product' => $product,
+                                    'embedded' => 1,
+                                    'history_video' => $number - 1,
+                                ]),
+                            ];
+                        }
+                    } elseif (str_contains($token, '混剪')) {
+                        $type = OperationAiProductReferenceVideo::TYPE_REMIX;
+                    } elseif (str_contains($token, '扒') || str_contains($token, '引流')) {
+                        $type = OperationAiProductReferenceVideo::TYPE_TRAFFIC;
+                    } else {
+                        $type = OperationAiProductReferenceVideo::TYPE_FLOW;
+                    }
+                }
+                $absolute += strlen($chunk);
+                $tail = substr($buffer, -65536);
+            }
+        } finally {
+            fclose($stream);
+        }
+
+        return $items;
+    }
+
+    /** @param list<int> $indexes */
+    private function hideHistoricalReferenceVideos(AikaipinProduct $product, array $indexes): void
+    {
+        $file = $product->referenceFilePayload();
+        if ($file === null || $indexes === []) return;
+
+        $disk = Storage::disk($file['disk']);
+        $hiddenPath = $file['path'].'.erp-hidden-videos.json';
+        $existing = $disk->exists($hiddenPath)
+            ? (array) (json_decode($disk->get($hiddenPath), true) ?: [])
+            : [];
+        $hidden = collect([...$existing, ...$indexes])
+            ->map(static fn ($index): int => (int) $index)
+            ->filter(static fn (int $index): bool => $index >= 0)
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
+
+        $disk->put($hiddenPath, json_encode($hidden, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
     }
 
     /** @param array<string, mixed> $payload
