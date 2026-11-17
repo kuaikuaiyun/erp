@@ -66,9 +66,14 @@ class PaymentRenewalAnalysisService
     {
         $cacheFilters = $filters;
         unset($cacheFilters['stage_page'], $cacheFilters['stage']);
-        $cacheKey = 'payment:renewal-analysis:v6:'.sha1(json_encode($cacheFilters));
+        $cacheKey = 'payment:renewal-analysis:v7:'.sha1(json_encode($cacheFilters));
 
-        return Cache::remember($cacheKey, now()->addMinutes(5), fn (): array => $this->buildDataset($cacheFilters));
+        $expiresAt = now()->addMinutes(5);
+        return Cache::remember($cacheKey, $expiresAt, function () use ($cacheFilters, $expiresAt): array {
+            $dataset = $this->buildDataset($cacheFilters);
+            $dataset['calculation']['expires_at'] = $expiresAt->format('Y-m-d H:i:s');
+            return $dataset;
+        });
     }
 
     /** @param array<string,mixed> $filters @return array<string,mixed> */
@@ -161,6 +166,8 @@ class PaymentRenewalAnalysisService
         for ($number = 1; $number <= $maxStage; $number++) {
             $key = 'renewal_'.$number;
             $stage = ['key' => $key, 'number' => $number, 'eligible_chains' => 0, 'completed_chains' => 0,
+                'previous_chains' => 0, 'due_chains' => 0, 'early_completed_chains' => 0, 'not_due_chains' => 0,
+                'paid_from' => null, 'paid_to' => null,
                 'orders' => 0, 'revenue' => 0.0, 'refund_count' => 0, 'refund_order_count' => 0,
                 'refund_amount' => 0.0, 'dispute_count' => 0, 'dispute_amount' => 0.0];
             foreach ($initials as $initial) {
@@ -171,6 +178,11 @@ class PaymentRenewalAnalysisService
                 } else {
                     $previous = $chain[$number - 2] ?? null;
                     if ($previous === null) continue;
+                    $stage['previous_chains']++;
+                    $due = $previous->paid_at->copy()->addDays(30)->lte($to);
+                    if ($due) $stage['due_chains']++;
+                    elseif ($renewal !== null) $stage['early_completed_chains']++;
+                    else $stage['not_due_chains']++;
                     // An early successful payment is already an observed opportunity.
                     if ($renewal === null && $previous->paid_at->copy()->addDays(30)->gt($to)) continue;
                     $stage['eligible_chains']++;
@@ -179,6 +191,9 @@ class PaymentRenewalAnalysisService
                 $channel = $this->channelFor($renewal);
                 $refund = $risk['refunds'][(int) $renewal->id] ?? ['count' => 0, 'amount' => 0.0, 'details' => []];
                 $dispute = $risk['disputes'][(int) $renewal->id] ?? ['count' => 0, 'amount' => 0.0, 'details' => []];
+                $paid = $renewal->paid_at->format('Y-m-d H:i:s');
+                $stage['paid_from'] = $stage['paid_from'] === null ? $paid : min($stage['paid_from'], $paid);
+                $stage['paid_to'] = $stage['paid_to'] === null ? $paid : max($stage['paid_to'], $paid);
                 $stage['completed_chains']++;
                 $stage['orders']++;
                 $stage['revenue'] += (float) $renewal->paid_amount_usd;
@@ -220,6 +235,14 @@ class PaymentRenewalAnalysisService
         $renewedChains = count($firstRenewals);
 
         return [
+            'calculation' => [
+                'first_from' => $from->format('Y-m-d H:i:s'), 'first_to' => $to->format('Y-m-d H:i:s'),
+                'cohort_from' => $cohortFrom->format('Y-m-d H:i:s'), 'cohort_to' => $cohortTo->format('Y-m-d H:i:s'),
+                'previous_due_before' => $to->copy()->subDays(30)->format('Y-m-d H:i:s'),
+                'timezone' => $from->getTimezone()->getName(),
+                'generated_at' => now()->format('Y-m-d H:i:s'),
+                'expires_at' => now()->addMinutes(5)->format('Y-m-d H:i:s'),
+            ],
             'summary' => [
                 'eligible' => $eligible,
                 'renewed' => $renewedChains,
@@ -416,7 +439,7 @@ class PaymentRenewalAnalysisService
     /** @return array<string,mixed> */
     private function upsellSummary(array $renewalOrderIds, array $risk): array
     {
-        if ($renewalOrderIds === []) return ['linked_orders' => 0, 'references' => 0, 'unmeasured' => 0, 'measured_orders' => 0, 'revenue' => 0.0, 'refund_count' => 0, 'refund_amount' => 0.0, 'dispute_count' => 0, 'dispute_amount' => 0.0];
+        if ($renewalOrderIds === []) return ['reference_orders' => 0, 'scope_orders' => 0, 'linked_orders' => 0, 'references' => 0, 'unmeasured' => 0, 'measured_orders' => 0, 'revenue' => 0.0, 'refund_count' => 0, 'refund_amount' => 0.0, 'dispute_count' => 0, 'dispute_amount' => 0.0];
         $references = LogisticsOrderPaymentReference::query()->whereIn('logistics_order_id', $renewalOrderIds)->where('reference_type', LogisticsOrderPaymentReference::TYPE_UPSELL)->get();
         $taggedOrders = LogisticsOrder::query()->whereIn('id', $renewalOrderIds)->where('is_add_on', '已加购')->get();
         $refundCount = $refundAmount = $disputeCount = $disputeAmount = 0;
@@ -427,6 +450,8 @@ class PaymentRenewalAnalysisService
             $disputeCount += $dispute['count']; $disputeAmount += $dispute['amount'];
         }
         return [
+            'reference_orders' => $references->pluck('logistics_order_id')->unique()->count(),
+            'scope_orders' => count(array_unique($renewalOrderIds)),
             'linked_orders' => max($taggedOrders->count(), $references->pluck('logistics_order_id')->unique()->count()),
             'references' => $references->count(),
             'unmeasured' => $references->whereNull('gateway_order_id')->count(),
