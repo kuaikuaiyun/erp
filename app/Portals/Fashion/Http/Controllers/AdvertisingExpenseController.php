@@ -3,43 +3,43 @@
 namespace App\Portals\Fashion\Http\Controllers;
 
 use App\Http\Controllers\Controller;
-use App\Models\FashionAdvertisingReport;
-use App\Models\FashionLogisticsOrder;
 use App\Models\AdminUser;
+use App\Models\AppLovinAccountStoreBinding;
+use App\Models\AppLovinSpendScreenshot;
 use App\Models\AssistantAdvertisingAgency;
 use App\Models\AssistantAdvertisingMedia;
 use App\Models\AssistantDomainStore;
-use App\Models\AppLovinAccountStoreBinding;
-use App\Models\AppLovinSpendScreenshot;
-use App\Models\Department;
+use App\Models\FashionAdvertisingReport;
+use App\Models\FashionLogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantStoreOwnerService;
+use App\Portals\Fashion\OperationProjectCatalog;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Illuminate\View\View;
 use Illuminate\Validation\ValidationException;
+use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\Response;
 
 class AdvertisingExpenseController extends Controller
 {
-    private const PORTAL_CODE = 'fuzhuang';
+    private array $project;
 
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantStoreOwnerService $assistantStoreOwners,
-    )
-    {
-    }
+    ) {}
 
     public function index(Request $request): Response|View
     {
         $context = $this->context($request);
-        if ($context instanceof Response) return $context;
+        if ($context instanceof Response) {
+            return $context;
+        }
 
         $user = $context['user'];
         $isBoss = $this->isBoss($user);
@@ -47,19 +47,27 @@ class AdvertisingExpenseController extends Controller
 
         $from = $this->dateFilter($request->input('from'));
         $to = $this->dateFilter($request->input('to'));
-        $query = FashionAdvertisingReport::query()->with(['performanceEntries', 'adSpendEntries']);
-        if (!$isBoss) $query->where('submitter_id', $user->getKey());
-        if ($from) $query->whereDate('report_date', '>=', $from);
-        if ($to) $query->whereDate('report_date', '<=', $to);
+        $query = FashionAdvertisingReport::query()->where('project_code', $this->project['code'])->with(['performanceEntries', 'adSpendEntries']);
+        if (! $isBoss) {
+            $query->where('submitter_id', $user->getKey());
+        }
+        if ($from) {
+            $query->whereDate('report_date', '>=', $from);
+        }
+        if ($to) {
+            $query->whereDate('report_date', '<=', $to);
+        }
 
         $reports = $query->orderByDesc('report_date')->orderByDesc('id')->paginate(20)->withQueryString();
         $editing = null;
         if ($request->filled('edit')) {
-            $editing = FashionAdvertisingReport::query()->with(['performanceEntries', 'adSpendEntries'])->findOrFail((int) $request->input('edit'));
+            $editing = FashionAdvertisingReport::query()->where('project_code', $this->project['code'])->with(['performanceEntries', 'adSpendEntries'])->findOrFail((int) $request->input('edit'));
             $this->authorizeReport($user, $editing);
             if ($isBoss && ! $operatorOptions->contains('id', (int) $editing->submitter_id)) {
                 $editingOperator = AdminUser::query()->find((int) $editing->submitter_id);
-                if ($editingOperator) $operatorOptions->push($editingOperator);
+                if ($editingOperator) {
+                    $operatorOptions->push($editingOperator);
+                }
             }
         }
 
@@ -71,6 +79,7 @@ class AdvertisingExpenseController extends Controller
 
         $context['portal']->loadMissing('menus');
         $advertisingOptions = $this->advertisingOptions($this->assistantDepartmentIdsForUser($selectedOperator));
+
         return view('portals.fashion.advertising-expenses.index', [
             ...$context,
             'reports' => $reports,
@@ -84,30 +93,39 @@ class AdvertisingExpenseController extends Controller
             'operatorOptions' => $operatorOptions,
             'selectedOperator' => $selectedOperator,
             'operatorStores' => $operatorStores,
+            'operationProject' => $this->project,
         ]);
     }
 
     public function store(Request $request): RedirectResponse
     {
         $context = $this->context($request);
-        if ($context instanceof Response) abort(403);
+        if ($context instanceof Response) {
+            abort(403);
+        }
         $submitter = $this->resolveSubmitter($request, $context['user']);
         $data = $this->validatePayload($request, (int) $submitter->getKey());
 
         $duplicate = FashionAdvertisingReport::query()
+            ->where('project_code', $this->project['code'])
             ->whereDate('report_date', $data['report_date'])
             ->where('submitter_id', $submitter->getKey())
             ->exists();
-        if ($duplicate) return back()->withInput()->withErrors(['report_date' => '该日期已经填写过报表，可在下方记录中点击编辑。']);
+        if ($duplicate) {
+            return back()->withInput()->withErrors(['report_date' => '该日期已经填写过报表，可在下方记录中点击编辑。']);
+        }
 
         $this->persist($request, $data, $submitter);
-        return redirect()->route('fashion.advertising-expenses.index')->with('success', '广告费用保存成功，营业额数据已由系统自动统计。');
+
+        return redirect()->route(OperationProjectCatalog::route($this->project, 'advertising-expenses.index'))->with('success', '广告费用保存成功，营业额数据已由系统自动统计。');
     }
 
     public function update(Request $request, FashionAdvertisingReport $report): RedirectResponse
     {
         $context = $this->context($request);
-        if ($context instanceof Response) abort(403);
+        if ($context instanceof Response) {
+            abort(403);
+        }
         $this->authorizeReport($context['user'], $report);
         abort_unless(in_array($report->status, [
             FashionAdvertisingReport::STATUS_PENDING,
@@ -117,39 +135,49 @@ class AdvertisingExpenseController extends Controller
         $data = $this->validatePayload($request, (int) $report->submitter_id);
 
         $duplicate = FashionAdvertisingReport::query()
+            ->where('project_code', $this->project['code'])
             ->whereKeyNot($report->getKey())
             ->whereDate('report_date', $data['report_date'])
             ->where('submitter_id', $report->submitter_id)
             ->exists();
-        if ($duplicate) return back()->withInput()->withErrors(['report_date' => '该日期已经存在另一份报表。']);
+        if ($duplicate) {
+            return back()->withInput()->withErrors(['report_date' => '该日期已经存在另一份报表。']);
+        }
 
         $this->persist($request, $data, $context['user'], $report);
-        return redirect()->route('fashion.advertising-expenses.index')->with('success', '报表修改成功。');
+
+        return redirect()->route(OperationProjectCatalog::route($this->project, 'advertising-expenses.index'))->with('success', '报表修改成功。');
     }
 
     public function destroy(Request $request, FashionAdvertisingReport $report): RedirectResponse
     {
         $context = $this->context($request);
-        if ($context instanceof Response) abort(403);
+        if ($context instanceof Response) {
+            abort(403);
+        }
         $this->authorizeReport($context['user'], $report);
         $report->forceFill([
             'deleted_by' => $context['user']->getKey(),
             'deleter_name' => $context['user']->name ?: $context['user']->username,
         ])->save();
         $report->delete();
-        return redirect()->route('fashion.advertising-expenses.index')->with('success', '报表已删除，可重新填写该日期的广告费。');
+
+        return redirect()->route(OperationProjectCatalog::route($this->project, 'advertising-expenses.index'))->with('success', '报表已删除，可重新填写该日期的广告费。');
     }
 
     public function screenshot(Request $request, string $type, int $entry): BinaryFileResponse
     {
         $context = $this->context($request);
-        if ($context instanceof Response) abort(403);
+        if ($context instanceof Response) {
+            abort(403);
+        }
         $relation = $type === 'performance' ? 'performanceEntries' : ($type === 'advertising' ? 'adSpendEntries' : null);
         abort_unless($relation, 404);
-        $report = FashionAdvertisingReport::query()->whereHas($relation, fn ($query) => $query->whereKey($entry))->firstOrFail();
+        $report = FashionAdvertisingReport::query()->where('project_code', $this->project['code'])->whereHas($relation, fn ($query) => $query->whereKey($entry))->firstOrFail();
         $this->authorizeReport($context['user'], $report);
         $item = $report->{$relation}()->whereKey($entry)->firstOrFail();
         abort_unless($item->screenshot_path && Storage::disk('local')->exists($item->screenshot_path), 404);
+
         return response()->file(Storage::disk('local')->path($item->screenshot_path));
     }
 
@@ -178,13 +206,19 @@ class AdvertisingExpenseController extends Controller
         ]);
         foreach ($data['advertising'] as $index => &$row) {
             if (mb_strtolower(trim((string) $row['media'])) !== 'applovin') {
-                $row['assistant_domain_store_id'] = null; $row['store_domain'] = null; continue;
+                $row['assistant_domain_store_id'] = null;
+                $row['store_domain'] = null;
+
+                continue;
             }
             $store = AssistantDomainStore::query()->whereKey((int) ($row['assistant_domain_store_id'] ?? 0))->where('owner_user_id', $operatorId)->first();
-            if (! $store) throw ValidationException::withMessages(["advertising.{$index}.assistant_domain_store_id" => '选择 AppLovin 时必须选择该运营已绑定的店铺域名。']);
+            if (! $store) {
+                throw ValidationException::withMessages(["advertising.{$index}.assistant_domain_store_id" => '选择 AppLovin 时必须选择该运营已绑定的店铺域名。']);
+            }
             $row['store_domain'] = (string) $store->domain;
         }
         unset($row);
+
         return $data;
     }
 
@@ -205,8 +239,9 @@ class AdvertisingExpenseController extends Controller
 
         $connection = config('admin.database.connection') ?: config('database.default');
         DB::connection($connection)->transaction(function () use ($report, $data, $user, $performance, $advertising, $revenue, $orders, $spend): void {
-            $report ??= new FashionAdvertisingReport();
+            $report ??= new FashionAdvertisingReport;
             $report->fill([
+                'project_code' => $this->project['code'],
                 'report_date' => $data['report_date'],
                 'submitter_id' => $report->exists ? $report->submitter_id : $user->getKey(),
                 'submitter_name' => $report->exists ? $report->submitter_name : $user->name,
@@ -239,7 +274,9 @@ class AdvertisingExpenseController extends Controller
     {
         return collect($rows)->map(function (array $row, int|string $index) use ($request, $group, $operatorId): array {
             $path = Arr::get($row, 'existing_screenshot');
-            if ((bool) Arr::get($row, 'remove_screenshot', false)) $path = null;
+            if ((bool) Arr::get($row, 'remove_screenshot', false)) {
+                $path = null;
+            }
             if ($file = $request->file("{$group}.{$index}.screenshot")) {
                 $path = $file->storeAs('fashion-advertising/'.now()->format('Ym'), Str::uuid().'.'.$file->extension(), 'local');
             }
@@ -256,10 +293,15 @@ class AdvertisingExpenseController extends Controller
                 $row['actual_spend_usd'] = round($bookSpend + ($bookSpend * $coefficient), 2);
             }
             foreach (['revenue_usd', 'book_spend_usd', 'actual_spend_usd'] as $field) {
-                if (array_key_exists($field, $row)) $row[$field] = round((float) $row[$field], 2);
+                if (array_key_exists($field, $row)) {
+                    $row[$field] = round((float) $row[$field], 2);
+                }
             }
-            if (array_key_exists('order_count', $row)) $row['order_count'] = (int) $row['order_count'];
+            if (array_key_exists('order_count', $row)) {
+                $row['order_count'] = (int) $row['order_count'];
+            }
             $row['screenshot_path'] = $path ?: null;
+
             return $row;
         })->values()->all();
     }
@@ -268,7 +310,7 @@ class AdvertisingExpenseController extends Controller
     private function calculatedPerformanceRows(string $reportDate, int $ownerUserId): array
     {
         $connection = config('admin.database.connection') ?: config('database.default');
-        $orderTable = (new FashionLogisticsOrder())->getTable();
+        $orderTable = (new FashionLogisticsOrder)->getTable();
         $owner = AdminUser::query()->find($ownerUserId);
         $ownerNames = collect([$owner?->name, $owner?->username])
             ->filter()->map(fn ($name): string => trim((string) $name))->unique()->values()->all();
@@ -277,7 +319,9 @@ class AdvertisingExpenseController extends Controller
             ->join('assistant_domain_stores as stores', 'stores.id', '=', 'orders.assistant_domain_store_id')
             ->where(function ($binding) use ($ownerUserId, $ownerNames): void {
                 $binding->where('stores.owner_user_id', $ownerUserId);
-                if ($ownerNames !== []) $binding->orWhereIn('stores.user_name', $ownerNames);
+                if ($ownerNames !== []) {
+                    $binding->orWhereIn('stores.user_name', $ownerNames);
+                }
             })
             ->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy')")
             ->whereBetween('orders.order_created_at', [$reportDate.' 00:00:00', $reportDate.' 23:59:59'])
@@ -303,14 +347,20 @@ class AdvertisingExpenseController extends Controller
     private function context(Request $request): array|Response
     {
         $context = $this->portalEntries->portalContext($request);
-        if ($context instanceof Response) return $context;
-        abort_unless($context['portal']->code === self::PORTAL_CODE, 404);
+        if ($context instanceof Response) {
+            return $context;
+        }
+        $code = (string) ($request->route('operation_project') ?: 'fuzhuang');
+        $this->project = OperationProjectCatalog::get($code);
+        abort_unless($context['portal']->code === $code, 404);
+        $context['operationProject'] = $this->project;
+
         return $context;
     }
 
     private function authorizeReport($user, FashionAdvertisingReport $report): void
     {
-        abort_unless($this->isBoss($user) || (int) $report->submitter_id === (int) $user->getKey(), 403);
+        abort_unless($report->project_code === $this->project['code'] && ($this->isBoss($user) || (int) $report->submitter_id === (int) $user->getKey()), 403);
     }
 
     private function isBoss(AdminUser $user): bool
@@ -320,15 +370,10 @@ class AdvertisingExpenseController extends Controller
 
     private function operatorOptions()
     {
-        $root = Department::business()->where('name', '服装运营部门')->first(['id']);
-        if (! $root) return collect();
-        $departments = Department::business()->get(['id', 'parent_id']);
-        $departmentIds = [(int) $root->id];
-        do {
-            $children = $departments->whereIn('parent_id', $departmentIds)->pluck('id')->map(fn ($id) => (int) $id)->diff($departmentIds)->values()->all();
-            $before = count($departmentIds);
-            $departmentIds = array_values(array_unique([...$departmentIds, ...$children]));
-        } while (count($departmentIds) > $before);
+        $departmentIds = OperationProjectCatalog::departmentIds($this->project['code'])->all();
+        if ($departmentIds === []) {
+            return collect();
+        }
 
         return AdminUser::query()->where('status', AdminUser::STATUS_ACTIVE)
             ->whereHas('departments', fn ($query) => $query->whereIn('id', $departmentIds))
@@ -337,9 +382,12 @@ class AdvertisingExpenseController extends Controller
 
     private function resolveSubmitter(Request $request, AdminUser $actor): AdminUser
     {
-        if (! $this->isBoss($actor)) return $actor;
+        if (! $this->isBoss($actor)) {
+            return $actor;
+        }
         $operatorId = $request->integer('operator_user_id');
         abort_unless($operatorId > 0 && $this->operatorOptions()->contains('id', $operatorId), 422, '请选择有效的服装运营账号。');
+
         return AdminUser::query()->findOrFail($operatorId);
     }
 

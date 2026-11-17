@@ -14,14 +14,14 @@ use App\Portals\Assistant\Http\Controllers\AdvertisingAccountAuthorizationReview
 use App\Portals\Assistant\Http\Controllers\AdvertisingAgencyController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingMediaController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingRechargeReviewController;
-use App\Portals\Assistant\Http\Controllers\DailyReportDepartmentSettingController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingSpendAnalysisController;
 use App\Portals\Assistant\Http\Controllers\AdvertisingSpendSummaryController;
-use App\Portals\Assistant\Http\Controllers\AppLovinPerformanceReportController;
 use App\Portals\Assistant\Http\Controllers\AppLovinAccountStatisticsController;
+use App\Portals\Assistant\Http\Controllers\AppLovinPerformanceReportController;
 use App\Portals\Assistant\Http\Controllers\AppLovinSpendReviewController;
 use App\Portals\Assistant\Http\Controllers\AssistantProjectController;
 use App\Portals\Assistant\Http\Controllers\AssistantWebsiteSystemController;
+use App\Portals\Assistant\Http\Controllers\DailyReportDepartmentSettingController;
 use App\Portals\Assistant\Http\Controllers\DomainStoreController;
 use App\Portals\Assistant\Http\Controllers\FashionAdvertisingReviewController;
 use App\Portals\Assistant\Http\Controllers\FashionAppLovinPerformanceReportController;
@@ -35,6 +35,7 @@ use App\Portals\Fashion\Http\Controllers\AdvertisingExpenseController;
 use App\Portals\Fashion\Http\Controllers\AppLovinSpendController as FashionAppLovinSpendController;
 use App\Portals\Fashion\Http\Controllers\PerformanceReportController;
 use App\Portals\Fashion\Http\Controllers\StoreController as FashionStoreController;
+use App\Portals\Fashion\OperationProjectCatalog;
 use App\Portals\FashionLogistics\Http\Controllers\FashionOrderController;
 use App\Portals\FashionLogistics\Http\Controllers\ShoplineOrderController;
 use App\Portals\FashionLogistics\Http\Controllers\NbcOrderController;
@@ -51,10 +52,10 @@ use App\Portals\Logistics\Http\Controllers\WarehouseProductStatisticsController;
 use App\Portals\Logistics\Http\Controllers\WarehouseWeightExceptionController;
 use App\Portals\Operation\Http\Controllers\AppLovinSpendController;
 use App\Portals\Operation\Http\Controllers\DailySubmissionController;
-use App\Portals\OperationTasks\Http\Controllers\OperationTaskController;
 use App\Portals\Operation\Http\Controllers\OperationAiProductLibraryController;
 use App\Portals\Operation\Http\Controllers\OperationDomainStoreController;
 use App\Portals\Operation\Http\Controllers\OperationReportController;
+use App\Portals\OperationTasks\Http\Controllers\OperationTaskController;
 use App\Portals\Payment\Http\Controllers\PaymentPortalController;
 use App\Portals\ProductRequests\Http\Controllers\ProductRequestController;
 use Illuminate\Support\Facades\Route;
@@ -86,6 +87,23 @@ Route::post('/fashion/advertising-expenses', [AdvertisingExpenseController::clas
 Route::put('/fashion/advertising-expenses/{report}', [AdvertisingExpenseController::class, 'update'])->name('fashion.advertising-expenses.update');
 Route::delete('/fashion/advertising-expenses/{report}', [AdvertisingExpenseController::class, 'destroy'])->name('fashion.advertising-expenses.destroy');
 Route::get('/fashion/advertising-expenses/screenshots/{type}/{entry}', [AdvertisingExpenseController::class, 'screenshot'])->whereIn('type', ['performance', 'advertising'])->whereNumber('entry')->name('fashion.advertising-expenses.screenshot');
+
+foreach (OperationProjectCatalog::all() as $operationPortalCode => $operationProject) {
+    if ($operationPortalCode === 'fuzhuang') {
+        continue;
+    }
+    Route::prefix($operationProject['path'])->name($operationProject['route'].'.')->group(function () use ($operationPortalCode): void {
+        Route::get('/advertising-expenses', [AdvertisingExpenseController::class, 'index'])->defaults('operation_project', $operationPortalCode)->name('advertising-expenses.index');
+        Route::post('/advertising-expenses', [AdvertisingExpenseController::class, 'store'])->defaults('operation_project', $operationPortalCode)->name('advertising-expenses.store');
+        Route::put('/advertising-expenses/{report}', [AdvertisingExpenseController::class, 'update'])->defaults('operation_project', $operationPortalCode)->name('advertising-expenses.update');
+        Route::delete('/advertising-expenses/{report}', [AdvertisingExpenseController::class, 'destroy'])->defaults('operation_project', $operationPortalCode)->name('advertising-expenses.destroy');
+        Route::get('/advertising-expenses/screenshots/{type}/{entry}', [AdvertisingExpenseController::class, 'screenshot'])->defaults('operation_project', $operationPortalCode)->whereIn('type', ['performance', 'advertising'])->whereNumber('entry')->name('advertising-expenses.screenshot');
+        Route::get('/performance-report', [PerformanceReportController::class, 'index'])->defaults('operation_project', $operationPortalCode)->name('performance-report.index');
+        Route::get('/performance-report/orders', [PerformanceReportController::class, 'orders'])->defaults('operation_project', $operationPortalCode)->name('performance-report.orders');
+        Route::get('/stores', [FashionStoreController::class, 'index'])->defaults('operation_project', $operationPortalCode)->name('stores.index');
+        Route::patch('/stores/{store}/xshoppy-credentials', [FashionStoreController::class, 'updateCredentials'])->defaults('operation_project', $operationPortalCode)->whereNumber('store')->name('stores.credentials.update');
+    });
+}
 
 Route::prefix('finance')->name('finance.')->middleware(RedirectFinanceDomain::class)->controller(FinanceController::class)->group(function (): void {
     Route::get('/management/menus', [PortalMenuConfigurationController::class, 'index'])->name('menus.index');

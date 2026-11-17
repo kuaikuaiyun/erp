@@ -1,5 +1,8 @@
 @extends('portal.layout')
 
+@php
+    $operationRoute = ($operationProject['route'] ?? 'fashion').'.performance-report';
+@endphp
 @section('page_title', '业绩报表')
 
 @push('styles')
@@ -16,14 +19,14 @@
 @section('content')
 <section class="content-header"><h1>业绩报表 <small>按运营绑定店铺的原始付款时间统计已付款订单</small></h1></section>
 <section class="content">
-    <div class="box performance-box"><form method="get" action="{{ route('fashion.performance-report.index') }}" class="performance-filter">
+    <div class="box performance-box"><form method="get" action="{{ route($operationRoute.'.index') }}" class="performance-filter">
         <div class="form-group"><label>开始日期</label><input class="form-control" type="date" name="date_from" value="{{ $filters['date_from'] }}"></div>
         <div class="form-group"><label>结束日期</label><input class="form-control" type="date" name="date_to" value="{{ $filters['date_to'] }}"></div>
         <div class="form-group"><label>统计时区</label><select class="form-control" name="timezone">@foreach($timezoneOptions as $value=>$label)<option value="{{ $value }}" @selected($filters['timezone']===$value)>{{ $label }}</option>@endforeach</select></div>
         <div class="form-group"><label>建站系统</label><select class="form-control" name="site_builder"><option value="">全部建站系统</option><option value="xshoppy" @selected($filters['site_builder']==='xshoppy')>XShoppy</option><option value="shopline" @selected($filters['site_builder']==='shopline')>Shopline</option></select></div>
         @if($canSelectOperator)<div class="form-group"><label>运营人员</label><select class="form-control" name="operator_id"><option value="">全部运营人员</option>@foreach($operators as $operator)<option value="{{ $operator->id }}" @selected((string)$filters['operator_id'] === (string)$operator->id)>{{ $operator->name ?: $operator->username }}</option>@endforeach</select></div>@endif
         <div class="form-group"><label>每页</label><select class="form-control" name="per_page">@foreach([20,50,100] as $size)<option value="{{ $size }}" @selected($filters['per_page'] === $size)>{{ $size }} 条</option>@endforeach</select></div>
-        <button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> 查询业绩</button><a class="btn btn-default" href="{{ route('fashion.performance-report.index') }}"><i class="fa fa-refresh"></i> 重置</a>
+        <button class="btn btn-primary" type="submit"><i class="fa fa-search"></i> 查询业绩</button><a class="btn btn-default" href="{{ route($operationRoute.'.index') }}"><i class="fa fa-refresh"></i> 重置</a>
     </form></div>
 
     <div class="performance-cards">
@@ -80,7 +83,7 @@
 @push('scripts')
 <script>
 (function($){
- var modal=$('#performanceOrderModal'),title=$('#performanceOrderTitle'),body=$('#performanceOrderBody'),url=@json(route('fashion.performance-report.orders')),current={date:'',storeId:'',storeName:'',timezone:'-08:00'};
+ var modal=$('#performanceOrderModal'),title=$('#performanceOrderTitle'),body=$('#performanceOrderBody'),url=@json(route($operationRoute.'.orders')),current={date:'',storeId:'',storeName:'',timezone:'-08:00'};
  function esc(v){return $('<div>').text(v==null?'':String(v)).html()}
  function money(v,c){return esc(c||'USD')+' '+Number(v||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
  function pageButtons(meta){var html='<div class="order-detail-pagination"><span>显示 '+meta.from+'-'+meta.to+' 条，共 '+meta.total+' 条　第 '+meta.current_page+' / '+meta.last_page+' 页</span><div class="order-detail-pages">';html+='<button data-order-page="'+(meta.current_page-1)+'" '+(meta.current_page<=1?'disabled':'')+'><i class="fa fa-angle-left"></i></button>';var start=Math.max(1,meta.current_page-2),end=Math.min(meta.last_page,start+4);start=Math.max(1,end-4);for(var i=start;i<=end;i++)html+='<button data-order-page="'+i+'" class="'+(i===meta.current_page?'active':'')+'">'+i+'</button>';html+='<button data-order-page="'+(meta.current_page+1)+'" '+(meta.current_page>=meta.last_page?'disabled':'')+'><i class="fa fa-angle-right"></i></button></div></div>';return html}

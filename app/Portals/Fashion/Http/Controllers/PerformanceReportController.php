@@ -4,10 +4,10 @@ namespace App\Portals\Fashion\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
-use App\Models\Department;
 use App\Models\FashionAdvertisingReport;
 use App\Models\FashionLogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
+use App\Portals\Fashion\OperationProjectCatalog;
 use App\Services\DepartmentAuthorizationService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
@@ -19,7 +19,7 @@ use Symfony\Component\HttpFoundation\Response;
 
 class PerformanceReportController extends Controller
 {
-    private const PORTAL_CODE = 'fuzhuang';
+    private array $project;
 
     public function __construct(
         private readonly PortalEntryController $portalEntries,
@@ -32,7 +32,7 @@ class PerformanceReportController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
-        abort_unless($context['portal']->code === self::PORTAL_CODE, 404);
+        $this->setProject($request, $context);
 
         $timezoneOptions = $this->timezoneOptions();
         $validated = $request->validate([
@@ -59,6 +59,16 @@ class PerformanceReportController extends Controller
         $storeTable = 'assistant_domain_stores';
         $userTable = config('admin.database.users_table');
         $orderTable = (new FashionLogisticsOrder)->getTable();
+        $nameIdentities = DB::connection($connection)->table($userTable)
+            ->whereNotNull('name')->whereRaw("TRIM(name) <> ''")
+            ->selectRaw('id as owner_id, LOWER(TRIM(name)) as identity');
+        $usernameIdentities = DB::connection($connection)->table($userTable)
+            ->whereNotNull('username')->whereRaw("TRIM(username) <> ''")
+            ->selectRaw('id as owner_id, LOWER(TRIM(username)) as identity');
+        $identityMap = DB::connection($connection)->query()
+            ->fromSub($nameIdentities->unionAll($usernameIdentities), 'operator_identities')
+            ->selectRaw('MIN(owner_id) as owner_id, identity')->groupBy('identity');
+        $resolvedOwnerSql = 'COALESCE(stores.owner_user_id, owner_identity.owner_id)';
         // Both platforms store their China-normalized payment time in this legacy
         // column. The selected report timezone is applied below for date grouping.
         $orderTimestampSql = 'orders.paid_at_utc';
@@ -75,7 +85,8 @@ class PerformanceReportController extends Controller
 
         $base = DB::connection($connection)->table($orderTable.' as orders')
             ->join($storeTable.' as stores', 'stores.id', '=', 'orders.assistant_domain_store_id')
-            ->leftJoin($userTable.' as owners', 'owners.id', '=', 'stores.owner_user_id')
+            ->leftJoinSub($identityMap, 'owner_identity', fn ($join) => $join->on('owner_identity.identity', '=', DB::raw('LOWER(TRIM(stores.user_name))')))
+            ->leftJoin($userTable.' as owners', 'owners.id', '=', DB::raw($resolvedOwnerSql))
             ->whereNotNull('orders.paid_at_utc')
             ->whereBetween(DB::raw($orderTimestampSql), [$storageFrom, $storageTo])
             ->where(function ($platform): void {
@@ -87,6 +98,10 @@ class PerformanceReportController extends Controller
                         ->where('orders.source_platform', 'shopline');
                 });
             });
+
+        if ($this->project['code'] !== 'fuzhuang') {
+            $base->whereRaw('TRIM(stores.project) = ?', [$this->project['name']]);
+        }
 
         if (($validated['site_builder'] ?? '') === 'xshoppy') {
             $base->whereRaw("LOWER(TRIM(stores.site_builder)) IN ('xshoppy','xshopy')")
@@ -130,12 +145,12 @@ class PerformanceReportController extends Controller
                 'stores.shop_name',
                 'stores.domain',
                 'stores.site_builder',
-                'stores.owner_user_id',
                 'owners.name as owner_name',
                 'owners.username as owner_username',
             ])
+            ->selectRaw($resolvedOwnerSql.' as owner_user_id')
             ->selectRaw('COUNT(*) as order_count, COALESCE(SUM(orders.total_amount), 0) as revenue')
-            ->groupByRaw($reportDateSql.', stores.id, stores.shop_name, stores.domain, stores.site_builder, stores.owner_user_id, owners.name, owners.username')
+            ->groupByRaw($reportDateSql.', stores.id, stores.shop_name, stores.domain, stores.site_builder, '.$resolvedOwnerSql.', owners.name, owners.username')
             ->orderByDesc('report_date')
             ->orderBy('owner_name')
             ->orderBy('stores.shop_name')
@@ -143,13 +158,14 @@ class PerformanceReportController extends Controller
             ->withQueryString();
 
         $operatorDailyRevenue = (clone $base)
-            ->selectRaw($reportDateSql.' as report_date, stores.owner_user_id, COALESCE(SUM(orders.total_amount),0) revenue')
-            ->whereNotNull('stores.owner_user_id')
-            ->groupByRaw($reportDateSql.', stores.owner_user_id')
+            ->selectRaw($reportDateSql.' as report_date, '.$resolvedOwnerSql.' as owner_user_id, COALESCE(SUM(orders.total_amount),0) revenue')
+            ->whereRaw($resolvedOwnerSql.' IS NOT NULL')
+            ->groupByRaw($reportDateSql.', '.$resolvedOwnerSql)
             ->get()->keyBy(fn ($item) => (int) $item->owner_user_id.'|'.$item->report_date);
         $scopeOperatorIds = $operatorDailyRevenue->pluck('owner_user_id')->map(fn ($id) => (int) $id)->unique()->values();
         $operatorProfiles = AdminUser::query()->with('departments')->whereIn('id', $scopeOperatorIds)->get()->keyBy('id');
         $approvedReports = FashionAdvertisingReport::query()
+            ->where('project_code', $this->project['code'])
             ->where('status', FashionAdvertisingReport::STATUS_APPROVED)
             ->whereBetween('report_date', [$dateFrom, $dateTo])
             ->whereIn('submitter_id', $scopeOperatorIds)
@@ -204,6 +220,7 @@ class PerformanceReportController extends Controller
                 'ad_spend' => $summaryAdSpend,
                 'roi' => $summaryAdSpend > 0 ? $revenue / $summaryAdSpend : null,
             ],
+            'operationProject' => $this->project,
         ]);
     }
 
@@ -213,7 +230,7 @@ class PerformanceReportController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
-        abort_unless($context['portal']->code === self::PORTAL_CODE, 404);
+        $this->setProject($request, $context);
         $validated = $request->validate([
             'date' => ['required', 'date_format:Y-m-d'],
             'store_id' => ['required', 'integer'],
@@ -236,6 +253,7 @@ class PerformanceReportController extends Controller
             ->table('assistant_domain_stores')
             ->where('id', (int) $validated['store_id'])
             ->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy','shopline')")
+            ->when($this->project['code'] !== 'fuzhuang', fn ($query) => $query->whereRaw('TRIM(project) = ?', [$this->project['name']]))
             ->when(! $user->isAdministrator(), function ($query) use ($visibleOperatorIds, $visibleOperatorNames): void {
                 $query->where(function ($binding) use ($visibleOperatorIds, $visibleOperatorNames): void {
                     if ($visibleOperatorIds !== []) {
@@ -314,6 +332,9 @@ class PerformanceReportController extends Controller
     private function reportOperators(AdminUser $user, $managedDepartmentIds)
     {
         if ($user->isAdministrator()) {
+            if ($this->project['code'] !== 'fuzhuang') {
+                return $this->projectStoreOperators();
+            }
             $storeOperatorIds = DB::connection(config('admin.database.connection') ?: config('database.default'))
                 ->table('assistant_domain_stores')
                 ->whereNotNull('owner_user_id')
@@ -355,24 +376,40 @@ class PerformanceReportController extends Controller
             ->get(['id', 'name', 'username']);
     }
 
+    private function projectStoreOperators()
+    {
+        $stores = DB::connection(config('admin.database.connection') ?: config('database.default'))
+            ->table('assistant_domain_stores')
+            ->whereRaw('TRIM(project) = ?', [$this->project['name']])
+            ->get(['owner_user_id', 'user_name']);
+        $ids = $stores->pluck('owner_user_id')->filter()->map(fn ($id): int => (int) $id)->unique()->values();
+        $names = $stores->pluck('user_name')->filter()->map(fn ($name): string => trim((string) $name))->unique()->values();
+
+        return AdminUser::query()->where(function ($query) use ($ids, $names): void {
+            if ($ids->isNotEmpty()) {
+                $query->whereIn('id', $ids);
+            }
+            if ($names->isNotEmpty()) {
+                $query->{$ids->isNotEmpty() ? 'orWhereIn' : 'whereIn'}('name', $names)
+                    ->orWhereIn('username', $names);
+            }
+            if ($ids->isEmpty() && $names->isEmpty()) {
+                $query->whereRaw('1 = 0');
+            }
+        })->orderBy('name')->orderBy('username')->get(['id', 'name', 'username']);
+    }
+
     private function fashionDepartmentIds()
     {
-        $root = Department::business()->where('name', '服装运营部门')->first(['id']);
-        if (! $root) {
-            return collect();
-        }
+        return OperationProjectCatalog::departmentIds($this->project['code']);
+    }
 
-        $departments = Department::business()->get(['id', 'parent_id']);
-        $departmentIds = collect([(int) $root->id]);
-        do {
-            $children = $departments->whereIn('parent_id', $departmentIds)
-                ->pluck('id')->map(fn ($id): int => (int) $id)
-                ->diff($departmentIds)->values();
-            $before = $departmentIds->count();
-            $departmentIds = $departmentIds->merge($children)->unique()->values();
-        } while ($departmentIds->count() > $before);
-
-        return $departmentIds;
+    private function setProject(Request $request, array &$context): void
+    {
+        $code = (string) ($request->route('operation_project') ?: 'fuzhuang');
+        $this->project = OperationProjectCatalog::get($code);
+        abort_unless($context['portal']->code === $code, 404);
+        $context['operationProject'] = $this->project;
     }
 
     /** @return array<string,string> */

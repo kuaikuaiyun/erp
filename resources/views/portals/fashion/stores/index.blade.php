@@ -1,4 +1,7 @@
 @extends('portal.layout')
+@php
+    $operationRoute = ($operationProject['route'] ?? 'fashion').'.stores';
+@endphp
 @section('page_title','店铺列表')
 @push('styles')
 <style>
@@ -20,26 +23,37 @@
 </style>
 @endpush
 @section('content')
-<section class="content-header"><h1>店铺列表 <small>查看绑定的 XShoppy、Shopline 店铺业绩并配置 API 信息</small></h1></section>
+<section class="content-header"><h1>店铺列表 <small>{{ ($operationProject['code'] ?? 'fuzhuang') === 'fuzhuang' ? '查看绑定的 XShoppy、Shopline 店铺业绩并配置 API 信息' : '数据来源：助理系统域名和店铺信息管理 · '.($operationProject['name'] ?? '') }}</small></h1></section>
 <section class="content">
 @if(session('success'))<div class="alert alert-success"><i class="fa fa-check-circle"></i> {{ session('success') }}</div>@endif
 @if($errors->any())<div class="alert alert-danger"><i class="fa fa-exclamation-circle"></i> {{ $errors->first() }}</div>@endif
 <div class="box fashion-store-box"><div class="box-body"><form method="get" class="store-filter"><div class="filter-caption"><i class="fa fa-filter"></i>筛选条件 <small>按平台、店铺或运营人员快速定位</small></div>
- <div class="form-group"><label>平台</label><select class="form-control" name="platform"><option value="">全部平台</option><option value="xshoppy" @selected(($filters['platform']??'')==='xshoppy')>XShoppy</option><option value="shopline" @selected(($filters['platform']??'')==='shopline')>Shopline</option></select></div>
+ <div class="form-group"><label>平台</label><select class="form-control" name="platform"><option value="">全部平台</option>@foreach($platformOptions as $platform)<option value="{{ $platform }}" @selected(($filters['platform']??'')===$platform)>{{ $platform === 'xshoppy' ? 'XShoppy' : ($platform === 'shopline' ? 'Shopline' : strtoupper($platform)) }}</option>@endforeach</select></div>
  <div class="form-group"><label>运营部门</label><select class="form-control" name="department_id"><option value="">全部部门</option>@foreach($departmentOptions as $department)<option value="{{ $department->id }}" @selected((string)($filters['department_id']??'')===(string)$department->id)>{{ $department->parent ? $department->parent->name.' / ' : '' }}{{ $department->name }}</option>@endforeach</select></div>
  <div class="form-group store-autocomplete"><label>店铺名称</label><input id="fashion-store-keyword" class="form-control store-search" name="keyword" value="{{ $filters['keyword']??'' }}" autocomplete="off" placeholder="输入店铺名称或域名搜索"><button class="store-autocomplete-toggle" type="button" aria-label="展开店铺候选"><i class="fa fa-caret-down"></i></button><div class="store-autocomplete-menu" id="fashion-store-options" role="listbox">@foreach($storeOptions as $option)<button class="store-autocomplete-option" type="button" role="option" data-value="{{ $option->shop_name }}" data-search="{{ mb_strtolower($option->shop_name.' '.$option->domain) }}"><strong>{{ $option->shop_name }}</strong><small>{{ $option->domain?:'未填写域名' }}</small></button>@endforeach<div class="store-autocomplete-empty" hidden>没有匹配店铺，仍可直接按当前输入内容查询。</div></div></div>
  @if($user->isAdministrator())<div class="form-group"><label>运营人员</label><select class="form-control" name="operator_id"><option value="">全部运营</option>@foreach($operators as $operator)<option value="{{ $operator->id }}" @selected((string)($filters['operator_id']??'')===(string)$operator->id)>{{ $operator->name?:$operator->username }}</option>@endforeach</select></div>@endif
  <div class="form-group"><label>每页</label><select class="form-control" name="per_page">@foreach([20,50,100] as $size)<option value="{{ $size }}" @selected($filters['per_page']===$size)>{{ $size }}</option>@endforeach</select></div>
- <button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{ route('fashion.stores.index') }}">重置</a>
+ <button class="btn btn-primary"><i class="fa fa-search"></i> 查询</button><a class="btn btn-default" href="{{ route($operationRoute.'.index') }}">重置</a>
 </form></div></div>
 <div class="box fashion-store-box"><div class="box-header with-border"><h3 class="box-title">绑定店铺 <small>共 {{ $stores->total() }} 个</small></h3><div class="box-tools pull-right"><button type="button" class="btn btn-default btn-sm tutorial-button" data-toggle="modal" data-target="#credentialGuideModal"><i class="fa fa-book"></i> 密钥填写教程</button></div></div><div class="table-responsive">
 <table class="table table-bordered table-hover fashion-store-table"><thead><tr><th>店铺名称 / 域名</th><th>建站系统</th><th>运营人员</th><th>运营部门</th><th>店铺状态</th><th>配置状态</th><th style="min-width:460px">API 配置</th></tr></thead><tbody>
 @forelse($stores as $store)
- @php($builder=mb_strtolower(trim((string)$store->site_builder))) @php($isShopline=$builder==='shopline') @php($configured=$isShopline?filled($store->shopline_app_token):(filled($store->xshoppy_api_key)&&filled($store->xshoppy_password))) @php($storeOperator=$store->ownerUser?:$operatorLookup->get(mb_strtolower(trim((string)$store->user_name)))) @php($storeDepartments=$storeOperator?->departments??collect())
+ @php
+  $builder = mb_strtolower(trim((string) $store->site_builder));
+  $isShopline = $builder === 'shopline';
+  $isXShoppy = in_array($builder, ['xshoppy', 'xshopy'], true);
+  $supportsCredentials = $isShopline || $isXShoppy;
+  $configured = $isShopline ? filled($store->shopline_app_token) : ($isXShoppy && filled($store->xshoppy_api_key) && filled($store->xshoppy_password));
+  $builderLabel = $isShopline ? 'Shopline' : ($isXShoppy ? 'XShoppy' : strtoupper($builder ?: '—'));
+  $storeOperator = $store->ownerUser ?: $operatorLookup->get(mb_strtolower(trim((string) $store->user_name)));
+  $storeDepartments = $storeOperator?->departments ?? collect();
+ @endphp
  <tr><td><div class="store-name">{{ $store->shop_name?:'未命名店铺' }}</div><div class="store-domain">{{ $store->domain?:'—' }}</div></td>
- <td class="text-center"><span class="builder-label {{ $isShopline?'shopline':'' }}">{{ $isShopline?'Shopline':'XShoppy' }}</span></td><td>{{ $store->user_name?:$storeOperator?->name?:$storeOperator?->username?:'—' }}</td><td><div class="store-departments">@forelse($storeDepartments as $department)<span class="store-department-label">{{ $department->name }}</span>@empty<span class="store-department-empty">未绑定部门</span>@endforelse</div></td><td>{{ $store->shop_status==='in_use'?'在用':($store->shop_status==='abandoned'?'已弃用':($store->shop_status==='stopped'?'已停用':'—')) }}</td>
- <td><span class="credential-state {{ $configured?'':'missing' }}">{{ $configured?'已配置':'未配置' }}</span></td><td class="api-config-cell">
- @if($configured)
+ <td class="text-center"><span class="builder-label {{ $isShopline?'shopline':'' }}">{{ $builderLabel }}</span></td><td>{{ $store->user_name?:$storeOperator?->name?:$storeOperator?->username?:'—' }}</td><td><div class="store-departments">@forelse($storeDepartments as $department)<span class="store-department-label">{{ $department->name }}</span>@empty<span class="store-department-empty">未绑定部门</span>@endforelse</div></td><td>{{ $store->shop_status==='in_use'?'在用':($store->shop_status==='abandoned'?'已弃用':($store->shop_status==='stopped'?'已停用':'—')) }}</td>
+ <td>@if($supportsCredentials)<span class="credential-state {{ $configured?'':'missing' }}">{{ $configured?'已配置':'未配置' }}</span>@else<span class="text-muted">—</span>@endif</td><td class="api-config-cell">
+ @if(!$supportsCredentials)
+  <span class="text-muted">该建站系统无需在此配置 API 信息</span>
+ @elseif($configured)
   <div class="credential-locked credentials-visible">
    @if($isShopline)
     <div class="credential-field"><label>后台 API 访问令牌</label><textarea class="form-control input-sm" readonly>{{ $store->shopline_app_token }}</textarea></div>
@@ -49,10 +63,10 @@
    @endif
    <div class="credential-lock-note"><i class="fa fa-lock"></i><span>仅查看，不可编辑</span></div>
   </div>
- @elseif($isShopline)<form class="credential-form" method="post" action="{{ route('fashion.stores.credentials.update',$store) }}">@csrf @method('PATCH')<div class="credential-field"><label>后台 API 访问令牌</label><textarea class="form-control input-sm" name="shopline_app_token" required autocomplete="new-password" placeholder="粘贴 Shopline 访问令牌"></textarea></div><button class="btn btn-primary btn-sm credential-save" onclick="return confirm('确认保存该 Shopline 店铺的后台 API 访问令牌？保存后不能再次编辑。')"><i class="fa fa-save"></i> 保存</button></form>
- @else<form class="credential-form" method="post" action="{{ route('fashion.stores.credentials.update',$store) }}">@csrf @method('PATCH')<div class="credential-field"><label>API 密钥</label><input class="form-control input-sm" type="password" name="xshoppy_api_key" required autocomplete="new-password" placeholder="填写 API 密钥"></div><div class="credential-field"><label>密码</label><input class="form-control input-sm" type="password" name="xshoppy_password" required autocomplete="new-password" placeholder="填写密码"></div><button class="btn btn-primary btn-sm credential-save" onclick="return confirm('确认保存？保存后不能再次编辑。')"><i class="fa fa-save"></i> 保存</button></form>@endif
+ @elseif($isShopline)<form class="credential-form" method="post" action="{{ route($operationRoute.'.credentials.update',$store) }}">@csrf @method('PATCH')<div class="credential-field"><label>后台 API 访问令牌</label><textarea class="form-control input-sm" name="shopline_app_token" required autocomplete="new-password" placeholder="粘贴 Shopline 访问令牌"></textarea></div><button class="btn btn-primary btn-sm credential-save" onclick="return confirm('确认保存该 Shopline 店铺的后台 API 访问令牌？保存后不能再次编辑。')"><i class="fa fa-save"></i> 保存</button></form>
+ @else<form class="credential-form" method="post" action="{{ route($operationRoute.'.credentials.update',$store) }}">@csrf @method('PATCH')<div class="credential-field"><label>API 密钥</label><input class="form-control input-sm" type="password" name="xshoppy_api_key" required autocomplete="new-password" placeholder="填写 API 密钥"></div><div class="credential-field"><label>密码</label><input class="form-control input-sm" type="password" name="xshoppy_password" required autocomplete="new-password" placeholder="填写密码"></div><button class="btn btn-primary btn-sm credential-save" onclick="return confirm('确认保存？保存后不能再次编辑。')"><i class="fa fa-save"></i> 保存</button></form>@endif
  </td></tr>
-@empty<tr><td colspan="7" class="text-center text-muted" style="padding:45px">暂无符合筛选条件的 XShoppy 或 Shopline 店铺</td></tr>@endforelse
+@empty<tr><td colspan="7" class="text-center text-muted" style="padding:45px">暂无符合筛选条件的店铺</td></tr>@endforelse
 </tbody></table></div>
 <div class="store-pagination">
  <div class="store-pagination-summary"><i class="fa fa-list-ul"></i><span>显示 <strong>{{ $stores->firstItem() ?: 0 }}–{{ $stores->lastItem() ?: 0 }}</strong> 个，共 <strong>{{ $stores->total() }}</strong> 个店铺　·　第 <strong>{{ $stores->currentPage() }}</strong> / {{ $stores->lastPage() }} 页</span></div>

@@ -3,19 +3,21 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\SoftDeletes;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class FashionAdvertisingReport extends Model
 {
     use SoftDeletes;
 
     public const STATUS_PENDING = 'pending';
+
     public const STATUS_APPROVED = 'approved';
+
     public const STATUS_REJECTED = 'rejected';
 
-    protected $fillable = ['report_date', 'submitter_id', 'submitter_name', 'total_revenue_usd', 'total_order_count', 'total_ad_spend_usd', 'roi', 'status', 'reviewed_by', 'reviewer_name', 'reviewed_at', 'review_reason', 'deleted_by', 'deleter_name'];
+    protected $fillable = ['project_code', 'report_date', 'submitter_id', 'submitter_name', 'total_revenue_usd', 'total_order_count', 'total_ad_spend_usd', 'roi', 'status', 'reviewed_by', 'reviewer_name', 'reviewed_at', 'review_reason', 'deleted_by', 'deleter_name'];
 
     public function __construct(array $attributes = [])
     {
@@ -45,7 +47,9 @@ class FashionAdvertisingReport extends Model
 
     public function statusLabel(): string
     {
-        if ($this->trashed()) return '已删除';
+        if ($this->trashed()) {
+            return '已删除';
+        }
 
         return match ($this->status) {
             self::STATUS_APPROVED => '审核通过',
