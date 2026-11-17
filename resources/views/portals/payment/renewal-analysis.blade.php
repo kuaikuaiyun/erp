@@ -16,6 +16,13 @@
         if ($b <= 0) $lines[] = $audit('zero');
         return $lines;
     };
+    $formulaNumber = static fn ($value, bool $amount = false) => $amount
+        ? rtrim(rtrim(number_format((float) $value, 4), '0'), '.') : number_format((float) $value);
+    $inlineRatio = static fn ($a, $b, bool $amount = false) => $b > 0
+        ? $text('inline_formula', ['numerator'=>$formulaNumber($a,$amount),'denominator'=>$formulaNumber($b,$amount)])
+        : $text('inline_no_sample');
+    $inlinePeriod = static fn ($name, $from, $to) => $text('inline_period', [
+        'stage'=>$name,'from'=>substr($from,0,10),'to'=>substr($to,0,10)]);
     $stageName = static fn (int $number) => __($t.'.funnel.stage_name',['number'=>$number]);
     $stageNumber = static fn (string $key) => (int) str_replace('renewal_', '', $key);
     $channels = ['total'=>$text('total'),'paypal'=>__($t.'.channels.paypal'),'credit_card'=>__($t.'.channels.credit_card')];
@@ -29,7 +36,7 @@
 @section('page_title', __($t.'.page_title'))
 @push('styles')
 <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261104-2">
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261117-5">
+<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261117-6">
 @endpush
 
 @section('content')
@@ -52,7 +59,7 @@
             @php
                 $rate = $summary['subscription_rate'][$channel];
             @endphp
-            <div class="payment-kpi-card payment-renewal-kpi"><div><p>{{ $label }}</p><strong>{{ number_format($rate['rate'],2) }}%</strong><small>{{ $text('subscription_orders') }} {{ number_format($rate['subscription_orders']) }} / {{ $text('qualified_orders') }} {{ number_format($rate['total_orders']) }}</small></div></div>
+            <div class="payment-kpi-card payment-renewal-kpi"><div><p>{{ $label }}</p><strong>{{ number_format($rate['rate'],2) }}%</strong><small>{{ $text('subscription_orders') }} {{ number_format($rate['subscription_orders']) }} / {{ $text('qualified_orders') }} {{ number_format($rate['total_orders']) }}</small><small class="payment-inline-formula">{{ $inlineRatio($rate['subscription_orders'],$rate['total_orders']) }}</small></div></div>
             @endforeach
         </div>
         <p class="payment-renewal-scope-note">{{ $text('first_scope') }}</p>
@@ -63,7 +70,7 @@
             @php
                 $refund = $dashboard['initial_refunds'][$channel];
             @endphp
-            <tr><td>{{ $label }}</td><td>{{ number_format($refund['orders']) }}</td><td>{{ $money($refund['revenue']) }}</td><td>{{ number_format($refund['refund_order_count']) }}</td><td>{{ $money($refund['refund_amount']) }}</td><td>{{ number_format($refund['refund_count_rate'],2) }}%</td><td>{{ number_format($refund['refund_amount_rate'],2) }}%</td></tr>
+            <tr><td>{{ $label }}</td><td>{{ number_format($refund['orders']) }}</td><td>{{ $money($refund['revenue']) }}</td><td>{{ number_format($refund['refund_order_count']) }}</td><td>{{ $money($refund['refund_amount']) }}</td><td>{{ number_format($refund['refund_count_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($refund['refund_order_count'],$refund['orders']) }}</small></td><td>{{ number_format($refund['refund_amount_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($refund['refund_amount'],$refund['revenue'],true) }}</small></td></tr>
         @endforeach
         </tbody></table></div>
         <details class="payment-calculation-details"><summary>{{ $text('view_calculation') }}</summary>
@@ -91,7 +98,7 @@
             <th>{{ $text('revenue') }}</th><th>{{ $text('refund_orders') }}</th><th>{{ $text('refund_amount') }}</th><th>{{ $text('refund_count_rate') }}</th><th>{{ $text('refund_amount_rate') }}</th>
         </tr></thead><tbody>
         @forelse($dashboard['stages'] as $stage)
-            <tr data-payment-renewal-number="{{ $stage['number'] }}"><td><strong>{{ $stageName($stage['number']) }}</strong></td><td>{{ number_format($stage['previous_orders']) }}</td><td>{{ number_format($stage['orders']) }}</td><td><strong>{{ $stage['rate'] === null ? __($t.'.funnel.not_applicable') : number_format($stage['rate'],2).'%' }}</strong></td><td>{{ $money($stage['revenue']) }}</td><td>{{ number_format($stage['refund_order_count']) }}</td><td>{{ $money($stage['refund_amount']) }}</td><td>{{ number_format($stage['refund_count_rate'],2) }}%</td><td>{{ number_format($stage['refund_amount_rate'],2) }}%</td></tr>
+            <tr data-payment-renewal-number="{{ $stage['number'] }}"><td><strong>{{ $stageName($stage['number']) }}</strong></td><td>{{ number_format($stage['previous_orders']) }}<small class="payment-inline-formula">{{ $inlinePeriod($stage['number'] === 1 ? __($t.'.funnel.initial_stage') : $stageName($stage['number']-1),$calc['comparison_from'],$calc['comparison_to']) }}</small></td><td>{{ number_format($stage['orders']) }}<small class="payment-inline-formula">{{ $inlinePeriod($stageName($stage['number']),$calc['period_from'],$calc['period_to']) }}</small></td><td><strong>{{ $stage['rate'] === null ? __($t.'.funnel.not_applicable') : number_format($stage['rate'],2).'%' }}</strong><small class="payment-inline-formula">{{ $stage['rate'] === null ? $text('inline_no_base') : $inlineRatio($stage['orders'],$stage['previous_orders']) }}</small></td><td>{{ $money($stage['revenue']) }}</td><td>{{ number_format($stage['refund_order_count']) }}</td><td>{{ $money($stage['refund_amount']) }}</td><td>{{ number_format($stage['refund_count_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($stage['refund_order_count'],$stage['orders']) }}</small></td><td>{{ number_format($stage['refund_amount_rate'],2) }}%<small class="payment-inline-formula">{{ $inlineRatio($stage['refund_amount'],$stage['revenue'],true) }}</small></td></tr>
             <tr class="payment-calculation-row"><td colspan="9">
                 <details class="payment-calculation-details"><summary>{{ $text('stage_calculation',['number'=>$stage['number']]) }}</summary>
                     {{ $notes([$audit('base',['number'=>$stage['number'],'previous'=>$stage['number'] === 1 ? __($t.'.funnel.initial_stage') : $stageName($stage['number']-1),'count'=>$stage['previous_orders']]),

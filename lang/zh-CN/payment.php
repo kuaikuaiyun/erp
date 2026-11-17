@@ -258,6 +258,10 @@ $translations = [
 
 return array_replace_recursive($translations, [
     'renewal_two_sections' => [
+        'inline_formula' => ':numerator ÷ :denominator × 100%',
+        'inline_period' => ':stage：:from ～ :to',
+        'inline_no_base' => '无可计算基数',
+        'inline_no_sample' => '分母为 0，无样本',
         'previous_orders' => '前推区间上一阶段订单数',
         'current_renewal_orders' => '本期本次续费订单数',
         'no_base' => '前推区间上一阶段订单数为 0，无可计算基数，续费率显示“—”；本期订单与退款仍正常统计。',
