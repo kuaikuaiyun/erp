@@ -13,6 +13,8 @@ class OperationAiProductReferenceVideo extends Model
 
     public const SOURCE_UPLOAD = 'upload';
 
+    public const SOURCE_OPERATOR_UPLOAD = 'operator_upload';
+
     public const SOURCE_HISTORICAL_HTML = 'historical_html';
 
     public static function fileTypeCode(string $type): string
@@ -32,6 +34,27 @@ class OperationAiProductReferenceVideo extends Model
         }
 
         return $fallback;
+    }
+
+    public static function operatorCode(int $userId): string
+    {
+        return 'op'.max(1, $userId);
+    }
+
+    public static function operatorFileName(
+        string $productCode,
+        int $userId,
+        string $date,
+        int $number,
+        string $extension,
+    ): string {
+        return implode('-', [
+            $productCode,
+            self::operatorCode($userId),
+            'min',
+            $date,
+            str_pad((string) max(1, $number), 3, '0', STR_PAD_LEFT),
+        ]).'.'.ltrim(strtolower($extension), '.');
     }
 
     protected $fillable = [
