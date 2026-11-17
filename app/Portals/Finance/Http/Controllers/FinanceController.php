@@ -1672,7 +1672,8 @@ class FinanceController extends Controller
             return response()->json($reportStatus)->header('Cache-Control', 'no-store');
         }
         [$items, $subscriptionOptions] = $result;
-        $items = array_values(array_filter($items, fn (array $row) => filled($row['team']) && filled($row['subscription'])));
+        $items = array_values(array_filter($items, fn (array $row) => filled($row['team'])
+            && (! $summary::requiresSubscription($tab) || filled($row['subscription']))));
         if ($request->boolean('download')) {
             abort_if(! $live && $reportSnapshot === null, 409, '报表正在生成，请稍后导出。');
             $export = \App\Portals\Finance\FinanceExportSelection::filter($request, $items)->map(fn ($row) => array_map(fn ($field) => $row[$field] ?? null, array_keys($columns)));
@@ -1761,7 +1762,7 @@ class FinanceController extends Controller
                             || FinanceSettlementService::transactionStatusCategory($layout['status'] ?? null) === 'failed')) {
                             continue;
                         }
-                        if ($missing($layout + $row, ['domain', 'team', 'subscription'])
+                        if ($missing($layout + $row, ['domain', 'team'])
                             || ($scope['card_channel'] === 'worldpay' && ! empty($row['success']) && $missing($layout + $row, ['gross', 'settlement']))) {
                             yield array_map(fn ($field) => $layout[$field] ?? '', array_keys($columns));
                         }
@@ -3205,8 +3206,8 @@ class FinanceController extends Controller
                     'project' => 'Shopify',
                     'channel' => $service::REPORT_CHANNELS[$platform],
                     'team' => $item['team'],
-                    'subscription' => $item['subscription'],
-                    'detail' => $item['account'].' / '.$item['team'].' / '.$item['subscription'],
+                    'subscription' => $item['subscription'] ?: '未分类',
+                    'detail' => $item['account'].' / '.$item['team'].' / '.($item['subscription'] ?: '未分类'),
                     default => $item['account'],
                 };
                 $key = json_encode([$name, $layer === 'project' ? ($channel ?: 'combined') : $platform], JSON_THROW_ON_ERROR);

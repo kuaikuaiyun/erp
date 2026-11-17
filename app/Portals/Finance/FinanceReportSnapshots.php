@@ -162,7 +162,7 @@ class FinanceReportSnapshots
     private function revision(Connection $db, string $report, string $month, array $filters, bool $tracksRevisions): string
     {
         $channel = $filters['channel'] ?? null;
-        $transactionVersion = $channel === 'worldpay' ? 9 : 8;
+        $transactionVersion = in_array($channel, ['ye', 'worldpay'], true) ? 10 : 8;
         // Installations without trigger privileges still generate reports in the background.
         if (! $tracksRevisions) {
             $bucket = (string) intdiv(now()->timestamp, 300);
@@ -171,7 +171,7 @@ class FinanceReportSnapshots
 
             return hash('sha256', match ($report) {
                 'transactions' => $prefix.$bucket,
-                'summary' => 'summary:4:'.$bucket,
+                'summary' => 'summary:5:'.$bucket,
                 default => $bucket,
             });
         }
@@ -181,7 +181,12 @@ class FinanceReportSnapshots
             ->orderBy('channel')->get(['channel', 'revision']);
         $rate = $db->table('finance_monthly_exchange_rates')->where(['month' => $month, 'currency' => 'USD'])->value('cny_rate');
 
-        return hash('sha256', json_encode([$report === 'transactions' ? $transactionVersion : 4, $periods, $rate], JSON_THROW_ON_ERROR));
+        $version = match ($report) {
+            'transactions' => $transactionVersion,
+            'summary' => 5,
+            default => 4,
+        };
+        return hash('sha256', json_encode([$version, $periods, $rate], JSON_THROW_ON_ERROR));
     }
 
     private function publish(Connection $db, string $scope, string $revision, array $result): string

@@ -1674,7 +1674,7 @@ class FinancePortalTest extends TestCase
             $totals[0]['fee'], $totals[0]['refund'], $totals[0]['per_order_fee'],
         ]);
         $this->get('/finance/reports/summary?view=transactions&month=2026-11&channel=worldpay')
-            ->assertOk()->assertViewHas('items', fn ($items) => array_filter($items, fn ($item) => blank($item['team']) || blank($item['subscription'])) === []);
+            ->assertOk()->assertViewHas('items', fn ($items) => array_filter($items, fn ($item) => blank($item['team'])) === []);
         $this->get('/finance/reports/summary?view=transactions&month=2026-11&channel=credit_card')
             ->assertOk()->assertViewHas('items', []);
         $this->get('/finance/reports/summary?view=settlement&month=2026-11&channel=worldpay')
@@ -3018,7 +3018,7 @@ class FinancePortalTest extends TestCase
     public function test_transaction_summary_allocates_all_failures_by_team_success_share(): void
     {
         $row = ['channel' => 'credit_card', 'account' => 'A', 'currency' => 'USD', 'team' => 'A',
-            'subscription' => '订阅', 'month' => '2026-11', 'success' => true, 'failed' => false,
+            'subscription' => '', 'month' => '2026-11', 'success' => true, 'failed' => false,
             'settlement' => null, 'gross' => null];
         $rows = [
             ...array_fill(0, 5, $row),

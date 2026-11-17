@@ -6,6 +6,11 @@ class FinanceTransactionSummary
 {
     public const VIEWS = ['paypal' => 'PayPal', 'credit_card' => '徐总信用卡', 'ye' => '叶总支付', 'worldpay' => 'Worldpay', 'combined' => 'Shopify'];
 
+    public static function requiresSubscription(string $tab): bool
+    {
+        return ! in_array($tab, ['ye', 'worldpay'], true);
+    }
+
     private const COMMON = ['channel' => '通道', 'account' => '支付账户', 'currency' => '货币', 'team' => '区域', 'subscription' => '订阅类型',
         'month' => '年月', 'orders' => '订单数', 'amount' => '金额', 'settlement' => '结算金额'];
 
@@ -96,7 +101,8 @@ class FinanceTransactionSummary
         $teams = [];
         foreach ($groups as $key => &$group) {
             $group['failed_orders'] = 0;
-            if ($group['orders'] > 0 && filled($group['team']) && filled($group['subscription'])) {
+            if ($group['orders'] > 0 && filled($group['team'])
+                && (! self::requiresSubscription($tab) || filled($group['subscription']))) {
                 $teams[$group['month']][$group['team']][$key] = $group['orders'];
             }
         }
