@@ -14,7 +14,7 @@
 
 @push('styles')
     <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261026-1">
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261026-1">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261117-alert1">
 @endpush
 
 @section('content')
@@ -48,10 +48,19 @@
 
     <article class="payment-panel payment-alert-list-panel">
         <h2>{{ __($translationPrefix.'.list_title') }}</h2>
-        <div class="table-responsive payment-alert-scroll-table"><table class="table payment-data-table payment-alert-table"><thead><tr>@foreach (['pcl', 'alert_data', 'threshold', 'status', 'status_message', 'action'] as $column)<th>{{ __($translationPrefix.'.table.'.$column) }}</th>@endforeach</tr></thead><tbody>
+        <div class="table-responsive payment-alert-scroll-table"><table class="table payment-data-table payment-alert-table"><thead><tr>@foreach (['pcl', 'alert_data', 'threshold', 'status', 'status_message', 'action'] as $column)<th>{{ __($translationPrefix.'.table.'.($column === 'pcl' ? 'product_information' : $column)) }}</th>@endforeach</tr></thead><tbody>
         @foreach ($dashboard['alerts'] as $alert)
             <tr class="payment-alert-severity-{{ $alert['severity_key'] }}" tabindex="0" data-payment-alert-detail="{{ route('payment.product-alerts.show', ['alert' => $alert['code']]) }}">
-                <td><strong>{{ $alert['sku'] }}</strong></td>
+                <td><div class="payment-alert-product-information">
+                    @if(!empty($alert['product_image_url']))
+                        <img src="{{ $alert['product_image_url'] }}" alt="{{ $alert['product_name'] }}" loading="lazy" onerror="this.hidden=true;this.nextElementSibling.hidden=false;">
+                        <span hidden>{{ __($translationPrefix.'.no_image') }}</span>
+                    @else
+                        <span>{{ __($translationPrefix.'.no_image') }}</span>
+                    @endif
+                    <strong>{{ $alert['sku'] }}</strong>
+                    <div>{{ $alert['product_name'] }}</div>
+                </div></td>
                 <td><div class="payment-alert-data-cell"><div class="payment-alert-channel-line"><span>{{ __($translationPrefix.'.table.channel') }}</span><strong>{{ __($translationPrefix.'.channels.'.$alert['channel_key']) }}</strong></div><div class="payment-alert-summary-grid"><span><small>{{ __($translationPrefix.'.summary.orders') }}</small><strong>{{ number_format($alert['eligible_order_count']) }}{{ __($translationPrefix.'.order_unit') }}</strong></span><span><small>{{ __($translationPrefix.'.summary.disputes') }}</small><strong>{{ number_format($alert['dispute_order_count']) }}{{ __($translationPrefix.'.order_unit') }}</strong></span><span><small>{{ __($translationPrefix.'.summary.amount') }}</small><strong>${{ number_format($alert['dispute_amount'], 2) }}</strong></span><span><small>{{ __($translationPrefix.'.summary.delivered_rate') }}</small><strong>{{ number_format($alert['delivered_dispute_rate'], 2) }}%</strong><em>{{ number_format($alert['delivered_dispute_order_count']) }}/{{ number_format($alert['delivered_order_count']) }}</em></span>@if($alert['channel_type'] === 'paypal')<span class="payment-alert-summary-mismatch payment-alert-mismatch-{{ $alert['severity_key'] }}"><small>{{ __($translationPrefix.'.table.description_mismatch') }}</small><strong>{{ number_format($alert['description_mismatch_rate'], 2) }}%</strong><em>${{ number_format($alert['description_mismatch_amount'], 2) }} <i class="fa fa-info-circle payment-formula-icon" tabindex="0" data-payment-formula-tooltip data-toggle="tooltip" data-container="body" title="{{ __($translationPrefix.'.formulas.description_mismatch_rate') }}"></i></em></span>@endif</div></div></td>
                 <td><div class="payment-alert-trigger-list">@foreach($alert['trigger_metrics'] as $metric)<span class="payment-alert-trigger-item payment-alert-trigger-{{ $alert['severity_key'] }}"><strong>{{ number_format($metric['value'], 2) }}%</strong><small>{{ __($translationPrefix.'.metrics.'.$metric['key']) }}</small></span>@endforeach</div></td>
                 <td><span class="payment-table-status payment-table-status-{{ $alert['workflow_status_key'] }}" data-payment-alert-workflow-status>{{ __($translationPrefix.'.statuses.'.$alert['workflow_status_key']) }}</span></td>

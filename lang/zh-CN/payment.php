@@ -118,7 +118,7 @@ $translations = [
         'sample_ranges' => ['under_50' => '50单以内', '50_500' => '50–500单', 'over_500' => '500单以上'],
         'severities' => ['warning' => '黄色预警', 'critical' => '红色预警'],
         'kpis' => ['pending' => '待处理', 'pending_note' => '尚未提交处理记录', 'processing' => '处理中', 'processing_note' => '已有处理结论、尚未完结', 'completed' => '已完成', 'completed_note' => '已完结的产品预警'], 'order_unit' => '单', 'list_title' => '产品预警列表',
-        'table' => ['pcl' => 'PCL', 'channel' => '渠道', 'summary' => '数据摘要', 'alert_data' => '预警数据', 'threshold' => '命中指标 / 进入原因', 'status' => '处理状态', 'status_message' => '状态消息', 'action' => '操作'],
+        'table' => ['product_information' => '产品信息', 'pcl' => 'PCL', 'channel' => '渠道', 'summary' => '数据摘要', 'alert_data' => '预警数据', 'threshold' => '命中指标 / 进入原因', 'status' => '处理状态', 'status_message' => '状态消息', 'action' => '操作'],
         'channels' => ['paypal' => 'PayPal', 'credit_card' => '信用卡'],
         'metrics' => ['refund_order_rate' => '退款率（按订单数）', 'refund_amount_rate' => '退款金额比', 'paypal_dispute_rate' => 'PayPal 全部纠纷率', 'credit_card_dispute_rate' => '信用卡争议率'],
         'thresholds' => ['refund_amount_ratio' => '退款 $6400 – 1.5%', 'refund_count_ratio' => "退款 5%\n2 笔/40 付款", 'estimated_profit' => '预计贡献利润≈0'], 'owners' => ['product_manager_a' => '产品跟进中', 'to_assign' => '待分配', 'product_manager_b' => '产品跟进下'], 'owner_note' => ['product_manager_a' => '客服 Z / 运营岗', 'to_assign' => '需跟专认领', 'product_manager_b' => '运营岗 / 财务已'],
@@ -840,6 +840,7 @@ return array_replace_recursive($translations, [
     ],
 ], [
     'product_alerts' => [
+        'no_image' => '暂无图片',
         'filters' => [
             'flow_status' => '流程状态',
             'processing_status' => '处理状态',
@@ -847,7 +848,7 @@ return array_replace_recursive($translations, [
         ],
         'flows' => ['open' => '待处理流程', 'completed' => '已完结流程', 'all' => '全部流程'],
         'statuses' => ['pending' => '待处理', 'processing' => '处理中', 'completed' => '已完结'],
-        'table' => ['alert_data' => '预警数据', 'description_mismatch' => '物品与描述不符占比'],
+        'table' => ['product_information' => '产品信息', 'alert_data' => '预警数据', 'description_mismatch' => '物品与描述不符占比'],
         'summary' => [
             'orders' => '有效订单',
             'disputes' => '纠纷订单',

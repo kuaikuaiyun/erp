@@ -40,6 +40,14 @@ class PaymentProductAlertService
         $offset = ($page - 1) * $perPage;
 
         $pageAlerts = $this->withStatuses($filtered->slice($offset, $perPage)->values(), true);
+        $itemIds = $pageAlerts->map(fn (array $alert): int => (int) preg_replace('/^PW-(?:[PC]-)?/', '', $alert['code']))->unique();
+        $images = \App\Models\LogisticsOrderItem::query()->with('skuMapping')->whereIn('id', $itemIds)->get()->keyBy('id');
+        $pageAlerts = $pageAlerts->map(function (array $alert) use ($images): array {
+            $id = (int) preg_replace('/^PW-(?:[PC]-)?/', '', $alert['code']);
+            $alert['product_image_url'] = $images->get($id)?->display_product_image_url;
+            return $alert;
+        });
+
 
         return [
             'filters' => $filters,
