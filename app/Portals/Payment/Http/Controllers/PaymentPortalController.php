@@ -642,7 +642,7 @@ class PaymentPortalController extends Controller
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
             'channel' => ['nullable', Rule::in(['', 'paypal', 'credit_card'])],
-            'stage' => ['nullable', 'regex:/^(renewal_\d+)?$/'],
+            'stage' => ['nullable', 'regex:/^(initial|renewal_[1-9]\d*)?$/'],
             'store' => ['nullable', 'string', 'max:191'],
             'stage_page' => ['nullable', 'integer', 'min:1'],
         ]);

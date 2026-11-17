@@ -23,12 +23,14 @@ class PaymentRenewalAnalysisExportService
         $summary->setTitle(__('payment.renewal_analysis.export.summary_sheet'));
         $summary->fromArray([
             [__('payment.renewal_analysis.export.metric'), __('payment.renewal_analysis.export.value')],
-            [__('payment.renewal_analysis.kpis.total_rate'), $data['summary']['rate'].'%'],
-            [__('payment.renewal_analysis.kpis.eligible'), $data['summary']['eligible']],
-            [__('payment.renewal_analysis.kpis.renewed'), $data['summary']['renewed']],
-            [__('payment.renewal_analysis.kpis.paypal_rate'), $data['summary']['paypal']['rate'].'%'],
-            [__('payment.renewal_analysis.kpis.card_rate'), $data['summary']['credit_card']['rate'].'%'],
-            [__('payment.renewal_analysis.kpis.renewal_revenue'), $data['summary']['renewal_revenue']],
+            [__('payment.renewal_analysis.export.period'), $data['calculation']['period_from'].' ~ '.$data['calculation']['period_to']],
+            [__('payment.renewal_analysis.export.comparison_period'), $data['calculation']['comparison_from'].' ~ '.$data['calculation']['comparison_to']],
+            [__('payment.renewal_analysis.kpis.period_orders'), $data['summary']['orders']],
+            [__('payment.renewal_analysis.kpis.period_revenue'), $data['summary']['revenue']],
+            [__('payment.renewal_analysis.kpis.refund_orders'), $data['summary']['refund_order_count']],
+            [__('payment.renewal_analysis.kpis.refund_amount'), $data['summary']['refund_amount']],
+            [__('payment.renewal_analysis.kpis.refund_count_rate'), $data['summary']['refund_count_rate'].'%'],
+            [__('payment.renewal_analysis.kpis.refund_amount_rate'), $data['summary']['refund_amount_rate'].'%'],
         ]);
         $summary->getStyle('A1:B1')->getFont()->setBold(true)->getColor()->setARGB('FFFFFFFF');
         $summary->getStyle('A1:B1')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF287FBD');
@@ -37,17 +39,19 @@ class PaymentRenewalAnalysisExportService
 
         $stageSheet = $book->createSheet();
         $stageSheet->setTitle(__('payment.renewal_analysis.export.stages_sheet'));
-        $stageKeys = ['stage','eligible','completed','renewal_rate','loss','orders_revenue','refund','refund_count_rate','refund_amount_rate','dispute'];
+        $stageKeys = ['stage','eligible','completed','renewal_rate','loss','orders_revenue','refund','refund_orders','refund_count_rate','refund_amount_rate','dispute'];
         $stageSheet->fromArray([array_map(fn ($key) => __('payment.renewal_analysis.funnel.'.$key), $stageKeys)], null, 'A1');
         $stageNumber = 2;
         foreach ($data['stages'] as $stage) {
             $stageSheet->fromArray([[
-                __('payment.renewal_analysis.funnel.stage_name', ['number' => $stage['number']]),
-                $stage['eligible_chains'], $stage['completed_chains'], $stage['rate'].'%',
-                $stage['loss_count'].' / '.$stage['loss_rate'].'%',
+                $stage['number'] === 0 ? __('payment.renewal_analysis.funnel.initial_stage') : __('payment.renewal_analysis.funnel.stage_name', ['number' => $stage['number']]),
+                $stage['eligible_chains'] ?? __('payment.renewal_analysis.funnel.not_applicable'),
+                $stage['completed_chains'] ?? __('payment.renewal_analysis.funnel.not_applicable'),
+                $stage['rate'] === null ? __('payment.renewal_analysis.funnel.not_applicable') : $stage['rate'].'%',
+                $stage['loss_count'] === null ? __('payment.renewal_analysis.funnel.not_applicable') : $stage['loss_count'].' / '.$stage['loss_rate'].'%',
                 $stage['orders'].' / '.number_format($stage['revenue'], 2, '.', ''),
                 $stage['refund_count'].' / '.number_format($stage['refund_amount'], 2, '.', ''),
-                $stage['refund_count_rate'].'%', $stage['refund_amount_rate'].'%',
+                $stage['refund_order_count'], $stage['refund_count_rate'].'%', $stage['refund_amount_rate'].'%',
                 $stage['dispute_count'].' / '.number_format($stage['dispute_amount'], 2, '.', ''),
             ]], null, 'A'.$stageNumber++);
         }
@@ -77,7 +81,7 @@ class PaymentRenewalAnalysisExportService
         $rowNumber = 2;
         foreach ($data['rows'] as $row) {
             $detail->fromArray([[
-                $row['stage_number'],
+                $row['stage_number'] === 0 ? __('payment.renewal_analysis.funnel.initial_stage') : __('payment.renewal_analysis.funnel.stage_name', ['number' => $row['stage_number']]),
                 __('payment.renewal_analysis.channels.'.$row['initial_channel']),
                 __('payment.renewal_analysis.channels.'.$row['actual_channel']),
                 $row['initial_order'], $row['renewal_order'], $row['store_name'], $row['transaction_id'],

@@ -15,6 +15,14 @@ use Illuminate\Support\Facades\Cache;
 
 class PaymentRenewalAnalysisService
 {
+    // Avoid loading large Shopify/Tongtu payloads when reconstructing historical stages.
+    private const ORDER_FIELDS = [
+        'id', 'paid_at', 'paid_amount_usd', 'subscription_origin_order_id', 'subscription_type',
+        'is_add_on', 'operator_name', 'store_name', 'transaction_id', 'shopify_order_id',
+        'shopify_order_number', 'payment_gateway_order_id', 'bill_number',
+        'payment_gateway', 'payment_method', 'paypal_account_id', 'paypal_association_source',
+    ];
+
     /** @param array<string,mixed> $filters @return array<string,mixed> */
     public function dashboard(array $filters): array
     {
@@ -44,20 +52,16 @@ class PaymentRenewalAnalysisService
             $dataset['stages'] = array_values(array_filter($dataset['stages'], fn (array $stage): bool => $stage['key'] === $filters['stage']));
             $dataset['rows'] = array_values(array_filter($dataset['rows'], fn (array $row): bool => $row['stage_key'] === $filters['stage']));
         }
-        $totals = ['paypal' => $this->emptyRiskTotal(), 'credit_card' => $this->emptyRiskTotal()];
-        foreach ($dataset['rows'] as $row) {
-            $channel = $row['actual_channel'];
-            $totals[$channel]['orders']++;
-            $totals[$channel]['revenue'] += $row['amount'];
-            foreach (['refund_count', 'refund_amount', 'dispute_count', 'dispute_amount'] as $field) $totals[$channel][$field] += $row[$field];
-            $totals[$channel]['refund_order_count'] += $row['refund_count'] > 0 ? 1 : 0;
+        $dataset['summary'] = [
+            ...$this->riskTotal($dataset['rows']),
+            'subscription_rate' => $dataset['summary']['subscription_rate'],
+        ];
+        $dataset['risk_by_channel'] = [];
+        foreach (['paypal', 'credit_card'] as $channel) {
+            $dataset['risk_by_channel'][$channel] = $this->riskTotal(array_values(array_filter(
+                $dataset['rows'], fn (array $row): bool => $row['actual_channel'] === $channel,
+            )));
         }
-        foreach ($totals as &$total) {
-            $total['refund_count_rate'] = $this->rate($total['refund_order_count'], $total['orders']);
-            $total['refund_amount_rate'] = $this->rate($total['refund_amount'], $total['revenue']);
-        }
-        unset($total);
-        $dataset['risk_by_channel'] = $totals;
         return $dataset;
     }
 
@@ -66,7 +70,7 @@ class PaymentRenewalAnalysisService
     {
         $cacheFilters = $filters;
         unset($cacheFilters['stage_page'], $cacheFilters['stage']);
-        $cacheKey = 'payment:renewal-analysis:v7:'.sha1(json_encode($cacheFilters));
+        $cacheKey = 'payment:renewal-analysis:v8:'.sha1(json_encode($cacheFilters));
 
         $expiresAt = now()->addMinutes(5);
         return Cache::remember($cacheKey, $expiresAt, function () use ($cacheFilters, $expiresAt): array {
@@ -81,45 +85,18 @@ class PaymentRenewalAnalysisService
     {
         $from = Carbon::parse((string) $filters['date_from'])->startOfDay();
         $to = Carbon::parse((string) $filters['date_to'])->endOfDay();
-        // The selected period describes when the first renewal was paid. Its
-        // corresponding first subscription cohort is exactly one cycle earlier.
-        $cohortFrom = $from->copy()->subDays(30);
-        $cohortTo = $to->copy()->subDays(30);
-        $subscriptionRate = $this->subscriptionRate($cohortFrom, $cohortTo, $filters);
+        $comparisonFrom = $from->copy()->subDays(30);
+        $comparisonTo = $to->copy()->subDays(30);
 
-        $initialQuery = LogisticsOrder::query()
-            ->whereNotNull('paid_at')
-            ->whereBetween('paid_at', [$cohortFrom, $cohortTo])
-            ->where(function ($query): void {
-                $query->whereNull('subscription_origin_order_id')->orWhere('subscription_origin_order_id', '');
+        $candidates = LogisticsOrder::query()->select(self::ORDER_FIELDS)
+            ->where(function ($query) use ($from, $to, $comparisonFrom, $comparisonTo): void {
+                $query->whereBetween('paid_at', [$from, $to])
+                    ->orWhereBetween('paid_at', [$comparisonFrom, $comparisonTo]);
             })
-            // The cohort must contain only true first subscription charges.  A
-            // malformed historical renewal without an origin reference must
-            // not silently become a new cohort chain.
-            ->where('subscription_type', '订阅首次购买')
             ->where(function ($query): void {
-                $query->whereNull('operator_name')->orWhere('operator_name', 'not like', '%刷单%');
-            });
-
-        if (($filters['store'] ?? '') !== '') {
-            $initialQuery->where('store_name', (string) $filters['store']);
-        }
-        if (($filters['keyword'] ?? '') !== '') {
-            $keyword = '%'.trim((string) $filters['keyword']).'%';
-            $initialQuery->where(function ($query) use ($keyword): void {
-                $query->where('shopify_order_number', 'like', $keyword)
-                    ->orWhere('transaction_id', 'like', $keyword)
-                    ->orWhere('buyer_email', 'like', $keyword)
-                    ->orWhere('subscription_origin_order_id', 'like', $keyword);
-            });
-        }
-
-        $initials = $initialQuery->orderBy('paid_at')->orderBy('id')->get();
-        $initials = $initials->filter(function (LogisticsOrder $order) use ($filters): bool {
-            $channel = $this->channelFor($order);
-            return ($filters['channel'] ?? '') === '' || $channel === $filters['channel'];
-        })->values();
-
+                $query->whereNull('is_add_on')->orWhere('is_add_on', '<>', '已加购');
+            })->get();
+        $initials = $this->periodInitials($candidates, $filters, $to);
         $referenceMap = [];
         foreach ($initials as $initial) {
             foreach ($this->chainReferences($initial) as $reference) {
@@ -127,140 +104,161 @@ class PaymentRenewalAnalysisService
             }
         }
 
-        $renewals = empty($referenceMap)
-            ? collect()
-            : LogisticsOrder::query()
-                ->whereIn('subscription_origin_order_id', array_keys($referenceMap))
-                ->whereNotNull('paid_at')
+        // Read the complete paid history of relevant chains, not just the current window.
+        // Otherwise a September second renewal could incorrectly become its first renewal.
+        $renewals = collect();
+        foreach (array_chunk(array_keys($referenceMap), 1000) as $references) {
+            $batch = LogisticsOrder::query()->select(self::ORDER_FIELDS)
+                ->whereIn('subscription_origin_order_id', $references)
+                ->whereNotNull('paid_at')->where('paid_at', '<=', $to)
                 ->where(function ($query): void {
                     $query->whereNull('is_add_on')->orWhere('is_add_on', '<>', '已加购');
-                })
-                ->orderBy('paid_at')->orderBy('id')->get();
+                })->get();
+            foreach ($batch as $order) $renewals->put((int) $order->id, $order);
+        }
+        $renewals = $renewals->sortBy([['paid_at', 'asc'], ['id', 'asc']])->values();
+        $initialMap = $initials->keyBy('id');
+        $entries = [];
+        foreach ($initials as $initial) $entries[] = ['order' => $initial, 'initial' => $initial, 'number' => 0];
+        $seen = [];
+        foreach ($renewals as $order) {
+            $initialId = $referenceMap[trim((string) $order->subscription_origin_order_id)] ?? null;
+            if ($initialId === null) continue;
+            $seen[$initialId] = ($seen[$initialId] ?? 0) + 1;
+            $entries[] = ['order' => $order, 'initial' => $initialMap->get($initialId), 'number' => $seen[$initialId]];
+        }
 
-        $byInitial = [];
-        foreach ($renewals as $renewal) {
-            $initialId = $referenceMap[trim((string) $renewal->subscription_origin_order_id)] ?? null;
-            if ($initialId) {
-                $byInitial[$initialId][] = $renewal;
+        $current = [];
+        $previousChains = [];
+        foreach ($entries as $entry) {
+            $order = $entry['order'];
+            $number = $entry['number'];
+            if ($order->paid_at->betweenIncluded($from, $to)) $current[$number][] = $entry;
+            if ($order->paid_at->betweenIncluded($comparisonFrom, $comparisonTo)) {
+                $previousChains[$number][(int) $entry['initial']->id] = true;
             }
         }
-
-        $firstRenewals = [];
-        foreach ($byInitial as $initialId => $chain) {
-            $firstRenewal = collect($chain)->sortBy([['paid_at', 'asc'], ['id', 'asc']])->first();
-            if ($firstRenewal !== null && $firstRenewal->paid_at?->betweenIncluded($from, $to)) {
-                $firstRenewals[(int) $initialId] = $firstRenewal;
-            }
-        }
-
-        $selectedChains = [];
-        foreach ($firstRenewals as $initialId => $first) {
-            $selectedChains[$initialId] = array_values(array_filter($byInitial[$initialId], fn (LogisticsOrder $order): bool => $order->paid_at->lte($to)));
-        }
-        $renewalOrderIds = collect($selectedChains)->flatten(1)->pluck('id')->map(fn ($id) => (int) $id)->all();
-        $risk = $this->riskMaps($renewalOrderIds, $filters, $from, $to);
+        $orderIds = collect($current)->flatten(1)->map(fn (array $entry): int => (int) $entry['order']->id)->all();
+        $risk = $this->riskMaps($orderIds, ['risk_date_mode' => 'payment'], $from, $to);
+        $numbers = [0 => true];
+        foreach (array_keys($current) as $number) $numbers[$number] = true;
+        foreach (array_keys($previousChains) as $number) $numbers[$number + 1] = true;
+        ksort($numbers, SORT_NUMERIC);
         $stages = [];
         $rows = [];
-        $actualChannelTotals = ['paypal' => $this->emptyRiskTotal(), 'credit_card' => $this->emptyRiskTotal()];
-        $maxStage = max(1, collect($selectedChains)->map(fn (array $chain): int => count($chain) + 1)->max() ?? 1);
-        for ($number = 1; $number <= $maxStage; $number++) {
-            $key = 'renewal_'.$number;
-            $stage = ['key' => $key, 'number' => $number, 'eligible_chains' => 0, 'completed_chains' => 0,
-                'previous_chains' => 0, 'due_chains' => 0, 'early_completed_chains' => 0, 'not_due_chains' => 0,
-                'paid_from' => null, 'paid_to' => null,
-                'orders' => 0, 'revenue' => 0.0, 'refund_count' => 0, 'refund_order_count' => 0,
-                'refund_amount' => 0.0, 'dispute_count' => 0, 'dispute_amount' => 0.0];
-            foreach ($initials as $initial) {
-                $chain = $selectedChains[(int) $initial->id] ?? [];
-                $renewal = $chain[$number - 1] ?? null;
-                if ($number === 1) {
-                    $stage['eligible_chains']++;
-                } else {
-                    $previous = $chain[$number - 2] ?? null;
-                    if ($previous === null) continue;
-                    $stage['previous_chains']++;
-                    $due = $previous->paid_at->copy()->addDays(30)->lte($to);
-                    if ($due) $stage['due_chains']++;
-                    elseif ($renewal !== null) $stage['early_completed_chains']++;
-                    else $stage['not_due_chains']++;
-                    // An early successful payment is already an observed opportunity.
-                    if ($renewal === null && $previous->paid_at->copy()->addDays(30)->gt($to)) continue;
-                    $stage['eligible_chains']++;
-                }
-                if ($renewal === null) continue;
-                $channel = $this->channelFor($renewal);
-                $refund = $risk['refunds'][(int) $renewal->id] ?? ['count' => 0, 'amount' => 0.0, 'details' => []];
-                $dispute = $risk['disputes'][(int) $renewal->id] ?? ['count' => 0, 'amount' => 0.0, 'details' => []];
-                $paid = $renewal->paid_at->format('Y-m-d H:i:s');
-                $stage['paid_from'] = $stage['paid_from'] === null ? $paid : min($stage['paid_from'], $paid);
-                $stage['paid_to'] = $stage['paid_to'] === null ? $paid : max($stage['paid_to'], $paid);
-                $stage['completed_chains']++;
-                $stage['orders']++;
-                $stage['revenue'] += (float) $renewal->paid_amount_usd;
-                $stage['refund_order_count'] += $refund['count'] > 0 ? 1 : 0;
-                $stage['refund_count'] += $refund['count'];
-                $stage['refund_amount'] += $refund['amount'];
-                $stage['dispute_count'] += $dispute['count'];
-                $stage['dispute_amount'] += $dispute['amount'];
-                $rows[] = [
+        $renewalOrderIds = [];
+        foreach (array_keys($numbers) as $number) {
+            $key = $number === 0 ? 'initial' : 'renewal_'.$number;
+            $stageRows = [];
+            $currentChains = [];
+            $paidFrom = $paidTo = null;
+            foreach ($current[$number] ?? [] as $entry) {
+                $order = $entry['order'];
+                $initial = $entry['initial'];
+                $refund = $risk['refunds'][(int) $order->id] ?? ['count' => 0, 'amount' => 0.0, 'details' => []];
+                $dispute = $risk['disputes'][(int) $order->id] ?? ['count' => 0, 'amount' => 0.0, 'details' => []];
+                $paid = $order->paid_at->format('Y-m-d H:i:s');
+                $paidFrom = $paidFrom === null ? $paid : min($paidFrom, $paid);
+                $paidTo = $paidTo === null ? $paid : max($paidTo, $paid);
+                $currentChains[(int) $initial->id] = true;
+                if ($number > 0) $renewalOrderIds[] = (int) $order->id;
+                $stageRows[] = [
                     'stage_key' => $key, 'stage_number' => $number,
-                    'initial_channel' => $this->channelFor($initial), 'actual_channel' => $channel,
+                    'initial_channel' => $this->channelFor($initial), 'actual_channel' => $this->channelFor($order),
                     'initial_order' => (string) ($initial->shopify_order_number ?: $initial->id),
-                    'renewal_order' => (string) ($renewal->shopify_order_number ?: $renewal->id),
-                    'store_name' => (string) ($renewal->store_name ?: $initial->store_name),
-                    'transaction_id' => (string) $renewal->transaction_id,
-                    'paid_at' => optional($renewal->paid_at)->format('Y-m-d H:i:s'),
-                    'amount' => round((float) $renewal->paid_amount_usd, 2),
-                    'refund_count' => $refund['count'], 'refund_amount' => round($refund['amount'], 2), 'refund_details' => $refund['details'],
-                    'dispute_count' => $dispute['count'], 'dispute_amount' => round($dispute['amount'], 2), 'dispute_details' => $dispute['details'],
+                    'renewal_order' => (string) ($order->shopify_order_number ?: $order->id),
+                    'store_name' => (string) ($order->store_name ?: $initial->store_name),
+                    'transaction_id' => (string) $order->transaction_id, 'paid_at' => $paid,
+                    'amount' => round((float) $order->paid_amount_usd, 2), 'raw_amount' => (float) $order->paid_amount_usd,
+                    'refund_count' => $refund['count'], 'refund_amount' => round($refund['amount'], 2), 'raw_refund_amount' => $refund['amount'], 'refund_details' => $refund['details'],
+                    'dispute_count' => $dispute['count'], 'dispute_amount' => round($dispute['amount'], 2), 'raw_dispute_amount' => $dispute['amount'], 'dispute_details' => $dispute['details'],
                 ];
             }
-            if ($stage['eligible_chains'] === 0 && $number > 1) continue;
-            $stage['rate'] = $this->rate($stage['completed_chains'], $stage['eligible_chains']);
-            $stage['loss_count'] = max(0, $stage['eligible_chains'] - $stage['completed_chains']);
-            $stage['loss_rate'] = $this->rate($stage['loss_count'], $stage['eligible_chains']);
-            $stage['refund_rate'] = $stage['refund_amount_rate'] = $this->rate($stage['refund_amount'], $stage['revenue']);
-            $stage['refund_count_rate'] = $this->rate($stage['refund_order_count'], $stage['orders']);
-            $stage['dispute_rate'] = $this->rate($stage['dispute_count'], $stage['orders']);
-            $stages[] = $stage;
+            $base = $number > 0 ? ($previousChains[$number - 1] ?? []) : [];
+            $completed = count(array_intersect_key($base, $currentChains));
+            $eligible = count($base);
+            $stages[] = [
+                ...$this->riskTotal($stageRows, true),
+                'key' => $key, 'number' => $number,
+                'eligible_chains' => $number === 0 ? null : $eligible,
+                'completed_chains' => $number === 0 ? null : $completed,
+                'rate' => $number === 0 ? null : $this->rate($completed, $eligible),
+                'loss_count' => $number === 0 ? null : $eligible - $completed,
+                'loss_rate' => $number === 0 ? null : $this->rate($eligible - $completed, $eligible),
+                'outside_base_chains' => $number === 0 ? 0 : count($currentChains) - $completed,
+                'paid_from' => $paidFrom, 'paid_to' => $paidTo,
+            ];
+            array_push($rows, ...$stageRows);
         }
-
-        $eligible = $initials->count();
-        $channelSummary = [];
-        foreach (['paypal', 'credit_card'] as $channel) {
-            $channelInitials = $initials->filter(fn (LogisticsOrder $order) => $this->channelFor($order) === $channel);
-            $renewed = $channelInitials->filter(fn (LogisticsOrder $order) => isset($firstRenewals[(int) $order->id]))->count();
-            $channelSummary[$channel] = ['eligible' => $channelInitials->count(), 'renewed' => $renewed, 'rate' => $this->rate($renewed, $channelInitials->count())];
-        }
-        $renewedChains = count($firstRenewals);
-
         return [
             'calculation' => [
-                'first_from' => $from->format('Y-m-d H:i:s'), 'first_to' => $to->format('Y-m-d H:i:s'),
-                'cohort_from' => $cohortFrom->format('Y-m-d H:i:s'), 'cohort_to' => $cohortTo->format('Y-m-d H:i:s'),
-                'previous_due_before' => $to->copy()->subDays(30)->format('Y-m-d H:i:s'),
+                'period_from' => $from->format('Y-m-d H:i:s'), 'period_to' => $to->format('Y-m-d H:i:s'),
+                'comparison_from' => $comparisonFrom->format('Y-m-d H:i:s'), 'comparison_to' => $comparisonTo->format('Y-m-d H:i:s'),
                 'timezone' => $from->getTimezone()->getName(),
                 'generated_at' => now()->format('Y-m-d H:i:s'),
                 'expires_at' => now()->addMinutes(5)->format('Y-m-d H:i:s'),
             ],
-            'summary' => [
-                'eligible' => $eligible,
-                'renewed' => $renewedChains,
-                'rate' => $this->rate($renewedChains, $eligible),
-                'paypal' => $channelSummary['paypal'],
-                'credit_card' => $channelSummary['credit_card'],
-                'renewal_orders' => count($rows),
-                'renewal_revenue' => round(array_sum(array_column($rows, 'amount')), 2),
-                'subscription_rate' => $subscriptionRate,
-            ],
-            'stages' => array_values($stages),
-            'risk_by_channel' => $actualChannelTotals,
+            'summary' => ['subscription_rate' => $this->subscriptionRate($from, $to, $filters)],
+            'stages' => $stages, 'rows' => $rows,
             'upsell' => $this->upsellSummary($renewalOrderIds, $risk),
-            'rows' => $rows,
             'stores' => $initials->pluck('store_name')->filter()->unique()->sort()->values()->all(),
-            'stage_options' => array_map(fn ($stage) => $stage['key'], array_values($stages)),
-            'observation_days' => 30,
+            'stage_options' => array_column($stages, 'key'),
         ];
+    }
+
+    /** @return Collection<int,LogisticsOrder> */
+    private function periodInitials(Collection $candidates, array $filters, Carbon $to): Collection
+    {
+        $references = $candidates->pluck('subscription_origin_order_id')->map(fn ($value): string => trim((string) $value))->filter()->all();
+        foreach ($candidates as $order) {
+            if (trim((string) $order->subscription_origin_order_id) === '' && $order->subscription_type === '订阅首次购买') {
+                $references[] = (string) $order->id;
+            }
+        }
+        $initials = collect();
+        foreach (array_chunk(array_values(array_unique($references)), 300) as $chunk) {
+            $numericIds = array_values(array_filter($chunk, fn ($value): bool => ctype_digit((string) $value)));
+            $query = LogisticsOrder::query()->select(self::ORDER_FIELDS)
+                ->where('subscription_type', '订阅首次购买')->whereNotNull('paid_at')->where('paid_at', '<=', $to)
+                ->where(function ($query): void {
+                    $query->whereNull('subscription_origin_order_id')->orWhere('subscription_origin_order_id', '');
+                })->where(function ($query): void {
+                    $query->whereNull('operator_name')->orWhere('operator_name', 'not like', '%刷单%');
+                })->where(function ($query): void {
+                    $query->whereNull('is_add_on')->orWhere('is_add_on', '<>', '已加购');
+                })->where(function ($query) use ($chunk, $numericIds): void {
+                    $query->whereIn('transaction_id', $chunk)->orWhereIn('shopify_order_id', $chunk)
+                        ->orWhereIn('shopify_order_number', $chunk)->orWhereIn('payment_gateway_order_id', $chunk)
+                        ->orWhereIn('bill_number', $chunk);
+                    if ($numericIds !== []) $query->orWhereIn('id', $numericIds);
+                });
+            if (($filters['store'] ?? '') !== '') $query->where('store_name', $filters['store']);
+            foreach ($query->get() as $order) {
+                if (($filters['channel'] ?? '') === '' || $this->channelFor($order) === $filters['channel']) {
+                    $initials->put((int) $order->id, $order);
+                }
+            }
+        }
+        return $initials->sortBy('id')->values();
+    }
+
+    /** @param list<array<string,mixed>> $rows @return array<string,int|float> */
+    private function riskTotal(array $rows, bool $raw = false): array
+    {
+        $total = $this->emptyRiskTotal();
+        foreach ($rows as $row) {
+            $total['orders']++;
+            $total['revenue'] += $row[$raw ? 'raw_amount' : 'amount'];
+            $total['refund_count'] += $row['refund_count'];
+            $total['refund_order_count'] += $row['refund_count'] > 0 ? 1 : 0;
+            $total['refund_amount'] += $row[$raw ? 'raw_refund_amount' : 'refund_amount'];
+            $total['dispute_count'] += $row['dispute_count'];
+            $total['dispute_amount'] += $row[$raw ? 'raw_dispute_amount' : 'dispute_amount'];
+        }
+        $total['refund_count_rate'] = $this->rate($total['refund_order_count'], $total['orders']);
+        $total['refund_amount_rate'] = $this->rate($total['refund_amount'], $total['revenue']);
+        $total['dispute_rate'] = $this->rate($total['dispute_count'], $total['orders']);
+        return $total;
     }
 
     /** @return array<string,array<int,array{count:int,amount:float,details:list<array<string,mixed>>}>> */

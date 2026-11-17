@@ -1076,3 +1076,7 @@
 .payment-renewal-page .payment-renewal-two-column > article:not(.payment-renewal-upsell) table { min-width: 1300px; table-layout: fixed; }
 .payment-renewal-page .payment-renewal-two-column td { vertical-align: top; white-space: normal; }
 .payment-renewal-page .payment-renewal-upsell small.payment-calculation-note { max-width: none; }
+
+.payment-renewal-page .payment-renewal-funnel tbody tr.payment-stage-initial > td:first-child { border-left: 3px solid #258bc9; }
+.payment-renewal-page .payment-renewal-funnel thead th { white-space: normal; line-height: 1.5; }
+.payment-renewal-page .payment-renewal-kpi .payment-calculation-note { margin-top: 6px; }
