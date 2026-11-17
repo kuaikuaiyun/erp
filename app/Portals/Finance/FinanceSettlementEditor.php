@@ -17,7 +17,7 @@ class FinanceSettlementEditor
         return array_unique([...array_keys($this->settlements->moneyFields($channel)), 'settlement', 'gross', 'source_settlement_usd', 'paypal_7', 'paypal_8', 'paypal_9']);
     }
 
-    public function save(FinanceRecord $record, array $input, string $channel, int $actor): void
+    public function save(FinanceRecord $record, array $input, string $channel, int $actor, bool $addImportedCosts = false): void
     {
         $columns = array_diff_key($this->settlements->columns($channel), ['id' => true]);
         $rules = array_fill_keys(array_keys($columns), 'sometimes|nullable|string|max:191');
@@ -44,14 +44,23 @@ class FinanceSettlementEditor
             $rules['status'] = 'sometimes|required|string|max:100';
             $rules['currency'] = 'sometimes|required|regex:/^[A-Z]{3}$/';
         }
+        if (! $addImportedCosts) {
+            unset($rules['logistics'], $rules['purchase']);
+        }
         $values = validator($input, $rules)->validate();
         $db = $this->workbooks->database();
-        $db->transaction(function () use ($db, $record, $values, $channel, $actor): void {
+        $db->transaction(function () use ($db, $record, $values, $channel, $actor, $addImportedCosts): void {
             $record = FinanceRecord::query()->whereKey($record->id)->lockForUpdate()->firstOrFail();
             $accounting = app(FinanceAccountingService::class);
             $accounting->guardUnlocked($record->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'));
             $current = $this->settlements->rows($channel, [], new \Illuminate\Database\Eloquent\Collection([$record]))->sole();
             $accounting->guardUnlocked($current['month']);
+            if ($addImportedCosts) {
+                foreach ($values as $field => $amount) {
+                    $prior = $current[$field] ?? null;
+                    $values[$field] = bcadd(is_numeric($prior) ? (string) $prior : '0', (string) $amount, 8);
+                }
+            }
             $changed = array_filter($values, fn ($value, $field) => (string) ($value ?? '') !== (string) ($current[$field] ?? ''), ARRAY_FILTER_USE_BOTH);
             if ($changed === []) {
                 return;

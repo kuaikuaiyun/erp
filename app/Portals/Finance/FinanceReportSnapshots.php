@@ -162,7 +162,7 @@ class FinanceReportSnapshots
     private function revision(Connection $db, string $report, string $month, array $filters, bool $tracksRevisions): string
     {
         $channel = $filters['channel'] ?? null;
-        $transactionVersion = in_array($channel, ['ye', 'worldpay'], true) ? 10 : 8;
+        $transactionVersion = in_array($channel, ['ye', 'worldpay'], true) ? 11 : 9;
         // Installations without trigger privileges still generate reports in the background.
         if (! $tracksRevisions) {
             $bucket = (string) intdiv(now()->timestamp, 300);
@@ -183,8 +183,8 @@ class FinanceReportSnapshots
 
         $version = match ($report) {
             'transactions' => $transactionVersion,
-            'summary' => 5,
-            default => 4,
+            'summary' => 6,
+            default => 5,
         };
         return hash('sha256', json_encode([$version, $periods, $rate], JSON_THROW_ON_ERROR));
     }

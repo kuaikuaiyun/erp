@@ -85,7 +85,7 @@ class FinanceXuzongCreditReport
         $baseHeaders = array_map(fn ($field) => self::DISPLAY_HEADERS[$field] ?? $field,
             FinanceXuzongOrderImport::EDITABLE_ORDER_FIELDS);
 
-        return array_values(array_diff(self::headers(), $baseHeaders));
+        return array_values(array_diff(self::headers(), $baseHeaders, FinanceXuzongCostEligibility::FIELDS));
     }
 
     public function orderValues(int $id): array

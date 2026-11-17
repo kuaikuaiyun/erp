@@ -48,7 +48,7 @@
         @endif
     </p>
 @endif
-<p class="finance-report-help">按币种、区域和订阅类型汇总。结算相关金额以美元计，物流和采购成本以人民币计。物流、采购未录入时，匹配到的物流订单按商品重量估算运费，按 SKU 指导价估算采购成本。缺少匹配或成本资料时留空。</p>
+<p class="finance-report-help">按币种、区域和订阅类型汇总。结算相关金额以美元计，物流和采购成本以人民币计。物流和采购成本按财务导入金额累计，未导入时留空。</p>
 <div class="box">
     <nav class="finance-summary-tabs finance-channel-tabs" aria-label="交易汇总通道">
         @foreach($summaryTabs as $key => $label)

@@ -550,7 +550,6 @@ class FinanceSettlementService
                             $row['card_layout'][$field] = $value;
                         }
                     }
-                    $row['worldpay_logistics_manual'] = array_key_exists('logistics', $manual);
                 }
                 if ($worldpay || $conflux !== null) {
                     $row['card_layout']['operation_region'] = self::operationRegion((string) $row['team']);
@@ -623,14 +622,6 @@ class FinanceSettlementService
 
             return $row;
         });
-        if ($worldpay) {
-            $rows = $this->withLogisticsCosts($rows)->map(function (array $row): array {
-                if (empty($row['worldpay_logistics_manual']) && blank($row['card_layout']['logistics']) && filled($row['logistics'])) {
-                    $row['card_layout']['logistics'] = $row['logistics'];
-                }
-                return $row;
-            });
-        }
         if (! empty($filters['summary_projection'])) {
             $rows = $rows->map(fn ($row) => $row + ['_summary_team' => $row['team']]);
         }
@@ -1302,143 +1293,6 @@ class FinanceSettlementService
 
         return $rows->pluck('subscription')->concat($options)
             ->map(self::subscriptionLabel(...))->filter(fn ($value) => $value !== '')->unique()->sort()->values();
-    }
-
-    public function logisticsCostStream(iterable $rows): iterable
-    {
-        $db = $this->workbooks->database();
-        $mysql = in_array($db->getDriverName(), ['mysql', 'mariadb'], true);
-        $table = 'finance_cost_orders_'.bin2hex(random_bytes(8));
-        $runId = (string) \Illuminate\Support\Str::uuid();
-        if ($mysql) {
-            // MySQL 5.7 can crash when dropping the temporary InnoDB cost table.
-            $table = 'finance_report_order_costs';
-        } else {
-            $db->getSchemaBuilder()->create($table, function (\Illuminate\Database\Schema\Blueprint $table): void {
-                $table->temporary();
-                $table->bigIncrements('id');
-                $table->uuid('run_id');
-                $table->unsignedBigInteger('order_id')->unique();
-                $table->text('payment')->nullable();
-                $table->string('purchase')->nullable();
-                $table->string('logistics')->nullable();
-            });
-        }
-        try {
-            yield from $this->aggregateLogisticsCosts($rows, $db, $table, $runId);
-        } finally {
-            if ($mysql) {
-                $db->table($table)->where('run_id', $runId)->delete();
-            } else {
-                $db->getSchemaBuilder()->dropIfExists($table);
-            }
-        }
-    }
-
-    private function aggregateLogisticsCosts(iterable $rows, \Illuminate\Database\Connection $db, string $table, string $runId): iterable
-    {
-        // Keep the first successful payment and first known cost per order across all batches.
-        $mysql = in_array($db->getDriverName(), ['mysql', 'mariadb'], true);
-        $orderKey = $mysql ? ['run_id', 'order_id'] : ['order_id'];
-        $update = [];
-        foreach (['payment', 'purchase', 'logistics'] as $field) {
-            $incoming = $mysql
-                ? ($db->getConfig('use_upsert_alias') ? 'laravel_upsert_alias.'.$field : 'VALUES('.$field.')')
-                : 'excluded.'.$field;
-            $update[$field] = $db->raw('COALESCE('.$db->getQueryGrammar()->wrapTable($table).'.'.$field.', '.$incoming.')');
-        }
-        $orders = [];
-        foreach ($rows as $row) {
-            $id = $row['logistics_order_id'] ?? null;
-            if (filled($id)) {
-                $orders[$id] ??= ['run_id' => $runId, 'order_id' => $id, 'payment' => null, 'purchase' => null, 'logistics' => null];
-                $orders[$id]['payment'] ??= $row['success'] ? json_encode(array_intersect_key($row, array_fill_keys(
-                    ['id', 'channel', 'payment_channel', 'account', 'account_key', 'team', 'owner', 'subscription', 'payment_method', 'currency', 'month'], true
-                )), JSON_THROW_ON_ERROR) : null;
-                $orders[$id]['purchase'] ??= $row['purchase'];
-                $orders[$id]['logistics'] ??= $row['logistics'];
-                if (count($orders) === 100) {
-                    $db->table($table)->upsert(array_values($orders), $orderKey, $update);
-                    $orders = [];
-                }
-            }
-            yield $row;
-        }
-        if ($orders !== []) {
-            $db->table($table)->upsert(array_values($orders), $orderKey, $update);
-        }
-        $missing = $db->table($table)->useWritePdo()->where('run_id', $runId)->whereNotNull('payment')
-            ->where(fn ($query) => $query->whereNull('purchase')->orWhereNull('logistics'));
-        foreach ($missing->lazyById(500)->chunk(500) as $batch) {
-            $payments = $batch->map(fn ($order) => json_decode($order->payment, true, 512, JSON_THROW_ON_ERROR) + [
-                'logistics_order_id' => $order->order_id, 'success' => true,
-                'purchase' => $order->purchase, 'logistics' => $order->logistics,
-            ])->values()->collect();
-            foreach ($this->withLogisticsCosts($payments) as $index => $payment) {
-                $original = $payments[$index];
-                $adjustment = ['id' => $payment['id']];
-                foreach (['purchase', 'logistics'] as $field) {
-                    if ($original[$field] === null && $payment[$field] !== null) {
-                        $adjustment[$field] = $payment[$field];
-                    }
-                }
-                if (count($adjustment) > 1) {
-                    yield ['_cost_adjustment' => true] + $adjustment + array_diff_key($original, [
-                        'purchase' => true, 'logistics' => true, 'success' => true,
-                    ]);
-                }
-            }
-        }
-    }
-
-    public function withLogisticsCosts(Collection $rows): Collection
-    {
-        $db = $this->workbooks->database();
-        $orders = $rows->filter(fn ($row) => filled($row['logistics_order_id'] ?? null))->groupBy('logistics_order_id')
-            ->filter(fn ($payments) => $payments->contains(fn ($row) => $row['success'])
-                && (! $payments->contains(fn ($row) => $row['purchase'] !== null)
-                    || ! $payments->contains(fn ($row) => $row['logistics'] !== null)));
-        if ($orders->isEmpty() || ! $db->getSchemaBuilder()->hasTable('logistics_order_items')
-            || ! $db->getSchemaBuilder()->hasTable('logistics_tongtu_sku_mappings')) {
-            return $rows;
-        }
-        $itemColumns = array_intersect(['logistics_order_id', 'tongtu_sku_mapping_id', 'quantity', 'sale_weight_gram', 'tongtu_goods_weight_gram'],
-            $db->getSchemaBuilder()->getColumnListing('logistics_order_items'));
-        $fallbacks = [];
-        foreach ($orders->chunk(500) as $batch) {
-            $items = \App\Models\LogisticsOrderItem::query()->with('skuMapping:id,product_guide_cost_cny,goods_weight_gram')
-                ->whereIntegerInRaw('logistics_order_id', $batch->keys()->all())->get($itemColumns)->groupBy('logistics_order_id');
-            foreach ($batch as $orderId => $payments) {
-                $payment = $payments->first(fn ($row) => $row['success']);
-                $orderItems = $items->get($orderId);
-                if ($payment === null || $orderItems === null) {
-                    continue;
-                }
-                $purchase = $weight = '0';
-                foreach ($orderItems as $item) {
-                    $quantity = $this->number($item->quantity);
-                    if ($quantity === null || bccomp($quantity, '0', 8) <= 0) {
-                        $purchase = $weight = null;
-                        break;
-                    }
-                    $cost = $this->number($item->skuMapping?->product_guide_cost_cny);
-                    $grams = $this->number($item->sale_weight_gram ?: $item->tongtu_goods_weight_gram ?: $item->skuMapping?->goods_weight_gram);
-                    $purchase = $purchase !== null && $cost !== null && bccomp($cost, '0', 8) > 0
-                        ? bcadd($purchase, bcmul($cost, $quantity, 8), 8) : null;
-                    $weight = $weight !== null && $grams !== null && bccomp($grams, '0', 8) > 0
-                        ? bcadd($weight, bcmul($grams, $quantity, 8), 8) : null;
-                }
-                // Use the same weight-based estimate as the operations report, in CNY.
-                $logistics = $weight === null ? null : bcadd(bcmul($weight, '0.08', 8), '20', 8);
-                foreach (['purchase' => $purchase, 'logistics' => $logistics] as $field => $value) {
-                    if ($value !== null && ! $payments->contains(fn ($row) => $row[$field] !== null)) {
-                        $fallbacks[$payment['id']][$field] = $value;
-                    }
-                }
-            }
-        }
-
-        return $rows->map(fn ($row) => isset($fallbacks[$row['id']]) ? array_replace($row, $fallbacks[$row['id']]) : $row);
     }
 
     public function shopDifference(mixed $channelAmount, mixed $shopPaid): ?string

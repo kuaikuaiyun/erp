@@ -446,7 +446,7 @@ class FinanceWorkbookService
             return $this->saveImportedCreditOrders($records);
         }
         if ($dataset === 'xuzong2-details' && $createOnly && $guardSettlementMonth && ! $fillMissing
-            && ($records[0]['payload']['_card_channel'] ?? null) === 'ye') {
+            && in_array($records[0]['payload']['_card_channel'] ?? null, ['ye', 'worldpay'], true)) {
             return $this->saveImportedCreditOrders($records, fillMissing: false, guardSettlementMonth: true);
         }
 
@@ -512,23 +512,26 @@ class FinanceWorkbookService
                             $checkedMonths[$month] = true;
                         }
                     }
-                    $inserts[$fingerprint] ??= [
-                        ...$record, 'payload' => json_encode($record['payload'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
-                        'created_at' => $now, 'updated_at' => $now,
-                    ];
-                    continue;
-                }
-                if (! $fillMissing) {
-                    continue;
-                }
-                $payload = $model->payload;
-                foreach ($record['payload'] as $key => $value) {
-                    if (blank($payload[$key] ?? null) && filled($value)) {
-                        $payload[$key] = $value;
+                    if (isset($inserts[$fingerprint])) {
+                        $inserts[$fingerprint]['payload'] = $this->addCreditCosts($inserts[$fingerprint]['payload'], $record['payload']);
+                    } else {
+                        $inserts[$fingerprint] = [...$record, 'created_at' => $now, 'updated_at' => $now];
                     }
+                    continue;
+                }
+                $payload = $this->addCreditCosts($model->payload, $record['payload']);
+                if ($payload !== $model->payload) {
+                    app(FinanceAccountingService::class)->guardUnlocked($model->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'));
+                }
+                if ($fillMissing) {
+                    foreach (array_diff_key($record['payload'], array_flip(FinanceXuzongCostEligibility::FIELDS)) as $key => $value) {
+                        if (blank($payload[$key] ?? null) && filled($value)) {
+                            $payload[$key] = $value;
+                        }
+                    }
+                    $model->domain = $model->domain ?: $record['domain'];
                 }
                 $model->payload = $payload;
-                $model->domain = $model->domain ?: $record['domain'];
                 if ($model->isDirty()) {
                     $model->save();
                     $updated++;
@@ -537,11 +540,29 @@ class FinanceWorkbookService
             // Keep the SQL parameter count within the limits of each database driver.
             $batchSize = $this->database()->getDriverName() === 'mysql' ? 300 : 75;
             foreach (array_chunk($inserts, $batchSize) as $batch) {
-                $this->database()->table('finance_records')->insert($batch);
+                $this->database()->table('finance_records')->insert(array_map(function (array $record): array {
+                    $record['payload'] = json_encode($record['payload'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+
+                    return $record;
+                }, $batch));
             }
 
             return count($inserts) + $updated;
         });
+    }
+
+    private function addCreditCosts(array $payload, array $incoming): array
+    {
+        foreach (FinanceXuzongCostEligibility::FIELDS as $field) {
+            if (! is_numeric($incoming[$field] ?? null)) {
+                continue;
+            }
+            $prior = $payload['_edited_report_fields'][$field] ?? $payload[$field] ?? null;
+            $payload[$field] = bcadd(is_numeric($prior) ? (string) $prior : '0', (string) $incoming[$field], 8);
+            unset($payload['_edited_report_fields'][$field]);
+        }
+
+        return $payload;
     }
 
     public function importSettings(string $kind, array $rows): int

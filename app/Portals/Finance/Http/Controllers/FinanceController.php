@@ -1823,7 +1823,7 @@ class FinanceController extends Controller
                 yield $row;
             }
         })();
-        $items = $summary->summarize($service->logisticsCostStream($source), $tab);
+        $items = $summary->summarize($source, $tab);
         if (collect(\Illuminate\Support\Arr::only($scope, ['payment_account_id', 'currency', 'team', 'subscription', 'conditions']))->contains(fn ($value) => filled($value))) {
             $monthRows = $this->transactionSummaryRows($service, $tab, [], $month, null, reuse: $reuse, includePayPalAmounts: false);
             $allocation = array_column($summary->summarize($monthRows, $tab), 'failed_orders', 'account_group');
@@ -1954,6 +1954,9 @@ class FinanceController extends Controller
         }
         $columns = $service->columns($channel);
         if ($request->boolean('template')) {
+            if (isset(FinanceCreditSettlementLayout::REPORT_CHANNELS[$report]) && $request->input('import_kind') === 'transaction_costs') {
+                return $this->workbooks->download(['交易流水号', '物流-元', '采购成本-元'], [], $report.'-costs-template.xlsx');
+            }
             if ($channel === 'paypal' && $request->input('import_kind') === 'tongtu_costs') {
                 return $this->workbooks->download(FinanceSettlementService::PAYPAL_COST_HEADERS, [], 'paypal-tongtu-costs-template.xlsx');
             }
@@ -1964,6 +1967,7 @@ class FinanceController extends Controller
         $paginator = null;
         $editorFields = array_diff_key($columns, $channel === 'paypal'
             ? ['id' => true, 'team' => true, 'operation_region' => true] : ['id' => true]);
+        $editorFields = array_diff_key($editorFields, array_flip(['logistics', 'purchase']));
         $orderView = $channel === 'paypal';
         $displayCardLayout = FinanceCreditSettlementLayout::displayColumns($channel === 'credit_card' ? ($filters['card_channel'] ?? null) : null);
         if ($displayCardLayout) {
@@ -2308,6 +2312,9 @@ class FinanceController extends Controller
         if ($fixedCardChannel = FinanceCreditSettlementLayout::REPORT_CHANNELS[$report] ?? null) {
             $request->merge(['card_channel' => $fixedCardChannel]);
         }
+        if ($fixedCardChannel && $request->input('import_kind') === 'transaction_costs') {
+            return $this->importCardTransactionCosts($request, $report, $fixedCardChannel, (int) $context['user']->getKey());
+        }
         if ($report === 'worldpay-settlement' && ($request->has('files') || ! $request->hasFile('file'))) {
             return $this->importWorldpayFiles($request, $report, (int) $context['user']->getKey());
         }
@@ -2495,11 +2502,21 @@ class FinanceController extends Controller
                     $seen[$id] = true;
                     $values = [];
                     foreach ($fields as $field => $label) {
-                        if (($row[$label] ?? '') !== '' && (! isset($service::MONEY[$field]) || $row[$label] !== '待补充')) {
+                        if (($row[$label] ?? '') !== '' && (! isset($service::MONEY[$field]) || ! in_array($row[$label], ['待补充', '不可填写'], true))) {
                             $values[$field] = $row[$label];
                         }
                     }
-                    $service->save($record, $this->settlementValues($values, $channel), (int) $context['user']->getKey());
+                    $values = $this->settlementValues($values, $channel);
+                    $costFields = array_flip(['logistics', 'purchase']);
+                    $costs = array_intersect_key($values, $costFields);
+                    $actor = (int) $context['user']->getKey();
+                    if ($costs !== []) {
+                        if (! FinanceSettlementService::isSuccessfulTransaction($record->status)) {
+                            throw ValidationException::withMessages(['file' => '第'.$index.'行交易不可填写物流或采购成本。']);
+                        }
+                        app(FinanceSettlementEditor::class)->save($record, $costs, $channel, $actor, addImportedCosts: true);
+                    }
+                    $service->save($record, array_diff_key($values, $costFields), $actor);
                     $imported[$record->id] = $record;
                 }
             });
@@ -2516,6 +2533,47 @@ class FinanceController extends Controller
         }
 
         return redirect()->route('finance.report', $route)->with('success', $message);
+    }
+
+    private function importCardTransactionCosts(Request $request, string $report, string $platform, int $actor): Response
+    {
+        $request->validate(['file' => 'required|file|mimes:xlsx,csv,txt|max:10240']);
+        $headers = ['交易流水号', '物流-元', '采购成本-元'];
+        $rows = $this->workbooks->read($request->file('file'), $headers, optionalHeaders: array_slice($headers, 1));
+        $costs = [];
+        foreach ($rows as $line => $row) {
+            $reference = trim((string) $row['交易流水号']);
+            if ($row['物流-元'] === '不可填写' || $row['采购成本-元'] === '不可填写') {
+                continue;
+            }
+            $values = array_filter(['logistics' => $row['物流-元'], 'purchase' => $row['采购成本-元']], fn ($value) => filled($value));
+            if ($reference === '' || $values === []) {
+                throw ValidationException::withMessages(['file' => '第 '.$line.' 行请填写交易流水号和至少一项成本。']);
+            }
+            foreach ($this->settlementValues($values, 'credit_card') as $field => $value) {
+                $costs[$reference][$field] = bcadd($costs[$reference][$field] ?? '0', $value, 8);
+            }
+        }
+
+        $service = app(FinanceSettlementService::class);
+        $editor = app(FinanceSettlementEditor::class);
+        $this->workbooks->database()->transaction(function () use ($service, $editor, $platform, $costs, $actor): void {
+            foreach (array_chunk(array_keys($costs), 500) as $references) {
+                $matches = $service->query('credit_card', ['card_channel' => $platform])
+                    ->whereIn('reference', $references)->orderBy('id')->lockForUpdate()->get()->groupBy('reference');
+                foreach ($references as $reference) {
+                    $payments = $matches->get($reference, collect())->filter(
+                        fn ($record) => FinanceSettlementService::isSuccessfulTransaction($record->status),
+                    );
+                    if ($payments->count() !== 1) {
+                        throw ValidationException::withMessages(['file' => '交易流水号 '.$reference.' 无法唯一匹配成功交易。']);
+                    }
+                    $editor->save($payments->sole(), $costs[$reference], 'credit_card', $actor, addImportedCosts: true);
+                }
+            }
+        });
+
+        return redirect()->route('finance.report', $report)->with('success', '已累计 '.count($costs).' 笔成功交易的成本。');
     }
 
     private function importPayPalTongtuCosts(Request $request, FinanceSettlementService $service, int $actor): Response
@@ -2536,14 +2594,10 @@ class FinanceController extends Controller
             }
             $values = $this->settlementValues($values, 'paypal');
             $prior = $costs[$order] ?? ['line' => $line, 'values' => []];
-            foreach (array_intersect_key($values, $prior['values']) as $field => $value) {
-                if (bccomp($prior['values'][$field], $value, 8) !== 0) {
-                    throw ValidationException::withMessages([
-                        'file' => '第'.$line.'行通途订单 '.$order.' 的'.FinanceSettlementService::MONEY[$field].'与文件内同单号的金额不一致。',
-                    ]);
-                }
+            foreach ($values as $field => $value) {
+                $prior['values'][$field] = bcadd($prior['values'][$field] ?? '0', $value, 8);
             }
-            $costs[$order] = ['line' => $prior['line'], 'values' => $prior['values'] + $values];
+            $costs[$order] = $prior;
         }
 
         try {
@@ -2555,7 +2609,7 @@ class FinanceController extends Controller
                     if ($matches->count() !== 1) {
                         throw ValidationException::withMessages(['file' => '第'.$cost['line'].'行通途订单 '.$order.' 无法唯一匹配已付款的 PayPal 主单。']);
                     }
-                    $editor->save($matches->sole(), $cost['values'], 'paypal', $actor);
+                    $editor->save($matches->sole(), $cost['values'], 'paypal', $actor, addImportedCosts: true);
                 }
             });
         } catch (\App\Portals\Finance\FinanceRelayException $e) {
@@ -2785,7 +2839,7 @@ class FinanceController extends Controller
             ini_set('memory_limit', '384M');
         }
         $columns = FinanceCreditSettlementLayout::columns($channel);
-        $optional = $channel === 'ye' ? array_keys(array_slice($columns, 21, preserve_keys: true)) : [];
+        $optional = $channel === 'ye' ? array_keys(array_slice($columns, 21, preserve_keys: true)) : ['purchase'];
         $sheetName = FinanceCreditSettlementLayout::SHEETS[$channel];
         $batches = $channel === 'ye' && strtolower($file->getClientOriginalExtension()) === 'xlsx'
             ? $this->workbooks->readConfluxOrderBatches($file, $columns, $sheetName, $optional)
@@ -3110,7 +3164,7 @@ class FinanceController extends Controller
                 }
             }
         })();
-        $groups = $service->totals($report === 'losses' ? $service->logisticsCostStream($rows) : $rows, $layer);
+        $groups = $service->totals($rows, $layer);
         if ($includeOptions) {
             $filterOptions['account'] = collect($optionValues['account'] ?? [])->values();
             foreach (['owner', 'team', 'subscription', 'payment_method'] as $field) {

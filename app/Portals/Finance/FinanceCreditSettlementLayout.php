@@ -49,8 +49,8 @@ class FinanceCreditSettlementLayout
     public static function columns(?string $channel): array
     {
         return match ($channel) {
-            'ye' => self::YE,
-            'worldpay' => self::WORLDPAY,
+            'ye' => self::YE + ['purchase' => '采购成本-元'],
+            'worldpay' => self::WORLDPAY + ['purchase' => '采购成本-元'],
             default => [],
         };
     }
@@ -125,7 +125,7 @@ class FinanceCreditSettlementLayout
     {
         $payload = ['_card_channel' => $channel];
         foreach (self::columns($channel) as $field => $label) {
-            $value = $values[$field];
+            $value = $values[$field] ?? '';
             if (in_array($field, ['completed_at', 'calendar_date'], true) && is_numeric($value)) {
                 $value = Date::excelToDateTimeObject((float) $value)
                     ->format($field === 'calendar_date' ? 'Y-m-d' : 'Y-m-d H:i:s');
