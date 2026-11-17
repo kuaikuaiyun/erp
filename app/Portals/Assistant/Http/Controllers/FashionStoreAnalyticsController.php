@@ -8,6 +8,7 @@ use App\Models\AssistantDomainStore;
 use App\Models\AssistantDomainStoreQuickOption;
 use App\Models\FashionLogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
+use App\Portals\Assistant\AssistantEmailPurchaseSyncService;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
@@ -21,6 +22,7 @@ class FashionStoreAnalyticsController extends Controller
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
+        private readonly AssistantEmailPurchaseSyncService $emailPurchases,
     ) {}
 
     public function index(Request $request): Response|View
@@ -53,6 +55,7 @@ class FashionStoreAnalyticsController extends Controller
             ->first();
         $sortColumns = [
             'shop_name' => 'assistant_domain_stores.shop_name', 'domain' => 'assistant_domain_stores.domain',
+            'email_purchased' => 'assistant_domain_stores.email_purchased',
             'platform' => 'assistant_domain_stores.site_builder', 'orders_count' => 'fashion_metrics.orders_count',
             'total_sales' => 'fashion_metrics.total_sales', 'average_order_value' => 'fashion_metrics.average_order_value',
             'last_paid_at' => 'fashion_metrics.last_paid_at',
@@ -72,6 +75,7 @@ class FashionStoreAnalyticsController extends Controller
             'portal' => $context['portal']->loadMissing('menus'), 'user' => $context['user'],
             'stores' => $stores, 'filters' => $filters,
             'teamOptions' => AssistantDomainStoreQuickOption::valuesByField()['team'] ?? [],
+            'timezoneOptions' => $this->timezoneOptions(),
             'summary' => ['stores_count' => (int) ($summaryRow?->stores_count ?? 0),
                 'active_stores_count' => (int) ($summaryRow?->active_stores_count ?? 0),
                 'orders_count' => $ordersCount, 'total_sales' => $totalSales,
@@ -91,6 +95,9 @@ class FashionStoreAnalyticsController extends Controller
                 ? $q->whereRaw("LOWER(TRIM(site_builder)) IN ('xshoppy','xshopy')")
                 : $q->whereRaw("LOWER(TRIM(site_builder)) = 'shopline'"))
             ->when($filters['team'] !== '', fn (Builder $q) => $q->whereJsonContains('team', $filters['team']))
+            ->when($filters['email_purchased'] !== '', function (Builder $q) use ($filters): void {
+                $this->emailPurchases->applyPurchaseFilter($q, $filters['email_purchased'] === '1');
+            })
             ->when($filters['owner_assignment'] === 'assigned', fn (Builder $q) => $q->whereNotNull('owner_user_id'))
             ->when($filters['owner_assignment'] === 'unassigned', fn (Builder $q) => $q->whereNull('owner_user_id'));
     }
@@ -99,11 +106,12 @@ class FashionStoreAnalyticsController extends Controller
     private function orderMetrics(array $filters)
     {
         $from = CarbonImmutable::parse($filters['from_date'].' 00:00:00', $filters['timezone'])
-            ->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
-        $to = CarbonImmutable::parse($filters['to_date'].' 23:59:59', $filters['timezone'])
-            ->setTimezone('Asia/Shanghai')->format('Y-m-d H:i:s');
+            ->utc()->format('Y-m-d H:i:s');
+        $to = CarbonImmutable::parse($filters['to_date'].' 00:00:00', $filters['timezone'])
+            ->addDay()->utc()->format('Y-m-d H:i:s');
 
-        return FashionLogisticsOrder::query()->whereNotNull('paid_at_utc')->whereBetween('paid_at_utc', [$from, $to])
+        return FashionLogisticsOrder::query()->whereNotNull('paid_at_utc')
+            ->where('paid_at_utc', '>=', $from)->where('paid_at_utc', '<', $to)
             ->selectRaw('assistant_domain_store_id, COUNT(*) orders_count, COALESCE(SUM(total_amount),0) total_sales')
             ->selectRaw('COALESCE(AVG(total_amount),0) average_order_value, MAX(paid_at_utc) last_paid_at, MAX(source_synced_at) last_synced_at')
             ->groupBy('assistant_domain_store_id');
@@ -119,15 +127,31 @@ class FashionStoreAnalyticsController extends Controller
         $to = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $request->input('to_date')) ? (string) $request->input('to_date') : $from;
         if ($from > $to) [$from, $to] = [$to, $from];
         $sort = (string) $request->input('sort', 'total_sales');
-        $allowedSorts = ['shop_name','domain','platform','orders_count','total_sales','average_order_value','last_paid_at'];
+        $allowedSorts = ['shop_name','domain','email_purchased','platform','orders_count','total_sales','average_order_value','last_paid_at'];
         $perPage = (int) $request->input('per_page', 20);
 
         return ['shop_name' => trim((string) $request->input('shop_name')), 'domain' => trim((string) $request->input('domain')),
             'platform' => in_array($request->input('platform'), ['xshoppy','shopline'], true) ? $request->input('platform') : '',
             'team' => trim((string) $request->input('team')), 'owner_assignment' => in_array($request->input('owner_assignment'), ['assigned','unassigned'], true) ? $request->input('owner_assignment') : '',
+            'email_purchased' => in_array((string) $request->input('email_purchased'), ['0','1'], true) ? (string) $request->input('email_purchased') : '',
             'timezone' => $timezone, 'from_date' => $from, 'to_date' => $to,
             'sort' => in_array($sort, $allowedSorts, true) ? $sort : 'total_sales',
             'direction' => strtolower((string) $request->input('direction')) === 'asc' ? 'asc' : 'desc',
             'per_page' => in_array($perPage, [20,50,100], true) ? $perPage : 20];
+    }
+
+    /** @return array<string,string> */
+    private function timezoneOptions(): array
+    {
+        $options = [];
+        for ($offset = -12; $offset <= 14; $offset++) {
+            $timezone = $offset === 8
+                ? 'Asia/Shanghai'
+                : ($offset === 0 ? 'UTC' : 'Etc/GMT'.($offset > 0 ? '-'.$offset : '+'.abs($offset)));
+            $label = 'UTC'.sprintf('%+03d:00', $offset);
+            $options[$timezone] = $offset === 8 ? $label.'（上海时间）' : $label;
+        }
+
+        return $options;
     }
 }

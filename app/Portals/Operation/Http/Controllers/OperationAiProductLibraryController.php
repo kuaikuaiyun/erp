@@ -572,7 +572,6 @@ class OperationAiProductLibraryController extends Controller
         $this->normalizeUploadedReferenceVideos($product, $historicalCount);
         $productCode = trim((string) preg_replace('/[^A-Za-z0-9_-]+/', '-', (string) $product->product_code), '-_') ?: 'product-'.$product->getKey();
         $departmentCode = 'OP:'.$this->departmentCode($context['user']);
-        $typeCode = OperationAiProductReferenceVideo::fileTypeCode($data['type']);
         $extension = strtolower($file->getClientOriginalExtension() ?: $file->extension() ?: 'mp4');
         $fileName = null;
         $path = null;
@@ -580,18 +579,29 @@ class OperationAiProductLibraryController extends Controller
         $connection = config('admin.database.connection') ?: config('database.default');
 
         try {
-            $video = DB::connection($connection)->transaction(function () use ($context, $product, $data, $file, $date, $historicalCount, $productCode, $departmentCode, $typeCode, $extension, &$fileName, &$path): OperationAiProductReferenceVideo {
+            $video = DB::connection($connection)->transaction(function () use ($context, $product, $data, $file, $date, $historicalCount, $productCode, $departmentCode, $extension, &$fileName, &$path): OperationAiProductReferenceVideo {
                 AikaipinProduct::query()->whereKey($product->getKey())->lockForUpdate()->firstOrFail();
                 $existing = OperationAiProductReferenceVideo::query()
                     ->where('aikaipin_product_id', $product->getKey())
                     ->lockForUpdate()
                     ->get(['file_name', 'sequence']);
                 $sequence = max($historicalCount, (int) $existing->max('sequence')) + 1;
-                $fileNumber = $existing->reduce(fn (int $carry, OperationAiProductReferenceVideo $item): int => max(
+                $operatorVideos = OperationAiProductReferenceVideo::query()
+                    ->where('uploaded_by', $context['user']->getKey())
+                    ->where('source_kind', OperationAiProductReferenceVideo::SOURCE_OPERATOR_UPLOAD)
+                    ->lockForUpdate()
+                    ->get(['file_name', 'sequence']);
+                $fileNumber = $operatorVideos->reduce(fn (int $carry, OperationAiProductReferenceVideo $item): int => max(
                     $carry,
-                    OperationAiProductReferenceVideo::fileNumber($item->file_name, (int) $item->sequence),
-                ), $historicalCount) + 1;
-                $fileName = $productCode.'-'.$typeCode.'-'.$date->format('ymd').'-'.str_pad((string) $fileNumber, 3, '0', STR_PAD_LEFT).'.'.$extension;
+                    OperationAiProductReferenceVideo::fileNumber($item->file_name, 0),
+                ), 0) + 1;
+                $fileName = OperationAiProductReferenceVideo::operatorFileName(
+                    $productCode,
+                    (int) $context['user']->getKey(),
+                    $date->format('ymd'),
+                    $fileNumber,
+                    $extension,
+                );
                 $path = $file->storeAs('aikaipin/reference-videos/'.$product->getKey(), $fileName, 'local');
                 if (! is_string($path) || $path === '') {
                     throw new \RuntimeException('视频文件写入失败，请检查服务器存储目录权限及剩余空间。');
@@ -603,7 +613,7 @@ class OperationAiProductLibraryController extends Controller
                     'path' => $path, 'file_name' => $fileName, 'original_name' => $file->getClientOriginalName(),
                     'mime_type' => $file->getMimeType(), 'size' => $file->getSize(),
                     'department_code' => $departmentCode,
-                    'source_kind' => OperationAiProductReferenceVideo::SOURCE_UPLOAD,
+                    'source_kind' => OperationAiProductReferenceVideo::SOURCE_OPERATOR_UPLOAD,
                     'uploaded_by' => $context['user']->getKey(),
                     'uploaded_by_name' => $context['user']->name ?: $context['user']->username,
                 ]);
@@ -673,7 +683,7 @@ class OperationAiProductLibraryController extends Controller
         $layoutPath = $file['path'].'.erp-layout.json';
         $referenceLayouts = Storage::disk($file['disk'])->exists($layoutPath)
             ? (json_decode(Storage::disk($file['disk'])->get($layoutPath), true) ?: []) : [];
-        $historicalCount = $this->countReferenceHtmlVideos($file['disk'], $file['path']);
+        $historicalCount = $this->historicalReferenceVideoCount($product);
         $this->normalizeUploadedReferenceVideos($product, $historicalCount);
         $videos = $this->referenceVideos($product, $context['user'])
             ->map(fn (OperationAiProductReferenceVideo $video): array => [
@@ -716,27 +726,6 @@ class OperationAiProductLibraryController extends Controller
             'X-Robots-Tag' => 'noindex, nofollow, noarchive',
             'Content-Security-Policy' => "sandbox allow-scripts allow-modals allow-downloads; default-src 'none'; base-uri 'none'; object-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https:; style-src 'unsafe-inline' https:; img-src data: blob: https:; font-src data: https:; media-src data: blob: https: http:; connect-src https: http:; frame-src https:; worker-src blob:; form-action 'none'; frame-ancestors 'self'",
         ]);
-    }
-
-    private function countReferenceHtmlVideos(string $disk, string $path): int
-    {
-        $stream = Storage::disk($disk)->readStream($path);
-        abort_unless(is_resource($stream), 404);
-        $count = 0;
-        $carry = '';
-        try {
-            while (! feof($stream)) {
-                $chunk = fread($stream, 1024 * 1024);
-                if ($chunk === false || $chunk === '') continue;
-                $buffer = $carry.$chunk;
-                $count += substr_count(strtolower($buffer), '<video');
-                $carry = substr($buffer, -5);
-            }
-        } finally {
-            fclose($stream);
-        }
-
-        return $count;
     }
 
     public function publishForm(Request $request, AikaipinProduct $product): Response|View
@@ -927,20 +916,10 @@ class OperationAiProductLibraryController extends Controller
 
     private function historicalReferenceVideoCount(AikaipinProduct $product): int
     {
-        $file = $this->referencePreviewFile($product);
-        $stream = Storage::disk($file['disk'])->readStream($file['path']);
-        if (! is_resource($stream)) return 0;
-
-        $count = 0;
-        $tail = '';
-        while (! feof($stream)) {
-            $chunk = $tail.(fread($stream, 1048576) ?: '');
-            $count += substr_count(strtolower($chunk), '<video') - substr_count(strtolower($tail), '<video');
-            $tail = substr($chunk, -10);
-        }
-        fclose($stream);
-
-        return $count;
+        return OperationAiProductReferenceVideo::query()
+            ->where('aikaipin_product_id', $product->getKey())
+            ->where('source_kind', OperationAiProductReferenceVideo::SOURCE_HISTORICAL_HTML)
+            ->count();
     }
 
     private function normalizeUploadedReferenceVideos(AikaipinProduct $product, int $historicalCount): Collection
@@ -949,11 +928,28 @@ class OperationAiProductLibraryController extends Controller
             $productCode = trim((string) preg_replace('/[^A-Za-z0-9_-]+/', '-', (string) $product->product_code), '-_') ?: 'product-'.$product->getKey();
             $videos = OperationAiProductReferenceVideo::query()
                 ->where('aikaipin_product_id', $product->getKey())
+                ->where(function (Builder $query): void {
+                    $query->where(function (Builder $systemQuery): void {
+                        $systemQuery->where('source_kind', OperationAiProductReferenceVideo::SOURCE_UPLOAD)
+                            ->where(function (Builder $departmentQuery): void {
+                                $departmentQuery->whereNull('department_code')
+                                    ->orWhere('department_code', 'AI');
+                            });
+                    })->orWhere(function (Builder $legacyQuery): void {
+                        $legacyQuery->whereNull('source_kind')
+                            ->where(function (Builder $departmentQuery): void {
+                                $departmentQuery->whereNull('department_code')
+                                    ->orWhere('department_code', 'AI');
+                            });
+                    });
+                })
                 ->orderByRaw("CASE type WHEN 'flow' THEN 1 WHEN 'traffic' THEN 2 WHEN 'remix' THEN 3 ELSE 4 END")
                 ->orderBy('sequence')->orderBy('id')->lockForUpdate()->get()->values();
             if ($videos->isEmpty()) return;
 
-            $temporaryBase = (int) $videos->max('sequence') + $videos->count() + $historicalCount + 1000;
+            $temporaryBase = (int) OperationAiProductReferenceVideo::query()
+                ->where('aikaipin_product_id', $product->getKey())
+                ->max('sequence') + $videos->count() + $historicalCount + 1000;
             $renames = [];
             foreach ($videos as $index => $video) {
                 $sequence = $historicalCount + $index + 1;
