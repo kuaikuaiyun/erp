@@ -41,9 +41,43 @@ class ShopifyStoreController extends Controller
             $perPage = 20;
         }
 
+        $webhookStatus = $request->input('webhook_status', '');
+        if (!in_array($webhookStatus, ['', 'active', 'failed', 'not_registered'], true)) {
+            $webhookStatus = '';
+        }
+        $syncStatus = $request->input('sync_status', '');
+        if (!in_array($syncStatus, ['', 'success', 'failed', 'not_synced'], true)) {
+            $syncStatus = '';
+        }
+
         $stores = AssistantDomainStore::query()
             ->where('site_builder', 'shopify')
             ->where('shop_status', AssistantDomainStore::SHOP_STATUS_IN_USE)
+            ->when($webhookStatus !== '', function ($query) use ($webhookStatus) {
+                if ($webhookStatus === 'not_registered') {
+                    $query->where(function ($query) {
+                        $query->whereDoesntHave('shopifyConnection')
+                            ->orWhereHas('shopifyConnection', function ($connection) {
+                                $connection->whereNull('webhook_status')
+                                    ->orWhereNotIn('webhook_status', ['active', 'failed']);
+                            });
+                    });
+                } else {
+                    $query->whereHas('shopifyConnection', fn ($connection) => $connection->where('webhook_status', $webhookStatus));
+                }
+            })
+            ->when($syncStatus !== '', function ($query) use ($syncStatus) {
+                if ($syncStatus === 'not_synced') {
+                    $query->where(function ($query) {
+                        $query->whereDoesntHave('shopifyConnection')
+                            ->orWhereHas('shopifyConnection', function ($connection) {
+                                $connection->whereNull('last_sync_status')->orWhere('last_sync_status', '');
+                            });
+                    });
+                } else {
+                    $query->whereHas('shopifyConnection', fn ($connection) => $connection->where('last_sync_status', $syncStatus));
+                }
+            })
             ->with('shopifyConnection')
             ->orderBy('shop_name')
             ->paginate($perPage)
@@ -57,7 +91,7 @@ class ShopifyStoreController extends Controller
         return view('portals.logistics.shopify-stores.index', [
             ...$this->viewContext($context),
             'stores' => $stores,
-            'filters' => ['per_page' => $perPage],
+            'filters' => ['per_page' => $perPage, 'webhook_status' => $webhookStatus, 'sync_status' => $syncStatus],
             'activeSyncBatch' => $syncBatch,
             'syncIssueDetails' => $syncBatch ? $this->syncIssueDetails($syncBatch) : [],
             'manualSyncDays' => self::MANUAL_SYNC_DAYS,

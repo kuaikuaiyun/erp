@@ -84,6 +84,12 @@ return [
         'menu' => '数据大盘',
     ],
     'shopify_stores' => [
+        'webhook_status' => 'Webhook 状态',
+        'sync_status' => '最近同步结果',
+        'webhook_options' => ['active' => '成功（已登记）', 'failed' => '失败（登记失败）', 'not_registered' => '未登记'],
+        'sync_options' => ['success' => '成功', 'failed' => '失败', 'not_synced' => '未同步'],
+        'filter_hint' => '按最近一次记录的结果筛选；同时选择两个条件时，店铺需同时满足。未同步包含尚无同步结果的店铺。',
+
         'menu' => 'Shopify 店铺列表',
     ],
     'orders' => [

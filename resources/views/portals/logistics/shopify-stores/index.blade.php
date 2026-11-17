@@ -19,6 +19,35 @@
         @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
         @if(session('error'))<div class="alert alert-danger">{{ session('error') }}</div>@endif
 
+        <form method="get" action="{{ route('logistics.shopify-stores.index') }}" class="box box-solid logistics-filter-box">
+            <input type="hidden" name="per_page" value="{{ $filters['per_page'] }}">
+            <div class="box-body">
+                <div class="logistics-filter-grid">
+                    <div class="logistics-filter-field">
+                        <label for="shopify-webhook-status">{{ __('logistics.shopify_stores.webhook_status') }}</label>
+                        <select id="shopify-webhook-status" name="webhook_status" class="form-control">
+                            <option value="">{{ __('logistics.common.all') }}</option>
+                            @foreach(__('logistics.shopify_stores.webhook_options') as $value => $label)
+                                <option value="{{ $value }}" @selected($filters['webhook_status'] === $value)>{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <div class="logistics-filter-field">
+                        <label for="shopify-sync-status">{{ __('logistics.shopify_stores.sync_status') }}</label>
+                        <select id="shopify-sync-status" name="sync_status" class="form-control">
+                            <option value="">{{ __('logistics.common.all') }}</option>
+                            @foreach(__('logistics.shopify_stores.sync_options') as $value => $label)
+                                <option value="{{ $value }}" @selected($filters['sync_status'] === $value)>{{ $label }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                </div>
+                <p class="help-block">{{ __('logistics.shopify_stores.filter_hint') }}</p>
+                <button type="submit" class="btn btn-primary btn-sm"><i class="fa fa-search"></i> {{ __('logistics.common.search') }}</button>
+                <a href="{{ route('logistics.shopify-stores.index') }}" class="btn btn-default btn-sm">{{ __('logistics.common.reset') }}</a>
+            </div>
+        </form>
+
         @if($activeSyncBatch)
             @php
                 $syncProgress = $activeSyncBatch->progressPayload();
