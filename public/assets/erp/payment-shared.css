@@ -1115,3 +1115,58 @@
 .payment-renewal-two-sections .payment-inline-formula { display: block; margin-top: 5px; max-width: 240px; color: #607c91; font-size: 12px; font-weight: 400; line-height: 1.6; white-space: normal; overflow-wrap: anywhere; }
 
 .payment-renewal-two-sections .payment-renewal-date-range { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); align-items: center; gap: 8px; }
+
+/* Renewal analysis: section, channel and payment-method hierarchy. */
+.payment-renewal-two-sections { --renewal-line: #dbe5ef; --renewal-ink: #203f5b; }
+.payment-renewal-two-sections .payment-panel { border: 1px solid var(--renewal-line); border-radius: 12px; overflow: hidden; margin-bottom: 28px; background: #fff; box-shadow: 0 3px 12px rgba(30,60,90,.05); }
+.payment-renewal-two-sections .payment-panel > h2 { display: flex; align-items: center; gap: 10px; padding: 17px 20px 8px; margin: 0; border: 0; color: var(--renewal-ink); font-size: 19px; background: #f5f9fd; }
+.payment-renewal-two-sections .payment-section-number { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; background: #256fa5; color: #fff; font-size: 13px; }
+.payment-renewal-two-sections .payment-section-hint { margin: 0; padding: 0 20px 16px 60px; background: #f5f9fd; color: #546c82; font-size: 12px; }
+.payment-renewal-two-sections .payment-renewal-filter { margin: 16px 18px 10px; padding: 16px; background: #f7f9fc; border: 1px solid #e3eaf1; border-radius: 8px; box-shadow: none; }
+.payment-renewal-two-sections .payment-renewal-compact-context { margin: 0 20px 12px; padding: 9px 12px; border-left: 3px solid #95bbd9; background: #f8fbfd; }
+.payment-renewal-two-sections .payment-renewal-kpis { grid-template-columns: repeat(4,minmax(0,1fr)); gap: 12px; padding: 8px 18px; }
+.payment-renewal-two-sections .payment-renewal-kpi { box-shadow: none; border: 1px solid #dce7f0; border-top: 3px solid #5b92bc; border-radius: 8px; }
+.payment-renewal-two-sections .payment-renewal-kpi strong { font-size: 28px; color: #194e76; }
+.payment-renewal-two-sections .payment-method-rates { margin: 12px 18px; padding: 14px; border: 1px solid #e4eaf1; border-radius: 8px; }
+.payment-renewal-two-sections .payment-method-rates h3 { font-size: 14px; margin: 0 0 12px; color: #344e65; }
+.payment-renewal-two-sections .payment-method-rate-grid { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 12px; }
+.payment-renewal-two-sections .payment-method-rate { min-width: 0; padding: 10px; background: #f6f9fc; border-radius: 6px; }
+.payment-renewal-two-sections .payment-method-rate > span, .payment-renewal-two-sections .payment-method-rate > small { display: block; color: #4f677c; font-size: 12px; }
+.payment-renewal-two-sections .payment-method-rate > strong { display: block; margin: 7px 0; color: #234c6b; font-size: 21px; }
+.payment-renewal-two-sections .payment-data-table { font-variant-numeric: tabular-nums; }
+.payment-renewal-two-sections .payment-data-table thead th { padding: 12px; color: #35536d; background: #edf3f9; border-bottom: 1px solid #cfdeeb; }
+.payment-renewal-two-sections .payment-data-table tbody td { padding: 12px; vertical-align: middle; color: #294962; border-bottom: 1px solid #e7eef4; }
+.payment-renewal-two-sections .payment-level-total > td { background: #eaf3fb; font-weight: 700; }
+.payment-renewal-two-sections .payment-level-channel.payment-group-start > td, .payment-renewal-two-sections .payment-renewal-funnel .payment-level-channel > td { background: #f2f6fa; font-weight: 600; }
+.payment-renewal-two-sections .payment-group-start > td { border-top: 2px solid #d3e1ed; }
+.payment-renewal-two-sections .payment-type-detail > td { font-weight: 400; background: #fff; }
+.payment-renewal-two-sections .payment-type-detail > td:nth-child(3) { padding-left: 25px; color: #586e80; }
+.payment-renewal-two-sections .payment-level-method > td:nth-child(2) { padding-left: 24px; }
+.payment-renewal-two-sections .payment-stage-start > td { border-top: 5px solid #fff; padding-top: 18px; padding-bottom: 18px; font-size: 14px; }
+.payment-renewal-two-sections .payment-renewal-funnel table { min-width: 1550px; }
+.payment-renewal-two-sections .payment-subscription-refunds { min-width: 1150px; }
+.payment-renewal-two-sections .payment-column-groups > th { text-align: center; background: #e0ebf5 !important; border-right: 2px solid #fff; font-size: 12px; }
+.payment-renewal-two-sections .payment-renewal-funnel tr:not(.payment-column-groups):not(.payment-calculation-row) > :nth-child(7),
+.payment-renewal-two-sections .payment-subscription-refunds tr > :nth-child(6) { border-left: 2px solid #d8e3ed; }
+.payment-renewal-two-sections .payment-renewal-funnel tr:not(.payment-column-groups):not(.payment-calculation-row) > :nth-child(8) { border-left: 2px solid #d8e3ed; }
+.payment-renewal-two-sections .payment-rate-cell > strong { color: #066952; font-size: 16px; }
+.payment-renewal-two-sections .payment-refund-rate { font-weight: 600; }
+.payment-renewal-two-sections .payment-inline-formula { max-width: 230px; color: #50677b; font-size: 11px; font-weight: 400; background: rgba(235,241,247,.65); padding: 3px 5px; border-radius: 4px; line-height: 1.55; }
+.payment-renewal-two-sections .payment-period-note { background: transparent; padding-left: 0; color: #627589; max-width: 195px; }
+.payment-renewal-two-sections .payment-method-badge { display: inline-block; padding: 2px 7px; border: 1px solid #d6e3ee; border-radius: 5px; font-size: 11px; font-weight: 500; color: #355e7c; background: #f5f9fc; }
+.payment-renewal-two-sections .payment-data-table tr:not(.payment-calculation-row):hover > td { background: #eef7ff; }
+.payment-renewal-two-sections .payment-data-table tr:not(.payment-column-groups):not(.payment-calculation-row) > :first-child { position: sticky; left: 0; z-index: 1; background-color: #f5f9fc; box-shadow: 1px 0 #dce7ef; }
+.payment-renewal-two-sections .payment-data-table thead tr:not(.payment-column-groups) > :first-child { z-index: 2; background: #edf3f9; }
+.payment-renewal-two-sections .payment-calculation-row > td { padding: 0; }
+.payment-renewal-two-sections .payment-calculation-details { padding: 12px 18px; background: #fafcfe; }
+.payment-renewal-two-sections .payment-calculation-details[open] { border-left: 3px solid #7aa6c8; background: #f5f9fd; }
+.payment-renewal-two-sections .payment-calculation-details summary { font-weight: 600; }
+@media (max-width: 1199px) {
+    .payment-renewal-two-sections .payment-renewal-kpis { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    .payment-renewal-two-sections .payment-method-rate-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
+}
+@media (max-width: 767px) {
+    .payment-renewal-two-sections .payment-method-rate-grid, .payment-renewal-two-sections .payment-renewal-kpis { grid-template-columns: minmax(0,1fr); }
+    .payment-renewal-two-sections .payment-renewal-filter { margin: 10px; padding: 12px; }
+    .payment-renewal-two-sections .payment-renewal-compact-context { margin: 0 10px 10px; }
+}

@@ -23,6 +23,33 @@ class PaymentRenewalAnalysisService
         'payment_gateway', 'payment_method', 'paypal_account_id', 'paypal_association_source',
     ];
 
+    /** Ordered groups shared by the page and Excel export. */
+    public static function breakdownGroups(): array
+    {
+        return [
+            'total' => ['channel'=>'total', 'method'=>'all', 'level'=>'total'],
+            'paypal' => ['channel'=>'paypal', 'method'=>'all', 'level'=>'channel'],
+            'method_ap' => ['channel'=>'paypal', 'method'=>'ap', 'level'=>'method'],
+            'method_gp' => ['channel'=>'paypal', 'method'=>'gp', 'level'=>'method'],
+            'method_pp' => ['channel'=>'paypal', 'method'=>'pp', 'level'=>'method'],
+            'credit_card' => ['channel'=>'credit_card', 'method'=>'all', 'level'=>'channel'],
+            'method_cc' => ['channel'=>'credit_card', 'method'=>'cc', 'level'=>'method'],
+            'unknown' => ['channel'=>'unknown', 'method'=>'unknown', 'level'=>'channel'],
+        ];
+    }
+
+    private function matchesGroup(array $row, string $key): bool
+    {
+        return $key === 'total' || (str_starts_with($key, 'method_')
+            ? $row['payment_method'] === substr($key, 7) : $row['actual_channel'] === $key);
+    }
+
+    private function methodFor(LogisticsOrder $order): string
+    {
+        $method = strtolower(trim((string) $order->payment_method));
+        return in_array($method, ['ap', 'gp', 'pp', 'cc'], true) ? $method : 'unknown';
+    }
+
     /** @return array<string,string> */
     public static function timezones(): array
     {
@@ -91,8 +118,8 @@ class PaymentRenewalAnalysisService
         // First-purchase refunds remain independent of renewal-stage filtering and pagination.
         $dataset['initial_rows'] = array_merge(array_values(array_filter($dataset['rows'], fn (array $row): bool => $row['stage_number'] === 0)), $dataset['non_subscription_rows']);
         $dataset['initial_refunds'] = $dataset['initial_refunds_by_type'] = [];
-        foreach (['total', 'paypal', 'credit_card'] as $channel) {
-            $channelRows = array_values(array_filter($dataset['initial_rows'], fn (array $row): bool => $channel === 'total' || $row['actual_channel'] === $channel));
+        foreach (array_keys(self::breakdownGroups()) as $channel) {
+            $channelRows = array_values(array_filter($dataset['initial_rows'], fn (array $row): bool => $this->matchesGroup($row, $channel)));
             foreach (['all', 'subscription', 'non_subscription'] as $type) {
                 $dataset['initial_refunds_by_type'][$channel][$type] = $this->riskTotal(array_values(array_filter(
                     $channelRows, fn (array $row): bool => $type === 'all' || $row['purchase_type'] === $type,
@@ -114,7 +141,7 @@ class PaymentRenewalAnalysisService
             'subscription_rate' => $dataset['summary']['subscription_rate'],
         ];
         $dataset['risk_by_channel'] = [];
-        foreach (['paypal', 'credit_card'] as $channel) {
+        foreach (['paypal', 'credit_card', 'unknown'] as $channel) {
             $dataset['risk_by_channel'][$channel] = $this->riskTotal(array_values(array_filter(
                 $dataset['rows'], fn (array $row): bool => $row['actual_channel'] === $channel,
             )));
@@ -129,7 +156,7 @@ class PaymentRenewalAnalysisService
         $cacheFilters['channel'] = '';
         $cacheFilters['timezone'] ??= '+08:00';
         unset($cacheFilters['stage_page'], $cacheFilters['stage']);
-        $cacheKey = 'payment:renewal-analysis:v12:'.sha1(json_encode($cacheFilters));
+        $cacheKey = 'payment:renewal-analysis:v13:'.sha1(json_encode($cacheFilters));
 
         $expiresAt = now()->addMinutes(5);
         return Cache::remember($cacheKey, $expiresAt, function () use ($cacheFilters, $expiresAt): array {
@@ -202,12 +229,15 @@ class PaymentRenewalAnalysisService
         $current = [];
         $previousOrders = [];
         $previousChannels = [];
+        $previousMethods = [];
         foreach ($entries as $entry) {
             $order = $entry['order'];
             $number = $entry['number'];
             if ($order->paid_at->betweenIncluded($from, $to)) $current[$number][] = $entry;
             if ($order->paid_at->betweenIncluded($comparisonFrom, $comparisonTo)) {
                 $previousOrders[$number] = ($previousOrders[$number] ?? 0) + 1;
+                $method = $this->methodFor($order);
+                $previousMethods[$number][$method] = ($previousMethods[$number][$method] ?? 0) + 1;
                 $channel = $this->channelFor($order);
                 $previousChannels[$number][$channel] = ($previousChannels[$number][$channel] ?? 0) + 1;
             }
@@ -241,9 +271,11 @@ class PaymentRenewalAnalysisService
             $previousCount = $number > 0 ? ($previousOrders[$number - 1] ?? 0) : null;
             $currentCount = count($stageRows);
             $byChannel = [];
-            foreach (['paypal', 'credit_card'] as $channel) {
-                $channelRows = array_values(array_filter($stageRows, fn (array $row): bool => $row['actual_channel'] === $channel));
-                $channelBase = $number > 0 ? ($previousChannels[$number - 1][$channel] ?? 0) : null;
+            foreach (array_keys(self::breakdownGroups()) as $channel) {
+                $channelRows = array_values(array_filter($stageRows, fn (array $row): bool => $this->matchesGroup($row, $channel)));
+                $channelBase = $number === 0 ? null : ($channel === 'total' ? $previousCount
+                    : (str_starts_with($channel, 'method_') ? ($previousMethods[$number - 1][substr($channel,7)] ?? 0)
+                        : ($previousChannels[$number - 1][$channel] ?? 0)));
                 $byChannel[$channel] = [
                     ...$this->riskTotal($channelRows, true),
                     'previous_orders' => $channelBase,
@@ -291,7 +323,7 @@ class PaymentRenewalAnalysisService
         $paid = $order->paid_at->copy()->setTimezone($timezone)->format('Y-m-d H:i:s');
         return [
             'stage_key' => $number === 0 ? 'initial' : 'renewal_'.$number, 'stage_number' => $number, 'purchase_type' => $purchaseType,
-            'initial_channel' => $this->channelFor($initial), 'actual_channel' => $this->channelFor($order),
+            'initial_channel' => $this->channelFor($initial), 'actual_channel' => $this->channelFor($order), 'payment_method' => $this->methodFor($order),
             'initial_order' => (string) ($initial->shopify_order_number ?: $initial->id),
             'renewal_order' => (string) ($order->shopify_order_number ?: $order->id),
             'store_name' => (string) ($order->store_name ?: $initial->store_name),
@@ -455,7 +487,7 @@ class PaymentRenewalAnalysisService
         })->values();
     }
 
-    /** @param array<string,mixed> $filters @return array{total:array{subscription_orders:int,total_orders:int,rate:float},paypal:array{subscription_orders:int,total_orders:int,rate:float},credit_card:array{subscription_orders:int,total_orders:int,rate:float}} */
+    /** @param array<string,mixed> $filters @return array<string,array{subscription_orders:int,total_orders:int,rate:float}> */
     private function subscriptionRate(Carbon $from, Carbon $to, array $filters): array
     {
         $query = LogisticsOrder::query()
@@ -491,10 +523,7 @@ class PaymentRenewalAnalysisService
             ->whereIn('status', ['S', 'V'])
             ->pluck('logistics_order_id')->mapWithKeys(fn ($id): array => [(int) $id => true])->all();
 
-        $counts = [
-            'paypal' => ['subscription_orders' => 0, 'total_orders' => 0],
-            'credit_card' => ['subscription_orders' => 0, 'total_orders' => 0],
-        ];
+        $counts = array_fill_keys(array_keys(self::breakdownGroups()), ['subscription_orders'=>0, 'total_orders'=>0]);
         foreach ($orders as $order) {
             $channel = $this->channelFor($order);
             if (($filters['channel'] ?? '') !== '' && $channel !== $filters['channel']) {
@@ -509,25 +538,18 @@ class PaymentRenewalAnalysisService
                 continue;
             }
 
-            $counts[$channel]['total_orders']++;
-            if ($order->subscription_type === '订阅首次购买') {
-                $counts[$channel]['subscription_orders']++;
+            $row = ['actual_channel'=>$channel, 'payment_method'=>$this->methodFor($order)];
+            foreach ($counts as $key => &$count) {
+                if (!$this->matchesGroup($row, $key)) continue;
+                $count['total_orders']++;
+                if ($order->subscription_type === '订阅首次购买') $count['subscription_orders']++;
             }
+            unset($count);
         }
 
-        $totalSubscriptionOrders = $counts['paypal']['subscription_orders'] + $counts['credit_card']['subscription_orders'];
-        $totalOrders = $counts['paypal']['total_orders'] + $counts['credit_card']['total_orders'];
-        $format = fn (array $count): array => [
-            'subscription_orders' => $count['subscription_orders'],
-            'total_orders' => $count['total_orders'],
-            'rate' => $this->rate($count['subscription_orders'], $count['total_orders']),
-        ];
-
-        return [
-            'total' => $format(['subscription_orders' => $totalSubscriptionOrders, 'total_orders' => $totalOrders]),
-            'paypal' => $format($counts['paypal']),
-            'credit_card' => $format($counts['credit_card']),
-        ];
+        return array_map(fn (array $count): array => [
+            ...$count, 'rate'=>$this->rate($count['subscription_orders'], $count['total_orders']),
+        ], $counts);
     }
 
     /** @return array<string,mixed> */
@@ -566,8 +588,11 @@ class PaymentRenewalAnalysisService
 
     private function channelFor(LogisticsOrder $order): string
     {
-        $text = mb_strtolower((string) $order->payment_gateway.' '.(string) $order->payment_method);
-        return $order->paypal_account_id || str_contains($text, 'paypal') ? 'paypal' : 'credit_card';
+        return match ($this->methodFor($order)) {
+            'cc' => 'credit_card',
+            'ap', 'gp', 'pp' => 'paypal',
+            default => 'unknown',
+        };
     }
 
     private function rate(float|int $numerator, float|int $denominator): float

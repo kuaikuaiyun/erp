@@ -28,6 +28,7 @@ class PaymentRenewalAnalysisTest extends TestCase
         });
         Schema::create('logistics_paypal_transactions', function (Blueprint $table): void {
             $table->increments('id'); $table->unsignedInteger('logistics_order_id')->nullable();
+            $table->string('event_code')->nullable(); $table->string('status')->nullable();
         });
         Schema::create('logistics_order_payment_references', function (Blueprint $table): void {
             $table->increments('id'); $table->unsignedInteger('logistics_order_id'); $table->string('reference_type'); $table->string('gateway_order_id')->nullable();
@@ -59,11 +60,12 @@ class PaymentRenewalAnalysisTest extends TestCase
         DB::table('logistics_orders')->insert(array_merge([
             'id' => $id, 'paid_at' => $time, 'subscription_type' => $type, 'payment_gateway' => $channel,
             'paid_amount_usd' => 20, 'subscription_origin_order_id' => $origin, 'store_name' => $store,
+            'payment_method' => $channel === 'paypal' ? 'pp' : 'cc',
             'tongtu_order_number' => 'T-'.$id, 'transaction_id' => 'TX-'.$id,
             'paypal_account_id' => $channel === 'paypal' ? 1 : null,
             'paypal_association_source' => $channel === 'paypal' ? 'actual_transaction' : null,
         ], $extra));
-        if ($channel === 'paypal') DB::table('logistics_paypal_transactions')->insert(['logistics_order_id' => $id]);
+        if ($channel === 'paypal') DB::table('logistics_paypal_transactions')->insert(['logistics_order_id' => $id, 'event_code'=>'T0006', 'status'=>'S']);
     }
 
     private function filters(array $overrides = []): array
@@ -73,6 +75,58 @@ class PaymentRenewalAnalysisTest extends TestCase
             'renewal_date_from' => '2026-11-01', 'renewal_date_to' => '2026-11-01', 'renewal_timezone' => '+08:00', 'renewal_store' => 'Test',
             'stage' => '', 'stage_page' => 1, 'risk_date_mode' => 'payment', 'channel' => 'paypal',
         ], $overrides);
+    }
+
+    public function test_payment_methods_override_gateway_and_account_and_reconcile_all_groups(): void
+    {
+        foreach (['ap', 'gp', 'pp', 'cc', '', 'other'] as $index => $method) {
+            // Deliberately conflicting gateway and PayPal account for cc; method must win.
+            $this->order(100+$index, '2026-10-02 12:00:00', '订阅首次购买', 'paypal', '', 'Methods', ['payment_method'=>$method]);
+            $this->order(110+$index, '2026-11-01 12:00:00', '订阅复购', 'paypal', (string)(100+$index), 'Methods', ['payment_method'=>$method]);
+            $this->order(120+$index, '2026-11-01 12:00:00', $index % 2 ? '无订阅' : '订阅首次购买', 'paypal', '', 'Methods', ['payment_method'=>$method]);
+        }
+        $this->order(140, '2026-11-01 12:00:00', '订阅复购', 'credit_card', '100', 'Methods', ['payment_method'=>' GP ']);
+        DB::table('logistics_credit_card_refunds')->insert(['logistics_order_id'=>113,'refund_amount_usd'=>4,'refund_reason'=>'质量问题']);
+        DB::table('logistics_paypal_refunds')->insert(['logistics_order_id'=>110,'refund_amount_usd'=>3]);
+        $data = app(PaymentRenewalAnalysisService::class)->dashboard($this->filters(['initial_store'=>'Methods','renewal_store'=>'Methods']));
+        $stage = $data['stages'][0];
+        self::assertSame(6, $stage['orders']);
+        self::assertSame(3, $stage['by_channel']['paypal']['orders']);
+        self::assertSame(1, $stage['by_channel']['credit_card']['orders']);
+        self::assertSame(2, $stage['by_channel']['unknown']['orders']);
+        foreach (['ap','gp','pp','cc'] as $method) {
+            self::assertSame(1, $stage['by_channel']['method_'.$method]['previous_orders']);
+            self::assertSame(1, $stage['by_channel']['method_'.$method]['orders']);
+            self::assertEquals(100, $stage['by_channel']['method_'.$method]['rate']);
+        }
+        self::assertEquals(4, $stage['by_channel']['method_cc']['refund_amount']);
+        self::assertEquals(3, $stage['by_channel']['method_ap']['refund_amount']);
+        $second = $data['stages'][1]['by_channel']['method_gp'];
+        self::assertSame(1, $second['orders']);
+        self::assertSame(0, $second['previous_orders']);
+        self::assertNull($second['rate']);
+        $refunds = $data['initial_refunds_by_type'];
+        foreach (['orders','revenue','refund_order_count','refund_amount'] as $metric) {
+            self::assertEquals($refunds['total']['all'][$metric],
+                $refunds['paypal']['all'][$metric]+$refunds['credit_card']['all'][$metric]+$refunds['unknown']['all'][$metric]);
+            self::assertEquals($refunds['paypal']['all'][$metric],
+                $refunds['method_ap']['all'][$metric]+$refunds['method_gp']['all'][$metric]+$refunds['method_pp']['all'][$metric]);
+        }
+        $rates = $data['summary']['subscription_rate'];
+        self::assertSame(6, $rates['total']['total_orders']);
+        self::assertSame(2, $rates['unknown']['total_orders']);
+        self::assertSame(1, $rates['method_cc']['total_orders']);
+        self::assertSame(3, $rates['total']['subscription_orders']);
+        $this->order(150, '2026-10-02 12:00:00', '订阅首次购买', 'credit_card', '', 'Methods', ['payment_method'=>' AP ']);
+        $this->order(151, '2026-11-01 12:00:00', '订阅复购', 'credit_card', '150', 'Methods', ['payment_method'=>' GP ']);
+        // This ap first purchase has no matched PayPal transaction and remains unqualified.
+        $this->order(152, '2026-11-01 12:00:00', '订阅首次购买', 'credit_card', '', 'Methods', ['payment_method'=>'ap']);
+        \Illuminate\Support\Facades\Cache::flush();
+        $updated = app(PaymentRenewalAnalysisService::class)->dashboard($this->filters(['initial_store'=>'Methods','renewal_store'=>'Methods']));
+        self::assertEquals(50, $updated['stages'][0]['by_channel']['method_ap']['rate']);
+        self::assertEquals(200, $updated['stages'][0]['by_channel']['method_gp']['rate']);
+        self::assertSame(6, $updated['summary']['subscription_rate']['total']['total_orders']);
+        self::assertSame(7, $updated['initial_refunds']['total']['orders']);
     }
 
     public function test_refunds_include_non_subscription_first_orders_and_all_channel_totals_reconcile(): void
@@ -162,6 +216,13 @@ class PaymentRenewalAnalysisTest extends TestCase
         self::assertStringContainsString('data-renewal-module="renewal"', $html);
         self::assertStringNotContainsString('name="channel"', $html);
         self::assertStringContainsString('非订阅首购', $html);
+        self::assertStringContainsString('data-payment-method="ap"', $html);
+        self::assertStringContainsString('data-payment-method="cc"', $html);
+        self::assertStringContainsString('payment-stage-start', $html);
+        self::assertStringContainsString('payment-method-rate-grid', $html);
+        self::assertStringContainsString('支付方式', $html);
+        self::assertStringNotContainsString('payment.renewal_two_sections.', $html);
+        self::assertStringContainsString('2 ÷ 2 × 100%', $html);
         self::assertStringContainsString('name="initial_store" value="Test"', $html);
         self::assertStringContainsString('name="renewal_store" value="Test"', $html);
     }
@@ -176,11 +237,14 @@ class PaymentRenewalAnalysisTest extends TestCase
             $book = IOFactory::load($path);
             self::assertSame(4, $book->getSheetCount());
             self::assertSame('UTC-05:00', $book->getSheet(0)->getCell('B1')->getValue());
-            self::assertSame(14, $book->getSheet(1)->getHighestRow());
+            self::assertSame(29, $book->getSheet(1)->getHighestRow());
+            self::assertSame('支付方式', $book->getSheet(1)->getCell('B5')->getValue());
+            self::assertSame('ap', $book->getSheet(1)->getCell('B12')->getValue());
             self::assertSame('UTC+08:00', $book->getSheet(2)->getCell('B1')->getValue());
             self::assertSame('总体', $book->getSheet(2)->getCell('B7')->getValue());
             self::assertSame('PayPal', $book->getSheet(2)->getCell('B8')->getValue());
-            self::assertSame('信用卡', $book->getSheet(2)->getCell('B9')->getValue());
+            self::assertSame('ap', $book->getSheet(2)->getCell('C9')->getValue());
+            self::assertSame('信用卡', $book->getSheet(2)->getCell('B12')->getValue());
             $book->disconnectWorksheets();
         } finally { @unlink($path); }
     }

@@ -258,6 +258,18 @@ $translations = [
 
 return array_replace_recursive($translations, [
     'renewal_two_sections' => [
+        'payment_method' => '支付方式',
+        'method_all' => '全部方式',
+        'unknown' => '未识别',
+        'method_rule' => '按订单支付方式归类：ap、gp、pp 属于 PayPal，cc 属于信用卡；空值及其他值单列未识别。各方式续费率 = 本期该方式本次续费订单数 ÷ 前推 30 天区间该方式上一阶段订单数 × 100%。渠道汇总包含其下支付方式明细，请勿重复相加。',
+        'subscription_hint' => '本区独立筛选，查看首单订阅与首购退款。',
+        'renewal_hint' => '本区独立筛选，按续费次数核对前推基数、本期订单及退款。',
+        'method_subscription' => '支付方式订阅率',
+        'renewal_group' => '续费转化',
+        'payment_group' => '本期付款',
+        'refund_group' => '本期订单退款',
+        'formula_label' => '计算公式',
+
         'inline_formula' => ':numerator ÷ :denominator × 100%',
         'inline_period' => ':stage：:from ～ :to',
         'inline_no_base' => '无可计算基数',
@@ -283,7 +295,7 @@ return array_replace_recursive($translations, [
         'date_range_error' => '结束日期不能早于开始日期。',
         'first_source_scope' => '首购退款取所选付款区间、时区和店铺的订阅首次购买及无订阅订单，要求无订阅来源号，排除已加购及运营名含“刷单”的订单。不会把续费订单纳入首购退款。',
         'start_date' => '开始日期', 'end_date' => '结束日期',
-        'channel_rule' => '渠道按本笔实际付款归属：有 PayPal 账户 ID 或网关/付款方式包含 paypal 则归 PayPal，其余归信用卡。分渠道续费率的分子、分母分别按各期实际渠道统计，跨渠道付款不会沿用首扣渠道。',
+        'channel_rule' => '渠道按本笔 payment_method 归属：ap、gp、pp 归 PayPal，cc 归信用卡；空值及其他值归未识别。分渠道及支付方式续费率的分子、分母分别按各期实际付款方式统计，跨方式付款不会沿用首扣方式。',
         'subscription_orders' => '合格订阅首购数', 'qualified_orders' => '合格首单数', 'subscription_rate' => '首单订阅率',
         'orders' => '付款订单数', 'revenue' => '实收金额', 'refund_orders' => '退款订单数', 'refund_amount' => '退款金额',
         'refund_count_rate' => '笔数退款率', 'refund_amount_rate' => '金额退款率',
