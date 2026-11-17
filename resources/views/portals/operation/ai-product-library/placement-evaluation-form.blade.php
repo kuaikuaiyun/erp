@@ -5,8 +5,20 @@
         <div class="col-sm-6 form-group"><label>开始测试日期</label><input class="form-control" type="date" name="test_started_on" required></div>
         <div class="col-sm-6 form-group"><label>数据截至日期</label><input class="form-control" type="date" name="data_ended_on" required></div>
         <div class="col-sm-12"><div data-placement-records></div><button class="btn btn-default btn-sm" type="button" data-add-placement-record><i class="fa fa-plus"></i> 添加投放平台</button><p class="help-block">可添加多个投放平台，每个平台分别填写币种、实际消耗、出单量和 ROI。</p></div>
-        <div class="col-sm-6 form-group"><label>素材名称</label><input class="form-control" type="text" maxlength="191" name="material_name" placeholder="填写本次投放素材名称" required></div>
-        <div class="col-sm-6 form-group"><label>投放视频</label><input class="form-control" type="file" name="video" accept="video/mp4,video/quicktime,video/x-msvideo,video/webm,video/x-matroska,video/x-m4v" required><small class="text-muted">单个最大300MB</small></div>
+        <div class="col-sm-12 form-group">
+            <label>
+                素材名称
+                <button type="button" class="btn btn-link btn-xs" style="padding:0 3px;vertical-align:baseline" data-toggle="popover" data-trigger="focus" data-placement="top" title="素材填写提示" data-content="如果未使用素材库素材且数据良好，请先点击产品列表中的上传素材按钮上传投放素材，后续剪辑部门可以给到拓展素材。">
+                    <i class="fa fa-info-circle"></i> 提示
+                </button>
+            </label>
+            <div style="position:relative" data-placement-material-picker data-search-url="{{ route('operation.ai-product-library.placement-evaluations.material-videos', $product) }}">
+                <input class="form-control" type="text" maxlength="191" name="material_name" autocomplete="off" placeholder="输入素材名称，模糊搜索素材库视频" required data-placement-material-search>
+                <input type="hidden" name="material_video_id" value="" data-placement-material-video-id>
+                <div class="list-group" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:1060;max-height:260px;overflow:auto;box-shadow:0 6px 14px rgba(0,0,0,.15)" data-placement-material-results></div>
+            </div>
+            <p class="help-block" style="margin-bottom:0" data-placement-material-selected>输入关键词并选择素材，系统会自动关联对应视频，无需再次上传。</p>
+        </div>
         <div class="col-sm-12" data-placement-upload-progress hidden><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span data-placement-upload-status>等待上传</span><strong data-placement-upload-percent>0%</strong></div><div class="progress" style="height:10px;margin-bottom:12px"><div class="progress-bar progress-bar-info progress-bar-striped active" data-placement-upload-bar style="width:0%;min-width:0"></div></div></div>
         <div class="col-sm-12 form-group"><label>备注</label><textarea class="form-control" name="remark" rows="2" maxlength="2000"></textarea></div>
     </div>
@@ -24,6 +36,6 @@
 <hr><h4><i class="fa fa-history"></i> 我的投放记录</h4>
 <div class="table-responsive"><table class="table table-bordered table-striped"><thead><tr><th>测评编号</th><th>测试周期</th><th>平台</th><th>消耗</th><th>出单量</th><th>ROI</th><th>素材名称</th><th>投放视频</th></tr></thead><tbody>
 @forelse($evaluations as $evaluation) @foreach($evaluation->records as $record)
-<tr><td>{{ $evaluation->evaluation_code }}</td><td>{{ $evaluation->test_started_on?->format('Y-m-d') }} 至 {{ $evaluation->data_ended_on?->format('Y-m-d') }}</td><td>{{ ucfirst($record->platform) }}</td><td>{{ strtoupper($record->currency) }} {{ $record->actual_spend }}</td><td>{{ $record->orders }}</td><td>{{ $record->roi !== null ? number_format((float) $record->roi, 2) : '—' }}</td><td>{{ $record->material_name ?: '—' }}</td><td>@if($record->video_path)<a class="btn btn-xs btn-info" target="_blank" href="{{ route('operation.ai-product-library.placement-evaluations.video', [$evaluation, $record]) }}"><i class="fa fa-play"></i> 投放视频</a>@else — @endif</td></tr>
+<tr><td>{{ $evaluation->evaluation_code }}</td><td>{{ $evaluation->test_started_on?->format('Y-m-d') }} 至 {{ $evaluation->data_ended_on?->format('Y-m-d') }}</td><td>{{ ucfirst($record->platform) }}</td><td>{{ strtoupper($record->currency) }} {{ $record->actual_spend }}</td><td>{{ $record->orders }}</td><td>{{ $record->roi !== null ? number_format((float) $record->roi, 2) : '—' }}</td><td>{{ $record->material_name ?: '—' }}</td><td>@if($record->video_path)<a class="btn btn-xs btn-info" target="_blank" href="{{ route('operation.ai-product-library.placement-evaluations.video', [$evaluation, $record]) }}"><i class="fa fa-play"></i> {{ pathinfo((string) $record->video_name, PATHINFO_FILENAME) ?: '投放视频' }}</a>@else — @endif</td></tr>
 @endforeach @empty <tr><td colspan="8" class="text-center text-muted">暂无本人提交的投放记录</td></tr> @endforelse
 </tbody></table></div>

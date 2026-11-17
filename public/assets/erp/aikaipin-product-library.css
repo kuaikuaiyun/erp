@@ -860,6 +860,109 @@
     white-space: nowrap;
 }
 
+.aikaipin-material-video-panel {
+    background: #f8fbfd;
+    border: 1px solid #dce8f1;
+    border-radius: 6px;
+    margin-top: 12px;
+    padding: 12px;
+}
+
+.aikaipin-material-video-heading strong,
+.aikaipin-material-video-heading small {
+    display: block;
+}
+
+.aikaipin-material-video-heading strong { color: #38566e; font-size: 13px; }
+.aikaipin-material-video-heading small { color: #8494a3; margin-top: 3px; }
+
+.aikaipin-material-video-upload-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-top: 10px;
+}
+
+.aikaipin-material-video-upload {
+    background: #fff;
+    border: 1px dashed #8bbbd8;
+    border-radius: 5px;
+    color: #287aa8;
+    cursor: pointer;
+    margin: 0;
+    min-width: 0;
+    padding: 10px 12px;
+    transition: border-color .15s ease, background .15s ease;
+}
+
+.aikaipin-material-video-upload:hover { background: #f0f8fd; border-color: #3c8dbc; }
+.aikaipin-material-video-upload span,
+.aikaipin-material-video-upload small { display: block; }
+.aikaipin-material-video-upload small { color: #8a97a6; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.aikaipin-material-video-list {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-top: 10px;
+}
+
+.aikaipin-view-video-list {
+    display: grid;
+    gap: 14px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.aikaipin-material-video-card {
+    background: #fff;
+    border: 1px solid #dde7ee;
+    border-radius: 6px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.aikaipin-material-video-card.is-history { background: #fffaf0; border-color: #efd9a7; }
+.aikaipin-material-video-card video { background: #111; display: block; height: 190px; object-fit: contain; width: 100%; }
+.aikaipin-material-video-card-info { display: grid; gap: 4px; grid-template-columns: auto minmax(0, 1fr) auto; padding: 8px 10px; }
+.aikaipin-material-video-card-info strong { color: #405467; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aikaipin-material-video-card-info small { color: #92a0ad; }
+.aikaipin-material-video-delete {
+    align-items: center;
+    background: #fff5f5;
+    border: 1px solid #f2b8b5;
+    border-radius: 4px;
+    color: #c0392b;
+    display: inline-flex;
+    font-size: 12px;
+    gap: 5px;
+    grid-column: 1 / -1;
+    justify-content: center;
+    margin-top: 3px;
+    padding: 6px 10px;
+    transition: background .15s ease, border-color .15s ease;
+    width: 100%;
+}
+.aikaipin-material-video-delete:hover { background: #fde5e3; border-color: #e98b84; }
+.aikaipin-material-video-history { align-items: center; color: #7e6a3b; display: flex; flex-direction: column; gap: 8px; height: 190px; justify-content: center; padding: 18px; text-align: center; }
+.aikaipin-material-video-history > .fa { font-size: 28px; }
+.aikaipin-material-video-empty { background: #f8fafc; border: 1px dashed #cad7e1; border-radius: 6px; color: #8a99a7; grid-column: 1 / -1; padding: 28px; text-align: center; }
+
+.aikaipin-material-video-item {
+    align-items: center;
+    background: #fff;
+    border: 1px solid #e2eaf0;
+    border-radius: 4px;
+    display: grid;
+    gap: 8px;
+    grid-template-columns: 88px minmax(0, 1fr) auto;
+    padding: 7px 9px;
+}
+
+.aikaipin-material-video-item.is-history { background: #fffaf0; border-color: #f2dfb4; }
+.aikaipin-material-video-type { color: #2d769d; font-size: 11px; font-weight: 600; }
+.aikaipin-material-video-file { color: #3f5365; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aikaipin-material-video-item small { color: #93a0ac; }
+
 .aikaipin-package-file-card {
     background: linear-gradient(135deg, #f7fbfe, #eef6fc);
     border-color: #8dc3e4;
@@ -1057,6 +1160,10 @@
     .aikaipin-attachment-grid {
         grid-template-columns: 1fr;
     }
+
+    .aikaipin-material-video-upload-grid { grid-template-columns: 1fr; }
+    .aikaipin-material-video-list,
+    .aikaipin-view-video-list { grid-template-columns: 1fr; }
 
     .aikaipin-pagination-control {
         align-items: flex-start;

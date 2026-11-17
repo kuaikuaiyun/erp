@@ -136,6 +136,11 @@ class AikaipinProduct extends Model
             ->latest('id');
     }
 
+    public function referenceVideos(): HasMany
+    {
+        return $this->hasMany(OperationAiProductReferenceVideo::class, 'aikaipin_product_id');
+    }
+
     public function defaultProductPage(): ?AikaipinProductPage
     {
         return $this->productPages()->first();

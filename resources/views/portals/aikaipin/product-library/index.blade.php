@@ -45,6 +45,7 @@
         'csrfToken' => csrf_token(),
         'productStoreUrl' => route('aikaipin.product-library.store'),
         'productEditUrlTemplate' => route('aikaipin.product-library.edit', ['product' => '__product__']),
+        'productViewUrlTemplate' => route('aikaipin.product-library.view', ['product' => '__product__']),
         'productUpdateUrlTemplate' => route('aikaipin.product-library.update', ['product' => '__product__']),
         'productDeleteUrlTemplate' => route('aikaipin.product-library.destroy', ['product' => '__product__']),
         'shopifyImportPreviewUrlTemplate' => route('aikaipin.product-library.shopify-import.preview', ['product' => '__product__']),
@@ -96,12 +97,12 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261116-5">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.css?v=20261117-3">
 @endpush
 
 @push('scripts')
     <script>window.ErpAikaipinProductLibraryConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261116-5"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-product-library.js?v=20261117-3"></script>
 @endpush
 
 @section('content')
@@ -311,6 +312,11 @@
                             </td>
                             <td class="aikaipin-operation-cell">
                                 <div class="aikaipin-row-actions" role="group" aria-label="{{ $t('table.operation') }}">
+                                    <button class="btn btn-default aikaipin-row-action-icon" type="button" data-aikaipin-action="view"
+                                        data-aikaipin-product-id="{{ $product->getKey() }}" title="查看产品及素材视频" aria-label="查看产品及素材视频">
+                                        <i class="fa fa-eye" aria-hidden="true"></i>
+                                        <span class="sr-only">查看产品及素材视频</span>
+                                    </button>
                                     @if ($product->landing_page_url)
                                         <a class="btn btn-default aikaipin-row-action-icon" href="{{ $product->landing_page_url }}" target="_blank" rel="noopener noreferrer"
                                             title="{{ $t('actions.open_landing_page') }}" aria-label="{{ $t('actions.open_landing_page') }}">
@@ -435,6 +441,26 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-default" data-dismiss="modal">{{ $t('image_preview.close') }}</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="aikaipin-product-view-modal" class="modal fade" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal" aria-label="关闭"><span aria-hidden="true">&times;</span></button>
+                <h4 class="modal-title" data-aikaipin-product-view-title>产品详情</h4>
+            </div>
+            <div class="modal-body">
+                <div class="aikaipin-view-video-list" data-aikaipin-product-view-videos>
+                    <div class="text-muted">正在加载素材视频...</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <a class="btn btn-info" href="#" target="_blank" rel="noopener noreferrer" hidden data-aikaipin-product-view-reference><i class="fa fa-file-text-o"></i> 打开参考页</a>
+                <button type="button" class="btn btn-default" data-dismiss="modal">关闭</button>
             </div>
         </div>
     </div>
@@ -635,6 +661,28 @@
                                         <i class="fa fa-angle-right" aria-hidden="true"></i>
                                     </label>
                                 </div>
+                            </div>
+                            <div class="aikaipin-material-video-panel">
+                                <div class="aikaipin-material-video-heading">
+                                    <div>
+                                        <strong><i class="fa fa-film"></i> 素材视频</strong>
+                                        <small>与参考页共用视频数据和编号：产品编号-flow/spy/mix-日期-序号</small>
+                                    </div>
+                                </div>
+                                <div class="aikaipin-material-video-upload-grid">
+                                    @foreach ([
+                                        'flow' => ['Flow 素材', 'flow'],
+                                        'traffic' => ['扒的素材', 'spy'],
+                                        'remix' => ['混剪素材', 'mix'],
+                                    ] as $videoType => [$videoLabel, $videoCode])
+                                        <label class="aikaipin-material-video-upload">
+                                            <span><i class="fa fa-plus-circle"></i> 上传{{ $videoLabel }}</span>
+                                            <small data-aikaipin-material-video-name="{{ $videoType }}">可多选，单个最大 300MB（{{ $videoCode }}）</small>
+                                            <input class="aikaipin-visually-hidden" type="file" name="material_videos[{{ $videoType }}][]" accept="video/mp4,video/quicktime,video/x-msvideo,video/webm,video/x-matroska,.m4v" multiple data-aikaipin-material-video="{{ $videoType }}">
+                                        </label>
+                                    @endforeach
+                                </div>
+                                <div class="aikaipin-material-video-list" data-aikaipin-material-video-list hidden></div>
                             </div>
                         </div>
                     </section>

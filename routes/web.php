@@ -399,11 +399,13 @@ Route::post('/operation/ai-product-library/{product}/publish', [OperationAiProdu
 Route::get('/operation/ai-product-library/{product}/shopify-images/{imageIndex}', [OperationAiProductLibraryController::class, 'shopifyImage'])->whereNumber('imageIndex')->name('operation.ai-product-library.shopify-image');
 Route::get('/operation/ai-product-library/{product}/detail', [OperationAiProductLibraryController::class, 'detail'])->name('operation.ai-product-library.detail');
 Route::get('/operation/ai-product-library/{product}/placement-evaluations', [OperationAiProductLibraryController::class, 'placementEvaluationForm'])->name('operation.ai-product-library.placement-evaluations.form');
+Route::get('/operation/ai-product-library/{product}/placement-evaluations/material-videos', [OperationAiProductLibraryController::class, 'searchPlacementMaterialVideos'])->name('operation.ai-product-library.placement-evaluations.material-videos');
 Route::post('/operation/ai-product-library/{product}/placement-evaluations', [OperationAiProductLibraryController::class, 'storePlacementEvaluation'])->name('operation.ai-product-library.placement-evaluations.store');
 Route::get('/operation/ai-product-library/placement-evaluations/{evaluation}/records/{record}/video', [OperationAiProductLibraryController::class, 'placementEvaluationVideo'])->whereNumber('evaluation')->whereNumber('record')->name('operation.ai-product-library.placement-evaluations.video');
 Route::get('/operation/ai-product-library/{product}/reference-preview', [OperationAiProductLibraryController::class, 'referencePreview'])->name('operation.ai-product-library.reference-preview');
 Route::get('/operation/ai-product-library/{product}/reference-preview/content', [OperationAiProductLibraryController::class, 'referencePreviewContent'])->name('operation.ai-product-library.reference-preview.content');
-Route::post('/operation/ai-product-library/{product}/reference-videos', [OperationAiProductLibraryController::class, 'uploadReferenceVideo'])->name('operation.ai-product-library.reference-videos.upload');
+Route::post('/operation/ai-product-library/reference-videos/upload', [OperationAiProductLibraryController::class, 'uploadReferenceVideoFromLibrary'])->name('operation.ai-product-library.reference-videos.upload');
+Route::post('/operation/ai-product-library/{product}/reference-videos', [OperationAiProductLibraryController::class, 'uploadReferenceVideo'])->whereNumber('product')->name('operation.ai-product-library.reference-videos.upload.by-product');
 Route::get('/operation/ai-product-library/{product}/reference-videos/{video}/preview', [OperationAiProductLibraryController::class, 'previewReferenceVideo'])->whereNumber('video')->name('operation.ai-product-library.reference-videos.preview');
 Route::get('/operation/ai-product-library/{product}/reference-videos/{video}/download', [OperationAiProductLibraryController::class, 'downloadReferenceVideo'])->whereNumber('video')->name('operation.ai-product-library.reference-videos.download');
 Route::get('/operation/ai-product-library/{product}/images/{imageIndex}', [OperationAiProductLibraryController::class, 'image'])->whereNumber('imageIndex')->name('operation.ai-product-library.images.show');
@@ -527,6 +529,7 @@ Route::middleware(MonitorPaymentPerformance::class)->group(function (): void {
 });
 Route::post('/product-library', [ProductLibraryController::class, 'storeProduct'])->name('aikaipin.product-library.store');
 Route::get('/product-library/{product}/edit-data', [ProductLibraryController::class, 'editProduct'])->name('aikaipin.product-library.edit');
+Route::get('/product-library/{product}/view-data', [ProductLibraryController::class, 'viewProduct'])->name('aikaipin.product-library.view');
 Route::put('/product-library/{product}', [ProductLibraryController::class, 'updateProduct'])->name('aikaipin.product-library.update');
 Route::patch('/product-library/{product}/publication', [ProductLibraryController::class, 'updatePublication'])->name('aikaipin.product-library.publication.update');
 Route::post('/product-library/{product}/shopify-import/preview', [ProductLibraryController::class, 'previewShopifyImport'])->name('aikaipin.product-library.shopify-import.preview');

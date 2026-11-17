@@ -40,6 +40,12 @@
     var imagePreviews = document.querySelector('[data-aikaipin-image-previews]');
     var referenceFile = document.querySelector('[data-aikaipin-reference-file]');
     var referenceFileName = document.querySelector('[data-aikaipin-reference-file-name]');
+    var materialVideoInputs = Array.prototype.slice.call(document.querySelectorAll('[data-aikaipin-material-video]'));
+    var materialVideoList = document.querySelector('[data-aikaipin-material-video-list]');
+    var productViewModal = document.getElementById('aikaipin-product-view-modal');
+    var productViewTitle = document.querySelector('[data-aikaipin-product-view-title]');
+    var productViewVideos = document.querySelector('[data-aikaipin-product-view-videos]');
+    var productViewReference = document.querySelector('[data-aikaipin-product-view-reference]');
     var packageFile = document.querySelector('[data-aikaipin-package-file]');
     var packageFileName = document.querySelector('[data-aikaipin-package-file-name]');
     var uploadShopifyCsvList = document.querySelector('[data-aikaipin-upload-shopify-csv-list]');
@@ -71,6 +77,10 @@
     var removedImageIds = [];
     var existingReferenceFile = null;
     var existingPackageFile = null;
+    var existingMaterialVideos = [];
+    var existingMaterialReferenceUrl = '';
+    var removedMaterialVideoIds = [];
+    var removedHistoryVideoIndexes = [];
     var editingProductId = null;
     var isProductSubmitting = false;
     var uploadTimer = null;
@@ -922,6 +932,10 @@
         removedImageIds = [];
         existingReferenceFile = null;
         existingPackageFile = null;
+        existingMaterialVideos = [];
+        existingMaterialReferenceUrl = '';
+        removedMaterialVideoIds = [];
+        removedHistoryVideoIndexes = [];
         packageUploadToken = '';
         referenceUploadToken = '';
         isProductSubmitting = false;
@@ -930,6 +944,7 @@
         renderImagePreviews();
         updateFileName(referenceFileName, null);
         updateFileName(packageFileName, null);
+        renderMaterialVideos();
         if (uploadShopifyCsvList) {
             uploadShopifyCsvList.innerHTML = '';
             addShopifyCsvPairRow();
@@ -947,6 +962,79 @@
         }
         resetProductSaveProgress();
         syncChoiceButtons();
+    }
+
+    function materialVideoTypeLabel(type) {
+        return { flow: 'Flow 素材', traffic: '扒的素材', remix: '混剪素材' }[type] || '素材视频';
+    }
+
+    function materialVideoCardsHtml(items, referenceUrl, editable) {
+        if (!items.length) return '<div class="aikaipin-material-video-empty"><i class="fa fa-film"></i> 暂无素材视频</div>';
+        return items.map(function (item) {
+            var media = item.preview_url
+                ? '<video controls preload="none" src="' + escapeHtml(item.preview_url) + '"></video>'
+                : (item.pending
+                    ? '<div class="aikaipin-material-video-history"><i class="fa fa-upload"></i><span>保存产品后即可在线播放</span></div>'
+                    : '<div class="aikaipin-material-video-history"><i class="fa fa-file-code-o"></i><span>视频保存在历史 HTML 参考页中</span>' +
+                        (referenceUrl ? '<a class="btn btn-info btn-xs" href="' + escapeHtml(referenceUrl) + '" target="_blank" rel="noopener noreferrer"><i class="fa fa-play"></i> 打开参考页播放</a>' : '') + '</div>');
+            var deleteButton = '';
+            if (editable) {
+                if (item.pending) {
+                    deleteButton = '<button type="button" class="aikaipin-material-video-delete" data-aikaipin-remove-pending-material-video="' + escapeHtml(item.type) + '" data-aikaipin-pending-video-index="' + Number(item.pending_index) + '"><i class="fa fa-times"></i> 移除待上传视频</button>';
+                } else if (item.id) {
+                    deleteButton = '<button type="button" class="aikaipin-material-video-delete" data-aikaipin-remove-material-video-id="' + Number(item.id) + '"><i class="fa fa-trash"></i> 删除视频</button>';
+                } else if (item.historical && Number.isInteger(Number(item.history_index))) {
+                    deleteButton = '<button type="button" class="aikaipin-material-video-delete" data-aikaipin-remove-history-video-index="' + Number(item.history_index) + '"><i class="fa fa-eye-slash"></i> 隐藏视频</button>';
+                }
+            }
+            return '<article class="aikaipin-material-video-card' + (item.historical ? ' is-history' : '') + '">' + media +
+                '<div class="aikaipin-material-video-card-info"><span class="aikaipin-material-video-type">' + escapeHtml(materialVideoTypeLabel(item.type)) + '</span>' +
+                '<strong title="' + escapeHtml(item.name) + '">' + escapeHtml(item.name) + '</strong><small>' + escapeHtml(item.meta || item.size || '') + '</small>' + deleteButton + '</div></article>';
+        }).join('');
+    }
+
+    function renderMaterialVideos() {
+        if (!materialVideoList) return;
+        var items = (existingMaterialVideos || []).map(function (video) {
+            return {
+                id: video.id || null,
+                history_index: video.history_index,
+                type: video.type,
+                name: video.name,
+                meta: video.historical ? '历史 HTML 视频' : (video.size || '已上传'),
+                historical: Boolean(video.historical),
+                preview_url: video.preview_url || ''
+            };
+        });
+        materialVideoInputs.forEach(function (input) {
+            var type = input.getAttribute('data-aikaipin-material-video');
+            var files = Array.prototype.slice.call(input.files || []);
+            var nameNode = document.querySelector('[data-aikaipin-material-video-name="' + type + '"]');
+            if (nameNode) nameNode.textContent = files.length ? ('已选择 ' + files.length + ' 个文件') : ('可多选，单个最大 300MB（' + ({ flow: 'flow', traffic: 'spy', remix: 'mix' }[type] || type) + '）');
+            files.forEach(function (file, pendingIndex) {
+                items.push({ type: type, name: file.name, meta: (file.size / 1048576).toFixed(2) + ' MB · 待上传', historical: false, pending: true, pending_index: pendingIndex });
+            });
+        });
+        materialVideoList.hidden = items.length === 0;
+        materialVideoList.innerHTML = materialVideoCardsHtml(items, existingMaterialReferenceUrl, Boolean(editingProductId));
+    }
+
+    function openProductViewModal(productId) {
+        if (!productId || !productViewModal || !window.jQuery) return;
+        productViewTitle.textContent = '产品详情';
+        productViewVideos.innerHTML = '<div class="text-muted"><i class="fa fa-spinner fa-spin"></i> 正在加载素材视频...</div>';
+        productViewReference.hidden = true;
+        window.jQuery(productViewModal).modal('show');
+        var url = String(config.productViewUrlTemplate || '').replace('__product__', encodeURIComponent(productId));
+        jsonRequest(url, 'GET').then(function (product) {
+            productViewTitle.textContent = (product.product_code || '') + ' · ' + (product.name || '产品详情');
+            var referenceUrl = product.reference_url || '';
+            productViewReference.hidden = !referenceUrl;
+            if (referenceUrl) productViewReference.href = referenceUrl;
+            productViewVideos.innerHTML = materialVideoCardsHtml(Array.isArray(product.material_videos) ? product.material_videos : [], referenceUrl, false);
+        }).catch(function (error) {
+            productViewVideos.innerHTML = '<div class="alert alert-danger">' + escapeHtml(error.message || '素材视频加载失败') + '</div>';
+        });
     }
 
     function shopifySummaryGrid(data) {
@@ -1460,6 +1548,12 @@
             removedImageIds.forEach(function (index) {
                 formData.append('remove_image_indexes[]', String(index));
             });
+            removedMaterialVideoIds.forEach(function (id) {
+                formData.append('remove_material_video_ids[]', String(id));
+            });
+            removedHistoryVideoIndexes.forEach(function (index) {
+                formData.append('remove_history_video_indexes[]', String(index));
+            });
             if (sessions.packageSession && sessions.packageSession.upload_token) {
                 formData.append('package_upload_token', sessions.packageSession.upload_token);
             }
@@ -1557,11 +1651,14 @@
             existingImageFiles = Array.isArray(product.images) ? product.images.slice() : [];
             existingReferenceFile = product.reference_file || null;
             existingPackageFile = product.package_file || null;
+            existingMaterialVideos = Array.isArray(product.material_videos) ? product.material_videos.slice() : [];
+            existingMaterialReferenceUrl = product.reference_url || '';
             renderSkus();
             renderCategories(Array.isArray(product.categories) ? product.categories.map(String) : []);
             renderImagePreviews();
             updateExistingFileName(referenceFileName, existingReferenceFile);
             updateExistingFileName(packageFileName, existingPackageFile);
+            renderMaterialVideos();
             setAuthorizedDepartments(product.authorized_department_ids);
             renderShopifyEditData(product.shopify_data || null, product.product_pages || []);
             syncChoiceButtons();
@@ -1652,6 +1749,10 @@
         });
     }
 
+    materialVideoInputs.forEach(function (input) {
+        input.addEventListener('change', renderMaterialVideos);
+    });
+
     if (addShopifyCsvPair) addShopifyCsvPair.addEventListener('click', addShopifyCsvPairRow);
     if (uploadShopifyCsvList) {
         uploadShopifyCsvList.addEventListener('click', function (event) {
@@ -1714,6 +1815,16 @@
 
     if (uploadModal && window.jQuery) {
         window.jQuery(uploadModal).on('hidden.bs.modal', resetUploadModal);
+    }
+
+    if (productViewModal && window.jQuery) {
+        window.jQuery(productViewModal).on('hidden.bs.modal', function () {
+            Array.prototype.slice.call(productViewModal.querySelectorAll('video')).forEach(function (video) {
+                video.pause();
+                video.removeAttribute('src');
+                video.load();
+            });
+        });
     }
 
     if (imagePreviewModal && window.jQuery) {
@@ -1810,6 +1921,55 @@
             return;
         }
 
+        var removeMaterialVideoButton = event.target.closest('[data-aikaipin-remove-material-video-id]');
+        if (removeMaterialVideoButton) {
+            var materialVideoId = Number(removeMaterialVideoButton.getAttribute('data-aikaipin-remove-material-video-id'));
+            existingMaterialVideos = existingMaterialVideos.filter(function (video) {
+                return Number(video.id) !== materialVideoId;
+            });
+            if (removedMaterialVideoIds.indexOf(materialVideoId) === -1) {
+                removedMaterialVideoIds.push(materialVideoId);
+            }
+            renderMaterialVideos();
+            return;
+        }
+
+        var removePendingMaterialVideoButton = event.target.closest('[data-aikaipin-remove-pending-material-video]');
+        if (removePendingMaterialVideoButton) {
+            var pendingVideoType = removePendingMaterialVideoButton.getAttribute('data-aikaipin-remove-pending-material-video');
+            var pendingVideoIndex = Number(removePendingMaterialVideoButton.getAttribute('data-aikaipin-pending-video-index'));
+            var pendingVideoInput = materialVideoInputs.find(function (input) {
+                return input.getAttribute('data-aikaipin-material-video') === pendingVideoType;
+            });
+            if (pendingVideoInput) {
+                var pendingFiles = Array.prototype.slice.call(pendingVideoInput.files || []);
+                if (typeof window.DataTransfer === 'function') {
+                    var transfer = new window.DataTransfer();
+                    pendingFiles.forEach(function (file, index) {
+                        if (index !== pendingVideoIndex) transfer.items.add(file);
+                    });
+                    pendingVideoInput.files = transfer.files;
+                } else {
+                    pendingVideoInput.value = '';
+                }
+                renderMaterialVideos();
+            }
+            return;
+        }
+
+        var removeHistoryVideoButton = event.target.closest('[data-aikaipin-remove-history-video-index]');
+        if (removeHistoryVideoButton) {
+            var historyVideoIndex = Number(removeHistoryVideoButton.getAttribute('data-aikaipin-remove-history-video-index'));
+            existingMaterialVideos = existingMaterialVideos.filter(function (video) {
+                return Number(video.history_index) !== historyVideoIndex;
+            });
+            if (removedHistoryVideoIndexes.indexOf(historyVideoIndex) === -1) {
+                removedHistoryVideoIndexes.push(historyVideoIndex);
+            }
+            renderMaterialVideos();
+            return;
+        }
+
         var uploadSubmitButton = event.target.closest('[data-aikaipin-upload-submit]');
         if (uploadSubmitButton) {
             event.preventDefault();
@@ -1874,6 +2034,10 @@
             }
             if (actionButton.getAttribute('data-aikaipin-action') === 'edit') {
                 openEditModal(Number(actionButton.getAttribute('data-aikaipin-product-id')));
+                return;
+            }
+            if (actionButton.getAttribute('data-aikaipin-action') === 'view') {
+                openProductViewModal(Number(actionButton.getAttribute('data-aikaipin-product-id')));
                 return;
             }
             if (actionButton.getAttribute('data-aikaipin-action') === 'shopify-import') {
