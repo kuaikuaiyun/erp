@@ -15,8 +15,9 @@ use App\Models\Portal;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Aikaipin\AikaipinProductLibraryStorageService;
 use App\Portals\Operation\AiProductShopifyPublisher;
-use App\Services\AiProductListingPushService;
 use App\Portals\ProductRequests\ProductRequestAccessService;
+use App\Services\AiProductListingPushService;
+use App\Support\PrivateVideoResponse;
 use Encore\Admin\Facades\Admin;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -39,6 +40,7 @@ class OperationAiProductLibraryController extends Controller
         private readonly ProductRequestAccessService $access,
         private readonly AiProductShopifyPublisher $shopifyPublisher,
         private readonly AiProductListingPushService $listingPush,
+        private readonly PrivateVideoResponse $privateVideoResponse,
     ) {}
 
     public function index(Request $request): Response|View
@@ -645,12 +647,12 @@ class OperationAiProductLibraryController extends Controller
         if ($context instanceof Response) return $context;
         $this->assertReferenceVideo($product, $video, $context['user']);
 
-        return response()->file(Storage::disk($video->disk)->path($video->path), [
-            'Content-Type' => $video->mime_type ?: 'video/mp4',
-            'Content-Disposition' => 'inline; filename="'.$video->file_name.'"',
-            'Cache-Control' => 'private, max-age=300',
-            'X-Content-Type-Options' => 'nosniff',
-        ]);
+        return $this->privateVideoResponse->inline(
+            (string) $video->disk,
+            (string) $video->path,
+            (string) $video->file_name,
+            $video->mime_type,
+        );
     }
 
     public function downloadReferenceVideo(Request $request, AikaipinProduct $product, OperationAiProductReferenceVideo $video): Response

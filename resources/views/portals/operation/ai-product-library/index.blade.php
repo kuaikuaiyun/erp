@@ -45,6 +45,8 @@
         .operation-ai-detail-videos { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
         .operation-ai-detail-video { overflow:hidden; border:1px solid #dce6ed; border-radius:7px; background:#f9fbfc; }
         .operation-ai-detail-video video { display:block; width:100%; height:190px; background:#111; object-fit:contain; }
+        .operation-ai-detail-video-error { display:none; margin:8px 10px 0; padding:7px 9px; border:1px solid #f1c2bd; border-radius:4px; color:#b74235; background:#fff3f2; font-size:11px; line-height:1.5; }
+        .operation-ai-detail-video.is-playback-error .operation-ai-detail-video-error { display:block; }
         .operation-ai-detail-video-info { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:3px 8px; padding:8px 10px; }
         .operation-ai-detail-video-code { overflow:hidden; color:#285d7d; font-family:Consolas,monospace; font-size:12px; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }
         .operation-ai-detail-video-info small { color:#8998a6; font-size:10px; }
@@ -379,7 +381,7 @@
         return '<div class="operation-ai-detail-video-groups">' + groups.map(function (group) {
             var groupVideos = videos.filter(function (video) { return video.type === group.type; });
             var cards = groupVideos.length ? '<div class="operation-ai-detail-videos">' + groupVideos.map(function (video) {
-                return '<article class="operation-ai-detail-video"><video controls preload="metadata" src="' + escapeHtml(video.preview_url) + '"></video><div class="operation-ai-detail-video-info"><strong class="operation-ai-detail-video-code" title="' + escapeHtml(video.video_code) + '">' + escapeHtml(video.video_code) + '</strong><span class="label label-info">' + escapeHtml(video.type_label) + '</span><small>' + escapeHtml(video.size) + '</small><small>' + escapeHtml(video.uploaded_by_name) + '</small><div class="operation-ai-detail-video-actions"><span class="text-muted"><i class="fa fa-file-video-o"></i> ' + escapeHtml(video.file_name) + '</span><a class="operation-ai-detail-video-download" href="' + escapeHtml(video.download_url) + '"><i class="fa fa-download"></i> 下载</a></div></div></article>';
+                return '<article class="operation-ai-detail-video"><video controls preload="metadata" playsinline src="' + escapeHtml(video.preview_url) + '"></video><div class="operation-ai-detail-video-error"><i class="fa fa-exclamation-triangle"></i> 当前视频无法在线解码播放，请先下载查看；若下载后也无法播放，说明源文件不完整。</div><div class="operation-ai-detail-video-info"><strong class="operation-ai-detail-video-code" title="' + escapeHtml(video.video_code) + '">' + escapeHtml(video.video_code) + '</strong><span class="label label-info">' + escapeHtml(video.type_label) + '</span><small>' + escapeHtml(video.size) + '</small><small>' + escapeHtml(video.uploaded_by_name) + '</small><div class="operation-ai-detail-video-actions"><span class="text-muted"><i class="fa fa-file-video-o"></i> ' + escapeHtml(video.file_name) + '</span><a class="operation-ai-detail-video-download" href="' + escapeHtml(video.download_url) + '"><i class="fa fa-download"></i> 下载</a></div></div></article>';
             }).join('') + '</div>' : '<div class="operation-ai-detail-video-empty"><i class="fa fa-inbox"></i> 暂无' + group.label + '</div>';
             return '<section class="operation-ai-detail-video-group"><div class="operation-ai-detail-video-group-head"><span><i class="fa ' + group.icon + '"></i> ' + group.label + '</span><span class="badge">' + groupVideos.length + '</span></div>' + cards + '</section>';
         }).join('') + '</div>';
@@ -414,6 +416,13 @@
             item(labels.package_file, packageFile) + item(labels.creator, value(data.created_by_name)) +
             item(labels.updater, value(data.updated_by_name)) + item(labels.created_at, value(data.created_at)) +
             item(labels.updated_at, value(data.updated_at));
+        Array.prototype.forEach.call(content.querySelectorAll('.operation-ai-detail-video video'), function (video) {
+            video.addEventListener('error', function () {
+                var card = video.closest('.operation-ai-detail-video');
+                if (card) card.classList.add('is-playback-error');
+            });
+            video.load();
+        });
         loading.hidden = true; error.hidden = true; content.hidden = false;
     }
     function loadDetail(url) {

@@ -974,7 +974,7 @@
             var media = item.preview_url
                 ? (item.historical
                     ? '<iframe class="aikaipin-material-video-frame" loading="lazy" src="' + escapeHtml(item.preview_url) + '" title="' + escapeHtml(item.name || '历史素材视频') + '" allow="fullscreen" referrerpolicy="same-origin"></iframe>'
-                    : '<video controls preload="none" src="' + escapeHtml(item.preview_url) + '"></video>')
+                    : '<video controls preload="metadata" playsinline src="' + escapeHtml(item.preview_url) + '"></video><div class="aikaipin-material-video-playback-error"><i class="fa fa-exclamation-triangle"></i> 当前视频无法在线解码播放，请下载后查看。</div>')
                 : (item.pending
                     ? '<div class="aikaipin-material-video-history"><i class="fa fa-upload"></i><span>保存产品后即可在线播放</span></div>'
                     : '<div class="aikaipin-material-video-history"><i class="fa fa-file-code-o"></i><span>视频保存在历史 HTML 参考页中</span>' +
@@ -1019,6 +1019,18 @@
         });
         materialVideoList.hidden = items.length === 0;
         materialVideoList.innerHTML = materialVideoCardsHtml(items, existingMaterialReferenceUrl, Boolean(editingProductId));
+        bindMaterialVideoPlaybackErrors(materialVideoList);
+    }
+
+    function bindMaterialVideoPlaybackErrors(root) {
+        if (!root) return;
+        Array.prototype.forEach.call(root.querySelectorAll('.aikaipin-material-video-card video'), function (video) {
+            video.addEventListener('error', function () {
+                var card = video.closest('.aikaipin-material-video-card');
+                if (card) card.classList.add('is-playback-error');
+            });
+            video.load();
+        });
     }
 
     function openProductViewModal(productId) {
@@ -1034,6 +1046,7 @@
             productViewReference.hidden = !referenceUrl;
             if (referenceUrl) productViewReference.href = referenceUrl;
             productViewVideos.innerHTML = materialVideoCardsHtml(Array.isArray(product.material_videos) ? product.material_videos : [], referenceUrl, false);
+            bindMaterialVideoPlaybackErrors(productViewVideos);
         }).catch(function (error) {
             productViewVideos.innerHTML = '<div class="alert alert-danger">' + escapeHtml(error.message || '素材视频加载失败') + '</div>';
         });

@@ -923,6 +923,8 @@
 
 .aikaipin-material-video-card.is-history { background: #fffaf0; border-color: #efd9a7; }
 .aikaipin-material-video-card video { background: #111; display: block; height: 190px; object-fit: contain; width: 100%; }
+.aikaipin-material-video-playback-error { display: none; margin: 8px 10px 0; padding: 7px 9px; border: 1px solid #f1c2bd; border-radius: 4px; color: #b74235; background: #fff3f2; font-size: 11px; line-height: 1.5; }
+.aikaipin-material-video-card.is-playback-error .aikaipin-material-video-playback-error { display: block; }
 .aikaipin-material-video-frame { background: #111; border: 0; display: block; height: 190px; width: 100%; }
 .aikaipin-material-video-card-info { display: grid; gap: 4px; grid-template-columns: auto minmax(0, 1fr) auto; padding: 8px 10px; }
 .aikaipin-material-video-card-info strong { color: #405467; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

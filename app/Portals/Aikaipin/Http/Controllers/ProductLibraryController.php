@@ -20,6 +20,7 @@ use App\Portals\Aikaipin\AikaipinProductLibraryStorageService;
 use App\Portals\Aikaipin\AikaipinSelectionProposalStorageService;
 use App\Portals\Operation\ShopifyProductCsvImporter;
 use App\Services\AiProductListingPushService;
+use App\Support\PrivateVideoResponse;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
@@ -51,6 +52,7 @@ class ProductLibraryController extends Controller
         private readonly AikaipinSelectionProposalStorageService $selectionProposalStorage,
         private readonly ShopifyProductCsvImporter $shopifyCsvImporter,
         private readonly AiProductListingPushService $listingPush,
+        private readonly PrivateVideoResponse $privateVideoResponse,
         private readonly AikaipinHistoricalVideoImporter $historicalVideoImporter,
     ) {}
 
@@ -1237,12 +1239,12 @@ class ProductLibraryController extends Controller
         }
         $this->assertReferenceVideo($product, $video);
 
-        return response()->file(Storage::disk($video->disk)->path($video->path), [
-            'Content-Type' => $video->mime_type ?: 'video/mp4',
-            'Content-Disposition' => 'inline; filename="'.$video->file_name.'"',
-            'Cache-Control' => 'private, max-age=300',
-            'X-Content-Type-Options' => 'nosniff',
-        ]);
+        return $this->privateVideoResponse->inline(
+            (string) $video->disk,
+            (string) $video->path,
+            (string) $video->file_name,
+            $video->mime_type,
+        );
     }
 
     public function downloadReferenceVideo(Request $request, AikaipinProduct $product, OperationAiProductReferenceVideo $video): Response
