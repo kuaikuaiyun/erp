@@ -603,6 +603,7 @@ class OperationAiProductLibraryController extends Controller
                     'path' => $path, 'file_name' => $fileName, 'original_name' => $file->getClientOriginalName(),
                     'mime_type' => $file->getMimeType(), 'size' => $file->getSize(),
                     'department_code' => $departmentCode,
+                    'source_kind' => OperationAiProductReferenceVideo::SOURCE_UPLOAD,
                     'uploaded_by' => $context['user']->getKey(),
                     'uploaded_by_name' => $context['user']->name ?: $context['user']->username,
                 ]);
