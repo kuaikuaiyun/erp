@@ -55,6 +55,11 @@ Schedule::command('fashion-logistics:sync-shopline-orders --days=60')
     ->withoutOverlapping(1440)
     ->runInBackground();
 
+Schedule::command('fashion-logistics:sync-nbc-orders')
+    ->everyTenMinutes()
+    ->withoutOverlapping(1440)
+    ->runInBackground();
+
 // The existing VPS push endpoint remains available. This pull job is opt-in
 // and must be enabled explicitly through LOGISTICS_PAYPAL_RELAY_SYNC_ENABLED.
 Schedule::command('logistics:paypal-relay:sync')

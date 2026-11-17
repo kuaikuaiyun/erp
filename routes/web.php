@@ -37,6 +37,7 @@ use App\Portals\Fashion\Http\Controllers\PerformanceReportController;
 use App\Portals\Fashion\Http\Controllers\StoreController as FashionStoreController;
 use App\Portals\FashionLogistics\Http\Controllers\FashionOrderController;
 use App\Portals\FashionLogistics\Http\Controllers\ShoplineOrderController;
+use App\Portals\FashionLogistics\Http\Controllers\NbcOrderController;
 use App\Portals\Finance\Http\Controllers\FinanceController;
 use App\Portals\Logistics\Http\Controllers\AbnormalSkuController;
 use App\Portals\Logistics\Http\Controllers\LogisticsOrderController;
@@ -58,6 +59,8 @@ use App\Portals\Payment\Http\Controllers\PaymentPortalController;
 use App\Portals\ProductRequests\Http\Controllers\ProductRequestController;
 use Illuminate\Support\Facades\Route;
 
+require __DIR__.'/review_center.php';
+
 Route::get('/fashion/advertising-expenses', [AdvertisingExpenseController::class, 'index'])->name('fashion.advertising-expenses.index');
 Route::get('/fashion/applovin-spends', [FashionAppLovinSpendController::class, 'index'])->name('fashion.applovin-spends.index');
 Route::get('/fashion/applovin-spends/pending-count', [FashionAppLovinSpendController::class, 'pendingCount'])->name('fashion.applovin-spends.pending-count');
@@ -76,6 +79,9 @@ Route::get('/fashion-logistics/orders/test-api/{store}', [FashionOrderController
 Route::get('/fashion-logistics/shopline-orders', [ShoplineOrderController::class, 'index'])->name('fashion-logistics.shopline-orders.index');
 Route::get('/fashion-logistics/shopline-orders/sync-status', [ShoplineOrderController::class, 'syncStatus'])->name('fashion-logistics.shopline-orders.sync-status');
 Route::get('/fashion-logistics/shopline-orders/{order}', [ShoplineOrderController::class, 'show'])->whereNumber('order')->name('fashion-logistics.shopline-orders.show');
+Route::get('/fashion-logistics/nbc-orders', [NbcOrderController::class, 'index'])->name('fashion-logistics.nbc-orders.index');
+Route::get('/fashion-logistics/nbc-orders/sync-status', [NbcOrderController::class, 'syncStatus'])->name('fashion-logistics.nbc-orders.sync-status');
+Route::get('/fashion-logistics/nbc-orders/{order}', [NbcOrderController::class, 'show'])->whereNumber('order')->name('fashion-logistics.nbc-orders.show');
 Route::post('/fashion/advertising-expenses', [AdvertisingExpenseController::class, 'store'])->name('fashion.advertising-expenses.store');
 Route::put('/fashion/advertising-expenses/{report}', [AdvertisingExpenseController::class, 'update'])->name('fashion.advertising-expenses.update');
 Route::delete('/fashion/advertising-expenses/{report}', [AdvertisingExpenseController::class, 'destroy'])->name('fashion.advertising-expenses.destroy');
