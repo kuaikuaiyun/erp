@@ -57,6 +57,12 @@ return new class extends Migration
             : collect();
 
         foreach (OperationProjectCatalog::all() as $code => $project) {
+            // 单包服装门户已有沿用中的 fashion_* 菜单，不能再生成一套
+            // fuzhuang_* 菜单，否则会出现路径相同的重复入口。
+            if ($code === 'fuzhuang') {
+                continue;
+            }
+
             $projectRoleId = null;
             if ($code === 'danbao-general' && $schema->hasTable($rolesTable)) {
                 $departmentName = $project['departments'][0];
