@@ -137,10 +137,10 @@ class FinanceSettlementService
             $creditSources = [...$creditSources, ...array_values(FinanceCatalog::XUZONG_REPORT_IMPORTS), FinanceLogisticsCreditOrders::IMPORTED_DATASET];
         }
         $query = FinanceRecord::query()->whereIn('dataset', $channel === 'paypal' ? ['paypal-orders'] : $creditSources);
-        $query->whereNotExists(function ($deleted): void {
-            $deleted->selectRaw('1')->from('finance_settlement_supplements as removed_settlement')
-                ->whereColumn('removed_settlement.finance_record_id', 'finance_records.id')
-                ->whereNotNull('removed_settlement.payload->_deleted_at');
+        $query->whereNotIn('finance_records.id', function ($deleted): void {
+            $deleted->select('finance_record_id')->from('finance_settlement_supplements')
+                ->whereNotNull('finance_record_id')
+                ->whereNotNull('payload->_deleted_at');
         });
         $this->filterAccountHistory($query, $channel);
         if ($channel === 'paypal') {
@@ -229,7 +229,7 @@ class FinanceSettlementService
         }
     }
 
-    private function rowContext(string $channel): array
+    public function rowContext(string $channel): array
     {
         $accountModels = FinancePaymentAccount::query()->where('account_type', $channel)->get();
         $accounts = $accountModels->pluck('account_name', 'activity_account');
@@ -251,39 +251,68 @@ class FinanceSettlementService
         return compact('accountModels', 'accounts', 'accountsById', 'storesById', 'domains', 'uniqueDomains', 'brushStores', 'locks');
     }
 
-    public function rowBatches(string $channel, array $filters): iterable
+    public function rowBatches(string $channel, array $filters, bool $businessMatchesOnly = false): iterable
     {
         $context = $this->rowContext($channel);
         $context['conflux_report_fees'] = new \ArrayObject;
         $query = $this->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id');
+        if (($filters['card_channel'] ?? null) === 'ye'
+            && in_array($query->getConnection()->getDriverName(), ['mysql', 'mariadb'], true)) {
+            // Read each keyset batch in date order instead of sorting the entire matching ledger again.
+            $query->forceIndex('finance_records_occurred_at_index');
+        }
         $last = null;
         do {
             $page = clone $query;
             if ($last !== null) {
-                $page->where(fn ($scope) => $scope->where('occurred_at', '<', $last->occurred_at)
-                    ->orWhere(fn ($tie) => $tie->where('occurred_at', $last->occurred_at)->where('id', '<', $last->id)));
+                $lastOccurredAt = $last->getRawOriginal('occurred_at');
+                $page->where(fn ($scope) => $scope->where('occurred_at', '<', $lastOccurredAt)
+                    ->orWhere(fn ($tie) => $tie->where('occurred_at', $lastOccurredAt)->where('id', '<', $last->id)));
             }
             $records = $page->limit(500)->get();
             if ($records->isEmpty()) {
                 break;
             }
             $last = $records->last();
-            yield $this->rows($channel, $filters, $records, $context);
+            yield $this->rows($channel, $filters, $records, $context, $businessMatchesOnly);
         } while ($records->count() === 500);
     }
 
-    public function rows(string $channel, array $filters, ?Collection $records = null, ?array $context = null): Collection
+    public function rows(string $channel, array $filters, ?Collection $records = null, ?array $context = null, bool $businessMatchesOnly = false): Collection
     {
         $db = $this->workbooks->database();
         $records ??= $this->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id')->get();
         $supplements = $db->table('finance_settlement_supplements')->whereIntegerInRaw('finance_record_id', $records->modelKeys())->get()->keyBy('finance_record_id');
-        $owners = $db->table('finance_payment_transactions')->whereIntegerInRaw('finance_record_id', $records->modelKeys())
-            ->pluck('payment_account_id', 'finance_record_id');
         ['accountModels' => $accountModels, 'accounts' => $accounts, 'accountsById' => $accountsById,
             'storesById' => $storesById, 'domains' => $domains, 'uniqueDomains' => $uniqueDomains, 'brushStores' => $brushStores, 'locks' => $locks] =
             $context ?? $this->rowContext($channel);
         $worldpay = ($filters['card_channel'] ?? null) === 'worldpay';
         $ye = ($filters['card_channel'] ?? null) === 'ye';
+        if ($businessMatchesOnly && filled($filters['team'] ?? null)) {
+            // Conflux uses the settlement domain for ownership even when it has a linked order.
+            $records = $records->filter(function ($record) use ($supplements, $domains, $filters): bool {
+                $saved = isset($supplements[$record->id])
+                    ? json_decode($supplements[$record->id]->payload, true, 512, JSON_THROW_ON_ERROR) : [];
+                $edited = $saved['_edited_fields'] ?? [];
+                if (array_key_exists('team', $edited) || filled($saved['team'] ?? null)) {
+                    return (array_key_exists('team', $edited) ? $edited['team'] : $saved['team']) === $filters['team'];
+                }
+                $domain = $edited['domain'] ?? (array_key_exists('domain', $saved) ? $saved['domain'] : $record->domain);
+                if (blank($domain)) {
+                    // A linked logistics order can supply a missing domain.
+                    return true;
+                }
+                $domain = strtolower(trim((string) $domain));
+                $group = $domains->get($domain) ?? (str_starts_with($domain, 'www.') ? $domains->get(substr($domain, 4)) : null);
+
+                return ($group?->team ?? ($record->payload['团队'] ?? '')) === $filters['team'];
+            });
+        }
+        if ($records->isEmpty()) {
+            return collect();
+        }
+        $owners = $businessMatchesOnly ? collect() : $db->table('finance_payment_transactions')
+            ->whereIntegerInRaw('finance_record_id', $records->modelKeys())->pluck('payment_account_id', 'finance_record_id');
         $metadata = $this->logisticsMetadata($records, $channel, withCustomReference: ! empty($filters['order_view']),
             summaryOnly: ! empty($filters['summary_only']), includeOrder: $worldpay || ($ye && empty($filters['summary_only'])));
         if ($channel === 'credit_card' && ! empty($filters['summary_only']) && ! $worldpay && ! $ye) {
@@ -332,14 +361,15 @@ class FinanceSettlementService
         $membersByName = $departmentMembers->groupBy(fn ($member) => array_unique(array_filter([$member->name, $member->username])));
         $conflux = $channel === 'credit_card' && ($filters['card_channel'] ?? null) === 'ye'
             ? app(FinanceConfluxSettlement::class) : null;
-        $ledger = $conflux?->entriesFor($records, $accountModels->keyBy('activity_account'));
-        $confluxFees = $conflux && $ledger->isNotEmpty() ? $conflux->feesFor($ledger, $context['conflux_report_fees'] ?? null) : [];
+        $ledger = $businessMatchesOnly ? null : $conflux?->entriesFor($records, $accountModels->keyBy('activity_account'));
+        $confluxFees = null;
+        $reportFees = $context['conflux_report_fees'] ?? null;
         $usdRates = app(FinanceCreditUsdRates::class);
         $confluxOrders = $conflux ? $records : ($channel === 'credit_card' && empty($filters['card_channel']) && empty($filters['summary_only'])
             ? $records->filter(fn ($record) => ($record->payload['_card_channel'] ?? null) === 'ye') : collect());
         $confluxOrderIds = $confluxOrders->pluck('id')->flip();
-        $creditUsdRates = $usdRates->forOrders($confluxOrders);
-        $rows = $records->map(function ($record) use ($channel, $filters, $supplements, $accounts, $owners, $accountsById, $domains, $uniqueDomains, $storesById, $brushStores, $locks, $metadata, $candidateOrders, $membersById, $membersByName, $conflux, $ledger, $confluxFees, $usdRates, $confluxOrderIds, $creditUsdRates, $worldpay, $ye): array {
+        $creditUsdRates = $businessMatchesOnly ? [] : $usdRates->forOrders($confluxOrders);
+        $rows = $records->map(function ($record) use ($channel, $filters, $supplements, $accounts, $owners, $accountsById, $domains, $uniqueDomains, $storesById, $brushStores, $locks, $metadata, $candidateOrders, $membersById, $membersByName, $conflux, $ledger, &$confluxFees, $reportFees, $usdRates, $confluxOrderIds, $creditUsdRates, $worldpay, $ye, $businessMatchesOnly): ?array {
             $owner = $accountsById->get($owners->get($record->id));
             $p = $record->payload;
             $definition = FinanceCatalog::dataset($record->dataset);
@@ -485,6 +515,12 @@ class FinanceSettlementService
             $row['owner'] = filled($saved['owner'] ?? null) ? $saved['owner'] : $ownerName;
             $row['team'] = filled($saved['team'] ?? null) ? $saved['team'] : $team;
             $row = [...$row, ...($saved['_edited_fields'] ?? [])];
+            if ($conflux && ! $this->matchesBusinessFilters($row, $filters)) {
+                return null;
+            }
+            if ($businessMatchesOnly) {
+                return array_intersect_key($row, ['id' => true, 'subscription' => true]);
+            }
             if ($channel === 'paypal') {
                 $manualUpsell = $saved['_edited_fields']['upsell'] ?? $saved['upsell'] ?? null;
                 $isUpsellPayment = $manualUpsell !== null ? self::isUpsell($manualUpsell)
@@ -565,6 +601,7 @@ class FinanceSettlementService
                 }
                 if ($ledger?->has($record->id)) {
                     $entries = $ledger->get($record->id);
+                    $confluxFees ??= $conflux->feesFor($ledger, $reportFees);
                     $details = $conflux->details($entries, $confluxFees);
                     $existingFees = array_intersect_key(array_filter($row['card_layout'], fn ($value) => filled($value)),
                         array_flip(['hold', 'fee', 'per_order_fee', 'refund_fee', 'chargeback_fee', 'ethoca_fee', 'rdr_fee']));
@@ -621,13 +658,14 @@ class FinanceSettlementService
             }
 
             return $row;
-        });
+        })->filter();
+        if ($businessMatchesOnly) {
+            return $rows;
+        }
         if (! empty($filters['summary_projection'])) {
             $rows = $rows->map(fn ($row) => $row + ['_summary_team' => $row['team']]);
         }
-        return $rows->filter(fn ($row) => (! filled($filters['team'] ?? null) || $row['team'] === $filters['team'])
-            && (! filled($filters['subscription'] ?? null) || $row['subscription'] === self::subscriptionLabel($filters['subscription']))
-            && (! filled($filters['domain'] ?? null) || str_contains((string) $row['domain'], $filters['domain']))
+        return $rows->filter(fn ($row) => $this->matchesBusinessFilters($row, $filters)
             && (empty($filters['card_exceptions']) || filled($row['card_layout']['ledger_exceptions'] ?? null))
             && (empty($filters['card_wallet']) || ! empty($row['ledger_wallet']))
             && (empty($filters['card_match']) || ($row['ledger_matched'] ?? false) === ($filters['card_match'] === 'matched'))
@@ -637,6 +675,13 @@ class FinanceSettlementService
                 default => in_array($filters['ledger_settlement_type'], explode('、', $row['card_layout']['ledger_settlement_type'] ?? ''), true),
             }
             && $this->matches(array_replace($row, $row['card_layout'] ?? []), $filters['conditions'] ?? []))->values();
+    }
+
+    private function matchesBusinessFilters(array $row, array $filters): bool
+    {
+        return (! filled($filters['team'] ?? null) || $row['team'] === $filters['team'])
+            && (! filled($filters['subscription'] ?? null) || $row['subscription'] === self::subscriptionLabel($filters['subscription']))
+            && (! filled($filters['domain'] ?? null) || str_contains((string) $row['domain'], $filters['domain']));
     }
 
     public function matches(array $row, array $conditions, ?array $numericFields = null): bool
@@ -1279,15 +1324,16 @@ class FinanceSettlementService
         $cache = Cache::store(config("cache.stores.{$default}.driver") === 'database' ? 'file' : $default);
         $options = $cache->remember($key, 60, function () use ($db): array {
             $datasets = ['paypal-orders', 'xuzong2-orders', 'xuzong2-details', 'xuzong1-details'];
-            $types = FinanceRecord::query()->whereIn('dataset', $datasets)->select('payload->订阅类型 as subscription')->distinct()->pluck('subscription');
-            $supplements = $db->table('finance_settlement_supplements')->select('payload->subscription as subscription')->distinct()->pluck('subscription');
+            $types = FinanceRecord::query()->whereIn('dataset', $datasets)
+                ->distinct()->get(['payload->订阅类型 as subscription', 'payload->是否加购 as upsell']);
+            $supplements = $db->table('finance_settlement_supplements')
+                ->distinct()->get(['payload->subscription as subscription', 'payload->upsell as upsell']);
             $columns = array_intersect(['subscription_type', 'is_add_on'], $db->getSchemaBuilder()->getColumnListing('logistics_orders'));
             $logistics = $columns === [] ? collect() : $db->table('logistics_orders')->distinct()->get(array_values($columns));
-            $upsells = FinanceRecord::query()->whereIn('dataset', $datasets)->select('payload->是否加购 as upsell')->distinct()->pluck('upsell')
-                ->concat($db->table('finance_settlement_supplements')->select('payload->upsell as upsell')->distinct()->pluck('upsell'))
+            $upsells = $types->pluck('upsell')->concat($supplements->pluck('upsell'))
                 ->concat($logistics->pluck('is_add_on'));
 
-            return $types->concat($supplements)->concat($logistics->pluck('subscription_type'))
+            return $types->pluck('subscription')->concat($supplements->pluck('subscription'))->concat($logistics->pluck('subscription_type'))
                 ->concat($upsells->contains(self::isUpsell(...)) ? ['加购'] : [])->all();
         });
 

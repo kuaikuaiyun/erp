@@ -40,6 +40,10 @@ class RefreshFinanceSummaries extends Command
         if (! $acquired) {
             return self::SUCCESS;
         }
+        $memoryLimit = (string) ini_get('memory_limit');
+        $memoryBytes = ini_parse_quantity($memoryLimit);
+        $raisedLimit = $memoryBytes > 0 && $memoryBytes < 256 * 1024 ** 2
+            && ini_set('memory_limit', '256M') !== false;
         try {
             $tracksRevisions = \App\Portals\Finance\FinanceSummaryTriggers::available($db);
             $failed = false;
@@ -71,6 +75,9 @@ class RefreshFinanceSummaries extends Command
                 }
             } else {
                 $lock->release();
+            }
+            if ($raisedLimit && memory_get_usage(true) < $memoryBytes) {
+                ini_set('memory_limit', $memoryLimit);
             }
         }
     }

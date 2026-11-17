@@ -600,11 +600,12 @@ class FinancePortalTest extends TestCase
         $account = $this->financePayPalAccount('结算账户');
         $this->workbooks->importRecords('paypal-orders', [
             2 => $this->recordRow(),
-            3 => [...$this->recordRow(), '交易 ID' => 'GBP-PAYMENT', '貨幣' => 'GBP', '總額' => '1234.50'],
+            3 => [...$this->recordRow(), '交易 ID' => 'GBP-PAYMENT', '貨幣' => 'GBP', '總額' => '1234.50', '订阅类型' => '首单'],
         ], $account->activity_account, 'UTC', 1);
         $url = '/finance/reports/paypal-settlement';
         $view = $this->get($url)->assertOk()->assertViewHas('numericConditionFields', fn ($fields) => in_array('hold', $fields, true));
         $this->assertSame([], array_diff_key($view->viewData('columns'), $view->viewData('conditionFields')));
+        $this->getJson($url.'?subscription_options=1')->assertOk()->assertExactJson(['首单']);
         $this->getJson($url.'?suggestion_field=paypal_6')->assertExactJson([
             ['value' => 'GBP', 'label' => 'GBP'], ['value' => 'USD', 'label' => 'USD'],
         ]);
@@ -617,6 +618,20 @@ class FinancePortalTest extends TestCase
         $sheet = $this->readDownload($this->get($url.'?'.$query.'&download=1&export_columns[]=paypal_6')->assertOk()->streamedContent());
         $this->assertSame('GBP', $sheet->getCell('A2')->getValue());
         $this->assertSame(2, $sheet->getHighestDataRow());
+    }
+
+    public function test_paypal_settlement_date_filter_uses_the_selected_timezone_before_loading_details(): void
+    {
+        $account = $this->financePayPalAccount('结算账户');
+        $this->workbooks->importRecords('paypal-orders', [
+            2 => [...$this->recordRow(), '時間' => '15:59:59', '交易 ID' => 'BEFORE-DAY'],
+            3 => [...$this->recordRow(), '時間' => '16:00:00', '交易 ID' => 'START-OF-DAY'],
+            4 => [...$this->recordRow(), '日期' => '2026-09-09', '時間' => '16:00:00', '交易 ID' => 'AFTER-DAY'],
+        ], $account->activity_account, 'UTC', 1);
+
+        $url = '/finance/reports/paypal-settlement?from=2026-09-09&to=2026-09-09&timezone=Asia%2FShanghai';
+        $this->get($url)->assertOk()->assertViewHas('rows', fn ($rows) =>
+            $rows->total() === 1 && $rows->first()['reference'] === 'START-OF-DAY');
     }
 
     public function test_paypal_settlement_uses_the_configured_brush_order_domain_in_list_and_export(): void
@@ -1338,13 +1353,23 @@ class FinancePortalTest extends TestCase
             $orders[] = [
                 '_card_channel' => 'ye', '平台订单号' => 'BATCH-'.$index,
                 '创建时间' => '2026-11-06 02:00:00', '交易币种' => 'USD',
-                '交易金额' => '10', '支付状态' => 'SUCCESS',
+                '交易金额' => '10', '支付状态' => 'SUCCESS', '团队' => 'Shopify',
             ];
         }
         $this->workbooks->importRecords('xuzong2-details', $orders, 'Batch shop', 'UTC', 1);
 
+        $this->get('/finance/reports/ye-settlement', ['Sec-Fetch-Dest' => 'document'])
+            ->assertOk()->assertSee('正在统计总数')->assertSee('BATCH-512');
+        $this->getJson('/finance/reports/ye-settlement?settlement_total=1')
+            ->assertOk()->assertJsonPath('total', 512);
+
         // Every record is waiting for a statement, including the records in the second batch.
         $this->get('/finance/reports/ye-settlement?card_match=waiting&page=51')->assertOk()
+            ->assertViewHas('rows', fn ($rows) => $rows->total() === 512
+                && $rows->getCollection()->pluck('reference')->all() === array_map(
+                    fn ($index) => 'BATCH-'.$index, range(12, 3)
+                ));
+        $this->get('/finance/reports/ye-settlement?team=Shopify&page=51')->assertOk()
             ->assertViewHas('rows', fn ($rows) => $rows->total() === 512
                 && $rows->getCollection()->pluck('reference')->all() === array_map(
                     fn ($index) => 'BATCH-'.$index, range(12, 3)

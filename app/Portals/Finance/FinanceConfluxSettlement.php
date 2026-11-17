@@ -371,7 +371,8 @@ class FinanceConfluxSettlement
                 $bill = $this->workbooks->database()->table(self::TABLE)->where([
                     'payment_account_id' => $report->payment_account_id, 'settlement_date' => $report->settlement_date,
                     'platform' => 'ye', 'report_hash' => $report->report_hash,
-                ])->whereIn('kind', ['summary', 'sale', 'failed', ...array_keys(self::EVENT_FEES)])->get(['id', 'kind', 'payload']);
+                ])->whereIn('kind', ['summary', 'sale', 'failed', ...array_keys(self::EVENT_FEES)])
+                    ->select('id', 'kind', 'payload')->lazyById(1000);
                 $calculated = $this->statementFees($bill, $report->settlement_date);
                 $cachedEntries = array_sum(array_map('count', $reportFees->getArrayCopy()));
                 while ($reportFees->count() > 0 && ($reportFees->count() >= 64 || $cachedEntries + count($calculated) > 40000)) {
@@ -397,19 +398,29 @@ class FinanceConfluxSettlement
         return $fees;
     }
 
-    private function statementFees(Collection $bill, string $settlementDate): array
+    private function statementFees(iterable $bill, string $settlementDate): array
     {
-        $entries = $bill->map(function ($entry) {
+        $entries = collect();
+        $summaryFeeFields = array_fill_keys([
+            '成功网关费', '失败网关费', ...array_column(self::EVENT_FEES, 1),
+        ], true);
+        foreach ($bill as $entry) {
             $payload = json_decode($entry->payload, true, 512, JSON_THROW_ON_ERROR);
             $merchant = trim($payload['商户号'] ?? '');
             $descriptor = trim($payload['账单描述符'] ?? '');
-            $entry->merchant_descriptor = $merchant !== '' && $descriptor !== '' ? $merchant.'|'.$descriptor : null;
             $tradeTime = $payload[$entry->kind === 'summary' ? '交易日期' : '交易时间'] ?? '';
-            $entry->trade_date = $this->date(is_numeric($tradeTime) ? $tradeTime : substr($tradeTime, 0, 10));
-            $entry->data = $payload;
-
-            return $entry;
-        });
+            $entries->push((object) [
+                'id' => $entry->id,
+                'kind' => $entry->kind,
+                'merchant_descriptor' => $merchant !== '' && $descriptor !== '' ? $merchant.'|'.$descriptor : null,
+                'trade_date' => $this->date(is_numeric($tradeTime) ? $tradeTime : substr($tradeTime, 0, 10)),
+                'data' => match ($entry->kind) {
+                    'summary' => array_intersect_key($payload, $summaryFeeFields + ['账单描述符' => true]),
+                    'sale' => array_intersect_key($payload, ['结算货币' => true, '结算金额' => true]),
+                    default => [],
+                },
+            ]);
+        }
         $sales = $entries->where('kind', 'sale');
         $currencies = $sales->map(fn ($entry) => strtoupper($entry->data['结算货币']))->unique();
         $currency = $currencies->count() === 1 ? $currencies->first() : null;
@@ -663,6 +674,9 @@ class FinanceConfluxSettlement
         $matches = $this->orders()->selectRaw('COUNT(*)')
             ->whereColumn('finance_records.account', 'merchant.activity_account')
             ->whereColumn('finance_records.reference', 'entry.reference');
+        if (in_array($matches->getConnection()->getDriverName(), ['mysql', 'mariadb'], true)) {
+            $matches->forceIndex('finance_records_dataset_account_ref_idx');
+        }
         return $this->workbooks->database()->table(self::TABLE.' as entry')
             ->join('finance_payment_accounts as merchant', 'merchant.id', '=', 'entry.payment_account_id')
             ->where('entry.platform', 'ye')->whereNull('merchant.deleted_at')->whereNotNull('entry.reference')
@@ -683,7 +697,10 @@ class FinanceConfluxSettlement
 
         $keys = (clone $query)->select(['entry.payment_account_id', 'entry.reference'])
             ->groupBy('entry.payment_account_id', 'entry.reference');
-        $total = $this->workbooks->database()->query()->fromSub(clone $keys, 'statement_orders')->count();
+        $db = $this->workbooks->database();
+        $total = in_array($db->getDriverName(), ['mysql', 'mariadb'], true)
+            ? (int) (clone $query)->selectRaw('COUNT(DISTINCT entry.payment_account_id, entry.reference) AS total')->first()->total
+            : $db->query()->fromSub(clone $keys, 'statement_orders')->count();
         if ($limit <= 0 || $offset >= $total) {
             return [$total, collect()];
         }
@@ -798,9 +815,9 @@ class FinanceConfluxSettlement
     {
         return FinanceRecord::query()->from($table === 'finance_records' ? $table : 'finance_records as '.$table)
             ->where($table.'.dataset', 'xuzong2-details')->when($account !== null, fn ($query) => $query->where($table.'.account', $account))
-            ->where($table.'.payload->_card_channel', 'ye')->whereNotExists(function ($deleted) use ($table): void {
-                $deleted->selectRaw('1')->from('finance_settlement_supplements')
-                    ->whereColumn('finance_record_id', $table.'.id')->whereNotNull('payload->_deleted_at');
+            ->where($table.'.payload->_card_channel', 'ye')->whereNotIn($table.'.id', function ($deleted): void {
+                $deleted->select('finance_record_id')->from('finance_settlement_supplements')
+                    ->whereNotNull('finance_record_id')->whereNotNull('payload->_deleted_at');
             });
     }
 

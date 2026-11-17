@@ -193,9 +193,9 @@ class FinancePayPalSettlementOrders
         if ($graph === null) {
             return [collect(), 0, collect()];
         }
-        $orders = $graph[0];
+        $orders = $this->ordersInDateRange($graph[0], $filters);
 
-        $scope = array_intersect_key($filters, array_flip(['account', 'from', 'to', 'reference', 'team', 'domain', 'subscription', 'order_status', 'conditions']));
+        $scope = array_intersect_key($filters, array_flip(['account', 'reference', 'team', 'domain', 'subscription', 'order_status', 'conditions']));
         if (! array_filter($scope)) {
             $rows = collect($this->matchingRows($filters, array_slice($orders, $offset, $limit), $graph, false));
             return [$rows, count($orders), $rows];
@@ -212,6 +212,21 @@ class FinancePayPalSettlementOrders
             $total++;
         }
         return [$rows, $total, collect($subscriptions)];
+    }
+
+    private function ordersInDateRange(array $orders, array $filters): array
+    {
+        if (! filled($filters['from'] ?? null) && ! filled($filters['to'] ?? null)) {
+            return $orders;
+        }
+
+        $zone = $filters['timezone'];
+        $from = filled($filters['from'] ?? null) ? CarbonImmutable::parse($filters['from'], $zone)->getTimestamp() : null;
+        $until = filled($filters['to'] ?? null) ? CarbonImmutable::parse($filters['to'], $zone)->addDay()->getTimestamp() : null;
+
+        // Graph timestamps are the same source dates used by the final row filter.
+        return array_filter($orders, fn (array $order) => ($from === null || $order['time'] >= $from)
+            && ($until === null || $order['time'] < $until));
     }
 
     public function rows(array $filters, ?int $recordId = null): Collection
@@ -233,7 +248,7 @@ class FinancePayPalSettlementOrders
             return;
         }
         $fields = $this->settlements->exportColumns('paypal') + ['gross' => '原币总额', 'success' => true];
-        $orders = $graph[0];
+        $orders = $this->ordersInDateRange($graph[0], $filters);
         if ($recordIds !== null) {
             $selected = array_fill_keys($recordIds, true);
             $orders = array_values(array_filter($orders, fn ($order) => ! isset($order['event']) && isset($selected[$order['id']])));
@@ -250,14 +265,18 @@ class FinancePayPalSettlementOrders
             ->whereNotNull('report_snapshot')->pluck('month')->all();
         $numericConditionFields = $this->settlements->numericConditionFields('paypal');
         $count = count($orders);
+        $context = null;
+        $paymentQuery = null;
         for ($offset = 0; $offset < $count; $offset += 250) {
             $batch = array_slice($orders, $offset, 250);
             $ids = array_column(array_filter($batch, fn ($row) => ! isset($row['event'])), 'id');
-            $records = $this->settlements->query('paypal', [])->whereIntegerInRaw('id', $ids)
+            $paymentQuery ??= $this->settlements->query('paypal', []);
+            $records = (clone $paymentQuery)->whereIntegerInRaw('id', $ids)
                 ->orderByDesc('occurred_at')->orderByDesc('id')->get();
+            $context ??= $this->settlements->rowContext('paypal');
             $payments = $this->settlements->rows('paypal', [
                 'timezone' => $filters['timezone'], 'order_view' => true, 'match_candidate_domains' => $matchCandidateDomains,
-            ], $records)->keyBy('id');
+            ], $records, $context)->keyBy('id');
             foreach ($batch as $order) {
                 if (isset($order['event'])) {
                     $row = $this->unlinkedRow($order['event'], $filters['timezone'], $includeDetails, $lockedMonths);
@@ -316,14 +335,14 @@ class FinancePayPalSettlementOrders
                 $byId = (clone $paymentQuery)->pluck('id')->flip()->all();
             }
         } else {
-            $paymentQuery->when($mysql, fn ($query) => $query->forceIndex('PRIMARY'))
-                ->select('id', 'occurred_at')
-                ->chunkById(700, function ($records) use (&$orders, &$byId): void {
-                    foreach ($records as $record) {
-                        $orders['payment:'.$record->id] = ['id' => $record->id, 'time' => $record->occurred_at->getTimestamp()];
-                        $byId[$record->id] = true;
-                    }
-                });
+            foreach ($paymentQuery->select('id', 'occurred_at')->toBase()->cursor() as $record) {
+                $time = strtotime($record->occurred_at);
+                $orders['payment:'.$record->id] = [
+                    'id' => $record->id,
+                    'time' => $time !== false ? $time : CarbonImmutable::parse($record->occurred_at)->getTimestamp(),
+                ];
+                $byId[$record->id] = true;
+            }
         }
         $index = $invoiceRoots = $events = $extraEvents = $crossAccount = [];
         $removedSettlements = $db->table('finance_settlement_supplements')->whereNotNull('payload->_deleted_at');
@@ -375,7 +394,7 @@ class FinancePayPalSettlementOrders
         if ($recordId !== null) {
             $transactions->addSelect('event_type.category as configured_category');
         }
-        foreach ($transactions->lazyById(1500, 'txn.id', 'id') as $txn) {
+        foreach ($transactions->lazyById(8000, 'txn.id', 'id') as $txn) {
             if (isset($removedEvents[(int) $txn->finance_record_id])) {
                 continue;
             }
@@ -401,7 +420,7 @@ class FinancePayPalSettlementOrders
                 'related_id' => $relatedId, 'related_type' => $relatedType,
                 'invoice' => trim((string) ($info['invoice_id'] ?? '')),
                 'parent' => $relatedType === 'TXN' ? $relatedId : '',
-                'time' => CarbonImmutable::parse($txn->occurred_at, 'UTC')->getTimestamp(),
+                'time' => strtotime($txn->occurred_at.' UTC') ?: CarbonImmutable::parse($txn->occurred_at, 'UTC')->getTimestamp(),
                 'amount' => $this->settlements->number($info['transaction_amount']['value'] ?? null),
                 'currency' => $info['transaction_amount']['currency_code'] ?? '',
                 'fee' => $this->settlements->number($info['fee_amount']['value'] ?? null),

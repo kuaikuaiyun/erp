@@ -771,21 +771,9 @@ class FinanceController extends Controller
             ? app(FinanceLogisticsCreditOrders::class)->query(xuzongReport: $xuzongReport, indexOnly: true)
             : $this->recordsQuery($dataset, $filters, $xuzongReport, lightweight: $xuzongReport);
         $perPage = (int) ($filters['per_page'] ?? 10);
-        if ($indexOnly && $xuzongReport && in_array($query->getConnection()->getDriverName(), ['mysql', 'mariadb'], true)) {
-            $orderIndex = Cache::remember($this->filterCacheKey('xuzong-credit:imported-page-index'), 15, fn () => $query
-                ->orderByDesc('occurred_at')->orderByDesc('id')->toBase()->get(['id', 'account']));
-            $exportAccounts = $orderIndex->countBy('account')->sortKeys()
-                ->map(fn ($total, $account) => (object) ['account' => $account, 'total' => $total])->values();
-            $pageNumber = \Illuminate\Pagination\LengthAwarePaginator::resolveCurrentPage();
-            $records = new \Illuminate\Pagination\LengthAwarePaginator(
-                $orderIndex->forPage($pageNumber, $perPage)->values(), $orderIndex->count(), $perPage, $pageNumber,
-                ['path' => $request->url(), 'query' => $request->query()]
-            );
-        } else {
-            $exportAccounts = (clone $query)->selectRaw('account, count(*) as total')->groupBy('account')->orderBy('account')->get();
-            $records = $query->orderByDesc('occurred_at')->orderByDesc('id')
-                ->paginate($perPage, $hydratePage ? ['id'] : ['*'], total: (int) $exportAccounts->sum('total'))->withQueryString();
-        }
+        $exportAccounts = (clone $query)->selectRaw('account, count(*) as total')->groupBy('account')->orderBy('account')->get();
+        $records = $query->orderByDesc('occurred_at')->orderByDesc('id')
+            ->paginate($perPage, $hydratePage ? ['id'] : ['*'], total: (int) $exportAccounts->sum('total'))->withQueryString();
         if ($hydratePage && $records->isNotEmpty()) {
             $ids = $records->pluck('id');
             $page = app(FinanceLogisticsCreditOrders::class)->query(xuzongReport: $xuzongReport, ids: $ids->all())->get()->keyBy('id');
@@ -1703,10 +1691,11 @@ class FinanceController extends Controller
             ...$context, 'report' => $report, 'filters' => $filters, 'columns' => $columns, 'items' => $items, 'paginator' => $paginator,
             'reportSnapshot' => $reportSnapshot, 'reportStatus' => $reportStatus, 'tab' => $tab, 'tabUrls' => $tabUrls, 'summaryTabs' => \App\Portals\Finance\FinanceTransactionSummary::VIEWS,
             'creditMonths' => $creditMonths,
-            'currencyOptions' => FinanceRecord::query()->whereIn('dataset', ['paypal-orders', 'xuzong2-orders', 'xuzong2-details', 'xuzong1-details'])
+            'currencyOptions' => Cache::remember($this->filterCacheKey('transaction-summary:currencies'), 60, fn () =>
+                FinanceRecord::query()->whereIn('dataset', ['paypal-orders', 'xuzong2-orders', 'xuzong2-details', 'xuzong1-details'])
                 ->whereNotNull('currency')->distinct()->pluck('currency')
                 ->map(fn ($currency) => strtoupper(trim($currency)))
-                ->filter(fn ($currency) => preg_match('/^[A-Z]{3}$/D', $currency))->unique()->sort()->values(),
+                ->filter(fn ($currency) => preg_match('/^[A-Z]{3}$/D', $currency))->unique()->sort()->values()),
             'subscriptionOptions' => $subscriptionOptions,
             'teamOptions' => $teamOptions,
             'conditionFields' => $service::CONDITION_FIELDS,
@@ -1928,6 +1917,9 @@ class FinanceController extends Controller
         }
         $channel = $report === 'paypal-settlement' ? 'paypal' : 'credit_card';
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
+        if ($request->boolean('subscription_options')) {
+            return response()->json($service->subscriptionOptions(collect()))->header('Cache-Control', 'no-store');
+        }
         $conditionFields = $service->conditionFields($channel);
         $numericConditionFields = $service->numericConditionFields($channel);
         $fixedCardChannel = FinanceCreditSettlementLayout::REPORT_CHANNELS[$report] ?? null;
@@ -2019,7 +2011,36 @@ class FinanceController extends Controller
             && empty($filters['card_wallet']) && empty($filters['card_exceptions']) && empty($filters['ledger_settlement_type'])
             && ! filled($filters['team'] ?? null) && ! filled($filters['subscription'] ?? null)
             && ! filled($filters['domain'] ?? null) && empty($filters['conditions']);
-        if ($orderView) {
+        $deferredTotalUrl = null;
+        $firstPage = max(1, (int) $request->query('page', 1)) === 1;
+        if ($canPaginate && $firstPage && ($filters['card_channel'] ?? null) === 'ye'
+            && ! filled($filters['from'] ?? null) && ! filled($filters['to'] ?? null)
+            && empty($filters['card_match'])
+            && ($request->boolean('settlement_total') || $request->header('Sec-Fetch-Dest') === 'document')) {
+            $perPage = (int) ($filters['per_page'] ?? 10);
+            $query = $service->query($channel, $filters);
+            $queryParams = $request->except('settlement_total');
+            $paginationOptions = ['path' => $request->url(), 'query' => $queryParams];
+            if ($request->boolean('settlement_total')) {
+                [$statementTotal] = app(FinanceConfluxSettlement::class)->unmatchedPage($filters, 0, 0);
+                $total = $query->count() + $statementTotal;
+                $pagination = new \Illuminate\Pagination\LengthAwarePaginator(
+                    array_fill(0, min($perPage, $total), null), $total, $perPage, 1, $paginationOptions,
+                );
+
+                return response()->json(['total' => $total, 'pagination' => view('portals.finance.pagination', ['paginator' => $pagination])->render()])
+                    ->header('Cache-Control', 'no-store');
+            }
+            $records = $query->orderByDesc('occurred_at')->orderByDesc('id')->limit($perPage + 1)->get();
+            if ($records->count() > $perPage) {
+                $rows = $service->rows($channel, $filters, $records->take($perPage));
+                $paginator = new \Illuminate\Pagination\LengthAwarePaginator($rows, $perPage + 1, $perPage, 1, $paginationOptions);
+                $deferredTotalUrl = $request->fullUrlWithQuery(['settlement_total' => 1]);
+            }
+        }
+        if ($paginator !== null) {
+            // The first page already has enough orders without counting the rest of the ledger.
+        } elseif ($orderView) {
             $pageSize = (int) ($filters['per_page'] ?? 10);
             $paypalOrders = app(\App\Portals\Finance\FinancePayPalSettlementOrders::class);
             if ($request->boolean('download') || $request->has('suggestion_field')) {
@@ -2053,7 +2074,12 @@ class FinanceController extends Controller
             $total = 0;
             $rows = collect();
             $subscriptions = [];
-            foreach ($resultBatches() as $batch) {
+            $businessMatchesOnly = ($filters['card_channel'] ?? null) === 'ye'
+                && empty($filters['card_wallet']) && empty($filters['card_exceptions'])
+                && empty($filters['ledger_settlement_type']) && empty($filters['card_match']) && empty($filters['conditions'])
+                && (filled($filters['team'] ?? null) || filled($filters['subscription'] ?? null) || filled($filters['domain'] ?? null));
+            $batches = $businessMatchesOnly ? $service->rowBatches($channel, $filters, businessMatchesOnly: true) : $resultBatches();
+            foreach ($batches as $batch) {
                 foreach ($batch as $row) {
                     $subscriptions[(string) ($row['subscription'] ?? '')] = ['subscription' => $row['subscription'] ?? null];
                     if ($total >= $offset && $rows->count() < $perPage) {
@@ -2061,6 +2087,11 @@ class FinanceController extends Controller
                     }
                     $total++;
                 }
+            }
+            if ($businessMatchesOnly && $rows->isNotEmpty()) {
+                $records = $service->query($channel, $filters)->whereIntegerInRaw('id', $rows->pluck('id')->all())
+                    ->orderByDesc('occurred_at')->orderByDesc('id')->get();
+                $rows = $service->rows($channel, $filters, $records);
             }
             $paginator = new \Illuminate\Pagination\LengthAwarePaginator($rows, $total, $perPage, $page,
                 ['path' => $request->url(), 'query' => $request->query()]);
@@ -2134,7 +2165,7 @@ class FinanceController extends Controller
         $paginator ??= new \Illuminate\Pagination\LengthAwarePaginator($rows->forPage($page, $perPage)->values(), $rows->count(), $perPage, $page, ['path' => $request->url(), 'query' => $request->query()]);
         $accounts = FinancePaymentAccount::query()->where('account_type', $channel)->orderBy('id')->get();
         $filterAccounts = $accounts;
-        if ($cardLayout && $accounts->isNotEmpty()) {
+        if ($cardLayout && $fixedCardChannel !== 'worldpay' && $accounts->isNotEmpty()) {
             $platform = $filters['card_channel'];
             [$configured, $other] = $accounts->partition(
                 fn ($account) => FinanceCreditSettlementLayout::accountPlatform($account) === $platform
@@ -2152,12 +2183,14 @@ class FinanceController extends Controller
 
         return response()->view('portals.finance.settlement', [...$context, 'report' => $report, 'channel' => $channel, 'filters' => $filters,
             'fixedCardChannel' => $fixedCardChannel,
+            'deferredTotalUrl' => $deferredTotalUrl,
             'rows' => $paginator, 'columns' => $columns, 'exportColumns' => $exportColumns,
             'moneyFields' => $service->moneyFields($channel), 'textFields' => $service->textFields($channel),
             'editorFields' => $editorFields, 'orderView' => $orderView,
             'editorNumericFields' => app(\App\Portals\Finance\FinanceSettlementEditor::class)->numericFields($channel),
             'conditionFields' => $conditionFields, 'numericConditionFields' => $numericConditionFields,
-            'subscriptionOptions' => $service->subscriptionOptions(isset($subscriptions) ? collect($subscriptions) : $rows),
+            'subscriptionOptions' => collect($subscriptions ?? $paginator->items())->pluck('subscription')
+                ->map($service::subscriptionLabel(...))->filter(fn ($value) => $value !== '')->unique()->sort()->values(),
             'accounts' => $accounts, 'filterAccounts' => $filterAccounts,
             'cardGroups' => $channel === 'credit_card' ? FinanceCreditAccountGroup::query()->orderBy('name')->pluck('name', 'id') : collect(),
             'teams' => ($orderView ? $service->operationDepartments()->pluck('name') : $this->workbooks->domainGroups()->pluck('team'))
@@ -3413,14 +3446,21 @@ class FinanceController extends Controller
             $choices['direction'] = collect(__('finance.accounting.directions'))
                 ->map(fn ($label, $value) => compact('value', 'label'))->values()->all();
         }
+        $recordOptions = $creditOptions === null
+            ? Cache::remember($this->filterCacheKey($dataset.':record-options'), 60, function () use ($dataset, $fields): array {
+                $columns = array_map(fn ($field) => FinanceCatalog::filterColumn($dataset, $field).' as '.$field, $fields);
+                $options = $this->recordsQuery($dataset, [])->distinct()->toBase()->get($columns);
+
+                return collect($fields)->mapWithKeys(fn ($field) => [
+                    $field => $options->pluck($field)->filter(fn ($value) => $value !== null && $value !== '')
+                        ->uniqueStrict()->sort(SORT_STRING)->values()->all(),
+                ])->all();
+            })
+            : [];
         foreach ($fields as $field) {
-            $column = FinanceCatalog::filterColumn($dataset, $field);
             $values = $field === 'currency' && $reportCurrencies !== null ? collect($reportCurrencies) : ($creditOptions !== null
                 ? $creditOptions->pluck($field)->filter(fn ($value) => $value !== null && $value !== '')->uniqueStrict()->sort()
-                : collect(Cache::remember($this->filterCacheKey($dataset.':'.$field), 60, function () use ($dataset, $column): array {
-                    return $this->recordsQuery($dataset, [])->whereNotNull($column)
-                        ->select($column.' as choice')->distinct()->orderBy('choice')->pluck('choice')->filter(fn ($value) => $value !== '')->all();
-                })));
+                : collect($recordOptions[$field]));
             if ($field === 'raw_type') {
                 $values = $values->merge($this->workbooks->database()->table('finance_transaction_types')->pluck('raw_type'))->unique();
             }

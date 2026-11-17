@@ -403,7 +403,12 @@ class AssistantDomainStore extends Model
             $orderNumber = $matches[1];
         }
 
-        return $prefix.'-'.$orderNumber;
+        return self::normalizeStaenTongtuOrderNumber($prefix.'-'.$orderNumber);
+    }
+
+    public static function normalizeStaenTongtuOrderNumber(string $number): string
+    {
+        return preg_replace('/^staen-(?:JS)?918([0-9]{4})$/iD', 'staen-$1', $number);
     }
 
     /** @return array<string, mixed> */
