@@ -83,7 +83,7 @@
 @endphp
 
 @push('styles')
-    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-submissions.css?v=20261113-4">
+    <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/aikaipin-submissions.css?v=20261117-1">
 @endpush
 
 @push('scripts')
@@ -123,8 +123,8 @@
                 <table class="table table-hover aikaipin-submission-table aikaipin-placement-evaluation-table">
                     <thead>
                     <tr>
-                        <th>产品图片</th><th>产品编号</th><th>产品名称</th><th>产品分类</th>
-                        <th>来源平台 / 类型</th><th>投放总数据</th><th>平均 ROI</th><th>测评人数</th><th>更新时间</th><th>测评状态</th><th>操作</th>
+                        <th class="aikaipin-placement-product-image-column">产品图片</th><th class="aikaipin-placement-product-code-column">产品编号</th><th class="aikaipin-placement-product-name-column">产品名称</th><th class="aikaipin-placement-product-category-column">产品分类</th>
+                        <th class="aikaipin-placement-product-source-column">来源平台 / 类型</th><th class="aikaipin-placement-product-total-column">投放总数据</th><th class="aikaipin-placement-product-roi-column">平均 ROI</th><th class="aikaipin-placement-product-count-column">测评人数</th><th class="aikaipin-placement-product-updated-column">更新时间</th><th class="aikaipin-placement-product-status-column">测评状态</th><th class="aikaipin-placement-product-action-column">操作</th>
                     </tr>
                     </thead>
                     <tbody>
@@ -138,12 +138,12 @@
                             $images = $product->imageFiles();
                         @endphp
                         <tr data-aikaipin-list-row>
-                            <td>@if($images !== [])<img src="{{ route($placementRouteNames['image'], [$product, 0, 'thumb' => 1, 'v' => $product->updated_at?->getTimestamp()]) }}" loading="lazy" decoding="async" width="52" height="52" style="width:52px;height:52px;object-fit:cover;border-radius:6px">@else — @endif</td>
-                            <td><code>{{ $product->product_code }}</code></td>
-                            <td><strong>{{ $product->name }}</strong></td>
-                            <td>@foreach($product->categoryValues() as $category)<span class="label label-default">{{ $category }}</span> @endforeach</td>
-                            <td>{{ trans('aikaipin.upload.source_options.'.$product->source_platform) }}<br><small>{{ trans('aikaipin.upload.type_options.'.$product->product_type) }}</small></td>
-                            <td>
+                            <td class="aikaipin-placement-product-image-cell">@if($images !== [])<img src="{{ route($placementRouteNames['image'], [$product, 0, 'thumb' => 1, 'v' => $product->updated_at?->getTimestamp()]) }}" loading="lazy" decoding="async" width="52" height="52" style="width:52px;height:52px;object-fit:cover;border-radius:6px">@else — @endif</td>
+                            <td class="aikaipin-placement-product-code-cell"><code>{{ $product->product_code }}</code></td>
+                            <td class="aikaipin-placement-product-name-cell"><strong>{{ $product->name }}</strong></td>
+                            <td class="aikaipin-placement-product-category-cell">@foreach($product->categoryValues() as $category)<span class="label label-default">{{ $category }}</span> @endforeach</td>
+                            <td class="aikaipin-placement-product-source-cell">{{ trans('aikaipin.upload.source_options.'.$product->source_platform) }}<br><small>{{ trans('aikaipin.upload.type_options.'.$product->product_type) }}</small></td>
+                            <td class="aikaipin-placement-product-total-cell">
                                 @forelse($records->groupBy(fn($record) => strtolower((string) $record->platform)) as $platform => $platformRecords)
                                     @php
                                         $platformTranslationKey = 'aikaipin.placement_evaluation.platform_options.'.$platform;
@@ -168,11 +168,11 @@
                                     —
                                 @endforelse
                             </td>
-                            <td>@if($averageRoi !== null)<strong>{{ number_format($averageRoi, 2) }}</strong>@else — @endif</td>
-                            <td><span class="badge bg-light-blue">{{ $evaluatorCount }}</span></td>
-                            <td>{{ $updatedAt?->timezone(config('app.timezone'))->format('Y-m-d H:i') }}</td>
-                            <td>@if($evaluations->isNotEmpty())<span class="label label-success">已测评</span>@else<span class="label label-danger">未测评</span>@endif</td>
-                            <td><button class="btn btn-default btn-sm" type="button" data-aikaipin-product-placement-view data-url="{{ route($placementRouteNames['product_show'], $product) }}"><i class="fa fa-eye"></i> 查看详情</button></td>
+                            <td class="aikaipin-placement-product-roi-cell">@if($averageRoi !== null)<strong>{{ number_format($averageRoi, 2) }}</strong>@else — @endif</td>
+                            <td class="aikaipin-placement-product-count-cell"><span class="badge bg-light-blue">{{ $evaluatorCount }}</span></td>
+                            <td class="aikaipin-placement-product-updated-cell">{{ $updatedAt?->timezone(config('app.timezone'))->format('Y-m-d H:i') }}</td>
+                            <td class="aikaipin-placement-product-status-cell">@if($evaluations->isNotEmpty())<span class="label label-success">已测评</span>@else<span class="label label-danger">未测评</span>@endif</td>
+                            <td class="aikaipin-placement-product-action-cell"><button class="btn btn-default btn-sm" type="button" data-aikaipin-product-placement-view data-url="{{ route($placementRouteNames['product_show'], $product) }}"><i class="fa fa-eye"></i> 查看详情</button></td>
                         </tr>
                     @endforeach
                     <tr data-aikaipin-list-empty-row @if ($products->isNotEmpty()) hidden @endif>
