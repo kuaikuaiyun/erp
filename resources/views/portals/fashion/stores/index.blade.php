@@ -42,9 +42,16 @@
   $builder = mb_strtolower(trim((string) $store->site_builder));
   $isShopline = $builder === 'shopline';
   $isXShoppy = in_array($builder, ['xshoppy', 'xshopy'], true);
-  $supportsCredentials = $isShopline || $isXShoppy;
-  $configured = $isShopline ? filled($store->shopline_app_token) : ($isXShoppy && filled($store->xshoppy_api_key) && filled($store->xshoppy_password));
-  $builderLabel = $isShopline ? 'Shopline' : ($isXShoppy ? 'XShoppy' : strtoupper($builder ?: '—'));
+  $isNbc = $builder === 'nbc';
+  $isShopYY = $builder === 'shopyy';
+  $isNbcFamily = $isNbc || $isShopYY;
+  $supportsCredentials = $isShopline || $isXShoppy || $isNbcFamily;
+  $nbcFamilyToken = $isShopYY ? ($store->shopyy_app_token ?: $store->nbc_app_token) : $store->nbc_app_token;
+  $nbcFamilyField = $isShopYY ? 'shopyy_app_token' : 'nbc_app_token';
+  $configured = $isShopline
+   ? filled($store->shopline_app_token)
+   : ($isXShoppy ? filled($store->xshoppy_api_key) && filled($store->xshoppy_password) : ($isNbcFamily && filled($nbcFamilyToken)));
+  $builderLabel = $isShopline ? 'Shopline' : ($isXShoppy ? 'XShoppy' : ($isShopYY ? 'ShopYY' : ($isNbc ? 'NBC' : strtoupper($builder ?: '—'))));
   $storeOperator = $store->ownerUser ?: $operatorLookup->get(mb_strtolower(trim((string) $store->user_name)));
   $storeDepartments = $storeOperator?->departments ?? collect();
  @endphp
@@ -57,6 +64,8 @@
   <div class="credential-locked credentials-visible">
    @if($isShopline)
     <div class="credential-field"><label>后台 API 访问令牌</label><textarea class="form-control input-sm" readonly>{{ $store->shopline_app_token }}</textarea></div>
+   @elseif($isNbcFamily)
+    <div class="credential-field"><label>{{ $builderLabel }} API Token</label><textarea class="form-control input-sm" readonly>{{ $nbcFamilyToken }}</textarea></div>
    @else
     <div class="credential-field"><label>API 密钥</label><input class="form-control input-sm" type="text" value="{{ $store->xshoppy_api_key }}" readonly></div>
     <div class="credential-field"><label>密码</label><input class="form-control input-sm" type="text" value="{{ $store->xshoppy_password }}" readonly></div>
@@ -64,6 +73,7 @@
    <div class="credential-lock-note"><i class="fa fa-lock"></i><span>仅查看，不可编辑</span></div>
   </div>
  @elseif($isShopline)<form class="credential-form" method="post" action="{{ route($operationRoute.'.credentials.update',$store) }}">@csrf @method('PATCH')<div class="credential-field"><label>后台 API 访问令牌</label><textarea class="form-control input-sm" name="shopline_app_token" required autocomplete="new-password" placeholder="粘贴 Shopline 访问令牌"></textarea></div><button class="btn btn-primary btn-sm credential-save" onclick="return confirm('确认保存该 Shopline 店铺的后台 API 访问令牌？保存后不能再次编辑。')"><i class="fa fa-save"></i> 保存</button></form>
+ @elseif($isNbcFamily)<form class="credential-form" method="post" action="{{ route($operationRoute.'.credentials.update',$store) }}">@csrf @method('PATCH')<div class="credential-field"><label>{{ $builderLabel }} API Token</label><textarea class="form-control input-sm" name="{{ $nbcFamilyField }}" required autocomplete="new-password" placeholder="粘贴 {{ $builderLabel }} API Token"></textarea></div><button class="btn btn-primary btn-sm credential-save" onclick="return confirm('确认保存该 {{ $builderLabel }} 店铺的 API Token？保存后不能再次编辑。')"><i class="fa fa-save"></i> 保存</button></form>
  @else<form class="credential-form" method="post" action="{{ route($operationRoute.'.credentials.update',$store) }}">@csrf @method('PATCH')<div class="credential-field"><label>API 密钥</label><input class="form-control input-sm" type="password" name="xshoppy_api_key" required autocomplete="new-password" placeholder="填写 API 密钥"></div><div class="credential-field"><label>密码</label><input class="form-control input-sm" type="password" name="xshoppy_password" required autocomplete="new-password" placeholder="填写密码"></div><button class="btn btn-primary btn-sm credential-save" onclick="return confirm('确认保存？保存后不能再次编辑。')"><i class="fa fa-save"></i> 保存</button></form>@endif
  </td></tr>
 @empty<tr><td colspan="7" class="text-center text-muted" style="padding:45px">暂无符合筛选条件的店铺</td></tr>@endforelse

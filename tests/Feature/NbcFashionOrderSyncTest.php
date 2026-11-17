@@ -39,6 +39,7 @@ class NbcFashionOrderSyncTest extends TestCase
             $table->string('xshoppy_password', 191)->nullable();
             $table->string('shopline_app_token', 500)->nullable();
             $table->text('nbc_app_token')->nullable();
+            $table->text('shopyy_app_token')->nullable();
             $table->string('shop_status')->nullable();
             $table->unsignedBigInteger('owner_user_id')->nullable();
             $table->string('user_name')->nullable();
@@ -378,7 +379,11 @@ class NbcFashionOrderSyncTest extends TestCase
     public function test_both_builders_use_their_own_tokens_and_preserve_platform_identity(): void
     {
         $nbc = $this->store(['nbc_app_token' => 'nbc-token']);
-        $shopyy = $this->store(['site_builder' => ' ShOpYy ', 'nbc_app_token' => 'shopyy-token']);
+        $shopyy = $this->store([
+            'site_builder' => ' ShOpYy ',
+            'nbc_app_token' => 'legacy-wrong-token',
+            'shopyy_app_token' => 'shopyy-token',
+        ]);
         $this->store(['site_builder' => 'shopline']);
         Http::fake(fn () => Http::response($this->response([$this->payload()])));
 
