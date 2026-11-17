@@ -5,7 +5,18 @@
 
     const url = new URL(window.location.href);
     url.searchParams.set('snapshot_status', '1');
-    const originalFilters = new URLSearchParams(new FormData(form)).toString();
+    url.searchParams.delete('report_snapshot');
+    const displayedTime = notice.dataset.financeSnapshotTime;
+    const message = notice.querySelector('[data-finance-snapshot-message]');
+    const formValues = () => new URLSearchParams(new FormData(form)).toString();
+    const originalFilters = formValues();
+    let navigating = false;
+    form.addEventListener('submit', () => { navigating = true; });
+    document.addEventListener('click', (event) => {
+        if (event.target.closest?.('.finance-summary-tabs a, .finance-channel-tabs a, .finance-report-actions a')) {
+            navigating = true;
+        }
+    }, true);
     const messages = {
         pending: '报表已登记，等待后台生成。',
         updating: '正在更新，当前显示上一版。',
@@ -13,27 +24,29 @@
     };
 
     async function checkStatus() {
-        if (!document.hidden) {
+        if (!document.hidden && !navigating) {
             try {
                 const response = await fetch(url, { headers: { Accept: 'application/json' } });
                 if (response.status === 401 || response.status === 403 || response.redirected) return;
                 if (response.ok) {
-                    const { state } = await response.json();
-                    if (state === 'ready') {
-                        const filtersChanged = new URLSearchParams(new FormData(form)).toString() !== originalFilters;
-                        if (!filtersChanged && !form.contains(document.activeElement)
+                    const { state, updated_at: updatedAt } = await response.json();
+                    if (navigating) return;
+                    if (state === 'ready' && updatedAt && updatedAt !== displayedTime) {
+                        const latest = new URL(window.location.href);
+                        latest.searchParams.delete('report_snapshot');
+                        if (formValues() === originalFilters && !form.contains(document.activeElement)
                             && !document.querySelector('[data-export-row]:checked')) {
-                            window.location.reload();
+                            window.location.replace(latest.toString());
                         } else {
                             const link = document.createElement('a');
-                            link.href = window.location.href;
+                            link.href = latest.toString();
                             link.textContent = '查看已生成的结果';
-                            notice.replaceChildren('报表已生成。', link);
+                            message.replaceChildren('报表已生成。', link, ' ');
                         }
                         return;
                     }
-                    if (messages[state] && state !== notice.dataset.financeSnapshotStatus) {
-                        notice.textContent = messages[state];
+                    if (state !== notice.dataset.financeSnapshotStatus) {
+                        message.textContent = messages[state] ?? '';
                         notice.dataset.financeSnapshotStatus = state;
                     }
                 }

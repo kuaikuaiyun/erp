@@ -9,6 +9,7 @@ use App\Models\LogisticsOrderItem;
 use App\Portals\Logistics\LogisticsOrderItemService;
 use App\Portals\Logistics\SkuDatabaseLookupService;
 use App\Portals\Logistics\TongtuSkuMappingService;
+use App\Portals\Logistics\TongtuOrderSnapshotService;
 use App\Portals\Operation\OperationReportMetricsService;
 use App\Portals\Payment\PaymentAccountRiskSnapshotService;
 use App\Portals\Payment\PaymentPayPalLedgerBackfillService;
@@ -38,6 +39,42 @@ Schedule::command('logistics:tongtu-skus:refresh --limit=200')
     ->everyMinute()
     ->withoutOverlapping(5)
     ->runInBackground();
+
+Schedule::command('logistics:tongtu-orders:sync')
+    ->everyMinute()
+    ->withoutOverlapping(120)
+    ->runInBackground();
+
+Artisan::command('logistics:tongtu-orders:sync {--date=}', function (TongtuOrderSnapshotService $snapshots): int {
+    $date = $this->option('date');
+    if ($date !== null && validator(['date' => $date], [
+        'date' => ['date_format:Y-m-d', 'before_or_equal:'.now('Asia/Shanghai')->toDateString()],
+    ])->fails()) {
+        $this->error('请输入有效的同步日期（YYYY-MM-DD）。');
+
+        return 1;
+    }
+
+    $exitCode = 0;
+    $batchSize = $date === null ? 5 : 1;
+    for ($index = 0; $index < $batchSize; $index++) {
+        try {
+            $day = $snapshots->syncNextDay($date);
+        } catch (\RuntimeException) {
+            $this->error('通途订单同步未完成，该日期将延后重试。');
+            $exitCode = 1;
+
+            continue;
+        }
+
+        if ($day === null) {
+            break;
+        }
+        $this->info("通途订单已同步 {$day}。");
+    }
+
+    return $exitCode;
+});
 
 Schedule::command('logistics:sku-database:backfill-guide-costs --batch=100')
     ->everyFiveMinutes()

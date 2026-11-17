@@ -1588,6 +1588,8 @@ class FinanceController extends Controller
             'page' => 'nullable|integer|min:1', 'payment_account_id' => 'nullable|integer|min:1',
             'currency' => ['nullable', 'regex:/^[A-Z]{3}$/'], 'channel' => ['nullable', Rule::in(array_keys(\App\Portals\Finance\FinanceTransactionSummary::VIEWS))],
             'team' => 'nullable|string|max:100', 'subscription' => 'nullable|string|max:100', 'download' => 'nullable|boolean',
+            'download_missing' => 'nullable|boolean',
+            'missing_format' => ['nullable', Rule::in(['csv', 'xlsx'])],
             'conditions' => 'nullable|array|max:10', 'conditions.*' => 'array:field,operator,value',
             'conditions.*.field' => ['required', Rule::in(array_keys(\App\Portals\Finance\FinanceSettlementService::CONDITION_FIELDS))],
             'conditions.*.operator' => 'required|in:equals', 'conditions.*.value' => 'required|string|max:191',
@@ -1613,6 +1615,10 @@ class FinanceController extends Controller
         $month = CarbonImmutable::parse($filters['month'].'-01', 'Asia/Shanghai');
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
         $summary = app(\App\Portals\Finance\FinanceTransactionSummary::class);
+        if ($request->boolean('download_missing')) {
+            return $this->downloadMissingDetails($service, $month, $filters['missing_format'] ?? 'xlsx');
+        }
+        unset($filters['missing_format']);
         if ($request->has('suggestion_field')) {
             $rows = $this->transactionSummaryRows($service, $tab, $filters, $month, $account, reuse: true);
             $suggestion = $request->validate([
@@ -1629,7 +1635,7 @@ class FinanceController extends Controller
         $scope = \Illuminate\Support\Arr::except($filters, ['page', 'per_page', 'download']);
         ksort($scope);
         $snapshots = app(\App\Portals\Finance\FinanceReportSnapshots::class);
-        $snapshotId = $request->boolean('download') || $request->has('page')
+        $snapshotId = ! $statusOnly && ($request->boolean('download') || $request->has('page'))
             ? $request->query('report_snapshot')
             : null;
         $build = fn () => $this->buildTransactionReport($tab, $scope, $month, $account);
@@ -1666,6 +1672,9 @@ class FinanceController extends Controller
             return response()->json($reportStatus)->header('Cache-Control', 'no-store');
         }
         [$items, $subscriptionOptions] = $result;
+        $items = $summary->reallocateUnassignedFailures($items, $tab);
+        $items = array_values(array_filter($items, fn (array $row) => filled($row['team'])
+            && (! $summary::requiresSubscription($tab) || filled($row['subscription']))));
         if ($request->boolean('download')) {
             abort_if(! $live && $reportSnapshot === null, 409, '报表正在生成，请稍后导出。');
             $export = \App\Portals\Finance\FinanceExportSelection::filter($request, $items)->map(fn ($row) => array_map(fn ($field) => $row[$field] ?? null, array_keys($columns)));
@@ -1707,6 +1716,99 @@ class FinanceController extends Controller
         ]);
     }
 
+    private function downloadMissingDetails(FinanceSettlementService $service, CarbonImmutable $month, string $format): Response
+    {
+        $timeout = (int) ini_get('max_execution_time');
+        if ($timeout > 0 && $timeout < 900) {
+            set_time_limit(900);
+        }
+        $limit = ini_parse_quantity((string) ini_get('memory_limit'));
+        if ($limit > 0 && $limit < 256 * 1024 ** 2) {
+            ini_set('memory_limit', '256M');
+        }
+        $filters = ['from' => $month->toDateString(), 'to' => $month->endOfMonth()->toDateString(), 'timezone' => 'Asia/Shanghai',
+            'stream_statement_export' => true];
+        $missing = static function (array $row, array $fields): bool {
+            foreach ($fields as $field) {
+                if (blank($row[$field] ?? null)) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+        $paypal = array_intersect_key($service->exportColumns('paypal'), $service->listColumns('paypal'));
+        $paypalRows = function () use ($filters, $paypal, $missing): iterable {
+            foreach (app(FinancePayPalSettlementOrders::class)->exportRows($filters) as $row) {
+                if ($missing($row, ['domain', 'team', 'subscription'])
+                    || (! empty($row['success']) && $missing($row, ['settlement']))) {
+                    yield array_map(fn ($field) => match (true) {
+                        $field === 'paypal_18' => FinanceProductNames::categories((string) ($row[$field] ?? '')),
+                        $field === 'review' && ($row[$field] ?? null) === FinancePayPalSettlementOrders::ACCOUNT_RESERVE_NOTE => '',
+                        default => FinancePayPalSettlementOrders::splitRefundNote($row, $field) ?? ($row[$field] ?? ''),
+                    }, array_keys($paypal));
+                }
+            }
+        };
+
+        $sheets = [];
+        foreach (['ye' => '叶总支付明细', 'worldpay' => 'Worldpay明细'] as $channel => $title) {
+            $columns = FinanceCreditSettlementLayout::displayColumns($channel) + FinanceSettlementService::SHOP_DIFFERENCE_COLUMN;
+            $scope = [...$filters, 'card_channel' => $channel];
+            $sheets[] = [$title, array_values($columns), function () use ($service, $scope, $columns, $missing): iterable {
+                foreach ($this->settlementDetailBatches($service, 'credit_card', $scope) as $batch) {
+                    foreach ($batch as $row) {
+                        $layout = $row['card_layout'] ?? $row;
+                        if ($scope['card_channel'] === 'worldpay' && (! empty($row['failed'])
+                            || FinanceSettlementService::transactionStatusCategory($layout['status'] ?? null) === 'failed')) {
+                            continue;
+                        }
+                        if ($missing($layout + $row, ['domain', 'team'])
+                            || ($scope['card_channel'] === 'worldpay' && ! empty($row['success']) && $missing($layout + $row, ['gross', 'settlement']))) {
+                            yield array_map(fn ($field) => $layout[$field] ?? '', array_keys($columns));
+                        }
+                    }
+                }
+            }, true];
+        }
+        $headers = array_values(FinanceXuzongCreditReport::headers());
+        $sheets[] = ['徐总信用卡', $headers, function () use ($filters, $headers, $missing): iterable {
+            $query = $this->recordsQuery('xuzong2-orders', $filters, xuzongReport: true, lightweight: true);
+            $orders = app(FinanceLogisticsCreditOrders::class);
+            $report = app(FinanceXuzongCreditReport::class);
+            foreach ($query->reorder('id')->select('id')->lazyById(300)->chunk(300) as $batch) {
+                $records = $orders->query(xuzongReport: true, ids: $batch->pluck('id')->all())->orderBy('id')->get();
+                foreach ($report->rows($records, $filters['timezone']) as $row) {
+                    if (FinanceSettlementService::transactionStatusCategory($row['原始支付状态'] ?? null) === 'failed'
+                        || FinanceSettlementService::transactionStatusCategory($row['状态'] ?? null) === 'failed') {
+                        continue;
+                    }
+                    if ($missing($row, ['域名', FinanceSettlementService::OPERATION_DEPARTMENT, '订阅类型'])) {
+                        yield array_map(fn ($header) => ! $row['_cost_editable'] && in_array($header, FinanceXuzongCostEligibility::FIELDS, true)
+                            ? FinanceXuzongCostEligibility::LOCKED_LABEL
+                            : FinanceXuzongCreditReport::formatCell($header, $row[$header] ?? ''), $headers);
+                    }
+                }
+            }
+        }, true];
+
+        if ($format === 'csv') {
+            return $this->workbooks->downloadCombinedCsv([['PayPal结算明细', array_values($paypal), $paypalRows], ...$sheets],
+                'finance-missing-details-'.$month->format('Y-m').'.csv');
+        }
+
+        return $this->workbooks->download(array_values($paypal), $paypalRows(),
+            'finance-missing-details-'.$month->format('Y-m').'.xlsx', sheetTitle: 'PayPal结算明细', additionalSheets: $sheets, omitEmptyCells: true);
+    }
+
+    private function settlementDetailBatches(FinanceSettlementService $service, string $channel, array $filters): iterable
+    {
+        yield from $service->rowBatches($channel, $filters);
+        if (empty($filters['export_record_ids'])) {
+            yield from collect()->lazy()->concat(app(FinanceConfluxSettlement::class)->unmatchedRows($filters))->chunk(500);
+        }
+    }
+
     public function buildTransactionReport(string $tab, array $scope, CarbonImmutable $month, ?FinancePaymentAccount $account, bool $reuse = true): array
     {
         $service = app(FinanceSettlementService::class);
@@ -1721,12 +1823,23 @@ class FinanceController extends Controller
                 yield $row;
             }
         })();
-        return [$summary->summarize($service->logisticsCostStream($source), $tab), $service->subscriptionOptions(collect($subscriptions))->all()];
+        $items = $summary->summarize($service->logisticsCostStream($source), $tab);
+        if (collect(\Illuminate\Support\Arr::only($scope, ['payment_account_id', 'currency', 'team', 'subscription', 'conditions']))->contains(fn ($value) => filled($value))) {
+            $monthRows = $this->transactionSummaryRows($service, $tab, [], $month, null, reuse: $reuse, includePayPalAmounts: false);
+            $allocation = array_column($summary->summarize($monthRows, $tab), 'failed_orders', 'account_group');
+            $items = array_values(array_filter($items, fn ($item) => $item['team'] !== '未分配' || $item['subscription'] !== '未分配'));
+            foreach ($items as &$item) {
+                $item['failed_orders'] = $allocation[$item['account_group']] ?? 0;
+            }
+            unset($item);
+        }
+
+        return [$items, $service->subscriptionOptions(collect($subscriptions))->all()];
     }
 
-    private function transactionSummaryRows(FinanceSettlementService $service, string $tab, array $filters, CarbonImmutable $month, ?FinancePaymentAccount $account, bool $reuse): \Illuminate\Support\LazyCollection
+    private function transactionSummaryRows(FinanceSettlementService $service, string $tab, array $filters, CarbonImmutable $month, ?FinancePaymentAccount $account, bool $reuse, bool $includePayPalAmounts = true): \Illuminate\Support\LazyCollection
     {
-        return \Illuminate\Support\LazyCollection::make(function () use ($service, $tab, $filters, $month, $account, $reuse) {
+        return \Illuminate\Support\LazyCollection::make(function () use ($service, $tab, $filters, $month, $account, $reuse, $includePayPalAmounts) {
         $channels = $tab === 'combined' ? ['paypal', 'credit_card'] : [$tab === 'paypal' ? 'paypal' : 'credit_card'];
         foreach ($channels as $channel) {
             if (isset($filters['payment_account_id']) && (! $account || $account->account_type !== $channel)) {
@@ -1747,8 +1860,22 @@ class FinanceController extends Controller
             $projection = $reuse ? app(\App\Portals\Finance\FinanceSummaryProjection::class)
                 ->stream($channel, $scope, true, $filters['currency'] ?? null, $paymentChannels) : null;
             $channelRows = $projection ?? $service->summaryRowStream($channel, $scope, transactions: true);
+            $paypalAmounts = [];
+            if ($channel === 'paypal' && $includePayPalAmounts) {
+                $period = array_intersect_key($scope, array_flip(['from', 'to', 'timezone', 'account']));
+                $ids = $service->query('paypal', $period)->pluck('id')->all();
+                foreach (app(FinancePayPalSettlementOrders::class)->exportRows($period, matchCandidateDomains: false, recordIds: $ids) as $detail) {
+                    $paypalAmounts[$detail['id']] = array_intersect_key($detail, ['settlement' => true, 'fee' => true]);
+                }
+            }
             foreach ($channelRows as $row) {
+                if (isset($paypalAmounts[$row['id']])) {
+                    $row = array_replace($row, $paypalAmounts[$row['id']]);
+                }
                 $paymentChannel = $row['payment_channel'];
+                if ($paymentChannel === 'worldpay' && $row['failed']) {
+                    $row['team'] = '';
+                }
                 if ($tab === 'combined' && ! FinanceSettlementService::isShopifySummaryChannel($paymentChannel)) {
                     continue;
                 }
@@ -1764,7 +1891,7 @@ class FinanceController extends Controller
         });
     }
 
-    private function settlementFilters(Request $request, array $conditionFields): array
+    private function settlementFilters(Request $request, array $conditionFields, bool $allowCsv = false): array
     {
         return [...$request->validate([
             'account' => 'nullable|string|max:191', 'reference' => 'nullable|string|max:191',
@@ -1787,7 +1914,7 @@ class FinanceController extends Controller
             'conditions.*.field' => ['required', Rule::in(array_keys($conditionFields))],
             'conditions.*.operator' => ['required', Rule::in(['equals','contains','not_equals','empty','not_empty','gt','gte','lt','lte'])],
             'conditions.*.value' => 'nullable|string|max:191',
-            'format' => ['nullable', Rule::in(['xls', 'xlsx'])],
+            'format' => ['nullable', Rule::in($allowCsv ? ['csv', 'xls', 'xlsx'] : ['xls', 'xlsx'])],
         ]), 'timezone' => $request->input('timezone', 'Asia/Shanghai') ?: 'Asia/Shanghai'];
     }
 
@@ -1802,7 +1929,7 @@ class FinanceController extends Controller
         $conditionFields = $service->conditionFields($channel);
         $numericConditionFields = $service->numericConditionFields($channel);
         $fixedCardChannel = FinanceCreditSettlementLayout::REPORT_CHANNELS[$report] ?? null;
-        $filters = $this->settlementFilters($request, $conditionFields);
+        $filters = $this->settlementFilters($request, $conditionFields, allowCsv: $fixedCardChannel === 'ye');
         if ($fixedCardChannel !== null) {
             $filters['card_channel'] = $fixedCardChannel;
         }
@@ -1879,12 +2006,8 @@ class FinanceController extends Controller
             $filters += $selection;
         }
         $statementRows = fn () => empty($filters['export_record_ids']) ? app(FinanceConfluxSettlement::class)->unmatchedRows($filters) : [];
-        $resultBatches = function () use ($service, $channel, $filters, $statementRows): iterable {
-            yield from $service->rowBatches($channel, $filters);
-            foreach (collect()->lazy()->concat($statementRows())->chunk(500) as $batch) {
-                yield $batch;
-            }
-        };
+        $resultBatches = fn () => $this->settlementDetailBatches($service, $channel,
+            [...$filters, 'stream_statement_export' => $request->boolean('download')]);
         // Computed filters are evaluated in batches before counting and slicing the matches.
         $canPaginate = ! $request->boolean('download') && ! $request->has('suggestion_field')
             && empty($filters['card_wallet']) && empty($filters['card_exceptions']) && empty($filters['ledger_settlement_type'])
@@ -1997,7 +2120,8 @@ class FinanceController extends Controller
                 },
                 $requestedColumns,
             )), $report.'.'.$format, $format, plain: $orderView,
-                sheetTitle: empty($filters['card_exceptions']) ? 'Sheet1' : '异常汇总', additionalSheets: $additionalSheets);
+                sheetTitle: empty($filters['card_exceptions']) ? 'Sheet1' : '异常汇总', additionalSheets: $additionalSheets,
+                omitEmptyCells: $fixedCardChannel === 'ye');
         }
         $perPage = (int) ($filters['per_page'] ?? 10);
         $page = max(1, (int) $request->query('page', 1));
@@ -2104,7 +2228,8 @@ class FinanceController extends Controller
         $channel = $report === 'paypal-settlement' ? 'paypal' : 'credit_card';
         $request->validate(['id' => 'required|integer|min:1']);
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
-        $returnFilters = $this->settlementFilters(Request::create('/', 'GET', $request->query()), $service->conditionFields($channel));
+        $returnFilters = $this->settlementFilters(Request::create('/', 'GET', $request->query()), $service->conditionFields($channel),
+            allowCsv: $report === 'ye-settlement');
         $page = filter_var($request->query('page'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 2]]);
         if ($page !== false) {
             $returnFilters['page'] = $page;
@@ -3000,6 +3125,9 @@ class FinanceController extends Controller
             }
             unset($group);
         }
+        if ($report === 'summary') {
+            $this->applyTransactionFailureCounts($groups, $service, $start, $data, $layer, $reuse);
+        }
         $rate = $this->workbooks->database()->table('finance_monthly_exchange_rates')->where('month', $comparisonMonth)->where('currency', 'USD')->value('cny_rate');
         $metrics = ['logistics' => '物流占比', 'purchase' => '采购占比', 'fee' => '手续费占比', 'refund' => '退款金额占比', 'refund_fee' => '退款费用占比', 'dispute_refund' => '争议冻结退款占比', 'dispute_fee' => '争议费用占比'];
         foreach ($groups as &$group) {
@@ -3034,6 +3162,63 @@ class FinanceController extends Controller
         unset($group);
 
         return [$groups, $filterOptions, $rate];
+    }
+
+    private function applyTransactionFailureCounts(array &$groups, FinanceSettlementService $service, CarbonImmutable $month, array $filters, string $layer, bool $reuse): void
+    {
+        // Transaction summary allocates to teams and subscriptions, with no owner dimension.
+        if ($groups === [] || filled($filters['owner'] ?? null)) {
+            return;
+        }
+        $summary = app(\App\Portals\Finance\FinanceTransactionSummary::class);
+        $channel = $filters['channel'] ?? '';
+        $tabs = match ($channel) {
+            'paypal', 'ye', 'worldpay' => [$channel],
+            'xuzong', 'xuzong1', 'xuzong2' => ['credit_card'],
+            'combined' => ['combined'],
+            default => $layer === 'project' ? ['combined'] : ['paypal', 'credit_card', 'ye', 'worldpay'],
+        };
+        $counts = [];
+        $unallocated = [];
+        foreach ($tabs as $tab) {
+            $rows = $this->transactionSummaryRows($service, $tab, [], $month, null, reuse: $reuse, includePayPalAmounts: false);
+            foreach ($summary->summarize($rows, $tab) as $item) {
+                if (! $item['failed_orders']) {
+                    continue;
+                }
+                $dimensions = json_decode($item['account_group'], true, 512, JSON_THROW_ON_ERROR);
+                if (! is_array($dimensions[2] ?? null)) {
+                    $unallocated += array_fill_keys(match ($tab) {
+                        'credit_card' => ['xuzong1', 'xuzong2'],
+                        'combined' => ['combined', ...$service::SHOPIFY_SUMMARY_CHANNELS],
+                        default => [$tab],
+                    }, true);
+                    continue;
+                }
+                [$platform, $accountKey] = $dimensions;
+                if (in_array($channel, ['xuzong1', 'xuzong2'], true) && $platform !== $channel
+                    || filled($filters['account'] ?? null) && $accountKey !== $filters['account']
+                    || filled($filters['team'] ?? null) && $item['team'] !== $filters['team']
+                    || filled($filters['subscription'] ?? null) && $item['subscription'] !== $service::subscriptionLabel($filters['subscription'])) {
+                    continue;
+                }
+                $name = match ($layer) {
+                    'project' => 'Shopify',
+                    'channel' => $service::REPORT_CHANNELS[$platform],
+                    'team' => $item['team'],
+                    'subscription' => $item['subscription'] ?: '未分类',
+                    'detail' => $item['account'].' / '.$item['team'].' / '.($item['subscription'] ?: '未分类'),
+                    default => $item['account'],
+                };
+                $key = json_encode([$name, $layer === 'project' ? ($channel ?: 'combined') : $platform], JSON_THROW_ON_ERROR);
+                $counts[$key] = ($counts[$key] ?? 0) + $item['failed_orders'];
+            }
+        }
+        foreach ($groups as &$group) {
+            $key = json_encode([$group['name'], $group['channel']], JSON_THROW_ON_ERROR);
+            $group['failed_count'] = $counts[$key] ?? (isset($unallocated[$group['channel']]) ? $group['failed_count'] : 0);
+        }
+        unset($group);
     }
 
     private function reportTabUrls(array $filters): array

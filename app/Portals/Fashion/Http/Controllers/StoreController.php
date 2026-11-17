@@ -102,7 +102,21 @@ class StoreController extends Controller
         }
         abort_unless($this->accessibleStores($context['user'])->whereKey($store->getKey())->exists(), 403);
         $siteBuilder = mb_strtolower(trim((string) $store->site_builder));
-        abort_unless(in_array($siteBuilder, ['xshoppy', 'xshopy', 'shopline'], true), 422, '只能维护 XShoppy 或 Shopline 店铺应用信息。');
+        abort_unless(in_array($siteBuilder, ['xshoppy', 'xshopy', 'shopline', 'nbc', 'shopyy'], true), 422, '只能维护 XShoppy、Shopline、NBC 或 ShopYY 店铺应用信息。');
+        if (in_array($siteBuilder, ['nbc', 'shopyy'], true)) {
+            $tokenField = $siteBuilder === 'shopyy' ? 'shopyy_app_token' : 'nbc_app_token';
+            $platformLabel = $siteBuilder === 'shopyy' ? 'ShopYY' : 'NBC';
+            $existingToken = $siteBuilder === 'shopyy'
+                ? ((string) ($store->shopyy_app_token ?: $store->nbc_app_token))
+                : (string) $store->nbc_app_token;
+            abort_if(filled($existingToken), 422, "该店铺的 {$platformLabel} API Token 已配置，不能再次编辑。");
+            $data = $request->validate([$tokenField => ['required', 'string', 'max:65535']], [
+                "{$tokenField}.required" => "请填写 {$platformLabel} API Token。",
+            ]);
+            $store->update([$tokenField => trim((string) $data[$tokenField])]);
+
+            return back()->with('success', "{$platformLabel} API Token 已配置。");
+        }
         if ($siteBuilder === 'shopline') {
             abort_if(filled($store->shopline_app_token), 422, '该店铺的 Shopline 后台 API 访问令牌已配置，不能再次编辑。');
             $data = $request->validate(['shopline_app_token' => ['required', 'string', 'max:65535']], [

@@ -70,7 +70,7 @@ class NbcOrderSyncService
         $after = $history ? 0 : $today->subDays(7)->timestamp;
         $before = $history ? $startedAt->timestamp : $today->addDays(7)->endOfDay()->timestamp;
         try {
-            if (blank($store->nbc_app_token)) {
+            if ($this->token($store) === '') {
                 throw new RuntimeException(__('nbc_orders.errors.token'));
             }
             $seen = [];
@@ -128,7 +128,8 @@ class NbcOrderSyncService
         }
         try {
             // User-selected contract: filter normal orders by creation time, not update time.
-            $response = Http::acceptJson()->withHeaders(['token' => trim((string) $store->nbc_app_token)])
+            $token = $this->token($store);
+            $response = Http::acceptJson()->withHeaders(['token' => $token])
                 ->timeout(45)->connectTimeout(15)->withOptions(['allow_redirects' => false])
                 ->get(config('fashion_logistics.nbc.endpoint'), [
                     'group' => 'all', 'created_at_min' => $after, 'created_at_max' => $before,
@@ -147,7 +148,7 @@ class NbcOrderSyncService
             throw new RuntimeException(__('nbc_orders.errors.response'));
         }
         if (! is_array($body) || ! array_key_exists('code', $body) || ! in_array($body['code'], [0, '0'], true)) {
-            throw new RuntimeException($this->apiError($body, trim((string) $store->nbc_app_token)));
+            throw new RuntimeException($this->apiError($body, $token));
         }
         $data = $body['data'] ?? null;
         if (! is_array($data) || ! is_array($data['list'] ?? null) || ! array_is_list($data['list']) || ! is_array($data['paginate'] ?? null)) {
@@ -155,6 +156,17 @@ class NbcOrderSyncService
         }
 
         return $data;
+    }
+
+    private function token(AssistantDomainStore $store): string
+    {
+        if ($this->platform($store) === 'shopyy') {
+            // Older ShopYY records shared the NBC field; retain that fallback so
+            // existing stores keep syncing after introducing a dedicated field.
+            return trim((string) ($store->shopyy_app_token ?: $store->nbc_app_token));
+        }
+
+        return trim((string) $store->nbc_app_token);
     }
 
     private function apiError(mixed $body, string $token): string

@@ -6,6 +6,30 @@ class FinanceTransactionSummary
 {
     public const VIEWS = ['paypal' => 'PayPal', 'credit_card' => '徐总信用卡', 'ye' => '叶总支付', 'worldpay' => 'Worldpay', 'combined' => 'Shopify'];
 
+    public static function requiresSubscription(string $tab): bool
+    {
+        return ! in_array($tab, ['ye', 'worldpay'], true);
+    }
+
+    public function reallocateUnassignedFailures(array $items, string $tab): array
+    {
+        if (self::requiresSubscription($tab)) {
+            return $items;
+        }
+
+        $groups = array_column($items, null, 'account_group');
+        $failedByMonth = [];
+        foreach ($groups as $key => $group) {
+            if ($group['team'] === '未分配' && $group['subscription'] === '未分配' && blank($group['account'])) {
+                $month = $group['month'];
+                $failedByMonth[$month] = ($failedByMonth[$month] ?? 0) + $group['failed_orders'];
+                unset($groups[$key]);
+            }
+        }
+
+        return $failedByMonth === [] ? $items : $this->allocateFailures($groups, $failedByMonth, $tab);
+    }
+
     private const COMMON = ['channel' => '通道', 'account' => '支付账户', 'currency' => '货币', 'team' => '区域', 'subscription' => '订阅类型',
         'month' => '年月', 'orders' => '订单数', 'amount' => '金额', 'settlement' => '结算金额'];
 
@@ -23,12 +47,13 @@ class FinanceTransactionSummary
             'paypal' => self::PAYPAL,
             'credit_card', 'ye', 'worldpay' => ['hold' => '保证金', ...self::CARD],
             'combined' => ['hold' => '保证金', 'dispute_hold' => '争议冻结金额', ...self::CARD],
-        }, 'payable' => '应结算', 'logistics' => '物流-元', 'purchase' => '采购成本-元'];
+        }, 'payable' => '应结算', 'logistics' => '物流-元', 'purchase' => '采购成本-元', 'failed_orders' => '失败订单数'];
     }
 
     public function summarize(iterable $rows, string $tab): array
     {
         $groups = [];
+        $failedByMonth = [];
         foreach ($rows as $row) {
             $dimensions = ['account' => $row['account'], 'currency' => $row['currency'], 'team' => $row['team'],
                 'subscription' => $row['subscription'], 'month' => $row['month']];
@@ -43,6 +68,9 @@ class FinanceTransactionSummary
                 continue;
             }
             $group['orders'] += (int) $row['success'];
+            if ($row['failed'] && ! $row['success']) {
+                $failedByMonth[$row['month']] = ($failedByMonth[$row['month']] ?? 0) + 1;
+            }
             $paypal = $row['channel'] === 'paypal';
             $values = array_intersect_key($row, [...self::PAYPAL, ...self::CARD, 'logistics' => true, 'purchase' => true]);
             $values['refund'] = FinanceSettlementService::refundIncludingSplit($row);
@@ -84,7 +112,51 @@ class FinanceTransactionSummary
         }
         unset($group);
 
+        return $this->allocateFailures($groups, $failedByMonth, $tab);
+    }
+
+    private function allocateFailures(array $groups, array $failedByMonth, string $tab): array
+    {
+        $teams = [];
+        foreach ($groups as $key => &$group) {
+            $group['failed_orders'] ??= 0;
+            if ($group['orders'] > 0 && filled($group['team'])
+                && (! self::requiresSubscription($tab) || filled($group['subscription']))) {
+                $teams[$group['month']][$group['team']][$key] = $group['orders'];
+            }
+        }
+        unset($group);
+
+        foreach ($failedByMonth as $month => $failed) {
+            $teamGroups = $teams[$month] ?? [];
+            if ($teamGroups === []) {
+                $key = json_encode([$tab, $month, 'unallocated'], JSON_THROW_ON_ERROR);
+                $groups[$key] = ['account_group' => $key, 'channel' => self::VIEWS[$tab], 'account' => '', 'currency' => '',
+                    'team' => '未分配', 'subscription' => '未分配', 'month' => $month, 'orders' => 0, 'failed_orders' => $failed];
+                continue;
+            }
+            foreach ($this->proportionalShares(array_map(array_sum(...), $teamGroups), $failed) as $team => $share) {
+                foreach ($this->proportionalShares($teamGroups[$team], $share) as $key => $count) {
+                    $groups[$key]['failed_orders'] = $count;
+                }
+            }
+        }
+
         return array_values($groups);
+    }
+
+    private function proportionalShares(array $weights, int $total): array
+    {
+        ksort($weights, SORT_STRING);
+        arsort($weights, SORT_NUMERIC);
+        $sum = array_sum($weights);
+        $shares = array_map(fn (int $weight) => intdiv($weight * $total, $sum), $weights);
+        $remainder = $total - array_sum($shares);
+        foreach (array_slice(array_keys($shares), 0, $remainder) as $key) {
+            $shares[$key]++;
+        }
+
+        return $shares;
     }
 
     public static function shopifyPayPalDisputeFee(?string $fee, string $month): ?string

@@ -34,10 +34,26 @@ document.addEventListener('change', function (event) {
     else url.searchParams.set(select.dataset.financePageName, '1');
     window.location.assign(url.toString());
 });
+function financeStartDownload(url) {
+    var frame = document.createElement('iframe');
+    frame.hidden = true;
+    frame.title = '财务报表下载';
+    frame.src = url;
+    document.body.appendChild(frame);
+}
 document.addEventListener('click', function (event) {
+    var monthExport = event.target.closest('[data-finance-month-export]');
+    if (monthExport) {
+        var month = monthExport.form.elements.namedItem('month');
+        if (!month.reportValidity()) return;
+        var exportUrl = new URL(monthExport.dataset.financeMonthExport, window.location.href);
+        exportUrl.searchParams.set('month', month.value);
+        financeStartDownload(exportUrl.toString());
+        return;
+    }
     var button = event.target.closest('[data-finance-download]');
     if (!button) return;
-    if (button.dataset.financeExportUrl) { window.location.assign(button.dataset.financeExportUrl); return; }
+    if (button.dataset.financeExportUrl) { financeStartDownload(button.dataset.financeExportUrl); return; }
     var form = button.form;
     if (!form || !form.reportValidity()) return;
     var url = new URL(form.action || window.location.href, window.location.href);

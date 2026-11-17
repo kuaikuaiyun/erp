@@ -764,6 +764,32 @@ class TongtuSkuMappingService
         return is_array($records) ? array_values(array_filter($records, 'is_array')) : [];
     }
 
+    /** @return list<array<string,mixed>> */
+    public function shopifyErpOrderPage(string $from, string $to, int $page, int $size): array
+    {
+        $session = $this->authenticatedSession();
+        $body = $this->postJson(
+            (string) config('logistics.tongtu.orders_query_url'),
+            $this->authParameters($session),
+            [
+                'merchantId' => $session['merchant_id'],
+                'platformCode' => 'shopify_api',
+                'payDateFrom' => $from,
+                'payDateTo' => $to,
+                'sortType' => 'asc',
+                'pageNo' => $page,
+                'pageSize' => $size,
+            ],
+        );
+        $this->assertSuccess($body, 'Tongtu Shopify order query');
+        $rows = data_get($body, 'datas.array');
+        if (!is_array($rows) || !array_is_list($rows) || count(array_filter($rows, 'is_array')) !== count($rows)) {
+            throw new RuntimeException('Invalid Tongtu Shopify order response.');
+        }
+
+        return $rows;
+    }
+
     /** @return array{app_token:string, app_secret:string, merchant_id:string} */
     private function authenticatedSession(): array
     {
@@ -860,7 +886,7 @@ class TongtuSkuMappingService
             throw new RuntimeException('Tongtu connection failed: '.$exception->getMessage());
         }
 
-        return $this->responseJson($response, 'Tongtu goods request');
+        return $this->responseJson($response, 'Tongtu POST request');
     }
 
     private function pacer(): TongtuRequestPacer

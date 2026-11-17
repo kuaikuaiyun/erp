@@ -11,19 +11,24 @@ use App\Models\LogisticsTrackingSyncBatch;
 use App\Models\LogisticsTrackingSyncTask;
 use App\Models\ProductRequestLinkSku;
 use App\Portal\Http\Controllers\PortalEntryController;
+use App\Portal\Services\PortalDomainService;
 use App\Portals\Logistics\LogisticsOrderSpreadsheetService;
 use App\Portals\Logistics\LogisticsOrderPaymentReferenceService;
 use App\Portals\Logistics\LogisticsPortalService;
 use App\Portals\Logistics\LogisticsRefundImportService;
+use App\Portals\Logistics\TongtuOrderSnapshotService;
 use App\Portals\Logistics\TongtuSkuMappingService;
 use App\Portals\Logistics\LogisticsTrackingService;
 use App\Portals\Logistics\PayPalOrderAssociationService;
 use App\Portals\Assistant\AssistantStoreOwnerTimelineService;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -83,6 +88,139 @@ class LogisticsOrderController extends Controller
             'trackingFailureDetails' => $trackingBatch ? $this->trackingFailureDetails($trackingBatch) : [],
             'nonRunnableProductKeys' => $nonRunnableProductKeys,
         ]);
+    }
+
+    public function missingTongtu(Request $request, PortalDomainService $domains, TongtuOrderSnapshotService $snapshots): Response|View|JsonResponse
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        $menu = $context['portal']->menus->firstWhere('code', 'logistics_missing_tongtu_orders');
+        abort_unless($menu?->is_enabled, 403);
+
+        $filters = $request->validate([
+            'paid_from' => ['nullable', 'date_format:Y-m-d'],
+            'paid_to' => ['nullable', 'date_format:Y-m-d', Rule::when($request->filled('paid_from'), 'after_or_equal:paid_from')],
+            'store_domain' => ['nullable', 'string', 'max:255'],
+            'tongtu_order_number' => ['nullable', 'string', 'max:191'],
+            'per_page' => ['sometimes', 'integer', Rule::in([20, 50, 100])],
+            'page' => ['sometimes', 'integer', 'min:1'],
+        ]);
+        $today = \Carbon\CarbonImmutable::today('Asia/Shanghai');
+        $paidFrom = $filters['paid_from'] ?? '';
+        $paidTo = $filters['paid_to'] ?? '';
+        $storeDomain = trim($filters['store_domain'] ?? '');
+        $tongtuOrderNumber = trim($filters['tongtu_order_number'] ?? '');
+        $coverageFrom = $paidFrom ?: $today->subDays(TongtuOrderSnapshotService::HISTORY_DAYS - 1)->toDateString();
+        $coverageTo = $paidTo ?: $today->toDateString();
+        $totalDays = max(0, (int) \Carbon\CarbonImmutable::parse($coverageFrom)->diffInDays($coverageTo, false) + 1);
+        $db = $snapshots->connection();
+
+        $syncDays = $db->table('logistics_tongtu_sync_days')
+            ->when($paidFrom !== '', fn (QueryBuilder $query) => $query->where('paid_date', '>=', $paidFrom))
+            ->when($paidTo !== '', fn (QueryBuilder $query) => $query->where('paid_date', '<=', $paidTo));
+        $lastSync = (clone $syncDays)->max('synced_at');
+        $syncedDays = $syncDays->whereBetween('paid_date', [$coverageFrom, $coverageTo])->count();
+        if ($request->boolean('progress')) {
+            return response()->json([
+                'synced_days' => $syncedDays,
+                'total_days' => $totalDays,
+                'last_sync' => $lastSync,
+                'active' => $snapshots->progress(),
+            ])->header('Cache-Control', 'no-store');
+        }
+
+        $existing = $this->listedOrders()->selectRaw('1')
+            ->whereColumn('logistics_orders.tongtu_order_number', 'snapshot.tongtu_order_number');
+        $query = $db->table('logistics_tongtu_order_snapshots as snapshot')
+            ->when($paidFrom !== '', fn (QueryBuilder $query) => $query->where('snapshot.paid_date', '>=', $paidFrom))
+            ->when($paidTo !== '', fn (QueryBuilder $query) => $query->where('snapshot.paid_date', '<=', $paidTo))
+            ->whereNotExists($existing->toBase())
+            ->when($tongtuOrderNumber !== '', fn (QueryBuilder $query) => $query->where(
+                'snapshot.tongtu_order_number', 'like', $this->contains($tongtuOrderNumber),
+            ))
+            ->selectRaw('snapshot.tongtu_order_number AS number, MAX(snapshot.domain) AS domain')
+            ->groupBy('snapshot.tongtu_order_number')
+            ->orderBy('snapshot.tongtu_order_number');
+        $perPage = (int) ($filters['per_page'] ?? 20);
+        $paginationFilters = array_filter([
+            'paid_from' => $paidFrom,
+            'paid_to' => $paidTo,
+            'store_domain' => $storeDomain,
+            'tongtu_order_number' => $tongtuOrderNumber,
+            'per_page' => $perPage,
+        ], fn ($value) => $value !== '');
+        $orders = $this->paginateMissingTongtuOrders($query, $storeDomain, $perPage)->appends($paginationFilters);
+
+        return view('portals.logistics.orders.missing-tongtu', [
+            ...$this->viewContext($context),
+            'checkUrl' => $domains->portalPath($context['portal'], $menu->path),
+            'paidFrom' => $paidFrom,
+            'paidTo' => $paidTo,
+            'storeDomain' => $storeDomain,
+            'tongtuOrderNumber' => $tongtuOrderNumber,
+            'orders' => $orders,
+            'paginationFilters' => $paginationFilters,
+            'syncedDays' => $syncedDays,
+            'totalDays' => $totalDays,
+            'coverageFrom' => $coverageFrom,
+            'coverageTo' => $coverageTo,
+            'lastSync' => $lastSync,
+        ]);
+    }
+
+    private function paginateMissingTongtuOrders(QueryBuilder $query, string $storeDomain, int $perPage): LengthAwarePaginator
+    {
+        $domainsByPrefix = $this->tongtuDomainsByPrefix();
+        $resolve = fn (object $order): object => $this->resolveTongtuDomain($order, $domainsByPrefix);
+        if ($storeDomain === '') {
+            $orders = $query->paginate($perPage);
+            $orders->setCollection($orders->getCollection()->map($resolve));
+
+            return $orders;
+        }
+
+        $page = LengthAwarePaginator::resolveCurrentPage();
+        $offset = ($page - 1) * $perPage;
+        $matches = $query->cursor()->map($resolve)
+            ->filter(fn (object $order): bool => $order->domain !== null && mb_stripos($order->domain, $storeDomain) !== false);
+        $items = [];
+        $total = 0;
+        foreach ($matches as $order) {
+            if ($total >= $offset && count($items) < $perPage) {
+                $items[] = $order;
+            }
+            $total++;
+        }
+
+        return new LengthAwarePaginator($items, $total, $perPage, $page, ['path' => LengthAwarePaginator::resolveCurrentPath()]);
+    }
+
+    private function tongtuDomainsByPrefix(): Collection
+    {
+        return AssistantDomainStore::query()
+            ->where('site_builder', 'shopify')
+            ->whereNotNull('tongtu_prefix')
+            ->whereNotNull('domain')
+            ->get(['tongtu_prefix', 'domain'])
+            ->groupBy(fn (AssistantDomainStore $store): string => mb_strtolower(rtrim(trim($store->tongtu_prefix), '-')))
+            ->forget('')
+            ->map(fn ($stores) => $stores->map(fn ($store) => TongtuOrderSnapshotService::domain($store->domain))->filter()->unique()->values())
+            ->filter(fn ($domains) => $domains->isNotEmpty())
+            ->sortKeysUsing(fn ($a, $b): int => strlen((string) $b) <=> strlen((string) $a));
+    }
+
+    private function resolveTongtuDomain(object $order, Collection $domainsByPrefix): object
+    {
+        $number = mb_strtolower($order->number);
+        $domains = $domainsByPrefix->first(fn ($domains, $prefix) => str_starts_with($number, $prefix.'-'));
+        if ($domains?->count() === 1) {
+            $order->domain = $domains->first();
+        }
+
+        return $order;
     }
 
     public function edit(Request $request, LogisticsOrder $order): Response|View
@@ -617,14 +755,19 @@ class LogisticsOrderController extends Controller
         return $filters;
     }
 
-    /** @param array<string, string|int> $filters */
-    private function orderQuery(array $filters): Builder
+    private function listedOrders(): Builder
     {
-        $query = LogisticsOrder::query()
+        return LogisticsOrder::query()
             ->where(function (Builder $operator): void {
                 $operator->whereNull('operator_name')
                     ->orWhere('operator_name', 'not like', $this->contains('刷单'));
             });
+    }
+
+    /** @param array<string, string|int> $filters */
+    private function orderQuery(array $filters): Builder
+    {
+        $query = $this->listedOrders();
         $textColumns = [
             'id', 'shopify_order_id', 'shopify_order_number', 'tongtu_order_number', 'store_name',
             'group_names', 'staff_status', 'buyer_name', 'buyer_email',

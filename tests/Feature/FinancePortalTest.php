@@ -1184,6 +1184,10 @@ class FinancePortalTest extends TestCase
         $this->assertEquals(3, $yeExport[1][29]);
         $this->assertEquals(2, array_combine($yeExport[0], $yeExport[1])['与店铺差额（美元）']);
         $this->assertCount(2, $yeExport);
+        $yeCsv = $this->get('/finance/reports/ye-settlement?download=1&format=csv')
+            ->assertOk()->assertHeader('Content-Type', 'text/csv; charset=UTF-8')->streamedContent();
+        $this->assertStringContainsString('YE-ORDER', $yeCsv);
+        $this->assertStringNotContainsString('WP-ORDER', $yeCsv);
         $worldpayExport = $this->readDownload($this->get('/finance/reports/worldpay-settlement?download=1')->assertOk()->streamedContent())->toArray();
         $this->assertCount(45, $worldpayExport[0]);
         $this->assertSame('网关接入号', $worldpayExport[0][0]);
@@ -1670,7 +1674,7 @@ class FinancePortalTest extends TestCase
             $totals[0]['fee'], $totals[0]['refund'], $totals[0]['per_order_fee'],
         ]);
         $this->get('/finance/reports/summary?view=transactions&month=2026-11&channel=worldpay')
-            ->assertOk()->assertViewHas('items', fn ($items) => array_sum(array_column($items, 'orders')) === 2);
+            ->assertOk()->assertViewHas('items', fn ($items) => array_filter($items, fn ($item) => blank($item['team'])) === []);
         $this->get('/finance/reports/summary?view=transactions&month=2026-11&channel=credit_card')
             ->assertOk()->assertViewHas('items', []);
         $this->get('/finance/reports/summary?view=settlement&month=2026-11&channel=worldpay')
@@ -1700,8 +1704,10 @@ class FinancePortalTest extends TestCase
         $attributionQuery = http_build_query(['month' => '2026-11', 'gateway' => '25', 'team' => '厦门团队', 'download' => 1,
             'export_columns' => ['reference', 'transaction_url', 'domain', 'owner', 'team', 'per_order_fee']]);
         $attribution = $this->readDownload($this->get($report.'?'.$attributionQuery)->assertOk()->streamedContent())->toArray();
-        $this->assertCount(2, $attribution);
-        $this->assertEquals(['wp-failed', 'example.com', 'matched.example', '订单运营', '厦门团队', 0.30], $attribution[1]);
+        $this->assertCount(1, $attribution);
+        $unfiltered = str_replace('&team='.urlencode('厦门团队'), '', $attributionQuery);
+        $allAttribution = $this->readDownload($this->get($report.'?'.$unfiltered)->assertOk()->streamedContent())->toArray();
+        $this->assertEquals(['wp-failed', 'example.com', 'matched.example', '订单运营', null, 0.30], collect($allAttribution)->first(fn ($row) => $row[0] === 'wp-failed'));
         $this->get($report.'?gateway=999')->assertOk()->assertDontSee('wp-failed');
         Schema::table('logistics_orders', fn (Blueprint $table) => $table->string('tongtu_product_name')->nullable());
         $orderId = DB::table('logistics_orders')->insertGetId(['bill_number' => 'wp-1', 'source_shop_domain' => 'matched.example',
@@ -2539,6 +2545,8 @@ class FinancePortalTest extends TestCase
             $row = array_fill_keys($headers, '');
             $row['商户订单号'] = $merchant; $row['平台订单号'] = 'SHARED'; $row['结算金额'] = $amount;
             $row['交易币种'] = 'USD'; $row['支付状态'] = 'SUCCESS'; $row['年月'] = '2026-12';
+            $row['团队'] = '郑州团队';
+            $row['订阅类型'] = '订阅';
             $sheet->fromArray([array_values($row)], null, $merchant === 'A' ? 'A2' : 'A3');
         }
         $this->post('/finance/reports/credit-settlement/import', ['file' => $this->upload($book),
@@ -2648,6 +2656,9 @@ class FinancePortalTest extends TestCase
             2 => [...$this->recordRow(), '日期' => '2026-11-02', '交易 ID' => 'ADD-ON', '是否加购' => '已加购', '订阅类型' => '订阅'],
             3 => [...$this->recordRow(), '日期' => '2026-11-02', '交易 ID' => 'NORMAL', '是否加购' => '未加购', '订阅类型' => '订阅'],
         ], 'A', 'UTC', 1);
+        foreach (FinanceRecord::query()->whereIn('reference', ['ADD-ON', 'NORMAL'])->pluck('id') as $id) {
+            DB::table('finance_settlement_supplements')->insert(['finance_record_id' => $id, 'payload' => json_encode(['team' => '郑州团队'])]);
+        }
         $headers = FinanceCatalog::dataset('xuzong2-details')['headers'];
         $this->workbooks->importRecords('xuzong2-details', [2 => [...array_fill_keys($headers, ''), '平台订单号' => 'CARD-ADD', '创建时间' => '2026-11-02 12:00:00', '交易币种' => 'USD', '交易金额' => '35', '支付状态' => 'SUCCESS', '是否加购' => '已加购']], 'B', 'UTC', 1);
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
@@ -2697,7 +2708,11 @@ class FinancePortalTest extends TestCase
         for ($index = 1; $index <= 25; $index++) {
             $rows[$index + 1] = [...$this->recordRow(), '日期' => '2026-11-02', '交易 ID' => 'PAGE-'.$index, '订阅类型' => '订阅复购'.$index.'次'];
         }
+        $rows[] = [...$this->recordRow(), '日期' => '2026-11-02', '交易 ID' => 'PAGE-MISSING', '订阅类型' => '订阅'];
         $this->workbooks->importRecords('paypal-orders', $rows, 'A', 'UTC', 1);
+        foreach (FinanceRecord::query()->where('reference', 'like', 'PAGE-%')->where('reference', '!=', 'PAGE-MISSING')->pluck('id') as $id) {
+            DB::table('finance_settlement_supplements')->insert(['finance_record_id' => $id, 'payload' => json_encode(['team' => '郑州团队'])]);
+        }
         $url = '/finance/reports/summary?view=transactions&month=2026-11&channel=paypal&currency=USD&per_page=10';
         $first = $this->get($url)->assertOk()->assertSee('aria-label="分页"', false);
         $this->assertCount(10, $first->viewData('items'));
@@ -2954,9 +2969,78 @@ class FinancePortalTest extends TestCase
             ->assertDontSee('aria-label="汇总明细视图"', false);
     }
 
+    public function test_transaction_summary_exports_missing_details_for_the_selected_channel_and_month(): void
+    {
+        $this->workbooks->importRecords('paypal-orders', [
+            2 => [...$this->recordRow(), '日期' => '2026-11-02', '交易 ID' => 'MISSING-NOV', '貨幣' => 'NZD'],
+            3 => [...$this->recordRow(), '日期' => '2026-10-02', '交易 ID' => 'MISSING-OCT'],
+        ], 'A', 'UTC', 1);
+        DB::table('finance_domain_groups')->insert(['domain' => 'example.com', 'owner' => '刷单', 'team' => '刷单']);
+        DB::table('finance_settlement_supplements')->insert([
+            'finance_record_id' => FinanceRecord::query()->where('reference', 'MISSING-NOV')->value('id'),
+            'payload' => json_encode(['domain' => 'example.com', 'subscription' => '订阅']),
+        ]);
+        $details = collect(app(\App\Portals\Finance\FinancePayPalSettlementOrders::class)->exportRows([
+            'from' => '2026-11-01', 'to' => '2026-11-30', 'timezone' => 'Asia/Shanghai',
+        ]))->firstWhere('reference', 'MISSING-NOV');
+        $this->assertSame([true, 'example.com', '刷单', null],
+            [$details['success'], $details['domain'], $details['team'], $details['settlement']]);
+        $this->assertNotEmpty($details['subscription']);
+
+        $url = '/finance/reports/summary?view=transactions&month=2026-11&channel=paypal';
+        $this->get($url)->assertOk()->assertSee('导出整月缺失明细');
+        $exportUrl = '/finance/reports/summary?view=transactions&month=2026-11&channel=worldpay&currency=EUR&download_missing=1';
+        $sheet = $this->readDownload($this->get($exportUrl)->assertOk()->streamedContent());
+        $rows = $sheet->toArray();
+        $this->assertSame(['PayPal结算明细', '叶总支付明细', 'Worldpay明细', '徐总信用卡'], $sheet->getParent()->getSheetNames());
+        $this->assertCount(2, $rows);
+        $this->assertContains('域名', $rows[0]);
+        $this->assertContains('MISSING-NOV', $rows[1]);
+        $this->assertSame('example.com', $rows[1][array_search('域名', $rows[0], true)]);
+        $this->assertContains($details['subscription'], $rows[1]);
+        $csv = $this->get($exportUrl.'&missing_format=csv')->assertOk()->assertHeader('Content-Type', 'text/csv; charset=UTF-8')->streamedContent();
+        $stream = fopen('php://temp', 'w+');
+        try {
+            fwrite($stream, substr($csv, 3));
+            rewind($stream);
+            $headers = fgetcsv($stream, escape: '');
+            $row = fgetcsv($stream, escape: '');
+            $this->assertSame('来源通道', $headers[0]);
+            $this->assertSame('PayPal结算明细', $row[0]);
+            $this->assertCount(count($headers), $row);
+            $this->assertContains('MISSING-NOV', $row);
+            $this->assertFalse(fgetcsv($stream, escape: ''));
+        } finally {
+            fclose($stream);
+        }
+    }
+
+    public function test_transaction_summary_allocates_all_failures_by_team_success_share(): void
+    {
+        $row = ['channel' => 'credit_card', 'account' => 'A', 'currency' => 'USD', 'team' => 'A',
+            'subscription' => '', 'month' => '2026-11', 'success' => true, 'failed' => false,
+            'settlement' => null, 'gross' => null];
+        $rows = [
+            ...array_fill(0, 5, $row),
+            ...array_fill(0, 3, [...$row, 'team' => 'B']),
+            ...array_fill(0, 2, [...$row, 'team' => 'C']),
+            ...array_fill(0, 5, [...$row, 'team' => '', 'success' => false, 'failed' => true]),
+        ];
+        $summary = new \App\Portals\Finance\FinanceTransactionSummary;
+        $items = $summary->summarize($rows, 'worldpay');
+        $this->assertSame(['A' => 3, 'B' => 1, 'C' => 1, '' => 0], array_column($items, 'failed_orders', 'team'));
+        $this->assertSame(5, array_sum(array_column($items, 'failed_orders')));
+        $items = $summary->summarize(array_slice($rows, 0, 13), 'worldpay');
+        $this->assertSame(['A' => 2, 'B' => 1, 'C' => 0, '' => 0], array_column($items, 'failed_orders', 'team'));
+        $legacyItems = $summary->summarize($rows, 'credit_card');
+        $this->assertContains('未分配', array_column($legacyItems, 'team'));
+        $items = $summary->reallocateUnassignedFailures($legacyItems, 'worldpay');
+        $this->assertSame(['A' => 3, 'B' => 1, 'C' => 1, '' => 0], array_column($items, 'failed_orders', 'team'));
+    }
+
     public function test_transaction_summary_uses_each_channel_template_for_display_and_export(): void
     {
-        foreach (['paypal' => 22, 'credit_card' => 24, 'ye' => 24, 'worldpay' => 24, 'combined' => 25] as $channel => $count) {
+        foreach (['paypal' => 23, 'credit_card' => 25, 'ye' => 25, 'worldpay' => 25, 'combined' => 26] as $channel => $count) {
             $url = '/finance/reports/summary?view=transactions&month=2026-10&channel='.$channel;
             $response = $this->get($url)->assertOk()->assertViewHas('tab', $channel);
             $columns = $response->viewData('columns');

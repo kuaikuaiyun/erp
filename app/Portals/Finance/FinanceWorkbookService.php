@@ -590,10 +590,13 @@ class FinanceWorkbookService
         });
     }
 
-    public function download(array $headers, iterable $rows, string $filename, string $format = 'xlsx', bool $plain = false, bool $simplifyText = true, string $sheetTitle = 'Sheet1', array $additionalSheets = [], bool $protectedCostRows = false): StreamedResponse
+    public function download(array $headers, iterable $rows, string $filename, string $format = 'xlsx', bool $plain = false, bool $simplifyText = true, string $sheetTitle = 'Sheet1', array $additionalSheets = [], bool $protectedCostRows = false, bool $omitEmptyCells = false): StreamedResponse
     {
+        if ($format === 'csv') {
+            return $this->downloadDelimited($headers, $rows, $filename, simplifyText: $simplifyText);
+        }
         if ($format === 'xlsx') {
-            return $this->downloadStreamingXlsx($headers, $rows, $filename, $plain, $simplifyText, $sheetTitle, $additionalSheets);
+            return $this->downloadStreamingXlsx($headers, $rows, $filename, $plain, $simplifyText, $sheetTitle, $additionalSheets, $omitEmptyCells);
         }
         return response()->streamDownload(function () use ($headers, $rows, $format, $plain, $simplifyText, $sheetTitle, $additionalSheets, $protectedCostRows): void {
             // Spreadsheet cells and ZIP compression coexist during export.
@@ -704,7 +707,7 @@ class FinanceWorkbookService
         }, $filename, ['Content-Type' => $format === 'xls' ? 'application/vnd.ms-excel' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
     }
 
-    private function downloadStreamingXlsx(array $headers, iterable $rows, string $filename, bool $plain, bool $simplifyText, string $sheetTitle, array $additionalSheets): StreamedResponse
+    private function downloadStreamingXlsx(array $headers, iterable $rows, string $filename, bool $plain, bool $simplifyText, string $sheetTitle, array $additionalSheets, bool $omitEmptyCells): StreamedResponse
     {
         if ($simplifyText) {
             $headers = array_map(FinanceCatalog::simplified(...), $headers);
@@ -720,7 +723,11 @@ class FinanceWorkbookService
             'label' => $header, 'width' => $this->downloadColumnWidth($header, $plain),
         ], $sheet[1]), function () use ($sheet): iterable {
             foreach ($sheet[2]() as $row) {
-                yield ['cells' => array_map(fn ($value) => ['value' => $value, 'type' => match (true) {
+                $omitEmptyCells = $sheet[3] ?? false;
+                if ($omitEmptyCells) {
+                    $row = array_filter($row, fn ($value) => $value !== null && $value !== '');
+                }
+                yield ['omitEmptyCells' => $omitEmptyCells, 'cells' => array_map(fn ($value) => ['value' => $value, 'type' => match (true) {
                     is_int($value) => 'quantity',
                     is_float($value) => 'decimal',
                     default => 'text',
@@ -728,23 +735,27 @@ class FinanceWorkbookService
             }
         }], $additionalSheets);
         return app(\App\Portals\Logistics\StreamedXlsxWriter::class)->response($filename, $sheetTitle, $columns,
-            function () use ($headers, $numeric, $rows, $simplifyText): iterable {
+            function () use ($headers, $numeric, $rows, $simplifyText, $omitEmptyCells): iterable {
                 foreach ($rows as $row) {
                     $cells = [];
                     foreach (array_values($row) as $column => $raw) {
                         $value = FinanceCatalog::exportCell($headers[$column] ?? '', $raw);
+                        if ($omitEmptyCells && $value === '') {
+                            continue;
+                        }
                         if ($simplifyText) {
                             $value = FinanceCatalog::simplified($value);
                         }
                         $number = str_replace(',', '', $value);
                         $isNumeric = ($numeric[$column] ?? false) && preg_match('/^-?\d+(?:\.\d+)?$/D', $number)
                             && strlen(ltrim(str_replace(['-', '.'], '', $number), '0')) <= 15;
-                        $cells[] = ['value' => $isNumeric ? (float) $number : $value,
+                        $cells[$column] = ['value' => $isNumeric ? (float) $number : $value,
                             'type' => $isNumeric ? (preg_match('/数量|条数/u', $headers[$column]) ? 'quantity' : 'decimal') : 'text', 'wrap' => true];
                     }
-                    yield ['height' => 36, 'cells' => $cells];
+                    yield ['height' => 36, 'cells' => $cells, 'omitEmptyCells' => $omitEmptyCells];
                 }
-            }, plain: $plain, additionalSheets: $extraSheets, streamDirectly: true);
+            }, plain: $plain, additionalSheets: $extraSheets, streamDirectly: true,
+            compressionLevel: $omitEmptyCells || collect($additionalSheets)->contains(fn ($sheet) => $sheet[3] ?? false) ? 3 : 6);
     }
 
     private function downloadColumnWidth(string $header, bool $plain): int
@@ -774,21 +785,67 @@ class FinanceWorkbookService
     {
         return response()->streamDownload(function () use ($headers, $rows, $delimiter, $simplifyText): void {
             $stream = fopen('php://output', 'wb');
-            fwrite($stream, "\xEF\xBB\xBF");
-            fputcsv($stream, $simplifyText ? array_map(FinanceCatalog::simplified(...), $headers) : $headers, $delimiter, '"', '');
-            foreach ($rows as $row) {
-                $row = array_values($row);
-                $values = array_map(static function ($value, $column) use ($headers, $simplifyText): string {
-                    $value = FinanceCatalog::exportCell($headers[$column] ?? '', $value);
-                    if ($simplifyText) {
-                        $value = FinanceCatalog::simplified($value);
-                    }
-
-                    return ! is_numeric($value) && preg_match('/^[=+\-@\t\r]/', $value) ? "'".$value : $value;
-                }, $row, array_keys($row));
-                fputcsv($stream, $values, $delimiter, '"', '');
+            try {
+                $this->writeDelimited($stream, $headers, $rows, $delimiter, $simplifyText);
+            } finally {
+                fclose($stream);
             }
-            fclose($stream);
         }, $filename, ['Content-Type' => $delimiter === "\t" ? 'text/tab-separated-values; charset=UTF-8' : 'text/csv; charset=UTF-8']);
+    }
+
+    public function downloadCombinedCsv(array $sheets, string $filename): StreamedResponse
+    {
+        $headers = ['来源通道'];
+        $positions = [];
+        $sources = [];
+        foreach ($sheets as [$title, $sourceHeaders, $rows]) {
+            $occurrences = [];
+            $columns = [];
+            foreach ($sourceHeaders as $header) {
+                $header = FinanceCatalog::simplified($header);
+                $occurrences[$header] = ($occurrences[$header] ?? 0) + 1;
+                $occurrence = $occurrences[$header];
+                if (! isset($positions[$header][$occurrence])) {
+                    $positions[$header][$occurrence] = count($headers);
+                    $headers[] = $occurrence === 1 ? $header : $header.'（'.$occurrence.'）';
+                }
+                $columns[] = $positions[$header][$occurrence];
+            }
+            $sources[] = [$title, $columns, $rows];
+        }
+
+        $rows = (function () use ($sources, $headers): iterable {
+            $empty = array_fill(0, count($headers), '');
+            foreach ($sources as [$title, $columns, $sourceRows]) {
+                foreach ($sourceRows() as $sourceRow) {
+                    $row = $empty;
+                    $row[0] = $title;
+                    foreach (array_values($sourceRow) as $index => $value) {
+                        $row[$columns[$index]] = $value;
+                    }
+                    yield $row;
+                }
+            }
+        })();
+
+        return $this->downloadDelimited($headers, $rows, $filename);
+    }
+
+    private function writeDelimited($stream, array $headers, iterable $rows, string $delimiter, bool $simplifyText): void
+    {
+        fwrite($stream, "\xEF\xBB\xBF");
+        fputcsv($stream, $simplifyText ? array_map(FinanceCatalog::simplified(...), $headers) : $headers, $delimiter, '"', '');
+        foreach ($rows as $row) {
+            $row = array_values($row);
+            $values = array_map(static function ($value, $column) use ($headers, $simplifyText): string {
+                $value = FinanceCatalog::exportCell($headers[$column] ?? '', $value);
+                if ($simplifyText) {
+                    $value = FinanceCatalog::simplified($value);
+                }
+
+                return ! is_numeric($value) && preg_match('/^[=+\-@\t\r]/', $value) ? "'".$value : $value;
+            }, $row, array_keys($row));
+            fputcsv($stream, $values, $delimiter, '"', '');
+        }
     }
 }
