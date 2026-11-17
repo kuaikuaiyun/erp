@@ -269,10 +269,20 @@ class AikaipinHistoricalVideoImporter
         $mime = (new \finfo(FILEINFO_MIME_TYPE))->file($absolute) ?: ($source['mime'] ?: 'video/mp4');
         $extension = $this->extension($mime, (string) ($source['value'] ?? ''));
         $date = $product->created_at?->copy()->timezone('Asia/Shanghai')->format('ymd') ?: now('Asia/Shanghai')->format('ymd');
-        $fileName = $this->productCode($product).'-'.OperationAiProductReferenceVideo::fileTypeCode($source['type']).'-'.$date.'-'.str_pad((string) ($source['index'] + 1), 3, '0', STR_PAD_LEFT).'.'.$extension;
-        $final = 'aikaipin/reference-videos/'.$product->getKey().'/'.$fileName;
+        $usedNumber = OperationAiProductReferenceVideo::query()
+            ->where('aikaipin_product_id', $product->getKey())
+            ->get(['file_name', 'sequence'])
+            ->reduce(fn (int $carry, OperationAiProductReferenceVideo $video): int => max(
+                $carry,
+                OperationAiProductReferenceVideo::fileNumber($video->file_name, (int) $video->sequence),
+            ), 0);
+        $fileNumber = max($source['index'] + 1, $usedNumber + 1);
+        do {
+            $fileName = $this->productCode($product).'-'.OperationAiProductReferenceVideo::fileTypeCode($source['type']).'-'.$date.'-'.str_pad((string) $fileNumber, 3, '0', STR_PAD_LEFT).'.'.$extension;
+            $final = 'aikaipin/reference-videos/'.$product->getKey().'/'.$fileName;
+            $fileNumber++;
+        } while (Storage::disk('local')->exists($final));
         Storage::disk('local')->makeDirectory(dirname($final));
-        if (Storage::disk('local')->exists($final)) Storage::disk('local')->delete($final);
         if (! Storage::disk('local')->move($temp, $final)) throw new RuntimeException('视频文件保存失败。');
 
         return ['path' => $final, 'file_name' => $fileName, 'original_name' => basename(parse_url((string) ($source['value'] ?? ''), PHP_URL_PATH) ?: $fileName), 'mime_type' => $mime, 'size' => $size];

@@ -73,27 +73,35 @@ class AikaipinHistoricalVideoImporterTest extends TestCase
                 'size' => Storage::disk('local')->size('references/product.html'),
             ],
         ]);
+        $date = $product->created_at->copy()->timezone('Asia/Shanghai')->format('ymd');
+        $existingPath = 'aikaipin/reference-videos/'.$product->getKey().'/kky-test-flow-'.$date.'-001.mp4';
         OperationAiProductReferenceVideo::query()->create([
             'aikaipin_product_id' => $product->getKey(),
-            'type' => OperationAiProductReferenceVideo::TYPE_REMIX,
+            'type' => OperationAiProductReferenceVideo::TYPE_FLOW,
             'sequence' => 1,
             'file_date' => $product->created_at->toDateString(),
             'disk' => 'local',
-            'path' => 'existing/upload.mp4',
-            'file_name' => 'kky-test-mix-001.mp4',
+            'path' => $existingPath,
+            'file_name' => 'kky-test-flow-'.$date.'-001.mp4',
             'original_name' => 'upload.mp4',
             'source_kind' => OperationAiProductReferenceVideo::SOURCE_UPLOAD,
         ]);
+        Storage::disk('local')->put($existingPath, 'existing-upload-content');
 
         $result = app(AikaipinHistoricalVideoImporter::class)->import($product);
 
         self::assertSame(['found' => 2, 'imported' => 2, 'skipped' => 0, 'failed' => 0, 'errors' => []], $result);
         $videos = OperationAiProductReferenceVideo::query()->where('aikaipin_product_id', $product->getKey())->orderBy('sequence')->get();
-        self::assertSame(['flow', 'traffic', 'remix'], $videos->pluck('type')->all());
+        self::assertSame(['flow', 'traffic', 'flow'], $videos->pluck('type')->all());
         self::assertSame([1, 2, 3], $videos->pluck('sequence')->all());
         self::assertSame([0, 1], $videos->take(2)->pluck('source_reference_index')->all());
+        self::assertSame([
+            'kky-test-flow-'.$date.'-002.mp4',
+            'kky-test-spy-'.$date.'-003.mp4',
+        ], $videos->take(2)->pluck('file_name')->all());
         self::assertTrue(Storage::disk('local')->exists($videos[0]->path));
         self::assertTrue(Storage::disk('local')->exists($videos[1]->path));
+        self::assertSame('existing-upload-content', Storage::disk('local')->get($videos[2]->path));
         self::assertSame([0, 1], json_decode(Storage::disk('local')->get('references/product.html.erp-hidden-videos.json'), true));
 
         $again = app(AikaipinHistoricalVideoImporter::class)->import($product->fresh());

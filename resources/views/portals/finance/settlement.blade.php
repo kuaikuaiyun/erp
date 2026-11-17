@@ -170,7 +170,7 @@
 @include('portals.finance.partials.filter-conditions', ['enhancedConditions' => true, 'hideConditionOperator' => true])
 <div class="settlement-actions"><button class="btn btn-primary">查询</button><a class="btn btn-default" href="{{ route('finance.report', $report) }}">重置</a><select class="form-control" name="format" aria-label="导出格式">@if($fixedCardChannel === 'ye')<option value="csv" @selected(($filters['format'] ?? 'csv') === 'csv')>CSV (.csv)</option>@endif<option value="xlsx" @selected(($filters['format'] ?? ($fixedCardChannel === 'ye' ? 'csv' : 'xlsx')) === 'xlsx')>Excel (.xlsx)</option><option value="xls" @selected(($filters['format'] ?? 'xlsx') === 'xls')>Excel (.xls)</option></select><label class="settlement-template-toolbar">导出模板 <select class="form-control" data-active-export-template aria-label="本次使用的导出模板"><option value="">{{ $orderView ? '按当前列表导出' : '默认字段设置' }}</option></select></label><button type="button" data-finance-download  class="btn btn-default" >导出筛选结果</button>@if($canManage)<button type="button" class="btn btn-default" data-open-settlement-import>导入数据</button> <button type="button" class="btn btn-danger" data-delete-selected-settlements>删除所选</button> @endif</div>
 </form></div></div>
-<div class="box"><div class="box-body"><div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><span>共 {{ $rows->total() }} 条</span><div class="settlement-column-settings-trigger">@include('portals.finance.partials.settlement-column-settings', ['columnCardChannel' => $cardChannel])</div></div>
+<div class="box"><div class="box-body"><div style="display:flex;align-items:center;gap:12px;margin-bottom:14px"><span @if($deferredTotalUrl) id="settlement-total" role="status" data-total-url="{{ $deferredTotalUrl }}" @endif>{{ $deferredTotalUrl ? '正在统计总数…' : '共 '.$rows->total().' 条' }}</span><div class="settlement-column-settings-trigger">@include('portals.finance.partials.settlement-column-settings', ['columnCardChannel' => $cardChannel])</div></div>
 <div class="finance-table-wrap"><table class="table finance-table"><thead><tr><th class="finance-selection"><input type="checkbox" data-export-all aria-label="全选当前页"></th>@foreach($columns as $field => $label)<th data-settlement-column="{{ $field }}">{{ $label }}</th>@endforeach @if($hasOperations)<th class="{{ $operationClass }}">操作</th>@endif</tr></thead><tbody>
 @forelse($rows as $row)
 @php($editable = $orderView ? ($row['payments'][0] ?? null) : (empty($row['statement_only']) ? $row : null))
@@ -205,7 +205,14 @@
 </td>@endif
 </tr>
 @empty<tr><td data-settlement-colspan="{{ $hasOperations ? 2 : 1 }}" colspan="{{ count($columns) + ($hasOperations ? 2 : 1) }}">无符合条件的记录</td></tr>@endforelse
-</tbody></table></div>@include('portals.finance.pagination', ['paginator' => $rows])
+</tbody></table></div>
+@if($deferredTotalUrl)
+<div id="settlement-pagination">
+    @include('portals.finance.pagination', ['paginator' => $rows, 'totalPending' => true])
+</div>
+@else
+    @include('portals.finance.pagination', ['paginator' => $rows])
+@endif
 <p class="settlement-note">@if($orderView)每笔付款单独列示。应结算为美元收款金额减去手续费至争议费各列，再加上三项返还。缺少换汇或返还依据的金额待核对。@endif
 @if($cardChannel === 'ye')保证金和交易手续费按每笔结算金额及费率计算，处理费按账单核对后填入。费用和返还使用结算币种。应结算按明细公式计算，平台净结算以结算统计为准。
 @else 费用和返还金额以美元填写。@endif 物流和采购以人民币填写。金额可按需补充。@if($orderView)使用人优先显示财务补录，其次按下单时间匹配归属历史。已停用店铺的初始归属为空时，可用订单快照或该店紧接着登记的归属补齐；明确清空归属的时段仍留空。查不到历史时，依次取订单归属快照和绑定店铺的归属人。运营所属部门取使用人在助理系统对应的运营部门。@else 使用人和团队优先显示财务补录，未补充时按域名匹配。@endif 已锁定月份不可修改。</p>
@@ -334,12 +341,45 @@
 
 
 <datalist id="settlement-accounts">@foreach($accounts as $account)<option value="{{ $account->account_name }}">{{ $account->activity_account }}</option>@endforeach</datalist>
-<datalist id="settlement-subscriptions">@foreach($subscriptionOptions as $type)<option value="{{ $type }}">@endforeach</datalist>
+<datalist id="settlement-subscriptions" data-options-url="{{ route('finance.report', ['report' => $report, 'subscription_options' => 1]) }}">@foreach($subscriptionOptions as $type)<option value="{{ $type }}">@endforeach</datalist>
 </div>
 @endsection
 @push('scripts')
 <script>
 (function(){
+
+var totalStatus = document.getElementById('settlement-total');
+if (totalStatus) {
+    fetch(totalStatus.dataset.totalUrl, {headers: {Accept: 'application/json'}})
+        .then(function(response) {
+            if (!response.ok) throw new Error('Settlement total unavailable');
+            return response.json();
+        })
+        .then(function(result) {
+            totalStatus.textContent = '共 ' + result.total + ' 条';
+            document.getElementById('settlement-pagination').innerHTML = result.pagination;
+        })
+        .catch(function() { totalStatus.textContent = '暂时无法统计总数'; });
+}
+
+var subscriptionOptions = document.getElementById('settlement-subscriptions');
+var pendingSubscriptions = false;
+document.addEventListener('focusin', function(event) {
+    if (!event.target.matches('[list="settlement-subscriptions"]') || pendingSubscriptions) return;
+    pendingSubscriptions = true;
+    fetch(subscriptionOptions.dataset.optionsUrl, {headers: {Accept: 'application/json'}})
+        .then(function(response) {
+            if (!response.ok) throw new Error('Subscription options unavailable');
+            return response.json();
+        })
+        .then(function(values) {
+            var known = new Set(Array.from(subscriptionOptions.options, function(option) { return option.value; }));
+            values.forEach(function(value) {
+                if (!known.has(value)) subscriptionOptions.appendChild(new Option(value, value));
+            });
+        })
+        .catch(function() { pendingSubscriptions = false; });
+});
 
 var editor=document.getElementById('settlement-editor'),importer=document.getElementById('settlement-import');
 var deleteForm=document.getElementById('settlement-delete-form');

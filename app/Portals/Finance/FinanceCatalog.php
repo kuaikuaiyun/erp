@@ -2,6 +2,8 @@
 
 namespace App\Portals\Finance;
 
+use App\Models\AssistantDomainStore;
+
 class FinanceCatalog
 {
     public const PORTAL_CODE = 'caiwu';
@@ -188,7 +190,9 @@ class FinanceCatalog
 
     public static function displayTongtuOrder(mixed $value): string
     {
-        return preg_replace('/^(.+)-[A-Z]+([0-9]+)$/D', '$1-$2', (string) ($value ?? ''));
+        $number = AssistantDomainStore::normalizeStaenTongtuOrderNumber((string) ($value ?? ''));
+
+        return preg_replace('/^(.+)-[A-Z]+([0-9]+)$/D', '$1-$2', $number);
     }
 
     public static function exportCell(string $header, mixed $value): string

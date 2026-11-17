@@ -2,6 +2,7 @@
 
 namespace App\Portals\Finance;
 
+use App\Models\AssistantDomainStore;
 use App\Models\FinancePaymentAccount;
 use App\Models\FinanceRecord;
 use App\Portals\Logistics\LogisticsCreditCardRefundReason;
@@ -290,7 +291,9 @@ class FinanceXuzongCreditMatches
                 $names = array_map(self::accountKey(...), [$detail->account, $detail->payload['商户名称'] ?? '', $account?->account_name]);
                 $statementErpOrder = trim((string) ($detail->payload['通途订单'] ?? ''));
                 $hasErpPair = filled($erpOrder) && $statementErpOrder !== '';
-                $erpMatches = $hasErpPair && $statementErpOrder === $erpOrder;
+                $erpMatches = $hasErpPair
+                    && AssistantDomainStore::normalizeStaenTongtuOrderNumber($statementErpOrder)
+                        === AssistantDomainStore::normalizeStaenTongtuOrderNumber($erpOrder);
                 $merchantMatches = $merchant !== '' && in_array($merchant, $names, true);
 
                 return FinanceSettlementService::transactionStatusCategory($detail->status) === FinanceSettlementService::transactionStatusCategory($record->status)

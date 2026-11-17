@@ -14,6 +14,7 @@ use App\Models\AikaipinSelectionProposalImage;
 use App\Models\AikaipinSelectionProposalTag;
 use App\Models\OperationAiProductReferenceVideo;
 use App\Portal\Http\Controllers\PortalEntryController;
+use App\Portals\Aikaipin\AikaipinHistoricalVideoImporter;
 use App\Portals\Aikaipin\AikaipinPortalAuthorizationService;
 use App\Portals\Aikaipin\AikaipinProductLibraryStorageService;
 use App\Portals\Aikaipin\AikaipinSelectionProposalStorageService;
@@ -50,6 +51,7 @@ class ProductLibraryController extends Controller
         private readonly AikaipinSelectionProposalStorageService $selectionProposalStorage,
         private readonly ShopifyProductCsvImporter $shopifyCsvImporter,
         private readonly AiProductListingPushService $listingPush,
+        private readonly AikaipinHistoricalVideoImporter $historicalVideoImporter,
     ) {}
 
     public function index(Request $request): Response|View
@@ -449,15 +451,17 @@ class ProductLibraryController extends Controller
                 report($exception);
             }
         }
+        $videoImport = $this->importReferenceVideosToTable($product);
         Cache::forget(self::PRODUCT_CATEGORY_OPTIONS_CACHE_KEY);
         if ($product?->is_published) {
             $this->listingPush->notifyDepartmentManagers($product, $context['user']);
         }
 
         return response()->json([
-            'message' => __('aikaipin.messages.product_created_message'),
+            'message' => $this->productSaveMessage(__('aikaipin.messages.product_created_message'), $videoImport),
             'redirect_url' => route('aikaipin.product-library.index'),
             'product_id' => $product?->getKey(),
+            'video_import' => $videoImport,
         ], 201);
     }
 
@@ -727,10 +731,11 @@ class ProductLibraryController extends Controller
         $obsoletePaths = [];
         $completedSession = null;
         $completedReferenceSession = null;
+        $referenceReplaced = false;
 
         try {
             $connection = config('admin.database.connection') ?: config('database.default');
-            DB::connection($connection)->transaction(function () use ($context, $product, $data, $categories, $departmentIds, $skuValues, $removedImageIndexes, $removedMaterialVideoIds, $newImages, &$createdPaths, &$obsoletePaths, &$completedSession, &$completedReferenceSession): void {
+            DB::connection($connection)->transaction(function () use ($context, $product, $data, $categories, $departmentIds, $skuValues, $removedImageIndexes, $removedMaterialVideoIds, $newImages, &$createdPaths, &$obsoletePaths, &$completedSession, &$completedReferenceSession, &$referenceReplaced): void {
                 $images = $product->imageFiles();
                 foreach (array_reverse($removedImageIndexes) as $index) {
                     $removedFile = $images[$index] ?? null;
@@ -763,9 +768,10 @@ class ProductLibraryController extends Controller
                     $referencePayload = $this->storage->copyStoredFile($referenceSession->assembled_path, 'references', $referenceSession->original_name, $referenceSession->mime_type);
                     $createdPaths[] = $referencePayload['path'];
                     if ($referenceFile !== null) {
-                        $obsoletePaths[] = $referenceFile['path'];
+                        array_push($obsoletePaths, ...$this->referenceFilePaths($referenceFile['path']));
                     }
                     $referenceFile = $this->productFilePayload($referencePayload);
+                    $referenceReplaced = true;
                     $referenceSession->forceFill([
                         'status' => AikaipinProductUploadSession::STATUS_CONSUMED,
                         'expires_at' => now()->addHour(),
@@ -777,9 +783,22 @@ class ProductLibraryController extends Controller
                     $referencePayload = $this->storage->storeUploadedFile($uploadedReferenceFile, 'references');
                     $createdPaths[] = $referencePayload['path'];
                     if ($referenceFile !== null) {
-                        $obsoletePaths[] = $referenceFile['path'];
+                        array_push($obsoletePaths, ...$this->referenceFilePaths($referenceFile['path']));
                     }
                     $referenceFile = $this->productFilePayload($referencePayload);
+                    $referenceReplaced = true;
+                }
+
+                if ($referenceReplaced) {
+                    $historicalVideos = OperationAiProductReferenceVideo::query()
+                        ->where('aikaipin_product_id', $product->getKey())
+                        ->where('source_kind', OperationAiProductReferenceVideo::SOURCE_HISTORICAL_HTML)
+                        ->lockForUpdate()
+                        ->get();
+                    foreach ($historicalVideos as $historicalVideo) {
+                        $obsoletePaths[] = $historicalVideo->path;
+                        $historicalVideo->delete();
+                    }
                 }
 
                 $packageFile = $product->packageFilePayload();
@@ -891,12 +910,14 @@ class ProductLibraryController extends Controller
                 report($exception);
             }
         }
+        $videoImport = $this->importReferenceVideosToTable($product);
         Cache::forget(self::PRODUCT_CATEGORY_OPTIONS_CACHE_KEY);
 
         return response()->json([
-            'message' => __('aikaipin.messages.product_updated_message'),
+            'message' => $this->productSaveMessage(__('aikaipin.messages.product_updated_message'), $videoImport),
             'redirect_url' => route('aikaipin.product-library.index'),
             'product_id' => $product->getKey(),
+            'video_import' => $videoImport,
         ]);
     }
 
@@ -2067,6 +2088,46 @@ class ProductLibraryController extends Controller
                 'size' => number_format(((int) $video->size) / 1048576, 2).' MB',
                 'preview_url' => URL::temporarySignedRoute('aikaipin.product-library.reference-videos.preview', now()->addHours(12), [$product, $video]),
             ])->all(),
+        ];
+    }
+
+    /** @return array{found:int,imported:int,skipped:int,failed:int,errors:list<string>} */
+    private function importReferenceVideosToTable(?AikaipinProduct $product): array
+    {
+        $empty = ['found' => 0, 'imported' => 0, 'skipped' => 0, 'failed' => 0, 'errors' => []];
+        if ($product === null || $product->referenceFilePayload() === null) return $empty;
+
+        try {
+            return $this->historicalVideoImporter->import($product->fresh());
+        } catch (Throwable $exception) {
+            report($exception);
+
+            return [...$empty, 'failed' => 1, 'errors' => [$exception->getMessage()]];
+        }
+    }
+
+    /** @param array{found:int,imported:int,skipped:int,failed:int,errors:list<string>} $videoImport */
+    private function productSaveMessage(string $message, array $videoImport): string
+    {
+        if ($videoImport['found'] === 0) return $message;
+        if ($videoImport['failed'] > 0) {
+            return $message.'；参考页视频已导入 '.$videoImport['imported'].' 个，失败 '.$videoImport['failed'].' 个，请检查视频地址。';
+        }
+        if ($videoImport['imported'] === 0 && $videoImport['skipped'] > 0) {
+            return $message.'；参考页视频库已是最新。';
+        }
+
+        return $message.'；参考页视频已同步到视频库 '.$videoImport['imported'].' 个。';
+    }
+
+    /** @return list<string> */
+    private function referenceFilePaths(string $path): array
+    {
+        return [
+            $path,
+            $path.'.erp-edits.json',
+            $path.'.erp-hidden-videos.json',
+            $path.'.erp-layout.json',
         ];
     }
 
