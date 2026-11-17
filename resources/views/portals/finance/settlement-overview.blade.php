@@ -167,7 +167,7 @@ document.getElementById('overview-channel').addEventListener('change', function 
 <script type="application/json" data-loss-panels>@json($switchPanels)</script>
 @foreach($allPanels as $index => $panel)<template id="loss-table-{{ $index }}">@include('portals.finance.partials.loss-month-table')</template>@endforeach
 </div>@endif
-<details class="overview-method"><summary>统计口径</summary><p>月度对照按所选开始月份至结束月份展示，包含起止月份。PayPal 中团队或使用人包含“刷单”的记录归入 Shopify、PayPal 的“刷单”分类，并计入总计；信用卡不设置刷单分类。缺少订阅类型的记录只计入总计，不推断为无订阅；Shopify 为 PayPal 与信用卡合计，通道分项不再重复计入顶部汇总。无结算基数或缺少资料时显示“—”。结算和费用按美元计算，物流、采购先按本月汇率换算美元，再除以结算金额。PayPal手续费扣除返还手续费，争议冻结退款计入争议退款与冻结、扣除解除冻结。按明细表的SUM口径汇总，空白费用不参与加总；缺少汇率只影响物流和采购，结算金额为零时不计算占比。信用卡保留失败记录的单笔费用。ERP订单、团队和订阅数据尚未匹配时不自动推断。物流、采购未录入时，匹配到的物流订单按商品重量估算运费，按 SKU 指导价估算采购成本。缺少匹配或成本资料时留空。</p></details></div>
+<details class="overview-method"><summary>统计口径</summary><p>月度对照按所选开始月份至结束月份展示，包含起止月份。PayPal 中团队或使用人包含“刷单”的记录归入 Shopify、PayPal 的“刷单”分类，并计入总计；信用卡不设置刷单分类。缺少订阅类型的记录只计入总计，不推断为无订阅；Shopify 为 PayPal 与信用卡合计，通道分项不再重复计入顶部汇总。无结算基数或缺少资料时显示“—”。结算和费用按美元计算，物流、采购先按本月汇率换算美元，再除以结算金额。PayPal手续费扣除返还手续费，争议冻结退款计入争议退款与冻结、扣除解除冻结。按明细表的SUM口径汇总，空白费用不参与加总；缺少汇率只影响物流和采购，结算金额为零时不计算占比。信用卡保留失败记录的单笔费用。ERP订单、团队和订阅数据尚未匹配时不自动推断。物流和采购成本按财务导入金额累计，未导入时留空。</p></details></div>
 @endsection
 
 @push('scripts')

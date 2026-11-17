@@ -1008,7 +1008,7 @@ class FinancePortalTest extends TestCase
         $db = $this->workbooks->database();
         $db->table('finance_monthly_exchange_rates')->insert(['month' => '2026-11', 'currency' => 'USD', 'cny_rate' => '6.7628']);
         $this->get('/finance/reports/losses?month=2026-11')->assertOk()
-            ->assertViewHas('groups', fn ($groups) => $groups[0]['total_ratio'] === '54.00000000');
+            ->assertViewHas('groups', fn ($groups) => $groups[0]['total_ratio'] === '24.00000000');
         foreach (['xls', 'xlsx'] as $format) {
             $sheet = $this->readDownload($this->get('/finance/reports/paypal-settlement?download=1&format='.$format)->assertOk()->streamedContent());
             $this->assertSame(2, $sheet->getHighestDataRow());
@@ -1081,7 +1081,7 @@ class FinancePortalTest extends TestCase
             'subscription' => '订阅', 'upsell' => '否', 'converted_usd' => '34.8', 'usd_rate' => '1.2', 'settlement' => '36', 'fee' => '1.2',
             'domain' => 'edited.example.test', 'owner' => '编辑使用人', 'team' => '编辑团队', 'erp_order' => 'EDITED-ERP', 'note' => '编辑备注'];
         $page = $this->get('/finance/reports/paypal-settlement')->assertOk();
-        foreach (array_diff_key($service->columns('paypal'), ['id' => true, 'team' => true, 'operation_region' => true]) as $field => $label) {
+        foreach (array_diff_key($service->columns('paypal'), ['id' => true, 'team' => true, 'operation_region' => true, 'logistics' => true, 'purchase' => true]) as $field => $label) {
             $page->assertSee('id="edit-'.$field.'"', false);
         }
         $page->assertDontSee('id="edit-team"', false);
@@ -1124,7 +1124,7 @@ class FinancePortalTest extends TestCase
         $record = FinanceRecord::where('reference', 'CARD-EDIT')->sole();
         $service = app(\App\Portals\Finance\FinanceSettlementService::class);
         $page = $this->get('/finance/reports/credit-settlement')->assertOk();
-        foreach (array_diff_key($service->columns('credit_card'), ['id' => true]) as $field => $label) {
+        foreach (array_diff_key($service->columns('credit_card'), ['id' => true, 'logistics' => true, 'purchase' => true]) as $field => $label) {
             $page->assertSee('id="edit-'.$field.'"', false);
         }
         $this->post('/finance/reports/credit-settlement/save', ['id' => $record->id, 'reference' => 'CARD-DUPLICATE', 'gross' => '999'])->assertSessionHasErrors('reference');
@@ -1177,7 +1177,7 @@ class FinancePortalTest extends TestCase
             ->assertSee('WP-ORDER')->assertDontSee('YE-ORDER');
 
         $yeExport = $this->readDownload($this->get('/finance/reports/ye-settlement?download=1')->assertOk()->streamedContent())->toArray();
-        $this->assertCount(53, $yeExport[0]);
+        $this->assertCount(54, $yeExport[0]);
         $this->assertSame('订单退款金额', $yeExport[0][18]);
         $this->assertSame('账单退款金额', $yeExport[0][29]);
         $this->assertEquals(2, $yeExport[1][18]);
@@ -1189,11 +1189,26 @@ class FinancePortalTest extends TestCase
         $this->assertStringContainsString('YE-ORDER', $yeCsv);
         $this->assertStringNotContainsString('WP-ORDER', $yeCsv);
         $worldpayExport = $this->readDownload($this->get('/finance/reports/worldpay-settlement?download=1')->assertOk()->streamedContent())->toArray();
-        $this->assertCount(45, $worldpayExport[0]);
+        $this->assertCount(46, $worldpayExport[0]);
         $this->assertSame('网关接入号', $worldpayExport[0][0]);
         $this->assertSame('预仲裁金额', $worldpayExport[0][31]);
         $this->assertEquals(4, $worldpayExport[1][31]);
         $this->assertCount(2, $worldpayExport);
+
+
+        foreach (['ye' => 'YE-ORDER', 'worldpay' => 'WP-ORDER'] as $platform => $reference) {
+            $url = '/finance/reports/'.$platform.'-settlement';
+            $costs = new Spreadsheet;
+            $costs->getActiveSheet()->fromArray([['交易流水号', '物流-元', '采购成本-元'], [$reference, 7, 11]]);
+            for ($attempt = 0; $attempt < 2; $attempt++) {
+                $this->post($url.'/import', ['import_kind' => 'transaction_costs', 'file' => $this->upload($costs)])
+                    ->assertSessionHasNoErrors();
+            }
+            $export = $this->readDownload($this->get($url.'?download=1')->assertOk()->streamedContent())->toArray();
+            $row = array_combine($export[0], $export[1]);
+            $this->assertEquals(14, $row['物流-元']);
+            $this->assertEquals(22, $row['采购成本-元']);
+        }
 
         $template = $this->readDownload($this->get($report.'?card_channel=ye&download=1&export_template=1')
             ->assertOk()->streamedContent());
@@ -1425,8 +1440,8 @@ class FinancePortalTest extends TestCase
         $export = $this->get($url.'?'.http_build_query([...$scope, 'card_match' => 'matched', 'download' => 1]))->assertOk();
         $dataRows = $this->readDownload($export->streamedContent())->toArray();
         $this->assertCount(2, $dataRows);
-        $this->assertCount(53, $dataRows[0]);
-        $this->assertSame(\App\Portals\Finance\FinanceSettlementService::SHOP_DIFFERENCE_LABEL, $dataRows[0][49]);
+        $this->assertCount(54, $dataRows[0]);
+        $this->assertSame(\App\Portals\Finance\FinanceSettlementService::SHOP_DIFFERENCE_LABEL, $dataRows[0][50]);
         $this->assertSame('ORDER-1', $dataRows[1][3]);
         $this->assertEquals(30, $dataRows[1][25]);
         $this->assertEquals(5, $dataRows[1][29]);
@@ -1769,7 +1784,7 @@ class FinancePortalTest extends TestCase
         $orderQuery = http_build_query(['reference' => 'wp-1', 'download' => 1,
             'export_columns' => ['reference', 'logistics', 'store_platform', 'product_name', 'payable']]);
         $orderExport = $this->readDownload($this->get($report.'?'.$orderQuery)->assertOk()->streamedContent())->toArray();
-        $this->assertEquals(['wp-1', 60, '索引', '保暖内衣套装', 33.63], $orderExport[1]);
+        $this->assertEquals(['wp-1', '', '索引', '保暖内衣套装', 33.63], $orderExport[1]);
         $release = "商户号,结单币种,成功结单金额,保证金扣取日期,保证金扣取批次号,保证金返还日期,保证金返还批次号,保证金返还金额\n"
             .'888999,USD,"80,709.64",2026-05-12,R135,2026-11-10,R161,"8,076.25"';
         $import($release);
@@ -1886,9 +1901,6 @@ class FinancePortalTest extends TestCase
         $this->assertDatabaseCount('finance_settlement_supplements', 0);
         $book->getActiveSheet()->removeRow(3);
         $book->getActiveSheet()->fromArray([['erp-1001', '21.4', '16.00']], null, 'A3');
-        $this->post($url.'/import', ['import_kind' => 'tongtu_costs', 'file' => $this->upload($book)])->assertSessionHasErrors('file');
-        $this->assertDatabaseCount('finance_settlement_supplements', 0);
-        $book->getActiveSheet()->setCellValue('C3', '15');
         for ($attempt = 0; $attempt < 2; $attempt++) {
             $this->post($url.'/import', ['import_kind' => 'tongtu_costs', 'file' => $this->upload($book)])->assertSessionHasNoErrors();
         }
@@ -1899,7 +1911,7 @@ class FinancePortalTest extends TestCase
             'download' => 1, 'export_columns' => ['reference', 'erp_order', 'logistics', 'purchase'],
         ]))->assertOk()->streamedContent())->toArray();
         $exported = collect(array_slice($sheet, 1))->keyBy(0);
-        $this->assertEquals(['PRIMARY', 'erp-1001', 21.4, 15], $exported['PRIMARY']);
+        $this->assertEquals(['PRIMARY', 'erp-1001', 85.6, 62], $exported['PRIMARY']);
         $this->assertSame(['UPSELL', 'erp-1001', '', ''], $exported['UPSELL']);
     }
 
@@ -2620,7 +2632,7 @@ class FinancePortalTest extends TestCase
         }
     }
 
-    public function test_loss_report_fills_missing_costs_from_a_matched_logistics_order_only_once(): void
+    public function test_loss_report_leaves_unimported_costs_blank_even_when_logistics_is_matched(): void
     {
         Schema::create('logistics_orders', function (Blueprint $table): void {
             $table->id();
@@ -2647,7 +2659,7 @@ class FinancePortalTest extends TestCase
 
         $this->get('/finance/reports/losses?month=2026-10&channel=combined')->assertOk()
             ->assertViewHas('groups', fn ($groups) => count($groups) === 1
-                && $groups[0]['purchase'] === '24.00000000' && $groups[0]['logistics'] === '60.00000000');
+                && $groups[0]['purchase'] === null && $groups[0]['logistics'] === null);
     }
 
     public function test_finance_export_selection_and_imported_upsell_labels(): void
@@ -3293,8 +3305,12 @@ class FinancePortalTest extends TestCase
         $this->postJson($report.'/import', ['file' => $this->upload($sheet->getParent())])->assertOk();
         $this->assertSame(4, FinanceRecord::where('dataset', $dataset)->count());
         $payload = FinanceRecord::where('dataset', $dataset)->where('reference', 'P-MAIN')->sole()->payload;
-        $this->assertSame('8', $payload['物流-元']);
-        $this->assertSame('11', $payload['采购成本-元']);
+        $this->assertEquals(8, $payload['物流-元']);
+        $this->assertEquals(11, $payload['采购成本-元']);
+        $this->postJson($report.'/import', ['file' => $this->upload($sheet->getParent())])->assertOk();
+        $payload = FinanceRecord::where('dataset', $dataset)->where('reference', 'P-MAIN')->sole()->payload;
+        $this->assertEquals(16, $payload['物流-元']);
+        $this->assertEquals(22, $payload['采购成本-元']);
     }
 
     public function test_credit_order_page_reads_live_logistics_orders_for_filters_and_exports(): void

@@ -319,6 +319,17 @@
 @endif
 </p>
 <footer><button type="button" class="btn btn-default" data-settlement-close>取消</button><button class="btn btn-success">确认导入</button></footer></form></dialog>
+@if(in_array($cardChannel, ['ye', 'worldpay'], true))
+<details class="box"><summary class="box-header">导入物流和采购成本</summary>
+    <form class="box-body" method="post" action="{{ route('finance.settlement.import', $report) }}" enctype="multipart/form-data">
+        @csrf
+        <input type="hidden" name="import_kind" value="transaction_costs">
+        <a href="{{ route('finance.report', ['report' => $report, 'template' => 1, 'import_kind' => 'transaction_costs']) }}">下载成本模板</a>
+        <input type="file" name="file" required accept=".xlsx,.csv" aria-label="成本文件">
+        <button class="btn btn-success">导入并累计</button>
+    </form>
+</details>
+@endif
 @endif
 
 

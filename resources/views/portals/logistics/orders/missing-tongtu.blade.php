@@ -78,11 +78,11 @@
             <div class="table-responsive">
                 <table class="table table-striped table-hover results-table">
                     <thead>
-                        <tr><th scope="col">通途订单号</th><th scope="col">店铺域名</th></tr>
+                        <tr><th scope="col">店铺域名</th><th scope="col">通途订单号</th></tr>
                     </thead>
                     <tbody>
                         @forelse ($orders as $order)
-                            <tr><td>{{ $order->number }}</td><td>{{ $order->domain ?? '未匹配域名' }}</td></tr>
+                            <tr><td>{{ $order->domain ?? '未匹配域名' }}</td><td>{{ $order->number }}</td></tr>
                         @empty
                             <tr><td colspan="2" class="empty">{{ $lastSync ? '已同步的数据中没有符合筛选条件的缺失订单。' : '所选日期暂无已同步数据。' }}</td></tr>
                         @endforelse
