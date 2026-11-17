@@ -805,7 +805,7 @@ return array_replace_recursive($translations, [
     ],
     'renewal_analysis' => [
         'page_title' => '续费订单分析',
-        'page_subtitle' => '按首次续费付款时间观察首次续费转化、风险与明确关联的 Upsell 表现。',
+        'page_subtitle' => '按首次续费付款时间选定订阅链，跟踪各次续费转化、退款与争议。',
         'filters' => [
             'cohort_period' => '首次续费付款时间', 'risk_date_mode' => '风险时间口径',
             'payment_mode' => '续费付款时间', 'event_mode' => '真实退款 / 纠纷时间',
@@ -824,21 +824,25 @@ return array_replace_recursive($translations, [
             'completed_first_renewal' => '完成首次续费', 'expected_first_renewal' => '应首次续费订阅',
             'total_subscription_rate' => '总首单订阅率', 'paypal_subscription_rate' => 'PayPal 首单订阅率', 'credit_card_subscription_rate' => '信用卡首单订阅率',
             'subscription_first_purchase' => '订阅首次购买', 'qualified_first_orders' => '合格首单',
-            'renewal_orders' => '首次续费订单', 'renewal_revenue' => '首次续费实收金额',
+            'renewal_orders' => '续费订单', 'renewal_revenue' => '续费实收金额（全部阶段）',
         ],
         'formulas' => [
             'first_renewal_rate' => '首次续费率 = 完成首次续费订阅链 ÷ 应首次续费订阅链',
+            'refund_rates' => '笔数退款率 = 发生退款的订单数（去重）÷ 续费订单数；金额退款率 = 退款金额 ÷ 续费实收。退款栏保留退款记录笔数及金额。',
             'subscription_rate' => '首单订阅率 = 订阅首次购买首单 ÷ 合格首单',
             'subscription_scope' => 'PayPal 合格首单需已关联 ERP 且已匹配成功 PayPal 真实交易；信用卡合格首单需已关联 ERP。',
         ],
-        'observation_note' => '筛选时间为首次续费付款时间；分母取该时间区间整体前推 :days 天的首次订阅单，渠道按首扣支付渠道归属。',
+        'observation_note' => '首次分母保留筛选区间前推 :days 天的订阅首单；选中首次续费落在区间内的链，后续跟踪至区间结束日。后续未到期且未付款不计入应续费和流失；提前完成的续费计入应续费和完成。退款与争议按所选续费订单关联统计。',
         'funnel' => [
-            'title' => '首次续费漏斗', 'stage' => '续费阶段', 'eligible' => '应首次续费链', 'completed' => '完成首次续费链',
-            'renewal_rate' => '首次续费率', 'loss' => '阶段流失', 'orders_revenue' => '订单 / 实收',
+            'title' => '续费阶段漏斗', 'stage' => '续费阶段', 'eligible' => '应续费链', 'completed' => '完成续费链',
+            'refund_count_rate' => '退款率（笔数）', 'refund_amount_rate' => '退款率（金额）',
+            'per_page' => '每页 10 个阶段', 'pagination_summary' => '显示 :from - :to，共 :total 个阶段',
+            'renewal_rate' => '阶段续费率', 'loss' => '阶段流失', 'orders_revenue' => '订单 / 实收',
             'refund' => '退款', 'dispute' => '争议', 'stage_name' => '第 :number 次续费', 'empty' => '当前队列尚未产生续费订单。',
         ],
         'risk' => [
-            'title' => '续费风险（按实际续费支付渠道）', 'channel' => '实际渠道', 'orders' => '续费订单',
+            'title' => '续费风险（按实际续费支付渠道）',
+            'refund_count_rate' => '退款率（笔数）', 'refund_amount_rate' => '退款率（金额）', 'channel' => '实际渠道', 'orders' => '续费订单',
             'revenue' => '续费实收', 'refunds' => '退款笔数 / 金额', 'disputes' => '争议笔数 / 金额',
         ],
         'upsell' => [
@@ -856,6 +860,7 @@ return array_replace_recursive($translations, [
         ],
         'export' => [
             'button' => '导出 Excel', 'summary_sheet' => '续费概览', 'detail_sheet' => '续费明细',
+            'stages_sheet' => '续费阶段', 'risk_sheet' => '渠道风险',
             'metric' => '指标', 'value' => '数值', 'filename' => '续费订单分析_:time.xlsx',
             'columns' => [
                 'stage' => '续费次数', 'initial_channel' => '首扣渠道', 'actual_channel' => '实际支付渠道',

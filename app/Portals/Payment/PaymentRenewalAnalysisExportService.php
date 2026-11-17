@@ -35,6 +35,41 @@ class PaymentRenewalAnalysisExportService
         $summary->getColumnDimension('A')->setWidth(30);
         $summary->getColumnDimension('B')->setWidth(20);
 
+        $stageSheet = $book->createSheet();
+        $stageSheet->setTitle(__('payment.renewal_analysis.export.stages_sheet'));
+        $stageKeys = ['stage','eligible','completed','renewal_rate','loss','orders_revenue','refund','refund_count_rate','refund_amount_rate','dispute'];
+        $stageSheet->fromArray([array_map(fn ($key) => __('payment.renewal_analysis.funnel.'.$key), $stageKeys)], null, 'A1');
+        $stageNumber = 2;
+        foreach ($data['stages'] as $stage) {
+            $stageSheet->fromArray([[
+                __('payment.renewal_analysis.funnel.stage_name', ['number' => $stage['number']]),
+                $stage['eligible_chains'], $stage['completed_chains'], $stage['rate'].'%',
+                $stage['loss_count'].' / '.$stage['loss_rate'].'%',
+                $stage['orders'].' / '.number_format($stage['revenue'], 2, '.', ''),
+                $stage['refund_count'].' / '.number_format($stage['refund_amount'], 2, '.', ''),
+                $stage['refund_count_rate'].'%', $stage['refund_amount_rate'].'%',
+                $stage['dispute_count'].' / '.number_format($stage['dispute_amount'], 2, '.', ''),
+            ]], null, 'A'.$stageNumber++);
+        }
+        $riskSheet = $book->createSheet();
+        $riskSheet->setTitle(__('payment.renewal_analysis.export.risk_sheet'));
+        $riskKeys = ['channel','orders','revenue','refunds','refund_count_rate','refund_amount_rate','disputes'];
+        $riskSheet->fromArray([array_map(fn ($key) => __('payment.renewal_analysis.risk.'.$key), $riskKeys)], null, 'A1');
+        $riskNumber = 2;
+        foreach ($data['risk_by_channel'] as $channel => $risk) {
+            $riskSheet->fromArray([[
+                __('payment.renewal_analysis.channels.'.$channel), $risk['orders'], $risk['revenue'],
+                $risk['refund_count'].' / '.number_format($risk['refund_amount'], 2, '.', ''),
+                $risk['refund_count_rate'].'%', $risk['refund_amount_rate'].'%',
+                $risk['dispute_count'].' / '.number_format($risk['dispute_amount'], 2, '.', ''),
+            ]], null, 'A'.$riskNumber++);
+        }
+        foreach ([$stageSheet, $riskSheet] as $sheet) {
+            $sheet->getStyle('A1:'.$sheet->getHighestColumn().'1')->getFont()->setBold(true);
+            $sheet->freezePane('A2');
+            foreach (range('A', $sheet->getHighestColumn()) as $column) $sheet->getColumnDimension($column)->setAutoSize(true);
+        }
+
         $detail = $book->createSheet();
         $detail->setTitle(__('payment.renewal_analysis.export.detail_sheet'));
         $headers = array_values(__('payment.renewal_analysis.export.columns'));

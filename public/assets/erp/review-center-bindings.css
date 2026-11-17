@@ -13,8 +13,18 @@
 .rc-bindings-page .form-control { height: 40px; border: 1px solid #d6e0e9; border-radius: 6px; box-shadow: none; color: #334b60; }
 .rc-bindings-page .form-control:focus { border-color: #3689bd; box-shadow: 0 0 0 3px rgba(54, 137, 189, .12); }
 .rc-bindings-page .btn { border-radius: 6px; padding: 10px 16px; font-size: 13px; }
-.rc-bindings-page .rc-load-member { width: 100%; margin-top: 14px; background: #f6f9fc; border-color: #dce5ed; color: #38556c; display: flex; justify-content: space-between; align-items: center; }
-.rc-bindings-page .rc-load-member:hover { background: #eaf3fa; }
+.rc-bindings-page .rc-member-loading { display: block; margin-top: 12px; color: #287eae; font-size: 12px; }
+.rc-bindings-page .rc-member-loading[hidden] { display: none; }
+.rc-bindings-page .rc-loading-placeholder { display: none; padding: 22px; }
+.rc-bindings-page .rc-loading-placeholder span { display: block; height: 48px; margin-bottom: 14px; border-radius: 6px; background: linear-gradient(90deg, #edf2f7 25%, #f8fafc 50%, #edf2f7 75%); background-size: 200% 100%; animation: rc-binding-shimmer 1.4s linear infinite; }
+.rc-bindings-page .rc-loading-placeholder span:last-child { width: 65%; margin-bottom: 0; }
+.rc-bindings-page.is-member-loading .rc-loading-placeholder { display: block; }
+.rc-bindings-page.is-member-loading #rc-department-form,
+.rc-bindings-page.is-member-loading .rc-history-panel .table-responsive { display: none; }
+.rc-bindings-page.is-member-loading .rc-current-member,
+.rc-bindings-page.is-member-loading .rc-history-member { visibility: hidden; }
+@keyframes rc-binding-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .rc-bindings-page .rc-loading-placeholder span { animation: none; } }
 .rc-bindings-page .rc-current-member { margin: 0 22px; padding: 20px 0; border-top: 1px solid #edf1f5; display: flex; gap: 12px; align-items: center; }
 .rc-bindings-page .rc-member-avatar { display: flex; flex: 0 0 42px; height: 42px; align-items: center; justify-content: center; background: #eaf4fb; color: #3689bd; border-radius: 50%; font-size: 19px; }
 .rc-bindings-page .rc-current-member > div { min-width: 0; }

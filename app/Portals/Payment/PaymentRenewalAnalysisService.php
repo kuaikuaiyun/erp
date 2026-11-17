@@ -19,47 +19,45 @@ class PaymentRenewalAnalysisService
     public function dashboard(array $filters): array
     {
         $dataset = $this->dataset($filters);
-        $rows = collect($dataset['rows']);
-
-        if (($filters['stage'] ?? '') !== '') {
-            $rows = $rows->where('stage_key', (string) $filters['stage'])->values();
-        }
-        if (($filters['detail_channel'] ?? '') !== '') {
-            $rows = $rows->where('actual_channel', (string) $filters['detail_channel'])->values();
-        }
-        $rows = $this->prioritiseRiskRows($rows);
-
-        $page = max(1, (int) ($filters['page'] ?? 1));
-        $perPage = in_array((int) ($filters['per_page'] ?? 50), [50, 100], true) ? (int) $filters['per_page'] : 50;
-        $total = $rows->count();
-
+        $dataset = $this->filterStages($dataset, $filters);
+        $total = count($dataset['stages']);
+        $lastPage = max(1, (int) ceil($total / 10));
+        $page = min($lastPage, max(1, (int) ($filters['stage_page'] ?? 1)));
         return [
             ...$dataset,
             'filters' => $filters,
-            'rows' => $rows->slice(($page - 1) * $perPage, $perPage)->values()->all(),
-            'pagination' => [
-                'page' => $page,
-                'current_page' => $page,
-                'per_page' => $perPage,
-                'total' => $total,
-                'last_page' => max(1, (int) ceil($total / $perPage)),
-                'from' => $total ? (($page - 1) * $perPage) + 1 : 0,
-                'to' => min($page * $perPage, $total),
-            ],
+            'stages' => array_slice($dataset['stages'], ($page - 1) * 10, 10),
+            'stage_pagination' => ['current_page' => $page, 'last_page' => $lastPage, 'total' => $total,
+                'from' => $total ? ($page - 1) * 10 + 1 : 0, 'to' => min($page * 10, $total)],
         ];
     }
 
     /** @param array<string,mixed> $filters @return array<string,mixed> */
     public function exportData(array $filters): array
     {
-        $dataset = $this->dataset($filters);
+        return $this->filterStages($this->dataset($filters), $filters);
+    }
+
+    private function filterStages(array $dataset, array $filters): array
+    {
         if (($filters['stage'] ?? '') !== '') {
-            $dataset['rows'] = collect($dataset['rows'])->where('stage_key', (string) $filters['stage'])->values()->all();
+            $dataset['stages'] = array_values(array_filter($dataset['stages'], fn (array $stage): bool => $stage['key'] === $filters['stage']));
+            $dataset['rows'] = array_values(array_filter($dataset['rows'], fn (array $row): bool => $row['stage_key'] === $filters['stage']));
         }
-        if (($filters['detail_channel'] ?? '') !== '') {
-            $dataset['rows'] = collect($dataset['rows'])->where('actual_channel', (string) $filters['detail_channel'])->values()->all();
+        $totals = ['paypal' => $this->emptyRiskTotal(), 'credit_card' => $this->emptyRiskTotal()];
+        foreach ($dataset['rows'] as $row) {
+            $channel = $row['actual_channel'];
+            $totals[$channel]['orders']++;
+            $totals[$channel]['revenue'] += $row['amount'];
+            foreach (['refund_count', 'refund_amount', 'dispute_count', 'dispute_amount'] as $field) $totals[$channel][$field] += $row[$field];
+            $totals[$channel]['refund_order_count'] += $row['refund_count'] > 0 ? 1 : 0;
         }
-        $dataset['rows'] = $this->prioritiseRiskRows(collect($dataset['rows']))->all();
+        foreach ($totals as &$total) {
+            $total['refund_count_rate'] = $this->rate($total['refund_order_count'], $total['orders']);
+            $total['refund_amount_rate'] = $this->rate($total['refund_amount'], $total['revenue']);
+        }
+        unset($total);
+        $dataset['risk_by_channel'] = $totals;
         return $dataset;
     }
 
@@ -67,8 +65,8 @@ class PaymentRenewalAnalysisService
     private function dataset(array $filters): array
     {
         $cacheFilters = $filters;
-        unset($cacheFilters['page'], $cacheFilters['per_page'], $cacheFilters['stage'], $cacheFilters['detail_channel']);
-        $cacheKey = 'payment:renewal-analysis:v5:'.sha1(json_encode($cacheFilters));
+        unset($cacheFilters['stage_page'], $cacheFilters['stage']);
+        $cacheKey = 'payment:renewal-analysis:v6:'.sha1(json_encode($cacheFilters));
 
         return Cache::remember($cacheKey, now()->addMinutes(5), fn (): array => $this->buildDataset($cacheFilters));
     }
@@ -150,77 +148,69 @@ class PaymentRenewalAnalysisService
             }
         }
 
-        $renewalOrderIds = collect($firstRenewals)->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $selectedChains = [];
+        foreach ($firstRenewals as $initialId => $first) {
+            $selectedChains[$initialId] = array_values(array_filter($byInitial[$initialId], fn (LogisticsOrder $order): bool => $order->paid_at->lte($to)));
+        }
+        $renewalOrderIds = collect($selectedChains)->flatten(1)->pluck('id')->map(fn ($id) => (int) $id)->all();
         $risk = $this->riskMaps($renewalOrderIds, $filters, $from, $to);
         $stages = [];
         $rows = [];
         $actualChannelTotals = ['paypal' => $this->emptyRiskTotal(), 'credit_card' => $this->emptyRiskTotal()];
-
-        foreach ($initials as $initial) {
-            $renewal = $firstRenewals[(int) $initial->id] ?? null;
-            if ($renewal === null) {
-                continue;
-            }
-
-            $number = 1;
+        $maxStage = max(1, collect($selectedChains)->map(fn (array $chain): int => count($chain) + 1)->max() ?? 1);
+        for ($number = 1; $number <= $maxStage; $number++) {
             $key = 'renewal_'.$number;
-            $channel = $this->channelFor($renewal);
-            $refund = $risk['refunds'][(int) $renewal->id] ?? ['count' => 0, 'amount' => 0.0, 'details' => []];
-            $dispute = $risk['disputes'][(int) $renewal->id] ?? ['count' => 0, 'amount' => 0.0, 'details' => []];
-
-            $stages[$key] ??= ['key' => $key, 'number' => $number, 'completed_chains' => [], 'orders' => 0, 'revenue' => 0.0, 'refund_count' => 0, 'refund_amount' => 0.0, 'dispute_count' => 0, 'dispute_amount' => 0.0];
-            $stages[$key]['completed_chains'][(int) $initial->id] = true;
-            $stages[$key]['orders']++;
-            $stages[$key]['revenue'] += (float) $renewal->paid_amount_usd;
-            $stages[$key]['refund_count'] += $refund['count'];
-            $stages[$key]['refund_amount'] += $refund['amount'];
-            $stages[$key]['dispute_count'] += $dispute['count'];
-            $stages[$key]['dispute_amount'] += $dispute['amount'];
-
-            $actualChannelTotals[$channel]['orders']++;
-            $actualChannelTotals[$channel]['revenue'] += (float) $renewal->paid_amount_usd;
-            $actualChannelTotals[$channel]['refund_count'] += $refund['count'];
-            $actualChannelTotals[$channel]['refund_amount'] += $refund['amount'];
-            $actualChannelTotals[$channel]['dispute_count'] += $dispute['count'];
-            $actualChannelTotals[$channel]['dispute_amount'] += $dispute['amount'];
-
-            $rows[] = [
-                'stage_key' => $key,
-                'stage_number' => $number,
-                'initial_channel' => $this->channelFor($initial),
-                'actual_channel' => $channel,
-                'initial_order' => (string) ($initial->shopify_order_number ?: $initial->id),
-                'renewal_order' => (string) ($renewal->shopify_order_number ?: $renewal->id),
-                'store_name' => (string) ($renewal->store_name ?: $initial->store_name),
-                'transaction_id' => (string) $renewal->transaction_id,
-                'paid_at' => optional($renewal->paid_at)->format('Y-m-d H:i:s'),
-                'amount' => round((float) $renewal->paid_amount_usd, 2),
-                'refund_count' => $refund['count'],
-                'refund_amount' => round($refund['amount'], 2),
-                'refund_details' => $refund['details'],
-                'dispute_count' => $dispute['count'],
-                'dispute_amount' => round($dispute['amount'], 2),
-                'dispute_details' => $dispute['details'],
-            ];
-        }
-
-        ksort($stages, SORT_NATURAL);
-        $eligible = $initials->count();
-        $previousCompleted = $eligible;
-        foreach ($stages as &$stage) {
-            $completed = count($stage['completed_chains']);
-            unset($stage['completed_chains']);
-            $stage['eligible_chains'] = $previousCompleted;
-            $stage['completed_chains'] = $completed;
-            $stage['rate'] = $this->rate($completed, $previousCompleted);
-            $stage['loss_count'] = max(0, $previousCompleted - $completed);
-            $stage['loss_rate'] = $this->rate($stage['loss_count'], $previousCompleted);
-            $stage['refund_rate'] = $this->rate($stage['refund_amount'], $stage['revenue']);
+            $stage = ['key' => $key, 'number' => $number, 'eligible_chains' => 0, 'completed_chains' => 0,
+                'orders' => 0, 'revenue' => 0.0, 'refund_count' => 0, 'refund_order_count' => 0,
+                'refund_amount' => 0.0, 'dispute_count' => 0, 'dispute_amount' => 0.0];
+            foreach ($initials as $initial) {
+                $chain = $selectedChains[(int) $initial->id] ?? [];
+                $renewal = $chain[$number - 1] ?? null;
+                if ($number === 1) {
+                    $stage['eligible_chains']++;
+                } else {
+                    $previous = $chain[$number - 2] ?? null;
+                    if ($previous === null) continue;
+                    // An early successful payment is already an observed opportunity.
+                    if ($renewal === null && $previous->paid_at->copy()->addDays(30)->gt($to)) continue;
+                    $stage['eligible_chains']++;
+                }
+                if ($renewal === null) continue;
+                $channel = $this->channelFor($renewal);
+                $refund = $risk['refunds'][(int) $renewal->id] ?? ['count' => 0, 'amount' => 0.0, 'details' => []];
+                $dispute = $risk['disputes'][(int) $renewal->id] ?? ['count' => 0, 'amount' => 0.0, 'details' => []];
+                $stage['completed_chains']++;
+                $stage['orders']++;
+                $stage['revenue'] += (float) $renewal->paid_amount_usd;
+                $stage['refund_order_count'] += $refund['count'] > 0 ? 1 : 0;
+                $stage['refund_count'] += $refund['count'];
+                $stage['refund_amount'] += $refund['amount'];
+                $stage['dispute_count'] += $dispute['count'];
+                $stage['dispute_amount'] += $dispute['amount'];
+                $rows[] = [
+                    'stage_key' => $key, 'stage_number' => $number,
+                    'initial_channel' => $this->channelFor($initial), 'actual_channel' => $channel,
+                    'initial_order' => (string) ($initial->shopify_order_number ?: $initial->id),
+                    'renewal_order' => (string) ($renewal->shopify_order_number ?: $renewal->id),
+                    'store_name' => (string) ($renewal->store_name ?: $initial->store_name),
+                    'transaction_id' => (string) $renewal->transaction_id,
+                    'paid_at' => optional($renewal->paid_at)->format('Y-m-d H:i:s'),
+                    'amount' => round((float) $renewal->paid_amount_usd, 2),
+                    'refund_count' => $refund['count'], 'refund_amount' => round($refund['amount'], 2), 'refund_details' => $refund['details'],
+                    'dispute_count' => $dispute['count'], 'dispute_amount' => round($dispute['amount'], 2), 'dispute_details' => $dispute['details'],
+                ];
+            }
+            if ($stage['eligible_chains'] === 0 && $number > 1) continue;
+            $stage['rate'] = $this->rate($stage['completed_chains'], $stage['eligible_chains']);
+            $stage['loss_count'] = max(0, $stage['eligible_chains'] - $stage['completed_chains']);
+            $stage['loss_rate'] = $this->rate($stage['loss_count'], $stage['eligible_chains']);
+            $stage['refund_rate'] = $stage['refund_amount_rate'] = $this->rate($stage['refund_amount'], $stage['revenue']);
+            $stage['refund_count_rate'] = $this->rate($stage['refund_order_count'], $stage['orders']);
             $stage['dispute_rate'] = $this->rate($stage['dispute_count'], $stage['orders']);
-            $previousCompleted = $completed;
+            $stages[] = $stage;
         }
-        unset($stage);
 
+        $eligible = $initials->count();
         $channelSummary = [];
         foreach (['paypal', 'credit_card'] as $channel) {
             $channelInitials = $initials->filter(fn (LogisticsOrder $order) => $this->channelFor($order) === $channel);
@@ -469,6 +459,6 @@ class PaymentRenewalAnalysisService
     /** @return array<string,int|float> */
     private function emptyRiskTotal(): array
     {
-        return ['orders' => 0, 'revenue' => 0.0, 'refund_count' => 0, 'refund_amount' => 0.0, 'dispute_count' => 0, 'dispute_amount' => 0.0];
+        return ['orders' => 0, 'revenue' => 0.0, 'refund_order_count' => 0, 'refund_count' => 0, 'refund_amount' => 0.0, 'dispute_count' => 0, 'dispute_amount' => 0.0];
     }
 }

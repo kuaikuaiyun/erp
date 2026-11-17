@@ -1,7 +1,7 @@
 @extends('portals.review-center.layout')
 @section('page_title', __('review_center.department_bindings'))
 @push('styles')
-<link rel="stylesheet" href="{{ request()->getSchemeAndHttpHost() }}/assets/erp/review-center-bindings.css?v=20261117-1">
+<link rel="stylesheet" href="{{ request()->getSchemeAndHttpHost() }}/assets/erp/review-center-bindings.css?v=20261117-2">
 @endpush
 @section('content')
 @php
@@ -25,7 +25,7 @@
                     <select id="binding-member" name="user_id" class="form-control" @disabled($users->isEmpty())>
                         @foreach($users as $member)<option value="{{ $member->id }}" @selected($selectedUserId === (int) $member->id)>{{ $member->name }} ({{ $member->username }})</option>@endforeach
                     </select>
-                    <button type="submit" class="btn btn-default rc-load-member" @disabled($users->isEmpty())>{{ __('review_center.load_member') }} <i class="fa fa-angle-right" aria-hidden="true"></i></button>
+                    <span class="rc-member-loading" role="status" hidden>{{ __('review_center.bindings_ui.loading') }}</span>
                 </form>
                 @if($selectedMember)
                     <div class="rc-current-member"><span class="rc-member-avatar" aria-hidden="true"><i class="fa fa-user"></i></span><div><span class="rc-muted">{{ __('review_center.bindings_ui.current_member') }}</span><strong>{{ $selectedMember->name }}</strong><span class="rc-member-account">{{ $selectedMember->username }}</span></div></div>
@@ -34,6 +34,7 @@
             </aside>
             <div class="rc-panel rc-department-panel">
                 <div class="rc-panel-heading"><span class="rc-step" aria-hidden="true">2</span><h2>{{ __('review_center.departments') }}</h2><span class="rc-multiple-label">{{ __('review_center.bindings_ui.multiple') }}</span></div>
+                <div class="rc-loading-placeholder" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
                 @if($users->isEmpty())
                     <div class="rc-empty"><i class="fa fa-user-o" aria-hidden="true"></i><p>{{ __('review_center.no_authorized_members') }}</p></div>
                 @elseif($selectedUserId)
@@ -67,6 +68,7 @@
         </div>
         <div class="rc-panel rc-history-panel">
             <div class="rc-panel-heading"><i class="fa fa-history rc-history-icon" aria-hidden="true"></i><h2>{{ __('review_center.history') }}</h2>@if($selectedMember)<span class="rc-history-member">{{ $selectedMember->name }}</span>@endif</div>
+            <div class="rc-loading-placeholder" aria-hidden="true"><span></span><span></span><span></span></div>
             <div class="table-responsive"><table class="table rc-history-table"><thead><tr><th scope="col">{{ __('review_center.changed_at') }}</th><th scope="col">{{ __('review_center.actor') }}</th><th scope="col">{{ __('review_center.before') }}</th><th scope="col">{{ __('review_center.after') }}</th></tr></thead><tbody>
                 @forelse($history as $entry)
                     <tr><td class="rc-history-time">{{ \App\Portals\OperationTasks\Support\OperationTaskTime::format($entry->created_at) }}</td><td>{{ $entry->actor_name }}</td>
@@ -86,6 +88,60 @@
     var inputs = form.querySelectorAll('input[name="department_ids[]"]');
     var summary = document.getElementById('rc-selected-summary');
     var countLabel = @json(__('review_center.bindings_ui.selected_count', ['count' => ':count']));
+    var member = document.getElementById('binding-member');
+    var page = document.querySelector('.rc-bindings-page');
+    var loadedMemberId = form.querySelector('input[name="user_id"]').value;
+    var discardMessage = @json(__('review_center.bindings_ui.discard_changes'));
+    var switching = false;
+    var saving = false;
+    function selectedValues() {
+        return Array.prototype.filter.call(inputs, function (input) { return input.checked; })
+            .map(function (input) { return input.value; }).sort().join(',');
+    }
+    var initialValues = selectedValues();
+    function resetLoading() {
+        switching = false;
+        saving = false;
+        member.value = loadedMemberId;
+        member.disabled = false;
+        page.classList.remove('is-member-loading');
+        page.querySelector('.rc-member-loading').hidden = true;
+        Array.prototype.forEach.call(page.querySelectorAll('.rc-department-panel, .rc-history-panel'), function (panel) {
+            panel.removeAttribute('aria-busy');
+        });
+        Array.prototype.forEach.call(form.querySelectorAll('input[type="checkbox"], button[type="submit"]'), function (input) { input.disabled = false; });
+        updateSelection();
+    }
+    function switchMember(event) {
+        if (event) event.preventDefault();
+        if (switching || saving || member.value === loadedMemberId) return;
+        if (selectedValues() !== initialValues && !window.confirm(discardMessage)) {
+            member.value = loadedMemberId;
+            return;
+        }
+        var destination = new URL(member.form.action, window.location.href);
+        destination.searchParams.set('user_id', member.value);
+        switching = true;
+        member.disabled = true;
+        page.classList.add('is-member-loading');
+        page.querySelector('.rc-member-loading').hidden = false;
+        Array.prototype.forEach.call(page.querySelectorAll('.rc-department-panel, .rc-history-panel'), function (panel) {
+            panel.setAttribute('aria-busy', 'true');
+        });
+        Array.prototype.forEach.call(form.querySelectorAll('input[type="checkbox"], button[type="submit"]'), function (input) { input.disabled = true; });
+        // Navigate only after the placeholder has had a chance to paint.
+        window.requestAnimationFrame(function () {
+            window.requestAnimationFrame(function () { window.location.assign(destination.href); });
+        });
+    }
+    member.addEventListener('change', switchMember);
+    member.form.addEventListener('submit', switchMember);
+    form.addEventListener('submit', function (event) {
+        if (switching || saving) { event.preventDefault(); return; }
+        saving = true;
+        member.disabled = true;
+    });
+    window.addEventListener('pageshow', function (event) { if (event.persisted) resetLoading(); });
     function updateSelection() {
         var count = 0;
         Array.prototype.forEach.call(inputs, function (input) {

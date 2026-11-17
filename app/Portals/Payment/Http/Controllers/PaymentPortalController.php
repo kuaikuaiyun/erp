@@ -641,28 +641,21 @@ class PaymentPortalController extends Controller
         $validated = $request->validate([
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
-            'risk_date_mode' => ['nullable', Rule::in(['payment', 'event'])],
             'channel' => ['nullable', Rule::in(['', 'paypal', 'credit_card'])],
-            'detail_channel' => ['nullable', Rule::in(['', 'paypal', 'credit_card'])],
             'stage' => ['nullable', 'regex:/^(renewal_\d+)?$/'],
             'store' => ['nullable', 'string', 'max:191'],
-            'keyword' => ['nullable', 'string', 'max:191'],
-            'page' => ['nullable', 'integer', 'min:1'],
-            'per_page' => ['nullable', Rule::in([50, 100, '50', '100'])],
+            'stage_page' => ['nullable', 'integer', 'min:1'],
         ]);
         $today = now('Asia/Shanghai');
 
         return [
             'date_from' => (string) ($validated['date_from'] ?? $today->copy()->subDays(89)->format('Y-m-d')),
             'date_to' => (string) ($validated['date_to'] ?? $today->format('Y-m-d')),
-            'risk_date_mode' => (string) ($validated['risk_date_mode'] ?? 'payment'),
+            'risk_date_mode' => 'payment',
             'channel' => (string) ($validated['channel'] ?? ''),
-            'detail_channel' => (string) ($validated['detail_channel'] ?? ''),
             'stage' => (string) ($validated['stage'] ?? ''),
             'store' => trim((string) ($validated['store'] ?? '')),
-            'keyword' => trim((string) ($validated['keyword'] ?? '')),
-            'page' => max(1, (int) ($validated['page'] ?? 1)),
-            'per_page' => (int) ($validated['per_page'] ?? 50),
+            'stage_page' => max(1, (int) ($validated['stage_page'] ?? 1)),
         ];
     }
 

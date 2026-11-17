@@ -119,7 +119,7 @@
             }
         });
         page.on('submit', '.payment-pagination-form', function (event) {
-            if ($.trim($(this).find('[name="page"]').val()) === '') {
+            if ($.trim($(this).find('[name="page"], [name="stage_page"]').val()) === '') {
                 event.preventDefault();
             }
         });

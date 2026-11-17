@@ -19,6 +19,8 @@ return [
     'bindings_ui' => [
         'subtitle' => '为审核成员分配负责的部门，独立管理每位成员的审核范围。',
         'select_member' => '选择已授权成员',
+        'loading' => '正在加载成员授权…',
+        'discard_changes' => '当前部门授权有未保存的修改，是否放弃修改并切换成员？',
         'current_member' => '当前配置成员',
         'multiple' => '支持多选',
         'department_hint' => '按一级部门分组展示。勾选一级部门可审核其下属二级部门；也可单独勾选二级部门。',
