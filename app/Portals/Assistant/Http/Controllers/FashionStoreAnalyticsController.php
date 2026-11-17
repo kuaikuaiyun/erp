@@ -120,8 +120,10 @@ class FashionStoreAnalyticsController extends Controller
     /** @return array<string,mixed> */
     private function filters(Request $request): array
     {
-        $timezone = in_array((string) $request->input('timezone'), timezone_identifiers_list(), true)
-            ? (string) $request->input('timezone') : 'Asia/Shanghai';
+        $requestedTimezone = (string) $request->input('timezone');
+        $timezone = array_key_exists($requestedTimezone, $this->timezoneOptions())
+            ? $requestedTimezone
+            : 'Asia/Shanghai';
         $today = now($timezone)->toDateString();
         $from = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $request->input('from_date')) ? (string) $request->input('from_date') : $today;
         $to = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $request->input('to_date')) ? (string) $request->input('to_date') : $from;
