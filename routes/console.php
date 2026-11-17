@@ -100,7 +100,7 @@ Schedule::command('fashion-logistics:sync-nbc-orders')
 // The existing VPS push endpoint remains available. This pull job is opt-in
 // and must be enabled explicitly through LOGISTICS_PAYPAL_RELAY_SYNC_ENABLED.
 Schedule::command('logistics:paypal-relay:sync')
-    ->hourly()
+    ->everyFifteenMinutes()
     ->when(fn (): bool => (bool) config('logistics.paypal.relay.sync_enabled', false))
     ->withoutOverlapping(120)
     ->runInBackground();
