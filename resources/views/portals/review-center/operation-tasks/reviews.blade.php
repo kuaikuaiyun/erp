@@ -1,4 +1,4 @@
-@extends('portal.layout')
+@extends('portals.review-center.layout')
 
 @section('page_title', __('review_center.operation_tasks'))
 

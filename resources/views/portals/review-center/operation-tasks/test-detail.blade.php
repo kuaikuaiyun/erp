@@ -1,4 +1,4 @@
-@extends('portal.layout')
+@extends('portals.review-center.layout')
 @section('page_title',__('review_center.copy.text_114'))
 @section('content')
 @include('portals.review-center.operation-tasks.partials.head')

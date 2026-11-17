@@ -483,6 +483,17 @@
                 </div>
             </div>
 
+            <div id="assistant-shopyy-app-section" class="box box-solid assistant-form-section assistant-form-shopify-section" @if (strtolower(trim((string) $value('site_builder'))) !== 'shopyy') hidden @endif>
+                <div class="box-header with-border"><h3 class="box-title">{{ $t('shopyy_app.title') }}</h3></div>
+                <div class="box-body row assistant-form-grid">
+                    <div class="form-group col-md-6 @error('shopyy_app_token') has-error @enderror">
+                        <label for="shopyy_app_token">{{ $t('shopyy_app.token') }}</label>
+                        <input id="shopyy_app_token" name="shopyy_app_token" type="password" class="form-control" value="{{ $value('shopyy_app_token') }}" maxlength="65535" autocomplete="new-password">
+                        @error('shopyy_app_token')<span class="help-block">{{ $message }}</span>@enderror
+                    </div>
+                </div>
+            </div>
+
             <div id="assistant-shopline-app-section" class="box box-solid assistant-form-section assistant-form-shopify-section" @if (strtolower((string) $value('site_builder')) !== 'shopline') hidden @endif>
                 <div class="box-header with-border"><h3 class="box-title">Shopline App 应用</h3></div>
                 <div class="box-body row assistant-form-grid">
@@ -621,7 +632,7 @@
         window.ErpAssistantDomainStoreOwnerForm = @json($ownerAssignmentJavascriptConfig);
     </script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-tags-20261007-3.js"></script>
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-form-20261008-1.js?v=20261116-2"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-form-20261008-1.js?v=20261117-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-access-guide-20261009-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-quick-options-20261008-2.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-team-project-options-20261009-1.js"></script>

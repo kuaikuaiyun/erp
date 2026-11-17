@@ -20,6 +20,7 @@ return [
     ],
     'domain_stores' => [
         'nbc_app' => ['title' => 'NBC App 应用', 'token' => 'Token'],
+        'shopyy_app' => ['title' => 'Shopyy App 应用', 'token' => 'Token'],
         'menu' => '域名与店铺信息管理',
         'title' => '域名与店铺信息管理',
         'subtitle' => '助理系统',

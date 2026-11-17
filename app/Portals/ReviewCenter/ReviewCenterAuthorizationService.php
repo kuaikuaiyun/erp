@@ -4,6 +4,8 @@ namespace App\Portals\ReviewCenter;
 
 use App\Models\AdminUser;
 use App\Models\Department;
+use App\Models\Portal;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
 class ReviewCenterAuthorizationService
@@ -11,6 +13,27 @@ class ReviewCenterAuthorizationService
     public function database()
     {
         return DB::connection(config('admin.database.connection') ?: config('database.default'));
+    }
+
+    /** Match the platform's active-account and root-department portal grants.
+     * Portal maintenance/availability does not remove the underlying member authorization.
+     */
+    public function authorizedMembers(Portal $portal): Builder
+    {
+        $rootIds = $portal->departmentGrants()->pluck('department_id')->map(fn ($id) => (int) $id)->all();
+        $rolesTable = config('admin.database.roles_table');
+
+        return AdminUser::query()
+            ->where(fn (Builder $query) => $query->whereNull('status')->orWhere('status', AdminUser::STATUS_ACTIVE))
+            ->whereHas('roles', function (Builder $roles) use ($rootIds, $rolesTable): void {
+                $roles->where('slug', Department::SYSTEM_SLUG)
+                    ->orWhere(function (Builder $business) use ($rootIds, $rolesTable): void {
+                        $business->where('slug', '!=', Department::SYSTEM_SLUG)
+                            ->where(fn (Builder $department) => $department
+                                ->where(fn (Builder $root) => $root->whereNull($rolesTable.'.parent_id')->whereIn($rolesTable.'.id', $rootIds))
+                                ->orWhereIn($rolesTable.'.parent_id', $rootIds));
+                    });
+            });
     }
 
     /** The binding grants review scope only; portal and menu access are checked separately. */

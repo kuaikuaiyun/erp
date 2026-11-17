@@ -1,13 +1,33 @@
 <?php
 
 return [
+    'member_not_authorized' => '该成员未获得运营审核中心授权或账号已停用，请重新选择。',
+    'no_authorized_members' => '暂无已授权的正常成员，请先在门户管理中为部门授权，并确认成员账号正常。',
+    'pending' => [
+        'title' => '待审核：每日复盘 / 测品任务',
+        'recaps' => '复 :count',
+        'tests' => '测 :count',
+    ],
+    'zoom' => [
+        'preview' => '图片放大预览', 'hint' => '滚轮或按钮缩放，放大后可拖动',
+        'out' => '缩小', 'in' => '放大', 'reset' => '还原', 'close' => '关闭',
+    ],
     'roi' => 'ROI',
     'title' => '运营审核中心',
     'operation_tasks' => '运营任务审核',
     'department_bindings' => '审核部门授权',
+    'bindings_ui' => [
+        'subtitle' => '为审核成员分配负责的部门，独立管理每位成员的审核范围。',
+        'select_member' => '选择已授权成员',
+        'current_member' => '当前配置成员',
+        'multiple' => '支持多选',
+        'department_hint' => '按一级部门分组展示。勾选一级部门可审核其下属二级部门；也可单独勾选二级部门。',
+        'selected_count' => '已勾选 :count 个部门',
+        'no_departments' => '暂无可授权的业务部门。',
+    ],
     'portal_missing' => '请先在门户管理中创建编码为 review-center 的运营审核中心，再执行此迁移。',
     'bindings_saved' => '审核部门授权已保存。',
-    'binding_hint' => '仅系统管理员可配置。成员还须具备运营审核中心及运营任务审核菜单访问权限。绑定决定审核的数据范围，不改变组织职位。',
+    'binding_hint' => '仅系统管理员可配置。这里只列出运营审核中心已授权且账号正常的成员；每名成员可独立多选审核部门。进入审核页仍需菜单访问权限，部门绑定不改变组织职位。',
     'member' => '审核成员',
     'load_member' => '查看成员授权',
     'departments' => '授权审核部门',

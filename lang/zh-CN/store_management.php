@@ -1,6 +1,20 @@
 <?php
 
 return [
+    'credential_guide' => [
+        'shopyy_nbc' => [
+            'tab' => 'shopyy/nbc',
+            'step1_title' => '步骤 1：进入开发者页面',
+            'step1_body' => '登录店铺后台，依次进入「店铺设置」→「系统设置」→「开发者」。',
+            'step1_alt' => 'Shopyy / NBC 从系统设置进入开发者页面',
+            'step2_title' => '步骤 2：配置 IP 白名单',
+            'step2_body' => '点击「IP白名单」，按下图在白名单中填写 *.*.*.*，然后保存。',
+            'step2_alt' => 'Shopyy / NBC 配置 IP 白名单',
+            'step3_title' => '步骤 3：复制 Token 并保存到 ERP',
+            'step3_body' => '复制对应开发者应用的 Token，粘贴到 ERP 对应店铺的 Token 栏并保存。约等待 10 分钟，系统将开始同步店铺订单；具体同步范围以现有订单同步规则为准。',
+            'step3_alt' => 'Shopyy / NBC 复制开发者应用 Token',
+        ],
+    ],
     'page_title' => '店铺列表',
 
     'title' => '店铺列表',

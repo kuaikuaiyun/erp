@@ -10,6 +10,8 @@ use App\Models\Portal;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portal\Services\PortalMenuAuthorizationService;
 use App\Portals\ReviewCenter\ReviewCenterAuthorizationService;
+use App\Portals\ReviewCenter\ReviewCenterPendingCountService;
+use App\Portals\ReviewCenter\Http\Controllers\DepartmentBindingController;
 use App\Portals\ReviewCenter\Http\Controllers\OperationTaskReviewController;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
@@ -41,7 +43,7 @@ class ReviewCenterOperationTaskReviewTest extends TestCase
             '2026_11_13_000100_add_operation_task_deletion_tracking.php',
         ] as $migration) (require database_path('migrations/'.$migration))->up();
         Schema::create('admin_users', function (Blueprint $table): void {
-            $table->id(); $table->string('name'); $table->string('username'); $table->timestamps();
+            $table->id(); $table->string('name'); $table->string('username'); $table->unsignedTinyInteger('status')->nullable()->default(1); $table->timestamps();
         });
         Schema::create('admin_roles', function (Blueprint $table): void {
             $table->id(); $table->string('name'); $table->string('slug'); $table->unsignedInteger('parent_id')->nullable(); $table->integer('sort')->default(0); $table->timestamps();
@@ -81,6 +83,8 @@ class ReviewCenterOperationTaskReviewTest extends TestCase
         $this->portal = Portal::findOrFail(2);
         $this->mock(PortalEntryController::class)->shouldReceive('portalContext')->andReturnUsing(fn () => ['portal' => $this->portal, 'user' => $this->actor]);
         $this->mock(PortalMenuAuthorizationService::class)->shouldReceive('canAccess')->andReturnUsing(fn () => $this->menuAllowed);
+        DB::table('portal_departments')->insert(['portal_id' => 2, 'department_id' => 1]);
+        DB::table('admin_role_users')->insert(['role_id' => 2, 'user_id' => 8, 'position' => 'member']);
         $this->bind(8, 2);
     }
 
@@ -115,7 +119,7 @@ class ReviewCenterOperationTaskReviewTest extends TestCase
         $this->bind(7, 2);
         DB::table('review_center_department_bindings')->where('user_id', 8)->delete();
         self::assertSame([], $authorization->departmentIds($this->actor));
-        self::assertSame(0, DB::table('admin_role_users')->where('user_id', 8)->count());
+        self::assertSame(['member'], DB::table('admin_role_users')->where('user_id', 8)->pluck('position')->all());
     }
 
     public function test_lists_and_archives_use_bound_departments_and_reject_foreign_task_assets(): void
@@ -237,6 +241,151 @@ class ReviewCenterOperationTaskReviewTest extends TestCase
         self::assertSame(1, (int) DB::table('portal_menus')->where('portal_id', 1)->value('is_enabled'));
         self::assertNotNull($task->fresh());
         self::assertSame(1, DB::table('review_center_department_bindings')->count());
+    }
+
+    private function createMember(int $id, ?int $departmentId, ?int $status = 1): void
+    {
+        DB::table('admin_users')->insert(['id' => $id, 'name' => '成员'.$id, 'username' => 'member'.$id, 'status' => $status]);
+        if ($departmentId !== null) DB::table('admin_role_users')->insert(['role_id' => $departmentId, 'user_id' => $id, 'position' => 'member']);
+    }
+
+    private function pendingRecap(int $departmentId = 2): OperationTaskRecap
+    {
+        return OperationTaskRecap::create([
+            'user_id' => 7, 'user_name' => '测试运营', 'department_id' => $departmentId,
+            'data_date' => sprintf('2026-10-%02d', OperationTaskRecap::withTrashed()->count() + 1),
+            'submitted_at' => now(), 'media_items' => [], 'finding_answer' => '发现', 'action_answer' => '行动', 'advertising_plan' => '计划',
+            'version' => 1, 'workflow_status' => 'pending_leader', 'leader_review_status' => 'pending', 'department_review_status' => 'pending',
+        ])->fresh();
+    }
+
+    private function taskReview(OperationTestTask $task, string $channel = 'department', string $result = 'approved', ?int $version = null): void
+    {
+        \App\Models\OperationTaskReview::create([
+            'target_type' => 'task', 'target_id' => $task->id, 'target_version' => $version ?? $task->version,
+            'channel' => $channel, 'result' => $result, 'reviewer_id' => 8, 'reviewer_name' => '审核员', 'reviewed_at' => now(),
+        ]);
+    }
+
+    public function test_binding_members_follow_portal_grants_account_status_and_administrator_access(): void
+    {
+        $this->createMember(10, 3);
+        $this->createMember(11, 4);
+        $this->createMember(12, 2, 0);
+        $this->createMember(13, null);
+        $this->createMember(14, 1);
+        $this->createMember(15, 2, null);
+        DB::table('admin_roles')->insert(['id' => 5, 'name' => '系统管理员', 'slug' => 'administrator', 'parent_id' => null]);
+        $this->createMember(16, 5);
+        DB::table('admin_role_users')->insert(['role_id' => 3, 'user_id' => 8, 'position' => 'member']);
+        $this->actor->setAttribute('system_admin', true);
+        $data = app(DepartmentBindingController::class)->index(Request::create('/review-center/department-bindings'))->getData();
+        self::assertEqualsCanonicalizing([7, 8, 10, 14, 15, 16], $data['users']->pluck('id')->all());
+        self::assertSame(1, $data['users']->where('id', 8)->count());
+
+        // A child-only grant is not a valid root grant in the platform's portal access model.
+        DB::table('portal_departments')->where('portal_id', 2)->update(['department_id' => 2]);
+        self::assertSame([16], app(ReviewCenterAuthorizationService::class)->authorizedMembers($this->portal)->pluck('id')->all());
+    }
+
+    public function test_foreign_disabled_and_revoked_members_cannot_be_selected_or_saved(): void
+    {
+        $this->createMember(10, 4);
+        $this->createMember(11, 2, 0);
+        $this->actor->setAttribute('system_admin', true);
+        foreach ([10, 11] as $memberId) {
+            $this->getJson(route('review-center.department-bindings.index', ['user_id' => $memberId]))->assertUnprocessable()->assertJsonValidationErrors('user_id');
+            $this->putJson(route('review-center.department-bindings.update'), ['user_id' => $memberId, 'department_ids' => [2, 3]])->assertUnprocessable()->assertJsonValidationErrors('user_id');
+        }
+        DB::table('portal_departments')->where('portal_id', 2)->delete();
+        $this->putJson(route('review-center.department-bindings.update'), ['user_id' => 8, 'department_ids' => [1]])->assertUnprocessable();
+        self::assertSame([2], DB::table('review_center_department_bindings')->where('user_id', 8)->pluck('department_id')->all());
+        self::assertSame(0, DB::table('review_center_department_binding_logs')->count());
+        $this->get(route('review-center.department-bindings.index'))->assertOk()->assertSee(__('review_center.no_authorized_members'))->assertDontSee('id="binding-member" name="user_id" class="form-control"><option', false);
+    }
+
+    public function test_each_authorized_member_can_select_and_reopen_multiple_departments_independently(): void
+    {
+        $this->actor->setAttribute('system_admin', true);
+        $this->put(route('review-center.department-bindings.update'), ['user_id' => 7, 'department_ids' => [2, 3]])->assertRedirect();
+        $this->put(route('review-center.department-bindings.update'), ['user_id' => 8, 'department_ids' => [1, 4]])->assertRedirect();
+        foreach ([7 => [2, 3], 8 => [1, 4]] as $memberId => $ids) {
+            $data = app(DepartmentBindingController::class)->index(Request::create('/review-center/department-bindings', 'GET', ['user_id' => $memberId]))->getData();
+            self::assertSame($memberId, $data['selectedUserId']);
+            self::assertEqualsCanonicalizing($ids, $data['selectedIds']);
+            $html = $this->get(route('review-center.department-bindings.index', ['user_id' => $memberId]))->assertOk()->getContent();
+            foreach ($ids as $id) self::assertMatchesRegularExpression('/name="department_ids\[\]" value="'.$id.'"\s+checked/', $html);
+        }
+        $this->put(route('review-center.department-bindings.update'), ['user_id' => 8])->assertRedirect();
+        self::assertSame([2, 3], DB::table('review_center_department_bindings')->where('user_id', 7)->orderBy('department_id')->pluck('department_id')->all());
+    }
+
+    public function test_pending_counts_use_bound_scope_current_version_and_department_channel(): void
+    {
+        $task = $this->task(); $this->asset($task); $this->asset($task); $this->asset($task);
+        $this->task(3);
+        $old = $this->task(); $old->update(['version' => 2]); $this->taskReview($old, 'department', 'approved', 1);
+        $this->taskReview($this->task());
+        $this->taskReview($this->task(), 'department', 'rejected');
+        $this->taskReview($this->task(), 'leader');
+        $this->task()->delete();
+        $this->pendingRecap(); $this->pendingRecap(3);
+        $this->pendingRecap()->update(['department_review_status' => 'approved']);
+        $this->pendingRecap()->update(['department_review_status' => 'rejected']);
+        $this->pendingRecap()->update(['leader_review_status' => 'rejected', 'workflow_status' => 'rejected']);
+        $this->pendingRecap()->delete();
+        $counts = app(ReviewCenterPendingCountService::class)->forUser($this->portal, $this->actor);
+        self::assertSame(['recaps' => 2, 'tests' => 3], $counts);
+        $this->bind(7, 3);
+        self::assertSame(['recaps' => 1, 'tests' => 1], app(ReviewCenterPendingCountService::class)->forUser($this->portal, AdminUser::findOrFail(7)));
+        $this->bind(8, 1);
+        self::assertSame(['recaps' => 3, 'tests' => 4], app(ReviewCenterPendingCountService::class)->forUser($this->portal, $this->actor));
+    }
+
+    public function test_badges_refresh_after_reviews_and_ignore_page_search_and_date_filters(): void
+    {
+        $task = $this->task(); $asset = $this->asset($task); $recap = $this->pendingRecap();
+        $url = route('review-center.operation-tasks.reviews.index', ['from' => '2027-01-01', 'person_search' => '不存在的运营']);
+        $this->get($url)->assertOk()
+            ->assertSee('class="operation-review-count operation-review-count-recap">复 1', false)
+            ->assertSee('class="operation-review-count operation-review-count-test">测 1', false);
+        $this->postJson(route('review-center.operation-tasks.reviews.batch.store'), $this->payload($task, $asset))->assertOk();
+        $this->get($url)->assertOk()->assertSee('class="operation-review-count operation-review-count-recap">复 1', false)
+            ->assertDontSee('class="operation-review-count operation-review-count-test"', false);
+        $this->post(route('review-center.operation-tasks.recaps.reviews.store', $recap), ['channel' => 'department', 'version' => 1, 'result' => 'approved'])->assertRedirect();
+        $this->get($url)->assertOk()->assertDontSee('class="operation-review-counts"', false);
+    }
+
+    public function test_pending_counts_do_not_disclose_data_without_portal_menu_or_binding_access(): void
+    {
+        $this->task(); $this->pendingRecap();
+        $counts = app(ReviewCenterPendingCountService::class);
+        self::assertSame(['recaps' => 1, 'tests' => 1], $counts->forUser($this->portal, $this->actor));
+        $this->menuAllowed = false;
+        self::assertSame(['recaps' => 0, 'tests' => 0], $counts->forUser($this->portal, $this->actor));
+        $this->menuAllowed = true;
+        DB::table('portal_menus')->where('code', 'review_center_operation_tasks')->update(['is_enabled' => false]);
+        self::assertSame(['recaps' => 0, 'tests' => 0], $counts->forUser($this->portal, $this->actor));
+        DB::table('portal_menus')->where('code', 'review_center_operation_tasks')->update(['is_enabled' => true]);
+        $this->actor->setAttribute('status', 0);
+        self::assertSame(['recaps' => 0, 'tests' => 0], $counts->forUser($this->portal, $this->actor));
+        $this->actor->setAttribute('status', 1);
+        DB::table('review_center_department_bindings')->where('user_id', 8)->delete();
+        self::assertSame(['recaps' => 0, 'tests' => 0], $counts->forUser($this->portal, $this->actor));
+        $this->bind(8, 2);
+        DB::table('portal_departments')->where('portal_id', 2)->delete();
+        self::assertSame(['recaps' => 0, 'tests' => 0], $counts->forUser($this->portal, $this->actor));
+    }
+
+    public function test_private_menu_badges_survive_menu_grouping_and_are_present_on_the_binding_page(): void
+    {
+        $this->task();
+        $parentId = DB::table('portal_menus')->insertGetId(['portal_id' => 2, 'parent_id' => 0, 'code' => 'review_group', 'title' => '审核分组', 'title_key' => '', 'path' => '#', 'permission_slug' => null, 'icon' => 'fa-folder', 'sort' => 5, 'is_enabled' => true]);
+        DB::table('portal_menus')->where('code', 'review_center_operation_tasks')->update(['parent_id' => $parentId]);
+        $this->get(route('review-center.operation-tasks.reviews.index'))->assertOk()->assertSee('class="operation-review-count operation-review-count-test">测 1', false)->assertDontSee(__('review_center.department_bindings'));
+        $this->actor->setAttribute('system_admin', true);
+        $this->get(route('review-center.department-bindings.index'))->assertOk()->assertSee('class="operation-review-count operation-review-count-test">测 1', false);
+        foreach (['layout.blade.php', 'partials/menu.blade.php'] as $view) self::assertNotEmpty(token_get_all(app('blade.compiler')->compileString(file_get_contents(resource_path('views/portals/review-center/'.$view))), TOKEN_PARSE));
     }
 
 }

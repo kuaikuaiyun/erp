@@ -302,6 +302,7 @@
             xshoppySection.prop('hidden', value !== 'xshoppy' && value !== 'xshopy');
             shoplineSection.prop('hidden', value !== 'shopline');
             root.find('#assistant-nbc-app-section').prop('hidden', value !== 'nbc');
+            root.find('#assistant-shopyy-app-section').prop('hidden', value !== 'shopyy');
         }
 
         function hostnameFromInput(rawValue) {

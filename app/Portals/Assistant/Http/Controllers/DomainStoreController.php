@@ -1703,7 +1703,7 @@ class DomainStoreController extends Controller
             'site_builder', 'shop_name', 'domain', 'email', 'project', 'user_name',
             'credit_card', 'wallet', 'paypal', 'other_payment', 'shop_login_url', 'store_prefix',
             'tongtu_prefix',
-            'shopify_client_id', 'shopify_client_secret', 'xshoppy_api_key', 'xshoppy_password', 'shopline_app_token', 'nbc_app_token', 'payment_card', 'remark',
+            'shopify_client_id', 'shopify_client_secret', 'xshoppy_api_key', 'xshoppy_password', 'shopline_app_token', 'nbc_app_token', 'shopyy_app_token', 'payment_card', 'remark',
         ] as $field) {
             if ($request->has($field)) {
                 $request->merge([$field => trim((string) $request->input($field))]);
@@ -2134,6 +2134,7 @@ class DomainStoreController extends Controller
             'xshoppy_password' => ['nullable', 'string', 'max:255'],
             'shopline_app_token' => ['nullable', 'string', 'max:65535'],
             'nbc_app_token' => ['nullable', 'string', 'max:65535'],
+            'shopyy_app_token' => ['nullable', 'string', 'max:65535'],
             'shop_status' => ['required', 'in:'.implode(',', array_keys(AssistantDomainStore::shopStatusLabels()))],
             'plan_expires_at' => ['nullable', 'date'],
             'payment_card' => ['nullable', 'string', 'max:255'],

@@ -31,8 +31,10 @@ class DepartmentBindingController extends Controller
     public function index(Request $request)
     {
         $context = $this->context($request);
-        $users = AdminUser::query()->orderBy('name')->orderBy('id')->get(['id', 'name', 'username']);
-        $data = $request->validate(['user_id' => ['nullable', 'integer', Rule::exists(AdminUser::class, 'id')]]);
+        $users = $this->authorization->authorizedMembers($context['portal'])->orderBy('name')->orderBy('id')->get(['id', 'name', 'username']);
+        $data = $request->validate(['user_id' => ['nullable', 'integer', Rule::in($users->pluck('id')->all())]], [
+            'user_id.in' => __('review_center.member_not_authorized'),
+        ], __('review_center.attributes'));
         $selectedUserId = (int) ($data['user_id'] ?? $users->first()?->id ?? 0);
         $db = $this->authorization->database();
         return view('portals.review-center.department-bindings', [...$context,
@@ -47,15 +49,18 @@ class DepartmentBindingController extends Controller
     {
         $context = $this->context($request);
         $data = $request->validate([
-            'user_id' => ['required', 'integer', Rule::exists(AdminUser::class, 'id')],
+            'user_id' => ['required', 'integer', Rule::in($this->authorization->authorizedMembers($context['portal'])->pluck('id')->all())],
             'department_ids' => ['nullable', 'array', 'max:500'],
             'department_ids.*' => ['required', 'integer', 'distinct', Rule::in(Department::business()->pluck('id')->all())],
-        ], [], __('review_center.attributes'));
+        ], ['user_id.in' => __('review_center.member_not_authorized')], __('review_center.attributes'));
         $ids = collect($data['department_ids'] ?? [])->map(fn ($id) => (int) $id)->unique()->sort()->values()->all();
         $db = $this->authorization->database();
         $db->transaction(function () use ($db, $data, $ids, $context): void {
             // Serialize changes for the same member, including an initially empty binding.
             $member = AdminUser::query()->lockForUpdate()->findOrFail($data['user_id']);
+            if (! $this->authorization->authorizedMembers($context['portal'])->whereKey($member->id)->exists()) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['user_id' => __('review_center.member_not_authorized')]);
+            }
             $before = $db->table('review_center_department_bindings')->where('user_id', $member->id)->orderBy('department_id')->pluck('department_id')->map(fn ($id) => (int) $id)->all();
             $db->table('review_center_department_bindings')->where('user_id', $member->id)->delete();
             $now = now();
