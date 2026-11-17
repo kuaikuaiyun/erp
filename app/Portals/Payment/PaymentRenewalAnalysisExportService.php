@@ -20,7 +20,8 @@ class PaymentRenewalAnalysisExportService
         $book = new Spreadsheet();
         $text = static fn (string $key): string => __('payment.renewal_two_sections.'.$key);
         $channels = ['total'=>$text('total'),'paypal'=>__('payment.renewal_analysis.channels.paypal'),'credit_card'=>__('payment.renewal_analysis.channels.credit_card'),'unknown'=>$text('unknown')];
-        $groups = array_filter(PaymentRenewalAnalysisService::breakdownGroups(), static fn ($group, $key) => !in_array($key, ['paypal','credit_card'], true), ARRAY_FILTER_USE_BOTH);
+        $allGroups = PaymentRenewalAnalysisService::breakdownGroups();
+        $groups = array_replace(array_flip(['total','method_pp','method_cc','method_gp','method_ap']), array_intersect_key($allGroups, array_flip(['total','method_pp','method_cc','method_gp','method_ap'])));
         $methodLabel = static fn (array $group) => $group['method'] === 'all' ? $text('total') : ($group['method'] === 'unknown' ? $text('unknown') : $text('method_names.'.$group['method']));
         $first = $book->getActiveSheet();
         $first->setTitle($text('first_sheet'));

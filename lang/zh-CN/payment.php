@@ -262,7 +262,7 @@ return array_replace_recursive($translations, [
         'method_names' => ['ap'=>'苹果支付', 'gp'=>'谷歌支付', 'pp'=>'PayPal支付', 'cc'=>'信用卡支付'],
         'method_all' => '全部方式',
         'unknown' => '未识别',
-        'method_rule' => '总体等于苹果支付、谷歌支付、PayPal支付、信用卡支付及未识别之和。各方式续费率 = 本期该方式本次续费订单数 ÷ 前推 30 天区间该方式上一阶段订单数 × 100%。',
+        'method_rule' => '总体包含全部支付方式（含未识别数据）；下方仅展示 PayPal支付、信用卡支付、谷歌支付及苹果支付，总体可能大于四种方式之和。各方式续费率 = 本期该方式本次续费订单数 ÷ 前推 30 天区间该方式上一阶段订单数 × 100%。',
         'subscription_hint' => '本区独立筛选，查看首单订阅与首购退款。',
         'renewal_hint' => '本区独立筛选，按续费次数核对前推基数、本期订单及退款。',
         'method_subscription' => '支付方式订阅率',

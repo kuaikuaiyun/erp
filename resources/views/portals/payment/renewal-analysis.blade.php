@@ -27,7 +27,8 @@
     $stageName = static fn (int $number) => __($t.'.funnel.stage_name',['number'=>$number]);
     $stageNumber = static fn (string $key) => (int) str_replace('renewal_', '', $key);
     $channels = ['total'=>$text('total'),'paypal'=>__($t.'.channels.paypal'),'credit_card'=>__($t.'.channels.credit_card'),'unknown'=>$text('unknown')];
-    $groups = array_filter(\App\Portals\Payment\PaymentRenewalAnalysisService::breakdownGroups(), static fn ($group, $key) => !in_array($key, ['paypal','credit_card'], true), ARRAY_FILTER_USE_BOTH);
+    $allGroups = \App\Portals\Payment\PaymentRenewalAnalysisService::breakdownGroups();
+        $groups = array_replace(array_flip(['total','method_pp','method_cc','method_gp','method_ap']), array_intersect_key($allGroups, array_flip(['total','method_pp','method_cc','method_gp','method_ap'])));
     $methodLabel = static fn (array $group) => $group['method'] === 'all' ? $text('total') : ($group['method'] === 'unknown' ? $text('unknown') : $text('method_names.'.$group['method']));
     $period = $audit('first_period',['from'=>$calc['period_from'],'to'=>$calc['period_to']]);
     $comparison = $audit('cohort_period',['from'=>$calc['comparison_from'],'to'=>$calc['comparison_to']]);
@@ -75,7 +76,7 @@
             <h3>{{ $text('method_subscription') }}</h3>
             <div class="payment-method-rate-grid">
             @foreach($groups as $key=>$group)
-                @if($group['level'] === 'method' || $key === 'unknown')
+                @if($group['level'] === 'method')
                     @php $rate = $summary['subscription_rate'][$key]; @endphp
                     <div class="payment-method-rate" data-payment-method="{{ $group['method'] }}">
                         <span><b>{{ $methodLabel($group) }}</b></span>
