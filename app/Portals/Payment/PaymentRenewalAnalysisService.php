@@ -97,7 +97,7 @@ class PaymentRenewalAnalysisService
         $cacheFilters = $filters;
         $cacheFilters['timezone'] ??= '+08:00';
         unset($cacheFilters['stage_page'], $cacheFilters['stage']);
-        $cacheKey = 'payment:renewal-analysis:v10:'.sha1(json_encode($cacheFilters));
+        $cacheKey = 'payment:renewal-analysis:v11:'.sha1(json_encode($cacheFilters));
 
         $expiresAt = now()->addMinutes(5);
         return Cache::remember($cacheKey, $expiresAt, function () use ($cacheFilters, $expiresAt): array {
@@ -161,20 +161,20 @@ class PaymentRenewalAnalysisService
         }
 
         $current = [];
-        $previousChains = [];
+        $previousOrders = [];
         foreach ($entries as $entry) {
             $order = $entry['order'];
             $number = $entry['number'];
             if ($order->paid_at->betweenIncluded($from, $to)) $current[$number][] = $entry;
             if ($order->paid_at->betweenIncluded($comparisonFrom, $comparisonTo)) {
-                $previousChains[$number][(int) $entry['initial']->id] = true;
+                $previousOrders[$number] = ($previousOrders[$number] ?? 0) + 1;
             }
         }
         $orderIds = collect($current)->flatten(1)->map(fn (array $entry): int => (int) $entry['order']->id)->all();
         $risk = $this->riskMaps($orderIds, ['risk_date_mode' => 'payment', 'timezone' => $timezone], $from, $to);
         $numbers = [0 => true];
         foreach (array_keys($current) as $number) $numbers[$number] = true;
-        foreach (array_keys($previousChains) as $number) $numbers[$number + 1] = true;
+        foreach (array_keys($previousOrders) as $number) $numbers[$number + 1] = true;
         ksort($numbers, SORT_NUMERIC);
         $stages = [];
         $rows = [];
@@ -182,7 +182,6 @@ class PaymentRenewalAnalysisService
         foreach (array_keys($numbers) as $number) {
             $key = $number === 0 ? 'initial' : 'renewal_'.$number;
             $stageRows = [];
-            $currentChains = [];
             $paidFrom = $paidTo = null;
             foreach ($current[$number] ?? [] as $entry) {
                 $order = $entry['order'];
@@ -192,7 +191,6 @@ class PaymentRenewalAnalysisService
                 $paid = $order->paid_at->copy()->setTimezone($timezone)->format('Y-m-d H:i:s');
                 $paidFrom = $paidFrom === null ? $paid : min($paidFrom, $paid);
                 $paidTo = $paidTo === null ? $paid : max($paidTo, $paid);
-                $currentChains[(int) $initial->id] = true;
                 if ($number > 0) $renewalOrderIds[] = (int) $order->id;
                 $stageRows[] = [
                     'stage_key' => $key, 'stage_number' => $number,
@@ -206,18 +204,15 @@ class PaymentRenewalAnalysisService
                     'dispute_count' => $dispute['count'], 'dispute_amount' => round($dispute['amount'], 2), 'raw_dispute_amount' => $dispute['amount'], 'dispute_details' => $dispute['details'],
                 ];
             }
-            $base = $number > 0 ? ($previousChains[$number - 1] ?? []) : [];
-            $completed = count(array_intersect_key($base, $currentChains));
-            $eligible = count($base);
+            // Stage numbers still use chain history. The rate compares period order
+            // counts directly and does not intersect the two periods' customers.
+            $previousCount = $number > 0 ? ($previousOrders[$number - 1] ?? 0) : null;
+            $currentCount = count($stageRows);
             $stages[] = [
                 ...$this->riskTotal($stageRows, true),
                 'key' => $key, 'number' => $number,
-                'eligible_chains' => $number === 0 ? null : $eligible,
-                'completed_chains' => $number === 0 ? null : $completed,
-                'rate' => $number === 0 ? null : $this->rate($completed, $eligible),
-                'loss_count' => $number === 0 ? null : $eligible - $completed,
-                'loss_rate' => $number === 0 ? null : $this->rate($eligible - $completed, $eligible),
-                'outside_base_chains' => $number === 0 ? 0 : count($currentChains) - $completed,
+                'previous_orders' => $previousCount,
+                'rate' => $previousCount > 0 ? $this->rate($currentCount, $previousCount) : null,
                 'paid_from' => $paidFrom, 'paid_to' => $paidTo,
             ];
             array_push($rows, ...$stageRows);
@@ -225,7 +220,7 @@ class PaymentRenewalAnalysisService
         $stores = $initials->pluck('store_name')->filter()->unique()->sort()->values()->all();
         // Output rows now contain scalars; release historical model graphs before other queries.
         unset($candidates, $initials, $initialMap, $renewals, $batch, $entries, $current,
-            $entry, $order, $initial, $referenceMap, $currentChains, $stageRows);
+            $entry, $order, $initial, $referenceMap, $stageRows);
         return [
             'calculation' => [
                 'period_from' => $localFrom->format('Y-m-d H:i:s'), 'period_to' => $localTo->format('Y-m-d H:i:s'),

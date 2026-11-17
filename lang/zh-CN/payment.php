@@ -258,6 +258,9 @@ $translations = [
 
 return array_replace_recursive($translations, [
     'renewal_two_sections' => [
+        'previous_orders' => '前推区间上一阶段订单数',
+        'current_renewal_orders' => '本期本次续费订单数',
+        'no_base' => '前推区间上一阶段订单数为 0，无可计算基数，续费率显示“—”；本期订单与退款仍正常统计。',
         'subtitle' => '查看首单订阅率，以及第 1 次至第 N 次续费率和各阶段退款率。',
         'renewal_title' => '各次续费率',
         'context' => '付款区间：:from ～ :to ｜ :timezone ｜ 数据生成：:generated',
@@ -272,7 +275,7 @@ return array_replace_recursive($translations, [
         'subscription_orders' => '合格订阅首购数', 'qualified_orders' => '合格首单数', 'subscription_rate' => '首单订阅率',
         'orders' => '付款订单数', 'revenue' => '实收金额', 'refund_orders' => '退款订单数', 'refund_amount' => '退款金额',
         'refund_count_rate' => '笔数退款率', 'refund_amount_rate' => '金额退款率',
-        'stage_note' => '本期付款与前推 30 天的上一阶段按同一订阅链对比；各次退款率仅使用本次付款订单。每页显示 10 次，首购不占续费分页。',
+        'stage_note' => '各次续费率 = 本期本次续费订单数 ÷ 前推 30 天区间的上一阶段订单数 × 100%；不要求两期订单属于同一批订阅链。每页 10 次，退款率仅使用本期本次订单。',
         'first_sheet' => '首单订阅率', 'renewal_sheet' => '各次续费率',
     ],
     'renewal_audit' => [
@@ -297,14 +300,12 @@ return array_replace_recursive($translations, [
         'stage_scope' => '应用当前阶段筛选；翻页仅改变显示阶段，不截断指标卡与渠道风险统计。',
         'initial_stage' => '本行仅核算本期首次订阅订单及其退款；不是前推区间的续费对比分母。',
         'not_applicable' => '首次订阅没有上一付款阶段，续费对比、续费率和流失不适用，显示“—”。',
-        'base' => '第 :number 次续费的基数 = 对比区间内 :previous 的订阅链去重数，共 :count 条；上一笔付款 + 30 天落入本期。',
-        'completed' => '在对比基数的同一批链中，本期完成第 :number 次续费的链共 :count 条。',
-        'outside_base' => '本期本阶段付款 :orders 单；其中 :outside 条链的上一阶段不在对比区间，仅计入本期实收/退款，不计入同链续费率分子。',
+        'base' => '第 :number 次续费的分母 = 前推 30 天对比区间内的 :previous 订单数，共 :count 单。',
+        'completed' => '第 :number 次续费的分子 = 本期全部第 :number 次续费订单数，共 :count 单，不取两期订阅链交集。此数量对比比例可超过 100%，不作截断。',
         'stage_number' => '同一首单关联的有效续费按已入库历史付款时间、订单 ID 排序，第 :number 笔归本阶段；排除已加购。',
         'actual_period' => '本阶段实际付款范围：:from ～ :to。',
-        'no_payments' => '本阶段无本期付款订单；若存在对比基数，仍显示待续费/流失。',
-        'loss' => '未在本期完成：基数 :eligible − 同链完成 :completed = :loss 条。',
-        'orders' => '本期本阶段付款订单共 :count 单；与同链完成数的范围分别列示。',
+        'no_payments' => '本阶段本期没有付款订单：对比基数大于 0 时续费率为 0%；对比基数为 0 时显示“—”。',
+        'orders' => '本期本阶段付款订单共 :count 单，作为该次续费率分子和笔数退款率分母。',
         'revenue' => '该范围订单美元实收合计 :amount（未扣退款、争议及手续费）。',
         'refund' => '退款记录 :records 笔；发生退款的付款订单去重 :orders 单；退款金额合计 :amount。',
         'refund_count' => '分子：本阶段退款订单去重 :a 单；分母：本阶段本期付款订单 :b 单。',
@@ -902,7 +903,7 @@ return array_replace_recursive($translations, [
             'subscription_rate' => '首单订阅率 = 订阅首次购买首单 ÷ 合格首单',
             'subscription_scope' => 'PayPal 合格首单需已关联 ERP 且已匹配成功 PayPal 真实交易；信用卡合格首单需已关联 ERP。',
         ],
-        'observation_note' => '首次订阅及第 N 次续费均统计本期付款；第 N 次续费对比前推 30 天区间内的上一阶段，同一订阅链核对完成情况。各阶段退款率仅使用本阶段本期订单。',
+        'observation_note' => '首次订阅率使用本期合格首单；第 N 次续费率使用本期第 N 次续费订单数，直接除以前推 30 天区间的第 N−1 阶段订单数。各阶段退款率仅使用本期本阶段订单。',
         'funnel' => [
             'title' => '首次订阅与各次续费', 'stage' => '付款阶段', 'eligible' => '对比基数（上一阶段）', 'completed' => '同链本期完成',
             'refund_count_rate' => '退款率（笔数）', 'refund_amount_rate' => '退款率（金额）',

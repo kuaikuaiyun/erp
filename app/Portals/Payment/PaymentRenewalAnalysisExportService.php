@@ -46,16 +46,17 @@ class PaymentRenewalAnalysisExportService
         $renewals = $book->createSheet();
         $renewals->setTitle($text('renewal_sheet'));
         $renewals->fromArray([[
-            $text('renewal_stage'), __('payment.renewal_analysis.funnel.eligible'), __('payment.renewal_analysis.funnel.completed'),
-            __('payment.renewal_analysis.funnel.renewal_rate'), $text('orders'), $text('revenue'),
+            $text('renewal_stage'), $text('previous_orders'), $text('current_renewal_orders'),
+            __('payment.renewal_analysis.funnel.renewal_rate'), $text('revenue'),
             $text('refund_orders'), $text('refund_amount'), $text('refund_count_rate'), $text('refund_amount_rate'),
         ]], null, 'A1');
         $rowNumber = 2;
         foreach ($data['stages'] as $stage) {
             $renewals->fromArray([[
                 __('payment.renewal_analysis.funnel.stage_name',['number'=>$stage['number']]),
-                $stage['eligible_chains'], $stage['completed_chains'], $stage['rate'].'%',
-                $stage['orders'], $stage['revenue'], $stage['refund_order_count'], $stage['refund_amount'],
+                $stage['previous_orders'], $stage['orders'],
+                $stage['rate'] === null ? __('payment.renewal_analysis.funnel.not_applicable') : $stage['rate'].'%',
+                $stage['revenue'], $stage['refund_order_count'], $stage['refund_amount'],
                 $stage['refund_count_rate'].'%', $stage['refund_amount_rate'].'%',
             ]], null, 'A'.$rowNumber++);
         }

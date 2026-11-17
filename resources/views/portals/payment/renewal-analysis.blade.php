@@ -87,26 +87,28 @@
         <h2>{{ $text('renewal_title') }}</h2>
         <p class="payment-renewal-scope-note">{{ $text('stage_note') }}</p>
         <div class="table-responsive"><table class="table payment-data-table"><thead><tr>
-            <th>{{ $text('renewal_stage') }}</th><th>{{ __($t.'.funnel.eligible') }}</th><th>{{ __($t.'.funnel.completed') }}</th><th>{{ __($t.'.funnel.renewal_rate') }}</th>
-            <th>{{ $text('orders') }}</th><th>{{ $text('revenue') }}</th><th>{{ $text('refund_orders') }}</th><th>{{ $text('refund_amount') }}</th><th>{{ $text('refund_count_rate') }}</th><th>{{ $text('refund_amount_rate') }}</th>
+            <th>{{ $text('renewal_stage') }}</th><th>{{ $text('previous_orders') }}</th><th>{{ $text('current_renewal_orders') }}</th><th>{{ __($t.'.funnel.renewal_rate') }}</th>
+            <th>{{ $text('revenue') }}</th><th>{{ $text('refund_orders') }}</th><th>{{ $text('refund_amount') }}</th><th>{{ $text('refund_count_rate') }}</th><th>{{ $text('refund_amount_rate') }}</th>
         </tr></thead><tbody>
         @forelse($dashboard['stages'] as $stage)
-            <tr data-payment-renewal-number="{{ $stage['number'] }}"><td><strong>{{ $stageName($stage['number']) }}</strong></td><td>{{ number_format($stage['eligible_chains']) }}</td><td>{{ number_format($stage['completed_chains']) }}</td><td><strong>{{ number_format($stage['rate'],2) }}%</strong></td><td>{{ number_format($stage['orders']) }}</td><td>{{ $money($stage['revenue']) }}</td><td>{{ number_format($stage['refund_order_count']) }}</td><td>{{ $money($stage['refund_amount']) }}</td><td>{{ number_format($stage['refund_count_rate'],2) }}%</td><td>{{ number_format($stage['refund_amount_rate'],2) }}%</td></tr>
-            <tr class="payment-calculation-row"><td colspan="10">
+            <tr data-payment-renewal-number="{{ $stage['number'] }}"><td><strong>{{ $stageName($stage['number']) }}</strong></td><td>{{ number_format($stage['previous_orders']) }}</td><td>{{ number_format($stage['orders']) }}</td><td><strong>{{ $stage['rate'] === null ? __($t.'.funnel.not_applicable') : number_format($stage['rate'],2).'%' }}</strong></td><td>{{ $money($stage['revenue']) }}</td><td>{{ number_format($stage['refund_order_count']) }}</td><td>{{ $money($stage['refund_amount']) }}</td><td>{{ number_format($stage['refund_count_rate'],2) }}%</td><td>{{ number_format($stage['refund_amount_rate'],2) }}%</td></tr>
+            <tr class="payment-calculation-row"><td colspan="9">
                 <details class="payment-calculation-details"><summary>{{ $text('stage_calculation',['number'=>$stage['number']]) }}</summary>
-                    {{ $notes([$audit('base',['number'=>$stage['number'],'previous'=>$stage['number'] === 1 ? __($t.'.funnel.initial_stage') : $stageName($stage['number']-1),'count'=>$stage['eligible_chains']]),
-                        $audit('completed',['number'=>$stage['number'],'count'=>$stage['completed_chains']]),
-                        $audit('outside_base',['orders'=>$stage['orders'],'outside'=>$stage['outside_base_chains']])]) }}
-                    {{ $notes($ratio($stage['completed_chains'],$stage['eligible_chains'],$stage['rate'])) }}
-                    {{ $notes([$audit('loss',['eligible'=>$stage['eligible_chains'],'completed'=>$stage['completed_chains'],'loss'=>$stage['loss_count']]),
-                        $audit('revenue',['amount'=>$money($stage['revenue'])]),
+                    {{ $notes([$audit('base',['number'=>$stage['number'],'previous'=>$stage['number'] === 1 ? __($t.'.funnel.initial_stage') : $stageName($stage['number']-1),'count'=>$stage['previous_orders']]),
+                        $audit('completed',['number'=>$stage['number'],'count'=>$stage['orders']]),$period,$comparison]) }}
+                    @if($stage['rate'] === null)
+                        {{ $notes([$text('no_base')]) }}
+                    @else
+                        {{ $notes($ratio($stage['orders'],$stage['previous_orders'],$stage['rate'])) }}
+                    @endif
+                    {{ $notes([$audit('revenue',['amount'=>$money($stage['revenue'])]),
                         $audit('refund',['records'=>$stage['refund_count'],'orders'=>$stage['refund_order_count'],'amount'=>$money($stage['refund_amount'])])]) }}
                     {{ $notes($ratio($stage['refund_order_count'],$stage['orders'],$stage['refund_count_rate'])) }}
                     {{ $notes($ratio($stage['refund_amount'],$stage['revenue'],$stage['refund_amount_rate'],4)) }}
                     {{ $notes([$stage['paid_from'] === null ? $audit('no_payments') : $audit('actual_period',['from'=>$stage['paid_from'],'to'=>$stage['paid_to']]),$audit('stage_number',['number'=>$stage['number']])]) }}
                 </details>
             </td></tr>
-        @empty<tr><td colspan="10" class="payment-product-empty">{{ __($t.'.funnel.empty') }}</td></tr>@endforelse
+        @empty<tr><td colspan="9" class="payment-product-empty">{{ __($t.'.funnel.empty') }}</td></tr>@endforelse
         </tbody></table></div>
         @php
             $p = $dashboard['stage_pagination'];
