@@ -1472,6 +1472,77 @@
         });
     }
 
+    function uploadMaterialVideoFiles(items) {
+        var totalSize = items.reduce(function (sum, item) { return sum + item.file.size; }, 0);
+        var completedSize = 0;
+        var uploadedSessions = [];
+
+        function uploadOne(item) {
+            var file = item.file;
+            var totalChunks = Math.ceil(file.size / (5 * 1024 * 1024));
+
+            return jsonRequest(config.packageUploadInitializeUrl, 'POST', {
+                client_fingerprint: packageFingerprint(file),
+                original_name: file.name,
+                mime_type: file.type || 'video/mp4',
+                total_size: file.size,
+                total_chunks: totalChunks
+            }).then(function (session) {
+                var uploaded = {};
+                var chunkIndex = 0;
+                var uploadToken = session.upload_token;
+
+                (session.uploaded_chunks || []).forEach(function (index) {
+                    uploaded[Number(index)] = true;
+                });
+                updateProductSaveProgress(completedSize + Number(session.received_size || 0), totalSize);
+
+                function uploadNextPart() {
+                    while (chunkIndex < totalChunks && uploaded[chunkIndex]) {
+                        chunkIndex += 1;
+                    }
+                    if (chunkIndex >= totalChunks) {
+                        return jsonRequest(packageCompleteUrl(uploadToken), 'POST').then(function (completed) {
+                            updateProductSaveProgress(completedSize + file.size, totalSize);
+                            return completed;
+                        });
+                    }
+
+                    var start = chunkIndex * 5 * 1024 * 1024;
+                    var end = Math.min(file.size, start + 5 * 1024 * 1024);
+                    var currentIndex = chunkIndex;
+                    var partData = new FormData();
+                    partData.append('chunk', file.slice(start, end), file.name + '.part');
+
+                    function sendPart(attempt) {
+                        return formDataRequest(packagePartUrl(uploadToken, currentIndex), partData).catch(function (error) {
+                            if (attempt >= 3) throw error;
+                            return new Promise(function (resolve) {
+                                window.setTimeout(resolve, attempt * 800);
+                            }).then(function () { return sendPart(attempt + 1); });
+                        });
+                    }
+
+                    return sendPart(1).then(function (updatedSession) {
+                        uploaded[currentIndex] = true;
+                        chunkIndex = currentIndex + 1;
+                        updateProductSaveProgress(completedSize + Number(updatedSession.received_size || 0), totalSize);
+                        return uploadNextPart();
+                    });
+                }
+
+                return session.status === 'completed' ? session : uploadNextPart();
+            }).then(function (session) {
+                completedSize += file.size;
+                uploadedSessions.push({type: item.type, upload_token: session.upload_token});
+            });
+        }
+
+        return items.reduce(function (promise, item) {
+            return promise.then(function () { return uploadOne(item); });
+        }, Promise.resolve()).then(function () { return uploadedSessions; });
+    }
+
     function submitProduct() {
         var packageFileToUpload = packageFile && packageFile.files && packageFile.files[0];
         var referenceFileToUpload = referenceFile && referenceFile.files && referenceFile.files[0];
@@ -1480,6 +1551,13 @@
             var input = pair.querySelector('[data-aikaipin-csv-file]');
             return input && input.files ? input.files[0] : null;
         }).filter(Boolean);
+        var materialVideoFilesToUpload = [];
+        materialVideoInputs.forEach(function (input) {
+            var type = input.getAttribute('data-aikaipin-material-video');
+            Array.prototype.slice.call(input.files || []).forEach(function (file) {
+                materialVideoFilesToUpload.push({type: type, file: file});
+            });
+        });
         var isEditing = editingProductId !== null;
         var packageRequest;
 
@@ -1536,6 +1614,16 @@
                 return { packageSession: session, referenceSession: referenceSession };
             });
         }).then(function (sessions) {
+            if (!materialVideoFilesToUpload.length) {
+                sessions.materialVideoSessions = [];
+                return sessions;
+            }
+            setUploadSubmitState(true, '正在分片上传素材视频...');
+            return uploadMaterialVideoFiles(materialVideoFilesToUpload).then(function (materialVideoSessions) {
+                sessions.materialVideoSessions = materialVideoSessions;
+                return sessions;
+            });
+        }).then(function (sessions) {
             var formData = new FormData(uploadForm);
             var requestUrl = isEditing
                 ? String(config.productUpdateUrlTemplate || '').replace('__product__', encodeURIComponent(editingProductId))
@@ -1562,6 +1650,12 @@
             if (sessions.referenceSession && sessions.referenceSession.upload_token) {
                 formData.append('reference_upload_token', sessions.referenceSession.upload_token);
             }
+            materialVideoInputs.forEach(function (input) {
+                if (input.name) formData.delete(input.name);
+            });
+            (sessions.materialVideoSessions || []).forEach(function (session) {
+                formData.append('material_video_upload_tokens[' + session.type + '][]', session.upload_token);
+            });
             if (isEditing) {
                 formData.append('_method', 'PUT');
             }
@@ -1595,7 +1689,7 @@
             isProductSubmitting = false;
             setUploadSubmitState(false);
             if (productSaveProgressLabel) {
-                productSaveProgressLabel.textContent = '上传失败，请检查文件或网络后重试';
+                productSaveProgressLabel.textContent = error.message || '上传失败，请检查文件或网络后重试';
             }
         });
     }

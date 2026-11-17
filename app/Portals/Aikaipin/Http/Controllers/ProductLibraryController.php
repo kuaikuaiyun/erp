@@ -90,7 +90,10 @@ class ProductLibraryController extends Controller
             'client_fingerprint' => ['required', 'string', 'size:64'],
             'original_name' => ['required', 'string', 'max:255'],
             'mime_type' => ['nullable', 'string', 'max:191'],
-            'total_size' => ['required', 'integer', 'min:1', 'max:268435456'],
+            // The shared chunk endpoint also receives material videos, whose
+            // documented single-file limit is 300 MB. The final save action
+            // still applies the stricter reference/package limits.
+            'total_size' => ['required', 'integer', 'min:1', 'max:314572800'],
             'total_chunks' => ['required', 'integer', 'min:1'],
         ]);
         $expectedChunks = (int) ceil((int) $data['total_size'] / AikaipinProductLibraryStorageService::PACKAGE_CHUNK_SIZE);
@@ -257,6 +260,9 @@ class ProductLibraryController extends Controller
             'material_videos' => ['nullable', 'array'],
             'material_videos.*' => ['nullable', 'array', 'max:20'],
             'material_videos.*.*' => ['file', 'mimes:mp4,mov,avi,webm,mkv,m4v', 'max:307200'],
+            'material_video_upload_tokens' => ['nullable', 'array:flow,traffic,remix'],
+            'material_video_upload_tokens.*' => ['nullable', 'array', 'max:20'],
+            'material_video_upload_tokens.*.*' => ['uuid', 'distinct'],
             'shopify_csvs' => ['required', 'array', 'min:1', 'max:10'],
             'shopify_csvs.*' => ['required', 'file', 'mimes:csv,txt', 'max:20480'],
             'shopify_landing_page_urls' => ['required', 'array', 'min:1', 'max:10'],
@@ -305,18 +311,20 @@ class ProductLibraryController extends Controller
         }
 
         $createdPaths = [];
+        $completedMaterialSessions = [];
         $product = null;
 
         try {
             $connection = config('admin.database.connection') ?: config('database.default');
-            $product = DB::connection($connection)->transaction(function () use ($context, $data, $categories, $departmentIds, $skuValues, $shopifyImports, &$createdPaths): AikaipinProduct {
+            $product = DB::connection($connection)->transaction(function () use ($context, $data, $categories, $departmentIds, $skuValues, $shopifyImports, &$createdPaths, &$completedMaterialSessions): AikaipinProduct {
                 $session = null;
                 $referenceSession = null;
                 if (filled($data['package_upload_token'] ?? null)) {
                     $session = $this->uploadSessionForUser($context['user'], (string) $data['package_upload_token'], true);
                     if ($session->status !== AikaipinProductUploadSession::STATUS_COMPLETED
                         || ! $session->assembled_path
-                        || ! Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($session->assembled_path)) {
+                        || ! Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($session->assembled_path)
+                        || (int) $session->total_size > 256 * 1024 * 1024) {
                         throw ValidationException::withMessages([
                             'package_upload_token' => __('aikaipin.messages.package_upload_incomplete_message'),
                         ]);
@@ -328,6 +336,7 @@ class ProductLibraryController extends Controller
                     if ($referenceSession->status !== AikaipinProductUploadSession::STATUS_COMPLETED
                         || ! $referenceSession->assembled_path
                         || ! Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($referenceSession->assembled_path)
+                        || (int) $referenceSession->total_size > self::REFERENCE_FILE_MAX_KILOBYTES * 1024
                         || ! in_array($extension, ['html', 'htm'], true)) {
                         throw ValidationException::withMessages([
                             'reference_upload_token' => '参考页面文件上传不完整或格式不正确，请重新上传。',
@@ -407,7 +416,16 @@ class ProductLibraryController extends Controller
                     );
                 }
 
-                $this->storeMaterialVideos($product, (array) ($data['material_videos'] ?? []), $context['user'], $createdPaths);
+                $materialVideos = (array) ($data['material_videos'] ?? []);
+                $chunkedMaterialVideos = $this->materialVideoFilesFromUploadTokens(
+                    (array) ($data['material_video_upload_tokens'] ?? []),
+                    $context['user'],
+                    $completedMaterialSessions,
+                );
+                foreach ($chunkedMaterialVideos as $type => $files) {
+                    $materialVideos[$type] = [...(array) ($materialVideos[$type] ?? []), ...$files];
+                }
+                $this->storeMaterialVideos($product, $materialVideos, $context['user'], $createdPaths);
 
                 if ($session !== null) {
                     $session->forceFill([
@@ -451,6 +469,7 @@ class ProductLibraryController extends Controller
                 report($exception);
             }
         }
+        $this->deleteCompletedUploadSessions($completedMaterialSessions);
         $videoImport = $this->importReferenceVideosToTable($product);
         Cache::forget(self::PRODUCT_CATEGORY_OPTIONS_CACHE_KEY);
         if ($product?->is_published) {
@@ -678,6 +697,9 @@ class ProductLibraryController extends Controller
             'material_videos' => ['nullable', 'array'],
             'material_videos.*' => ['nullable', 'array', 'max:20'],
             'material_videos.*.*' => ['file', 'mimes:mp4,mov,avi,webm,mkv,m4v', 'max:307200'],
+            'material_video_upload_tokens' => ['nullable', 'array:flow,traffic,remix'],
+            'material_video_upload_tokens.*' => ['nullable', 'array', 'max:20'],
+            'material_video_upload_tokens.*.*' => ['uuid', 'distinct'],
             'remove_material_video_ids' => ['nullable', 'array', 'max:200'],
             'remove_material_video_ids.*' => ['integer', 'min:1', 'distinct'],
             'remove_history_video_indexes' => ['nullable', 'array', 'max:500'],
@@ -731,11 +753,12 @@ class ProductLibraryController extends Controller
         $obsoletePaths = [];
         $completedSession = null;
         $completedReferenceSession = null;
+        $completedMaterialSessions = [];
         $referenceReplaced = false;
 
         try {
             $connection = config('admin.database.connection') ?: config('database.default');
-            DB::connection($connection)->transaction(function () use ($context, $product, $data, $categories, $departmentIds, $skuValues, $removedImageIndexes, $removedMaterialVideoIds, $newImages, &$createdPaths, &$obsoletePaths, &$completedSession, &$completedReferenceSession, &$referenceReplaced): void {
+            DB::connection($connection)->transaction(function () use ($context, $product, $data, $categories, $departmentIds, $skuValues, $removedImageIndexes, $removedMaterialVideoIds, $newImages, &$createdPaths, &$obsoletePaths, &$completedSession, &$completedReferenceSession, &$completedMaterialSessions, &$referenceReplaced): void {
                 $images = $product->imageFiles();
                 foreach (array_reverse($removedImageIndexes) as $index) {
                     $removedFile = $images[$index] ?? null;
@@ -760,6 +783,7 @@ class ProductLibraryController extends Controller
                     if ($referenceSession->status !== AikaipinProductUploadSession::STATUS_COMPLETED
                         || ! $referenceSession->assembled_path
                         || ! Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($referenceSession->assembled_path)
+                        || (int) $referenceSession->total_size > self::REFERENCE_FILE_MAX_KILOBYTES * 1024
                         || ! in_array($extension, ['html', 'htm'], true)) {
                         throw ValidationException::withMessages([
                             'reference_upload_token' => '参考页面文件上传不完整或格式不正确，请重新上传。',
@@ -806,7 +830,8 @@ class ProductLibraryController extends Controller
                     $session = $this->uploadSessionForUser($context['user'], (string) $data['package_upload_token'], true);
                     if ($session->status !== AikaipinProductUploadSession::STATUS_COMPLETED
                         || ! $session->assembled_path
-                        || ! Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($session->assembled_path)) {
+                        || ! Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($session->assembled_path)
+                        || (int) $session->total_size > 256 * 1024 * 1024) {
                         throw ValidationException::withMessages([
                             'package_upload_token' => __('aikaipin.messages.package_upload_incomplete_message'),
                         ]);
@@ -843,7 +868,16 @@ class ProductLibraryController extends Controller
 
                 // Store newly selected files before deleting existing rows so the
                 // filename sequence never reuses a number that was already shown.
-                $this->storeMaterialVideos($product, (array) ($data['material_videos'] ?? []), $context['user'], $createdPaths);
+                $materialVideos = (array) ($data['material_videos'] ?? []);
+                $chunkedMaterialVideos = $this->materialVideoFilesFromUploadTokens(
+                    (array) ($data['material_video_upload_tokens'] ?? []),
+                    $context['user'],
+                    $completedMaterialSessions,
+                );
+                foreach ($chunkedMaterialVideos as $type => $files) {
+                    $materialVideos[$type] = [...(array) ($materialVideos[$type] ?? []), ...$files];
+                }
+                $this->storeMaterialVideos($product, $materialVideos, $context['user'], $createdPaths);
 
                 if ($removedMaterialVideoIds !== []) {
                     $removedVideos = OperationAiProductReferenceVideo::query()
@@ -910,6 +944,7 @@ class ProductLibraryController extends Controller
                 report($exception);
             }
         }
+        $this->deleteCompletedUploadSessions($completedMaterialSessions);
         $videoImport = $this->importReferenceVideosToTable($product);
         Cache::forget(self::PRODUCT_CATEGORY_OPTIONS_CACHE_KEY);
 
@@ -2131,6 +2166,63 @@ class ProductLibraryController extends Controller
         ];
     }
 
+    /**
+     * @param array<string, list<string>> $groups
+     * @param list<AikaipinProductUploadSession> $completedSessions
+     * @return array<string, list<UploadedFile>>
+     */
+    private function materialVideoFilesFromUploadTokens(array $groups, AdminUser $user, array &$completedSessions): array
+    {
+        $allowedTypes = [
+            OperationAiProductReferenceVideo::TYPE_FLOW,
+            OperationAiProductReferenceVideo::TYPE_TRAFFIC,
+            OperationAiProductReferenceVideo::TYPE_REMIX,
+        ];
+        $allowedExtensions = ['mp4', 'mov', 'avi', 'webm', 'mkv', 'm4v'];
+        $files = [];
+        $seenTokens = [];
+
+        foreach ($allowedTypes as $type) {
+            foreach ((array) ($groups[$type] ?? []) as $uploadToken) {
+                $uploadToken = (string) $uploadToken;
+                if (isset($seenTokens[$uploadToken])) {
+                    throw ValidationException::withMessages([
+                        'material_video_upload_tokens' => '同一个素材视频不能重复提交。',
+                    ]);
+                }
+                $seenTokens[$uploadToken] = true;
+
+                $session = $this->uploadSessionForUser($user, $uploadToken, true);
+                $extension = strtolower(pathinfo((string) $session->original_name, PATHINFO_EXTENSION));
+                $valid = $session->status === AikaipinProductUploadSession::STATUS_COMPLETED
+                    && $session->assembled_path
+                    && Storage::disk(AikaipinProductLibraryStorageService::DISK)->exists($session->assembled_path)
+                    && in_array($extension, $allowedExtensions, true)
+                    && (int) $session->total_size <= 300 * 1024 * 1024;
+                if (! $valid) {
+                    throw ValidationException::withMessages([
+                        'material_video_upload_tokens' => '素材视频上传不完整、格式不正确或超过 300MB，请重新上传。',
+                    ]);
+                }
+
+                $files[$type][] = new UploadedFile(
+                    Storage::disk(AikaipinProductLibraryStorageService::DISK)->path($session->assembled_path),
+                    (string) $session->original_name,
+                    $session->mime_type ?: null,
+                    UPLOAD_ERR_OK,
+                    true,
+                );
+                $session->forceFill([
+                    'status' => AikaipinProductUploadSession::STATUS_CONSUMED,
+                    'expires_at' => now()->addHour(),
+                ])->save();
+                $completedSessions[] = $session;
+            }
+        }
+
+        return $files;
+    }
+
     /** @param array<string, mixed> $groups @param list<string> $createdPaths */
     private function storeMaterialVideos(AikaipinProduct $product, array $groups, AdminUser $user, array &$createdPaths): void
     {
@@ -2301,6 +2393,18 @@ class ProductLibraryController extends Controller
         $this->storage->deleteUploadTemporaryFiles($session);
         $session->parts()->delete();
         $session->delete();
+    }
+
+    /** @param iterable<AikaipinProductUploadSession> $sessions */
+    private function deleteCompletedUploadSessions(iterable $sessions): void
+    {
+        foreach ($sessions as $session) {
+            try {
+                $this->deleteUploadSession($session);
+            } catch (Throwable $exception) {
+                report($exception);
+            }
+        }
     }
 
     private function canViewProduct(AdminUser $user, AikaipinProduct $product): bool
