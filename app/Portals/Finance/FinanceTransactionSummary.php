@@ -89,6 +89,17 @@ class FinanceTransactionSummary
             }
             unset($group);
         }
+        $groups = $this->allocateFailures($groups, $failedByMonth, $tab);
+        if ($tab === 'credit_card') {
+            foreach ($groups as &$group) {
+                if ($group['failed_orders'] > 0) {
+                    $fee = bcmul((string) $group['failed_orders'], '0.30', 8);
+                    $group['per_order_fee'] = bcadd($group['per_order_fee'] ?? '0', $fee, 8);
+                }
+            }
+            unset($group);
+        }
+
         $deductions = match ($tab) {
             'paypal' => ['fee', 'hold', 'dispute_hold', 'refund', 'refund_fee', 'dispute_refund', 'dispute_fee'],
             'credit_card', 'ye', 'worldpay' => ['hold', ...array_diff(array_keys(self::CARD), ['release'])],
@@ -112,7 +123,7 @@ class FinanceTransactionSummary
         }
         unset($group);
 
-        return $this->allocateFailures($groups, $failedByMonth, $tab);
+        return $groups;
     }
 
     private function allocateFailures(array $groups, array $failedByMonth, string $tab): array

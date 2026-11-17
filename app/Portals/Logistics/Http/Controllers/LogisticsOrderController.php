@@ -17,6 +17,7 @@ use App\Portals\Logistics\LogisticsOrderPaymentReferenceService;
 use App\Portals\Logistics\LogisticsPortalService;
 use App\Portals\Logistics\LogisticsRefundImportService;
 use App\Portals\Logistics\TongtuOrderSnapshotService;
+use App\Portals\Logistics\StreamedXlsxWriter;
 use App\Portals\Logistics\TongtuSkuMappingService;
 use App\Portals\Logistics\LogisticsTrackingService;
 use App\Portals\Logistics\PayPalOrderAssociationService;
@@ -152,11 +153,50 @@ class LogisticsOrderController extends Controller
             'tongtu_order_number' => $tongtuOrderNumber,
             'per_page' => $perPage,
         ], fn ($value) => $value !== '');
-        $orders = $this->paginateMissingTongtuOrders($query, $storeDomain, $perPage)->appends($paginationFilters);
+        $groups = $this->groupMissingTongtuOrders($this->matchingMissingTongtuOrders($query, $storeDomain));
+        if ($request->boolean('export')) {
+            return app(StreamedXlsxWriter::class)->response(
+                'missing-tongtu-orders-'.$today->toDateString().'.xlsx',
+                '缺失通途订单',
+                [
+                    ['label' => '店铺域名', 'width' => 30],
+                    ['label' => '通途订单号', 'width' => 110],
+                ],
+                static function () use ($groups): iterable {
+                    foreach ($groups as $group) {
+                        // Keep large groups within Excel's text and row-height limits.
+                        $lines = [];
+                        $line = '';
+                        foreach ($group['numbers'] as $number) {
+                            if ($line !== '' && mb_strwidth($line.', '.$number) > 100) {
+                                $lines[] = $line;
+                                $line = '';
+                            }
+                            $line .= ($line === '' ? '' : ', ').$number;
+                        }
+                        $lines[] = $line;
+
+                        foreach (array_chunk($lines, 20) as $index => $part) {
+                            yield [
+                                'height' => max(18, count($part) * 17 + 4),
+                                'cells' => [
+                                    ['value' => $index === 0 ? ($group['domain'] ?? '未匹配域名') : ''],
+                                    ['value' => implode("\n", $part), 'wrap' => true],
+                                ],
+                            ];
+                        }
+                    }
+                },
+            );
+        }
+
+        $orders = $this->paginateMissingTongtuOrders($groups, $perPage)->appends($paginationFilters);
+        $checkUrl = $domains->portalPath($context['portal'], $menu->path);
 
         return view('portals.logistics.orders.missing-tongtu', [
             ...$this->viewContext($context),
-            'checkUrl' => $domains->portalPath($context['portal'], $menu->path),
+            'checkUrl' => $checkUrl,
+            'exportUrl' => $checkUrl.'?'.http_build_query(['export' => 1] + $paginationFilters),
             'paidFrom' => $paidFrom,
             'paidTo' => $paidTo,
             'storeDomain' => $storeDomain,
@@ -171,31 +211,41 @@ class LogisticsOrderController extends Controller
         ]);
     }
 
-    private function paginateMissingTongtuOrders(QueryBuilder $query, string $storeDomain, int $perPage): LengthAwarePaginator
+    private function matchingMissingTongtuOrders(QueryBuilder $query, string $storeDomain): iterable
     {
         $domainsByPrefix = $this->tongtuDomainsByPrefix();
-        $resolve = fn (object $order): object => $this->resolveTongtuDomain($order, $domainsByPrefix);
-        if ($storeDomain === '') {
-            $orders = $query->paginate($perPage);
-            $orders->setCollection($orders->getCollection()->map($resolve));
+        foreach ($query->cursor() as $order) {
+            $order = $this->resolveTongtuDomain($order, $domainsByPrefix);
+            if ($storeDomain === '' || ($order->domain !== null && mb_stripos($order->domain, $storeDomain) !== false)) {
+                yield $order;
+            }
+        }
+    }
 
-            return $orders;
+    private function groupMissingTongtuOrders(iterable $matches): array
+    {
+        $groups = [];
+        foreach ($matches as $order) {
+            $key = $order->domain === null ? 'order:'.$order->number : 'domain:'.mb_strtolower($order->domain);
+            $groups[$key] ??= ['domain' => $order->domain, 'numbers' => []];
+            $groups[$key]['numbers'][] = $order->number;
         }
 
+        return $groups;
+    }
+
+    private function paginateMissingTongtuOrders(array $groups, int $perPage): LengthAwarePaginator
+    {
         $page = LengthAwarePaginator::resolveCurrentPage();
         $offset = ($page - 1) * $perPage;
-        $matches = $query->cursor()->map($resolve)
-            ->filter(fn (object $order): bool => $order->domain !== null && mb_stripos($order->domain, $storeDomain) !== false);
-        $items = [];
-        $total = 0;
-        foreach ($matches as $order) {
-            if ($total >= $offset && count($items) < $perPage) {
-                $items[] = $order;
-            }
-            $total++;
-        }
 
-        return new LengthAwarePaginator($items, $total, $perPage, $page, ['path' => LengthAwarePaginator::resolveCurrentPath()]);
+        return new LengthAwarePaginator(
+            array_values(array_slice($groups, $offset, $perPage)),
+            count($groups),
+            $perPage,
+            $page,
+            ['path' => LengthAwarePaginator::resolveCurrentPath()],
+        );
     }
 
     private function tongtuDomainsByPrefix(): Collection

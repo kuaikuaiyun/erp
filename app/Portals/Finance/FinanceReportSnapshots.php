@@ -162,7 +162,7 @@ class FinanceReportSnapshots
     private function revision(Connection $db, string $report, string $month, array $filters, bool $tracksRevisions): string
     {
         $channel = $filters['channel'] ?? null;
-        $transactionVersion = in_array($channel, ['ye', 'worldpay'], true) ? 11 : 9;
+        $transactionVersion = in_array($channel, ['ye', 'worldpay'], true) ? 11 : 12;
         // Installations without trigger privileges still generate reports in the background.
         if (! $tracksRevisions) {
             $bucket = (string) intdiv(now()->timestamp, 300);
@@ -171,19 +171,21 @@ class FinanceReportSnapshots
 
             return hash('sha256', match ($report) {
                 'transactions' => $prefix.$bucket,
-                'summary' => 'summary:5:'.$bucket,
+                'summary' => 'summary:7:'.$bucket,
                 default => $bucket,
             });
         }
-        $periods = $db->table('finance_summary_periods')->where('month', $month)
+        $periods = $db->table('finance_summary_periods')->whereIn('month', $report === 'summary'
+                ? [$month, CarbonImmutable::parse($month.'-01')->addMonth()->format('Y-m')]
+                : [$month])
             ->when($channel === 'paypal', fn ($query) => $query->where('channel', 'paypal'))
             ->when(filled($channel) && ! in_array($channel, ['paypal', 'combined'], true), fn ($query) => $query->where('channel', 'credit_card'))
-            ->orderBy('channel')->get(['channel', 'revision']);
+            ->orderBy('month')->orderBy('channel')->get(['month', 'channel', 'revision']);
         $rate = $db->table('finance_monthly_exchange_rates')->where(['month' => $month, 'currency' => 'USD'])->value('cny_rate');
 
         $version = match ($report) {
             'transactions' => $transactionVersion,
-            'summary' => 6,
+            'summary' => 7,
             default => 5,
         };
         return hash('sha256', json_encode([$version, $periods, $rate], JSON_THROW_ON_ERROR));

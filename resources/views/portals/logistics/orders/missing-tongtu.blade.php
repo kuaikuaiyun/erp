@@ -18,7 +18,16 @@
         .tongtu-check .results-table { margin-bottom: 0; }
         .tongtu-check .results-table th { background: #edf3f7; color: #344e63; }
         .tongtu-check .results-table th, .tongtu-check .results-table td { padding: 12px 18px; overflow-wrap: anywhere; }
-        .tongtu-check .results-table th:first-child { width: 45%; }
+        .tongtu-check .results-table th:first-child { width: 22%; min-width: 145px; }
+        .tongtu-check .store-domain { color: #344e63; font-weight: 600; }
+        .tongtu-check .order-numbers { display: flex; flex-wrap: wrap; gap: 6px; padding: 0; margin: 0; list-style: none; }
+        .tongtu-check .order-numbers li { padding: 2px 8px; border: 1px solid #d4e0ea; border-radius: 4px; background: #edf3f7; color: #344e63; font-variant-numeric: tabular-nums; }
+        .tongtu-check .more-orders { margin-top: 8px; }
+        .tongtu-check .more-orders summary { display: list-item; width: fit-content; cursor: pointer; color: #367fa9; }
+        .tongtu-check .more-orders[open] summary { margin-bottom: 8px; }
+        .tongtu-check .more-orders[open] .expand-orders,
+        .tongtu-check .more-orders:not([open]) .collapse-orders { display: none; }
+        .tongtu-check .result-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
         .tongtu-check .result-footer .logistics-pagination-control { flex-wrap: wrap; }
         .tongtu-check .empty { text-align: center; color: #526a7b; padding: 28px 18px; }
     </style>
@@ -73,7 +82,12 @@
         <div class="box tongtu-result-box">
             <div class="box-header with-border">
                 <h2 class="box-title">核对结果</h2>
-                <span id="tongtu-last-sync" class="text-muted pull-right" @if (!$lastSync) hidden @endif>最近同步 {{ $lastSync }}</span>
+                <div class="result-actions pull-right">
+                    <span id="tongtu-last-sync" class="text-muted" @if (!$lastSync) hidden @endif>最近同步 {{ $lastSync }}</span>
+                    <a href="{{ $exportUrl }}" class="btn btn-default btn-sm" data-pjax="false" download>
+                        <i class="fa fa-download" aria-hidden="true"></i> 导出 Excel
+                    </a>
+                </div>
             </div>
             <div class="table-responsive">
                 <table class="table table-striped table-hover results-table">
@@ -81,8 +95,31 @@
                         <tr><th scope="col">店铺域名</th><th scope="col">通途订单号</th></tr>
                     </thead>
                     <tbody>
-                        @forelse ($orders as $order)
-                            <tr><td>{{ $order->domain ?? '未匹配域名' }}</td><td>{{ $order->number }}</td></tr>
+                        @forelse ($orders as $group)
+                            @php($previewSize = 8)
+                            <tr>
+                                <td class="{{ $group['domain'] ? 'store-domain' : 'text-muted' }}">{{ $group['domain'] ?? '未匹配域名' }}</td>
+                                <td>
+                                    <ul class="order-numbers">
+                                        @foreach (array_slice($group['numbers'], 0, $previewSize) as $number)
+                                            <li>{{ $number }}</li>
+                                        @endforeach
+                                    </ul>
+                                    @if (count($group['numbers']) > $previewSize)
+                                        <details class="more-orders">
+                                            <summary>
+                                                <span class="expand-orders">展开剩余 {{ count($group['numbers']) - $previewSize }} 个单号</span>
+                                                <span class="collapse-orders">收起单号</span>
+                                            </summary>
+                                            <ul class="order-numbers">
+                                                @foreach (array_slice($group['numbers'], $previewSize) as $number)
+                                                    <li>{{ $number }}</li>
+                                                @endforeach
+                                            </ul>
+                                        </details>
+                                    @endif
+                                </td>
+                            </tr>
                         @empty
                             <tr><td colspan="2" class="empty">{{ $lastSync ? '已同步的数据中没有符合筛选条件的缺失订单。' : '所选日期暂无已同步数据。' }}</td></tr>
                         @endforelse
