@@ -144,12 +144,14 @@
     align-items: stretch;
     background: #f8fbfd;
     border: 1px solid #dbe7ef;
-    border-radius: 5px;
-    display: flex;
-    font-size: 11px;
-    max-width: 210px;
-    min-width: 190px;
+    border-radius: 7px;
+    display: grid;
+    font-size: 12px;
+    grid-template-columns: 88px minmax(150px, 1fr);
+    max-width: 100%;
+    min-width: 238px;
     overflow: hidden;
+    width: 100%;
 }
 
 .aikaipin-placement-platform-summary + .aikaipin-placement-platform-summary {
@@ -161,10 +163,9 @@
     background: #eef6fb;
     color: #315d78;
     display: flex;
-    flex: 0 0 64px;
     font-weight: 600;
     gap: 3px;
-    padding: 5px 6px;
+    padding: 7px 8px;
 }
 
 .aikaipin-placement-platform-metrics {
@@ -175,8 +176,8 @@
 .aikaipin-placement-platform-metric {
     align-items: center;
     display: grid;
-    grid-template-columns: minmax(78px, 1fr) 42px;
-    min-height: 28px;
+    grid-template-columns: minmax(100px, 1fr) 52px;
+    min-height: 32px;
 }
 
 .aikaipin-placement-platform-metric + .aikaipin-placement-platform-metric {
@@ -188,6 +189,37 @@
     color: #38566b;
     padding: 4px 6px;
     white-space: nowrap;
+}
+
+.aikaipin-placement-evaluation-table th.aikaipin-placement-product-image-column,
+.aikaipin-placement-evaluation-table .aikaipin-placement-product-image-cell { width: 74px; }
+.aikaipin-placement-evaluation-table th.aikaipin-placement-product-code-column,
+.aikaipin-placement-evaluation-table .aikaipin-placement-product-code-cell { width: 105px; }
+.aikaipin-placement-evaluation-table th.aikaipin-placement-product-name-column,
+.aikaipin-placement-evaluation-table .aikaipin-placement-product-name-cell { width: 180px; }
+.aikaipin-placement-evaluation-table th.aikaipin-placement-product-category-column,
+.aikaipin-placement-evaluation-table .aikaipin-placement-product-category-cell { width: 120px; }
+.aikaipin-placement-evaluation-table th.aikaipin-placement-product-source-column,
+.aikaipin-placement-evaluation-table .aikaipin-placement-product-source-cell { width: 135px; }
+.aikaipin-placement-evaluation-table th.aikaipin-placement-product-total-column,
+.aikaipin-placement-evaluation-table .aikaipin-placement-product-total-cell { width: 270px; }
+.aikaipin-placement-evaluation-table th.aikaipin-placement-product-roi-column,
+.aikaipin-placement-evaluation-table .aikaipin-placement-product-roi-cell { width: 90px; text-align: center; }
+.aikaipin-placement-evaluation-table th.aikaipin-placement-product-count-column,
+.aikaipin-placement-evaluation-table .aikaipin-placement-product-count-cell { width: 85px; text-align: center; }
+.aikaipin-placement-evaluation-table th.aikaipin-placement-product-updated-column,
+.aikaipin-placement-evaluation-table .aikaipin-placement-product-updated-cell { width: 140px; white-space: nowrap; }
+.aikaipin-placement-evaluation-table th.aikaipin-placement-product-status-column,
+.aikaipin-placement-evaluation-table .aikaipin-placement-product-status-cell { width: 90px; text-align: center; }
+.aikaipin-placement-evaluation-table th.aikaipin-placement-product-action-column,
+.aikaipin-placement-evaluation-table .aikaipin-placement-product-action-cell { width: 110px; text-align: center; white-space: nowrap; }
+.aikaipin-placement-evaluation-table .aikaipin-placement-product-roi-cell strong {
+    background: #eaf7ef;
+    border-radius: 12px;
+    color: #17734a;
+    display: inline-block;
+    min-width: 48px;
+    padding: 4px 9px;
 }
 
 .aikaipin-placement-platform-orders {
@@ -1522,7 +1554,7 @@ button.aikaipin-selection-list-image:focus {
 }
 
 .aikaipin-placement-evaluation-table {
-    min-width: 1320px;
+    min-width: 1500px;
     table-layout: fixed;
     width: 100%;
 }

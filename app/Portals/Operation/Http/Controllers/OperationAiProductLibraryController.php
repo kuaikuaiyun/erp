@@ -66,8 +66,7 @@ class OperationAiProductLibraryController extends Controller
         $filters = ['keyword' => trim((string) $request->query('keyword', ''))];
         $products = $this->productQuery([
             'keyword' => $filters['keyword'], 'category' => '', 'source' => '', 'type' => '',
-        ])->with(['placementEvaluations' => fn ($query) => $query->with('records')
-            ->where('created_by', $context['user']->getKey())->latest('updated_at')])
+        ])->with(['placementEvaluations' => fn ($query) => $query->with('records')->latest('updated_at')])
             ->paginate(15)->withQueryString();
 
         return view('portals.aikaipin.placement-evaluation.index', [
@@ -103,7 +102,6 @@ class OperationAiProductLibraryController extends Controller
 
         $evaluations = AikaipinPlacementEvaluation::query()->with('records')
             ->where('product_id', $product->getKey())
-            ->where('created_by', $context['user']->getKey())
             ->latest('updated_at')->get();
 
         return response()->json([
@@ -386,7 +384,10 @@ class OperationAiProductLibraryController extends Controller
     {
         $context = $this->portalContext($request);
         if ($context instanceof Response) return $context;
-        abort_unless((int) $evaluation->created_by === (int) $context['user']->getKey(), 403);
+        abort_unless(AikaipinProduct::query()
+            ->whereKey($evaluation->product_id)
+            ->where('is_published', true)
+            ->exists(), 404);
         abort_unless((int) $record->evaluation_id === (int) $evaluation->getKey(), 404);
         abort_unless($record->video_path && Storage::disk($record->video_disk ?: 'local')->exists($record->video_path), 404);
 
