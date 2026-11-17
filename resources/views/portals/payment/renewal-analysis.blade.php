@@ -70,7 +70,7 @@
         </div>
         <p class="payment-renewal-scope-note">{{ $text('first_scope') }}</p>
         <div class="table-responsive"><table class="table payment-data-table payment-subscription-refunds"><caption>{{ $text('first_refunds') }}</caption><thead><tr>
-            <th>{{ $text('channel') }}</th><th>{{ $text('purchase_type') }}</th><th>{{ $text('refund_base') }}</th><th>{{ $text('revenue') }}</th><th>{{ $text('refund_orders') }}</th><th>{{ $text('refund_amount') }}</th><th>{{ $text('refund_count_rate') }}</th><th>{{ $text('refund_amount_rate') }}</th>
+            <th>{{ $text('channel') }}</th><th>{{ $text('purchase_type') }}</th><th>{{ $text('refund_base') }}<small class="payment-inline-formula">{{ $text('refund_base_hint') }}</small></th><th>{{ $text('revenue') }}</th><th>{{ $text('refund_orders') }}</th><th>{{ $text('refund_amount') }}</th><th>{{ $text('refund_count_rate') }}</th><th>{{ $text('refund_amount_rate') }}</th>
         </tr></thead><tbody>
         @foreach($channels as $channel=>$label)
             @foreach(['all','subscription','non_subscription'] as $type)
