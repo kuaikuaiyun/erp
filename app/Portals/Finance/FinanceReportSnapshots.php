@@ -30,7 +30,10 @@ class FinanceReportSnapshots
             return false;
         }
         $failed = false;
-        foreach ($db->table('finance_report_scopes')->where('used_at', '>=', $activeSince)->lazyById(200, 'scope') as $scope) {
+        $activeScopes = $db->table('finance_report_scopes')->where('used_at', '>=', $activeSince)
+            ->whereIn('report', ['summary', 'transactions', 'losses'])->where('month', '<>', '')
+            ->orderByDesc('used_at')->orderBy('scope')->get();
+        foreach ($activeScopes as $scope) {
             $started = hrtime(true);
             if (function_exists('memory_reset_peak_usage')) {
                 memory_reset_peak_usage();
@@ -86,7 +89,7 @@ class FinanceReportSnapshots
         return $controller->buildSettlementOverviewMonth($scope->month, $scope->report, $filters, $filters['_include_options'], reuse: true);
     }
 
-    public function result(string $report, string $month, array $filters, callable $build, ?string $id = null, bool $statusOnly = false): array
+    public function result(string $report, string $month, array $filters, callable $build, ?string $id = null, bool $statusOnly = false, bool $live = false): array
     {
         $filters = array_filter($filters, fn ($value) => $value !== null && $value !== '');
         if (isset($filters['payment_account_id'])) {
@@ -96,10 +99,11 @@ class FinanceReportSnapshots
         $scope = hash('sha256', json_encode([$report, $month, $filters], JSON_THROW_ON_ERROR));
         $db = $this->workbooks->database();
 
-        if ($statusOnly && ! $this->runsInBackground()) {
+        $background = ! $live && $this->runsInBackground();
+        if ($statusOnly && ! $background) {
             return [null, null, ['state' => 'ready']];
         }
-        if (! $this->runsInBackground() && ! $db->getSchemaBuilder()->hasTable('finance_report_snapshots')) {
+        if (! $background && $id === null && ! $db->getSchemaBuilder()->hasTable('finance_report_snapshots')) {
             return [$build(), null, ['state' => 'ready']];
         }
         if ($id !== null) {
@@ -108,9 +112,14 @@ class FinanceReportSnapshots
                 throw ValidationException::withMessages(['report_snapshot' => '报表版本已过期或筛选已变更，请重新查询后导出。']);
             }
 
-            return [json_decode($saved->payload, true, 512, JSON_THROW_ON_ERROR), $id, ['state' => 'ready', 'updated_at' => $saved->created_at]];
+            $payload = json_decode($saved->payload, true, 512, JSON_THROW_ON_ERROR);
+            if ($report === 'transactions' && ! is_array($payload[0] ?? null)) {
+                throw ValidationException::withMessages(['report_snapshot' => '报表版本已过期，请重新查询后导出。']);
+            }
+
+            return [$payload, $id, ['state' => 'ready', 'updated_at' => $saved->created_at]];
         }
-        if (! $this->runsInBackground()) {
+        if (! $background) {
             $result = $build();
 
             return [$result, $this->publish($db, $scope, hash('sha256', Str::uuid()), $result), ['state' => 'ready']];
@@ -123,6 +132,10 @@ class FinanceReportSnapshots
         $tracksRevisions = FinanceSummaryTriggers::available($db);
         $revision = $this->revision($db, $report, $month, $filters, $tracksRevisions);
         $query = $db->table('finance_report_snapshots')->where('scope', $scope)->latest('created_at')->orderByDesc('id');
+        if ($report === 'transactions' && in_array($db->getDriverName(), ['mysql', 'mariadb'], true)) {
+            // Older transaction snapshots stored totals and options in a JSON object.
+            $query->whereRaw("JSON_TYPE(payload) = 'ARRAY'");
+        }
         $saved = (clone $query)->where('revision', $revision)->first(['id', 'created_at']);
         $current = $saved !== null;
         $saved ??= $query->first(['id', 'created_at']);
@@ -150,7 +163,9 @@ class FinanceReportSnapshots
     {
         // Installations without trigger privileges still generate reports in the background.
         if (! $tracksRevisions) {
-            return hash('sha256', (string) intdiv(now()->timestamp, 300));
+            $bucket = (string) intdiv(now()->timestamp, 300);
+
+            return hash('sha256', $report === 'transactions' ? 'transactions:'.$bucket : $bucket);
         }
         $channel = $filters['channel'] ?? null;
         $periods = $db->table('finance_summary_periods')->where('month', $month)
@@ -159,7 +174,7 @@ class FinanceReportSnapshots
             ->orderBy('channel')->get(['channel', 'revision']);
         $rate = $db->table('finance_monthly_exchange_rates')->where(['month' => $month, 'currency' => 'USD'])->value('cny_rate');
 
-        return hash('sha256', json_encode([$report === 'transactions' ? 5 : ($report === 'losses' ? 4 : 3), $periods, $rate], JSON_THROW_ON_ERROR));
+        return hash('sha256', json_encode([$report === 'transactions' ? 6 : ($report === 'losses' ? 4 : 3), $periods, $rate], JSON_THROW_ON_ERROR));
     }
 
     private function publish(Connection $db, string $scope, string $revision, array $result): string

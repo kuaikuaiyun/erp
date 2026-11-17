@@ -29,6 +29,11 @@ class AiProductShopifyPublication extends Model
         return $this->belongsTo(AikaipinProduct::class, 'aikaipin_product_id');
     }
 
+    public function productPage(): BelongsTo
+    {
+        return $this->belongsTo(AikaipinProductPage::class, 'aikaipin_product_page_id');
+    }
+
     public function store(): BelongsTo
     {
         return $this->belongsTo(AssistantDomainStore::class, 'assistant_domain_store_id');

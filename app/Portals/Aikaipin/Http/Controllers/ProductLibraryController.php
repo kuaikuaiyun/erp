@@ -7,6 +7,7 @@ use App\Models\AdminUser;
 use App\Models\AikaipinPlacementEvaluation;
 use App\Models\AikaipinPlacementEvaluationRecord;
 use App\Models\AikaipinProduct;
+use App\Models\AikaipinProductPage;
 use App\Models\AikaipinProductUploadSession;
 use App\Models\AikaipinSelectionProposal;
 use App\Models\AikaipinSelectionProposalImage;
@@ -17,6 +18,7 @@ use App\Portals\Aikaipin\AikaipinPortalAuthorizationService;
 use App\Portals\Aikaipin\AikaipinProductLibraryStorageService;
 use App\Portals\Aikaipin\AikaipinSelectionProposalStorageService;
 use App\Portals\Operation\ShopifyProductCsvImporter;
+use App\Services\AiProductListingPushService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
@@ -47,6 +49,7 @@ class ProductLibraryController extends Controller
         private readonly AikaipinProductLibraryStorageService $storage,
         private readonly AikaipinSelectionProposalStorageService $selectionProposalStorage,
         private readonly ShopifyProductCsvImporter $shopifyCsvImporter,
+        private readonly AiProductListingPushService $listingPush,
     ) {}
 
     public function index(Request $request): Response|View
@@ -226,6 +229,15 @@ class ProductLibraryController extends Controller
 
         abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
 
+        // Keep older cached upload forms compatible while the new multi-CSV UI
+        // is rolling out.
+        if (! $request->hasFile('shopify_csvs') && $request->hasFile('shopify_csv')) {
+            $request->files->set('shopify_csvs', [$request->file('shopify_csv')]);
+            $request->merge([
+                'shopify_landing_page_urls' => [(string) $request->input('landing_page_url', '')],
+            ]);
+        }
+
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'source_platform' => ['required', 'in:shopify,shopline'],
@@ -240,27 +252,43 @@ class ProductLibraryController extends Controller
             'images.*' => ['file', 'image', 'max:20480'],
             'reference_file' => ['nullable', 'file', 'extensions:html,htm', 'max:'.self::REFERENCE_FILE_MAX_KILOBYTES],
             'reference_upload_token' => ['nullable', 'uuid'],
-            'shopify_csv' => ['required', 'file', 'mimes:csv,txt', 'max:20480'],
+            'shopify_csvs' => ['required', 'array', 'min:1', 'max:10'],
+            'shopify_csvs.*' => ['required', 'file', 'mimes:csv,txt', 'max:20480'],
+            'shopify_landing_page_urls' => ['required', 'array', 'min:1', 'max:10'],
+            'shopify_landing_page_urls.*' => ['required', 'url', 'max:2048'],
             'package_upload_token' => ['nullable', 'uuid'],
             'authorized_department_ids' => ['nullable', 'array'],
             'authorized_department_ids.*' => ['integer', 'distinct'],
         ], [
-            'shopify_csv.required' => '请选择 Shopify 导出的 CSV 商品文件。',
-            'shopify_csv.mimes' => 'Shopify 商品文件只支持 CSV 格式。',
-            'shopify_csv.max' => 'Shopify 商品 CSV 文件不能超过 20 MB。',
+            'shopify_csvs.required' => '请选择至少一个 Shopify 商品 CSV 文件。',
+            'shopify_csvs.*.mimes' => 'Shopify 商品文件只支持 CSV 格式。',
+            'shopify_csvs.*.max' => '单个 Shopify 商品 CSV 文件不能超过 20 MB。',
+            'shopify_landing_page_urls.*.required' => '每个 CSV 文件都必须填写对应的落地页链接。',
             'reference_file.max' => '参考页面文件不能超过 256 MB。',
         ]);
         $departmentIds = collect($data['authorized_department_ids'] ?? [])->map(static fn ($id): int => (int) $id)->unique()->values()->all();
         $skuValues = $this->normalizeProductValues($data['skus'] ?? []);
         $categories = $this->normalizeProductValues($data['categories'] ?? []);
-        $shopifyPayload = null;
-        $shopifySourceName = null;
-        if (($data['shopify_csv'] ?? null) instanceof UploadedFile) {
+        $shopifyFiles = array_values($data['shopify_csvs'] ?? []);
+        $shopifyLandingUrls = array_values($data['shopify_landing_page_urls'] ?? []);
+        if (count($shopifyFiles) !== count($shopifyLandingUrls)) {
+            throw ValidationException::withMessages([
+                'shopify_landing_page_urls' => 'CSV 文件数量与落地页链接数量不一致，请重新选择文件。',
+            ]);
+        }
+        $shopifyImports = [];
+        foreach ($shopifyFiles as $index => $shopifyFile) {
+            /** @var UploadedFile $shopifyFile */
             try {
-                $shopifyPayload = $this->shopifyCsvImporter->parse($data['shopify_csv']->getRealPath());
-                $shopifySourceName = $data['shopify_csv']->getClientOriginalName();
+                $shopifyImports[] = [
+                    'payload' => $this->shopifyCsvImporter->parse($shopifyFile->getRealPath()),
+                    'source_name' => $shopifyFile->getClientOriginalName(),
+                    'landing_page_url' => trim((string) $shopifyLandingUrls[$index]),
+                ];
             } catch (\Throwable $exception) {
-                throw ValidationException::withMessages(['shopify_csv' => $exception->getMessage()]);
+                throw ValidationException::withMessages([
+                    'shopify_csvs.'.($index) => $shopifyFile->getClientOriginalName().'：'.$exception->getMessage(),
+                ]);
             }
         }
 
@@ -276,7 +304,7 @@ class ProductLibraryController extends Controller
 
         try {
             $connection = config('admin.database.connection') ?: config('database.default');
-            $product = DB::connection($connection)->transaction(function () use ($context, $data, $categories, $departmentIds, $skuValues, $shopifyPayload, $shopifySourceName, &$createdPaths): AikaipinProduct {
+            $product = DB::connection($connection)->transaction(function () use ($context, $data, $categories, $departmentIds, $skuValues, $shopifyImports, &$createdPaths): AikaipinProduct {
                 $session = null;
                 $referenceSession = null;
                 if (filled($data['package_upload_token'] ?? null)) {
@@ -310,7 +338,7 @@ class ProductLibraryController extends Controller
                     'source_platform' => $data['source_platform'],
                     'product_type' => $data['product_type'],
                     'is_published' => (bool) $data['is_published'],
-                    'landing_page_url' => $data['landing_page_url'] ?: null,
+                    'landing_page_url' => $shopifyImports[0]['landing_page_url'] ?? (($data['landing_page_url'] ?? null) ?: null),
                     'visible_department_ids' => $departmentIds === [] ? null : $departmentIds,
                     'created_by' => (int) $context['user']->getKey(),
                     'created_by_name' => (string) ($context['user']->name ?: $context['user']->username),
@@ -360,12 +388,17 @@ class ProductLibraryController extends Controller
                     'package_file' => $packageFile,
                 ])->save();
 
-                if (is_array($shopifyPayload) && $shopifySourceName !== null) {
+                foreach ($shopifyImports as $shopifyImport) {
+                    $shopifyPayload = (array) $shopifyImport['payload'];
+                    $shopifySourceName = (string) $shopifyImport['source_name'];
                     $product = $this->shopifyCsvImporter->supplement(
                         $product,
                         $shopifyPayload,
                         $shopifySourceName,
                         $shopifySourceName,
+                        trim((string) ($shopifyPayload['title'] ?? '')),
+                        $context['user'],
+                        (string) $shopifyImport['landing_page_url'],
                     );
                 }
 
@@ -412,6 +445,9 @@ class ProductLibraryController extends Controller
             }
         }
         Cache::forget(self::PRODUCT_CATEGORY_OPTIONS_CACHE_KEY);
+        if ($product?->is_published) {
+            $this->listingPush->notifyDepartmentManagers($product, $context['user']);
+        }
 
         return response()->json([
             'message' => __('aikaipin.messages.product_created_message'),
@@ -442,6 +478,8 @@ class ProductLibraryController extends Controller
 
         $data = $request->validate([
             'shopify_csv' => ['required', 'file', 'mimes:csv,txt', 'max:20480'],
+            'page_name' => ['nullable', 'string', 'max:255'],
+            'landing_page_url' => ['required', 'url', 'max:2048'],
         ], [
             'shopify_csv.required' => '请选择 Shopify 导出的 CSV 商品文件。',
             'shopify_csv.mimes' => '只支持 CSV 文件。',
@@ -471,6 +509,8 @@ class ProductLibraryController extends Controller
             'user_id' => (int) $context['user']->getKey(),
             'product_id' => (int) $product->getKey(),
             'file_name' => $file->getClientOriginalName(),
+            'page_name' => trim((string) ($data['page_name'] ?? '')),
+            'landing_page_url' => trim((string) $data['landing_page_url']),
             'payload' => $payload,
         ], now()->addMinutes(20));
 
@@ -489,7 +529,11 @@ class ProductLibraryController extends Controller
             return $context;
         }
         abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
-        $data = $request->validate(['preview_token' => ['required', 'uuid']]);
+        $data = $request->validate([
+            'preview_token' => ['required', 'uuid'],
+            'page_name' => ['nullable', 'string', 'max:255'],
+            'landing_page_url' => ['required', 'url', 'max:2048'],
+        ]);
         $preview = Cache::pull($this->shopifyImportCacheKey($data['preview_token']));
         if (! is_array($preview)
             || (int) ($preview['user_id'] ?? 0) !== (int) $context['user']->getKey()
@@ -502,13 +546,79 @@ class ProductLibraryController extends Controller
             (array) ($preview['payload'] ?? []),
             (string) ($preview['file_name'] ?? 'products.csv'),
             (string) ($preview['file_name'] ?? 'products.csv'),
+            trim((string) ($data['page_name'] ?? $preview['page_name'] ?? '')),
+            $context['user'],
+            trim((string) ($data['landing_page_url'] ?? $preview['landing_page_url'] ?? '')),
         );
-        $shopify = $this->shopifyImportPayload($updated->shopifyData());
+        $productPage = $updated->productPages->first();
+        $shopify = $this->shopifyImportPayload($productPage?->shopifyData() ?? $updated->shopifyData());
 
         return response()->json([
-            'message' => "Shopify 商品资料导入成功，已补充 {$shopify['variant_count']} 个规格、{$shopify['image_count']} 张图片。",
+            'message' => "产品页资料新增成功，当前共有 {$updated->productPages->count()} 份；本次包含 {$shopify['variant_count']} 个规格、{$shopify['image_count']} 张图片。",
             'redirect_url' => route('aikaipin.product-library.index'),
             'shopify_data' => $shopify,
+            'product_page_id' => $productPage?->getKey(),
+            'product_page_count' => $updated->productPages->count(),
+        ]);
+    }
+
+    public function updateProductPage(Request $request, AikaipinProduct $product, AikaipinProductPage $page): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
+        abort_unless((int) $page->aikaipin_product_id === (int) $product->getKey(), 404);
+
+        $data = $request->validate([
+            'landing_page_url' => ['nullable', 'url', 'max:2048'],
+        ]);
+        $landingPageUrl = trim((string) ($data['landing_page_url'] ?? '')) ?: null;
+
+        $page->forceFill(['landing_page_url' => $landingPageUrl])->save();
+
+        return response()->json([
+            'message' => '产品页落地页链接已保存。',
+            'product_page' => [
+                'id' => (int) $page->getKey(),
+                'landing_page_url' => $page->landing_page_url,
+            ],
+        ]);
+    }
+
+    public function destroyProductPage(Request $request, AikaipinProduct $product, AikaipinProductPage $page): JsonResponse|Response
+    {
+        $context = $this->pageContext($request);
+        if ($context instanceof Response) {
+            return $context;
+        }
+
+        abort_unless($this->authorization->canManageProductLibrary($context['user']), 403);
+        abort_unless((int) $page->aikaipin_product_id === (int) $product->getKey(), 404);
+
+        DB::connection($product->getConnectionName())->transaction(function () use ($product, $page): void {
+            $page->delete();
+
+            $replacement = $product->productPages()->first();
+            if ($replacement instanceof AikaipinProductPage) {
+                $product->productPages()->update(['is_default' => false]);
+                $replacement->forceFill(['is_default' => true])->save();
+                $product->forceFill(['shopify_data' => $replacement->shopifyData()])->save();
+            } else {
+                $product->forceFill(['shopify_data' => null])->save();
+            }
+        });
+
+        $product->refresh()->load('productPages');
+        $payload = $this->productEditPayload($product);
+
+        return response()->json([
+            'message' => '产品 CSV 及其对应的产品页资料已删除。',
+            'product_page_count' => $product->productPages->count(),
+            'product_pages' => $payload['product_pages'],
+            'shopify_data' => $payload['shopify_data'],
         ]);
     }
 
@@ -851,6 +961,9 @@ class ProductLibraryController extends Controller
             'updated_by' => $context['user']->getKey(),
             'updated_by_name' => $context['user']->name ?: $context['user']->username,
         ])->save();
+        if ($published) {
+            $this->listingPush->notifyDepartmentManagers($product, $context['user']);
+        }
 
         return back()->with('success', $published ? '商品已上架，订阅运营系统现在可以查看。' : '商品已下架，订阅运营系统将不再显示。');
     }
@@ -914,7 +1027,7 @@ class ProductLibraryController extends Controller
         if ($this->authorization->canManageProductLibrary($context['user'])) {
             $viewData['referenceVideos'] = $this->referenceVideos($product);
             $viewData['referenceVideoUploadUrl'] = route('aikaipin.product-library.reference-videos.upload', $product);
-            $viewData['referenceVideoNamingHint'] = '上传后自动命名：产品编号-AI-日期-递增编号';
+            $viewData['referenceVideoNamingHint'] = '上传后自动命名：产品编号-flow/spy/mix-日期-递增编号';
             $viewData['referenceEditable'] = true;
             $viewData['referenceContentUpdateUrl'] = route('aikaipin.product-library.reference-preview.content.update', $product);
         }
@@ -941,9 +1054,20 @@ class ProductLibraryController extends Controller
         $date = now('Asia/Shanghai');
         $historicalCount = $this->historicalReferenceVideoCount($product);
         $this->normalizeReferenceVideos($product, $historicalCount);
-        $sequence = $historicalCount + $this->referenceVideos($product)->count() + 1;
+        $latestSequence = (int) OperationAiProductReferenceVideo::query()
+            ->where('aikaipin_product_id', $product->getKey())->max('sequence');
+        $sequence = max($historicalCount, $latestSequence) + 1;
+        $latestFileNumber = OperationAiProductReferenceVideo::query()
+            ->where('aikaipin_product_id', $product->getKey())
+            ->get(['file_name', 'sequence'])
+            ->reduce(fn (int $carry, OperationAiProductReferenceVideo $video): int => max(
+                $carry,
+                OperationAiProductReferenceVideo::fileNumber($video->file_name, (int) $video->sequence),
+            ), $historicalCount);
+        $fileNumber = $latestFileNumber + 1;
         $extension = strtolower($file->getClientOriginalExtension() ?: $file->extension() ?: 'mp4');
-        $fileName = $this->referenceProductCode($product).'-AI-'.$date->format('ymd').'-'.str_pad((string) $sequence, 3, '0', STR_PAD_LEFT).'.'.$extension;
+        $typeCode = OperationAiProductReferenceVideo::fileTypeCode($data['type']);
+        $fileName = $this->referenceProductCode($product).'-'.$typeCode.'-'.$date->format('ymd').'-'.str_pad((string) $fileNumber, 3, '0', STR_PAD_LEFT).'.'.$extension;
         $path = $file->storeAs('aikaipin/reference-videos/'.$product->getKey(), $fileName, 'local');
 
         try {
@@ -1235,10 +1359,11 @@ class ProductLibraryController extends Controller
             $renames = [];
             foreach ($videos as $index => $video) {
                 $sequence = $historicalCount + $index + 1;
+                $fileNumber = OperationAiProductReferenceVideo::fileNumber($video->file_name, (int) $video->sequence);
                 $extension = strtolower(pathinfo($video->file_name, PATHINFO_EXTENSION) ?: pathinfo($video->path, PATHINFO_EXTENSION) ?: 'mp4');
                 $date = $video->file_date?->format('ymd') ?: $video->created_at?->copy()->timezone('Asia/Shanghai')->format('ymd') ?: now('Asia/Shanghai')->format('ymd');
-                $code = trim((string) preg_replace('/[^A-Za-z0-9_-]+/', '-', strtoupper((string) ($video->department_code ?: 'AI'))), '-_') ?: 'AI';
-                $fileName = $productCode.'-'.$code.'-'.$date.'-'.str_pad((string) $sequence, 3, '0', STR_PAD_LEFT).'.'.$extension;
+                $typeCode = OperationAiProductReferenceVideo::fileTypeCode((string) $video->type);
+                $fileName = $productCode.'-'.$typeCode.'-'.$date.'-'.str_pad((string) $fileNumber, 3, '0', STR_PAD_LEFT).'.'.$extension;
                 $directory = trim(str_replace('\\', '/', dirname($video->path)), '.');
                 $path = ($directory !== '' ? $directory.'/' : '').$fileName;
                 $temporaryPath = ($directory !== '' ? $directory.'/' : '').'.renumber-'.$video->getKey().'-'.Str::uuid().'.'.$extension;
@@ -1575,6 +1700,7 @@ class ProductLibraryController extends Controller
                 'records' => $evaluation->records->map(fn ($record): array => [
                     'platform' => $record->platform, 'currency' => $record->currency,
                     'spend' => (string) $record->actual_spend, 'orders' => (int) $record->orders,
+                    'roi' => $record->roi !== null ? (string) $record->roi : null,
                     'material_name' => $record->material_name,
                     'video_url' => $record->video_path ? route('aikaipin.placement-evaluations.records.video', [$evaluation, $record]) : null,
                 ])->values(),
@@ -1805,6 +1931,7 @@ class ProductLibraryController extends Controller
     /** @return array<string, mixed> */
     private function productEditPayload(AikaipinProduct $product): array
     {
+        $product->loadMissing('productPages');
         $filePayload = function (?array $file, string $kind) use ($product): ?array {
             if ($file === null) {
                 return null;
@@ -1822,6 +1949,7 @@ class ProductLibraryController extends Controller
 
         return [
             'id' => (int) $product->getKey(),
+            'product_code' => (string) $product->product_code,
             'name' => (string) $product->name,
             'source_platform' => (string) $product->source_platform,
             'product_type' => (string) $product->product_type,
@@ -1844,6 +1972,13 @@ class ProductLibraryController extends Controller
             'reference_file' => $filePayload($product->referenceFilePayload(), 'reference'),
             'package_file' => $filePayload($product->packageFilePayload(), 'package'),
             'shopify_data' => $product->hasShopifyData() ? $this->shopifyImportPayload($product->shopifyData()) : null,
+            'product_pages' => $product->productPages->map(fn ($page): array => [
+                'id' => (int) $page->getKey(),
+                'name' => (string) $page->name,
+                'is_default' => (bool) $page->is_default,
+                'landing_page_url' => $page->landing_page_url,
+                'shopify_data' => $this->shopifyImportPayload($page->shopifyData()),
+            ])->values()->all(),
         ];
     }
 
@@ -1921,6 +2056,7 @@ class ProductLibraryController extends Controller
             'records.*.currency' => ['required', 'in:usd,eur,cny'],
             'records.*.actual_spend' => ['required', 'numeric', 'min:0', 'max:99999999999999.99'],
             'records.*.orders' => ['required', 'integer', 'min:0', 'max:4294967295'],
+            'records.*.roi' => ['required', 'numeric', 'min:0', 'max:99999999.9999'],
         ]);
     }
 
@@ -1935,6 +2071,7 @@ class ProductLibraryController extends Controller
                 'currency' => (string) $record['currency'],
                 'actual_spend' => (string) $record['actual_spend'],
                 'orders' => (int) $record['orders'],
+                'roi' => (string) $record['roi'],
             ])
             ->values()
             ->all();
@@ -2010,6 +2147,7 @@ class ProductLibraryController extends Controller
                 'currency' => (string) $record->currency,
                 'actual_spend' => (string) $record->actual_spend,
                 'orders' => (int) $record->orders,
+                'roi' => $record->roi !== null ? (string) $record->roi : null,
             ])->values()->all(),
         ];
     }
@@ -2199,6 +2337,8 @@ class ProductLibraryController extends Controller
                 'landing_page_url', 'images', 'reference_file', 'package_file', 'visible_department_ids', 'is_published',
                 'created_at', 'updated_at',
             ])
+            ->with(['productPages:id,aikaipin_product_id,name,landing_page_url,is_default'])
+            ->withCount('productPages')
             ->selectRaw('shopify_data IS NOT NULL AS has_shopify_data')
             ->latest('created_at')
             ->latest('id');

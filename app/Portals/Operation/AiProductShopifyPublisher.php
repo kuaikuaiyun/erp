@@ -4,6 +4,7 @@ namespace App\Portals\Operation;
 
 use App\Models\AdminUser;
 use App\Models\AikaipinProduct;
+use App\Models\AikaipinProductPage;
 use App\Models\AssistantDomainStore;
 use App\Portals\Logistics\ShopifyOrderSyncService;
 use Illuminate\Support\Arr;
@@ -25,6 +26,7 @@ class AiProductShopifyPublisher
         string $sku,
         float $price,
         string $status,
+        ?AikaipinProductPage $productPage = null,
     ): array {
         $grantedScopes = $this->grantedScopes($store, $actor);
         if (! $grantedScopes->contains('write_products')) {
@@ -42,8 +44,9 @@ class AiProductShopifyPublisher
             );
         }
 
-        if ($product->hasShopifyData() && collect($product->shopifyData()['variants'] ?? [])->isNotEmpty()) {
-            return $this->publishEnrichedProduct($product, $store, $actor, $title, $status);
+        $shopifyData = $productPage?->shopifyData() ?? $product->shopifyData();
+        if (collect($shopifyData['variants'] ?? [])->isNotEmpty()) {
+            return $this->publishEnrichedProduct($product, $store, $actor, $title, $status, $shopifyData, $productPage);
         }
 
         $media = collect(array_keys($product->imageFiles()))
@@ -142,8 +145,9 @@ GRAPHQL;
         AdminUser $actor,
         string $title,
         string $status,
+        array $data,
+        ?AikaipinProductPage $productPage,
     ): array {
-        $data = $product->shopifyData();
         $variants = collect($data['variants'] ?? [])->filter(fn ($variant): bool => is_array($variant) && filled($variant['sku'] ?? null))->values();
         if ($variants->isEmpty()) {
             throw new RuntimeException('AI 产品库中的 Shopify 补充数据没有有效规格。');
@@ -217,10 +221,11 @@ GRAPHQL;
             return $input;
         })->all();
 
-        $existing = $this->findExistingProduct($product, $store, $actor, $title, false);
+        $pageTag = $productPage ? 'AI-PAGE-'.$productPage->getKey() : null;
+        $existing = $this->findExistingProduct($product, $store, $actor, $title, false, $pageTag);
         $handle = filled(data_get($existing, 'handle'))
             ? (string) data_get($existing, 'handle')
-            : $this->uniqueProductHandle($product, (string) ($data['handle'] ?? ''), $title);
+            : $this->uniqueProductHandle($product, (string) ($data['handle'] ?? ''), $title, $productPage?->getKey());
 
         $input = array_filter([
             'title' => $title,
@@ -232,6 +237,7 @@ GRAPHQL;
             'tags' => array_values(array_unique(array_filter([
                 'AI产品库',
                 (string) $product->product_code,
+                $pageTag,
                 ...$product->categoryValues(),
             ]))),
             'productOptions' => $productOptions,
@@ -292,10 +298,10 @@ GRAPHQL;
         }
     }
 
-    private function uniqueProductHandle(AikaipinProduct $product, string $importedHandle, string $title): string
+    private function uniqueProductHandle(AikaipinProduct $product, string $importedHandle, string $title, ?int $productPageId = null): string
     {
         $base = Str::slug(trim($importedHandle)) ?: Str::slug($title) ?: 'ai-product';
-        $suffix = '-ai-'.$product->getKey();
+        $suffix = '-ai-'.$product->getKey().($productPageId ? '-page-'.$productPageId : '');
 
         return Str::limit($base, 255 - strlen($suffix), '').$suffix;
     }
@@ -307,9 +313,11 @@ GRAPHQL;
         AdminUser $actor,
         string $title,
         bool $requireSameTitle = true,
+        ?string $pageTag = null,
     ): ?array {
         $productCode = trim((string) $product->product_code);
-        if ($productCode === '') {
+        $identityTag = trim((string) ($pageTag ?: $productCode));
+        if ($identityTag === '') {
             return null;
         }
 
@@ -326,7 +334,7 @@ query FindAiProductForRetry($search: String!) {
   }
 }
 GRAPHQL;
-        $escapedCode = str_replace(['\\', '"'], ['\\\\', '\\"'], $productCode);
+        $escapedCode = str_replace(['\\', '"'], ['\\\\', '\\"'], $identityTag);
         $response = $this->shopify->graphqlForStore($store, $actor, $query, [
             'search' => 'tag:"'.$escapedCode.'"',
         ]);
@@ -334,7 +342,7 @@ GRAPHQL;
         return collect(Arr::get($response, 'data.products.nodes', []))
             ->first(static fn (mixed $candidate): bool => is_array($candidate)
                 && (! $requireSameTitle || (string) ($candidate['title'] ?? '') === $title)
-                && in_array($productCode, (array) ($candidate['tags'] ?? []), true));
+                && in_array($identityTag, (array) ($candidate['tags'] ?? []), true));
     }
 
     private function errorMessage(array $errors): string

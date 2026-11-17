@@ -28,9 +28,9 @@
 document.addEventListener('change', function (event) {
     var select = event.target;
     if (!select.matches('select[data-finance-page-size]')) return;
-    var url = new window.URL(window.location.href);
+    var url = new window.URL(select.dataset.financePageUrl || window.location.href);
     url.searchParams.set(select.dataset.financePageSize, select.value);
-    if (select.dataset.financePageName === 'page') url.searchParams.delete('page');
+    if (select.dataset.financePageName === 'page' && !select.dataset.financePageUrl) url.searchParams.delete('page');
     else url.searchParams.set(select.dataset.financePageName, '1');
     window.location.assign(url.toString());
 });

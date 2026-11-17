@@ -12,6 +12,7 @@
 <section class="content-header"><h1>站内消息 <small>{{ $isDailyReport ? '查看收到的消息记录' : '查看发送给我的消息并跟踪处理状态' }}</small></h1></section>
 <section class="content received-message-page">
     @if(session('success'))<div class="alert alert-success">{{ session('success') }}</div>@endif
+    @if($errors->any())<div class="alert alert-danger">{{ $errors->first() }}</div>@endif
     @unless($isDailyReport)
     <div class="received-summary">
         <div><i class="fa fa-clock-o text-orange"></i> 当前待处理消息：<strong>{{ $pendingCount }}</strong> 条</div>
@@ -25,6 +26,8 @@
 
     @forelse($recipients as $recipient)
         @php($message = $recipient->message)
+        @php($managerTask = $recipient->managerListingTask)
+        @php($assigneeTask = $recipient->assigneeListingTask)
         <div class="box received-message {{ $isDailyReport ? '' : ($recipient->processed_at ? 'processed' : 'pending') }}">
             <div class="received-message-head">
                 <div><h3 class="received-title">{{ $message->title }}</h3><div class="received-meta">{{ $message->sender_portal_name }} · {{ $message->sender_name }} · {{ $message->published_at?->copy()->timezone('Asia/Shanghai')->format('Y-m-d H:i') }}</div></div>
@@ -34,6 +37,24 @@
             @if($message->images->isNotEmpty())<div class="received-images">@foreach($message->images as $image)<img class="erp-zoomable" src="{{ route('internal-messages.images.show',[$message,$image]) }}" alt="{{ $image->original_name }}">@endforeach</div>@endif
             @unless($isDailyReport)<div class="received-actions">
                 @if($recipient->processed_at)<span class="received-processed-time"><i class="fa fa-check-circle"></i> 处理时间：{{ $recipient->processed_at->copy()->timezone('Asia/Shanghai')->format('Y-m-d H:i') }}</span>
+                @elseif($managerTask && $managerTask->status === \App\Models\AiProductListingTask::STATUS_PENDING_ASSIGNMENT)
+                    <form method="post" action="{{ route('operation.internal-messages.listing-tasks.assign',$managerTask) }}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                        @csrf
+                        <strong>选择具体运营：</strong>
+                        <select class="form-control input-sm" name="assignee_id" required style="width:190px">
+                            <option value="">请选择运营人员</option>
+                            @if(($listingTaskAssignees[$managerTask->getKey()] ?? collect())->isNotEmpty())
+                                <option value="all">全部运营（{{ ($listingTaskAssignees[$managerTask->getKey()] ?? collect())->count() }}人）</option>
+                            @endif
+                            @foreach(($listingTaskAssignees[$managerTask->getKey()] ?? collect()) as $assignee)
+                                <option value="{{ $assignee->getKey() }}">{{ $assignee->name ?: $assignee->username }}</option>
+                            @endforeach
+                        </select>
+                        <button class="btn btn-primary btn-sm" type="submit" onclick="return confirm('确认将该商品的必须上架任务推送给所选运营？')"><i class="fa fa-paper-plane"></i> 一键推送</button>
+                    </form>
+                @elseif($assigneeTask && $assigneeTask->status === \App\Models\AiProductListingTask::STATUS_ASSIGNED)
+                    <span class="received-processed-time text-orange"><i class="fa fa-exclamation-circle"></i> 必须完成上架，成功后自动处理</span>
+                    <a class="btn btn-success btn-sm" href="{{ route('operation.ai-product-library.index',['keyword'=>$assigneeTask->product?->product_code]) }}"><i class="fa fa-cloud-upload"></i> 去上架商品</a>
                 @else<form method="post" action="{{ route('operation.internal-messages.process',$message) }}" onsubmit="return confirm('确认这条消息已经处理完成？')">@csrf<button class="btn btn-success btn-sm"><i class="fa fa-check"></i> 标记已处理</button></form>@endif
             </div>@endunless
         </div>

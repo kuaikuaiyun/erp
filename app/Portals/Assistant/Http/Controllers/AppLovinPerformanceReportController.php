@@ -36,7 +36,10 @@ class AppLovinPerformanceReportController extends Controller
             return $context;
         }
         $isOperationPortal = $request->routeIs('operation.applovin-performance-reports.*');
-        if ($isOperationPortal) {
+        $isDashboard = $request->routeIs('operation-dashboard.applovin-performance-reports.*');
+        if ($isDashboard) {
+            abort_unless($context['portal']->code === 'yunying-kanban', 404);
+        } elseif ($isOperationPortal) {
             abort_unless($context['portal']->code === 'yunying', 404);
         } else {
             $this->authorization->assertAssistantPortal($context['portal']);
@@ -47,9 +50,11 @@ class AppLovinPerformanceReportController extends Controller
         $managedIds = $this->departmentAuthorization->managedDepartmentIds($context['user'])
             ->intersect($this->storeOwners->operationDepartments()->pluck('id'))->map(fn ($id) => (int) $id)->values()->all();
         $operatorOnly = $isOperationPortal && ! $canSeeAll && $managedIds === [];
-        $visibleIds = $isOperationPortal
+        $visibleIds = $isDashboard
+            ? $this->storeOwners->operationDepartments()->pluck('id')->map(fn ($id) => (int) $id)->all()
+            : ($isOperationPortal
             ? ($canSeeAll ? $this->storeOwners->operationDepartments()->pluck('id')->map(fn ($id) => (int) $id)->all() : $managedIds)
-            : $this->storeOwners->visibleOperationDepartmentIds($context['user']);
+            : $this->storeOwners->visibleOperationDepartmentIds($context['user']));
         $timezoneOptions = $this->timezoneOptions();
         $filters = $request->validate([
             'date_from' => ['nullable', 'date_format:Y-m-d'],
@@ -332,9 +337,11 @@ class AppLovinPerformanceReportController extends Controller
             'consumptionCustom' => $filters['consumption_custom'] ?? '',
             'consumptionCustomMax' => $filters['consumption_custom_max'] ?? '',
             'departmentOptions' => $this->storeOwners->operationDepartments()->whereIn('id', $visibleIds)->values(),
-            'performanceResetRoute' => $isOperationPortal
-                ? 'operation.applovin-performance-reports.index'
-                : 'assistant.applovin-performance-reports.index',
+            'performanceResetRoute' => $isDashboard
+                ? 'operation-dashboard.applovin-performance-reports.index'
+                : ($isOperationPortal
+                    ? 'operation.applovin-performance-reports.index'
+                    : 'assistant.applovin-performance-reports.index'),
         ]);
     }
 

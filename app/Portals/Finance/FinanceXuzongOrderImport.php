@@ -71,6 +71,7 @@ class FinanceXuzongOrderImport
         return match (true) {
             in_array('退款单号', $headers, true) => 'refunds',
             in_array('结算批次号', $headers, true) => 'batches',
+            in_array('原始支付状态', $headers, true) && in_array('交易 ID', $headers, true) => 'orders',
             ! array_diff(['平台订单号', '折算后结算贡献', '适用汇率'], $headers) => 'official_statement',
             array_intersect([FinanceXuzongCreditReport::PLATFORM_CODE, FinanceXuzongCreditReport::PLATFORM_MESSAGE,
                 FinanceXuzongCreditReport::PLATFORM_RESULT], $headers) => 'orders',
@@ -205,10 +206,12 @@ class FinanceXuzongOrderImport
                 unset($fields['平台订单号']);
                 $payload = array_replace($payload, array_map(fn ($value) => $value ?? '', $fields));
                 $payload['_edited_platform_order_id'] = $platform;
+                $costChanged = false;
                 if (! empty($data['report_fields'])) {
                     $current = app(FinanceXuzongCreditReport::class)->orderValues($order->id);
                     foreach ($data['report_fields'] as $field => $value) {
-                        if ((string) $value !== (string) ($current[$field] ?? '')) {
+                        if ((string) $value !== FinanceCatalog::exportCell($field, $current[$field] ?? '')) {
+                            $costChanged = $costChanged || in_array($field, FinanceXuzongCostEligibility::FIELDS, true);
                             $payload['_edited_report_fields'][$field] = $value ?? '';
                         }
                     }
@@ -217,6 +220,10 @@ class FinanceXuzongOrderImport
                     'payload' => $payload, 'occurred_at' => $created,
                     'currency' => strtoupper($fields['交易币种']), 'status' => $fields['支付状态'],
                 ]);
+                if ($costChanged) {
+                    $records = $this->creditOrders->query(xuzongReport: true, ids: [-$order->id])->get();
+                    app(FinanceXuzongCostEligibility::class)->guard($records, 'report_fields');
+                }
 
                 return;
             }
@@ -438,18 +445,33 @@ class FinanceXuzongOrderImport
 
     public function import(UploadedFile $file, ?string $account, string $timezone, int $actor, bool $legacySheet = false): array
     {
+        return $this->workbooks->database()->transaction(function () use ($file, $account, $timezone, $actor, $legacySheet): array {
+            $costFingerprints = collect();
+            $result = $this->importOrderSheets($file, $account, $timezone, $actor, $legacySheet, $costFingerprints);
+            $eligibility = app(FinanceXuzongCostEligibility::class);
+            foreach ($costFingerprints->unique()->chunk(300) as $batch) {
+                $ids = FinanceRecord::query()->whereIn('fingerprint', $batch->all())->pluck('id')->map(fn ($id) => -$id)->all();
+                $eligibility->guard($this->creditOrders->query(xuzongReport: true, ids: $ids)->get(), 'file');
+            }
+
+            return $result;
+        });
+    }
+
+    private function importOrderSheets(UploadedFile $file, ?string $account, string $timezone, int $actor, bool $legacySheet, \Illuminate\Support\Collection $costFingerprints): array
+    {
         if (! $legacySheet) {
-            return $this->importOrderSheet($file, $account, $timezone, $actor);
+            return $this->importOrderSheet($file, $account, $timezone, $actor, $costFingerprints);
         }
 
-        $result = $this->importOrderSheet($file, 'SHANGYUN', $timezone, $actor, self::LEGACY_ORDER_SHEET);
+        $result = $this->importOrderSheet($file, 'SHANGYUN', $timezone, $actor, $costFingerprints, self::LEGACY_ORDER_SHEET);
         $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($file->getPathname());
         foreach ($reader->listWorksheetNames($file->getPathname()) as $sheet) {
             if (! in_array(trim($sheet), ['徐总2失败订单', '徐总2数据'], true)) {
                 continue;
             }
 
-            $second = $this->importOrderSheet($file, 'SHANGYUN-v2', $timezone, $actor, $sheet);
+            $second = $this->importOrderSheet($file, 'SHANGYUN-v2', $timezone, $actor, $costFingerprints, $sheet);
             foreach ($result as $key => $count) {
                 $result[$key] = $count + $second[$key];
             }
@@ -458,7 +480,7 @@ class FinanceXuzongOrderImport
         return $result;
     }
 
-    private function importOrderSheet(UploadedFile $file, ?string $account, string $timezone, int $actor, ?string $sheet = null): array
+    private function importOrderSheet(UploadedFile $file, ?string $account, string $timezone, int $actor, \Illuminate\Support\Collection $costFingerprints, ?string $sheet = null): array
     {
         $headers = [...array_values(FinanceXuzongCreditReport::headers()), ...array_keys(FinanceXuzongCreditReport::DISPLAY_HEADERS),
             FinanceXuzongCreditReport::PLATFORM_CODE, FinanceXuzongCreditReport::PLATFORM_MESSAGE, '是否 3D', '交易单号', '交易时间',
@@ -471,6 +493,11 @@ class FinanceXuzongOrderImport
         foreach ($batches as $rows) {
             $total += count($rows);
             foreach ($rows as &$row) {
+                foreach (FinanceXuzongCostEligibility::FIELDS as $field) {
+                    if (($row[$field] ?? null) === FinanceXuzongCostEligibility::LOCKED_LABEL) {
+                        unset($row[$field]);
+                    }
+                }
                 if (filled($row['原始支付状态'] ?? null)) {
                     $row['支付状态'] = $row['原始支付状态'];
                 }
@@ -503,7 +530,10 @@ class FinanceXuzongOrderImport
                     $matched++;
                     $row['_linked_logistics_id'] = $order->id;
                     $row['_linked_platform_order_id'] = $order->reference;
-                    if (FinanceSettlementService::isSuccessfulTransaction($row['支付状态'] ?? null)
+                    if ($order->is_upsell_reference) {
+                        $row['是否加购'] = '加购';
+                    }
+                    if (! $order->is_upsell_reference && FinanceSettlementService::isSuccessfulTransaction($row['支付状态'] ?? null)
                         && FinanceSettlementService::isSuccessfulTransaction($order->status)) {
                         $row['_replaced_logistics_id'] = $order->id;
                     }
@@ -531,7 +561,7 @@ class FinanceXuzongOrderImport
 
             foreach ($byAccount as $reportAccount => $accountRows) {
                 $saved += $this->workbooks->importRecords(FinanceLogisticsCreditOrders::IMPORTED_DATASET,
-                    $accountRows, $reportAccount, $timezone, $actor, createOnly: true, fillMissing: true);
+                    $accountRows, $reportAccount, $timezone, $actor, createOnly: true, fillMissing: true, costFingerprints: $costFingerprints);
             }
         }
 
@@ -563,6 +593,19 @@ class FinanceXuzongOrderImport
                     ->get(['id', ...array_values($columns)])->keyBy('id'));
             }
         }
+        // Shopify can attach a separate payment reference for an upsell to the same logistics order.
+        $paymentReferences = collect();
+        $flows = array_values(array_unique(array_filter(array_column($rows, '交易流水号'))));
+        if ($flows !== [] && $db->getSchemaBuilder()->hasTable('logistics_order_payment_references')) {
+            $paymentReferences = $db->table('logistics_order_payment_references')
+                ->whereIn('reference_number', $flows)
+                ->get(['logistics_order_id', 'reference_number', 'reference_type']);
+            $missing = $paymentReferences->pluck('logistics_order_id')->unique()->diff($candidates->keys());
+            if ($missing->isNotEmpty()) {
+                $candidates = $candidates->union($db->table('logistics_orders')->whereIntegerInRaw('id', $missing->all())
+                    ->get(['id', ...array_values($columns)])->keyBy('id'));
+            }
+        }
         if ($candidates->isEmpty()) {
             return [];
         }
@@ -572,17 +615,22 @@ class FinanceXuzongOrderImport
         foreach ($columns as $header => $column) {
             $byField[$header] = $candidates->filter(fn ($order) => $eligible->has($order->id))->groupBy($column);
         }
+        $byFlow = $paymentReferences->filter(fn ($reference) => $eligible->has($reference->logistics_order_id))
+            ->groupBy('reference_number');
 
         $matches = [];
         foreach ($rows as $line => $row) {
             $rowAccount = $account ?? self::accountForRow($row);
+            $aliases = $byFlow->get($row['交易流水号'] ?? '', collect());
             $ids = collect($byField)->flatMap(fn ($orders, $header) => filled($row[$header] ?? null)
-                ? $orders->get($row[$header], collect())->pluck('id') : [])->unique()
+                ? $orders->get($row[$header], collect())->pluck('id') : [])->concat($aliases->pluck('logistics_order_id'))->unique()
                 ->filter(fn ($id) => $rowAccount === null || $eligible->get($id)->account === $rowAccount)->values();
             if ($ids->count() === 1) {
                 $id = $ids->first();
-                $matches[$line] = $eligible->get($id);
+                $matches[$line] = clone $eligible->get($id);
                 $matches[$line]->tongtu_order_number = $candidates->get($id)->tongtu_order_number ?? null;
+                $matches[$line]->is_upsell_reference = $aliases->contains(fn ($alias) => (int) $alias->logistics_order_id === (int) $id
+                    && $alias->reference_type === \App\Models\LogisticsOrderPaymentReference::TYPE_UPSELL);
             }
         }
 

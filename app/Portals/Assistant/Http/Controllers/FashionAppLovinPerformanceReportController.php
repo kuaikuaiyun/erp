@@ -37,7 +37,10 @@ class FashionAppLovinPerformanceReportController extends Controller
             return $context;
         }
         $isFashionPortal = $request->routeIs('fashion.applovin-performance-reports.*');
-        if ($isFashionPortal) {
+        $isDashboard = $request->routeIs('operation-dashboard.fashion-applovin-performance-reports.*');
+        if ($isDashboard) {
+            abort_unless($context['portal']->code === 'yunying-kanban', 404);
+        } elseif ($isFashionPortal) {
             abort_unless($context['portal']->code === 'fuzhuang', 404);
         } else {
             $this->authorization->assertAssistantPortal($context['portal']);
@@ -48,9 +51,11 @@ class FashionAppLovinPerformanceReportController extends Controller
         $managedDepartmentIds = $this->departmentAuthorization->managedDepartmentIds($context['user'])
             ->map(fn ($id) => (int) $id)->values()->all();
         $operatorOnly = $isFashionPortal && ! $canSeeAll && $managedDepartmentIds === [];
-        $visibleDepartmentIds = $isFashionPortal
+        $visibleDepartmentIds = $isDashboard
+            ? null
+            : ($isFashionPortal
             ? ($canSeeAll ? null : $managedDepartmentIds)
-            : $this->visibleDepartmentIds($context['user']);
+            : $this->visibleDepartmentIds($context['user']));
         $submitterIds = FashionAdvertisingReport::query()->whereHas('adSpendEntries', fn ($query) => $query->whereRaw("LOWER(TRIM(media)) = 'applovin'"))
             ->whereIn('status', [FashionAdvertisingReport::STATUS_APPROVED, FashionAdvertisingReport::STATUS_REJECTED])
             ->when($operatorOnly, fn ($query) => $query->where('submitter_id', $context['user']->getKey()))
@@ -274,9 +279,11 @@ class FashionAppLovinPerformanceReportController extends Controller
             'selectedGiftStatus' => $filters['gift_status'] ?? '', 'selectedConsumptionRange' => $filters['consumption_range'] ?? '',
             'consumptionCustom' => $filters['consumption_custom'] ?? '', 'consumptionCustomMax' => $filters['consumption_custom_max'] ?? '',
             'selectedDepartmentIds' => $selectedDepartmentIds, 'departmentOptions' => $departments,
-            'performanceResetRoute' => $isFashionPortal
-                ? 'fashion.applovin-performance-reports.index'
-                : 'assistant.fashion-applovin-performance-reports.index',
+            'performanceResetRoute' => $isDashboard
+                ? 'operation-dashboard.fashion-applovin-performance-reports.index'
+                : ($isFashionPortal
+                    ? 'fashion.applovin-performance-reports.index'
+                    : 'assistant.fashion-applovin-performance-reports.index'),
         ]);
     }
 

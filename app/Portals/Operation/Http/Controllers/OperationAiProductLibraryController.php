@@ -5,6 +5,7 @@ namespace App\Portals\Operation\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
 use App\Models\AikaipinProduct;
+use App\Models\AikaipinProductPage;
 use App\Models\AikaipinPlacementEvaluation;
 use App\Models\AikaipinPlacementEvaluationRecord;
 use App\Models\AiProductShopifyPublication;
@@ -14,6 +15,7 @@ use App\Models\Portal;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Aikaipin\AikaipinProductLibraryStorageService;
 use App\Portals\Operation\AiProductShopifyPublisher;
+use App\Services\AiProductListingPushService;
 use App\Portals\ProductRequests\ProductRequestAccessService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -25,6 +27,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
@@ -35,6 +38,7 @@ class OperationAiProductLibraryController extends Controller
         private readonly PortalEntryController $portalEntries,
         private readonly ProductRequestAccessService $access,
         private readonly AiProductShopifyPublisher $shopifyPublisher,
+        private readonly AiProductListingPushService $listingPush,
     ) {}
 
     public function index(Request $request): Response|View
@@ -51,6 +55,165 @@ class OperationAiProductLibraryController extends Controller
             'products' => $this->productQuery($filters)->paginate(15)->withQueryString(),
             'filters' => $filters,
             'categories' => $this->categoryOptions(),
+        ]);
+    }
+
+    public function placementEvaluationsIndex(Request $request): Response|View
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) return $context;
+
+        $filters = ['keyword' => trim((string) $request->query('keyword', ''))];
+        $products = $this->productQuery([
+            'keyword' => $filters['keyword'], 'category' => '', 'source' => '', 'type' => '',
+        ])->with(['placementEvaluations' => fn ($query) => $query->with('records')
+            ->where('created_by', $context['user']->getKey())->latest('updated_at')])
+            ->paginate(15)->withQueryString();
+
+        return view('portals.aikaipin.placement-evaluation.index', [
+            'portal' => $context['portal']->loadMissing('menus'),
+            'user' => $context['user'],
+            'products' => $products,
+            'filters' => $filters,
+            'canReviewAllPlacementEvaluations' => false,
+            'placementRouteNames' => $this->operationPlacementRouteNames(),
+        ]);
+    }
+
+    public function placementEvaluationProductOptions(Request $request): JsonResponse|Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) return $context;
+
+        $products = $this->productQuery([
+            'keyword' => trim((string) $request->query('keyword', '')),
+            'category' => '', 'source' => '', 'type' => '',
+        ])->limit(12)->get(['id', 'product_code', 'name']);
+
+        return response()->json(['products' => $products->map(static fn (AikaipinProduct $product): array => [
+            'id' => (int) $product->getKey(), 'code' => (string) $product->product_code, 'name' => (string) $product->name,
+        ])->values()->all()]);
+    }
+
+    public function placementEvaluationProductDetails(Request $request, AikaipinProduct $product): JsonResponse|Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) return $context;
+        abort_unless((bool) $product->is_published, 404);
+
+        $evaluations = AikaipinPlacementEvaluation::query()->with('records')
+            ->where('product_id', $product->getKey())
+            ->where('created_by', $context['user']->getKey())
+            ->latest('updated_at')->get();
+
+        return response()->json([
+            'product' => ['code' => $product->product_code, 'name' => $product->name, 'skus' => $product->skuValues()],
+            'evaluations' => $evaluations->map(fn (AikaipinPlacementEvaluation $evaluation): array => [
+                'code' => $evaluation->evaluation_code,
+                'submitter' => $evaluation->created_by_name,
+                'period' => $evaluation->test_started_on?->format('Y-m-d').' 至 '.$evaluation->data_ended_on?->format('Y-m-d'),
+                'records' => $evaluation->records->map(fn (AikaipinPlacementEvaluationRecord $record): array => [
+                    'platform' => $record->platform, 'currency' => $record->currency,
+                    'spend' => (string) $record->actual_spend, 'orders' => (int) $record->orders,
+                    'roi' => $record->roi !== null ? (string) $record->roi : null,
+                    'material_name' => $record->material_name,
+                    'video_url' => $record->video_path
+                        ? route('operation.ai-product-library.placement-evaluations.video', [$evaluation, $record]) : null,
+                ])->values(),
+            ])->values(),
+        ]);
+    }
+
+    public function storeStandalonePlacementEvaluation(Request $request): JsonResponse|Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) return $context;
+        $data = $this->validatedStandalonePlacementEvaluation($request);
+        $product = $this->standalonePlacementProduct((int) $data['product_id']);
+        $records = $this->standalonePlacementRecords($data['records']);
+        $connection = config('admin.database.connection') ?: config('database.default');
+
+        try {
+            $evaluation = DB::connection($connection)->transaction(function () use ($context, $data, $product, $records): AikaipinPlacementEvaluation {
+                $evaluation = AikaipinPlacementEvaluation::query()->create([
+                    'evaluation_code' => $this->nextPlacementEvaluationCode(),
+                    'product_id' => $product->getKey(), 'product_code' => $product->product_code, 'product_name' => $product->name,
+                    'test_started_on' => $data['test_started_on'], 'data_ended_on' => $data['data_ended_on'],
+                    'remark' => ($data['remark'] ?? null) ?: null,
+                    'created_by' => $context['user']->getKey(), 'created_by_name' => $context['user']->name ?: $context['user']->username,
+                    'updated_by' => $context['user']->getKey(), 'updated_by_name' => $context['user']->name ?: $context['user']->username,
+                ]);
+                foreach ($records as $sort => $record) $evaluation->records()->create([...$record, 'sort' => $sort]);
+                return $evaluation;
+            });
+        } catch (Throwable $exception) {
+            report($exception);
+            return response()->json(['message' => __('aikaipin.placement_evaluation.messages.save_failed_message')], 500);
+        }
+
+        return response()->json([
+            'message' => __('aikaipin.placement_evaluation.messages.created_message'),
+            'redirect_url' => route('operation.ai-product-library.placement-evaluations.index'),
+            'evaluation_id' => $evaluation->getKey(),
+        ], 201);
+    }
+
+    public function showStandalonePlacementEvaluation(Request $request, AikaipinPlacementEvaluation $evaluation): JsonResponse|Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) return $context;
+        $this->assertOwnPlacementEvaluation($context['user'], $evaluation);
+        $evaluation->load('records');
+        return response()->json($this->standalonePlacementPayload($evaluation));
+    }
+
+    public function updateStandalonePlacementEvaluation(Request $request, AikaipinPlacementEvaluation $evaluation): JsonResponse|Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) return $context;
+        $this->assertOwnPlacementEvaluation($context['user'], $evaluation);
+        $data = $this->validatedStandalonePlacementEvaluation($request);
+        $product = $this->standalonePlacementProduct((int) $data['product_id']);
+        $records = $this->standalonePlacementRecords($data['records']);
+        $connection = config('admin.database.connection') ?: config('database.default');
+
+        try {
+            DB::connection($connection)->transaction(function () use ($context, $evaluation, $data, $product, $records): void {
+                $evaluation->forceFill([
+                    'product_id' => $product->getKey(), 'product_code' => $product->product_code, 'product_name' => $product->name,
+                    'test_started_on' => $data['test_started_on'], 'data_ended_on' => $data['data_ended_on'],
+                    'remark' => ($data['remark'] ?? null) ?: null,
+                    'updated_by' => $context['user']->getKey(), 'updated_by_name' => $context['user']->name ?: $context['user']->username,
+                ])->save();
+                $evaluation->records()->delete();
+                foreach ($records as $sort => $record) $evaluation->records()->create([...$record, 'sort' => $sort]);
+            });
+        } catch (Throwable $exception) {
+            report($exception);
+            return response()->json(['message' => __('aikaipin.placement_evaluation.messages.save_failed_message')], 500);
+        }
+
+        return response()->json([
+            'message' => __('aikaipin.placement_evaluation.messages.updated_message'),
+            'redirect_url' => route('operation.ai-product-library.placement-evaluations.index'),
+            'evaluation_id' => $evaluation->getKey(),
+        ]);
+    }
+
+    public function destroyStandalonePlacementEvaluation(Request $request, AikaipinPlacementEvaluation $evaluation): JsonResponse|Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) return $context;
+        $this->assertOwnPlacementEvaluation($context['user'], $evaluation);
+        $connection = config('admin.database.connection') ?: config('database.default');
+        DB::connection($connection)->transaction(function () use ($evaluation): void {
+            $evaluation->records()->delete();
+            $evaluation->delete();
+        });
+
+        return response()->json([
+            'message' => __('aikaipin.placement_evaluation.messages.deleted_message'),
+            'redirect_url' => route('operation.ai-product-library.placement-evaluations.index'),
         ]);
     }
 
@@ -79,6 +242,8 @@ class OperationAiProductLibraryController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
+
+        $product->loadMissing('productPages');
 
         return response()->json([
             'id' => (int) $product->getKey(),
@@ -109,8 +274,25 @@ class OperationAiProductLibraryController extends Controller
                 'variant_count' => count((array) data_get($product->shopifyData(), 'variants', [])),
                 'image_count' => count((array) data_get($product->shopifyData(), 'images', [])),
             ] : null,
-            'created_at' => $product->created_at?->timezone(config('app.timezone'))->format('Y-m-d H:i:s'),
-            'updated_at' => $product->updated_at?->timezone(config('app.timezone'))->format('Y-m-d H:i:s'),
+            'product_pages' => $product->productPages->map(static function (AikaipinProductPage $page): array {
+                $shopify = $page->shopifyData();
+
+                return [
+                    'id' => (int) $page->getKey(),
+                    'name' => (string) $page->name,
+                    'source_file' => (string) ($page->source_file ?: data_get($shopify, 'source_file', '')),
+                    'landing_page_url' => $page->landing_page_url,
+                    'is_default' => (bool) $page->is_default,
+                    'title' => (string) data_get($shopify, 'title', ''),
+                    'vendor' => (string) data_get($shopify, 'vendor', ''),
+                    'product_type' => (string) data_get($shopify, 'product_type', ''),
+                    'variant_count' => count((array) data_get($shopify, 'variants', [])),
+                    'image_count' => count((array) data_get($shopify, 'images', [])),
+                    'imported_at' => (string) data_get($shopify, 'imported_at', ''),
+                ];
+            })->values()->all(),
+            'created_at' => $product->created_at?->copy()->timezone('Asia/Shanghai')->format('Y-m-d H:i:s'),
+            'updated_at' => $product->updated_at?->copy()->timezone('Asia/Shanghai')->format('Y-m-d H:i:s'),
         ]);
     }
 
@@ -139,10 +321,11 @@ class OperationAiProductLibraryController extends Controller
             'test_started_on' => ['required', 'date'],
             'data_ended_on' => ['required', 'date', 'after_or_equal:test_started_on'],
             'records' => ['required', 'array', 'min:1', 'max:6'],
-            'records.*.platform' => ['required', 'distinct', Rule::in(['facebook', 'google', 'tiktok', 'mediago', 'newsbreak', 'applovin'])],
+            'records.*.platform' => ['required', Rule::in(['facebook', 'google', 'tiktok', 'mediago', 'newsbreak', 'applovin'])],
             'records.*.currency' => ['required', Rule::in(['usd', 'eur', 'cny'])],
             'records.*.actual_spend' => ['required', 'numeric', 'min:0', 'max:99999999999999.99'],
             'records.*.orders' => ['required', 'integer', 'min:0', 'max:4294967295'],
+            'records.*.roi' => ['required', 'numeric', 'min:0', 'max:99999999.9999'],
             'material_name' => ['required', 'string', 'max:191'],
             'video' => ['required', 'file', 'mimes:mp4,mov,avi,webm,mkv,m4v', 'max:307200'],
             'remark' => ['nullable', 'string', 'max:2000'],
@@ -180,7 +363,8 @@ class OperationAiProductLibraryController extends Controller
                 foreach ($data['records'] as $index => $recordData) {
                     $evaluation->records()->create([
                         'platform' => $recordData['platform'], 'currency' => $recordData['currency'],
-                        'actual_spend' => $recordData['actual_spend'], 'orders' => $recordData['orders'], 'sort' => $index,
+                        'actual_spend' => $recordData['actual_spend'], 'orders' => $recordData['orders'],
+                        'roi' => $recordData['roi'], 'sort' => $index,
                         'material_name' => $data['material_name'], 'video_disk' => 'local', 'video_path' => $path,
                         'video_name' => $fileName, 'video_mime_type' => $file->getMimeType(), 'video_size' => $file->getSize(),
                     ]);
@@ -228,7 +412,7 @@ class OperationAiProductLibraryController extends Controller
             'libraryUrl' => route('operation.ai-product-library.index'),
             'referenceVideos' => $this->referenceVideos($product),
             'referenceVideoUploadUrl' => route('operation.ai-product-library.reference-videos.upload', $product),
-            'referenceVideoNamingHint' => '上传后自动命名：产品编号-部门编号-日期-递增编号',
+            'referenceVideoNamingHint' => '上传后自动命名：产品编号-flow/spy/mix-日期-递增编号',
         ]);
     }
 
@@ -253,12 +437,22 @@ class OperationAiProductLibraryController extends Controller
         $date = now('Asia/Shanghai');
         $historicalCount = $this->historicalReferenceVideoCount($product);
         $this->normalizeUploadedReferenceVideos($product, $historicalCount);
-        $sequence = $historicalCount + OperationAiProductReferenceVideo::query()
-            ->where('aikaipin_product_id', $product->getKey())->count() + 1;
+        $latestSequence = (int) OperationAiProductReferenceVideo::query()
+            ->where('aikaipin_product_id', $product->getKey())->max('sequence');
+        $sequence = max($historicalCount, $latestSequence) + 1;
+        $latestFileNumber = OperationAiProductReferenceVideo::query()
+            ->where('aikaipin_product_id', $product->getKey())
+            ->get(['file_name', 'sequence'])
+            ->reduce(fn (int $carry, OperationAiProductReferenceVideo $video): int => max(
+                $carry,
+                OperationAiProductReferenceVideo::fileNumber($video->file_name, (int) $video->sequence),
+            ), $historicalCount);
+        $fileNumber = $latestFileNumber + 1;
         $productCode = trim((string) preg_replace('/[^A-Za-z0-9_-]+/', '-', (string) $product->product_code), '-_') ?: 'product-'.$product->getKey();
         $departmentCode = $this->departmentCode($context['user']);
+        $typeCode = OperationAiProductReferenceVideo::fileTypeCode($data['type']);
         $extension = strtolower($file->getClientOriginalExtension() ?: $file->extension() ?: 'mp4');
-        $fileName = $productCode.'-'.$departmentCode.'-'.$date->format('ymd').'-'.str_pad((string) $sequence, 3, '0', STR_PAD_LEFT).'.'.$extension;
+        $fileName = $productCode.'-'.$typeCode.'-'.$date->format('ymd').'-'.str_pad((string) $fileNumber, 3, '0', STR_PAD_LEFT).'.'.$extension;
         $path = $file->storeAs('aikaipin/reference-videos/'.$product->getKey(), $fileName, 'local');
 
         try {
@@ -404,11 +598,15 @@ class OperationAiProductLibraryController extends Controller
         if ($context instanceof Response) {
             return $context;
         }
+        $product->load('productPages');
+        $defaultPage = $product->productPages->first();
+
         return view('portals.operation.ai-product-library.publish-form', [
             'product' => $product,
             'stores' => $this->publishableStores($context['user']),
             'skus' => $product->skuValues(),
-            'shopifyData' => $product->shopifyData(),
+            'productPages' => $product->productPages,
+            'shopifyData' => $defaultPage?->shopifyData() ?? $product->shopifyData(),
         ]);
     }
 
@@ -422,6 +620,7 @@ class OperationAiProductLibraryController extends Controller
 
         $data = $request->validate([
             'store_id' => ['required', 'integer'],
+            'product_page_id' => ['nullable', 'integer', 'min:1'],
             'title' => ['required', 'string', 'max:255'],
             'sku' => ['required', 'string', 'max:191'],
             'price' => ['required', 'numeric', 'min:0', 'max:99999999'],
@@ -429,10 +628,18 @@ class OperationAiProductLibraryController extends Controller
         ]);
         $store = $this->publishableStores($user)->firstWhere('id', (int) $data['store_id']);
         abort_unless($store instanceof AssistantDomainStore, 422, '该店铺不属于当前可上架范围。');
-        abort_unless(in_array($data['sku'], $product->skuValues(), true), 422, '请选择该产品已有的 SKU。');
+        $productPage = filled($data['product_page_id'] ?? null)
+            ? $product->productPages()->whereKey((int) $data['product_page_id'])->first()
+            : $product->defaultProductPage();
+        abort_if(filled($data['product_page_id'] ?? null) && ! $productPage instanceof AikaipinProductPage, 422, '选择的产品页信息不存在或不属于当前商品。');
+        $pageSkus = $productPage instanceof AikaipinProductPage
+            ? collect($productPage->shopifyData()['variants'] ?? [])->pluck('sku')->map(fn ($sku): string => trim((string) $sku))->filter()->all()
+            : $product->skuValues();
+        abort_unless(in_array($data['sku'], $pageSkus, true), 422, '请选择当前产品页中已有的 SKU。');
 
         $publication = AiProductShopifyPublication::query()->create([
             'aikaipin_product_id' => $product->getKey(),
+            'aikaipin_product_page_id' => $productPage?->getKey(),
             'assistant_domain_store_id' => $store->getKey(),
             'published_by' => $user->getKey(),
             'published_by_name' => $user->name ?: $user->username,
@@ -451,6 +658,7 @@ class OperationAiProductLibraryController extends Controller
                 $data['sku'],
                 (float) $data['price'],
                 $data['status'],
+                $productPage,
             );
             $productGid = (string) data_get($result, 'product.id');
             $variantGid = (string) data_get($result, 'variant.id');
@@ -466,6 +674,7 @@ class OperationAiProductLibraryController extends Controller
                 'response_payload' => $result['responses'],
                 'published_at' => now(),
             ]);
+            $this->listingPush->completeForPublication($product, $user, $publication);
 
             return back()->with('success', '商品已成功上架到 '.$store->shop_name.'。');
         } catch (Throwable $exception) {
@@ -583,10 +792,11 @@ class OperationAiProductLibraryController extends Controller
             $renames = [];
             foreach ($videos as $index => $video) {
                 $sequence = $historicalCount + $index + 1;
+                $fileNumber = OperationAiProductReferenceVideo::fileNumber($video->file_name, (int) $video->sequence);
                 $extension = strtolower(pathinfo($video->file_name, PATHINFO_EXTENSION) ?: pathinfo($video->path, PATHINFO_EXTENSION) ?: 'mp4');
                 $date = $video->file_date?->format('ymd') ?: $video->created_at?->copy()->timezone('Asia/Shanghai')->format('ymd') ?: now('Asia/Shanghai')->format('ymd');
-                $departmentCode = $this->sanitizeDepartmentCode((string) ($video->department_code ?: 'AI'));
-                $fileName = $productCode.'-'.$departmentCode.'-'.$date.'-'.str_pad((string) $sequence, 3, '0', STR_PAD_LEFT).'.'.$extension;
+                $typeCode = OperationAiProductReferenceVideo::fileTypeCode((string) $video->type);
+                $fileName = $productCode.'-'.$typeCode.'-'.$date.'-'.str_pad((string) $fileNumber, 3, '0', STR_PAD_LEFT).'.'.$extension;
                 $directory = trim(str_replace('\\', '/', dirname($video->path)), '.');
                 $path = ($directory !== '' ? $directory.'/' : '').$fileName;
                 $temporaryPath = ($directory !== '' ? $directory.'/' : '').'.renumber-'.$video->getKey().'-'.Str::uuid().'.'.$extension;
@@ -653,6 +863,98 @@ class OperationAiProductLibraryController extends Controller
         return trim((string) preg_replace('/[^A-Za-z0-9_-]+/', '-', strtoupper($code)), '-_') ?: 'AI';
     }
 
+    /** @return array<string, string> */
+    private function operationPlacementRouteNames(): array
+    {
+        return [
+            'index' => 'operation.ai-product-library.placement-evaluations.index',
+            'store' => 'operation.ai-product-library.placement-evaluations.standalone.store',
+            'product_options' => 'operation.ai-product-library.placement-evaluations.product-options',
+            'product_show' => 'operation.ai-product-library.placement-evaluations.products.show',
+            'show' => 'operation.ai-product-library.placement-evaluations.show',
+            'update' => 'operation.ai-product-library.placement-evaluations.update',
+            'destroy' => 'operation.ai-product-library.placement-evaluations.destroy',
+            'image' => 'operation.ai-product-library.images.show',
+        ];
+    }
+
+    /** @return array{product_id:int,test_started_on:string,data_ended_on:string,remark:?string,records:array<int,array<string,mixed>>} */
+    private function validatedStandalonePlacementEvaluation(Request $request): array
+    {
+        return $request->validate([
+            'product_id' => ['required', 'integer', 'min:1'],
+            'test_started_on' => ['required', 'date'],
+            'data_ended_on' => ['required', 'date', 'after_or_equal:test_started_on'],
+            'remark' => ['nullable', 'string', 'max:2000'],
+            'records' => ['required', 'array', 'min:1', 'max:60'],
+            'records.*.platform' => ['required', Rule::in(['facebook', 'google', 'tiktok', 'mediago', 'newsbreak', 'applovin'])],
+            'records.*.currency' => ['required', Rule::in(['usd', 'eur', 'cny'])],
+            'records.*.actual_spend' => ['required', 'numeric', 'min:0', 'max:99999999999999.99'],
+            'records.*.orders' => ['required', 'integer', 'min:0', 'max:4294967295'],
+            'records.*.roi' => ['required', 'numeric', 'min:0', 'max:99999999.9999'],
+        ]);
+    }
+
+    /** @param array<int,array<string,mixed>> $records
+     * @return array<int,array{platform:string,currency:string,actual_spend:string,orders:int}>
+     */
+    private function standalonePlacementRecords(array $records): array
+    {
+        return collect($records)->map(static fn (array $record): array => [
+            'platform' => (string) $record['platform'],
+            'currency' => (string) $record['currency'],
+            'actual_spend' => (string) $record['actual_spend'],
+            'orders' => (int) $record['orders'],
+            'roi' => (string) $record['roi'],
+        ])->values()->all();
+    }
+
+    private function standalonePlacementProduct(int $productId): AikaipinProduct
+    {
+        $product = AikaipinProduct::query()->where('is_published', true)->find($productId);
+        if ($product === null) {
+            throw ValidationException::withMessages([
+                'product_id' => __('aikaipin.placement_evaluation.messages.related_product_invalid_message'),
+            ]);
+        }
+
+        return $product;
+    }
+
+    private function assertOwnPlacementEvaluation(AdminUser $user, AikaipinPlacementEvaluation $evaluation): void
+    {
+        abort_unless((int) $evaluation->created_by === (int) $user->getKey(), 403);
+    }
+
+    /** @return array<string,mixed> */
+    private function standalonePlacementPayload(AikaipinPlacementEvaluation $evaluation): array
+    {
+        return [
+            'id' => (int) $evaluation->getKey(),
+            'evaluation_code' => (string) $evaluation->evaluation_code,
+            'product' => [
+                'id' => (int) $evaluation->product_id,
+                'code' => (string) $evaluation->product_code,
+                'name' => (string) $evaluation->product_name,
+            ],
+            'test_started_on' => $evaluation->test_started_on?->toDateString(),
+            'data_ended_on' => $evaluation->data_ended_on?->toDateString(),
+            'remark' => $evaluation->remark,
+            'created_by_name' => $evaluation->created_by_name,
+            'created_at' => $evaluation->created_at?->toAtomString(),
+            'updated_at' => $evaluation->updated_at?->toAtomString(),
+            'can_edit' => true,
+            'records' => $evaluation->records->map(static fn (AikaipinPlacementEvaluationRecord $record): array => [
+                'id' => (int) $record->getKey(),
+                'platform' => (string) $record->platform,
+                'currency' => (string) $record->currency,
+                'actual_spend' => (string) $record->actual_spend,
+                'orders' => (int) $record->orders,
+                'roi' => $record->roi !== null ? (string) $record->roi : null,
+            ])->values()->all(),
+        ];
+    }
+
     /** @return array{portal:Portal,user:AdminUser}|Response */
     private function portalContext(Request $request): array|Response
     {
@@ -681,7 +983,12 @@ class OperationAiProductLibraryController extends Controller
     /** @param array{keyword:string,category:string,source:string,type:string} $filters */
     private function productQuery(array $filters): Builder
     {
-        $query = AikaipinProduct::query()->where('is_published', true)->latest('created_at')->latest('id');
+        $query = AikaipinProduct::query()
+            ->with(['productPages:id,aikaipin_product_id,name,landing_page_url,is_default'])
+            ->withCount('productPages')
+            ->where('is_published', true)
+            ->latest('created_at')
+            ->latest('id');
 
         if ($filters['keyword'] !== '') {
             $like = '%'.$filters['keyword'].'%';

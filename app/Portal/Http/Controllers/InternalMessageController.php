@@ -4,10 +4,12 @@ namespace App\Portal\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
+use App\Models\AiProductListingTask;
 use App\Models\InternalMessage;
 use App\Models\InternalMessageImage;
 use App\Models\InternalMessageRecipient;
 use App\Portals\Assistant\AssistantStoreOwnerService;
+use App\Services\AiProductListingPushService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -25,6 +27,7 @@ class InternalMessageController extends Controller
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantStoreOwnerService $assistantStoreOwners,
+        private readonly AiProductListingPushService $listingPush,
     ) {
     }
 
@@ -133,10 +136,15 @@ class InternalMessageController extends Controller
             ->where('recipient_user_id', $context['user']->getKey())
             ->when($status === 'pending', fn ($query) => $query->whereNull('processed_at'))
             ->when($status === 'processed', fn ($query) => $query->whereNotNull('processed_at'))
-            ->with(['message.images'])
+            ->with(['message.images', 'managerListingTask.product', 'managerListingTask.department', 'assigneeListingTask.product'])
             ->orderByDesc('id')
             ->paginate(20)
             ->withQueryString();
+
+        $listingTaskAssignees = $recipients->getCollection()
+            ->map(fn (InternalMessageRecipient $recipient) => $recipient->managerListingTask)
+            ->filter()
+            ->mapWithKeys(fn (AiProductListingTask $task) => [$task->getKey() => $this->listingPush->eligibleAssignees($task)]);
 
         return view('portal.internal-messages.received', [
             'portal' => $context['portal']->loadMissing('menus'),
@@ -147,7 +155,25 @@ class InternalMessageController extends Controller
             'pendingCount' => InternalMessageRecipient::query()
                 ->where('recipient_user_id', $context['user']->getKey())
                 ->whereNull('processed_at')->count(),
+            'listingTaskAssignees' => $listingTaskAssignees,
         ]);
+    }
+
+    public function assignListingTask(Request $request, AiProductListingTask $task): RedirectResponse
+    {
+        $context = $this->operationContext($request);
+        if ($context instanceof Response) abort($context->getStatusCode());
+        $data = $request->validate(['assignee_id' => ['required', 'string', 'max:30']]);
+        if ($data['assignee_id'] === 'all') {
+            $count = $this->listingPush->assignAll($task, $context['user']);
+
+            return back()->with('success', '上架任务已一键推送给本部门全部 '.$count.' 名运营人员。');
+        }
+        abort_unless(ctype_digit($data['assignee_id']), 422);
+        $assignee = AdminUser::query()->findOrFail((int) $data['assignee_id']);
+        $this->listingPush->assign($task, $assignee, $context['user']);
+
+        return back()->with('success', '上架任务已推送给 '.$assignee->name.'。');
     }
 
     public function markProcessed(Request $request, InternalMessage $message): RedirectResponse
@@ -157,7 +183,14 @@ class InternalMessageController extends Controller
         $recipient = InternalMessageRecipient::query()
             ->where('internal_message_id', $message->getKey())
             ->where('recipient_user_id', $context['user']->getKey())
+            ->with(['managerListingTask', 'assigneeListingTask'])
             ->firstOrFail();
+        if ($recipient->managerListingTask && $recipient->managerListingTask->status === AiProductListingTask::STATUS_PENDING_ASSIGNMENT) {
+            return back()->withErrors(['message' => '请先选择具体运营并推送必须上架任务，不能直接标记为已处理。']);
+        }
+        if ($recipient->assigneeListingTask && $recipient->assigneeListingTask->status !== AiProductListingTask::STATUS_PROCESSED) {
+            return back()->withErrors(['message' => '这是必须上架任务，请先在 AI 产品库完成 Shopify 上架，成功后系统会自动标记为已处理。']);
+        }
         if ($recipient->processed_at === null) {
             $recipient->update([
                 'read_at' => $recipient->read_at ?: now(),

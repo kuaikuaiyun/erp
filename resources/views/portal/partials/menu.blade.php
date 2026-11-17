@@ -45,6 +45,7 @@
         'existing_product_library' => app(\App\Portals\ProductRequests\ProductRequestAccessService::class)->canViewExistingProductLibrary($user),
         'operation_non_runnable_product_library' => app(\App\Portals\ProductRequests\ProductRequestAccessService::class)->canViewExistingProductLibrary($user),
         'operation_ai_product_library' => app(\App\Portals\ProductRequests\ProductRequestAccessService::class)->canViewOperationAiProductLibrary($user),
+        'operation_ai_placement_evaluations' => app(\App\Portals\ProductRequests\ProductRequestAccessService::class)->canViewOperationAiProductLibrary($user),
         default => true,
     };
     $canAccessAssistantAnalyticsMenu = $menu->code !== 'assistant_shopify_analytics'

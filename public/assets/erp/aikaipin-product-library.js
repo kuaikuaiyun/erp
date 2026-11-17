@@ -31,6 +31,7 @@
     var uploadForm = document.querySelector('[data-aikaipin-upload-form]');
     var uploadName = document.querySelector('[data-aikaipin-upload-name]');
     var uploadLandingUrl = document.querySelector('[data-aikaipin-upload-landing-url]');
+    var mainLandingField = document.querySelector('[data-aikaipin-main-landing-field]');
     var skuInput = document.querySelector('[data-aikaipin-sku-input]');
     var skuTags = document.querySelector('[data-aikaipin-sku-tags]');
     var categoryInput = document.querySelector('[data-aikaipin-category-input]');
@@ -41,8 +42,8 @@
     var referenceFileName = document.querySelector('[data-aikaipin-reference-file-name]');
     var packageFile = document.querySelector('[data-aikaipin-package-file]');
     var packageFileName = document.querySelector('[data-aikaipin-package-file-name]');
-    var uploadShopifyCsv = document.querySelector('[data-aikaipin-upload-shopify-csv]');
-    var uploadShopifyCsvName = document.querySelector('[data-aikaipin-upload-shopify-csv-name]');
+    var uploadShopifyCsvList = document.querySelector('[data-aikaipin-upload-shopify-csv-list]');
+    var addShopifyCsvPair = document.querySelector('[data-aikaipin-add-csv-pair]');
     var createShopifyCsvSection = document.querySelector('[data-aikaipin-create-shopify-csv]');
     var uploadProgress = document.querySelector('[data-aikaipin-upload-progress]');
     var uploadProgressBar = document.querySelector('[data-aikaipin-upload-progress-bar]');
@@ -58,6 +59,8 @@
     var shopifyImportModal = document.getElementById('aikaipin-shopify-import-modal');
     var shopifyImportProduct = document.querySelector('[data-aikaipin-shopify-import-product]');
     var shopifyImportFile = document.querySelector('[data-aikaipin-shopify-import-file]');
+    var shopifyImportPageName = document.querySelector('[data-aikaipin-shopify-page-name]');
+    var shopifyImportLandingPageUrl = document.querySelector('[data-aikaipin-shopify-landing-page-url]');
     var shopifyImportFileName = document.querySelector('[data-aikaipin-shopify-import-file-name]');
     var shopifyImportPreview = document.querySelector('[data-aikaipin-shopify-import-preview]');
     var shopifyImportPreviewButton = document.querySelector('[data-aikaipin-shopify-import-preview-button]');
@@ -82,6 +85,7 @@
     var pendingProductDeletion = null;
     var importingProductId = null;
     var shopifyImportToken = '';
+    var editingProductPayload = null;
     var filters = {
         keyword: document.querySelector('[data-aikaipin-filter="keyword"]'),
         category: document.querySelector('[data-aikaipin-filter="category"]'),
@@ -107,6 +111,10 @@
 
     function templateUrl(template, productId) {
         return String(template || '').replace('__product__', encodeURIComponent(productId));
+    }
+
+    function productPageUrl(template, productId, pageId) {
+        return templateUrl(template, productId).replace('__page__', encodeURIComponent(pageId));
     }
 
     function filterValue(name) {
@@ -855,10 +863,45 @@
         if (createShopifyCsvSection) {
             createShopifyCsvSection.hidden = Boolean(editingProductId);
         }
-        if (uploadShopifyCsv) {
-            uploadShopifyCsv.disabled = Boolean(editingProductId);
+        if (mainLandingField) {
+            mainLandingField.hidden = !editingProductId;
         }
         setUploadSubmitState(false);
+    }
+
+    function shopifyCsvPairRows() {
+        return uploadShopifyCsvList ? Array.prototype.slice.call(uploadShopifyCsvList.querySelectorAll('[data-aikaipin-csv-pair]')) : [];
+    }
+
+    function refreshShopifyCsvPairs() {
+        var pairs = shopifyCsvPairRows();
+        pairs.forEach(function (pair, index) {
+            var number = pair.querySelector('[data-aikaipin-csv-pair-number]');
+            var remove = pair.querySelector('[data-aikaipin-remove-csv-pair]');
+            if (number) number.textContent = String(index + 1);
+            if (remove) remove.disabled = pairs.length === 1;
+        });
+        if (addShopifyCsvPair) addShopifyCsvPair.disabled = pairs.length >= 10;
+    }
+
+    function addShopifyCsvPairRow() {
+        if (!uploadShopifyCsvList) return;
+        if (shopifyCsvPairRows().length >= 10) {
+            notify('warning', '最多添加 10 个产品页', '一次最多上传 10 个 CSV 文件。');
+            return;
+        }
+        var pair = document.createElement('div');
+        pair.className = 'aikaipin-csv-link-row';
+        pair.setAttribute('data-aikaipin-csv-pair', '');
+        pair.innerHTML = '<div class="aikaipin-csv-link-index" data-aikaipin-csv-pair-number></div>' +
+            '<div class="aikaipin-csv-link-file-input"><label>产品 CSV 文件 <span class="text-red">*</span></label>' +
+            '<input class="form-control" type="file" name="shopify_csvs[]" accept=".csv,text/csv" required data-aikaipin-csv-file>' +
+            '<small data-aikaipin-csv-file-meta>请选择一个 CSV 文件</small></div>' +
+            '<div class="aikaipin-csv-link-input"><label>对应落地页链接 <span class="text-red">*</span></label>' +
+            '<input class="form-control" type="url" name="shopify_landing_page_urls[]" maxlength="2048" placeholder="https://example.com/products/..." required data-aikaipin-csv-landing-url></div>' +
+            '<button class="btn btn-danger btn-sm aikaipin-csv-pair-remove" type="button" data-aikaipin-remove-csv-pair title="删除这一组"><i class="fa fa-trash"></i></button>';
+        uploadShopifyCsvList.appendChild(pair);
+        refreshShopifyCsvPairs();
     }
 
     function resetUploadModal() {
@@ -887,8 +930,13 @@
         renderImagePreviews();
         updateFileName(referenceFileName, null);
         updateFileName(packageFileName, null);
-        updateFileName(uploadShopifyCsvName, null);
+        if (uploadShopifyCsvList) {
+            uploadShopifyCsvList.innerHTML = '';
+            addShopifyCsvPairRow();
+        }
+        setUploadMode(null);
         renderShopifyEditData(null);
+        editingProductPayload = null;
 
         if (uploadProgress) {
             uploadProgress.hidden = true;
@@ -899,7 +947,6 @@
         }
         resetProductSaveProgress();
         syncChoiceButtons();
-        setUploadMode(null);
     }
 
     function shopifySummaryGrid(data) {
@@ -925,25 +972,116 @@
             }).join('') + '</tbody></table></div>';
     }
 
-    function renderShopifyEditData(data) {
+    function decorateShopifyEditCards(productPages) {
+        if (!shopifyEditContent || !editingProductId) return;
+
+        var toolbar = document.createElement('div');
+        toolbar.className = 'aikaipin-shopify-page-toolbar';
+        toolbar.innerHTML = '<div><strong>' + (productPages.length ? '产品 CSV 与落地页' : '尚未添加产品 CSV') + '</strong>' +
+            '<span>' + (productPages.length ? '每个 CSV 对应一个独立落地页链接' : '上传 CSV 后需填写一一对应的落地页链接') + '</span></div>' +
+            '<button type="button" class="btn btn-info btn-sm" data-aikaipin-edit-add-product-page><i class="fa fa-plus"></i> 添加产品 CSV</button>';
+        shopifyEditContent.insertBefore(toolbar, shopifyEditContent.firstChild);
+
+        Array.prototype.slice.call(shopifyEditContent.querySelectorAll('.aikaipin-shopify-page-card')).forEach(function (card, index) {
+            var page = productPages[index];
+            if (!page) return;
+            var heading = card.querySelector('.aikaipin-shopify-page-heading');
+            var oldLanding = heading ? heading.querySelector('.aikaipin-shopify-page-link, .aikaipin-shopify-page-missing') : null;
+            if (oldLanding) oldLanding.remove();
+            if (heading) {
+                var actions = document.createElement('div');
+                actions.className = 'aikaipin-shopify-page-actions';
+                actions.innerHTML = '<button type="button" class="btn btn-danger btn-xs" data-aikaipin-delete-product-page="' + escapeHtml(page.id) + '"><i class="fa fa-trash"></i> 删除 CSV</button>';
+                heading.appendChild(actions);
+            }
+            var landing = document.createElement('div');
+            landing.className = 'aikaipin-shopify-page-landing';
+            landing.innerHTML = '<label>对应落地页链接</label><div class="input-group">' +
+                '<input class="form-control" type="url" maxlength="2048" placeholder="https://example.com/products/..." value="' + escapeHtml(page.landing_page_url || '') + '" data-aikaipin-product-page-url="' + escapeHtml(page.id) + '">' +
+                '<span class="input-group-btn"><button type="button" class="btn btn-primary" data-aikaipin-save-product-page="' + escapeHtml(page.id) + '"><i class="fa fa-save"></i> 保存链接</button></span></div>';
+            if (heading) card.insertBefore(landing, heading.nextSibling);
+        });
+    }
+
+    function openShopifyImportFromEdit() {
+        if (!editingProductPayload || !editingProductId) return;
+        var button = document.createElement('button');
+        button.setAttribute('data-aikaipin-product-id', String(editingProductId));
+        button.setAttribute('data-aikaipin-product-name', editingProductPayload.name || '');
+        button.setAttribute('data-aikaipin-product-code', editingProductPayload.product_code || '');
+        button.setAttribute('data-aikaipin-landing-page-url', '');
+        if (uploadModal && window.jQuery) window.jQuery(uploadModal).modal('hide');
+        window.setTimeout(function () { openShopifyImport(button); }, 220);
+    }
+
+    function saveProductPage(pageId, button) {
+        var input = shopifyEditContent.querySelector('[data-aikaipin-product-page-url="' + pageId + '"]');
+        var url = input ? String(input.value || '').trim() : '';
+        if (url && !input.checkValidity()) {
+            notify('warning', '链接格式不正确', '请填写以 http:// 或 https:// 开头的完整落地页链接。');
+            input.focus();
+            return;
+        }
+        button.disabled = true;
+        jsonRequest(productPageUrl(config.productPageUpdateUrlTemplate, editingProductId, pageId), 'PATCH', { landing_page_url: url })
+            .then(function (payload) { notify('success', '保存成功', payload.message || '落地页链接已保存。'); })
+            .catch(function (error) { notify('error', '保存失败', error.message || '落地页链接保存失败。'); })
+            .then(function () { button.disabled = false; });
+    }
+
+    function deleteProductPage(pageId, button) {
+        if (!window.confirm('确认删除这个产品 CSV 及其产品页资料？此操作不会删除整个商品。')) return;
+        button.disabled = true;
+        jsonRequest(productPageUrl(config.productPageDeleteUrlTemplate, editingProductId, pageId), 'DELETE')
+            .then(function (payload) {
+                editingProductPayload.product_pages = payload.product_pages || [];
+                editingProductPayload.shopify_data = payload.shopify_data || null;
+                renderShopifyEditData(editingProductPayload.shopify_data, editingProductPayload.product_pages);
+                notify('success', '删除成功', payload.message || '产品 CSV 已删除。');
+            }).catch(function (error) {
+                button.disabled = false;
+                notify('error', '删除失败', error.message || '产品 CSV 删除失败。');
+            });
+    }
+
+    function renderShopifyEditData(data, pages) {
         if (!shopifyEditSection || !shopifyEditContent) return;
-        shopifyEditSection.hidden = !data;
+        var productPages = Array.isArray(pages) ? pages : [];
+        shopifyEditSection.hidden = !editingProductId && !data && !productPages.length;
+        if (productPages.length) {
+            shopifyEditContent.innerHTML = productPages.map(function (page, index) {
+                var pageData = page.shopify_data || {};
+                var landing = page.landing_page_url
+                    ? '<a class="aikaipin-shopify-page-link" href="' + escapeHtml(page.landing_page_url) + '" target="_blank" rel="noopener noreferrer" title="' + escapeHtml(page.landing_page_url) + '"><i class="fa fa-external-link"></i> 打开落地页</a>'
+                    : '<span class="aikaipin-shopify-page-missing"><i class="fa fa-exclamation-circle"></i> 未设置落地页</span>';
+                return '<div class="aikaipin-shopify-page-card"><div class="aikaipin-shopify-page-heading"><h5><i class="fa fa-file-text-o"></i> ' +
+                    escapeHtml(page.name || ('产品页 ' + (index + 1))) +
+                    (page.is_default ? ' <span class="label label-primary">默认</span>' : '') + '</h5>' + landing + '</div>' +
+                    shopifySummaryGrid(pageData) + shopifyVariantsTable(pageData) + '</div>';
+            }).join('');
+            decorateShopifyEditCards(productPages);
+            return;
+        }
         shopifyEditContent.innerHTML = data ? shopifySummaryGrid(data) + shopifyVariantsTable(data) : '';
+        decorateShopifyEditCards([]);
     }
 
     function resetShopifyImport() {
         importingProductId = null;
         shopifyImportToken = '';
+        if (shopifyImportPageName) shopifyImportPageName.value = '';
+        if (shopifyImportLandingPageUrl) shopifyImportLandingPageUrl.value = '';
         if (shopifyImportFile) shopifyImportFile.value = '';
         if (shopifyImportFileName) { shopifyImportFileName.hidden = true; shopifyImportFileName.textContent = ''; }
         if (shopifyImportPreview) shopifyImportPreview.innerHTML = '';
         if (shopifyImportPreviewButton) { shopifyImportPreviewButton.hidden = false; shopifyImportPreviewButton.disabled = false; shopifyImportPreviewButton.innerHTML = '<i class="fa fa-search"></i> 校验并预览'; }
-        if (shopifyImportConfirm) { shopifyImportConfirm.hidden = true; shopifyImportConfirm.disabled = false; shopifyImportConfirm.innerHTML = '<i class="fa fa-check"></i> 确认补充数据'; }
+        if (shopifyImportConfirm) { shopifyImportConfirm.hidden = true; shopifyImportConfirm.disabled = false; shopifyImportConfirm.innerHTML = '<i class="fa fa-check"></i> 保存为新产品页'; }
     }
 
     function openShopifyImport(button) {
         resetShopifyImport();
         importingProductId = Number(button.getAttribute('data-aikaipin-product-id'));
+        if (shopifyImportLandingPageUrl) shopifyImportLandingPageUrl.value = button.getAttribute('data-aikaipin-landing-page-url') || '';
         if (shopifyImportProduct) {
             shopifyImportProduct.innerHTML = '<strong>' + escapeHtml(button.getAttribute('data-aikaipin-product-name')) + '</strong><span>' +
                 escapeHtml(button.getAttribute('data-aikaipin-product-code')) + '</span>';
@@ -953,12 +1091,26 @@
 
     function previewShopifyImport() {
         var file = shopifyImportFile && shopifyImportFile.files && shopifyImportFile.files[0];
+        var pageName = shopifyImportPageName ? shopifyImportPageName.value.trim() : '';
+        var landingPageUrl = shopifyImportLandingPageUrl ? shopifyImportLandingPageUrl.value.trim() : '';
+        if (!pageName) {
+            notify('warning', '请填写产品页名称', '请先填写便于上架时识别的产品页名称。');
+            if (shopifyImportPageName) shopifyImportPageName.focus();
+            return;
+        }
+        if (!landingPageUrl || (shopifyImportLandingPageUrl && !shopifyImportLandingPageUrl.checkValidity())) {
+            notify('warning', '请填写有效的落地页链接', '每个 CSV 文件必须绑定一个以 http:// 或 https:// 开头的落地页链接。');
+            if (shopifyImportLandingPageUrl) shopifyImportLandingPageUrl.focus();
+            return;
+        }
         if (!importingProductId || !file) {
             notify('warning', '请选择文件', '请选择 Shopify 导出的 CSV 商品文件。');
             return;
         }
         var data = new FormData();
         data.append('shopify_csv', file, file.name);
+        data.append('page_name', pageName);
+        data.append('landing_page_url', landingPageUrl);
         shopifyImportPreviewButton.disabled = true;
         shopifyImportPreviewButton.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 正在校验...';
         formDataRequest(templateUrl(config.shopifyImportPreviewUrlTemplate, importingProductId), data).then(function (payload) {
@@ -981,14 +1133,18 @@
         if (!shopifyImportToken || !importingProductId) return;
         shopifyImportConfirm.disabled = true;
         shopifyImportConfirm.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 正在导入...';
-        jsonRequest(templateUrl(config.shopifyImportStoreUrlTemplate, importingProductId), 'POST', {preview_token: shopifyImportToken}).then(function (payload) {
+        jsonRequest(templateUrl(config.shopifyImportStoreUrlTemplate, importingProductId), 'POST', {
+            preview_token: shopifyImportToken,
+            page_name: shopifyImportPageName ? shopifyImportPageName.value.trim() : '',
+            landing_page_url: shopifyImportLandingPageUrl ? shopifyImportLandingPageUrl.value.trim() : ''
+        }).then(function (payload) {
             notify('success', '导入成功', payload.message || 'Shopify 商品资料已补充。');
             if (shopifyImportModal && window.jQuery) window.jQuery(shopifyImportModal).modal('hide');
             window.setTimeout(function () { window.location.assign(window.location.href); }, 350);
         }).catch(function (error) {
             notify('error', '导入失败', error.message || 'Shopify 商品资料导入失败。');
             shopifyImportConfirm.disabled = false;
-            shopifyImportConfirm.innerHTML = '<i class="fa fa-check"></i> 确认补充数据';
+            shopifyImportConfirm.innerHTML = '<i class="fa fa-check"></i> 保存为新产品页';
         });
     }
 
@@ -1229,7 +1385,11 @@
     function submitProduct() {
         var packageFileToUpload = packageFile && packageFile.files && packageFile.files[0];
         var referenceFileToUpload = referenceFile && referenceFile.files && referenceFile.files[0];
-        var shopifyCsvToUpload = uploadShopifyCsv && uploadShopifyCsv.files && uploadShopifyCsv.files[0];
+        var csvPairs = shopifyCsvPairRows();
+        var shopifyCsvFiles = csvPairs.map(function (pair) {
+            var input = pair.querySelector('[data-aikaipin-csv-file]');
+            return input && input.files ? input.files[0] : null;
+        }).filter(Boolean);
         var isEditing = editingProductId !== null;
         var packageRequest;
 
@@ -1244,11 +1404,27 @@
             return;
         }
 
-        if (!isEditing && !shopifyCsvToUpload) {
+        if (!isEditing && !shopifyCsvFiles.length) {
             notify('warning', '请选择 Shopify 商品 CSV', '上传 Shopify 商品 CSV 文件为必填项，请选择文件后再保存。');
-            uploadShopifyCsv.focus();
+            var firstCsvInput = uploadShopifyCsvList && uploadShopifyCsvList.querySelector('[data-aikaipin-csv-file]');
+            if (firstCsvInput) firstCsvInput.focus();
             setUploadSubmitState(false);
             return;
+        }
+        if (!isEditing) {
+            var landingInputs = uploadShopifyCsvList ? Array.prototype.slice.call(uploadShopifyCsvList.querySelectorAll('[data-aikaipin-csv-landing-url]')) : [];
+            var invalidLanding = landingInputs.find(function (input) { return !String(input.value || '').trim() || !input.checkValidity(); });
+            var incompleteFile = csvPairs.find(function (pair) {
+                var input = pair.querySelector('[data-aikaipin-csv-file]');
+                return !input || !input.files || !input.files[0];
+            });
+            if (landingInputs.length !== shopifyCsvFiles.length || invalidLanding || incompleteFile) {
+                notify('warning', '请完善落地页链接', '每个 CSV 文件都必须填写一个有效的落地页链接。');
+                if (invalidLanding) invalidLanding.focus();
+                else if (incompleteFile) incompleteFile.querySelector('[data-aikaipin-csv-file]').focus();
+                setUploadSubmitState(false);
+                return;
+            }
         }
 
         isProductSubmitting = true;
@@ -1369,6 +1545,7 @@
         jsonRequest(productEditUrl(productId), 'GET').then(function (product) {
             resetUploadModal();
             setUploadMode(Number(product.id));
+            editingProductPayload = product;
             uploadName.value = product.name || '';
             if (uploadLandingUrl) {
                 uploadLandingUrl.value = product.landing_page_url || '';
@@ -1386,7 +1563,7 @@
             updateExistingFileName(referenceFileName, existingReferenceFile);
             updateExistingFileName(packageFileName, existingPackageFile);
             setAuthorizedDepartments(product.authorized_department_ids);
-            renderShopifyEditData(product.shopify_data || null);
+            renderShopifyEditData(product.shopify_data || null, product.product_pages || []);
             syncChoiceButtons();
 
             if (uploadModal && window.jQuery) {
@@ -1475,10 +1652,21 @@
         });
     }
 
-    if (uploadShopifyCsv) {
-        uploadShopifyCsv.addEventListener('change', function () {
-            var file = uploadShopifyCsv.files && uploadShopifyCsv.files[0];
-            updateFileName(uploadShopifyCsvName, file);
+    if (addShopifyCsvPair) addShopifyCsvPair.addEventListener('click', addShopifyCsvPairRow);
+    if (uploadShopifyCsvList) {
+        uploadShopifyCsvList.addEventListener('click', function (event) {
+            var remove = event.target.closest('[data-aikaipin-remove-csv-pair]');
+            if (!remove || remove.disabled) return;
+            var pair = remove.closest('[data-aikaipin-csv-pair]');
+            if (pair) pair.remove();
+            refreshShopifyCsvPairs();
+        });
+        uploadShopifyCsvList.addEventListener('change', function (event) {
+            var input = event.target.closest('[data-aikaipin-csv-file]');
+            if (!input) return;
+            var file = input.files && input.files[0];
+            var meta = input.closest('[data-aikaipin-csv-pair]').querySelector('[data-aikaipin-csv-file-meta]');
+            if (meta) meta.textContent = file ? file.name + ' · ' + (file.size / 1048576).toFixed(2) + ' MB' : '请选择一个 CSV 文件';
         });
     }
 
@@ -1495,6 +1683,25 @@
     if (shopifyImportPreviewButton) shopifyImportPreviewButton.addEventListener('click', previewShopifyImport);
     if (shopifyImportConfirm) shopifyImportConfirm.addEventListener('click', confirmShopifyImport);
     if (shopifyImportModal && window.jQuery) window.jQuery(shopifyImportModal).on('hidden.bs.modal', resetShopifyImport);
+
+    if (shopifyEditContent) {
+        shopifyEditContent.addEventListener('click', function (event) {
+            var addButton = event.target.closest('[data-aikaipin-edit-add-product-page]');
+            if (addButton) {
+                openShopifyImportFromEdit();
+                return;
+            }
+            var saveButton = event.target.closest('[data-aikaipin-save-product-page]');
+            if (saveButton) {
+                saveProductPage(Number(saveButton.getAttribute('data-aikaipin-save-product-page')), saveButton);
+                return;
+            }
+            var deleteButton = event.target.closest('[data-aikaipin-delete-product-page]');
+            if (deleteButton) {
+                deleteProductPage(Number(deleteButton.getAttribute('data-aikaipin-delete-product-page')), deleteButton);
+            }
+        });
+    }
 
     if (uploadForm) {
         uploadForm.addEventListener('submit', function (event) {

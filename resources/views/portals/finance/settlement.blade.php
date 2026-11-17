@@ -178,6 +178,9 @@
 @foreach($columns as $field => $label)
 @php($splitRefundNote = $orderView ? \App\Portals\Finance\FinancePayPalSettlementOrders::splitRefundNote($row, $field) : null)
 @php($cellValue = ($row['card_layout'] ?? $row)[$field] ?? null)
+@if($field === 'erp_order')
+@php($cellValue = \App\Portals\Finance\FinanceCatalog::displayTongtuOrder($cellValue))
+@endif
 <td data-settlement-column="{{ $field }}" title="{{ $splitRefundNote ?? $cellValue ?? '' }}" @class(['settlement-pending' => $cellValue === null])>
 @if($splitRefundNote !== null)
 {{ $splitRefundNote }}
@@ -381,12 +384,22 @@ document.querySelectorAll('[data-settlement-close]').forEach(function(button){
     button.addEventListener('click',function(){button.closest('dialog').close();});
 });
 if(editor){
+    var settlementForm=editor.querySelector('form');
+    var originalTongtuOrder, displayedTongtuOrder;
+    settlementForm.addEventListener('formdata',function(event){
+        if(event.formData.get('erp_order')===displayedTongtuOrder){
+            event.formData.set('erp_order',originalTongtuOrder);
+        }
+    });
     document.addEventListener('click',function(event){
         var button=event.target.closest('[data-edit-settlement]');
         if(!button)return;
         var form=editor.querySelector('form');
         form.reset();
         var row=JSON.parse(button.dataset.row);
+        originalTongtuOrder=row.erp_order??'';
+        displayedTongtuOrder=button.dataset.tongtuDisplay;
+        if(Object.hasOwn(row,'erp_order'))row.erp_order=displayedTongtuOrder;
         Object.keys(row).forEach(function(key){
             var input=form.elements[key];
             if(!input)return;

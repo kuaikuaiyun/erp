@@ -277,7 +277,7 @@ return [
             'submitter' => 'Submitter',
             'updated_at' => 'Updated At',
             'operation' => 'Actions',
-            'record_summary' => ':platform · :currency :spend · :orders orders',
+            'record_summary' => ':platform · :currency :spend · :orders orders · ROI :roi',
         ],
         'actions' => [
             'new' => 'New Evaluation',
@@ -320,6 +320,8 @@ return [
             'actual_spend_placeholder' => 'Enter amount',
             'orders' => 'Orders',
             'orders_placeholder' => 'Enter quantity',
+            'roi' => 'ROI',
+            'roi_placeholder' => 'Enter ROI',
             'data_row_title' => 'Placement Data :number',
         ],
         'platform_options' => [

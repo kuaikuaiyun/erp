@@ -6,6 +6,17 @@ class FinanceSummaryDependencies
 {
     public function resolve(\Illuminate\Database\Connection $db): void
     {
+        $pending = $db->table('finance_summary_changes');
+        if ($pending->count() > 1000) {
+            $lastId = $pending->max('id');
+            // A large import can produce thousands of expensive dependency lookups.
+            // Invalidate every existing period once and leave newer changes queued.
+            $db->transaction(function () use ($db, $lastId): void {
+                $db->table('finance_summary_periods')->increment('revision');
+                $db->table('finance_summary_changes')->where('id', '<=', $lastId)->delete();
+            });
+        }
+
         $db->table('finance_summary_changes')->orderBy('id')->chunkById(200, function ($changes) use ($db): void {
             $db->transaction(function () use ($db, $changes): void {
                 $affected = [];

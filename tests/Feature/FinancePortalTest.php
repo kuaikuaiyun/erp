@@ -2691,6 +2691,8 @@ class FinancePortalTest extends TestCase
 
     public function test_transaction_summary_paginates_groups_preserves_filters_and_exports_all_groups(): void
     {
+        (require database_path('migrations/2026_11_13_000004_create_finance_report_snapshots.php'))->up();
+
         $rows = [];
         for ($index = 1; $index <= 25; $index++) {
             $rows[$index + 1] = [...$this->recordRow(), '日期' => '2026-11-02', '交易 ID' => 'PAGE-'.$index, '订阅类型' => '订阅复购'.$index.'次'];
@@ -2705,7 +2707,10 @@ class FinancePortalTest extends TestCase
         $this->assertSame('transactions', $query['view']);
         $this->assertSame('USD', $query['currency']);
         $this->assertSame('2026-11', $query['month']);
+        $this->assertNotNull($first->viewData('reportSnapshot'));
+        $this->assertSame($first->viewData('reportSnapshot'), $query['report_snapshot']);
         $second = $this->get($nextUrl)->assertOk();
+        $this->assertSame($first->viewData('reportSnapshot'), $second->viewData('reportSnapshot'));
         $this->assertCount(10, $second->viewData('items'));
         $this->assertEmpty(array_intersect(array_column($first->viewData('items'), 'subscription'), array_column($second->viewData('items'), 'subscription')));
         $last = $this->get($url.'&page=3')->assertOk();
@@ -2893,7 +2898,7 @@ class FinancePortalTest extends TestCase
         $this->assertSame('', $service->rows('credit_card', [])->first()['domain']);
     }
 
-    public function test_both_summary_tabs_check_the_submitted_filters_until_the_snapshot_is_ready(): void
+    public function test_transaction_summary_runs_live_while_settlement_summary_checks_the_snapshot(): void
     {
         (require database_path('migrations/2026_11_13_000004_create_finance_report_snapshots.php'))->up();
         (require database_path('migrations/2026_11_13_000006_track_finance_report_refresh_attempts.php'))->up();
@@ -2904,10 +2909,12 @@ class FinancePortalTest extends TestCase
         $transactions = '/finance/reports/summary?view=transactions&month=2026-10&channel=paypal&currency=USD';
         $this->freezeTime();
 
-        foreach ([$settlement, $transactions] as $url) {
-            $this->get($url)->assertOk()->assertSee('data-finance-snapshot-status="pending"', false);
-            $this->getJson($url.'&snapshot_status=1')->assertOk()->assertJsonPath('state', 'pending');
-        }
+        $this->get($settlement)->assertOk()->assertSee('data-finance-snapshot-status="pending"', false);
+        $this->getJson($settlement.'&snapshot_status=1')->assertOk()->assertJsonPath('state', 'pending');
+        $first = $this->get($transactions)->assertOk()->viewData('reportSnapshot');
+        $second = $this->get($transactions)->assertOk()->viewData('reportSnapshot');
+        $this->assertNotNull($first);
+        $this->assertNotSame($first, $second);
 
         $this->assertTrue($snapshots->refresh(app(\App\Portals\Finance\Http\Controllers\FinanceController::class), false));
         foreach ([$settlement, $transactions] as $url) {
@@ -2916,7 +2923,7 @@ class FinancePortalTest extends TestCase
         $this->getJson(str_replace('team=North', 'team=South', $settlement).'&snapshot_status=1')
             ->assertOk()->assertJsonPath('state', 'pending');
         $this->getJson(str_replace('currency=USD', 'currency=EUR', $transactions).'&snapshot_status=1')
-            ->assertOk()->assertJsonPath('state', 'pending');
+            ->assertOk()->assertJsonPath('state', 'ready');
     }
 
     public function test_report_queries_and_reset_preserve_the_selected_tab(): void
@@ -3150,6 +3157,62 @@ class FinancePortalTest extends TestCase
         $this->get('http://caiwu.kky.com/')->assertForbidden();
     }
 
+    public function test_xuzong_order_costs_are_editable_on_only_one_successful_non_add_on_trade(): void
+    {
+        (require database_path('migrations/2026_11_10_000003_add_xuzong_credit_orders_report_menu.php'))->up();
+        $report = '/finance/reports/xuzong-credit';
+        $dataset = \App\Portals\Finance\FinanceLogisticsCreditOrders::IMPORTED_DATASET;
+        $header = "商户名称,商户订单号,平台订单号,交易 ID,货币,总额,状态,是否加购,创建时间,物流-元,采购成本-元\n";
+        $primary = 'SHANGYUN-v2,SAME-ORDER,P-MAIN,TXN-MAIN,USD,20,SUCCESS,否,2026-11-03 17:00:00';
+        $duplicate = 'SHANGYUN-v2,SAME-ORDER,,TXN-DUP,USD,20,SUCCESS,否,2026-11-03 17:01:00';
+        $failed = 'SHANGYUN-v2,SAME-ORDER,P-FAILED,TXN-FAILED,USD,20,FAILED,否,2026-11-03 17:02:00';
+        $addOn = 'SHANGYUN-v2,SAME-ORDER,P-ADD,TXN-ADD,USD,10,SUCCESS,是,2026-11-03 17:03:00';
+        $upload = fn ($csv) => $this->postJson($report.'/import', [
+            'file' => UploadedFile::fake()->createWithContent('orders.csv', $header.$csv),
+        ]);
+
+        $upload(implode(",,\n", [$duplicate, $failed, $addOn, $primary]).",,\n")->assertOk();
+        $this->get($report.'?reference=TXN-DUP')->assertOk()->assertSee('不可填写')
+            ->assertViewHas('xuzongRows', fn ($rows) => $rows->sole()['_cost_editable'] === false);
+
+        $headers = \App\Portals\Finance\FinanceXuzongCreditReport::headers();
+        $columns = array_keys(array_intersect($headers, ['交易 ID', '物流-元', '采购成本-元']));
+        $query = ['export_scope' => 'filtered', 'reference' => 'SAME-ORDER', 'report_columns' => $columns];
+        foreach (['xlsx', 'xls'] as $format) {
+            $sheet = $this->readDownload($this->get($report.'/export?'.http_build_query($query + ['export_format' => $format]))
+                ->assertOk()->streamedContent());
+            $this->assertTrue($sheet->getProtection()->getSheet());
+            $this->assertSame([
+                ['TXN-MAIN', '', ''],
+                ['TXN-ADD', '不可填写', '不可填写'],
+                ['TXN-FAILED', '不可填写', '不可填写'],
+                ['TXN-DUP', '不可填写', '不可填写'],
+            ], array_map(fn ($row) => array_map(fn ($value) => $value ?? '', $row), array_slice($sheet->toArray(), 1)));
+            foreach (['B', 'C'] as $column) {
+                $this->assertSame('unprotected', $sheet->getStyle($column.'2')->getProtection()->getLocked());
+                $this->assertNotSame('unprotected', $sheet->getStyle($column.'3')->getProtection()->getLocked());
+            }
+        }
+
+        foreach ([$duplicate, $failed, $addOn] as $locked) {
+            $upload($primary.",8,11\n".$locked.",3,4\n")->assertUnprocessable()->assertJsonValidationErrors('file');
+            $this->assertTrue(blank(FinanceRecord::where('dataset', $dataset)->where('reference', 'P-MAIN')->sole()->payload['物流-元'] ?? null));
+        }
+        $sheet = $this->readDownload($this->get($report.'/export?reference=SAME-ORDER&export_scope=filtered')
+            ->assertOk()->streamedContent());
+        $this->assertSame('TXN-MAIN', $sheet->getCell('D2')->getValue());
+        foreach (['物流-元' => 8, '采购成本-元' => 11] as $field => $value) {
+            $column = array_search($field, array_values($headers), true) + 1;
+            $this->assertSame($field, $sheet->getCell([$column, 1])->getValue());
+            $sheet->setCellValue([$column, 2], $value);
+        }
+        $this->postJson($report.'/import', ['file' => $this->upload($sheet->getParent())])->assertOk();
+        $this->assertSame(4, FinanceRecord::where('dataset', $dataset)->count());
+        $payload = FinanceRecord::where('dataset', $dataset)->where('reference', 'P-MAIN')->sole()->payload;
+        $this->assertSame('8', $payload['物流-元']);
+        $this->assertSame('11', $payload['采购成本-元']);
+    }
+
     public function test_credit_order_page_reads_live_logistics_orders_for_filters_and_exports(): void
     {
         Schema::create('logistics_orders', function (Blueprint $table): void {
@@ -3363,6 +3426,26 @@ class FinancePortalTest extends TestCase
         $this->assertSame('late.example.com', $lateExport[1][array_search('域名', $lateExport[0], true)]);
         $this->assertSame('FAILED', $lateExport[1][array_search('原始支付状态', $lateExport[0], true)]);
         DB::table('logistics_orders')->where('id', $lateId)->delete();
+        Schema::create('logistics_order_payment_references', function (Blueprint $table): void {
+            $table->unsignedBigInteger('logistics_order_id');
+            $table->string('reference_number');
+            $table->string('reference_type');
+        });
+        $upsellCsv = "商户名称,商户订单号,交易 ID,货币,总额,状态,创建时间\n"
+            ."SHANGYUN-v2,UPSELL-ORDER,TXN-UPSELL,USD,5,SUCCESS,2026-11-03 17:02:00\n";
+        $uploadUpsell = fn () => $this->postJson($report.'/import', ['file' => UploadedFile::fake()->createWithContent('upsell.csv', $upsellCsv)]);
+        $uploadUpsell()->assertOk()->assertJsonPath('matched', 0);
+        DB::table('logistics_order_payment_references')->insert([
+            'logistics_order_id' => $id, 'reference_number' => 'TXN-UPSELL', 'reference_type' => 'upsell',
+        ]);
+        $this->get($report.'?reference=TXN-UPSELL')->assertOk()->assertViewHas('xuzongRows', fn ($rows) =>
+            $rows->sole()['域名'] === 'example.com' && $rows->sole()['是否加购'] === '加购'
+            && ! $rows->sole()['_cost_editable'] && ! str_contains($rows->sole()['备注'], '系统无匹配订单'));
+        $uploadUpsell()->assertOk()->assertJsonPath('matched', 1);
+        $upsell = FinanceRecord::where('dataset', \App\Portals\Finance\FinanceLogisticsCreditOrders::IMPORTED_DATASET)
+            ->where('reference', 'TXN-UPSELL')->sole();
+        $this->assertSame($id, $upsell->payload['_linked_logistics_id']);
+        $this->assertArrayNotHasKey('_replaced_logistics_id', $upsell->payload);
         FinanceRecord::where('dataset', \App\Portals\Finance\FinanceLogisticsCreditOrders::IMPORTED_DATASET)->delete();
 
         $migration->down();

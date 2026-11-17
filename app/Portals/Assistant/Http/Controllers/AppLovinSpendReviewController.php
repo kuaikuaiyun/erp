@@ -167,6 +167,7 @@ class AppLovinSpendReviewController extends Controller
             'operator' => $filters['operator'] ?? '', 'selectedDepartmentIds' => $selectedDepartmentIds, 'overThreshold' => $filters['over_threshold'] ?? '', 'accountNumber' => $accountNumber, 'departmentOptions' => $departmentOptions, 'accounts' => $accounts, 'threshold' => 5000,
             'appLovinIndexUrl' => $isDashboard ? route('operation-dashboard.applovin-spends.index') : route('assistant.applovin-spends.index'),
             'appLovinScreenshotRoute' => $isDashboard ? 'operation-dashboard.applovin-spends.screenshot' : 'assistant.applovin-spends.screenshot',
+            'appLovinBindingRoute' => $isDashboard ? 'operation-dashboard.applovin-spends.store-binding' : 'assistant.applovin-spends.store-binding',
             'stores' => $stores,
         ]);
     }
@@ -177,8 +178,11 @@ class AppLovinSpendReviewController extends Controller
         if ($context instanceof Response) {
             abort($context->getStatusCode());
         }
-        $this->authorization->assertAssistantPortal($context['portal']);
-        abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
+        $isDashboard = (string) $context['portal']->code === self::DASHBOARD_PORTAL_CODE;
+        if (! $isDashboard) {
+            $this->authorization->assertAssistantPortal($context['portal']);
+            abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
+        }
         $validated = $request->validate([
             'account_key' => ['required', 'string', 'size:64'],
             'store_id' => ['nullable', 'integer', Rule::exists((new AssistantDomainStore)->getTable(), 'id')],
@@ -186,7 +190,7 @@ class AppLovinSpendReviewController extends Controller
 
         $visibleIds = $this->storeOwners->visibleOperationDepartmentIds($context['user']);
         $account = OperationReport::query()->where('status', OperationReport::STATUS_APPROVED)
-            ->when(! $context['user']->isAdministrator(), fn ($query) => $visibleIds === [] ? $query->whereRaw('1=0') : $query->whereIn('operation_department_id', $visibleIds))
+            ->when(! $isDashboard && ! $context['user']->isAdministrator(), fn ($query) => $visibleIds === [] ? $query->whereRaw('1=0') : $query->whereIn('operation_department_id', $visibleIds))
             ->get()->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])->map(function (array $row) use ($report): array {
                 return [
                     'account_key' => AppLovinSpendScreenshot::accountKey((int) $report->operator_user_id, (string) ($row['agency'] ?? ''), (string) ($row['media_source'] ?? ''), (string) ($row['account_name'] ?? ''), (string) ($row['account_number'] ?? '')),

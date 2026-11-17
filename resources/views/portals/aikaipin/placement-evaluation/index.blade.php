@@ -5,18 +5,28 @@
 @php
     $portalOrigin = rtrim(request()->getSchemeAndHttpHost(), '/');
     $t = static fn (string $key, array $replace = []): string => __('aikaipin.'.$key, $replace);
+    $placementRouteNames = $placementRouteNames ?? [
+        'index' => 'aikaipin.placement-evaluations.index',
+        'store' => 'aikaipin.placement-evaluations.store',
+        'product_options' => 'aikaipin.placement-evaluations.product-options',
+        'product_show' => 'aikaipin.placement-evaluations.products.show',
+        'show' => 'aikaipin.placement-evaluations.show',
+        'update' => 'aikaipin.placement-evaluations.update',
+        'destroy' => 'aikaipin.placement-evaluations.destroy',
+        'image' => 'aikaipin.product-library.images.show',
+    ];
     $clientConfig = [
         'page' => 'placement-evaluation',
         'serverFilters' => true,
-        'filterResetUrl' => route('aikaipin.placement-evaluations.index'),
+        'filterResetUrl' => route($placementRouteNames['index']),
         'csrfToken' => csrf_token(),
         'noRecords' => $t('placement_evaluation.messages.no_records'),
         'placement' => [
-            'storeUrl' => route('aikaipin.placement-evaluations.store'),
-            'productOptionsUrl' => route('aikaipin.placement-evaluations.product-options'),
-            'showUrlTemplate' => route('aikaipin.placement-evaluations.show', ['evaluation' => '__evaluation__']),
-            'updateUrlTemplate' => route('aikaipin.placement-evaluations.update', ['evaluation' => '__evaluation__']),
-            'destroyUrlTemplate' => route('aikaipin.placement-evaluations.destroy', ['evaluation' => '__evaluation__']),
+            'storeUrl' => route($placementRouteNames['store']),
+            'productOptionsUrl' => route($placementRouteNames['product_options']),
+            'showUrlTemplate' => route($placementRouteNames['show'], ['evaluation' => '__evaluation__']),
+            'updateUrlTemplate' => route($placementRouteNames['update'], ['evaluation' => '__evaluation__']),
+            'destroyUrlTemplate' => route($placementRouteNames['destroy'], ['evaluation' => '__evaluation__']),
             'platformOptions' => trans('aikaipin.placement_evaluation.platform_options'),
             'currencyOptions' => trans('aikaipin.placement_evaluation.currency_options'),
             'newTitle' => $t('placement_evaluation.modal.title'),
@@ -53,6 +63,8 @@
             'actualSpendPlaceholder' => $t('placement_evaluation.fields.actual_spend_placeholder'),
             'ordersLabel' => $t('placement_evaluation.fields.orders'),
             'ordersPlaceholder' => $t('placement_evaluation.fields.orders_placeholder'),
+            'roiLabel' => $t('placement_evaluation.fields.roi'),
+            'roiPlaceholder' => $t('placement_evaluation.fields.roi_placeholder'),
             'productDisplay' => $t('placement_evaluation.fields.product_display', ['code' => ':code', 'name' => ':name']),
             'dateRangeDisplay' => $t('placement_evaluation.fields.date_range', ['start' => ':start', 'end' => ':end']),
             'detailLabels' => [
@@ -64,7 +76,7 @@
                 'remark' => $t('placement_evaluation.fields.remark'),
                 'records' => $t('placement_evaluation.table.placement_data'),
                 'noValue' => $t('placement_evaluation.fields.no_value'),
-                'recordSummary' => $t('placement_evaluation.table.record_summary', ['platform' => ':platform', 'currency' => ':currency', 'spend' => ':spend', 'orders' => ':orders']),
+                'recordSummary' => $t('placement_evaluation.table.record_summary', ['platform' => ':platform', 'currency' => ':currency', 'spend' => ':spend', 'orders' => ':orders', 'roi' => ':roi']),
             ],
         ],
     ];
@@ -76,14 +88,14 @@
 
 @push('scripts')
     <script>window.ErpAikaipinSubmissionConfig = @json($clientConfig);</script>
-    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-placement-evaluation.js?v=20261113-3"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/aikaipin-placement-evaluation.js?v=20261116-1"></script>
 @endpush
 
 @section('content')
 <section class="content aikaipin-submission-page" data-aikaipin-submission-page="placement-evaluation">
     <div class="box box-solid aikaipin-submission-filter-box">
         <div class="box-body">
-            <form class="aikaipin-submission-filter-form" method="get" action="{{ route('aikaipin.placement-evaluations.index') }}" data-aikaipin-list-filter-form>
+            <form class="aikaipin-submission-filter-form" method="get" action="{{ route($placementRouteNames['index']) }}" data-aikaipin-list-filter-form>
                 <div class="aikaipin-submission-filter-grid">
                     <div class="aikaipin-submission-filter-field">
                         <label for="aikaipin-placement-evaluation-keyword">{{ $t('placement_evaluation.filters.keyword') }}</label>
@@ -92,7 +104,7 @@
                     </div>
                     <div class="aikaipin-submission-filter-actions">
                         <button class="btn btn-primary" type="submit"><i class="fa fa-search" aria-hidden="true"></i> {{ $t('placement_evaluation.filters.search') }}</button>
-                        <a class="btn btn-default" href="{{ route('aikaipin.placement-evaluations.index') }}"><i class="fa fa-undo" aria-hidden="true"></i> {{ $t('placement_evaluation.filters.reset') }}</a>
+                        <a class="btn btn-default" href="{{ route($placementRouteNames['index']) }}"><i class="fa fa-undo" aria-hidden="true"></i> {{ $t('placement_evaluation.filters.reset') }}</a>
                     </div>
                 </div>
             </form>
@@ -112,7 +124,7 @@
                     <thead>
                     <tr>
                         <th>产品图片</th><th>产品编号</th><th>产品名称</th><th>产品分类</th>
-                        <th>来源平台 / 类型</th><th>投放总数据</th><th>测评人数</th><th>更新时间</th><th>测评状态</th><th>操作</th>
+                        <th>来源平台 / 类型</th><th>投放总数据</th><th>平均 ROI</th><th>测评人数</th><th>更新时间</th><th>测评状态</th><th>操作</th>
                     </tr>
                     </thead>
                     <tbody>
@@ -120,12 +132,13 @@
                         @php
                             $evaluations = $product->placementEvaluations;
                             $records = $evaluations->flatMap->records;
+                            $averageRoi = $records->whereNotNull('roi')->avg(fn($record) => (float) $record->roi);
                             $evaluatorCount = $evaluations->pluck('created_by')->unique()->count();
                             $updatedAt = $evaluations->max('updated_at') ?: $product->updated_at;
                             $images = $product->imageFiles();
                         @endphp
                         <tr data-aikaipin-list-row>
-                            <td>@if($images !== [])<img src="{{ route('aikaipin.product-library.images.show', [$product, 0, 'thumb' => 1, 'v' => $product->updated_at?->getTimestamp()]) }}" loading="lazy" decoding="async" width="52" height="52" style="width:52px;height:52px;object-fit:cover;border-radius:6px">@else — @endif</td>
+                            <td>@if($images !== [])<img src="{{ route($placementRouteNames['image'], [$product, 0, 'thumb' => 1, 'v' => $product->updated_at?->getTimestamp()]) }}" loading="lazy" decoding="async" width="52" height="52" style="width:52px;height:52px;object-fit:cover;border-radius:6px">@else — @endif</td>
                             <td><code>{{ $product->product_code }}</code></td>
                             <td><strong>{{ $product->name }}</strong></td>
                             <td>@foreach($product->categoryValues() as $category)<span class="label label-default">{{ $category }}</span> @endforeach</td>
@@ -155,14 +168,15 @@
                                     —
                                 @endforelse
                             </td>
+                            <td>@if($averageRoi !== null)<strong>{{ number_format($averageRoi, 2) }}</strong>@else — @endif</td>
                             <td><span class="badge bg-light-blue">{{ $evaluatorCount }}</span></td>
                             <td>{{ $updatedAt?->timezone(config('app.timezone'))->format('Y-m-d H:i') }}</td>
                             <td>@if($evaluations->isNotEmpty())<span class="label label-success">已测评</span>@else<span class="label label-danger">未测评</span>@endif</td>
-                            <td><button class="btn btn-default btn-sm" type="button" data-aikaipin-product-placement-view data-url="{{ route('aikaipin.placement-evaluations.products.show', $product) }}"><i class="fa fa-eye"></i> 查看详情</button></td>
+                            <td><button class="btn btn-default btn-sm" type="button" data-aikaipin-product-placement-view data-url="{{ route($placementRouteNames['product_show'], $product) }}"><i class="fa fa-eye"></i> 查看详情</button></td>
                         </tr>
                     @endforeach
                     <tr data-aikaipin-list-empty-row @if ($products->isNotEmpty()) hidden @endif>
-                        <td colspan="10">
+                        <td colspan="11">
                             <div class="aikaipin-submission-empty-state">
                                 <i class="fa fa-search" aria-hidden="true"></i>
                                 <p data-aikaipin-list-empty-message>{{ $t('placement_evaluation.messages.no_records') }}</p>

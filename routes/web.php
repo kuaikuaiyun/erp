@@ -146,6 +146,7 @@ Route::post('/internal-messages/{message}/read', [InternalMessageController::cla
 Route::get('/internal-messages/{message}/images/{image}', [InternalMessageController::class, 'image'])->whereNumber(['message', 'image'])->name('internal-messages.images.show');
 Route::get('/operation/internal-messages', [InternalMessageController::class, 'receivedIndex'])->name('operation.internal-messages.index');
 Route::post('/operation/internal-messages/{message}/process', [InternalMessageController::class, 'markProcessed'])->whereNumber('message')->name('operation.internal-messages.process');
+Route::post('/operation/internal-messages/listing-tasks/{task}/assign', [InternalMessageController::class, 'assignListingTask'])->whereNumber('task')->name('operation.internal-messages.listing-tasks.assign');
 Route::get('/api/operation/internal-messages/pending-count', [InternalMessageController::class, 'pendingCount'])->name('operation.internal-messages.pending-count');
 Route::get('/domain-stores', [DomainStoreController::class, 'index'])->name('assistant.domain-stores.index');
 Route::get('/advertising-media', [AdvertisingMediaController::class, 'index'])->name('assistant.advertising-media.index');
@@ -202,6 +203,13 @@ Route::get('/product-requests', [ProductRequestController::class, 'operationInde
 Route::get('/product-request-dedupe', [ProductRequestController::class, 'operationDedupeIndex'])->name('product-requests.operation.dedupe');
 Route::get('/operation/domain-stores', [OperationDomainStoreController::class, 'index'])->name('operation.domain-stores.index');
 Route::get('/operation/ai-product-library', [OperationAiProductLibraryController::class, 'index'])->name('operation.ai-product-library.index');
+Route::get('/operation/ai-product-library/placement-evaluations', [OperationAiProductLibraryController::class, 'placementEvaluationsIndex'])->name('operation.ai-product-library.placement-evaluations.index');
+Route::get('/operation/ai-product-library/placement-evaluations/product-options', [OperationAiProductLibraryController::class, 'placementEvaluationProductOptions'])->name('operation.ai-product-library.placement-evaluations.product-options');
+Route::get('/operation/ai-product-library/placement-evaluations/products/{product}', [OperationAiProductLibraryController::class, 'placementEvaluationProductDetails'])->name('operation.ai-product-library.placement-evaluations.products.show');
+Route::post('/operation/ai-product-library/placement-evaluations', [OperationAiProductLibraryController::class, 'storeStandalonePlacementEvaluation'])->name('operation.ai-product-library.placement-evaluations.standalone.store');
+Route::get('/operation/ai-product-library/placement-evaluations/{evaluation}', [OperationAiProductLibraryController::class, 'showStandalonePlacementEvaluation'])->whereNumber('evaluation')->name('operation.ai-product-library.placement-evaluations.show');
+Route::put('/operation/ai-product-library/placement-evaluations/{evaluation}', [OperationAiProductLibraryController::class, 'updateStandalonePlacementEvaluation'])->whereNumber('evaluation')->name('operation.ai-product-library.placement-evaluations.update');
+Route::delete('/operation/ai-product-library/placement-evaluations/{evaluation}', [OperationAiProductLibraryController::class, 'destroyStandalonePlacementEvaluation'])->whereNumber('evaluation')->name('operation.ai-product-library.placement-evaluations.destroy');
 Route::get('/operation/reports', [OperationReportController::class, 'index'])->name('operation.reports.index');
 Route::get('/operation/weekly-reports', [OperationReportController::class, 'weekly'])->name('operation.weekly-reports.index');
 Route::get('/operation/daily-submissions/{type}', [DailySubmissionController::class, 'index'])
@@ -325,8 +333,22 @@ Route::get('/operation-dashboard/operation-reports', [OperationReportDashboardCo
 Route::get('/operation-dashboard/operation-reports/order-details', [OperationReportDashboardController::class, 'orderDetails'])->name('operation-dashboard.operation-reports.order-details');
 Route::post('/operation-dashboard/operation-reports/department-scope', [OperationReportDashboardController::class, 'updateDepartmentScope'])->name('operation-dashboard.operation-reports.department-scope.update');
 Route::get('/operation-dashboard/applovin-spends', [AppLovinSpendReviewController::class, 'index'])->name('operation-dashboard.applovin-spends.index');
+Route::post('/operation-dashboard/applovin-spends/store-binding', [AppLovinSpendReviewController::class, 'bindStore'])
+    ->name('operation-dashboard.applovin-spends.store-binding');
 Route::get('/operation-dashboard/applovin-spends/screenshots/{screenshot}', [AppLovinSpendReviewController::class, 'screenshot'])
     ->whereNumber('screenshot')->name('operation-dashboard.applovin-spends.screenshot');
+Route::get('/operation-dashboard/fashion-operation-reports', [FashionOperationReportController::class, 'index'])
+    ->name('operation-dashboard.fashion-operation-reports.index');
+Route::get('/operation-dashboard/applovin-account-statistics', [AppLovinAccountStatisticsController::class, 'index'])
+    ->name('operation-dashboard.applovin-account-statistics.index');
+Route::get('/operation-dashboard/applovin-account-statistics/accounts', [AppLovinAccountStatisticsController::class, 'spendBand'])
+    ->name('operation-dashboard.applovin-account-statistics.spend-band');
+Route::get('/operation-dashboard/applovin-account-statistics/{operator}', [AppLovinAccountStatisticsController::class, 'show'])
+    ->whereNumber('operator')->name('operation-dashboard.applovin-account-statistics.show');
+Route::get('/operation-dashboard/applovin-performance-reports', [AppLovinPerformanceReportController::class, 'index'])
+    ->name('operation-dashboard.applovin-performance-reports.index');
+Route::get('/operation-dashboard/fashion-applovin-performance-reports', [FashionAppLovinPerformanceReportController::class, 'index'])
+    ->name('operation-dashboard.fashion-applovin-performance-reports.index');
 Route::get('/assistant/advertising-spend-summary', [AdvertisingSpendSummaryController::class, 'index'])->name('assistant.advertising-spend-summary.index');
 Route::get('/assistant/advertising-spend-analysis', [AdvertisingSpendAnalysisController::class, 'index'])->name('assistant.advertising-spend-analysis.index');
 Route::get('/assistant/fashion-advertising-reviews', [FashionAdvertisingReviewController::class, 'index'])->name('assistant.fashion-advertising-reviews.index');
@@ -489,6 +511,8 @@ Route::put('/product-library/{product}', [ProductLibraryController::class, 'upda
 Route::patch('/product-library/{product}/publication', [ProductLibraryController::class, 'updatePublication'])->name('aikaipin.product-library.publication.update');
 Route::post('/product-library/{product}/shopify-import/preview', [ProductLibraryController::class, 'previewShopifyImport'])->name('aikaipin.product-library.shopify-import.preview');
 Route::post('/product-library/{product}/shopify-import', [ProductLibraryController::class, 'importShopifyCsv'])->name('aikaipin.product-library.shopify-import.store');
+Route::patch('/product-library/{product}/product-pages/{page}', [ProductLibraryController::class, 'updateProductPage'])->name('aikaipin.product-library.product-pages.update');
+Route::delete('/product-library/{product}/product-pages/{page}', [ProductLibraryController::class, 'destroyProductPage'])->name('aikaipin.product-library.product-pages.destroy');
 Route::delete('/product-library/{product}', [ProductLibraryController::class, 'destroyProduct'])->name('aikaipin.product-library.destroy');
 Route::post('/product-library/package-uploads', [ProductLibraryController::class, 'initializePackageUpload'])->name('aikaipin.product-library.package-uploads.initialize');
 Route::post('/product-library/package-uploads/{uploadToken}/parts/{chunkIndex}', [ProductLibraryController::class, 'storePackageUploadPart'])->whereNumber('chunkIndex')->name('aikaipin.product-library.package-uploads.parts.store');

@@ -218,8 +218,9 @@ class AppLovinAccountStatisticsController extends Controller
     private function accounts(AdminUser $viewer, string $project): Collection
     {
         $visibleIds = $this->visibleDepartmentIds($viewer, $project);
+        $unrestricted = $project === 'dashboard' || $this->canSeeAll($viewer);
         $subscriptionQuery = OperationReport::query()->where('status', OperationReport::STATUS_APPROVED);
-        if (! $this->canSeeAll($viewer)) {
+        if (! $unrestricted) {
             if ($project !== 'assistant') {
                 $subscriptionQuery->where(function ($scope) use ($viewer, $visibleIds): void {
                     $scope->where('operator_user_id', $viewer->getKey());
@@ -245,14 +246,14 @@ class AppLovinAccountStatisticsController extends Controller
 
         $fashion = $project === 'operation' ? collect() : FashionAdvertisingReport::query()->where('status', FashionAdvertisingReport::STATUS_APPROVED)
             ->with(['adSpendEntries', 'submitter.departments'])->get()
-            ->flatMap(function (FashionAdvertisingReport $report) use ($viewer, $visibleIds): Collection {
+            ->flatMap(function (FashionAdvertisingReport $report) use ($viewer, $visibleIds, $unrestricted): Collection {
                 $departments = $report->submitter?->departments ?? collect();
                 $isOwnReport = (int) $report->submitter_id === (int) $viewer->getKey();
                 $managedDepartment = $departments->first(fn ($item) => in_array((int) $item->id, $visibleIds, true));
-                $department = $isOwnReport || $this->canSeeAll($viewer)
+                $department = $isOwnReport || $unrestricted
                     ? ($departments->first(fn ($item) => (bool) ($item->pivot->is_primary ?? false)) ?: $departments->first())
                     : $managedDepartment;
-                if (! $this->canSeeAll($viewer) && ! $isOwnReport && ! $managedDepartment) return collect();
+                if (! $unrestricted && ! $isOwnReport && ! $managedDepartment) return collect();
                 return $report->adSpendEntries->filter(fn ($entry) => mb_strtolower(trim((string) $entry->media)) === 'applovin')
                     ->map(fn ($entry): array => [
                         'operator_user_id' => (int) $report->submitter_id, 'operator_name' => (string) $report->submitter_name,
@@ -287,6 +288,9 @@ class AppLovinAccountStatisticsController extends Controller
 
     private function visibleDepartmentIds(AdminUser $user, string $project): array
     {
+        if ($project === 'dashboard') {
+            return $this->storeOwners->storeOwnershipOperationDepartments()->pluck('id')->map(fn ($id) => (int) $id)->all();
+        }
         if ($project !== 'assistant' && ! $this->canSeeAll($user)) {
             return $this->departmentAuthorization->managedDepartmentIds($user)->map(fn ($id) => (int) $id)->all();
         }
@@ -304,6 +308,8 @@ class AppLovinAccountStatisticsController extends Controller
         if ($project === 'assistant') {
             $this->authorization->assertAssistantPortal($context['portal']);
             abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
+        } elseif ($project === 'dashboard') {
+            abort_unless($context['portal']->code === 'yunying-kanban', 404);
         } else {
             abort_unless($context['portal']->code === ($project === 'fashion' ? 'fuzhuang' : 'yunying'), 404);
         }
@@ -312,6 +318,7 @@ class AppLovinAccountStatisticsController extends Controller
 
     private function project(Request $request): string
     {
+        if ($request->routeIs('operation-dashboard.applovin-account-statistics.*')) return 'dashboard';
         if ($request->routeIs('operation.applovin-account-statistics.*')) return 'operation';
         if ($request->routeIs('fashion.applovin-account-statistics.*')) return 'fashion';
         return 'assistant';
@@ -320,7 +327,7 @@ class AppLovinAccountStatisticsController extends Controller
     /** @return array{index:string,show:string,spend_band:string} */
     private function routeNames(string $project): array
     {
-        $prefix = $project === 'assistant' ? 'assistant' : $project;
+        $prefix = $project === 'dashboard' ? 'operation-dashboard' : ($project === 'assistant' ? 'assistant' : $project);
         return [
             'index' => $prefix.'.applovin-account-statistics.index',
             'show' => $prefix.'.applovin-account-statistics.show',

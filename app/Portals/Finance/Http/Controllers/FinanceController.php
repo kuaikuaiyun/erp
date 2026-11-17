@@ -22,6 +22,7 @@ use App\Portals\Finance\FinanceSettlementService;
 use App\Portals\Finance\FinanceWorkbookService;
 use App\Portals\Finance\FinanceXuzongCreditMatches;
 use App\Portals\Finance\FinanceXuzongCreditReport;
+use App\Portals\Finance\FinanceXuzongCostEligibility;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
@@ -1205,18 +1206,25 @@ class FinanceController extends Controller
         if ($xuzongReport) {
             $report = app(FinanceXuzongCreditReport::class);
             $orders = app(FinanceLogisticsCreditOrders::class);
-            $rows = (clone $query)->reorder('id')->select('id')->lazyById(300)->chunk(300)->flatMap(function ($batch) use ($orders, $report, $filters, $headers) {
+            $format = $filters['export_format'] ?? 'xlsx';
+            $rows = (clone $query)->reorder('id')->select('id')->lazyById(300)->chunk(300)->flatMap(function ($batch) use ($orders, $report, $filters, $headers, $format) {
                 $records = $orders->query(xuzongReport: true, ids: $batch->pluck('id')->all())->orderBy('id')->get();
 
-                return $report->rows($records, $filters['timezone'])->values()->map(fn ($values) =>
-                    array_map(fn ($header) => FinanceXuzongCreditReport::formatCell($header, $values[$header] ?? ''), $headers));
+                return $report->rows($records, $filters['timezone'])->values()->map(function ($values) use ($headers, $format) {
+                    $editable = $values['_cost_editable'];
+                    $cells = array_map(fn ($header) => ! $editable && in_array($header, FinanceXuzongCostEligibility::FIELDS, true)
+                        ? FinanceXuzongCostEligibility::LOCKED_LABEL
+                        : FinanceXuzongCreditReport::formatCell($header, $values[$header] ?? ''), $headers);
+
+                    return in_array($format, ['csv', 'tsv'], true) ? $cells : ['values' => $cells, 'costEditable' => $editable];
+                });
             });
 
             $filename = 'xuzong-credit-'.now()->format('Ymd-His');
-            $format = $filters['export_format'] ?? 'xlsx';
 
             return match ($format) {
-                'xls' => $this->workbooks->download($headers, $rows, $filename.'.xls', 'xls', simplifyText: false),
+                'xls' => $this->workbooks->download($headers, $rows, $filename.'.xls', 'xls', simplifyText: false,
+                    protectedCostRows: true),
                 'csv', 'tsv' => $this->workbooks->downloadDelimited(
                     $headers, $rows, $filename.'.'.$format, $format === 'tsv' ? "\t" : ',', simplifyText: false,
                 ),
@@ -1595,7 +1603,10 @@ class FinanceController extends Controller
                     && FinanceCreditSettlementLayout::accountPlatform($account) === $tab,
             };
         };
-        $creditMonths = $tab === 'credit_card' ? $this->creditImportMonths($filters['payment_account_id'] ?? null) : [];
+        $statusOnly = $request->boolean('snapshot_status') && ! $request->boolean('download');
+        $creditMonths = $tab === 'credit_card' && (! $statusOnly || ! isset($filters['month']))
+            ? $this->creditImportMonths($filters['payment_account_id'] ?? null)
+            : [];
         $filters['month'] ??= $creditMonths[0] ?? now('Asia/Shanghai')->format('Y-m');
         $accounts = FinancePaymentAccount::query()->orderBy('account_name')->get();
         $account = $accounts->firstWhere('id', $filters['payment_account_id'] ?? null);
@@ -1618,16 +1629,45 @@ class FinanceController extends Controller
         $scope = \Illuminate\Support\Arr::except($filters, ['page', 'per_page', 'download']);
         ksort($scope);
         $snapshots = app(\App\Portals\Finance\FinanceReportSnapshots::class);
-        $statusOnly = $request->boolean('snapshot_status') && ! $request->boolean('download');
-        [$result, $reportSnapshot, $reportStatus] = $snapshots->result('transactions', $filters['month'], [...$scope, 'channel' => $tab],
-            fn () => $this->buildTransactionReport($tab, $scope, $month, $account),
-            $request->boolean('download') ? $request->query('report_snapshot') : null, statusOnly: $statusOnly);
+        $snapshotId = $request->boolean('download') || $request->has('page')
+            ? $request->query('report_snapshot')
+            : null;
+        $build = fn () => $this->buildTransactionReport($tab, $scope, $month, $account);
+        $snapshotScope = [...$scope, 'channel' => $tab];
+        $db = $this->workbooks->database();
+        $live = true;
+        if (in_array($db->getDriverName(), ['mysql', 'mariadb'], true)
+            && $db->getSchemaBuilder()->hasTable('finance_report_scopes')) {
+            $channels = match ($tab) {
+                'paypal' => ['paypal'],
+                'combined' => $account ? [$account->account_type] : ['paypal', 'credit_card'],
+                default => ['credit_card'],
+            };
+            $live = ! ($account?->account_type === 'credit_card' && in_array('credit_card', $channels, true))
+                && \App\Portals\Finance\FinanceSummaryTriggers::available($db)
+                && ! $db->table('finance_summary_changes')->exists()
+                && $db->table('finance_summary_periods')->where('month', $filters['month'])
+                    ->whereIn('channel', $channels)->where('published', '>', 0)
+                    ->whereColumn('published', 'revision')->count() === count($channels);
+        }
+        try {
+            [$result, $reportSnapshot, $reportStatus] = $snapshots->result(
+                'transactions', $filters['month'], $snapshotScope, $build, $snapshotId, statusOnly: $statusOnly, live: $live,
+            );
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            if ($snapshotId === null || $request->boolean('download') || ! isset($exception->errors()['report_snapshot'])) {
+                throw $exception;
+            }
+            [$result, $reportSnapshot, $reportStatus] = $snapshots->result(
+                'transactions', $filters['month'], $snapshotScope, $build, live: $live,
+            );
+        }
         if ($statusOnly) {
             return response()->json($reportStatus)->header('Cache-Control', 'no-store');
         }
         [$items, $subscriptionOptions] = $result;
         if ($request->boolean('download')) {
-            abort_if($snapshots->runsInBackground() && $reportSnapshot === null, 409, '报表正在生成，请稍后重新查询。');
+            abort_if(! $live && $reportSnapshot === null, 409, '报表正在生成，请稍后导出。');
             $export = \App\Portals\Finance\FinanceExportSelection::filter($request, $items)->map(fn ($row) => array_map(fn ($field) => $row[$field] ?? null, array_keys($columns)));
 
             return $this->workbooks->download(array_values($columns), $export, 'finance-transactions-'.$tab.'-'.$filters['month'].'.xlsx');
@@ -1638,7 +1678,7 @@ class FinanceController extends Controller
         $page = min((int) ($filters['page'] ?? 1), max(1, (int) ceil(count($items) / $perPage)));
         $paginator = new \Illuminate\Pagination\LengthAwarePaginator(
             array_slice($items, ($page - 1) * $perPage, $perPage), count($items), $perPage, $page,
-            ['path' => $request->url(), 'query' => [...\Illuminate\Support\Arr::except($filters, ['page', 'download']), 'view' => 'transactions', 'channel' => $tab]]
+            ['path' => $request->url(), 'query' => [...\Illuminate\Support\Arr::except($filters, ['page', 'download']), 'view' => 'transactions', 'channel' => $tab, 'report_snapshot' => $reportSnapshot]]
         );
         $items = $paginator->items();
         $tabUrls = [];
@@ -1667,11 +1707,11 @@ class FinanceController extends Controller
         ]);
     }
 
-    public function buildTransactionReport(string $tab, array $scope, CarbonImmutable $month, ?FinancePaymentAccount $account): array
+    public function buildTransactionReport(string $tab, array $scope, CarbonImmutable $month, ?FinancePaymentAccount $account, bool $reuse = true): array
     {
         $service = app(FinanceSettlementService::class);
         $summary = app(\App\Portals\Finance\FinanceTransactionSummary::class);
-        $rows = $this->transactionSummaryRows($service, $tab, $scope, $month, $account, reuse: true)
+        $rows = $this->transactionSummaryRows($service, $tab, $scope, $month, $account, reuse: $reuse)
             ->filter(fn ($row) => $service->matches($row, $scope['conditions'] ?? []));
 
         $subscriptions = [];
@@ -1696,10 +1736,16 @@ class FinanceController extends Controller
                 'from' => $month->toDateString(), 'to' => $month->endOfMonth()->toDateString(),
                 'timezone' => 'Asia/Shanghai', 'account' => $account?->activity_account,
                 'team' => $filters['team'] ?? null, 'subscription' => $filters['subscription'] ?? null,
-                'logistics_costs' => true, 'include_unmatched_fees' => true,
+                'logistics_costs' => true, 'include_unmatched_fees' => $tab === 'ye',
             ];
+            $paymentChannels = match ($tab) {
+                'credit_card' => ['xuzong1', 'xuzong2'],
+                'ye', 'worldpay' => [$tab],
+                'combined' => FinanceSettlementService::SHOPIFY_SUMMARY_CHANNELS,
+                default => [],
+            };
             $projection = $reuse ? app(\App\Portals\Finance\FinanceSummaryProjection::class)
-                ->stream($channel, $scope, true) : null;
+                ->stream($channel, $scope, true, $filters['currency'] ?? null, $paymentChannels) : null;
             $channelRows = $projection ?? $service->summaryRowStream($channel, $scope, transactions: true);
             foreach ($channelRows as $row) {
                 $paymentChannel = $row['payment_channel'];
@@ -2717,11 +2763,19 @@ class FinanceController extends Controller
 
     private function creditImportMonths(?int $accountId = null, ?string $account = null): array
     {
-        return FinanceRecord::query()->whereIn('dataset', ['xuzong2-details', 'xuzong1-details'])
+        $records = FinanceRecord::query()->whereIn('dataset', ['xuzong2-details', 'xuzong1-details'])
             ->when($accountId !== null, fn ($query) => $query->whereIn('account',
                 FinancePaymentAccount::query()->whereKey($accountId)->select('activity_account')))
-            ->when(filled($account), fn ($query) => $query->where('account', $account))
-            ->select('occurred_at')->orderByDesc('occurred_at')->cursor()
+            ->when(filled($account), fn ($query) => $query->where('account', $account));
+
+        if (in_array($records->getConnection()->getDriverName(), ['mysql', 'mariadb'], true)
+            && config('app.timezone') === 'UTC') {
+            return $records->whereNotNull('occurred_at')
+                ->selectRaw("DISTINCT DATE_FORMAT(DATE_ADD(occurred_at, INTERVAL 8 HOUR), '%Y-%m') AS report_month")
+                ->orderByDesc('report_month')->pluck('report_month')->all();
+        }
+
+        return $records->select('occurred_at')->orderByDesc('occurred_at')->cursor()
             ->map(fn ($record) => $record->occurred_at->setTimezone('Asia/Shanghai')->format('Y-m'))
             ->unique()->values()->all();
     }
@@ -2783,9 +2837,10 @@ class FinanceController extends Controller
         $scope = \Illuminate\Support\Arr::except($data, ['month', 'month_from', 'month_to']);
         ksort($scope);
         $snapshots = app(\App\Portals\Finance\FinanceReportSnapshots::class);
+        $liveSummary = $report === 'summary' && $this->settlementProjectionReady($month, $scope['channel'] ?? null);
         if ($report === 'summary' && $request->boolean('snapshot_status') && ! $request->boolean('download')) {
             [, , $status] = $snapshots->result($report, $month, [...$scope, '_include_options' => true],
-                fn () => $this->buildSettlementOverviewMonth($month, $report, $scope, true, reuse: false), statusOnly: true);
+                fn () => $this->buildSettlementOverviewMonth($month, $report, $scope, true, reuse: $liveSummary), statusOnly: true, live: $liveSummary);
 
             return response()->json($status)->header('Cache-Control', 'no-store');
         }
@@ -2801,8 +2856,8 @@ class FinanceController extends Controller
             }
             [[$groups, $options, $rate], $reportSnapshots[$comparisonMonth], $reportStatuses[$comparisonMonth]] = $snapshots
                 ->result($report, $comparisonMonth, [...$scope, '_include_options' => $includeOptions],
-                    fn () => $this->buildSettlementOverviewMonth($comparisonMonth, $report, $scope, $includeOptions, reuse: false),
-                    $versions[$comparisonMonth] ?? null);
+                    fn () => $this->buildSettlementOverviewMonth($comparisonMonth, $report, $scope, $includeOptions, reuse: $liveSummary),
+                    $versions[$comparisonMonth] ?? null, live: $liveSummary);
             $monthlyLossGroups[$comparisonMonth] = $groups;
             if ($includeOptions) {
                 $filterOptions = $options;
@@ -2852,6 +2907,24 @@ class FinanceController extends Controller
         return response()->view('portals.finance.settlement-overview', [...$context, 'report' => $report, 'filters' => [...$data, 'month' => $month], 'groups' => $groups, 'monthlyLossGroups' => $monthlyLossGroups, 'rate' => $rate, 'creditMonths' => $creditMonths, 'filterOptions' => $filterOptions, 'metrics' => [...$service::MONEY, ...$metrics], 'reportSnapshots' => $reportSnapshots, 'reportStatuses' => $reportStatuses, 'reportTabUrls' => $this->reportTabUrls([...$data, 'month' => $month])]);
     }
 
+    private function settlementProjectionReady(string $month, ?string $channel): bool
+    {
+        $db = $this->workbooks->database();
+        if (! \App\Portals\Finance\FinanceSummaryTriggers::available($db)
+            || $db->table('finance_summary_changes')->exists()) {
+            return false;
+        }
+
+        $channels = match ($channel) {
+            'paypal' => ['paypal'],
+            null, '', 'combined' => ['paypal', 'credit_card'],
+            default => ['credit_card'],
+        };
+
+        return $db->table('finance_summary_periods')->where('month', $month)->whereIn('channel', $channels)
+            ->where('published', '>', 0)->whereColumn('published', 'revision')->count() === count($channels);
+    }
+
     public function buildSettlementOverviewMonth(string $comparisonMonth, string $report, array $data, bool $includeOptions, bool $reuse): array
     {
         $start = CarbonImmutable::parse($comparisonMonth.'-01', 'Asia/Shanghai');
@@ -2869,8 +2942,14 @@ class FinanceController extends Controller
                     || filled($data['channel'] ?? null) && ! in_array($data['channel'], ['paypal', 'combined'], true) && $channel === 'paypal') {
                     continue;
                 }
+                $paymentChannels = match ($data['channel'] ?? null) {
+                    'xuzong' => ['xuzong1', 'xuzong2'],
+                    'xuzong1', 'xuzong2', 'ye', 'worldpay' => [$data['channel']],
+                    default => [],
+                };
                 $projection = $reuse && $report === 'summary'
-                    ? app(\App\Portals\Finance\FinanceSummaryProjection::class)->stream($channel, $filters, false) : null;
+                    ? app(\App\Portals\Finance\FinanceSummaryProjection::class)
+                        ->stream($channel, $filters, false, paymentChannels: $paymentChannels) : null;
                 foreach ($projection ?? $service->summaryRowStream($channel, $filters) as $row) {
                     if (filled($data['channel'] ?? null) && ! in_array($data['channel'], ['paypal', 'credit_card', 'combined'], true)
                         && ($data['channel'] === 'xuzong'
@@ -3224,6 +3303,10 @@ class FinanceController extends Controller
                             $linkedValue = '(SELECT logistics.'.$logisticsField.' FROM logistics_orders AS logistics WHERE logistics.id = '.$linkedId.')';
                         }
                         $effective = "COALESCE({$saved}, NULLIF({$base}, ''), {$linkedValue})";
+                        if ($field === 'tongtu_order_number') {
+                            $this->filterTongtuOrder($query, $effective, $value, 'contains');
+                            continue;
+                        }
                         if ($field === 'subscription_type') {
                             $effective = "REPLACE(REPLACE(REPLACE(TRIM({$effective}), '订购复购', '订阅复购'), '订阅首次购买', '订阅'), ' ', '')";
                             $value = str_replace(' ', '', FinanceSettlementService::subscriptionLabel($value));
@@ -3328,6 +3411,13 @@ class FinanceController extends Controller
                                 }
                             });
                         });
+                    } elseif ($dataset === 'paypal-orders' && array_keys($linked) === ['tongtu_order_number']) {
+                        $query->where(function ($query) use ($method, $arguments, $linked): void {
+                            $query->$method(...$arguments);
+                            $query->orWhere(fn ($fallback) => $this->applyCondition(
+                                $fallback, 'finance_records.payload->通途订单', 'contains', $linked['tongtu_order_number']
+                            ));
+                        });
                     } else {
                         $query->$method(...$arguments);
                     }
@@ -3411,6 +3501,11 @@ class FinanceController extends Controller
 
     private function applyCondition($query, string $column, string $operator, string $value): void
     {
+        if (preg_match('/(?:^|\.)(?:tongtu_order_number|payload->通途订单)$/uD', $column)
+            && in_array($operator, ['equals', 'contains'], true)) {
+            $this->filterTongtuOrder($query, $query->getConnection()->getQueryGrammar()->wrap($column), $value, $operator);
+            return;
+        }
         if (in_array($operator, ['gt', 'gte', 'lt', 'lte'], true)) {
             $comparison = ['gt' => '>', 'gte' => '>=', 'lt' => '<', 'lte' => '<='][$operator];
             $wrapped = $query->getQuery()->getGrammar()->wrap($column);
@@ -3428,5 +3523,31 @@ class FinanceController extends Controller
                 'contains' => 'like', 'not_equals' => '!=', default => '='
             }, $operator === 'contains' ? '%'.$value.'%' : $value);
         }
+    }
+
+    private function filterTongtuOrder($query, string $column, string $value, string $operator): void
+    {
+        $comparison = $operator === 'contains' ? 'LIKE' : '=';
+        $needle = $operator === 'contains' ? '%'.$value.'%' : $value;
+        $query->where(function ($matches) use ($column, $value, $comparison, $needle): void {
+            $matches->whereRaw("{$column} {$comparison} ?", [$needle]);
+            if (! preg_match('/^(.+-)([0-9]+)$/D', $value, $parts)) {
+                return;
+            }
+
+            [, $prefix, $number] = $parts;
+            $driver = $matches->getConnection()->getDriverName();
+            $length = $driver === 'sqlite' ? 'LENGTH' : 'CHAR_LENGTH';
+            $letters = "SUBSTR({$column}, ?, {$length}({$column}) - ?)";
+            $isUppercase = $driver === 'sqlite'
+                ? "({$letters}) NOT GLOB '*[^A-Z]*'"
+                : "({$letters}) REGEXP '^[A-Z]+$' AND CAST(({$letters}) AS BINARY) = CAST(UPPER({$letters}) AS BINARY)";
+            $letterBindings = [mb_strlen($prefix) + 1, mb_strlen($prefix) + strlen($number)];
+            $matches->orWhereRaw(
+                "SUBSTR({$column}, 1, ?) = ? AND SUBSTR({$column}, ?) = ? AND {$length}({$column}) > ? AND {$isUppercase}",
+                [mb_strlen($prefix), $prefix, -strlen($number), $number, $letterBindings[1],
+                    ...($driver === 'sqlite' ? $letterBindings : [...$letterBindings, ...$letterBindings, ...$letterBindings])]
+            );
+        });
     }
 }

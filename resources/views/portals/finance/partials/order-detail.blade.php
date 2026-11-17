@@ -137,7 +137,7 @@
     <header class="logistics-order-detail-hero {{ $statusTone }}">
         <div>
             <span class="logistics-order-detail-eyebrow">{{ $display($order->store_name) }} · Shopify #{{ $display($order->shopify_order_number) }}</span>
-            <h3>{{ $display($order->tongtu_order_number) }}</h3>
+            <h3>{{ $display(\App\Portals\Finance\FinanceCatalog::displayTongtuOrder($order->tongtu_order_number)) }}</h3>
             <p><i class="fa fa-clock-o"></i> 下单时间 {{ $date($order->order_created_at) }}　·　{{ \App\Portals\Finance\FinanceCatalog::timezoneLabel($timezone) }}　·　系统编号 {{ $order->getKey() }}</p>
         </div>
         <div class="logistics-order-detail-tags">
@@ -350,7 +350,7 @@
             <section class="logistics-order-detail-card">
                 <div class="logistics-order-detail-card-title"><h4><i class="fa fa-exchange"></i> 通途匹配与同步记录</h4><span>{{ $display($order->sku_exception_reason) }}</span></div>
                 <div class="logistics-order-detail-definition-grid">
-                    <dl><dt>通途订单号</dt><dd>{{ $display($order->tongtu_order_number) }}</dd></dl>
+                    <dl><dt>通途订单号</dt><dd>{{ $display(\App\Portals\Finance\FinanceCatalog::displayTongtuOrder($order->tongtu_order_number)) }}</dd></dl>
                     <dl><dt>{{ __('logistics.product_statistics.headers.product_code') }}</dt><dd class="is-wrap">{{ $display($order->tongtu_product_code) }}</dd></dl>
                     <dl><dt>{{ __('logistics.product_statistics.headers.tongtu_sku') }}</dt><dd class="is-wrap">{{ $display($order->tongtu_sku) }}</dd></dl>
                     <dl><dt>通途配货名称</dt><dd class="is-wrap">{{ \App\Portals\Finance\FinanceProductNames::display($display($order->tongtu_product_name)) }}</dd></dl>

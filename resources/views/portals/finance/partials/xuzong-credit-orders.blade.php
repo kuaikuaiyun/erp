@@ -14,7 +14,10 @@
             @php($values = $xuzongRows->get($record->id))
             <tr>
                 <td class="paypal-order-selection"><input type="checkbox" class="paypal-order-check" value="{{ $record->id }}" aria-label="选择记录 {{ $record->id }}"></td>
-                @foreach($displayHeaders as $columnId => $header)<td data-settlement-column="{{ $columnId }}">{{ \App\Portals\Finance\FinanceXuzongCreditReport::formatCell($header, $values[$header] ?? '') }}</td>@endforeach
+                @foreach($displayHeaders as $columnId => $header)
+                    @php($locked = in_array($header, \App\Portals\Finance\FinanceXuzongCostEligibility::FIELDS, true) && ! ($values['_cost_editable'] ?? false))
+                    <td data-settlement-column="{{ $columnId }}" @if($locked) class="text-muted" title="不可填写" @endif>{{ $locked && blank($values[$header] ?? null) ? '不可填写' : \App\Portals\Finance\FinanceXuzongCreditReport::formatCell($header, $values[$header] ?? '') }}</td>
+                @endforeach
                 <td><button type="button" class="btn btn-info btn-xs js-logistics-order-detail" data-order-detail-url="{{ route($recordsRoute, ['order_detail' => $record->id, 'timezone' => $filters['timezone']]) }}" aria-haspopup="dialog"><i class="fa fa-eye" aria-hidden="true"></i> 查看</button> <a class="btn btn-default btn-xs" data-xuzong-statement href="{{ route('finance.reports.xuzong-credit.statement', abs($record->id)) }}">结算明细</a></td>
             </tr>
         @empty
