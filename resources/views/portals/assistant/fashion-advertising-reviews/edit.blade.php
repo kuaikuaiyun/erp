@@ -14,7 +14,7 @@
   <form method="post" enctype="multipart/form-data" action="{{route('assistant.fashion-advertising-reviews.update',$report)}}">@csrf @method('put')
    <div id="fashion-deleted-entry-inputs"></div>
    @php($supportsMiscFeeRmb=\App\Portals\Fashion\OperationProjectCatalog::supportsMiscFeeRmb((string)$report->project_code))
-   <div class="table-responsive"><table class="table table-bordered"><thead><tr><th>广告代理</th><th>广告社媒</th><th>账户名称</th><th>账户编号</th><th>绑定店铺域名</th><th>账面广告费($)</th><th>结算系数</th><th>实际广告费($)</th>@if($supportsMiscFeeRmb)<th>杂费（RMB 谷歌邮箱）</th>@endif<th>广告费截图</th><th>操作</th></tr></thead><tbody>
+   <div class="table-responsive"><table class="table table-bordered"><thead><tr><th>广告代理</th><th>广告社媒</th><th>账户名称</th><th>账户编号</th><th>绑定店铺域名</th><th>账面广告费($)</th><th>结算系数</th><th>实际广告费($)</th>@if($supportsMiscFeeRmb)<th>杂费（RMB 谷歌邮箱，RMB开户费、个人号等）</th>@endif<th>广告费截图</th><th>操作</th></tr></thead><tbody>
    @foreach($report->adSpendEntries as $index=>$entry)
     <tr>
      <td><input type="hidden" name="entries[{{$index}}][id]" value="{{$entry->id}}"><input class="form-control" name="entries[{{$index}}][agency]" value="{{old("entries.$index.agency",$entry->agency)}}" required></td>
