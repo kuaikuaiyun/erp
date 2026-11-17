@@ -174,28 +174,28 @@ class LogisticsOrderController extends Controller
     private function paginateMissingTongtuOrders(QueryBuilder $query, string $storeDomain, int $perPage): LengthAwarePaginator
     {
         $domainsByPrefix = $this->tongtuDomainsByPrefix();
-        $resolve = fn (object $order): object => $this->resolveTongtuDomain($order, $domainsByPrefix);
-        if ($storeDomain === '') {
-            $orders = $query->paginate($perPage);
-            $orders->setCollection($orders->getCollection()->map($resolve));
+        $groups = [];
+        foreach ($query->cursor() as $order) {
+            $order = $this->resolveTongtuDomain($order, $domainsByPrefix);
+            if ($storeDomain !== '' && ($order->domain === null || mb_stripos($order->domain, $storeDomain) === false)) {
+                continue;
+            }
 
-            return $orders;
+            $key = $order->domain === null ? 'order:'.$order->number : 'domain:'.mb_strtolower($order->domain);
+            $groups[$key] ??= ['domain' => $order->domain, 'numbers' => []];
+            $groups[$key]['numbers'][] = $order->number;
         }
 
         $page = LengthAwarePaginator::resolveCurrentPage();
         $offset = ($page - 1) * $perPage;
-        $matches = $query->cursor()->map($resolve)
-            ->filter(fn (object $order): bool => $order->domain !== null && mb_stripos($order->domain, $storeDomain) !== false);
-        $items = [];
-        $total = 0;
-        foreach ($matches as $order) {
-            if ($total >= $offset && count($items) < $perPage) {
-                $items[] = $order;
-            }
-            $total++;
-        }
 
-        return new LengthAwarePaginator($items, $total, $perPage, $page, ['path' => LengthAwarePaginator::resolveCurrentPath()]);
+        return new LengthAwarePaginator(
+            array_values(array_slice($groups, $offset, $perPage)),
+            count($groups),
+            $perPage,
+            $page,
+            ['path' => LengthAwarePaginator::resolveCurrentPath()],
+        );
     }
 
     private function tongtuDomainsByPrefix(): Collection
