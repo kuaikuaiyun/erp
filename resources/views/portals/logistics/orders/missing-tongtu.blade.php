@@ -27,6 +27,7 @@
         .tongtu-check .more-orders[open] summary { margin-bottom: 8px; }
         .tongtu-check .more-orders[open] .expand-orders,
         .tongtu-check .more-orders:not([open]) .collapse-orders { display: none; }
+        .tongtu-check .result-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
         .tongtu-check .result-footer .logistics-pagination-control { flex-wrap: wrap; }
         .tongtu-check .empty { text-align: center; color: #526a7b; padding: 28px 18px; }
     </style>
@@ -81,7 +82,12 @@
         <div class="box tongtu-result-box">
             <div class="box-header with-border">
                 <h2 class="box-title">核对结果</h2>
-                <span id="tongtu-last-sync" class="text-muted pull-right" @if (!$lastSync) hidden @endif>最近同步 {{ $lastSync }}</span>
+                <div class="result-actions pull-right">
+                    <span id="tongtu-last-sync" class="text-muted" @if (!$lastSync) hidden @endif>最近同步 {{ $lastSync }}</span>
+                    <a href="{{ $exportUrl }}" class="btn btn-default btn-sm" data-pjax="false" download>
+                        <i class="fa fa-download" aria-hidden="true"></i> 导出 Excel
+                    </a>
+                </div>
             </div>
             <div class="table-responsive">
                 <table class="table table-striped table-hover results-table">
