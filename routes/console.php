@@ -55,19 +55,25 @@ Artisan::command('logistics:tongtu-orders:sync {--date=}', function (TongtuOrder
         return 1;
     }
 
-    try {
-        $day = $snapshots->syncNextDay($date);
-    } catch (\RuntimeException) {
-        $this->error('通途订单同步未完成，该日期将延后重试。');
+    $exitCode = 0;
+    $batchSize = $date === null ? 5 : 1;
+    for ($index = 0; $index < $batchSize; $index++) {
+        try {
+            $day = $snapshots->syncNextDay($date);
+        } catch (\RuntimeException) {
+            $this->error('通途订单同步未完成，该日期将延后重试。');
+            $exitCode = 1;
 
-        return 1;
-    }
+            continue;
+        }
 
-    if ($day !== null) {
+        if ($day === null) {
+            break;
+        }
         $this->info("通途订单已同步 {$day}。");
     }
 
-    return 0;
+    return $exitCode;
 });
 
 Schedule::command('logistics:sku-database:backfill-guide-costs --batch=100')

@@ -1783,8 +1783,7 @@ class FinanceController extends Controller
                         || FinanceSettlementService::transactionStatusCategory($row['状态'] ?? null) === 'failed') {
                         continue;
                     }
-                    if ($missing($row, ['域名', FinanceSettlementService::OPERATION_DEPARTMENT, '订阅类型'])
-                        || ($row['支付状态'] === 'SUCCESS' && $missing($row, ['交易金额', '结算金额', FinancePayPalSettlementOrders::USD_RECEIPT_LABEL]))) {
+                    if ($missing($row, ['域名', FinanceSettlementService::OPERATION_DEPARTMENT, '订阅类型'])) {
                         yield array_map(fn ($header) => ! $row['_cost_editable'] && in_array($header, FinanceXuzongCostEligibility::FIELDS, true)
                             ? FinanceXuzongCostEligibility::LOCKED_LABEL
                             : FinanceXuzongCreditReport::formatCell($header, $row[$header] ?? ''), $headers);

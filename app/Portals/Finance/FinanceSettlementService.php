@@ -1283,7 +1283,10 @@ class FinanceSettlementService
     {
         $db = $this->workbooks->database();
         $key = 'finance:subscription-options:v1:'.hash('sha256', $db->getName().'|'.$db->getDatabaseName());
-        $options = Cache::remember($key, 60, function () use ($db): array {
+        $default = config('cache.default');
+        // Report builds can run inside a transaction. Keep this cache outside its database locks.
+        $cache = Cache::store(config("cache.stores.{$default}.driver") === 'database' ? 'file' : $default);
+        $options = $cache->remember($key, 60, function () use ($db): array {
             $datasets = ['paypal-orders', 'xuzong2-orders', 'xuzong2-details', 'xuzong1-details'];
             $types = FinanceRecord::query()->whereIn('dataset', $datasets)->select('payload->订阅类型 as subscription')->distinct()->pluck('subscription');
             $supplements = $db->table('finance_settlement_supplements')->select('payload->subscription as subscription')->distinct()->pluck('subscription');

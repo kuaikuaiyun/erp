@@ -12,8 +12,10 @@ use RuntimeException;
 class TongtuOrderSnapshotService
 {
     public const HISTORY_DAYS = 90;
+    private const RECENT_BACKFILL_DAYS = 3;
     private const PAGE_SIZE = 100;
     private const RETRY_DELAY_MINUTES = 15;
+    private const PROGRESS_KEY = 'logistics:tongtu:order-snapshot-progress';
 
     public function __construct(private readonly TongtuSkuMappingService $tongtu)
     {
@@ -41,6 +43,8 @@ class TongtuOrderSnapshotService
                     ]);
 
                     throw $exception;
+                } finally {
+                    Cache::forget(self::PROGRESS_KEY);
                 }
                 Cache::forget($retryKey);
             }
@@ -51,26 +55,29 @@ class TongtuOrderSnapshotService
 
     private function nextDay(): ?string
     {
-        $today = CarbonImmutable::now('Asia/Shanghai')->startOfDay();
+        $now = CarbonImmutable::now('Asia/Shanghai');
+        $today = $now->startOfDay();
         $oldest = $today->subDays(self::HISTORY_DAYS - 1);
+        $refreshCutoff = $now->subHour()->toDateTimeString();
         $days = $this->connection()->table('logistics_tongtu_sync_days')
             ->whereBetween('paid_date', [$oldest->toDateString(), $today->toDateString()])
             ->pluck('synced_at', 'paid_date');
 
-        foreach ([$today, $today->subDay()] as $day) {
-            $date = $day->toDateString();
-            $lastSync = $days->get($date);
-            $cutoff = $day->eq($today)
-                ? now('Asia/Shanghai')->subMinutes(60)
-                : $today;
-            if ((!$lastSync || $lastSync < $cutoff->toDateTimeString()) && !Cache::has($this->retryKey($date))) {
-                return $date;
+        if ($days->count() < self::HISTORY_DAYS) {
+            for ($day = $today; $day->gte($oldest); $day = $day->subDay()) {
+                $date = $day->toDateString();
+                if (!$days->has($date) && !Cache::has($this->retryKey($date))) {
+                    return $date;
+                }
             }
+
+            return null;
         }
 
-        for ($day = $today->subDays(2); $day->gte($oldest); $day = $day->subDay()) {
+        for ($offset = 0; $offset <= self::RECENT_BACKFILL_DAYS; $offset++) {
+            $day = $today->subDays($offset);
             $date = $day->toDateString();
-            if (!$days->has($date) && !Cache::has($this->retryKey($date))) {
+            if ($days->get($date) <= $refreshCutoff && !Cache::has($this->retryKey($date))) {
                 return $date;
             }
         }
@@ -110,6 +117,10 @@ class TongtuOrderSnapshotService
         $orders = [];
         $seen = [];
         for ($page = 1; ; $page++) {
+            Cache::put(self::PROGRESS_KEY, [
+                'date' => $day,
+                'orders' => count($orders),
+            ], now()->addMinutes(3));
             $rows = $this->tongtu->shopifyErpOrderPage($day.' 00:00:00', $day.' 23:59:59', $page, self::PAGE_SIZE);
             $signature = hash('sha256', serialize(array_column($rows, 'orderIdCode')));
             if (isset($seen[$signature])) {
@@ -141,6 +152,11 @@ class TongtuOrderSnapshotService
             }
             $db->table('logistics_tongtu_sync_days')->updateOrInsert(['paid_date' => $day], ['synced_at' => $startedAt]);
         });
+    }
+
+    public function progress(): ?array
+    {
+        return Cache::get(self::PROGRESS_KEY);
     }
 
     public static function domain(mixed $account): ?string

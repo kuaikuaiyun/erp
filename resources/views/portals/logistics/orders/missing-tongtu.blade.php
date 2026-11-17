@@ -62,17 +62,18 @@
         @if ($errors->any())
             <div class="alert alert-danger" role="alert">{{ $errors->first() }}</div>
         @endif
-        @if ($syncedDays < $totalDays)
-            <div class="alert alert-info" role="status">
-                {{ $coverageFrom }} 至 {{ $coverageTo }} 已同步 {{ $syncedDays }} / {{ $totalDays }} 天，列表显示已同步的结果。
-            </div>
-        @endif
+        <div id="tongtu-sync-progress" class="alert alert-info" role="status"
+             data-url="{{ request()->fullUrlWithQuery(['progress' => 1]) }}"
+             data-synced-days="{{ $syncedDays }}" @if ($syncedDays >= $totalDays) hidden @endif>
+            {{ $coverageFrom }} 至 {{ $coverageTo }} 已同步
+            <span data-coverage>{{ $syncedDays }} / {{ $totalDays }}</span> 天。
+            <span data-active></span>
+            <a href="{{ request()->fullUrl() }}" data-refresh hidden>刷新核对结果</a>
+        </div>
         <div class="box tongtu-result-box">
             <div class="box-header with-border">
                 <h2 class="box-title">核对结果</h2>
-                @if ($lastSync)
-                    <span class="text-muted pull-right">最近同步 {{ $lastSync }}</span>
-                @endif
+                <span id="tongtu-last-sync" class="text-muted pull-right" @if (!$lastSync) hidden @endif>最近同步 {{ $lastSync }}</span>
             </div>
             <div class="table-responsive">
                 <table class="table table-striped table-hover results-table">
@@ -98,4 +99,5 @@
             </div>
         </div>
     </section>
+    <script src="{{ asset('assets/erp/tongtu-sync-progress.js') }}"></script>
 @endsection

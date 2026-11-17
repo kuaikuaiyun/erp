@@ -90,7 +90,7 @@ class LogisticsOrderController extends Controller
         ]);
     }
 
-    public function missingTongtu(Request $request, PortalDomainService $domains, TongtuOrderSnapshotService $snapshots): Response|View
+    public function missingTongtu(Request $request, PortalDomainService $domains, TongtuOrderSnapshotService $snapshots): Response|View|JsonResponse
     {
         $context = $this->portalContext($request);
         if ($context instanceof Response) {
@@ -123,6 +123,14 @@ class LogisticsOrderController extends Controller
             ->when($paidTo !== '', fn (QueryBuilder $query) => $query->where('paid_date', '<=', $paidTo));
         $lastSync = (clone $syncDays)->max('synced_at');
         $syncedDays = $syncDays->whereBetween('paid_date', [$coverageFrom, $coverageTo])->count();
+        if ($request->boolean('progress')) {
+            return response()->json([
+                'synced_days' => $syncedDays,
+                'total_days' => $totalDays,
+                'last_sync' => $lastSync,
+                'active' => $snapshots->progress(),
+            ])->header('Cache-Control', 'no-store');
+        }
 
         $existing = $this->listedOrders()->selectRaw('1')
             ->whereColumn('logistics_orders.tongtu_order_number', 'snapshot.tongtu_order_number');
