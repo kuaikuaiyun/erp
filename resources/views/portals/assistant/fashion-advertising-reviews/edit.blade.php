@@ -13,7 +13,8 @@
   <div class="fashion-ad-edit-meta"><span>报表日期：<strong>{{$report->report_date->format('Y-m-d')}}</strong></span><span>运营人员：<strong>{{$report->submitter_name}}</strong></span><span>运营部门：<strong>{{$report->submitter?->departments?->pluck('name')->filter()->unique()->implode('、')?:'—'}}</strong></span></div>
   <form method="post" enctype="multipart/form-data" action="{{route('assistant.fashion-advertising-reviews.update',$report)}}">@csrf @method('put')
    <div id="fashion-deleted-entry-inputs"></div>
-   <div class="table-responsive"><table class="table table-bordered"><thead><tr><th>广告代理</th><th>广告社媒</th><th>账户名称</th><th>账户编号</th><th>绑定店铺域名</th><th>账面广告费($)</th><th>结算系数</th><th>实际广告费($)</th><th>广告费截图</th><th>操作</th></tr></thead><tbody>
+   @php($supportsMiscFeeRmb=\App\Portals\Fashion\OperationProjectCatalog::supportsMiscFeeRmb((string)$report->project_code))
+   <div class="table-responsive"><table class="table table-bordered"><thead><tr><th>广告代理</th><th>广告社媒</th><th>账户名称</th><th>账户编号</th><th>绑定店铺域名</th><th>账面广告费($)</th><th>结算系数</th><th>实际广告费($)</th>@if($supportsMiscFeeRmb)<th>杂费（RMB 谷歌邮箱）</th>@endif<th>广告费截图</th><th>操作</th></tr></thead><tbody>
    @foreach($report->adSpendEntries as $index=>$entry)
     <tr>
      <td><input type="hidden" name="entries[{{$index}}][id]" value="{{$entry->id}}"><input class="form-control" name="entries[{{$index}}][agency]" value="{{old("entries.$index.agency",$entry->agency)}}" required></td>
@@ -24,6 +25,7 @@
      <td><input class="form-control money-input js-book" type="number" min="0" step="0.01" name="entries[{{$index}}][book_spend_usd]" value="{{old("entries.$index.book_spend_usd",$entry->book_spend_usd)}}" required></td>
      <td><input class="form-control money-input js-rate" type="number" min="0" step="0.0001" name="entries[{{$index}}][settlement_coefficient]" value="{{old("entries.$index.settlement_coefficient",$entry->settlement_coefficient)}}" required></td>
      <td><strong class="js-actual">${{number_format((float)$entry->actual_spend_usd,2)}}</strong></td>
+     @if($supportsMiscFeeRmb)<td><input class="form-control money-input" type="number" min="0" step="0.01" name="entries[{{$index}}][misc_fee_rmb]" value="{{old("entries.$index.misc_fee_rmb",$entry->misc_fee_rmb)}}"></td>@endif
      <td class="shot-cell">@if($entry->screenshot_path)<img class="erp-zoomable" src="{{route('assistant.fashion-advertising-reviews.screenshot',['type'=>'advertising','entry'=>$entry->id])}}" alt="广告截图">@endif<input type="file" name="entries[{{$index}}][screenshot]" accept="image/jpeg,image/png,image/webp"></td>
      <td class="delete-cell"><button type="button" class="btn btn-danger btn-sm js-delete-entry" data-entry-id="{{$entry->id}}"><i class="fa fa-trash"></i> 删除</button></td>
     </tr>
