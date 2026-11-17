@@ -31,7 +31,7 @@
 
 @push('styles')
 <link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-portal.css?v=20261104-2">
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261117-3">
+<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/payment-shared.css?v=20261117-4">
 @endpush
 
 @section('content')
@@ -43,6 +43,7 @@
     {{ $notes([$auditText('sum_orders',['count'=>$summary['orders']]),$selectedScope]) }}
     <form class="payment-renewal-filter" method="get" action="{{ route('payment.renewal-analysis.index') }}">
         <label class="payment-renewal-cohort"><span>{{ __($t.'.filters.cohort_period') }}</span><span class="payment-operation-date-range"><input class="form-control" type="date" name="date_from" value="{{ $filters['date_from'] }}"><b>{{ __('payment.common.range_to') }}</b><input class="form-control" type="date" name="date_to" value="{{ $filters['date_to'] }}"></span></label>
+        <label class="payment-renewal-timezone"><span>{{ __($t.'.filters.timezone') }}</span><select class="form-control" name="timezone">@foreach(\App\Portals\Payment\PaymentRenewalAnalysisService::timezones() as $offset=>$label)<option value="{{ $offset }}" @selected($filters['timezone']===$offset)>{{ $label }}</option>@endforeach</select></label>
         <label><span>{{ __($t.'.filters.channel') }}</span><select class="form-control" name="channel"><option value="">{{ __($t.'.filters.all_channels') }}</option>@foreach(['paypal','credit_card'] as $channel)<option value="{{ $channel }}" @selected($filters['channel']===$channel)>{{ __($t.'.channels.'.$channel) }}</option>@endforeach</select></label>
         <label><span>{{ __($t.'.filters.stage') }}</span><select class="form-control" name="stage"><option value="">{{ __($t.'.filters.all_stages') }}</option>@foreach($dashboard['stage_options'] as $key)<option value="{{ $key }}" @selected($filters['stage']===$key)>{{ $stageName($stageNumber($key)) }}</option>@endforeach</select></label>
         <label><span>{{ __($t.'.filters.store') }}</span><select class="form-control" name="store"><option value="">{{ __($t.'.filters.all_stores') }}</option>@foreach($dashboard['stores'] as $store)<option value="{{ $store }}" @selected($filters['store']===$store)>{{ $store }}</option>@endforeach</select></label>
@@ -52,6 +53,8 @@
     <aside class="payment-calculation-context">
         <h2>{{ $auditText('title') }}</h2>
         {{ $notes([$firstPeriod,$comparisonPeriod,
+            $auditText('utc_period',['from'=>$calc['utc_period_from'],'to'=>$calc['utc_period_to']]),
+            $auditText('utc_comparison',['from'=>$calc['utc_comparison_from'],'to'=>$calc['utc_comparison_to']]),
             $auditText('time',['timezone'=>$calc['timezone'],'generated'=>$calc['generated_at'],'expires'=>$calc['expires_at']]),
             $auditText('filters',['channel'=>$filters['channel'] === '' ? __($t.'.filters.all_channels') : __($t.'.channels.'.$filters['channel']),
                 'store'=>$filters['store'] ?: __($t.'.filters.all_stores'),

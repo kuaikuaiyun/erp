@@ -23,6 +23,9 @@ class PaymentRenewalAnalysisExportService
         $summary->setTitle(__('payment.renewal_analysis.export.summary_sheet'));
         $summary->fromArray([
             [__('payment.renewal_analysis.export.metric'), __('payment.renewal_analysis.export.value')],
+            [__('payment.renewal_analysis.export.timezone'), $data['calculation']['timezone']],
+            [__('payment.renewal_analysis.export.utc_period'), $data['calculation']['utc_period_from'].' ~ '.$data['calculation']['utc_period_to']],
+            [__('payment.renewal_analysis.export.utc_comparison'), $data['calculation']['utc_comparison_from'].' ~ '.$data['calculation']['utc_comparison_to']],
             [__('payment.renewal_analysis.export.period'), $data['calculation']['period_from'].' ~ '.$data['calculation']['period_to']],
             [__('payment.renewal_analysis.export.comparison_period'), $data['calculation']['comparison_from'].' ~ '.$data['calculation']['comparison_to']],
             [__('payment.renewal_analysis.kpis.period_orders'), $data['summary']['orders']],

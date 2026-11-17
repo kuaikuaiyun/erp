@@ -258,6 +258,8 @@ $translations = [
 
 return array_replace_recursive($translations, [
     'renewal_audit' => [
+        'utc_period' => '对应 UTC 查询区间：:from ～ :to。',
+        'utc_comparison' => '对比区间对应 UTC：:from ～ :to；固定偏移不切换夏令时。',
         'title' => '计算范围与数据时间',
         'ratio' => ':a ÷ :b × 100% = :result%',
         'zero' => '分母为 0，当前规则返回 0.00%，不代表存在可续费样本或没有风险。',
@@ -854,7 +856,7 @@ return array_replace_recursive($translations, [
         'page_title' => '续费订单分析',
         'page_subtitle' => '按本期付款时间区分首次订阅及各次续费，上一阶段对比区间整体前推 30 天。',
         'filters' => [
-            'cohort_period' => '付款时间', 'risk_date_mode' => '风险时间口径',
+            'timezone' => '时区（固定偏移）', 'cohort_period' => '付款时间', 'risk_date_mode' => '风险时间口径',
             'payment_mode' => '续费付款时间', 'event_mode' => '真实退款 / 纠纷时间',
             'channel' => '首扣渠道', 'all_channels' => '全部渠道', 'stage' => '订阅 / 续费阶段', 'all_stages' => '全部阶段',
             'store' => '店铺', 'all_stores' => '全部店铺', 'keyword' => '订单 / 流水 / 邮箱',
@@ -912,6 +914,7 @@ return array_replace_recursive($translations, [
         'export' => [
             'button' => '导出 Excel', 'summary_sheet' => '阶段概览', 'detail_sheet' => '阶段付款明细',
             'stages_sheet' => '订阅与续费阶段', 'risk_sheet' => '渠道风险',
+            'timezone' => '统计时区（固定偏移）', 'utc_period' => 'UTC 查询区间', 'utc_comparison' => '对比区间对应 UTC',
             'period' => '本期付款区间', 'comparison_period' => '前推 30 天对比区间',
             'metric' => '指标', 'value' => '数值', 'filename' => '续费订单分析_:time.xlsx',
             'columns' => [

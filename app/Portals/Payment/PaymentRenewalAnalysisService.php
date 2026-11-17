@@ -23,9 +23,21 @@ class PaymentRenewalAnalysisService
         'payment_gateway', 'payment_method', 'paypal_account_id', 'paypal_association_source',
     ];
 
+    /** @return array<string,string> */
+    public static function timezones(): array
+    {
+        $options = [];
+        for ($hour = -12; $hour <= 14; $hour++) {
+            $offset = sprintf('%+03d:00', $hour);
+            $options[$offset] = 'UTC'.$offset;
+        }
+        return $options;
+    }
+
     /** @param array<string,mixed> $filters @return array<string,mixed> */
     public function dashboard(array $filters): array
     {
+        $filters['timezone'] ??= '+08:00';
         $dataset = $this->dataset($filters);
         $dataset = $this->filterStages($dataset, $filters);
         $total = count($dataset['stages']);
@@ -69,13 +81,14 @@ class PaymentRenewalAnalysisService
     private function dataset(array $filters): array
     {
         $cacheFilters = $filters;
+        $cacheFilters['timezone'] ??= '+08:00';
         unset($cacheFilters['stage_page'], $cacheFilters['stage']);
-        $cacheKey = 'payment:renewal-analysis:v8:'.sha1(json_encode($cacheFilters));
+        $cacheKey = 'payment:renewal-analysis:v10:'.sha1(json_encode($cacheFilters));
 
         $expiresAt = now()->addMinutes(5);
         return Cache::remember($cacheKey, $expiresAt, function () use ($cacheFilters, $expiresAt): array {
             $dataset = $this->buildDataset($cacheFilters);
-            $dataset['calculation']['expires_at'] = $expiresAt->format('Y-m-d H:i:s');
+            $dataset['calculation']['expires_at'] = $expiresAt->copy()->setTimezone($cacheFilters['timezone'])->format('Y-m-d H:i:s');
             return $dataset;
         });
     }
@@ -83,10 +96,15 @@ class PaymentRenewalAnalysisService
     /** @param array<string,mixed> $filters @return array<string,mixed> */
     private function buildDataset(array $filters): array
     {
-        $from = Carbon::parse((string) $filters['date_from'])->startOfDay();
-        $to = Carbon::parse((string) $filters['date_to'])->endOfDay();
-        $comparisonFrom = $from->copy()->subDays(30);
-        $comparisonTo = $to->copy()->subDays(30);
+        $timezone = $filters['timezone'] ?? '+08:00';
+        $localFrom = Carbon::parse((string) $filters['date_from'], $timezone)->startOfDay();
+        $localTo = Carbon::parse((string) $filters['date_to'], $timezone)->endOfDay();
+        $localComparisonFrom = $localFrom->copy()->subDays(30);
+        $localComparisonTo = $localTo->copy()->subDays(30);
+        $from = $localFrom->copy()->utc();
+        $to = $localTo->copy()->utc();
+        $comparisonFrom = $localComparisonFrom->copy()->utc();
+        $comparisonTo = $localComparisonTo->copy()->utc();
 
         $candidates = LogisticsOrder::query()->select(self::ORDER_FIELDS)
             ->where(function ($query) use ($from, $to, $comparisonFrom, $comparisonTo): void {
@@ -139,7 +157,7 @@ class PaymentRenewalAnalysisService
             }
         }
         $orderIds = collect($current)->flatten(1)->map(fn (array $entry): int => (int) $entry['order']->id)->all();
-        $risk = $this->riskMaps($orderIds, ['risk_date_mode' => 'payment'], $from, $to);
+        $risk = $this->riskMaps($orderIds, ['risk_date_mode' => 'payment', 'timezone' => $timezone], $from, $to);
         $numbers = [0 => true];
         foreach (array_keys($current) as $number) $numbers[$number] = true;
         foreach (array_keys($previousChains) as $number) $numbers[$number + 1] = true;
@@ -157,7 +175,7 @@ class PaymentRenewalAnalysisService
                 $initial = $entry['initial'];
                 $refund = $risk['refunds'][(int) $order->id] ?? ['count' => 0, 'amount' => 0.0, 'details' => []];
                 $dispute = $risk['disputes'][(int) $order->id] ?? ['count' => 0, 'amount' => 0.0, 'details' => []];
-                $paid = $order->paid_at->format('Y-m-d H:i:s');
+                $paid = $order->paid_at->copy()->setTimezone($timezone)->format('Y-m-d H:i:s');
                 $paidFrom = $paidFrom === null ? $paid : min($paidFrom, $paid);
                 $paidTo = $paidTo === null ? $paid : max($paidTo, $paid);
                 $currentChains[(int) $initial->id] = true;
@@ -190,18 +208,24 @@ class PaymentRenewalAnalysisService
             ];
             array_push($rows, ...$stageRows);
         }
+        $stores = $initials->pluck('store_name')->filter()->unique()->sort()->values()->all();
+        // Output rows now contain scalars; release historical model graphs before other queries.
+        unset($candidates, $initials, $initialMap, $renewals, $batch, $entries, $current,
+            $entry, $order, $initial, $referenceMap, $currentChains, $stageRows);
         return [
             'calculation' => [
-                'period_from' => $from->format('Y-m-d H:i:s'), 'period_to' => $to->format('Y-m-d H:i:s'),
-                'comparison_from' => $comparisonFrom->format('Y-m-d H:i:s'), 'comparison_to' => $comparisonTo->format('Y-m-d H:i:s'),
-                'timezone' => $from->getTimezone()->getName(),
-                'generated_at' => now()->format('Y-m-d H:i:s'),
-                'expires_at' => now()->addMinutes(5)->format('Y-m-d H:i:s'),
+                'period_from' => $localFrom->format('Y-m-d H:i:s'), 'period_to' => $localTo->format('Y-m-d H:i:s'),
+                'comparison_from' => $localComparisonFrom->format('Y-m-d H:i:s'), 'comparison_to' => $localComparisonTo->format('Y-m-d H:i:s'),
+                'utc_period_from' => $from->format('Y-m-d H:i:s'), 'utc_period_to' => $to->format('Y-m-d H:i:s'),
+                'utc_comparison_from' => $comparisonFrom->format('Y-m-d H:i:s'), 'utc_comparison_to' => $comparisonTo->format('Y-m-d H:i:s'),
+                'timezone' => 'UTC'.$timezone,
+                'generated_at' => now()->setTimezone($timezone)->format('Y-m-d H:i:s'),
+                'expires_at' => now()->addMinutes(5)->setTimezone($timezone)->format('Y-m-d H:i:s'),
             ],
             'summary' => ['subscription_rate' => $this->subscriptionRate($from, $to, $filters)],
             'stages' => $stages, 'rows' => $rows,
             'upsell' => $this->upsellSummary($renewalOrderIds, $risk),
-            'stores' => $initials->pluck('store_name')->filter()->unique()->sort()->values()->all(),
+            'stores' => $stores,
             'stage_options' => array_column($stages, 'key'),
         ];
     }
@@ -277,29 +301,29 @@ class PaymentRenewalAnalysisService
             $cardQuery->whereBetween('occurred_at', [$from, $to]);
         }
 
-        foreach ($paypalRefundQuery->get() as $record) {
+        foreach ($paypalRefundQuery->select(['id', 'logistics_order_id', 'refund_amount_usd', 'manual_reason', 'refund_reason', 'event_code', 'status', 'refunded_at'])->lazyById(500) as $record) {
             $orderId = (int) $record->logistics_order_id;
             $this->accumulate($refunds, $orderId, (float) $record->refund_amount_usd);
             $this->appendRiskDetail($refunds, $orderId, [
                 'amount' => (float) $record->refund_amount_usd,
                 'reason' => (string) ($record->manual_reason ?: $record->refund_reason ?: $record->eventLabel()),
                 'status' => $record->statusLabel(),
-                'time' => optional($record->refunded_at)->format('Y-m-d H:i:s') ?: '-',
+                'time' => $record->refunded_at?->copy()->setTimezone($filters['timezone'] ?? '+08:00')->format('Y-m-d H:i:s') ?: '-',
             ]);
         }
-        foreach ($paypalDisputeQuery->get()->groupBy('logistics_order_id') as $orderId => $records) {
+        foreach ($paypalDisputeQuery->select(['id', 'logistics_order_id', 'dispute_amount_usd', 'original_amount', 'reason', 'status', 'dispute_created_at'])->get()->groupBy('logistics_order_id') as $orderId => $records) {
             $this->accumulate($disputes, (int) $orderId, (float) $records->max(fn ($record): float => (float) ($record->dispute_amount_usd ?? $record->original_amount ?? 0)));
             foreach ($records as $record) {
                 $this->appendRiskDetail($disputes, (int) $orderId, [
                     'amount' => (float) ($record->dispute_amount_usd ?? $record->original_amount ?? 0),
                     'reason' => $record->reasonLabel(),
                     'status' => $record->statusLabel(),
-                    'time' => optional($record->dispute_created_at)->format('Y-m-d H:i:s') ?: '-',
+                    'time' => $record->dispute_created_at?->copy()->setTimezone($filters['timezone'] ?? '+08:00')->format('Y-m-d H:i:s') ?: '-',
                 ]);
             }
         }
         $cardDisputes = [];
-        foreach ($cardQuery->get() as $record) {
+        foreach ($cardQuery->select(['id', 'logistics_order_id', 'refund_amount_usd', 'refund_reason', 'occurred_at'])->lazyById(500) as $record) {
             $reason = LogisticsCreditCardRefundReason::normalize((string) $record->refund_reason);
             if (in_array($reason, LogisticsCreditCardRefundReason::DISPUTE, true)) {
                 $orderId = (int) $record->logistics_order_id;
@@ -308,7 +332,7 @@ class PaymentRenewalAnalysisService
                     'amount' => (float) $record->refund_amount_usd,
                     'reason' => (string) $record->refund_reason,
                     'status' => '-',
-                    'time' => optional($record->occurred_at)->format('Y-m-d H:i:s') ?: '-',
+                    'time' => $record->occurred_at?->copy()->setTimezone($filters['timezone'] ?? '+08:00')->format('Y-m-d H:i:s') ?: '-',
                 ]);
             } elseif (in_array($reason, LogisticsCreditCardRefundReason::CUSTOMER_SERVICE, true)) {
                 $orderId = (int) $record->logistics_order_id;
@@ -317,7 +341,7 @@ class PaymentRenewalAnalysisService
                     'amount' => (float) $record->refund_amount_usd,
                     'reason' => (string) $record->refund_reason,
                     'status' => '-',
-                    'time' => optional($record->occurred_at)->format('Y-m-d H:i:s') ?: '-',
+                    'time' => $record->occurred_at?->copy()->setTimezone($filters['timezone'] ?? '+08:00')->format('Y-m-d H:i:s') ?: '-',
                 ]);
             }
         }
@@ -386,7 +410,7 @@ class PaymentRenewalAnalysisService
             });
         }
 
-        $orders = $query->get();
+        $orders = $query->select(['id', 'subscription_type', 'payment_gateway', 'payment_method', 'paypal_account_id', 'paypal_association_source'])->get();
         $paypalOrderIds = $orders->filter(fn (LogisticsOrder $order): bool => $this->channelFor($order) === 'paypal')
             ->pluck('id')->map(fn ($id): int => (int) $id)->all();
         $matchedPayPalOrders = $paypalOrderIds === [] ? [] : LogisticsPayPalTransaction::query()
@@ -438,8 +462,8 @@ class PaymentRenewalAnalysisService
     private function upsellSummary(array $renewalOrderIds, array $risk): array
     {
         if ($renewalOrderIds === []) return ['reference_orders' => 0, 'scope_orders' => 0, 'linked_orders' => 0, 'references' => 0, 'unmeasured' => 0, 'measured_orders' => 0, 'revenue' => 0.0, 'refund_count' => 0, 'refund_amount' => 0.0, 'dispute_count' => 0, 'dispute_amount' => 0.0];
-        $references = LogisticsOrderPaymentReference::query()->whereIn('logistics_order_id', $renewalOrderIds)->where('reference_type', LogisticsOrderPaymentReference::TYPE_UPSELL)->get();
-        $taggedOrders = LogisticsOrder::query()->whereIn('id', $renewalOrderIds)->where('is_add_on', '已加购')->get();
+        $references = LogisticsOrderPaymentReference::query()->whereIn('logistics_order_id', $renewalOrderIds)->where('reference_type', LogisticsOrderPaymentReference::TYPE_UPSELL)->get(['logistics_order_id', 'gateway_order_id']);
+        $taggedOrders = LogisticsOrder::query()->whereIn('id', $renewalOrderIds)->where('is_add_on', '已加购')->get(['id', 'paid_amount_usd']);
         $refundCount = $refundAmount = $disputeCount = $disputeAmount = 0;
         foreach ($taggedOrders as $order) {
             $refund = $risk['refunds'][(int) $order->id] ?? ['count' => 0, 'amount' => 0.0];

@@ -639,6 +639,7 @@ class PaymentPortalController extends Controller
     private function renewalAnalysisFilters(Request $request): array
     {
         $validated = $request->validate([
+            'timezone' => ['nullable', Rule::in(array_keys(PaymentRenewalAnalysisService::timezones()))],
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
             'channel' => ['nullable', Rule::in(['', 'paypal', 'credit_card'])],
@@ -646,9 +647,11 @@ class PaymentPortalController extends Controller
             'store' => ['nullable', 'string', 'max:191'],
             'stage_page' => ['nullable', 'integer', 'min:1'],
         ]);
-        $today = now('Asia/Shanghai');
+        $timezone = (string) ($validated['timezone'] ?? '+08:00');
+        $today = now($timezone);
 
         return [
+            'timezone' => $timezone,
             'date_from' => (string) ($validated['date_from'] ?? $today->copy()->subDays(89)->format('Y-m-d')),
             'date_to' => (string) ($validated['date_to'] ?? $today->format('Y-m-d')),
             'risk_date_mode' => 'payment',
