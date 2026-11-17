@@ -38,6 +38,7 @@ class PaymentRenewalAnalysisService
     public function dashboard(array $filters): array
     {
         $filters['timezone'] ??= '+08:00';
+        if (($filters['stage'] ?? '') === 'initial') $filters['stage'] = '';
         $dataset = $this->dataset($filters);
         $dataset = $this->filterStages($dataset, $filters);
         $total = count($dataset['stages']);
@@ -60,6 +61,19 @@ class PaymentRenewalAnalysisService
 
     private function filterStages(array $dataset, array $filters): array
     {
+        // First-subscription figures are independent of the renewal-stage filter and pagination.
+        $dataset['initial_rows'] = array_values(array_filter($dataset['rows'], fn (array $row): bool => $row['stage_number'] === 0));
+        $dataset['initial_refunds'] = ['total' => $this->riskTotal($dataset['initial_rows'], true)];
+        foreach (['paypal', 'credit_card'] as $channel) {
+            $dataset['initial_refunds'][$channel] = $this->riskTotal(array_values(array_filter(
+                $dataset['initial_rows'], fn (array $row): bool => $row['actual_channel'] === $channel,
+            )), true);
+        }
+        $dataset['stages'] = array_values(array_filter($dataset['stages'], fn (array $stage): bool => $stage['number'] > 0));
+        $dataset['rows'] = array_values(array_filter($dataset['rows'], fn (array $row): bool => $row['stage_number'] > 0));
+        $dataset['stage_options'] = array_values(array_filter($dataset['stage_options'], fn (string $key): bool => $key !== 'initial'));
+        if (($filters['stage'] ?? '') === 'initial') $filters['stage'] = '';
+
         if (($filters['stage'] ?? '') !== '') {
             $dataset['stages'] = array_values(array_filter($dataset['stages'], fn (array $stage): bool => $stage['key'] === $filters['stage']));
             $dataset['rows'] = array_values(array_filter($dataset['rows'], fn (array $row): bool => $row['stage_key'] === $filters['stage']));

@@ -257,6 +257,24 @@ $translations = [
 ];
 
 return array_replace_recursive($translations, [
+    'renewal_two_sections' => [
+        'subtitle' => '查看首单订阅率，以及第 1 次至第 N 次续费率和各阶段退款率。',
+        'renewal_title' => '各次续费率',
+        'context' => '付款区间：:from ～ :to ｜ :timezone ｜ 数据生成：:generated',
+        'view_calculation' => '查看计算',
+        'stage_calculation' => '查看第 :number 次续费的计算',
+        'renewal_stage' => '续费次数', 'all_renewals' => '全部续费次数',
+        'first_refunds' => '首购退款',
+        'first_scope' => '订阅率以合格首单为基数；退款率以本期订阅首购订单为基数，两者分母不同，具体见“查看计算”。',
+        'first_refund_scope' => '首购退款口径：本期订阅首购 :orders 单，实收 :revenue；退款记录 :records 笔，退款订单去重 :refunded 单，金额 :amount。不受续费次数筛选影响。',
+        'refund_base' => '首购订单数（退款口径）',
+        'channel' => '渠道', 'total' => '总体',
+        'subscription_orders' => '合格订阅首购数', 'qualified_orders' => '合格首单数', 'subscription_rate' => '首单订阅率',
+        'orders' => '付款订单数', 'revenue' => '实收金额', 'refund_orders' => '退款订单数', 'refund_amount' => '退款金额',
+        'refund_count_rate' => '笔数退款率', 'refund_amount_rate' => '金额退款率',
+        'stage_note' => '本期付款与前推 30 天的上一阶段按同一订阅链对比；各次退款率仅使用本次付款订单。每页显示 10 次，首购不占续费分页。',
+        'first_sheet' => '首单订阅率', 'renewal_sheet' => '各次续费率',
+    ],
     'renewal_audit' => [
         'utc_period' => '对应 UTC 查询区间：:from ～ :to。',
         'utc_comparison' => '对比区间对应 UTC：:from ～ :to；固定偏移不切换夏令时。',
