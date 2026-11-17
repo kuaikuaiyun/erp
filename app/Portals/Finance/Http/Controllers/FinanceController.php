@@ -1837,9 +1837,9 @@ class FinanceController extends Controller
         return [$items, $service->subscriptionOptions(collect($subscriptions))->all()];
     }
 
-    private function transactionSummaryRows(FinanceSettlementService $service, string $tab, array $filters, CarbonImmutable $month, ?FinancePaymentAccount $account, bool $reuse, bool $includePayPalAmounts = true): \Illuminate\Support\LazyCollection
+    private function transactionSummaryRows(FinanceSettlementService $service, string $tab, array $filters, CarbonImmutable $month, ?FinancePaymentAccount $account, bool $reuse, bool $includePayPalAmounts = true, bool $settlementTimezones = false): \Illuminate\Support\LazyCollection
     {
-        return \Illuminate\Support\LazyCollection::make(function () use ($service, $tab, $filters, $month, $account, $reuse, $includePayPalAmounts) {
+        return \Illuminate\Support\LazyCollection::make(function () use ($service, $tab, $filters, $month, $account, $reuse, $includePayPalAmounts, $settlementTimezones) {
         $channels = $tab === 'combined' ? ['paypal', 'credit_card'] : [$tab === 'paypal' ? 'paypal' : 'credit_card'];
         foreach ($channels as $channel) {
             if (isset($filters['payment_account_id']) && (! $account || $account->account_type !== $channel)) {
@@ -1857,9 +1857,11 @@ class FinanceController extends Controller
                 'combined' => FinanceSettlementService::SHOPIFY_SUMMARY_CHANNELS,
                 default => [],
             };
-            $projection = $reuse ? app(\App\Portals\Finance\FinanceSummaryProjection::class)
+            $projection = $reuse && ! $settlementTimezones ? app(\App\Portals\Finance\FinanceSummaryProjection::class)
                 ->stream($channel, $scope, true, $filters['currency'] ?? null, $paymentChannels) : null;
-            $channelRows = $projection ?? $service->summaryRowStream($channel, $scope, transactions: true);
+            $channelRows = $settlementTimezones
+                ? $this->settlementMonthRows($service, $channel, $scope, $paymentChannels, transactions: true)
+                : ($projection ?? $service->summaryRowStream($channel, $scope, transactions: true));
             $paypalAmounts = [];
             if ($channel === 'paypal' && $includePayPalAmounts) {
                 $period = array_intersect_key($scope, array_flip(['from', 'to', 'timezone', 'account']));
@@ -3104,6 +3106,24 @@ class FinanceController extends Controller
             ->where('published', '>', 0)->whereColumn('published', 'revision')->count() === count($channels);
     }
 
+    private function settlementMonthRows(FinanceSettlementService $service, string $channel, array $filters, array $paymentChannels, bool $transactions = false): iterable
+    {
+        $zones = $channel === 'paypal'
+            ? ['-04:00' => ['paypal']]
+            : ['-04:00' => ['xuzong1', 'xuzong2'], 'Asia/Shanghai' => ['ye', 'worldpay']];
+        foreach ($zones as $zone => $platforms) {
+            $selected = $paymentChannels === [] ? $platforms : array_intersect($platforms, $paymentChannels);
+            if ($selected === []) {
+                continue;
+            }
+            foreach ($service->summaryRowStream($channel, [...$filters, 'timezone' => $zone], $transactions) as $row) {
+                if (in_array($row['payment_channel'], $selected, true)) {
+                    yield $row;
+                }
+            }
+        }
+    }
+
     public function buildSettlementOverviewMonth(string $comparisonMonth, string $report, array $data, bool $includeOptions, bool $reuse): array
     {
         $start = CarbonImmutable::parse($comparisonMonth.'-01', 'Asia/Shanghai');
@@ -3126,10 +3146,10 @@ class FinanceController extends Controller
                     'xuzong1', 'xuzong2', 'ye', 'worldpay' => [$data['channel']],
                     default => [],
                 };
-                $projection = $reuse && $report === 'summary'
-                    ? app(\App\Portals\Finance\FinanceSummaryProjection::class)
-                        ->stream($channel, $filters, false, paymentChannels: $paymentChannels) : null;
-                foreach ($projection ?? $service->summaryRowStream($channel, $filters) as $row) {
+                $channelRows = $report === 'summary'
+                    ? $this->settlementMonthRows($service, $channel, $filters, $paymentChannels)
+                    : $service->summaryRowStream($channel, $filters);
+                foreach ($channelRows as $row) {
                     if (filled($data['channel'] ?? null) && ! in_array($data['channel'], ['paypal', 'credit_card', 'combined'], true)
                         && ($data['channel'] === 'xuzong'
                             ? ! in_array($row['payment_channel'], ['xuzong1', 'xuzong2'], true)
@@ -3235,7 +3255,7 @@ class FinanceController extends Controller
         $counts = [];
         $unallocated = [];
         foreach ($tabs as $tab) {
-            $rows = $this->transactionSummaryRows($service, $tab, [], $month, null, reuse: $reuse, includePayPalAmounts: false);
+            $rows = $this->transactionSummaryRows($service, $tab, [], $month, null, reuse: $reuse, includePayPalAmounts: false, settlementTimezones: true);
             foreach ($summary->summarize($rows, $tab) as $item) {
                 if (! $item['failed_orders']) {
                     continue;
