@@ -972,7 +972,9 @@
         if (!items.length) return '<div class="aikaipin-material-video-empty"><i class="fa fa-film"></i> 暂无素材视频</div>';
         return items.map(function (item) {
             var media = item.preview_url
-                ? '<video controls preload="none" src="' + escapeHtml(item.preview_url) + '"></video>'
+                ? (item.historical
+                    ? '<iframe class="aikaipin-material-video-frame" loading="lazy" src="' + escapeHtml(item.preview_url) + '" title="' + escapeHtml(item.name || '历史素材视频') + '" allow="fullscreen" referrerpolicy="same-origin"></iframe>'
+                    : '<video controls preload="none" src="' + escapeHtml(item.preview_url) + '"></video>')
                 : (item.pending
                     ? '<div class="aikaipin-material-video-history"><i class="fa fa-upload"></i><span>保存产品后即可在线播放</span></div>'
                     : '<div class="aikaipin-material-video-history"><i class="fa fa-file-code-o"></i><span>视频保存在历史 HTML 参考页中</span>' +

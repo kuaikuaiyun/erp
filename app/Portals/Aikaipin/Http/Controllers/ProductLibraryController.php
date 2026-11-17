@@ -1103,9 +1103,6 @@ class ProductLibraryController extends Controller
             'libraryUrl' => route('aikaipin.product-library.index'),
         ];
         if ($this->authorization->canManageProductLibrary($context['user'])) {
-            $viewData['referenceVideos'] = $this->referenceVideos($product);
-            $viewData['referenceVideoUploadUrl'] = route('aikaipin.product-library.reference-videos.upload', $product);
-            $viewData['referenceVideoNamingHint'] = '上传后自动命名：产品编号-flow/spy/mix-日期-递增编号';
             $viewData['referenceEditable'] = true;
             $viewData['referenceContentUpdateUrl'] = route('aikaipin.product-library.reference-preview.content.update', $product);
         }
@@ -1225,6 +1222,10 @@ class ProductLibraryController extends Controller
         $referenceLayouts = Storage::disk($file['disk'])->exists($layoutPath)
             ? (json_decode(Storage::disk($file['disk'])->get($layoutPath), true) ?: []) : [];
         $historicalCount = $this->countReferenceHtmlVideos($file['disk'], $file['path']);
+        $historicalPreviewIndex = $request->query('history_video');
+        $historicalPreviewIndex = is_numeric($historicalPreviewIndex) && (int) $historicalPreviewIndex >= 0
+            ? (int) $historicalPreviewIndex
+            : null;
         $videos = $this->normalizeReferenceVideos($product, $historicalCount)->map(fn ($video): array => [
             'id' => (int) $video->getKey(),
             'type' => $video->type,
@@ -1240,6 +1241,7 @@ class ProductLibraryController extends Controller
             'referenceEdits' => $referenceEdits,
             'referenceHiddenVideos' => $referenceHiddenVideos,
             'referenceLayouts' => $referenceLayouts,
+            'historicalPreviewIndex' => $historicalPreviewIndex,
         ])->render();
         return response()->stream(function () use ($file, $injection): void {
             $stream = Storage::disk($file['disk'])->readStream($file['path']);
@@ -2122,7 +2124,7 @@ class ProductLibraryController extends Controller
         }
     }
 
-    /** @return list<array{id:null,type:string,name:string,historical:true,size:string,preview_url:null}> */
+    /** @return list<array{id:null,type:string,name:string,historical:true,size:string,preview_url:string}> */
     private function historicalReferenceVideoPayloads(AikaipinProduct $product): array
     {
         $file = $product->referenceFilePayload();
@@ -2162,7 +2164,12 @@ class ProductLibraryController extends Controller
                             $items[] = [
                                 'id' => null, 'history_index' => $number - 1, 'type' => $type,
                                 'name' => $this->referenceProductCode($product).'-'.OperationAiProductReferenceVideo::fileTypeCode($type).'-'.$date.'-'.str_pad((string) $number, 3, '0', STR_PAD_LEFT).'.mp4',
-                                'historical' => true, 'size' => '历史 HTML', 'preview_url' => null,
+                                'historical' => true, 'size' => '历史 HTML',
+                                'preview_url' => route('aikaipin.product-library.reference-preview.content', [
+                                    'product' => $product,
+                                    'embedded' => 1,
+                                    'history_video' => $number - 1,
+                                ]),
                             ];
                         }
                     } elseif (str_contains($token, '混剪')) {

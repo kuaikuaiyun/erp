@@ -488,9 +488,6 @@ class OperationAiProductLibraryController extends Controller
             'product' => $product,
             'contentUrl' => route('operation.ai-product-library.reference-preview.content', ['product' => $product, 'embedded' => 1]),
             'libraryUrl' => route('operation.ai-product-library.index'),
-            'referenceVideos' => $this->referenceVideos($product, $context['user']),
-            'referenceVideoUploadUrl' => route('operation.ai-product-library.reference-videos.upload.by-product', $product, false),
-            'referenceVideoNamingHint' => '上传后自动命名：产品编号-flow/spy/mix-日期-递增编号',
         ]);
     }
 

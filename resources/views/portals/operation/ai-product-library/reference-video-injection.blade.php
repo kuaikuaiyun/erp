@@ -15,6 +15,7 @@
     var savedEdits = @json($referenceEdits ?? []);
     var savedLayouts = @json($referenceLayouts ?? []);
     var hiddenHistoryVideoIndexes = (@json($referenceHiddenVideos ?? [])||[]).map(Number);
+    var historicalPreviewIndex = @json($historicalPreviewIndex ?? null);
     var editSnapshot=[];
     var initialVideoIds=[];
     var initialHistoryVideoIndexes=[];
@@ -145,8 +146,22 @@
                 caption.insertAdjacentElement('afterend',link);link.insertAdjacentElement('afterend',remove);
         });
     }
+    function isolateHistoricalPreview(){
+        if(historicalPreviewIndex===null||historicalPreviewIndex===''||Number(historicalPreviewIndex)<0)return false;
+        var target=document.querySelector('[data-history-video-index="'+Number(historicalPreviewIndex)+'"]');
+        if(!target){document.body.innerHTML='<div style="padding:24px;font:14px Arial,sans-serif;color:#b91c1c">视频不存在或已被隐藏</div>';return true;}
+        var shell=document.createElement('main');
+        shell.style.cssText='display:flex;align-items:center;justify-content:center;width:100%;min-height:100vh;margin:0;padding:8px;box-sizing:border-box;background:#111';
+        target.style.cssText='display:block!important;width:100%!important;max-width:100%!important;margin:0!important';
+        var player=target.querySelector('video');
+        if(player)player.style.cssText='display:block!important;width:100%!important;height:190px!important;max-height:190px!important;object-fit:contain!important;background:#111!important';
+        target.querySelectorAll('.erp-history-video-name,.erp-history-video-download,.erp-reference-video__delete').forEach(function(item){item.remove();});
+        shell.appendChild(target);document.body.replaceChildren(shell);document.documentElement.style.background='#111';document.body.style.margin='0';
+        return true;
+    }
     function render(){
         normalizeHistoricalVideos();
+        if(isolateHistoricalPreview())return true;
         Object.keys(labels).forEach(function(type){
             var items=videos.filter(function(video){return video.type===type;});if(!items.length)return;
             var label=labelForType(type),box;
@@ -243,7 +258,7 @@
             window.parent.postMessage({type:'erp-reference-edit-content',patches:editablePatches(),video_layout:videoLayout(),element_layout:elementLayout(),deleted_video_ids:initialVideoIds.filter(function(id){return remaining.indexOf(id)===-1;}),deleted_history_video_indexes:hiddenHistoryVideoIndexes.concat(initialHistoryVideoIndexes.filter(function(index){return remainingHistory.indexOf(index)===-1;})).filter(function(value,index,items){return items.indexOf(value)===index;})},'*');
         }
     });
-    function initialize(){applySavedEdits();render();prepareLayoutTargets();applySavedLayouts();}
+    function initialize(){applySavedEdits();if(render())return;prepareLayoutTargets();applySavedLayouts();}
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initialize);else initialize();
     window.parent.postMessage({type:'erp-reference-edit-ready'},'*');
     document.addEventListener('click',function(event){var button=event.target.closest&&event.target.closest('.erp-reference-video__delete');if(button&&document.body.classList.contains('erp-reference-editing')){event.preventDefault();event.stopPropagation();var item=button.closest('.erp-reference-video,.erp-history-video-item');if(item){item.remove();return;}var historyIndex=button.getAttribute('data-history-video-index'),historyItem=document.querySelector('[data-history-video-index="'+historyIndex+'"]');if(historyItem)historyItem.remove();button.remove();}});
