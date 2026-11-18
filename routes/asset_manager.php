@@ -1,7 +1,19 @@
 <?php
 
 use App\Portals\AssetManager\Http\Controllers\AssetManagerController;
+use App\Portals\AssetManager\Http\Controllers\DisciplineController;
 use Illuminate\Support\Facades\Route;
+
+Route::prefix('asset-manager/discipline')->name('asset-manager.discipline.')->controller(DisciplineController::class)->group(function () {
+    Route::get('/', 'index')->name('index');
+    Route::get('/members', 'members')->name('members');
+    Route::get('/export', 'export')->name('export');
+    Route::get('/records', 'records')->name('records');
+    Route::post('/records', 'store')->name('store');
+    Route::get('/records/{record}', 'show')->whereNumber('record')->name('show');
+    Route::put('/records/{record}', 'update')->whereNumber('record')->name('update');
+    Route::delete('/records/{record}', 'destroy')->whereNumber('record')->name('destroy');
+});
 
 // Retired pages must not fall through to the generic portal page handler.
 Route::any('/asset-manager/{kind}/{retired?}', [AssetManagerController::class, 'retired'])
