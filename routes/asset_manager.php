@@ -3,18 +3,19 @@
 use App\Portals\AssetManager\Http\Controllers\AssetManagerController;
 use Illuminate\Support\Facades\Route;
 
+// Retired pages must not fall through to the generic portal page handler.
+Route::any('/asset-manager/{kind}/{retired?}', [AssetManagerController::class, 'retired'])
+    ->whereIn('kind', ['resources', 'codex-renewals', 'ipfoxy'])
+    ->where('retired', '.*')->name('asset-manager.retired');
+
+// Only computer equipment remains in the original portal.
 Route::prefix('asset-manager')->name('asset-manager.')->controller(AssetManagerController::class)->group(function () {
-    Route::post('/ipfoxy/accounts', 'accountSave')->name('accounts.store');
-    Route::put('/ipfoxy/accounts/{account}', 'accountSave')->whereNumber('account')->name('accounts.update');
-    Route::delete('/ipfoxy/accounts/{account}', 'accountDelete')->whereNumber('account')->name('accounts.delete');
-    Route::post('/ipfoxy/accounts/{account}/sync', 'sync')->whereNumber('account')->name('accounts.sync');
-    Route::post('/ipfoxy/sync/{sync}', 'syncStep')->whereUuid('sync')->name('sync.step');
-    Route::get('/{kind}/export', 'export')->whereIn('kind', ['computers', 'resources', 'codex-renewals', 'ipfoxy'])->name('export');
-    Route::post('/{kind}/import/preview', 'preview')->whereIn('kind', ['computers', 'resources', 'codex-renewals'])->name('preview');
-    Route::post('/{kind}/import', 'import')->whereIn('kind', ['computers', 'resources', 'codex-renewals'])->name('import');
-    Route::get('/{kind}', 'index')->whereIn('kind', ['computers', 'resources', 'codex-renewals', 'ipfoxy'])->name('index');
-    Route::post('/{kind}', 'save')->whereIn('kind', ['computers', 'resources', 'codex-renewals'])->name('store');
-    Route::get('/{kind}/{record}', 'show')->whereNumber('record')->whereIn('kind', ['computers', 'resources', 'codex-renewals'])->name('show');
-    Route::put('/{kind}/{record}', 'save')->whereNumber('record')->whereIn('kind', ['computers', 'resources', 'codex-renewals'])->name('update');
-    Route::delete('/{kind}/{record}', 'destroy')->whereNumber('record')->whereIn('kind', ['computers', 'resources', 'codex-renewals'])->name('delete');
+    Route::get('/{kind}/export', 'export')->whereIn('kind', ['computers'])->name('export');
+    Route::post('/{kind}/import/preview', 'preview')->whereIn('kind', ['computers'])->name('preview');
+    Route::post('/{kind}/import', 'import')->whereIn('kind', ['computers'])->name('import');
+    Route::get('/{kind}', 'index')->whereIn('kind', ['computers'])->name('index');
+    Route::post('/{kind}', 'save')->whereIn('kind', ['computers'])->name('store');
+    Route::get('/{kind}/{record}', 'show')->whereNumber('record')->whereIn('kind', ['computers'])->name('show');
+    Route::put('/{kind}/{record}', 'save')->whereNumber('record')->whereIn('kind', ['computers'])->name('update');
+    Route::delete('/{kind}/{record}', 'destroy')->whereNumber('record')->whereIn('kind', ['computers'])->name('delete');
 });

@@ -22,7 +22,7 @@ class PaymentRenewalAnalysisTest extends TestCase
         app()->setLocale('zh-CN');
         Schema::create('logistics_orders', function (Blueprint $table): void {
             $table->increments('id');
-            foreach (['paid_at', 'subscription_origin_order_id', 'subscription_type', 'is_add_on', 'operator_name', 'store_name', 'transaction_id', 'shopify_order_id', 'shopify_order_number', 'payment_gateway_order_id', 'bill_number', 'payment_gateway', 'payment_method', 'paypal_association_source', 'tongtu_order_number'] as $field) $table->string($field)->nullable();
+            foreach (['paid_at', 'subscription_origin_order_id', 'subscription_type', 'is_add_on', 'operator_name', 'store_name', 'transaction_id', 'shopify_order_id', 'shopify_order_number', 'payment_gateway_order_id', 'bill_number', 'payment_gateway', 'payment_method', 'paypal_association_source', 'tongtu_order_number', 'buyer_email'] as $field) $table->string($field)->nullable();
             $table->decimal('paid_amount_usd', 16, 4)->default(0);
             $table->unsignedInteger('paypal_account_id')->nullable();
         });
@@ -345,6 +345,98 @@ class PaymentRenewalAnalysisTest extends TestCase
         self::assertStringContainsString('2 ÷ 2 × 100%', $html);
         self::assertStringContainsString('name="initial_store" value="Test"', $html);
         self::assertStringContainsString('name="renewal_store" value="Test"', $html);
+    }
+
+    public function test_bill_and_email_are_searchable_and_export_covers_all_filtered_rows_as_literal_text(): void
+    {
+        $longBill = '00009549574570768548249622';
+        for ($i=0;$i<45;$i++) $this->order(200+$i,'2026-11-01 13:00:00','无订阅','credit_card','', 'Test', [
+            'bill_number'=>$i === 44 ? $longBill : ($i === 43 ? '=1+1' : 'BILL-'.$i),
+            'buyer_email'=>'buyer'.$i.'@example.com',
+        ]);
+        $service = app(PaymentRenewalAnalysisService::class);
+        foreach ([$longBill,'BUYER44@EXAMPLE.COM'] as $keyword) {
+            $detail = $service->initialOrderDetails($this->filters(),$this->detailFilters(['detail_keyword'=>$keyword]));
+            self::assertSame([244],array_column($detail['rows'],'erp_order_id'));
+            self::assertSame($longBill,$detail['rows'][0]['bill_number']);
+            self::assertSame('buyer44@example.com',$detail['rows'][0]['buyer_email']);
+            $html = view('portals.payment.renewal-order-details',compact('detail'))->render();
+            self::assertStringContainsString('账单号',$html);
+            self::assertStringContainsString('客户邮箱',$html);
+            self::assertStringContainsString('data-renewal-detail-export',$html);
+            self::assertStringContainsString('buyer44@example.com',$html);
+        }
+        $filter = $this->detailFilters(['detail_group'=>'method_cc','detail_purchase'=>'non_subscription','detail_page'=>2]);
+        self::assertCount(20,$service->initialOrderDetails($this->filters(),$filter)['rows']);
+        foreach ([$filter, [...$filter,'detail_keyword'=>'buyer44@'], [...$filter,'detail_keyword'=>'nothing-matches']] as $index=>$exportFilters) {
+            $expected = $service->initialOrderDetails($this->filters(),$exportFilters,false);
+            $response = app(PaymentRenewalAnalysisExportService::class)->downloadOrderDetails($this->filters(),$exportFilters);
+            ob_start(); $response->sendContent(); $bytes=ob_get_clean();
+            $path = tempnam(sys_get_temp_dir(),'renewal-details-export-');
+            try {
+                file_put_contents($path,$bytes);
+                $book = IOFactory::load($path);
+                self::assertSame(2,$book->getSheetCount());
+                $sheet=$book->getSheet(0);
+                self::assertSame(count($expected['rows'])+1,$sheet->getHighestRow());
+                self::assertSame('账单号',$sheet->getCell('D1')->getValue());
+                self::assertSame('客户邮箱',$sheet->getCell('E1')->getValue());
+                if ($index === 0) {
+                    self::assertSame(47,$sheet->getHighestRow());
+                    self::assertSame($longBill,$sheet->getCell('D2')->getValue());
+                    self::assertSame('s',$sheet->getCell('D2')->getDataType());
+                    self::assertSame('=1+1',$sheet->getCell('D3')->getValue());
+                    self::assertSame('s',$sheet->getCell('D3')->getDataType());
+                    self::assertSame('buyer44@example.com',$sheet->getCell('E2')->getValue());
+                    self::assertSame('UTC+08:00',$book->getSheet(1)->getCell('B3')->getValue());
+                }
+                $book->disconnectWorksheets();
+            } finally { unlink($path); }
+        }
+    }
+
+    public function test_main_export_includes_multiline_event_times_in_each_module_timezone(): void
+    {
+        DB::table('logistics_paypal_refunds')->where('logistics_order_id',5)->update(['refunded_at'=>'2026-11-02 03:00:00']);
+        DB::table('logistics_paypal_refunds')->insert(['logistics_order_id'=>5,'refund_amount_usd'=>2,'refunded_at'=>'2026-11-03 23:00:00']);
+        DB::table('logistics_paypal_disputes')->insert([
+            ['logistics_order_id'=>3,'dispute_amount_usd'=>6,'dispute_created_at'=>'2026-11-04 04:00:00'],
+            ['logistics_order_id'=>3,'dispute_amount_usd'=>6,'dispute_created_at'=>'2026-11-05 20:00:00'],
+        ]);
+        $response = app(PaymentRenewalAnalysisExportService::class)->download($this->filters(['initial_timezone'=>'-05:00']));
+        ob_start(); $response->sendContent(); $bytes=ob_get_clean();
+        $path=tempnam(sys_get_temp_dir(),'renewal-event-times-');
+        try {
+            file_put_contents($path,$bytes);
+            $book=IOFactory::load($path);
+            $sheet=$book->getSheet(3);
+            self::assertSame('退款时间',$sheet->getCell('L1')->getValue());
+            self::assertSame('争议时间',$sheet->getCell('O1')->getValue());
+            self::assertSame('时间所属时区',$sheet->getCell('Q1')->getValue());
+            $matched=[];
+            for ($r=2;$r<=$sheet->getHighestRow();$r++) {
+                $id=(string)$sheet->getCell('E'.$r)->getValue();
+                if ($id==='5') {
+                    self::assertSame("2026-11-01 22:00:00\n2026-11-03 18:00:00",$sheet->getCell('L'.$r)->getValue());
+                    self::assertNull($sheet->getCell('O'.$r)->getValue());
+                    self::assertSame('UTC-05:00',$sheet->getCell('Q'.$r)->getValue());
+                    self::assertTrue($sheet->getStyle('L'.$r)->getAlignment()->getWrapText());
+                    $matched[]=$id;
+                } elseif ($id==='3') {
+                    self::assertSame("2026-11-04 12:00:00\n2026-11-06 04:00:00",$sheet->getCell('O'.$r)->getValue());
+                    self::assertNull($sheet->getCell('L'.$r)->getValue());
+                    self::assertSame('UTC+08:00',$sheet->getCell('Q'.$r)->getValue());
+                    $matched[]=$id;
+                } elseif ($id==='6') {
+                    // A refund with no event timestamp remains blank; never invent a payment-time substitute.
+                    self::assertNull($sheet->getCell('L'.$r)->getValue());
+                    $matched[]=$id;
+                }
+            }
+            sort($matched);
+            self::assertSame(['3','5','6'],$matched);
+            $book->disconnectWorksheets();
+        } finally { unlink($path); }
     }
 
     public function test_export_contains_nine_refund_rows_channel_stage_rows_and_both_timezones(): void

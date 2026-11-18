@@ -258,11 +258,21 @@ $translations = [
 
 return array_replace_recursive($translations, [
     'renewal_details' => [
+        'bill_number'=>'账单号', 'buyer_email'=>'客户邮箱',
+        'export'=>'导出 Excel', 'exporting'=>'正在导出全部筛选结果…',
+        'export_error'=>'订单明细导出失败，请重试。',
+        'export_filename'=>'首购订单明细_:time.xlsx', 'export_default_filename'=>'首购订单明细.xlsx',
+        'original_scope'=>'原始范围', 'export_sheet'=>'订单明细', 'export_scope_sheet'=>'筛选范围',
+        'export_all_note'=>'导出当前筛选范围全部订单，不受页码或每页条数限制。',
+        'export_timezone'=>'时区', 'export_period'=>'原始付款日期',
+        'export_store'=>'原始店铺', 'export_method'=>'原始支付方式', 'export_type'=>'原始订单类型',
+        'export_kind'=>'明细范围', 'export_generated'=>'数据生成时间',
+
         'actions'=>'订单明细', 'orders'=>'分母订单明细', 'refunds'=>'退款订单明细',
         'title'=>'首购订单核查', 'close'=>'关闭', 'loading'=>'正在加载订单明细…',
         'error'=>'订单明细加载失败，请重试。', 'retry'=>'重试', 'empty'=>'当前筛选条件下没有订单。',
         'all'=>'全部', 'unknown'=>'未识别', 'query'=>'查询', 'reset'=>'重置筛选',
-        'keyword_hint'=>'搜索 ERP ID、订单号、交易号或店铺',
+        'keyword_hint'=>'搜索 ERP ID、订单号、交易号、账单号、邮箱或店铺',
         'scope'=>'原始范围：:method / :type / :kind；付款日期 :from ～ :to（:timezone）；店铺：:store。',
         'scope_note'=>'弹窗筛选仅在原始范围内缩小；退款按关联订单统计，不限制退款发生日期，同一订单多次退款只算一个退款订单。',
         'generated'=>'数据生成：:time；与页面相同统计缓存，若期间数据更新，请刷新页面后核对。',
@@ -985,15 +995,15 @@ return array_replace_recursive($translations, [
         ],
         'export' => [
             'button' => '导出 Excel', 'summary_sheet' => '阶段概览', 'detail_sheet' => '阶段付款明细',
-            'stages_sheet' => '订阅与续费阶段', 'risk_sheet' => '渠道风险',
+            'stages_sheet' => '订阅与续费阶段', 'risk_sheet' => '渠道风险', 'detail_timezone' => '时间所属时区',
             'timezone' => '统计时区（固定偏移）', 'utc_period' => 'UTC 查询区间', 'utc_comparison' => '对比区间对应 UTC',
             'period' => '本期付款区间', 'comparison_period' => '前推 30 天对比区间',
             'metric' => '指标', 'value' => '数值', 'filename' => '续费订单分析_:time.xlsx',
             'columns' => [
                 'stage' => '付款阶段', 'initial_channel' => '首扣渠道', 'actual_channel' => '实际支付渠道',
                 'initial_order' => '首扣订单', 'renewal_order' => '本阶段订单', 'store' => '店铺', 'transaction' => '支付流水',
-                'paid_at' => '付款时间', 'amount' => '实收金额', 'refund_count' => '退款笔数', 'refund_amount' => '退款金额',
-                'dispute_count' => '争议笔数', 'dispute_amount' => '争议金额',
+                'paid_at' => '付款时间', 'amount' => '实收金额', 'refund_count' => '退款笔数', 'refund_amount' => '退款金额', 'refund_time' => '退款时间',
+                'dispute_count' => '争议笔数', 'dispute_amount' => '争议金额', 'dispute_time' => '争议时间',
             ],
         ],
     ],

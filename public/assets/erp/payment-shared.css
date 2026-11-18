@@ -1295,3 +1295,6 @@
     .payment-renewal-two-sections .payment-renewal-filter,
     .payment-renewal-two-sections .payment-renewal-filter[data-renewal-module="renewal"] { grid-template-columns: minmax(0,1fr); }
 }
+
+.payment-renewal-detail-table { min-width: 1540px; }
+.payment-renewal-detail-email { min-width: 190px; max-width: 240px; overflow-wrap: anywhere; }

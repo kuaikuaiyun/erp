@@ -463,6 +463,16 @@ class PaymentPortalController extends Controller
         ])->header('Cache-Control', 'private, no-store');
     }
 
+    public function exportRenewalAnalysisOrderDetails(Request $request): Response
+    {
+        $context = $this->portalContext($request);
+        if ($context instanceof Response) return $context;
+
+        return $this->renewalAnalysisExport->downloadOrderDetails(
+            $this->renewalAnalysisFilters($request), $this->renewalOrderDetailFilters($request),
+        );
+    }
+
     private function renewalOrderDetailFilters(Request $request): array
     {
         $rules = [

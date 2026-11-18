@@ -34,7 +34,7 @@ final class AssetManagerSpreadsheetService
         });
     }
 
-    public function preview(string $kind, $file): array
+    public function preview(string $kind, $file, ?\Illuminate\Database\Eloquent\Builder $existingQuery = null): array
     {
         $reader = IOFactory::createReaderForFile($file->getRealPath());
         abort_unless(in_array(get_class($reader), ['PhpOffice\\PhpSpreadsheet\\Reader\\Xlsx', 'PhpOffice\\PhpSpreadsheet\\Reader\\Csv']), 422, __('asset_manager.failed'));
@@ -76,7 +76,7 @@ final class AssetManagerSpreadsheetService
                 continue;
             }
             if (! empty($row['_id'])) {
-                if ($class::query()->whereKey($row['_id'])->exists()) {
+                if (($existingQuery ? clone $existingQuery : $class::query())->whereKey($row['_id'])->exists()) {
                     $skipped++;
 
                     continue;

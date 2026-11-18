@@ -20,7 +20,7 @@ class PaymentRenewalAnalysisService
         'id', 'paid_at', 'paid_amount_usd', 'subscription_origin_order_id', 'subscription_type',
         'is_add_on', 'operator_name', 'store_name', 'transaction_id', 'shopify_order_id',
         'shopify_order_number', 'payment_gateway_order_id', 'bill_number',
-        'payment_gateway', 'payment_method', 'paypal_account_id', 'paypal_association_source',
+        'payment_gateway', 'payment_method', 'paypal_account_id', 'paypal_association_source', 'buyer_email',
     ];
 
     /** Ordered groups shared by the page and Excel export. */
@@ -86,7 +86,7 @@ class PaymentRenewalAnalysisService
     }
 
     /** Drill into the same cached first-purchase population used by the summary. */
-    public function initialOrderDetails(array $filters, array $detail): array
+    public function initialOrderDetails(array $filters, array $detail, bool $paginate = true): array
     {
         $module = $this->moduleFilters($filters, 'initial');
         $dataset = $this->filterStages($this->dataset($module), $module);
@@ -100,7 +100,7 @@ class PaymentRenewalAnalysisService
         $keyword = trim((string) ($detail['detail_keyword'] ?? ''));
         $rows = array_values(array_filter($scopeRows, static function (array $row) use ($detail, $keyword): bool {
             if ($keyword !== '' && !str_contains(mb_strtolower(implode(' ', [
-                $row['erp_order_id'], $row['initial_order'], $row['transaction_id'], $row['store_name'],
+                $row['erp_order_id'], $row['initial_order'], $row['transaction_id'], $row['store_name'], $row['bill_number'], $row['buyer_email'],
             ])), mb_strtolower($keyword))) return false;
             if (($detail['detail_store'] ?? '') !== '' && $row['store_name'] !== $detail['detail_store']) return false;
             if (($detail['detail_method'] ?? '') !== '' && $row['payment_method'] !== $detail['detail_method']) return false;
@@ -120,7 +120,7 @@ class PaymentRenewalAnalysisService
         return [
             'scope' => $this->riskTotal($scopeRows, true),
             'summary' => $this->riskTotal($rows, true),
-            'rows' => array_slice($rows, ($page - 1) * $perPage, $perPage),
+            'rows' => $paginate ? array_slice($rows, ($page - 1) * $perPage, $perPage) : $rows,
             'stores' => $stores, 'parent_store' => $module['store'], 'calculation' => $dataset['calculation'],
             'filters' => $detail,
             'pagination' => ['current_page'=>$page, 'last_page'=>$lastPage, 'total'=>$total, 'per_page'=>$perPage,
@@ -199,7 +199,7 @@ class PaymentRenewalAnalysisService
         $cacheFilters['channel'] = '';
         $cacheFilters['timezone'] ??= '+08:00';
         unset($cacheFilters['stage_page'], $cacheFilters['stage']);
-        $cacheKey = 'payment:renewal-analysis:v14:'.sha1(json_encode($cacheFilters));
+        $cacheKey = 'payment:renewal-analysis:v15:'.sha1(json_encode($cacheFilters));
 
         $expiresAt = now()->addMinutes(5);
         return Cache::remember($cacheKey, $expiresAt, function () use ($cacheFilters, $expiresAt): array {
@@ -372,6 +372,7 @@ class PaymentRenewalAnalysisService
             'renewal_order' => (string) ($order->shopify_order_number ?: $order->id),
             'store_name' => (string) ($order->store_name ?: $initial->store_name),
             'transaction_id' => (string) $order->transaction_id, 'paid_at' => $paid,
+            'bill_number' => (string) $order->bill_number, 'buyer_email' => (string) $order->buyer_email,
             'amount' => round((float) $order->paid_amount_usd, 2), 'raw_amount' => (float) $order->paid_amount_usd,
             'refund_count' => $refund['count'], 'refund_amount' => round($refund['amount'], 2), 'raw_refund_amount' => $refund['amount'], 'refund_details' => $refund['details'],
             'dispute_count' => $dispute['count'], 'dispute_amount' => round($dispute['amount'], 2), 'raw_dispute_amount' => $dispute['amount'], 'dispute_details' => $dispute['details'],

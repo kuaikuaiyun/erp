@@ -84,7 +84,7 @@ return ['id' => $id, 'done' => $done, 'count' => $count, 'total' => $total];
 
     public function query(Request $request)
     {
-        $q = AssetIpfoxyProxy::query()->join('asset_ipfoxy_accounts as a', 'a.id', '=', 'asset_ipfoxy_proxies.account_id')->select('asset_ipfoxy_proxies.*', 'a.label as account_label');
+        $q = AssetIpfoxyProxy::query()->join('asset_ipfoxy_accounts as a', 'a.id', '=', 'asset_ipfoxy_proxies.account_id')->select('asset_ipfoxy_proxies.*', 'a.label as account_label', 'a.owner_department_id');
         foreach (AssetManagerCatalog::fields('ipfoxy') as $key => $type) {
             $value = $request->input('filter.'.$key);
             if (! is_scalar($value) || trim((string) $value) === '') {

@@ -13,6 +13,87 @@ class PaymentRenewalAnalysisExportService
     {
     }
 
+    public function downloadOrderDetails(array $filters, array $detailFilters): StreamedResponse
+    {
+        $data = $this->analysis->initialOrderDetails($filters, $detailFilters, false);
+        $dt = static fn (string $key) => __('payment.renewal_details.'.$key);
+        $pt = static fn (string $key) => __('payment.renewal_two_sections.'.$key);
+        $methodName = static fn (string $method) => $method === 'unknown' ? $dt('unknown') : $pt('method_names.'.$method);
+        $f = $data['filters'];
+        $book = new Spreadsheet();
+        $sheet = $book->getActiveSheet();
+        $sheet->setTitle($dt('export_sheet'));
+        $columns = ['erp_id','order','transaction','bill_number','buyer_email','store','method','type','paid_at','revenue','refund_count','refund_amount'];
+        $sheet->fromArray([array_map($dt, $columns)], null, 'A1');
+        $rowNumber = 2;
+        foreach ($data['rows'] as $row) {
+            $values = [
+                (string)$row['erp_order_id'], $row['initial_order'], $row['transaction_id'], $row['bill_number'],
+                $row['buyer_email'], $row['store_name'], $methodName($row['payment_method']),
+                $pt('purchase_'.$row['purchase_type']), $row['paid_at'], $row['raw_amount'], $row['refund_count'], $row['raw_refund_amount'],
+            ];
+            foreach ($values as $index => $value) {
+                $cell = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($index + 1).$rowNumber;
+                // User-supplied text stays text: preserve long IDs/leading zeros and avoid formula interpretation.
+                $sheet->setCellValueExplicit($cell, $value, $index < 9
+                    ? \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING : \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
+            }
+            $rowNumber++;
+        }
+        $sheet->freezePane('A2');
+        $sheet->setAutoFilter('A1:L'.max(1,$rowNumber - 1));
+        $sheet->getStyle('A1:L1')->getFont()->setBold(true)->getColor()->setARGB('FFFFFFFF');
+        $sheet->getStyle('A1:L1')->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF287FBD');
+        if ($rowNumber > 2) {
+            $sheet->getStyle('J2:J'.($rowNumber - 1))->getNumberFormat()->setFormatCode('0.00');
+            $sheet->getStyle('L2:L'.($rowNumber - 1))->getNumberFormat()->setFormatCode('0.00');
+        }
+        foreach (range('A','L') as $column) $sheet->getColumnDimension($column)->setAutoSize(true);
+
+        $scope = $book->createSheet();
+        $scope->setTitle($dt('export_scope_sheet'));
+        $metadata = [
+            [$dt('export_all_note')],
+            [$dt('export_period'), $data['calculation']['period_from'].' ~ '.$data['calculation']['period_to']],
+            [$dt('export_timezone'), $data['calculation']['timezone']],
+            [$dt('export_store'), $data['parent_store'] ?: $dt('all')],
+            [$dt('export_method'), $f['detail_group'] === 'total' ? $pt('total') : $methodName(substr($f['detail_group'],7))],
+            [$dt('export_type'), $pt('purchase_'.$f['detail_purchase'])],
+            [$dt('export_kind'), $dt($f['detail_kind'])],
+            [$dt('export_generated'), $data['calculation']['generated_at']],
+        ];
+        foreach (['detail_keyword','detail_store','detail_method','detail_type','detail_refund','detail_from','detail_to'] as $key) {
+            $value = $f[$key] ?? '';
+            if ($key === 'detail_method' && $value !== '') $value = $methodName($value);
+            if ($key === 'detail_type' && $value !== '') $value = $pt('purchase_'.$value);
+            if ($key === 'detail_refund' && $value !== '') $value = $dt($value === 'yes' ? 'refund_yes' : 'refund_no');
+            $metadata[] = [__('payment.renewal_details.fields.'.$key), $value === '' ? $dt('all') : $value];
+        }
+        foreach (['scope','summary'] as $section) {
+            foreach (['orders'=>'order_count','revenue'=>'revenue','refund_order_count'=>'refund_orders','refund_amount'=>'refund_amount'] as $key=>$label) {
+                $metadata[] = [($section === 'scope' ? $dt('original_scope') : $dt('filtered')).' / '.$dt($label), (string)$data[$section][$key]];
+            }
+        }
+        foreach ($metadata as $i=>$values) {
+            foreach ($values as $j=>$value) $scope->setCellValueExplicit(
+                \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($j+1).($i+1),
+                (string)$value, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING,
+            );
+        }
+        $scope->getColumnDimension('A')->setWidth(40);
+        $scope->getColumnDimension('B')->setWidth(70);
+        $scope->getStyle('A:B')->getAlignment()->setWrapText(true);
+        $book->setActiveSheetIndex(0);
+        $filename = __('payment.renewal_details.export_filename',['time'=>now()->format('Ymd_His')]);
+        return response()->streamDownload(function () use ($book): void {
+            try { (new Xlsx($book))->save('php://output'); }
+            finally { $book->disconnectWorksheets(); }
+        }, $filename, [
+            'Content-Type'=>'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Cache-Control'=>'private, no-store',
+        ]);
+    }
+
     /** @param array<string,mixed> $filters */
     public function download(array $filters): StreamedResponse
     {
@@ -91,15 +172,23 @@ class PaymentRenewalAnalysisExportService
         // Keep the existing export-only payment trace for reconciliation.
         $detail = $book->createSheet();
         $detail->setTitle(__('payment.renewal_analysis.export.detail_sheet'));
-        $detail->fromArray([[...array_values(__('payment.renewal_analysis.export.columns')), $text('payment_method')]], null, 'A1');
+        $detail->fromArray([[...array_values(__('payment.renewal_analysis.export.columns')), $text('payment_method'), __('payment.renewal_analysis.export.detail_timezone')]], null, 'A1');
+        // Event timestamps are already converted by each module's dataset; keep every known record time.
+        $eventTimes = static function (array $records): string {
+            $times = array_values(array_filter(array_column($records, 'time'), static fn ($time): bool => $time !== null && $time !== '' && $time !== '-'));
+            sort($times, SORT_STRING);
+            return implode("\n", $times);
+        };
         $rowNumber = 2;
         foreach (array_merge($data['initial_rows'], $data['rows']) as $row) {
             $detail->fromArray([[
                 $row['stage_number'] === 0 ? $text('purchase_'.$row['purchase_type']) : __('payment.renewal_analysis.funnel.stage_name',['number'=>$row['stage_number']]),
                 $channels[$row['initial_channel']], $channels[$row['actual_channel']],
                 $row['initial_order'], $row['renewal_order'], $row['store_name'], $row['transaction_id'],
-                $row['paid_at'], $row['amount'], $row['refund_count'], $row['refund_amount'],
-                $row['dispute_count'], $row['dispute_amount'], $row['payment_method'] === 'unknown' ? $text('unknown') : $text('method_names.'.$row['payment_method']),
+                $row['paid_at'], $row['amount'], $row['refund_count'], $row['refund_amount'], $eventTimes($row['refund_details']),
+                $row['dispute_count'], $row['dispute_amount'], $eventTimes($row['dispute_details']),
+                $row['payment_method'] === 'unknown' ? $text('unknown') : $text('method_names.'.$row['payment_method']),
+                $data[$row['stage_number'] === 0 ? 'initial_calculation' : 'calculation']['timezone'],
             ]], null, 'A'.$rowNumber++);
         }
         foreach ([[$first,8],[$refunds,5],[$renewals,6],[$detail,1]] as [$sheet,$headerRow]) {
@@ -108,6 +197,10 @@ class PaymentRenewalAnalysisExportService
             $sheet->getStyle($range)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setARGB('FF287FBD');
             $sheet->freezePane('A'.($headerRow+1));
             foreach (range('A',$sheet->getHighestColumn()) as $column) $sheet->getColumnDimension($column)->setAutoSize(true);
+        }
+        foreach (['L','O'] as $column) {
+            $detail->getColumnDimension($column)->setAutoSize(false)->setWidth(24);
+            if ($rowNumber > 2) $detail->getStyle($column.'2:'.$column.($rowNumber-1))->getAlignment()->setWrapText(true);
         }
         $filename = __('payment.renewal_analysis.export.filename',['time'=>now()->format('Ymd_His')]);
         return response()->streamDownload(function () use ($book): void {

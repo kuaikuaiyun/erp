@@ -7,7 +7,7 @@
     var title = modal.querySelector('.modal-title');
     var messages = JSON.parse(modal.dataset.messages);
     var parent = JSON.parse(modal.dataset.parentFilters);
-    var base = null, current = {}, controller = null, sequence = 0, returnFocus = null;
+    var base = null, current = {}, controller = null, sequence = 0, returnFocus = null, exporting = false;
 
     function filtersFromForm() {
         var form = content.querySelector('[data-renewal-detail-filter]');
@@ -68,6 +68,56 @@
         });
     }
 
+    async function exportDetails(button) {
+        if (!base || exporting) return;
+        var form = content.querySelector('[data-renewal-detail-filter]');
+        if (form && !form.reportValidity()) return;
+        var params = new URLSearchParams(Object.assign({}, parent, base, filtersFromForm()));
+        params.delete('detail_page');
+        params.delete('detail_per_page');
+        var request = sequence;
+        exporting = true;
+        button.disabled = true;
+        feedback.classList.remove('payment-renewal-detail-error');
+        feedback.textContent = messages.exporting;
+        try {
+            var response = await fetch(modal.dataset.exportEndpoint + '?' + params.toString(), {
+                credentials: 'same-origin',
+                headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+            });
+            if (!response.ok || response.redirected) {
+                var problem = await response.json().catch(function () { return {}; });
+                var errors = problem.errors ? Object.values(problem.errors).flat() : [];
+                throw new Error(errors.length ? errors.join('；') : messages.exportError);
+            }
+            if (!(response.headers.get('Content-Type') || '').includes('spreadsheetml')) throw new Error(messages.exportError);
+            var blob = await response.blob();
+            var disposition = response.headers.get('Content-Disposition') || '';
+            var encoded = /filename\*=utf-8''([^;]+)/i.exec(disposition);
+            var filename = messages.exportFilename;
+            if (encoded) {
+                try { filename = decodeURIComponent(encoded[1]); } catch (ignore) {}
+            }
+            var url = URL.createObjectURL(blob);
+            var link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+            if (request === sequence) feedback.textContent = '';
+        } catch (error) {
+            if (request === sequence) {
+                feedback.classList.add('payment-renewal-detail-error');
+                feedback.textContent = error.message || messages.exportError;
+            }
+        } finally {
+            exporting = false;
+            button.disabled = false;
+        }
+    }
+
     document.addEventListener('click', function (event) {
         var trigger = event.target.closest('[data-renewal-detail-open]');
         if (!trigger) return;
@@ -88,6 +138,8 @@
         }
     });
     content.addEventListener('click', function (event) {
+        var exportButton = event.target.closest('[data-renewal-detail-export]');
+        if (exportButton) { exportDetails(exportButton); return; }
         var page = event.target.closest('[data-renewal-detail-page]');
         if (page && !page.disabled) load(Object.assign(filtersFromForm(), { detail_page: page.dataset.renewalDetailPage }));
         if (event.target.closest('[data-renewal-detail-reset]')) load({ detail_per_page: '20', detail_page: '1' });
