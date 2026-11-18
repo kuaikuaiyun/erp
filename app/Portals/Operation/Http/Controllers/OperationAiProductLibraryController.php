@@ -18,6 +18,7 @@ use App\Portals\Operation\AiProductShopifyPublisher;
 use App\Portals\ProductRequests\ProductRequestAccessService;
 use App\Services\AiProductListingPushService;
 use App\Services\OperatorMaterialVideoNotificationService;
+use App\Support\BrowserCompatibleVideoService;
 use App\Support\PrivateVideoResponse;
 use Encore\Admin\Facades\Admin;
 use Illuminate\Database\Eloquent\Builder;
@@ -42,6 +43,7 @@ class OperationAiProductLibraryController extends Controller
         private readonly AiProductShopifyPublisher $shopifyPublisher,
         private readonly AiProductListingPushService $listingPush,
         private readonly OperatorMaterialVideoNotificationService $materialVideoNotifications,
+        private readonly BrowserCompatibleVideoService $browserCompatibleVideo,
         private readonly PrivateVideoResponse $privateVideoResponse,
     ) {}
 
@@ -615,12 +617,14 @@ class OperationAiProductLibraryController extends Controller
                 if (! is_string($path) || $path === '') {
                     throw new \RuntimeException('视频文件写入失败，请检查服务器存储目录权限及剩余空间。');
                 }
+                $this->browserCompatibleVideo->normalize(Storage::disk('local')->path($path));
 
                 return OperationAiProductReferenceVideo::query()->create([
                     'aikaipin_product_id' => $product->getKey(), 'type' => $data['type'],
                     'sequence' => $sequence, 'file_date' => $date->toDateString(), 'disk' => 'local',
                     'path' => $path, 'file_name' => $fileName, 'original_name' => $file->getClientOriginalName(),
-                    'mime_type' => $file->getMimeType(), 'size' => $file->getSize(),
+                    'mime_type' => mime_content_type(Storage::disk('local')->path($path)) ?: $file->getMimeType(),
+                    'size' => Storage::disk('local')->size($path),
                     'department_code' => $departmentCode,
                     'source_kind' => OperationAiProductReferenceVideo::SOURCE_OPERATOR_UPLOAD,
                     'uploaded_by' => $context['user']->getKey(),
@@ -659,12 +663,20 @@ class OperationAiProductLibraryController extends Controller
         $context = $this->portalContext($request);
         if ($context instanceof Response) return $context;
         $this->assertReferenceVideo($product, $video, $context['user']);
+        $absolutePath = Storage::disk($video->disk)->path($video->path);
+        if ($this->browserCompatibleVideo->normalize($absolutePath) === BrowserCompatibleVideoService::TRANSCODED) {
+            $video->forceFill([
+                'mime_type' => mime_content_type($absolutePath) ?: 'video/mp4',
+                'size' => filesize($absolutePath) ?: $video->size,
+            ])->save();
+        }
 
         return $this->privateVideoResponse->inline(
             (string) $video->disk,
             (string) $video->path,
             (string) $video->file_name,
             $video->mime_type,
+            $request,
         );
     }
 

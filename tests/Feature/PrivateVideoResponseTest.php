@@ -14,22 +14,24 @@ class PrivateVideoResponseTest extends TestCase
         Storage::fake('local');
         Storage::disk('local')->put('aikaipin/reference-videos/1/test.mp4', str_repeat('video-data', 10));
 
+        $request = Request::create('/video', 'GET', [], [], [], ['HTTP_RANGE' => 'bytes=5-14']);
         $response = app(PrivateVideoResponse::class)->inline(
             'local',
             'aikaipin/reference-videos/1/test.mp4',
             'test.mp4',
             'video/mp4',
+            $request,
         );
-        $response->prepare(Request::create('/video', 'GET', [], [], [], ['HTTP_RANGE' => 'bytes=5-14']));
 
         self::assertSame(206, $response->getStatusCode());
         self::assertSame('bytes 5-14/100', $response->headers->get('Content-Range'));
         self::assertSame('10', $response->headers->get('Content-Length'));
         self::assertSame('bytes', $response->headers->get('Accept-Ranges'));
         self::assertSame('video/mp4', $response->headers->get('Content-Type'));
-        self::assertStringContainsString('private', (string) $response->headers->get('Cache-Control'));
-        self::assertNotEmpty($response->headers->get('ETag'));
-        self::assertNotEmpty($response->headers->get('Last-Modified'));
+        self::assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
+        self::assertSame('identity', $response->headers->get('Content-Encoding'));
+        self::assertSame('no', $response->headers->get('X-Accel-Buffering'));
+        self::assertSame('ready', $response->headers->get('X-Video-Compatibility'));
     }
 
     public function test_inline_video_response_returns_not_found_for_missing_file(): void
