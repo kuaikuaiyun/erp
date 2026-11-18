@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AssetIpfoxyAccount;
 use App\Models\AssetIpfoxyProxy;
 use App\Portal\Http\Controllers\PortalEntryController;
+use App\Portals\AssetManager\AssetComputerDepartmentScope;
 use App\Portals\AssetManager\AssetManagerCatalog as Catalog;
 use App\Portals\AssetManager\AssetManagerDepartmentScope;
 use App\Portals\AssetManager\AssetManagerService;
@@ -20,7 +21,7 @@ use Symfony\Component\HttpFoundation\Response;
 
 class AssetManagerController extends Controller
 {
-    public function __construct(private PortalEntryController $entries, private AssetManagerService $service, private AssetManagerSpreadsheetService $sheets, private IpfoxyService $ipfoxy, private AssetManagerDepartmentScope $scope) {}
+    public function __construct(private PortalEntryController $entries, private AssetManagerService $service, private AssetManagerSpreadsheetService $sheets, private IpfoxyService $ipfoxy, private AssetManagerDepartmentScope $scope, private AssetComputerDepartmentScope $computerScope) {}
 
     public function retired(): never
     {
@@ -48,7 +49,7 @@ class AssetManagerController extends Controller
             abort_unless($c['user']->can(Catalog::permission($kind).'.manage'), 403);
         }
 
-return $c;
+        return $c;
     }
 
     private function records(string $kind, array $c): Builder
@@ -56,7 +57,7 @@ return $c;
         $class = Catalog::model($kind);
         $query = $class::query();
 
-        return $kind === 'computers' ? $query : $this->scope->apply($query, $c['user']);
+        return $kind === 'computers' ? $this->computerScope->apply($query, $c['user']) : $this->scope->apply($query, $c['user']);
     }
 
     private function accounts(array $c): Builder
@@ -67,6 +68,14 @@ return $c;
     private function listing(Request $request, string $kind, array $c): Builder
     {
         $query = $kind === 'ipfoxy' ? $this->ipfoxy->query($request) : $this->service->query($kind, $request);
+        if ($kind === 'computers') {
+            $this->computerScope->apply($query, $c['user']);
+            if ($request->filled('filter.owner_department_id')) {
+                $request->validate(['filter.owner_department_id' => ['integer', 'min:0']]);
+                $owner = (int) $request->input('filter.owner_department_id');
+                $owner === 0 ? $query->whereNull('owner_department_id') : $query->where('owner_department_id', $owner);
+            }
+        }
         if ($kind !== 'computers') {
             $column = $kind === 'ipfoxy' ? 'a.owner_department_id' : $query->getModel()->qualifyColumn('owner_department_id');
             $this->scope->apply($query, $c['user'], $column);
@@ -94,8 +103,8 @@ return $c;
             ...$c,
             'kind' => $kind,
             'labels' => Catalog::labels($kind),
-            'fields' => ($kind === 'computers' ? [] : ['owner_department_id' => 'department']) + Catalog::fields($kind),
-            'ownerDepartments' => $kind === 'computers' ? [] : $this->scope->departments($c['user']),
+            'fields' => ['owner_department_id' => 'department'] + Catalog::fields($kind),
+            'ownerDepartments' => $kind === 'computers' ? $this->computerScope->departments($c['user']) : $this->scope->departments($c['user']),
             'routePrefix' => $kind === 'computers' ? 'asset-manager' : 'assistant.assets',
             'assetBase' => $kind === 'computers' ? url('/asset-manager') : url('/assistant/assets'),
             'rows' => $rows,
@@ -121,6 +130,13 @@ return $c;
         $class = Catalog::model($kind);
         $existing = $record ? $this->records($kind, $c)->findOrFail($record) : null;
         $data = $this->service->validate($kind, $request->all());
+        if ($kind === 'computers') {
+            $input = $request->all();
+            if ($existing && ! array_key_exists('owner_department_id', $input)) {
+                $input['owner_department_id'] = $existing->owner_department_id;
+            }
+            $data['owner_department_id'] = $this->computerScope->owner($c['user'], $input);
+        }
         if ($kind !== 'computers') {
             $data['owner_department_id'] = $this->scope->owner($c['user'], $request->all());
         }
@@ -130,7 +146,7 @@ return $c;
             $class::query()->create($data + ['created_by' => $c['user']->id]);
         }
 
-return response()->json(['message' => __('asset_manager.saved')]);
+        return response()->json(['message' => __('asset_manager.saved')]);
     }
 
     public function destroy(Request $request, string $kind, int $record)
@@ -154,7 +170,7 @@ return response()->json(['message' => __('asset_manager.saved')]);
             $q->whereIn($kind === 'ipfoxy' ? 'asset_ipfoxy_proxies.id' : 'id', $request->input('selected'));
         }
 
-return $this->sheets->download($kind, $q->orderBy($kind === 'ipfoxy' ? 'asset_ipfoxy_proxies.id' : 'id')->cursor());
+        return $this->sheets->download($kind, $q->orderBy($kind === 'ipfoxy' ? 'asset_ipfoxy_proxies.id' : 'id')->cursor());
     }
 
     public function preview(Request $request, string $kind)
@@ -162,7 +178,7 @@ return $this->sheets->download($kind, $q->orderBy($kind === 'ipfoxy' ? 'asset_ip
         $c = $this->context($request, $kind, true);
         abort_if($kind === 'ipfoxy', 404);
         $request->validate(['file' => ['required', 'file', 'max:20480', 'mimes:xlsx,csv,txt']]);
-        $owner = $kind === 'computers' ? null : $this->scope->owner($c['user'], $request->all());
+        $owner = $kind === 'computers' ? $this->computerScope->owner($c['user'], $request->all()) : $this->scope->owner($c['user'], $request->all());
         $result = $this->sheets->preview($kind, $request->file('file'), $this->records($kind, $c));
         if ($owner !== null) {
             $result['rows'] = array_map(fn ($row) => $row + ['owner_department_id' => $owner], $result['rows']);
@@ -185,7 +201,7 @@ return $this->sheets->download($kind, $q->orderBy($kind === 'ipfoxy' ? 'asset_ip
             $result = Cache::get($key);
             abort_unless($result && $result['actor'] === $c['user']->id && $result['kind'] === $kind, 422, __('asset_manager.failed'));
             abort_if($result['errors'] !== [] || $result['rows'] === [], 422, __('asset_manager.invalid'));
-            $owner = $kind === 'computers' ? null : $this->scope->owner($c['user'], ['owner_department_id' => $result['owner_department_id'] ?? null]);
+            $owner = $kind === 'computers' ? $this->computerScope->owner($c['user'], ['owner_department_id' => $result['owner_department_id'] ?? null]) : $this->scope->owner($c['user'], ['owner_department_id' => $result['owner_department_id'] ?? null]);
             $class = Catalog::model($kind);
             $model = new $class;
             $model->getConnection()->transaction(function () use ($result, $class, $c, $owner) {
@@ -226,7 +242,7 @@ return $this->sheets->download($kind, $q->orderBy($kind === 'ipfoxy' ? 'asset_ip
             AssetIpfoxyAccount::query()->create($data);
         }
 
-return response()->json(['message' => __('asset_manager.saved')]);
+        return response()->json(['message' => __('asset_manager.saved')]);
     }
 
     public function accountDelete(Request $request, int $account)
@@ -249,14 +265,14 @@ return response()->json(['message' => __('asset_manager.saved')]);
         return response()->json($this->ipfoxy->begin($this->accounts($c)->findOrFail($account), (int) $c['user']->id));
     }
 
-    public function syncStep(Request $request,string $sync)
+    public function syncStep(Request $request, string $sync)
     {
-        $c = $this->context($request,'ipfoxy',true);
+        $c = $this->context($request, 'ipfoxy', true);
 
         $state = Cache::get('asset-ipfoxy-sync:'.$sync);
         abort_unless($state && $state['actor'] === (int) $c['user']->id, 404);
         $this->accounts($c)->findOrFail($state['account_id']);
 
-        return response()->json($this->ipfoxy->step($sync,(int) $c['user']->id));
+        return response()->json($this->ipfoxy->step($sync, (int) $c['user']->id));
     }
 }
