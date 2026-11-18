@@ -20,6 +20,14 @@ use Symfony\Component\HttpFoundation\Response;
 
 class FashionOperationReportController extends Controller
 {
+    private const FASHION_ROOT_DEPARTMENT_SLUG = 'dept-000037';
+
+    private const FASHION_ROOT_DEPARTMENT_NAMES = [
+        '服装运营部门',
+        '单包服装运营部门',
+        '单包服装运营系统',
+    ];
+
     public function __construct(
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
@@ -124,8 +132,15 @@ class FashionOperationReportController extends Controller
             ->filter(fn ($operatorStores, $operatorId): bool => $operatorIds->contains((int) $operatorId));
         $stores = $stores->filter(fn (AssistantDomainStore $store): bool => $storesByOperator->has((int) ($store->owner_user_id
             ?: ($nameUsers->get(mb_strtolower(trim((string) $store->user_name)))?->getKey() ?? 0))))->values();
-        $departmentRows = Department::business()->get(['id', 'name', 'parent_id', 'sort']);
-        $fashionDepartment = $departmentRows->firstWhere('name', '服装运营部门');
+        $departmentRows = Department::business()->get(['id', 'name', 'slug', 'parent_id', 'sort']);
+        // 部门名称允许业务侧随时调整；报表归属应使用稳定 slug，避免改名后整张报表为空。
+        // 名称匹配仅用于兼容尚未统一 slug 的旧环境。
+        $fashionDepartment = $departmentRows->firstWhere('slug', self::FASHION_ROOT_DEPARTMENT_SLUG)
+            ?: $departmentRows->first(fn (Department $department): bool => in_array(
+                trim((string) $department->name),
+                self::FASHION_ROOT_DEPARTMENT_NAMES,
+                true
+            ));
         $fashionDepartmentIds = collect($fashionDepartment ? [(int) $fashionDepartment->id] : []);
         do {
             $childIds = $departmentRows->whereIn('parent_id', $fashionDepartmentIds)
