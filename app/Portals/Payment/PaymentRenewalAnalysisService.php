@@ -7,7 +7,6 @@ use App\Models\LogisticsOrder;
 use App\Models\LogisticsOrderPaymentReference;
 use App\Models\LogisticsPayPalDispute;
 use App\Models\LogisticsPayPalRefund;
-use App\Portals\Logistics\LogisticsCreditCardRefundReason;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
@@ -198,7 +197,7 @@ class PaymentRenewalAnalysisService
         $cacheFilters['channel'] = '';
         $cacheFilters['timezone'] ??= '+08:00';
         unset($cacheFilters['stage_page'], $cacheFilters['stage']);
-        $cacheKey = 'payment:renewal-analysis:v17:'.sha1(json_encode($cacheFilters));
+        $cacheKey = 'payment:renewal-analysis:v18:'.sha1(json_encode($cacheFilters));
 
         $expiresAt = now()->addMinutes(5);
         return Cache::remember($cacheKey, $expiresAt, function () use ($cacheFilters, $expiresAt): array {
@@ -464,30 +463,19 @@ class PaymentRenewalAnalysisService
                 ]);
             }
         }
-        $cardDisputes = [];
-        foreach ($cardQuery->select(['id', 'logistics_order_id', 'refund_amount_usd', 'refund_reason', 'occurred_at'])->lazyById(500) as $record) {
-            $reason = LogisticsCreditCardRefundReason::normalize((string) $record->refund_reason);
-            if (in_array($reason, LogisticsCreditCardRefundReason::DISPUTE, true)) {
-                $orderId = (int) $record->logistics_order_id;
-                $cardDisputes[$orderId] = max($cardDisputes[$orderId] ?? 0.0, (float) $record->refund_amount_usd);
-                $this->appendRiskDetail($disputes, $orderId, [
-                    'amount' => (float) $record->refund_amount_usd,
-                    'reason' => (string) $record->refund_reason,
-                    'status' => '-',
-                    'time' => $record->occurred_at?->copy()->setTimezone($filters['timezone'] ?? '+08:00')->format('Y-m-d H:i:s') ?: '-',
-                ]);
-            } elseif (in_array($reason, LogisticsCreditCardRefundReason::CUSTOMER_SERVICE, true)) {
-                $orderId = (int) $record->logistics_order_id;
-                $this->accumulate($refunds, $orderId, (float) $record->refund_amount_usd);
-                $this->appendRiskDetail($refunds, $orderId, [
-                    'amount' => (float) $record->refund_amount_usd,
-                    'reason' => (string) $record->refund_reason,
-                    'status' => '-',
-                    'time' => $record->occurred_at?->copy()->setTimezone($filters['timezone'] ?? '+08:00')->format('Y-m-d H:i:s') ?: '-',
-                ]);
-            }
+        foreach ($cardQuery->where('refund_amount_usd', '>', 0)
+            ->select(['id', 'logistics_order_id', 'refund_amount_usd', 'refund_reason', 'occurred_at'])->lazyById(500) as $record) {
+            $orderId = (int) $record->logistics_order_id;
+            $amount = (float) $record->refund_amount_usd;
+            // Each positive card record is refunded money, regardless of its reason.
+            $this->accumulate($refunds, $orderId, $amount);
+            $this->appendRiskDetail($refunds, $orderId, [
+                'amount' => $amount,
+                'reason' => (string) $record->refund_reason,
+                'status' => '-',
+                'time' => $record->occurred_at?->copy()->setTimezone($filters['timezone'] ?? '+08:00')->format('Y-m-d H:i:s') ?: '-',
+            ]);
         }
-        foreach ($cardDisputes as $orderId => $amount) $this->accumulate($disputes, (int) $orderId, (float) $amount);
         return compact('refunds', 'disputes');
     }
 

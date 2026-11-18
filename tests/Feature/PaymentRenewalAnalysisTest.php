@@ -195,6 +195,48 @@ class PaymentRenewalAnalysisTest extends TestCase
         self::assertSame(2, $service->exportData($filters)['initial_refunds']['total']['orders']);
     }
 
+    public function test_card_refunds_include_every_positive_record_once_regardless_of_reason(): void
+    {
+        $this->order(600,'2026-11-01 12:00:00','无订阅','credit_card','','CardAmount');
+        $this->order(601,'2026-11-01 12:00:00','订阅首次购买','credit_card','','CardAmount');
+        $this->order(602,'2026-11-01 12:00:00','无订阅','credit_card','','CardAmount');
+        $this->order(603,'2026-11-01 12:00:00','无订阅','credit_card','','CardAmount');
+        $this->order(610,'2026-10-02 12:00:00','订阅首次购买','credit_card','','CardAmount');
+        $this->order(611,'2026-11-01 12:00:00','订阅复购','credit_card','610','CardAmount');
+        $reasons=['Ethoca','CDRN','RDR','取消复购订单','取消加购','取消订单','质量问题','地址无法发货','描述不符','商品无法发货','取消加购,取消订单','争议（欺诈）','争议（其他）','未定义原因',''];
+        foreach ($reasons as $reason) DB::table('logistics_credit_card_refunds')->insert([
+            'logistics_order_id'=>600,'refund_amount_usd'=>1,'refund_reason'=>$reason,'occurred_at'=>'2026-12-01 12:00:00',
+        ]);
+        foreach ([null,0,-10] as $amount) DB::table('logistics_credit_card_refunds')->insert([
+            'logistics_order_id'=>601,'refund_amount_usd'=>$amount,'refund_reason'=>'质量问题',
+        ]);
+        DB::table('logistics_credit_card_refunds')->insert([
+            ['logistics_order_id'=>602,'refund_amount_usd'=>0.0001,'refund_reason'=>null],
+            ['logistics_order_id'=>611,'refund_amount_usd'=>3,'refund_reason'=>'争议（欺诈）'],
+        ]);
+        $filters=$this->filters(['initial_store'=>'CardAmount','renewal_store'=>'CardAmount']);
+        $service=app(PaymentRenewalAnalysisService::class);
+        $data=$service->dashboard($filters);
+        $total=$data['initial_refunds']['total'];
+        self::assertSame(4,$total['orders']);
+        self::assertSame(2,$total['refund_order_count']);
+        self::assertSame(count($reasons)+1,$total['refund_count']);
+        self::assertEqualsWithDelta(count($reasons)+0.0001,$total['refund_amount'],0.0000001);
+        self::assertEquals(50,$total['refund_count_rate']);
+        self::assertEquals(0,$total['dispute_amount']);
+        $detail=$service->initialOrderDetails($filters,$this->detailFilters(['detail_kind'=>'refunds']));
+        self::assertSame([602,600],array_column($detail['rows'],'erp_order_id'));
+        self::assertCount(count($reasons),$detail['rows'][1]['refund_details']);
+        self::assertEquals($total['refund_amount'],$detail['summary']['refund_amount']);
+        $stage=$data['stages'][0];
+        self::assertSame(1,$stage['refund_order_count']);
+        self::assertSame(1,$stage['refund_count']);
+        self::assertEquals(3,$stage['refund_amount']);
+        self::assertEquals(0,$stage['dispute_amount']);
+        self::assertEquals(0,$stage['dispute_count']);
+        self::assertSame($total,$service->exportData($filters)['initial_refunds']['total']);
+    }
+
     private function detailFilters(array $overrides = []): array
     {
         return array_replace([
