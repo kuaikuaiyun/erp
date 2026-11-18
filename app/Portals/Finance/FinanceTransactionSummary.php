@@ -11,6 +11,47 @@ class FinanceTransactionSummary
         return ! in_array($tab, ['ye', 'worldpay'], true);
     }
 
+    public function missingSummary(array $items, string $tab, string $month): array
+    {
+        $row = ['channel' => self::VIEWS[$tab], 'account' => '缺失数据汇总', 'currency' => 'USD',
+            'team' => '', 'subscription' => '', 'month' => $month, 'orders' => 0, 'failed_orders' => 0,
+            'account_group' => 'missing-summary:'.$tab.':'.$month];
+        $totals = [];
+        $currencies = [];
+        $incomplete = [];
+        foreach ($items as $item) {
+            if (filled($item['team']) && (! self::requiresSubscription($tab) || filled($item['subscription']))) {
+                continue;
+            }
+            $row['orders'] += (int) ($item['orders'] ?? 0);
+            $row['failed_orders'] += (int) ($item['failed_orders'] ?? 0);
+            foreach ($item['_incomplete_usd_fields'] ?? [] as $field) {
+                $incomplete[$field] = true;
+            }
+            $currency = $item['currency'] ?: '未标注币种';
+            $currencies[$currency] = true;
+            foreach (array_diff(array_keys($this->columns($tab)), array_keys($row)) as $field) {
+                if (($item[$field] ?? null) !== null) {
+                    $unit = $currency;
+                    $totals[$field][$unit] = bcadd($totals[$field][$unit] ?? '0', (string) $item[$field], 8);
+                }
+            }
+        }
+        foreach ($totals as $field => $amounts) {
+            ksort($amounts);
+            $row[$field] = count($amounts) === 1 ? reset($amounts) : implode(' / ', array_map(
+                fn ($amount) => FinanceCatalog::reportAmount($amount, 3), array_values($amounts),
+            ));
+        }
+        ksort($currencies);
+        $row['currency'] = $currencies === [] ? 'USD' : implode(' / ', array_keys($currencies));
+        foreach (array_keys($incomplete) as $field) {
+            $row[$field] = null;
+        }
+
+        return $row;
+    }
+
     public function reallocateUnassignedFailures(array $items, string $tab): array
     {
         if (self::requiresSubscription($tab)) {
@@ -47,15 +88,15 @@ class FinanceTransactionSummary
             'paypal' => self::PAYPAL,
             'credit_card', 'ye', 'worldpay' => ['hold' => '保证金', ...self::CARD],
             'combined' => ['hold' => '保证金', 'dispute_hold' => '争议冻结金额', ...self::CARD],
-        }, 'payable' => '应结算', 'logistics' => '物流-元', 'purchase' => '采购成本-元', 'failed_orders' => '失败订单数'];
+        }, 'payable' => '应结算', 'logistics' => '物流-美元', 'purchase' => '采购成本-美元', 'failed_orders' => '失败订单数'];
     }
 
-    public function summarize(iterable $rows, string $tab): array
+    public function summarize(iterable $rows, string $tab, bool $usd = false, ?string $cnyPerUsd = null): array
     {
         $groups = [];
         $failedByMonth = [];
         foreach ($rows as $row) {
-            $dimensions = ['account' => $row['account'], 'currency' => $row['currency'], 'team' => $row['team'],
+            $dimensions = ['account' => $row['account'], 'currency' => $usd ? 'USD' : $row['currency'], 'team' => $row['team'],
                 'subscription' => $row['subscription'], 'month' => $row['month']];
             $key = json_encode([$row['payment_channel'] ?? $row['channel'], $row['account_key'] ?? $row['account'], $dimensions], JSON_THROW_ON_ERROR);
             $group = &$groups[$key];
@@ -75,7 +116,12 @@ class FinanceTransactionSummary
             $values = array_intersect_key($row, [...self::PAYPAL, ...self::CARD, 'logistics' => true, 'purchase' => true]);
             $values['refund'] = FinanceSettlementService::refundIncludingSplit($row);
             $values['settlement'] = $row['failed'] ? null : $row['settlement'];
-            $values['amount'] = $paypal ? $values['settlement'] : $row['gross'];
+            // Canonical settlement rows already contain USD; never sum native gross as USD.
+            $values['amount'] = $usd ? ($row['failed'] ? null : ($row['_summary_amount_usd'] ?? $values['settlement']))
+                : ($paypal ? $values['settlement'] : $row['gross']);
+            if ($usd && $row['success'] && $values['settlement'] === null) {
+                $group['_missing_usd_settlement'] = true;
+            }
             if ($tab === 'combined' && $paypal) {
                 $values['fee'] = $this->difference($row['fee'], $row['fee_return']);
                 $values['dispute_hold'] = $this->difference($row['dispute_hold'], $row['dispute_release']);
@@ -106,6 +152,22 @@ class FinanceTransactionSummary
             'combined' => ['hold', 'dispute_hold', ...array_diff(array_keys(self::CARD), ['release'])],
         };
         foreach ($groups as &$group) {
+            if ($usd) {
+                foreach (['logistics', 'purchase'] as $field) {
+                    if (isset($group[$field])) {
+                        $group[$field] = bccomp($group[$field], '0', 8) === 0 ? '0.00000000'
+                            : ($cnyPerUsd !== null && bccomp($cnyPerUsd, '0', 8) > 0
+                                ? bcdiv($group[$field], $cnyPerUsd, 8) : null);
+                        if ($group[$field] === null) {
+                            $group['_incomplete_usd_fields'][] = $field;
+                        }
+                    }
+                }
+                if (! empty($group['_missing_usd_settlement'])) {
+                    $group['amount'] = $group['settlement'] = null;
+                    $group['_incomplete_usd_fields'] = [...($group['_incomplete_usd_fields'] ?? []), 'amount', 'settlement', 'payable'];
+                }
+            }
             $payable = $group['settlement'] ?? null;
             if ($payable !== null) {
                 foreach ($deductions as $field) {
@@ -117,13 +179,52 @@ class FinanceTransactionSummary
             }
             $group['payable'] = $payable;
             // The PayPal amount is USD in the template; do not add it to non-USD card amounts.
-            if ($tab === 'combined' && $group['currency'] !== 'USD') {
+            if (! $usd && $tab === 'combined' && $group['currency'] !== 'USD') {
                 $group['amount'] = null;
             }
         }
         unset($group);
 
         return $groups;
+    }
+
+    /** Aggregate failure allocation for all settlement tabs in one projection scan. */
+    public function summarizeFailuresByTab(iterable $rows): array
+    {
+        $groups = [];
+        $failed = [];
+        foreach ($rows as $row) {
+            $platform = $row['payment_channel'] ?? $row['channel'];
+            $tab = match ($platform) {
+                'paypal' => 'paypal',
+                'xuzong1', 'xuzong2' => 'credit_card',
+                'ye' => 'ye',
+                'worldpay' => 'worldpay',
+                default => null,
+            };
+            if ($tab === null) {
+                continue;
+            }
+            $dimensions = ['account' => $row['account'], 'currency' => 'USD', 'team' => $row['team'],
+                'subscription' => $row['subscription'], 'month' => $row['month']];
+            $key = json_encode([$platform, $row['account_key'] ?? $row['account'], $dimensions], JSON_THROW_ON_ERROR);
+            $groups[$tab][$key] ??= [...$dimensions, 'channel' => self::VIEWS[$tab], 'orders' => 0,
+                'failed_orders' => 0, 'account_group' => $key];
+            $groups[$tab][$key]['orders'] += (int) $row['success'];
+            if ($row['failed'] && ! $row['success']) {
+                $failed[$tab][$row['month']] = ($failed[$tab][$row['month']] ?? 0) + 1;
+            }
+        }
+
+        $items = [];
+        foreach (array_unique([...array_keys($groups), ...array_keys($failed)]) as $tab) {
+            foreach ($this->allocateFailures($groups[$tab] ?? [], $failed[$tab] ?? [], $tab) as $item) {
+                $item['_failure_tab'] = $tab;
+                $items[] = $item;
+            }
+        }
+
+        return $items;
     }
 
     private function allocateFailures(array $groups, array $failedByMonth, string $tab): array

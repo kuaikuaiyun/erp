@@ -20,6 +20,11 @@ class FinanceSummaryProjection
         return strtoupper($table->engine ?? '') !== 'INNODB';
     }
 
+    public function usesSourceFiles(): bool
+    {
+        return $this->usesTableLocks();
+    }
+
     public function read(string $channel, array $filters, bool $transactions, ?string $currency = null): ?Collection
     {
         $rows = $this->stream($channel, $filters, $transactions, $currency);
@@ -42,7 +47,8 @@ class FinanceSummaryProjection
         }
 
         $month = substr($filters['from'], 0, 7);
-        return $db->transaction(function () use ($db, $month, $channel, $filters, $transactions, $currency, $paymentChannels): ?iterable {
+        $timezone = $filters['timezone'] ?? 'Asia/Shanghai';
+        return $db->transaction(function () use ($db, $month, $channel, $timezone, $filters, $transactions, $currency, $paymentChannels): ?iterable {
             if ($db->table('finance_summary_changes')->exists()) {
                 return null;
             }
@@ -52,7 +58,7 @@ class FinanceSummaryProjection
             }
 
             $rows = $db->table('finance_summary_rows')
-                ->where(compact('month', 'channel', 'transactions'))->where('revision', $period->published)
+                ->where(compact('month', 'channel', 'timezone', 'transactions'))->where('revision', $period->published)
                 ->when(filled($filters['account'] ?? null), fn ($query) => $query->where('account', $filters['account']))
                 ->when(filled($currency), fn ($query) => $query->where('currency', $currency))
                 ->orderBy('position');
@@ -63,6 +69,10 @@ class FinanceSummaryProjection
             }
             if ($channel === 'paypal' && $first !== null
                 && (json_decode($first, true, 512, JSON_THROW_ON_ERROR)['_summary_calculation_version'] ?? null) !== 2) {
+                return null;
+            }
+            if ($channel === 'credit_card' && $first !== null
+                && (json_decode($first, true, 512, JSON_THROW_ON_ERROR)['_summary_usd_version'] ?? null) !== 1) {
                 return null;
             }
             if ($channel === 'credit_card' && $first !== null
@@ -102,12 +112,21 @@ class FinanceSummaryProjection
             return;
         }
         $db = $this->workbooks->database();
+        $start = CarbonImmutable::parse($period->month.'-01', 'Asia/Shanghai');
+        $nextRevision = (int) $db->table('finance_summary_periods')->where([
+            'month' => $start->addMonth()->format('Y-m'), 'channel' => $period->channel,
+        ])->value('revision');
+        $projectionVersion = hash('sha256', json_encode([2, $nextRevision], JSON_THROW_ON_ERROR));
         $fxVersion = $period->channel === 'credit_card' ? app(FinanceCreditUsdRates::class)->fingerprint($period->month) : null;
         if ((int) $period->published >= (int) $period->revision) {
-            $first = $db->table('finance_summary_rows')->where(['month' => $period->month, 'channel' => $period->channel,
-                'revision' => $period->published])->orderBy('position')->value('payload');
+            $publishedRows = $db->table('finance_summary_rows')->where(['month' => $period->month, 'channel' => $period->channel,
+                'revision' => $period->published]);
+            $first = (clone $publishedRows)->orderBy('position')->value('payload');
             $payload = $first === null ? null : json_decode($first, true, 512, JSON_THROW_ON_ERROR);
-            if ($payload === null || ($period->channel === 'paypal'
+            $variants = (clone $publishedRows)->select('timezone', 'transactions')
+                ->groupBy('timezone', 'transactions')->get()->count();
+            if ($payload !== null && $variants === 4 && ($payload['_summary_projection_version'] ?? null) === $projectionVersion
+                && ($period->channel === 'paypal'
                 ? ($payload['_summary_calculation_version'] ?? null) === 2
                 : ($payload['_summary_fx_version'] ?? null) === $fxVersion)) {
                 return;
@@ -120,19 +139,22 @@ class FinanceSummaryProjection
         }
         $scope = ['month' => $period->month, 'channel' => $period->channel];
         $version = [...$scope, 'revision' => $period->revision];
-        $start = CarbonImmutable::parse($period->month.'-01', 'Asia/Shanghai');
         $db->table('finance_summary_rows')->where($version)->delete();
-        foreach ([false, true] as $transactions) {
+        foreach ([['Asia/Shanghai', false], ['Asia/Shanghai', true], ['-04:00', false], ['-04:00', true]] as [$timezone, $transactions]) {
             $batch = [];
             $position = 0;
             $filters = ['from' => $start->toDateString(), 'to' => $start->endOfMonth()->toDateString(),
-                'timezone' => 'Asia/Shanghai', 'logistics_costs' => $transactions, 'summary_projection' => true, 'include_unmatched_fees' => true];
+                'timezone' => $timezone, 'logistics_costs' => $transactions, 'summary_projection' => true, 'include_unmatched_fees' => true];
+            if ($period->channel === 'credit_card' && ($timezone === '-04:00' || ! $transactions)) {
+                $filters['summary_payment_channels'] = $timezone === '-04:00' ? ['xuzong1', 'xuzong2'] : ['ye', 'worldpay'];
+            }
             foreach ($this->settlements->summaryRowStream($period->channel, $filters, $transactions) as $row) {
+                $row['_summary_projection_version'] = $projectionVersion;
                 $row['_summary_calculation_version'] = 2;
                 if ($fxVersion !== null) {
                     $row['_summary_fx_version'] = $fxVersion;
                 }
-                $batch[] = [...$version, 'transactions' => $transactions, 'position' => ++$position,
+                $batch[] = [...$version, 'timezone' => $timezone, 'transactions' => $transactions, 'position' => ++$position,
                     'account' => $row['_summary_source_account'], 'currency' => $row['currency'] ?? null,
                     'payload' => json_encode(array_diff_key($row, ['_summary_source_account' => true]), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE)];
                 if (count($batch) === 250) {

@@ -10,6 +10,7 @@ return new class extends Migration
     {
         Schema::connection(config('admin.database.connection') ?: config('database.default'))
             ->create('finance_worldpay_releases', function (Blueprint $table): void {
+                $table->engine = 'InnoDB';
                 $table->id();
                 $table->string('merchant', 64);
                 $table->char('currency', 3);

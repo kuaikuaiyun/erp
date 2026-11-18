@@ -20,7 +20,11 @@ class FinanceSummarySourceCache
         $rowFilters = array_filter(array_intersect_key($filters['summary_row_filters'] ?? [], array_flip(self::ROW_FILTERS)), fn ($value) => filled($value));
         unset($filters['team'], $filters['subscription'], $filters['summary_currency'], $filters['summary_row_filters']);
         $constraints = array_filter(['team' => $team, 'subscription' => filled($subscription) ? FinanceSettlementService::subscriptionLabel($subscription) : null, 'currency' => $currency], fn ($value) => filled($value));
-        foreach ($rowFilters as $field => $value) $constraints['row_'.$field] = $value;
+        foreach ($rowFilters as $field => $value) {
+            // These row filters read the same value as the canonical indexes.
+            // Reusing them avoids storing a second full set of offsets.
+            $constraints[in_array($field, ['subscription', 'currency'], true) ? $field : 'row_'.$field] = $value;
+        }
         foreach ($this->canonicalStream($channel, $filters, $transactions, fn () => $build($filters), $constraints, $options) as $row) {
             if (filled($team) && ($row['_summary_team'] ?? $row['team']) !== $team
                 || filled($subscription) && $row['subscription'] !== FinanceSettlementService::subscriptionLabel($subscription)
@@ -48,7 +52,7 @@ class FinanceSummarySourceCache
         if ($channel === 'paypal') {
             unset($filters['include_unmatched_fees']);
         }
-        $scope = hash('sha256', json_encode([$channel === 'paypal' ? 4 : 3, $channel, $filters], JSON_THROW_ON_ERROR));
+        $scope = hash('sha256', json_encode([4, $channel, $filters], JSON_THROW_ON_ERROR));
         $directory = rtrim(config('cache.stores.file.path'), '/\\').'/finance-summary-sources/'.$scope;
         $path = $directory.'/v-'.$version.'.jsonl';
         if (is_file($path)) {
@@ -86,7 +90,6 @@ class FinanceSummarySourceCache
                 if ($cacheable) {
                     try {
                         $line = json_encode($row, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION)."\n";
-                        $this->indexRow($index, $row, $offset, strlen($line));
                         $offset += strlen($line);
                         $buffer .= $line;
                         if (strlen($buffer) >= 1024 * 1024) {
@@ -107,7 +110,9 @@ class FinanceSummarySourceCache
                 $file = null;
             }
             if ($cacheable && $version === $this->versions->current($channel)) {
-                // Prepare the index before exposing the complete source file.
+                // A cold, unfiltered report does not use offset indexes. Persist
+                // only the small option list here; filter indexes are generated
+                // lazily for the fields that are actually requested.
                 $this->publishIndex($path, $index, $offset);
                 if (! @rename($temporary, $path)) return;
                 $temporary = null;
@@ -167,17 +172,24 @@ class FinanceSummarySourceCache
                 return;
             }
             $index = [];
-            $buildIndex = $needsIndex ? $savedIndex === null : ! is_file($path.'.index.json');
+            $missingFields = $constraints === [] ? [] : array_values(array_filter(
+                array_keys($constraints),
+                fn ($field) => ! isset($savedIndex['fields'][$field])
+            ));
+            $buildIndex = $missingFields !== [];
+            $collectOptions = $options !== null && $savedIndex === null;
             $offset = 0;
             while (($line = fgets($file)) !== false) {
                 $row = json_decode($line, true, 512, JSON_THROW_ON_ERROR);
                 if ($buildIndex) {
-                    $this->indexRow($index, $row, $offset, strlen($line));
+                    $this->indexRow($index, $row, $offset, strlen($line), $missingFields);
+                } elseif ($collectOptions) {
+                    $this->indexOptions($index, $row);
                 }
                 $offset += strlen($line);
                 yield $row;
             }
-            if ($buildIndex) {
+            if ($buildIndex || $collectOptions) {
                 $this->publishIndex($path, $index, $size);
                 if ($options !== null) $options($index['_options'] ?? []);
             }
@@ -186,10 +198,11 @@ class FinanceSummarySourceCache
         }
     }
 
-    private function indexRow(array &$index, array $row, int $offset, int $length): void
+    private function indexRow(array &$index, array $row, int $offset, int $length, ?array $onlyFields = null): void
     {
         $fields = ['team' => $row['_summary_team'] ?? $row['team'] ?? '', 'subscription' => $row['subscription'] ?? '', 'currency' => $row['currency'] ?? ''];
-        foreach (self::ROW_FILTERS as $field) $fields['row_'.$field] = $row[$field] ?? '';
+        foreach (array_diff(self::ROW_FILTERS, ['subscription', 'currency']) as $field) $fields['row_'.$field] = $row[$field] ?? '';
+        if ($onlyFields !== null) $fields = array_intersect_key($fields, array_flip($onlyFields));
         foreach ($fields as $field => $value) {
             $index[$field][(string) $value] ??= '';
             $index[$field][(string) $value] .= pack('J2', $offset, $length);
@@ -209,12 +222,13 @@ class FinanceSummarySourceCache
 
     private function publishIndex(string $path, array $index, int $size): void
     {
-        $options = $index['_options'] ?? [];
+        $existing = is_file($path) ? $this->savedIndex($path, $size) : null;
+        $options = $index['_options'] ?? $existing['options'] ?? [];
         unset($index['_options']);
         // Keep offsets binary, with a small manifest. Encoding/decoding every
         // field's offsets as one JSON document exhausted 128 MB PHP workers.
         $temporary = $path.'.'.bin2hex(random_bytes(8)).'.index.tmp';
-        $fields = [];
+        $fields = $existing['fields'] ?? [];
         $file = null;
         $part = null;
         try {
@@ -252,7 +266,7 @@ class FinanceSummarySourceCache
             if (($index['size'] ?? null) !== $size || ($index['format'] ?? null) !== 3
                 || ! is_array($index['fields'] ?? null) || ! is_array($index['options'] ?? null)) return null;
             foreach (array_keys($index['fields']) as $field) {
-                if (! in_array($field, ['team', 'subscription', 'currency', ...array_map(fn ($name) => 'row_'.$name, self::ROW_FILTERS)], true)
+                if (! in_array($field, ['team', 'subscription', 'currency', ...array_map(fn ($name) => 'row_'.$name, array_diff(self::ROW_FILTERS, ['subscription', 'currency']))], true)
                     || ! is_file($path.'.'.$field.'.idx')) return null;
             }
             return $index;

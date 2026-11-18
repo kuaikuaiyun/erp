@@ -30,6 +30,7 @@ class FinancePayPalSettlementOrders
     private const COSTS = ['fee', 'hold', 'dispute_hold', 'refund', 'refund_fee', 'dispute_refund', 'dispute_fee'];
     private const RETURNS = ['fee_return', 'dispute_release', 'release'];
     private const SCALE = 8;
+    private ?array $recordExportGraph = null;
     // Verified USD payments in the historical PayPal HKD statement before November 5.
     private const HISTORICAL_HKD_PAYMENT_REFERENCES = [
         '7M960508XY8098841', '8J190334VX070270G', '41880338N4901812T',
@@ -282,15 +283,25 @@ class FinancePayPalSettlementOrders
         if ($recordIds === []) {
             return;
         }
-        $graph = $this->orderGraph(null);
+        // Summary generation requests many small ID batches. Keep one graph for
+        // that generator instead of rebuilding it for every page.
+        $graph = $recordIds === null
+            ? $this->orderGraph(null)
+            : ($this->recordExportGraph ??= $this->orderGraph(null));
         if ($graph === null) {
             return;
         }
         $fields = $this->settlements->exportColumns('paypal') + ['gross' => '原币总额', 'success' => true];
-        $orders = $this->ordersInDateRange($graph[0], $filters);
         if ($recordIds !== null) {
-            $selected = array_fill_keys($recordIds, true);
-            $orders = array_values(array_filter($orders, fn ($order) => ! isset($order['event']) && isset($selected[$order['id']])));
+            $orders = [];
+            foreach ($recordIds as $recordId) {
+                if (isset($graph[0]['payment:'.$recordId])) {
+                    $orders[] = $graph[0]['payment:'.$recordId];
+                }
+            }
+            $orders = $this->ordersInDateRange($orders, $filters);
+        } else {
+            $orders = $this->ordersInDateRange($graph[0], $filters);
         }
         foreach ($this->matchingRows($filters, $orders, $graph, false, $matchCandidateDomains) as $row) {
             yield array_intersect_key($row, $fields);

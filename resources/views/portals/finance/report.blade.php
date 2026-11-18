@@ -48,7 +48,8 @@
         @endif
     </p>
 @endif
-<p class="finance-report-help">按币种、区域和订阅类型汇总。结算相关金额以美元计，物流和采购成本以人民币计。物流和采购成本按财务导入金额累计，未导入时留空。</p>
+<p class="finance-report-help">按支付账户、区域和订阅类型汇总，金额统一以美元（USD）计。金额和结算金额取渠道明细的美元结算值；物流和采购成本按会计月份的人民币兑美元汇率折算，未导入成本或缺少汇率时留空。</p>
+<p class="finance-report-help">顶部“缺失数据汇总”统计当前筛选下区域缺失的数据；PayPal、徐总信用卡和 Shopify 同时包含订阅类型缺失的数据。美元结算值缺失时，对应汇总金额留空。</p>
 <div class="box">
     <nav class="finance-summary-tabs finance-channel-tabs" aria-label="交易汇总通道">
         @foreach($summaryTabs as $key => $label)
@@ -59,6 +60,13 @@
         <table class="table finance-table summary-grid">
             <thead><tr><th class="finance-selection"><input type="checkbox" data-export-all aria-label="全选当前页"></th>@foreach($columns as $label)<th scope="col">{{ $label }}</th>@endforeach</tr></thead>
             <tbody>
+                <tr class="finance-missing-summary">
+                    <td class="finance-selection"><input type="checkbox" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($missingSummary) }}" aria-label="选择缺失数据汇总"></td>
+                    @foreach($columns as $field => $label)
+                        @php($value = $missingSummary[$field] ?? null)
+                        <td>{{ $value === null ? '' : (in_array($field, ['channel', 'account', 'currency', 'team', 'subscription', 'month'], true) || ! is_numeric($value) ? $value : \App\Portals\Finance\FinanceCatalog::reportAmount($value, in_array($field, ['orders', 'failed_orders'], true) ? 0 : 3)) }}</td>
+                    @endforeach
+                </tr>
                 @forelse($items as $item)
                     <tr><td class="finance-selection"><input type="checkbox" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($item) }}" aria-label="选择此行"></td>@foreach($columns as $field => $label)
                         <td>{{ ($item[$field] ?? null) === null ? '' : (in_array($field, ['channel', 'account', 'currency', 'team', 'subscription', 'month'], true) ? $item[$field] : \App\Portals\Finance\FinanceCatalog::reportAmount($item[$field], in_array($field, ['orders', 'failed_orders'], true) ? 0 : 3)) }}</td>

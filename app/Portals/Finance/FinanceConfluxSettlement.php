@@ -431,58 +431,93 @@ class FinanceConfluxSettlement
 
     private function statementFees(iterable $bill, string $settlementDate): array
     {
-        $entries = collect();
         $summaryFeeFields = array_fill_keys([
             '成功网关费', '失败网关费', ...array_column(self::EVENT_FEES, 1),
         ], true);
+        $sales = [];
+        $currencies = [];
+        $days = [];
+        $merchants = [];
         foreach ($bill as $entry) {
             $payload = json_decode($entry->payload, true, 512, JSON_THROW_ON_ERROR);
             $merchant = trim($payload['商户号'] ?? '');
             $descriptor = trim($payload['账单描述符'] ?? '');
             $tradeTime = $payload[$entry->kind === 'summary' ? '交易日期' : '交易时间'] ?? '';
-            $entries->push((object) [
-                'id' => $entry->id,
-                'kind' => $entry->kind,
-                'merchant_descriptor' => $merchant !== '' && $descriptor !== '' ? $merchant.'|'.$descriptor : null,
-                'trade_date' => $this->date(is_numeric($tradeTime) ? $tradeTime : substr($tradeTime, 0, 10)),
-                'data' => match ($entry->kind) {
-                    'summary' => array_intersect_key($payload, $summaryFeeFields + ['账单描述符' => true]),
-                    'sale' => array_intersect_key($payload, ['结算货币' => true, '结算金额' => true]),
-                    default => [],
-                },
-            ]);
+            $tradeDate = $this->date(is_numeric($tradeTime) ? $tradeTime : substr($tradeTime, 0, 10));
+            $key = $merchant !== '' && $descriptor !== '' ? $merchant.'|'.$descriptor : null;
+            if ($entry->kind === 'sale') {
+                $currency = strtoupper($payload['结算货币'] ?? '');
+                $currencies[$currency] = true;
+                $sales[(int) $entry->id] = $payload['结算金额'];
+            }
+            if ($key === null) {
+                continue;
+            }
+            if ($entry->kind === 'summary') {
+                $merchantSummary = &$merchants[$key]['summaries'];
+                foreach (array_keys($summaryFeeFields) as $column) {
+                    $amount = $payload[$column] ?? '';
+                    $merchantSummary[$column] ??= ['valid' => true, 'total' => '0'];
+                    if (! preg_match('/^-?\d{1,18}(?:\.\d{1,8})?$/D', $amount) || bccomp($amount, '0', 8) > 0) {
+                        $merchantSummary[$column]['valid'] = false;
+                    } else {
+                        $merchantSummary[$column]['total'] = bcsub($merchantSummary[$column]['total'], $amount, 8);
+                    }
+                }
+                unset($merchantSummary);
+                if ($tradeDate !== null) {
+                    $day = &$days[$key."\0".$tradeDate];
+                    $day['summary_count'] = ($day['summary_count'] ?? 0) + 1;
+                    if ($day['summary_count'] === 1) {
+                        $day['summary'] = array_intersect_key($payload, $summaryFeeFields + ['账单描述符' => true]);
+                    } else {
+                        unset($day['summary']);
+                    }
+                    unset($day);
+                }
+                continue;
+            }
+            if ($tradeDate !== null && in_array($entry->kind, ['sale', 'failed'], true)) {
+                $days[$key."\0".$tradeDate][$entry->kind] = ($days[$key."\0".$tradeDate][$entry->kind] ?? '')
+                    .pack('J', (int) $entry->id);
+            }
+            if (isset(self::EVENT_FEES[$entry->kind])) {
+                $merchants[$key]['events'][$entry->kind] = ($merchants[$key]['events'][$entry->kind] ?? '')
+                    .pack('J', (int) $entry->id);
+            }
         }
-        $sales = $entries->where('kind', 'sale');
-        $currencies = $sales->map(fn ($entry) => strtoupper($entry->data['结算货币']))->unique();
-        $currency = $currencies->count() === 1 ? $currencies->first() : null;
+        $currency = count($currencies) === 1 ? array_key_first($currencies) : null;
         if (! in_array($currency, ['USD', 'GBP'], true)) {
             return [];
         }
         $fees = [];
-        foreach ($sales as $entry) {
-            $amount = $entry->data['结算金额'];
-            $fees[$entry->id] = [
+        foreach ($sales as $id => $amount) {
+            $fees[$id] = [
                 'hold' => $this->roundMoney(bcmul($amount, '0.10', 10)),
                 'fee' => $this->roundMoney(bcmul($amount, $currency === 'USD' ? '0.05' : '0.06', 10)),
             ];
         }
-        foreach ($entries->whereNotNull('merchant_descriptor')->groupBy('merchant_descriptor') as $merchantEntries) {
-            $summaries = $merchantEntries->where('kind', 'summary');
-            foreach ($merchantEntries->whereNotNull('trade_date')->groupBy('trade_date') as $dayEntries) {
-                $summary = $dayEntries->where('kind', 'summary');
-                if ($summary->count() !== 1) {
-                    continue;
-                }
-                $isWallet = stripos($summary->first()->data['账单描述符'], 'wallet') !== false;
-                $gatewayFee = $currency === 'USD' && $settlementDate >= '2026-10-13' && $isWallet ? '0.35' : '0.30';
-                foreach (['sale' => '成功网关费', 'failed' => '失败网关费'] as $kind => $column) {
-                    $this->addVerifiedFees($fees, $dayEntries->where('kind', $kind), $summary, 'per_order_fee', $column, $gatewayFee);
-                }
+        unset($sales, $currencies);
+        foreach ($days as $day) {
+            if (($day['summary_count'] ?? 0) !== 1) {
+                continue;
             }
+            $isWallet = stripos($day['summary']['账单描述符'] ?? '', 'wallet') !== false;
+            $gatewayFee = $currency === 'USD' && $settlementDate >= '2026-10-13' && $isWallet ? '0.35' : '0.30';
+            foreach (['sale' => '成功网关费', 'failed' => '失败网关费'] as $kind => $column) {
+                $this->addVerifiedPackedFees($fees, $day[$kind] ?? '', $day['summary'][$column] ?? '', 'per_order_fee', $gatewayFee);
+            }
+        }
+        unset($days);
+        foreach ($merchants as $merchant) {
             foreach (self::EVENT_FEES as $kind => [$field, $column, $usdRate, $gbpRate]) {
-                // Event fees are booked in the statement period, even for older transactions.
-                $this->addVerifiedFees($fees, $merchantEntries->where('kind', $kind), $summaries, $field, $column,
-                    $currency === 'USD' ? $usdRate : $gbpRate);
+                $ids = $merchant['events'][$kind] ?? '';
+                $summary = $merchant['summaries'][$column] ?? ['valid' => false, 'total' => '0'];
+                $rate = $currency === 'USD' ? $usdRate : $gbpRate;
+                if ($ids !== '' && $summary['valid']
+                    && bccomp($summary['total'], bcmul((string) (strlen($ids) / 8), $rate, 8), 8) === 0) {
+                    $this->assignPackedFee($fees, $ids, $field, $rate);
+                }
             }
         }
         foreach ($fees as &$values) {
@@ -498,23 +533,21 @@ class FinanceConfluxSettlement
         return bcadd($amount, bccomp($amount, '0', 10) < 0 ? '-0.005' : '0.005', 2);
     }
 
-    private function addVerifiedFees(array &$fees, Collection $entries, Collection $summaries, string $field, string $column, string $rate): void
+    private function addVerifiedPackedFees(array &$fees, string $ids, string $amount, string $field, string $rate): void
     {
-        if ($entries->isEmpty() || $summaries->isEmpty()) {
+        if ($ids === '' || ! preg_match('/^-?\d{1,18}(?:\.\d{1,8})?$/D', $amount) || bccomp($amount, '0', 8) > 0) {
             return;
         }
-        $total = '0';
-        foreach ($summaries as $summary) {
-            $amount = $summary->data[$column] ?? '';
-            if (! preg_match('/^-?\d{1,18}(?:\.\d{1,8})?$/D', $amount) || bccomp($amount, '0', 8) > 0) {
-                return;
-            }
-            $total = bcsub($total, $amount, 8);
+        if (bccomp(bcsub('0', $amount, 8), bcmul((string) (strlen($ids) / 8), $rate, 8), 8) === 0) {
+            $this->assignPackedFee($fees, $ids, $field, $rate);
         }
-        if (bccomp($total, bcmul((string) $entries->count(), $rate, 8), 8) === 0) {
-            foreach ($entries as $entry) {
-                $fees[$entry->id][$field] = $rate;
-            }
+    }
+
+    private function assignPackedFee(array &$fees, string $ids, string $field, string $rate): void
+    {
+        for ($offset = 0, $length = strlen($ids); $offset < $length; $offset += 8) {
+            $id = unpack('Jid', $ids, $offset)['id'];
+            $fees[$id][$field] = $rate;
         }
     }
 

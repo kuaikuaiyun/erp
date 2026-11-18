@@ -10,6 +10,7 @@ return new class extends Migration
     {
         $schema = Schema::connection(config('admin.database.connection') ?: config('database.default'));
         $schema->create('finance_credit_usd_rates', function (Blueprint $table): void {
+            $table->engine = 'InnoDB';
             $table->id();
             $table->char('currency', 3);
             $table->string('scope', 5);

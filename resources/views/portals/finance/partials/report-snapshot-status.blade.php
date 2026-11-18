@@ -1,5 +1,5 @@
 @php($watch = $watchSnapshot ?? false)
-<p role="status" @if($watch) data-finance-snapshot-status="{{ $status['state'] }}" data-finance-snapshot-time="{{ $status['updated_at'] ?? '' }}" @endif>
+<p role="status" @if($watch) data-finance-snapshot-status="{{ $status['state'] }}" data-finance-snapshot-time="{{ $status['updated_at'] ?? '' }}" data-finance-snapshot-version="{{ $status['version'] ?? '' }}" @endif>
     <span data-finance-snapshot-message>
     @if(isset($period)){{ $period }} · @endif
     @switch($status['state'])
@@ -13,5 +13,5 @@
     @endif
 </p>
 @if($watch)
-    <script src="{{ asset('assets/erp/finance-snapshot-status.js') }}?v=2" defer></script>
+    <script src="{{ asset('assets/erp/finance-snapshot-status.js') }}?v=3" defer></script>
 @endif

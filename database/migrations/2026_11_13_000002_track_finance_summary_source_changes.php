@@ -24,6 +24,7 @@ return new class extends Migration
             return;
         }
         if (! $db->getSchemaBuilder()->hasTable('finance_summary_changes')) $db->getSchemaBuilder()->create('finance_summary_changes', function (Blueprint $table): void {
+            $table->engine = 'InnoDB';
             $table->id();
             $table->string('source', 20);
             $table->json('payload');

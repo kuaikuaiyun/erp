@@ -11,6 +11,7 @@ return new class extends Migration
         $db = DB::connection(config('admin.database.connection') ?: config('database.default'));
         $schema = $db->getSchemaBuilder();
         if (! $schema->hasTable('finance_summary_periods')) $schema->create('finance_summary_periods', function (Blueprint $table): void {
+            $table->engine = 'InnoDB';
             $table->string('month', 7);
             $table->string('channel', 12);
             $table->unsignedBigInteger('revision')->default(1);
@@ -18,17 +19,19 @@ return new class extends Migration
             $table->primary(['month', 'channel']);
         });
         if (! $schema->hasTable('finance_summary_rows')) $schema->create('finance_summary_rows', function (Blueprint $table): void {
+            $table->engine = 'InnoDB';
             $table->string('month', 7);
             $table->string('channel', 12);
+            $table->string('timezone', 32)->default('Asia/Shanghai');
             $table->unsignedBigInteger('revision');
             $table->boolean('transactions');
             $table->unsignedBigInteger('position');
             $table->string('account', 191);
             $table->string('currency', 10)->nullable();
             $table->json('payload');
-            $table->primary(['month', 'channel', 'revision', 'transactions', 'position'], 'finance_summary_rows_pk');
-            $table->index(['month', 'channel', 'revision', 'transactions', 'account'], 'finance_summary_account_idx');
-            $table->index(['month', 'channel', 'revision', 'transactions', 'currency'], 'finance_summary_currency_idx');
+            $table->primary(['month', 'channel', 'timezone', 'revision', 'transactions', 'position'], 'finance_summary_rows_pk');
+            $table->index(['month', 'channel', 'timezone', 'revision', 'transactions', 'account'], 'finance_summary_account_idx');
+            $table->index(['month', 'channel', 'timezone', 'revision', 'transactions', 'currency'], 'finance_summary_currency_idx');
         });
         if (! in_array($db->getDriverName(), ['mysql', 'mariadb'], true)) {
             return;

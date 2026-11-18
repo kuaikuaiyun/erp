@@ -10,6 +10,7 @@ return new class extends Migration
     {
         $schema = Schema::connection(config('admin.database.connection') ?: config('database.default'));
         if (! $schema->hasTable('finance_report_snapshots')) $schema->create('finance_report_snapshots', function (Blueprint $table): void {
+            $table->engine = 'InnoDB';
             $table->uuid('id')->primary();
             $table->char('scope', 64)->index();
             $table->char('revision', 64);
@@ -18,6 +19,7 @@ return new class extends Migration
             $table->index(['scope', 'revision']);
         });
         if (! $schema->hasTable('finance_report_scopes')) $schema->create('finance_report_scopes', function (Blueprint $table): void {
+            $table->engine = 'InnoDB';
             $table->char('scope', 64)->primary();
             $table->string('month', 7)->index();
             $table->string('report', 20);
