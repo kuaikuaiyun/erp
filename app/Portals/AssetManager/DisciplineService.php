@@ -128,9 +128,12 @@ class DisciplineService
         return $query->orderBy('name')->get(['id', 'name']);
     }
 
-    public function memberOptions(AdminUser $user, Collection $members): array
+    public function memberOptions(AdminUser $user, Collection $members, ?int $departmentId = null): array
     {
         $departments = $this->departments($user, true)->keyBy('id');
+        if ($departmentId !== null) {
+            $departments = $departments->filter(fn ($department) => (int) $department->id === $departmentId);
+        }
         $activeIds = AdminUser::whereIn('id', $members->pluck('id'))->where('employment_status', 'employed')->pluck('id');
         $pivot = (new DisciplineRecord)->getConnection()->table(config('admin.database.role_users_table'))
             ->whereIn('user_id', $members->pluck('id'))->whereIn('role_id', $departments->keys())->get()->groupBy('user_id');

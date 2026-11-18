@@ -1,6 +1,8 @@
 <?php
 
 return [
+    'computer_user_department_invalid' => '使用人不属于所选管理归属部门，请重新选择。',
+    'discipline_menu_required' => '未找到违纪管理菜单，请先完成违纪管理安装迁移，再执行页面权限同步。',
     'bindings' => [
         'title' => '部门管理配置', 'subtitle' => '配置各授权部门可查看和管理的电脑设备、违纪记录归属范围',
         'source' => '授权部门', 'choose_source' => '选择已授权部门', 'targets' => '可管理的部门',

@@ -98,6 +98,7 @@ class AssetManagerController extends Controller
         $cards = $kind === 'ipfoxy' ? [] : $this->service->cards($kind, clone $query);
         $rows = $kind === 'ipfoxy' ? $query->orderBy('expires_at')->orderBy('asset_ipfoxy_proxies.id')->paginate($per) : $query->orderByDesc('id')->paginate($per);
         $rows->withQueryString();
+        $computerUsers = $kind === 'computers' ? $this->computerScope->users($c['user']) : [];
 
         return view('portals.asset-manager.'.$kind, [
             ...$c,
@@ -110,7 +111,10 @@ class AssetManagerController extends Controller
             'rows' => $rows,
             'cards' => $cards,
             'service' => $this->service,
-            'users' => $kind === 'computers' ? $this->service->users() : [],
+            'users' => $computerUsers,
+            'filterUsers' => $kind === 'computers' && $request->filled('filter.owner_department_id') ? $this->computerScope->users($c['user'], (int) $request->input('filter.owner_department_id')) : $computerUsers,
+            'writeUsers' => $kind === 'computers' ? $this->computerScope->users($c['user'], null, true) : [],
+            'userDepartments' => $kind === 'computers' ? $this->computerScope->userDepartments($c['user'], array_keys($computerUsers)) : [],
             'departments' => in_array($kind, ['resources', 'codex-renewals']) ? $this->service->departments() : [],
             'accounts' => $kind === 'ipfoxy' ? $this->accounts($c)->orderBy('id')->get() : collect(),
             'canManage' => $kind === 'computers' ? $this->computerScope->canManage($c['user']) : $c['user']->can(Catalog::permission($kind).'.manage'),
@@ -133,13 +137,25 @@ class AssetManagerController extends Controller
         if ($kind === 'computers' && $existing) {
             $this->computerScope->ensureWritable($c['user'], $existing->owner_department_id === null ? null : (int) $existing->owner_department_id);
         }
-        $data = $this->service->validate($kind, $request->all());
+        $validationInput = $request->all();
+        if ($kind === 'computers' && $existing && (int) ($validationInput['owner_department_id'] ?? $existing->owner_department_id) === (int) $existing->owner_department_id
+            && array_key_exists('user_id', $validationInput) && (string) ($validationInput['user_id'] ?? '') === (string) ($existing->user_id ?? '')) {
+            // Preserve the historical assignee snapshot when unrelated fields are edited.
+            unset($validationInput['user_id']);
+        }
+        $data = $this->service->validate($kind, $validationInput);
         if ($kind === 'computers') {
             $input = $request->all();
             if ($existing && ! array_key_exists('owner_department_id', $input)) {
                 $input['owner_department_id'] = $existing->owner_department_id;
             }
             $data['owner_department_id'] = $this->computerScope->owner($c['user'], $input);
+            $selectedUser = array_key_exists('user_id', $data) ? $data['user_id'] : $existing?->user_id;
+            $unchanged = $existing && (int) $existing->owner_department_id === $data['owner_department_id']
+                && (! array_key_exists('user_id', $data) || (string) ($data['user_id'] ?? '') === (string) ($existing->user_id ?? ''));
+            if (! $unchanged) {
+                $this->computerScope->validateUser($c['user'], $selectedUser === null ? null : (int) $selectedUser, $data['owner_department_id']);
+            }
         }
         if ($kind !== 'computers') {
             $data['owner_department_id'] = $this->scope->owner($c['user'], $request->all());
@@ -187,7 +203,7 @@ class AssetManagerController extends Controller
         abort_if($kind === 'ipfoxy', 404);
         $request->validate(['file' => ['required', 'file', 'max:20480', 'mimes:xlsx,csv,txt']]);
         $owner = $kind === 'computers' ? $this->computerScope->owner($c['user'], $request->all()) : $this->scope->owner($c['user'], $request->all());
-        $result = $this->sheets->preview($kind, $request->file('file'), $this->records($kind, $c));
+        $result = $this->sheets->preview($kind, $request->file('file'), $this->records($kind, $c), $kind === 'computers' ? $this->computerScope->users($c['user'], $owner, true) : null);
         if ($owner !== null) {
             $result['rows'] = array_map(fn ($row) => $row + ['owner_department_id' => $owner], $result['rows']);
         }
@@ -213,10 +229,14 @@ class AssetManagerController extends Controller
             $class = Catalog::model($kind);
             $model = new $class;
             $model->getConnection()->transaction(function () use ($result, $class, $c, $owner) {
+                $importUsers = $result['kind'] === 'computers' ? $this->computerScope->users($c['user'], $owner, true) : null;
                 foreach ($result['rows'] as $row) {
                     $created = $row['created_at'] ?? null;
                     unset($row['created_at']);
                     $data = $this->service->validate($result['kind'], $row) + ['created_by' => $c['user']->id];
+                    if ($result['kind'] === 'computers') {
+                        $this->computerScope->validateUser($c['user'], isset($data['user_id']) ? (int) $data['user_id'] : null, $owner, $importUsers);
+                    }
                     if ($owner !== null) {
                         $data['owner_department_id'] = $owner;
                     }

@@ -40,7 +40,7 @@ final class AssetManagerSpreadsheetService
         });
     }
 
-    public function preview(string $kind, $file, ?Builder $existingQuery = null): array
+    public function preview(string $kind, $file, ?Builder $existingQuery = null, ?array $userOptions = null): array
     {
         $reader = IOFactory::createReaderForFile($file->getRealPath());
         abort_unless(in_array(get_class($reader), ['PhpOffice\\PhpSpreadsheet\\Reader\\Xlsx', 'PhpOffice\\PhpSpreadsheet\\Reader\\Csv']), 422, __('asset_manager.failed'));
@@ -63,7 +63,7 @@ final class AssetManagerSpreadsheetService
         $errors = [];
         $skipped = 0;
         $seen = [];
-        $users = $this->service->users();
+        $users = $userOptions ?? $this->service->users();
         $departments = $this->service->departments();
         $class = AssetManagerCatalog::model($kind);
         for ($n = 2; $n <= $sheet->getHighestDataRow(); $n++) {

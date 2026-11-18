@@ -699,4 +699,49 @@ class AssetManagerTest extends TestCase
         $this->get($url.'&page=2')->assertOk()->assertViewHas('rows', fn ($rows) => $rows->count() === 5)->assertSee('value="20" selected', false);
         $this->get('/assistant/assets/resources')->assertOk()->assertDontSee('asset-computers.css');
     }
+
+    public function test_computer_assignee_options_follow_authorized_departments_and_deduplicate_members(): void
+    {
+        [$root,$a,$b] = $this->departmentsForIsolation();
+        $outside = Department::create(['name' => 'Outside', 'slug' => 'outside']);
+        foreach ([10 => 'Shared', 11 => 'OnlyA', 12 => 'OnlyB', 13 => 'OutsidePerson'] as $id => $name) {
+            DB::table('admin_users')->insert(['id' => $id, 'name' => $name, 'username' => 'account'.$id]);
+        }
+        foreach ([[10, $a->id], [10, $b->id], [11, $a->id], [12, $b->id], [13, $outside->id]] as [$id,$department]) {
+            DB::table('admin_role_users')->insert(['user_id' => $id, 'role_id' => $department, 'position' => 'member']);
+        }
+        $this->joinDepartment($a, 'manager');
+        $this->get('/asset-manager/computers')->assertViewHas('users', fn ($users) => count($users) === 2 && isset($users[10],$users[11]))->assertDontSee('OutsidePerson')->assertDontSee('OnlyB');
+        DB::table('asset_computer_department_bindings')->insert(['source_department_id' => $a->id, 'target_department_id' => $b->id, 'updated_by' => 1]);
+        $this->get('/asset-manager/computers')->assertViewHas('users', fn ($users) => count($users) === 3)->assertViewHas('userDepartments', fn ($membership) => count($membership[10]) === 2);
+        $this->get('/asset-manager/computers?filter[owner_department_id]='.$b->id)->assertViewHas('filterUsers', fn ($users) => count($users) === 2 && isset($users[10],$users[12]) && ! isset($users[11]));
+        $this->postJson('/asset-manager/computers', ['owner_department_id' => $b->id, 'user_id' => 10])->assertOk();
+        $this->postJson('/asset-manager/computers', ['owner_department_id' => $b->id, 'user_id' => 11])->assertUnprocessable()->assertJsonValidationErrors('user_id');
+        $this->postJson('/asset-manager/computers', ['owner_department_id' => $a->id, 'user_id' => 13])->assertUnprocessable();
+        $this->actor->administrator = true;
+        $this->get('/asset-manager/computers')->assertViewHas('users', fn ($users) => count($users) === 4);
+        $this->get('/asset-manager/computers?filter[owner_department_id]='.$a->id)->assertViewHas('filterUsers', fn ($users) => count($users) === 2);
+    }
+
+    public function test_computer_import_rechecks_assignee_membership_and_edit_preserves_old_snapshot(): void
+    {
+        [$root,$a,$b] = $this->departmentsForIsolation();
+        DB::table('admin_users')->insert(['id' => 10, 'name' => 'Member', 'username' => 'member']);
+        DB::table('admin_role_users')->insert(['user_id' => 10, 'role_id' => $b->id, 'position' => 'member']);
+        $this->joinDepartment($a, 'manager');
+        $url = '/asset-manager/computers';
+        $this->postJson($url.'/import/preview', ['file' => $this->computerFile(['user_id' => 'Member (member)'])])->assertOk()->assertJsonPath('valid', 0)->assertJsonCount(1, 'errors');
+        DB::table('admin_role_users')->where('user_id', 10)->update(['role_id' => $a->id]);
+        $preview = $this->postJson($url.'/import/preview', ['file' => $this->computerFile(['user_id' => 'Member (member)'])])->assertOk()->assertJsonPath('valid', 1);
+        DB::table('admin_role_users')->where('user_id', 10)->update(['role_id' => $b->id]);
+        $this->postJson($url.'/import', ['token' => $preview->json('token')])->assertUnprocessable();
+        $this->assertSame(0, AssetComputerEquipment::count());
+        $record = AssetComputerEquipment::create(['owner_department_id' => $a->id, 'user_id' => 10, 'user_snapshot' => 'Historical member']);
+        DB::table('admin_users')->where('id', 10)->delete();
+        $this->putJson($url.'/'.$record->id, ['user_id' => 10, 'brand' => 'Updated'])->assertOk();
+        $this->assertSame('Historical member', $record->fresh()->user_snapshot);
+        $this->putJson($url.'/'.$record->id, ['user_id' => null])->assertOk();
+        $this->assertNull($record->fresh()->user_id);
+        $this->assertNull($record->fresh()->user_snapshot);
+    }
 }

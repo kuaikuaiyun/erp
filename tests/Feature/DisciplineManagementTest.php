@@ -8,9 +8,11 @@ use App\Models\DisciplineRecord;
 use App\Models\DisciplineRecordLog;
 use App\Models\Portal;
 use App\Portal\Http\Controllers\PortalEntryController;
+use App\Portal\Services\PortalMenuAuthorizationService;
 use App\Portals\AssetManager\AssetComputerDepartmentScope;
 use App\Portals\AssetManager\DisciplineService;
 use App\Services\AdminWatermarkService;
+use App\Services\DepartmentAuthorizationService;
 use App\Services\SystemSettingService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
@@ -94,6 +96,7 @@ class DisciplineManagementTest extends TestCase
             $t->unsignedBigInteger('department_id');
         });
         (require base_path('database/migrations/2026_11_18_000400_install_asset_computer_department_bindings.php'))->up();
+        (require base_path('database/migrations/2026_11_18_000500_unify_asset_manager_page_access.php'))->up();
         $this->actor = new class extends AdminUser
         {
             public bool $administrator = true;
@@ -102,6 +105,8 @@ class DisciplineManagementTest extends TestCase
 
             public bool $view = true;
 
+            public ?array $pageAbilities = null;
+
             public function isAdministrator(): bool
             {
                 return $this->administrator;
@@ -109,6 +114,10 @@ class DisciplineManagementTest extends TestCase
 
             public function can($ability, $arguments = []): bool
             {
+                if ($this->pageAbilities !== null) {
+                    return in_array($ability, $this->pageAbilities, true);
+                }
+
                 return str_ends_with($ability, '.manage') ? $this->manage : $this->view;
             }
         };
@@ -429,6 +438,53 @@ class DisciplineManagementTest extends TestCase
         DB::table('portal_departments')->where('department_id', $this->department->id)->delete();
         $this->getJson('/asset-manager/discipline?month=2026-11')->assertJsonCount(0, 'members');
         $this->assertSame(1, DisciplineRecordLog::count());
+    }
+
+    public function test_discipline_multi_department_member_is_unique_and_selected_department_limits_member_choices(): void
+    {
+        DB::table('admin_role_users')->insert(['user_id' => 2, 'role_id' => $this->outside->id, 'position' => 'member']);
+        $this->bind($this->department, [$this->department->id, $this->outside->id]);
+        $this->actor->administrator = false;
+        $all = $this->getJson('/asset-manager/discipline?month=2026-11')->assertOk()->assertJsonCount(3, 'members')->json('members');
+        $this->assertSame([1, 2, 3], array_column($all, 'id'));
+        $this->getJson('/asset-manager/discipline?month=2026-11&department_id='.$this->outside->id)->assertJsonCount(2, 'members')->assertJsonPath('members.0.id', 2)->assertJsonCount(1, 'members.0.departments')->assertJsonPath('members.0.departments.0.id', $this->outside->id);
+        $this->getJson('/asset-manager/discipline/members?month=2026-11&department_id='.$this->outside->id)->assertJsonCount(2, 'members')->assertJsonPath('members.0.departments.0.id', $this->outside->id);
+        $this->ordinaryMember();
+        $this->getJson('/asset-manager/discipline?month=2026-11')->assertJsonCount(3, 'members')->assertJsonCount(0, 'members.0.departments');
+    }
+
+    public function test_discipline_menu_and_controller_use_computer_page_access_without_extra_permission(): void
+    {
+        $this->actor->administrator = false;
+        $this->actor->pageAbilities = ['asset-manager.computers'];
+        $this->get('/asset-manager/discipline?month=2026-11')->assertOk()->assertSee('id="discipline-add"', false);
+        $this->add();
+        $authorization = \Mockery::mock(DepartmentAuthorizationService::class)->makePartial();
+        $authorization->shouldReceive('hasPermission')->andReturnUsing(fn ($user, $permission) => $permission === 'asset-manager.computers');
+        $this->app->instance(DepartmentAuthorizationService::class, $authorization);
+        $menu = $this->portal->menus()->where('code', 'asset_manager_discipline')->first();
+        $this->assertTrue(app(PortalMenuAuthorizationService::class)->canAccess($this->actor, $menu));
+        $this->actor->pageAbilities = ['asset-manager.discipline'];
+        $this->getJson('/asset-manager/discipline')->assertForbidden();
+    }
+
+    public function test_page_access_migration_preserves_menu_customizations_and_is_repeatable(): void
+    {
+        DB::table('portal_menus')->where('code', 'asset_manager_discipline')->update(['permission_slug' => 'asset-manager.discipline', 'title' => 'Custom', 'parent_id' => 123, 'sort' => 99, 'is_enabled' => false]);
+        $migration = require base_path('database/migrations/2026_11_18_000500_unify_asset_manager_page_access.php');
+        $migration->up();
+        $migration->up();
+        $menu = DB::table('portal_menus')->where('code', 'asset_manager_discipline')->first();
+        $this->assertSame('asset-manager.computers', $menu->permission_slug);
+        $this->assertSame('Custom', $menu->title);
+        $this->assertSame(123, $menu->parent_id);
+        $this->assertSame(99, $menu->sort);
+        $this->assertFalse((bool) $menu->is_enabled);
+        $this->assertSame(1, DB::table('portal_menus')->where('code', 'asset_manager_discipline')->count());
+        DB::table('portal_menus')->where('code', 'asset_manager_discipline')->delete();
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage(__('asset_manager.discipline_menu_required'));
+        $migration->up();
     }
 
     public function test_discipline_separates_read_and_write_sources_and_keeps_numeric_pagination_filters(): void

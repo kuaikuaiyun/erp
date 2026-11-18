@@ -109,7 +109,7 @@
     async function findMembers(page) {
         var seq = ++pickerSeq; el('discipline-member-results').replaceChildren(node('span', t.loading));
         try {
-            var data = await api('/members?' + query({month:c.month, search:el('discipline-member-search').value, page:page}));
+            var data = await api('/members?' + query({month:c.month, department_id:c.department, search:el('discipline-member-search').value, page:page}));
             if (seq !== pickerSeq) return;
             memberPage = data.page; memberLast = data.last_page; el('discipline-member-results').replaceChildren();
             if (!data.members.length) el('discipline-member-results').appendChild(node('span', t.no_members));

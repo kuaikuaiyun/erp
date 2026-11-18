@@ -23,7 +23,7 @@ class DisciplineController extends Controller
         abort_unless($request->routeIs('asset-manager.discipline.*') && $context['portal']->code === 'asset-manager', 404);
         $user = $context['user'];
         $menu = $context['portal']->menus->firstWhere('code', 'asset_manager_discipline');
-        abort_unless($menu && $menu->is_enabled && ($user->isAdministrator() || $user->can('asset-manager.discipline')), 403);
+        abort_unless($menu && $menu->is_enabled && ($user->isAdministrator() || $user->can('asset-manager.computers')), 403);
         app()->setLocale('zh-CN');
         if ($write) {
             abort_unless($this->service->canManage($user), 403);
@@ -37,7 +37,7 @@ class DisciplineController extends Controller
         $context = $this->context($request);
         $filters = $this->service->filters($request);
         $members = $this->service->membersQuery($context['user'], $filters)->paginate($filters['per_page'] ?? 30)->withQueryString();
-        $options = $this->service->memberOptions($context['user'], collect($members->items()));
+        $options = $this->service->memberOptions($context['user'], collect($members->items()), isset($filters['department_id']) ? (int) $filters['department_id'] : null);
         $summaries = $this->service->summaries($context['user'], $filters, array_column($options, 'id'));
         $data = [
             'members' => $options, 'summaries' => $summaries, 'page' => $members->currentPage(),
@@ -60,7 +60,7 @@ class DisciplineController extends Controller
         $filters = $this->service->filters($request);
         $members = $this->service->membersQuery($context['user'], $filters, true)->paginate(30);
 
-        return response()->json(['members' => $this->service->memberOptions($context['user'], collect($members->items())), 'page' => $members->currentPage(), 'last_page' => $members->lastPage()]);
+        return response()->json(['members' => $this->service->memberOptions($context['user'], collect($members->items()), isset($filters['department_id']) ? (int) $filters['department_id'] : null), 'page' => $members->currentPage(), 'last_page' => $members->lastPage()]);
     }
 
     public function records(Request $request)

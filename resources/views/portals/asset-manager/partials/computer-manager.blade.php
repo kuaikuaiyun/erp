@@ -43,7 +43,7 @@
                         @if($key==='owner_department_id' && $user->isAdministrator())
                         <option value="0" @selected((string)request('filter.owner_department_id')==='0')>{{ __('asset_manager.computer_unassigned') }}</option>
                         @endif
-                        @foreach($key==='owner_department_id' ? $ownerDepartments : $users as $id=>$label)
+                        @foreach($key==='owner_department_id' ? $ownerDepartments : $filterUsers as $id=>$label)
                         <option value="{{ $id }}" @selected((string)request('filter.'.$key)===(string)$id)>{{ $label }}</option>
                         @endforeach
                     </select>
@@ -170,10 +170,10 @@
 </section>
 @push('scripts')
 @php
-$clientConfig = ['kind'=>$kind,'fields'=>$fields,'users'=>$users,'departments'=>$departments,'ownerDepartments'=>$ownerDepartments,'records'=>$rows->getCollection()->keyBy('id'),'accounts'=>$accounts->keyBy('id'),'text'=>array_replace(__('asset_manager'),['fields'=>$labels]),'base'=>$assetBase,'csrf'=>csrf_token()];
+$clientConfig = ['kind'=>$kind,'fields'=>$fields,'users'=>$users,'writeUsers'=>$writeUsers,'userDepartments'=>$userDepartments,'departments'=>$departments,'ownerDepartments'=>$ownerDepartments,'records'=>$rows->getCollection()->keyBy('id'),'accounts'=>$accounts->keyBy('id'),'text'=>array_replace(__('asset_manager'),['fields'=>$labels]),'base'=>$assetBase,'csrf'=>csrf_token()];
 @endphp
 <script>window.AssetManagerConfig=@json($clientConfig);</script>
-<script src="{{ asset('assets/erp/asset-manager.js') }}?v=20261118-2"></script>
+<script src="{{ asset('assets/erp/asset-manager.js') }}?v=20261118-3"></script>
 <script src="{{ asset('vendor/laravel-admin/AdminLTE/plugins/select2/select2.full.min.js') }}"></script>
 <script>
 (function ($) {
@@ -216,6 +216,7 @@ $clientConfig = ['kind'=>$kind,'fields'=>$fields,'users'=>$users,'departments'=>
             if (!owner.value && writableDepartments.length === 1) owner.value = String(writableDepartments[0]);
         }
         enhanceSelects($(this).find('#am-fields select'), this);
+        $(this).trigger('am:computer-fields-ready');
     });
     $('#am-import-modal').on('show.bs.modal', function () {
         enhanceSelects($(this).find('#am-import-owner'), this);
