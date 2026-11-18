@@ -1,6 +1,16 @@
 <?php
 
 return [
+    'computer_ui' => [
+        'subtitle' => '电脑设备台账与部门资产管理',
+        'filters' => '筛选条件', 'list' => '设备列表',
+        'search_placeholder' => '请输入:key', 'option_search' => '输入关键词筛选选项',
+        'currency_prefix' => '¥', 'selected_count' => '勾选后可导出所选记录',
+        'pagination_summary' => '显示第 :from–:to 条，共 :total 条',
+        'pagination_navigation' => '设备列表分页', 'per_page' => '每页', 'records_suffix' => '条',
+        'read_only' => '当前为只读，可查看、筛选和导出本部门设备。',
+        'manage_hint' => '仅可新增、编辑、删除或导入主管／副主管管理范围内的设备。',
+    ],
     'computer_unassigned' => '未分配部门',
     'computer_install_required' => '请先执行电脑设备安装迁移，再增加部门隔离字段。',
     'computer_import_owner_help' => '本次导入的全部电脑设备归属于所选管理部门，表格中的归属部门仅供参考；设备使用人不决定管理归属。',

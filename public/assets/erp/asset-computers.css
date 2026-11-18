@@ -1,0 +1,94 @@
+.am-workspace.am-computers {
+    padding: 0;
+    padding-bottom: 24px;
+}
+
+.am-computer-summary {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(200px, 260px));
+    gap: 12px;
+    padding: 2px;
+    margin-bottom: 14px;
+}
+
+.am-computer-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    min-height: 92px;
+    padding: 14px;
+    background: #fff;
+    border: 1px solid #d9e3ec;
+    border-radius: 7px;
+    box-shadow: 0 2px 8px rgba(38, 62, 84, .06);
+}
+
+.am-computer-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 38px;
+    width: 38px;
+    height: 38px;
+    border-radius: 9px;
+    color: #2879b5;
+    background: #e6f2fb;
+    font-size: 18px;
+}
+
+.am-computer-card > div { min-width: 0; }
+.am-computer-card > div > span { display: block; color: #6e859a; font-size: 12px; line-height: 1.35; }
+.am-computer-card strong { display: block; margin-top: 3px; color: #1f405a; font-size: 21px; line-height: 1.2; overflow-wrap: anywhere; }
+.am-computer-card small { display: block; margin-top: 5px; color: #73879c; font-size: 11px; }
+.am-computer-filter-box, .am-computer-list-box { margin-bottom: 14px; border-color: #d9e3ec; box-shadow: 0 1px 4px rgba(38, 62, 84, .05); }
+.am-computer-filter-box .box-title, .am-computer-list-box .box-title { font-size: 16px; color: #234a69; }
+
+.am-computer-filter-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: start;
+    gap: 14px;
+}
+
+.am-computers .form-group { margin-bottom: 0; min-width: 0; }
+.am-computers .form-group > label { display: block; margin-bottom: 6px; color: #234a69; font-weight: 600; }
+.am-computers .form-control { width: 100%; min-width: 0; }
+.am-computer-filter-bottom { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px; margin-top: 14px; }
+.am-computer-filter-bottom .form-group { flex: 0 1 210px; }
+.am-computer-filter-actions, .am-computer-list-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.am-computer-filter-actions { min-height: 34px; }
+.am-computer-hint { color: #678095; border-top-color: #edf1f5; font-size: 12px; line-height: 1.7; }
+.am-computer-list-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 12px; border-bottom: 1px solid #e7edf3; }
+.am-computer-list-toolbar .box-title { margin: 0; }
+.am-computer-table-scroll { width: 100%; }
+.am-computer-table { min-width: 1700px; margin-bottom: 0; color: #294862; }
+.am-computer-table > thead > tr > th { padding: 11px 10px; background: #f3f7fb; border-color: #e4ebf2; font-weight: 600; }
+.am-computer-table > tbody > tr > td { padding: 12px 10px; border-color: #e8eef4; vertical-align: middle; }
+.am-computer-table > tbody > tr:hover > td { background: #f5faff; }
+.am-computers .am-computer-table .am-computer-select { min-width: 40px; width: 40px; text-align: center; }
+.am-computer-table .am-computer-money { text-align: right; font-variant-numeric: tabular-nums; }
+.am-computer-table .am-computer-time { min-width: 160px; white-space: nowrap; color: #688198; font-size: 12px; }
+.am-computer-table .am-actions { min-width: 205px; }
+.am-computer-table .am-actions .btn { margin: 2px 3px 2px 0; }
+.am-computers .am-computer-table .am-computer-empty { padding: 34px 12px; text-align: center; color: #7a8d9f; }
+.am-computer-pagination { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 14px; color: #688198; font-size: 12px; padding: 0 2px; }
+.am-computer-per-page { margin: 0; }
+.am-computer-per-page label { display: flex; align-items: center; gap: 7px; margin: 0; font-weight: 400; }
+.am-computer-per-page .form-control { display: inline-block; width: 76px; }
+.am-computers .pagination > .active > a { background: #3c8dbc; border-color: #3c8dbc; }
+
+@media (max-width: 767px) {
+    .am-computer-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .am-computer-card { gap: 8px; padding: 12px 9px; }
+    .am-computer-card strong { font-size: 19px; }
+    .am-computer-filter-grid { grid-template-columns: minmax(0, 1fr); }
+    .am-computer-filter-bottom .form-group { flex: 1 1 100%; }
+    .am-computer-list-toolbar { align-items: flex-start; }
+    .am-computer-pagination { justify-content: flex-start; }
+    .am-computer-pagination > span { flex-basis: 100%; }
+}
+
+@media (max-width: 380px) {
+    .am-computer-summary { grid-template-columns: minmax(0, 1fr); }
+}

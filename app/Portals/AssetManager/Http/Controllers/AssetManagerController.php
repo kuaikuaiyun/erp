@@ -46,7 +46,7 @@ class AssetManagerController extends Controller
         $menu = $c['portal']->menus->firstWhere('code', 'asset_manager_'.$kind);
         abort_unless($menu && $menu->is_enabled, 403);
         if ($write) {
-            abort_unless($c['user']->can(Catalog::permission($kind).'.manage'), 403);
+            abort_unless($kind === 'computers' ? $this->computerScope->canManage($c['user']) : $c['user']->can(Catalog::permission($kind).'.manage'), 403);
         }
 
         return $c;
@@ -113,7 +113,8 @@ class AssetManagerController extends Controller
             'users' => $kind === 'computers' ? $this->service->users() : [],
             'departments' => in_array($kind, ['resources', 'codex-renewals']) ? $this->service->departments() : [],
             'accounts' => $kind === 'ipfoxy' ? $this->accounts($c)->orderBy('id')->get() : collect(),
-            'canManage' => $c['user']->can(Catalog::permission($kind).'.manage'),
+            'canManage' => $kind === 'computers' ? $this->computerScope->canManage($c['user']) : $c['user']->can(Catalog::permission($kind).'.manage'),
+            'writableDepartmentIds' => $kind === 'computers' ? $this->computerScope->writableDepartmentIds($c['user']) : [],
         ]);
     }
 
@@ -129,6 +130,9 @@ class AssetManagerController extends Controller
         $c = $this->context($request, $kind, true);
         $class = Catalog::model($kind);
         $existing = $record ? $this->records($kind, $c)->findOrFail($record) : null;
+        if ($kind === 'computers' && $existing) {
+            $this->computerScope->ensureWritable($c['user'], $existing->owner_department_id === null ? null : (int) $existing->owner_department_id);
+        }
         $data = $this->service->validate($kind, $request->all());
         if ($kind === 'computers') {
             $input = $request->all();
@@ -152,7 +156,11 @@ class AssetManagerController extends Controller
     public function destroy(Request $request, string $kind, int $record)
     {
         $c = $this->context($request, $kind, true);
-        $this->records($kind, $c)->findOrFail($record)->delete();
+        $row = $this->records($kind, $c)->findOrFail($record);
+        if ($kind === 'computers') {
+            $this->computerScope->ensureWritable($c['user'], $row->owner_department_id === null ? null : (int) $row->owner_department_id);
+        }
+        $row->delete();
 
         return response()->json(['message' => __('asset_manager.deleted')]);
     }

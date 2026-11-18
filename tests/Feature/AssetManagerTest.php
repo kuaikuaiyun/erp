@@ -27,6 +27,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use Tests\TestCase;
@@ -143,6 +144,7 @@ class AssetManagerTest extends TestCase
         $id = AssetComputerEquipment::first()->id;
         $this->getJson('/asset-manager/computers/'.$id)->assertOk()->assertJsonPath('monthly_rent', '10.10');
         $this->putJson('/asset-manager/computers/'.$id, ['monthly_rent' => '20.20'])->assertOk();
+        $this->joinDepartment($owner, 'manager');
         $this->actor->manage = false;
         $this->deleteJson('/asset-manager/computers/'.$id)->assertForbidden();
         $this->actor->manage = true;
@@ -513,7 +515,7 @@ class AssetManagerTest extends TestCase
         $mine = AssetComputerEquipment::create(['owner_department_id' => $a->id, 'serial_number' => 'A-equipment', 'monthly_rent' => '10.10']);
         $other = AssetComputerEquipment::create(['owner_department_id' => $b->id, 'serial_number' => 'B-secret', 'monthly_rent' => '90.90']);
         AssetComputerEquipment::create(['serial_number' => 'legacy-unassigned', 'monthly_rent' => '100.00']);
-        $this->joinDepartment($a);
+        $this->joinDepartment($a, 'manager');
         $url = '/asset-manager/computers';
         $this->get($url)->assertOk()->assertSee('A-equipment')->assertDontSee('B-secret')->assertDontSee('legacy-unassigned')->assertViewHas('rows', fn ($rows) => $rows->total() === 1)->assertViewHas('cards', fn ($cards) => $cards['total_assets'] === 1 && $cards['rent_total'] === '10.10');
         $this->getJson($url.'/'.$other->id)->assertNotFound();
@@ -560,7 +562,7 @@ class AssetManagerTest extends TestCase
         DB::table('admin_role_users')->where('user_id', $this->actor->id)->delete();
         $this->actor->unsetRelation('roles')->unsetRelation('departments');
         $this->get('/asset-manager/computers')->assertViewHas('rows', fn ($rows) => $rows->total() === 0);
-        $this->postJson('/asset-manager/computers', [])->assertUnprocessable();
+        $this->postJson('/asset-manager/computers', [])->assertForbidden();
     }
 
     public function test_unassigned_computers_are_preserved_and_only_admin_can_assign(): void
@@ -586,17 +588,94 @@ class AssetManagerTest extends TestCase
     public function test_computer_import_rechecks_cached_department_and_ignores_forged_commit_owner(): void
     {
         [$root,$a,$b] = $this->departmentsForIsolation();
-        $this->joinDepartment($a);
+        $this->joinDepartment($a, 'manager');
         $url = '/asset-manager/computers';
         $this->postJson($url.'/import/preview', ['owner_department_id' => $b->id, 'file' => $this->computerFile(['serial_number' => 'imported'])])->assertUnprocessable();
         $preview = $this->postJson($url.'/import/preview', ['file' => $this->computerFile(['serial_number' => 'imported', 'owner_department_id' => 'B'])])->assertOk()->assertJsonPath('valid', 1);
         $token = $preview->json('token');
-        $this->joinDepartment($b);
+        $this->joinDepartment($b, 'manager');
         $this->postJson($url.'/import', ['token' => $token])->assertUnprocessable();
-        $this->joinDepartment($a);
+        $this->joinDepartment($a, 'manager');
         $this->postJson($url.'/import', ['token' => $token, 'owner_department_id' => $b->id])->assertOk();
         $this->assertSame($a->id, (int) AssetComputerEquipment::first()->owner_department_id);
         $this->actor->manage = false;
-        $this->postJson($url.'/import/preview',['file' => $this->computerFile(['serial_number' => 'blocked'])])->assertForbidden();
+        $this->postJson($url.'/import/preview', ['file' => $this->computerFile(['serial_number' => 'blocked'])])->assertForbidden();
+    }
+
+    public function test_computer_ordinary_member_is_read_only_even_with_management_permission(): void
+    {
+        [$root, $a, $b] = $this->departmentsForIsolation();
+        $mine = AssetComputerEquipment::create(['owner_department_id' => $a->id, 'brand' => 'Original']);
+        $other = AssetComputerEquipment::create(['owner_department_id' => $b->id, 'brand' => 'Hidden']);
+        $this->joinDepartment($a);
+        $url = '/asset-manager/computers';
+        $this->get($url)->assertOk()->assertViewHas('canManage', false)->assertSee('Original')->assertDontSee('Hidden')->assertDontSee('id="am-add"', false)->assertDontSee('id="am-import"', false)->assertDontSee('data-edit=', false)->assertDontSee('data-delete=', false);
+        $this->getJson($url.'/'.$mine->id)->assertOk();
+        $this->getJson($url.'/'.$other->id)->assertNotFound();
+        $this->postJson($url, ['owner_department_id' => $a->id])->assertForbidden();
+        $this->putJson($url.'/'.$mine->id, ['brand' => 'Changed'])->assertForbidden();
+        $this->deleteJson($url.'/'.$mine->id)->assertForbidden();
+        $this->postJson($url.'/import/preview', ['owner_department_id' => $a->id, 'file' => $this->computerFile(['serial_number' => 'Forbidden'])])->assertForbidden();
+        $this->postJson($url.'/import', ['token' => (string) Str::uuid()])->assertForbidden();
+        $this->get($url.'/export')->assertOk();
+        $this->assertSame('Original', $mine->fresh()->brand);
+        $this->assertSame(2, AssetComputerEquipment::count());
+    }
+
+    public function test_computer_manager_cannot_write_department_where_they_are_only_a_member(): void
+    {
+        [$root, $a, $b] = $this->departmentsForIsolation();
+        $this->joinDepartment($a, 'manager');
+        DB::table('admin_role_users')->insert(['role_id' => $b->id, 'user_id' => $this->actor->id, 'position' => 'member']);
+        $mine = AssetComputerEquipment::create(['owner_department_id' => $a->id, 'serial_number' => 'ManagerRecord']);
+        $readonly = AssetComputerEquipment::create(['owner_department_id' => $b->id, 'serial_number' => 'MemberRecord']);
+        $url = '/asset-manager/computers';
+        $this->get($url)->assertViewHas('rows', fn ($rows) => $rows->total() === 2)->assertViewHas('writableDepartmentIds', [$a->id])->assertSee('data-edit="'.$mine->id.'"', false)->assertDontSee('data-edit="'.$readonly->id.'"', false);
+        $this->getJson($url.'/'.$readonly->id)->assertOk();
+        $this->putJson($url.'/'.$readonly->id, ['owner_department_id' => $a->id, 'brand' => 'Stolen'])->assertForbidden();
+        $this->deleteJson($url.'/'.$readonly->id)->assertForbidden();
+        $this->postJson($url, ['owner_department_id' => $b->id])->assertUnprocessable();
+        $this->putJson($url.'/'.$mine->id, ['owner_department_id' => $b->id])->assertUnprocessable();
+        $this->postJson($url.'/import/preview', ['owner_department_id' => $b->id, 'file' => $this->computerFile(['serial_number' => 'Forbidden'])])->assertUnprocessable();
+        $this->assertSame($b->id, (int) $readonly->fresh()->owner_department_id);
+    }
+
+    public function test_computer_manager_and_deputy_can_write_with_permission_and_revocation_blocks_import(): void
+    {
+        [$root, $a, $b] = $this->departmentsForIsolation();
+        $url = '/asset-manager/computers';
+        foreach (['manager', 'deputy'] as $position) {
+            $this->joinDepartment($a, $position);
+            $this->get($url)->assertViewHas('canManage', true);
+            $this->postJson($url, ['serial_number' => $position])->assertOk();
+            $row = AssetComputerEquipment::orderByDesc('id')->first();
+            $this->putJson($url.'/'.$row->id, ['brand' => $position])->assertOk();
+            $this->deleteJson($url.'/'.$row->id)->assertOk();
+            $preview = $this->postJson($url.'/import/preview', ['file' => $this->computerFile(['serial_number' => $position.'-import'])])->assertOk();
+            $this->joinDepartment($a, 'member');
+            $this->postJson($url.'/import', ['token' => $preview->json('token')])->assertForbidden();
+            $this->joinDepartment($a, $position);
+            $this->postJson($url.'/import', ['token' => $preview->json('token')])->assertOk();
+            $this->actor->manage = false;
+            $this->get($url)->assertViewHas('canManage', false);
+            $this->postJson($url, [])->assertForbidden();
+            $this->actor->manage = true;
+        }
+        $this->actor->administrator = true;
+        $this->actor->manage = false;
+        $this->postJson($url, ['owner_department_id' => $b->id, 'serial_number' => 'AdminRecord'])->assertOk();
+        $this->get($url)->assertViewHas('canManage', true)->assertViewHas('rows', fn ($rows) => $rows->total() === 3);
+    }
+
+    public function test_computer_page_uses_standard_header_and_preserves_filters_in_numeric_pagination(): void
+    {
+        [$root, $a, $b] = $this->departmentsForIsolation();
+        for ($i = 0; $i < 25; $i++) {
+            AssetComputerEquipment::create(['owner_department_id' => $a->id, 'brand' => 'Paged', 'monthly_rent' => '10.10']);
+        }
+        $url = '/asset-manager/computers?filter[brand]=Paged&filter[owner_department_id]='.$a->id.'&per_page=20';
+        $this->get($url)->assertOk()->assertSee('<section class="content-header">', false)->assertSee('asset-computers.css')->assertSee('am-computer-card')->assertSee('am-computer-pagination')->assertSee('aria-current="page"', false)->assertSee('filter%5Bbrand%5D=Paged', false)->assertSee('name="filter[brand]" value="Paged"', false)->assertSee('¥252.50')->assertViewHas('rows', fn ($rows) => $rows->count() === 20 && $rows->total() === 25);
+        $this->get($url.'&page=2')->assertOk()->assertViewHas('rows', fn ($rows) => $rows->count() === 5)->assertSee('value="20" selected', false);
+        $this->get('/assistant/assets/resources')->assertOk()->assertDontSee('asset-computers.css');
     }
 }
