@@ -317,7 +317,7 @@
 @endif
 <p class="settlement-note" style="padding:0 20px">
 @if($cardChannel === 'worldpay')
-    直接上传 Worldpay 后台导出的文件。系统自动匹配订单明细、登记保证金返还，并跳过扣返款明细和商户结算费用汇总。一次最多 {{ \App\Portals\Finance\FinanceWorldpayImport::MAX_UPLOAD_FILES }} 个文件，每个最大 10 MB。
+    支持 Worldpay 官方文件及只填订单号和变动金额的简表账单。账单同订单金额合并后累计，负数冲减、空白不变，重复导入会再次累计；时间沿用原订单。系统自动匹配订单明细、登记保证金返还，并跳过扣返款明细和商户结算费用汇总。一次最多 {{ \App\Portals\Finance\FinanceWorldpayImport::MAX_UPLOAD_FILES }} 个文件，每个最大 10 MB。
 @elseif($channel === 'credit_card')
     ConfluxAPI 可一次选择多份文件，系统每批最多 5 份依次导入，单个文件最大 20 MB。正常结算和停结算请选择不同的队列。
 @endif

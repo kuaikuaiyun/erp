@@ -672,9 +672,13 @@ class FinanceWorkbookService
             if ($value === null) {
                 continue;
             }
-            $prior = $numbers->number($payload['_edited_report_fields'][$field] ?? $payload[$field] ?? null) ?? '0';
+            $label = $field === '应结算' ? '应结算（USD）' : (FinanceXuzongCreditReport::DISPLAY_HEADERS[$field] ?? $field);
+            $prior = $numbers->number($payload[$field] ?? null) ?? '0';
             $payload[$field] = bcadd($prior, $value, 8);
-            unset($payload['_edited_report_fields'][$field]);
+            if (is_numeric($payload['_edited_report_fields'][$label] ?? null)) {
+                $payload['_edited_report_fields'][$label] = bcadd($payload['_edited_report_fields'][$label], $value, 8);
+            }
+            $payload['_xuzong_bill_deltas'][$field] = bcadd($payload['_xuzong_bill_deltas'][$field] ?? '0', $value, 8);
         }
 
         return $payload;

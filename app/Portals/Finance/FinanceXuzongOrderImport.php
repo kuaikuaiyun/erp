@@ -168,9 +168,6 @@ class FinanceXuzongOrderImport
                     $payload = $order->payload;
                     $existing = $payload['_xuzong_statement_import'] ?? [];
                     $fields = array_fill_keys(self::statementAmountFields(), true);
-                    if (! $existing && (filled($payload['结算金额'] ?? null) || filled($payload['应结算'] ?? null))) {
-                        throw ValidationException::withMessages(['file' => '第'.$group['line'].'行已有未标记来源的结算数据，请先核对原账单。']);
-                    }
                     $events = $existing['events'] ?? [];
                     $legacy = $this->legacyStatement($payload, $existing);
                     $incoming = $group['events'];
@@ -326,7 +323,20 @@ class FinanceXuzongOrderImport
 
     private function statementPayload(array $payload, array $existing, array $events, ?array $legacy): array
     {
-        $amounts = $legacy['amounts'] ?? [];
+        $base = $existing['base'] ?? [];
+        if ($existing === []) {
+            foreach (self::statementAmountFields() as $field) {
+                if (is_numeric($payload[$field] ?? null)) {
+                    $base[$field] = bcsub($payload[$field], $payload['_xuzong_bill_deltas'][$field] ?? '0', 8);
+                }
+            }
+        }
+        $amounts = $legacy['amounts'] ?? $base;
+        foreach ($payload['_xuzong_bill_deltas'] ?? [] as $field => $value) {
+            if (in_array($field, self::statementAmountFields(), true)) {
+                $amounts[$field] = bcadd($amounts[$field] ?? '0', $value, $field === '应结算' ? 2 : 8);
+            }
+        }
         foreach ($events as $event) {
             foreach ($event['amounts'] as $field => $value) {
                 $amounts[$field] = bcadd($amounts[$field] ?? '0', $value, $field === '应结算' ? 2 : 8);
@@ -339,10 +349,17 @@ class FinanceXuzongOrderImport
         } else {
             $payload['结算币种'] = 'USD';
         }
+        foreach ($amounts as $field => $value) {
+            $label = $field === '应结算' ? '应结算（USD）' : (FinanceXuzongCreditReport::DISPLAY_HEADERS[$field] ?? $field);
+            if (is_numeric($payload['_edited_report_fields'][$label] ?? null)) {
+                $delta = bcsub($value, is_numeric($payload[$field] ?? null) ? $payload[$field] : '0', 8);
+                $payload['_edited_report_fields'][$label] = bcadd($payload['_edited_report_fields'][$label], $delta, 8);
+            }
+        }
 
         return [...$payload, ...$amounts, '_xuzong_statement_import' => [
             ...array_intersect_key($existing, array_flip(['notice', 'suppressed'])),
-            'events' => $events, 'legacy' => $legacy, 'prior_refund' => $priorRefund,
+            'events' => $events, 'legacy' => $legacy, 'prior_refund' => $priorRefund, 'base' => $base,
         ]];
     }
 
