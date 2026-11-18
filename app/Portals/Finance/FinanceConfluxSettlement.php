@@ -399,6 +399,17 @@ class FinanceConfluxSettlement
         $reportFees ??= new \ArrayObject;
         foreach ($batches as $key => $entries) {
             $report = $entries->first();
+            if ($reportFees instanceof FinanceStatementFeeCache) {
+                $fees += $reportFees->forEntries($key, $entries, function () use ($report) {
+                    $bill = $this->workbooks->database()->table(self::TABLE)->where([
+                        'payment_account_id' => $report->payment_account_id, 'settlement_date' => $report->settlement_date,
+                        'platform' => 'ye', 'report_hash' => $report->report_hash,
+                    ])->whereIn('kind', ['summary', 'sale', 'failed', ...array_keys(self::EVENT_FEES)])
+                        ->select('id', 'kind', 'payload')->lazyById(1000);
+                    return $this->statementFees($bill, $report->settlement_date);
+                });
+                continue;
+            }
             if (! $reportFees->offsetExists($key)) {
                 $bill = $this->workbooks->database()->table(self::TABLE)->where([
                     'payment_account_id' => $report->payment_account_id, 'settlement_date' => $report->settlement_date,

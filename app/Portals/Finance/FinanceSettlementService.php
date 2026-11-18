@@ -167,6 +167,30 @@ class FinanceSettlementService
         if ($channel === 'credit_card' && filled($filters['card_channel'] ?? null)) {
             FinanceCreditSettlementLayout::filter($query, $filters['card_channel']);
         }
+        if ($channel === 'credit_card' && ! empty($filters['summary_payment_channels'])) {
+            $accounts = FinancePaymentAccount::query()->where('account_type', 'credit_card')->get();
+            $predicates = [];
+            foreach (['ye', 'worldpay'] as $platform) {
+                $match = FinanceRecord::query();
+                FinanceCreditSettlementLayout::filter($match, $platform, $accounts);
+                $predicates[$platform] = [substr($match->getQuery()->getGrammar()->compileWheres($match->getQuery()), strlen('where ')), $match->getBindings()];
+            }
+            if (array_intersect($filters['summary_payment_channels'], ['xuzong1', 'xuzong2'])) {
+                foreach ($predicates as [$predicate, $bindings]) {
+                    // CASE preserves the classifier's treatment of SQL NULL as not matched.
+                    $query->whereRaw('CASE WHEN '.$predicate.' THEN 1 ELSE 0 END = 0', $bindings);
+                }
+            } else {
+                $query->where(function ($scope) use ($predicates, $filters) {
+                    foreach ($filters['summary_payment_channels'] as $platform) {
+                        if (isset($predicates[$platform])) {
+                            [$predicate, $bindings] = $predicates[$platform];
+                            $scope->orWhereRaw('CASE WHEN '.$predicate.' THEN 1 ELSE 0 END = 1', $bindings);
+                        }
+                    }
+                });
+            }
+        }
         if (($filters['card_channel'] ?? null) === 'ye' && in_array($filters['card_match'] ?? null, ['matched', 'waiting'], true)) {
             app(FinanceConfluxSettlement::class)->filterOrderMatch($query, $filters['card_match'] === 'matched');
         }
@@ -595,6 +619,7 @@ class FinanceSettlementService
                 $manual = [...$saved, ...($saved['_edited_fields'] ?? [])];
                 $row['card_layout'] = FinanceCreditSettlementLayout::values(
                     $filters['card_channel'], $row, $p, $manual, $record->source_timezone ?: 'Asia/Shanghai',
+                    summaryOnly: ! empty($filters['summary_only']),
                 );
                 if ($worldpay && ! array_key_exists('owner', $manual)) {
                     $row['card_layout']['owner'] = $row['owner'];
@@ -693,9 +718,7 @@ class FinanceSettlementService
         if ($businessMatchesOnly) {
             return $rows;
         }
-        if (! empty($filters['summary_projection'])) {
-            $rows = $rows->map(fn ($row) => $row + ['_summary_team' => $row['team']]);
-        }
+        $rows = $rows->map(fn ($row) => $row + ['_summary_team' => $row['team']]);
         return $rows->filter(fn ($row) => $this->matchesBusinessFilters($row, $filters)
             && (empty($filters['card_exceptions']) || filled($row['card_layout']['ledger_exceptions'] ?? null))
             && (empty($filters['card_wallet']) || ! empty($row['ledger_wallet']))
@@ -1417,14 +1440,18 @@ class FinanceSettlementService
         $filters['summary_only'] = true;
         $fields = self::MONEY + array_fill_keys(['id', 'logistics_order_id', 'channel', 'account', 'account_key',
             'owner', 'team', 'subscription', 'payment_method', 'success', 'failed', 'settlement'], true);
-        if ($transactions) {
-            $fields += self::CONDITION_FIELDS + array_fill_keys(['currency', 'month'], true);
-        }
-        if (! empty($filters['summary_projection'])) {
-            $fields['_summary_team'] = true;
-        }
+        // Both summary and transaction consumers need the same grouping fields.
+        $fields += self::CONDITION_FIELDS + array_fill_keys(['currency', 'month'], true);
+        $fields['_summary_team'] = true;
         // Keep the original date order for grouping and for assigning costs to the first successful payment.
         $query = $this->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id');
+        $paypalAmounts = [];
+        if ($channel === 'paypal') {
+            $ids = (clone $query)->reorder()->pluck('id')->all();
+            foreach (app(FinancePayPalSettlementOrders::class)->exportRows($filters, matchCandidateDomains: false, recordIds: $ids) as $detail) {
+                $paypalAmounts[$detail['id']] = array_intersect_key($detail, self::MONEY + ['settlement' => true]);
+            }
+        }
         if ($channel === 'credit_card' && empty($filters['card_channel'])) {
             $query->select('finance_records.*');
             $accounts = FinancePaymentAccount::query()->where('account_type', 'credit_card')->get();
@@ -1449,7 +1476,8 @@ class FinanceSettlementService
                 break;
             }
             $last = $records->last();
-            $context ??= $this->rowContext($channel) + ['conflux_report_fees' => new \ArrayObject];
+            $records->each(fn (FinanceRecord $record) => $record->withCachedReportCasts());
+            $context ??= $this->rowContext($channel) + ['conflux_report_fees' => new FinanceStatementFeeCache];
             $resolved = [];
             foreach ($records->groupBy(fn ($record) => $filters['card_channel'] ?? match (true) {
                 (bool) $record->matches_worldpay => 'worldpay',
@@ -1469,16 +1497,20 @@ class FinanceSettlementService
             }
             foreach ($records as $record) {
                 if (isset($resolved[$record->id])) {
+                    if (isset($paypalAmounts[$record->id])) {
+                        $resolved[$record->id] = array_replace($resolved[$record->id], $paypalAmounts[$record->id]);
+                    }
                     yield $resolved[$record->id] + (! empty($filters['summary_projection'])
                         ? ['_summary_source_account' => $record->account] : []);
                 }
             }
         } while ($records->count() === $batchSize);
-        if ($channel === 'credit_card' && ! empty($filters['include_unmatched_fees'])) {
+        if ($channel === 'credit_card' && ! empty($filters['include_unmatched_fees'])
+            && (empty($filters['summary_payment_channels']) || in_array('ye', $filters['summary_payment_channels'], true))) {
             $accounts = FinancePaymentAccount::query()->where('account_type', 'credit_card')->get()->keyBy('id');
             $conflux = app(FinanceConfluxSettlement::class);
             $rates = app(FinanceCreditUsdRates::class);
-            $statements = $conflux->unmatchedRows([...$filters, 'card_channel' => 'ye', 'conflux_report_fees' => new \ArrayObject]);
+            $statements = $conflux->unmatchedRows([...$filters, 'card_channel' => 'ye', 'conflux_report_fees' => new FinanceStatementFeeCache]);
             foreach (\Illuminate\Support\LazyCollection::make(fn () => $statements)->chunk(500) as $batch) {
                 $orders = $batch->map(fn ($row) => (object) [
                     'currency' => strtoupper(trim((string) ($row['card_layout']['settlement_currency'] ?? ''))),

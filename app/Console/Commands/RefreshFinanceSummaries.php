@@ -58,7 +58,9 @@ class RefreshFinanceSummaries extends Command
             $reportsRefreshed = $reports->refresh($controller, $tracksRevisions);
             if ($tracksRevisions) {
                 try {
-                    $periods = $db->table('finance_summary_periods')->whereColumn('published', '<', 'revision')->orderByDesc('month')->get();
+                    // Source revisions do not change when cached reference FX becomes available.
+                    // refresh() also checks its FX fingerprint before reusing a publication.
+                    $periods = $db->table('finance_summary_periods')->orderByDesc('month')->get();
                     foreach ($periods as $period) {
                         $projection->refresh($period);
                     }

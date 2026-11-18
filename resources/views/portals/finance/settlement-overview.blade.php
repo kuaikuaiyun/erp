@@ -123,7 +123,7 @@ document.getElementById('overview-channel').addEventListener('change', function 
         @if($creditMonths)
             已导入月份：
             @foreach($creditMonths as $month)
-                <a href="{{ route('finance.report', ['report' => $report, ...$filters, 'month' => $month]) }}">{{ $month }}</a>{{ $loop->last ? '。' : '、' }}
+                <a href="{{ route('finance.report', ['report' => $report, ...$filters, 'month' => $month, ...($report === 'losses' ? ['month_from' => $month, 'month_to' => $month] : [])]) }}">{{ $month }}</a>{{ $loop->last ? '。' : '、' }}
             @endforeach
         @else
             当前账户暂无导入记录。
@@ -137,13 +137,19 @@ document.getElementById('overview-channel').addEventListener('change', function 
 <div class="box"><header class="overview-results-head"><h2>汇总结果</h2><span>{{ $summaryAwaitingResult ? '待生成' : count($groups).' 组' }}</span></header><div class="box-body finance-table-wrap"><table class="table finance-table"><thead><tr><th class="finance-selection"><input type="checkbox" data-export-all aria-label="全选当前页"></th><th>项目</th><th>支付通道</th><th>成功订单数</th><th>失败交易数</th><th>结算金额（美元）</th></tr></thead><tbody>@forelse($groups as $group)<tr><td class="finance-selection"><input type="checkbox" data-export-row value="{{ \App\Portals\Finance\FinanceExportSelection::key($group) }}" aria-label="选择此行"></td><td>{{ $group['name'] }}</td><td>{{ \App\Portals\Finance\FinanceSettlementService::REPORT_CHANNELS[$group['channel']] }}</td><td>{{ number_format($group['success_count']) }}</td><td>{{ number_format($group['failed_count']) }}</td><td>{{ $group['settlement'] === null ? '' : \App\Portals\Finance\FinanceCatalog::reportAmount($group['settlement'], 3) }}</td></tr>@empty<tr><td colspan="6">{{ $summaryAwaitingResult ? ($summaryStatus['state'] === 'failed' ? '报表生成失败，后台将重试。' : '报表正在生成，请稍候。') : '无符合条件的记录' }}</td></tr>@endforelse</tbody></table></div></div>
 @else
 @php
-    $overallGroups = array_values(array_filter($groups, fn ($group) => $group['is_total'] ?? false));
-    $overviewGroups = $overallGroups ?: $groups;
-    $overviewSuccess = array_sum(array_column($overviewGroups, 'success_count'));
-    $overviewFailed = array_sum(array_column($overviewGroups, 'failed_count'));
-    $overviewSettlement = array_reduce($overviewGroups, fn ($sum, $group) => bcadd($sum, $group['settlement'] ?? '0', 8), '0');
+    $scopeStats = $scopes->flatMap(function ($scope) use ($categoriesByScope, $groups, $panelScope, $panelCategory) {
+        return $categoriesByScope[$scope]->map(function ($category) use ($scope, $groups, $panelScope, $panelCategory) {
+            $selected = array_values(array_filter($groups, fn ($group) => $panelScope($group) === $scope && $panelCategory($group) === $category));
+            return ['scope' => $scope, 'category' => $category, 'count' => (string) count($selected),
+                'success' => number_format(array_sum(array_column($selected, 'success_count'))),
+                'failed' => number_format(array_sum(array_column($selected, 'failed_count'))),
+                'settlement' => \App\Portals\Finance\FinanceCatalog::reportAmount(array_reduce($selected, fn ($sum, $group) => bcadd($sum, $group['settlement'] ?? '0', 8), '0'), 3)];
+        });
+    })->values();
+    $selectedStats = $scopeStats->first(fn ($stats) => $stats['scope'] === $selectedScope && $stats['category'] === $selectedCategory);
 @endphp
-<div class="overview-stats"><div class="overview-stat"><span>当前分类</span><strong>{{ count($groups) }}</strong><small>组</small></div><div class="overview-stat"><span>成功订单</span><strong>{{ number_format($overviewSuccess) }}</strong><small>单</small></div><div class="overview-stat"><span>失败交易</span><strong>{{ number_format($overviewFailed) }}</strong><small>笔</small></div><div class="overview-stat"><span>结算金额 · USD</span><strong>{{ \App\Portals\Finance\FinanceCatalog::reportAmount($overviewSettlement, 3) }}</strong></div></div>
+<p class="overview-rate">以下统计对应结束月份 {{ $filters['month'] }} 的当前通道及分类。</p>
+<div class="overview-stats"><div class="overview-stat"><span>当前分类</span><strong data-loss-stat="count">{{ $selectedStats['count'] }}</strong><small>组</small></div><div class="overview-stat"><span>成功订单</span><strong data-loss-stat="success">{{ $selectedStats['success'] }}</strong><small>单</small></div><div class="overview-stat"><span>失败交易</span><strong data-loss-stat="failed">{{ $selectedStats['failed'] }}</strong><small>笔</small></div><div class="overview-stat"><span>结算金额 · USD</span><strong data-loss-stat="settlement">{{ $selectedStats['settlement'] }}</strong></div></div>
 @php
     $lossMetricKeys = array_values(array_unique(array_merge(...array_map(fn ($group) => array_keys($group['ratios']), $groups))));
 @endphp
@@ -155,6 +161,7 @@ document.getElementById('overview-channel').addEventListener('change', function 
 @foreach($categories as $category)<a href="{{ route('finance.report', ['report' => $report, ...$switchFilters, 'loss_scope' => $selectedScope, 'loss_category' => $category]) }}" @class(['is-active' => $category === $selectedCategory]) @if($category === $selectedCategory) aria-current="page" @endif>{{ $category }}</a>@endforeach
 </nav>
 <p class="loss-selection">{{ $selectedScope }} / {{ $selectedCategory }}<span>月度对照 · {{ array_key_first($comparison) }} 至 {{ array_key_last($comparison) }}</span></p>
+<p class="overview-rate">Shopify 仅汇总 PayPal 和徐总信用卡；叶总支付、Worldpay 请查看对应通道。横线表示无法计算，悬停可查看原因。</p>
 <div class="loss-comparison">
 @forelse($panels as $panel)
 <div class="box loss-month-panel">@include('portals.finance.partials.loss-month-table')</div>
@@ -165,11 +172,12 @@ document.getElementById('overview-channel').addEventListener('change', function 
 @endphp
 <script type="application/json" data-loss-categories>@json($categoriesByScope)</script>
 <script type="application/json" data-loss-panels>@json($switchPanels)</script>
+<script type="application/json" data-loss-stats>@json($scopeStats)</script>
 @foreach($allPanels as $index => $panel)<template id="loss-table-{{ $index }}">@include('portals.finance.partials.loss-month-table')</template>@endforeach
 </div>@endif
 <details class="overview-method"><summary>统计口径</summary><p>结算汇总按通道时区划分月份，徐总信用卡和 PayPal 使用 UTC−4，其他通道使用 UTC+8。月度对照按所选开始月份至结束月份展示，包含起止月份。PayPal 中团队或使用人包含“刷单”的记录归入 Shopify、PayPal 的“刷单”分类，并计入总计；信用卡不设置刷单分类。缺少订阅类型的记录只计入总计，不推断为无订阅；Shopify 为 PayPal 与信用卡合计，通道分项不再重复计入顶部汇总。无结算基数或缺少资料时显示“—”。结算和费用按美元计算，物流、采购先按本月汇率换算美元，再除以结算金额。PayPal手续费扣除返还手续费，争议冻结退款计入争议退款与冻结、扣除解除冻结。按明细表的SUM口径汇总，空白费用不参与加总；缺少汇率只影响物流和采购，结算金额为零时不计算占比。信用卡保留失败记录的单笔费用。ERP订单、团队和订阅数据尚未匹配时不自动推断。物流和采购成本按财务导入金额累计，未导入时留空。</p></details></div>
 @endsection
 
 @push('scripts')
-@if($report === 'losses')<script src="{{ asset('assets/erp/finance-loss-switcher.js') }}?v=4"></script>@endif
+@if($report === 'losses')<script src="{{ asset('assets/erp/finance-loss-switcher.js') }}?v=5"></script>@endif
 @endpush

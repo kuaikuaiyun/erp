@@ -31,7 +31,7 @@ class FinanceReportSnapshots
         }
         $failed = false;
         $activeScopes = $db->table('finance_report_scopes')->where('used_at', '>=', $activeSince)
-            ->whereIn('report', ['summary', 'transactions', 'losses'])->where('month', '<>', '')
+            ->whereNotIn('report', ['summary', 'transactions', 'losses'])->where('month', '<>', '')
             ->orderByDesc('used_at')->orderBy('scope')->get();
         foreach ($activeScopes as $scope) {
             $started = hrtime(true);
@@ -99,12 +99,20 @@ class FinanceReportSnapshots
         $scope = hash('sha256', json_encode([$report, $month, $filters], JSON_THROW_ON_ERROR));
         $db = $this->workbooks->database();
 
+        // These reports query current channel data; an absent filter-specific cache must
+        // never register a background job and return an empty report to the user.
+        $queryCurrentData = in_array($report, ['summary', 'transactions', 'losses'], true);
+        if ($queryCurrentData) {
+            $live = true;
+            $reusePublishedRevision = $reusePublishedRevision || FinanceSummaryTriggers::available($db);
+        }
+
         $background = ! $live && $this->runsInBackground();
         if ($statusOnly && ! $background) {
             return [null, null, ['state' => 'ready']];
         }
         if (! $background && $id === null && ! $db->getSchemaBuilder()->hasTable('finance_report_snapshots')) {
-            return [$build(), null, ['state' => 'ready']];
+            return [$db->transaction($build), null, ['state' => 'ready']];
         }
         if ($id !== null) {
             $saved = $db->table('finance_report_snapshots')->where(compact('id', 'scope'))->first();
@@ -123,19 +131,21 @@ class FinanceReportSnapshots
             $revision = null;
             // The caller enables reuse only after every source projection is published at its current revision.
             if ($reusePublishedRevision && ! $db->table('finance_summary_changes')->exists()) {
+                // Usage metadata keeps active pagination/export versions from being pruned.
+                // refresh() no longer enqueues these report types for background generation.
                 $db->table('finance_report_scopes')->upsert([
                     compact('scope', 'month', 'report') + ['filters' => json_encode($filters, JSON_THROW_ON_ERROR), 'used_at' => now()],
                 ], ['scope'], ['used_at']);
-                $revision = $this->revision($db, $report, $month, $filters, true);
+                $revision = $this->queryRevision($db, $report, $month, $filters);
                 $saved = $db->table('finance_report_snapshots')->where(compact('scope', 'revision'))
                     ->latest('created_at')->first(['id', 'created_at']);
                 if ($saved) {
                     return [$this->payload($db, $saved->id), $saved->id, ['state' => 'ready', 'updated_at' => $saved->created_at]];
                 }
             }
-            $result = $build();
+            $result = $db->transaction($build);
             if ($revision !== null && ($db->table('finance_summary_changes')->exists()
-                || $revision !== $this->revision($db, $report, $month, $filters, true))) {
+                || $revision !== $this->queryRevision($db, $report, $month, $filters))) {
                 $revision = null;
             }
 
@@ -174,6 +184,18 @@ class FinanceReportSnapshots
         }
 
         return [$this->payload($db, $saved->id), $saved->id, $status];
+    }
+
+    private function queryRevision(Connection $db, string $report, string $month, array $filters): string
+    {
+        $channels = match ($filters['channel'] ?? null) {
+            'paypal' => ['paypal'],
+            null, '', 'combined' => ['paypal', 'credit_card'],
+            default => ['credit_card'],
+        };
+        $sources = array_map(fn ($channel) => app(FinanceSummaryDataVersion::class)->current($channel), $channels);
+        return hash('sha256', json_encode(['current-channel-data:3', $sources,
+            $this->revision($db, $report, $month, $filters, true)], JSON_THROW_ON_ERROR));
     }
 
     private function revision(Connection $db, string $report, string $month, array $filters, bool $tracksRevisions): string

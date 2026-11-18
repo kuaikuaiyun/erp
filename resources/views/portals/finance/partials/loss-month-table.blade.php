@@ -4,6 +4,15 @@
 @endphp
 <div class="loss-month-scroll"><table class="table" style="min-width:{{ max(420, 200 + count($comparison) * 110) }}px"><colgroup><col style="width:36px"><col style="width:200px">@foreach($comparison as $period => $items)<col>@endforeach</colgroup><thead><tr><th class="finance-selection"><input type="checkbox" data-export-all aria-label="全选当前页"></th><th>{{ $panel['name'] }}</th>@foreach($comparison as $period => $items)<th>{{ $period }}</th>@endforeach</tr></thead><tbody>
 <tr><td class="finance-selection"><input type="checkbox" data-export-row value="{{ hash('sha256', \App\Portals\Finance\FinanceExportSelection::key($panel).'|success_count') }}" aria-label="选择此行"></td><td>成功订单数</td>@foreach($panelMonths as $period => $item)<td>{{ isset($reportStatuses[$period]) && $reportStatuses[$period]['state'] !== 'ready' && !isset($reportStatuses[$period]['updated_at']) ? '—' : number_format($item['success_count'] ?? 0) }}</td>@endforeach</tr>
-@foreach($panelKeys as $key)<tr><td class="finance-selection"><input type="checkbox" data-export-row value="{{ hash('sha256', \App\Portals\Finance\FinanceExportSelection::key($panel).'|'.$key) }}" aria-label="选择此行"></td><td>{{ $metrics[$key] }}</td>@foreach($panelMonths as $item)<td>{{ ($item['ratios'][$key] ?? null) === null ? '—' : number_format((float) $item['ratios'][$key], 2).'%' }}</td>@endforeach</tr>@endforeach
+@foreach($panelKeys as $key)<tr><td class="finance-selection"><input type="checkbox" data-export-row value="{{ hash('sha256', \App\Portals\Finance\FinanceExportSelection::key($panel).'|'.$key) }}" aria-label="选择此行"></td><td>{{ $metrics[$key] }}</td>@foreach($panelMonths as $period => $item)
+@php
+    $missingReason = ! $item ? '当前月份无符合筛选的记录' : '缺少计算资料或结算金额为零';
+    if ($item && in_array($key, ['logistics', 'purchase'], true)) {
+        $missingReason = ($item[$key] ?? null) === null
+            ? ($key === 'logistics' ? '当前月份未导入物流成本' : '当前月份未导入采购成本')
+            : (($monthlyRates[$period] ?? null) === null ? '当前月份未配置美元兑人民币汇率' : '结算金额缺失或为零');
+    }
+@endphp
+<td @if(($item['ratios'][$key] ?? null) === null) title="{{ $missingReason }}" @endif>{{ ($item['ratios'][$key] ?? null) === null ? '—' : number_format((float) $item['ratios'][$key], 2).'%' }}</td>@endforeach</tr>@endforeach
 <tr class="loss-total"><td class="finance-selection"><input type="checkbox" data-export-row value="{{ hash('sha256', \App\Portals\Finance\FinanceExportSelection::key($panel).'|total_ratio') }}" aria-label="选择此行"></td><td>合计</td>@foreach($panelMonths as $item)<td>{{ ($item['total_ratio'] ?? null) === null ? '—' : number_format((float) $item['total_ratio'], 2).'%' }}</td>@endforeach</tr>
 </tbody></table></div>

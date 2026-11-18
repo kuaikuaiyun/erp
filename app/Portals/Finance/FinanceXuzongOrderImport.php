@@ -73,6 +73,8 @@ class FinanceXuzongOrderImport
             in_array('结算批次号', $headers, true) => 'batches',
             in_array('原始支付状态', $headers, true) && in_array('交易 ID', $headers, true) => 'orders',
             ! array_diff(['平台订单号', '折算后结算贡献', '适用汇率'], $headers) => 'official_statement',
+            array_intersect(array_diff(FinanceWorkbookService::XUZONG_ADDITIVE_FIELDS, FinanceXuzongCostEligibility::FIELDS), $headers)
+                || array_intersect(['应结算（USD）', '争议费'], $headers) => null,
             array_intersect([FinanceXuzongCreditReport::PLATFORM_CODE, FinanceXuzongCreditReport::PLATFORM_MESSAGE,
                 FinanceXuzongCreditReport::PLATFORM_RESULT], $headers) => 'orders',
             array_intersect(['平台订单号', '交易流水号', '交易 ID', '商户订单号'], $headers)
@@ -120,7 +122,8 @@ class FinanceXuzongOrderImport
                 }
                 $amounts['应结算'] = bcadd($net, '0', 2);
                 $event = ['time' => $time, 'amounts' => $amounts];
-                $eventKey = $this->statementEventKey($event);
+                // Every imported bill row contributes, including identical rows.
+                $eventKey = (string) \Illuminate\Support\Str::uuid();
                 $group['events'][$eventKey] = $event;
                 $groups[$reference] = $group;
                 $total++;
@@ -152,7 +155,7 @@ class FinanceXuzongOrderImport
                     }
                     $events = $existing['events'] ?? [];
                     $legacy = $this->legacyStatement($payload, $existing);
-                    $incoming = array_diff_key($group['events'], $events, $existing['suppressed'] ?? []);
+                    $incoming = $group['events'];
                     $restoringLegacy = $legacy !== null && $legacy['sha256'] === $hash;
                     if (! $restoringLegacy && $legacy !== null
                         && array_intersect($legacy['times'], array_column($incoming, 'time')) !== []) {

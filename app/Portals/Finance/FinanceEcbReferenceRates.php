@@ -9,6 +9,27 @@ use Illuminate\Support\Facades\Http;
 
 class FinanceEcbReferenceRates
 {
+    public function cachedFingerprint(string $month): string
+    {
+        $default = config('cache.default');
+        $cache = Cache::store(config("cache.stores.{$default}.driver") === 'database' ? 'file' : $default);
+        [, $usable] = $this->cachedMonth($cache, $month);
+        return hash('sha256', json_encode($usable, JSON_THROW_ON_ERROR));
+    }
+
+    private function cachedMonth($cache, string $month): array
+    {
+        $fresh = $cache->get('finance:ecb-reference:'.$month);
+        $key = 'finance:ecb-reference:last-known:'.$month;
+        $known = $cache->get($key, []);
+        $usable = array_replace_recursive($known, $fresh ?? []);
+        if ($usable !== [] && $usable !== $known) {
+            // A cache TTL or temporary ECB outage must not erase previously obtained quotes.
+            $cache->forever($key, $usable);
+        }
+        return [$fresh, $usable];
+    }
+
     public function forDates(array $dates): array
     {
         $default = config('cache.default');
@@ -26,11 +47,10 @@ class FinanceEcbReferenceRates
         $rates = [];
         $missing = [];
         foreach (array_keys($months) as $month) {
-            $cached = $cache->get('finance:ecb-reference:'.$month);
+            [$cached, $usable] = $this->cachedMonth($cache, $month);
+            $rates = array_replace_recursive($rates, $usable);
             if ($cached === null) {
                 $missing[$month] = [];
-            } else {
-                $rates += $cached;
             }
         }
         if ($missing === [] || $cache->has('finance:ecb-reference:unavailable')) {
@@ -70,11 +90,16 @@ class FinanceEcbReferenceRates
             }
         }
         foreach ($missing as $month => $dailyRates) {
+            [, $known] = $this->cachedMonth($cache, $month);
+            $dailyRates = array_replace_recursive($known, $dailyRates);
             // Recent quotes can still be published or revised.
             $expiry = $month >= substr(now('Asia/Shanghai')->subDays(2)->toDateString(), 0, 7)
                 ? now()->addMinutes(30) : now()->addDays(30);
             $cache->put('finance:ecb-reference:'.$month, $dailyRates, $expiry);
-            $rates += $dailyRates;
+            if ($dailyRates !== []) {
+                $cache->forever('finance:ecb-reference:last-known:'.$month, $dailyRates);
+            }
+            $rates = array_replace_recursive($rates, $dailyRates);
         }
 
         return $rates;

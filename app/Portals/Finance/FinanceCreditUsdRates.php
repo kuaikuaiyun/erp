@@ -13,6 +13,16 @@ class FinanceCreditUsdRates
 
     public function __construct(private readonly FinanceWorkbookService $workbooks) {}
 
+    public function fingerprint(string $month): string
+    {
+        $start = CarbonImmutable::parse($month.'-01', 'Asia/Shanghai');
+        $manual = $this->workbooks->database()->table(self::TABLE)
+            ->where('starts_on', '<=', $start->endOfMonth()->toDateString())->where('ends_on', '>=', $start->toDateString())
+            ->orderBy('currency')->orderBy('scope')->orderBy('starts_on')->orderBy('ends_on')
+            ->get(['currency', 'scope', 'starts_on', 'ends_on', 'usd_rate']);
+        return hash('sha256', json_encode([$manual, app(FinanceEcbReferenceRates::class)->cachedFingerprint($month)], JSON_THROW_ON_ERROR));
+    }
+
     public function save(array $data, int $actor): void
     {
         $scope = $data['usd_scope'];

@@ -15,6 +15,7 @@
     var title = root.querySelector('.loss-selection');
     var period = title.querySelector('span');
     var categoriesByScope = JSON.parse(root.querySelector('[data-loss-categories]').textContent);
+    var stats = JSON.parse(root.querySelector('[data-loss-stats]').textContent);
 
     function activate(url, push) {
         var scope = url.searchParams.get('loss_scope');
@@ -45,6 +46,12 @@
             categories.append(link);
         });
         title.replaceChildren(document.createTextNode(scope + ' / ' + category), period);
+        var selectedStats = stats.find(function (item) { return item.scope === scope && item.category === category; });
+        if (selectedStats) {
+            document.querySelectorAll('[data-loss-stat]').forEach(function (element) {
+                element.textContent = selectedStats[element.dataset.lossStat];
+            });
+        }
         results.replaceChildren();
         panels.filter(function (panel) {
             return panel.scope === scope && panel.category === category;
