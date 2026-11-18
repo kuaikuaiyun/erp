@@ -86,6 +86,7 @@
     var uploadTimer = null;
     var packageUploadToken = '';
     var referenceUploadToken = '';
+    var activeUploadFileName = '';
     var productSaveStartedAt = 0;
     var uploadSubmitHtml = uploadSubmit ? uploadSubmit.innerHTML : '';
     var uploadCategories = loadCategories();
@@ -618,6 +619,7 @@
                 var error = new Error(firstMessage || payload.message || config.productSaveFailedMessage);
                 error.code = payload.code || '';
                 error.payload = payload;
+                error.status = response.status;
                 throw error;
             }
 
@@ -636,6 +638,76 @@
             },
             body: body ? JSON.stringify(body) : null
         }).then(responsePayload);
+    }
+
+    function retryDelay(attempt) {
+        return Math.min(5000, 700 * Math.pow(2, Math.max(0, attempt - 1)));
+    }
+
+    function isRetryableUploadError(error) {
+        var status = Number(error && error.status || 0);
+
+        return !status || [408, 425, 429, 500, 502, 503, 504].indexOf(status) !== -1;
+    }
+
+    function waitForUploadRetry(attempt, fileName) {
+        var delay = retryDelay(attempt);
+
+        if (productSaveProgressLabel) {
+            productSaveProgressLabel.textContent = '上传连接中断，正在自动重试（第 ' + attempt + ' 次）';
+        }
+        if (productSaveProgressDetail) {
+            productSaveProgressDetail.textContent = (fileName ? fileName + ' · ' : '') + Math.ceil(delay / 1000) + ' 秒后继续，已上传进度不会丢失';
+        }
+
+        return new Promise(function (resolve) {
+            window.setTimeout(resolve, delay);
+        });
+    }
+
+    function retryUploadRequest(factory, fileName, maxAttempts) {
+        var limit = maxAttempts || 5;
+
+        function run(attempt) {
+            return factory().catch(function (error) {
+                if (attempt >= limit || !isRetryableUploadError(error)) {
+                    throw error;
+                }
+
+                return waitForUploadRetry(attempt, fileName).then(function () {
+                    return run(attempt + 1);
+                });
+            });
+        }
+
+        return run(1);
+    }
+
+    function uploadJsonRequest(url, method, body, fileName) {
+        return retryUploadRequest(function () {
+            return jsonRequest(url, method, body);
+        }, fileName, 5);
+    }
+
+    function readableUploadError(error, fileName) {
+        var status = Number(error && error.status || 0);
+        var original = String(error && error.message || '').trim();
+        var prefix = fileName ? '文件“' + fileName + '”' : '文件';
+
+        if (!status || /failed to fetch|networkerror|network request failed|上传连接中断/i.test(original)) {
+            return prefix + '上传连接中断。已上传的分片会保留，请检查网络后再次点击保存按钮，系统将从断点继续上传。';
+        }
+        if (status === 413) {
+            return prefix + '超过服务器允许的上传大小，请联系管理员调整 Nginx/PHP 上传限制后重试。';
+        }
+        if ([408, 504].indexOf(status) !== -1) {
+            return prefix + '上传超时。已上传的分片会保留，请再次点击保存按钮继续上传。';
+        }
+        if (status >= 500) {
+            return prefix + '上传时服务器暂时异常（HTTP ' + status + '），请稍后再次保存；已上传进度不会丢失。';
+        }
+
+        return original || config.productSaveFailedMessage;
     }
 
     function formDataRequest(url, formData, onUploadProgress) {
@@ -688,10 +760,14 @@
                 var error = new Error(firstMessage || payload.message || config.productSaveFailedMessage);
                 error.code = payload.code || '';
                 error.payload = payload;
+                error.status = request.status;
                 reject(error);
             });
             request.addEventListener('error', function () {
-                reject(new Error(config.productSaveFailedMessage));
+                var error = new Error('上传连接中断');
+                error.code = 'NETWORK_ERROR';
+                error.status = 0;
+                reject(error);
             });
             request.addEventListener('abort', function () {
                 reject(new Error('上传已取消'));
@@ -1371,13 +1447,14 @@
     function uploadPackage(file) {
         var totalChunks = Math.ceil(file.size / (5 * 1024 * 1024));
 
-        return jsonRequest(config.packageUploadInitializeUrl, 'POST', {
+        activeUploadFileName = file.name;
+        return uploadJsonRequest(config.packageUploadInitializeUrl, 'POST', {
             client_fingerprint: packageFingerprint(file),
             original_name: file.name,
             mime_type: file.type || null,
             total_size: file.size,
             total_chunks: totalChunks
-        }).then(function (session) {
+        }, file.name).then(function (session) {
             var uploaded = {};
             var chunkIndex = 0;
 
@@ -1393,7 +1470,7 @@
                 }
 
                 if (chunkIndex >= totalChunks) {
-                    return jsonRequest(packageCompleteUrl(packageUploadToken), 'POST').then(function (completed) {
+                    return uploadJsonRequest(packageCompleteUrl(packageUploadToken), 'POST', null, file.name).then(function (completed) {
                         packageUploadToken = completed.upload_token;
                         updateUploadProgress(file.size, file.size);
                         return completed;
@@ -1406,7 +1483,9 @@
                 var currentIndex = chunkIndex;
 
                 partData.append('chunk', file.slice(start, end), file.name + '.part');
-                return formDataRequest(packagePartUrl(packageUploadToken, currentIndex), partData).then(function (updatedSession) {
+                return retryUploadRequest(function () {
+                    return formDataRequest(packagePartUrl(packageUploadToken, currentIndex), partData);
+                }, file.name, 5).then(function (updatedSession) {
                     uploaded[currentIndex] = true;
                     chunkIndex = currentIndex + 1;
                     updateUploadProgress(Number(updatedSession.received_size || 0), file.size);
@@ -1426,13 +1505,14 @@
     function uploadReference(file) {
         var totalChunks = Math.ceil(file.size / (5 * 1024 * 1024));
 
-        return jsonRequest(config.packageUploadInitializeUrl, 'POST', {
+        activeUploadFileName = file.name;
+        return uploadJsonRequest(config.packageUploadInitializeUrl, 'POST', {
             client_fingerprint: packageFingerprint(file),
             original_name: file.name,
             mime_type: file.type || 'text/html',
             total_size: file.size,
             total_chunks: totalChunks
-        }).then(function (session) {
+        }, file.name).then(function (session) {
             var uploaded = {};
             var chunkIndex = 0;
 
@@ -1447,7 +1527,7 @@
                     chunkIndex += 1;
                 }
                 if (chunkIndex >= totalChunks) {
-                    return jsonRequest(packageCompleteUrl(referenceUploadToken), 'POST').then(function (completed) {
+                    return uploadJsonRequest(packageCompleteUrl(referenceUploadToken), 'POST', null, file.name).then(function (completed) {
                         referenceUploadToken = completed.upload_token;
                         updateProductSaveProgress(file.size, file.size);
                         return completed;
@@ -1460,20 +1540,9 @@
                 var partData = new FormData();
                 partData.append('chunk', file.slice(start, end), file.name + '.part');
 
-                function sendPart(attempt) {
-                    return formDataRequest(packagePartUrl(referenceUploadToken, currentIndex), partData).catch(function (error) {
-                        if (attempt >= 3) {
-                            throw error;
-                        }
-                        return new Promise(function (resolve) {
-                            window.setTimeout(resolve, attempt * 800);
-                        }).then(function () {
-                            return sendPart(attempt + 1);
-                        });
-                    });
-                }
-
-                return sendPart(1).then(function (updatedSession) {
+                return retryUploadRequest(function () {
+                    return formDataRequest(packagePartUrl(referenceUploadToken, currentIndex), partData);
+                }, file.name, 5).then(function (updatedSession) {
                     uploaded[currentIndex] = true;
                     chunkIndex = currentIndex + 1;
                     updateProductSaveProgress(Number(updatedSession.received_size || 0), file.size);
@@ -1494,13 +1563,14 @@
             var file = item.file;
             var totalChunks = Math.ceil(file.size / (5 * 1024 * 1024));
 
-            return jsonRequest(config.packageUploadInitializeUrl, 'POST', {
+            activeUploadFileName = file.name;
+            return uploadJsonRequest(config.packageUploadInitializeUrl, 'POST', {
                 client_fingerprint: packageFingerprint(file),
                 original_name: file.name,
                 mime_type: file.type || 'video/mp4',
                 total_size: file.size,
                 total_chunks: totalChunks
-            }).then(function (session) {
+            }, file.name).then(function (session) {
                 var uploaded = {};
                 var chunkIndex = 0;
                 var uploadToken = session.upload_token;
@@ -1515,7 +1585,7 @@
                         chunkIndex += 1;
                     }
                     if (chunkIndex >= totalChunks) {
-                        return jsonRequest(packageCompleteUrl(uploadToken), 'POST').then(function (completed) {
+                        return uploadJsonRequest(packageCompleteUrl(uploadToken), 'POST', null, file.name).then(function (completed) {
                             updateProductSaveProgress(completedSize + file.size, totalSize);
                             return completed;
                         });
@@ -1527,16 +1597,9 @@
                     var partData = new FormData();
                     partData.append('chunk', file.slice(start, end), file.name + '.part');
 
-                    function sendPart(attempt) {
-                        return formDataRequest(packagePartUrl(uploadToken, currentIndex), partData).catch(function (error) {
-                            if (attempt >= 3) throw error;
-                            return new Promise(function (resolve) {
-                                window.setTimeout(resolve, attempt * 800);
-                            }).then(function () { return sendPart(attempt + 1); });
-                        });
-                    }
-
-                    return sendPart(1).then(function (updatedSession) {
+                    return retryUploadRequest(function () {
+                        return formDataRequest(packagePartUrl(uploadToken, currentIndex), partData);
+                    }, file.name, 5).then(function (updatedSession) {
                         uploaded[currentIndex] = true;
                         chunkIndex = currentIndex + 1;
                         updateProductSaveProgress(completedSize + Number(updatedSession.received_size || 0), totalSize);
@@ -1573,6 +1636,8 @@
         });
         var isEditing = editingProductId !== null;
         var packageRequest;
+
+        activeUploadFileName = '';
 
         if (isProductSubmitting) {
             return;
@@ -1672,6 +1737,7 @@
             if (isEditing) {
                 formData.append('_method', 'PUT');
             }
+            activeUploadFileName = '';
             setUploadSubmitState(true, config.savingProduct);
             showProductSavingState(isEditing);
 
@@ -1698,11 +1764,16 @@
                 window.location.assign(isEditing ? window.location.href : (payload.redirect_url || window.location.href));
             }, 400);
         }).catch(function (error) {
-            notify('error', config.productSaveFailedTitle, error.message || config.productSaveFailedMessage);
+            var uploadErrorMessage = readableUploadError(error, activeUploadFileName);
+
+            notify('error', config.productSaveFailedTitle, uploadErrorMessage);
             isProductSubmitting = false;
             setUploadSubmitState(false);
             if (productSaveProgressLabel) {
-                productSaveProgressLabel.textContent = error.message || '上传失败，请检查文件或网络后重试';
+                productSaveProgressLabel.textContent = uploadErrorMessage;
+            }
+            if (productSaveProgressDetail && activeUploadFileName) {
+                productSaveProgressDetail.textContent = '失败文件：' + activeUploadFileName + '；再次保存时会从已完成分片继续';
             }
         });
     }
