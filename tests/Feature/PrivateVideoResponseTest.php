@@ -42,4 +42,24 @@ class PrivateVideoResponseTest extends TestCase
 
         app(PrivateVideoResponse::class)->inline('local', 'missing.mp4', 'missing.mp4', 'video/mp4');
     }
+
+    public function test_inline_video_uses_the_same_accelerated_delivery_as_operation_task_videos(): void
+    {
+        config(['operation_task_video.x_accel_enabled' => true]);
+        Storage::fake('local');
+        Storage::disk('local')->put('aikaipin/reference-videos/1/test file.mp4', str_repeat('video-data', 10));
+
+        $response = app(PrivateVideoResponse::class)->inline(
+            'local',
+            'aikaipin/reference-videos/1/test file.mp4',
+            'test file.mp4',
+            'video/mp4',
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('/_operation_private/aikaipin/reference-videos/1/test%20file.mp4', $response->headers->get('X-Accel-Redirect'));
+        self::assertSame('video/mp4', $response->headers->get('Content-Type'));
+        self::assertStringContainsString('inline', (string) $response->headers->get('Content-Disposition'));
+        self::assertSame('', $response->getContent());
+    }
 }

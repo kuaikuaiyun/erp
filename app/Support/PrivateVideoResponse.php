@@ -5,6 +5,7 @@ namespace App\Support;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\HeaderUtils;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PrivateVideoResponse
@@ -25,13 +26,18 @@ class PrivateVideoResponse
         string $fileName,
         ?string $storedMimeType = null,
         ?Request $request = null,
-    ): StreamedResponse {
+    ): Response {
         abort_unless(Storage::disk($disk)->exists($path), 404);
 
         $absolutePath = Storage::disk($disk)->path($path);
         abort_unless(is_file($absolutePath) && is_readable($absolutePath), 404);
 
         $compatibility = $this->videoCompatibility->normalize($absolutePath);
+
+        $mimeType = $this->videoMimeType($absolutePath, $storedMimeType);
+        if ($disk === 'local' && config('operation_task_video.x_accel_enabled')) {
+            return $this->acceleratedResponse($absolutePath, $fileName, $mimeType, $compatibility);
+        }
 
         $request ??= request();
         $fileSize = (int) filesize($absolutePath);
@@ -42,7 +48,6 @@ class PrivateVideoResponse
             $fileSize,
         );
         $length = $end - $start + 1;
-        $mimeType = $this->videoMimeType($absolutePath, $storedMimeType);
         $fallbackName = 'video.'.(pathinfo($fileName, PATHINFO_EXTENSION) ?: 'mp4');
 
         $response = new StreamedResponse(function () use ($absolutePath, $start, $length): void {
@@ -86,6 +91,37 @@ class PrivateVideoResponse
         }
 
         return $response;
+    }
+
+    private function acceleratedResponse(
+        string $absolutePath,
+        string $fileName,
+        string $mimeType,
+        string $compatibility,
+    ): Response {
+        $root = realpath(Storage::disk('local')->path(''));
+        $file = realpath($absolutePath);
+        abort_unless($root && $file && is_file($file), 404);
+
+        $normalizedRoot = rtrim(str_replace('\\', '/', $root), '/');
+        $normalizedFile = str_replace('\\', '/', $file);
+        abort_unless(str_starts_with($normalizedFile, $normalizedRoot.'/'), 404);
+
+        $suffix = substr($normalizedFile, strlen($normalizedRoot) + 1);
+        $internalUri = rtrim((string) config('operation_task_video.internal_prefix'), '/').'/'.implode(
+            '/',
+            array_map('rawurlencode', explode('/', $suffix)),
+        );
+        $fallbackName = 'video.'.(pathinfo($fileName, PATHINFO_EXTENSION) ?: 'mp4');
+
+        return response('', 200, [
+            'X-Accel-Redirect' => $internalUri,
+            'Content-Type' => $mimeType,
+            'Content-Disposition' => HeaderUtils::makeDisposition(HeaderUtils::DISPOSITION_INLINE, $fileName, $fallbackName),
+            'Cache-Control' => 'private, no-cache',
+            'X-Content-Type-Options' => 'nosniff',
+            'X-Video-Compatibility' => $compatibility,
+        ])->setPrivate();
     }
 
     /** @return array{int,int,bool} */
