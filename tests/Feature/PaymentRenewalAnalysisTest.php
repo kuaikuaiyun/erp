@@ -24,6 +24,7 @@ class PaymentRenewalAnalysisTest extends TestCase
             $table->increments('id');
             foreach (['paid_at', 'subscription_origin_order_id', 'subscription_type', 'is_add_on', 'operator_name', 'store_name', 'transaction_id', 'shopify_order_id', 'shopify_order_number', 'payment_gateway_order_id', 'bill_number', 'payment_gateway', 'payment_method', 'paypal_association_source', 'tongtu_order_number', 'buyer_email', 'collection_account', 'collection_account_email'] as $field) $table->string($field)->nullable();
             $table->decimal('paid_amount_usd', 16, 4)->default(0);
+            $table->text('shopify_payload')->nullable();
             $table->unsignedInteger('paypal_account_id')->nullable();
         });
         Schema::create('logistics_paypal_transactions', function (Blueprint $table): void {
@@ -334,6 +335,56 @@ class PaymentRenewalAnalysisTest extends TestCase
         $html=view('portals.payment.renewal-order-details',compact('detail'))->render();
         foreach(['订单交易号','主账单号','加购账单号','PayPal付款流水','订单收款账号','merchant@example.com'] as $label) self::assertStringContainsString($label,$html);
         self::assertStringNotContainsString('payment.renewal_details.',$html);
+    }
+
+    public function test_collection_account_falls_back_to_plural_shopify_alias_without_rewriting_orders(): void
+    {
+        $payload=static fn($alias)=>json_encode(['customAttributes'=>[['key'=>'yx_payments_alias','value'=>$alias]],'largeContent'=>str_repeat('x',1024*1024)]);
+        foreach([
+            3000=>['collection_account'=>'Original account','shopify_payload'=>$payload('Must not override')],
+            3001=>['collection_account'=>null,'collection_account_email'=>'merchant@example.com','shopify_payload'=>$payload('  1-尚雲科技有限公司pp  ')],
+            3002=>['collection_account'=>'   ','shopify_payload'=>$payload('Whitespace fallback')],
+            3003=>['shopify_payload'=>'not-json'],
+            3004=>['shopify_payload'=>json_encode(['customAttributes'=>[['key'=>'yx_payment_alias','value'=>'Singular should not match']]])],
+            3005=>['shopify_payload'=>json_encode(['customAttributes'=>['not-an-object']])],
+        ]as$id=>$extra)$this->order($id,'2026-11-01 12:00:00','无订阅','credit_card','','AliasTest',$extra);
+        $filters=$this->filters(['initial_store'=>'AliasTest','renewal_store'=>'AliasTest']);
+        $service=app(PaymentRenewalAnalysisService::class);
+        $queries=[];
+        DB::listen(function($event)use(&$queries):void{$queries[]=$event->sql;});
+        $before=$service->dashboard($filters);
+        self::assertSame(6,$before['initial_refunds']['total']['orders']);
+        self::assertFalse(collect($queries)->contains(fn($sql)=>str_contains($sql,'shopify_payload')),'Dashboard must never read raw Shopify attributes');
+        $detail=$service->initialOrderDetails($filters,$this->detailFilters());
+        $byId=array_column($detail['rows'],null,'erp_order_id');
+        self::assertSame('Original account',$byId[3000]['collection_account']);
+        self::assertSame('1-尚雲科技有限公司pp',$byId[3001]['collection_account']);
+        self::assertSame(['1-尚雲科技有限公司pp','merchant@example.com'],$byId[3001]['collection_accounts']);
+        self::assertSame('Whitespace fallback',$byId[3002]['collection_account']);
+        foreach([3003,3004,3005]as$id)self::assertSame('',$byId[$id]['collection_account']);
+        self::assertNull(DB::table('logistics_orders')->where('id',3001)->value('collection_account'));
+        self::assertStringContainsString('1-尚雲科技有限公司pp',view('portals.payment.renewal-order-details',compact('detail'))->render());
+        $matching=$service->initialOrderDetails($filters,$this->detailFilters(['detail_keyword'=>'尚雲科技']));
+        self::assertSame([3001],array_column($matching['rows'],'erp_order_id'));
+        self::assertSame(0,$service->initialOrderDetails($filters,$this->detailFilters(['detail_keyword'=>'Must not override']))['pagination']['total']);
+        self::assertSame($before['initial_refunds'],$service->dashboard($filters)['initial_refunds']);
+        foreach(['main','modal']as$kind){
+            $export=app(PaymentRenewalAnalysisExportService::class);
+            $response=$kind==='main'?$export->download($filters):$export->downloadOrderDetails($filters,$this->detailFilters(['detail_keyword'=>'尚雲科技']));
+            ob_start();$response->sendContent();$bytes=ob_get_clean();
+            $path=tempnam(sys_get_temp_dir(),'renewal-alias-export-');
+            try{
+                file_put_contents($path,$bytes);$book=IOFactory::load($path);
+                $sheet=$book->getSheet($kind==='main'?3:0);$found=false;
+                for($r=2;$r<=$sheet->getHighestRow();$r++){
+                    if($this->exportedValue($sheet,($kind==='main'?'E':'A').$r)==='3001'){
+                        self::assertSame("1-尚雲科技有限公司pp\nmerchant@example.com",$this->exportedValue($sheet,($kind==='main'?'K':'G').$r));$found=true;break;
+                    }
+                }
+                self::assertTrue($found);
+                $book->disconnectWorksheets();
+            }finally{unlink($path);}
+        }
     }
 
     public function test_large_exports_write_all_rows_under_a_bounded_memory_limit(): void
@@ -763,6 +814,9 @@ PHP;
         $dashboard = app(PaymentRenewalAnalysisService::class)->dashboard($this->filters());
         $source = str_replace("@extends('portal.layout')", '', file_get_contents(resource_path('views/portals/payment/renewal-analysis.blade.php')));
         $html = \Illuminate\Support\Facades\Blade::render($source.'@yield("content") @stack("scripts")', ['dashboard' => $dashboard, 'errors' => new \Illuminate\Support\ViewErrorBag()]);
+        self::assertSame(2,substr_count($html,'data-renewal-export-url='));
+        self::assertStringContainsString('data-renewal-export-feedback',$html);
+        self::assertStringContainsString('正在导出…',$html);
         self::assertStringContainsString('data-renewal-module="initial"', $html);
         self::assertStringContainsString('data-renewal-module="renewal"', $html);
         self::assertStringNotContainsString('name="channel"', $html);

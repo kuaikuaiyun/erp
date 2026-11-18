@@ -87,7 +87,7 @@ class PaymentRenewalAnalysisService
         $module=$this->moduleFilters($filters,'initial');
         $cacheFilters=$detail;
         unset($cacheFilters['detail_page'],$cacheFilters['detail_per_page']);
-        $key='payment:renewal-detail-summary:v21:'.sha1(json_encode([$module,$cacheFilters]));
+        $key='payment:renewal-detail-summary:v22:'.sha1(json_encode([$module,$cacheFilters]));
         $stats=Cache::remember($key,now()->addMinutes(5),function () use ($module,$detail): array {
             $scope=$summary=$this->emptyRiskTotal();
             $stores=[];
@@ -497,6 +497,8 @@ class PaymentRenewalAnalysisService
         }
         // If a reference was recorded as both types, the explicit primary wins.
         $upsell = array_values(array_diff($upsell, $primary));
+        $collectionAccount=trim((string)$order->collection_account);
+        if ($collectionAccount==='') $collectionAccount=trim((string)($identifiers['collection_alias'] ?? ''));
         return [
             'erp_order_id' => (int) $order->id,
             'stage_key' => $number === 0 ? 'initial' : 'renewal_'.$number, 'stage_number' => $number, 'purchase_type' => $purchaseType,
@@ -509,9 +511,9 @@ class PaymentRenewalAnalysisService
             'transaction_ids' => $this->uniqueIdentifiers($identifiers['transactions'] ?? []),
             'primary_bill_numbers' => $primary, 'upsell_bill_numbers' => $upsell,
             'bill_numbers' => $this->uniqueIdentifiers([...$primary, ...$upsell]),
-            'collection_account' => trim((string)$order->collection_account),
+            'collection_account' => $collectionAccount,
             'collection_account_email' => trim((string)$order->collection_account_email),
-            'collection_accounts' => $this->uniqueIdentifiers([(string)$order->collection_account,(string)$order->collection_account_email]),
+            'collection_accounts' => $this->uniqueIdentifiers([$collectionAccount,(string)$order->collection_account_email]),
             'amount' => round((float) $order->paid_amount_usd, 2), 'raw_amount' => (float) $order->paid_amount_usd,
             'refund_count' => $refund['count'], 'refund_amount' => round($refund['amount'], 2), 'raw_refund_amount' => $refund['amount'], 'refund_details' => $refund['details'],
             'dispute_count' => $dispute['count'], 'dispute_amount' => round($dispute['amount'], 2), 'raw_dispute_amount' => $dispute['amount'], 'dispute_details' => $dispute['details'],
@@ -523,6 +525,7 @@ class PaymentRenewalAnalysisService
     {
         $result = [];
         foreach (array_chunk($orderIds, 500) as $chunk) {
+            foreach ($this->collectionAliases($chunk) as $id=>$alias) $result[$id]['collection_alias']=$alias;
             $references = LogisticsOrderPaymentReference::query()->whereIn('logistics_order_id', $chunk)
                 ->orderByRaw('CASE WHEN reference_type = ? THEN 0 ELSE 1 END', [LogisticsOrderPaymentReference::TYPE_PRIMARY])
                 ->orderBy('id')->get(['logistics_order_id','reference_number','reference_type']);
@@ -542,6 +545,46 @@ class PaymentRenewalAnalysisService
             }
         }
         return $result;
+    }
+
+    /** Project only the requested JSON attribute; never hydrate full Shopify payloads for a page. */
+    private function collectionAliases(array $orderIds): array
+    {
+        if (!$orderIds) return [];
+        $query=LogisticsOrder::query()->whereIn('id',$orderIds)
+            ->whereRaw("TRIM(COALESCE(collection_account, '')) = ''");
+        $driver=$query->getModel()->getConnection()->getDriverName();
+        if ($driver==='mysql') {
+            $query->select('id')->selectRaw(
+                "CASE WHEN JSON_VALID(shopify_payload) THEN JSON_UNQUOTE(JSON_EXTRACT(shopify_payload, REPLACE(JSON_UNQUOTE(JSON_SEARCH(shopify_payload, 'one', ?, NULL, '$.customAttributes[*].key')), '.key', '.value'))) END AS payment_alias",
+                ['yx\_payments\_alias'],
+            );
+        } elseif ($driver==='sqlite') {
+            $query->select('id')->selectRaw(
+                "(SELECT json_extract(attribute.value, '$.value') FROM json_each(CASE WHEN json_valid(shopify_payload) THEN shopify_payload ELSE '{}' END, '$.customAttributes') AS attribute WHERE CASE WHEN attribute.type = 'object' THEN json_extract(attribute.value, '$.key') END = ? LIMIT 1) AS payment_alias",
+                ['yx_payments_alias'],
+            );
+        } else {
+            // Other database drivers read one missing-account payload at a time.
+            $aliases=[];
+            foreach ((clone $query)->select('id')->lazyById(100) as $record) {
+                $payload=json_decode((string)LogisticsOrder::query()->whereKey($record->id)->value('shopify_payload'),true);
+                foreach (is_array($payload['customAttributes'] ?? null) ? $payload['customAttributes'] : [] as $attribute) {
+                    if (is_array($attribute) && ($attribute['key'] ?? '')==='yx_payments_alias') {
+                        $value=$attribute['value'] ?? null;
+                        if (is_scalar($value) && trim((string)$value)!=='') $aliases[(int)$record->id]=trim((string)$value);
+                        break;
+                    }
+                }
+            }
+            return $aliases;
+        }
+        $aliases=[];
+        foreach ($query->get() as $record) {
+            $alias=trim((string)$record->payment_alias);
+            if ($alias!=='') $aliases[(int)$record->id]=$alias;
+        }
+        return $aliases;
     }
 
     private function uniqueIdentifiers(array $values): array

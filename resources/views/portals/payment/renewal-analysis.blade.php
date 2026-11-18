@@ -44,8 +44,10 @@
 @endpush
 
 @section('content')
-<section class="content payment-portal-page payment-renewal-page payment-renewal-two-sections">
+<section class="content payment-portal-page payment-renewal-page payment-renewal-two-sections"
+    data-renewal-export-messages="{{ json_encode(['exporting'=>__('payment.renewal_details.page_exporting'),'error'=>__('payment.renewal_details.page_export_error'),'done'=>__('payment.renewal_details.page_export_done'),'filename'=>__('payment.renewal_analysis.export.filename',['time'=>now()->format('Ymd_His')])],JSON_UNESCAPED_UNICODE) }}">
     <header class="payment-page-heading"><div><h1>{{ __($t.'.page_title') }}</h1><p>{{ $text('subtitle') }}</p></div></header>
+    <p data-renewal-export-feedback role="status" aria-live="polite" hidden></p>
     <article class="payment-panel payment-subscription-block" data-payment-analysis-section="subscription">
         <h2><span class="payment-section-number">01</span>{{ __($t.'.sections.subscription_rate') }}</h2>
         <p class="payment-section-hint">{{ $text('subscription_hint') }}</p>
@@ -58,7 +60,7 @@
             <label><span>{{ __($t.'.filters.timezone') }}</span><select class="form-control" name="initial_timezone">@foreach(\App\Portals\Payment\PaymentRenewalAnalysisService::timezones() as $offset=>$label)<option value="{{ $offset }}" @selected($filters['initial_timezone']===$offset)>{{ $label }}</option>@endforeach</select></label>
             <label><span>{{ __($t.'.filters.store') }}</span><select class="form-control" name="initial_store"><option value="">{{ __($t.'.filters.all_stores') }}</option>@foreach($dashboard['initial_stores'] as $store)<option value="{{ $store }}" @selected($filters['initial_store']===$store)>{{ $store }}</option>@endforeach</select></label>
 
-            <div class="payment-renewal-filter-actions"><button class="btn btn-primary" type="submit">{{ __('payment.common.query') }}</button><a class="btn btn-default" href="{{ route('payment.renewal-analysis.index',$moduleReset) }}">{{ __('payment.common.reset') }}</a><a class="btn btn-success" href="{{ route('payment.renewal-analysis.export', $exportQuery) }}">{{ __($t.'.export.button') }}</a></div>
+            <div class="payment-renewal-filter-actions"><button class="btn btn-primary" type="submit">{{ __('payment.common.query') }}</button><a class="btn btn-default" href="{{ route('payment.renewal-analysis.index',$moduleReset) }}">{{ __('payment.common.reset') }}</a><button class="btn btn-success" type="button" data-renewal-export-url="{{ route('payment.renewal-analysis.export', $exportQuery) }}">{{ __($t.'.export.button') }}</button></div>
             @foreach(['initial_date_from','initial_date_to','initial_timezone','initial_store'] as $field)@error($field)<p class="text-danger">{{ $message }}</p>@enderror
             @endforeach
         </form>
@@ -134,7 +136,7 @@
             <label><span>{{ __($t.'.filters.timezone') }}</span><select class="form-control" name="renewal_timezone">@foreach(\App\Portals\Payment\PaymentRenewalAnalysisService::timezones() as $offset=>$label)<option value="{{ $offset }}" @selected($filters['renewal_timezone']===$offset)>{{ $label }}</option>@endforeach</select></label>
             <label><span>{{ __($t.'.filters.store') }}</span><select class="form-control" name="renewal_store"><option value="">{{ __($t.'.filters.all_stores') }}</option>@foreach($dashboard['renewal_stores'] as $store)<option value="{{ $store }}" @selected($filters['renewal_store']===$store)>{{ $store }}</option>@endforeach</select></label>
             <label><span>{{ $text('renewal_stage') }}</span><select class="form-control" name="stage"><option value="">{{ $text('all_renewals') }}</option>@foreach($dashboard['stage_options'] as $key)<option value="{{ $key }}" @selected($filters['stage']===$key)>{{ $stageName($stageNumber($key)) }}</option>@endforeach</select></label>
-            <div class="payment-renewal-filter-actions"><button class="btn btn-primary" type="submit">{{ __('payment.common.query') }}</button><a class="btn btn-default" href="{{ route('payment.renewal-analysis.index',$moduleReset) }}">{{ __('payment.common.reset') }}</a><a class="btn btn-success" href="{{ route('payment.renewal-analysis.export', $exportQuery) }}">{{ __($t.'.export.button') }}</a></div>
+            <div class="payment-renewal-filter-actions"><button class="btn btn-primary" type="submit">{{ __('payment.common.query') }}</button><a class="btn btn-default" href="{{ route('payment.renewal-analysis.index',$moduleReset) }}">{{ __('payment.common.reset') }}</a><button class="btn btn-success" type="button" data-renewal-export-url="{{ route('payment.renewal-analysis.export', $exportQuery) }}">{{ __($t.'.export.button') }}</button></div>
             @foreach(['renewal_date_from','renewal_date_to','renewal_timezone','renewal_store'] as $field)@error($field)<p class="text-danger">{{ $message }}</p>@enderror
             @endforeach
         </form>
@@ -225,7 +227,7 @@
 @endsection
 
 @push('scripts')
-<script src="{{ $portalOrigin }}/assets/erp/payment-renewal-details.js?v=20261118-2"></script>
+<script src="{{ $portalOrigin }}/assets/erp/payment-renewal-details.js?v=20261118-3"></script>
 <script src="{{ $portalOrigin }}/assets/erp/payment-portal.js?v=20261117-1"></script>
 <script>
 (function () {

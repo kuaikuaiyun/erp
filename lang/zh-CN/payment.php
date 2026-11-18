@@ -258,6 +258,8 @@ $translations = [
 
 return array_replace_recursive($translations, [
     'renewal_details' => [
+        'page_exporting'=>'正在导出…', 'page_export_error'=>'导出失败，请重试。',
+        'page_export_done'=>'文件已生成，下载已开始。',
         'upsell_bill_number'=>'加购账单号', 'paypal_transactions'=>'PayPal付款流水', 'collection_account'=>'订单收款账号',
         'bill_number'=>'主账单号', 'buyer_email'=>'客户邮箱',
         'export'=>'导出 Excel', 'exporting'=>'正在导出全部筛选结果…',
