@@ -108,5 +108,23 @@ class AikaipinHistoricalVideoImporterTest extends TestCase
         self::assertSame(2, $again['skipped']);
         self::assertSame(3, OperationAiProductReferenceVideo::query()->where('aikaipin_product_id', $product->getKey())->count());
         self::assertSame([], Storage::disk('local')->files('aikaipin/reference-videos/.historical-import'));
+
+        $deletedHistoricalVideo = OperationAiProductReferenceVideo::query()
+            ->where('aikaipin_product_id', $product->getKey())
+            ->where('source_kind', OperationAiProductReferenceVideo::SOURCE_HISTORICAL_HTML)
+            ->where('source_reference_index', 0)
+            ->firstOrFail();
+        Storage::disk('local')->delete($deletedHistoricalVideo->path);
+        $deletedHistoricalVideo->delete();
+
+        $afterDeletion = app(AikaipinHistoricalVideoImporter::class)->import($product->fresh());
+        self::assertSame(2, $afterDeletion['skipped']);
+        self::assertSame(0, $afterDeletion['imported']);
+        self::assertFalse(OperationAiProductReferenceVideo::query()
+            ->where('aikaipin_product_id', $product->getKey())
+            ->where('source_kind', OperationAiProductReferenceVideo::SOURCE_HISTORICAL_HTML)
+            ->where('source_reference_index', 0)
+            ->exists());
+        self::assertSame(2, OperationAiProductReferenceVideo::query()->where('aikaipin_product_id', $product->getKey())->count());
     }
 }

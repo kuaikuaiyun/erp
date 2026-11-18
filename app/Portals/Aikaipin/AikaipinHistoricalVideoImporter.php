@@ -28,11 +28,32 @@ class AikaipinHistoricalVideoImporter
             ->whereNotNull('source_reference_index')
             ->pluck('source_reference_index')->map(fn ($value): int => (int) $value)->all();
 
+        // Imported HTML videos are written to this sidecar file so the raw
+        // <video> elements are not rendered a second time. When an imported
+        // row is deliberately deleted in the product editor, its index stays
+        // in the sidecar and must also prevent the importer from recreating it
+        // during the save-time synchronization pass.
+        $hiddenPath = $reference['path'].'.erp-hidden-videos.json';
+        $hiddenIndexes = Storage::disk($reference['disk'])->exists($hiddenPath)
+            ? collect((array) (json_decode(Storage::disk($reference['disk'])->get($hiddenPath), true) ?: []))
+                ->map(fn ($value): int => (int) $value)
+                ->filter(fn (int $value): bool => $value >= 0)
+                ->unique()
+                ->values()
+                ->all()
+            : [];
+
         $hidden = [];
-        $this->scan((string) $reference['disk'], (string) $reference['path'], function (array $source) use ($product, $reference, $dryRun, $existing, &$hidden, &$result): void {
+        $this->scan((string) $reference['disk'], (string) $reference['path'], function (array $source) use ($product, $reference, $dryRun, $existing, $hiddenIndexes, &$hidden, &$result): void {
             $result['found']++;
             $index = (int) $source['index'];
             if (in_array($index, $existing, true)) {
+                $this->deleteTemporarySource($source);
+                $result['skipped']++;
+                $hidden[] = $index;
+                return;
+            }
+            if (in_array($index, $hiddenIndexes, true)) {
                 $this->deleteTemporarySource($source);
                 $result['skipped']++;
                 $hidden[] = $index;
