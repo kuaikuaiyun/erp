@@ -2291,12 +2291,20 @@ class ProductLibraryController extends Controller
                 // a video and uploads another one in the same save operation,
                 // the old-file cleanup can therefore never remove the new
                 // physical file by mistake.
-                $path = $file->storeAs(
-                    'aikaipin/reference-videos/'.$product->getKey().'/'.Str::uuid(),
-                    $fileName,
-                    'local',
-                );
+                $directory = 'aikaipin/reference-videos/'.$product->getKey().'/'.Str::uuid();
+                $this->ensureMaterialVideoDirectoryIsWritable($directory, $product);
+
+                try {
+                    $path = $file->storeAs($directory, $fileName, 'local');
+                } catch (Throwable $exception) {
+                    Storage::disk('local')->deleteDirectory($directory);
+                    report($exception);
+                    throw ValidationException::withMessages([
+                        'material_videos' => '视频无法写入服务器存储目录，请联系管理员检查 storage 目录权限后重试。已上传的原视频不会被删除。',
+                    ]);
+                }
                 if (! is_string($path) || ! Storage::disk('local')->exists($path)) {
+                    Storage::disk('local')->deleteDirectory($directory);
                     throw ValidationException::withMessages([
                         'material_videos' => '素材视频保存失败，请重新选择视频后再试。',
                     ]);
@@ -2327,6 +2335,33 @@ class ProductLibraryController extends Controller
                     'uploaded_by' => $user->getKey(), 'uploaded_by_name' => $user->name ?: $user->username,
                 ]);
             }
+        }
+    }
+
+    private function ensureMaterialVideoDirectoryIsWritable(string $directory, AikaipinProduct $product): void
+    {
+        $disk = Storage::disk('local');
+
+        try {
+            if (! $disk->exists($directory) && ! $disk->makeDirectory($directory)) {
+                throw new \RuntimeException('Unable to create the AI product material video directory.');
+            }
+
+            $absolutePath = $disk->path($directory);
+            clearstatcache(true, $absolutePath);
+            if (! is_dir($absolutePath) || ! is_writable($absolutePath)) {
+                throw new \RuntimeException('The AI product material video directory is not writable.');
+            }
+        } catch (Throwable $exception) {
+            report($exception);
+            logger()->error('AI product material video directory is unavailable.', [
+                'product_id' => $product->getKey(),
+                'directory' => $directory,
+            ]);
+
+            throw ValidationException::withMessages([
+                'material_videos' => '服务器视频存储目录不可写，请联系管理员修复 storage 目录权限后重试。已上传的原视频不会被删除。',
+            ]);
         }
     }
 
