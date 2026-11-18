@@ -2,6 +2,11 @@
 
 return [
     'title' => '违纪管理', 'calendar' => '月度违纪表', 'details' => '记录明细',
+    'subtitle' => '成员月历与违纪备注管理', 'filters_title' => '筛选条件', 'reset' => '重置',
+    'search_placeholder' => '请输入成员姓名或账号', 'option_search' => '输入关键词筛选部门',
+    'no_results' => '未找到匹配部门', 'searching' => '搜索中…', 'load_error' => '选项加载失败，请重试。',
+    'pagination_summary' => '显示第 :from–:to 位，共 :total 位成员', 'pagination_navigation' => '成员月历分页',
+    'per_page_label' => '每页', 'members_suffix' => '位成员',
     'permission_view' => '违纪管理：查看与导出', 'permission_manage' => '违纪管理：部门管理',
     'install_required' => '请先创建编码为 asset-manager 的系统，再重新执行本次迁移。',
     'member' => '成员', 'department' => '管理部门', 'date' => '记录日期', 'remarks' => '管理备注',
@@ -11,8 +16,8 @@ return [
     'filter' => '查询', 'export' => '导出本月 Excel', 'add' => '新增记录', 'edit' => '编辑', 'view' => '查看',
     'delete' => '删除', 'save' => '保存', 'cancel' => '取消', 'close' => '关闭', 'back' => '返回',
     'empty' => '当前月份和筛选条件下没有可见成员。', 'empty_day' => '当日暂无记录。',
-    'self_scope' => '当前仅可查看和导出本人的记录。',
-    'manage_scope' => '可管理授权部门内的记录；本人历史记录仍可查看。点击成员对应日期即可记录。',
+    'self_scope' => '当前为只读，可查看和导出部门管理配置所授权范围内的记录；未配置授权时没有数据范围。',
+    'manage_scope' => '可管理部门管理配置所授权范围内的记录。点击成员对应日期即可记录；未配置授权时没有数据范围。',
     'history_hint' => '历史记录保留原部门归属；离职或已删除成员有记录时仍会展示。',
     'export_hint' => '导出包含当前月份及筛选条件下的所有成员页，并附完整记录明细。',
     'total_members' => '共 :count 位成员', 'page' => '第 :page / :total 页', 'per_page' => '每页成员数',

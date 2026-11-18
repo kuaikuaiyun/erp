@@ -4,6 +4,17 @@
     var day = null, dayPage = 1, dayLast = 1, memberPage = 1, memberLast = 1, selected = null, record = null, mode = '', busy = false, dirty = false, logPage = 1, logLast = 1;
     var daySeq = 0, pickerSeq = 0, detailSeq = 0, logSeq = 0;
     function el(id) { return document.getElementById(id); }
+    function enhancePicker(select, modal) {
+        if (!$.fn.select2 || select.data('select2')) return;
+        select.addClass('discipline-search-select').select2({
+            width:'100%', minimumResultsForSearch:0, dropdownCssClass:'discipline-select-dropdown',
+            dropdownParent:modal ? $(modal) : $(document.body),
+            language:{noResults:function(){return t.no_results;}, searching:function(){return t.searching;}, errorLoading:function(){return t.load_error;}}
+        }).on('select2:open', function () {
+            $('.discipline-select-dropdown .select2-search__field').attr('placeholder',t.option_search).attr('aria-label',t.option_search);
+        });
+    }
+    if (el('discipline-filter-department')) enhancePicker($('#discipline-filter-department'));
     function node(tag, text, cls) { var n = document.createElement(tag); n.textContent = text == null ? '' : text; if (cls) n.className = cls; return n; }
     function replace(text, data) { Object.keys(data).forEach(function (key) { text = text.split(':' + key).join(String(data[key])); }); return text; }
     function error(id, message) { el(id).textContent = message || ''; el(id).hidden = !message; }
@@ -56,6 +67,7 @@
         el('discipline-owner').replaceChildren(new Option(t.select_department, ''));
         member.departments.forEach(function (d) { el('discipline-owner').add(new Option(d.name, d.id)); });
         if (member.departments.length === 1) el('discipline-owner').value = member.departments[0].id;
+        $('#discipline-owner').trigger('change.select2');
     }
     function editor(action, data, member, date) {
         ++pickerSeq; ++logSeq;
@@ -79,6 +91,7 @@
             if (member) pickMember(member); else findMembers(1);
             el('discipline-date').value = date || c.month + '-01';
         }
+        $('#discipline-owner').trigger('change.select2');
         $('#discipline-editor').modal({backdrop:'static', keyboard:false});
     }
     function renderLogs(data) {
@@ -134,6 +147,8 @@
     el('discipline-log-prev').addEventListener('click', function () { if(logPage>1) logs(logPage-1); });
     el('discipline-log-next').addEventListener('click', function () { if(logPage<logLast) logs(logPage+1); });
     $('#discipline-editor').on('hide.bs.modal', function (event) { if(busy) event.preventDefault(); });
+    $('#discipline-editor').on('shown.bs.modal', function () { enhancePicker($('#discipline-owner'),this); });
+    $('#discipline-editor').on('hide.bs.modal', function () { if($.fn.select2 && $('#discipline-owner').data('select2')) $('#discipline-owner').select2('close'); });
     $('#discipline-editor').on('hidden.bs.modal', function () { ++pickerSeq; ++logSeq; if(day && !dirty) { $('#discipline-day').modal('show'); loadDay(dayPage); } });
     $('#discipline-day, #discipline-editor').on('hidden.bs.modal', function () { if($('.modal.in').length) $('body').addClass('modal-open'); });
 })(window.jQuery);

@@ -6,7 +6,6 @@ use App\Models\AdminUser;
 use App\Models\Department;
 use App\Models\DisciplineRecord;
 use App\Models\DisciplineRecordLog;
-use App\Services\DepartmentAuthorizationService;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
@@ -15,10 +14,11 @@ use Illuminate\Support\Str;
 
 class DisciplineService
 {
+    public function __construct(private AssetComputerDepartmentBindingService $bindings) {}
+
     public function managedIds(AdminUser $user): Collection
     {
-        return $user->isAdministrator() || $user->can('asset-manager.discipline.manage')
-            ? app(DepartmentAuthorizationService::class)->managedDepartmentIds($user) : collect();
+        return collect($this->bindings->departmentIds($user, true));
     }
 
     public function canManage(AdminUser $user): bool
@@ -53,8 +53,7 @@ class DisciplineService
     {
         $query = DisciplineRecord::query();
         if (! $user->isAdministrator()) {
-            $ids = $this->managedIds($user);
-            $query->where(fn ($q) => $q->where('member_id', $user->id)->orWhereIn('department_id', $ids));
+            $query->whereIn('department_id', $this->bindings->departmentIds($user));
         }
 
         return $query;
@@ -78,20 +77,18 @@ class DisciplineService
         $db = (new DisciplineRecord)->getConnection();
         $users = (new AdminUser)->getTable();
         $pivot = config('admin.database.role_users_table');
-        $ids = $this->managedIds($user);
+        $ids = collect($this->bindings->departmentIds($user, $eligibleOnly));
+        if (! empty($filters['department_id'])) {
+            $ids = $ids->intersect([(int) $filters['department_id']]);
+        }
         $history = $this->monthRecords($user, $filters)->select('member_id');
         $current = $db->table($users.' as u')->select('u.id', 'u.name', 'u.username');
         $current->where(function ($outer) use ($user, $ids, $pivot, $filters, $history, $eligibleOnly) {
             $outer->where(function ($active) use ($user, $ids, $pivot, $filters, $eligibleOnly) {
                 $active->where('u.employment_status', 'employed');
                 if ($eligibleOnly || ! $user->isAdministrator()) {
-                    $active->where(function ($allowed) use ($user, $ids, $pivot, $eligibleOnly) {
-                        if (! $eligibleOnly) {
-                            $allowed->where('u.id', $user->id);
-                        }
-                        $allowed->orWhereExists(function ($p) use ($pivot, $ids) {
-                            $p->selectRaw('1')->from($pivot.' as membership')->whereColumn('membership.user_id', 'u.id')->whereIn('membership.role_id', $ids);
-                        });
+                    $active->whereExists(function ($p) use ($pivot, $ids) {
+                        $p->selectRaw('1')->from($pivot.' as membership')->whereColumn('membership.user_id', 'u.id')->whereIn('membership.role_id', $ids);
                     });
                 }
                 if (! empty($filters['department_id'])) {
@@ -121,11 +118,11 @@ class DisciplineService
         return $db->query()->fromSub($current->unionAll($deleted), 'members')->orderBy('id');
     }
 
-    public function departments(AdminUser $user): Collection
+    public function departments(AdminUser $user, bool $write = false): Collection
     {
         $query = Department::business();
         if (! $user->isAdministrator()) {
-            $query->whereIn('id', $this->managedIds($user));
+            $query->whereIn('id', $this->bindings->departmentIds($user, $write));
         }
 
         return $query->orderBy('name')->get(['id', 'name']);
@@ -133,7 +130,7 @@ class DisciplineService
 
     public function memberOptions(AdminUser $user, Collection $members): array
     {
-        $departments = $this->departments($user)->keyBy('id');
+        $departments = $this->departments($user, true)->keyBy('id');
         $activeIds = AdminUser::whereIn('id', $members->pluck('id'))->where('employment_status', 'employed')->pluck('id');
         $pivot = (new DisciplineRecord)->getConnection()->table(config('admin.database.role_users_table'))
             ->whereIn('user_id', $members->pluck('id'))->whereIn('role_id', $departments->keys())->get()->groupBy('user_id');
@@ -178,7 +175,7 @@ class DisciplineService
         abort_unless($this->canManage($user), 403);
 
         return (new DisciplineRecord)->getConnection()->transaction(function () use ($user, $data) {
-            $department = $this->departments($user)->firstWhere('id', (int) $data['department_id']);
+            $department = $this->departments($user, true)->firstWhere('id', (int) $data['department_id']);
             abort_unless($department, 403);
             $member = AdminUser::where('employment_status', 'employed')->whereKey($data['member_id'])->firstOrFail();
             abort_unless($member->departments()->whereKey($department->id)->exists(), 422, __('discipline.member_department_invalid'));

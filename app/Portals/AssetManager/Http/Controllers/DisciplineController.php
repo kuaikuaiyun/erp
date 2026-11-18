@@ -14,7 +14,7 @@ class DisciplineController extends Controller
 {
     public function __construct(private PortalEntryController $entries, private DisciplineService $service) {}
 
-    private function context(Request $request): array
+    private function context(Request $request, bool $write = false): array
     {
         $context = $this->entries->portalContext($request);
         if ($context instanceof Response) {
@@ -25,6 +25,9 @@ class DisciplineController extends Controller
         $menu = $context['portal']->menus->firstWhere('code', 'asset_manager_discipline');
         abort_unless($menu && $menu->is_enabled && ($user->isAdministrator() || $user->can('asset-manager.discipline')), 403);
         app()->setLocale('zh-CN');
+        if ($write) {
+            abort_unless($this->service->canManage($user), 403);
+        }
 
         return $context;
     }
@@ -109,7 +112,7 @@ class DisciplineController extends Controller
 
     public function store(Request $request)
     {
-        $context = $this->context($request);
+        $context = $this->context($request, true);
         $record = $this->service->create($context['user'], $this->values($request, true));
 
         return response()->json($this->service->payload($record, $context['user']));
@@ -117,7 +120,7 @@ class DisciplineController extends Controller
 
     public function update(Request $request, int $record)
     {
-        $context = $this->context($request);
+        $context = $this->context($request, true);
         $this->service->change($context['user'], $record, $this->values($request, false));
 
         return response()->json(['message' => __('discipline.saved')]);
@@ -125,7 +128,7 @@ class DisciplineController extends Controller
 
     public function destroy(Request $request, int $record)
     {
-        $context = $this->context($request);
+        $context = $this->context($request, true);
         $data = $request->validate(['version' => ['required', 'string', 'max:40']], __('discipline.validation'), __('discipline.attributes'));
         $this->service->change($context['user'], $record, $data, true);
 

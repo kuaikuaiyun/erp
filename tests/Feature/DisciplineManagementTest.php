@@ -8,6 +8,7 @@ use App\Models\DisciplineRecord;
 use App\Models\DisciplineRecordLog;
 use App\Models\Portal;
 use App\Portal\Http\Controllers\PortalEntryController;
+use App\Portals\AssetManager\AssetComputerDepartmentScope;
 use App\Portals\AssetManager\DisciplineService;
 use App\Services\AdminWatermarkService;
 use App\Services\SystemSettingService;
@@ -87,6 +88,12 @@ class DisciplineManagementTest extends TestCase
         });
         $this->portal = Portal::create(['code' => 'asset-manager', 'name' => 'Assets', 'status' => 'enabled']);
         (require base_path('database/migrations/2026_11_18_000300_install_discipline_management.php'))->up();
+        Schema::create('portal_departments', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('portal_id');
+            $t->unsignedBigInteger('department_id');
+        });
+        (require base_path('database/migrations/2026_11_18_000400_install_asset_computer_department_bindings.php'))->up();
         $this->actor = new class extends AdminUser
         {
             public bool $administrator = true;
@@ -110,6 +117,8 @@ class DisciplineManagementTest extends TestCase
         DB::table('admin_users')->insert(['id' => 1, 'name' => 'Self', 'username' => 'self']);
         $this->department = Department::create(['name' => 'Team', 'slug' => 'team']);
         $this->outside = Department::create(['name' => 'Outside', 'slug' => 'outside']);
+        $this->bind($this->department, [$this->department->id]);
+        $this->bind($this->outside, [$this->outside->id]);
         $this->member(2, 'Member', $this->department);
         $this->member(3, 'Other', $this->outside);
         DB::table('admin_role_users')->insert(['role_id' => $this->department->id, 'user_id' => 1, 'position' => 'manager']);
@@ -124,6 +133,22 @@ class DisciplineManagementTest extends TestCase
     {
         DB::table('admin_users')->insert(['id' => $id, 'name' => $name, 'username' => 'account'.$id, 'employment_status' => $employment]);
         DB::table('admin_role_users')->insert(['role_id' => $department->id, 'user_id' => $id, 'position' => 'member']);
+    }
+
+    private function bind(Department $source, array $targets): void
+    {
+        DB::table('portal_departments')->updateOrInsert(['portal_id' => $this->portal->id, 'department_id' => $source->parent_id ?: $source->id], []);
+        DB::table('asset_computer_department_bindings')->where('source_department_id', $source->id)->delete();
+        foreach ($targets as $target) {
+            DB::table('asset_computer_department_bindings')->insert(['source_department_id' => $source->id, 'target_department_id' => $target, 'updated_by' => 1]);
+        }
+    }
+
+    private function ordinaryMember(): void
+    {
+        $this->actor->administrator = false;
+        DB::table('admin_role_users')->where('user_id', 1)->update(['position' => 'member']);
+        $this->actor->unsetRelation('roles')->unsetRelation('departments');
     }
 
     private function data(array $extra = []): array
@@ -141,9 +166,9 @@ class DisciplineManagementTest extends TestCase
         $this->get('/asset-manager/discipline?month=2026-11')->assertOk()->assertSee('discipline.js')->assertSee('Self');
         DB::table('portal_menus')->update(['sort' => 99]);
         (require base_path('database/migrations/2026_11_18_000300_install_discipline_management.php'))->up();
-        $this->assertSame(1, DB::table('portal_menus')->count());
+        $this->assertSame(2, DB::table('portal_menus')->count());
         $this->assertSame(99, DB::table('portal_menus')->value('sort'));
-        $this->assertSame(2, DB::table('admin_permissions')->count());
+        $this->assertSame(3, DB::table('admin_permissions')->count());
     }
 
     public function test_missing_portal_fails_install_before_creating_tables(): void
@@ -179,19 +204,21 @@ class DisciplineManagementTest extends TestCase
         $this->assertNotNull($logs[2]->after_data['deleted_at']);
     }
 
-    public function test_regular_member_and_ungranted_supervisor_only_see_self_and_cannot_write(): void
+    public function test_regular_member_reads_bound_department_members_and_cannot_write(): void
     {
         $other = $this->add();
         $own = $this->add(['member_id' => 1]);
-        $this->actor->administrator = false;
+        $hidden = $this->add(['member_id' => 3, 'department_id' => $this->outside->id]);
+        $this->ordinaryMember();
         $this->actor->manage = false;
-        $this->getJson('/asset-manager/discipline?month=2026-11')->assertOk()->assertJsonCount(1, 'members')->assertJsonPath('members.0.id', 1);
-        $this->getJson('/asset-manager/discipline/records/'.$other['id'])->assertNotFound();
+        $this->getJson('/asset-manager/discipline?month=2026-11')->assertOk()->assertJsonCount(2, 'members')->assertJsonPath('members.0.id', 1);
+        $this->getJson('/asset-manager/discipline/records/'.$other['id'])->assertOk()->assertJsonPath('writable', false);
+        $this->getJson('/asset-manager/discipline/records/'.$hidden['id'])->assertNotFound();
         $this->getJson('/asset-manager/discipline/records/'.$own['id'])->assertOk()->assertJsonMissingPath('logs');
         $this->postJson('/asset-manager/discipline/records', $this->data())->assertForbidden();
         $this->putJson('/asset-manager/discipline/records/'.$own['id'], ['record_date' => '2026-11-18', 'remarks' => 'changed', 'version' => $own['version']])->assertForbidden();
         $this->getJson('/asset-manager/discipline/members')->assertForbidden();
-        $this->getJson('/asset-manager/discipline/records?month=2026-11&date=2026-11-18&member_id=2')->assertJsonCount(0, 'records');
+        $this->getJson('/asset-manager/discipline/records?month=2026-11&date=2026-11-18&member_id=2')->assertJsonCount(1, 'records');
     }
 
     public function test_manager_cannot_access_other_departments_and_root_includes_descendants(): void
@@ -199,6 +226,7 @@ class DisciplineManagementTest extends TestCase
         $outside = $this->add(['member_id' => 3, 'department_id' => $this->outside->id]);
         $child = Department::create(['name' => 'Child', 'slug' => 'child', 'parent_id' => $this->department->id]);
         $this->member(4, 'ChildMember', $child);
+        $this->bind($child, [$this->department->id]);
         $this->actor->administrator = false;
         $this->getJson('/asset-manager/discipline?month=2026-11')->assertJsonCount(3, 'members');
         $this->add(['member_id' => 4, 'department_id' => $child->id]);
@@ -206,16 +234,16 @@ class DisciplineManagementTest extends TestCase
         $this->postJson('/asset-manager/discipline/records', $this->data(['member_id' => 3, 'department_id' => $this->outside->id]))->assertForbidden();
         DB::table('admin_role_users')->where('user_id', 1)->update(['position' => 'deputy']);
         $this->actor->unsetRelation('departments');
-        $this->getJson('/asset-manager/discipline?month=2026-11')->assertJsonCount(2, 'members');
+        $this->getJson('/asset-manager/discipline?month=2026-11')->assertJsonCount(0, 'members');
     }
 
-    public function test_department_transfer_retains_self_history_and_manager_cannot_edit_outside_history(): void
+    public function test_department_transfer_does_not_bypass_bound_scope_for_self_history(): void
     {
         $row = $this->add(['member_id' => 1]);
         DB::table('admin_role_users')->where('user_id', 1)->update(['role_id' => $this->outside->id]);
         $this->actor->administrator = false;
-        $this->getJson('/asset-manager/discipline/records/'.$row['id'])->assertOk()->assertJsonPath('writable', false);
-        $this->putJson('/asset-manager/discipline/records/'.$row['id'], ['record_date' => '2026-11-18', 'remarks' => 'x', 'version' => $row['version']])->assertForbidden();
+        $this->getJson('/asset-manager/discipline/records/'.$row['id'])->assertNotFound();
+        $this->putJson('/asset-manager/discipline/records/'.$row['id'], ['record_date' => '2026-11-18', 'remarks' => 'x', 'version' => $row['version']])->assertNotFound();
         $this->assertSame($this->department->id, DisciplineRecord::first()->department_id);
     }
 
@@ -342,15 +370,79 @@ class DisciplineManagementTest extends TestCase
             $this->assertNotSame('f', $book->getSheet(0)->getCell('S33')->getDataType());
             $this->assertSame(4, $book->getSheet(1)->getHighestRow());
             $book->disconnectWorksheets();
-            $this->actor->administrator = false;
+            $this->ordinaryMember();
             $this->actor->manage = false;
             file_put_contents($path, $this->get('/asset-manager/discipline/export?month=2026-11')->assertOk()->streamedContent());
             $book = IOFactory::load($path);
-            $this->assertSame(2, $book->getSheet(0)->getHighestRow());
+            $this->assertSame(32, $book->getSheet(0)->getHighestRow());
             $this->assertSame('SelfNote', (string) $book->getSheet(0)->getCell('S2')->getValue());
             $book->disconnectWorksheets();
         } finally {
             @unlink($path);
         }
+    }
+
+    public function test_discipline_uses_computer_department_mapping_and_manager_needs_no_manage_permission(): void
+    {
+        $own = $this->add(['member_id' => 1]);
+        $target = $this->add(['member_id' => 3, 'department_id' => $this->outside->id, 'remarks' => 'Mapped']);
+        $this->bind($this->department, [$this->outside->id]);
+        $this->actor->administrator = false;
+        $this->actor->manage = false;
+        $service = app(DisciplineService::class);
+        $computerScope = app(AssetComputerDepartmentScope::class);
+        $this->assertSame(array_keys($computerScope->departments($this->actor)), $service->departments($this->actor)->pluck('id')->all());
+        $this->assertSame($computerScope->writableDepartmentIds($this->actor), $service->managedIds($this->actor)->all());
+        $this->getJson('/asset-manager/discipline?month=2026-11')->assertJsonCount(1, 'members')->assertJsonPath('members.0.id', 3)->assertJsonPath('summaries.0.summary', 'Mapped');
+        $this->getJson('/asset-manager/discipline/records/'.$own['id'])->assertNotFound();
+        $this->getJson('/asset-manager/discipline/members?month=2026-11')->assertJsonCount(1, 'members')->assertJsonPath('members.0.departments.0.id', $this->outside->id);
+        $this->putJson('/asset-manager/discipline/records/'.$target['id'], ['record_date' => '2026-11-18', 'remarks' => 'Managed', 'version' => $target['version']])->assertOk();
+        $created = $this->add(['member_id' => 3, 'department_id' => $this->outside->id]);
+        $this->deleteJson('/asset-manager/discipline/records/'.$created['id'], ['version' => $created['version']])->assertOk();
+        $this->ordinaryMember();
+        $this->getJson('/asset-manager/discipline?month=2026-11')->assertJsonCount(1, 'members')->assertJsonCount(0, 'members.0.departments');
+        $this->getJson('/asset-manager/discipline/records/'.$target['id'])->assertJsonPath('writable', false)->assertJsonMissingPath('logs');
+        $this->get('/asset-manager/discipline?month=2026-11')->assertOk()->assertSee('discipline-filter-department')->assertDontSee('id="discipline-add"', false);
+    }
+
+    public function test_cleared_or_revoked_authorization_removes_self_history_and_blocks_stale_edits_and_export(): void
+    {
+        $own = $this->add(['member_id' => 1]);
+        $this->actor->administrator = false;
+        $this->bind($this->department, []);
+        $this->getJson('/asset-manager/discipline?month=2026-11')->assertJsonCount(0, 'members')->assertJsonCount(0, 'summaries');
+        $this->getJson('/asset-manager/discipline/records/'.$own['id'])->assertNotFound();
+        $this->putJson('/asset-manager/discipline/records/'.$own['id'], ['record_date' => '2026-11-18', 'remarks' => 'stale', 'version' => $own['version']])->assertForbidden();
+        $this->deleteJson('/asset-manager/discipline/records/'.$own['id'], ['version' => $own['version']])->assertForbidden();
+        $this->postJson('/asset-manager/discipline/records', $this->data())->assertForbidden();
+        $path = tempnam(sys_get_temp_dir(), 'discipline-empty-');
+        try {
+            file_put_contents($path, $this->get('/asset-manager/discipline/export?month=2026-11')->assertOk()->streamedContent());
+            $book = IOFactory::load($path);
+            $this->assertSame(1, $book->getSheet(0)->getHighestRow());
+            $this->assertSame(1, $book->getSheet(1)->getHighestRow());
+            $book->disconnectWorksheets();
+        } finally {
+            @unlink($path);
+        }
+        $this->bind($this->department, [$this->department->id]);
+        DB::table('portal_departments')->where('department_id', $this->department->id)->delete();
+        $this->getJson('/asset-manager/discipline?month=2026-11')->assertJsonCount(0, 'members');
+        $this->assertSame(1, DisciplineRecordLog::count());
+    }
+
+    public function test_discipline_separates_read_and_write_sources_and_keeps_numeric_pagination_filters(): void
+    {
+        $this->actor->administrator = false;
+        DB::table('admin_role_users')->insert(['user_id' => 1, 'role_id' => $this->outside->id, 'position' => 'member']);
+        $this->getJson('/asset-manager/discipline?month=2026-11')->assertJsonCount(3, 'members');
+        $this->getJson('/asset-manager/discipline/members?month=2026-11')->assertJsonCount(2, 'members');
+        $this->postJson('/asset-manager/discipline/records', $this->data(['member_id' => 3, 'department_id' => $this->outside->id]))->assertForbidden();
+        for ($i = 4; $i <= 40; $i++) {
+            $this->member($i, 'Person'.$i, $this->department);
+        }
+        $this->get('/asset-manager/discipline?month=2026-11&search=Person')->assertOk()->assertSee('<section class="content-header">', false)->assertSee('discipline-pagination')->assertSee('search=Person', false)->assertSee('name="search" value="Person"', false)->assertSee('aria-current="page"', false);
+        $this->bind($this->outside, []);
+        $this->getJson('/asset-manager/discipline?month=2026-11&department_id='.$this->outside->id)->assertJsonCount(0,'members')->assertJsonCount(0,'summaries');
     }
 }

@@ -55,8 +55,8 @@
 .am-computers .form-group > label { display: block; margin-bottom: 6px; color: #234a69; font-weight: 600; }
 .am-computers .form-control { width: 100%; min-width: 0; }
 .am-computers .am-computer-search-select + .select2-container { display: block; width: 100% !important; min-width: 0; }
-.am-computers .am-computer-search-select + .select2-container .select2-selection--single { height: 34px; padding: 0; border: 1px solid #d2d6de; border-radius: 0; background: #fff; }
-.am-computers .am-computer-search-select + .select2-container .select2-selection__rendered { padding-left: 12px; padding-right: 28px; line-height: 32px; color: #555; }
+.am-computers .am-computer-search-select + .select2-container .select2-selection--single { display: flex; align-items: center; height: 34px; padding: 0; border: 1px solid #d2d6de; border-radius: 0; background: #fff; }
+.am-computers .am-computer-search-select + .select2-container .select2-selection__rendered { width: 100%; height: auto; margin: 0; padding: 0 28px 0 12px; line-height: 20px; color: #555; }
 .am-computers .am-computer-search-select + .select2-container .select2-selection__arrow { height: 32px; right: 5px; }
 .am-computers .am-computer-search-select + .select2-container--focus .select2-selection--single,
 .am-computers .am-computer-search-select + .select2-container--open .select2-selection--single { border-color: #3c8dbc; }

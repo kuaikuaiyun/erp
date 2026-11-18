@@ -4,40 +4,44 @@
     $portalOrigin = rtrim(request()->getSchemeAndHttpHost(), '/');
 @endphp
 @push('styles')
-<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/discipline.css?v=20261118-1">
+<link rel="stylesheet" href="{{ $portalOrigin }}/vendor/laravel-admin/AdminLTE/plugins/select2/select2.min.css">
+<link rel="stylesheet" href="{{ $portalOrigin }}/assets/erp/discipline.css?v=20261118-2">
 @endpush
 @section('content')
 @php
     $monthDate = \Carbon\CarbonImmutable::parse($filters['month'].'-01', 'Asia/Shanghai');
     $baseUrl = url('/asset-manager/discipline');
     $clientConfig = ['base' => $baseUrl, 'month' => $filters['month'], 'department' => $filters['department_id'] ?? '', 'canManage' => $canManage, 'members' => $data['members'], 'summaries' => $data['summaries'], 'text' => __('discipline')];
+    $visiblePages = collect([1, 2, $members->currentPage()-1, $members->currentPage(), $members->currentPage()+1, $members->lastPage()-1, $members->lastPage()])->filter(fn ($page) => $page >= 1 && $page <= $members->lastPage())->unique()->sort()->values();
+    $previousPage = null;
 @endphp
-<div class="discipline-page">
-    <div class="box box-primary">
-        <div class="box-header with-border"><h3 class="box-title">{{ __('discipline.title') }}</h3></div>
+<section class="content-header"><h1>{{ __('discipline.title') }} <small>{{ __('discipline.subtitle') }}</small></h1></section>
+<section class="content discipline-page">
+    <div class="box box-default discipline-filter-box">
+        <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-filter" aria-hidden="true"></i> {{ __('discipline.filters_title') }}</h3></div>
         <div class="box-body">
-            <p class="text-muted">{{ __($canManage ? 'discipline.manage_scope' : 'discipline.self_scope') }}</p>
             <form method="get" action="{{ $baseUrl }}" class="discipline-filters">
-                <label>{{ __('discipline.month') }}<input class="form-control" type="month" name="month" min="1900-01" max="9999-12" value="{{ $filters['month'] }}" required></label>
-                @if($canManage)
-                <label>{{ __('discipline.department') }}<select class="form-control" name="department_id"><option value="">{{ __('discipline.all_departments') }}</option>
+                <input type="hidden" name="per_page" value="{{ $members->perPage() }}">
+                <div class="discipline-filter-grid">
+                <div class="form-group"><label for="discipline-filter-month">{{ __('discipline.month') }}</label><input id="discipline-filter-month" class="form-control" type="month" name="month" min="1900-01" max="9999-12" value="{{ $filters['month'] }}" required></div>
+                <div class="form-group"><label for="discipline-filter-department">{{ __('discipline.department') }}</label><select id="discipline-filter-department" class="form-control discipline-search-select" name="department_id"><option value="">{{ __('discipline.all_departments') }}</option>
                     @foreach($departments as $department)
                     <option value="{{ $department->id }}" @selected((string)($filters['department_id'] ?? '') === (string)$department->id)>{{ $department->name }}</option>
                     @endforeach
-                </select></label>
-                @endif
-                <label>{{ __('discipline.member_search') }}<input class="form-control" name="search" maxlength="100" value="{{ $filters['search'] ?? '' }}"></label>
-                <label>{{ __('discipline.per_page') }}<select class="form-control" name="per_page">
-                    @foreach([30,50,100] as $size)
-                    <option value="{{ $size }}" @selected((int)($filters['per_page'] ?? 30) === $size)>{{ $size }}</option>
-                    @endforeach
-                </select></label>
-                <button class="btn btn-primary" type="submit">{{ __('discipline.filter') }}</button>
-                <a class="btn btn-default" href="{{ $baseUrl.'/export?'.http_build_query(array_diff_key($filters, ['page'=>1])) }}">{{ __('discipline.export') }}</a>
-                @if($canManage)
-                <button class="btn btn-success" id="discipline-add" type="button">{{ __('discipline.add') }}</button>
-                @endif
+                </select></div>
+                <div class="form-group"><label for="discipline-filter-search">{{ __('discipline.member_search') }}</label><input id="discipline-filter-search" class="form-control" name="search" maxlength="100" value="{{ $filters['search'] ?? '' }}" placeholder="{{ __('discipline.search_placeholder') }}"></div>
+                </div>
+                <div class="discipline-filter-actions">
+                    <button class="btn btn-primary" type="submit"><i class="fa fa-search" aria-hidden="true"></i> {{ __('discipline.filter') }}</button>
+                    <a class="btn btn-success" href="{{ $baseUrl.'/export?'.http_build_query(array_diff_key($filters, ['page'=>1])) }}"><i class="fa fa-download" aria-hidden="true"></i> {{ __('discipline.export') }}</a>
+                    <a class="btn btn-default" href="{{ $baseUrl }}">{{ __('discipline.reset') }}</a>
+                </div>
             </form>
+        </div>
+        <div class="box-footer discipline-hint">{{ __($canManage ? 'discipline.manage_scope' : 'discipline.self_scope') }}</div>
+    </div>
+    <div class="box box-default discipline-calendar-box">
+        <div class="box-body">
             <div class="discipline-toolbar">
                 <div class="btn-group">
                     @if($filters['month'] > '1900-01')
@@ -49,7 +53,11 @@
                     @endif
                 </div>
                 <strong>{{ $filters['month'] }} · {{ __('discipline.calendar') }}</strong>
+                @if($canManage)
+                <button class="btn btn-primary" id="discipline-add" type="button"><i class="fa fa-plus" aria-hidden="true"></i> {{ __('discipline.add') }}</button>
+                @else
                 <span>{{ __('discipline.total_members', ['count'=>$members->total()]) }}</span>
+                @endif
             </div>
             <div class="discipline-grid" tabindex="0" aria-label="{{ __('discipline.calendar') }}">
                 <table class="discipline-table">
@@ -72,21 +80,48 @@
                     </tbody>
                 </table>
             </div>
-            <div class="discipline-toolbar">
-                <span>{{ __('discipline.page', ['page'=>$members->currentPage(), 'total'=>$members->lastPage()]) }}</span>
-                <div class="btn-group">
-                    @if($members->previousPageUrl())
-                    <a class="btn btn-default" href="{{ $members->previousPageUrl() }}">{{ __('discipline.previous_page') }}</a>
-                    @endif
-                    @if($members->nextPageUrl())
-                    <a class="btn btn-default" href="{{ $members->nextPageUrl() }}">{{ __('discipline.next_page') }}</a>
-                    @endif
-                </div>
-            </div>
-            <p class="text-muted">{{ __('discipline.history_hint') }} {{ __('discipline.export_hint') }}</p>
+            <p class="discipline-hint">{{ __('discipline.history_hint') }} {{ __('discipline.export_hint') }}</p>
         </div>
     </div>
-</div>
+    <div class="discipline-pagination">
+        <span>{{ __('discipline.pagination_summary', ['from'=>$members->firstItem() ?? 0, 'to'=>$members->lastItem() ?? 0, 'total'=>$members->total()]) }}</span>
+        @if($members->lastPage()>1)
+        <nav aria-label="{{ __('discipline.pagination_navigation') }}"><ul class="pagination pagination-sm no-margin">
+            <li class="{{ $members->onFirstPage() ? 'disabled' : '' }}">
+                @if($members->previousPageUrl())
+                <a href="{{ $members->previousPageUrl() }}" aria-label="{{ __('discipline.previous_page') }}">&laquo;</a>
+                @else
+                <span aria-label="{{ __('discipline.previous_page') }}">&laquo;</span>
+                @endif
+            </li>
+            @foreach($visiblePages as $page)
+                @if($previousPage!==null && $page-$previousPage>1)
+                <li class="disabled"><span>&hellip;</span></li>
+                @endif
+                <li class="{{ $members->currentPage()===$page ? 'active' : '' }}"><a href="{{ $members->url($page) }}" @if($members->currentPage()===$page) aria-current="page" @endif>{{ $page }}</a></li>
+                @php
+                    $previousPage = $page;
+                @endphp
+            @endforeach
+            <li class="{{ $members->hasMorePages() ? '' : 'disabled' }}">
+                @if($members->nextPageUrl())
+                <a href="{{ $members->nextPageUrl() }}" aria-label="{{ __('discipline.next_page') }}">&raquo;</a>
+                @else
+                <span aria-label="{{ __('discipline.next_page') }}">&raquo;</span>
+                @endif
+            </li>
+        </ul></nav>
+        @endif
+        <form method="get" action="{{ $baseUrl }}" class="discipline-per-page">
+            <input type="hidden" name="month" value="{{ $filters['month'] }}"><input type="hidden" name="department_id" value="{{ $filters['department_id'] ?? '' }}"><input type="hidden" name="search" value="{{ $filters['search'] ?? '' }}">
+            <label>{{ __('discipline.per_page_label') }} <select class="form-control input-sm" name="per_page" onchange="this.form.submit()">
+                @foreach([30,50,100] as $size)
+                <option value="{{ $size }}" @selected($members->perPage()===$size)>{{ $size }}</option>
+                @endforeach
+            </select> {{ __('discipline.members_suffix') }}</label>
+        </form>
+    </div>
+</section>
 <div class="modal fade" id="discipline-day" tabindex="-1" role="dialog" aria-labelledby="discipline-day-title">
     <div class="modal-dialog modal-lg" role="document"><div class="modal-content">
         <div class="modal-header"><button type="button" class="close" data-dismiss="modal" aria-label="{{ __('discipline.close') }}">&times;</button><h4 id="discipline-day-title" class="modal-title"></h4></div>
@@ -116,5 +151,6 @@
 @endsection
 @push('scripts')
 <script>window.DisciplineConfig = @json($clientConfig);</script>
-<script src="{{ $portalOrigin }}/assets/erp/discipline.js?v=20261118-1"></script>
+<script src="{{ $portalOrigin }}/vendor/laravel-admin/AdminLTE/plugins/select2/select2.full.min.js"></script>
+<script src="{{ $portalOrigin }}/assets/erp/discipline.js?v=20261118-2"></script>
 @endpush
