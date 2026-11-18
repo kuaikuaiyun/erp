@@ -30,4 +30,20 @@ class AppLovinGiftConsumptionTest extends TestCase
         self::assertSame(4999.99, AppLovinGiftConsumption::net(4999.99, true));
         self::assertSame(0.0, AppLovinGiftConsumption::net(-1.0, true));
     }
+
+    public function test_account_identity_ignores_historical_formatting_differences(): void
+    {
+        self::assertSame(
+            AppLovinGiftConsumption::accountIdentity(65, '2078896419', 'first-key'),
+            AppLovinGiftConsumption::accountIdentity(65, ' 207-889-6419 ', 'second-key'),
+        );
+    }
+
+    public function test_account_identity_uses_exact_key_when_number_is_missing(): void
+    {
+        self::assertNotSame(
+            AppLovinGiftConsumption::accountIdentity(65, '', 'first-key'),
+            AppLovinGiftConsumption::accountIdentity(65, '', 'second-key'),
+        );
+    }
 }
