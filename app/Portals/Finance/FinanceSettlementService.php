@@ -1463,13 +1463,7 @@ class FinanceSettlementService
         $fields['_summary_team'] = true;
         // Keep the original date order for grouping and for assigning costs to the first successful payment.
         $query = $this->query($channel, $filters)->orderByDesc('occurred_at')->orderByDesc('id');
-        $paypalAmounts = [];
-        if ($channel === 'paypal') {
-            $ids = (clone $query)->reorder()->pluck('id')->all();
-            foreach (app(FinancePayPalSettlementOrders::class)->exportRows($filters, matchCandidateDomains: false, recordIds: $ids) as $detail) {
-                $paypalAmounts[$detail['id']] = array_intersect_key($detail, self::MONEY + ['settlement' => true]);
-            }
-        }
+        $paypalOrders = $channel === 'paypal' ? app(FinancePayPalSettlementOrders::class) : null;
         if ($channel === 'credit_card' && empty($filters['card_channel'])) {
             $query->select('finance_records.*');
             $accounts = FinancePaymentAccount::query()->where('account_type', 'credit_card')->get();
@@ -1495,6 +1489,12 @@ class FinanceSettlementService
             }
             $last = $records->last();
             $records->each(fn (FinanceRecord $record) => $record->withCachedReportCasts());
+            $paypalAmounts = [];
+            if ($paypalOrders !== null) {
+                foreach ($paypalOrders->exportRows($filters, matchCandidateDomains: false, recordIds: $records->pluck('id')->all()) as $detail) {
+                    $paypalAmounts[$detail['id']] = array_intersect_key($detail, self::MONEY + ['settlement' => true]);
+                }
+            }
             $context ??= $this->rowContext($channel) + ['conflux_report_fees' => new FinanceStatementFeeCache];
             $resolved = [];
             foreach ($records->groupBy(fn ($record) => $filters['card_channel'] ?? match (true) {
@@ -1518,7 +1518,7 @@ class FinanceSettlementService
                     if (isset($paypalAmounts[$record->id])) {
                         $resolved[$record->id] = array_replace($resolved[$record->id], $paypalAmounts[$record->id]);
                     }
-                    yield $resolved[$record->id] + (! empty($filters['summary_projection'])
+                    yield $resolved[$record->id] + ['_summary_usd_version' => 1] + (! empty($filters['summary_projection'])
                         ? ['_summary_source_account' => $record->account] : []);
                 }
             }
@@ -1569,6 +1569,19 @@ class FinanceSettlementService
         $details = $this->rows($channel, $filters, $records, $context)->keyBy('id');
         $platform = $filters['card_channel'] ?? null;
         if (! in_array($platform, ['ye', 'worldpay'], true)) {
+            if ($channel === 'credit_card') {
+                $sources = $records->keyBy('id');
+                $fields['_summary_amount_usd'] = true;
+                $details = $details->map(function (array $row) use ($sources): array {
+                    $payload = $sources[$row['id']]->payload;
+                    $row['_summary_amount_usd'] = $this->number($payload['结算-美元'] ?? null)
+                        ?? ($row['currency'] === 'USD' ? $row['gross'] : null)
+                        ?? ($row['gross'] !== null && $row['usd_rate'] !== null
+                            ? bcmul($row['gross'], $row['usd_rate'], 8) : null)
+                        ?? $row['settlement'];
+                    return $row;
+                });
+            }
             return $details->map(fn ($row) => array_intersect_key($row, $fields))->all();
         }
         $currencyField = $platform === 'worldpay' ? 'statement_currency' : 'settlement_currency';

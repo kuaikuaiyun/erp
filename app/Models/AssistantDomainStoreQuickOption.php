@@ -20,6 +20,8 @@ class AssistantDomainStoreQuickOption extends Model
 
     public const FIELD_PROJECT = 'project';
 
+    public const FIELD_ERP = 'erp';
+
     protected $table = 'assistant_domain_store_quick_options';
 
     protected $fillable = [
@@ -38,6 +40,7 @@ class AssistantDomainStoreQuickOption extends Model
             self::FIELD_OTHER_PAYMENT,
             self::FIELD_TEAM,
             self::FIELD_PROJECT,
+            self::FIELD_ERP,
         ];
     }
 

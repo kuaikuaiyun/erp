@@ -240,7 +240,7 @@
                     </div>
                     <div class="form-group col-md-4 assistant-system-erp @error('erp') has-error @enderror">
                         <label for="erp">{{ $t('fields.erp') }}</label>
-                        <div class="assistant-tag-input-group" data-tag-input-group>
+                        <div class="assistant-quick-option-group assistant-tag-input-group" data-tag-input-group data-team-quick-option-group data-quick-option-field="erp">
                             <div class="assistant-tag-editor" data-tag-editor data-field-name="erp[]">
                                 @foreach ($erpValues as $tag)
                                     <span class="assistant-tag-chip" data-tag-value="{{ $tag }}">
@@ -249,11 +249,24 @@
                                         <button type="button" class="assistant-tag-remove" aria-label="{{ $t('javascript.remove_tag', ['name' => $tag]) }}" title="{{ $t('javascript.remove') }}"><i class="fa fa-times"></i></button>
                                     </span>
                                 @endforeach
-                                <input id="erp" type="text" class="assistant-tag-entry" maxlength="100" placeholder="{{ $t('form.erp_placeholder') }}">
+                                <input id="erp" type="text" class="assistant-tag-entry" maxlength="100" placeholder="{{ $t('form.erp_placeholder') }}" @readonly(! $canManageQuickOptions)>
                             </div>
+                            @if ($canManageQuickOptions)
+                                <button type="button" class="btn btn-default assistant-add-team-project-quick-option"><i class="fa fa-plus"></i> {{ $t('form.add_quick_option') }}</button>
+                            @endif
                             <div class="assistant-tag-presets" aria-label="{{ $t('form.erp_presets') }}">
                             @foreach ($erpOptions as $option => $label)
                                 <button type="button" class="btn btn-default btn-xs assistant-tag-preset @if (in_array($option, $erpValues, true)) is-selected @endif" data-tag-value="{{ $option }}">{{ $label }}</button>
+                            @endforeach
+                            @foreach ($quickOptions['erp'] ?? [] as $option)
+                                @if (!array_key_exists($option, $erpOptions))
+                                    <span class="assistant-custom-quick-option-wrap">
+                                        <button type="button" class="btn btn-default btn-xs assistant-tag-preset @if (in_array($option, $erpValues, true)) is-selected @endif" data-tag-value="{{ $option }}">{{ $option }}</button>
+                                        @if ($canManageQuickOptions)
+                                            <button type="button" class="assistant-remove-team-project-quick-option" data-option-value="{{ $option }}" aria-label="{{ $t('form.delete_quick_option') }}" title="{{ $t('form.delete_quick_option') }}"><i class="fa fa-times"></i></button>
+                                        @endif
+                                    </span>
+                                @endif
                             @endforeach
                             </div>
                         </div>
@@ -635,7 +648,7 @@
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-form-20261008-1.js?v=20261117-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-access-guide-20261009-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-quick-options-20261008-2.js"></script>
-    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-team-project-options-20261009-1.js"></script>
+    <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-team-project-options-20261009-1.js?v=20261118-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-domain-check-20261008-1.js"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-email-purchase-20261013-1.js?v=20261013-1"></script>
     <script src="{{ $portalOrigin }}/assets/erp/assistant-domain-store-owner-form-20261020-1.js?v=20261021-2"></script>

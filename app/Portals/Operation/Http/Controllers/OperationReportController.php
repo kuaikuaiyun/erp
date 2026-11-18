@@ -776,7 +776,7 @@ class OperationReportController extends Controller
             'ads.*.media_source' => ['required', Rule::in($mediaSources)],
             'ads.*.agency' => ['required', 'string', Rule::in(array_keys($agencyOptions))],
             'ads.*.account_name' => ['required', 'string', 'max:191'],
-            'ads.*.account_number' => ['required', 'string', 'max:191'],
+            'ads.*.account_number' => ['required', 'string', 'max:191', 'regex:/^\d+$/'],
             'ads.*.assistant_domain_store_id' => ['nullable', 'integer'],
             'ads.*.book_spend' => ['required', 'numeric', 'min:0'],
             'ads.*.settlement_coefficient' => ['required', 'numeric', 'min:0'],

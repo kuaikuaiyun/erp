@@ -53,9 +53,10 @@
     $summaryAwaitingResult = ($summaryStatus['state'] ?? 'ready') !== 'ready' && ! isset($summaryStatus['updated_at']);
 @endphp
 @if($report === 'summary')@include('portals.finance.partials.summary-tabs', ['activeTab' => 'settlement'])@endif
+@include('portals.finance.partials.report-snapshot-status', ['status' => $overviewStatus, 'watchSnapshot' => app(\App\Portals\Finance\FinanceReportSnapshots::class)->runsInBackground()])
 @foreach($reportStatuses as $period => $status)
     @if($status['state'] !== 'ready' || isset($status['updated_at']))
-        @include('portals.finance.partials.report-snapshot-status', ['period' => $period, 'status' => $status, 'watchSnapshot' => $report === 'summary'])
+        @include('portals.finance.partials.report-snapshot-status', ['period' => $period, 'status' => $status, 'watchSnapshot' => false])
     @endif
 @endforeach
 <div class="box"><div class="box-body"><form method="get" action="{{ route('finance.report', $report) }}">@if($report === 'summary')<input type="hidden" name="view" value="settlement">@endif
@@ -165,7 +166,7 @@ document.getElementById('overview-channel').addEventListener('change', function 
 <div class="loss-comparison">
 @forelse($panels as $panel)
 <div class="box loss-month-panel">@include('portals.finance.partials.loss-month-table')</div>
-@empty<div class="box overview-empty"><p>当前分类暂无数据</p><small>可切换分类或调整月份与筛选条件</small></div>@endforelse
+@empty<div class="box overview-empty"><p>{{ $overviewStatus['state'] === 'ready' ? '当前分类暂无数据' : '报表正在生成，请稍候。' }}</p>@if($overviewStatus['state'] === 'ready')<small>可切换分类或调整月份与筛选条件</small>@endif</div>@endforelse
 </div>
 @php
     $switchPanels = $allPanels->map(fn ($panel, $index) => ['scope' => $panelScope($panel), 'category' => $panelCategory($panel), 'template' => 'loss-table-'.$index]);

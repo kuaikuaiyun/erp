@@ -2755,6 +2755,35 @@ class FinancePortalTest extends TestCase
         }
     }
 
+    public function test_cold_loss_report_waits_for_all_months_without_calculating_on_the_request(): void
+    {
+        (require database_path('migrations/2026_11_13_000004_create_finance_report_snapshots.php'))->up();
+        (require database_path('migrations/2026_11_13_000006_track_finance_report_refresh_attempts.php'))->up();
+        $snapshots = Mockery::mock(\App\Portals\Finance\FinanceReportSnapshots::class, [$this->workbooks])->makePartial();
+        $snapshots->shouldReceive('runsInBackground')->andReturn(true);
+        $this->app->instance(\App\Portals\Finance\FinanceReportSnapshots::class, $snapshots);
+        $url = '/finance/reports/losses?month_from=2026-09&month_to=2026-11';
+
+        $page = $this->get($url)->assertOk()->assertSee('报表正在生成，请稍候。');
+        $this->assertDatabaseCount('finance_report_scopes', 3);
+        $this->assertDatabaseCount('finance_report_snapshots', 0);
+        $pending = $this->getJson($url.'&snapshot_status=1')->assertOk()->assertJsonPath('state', 'pending')->json('version');
+        $this->assertSame($pending, $page->viewData('overviewStatus')['version']);
+        $this->get($url.'&download=1')->assertStatus(409);
+
+        // Publishing one month must not mark the whole comparison ready.
+        $this->workbooks->database()->table('finance_report_scopes')->where('month', '2026-11')->update(['used_at' => now()->subDays(8)]);
+        $controller = Mockery::mock(\App\Portals\Finance\Http\Controllers\FinanceController::class);
+        $controller->shouldReceive('buildSettlementOverviewMonth')->times(3)->andReturn([[], [], null]);
+        $this->assertTrue($snapshots->refresh($controller, false));
+        $this->getJson($url.'&snapshot_status=1')->assertOk()->assertJsonPath('state', 'pending');
+        $this->assertTrue($snapshots->refresh($controller, false));
+        $ready = $this->getJson($url.'&snapshot_status=1')->assertOk()->assertJsonPath('state', 'ready')->json('version');
+        $this->assertNotSame($pending, $ready);
+        $completed = $this->get($url)->assertOk();
+        $this->assertSame($ready, $completed->viewData('overviewStatus')['version']);
+    }
+
     public function test_loss_report_leaves_unimported_costs_blank_even_when_logistics_is_matched(): void
     {
         Schema::create('logistics_orders', function (Blueprint $table): void {
@@ -2878,7 +2907,7 @@ class FinancePortalTest extends TestCase
         $this->assertSame(1, $filtered->viewData('paginator')->total());
         $this->assertSame('10.00000000', $filtered->viewData('items')[0]['settlement']);
         $sheet = $this->readDownload($this->get($url.'&page=3&download=1')->assertOk()->streamedContent());
-        $this->assertCount(26, $sheet->toArray());
+        $this->assertCount(27, $sheet->toArray());
         $this->get($url.'&page=0')->assertSessionHasErrors('page');
     }
 
@@ -3165,6 +3194,55 @@ class FinancePortalTest extends TestCase
             ->assertViewIs('portals.finance.settlement-overview')->assertSee('name="view" value="settlement"', false);
         $this->get('/finance/reports/losses?month=2026-10')->assertOk()->assertViewHas('report', 'losses')
             ->assertDontSee('aria-label="汇总明细视图"', false);
+    }
+
+    public function test_each_transaction_channel_shows_the_missing_summary_above_regular_rows(): void
+    {
+        foreach (array_keys(\App\Portals\Finance\FinanceTransactionSummary::VIEWS) as $channel) {
+            $url = '/finance/reports/summary?view=transactions&month=2026-11&channel='.$channel;
+            $response = $this->get($url)
+                ->assertOk()
+                ->assertSee('class="finance-missing-summary"', false)
+                ->assertSee('aria-label="选择缺失数据汇总"', false)
+                ->assertSee('缺失数据汇总')
+                ->assertViewHas('missingSummary', fn ($row) => $row['currency'] === 'USD')
+                ->assertViewHas('items', fn ($items) => collect($items)->every(fn ($row) => $row['currency'] === 'USD'))
+                ->assertViewHas('missingSummary', fn ($row) => $row['orders'] === 0);
+            $key = \App\Portals\Finance\FinanceExportSelection::key($response->viewData('missingSummary'));
+            foreach (['&download=1', '&download=1&selected_rows[]='.$key] as $query) {
+                $rows = $this->readDownload($this->get($url.$query)->assertOk()->streamedContent())->toArray();
+                $this->assertCount(2, $rows);
+                $this->assertSame('缺失数据汇总', $rows[1][1]);
+                $this->assertSame('USD', $rows[1][2]);
+            }
+        }
+    }
+
+    public function test_transaction_summary_uses_detail_usd_amounts_and_exports_converted_costs(): void
+    {
+        $headers = FinanceCatalog::dataset('xuzong2-details')['headers'];
+        $source = [...array_fill_keys($headers, ''), '平台订单号' => 'USD-SUMMARY',
+            '创建时间' => '2026-11-02 12:00:00', '交易币种' => 'EUR', '交易金额' => '100',
+            '支付状态' => 'SUCCESS', '结算-美元' => '108', '结算金额' => '105'];
+        $this->workbooks->importRecords('xuzong2-details', [2 => $source], 'USD测试账户', 'UTC', 1);
+        $record = FinanceRecord::query()->where('reference', 'USD-SUMMARY')->firstOrFail();
+        DB::table('finance_settlement_supplements')->insert(['finance_record_id' => $record->id,
+            'payload' => json_encode(['team' => '深圳团队', 'subscription' => '订阅', 'logistics' => '70', 'purchase' => '140'])]);
+        DB::table('finance_monthly_exchange_rates')->insert(['month' => '2026-11', 'currency' => 'USD', 'cny_rate' => '7']);
+        $url = '/finance/reports/summary?view=transactions&month=2026-11&channel=credit_card';
+        $response = $this->get($url)->assertOk();
+        $row = collect($response->viewData('items'))->firstWhere('team', '深圳团队');
+        $this->assertNotNull($row);
+        $this->assertSame('USD', $row['currency']);
+        $this->assertSame('108.00000000', $row['amount']);
+        $this->assertSame('105.00000000', $row['settlement']);
+        $this->assertSame('10.00000000', $row['logistics']);
+        $this->assertSame('20.00000000', $row['purchase']);
+        $key = \App\Portals\Finance\FinanceExportSelection::key($row);
+        $sheet = $this->readDownload($this->get($url.'&download=1&selected_rows[]='.$key)->assertOk()->streamedContent())->toArray();
+        $this->assertCount(2, $sheet);
+        $this->assertEquals(108, $sheet[1][array_search('金额', $sheet[0], true)]);
+        $this->assertEquals(10, $sheet[1][array_search('物流-美元', $sheet[0], true)]);
     }
 
     public function test_transaction_summary_exports_missing_details_for_the_selected_channel_and_month(): void

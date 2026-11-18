@@ -7,6 +7,7 @@
     url.searchParams.set('snapshot_status', '1');
     url.searchParams.delete('report_snapshot');
     const displayedTime = notice.dataset.financeSnapshotTime;
+    const displayedVersion = notice.dataset.financeSnapshotVersion;
     const message = notice.querySelector('[data-finance-snapshot-message]');
     const formValues = () => new URLSearchParams(new FormData(form)).toString();
     const originalFilters = formValues();
@@ -29,9 +30,10 @@
                 const response = await fetch(url, { headers: { Accept: 'application/json' } });
                 if (response.status === 401 || response.status === 403 || response.redirected) return;
                 if (response.ok) {
-                    const { state, updated_at: updatedAt } = await response.json();
+                    const { state, updated_at: updatedAt, version } = await response.json();
                     if (navigating) return;
-                    if (state === 'ready' && updatedAt && updatedAt !== displayedTime) {
+                    const changed = version ? version !== displayedVersion : updatedAt && updatedAt !== displayedTime;
+                    if (state === 'ready' && changed) {
                         const latest = new URL(window.location.href);
                         latest.searchParams.delete('report_snapshot');
                         if (formValues() === originalFilters && !form.contains(document.activeElement)

@@ -1741,6 +1741,7 @@ class DomainStoreController extends Controller
             'other_payment' => [...array_keys(AssistantDomainStore::otherPaymentOptions()), ...($quickOptions['other_payment'] ?? [])],
             'project' => $quickOptions['project'] ?? [],
             'team' => $quickOptions['team'] ?? [],
+            'erp' => [...array_keys(AssistantDomainStore::erpOptions()), ...($quickOptions['erp'] ?? [])],
         ];
         $existingValues = [
             'site_builder' => (string) ($existingStore?->site_builder ?? ''),
@@ -1750,6 +1751,7 @@ class DomainStoreController extends Controller
             'other_payment' => (string) ($existingStore?->other_payment ?? ''),
             'project' => (string) ($existingStore?->project ?? ''),
             'team' => AssistantDomainStore::normalizeMultiValue($existingStore?->team),
+            'erp' => AssistantDomainStore::normalizeMultiValue($existingStore?->erp),
         ];
         $errors = [];
 
@@ -1762,6 +1764,13 @@ class DomainStoreController extends Controller
         foreach (AssistantDomainStore::normalizeMultiValue($data['team'] ?? null) as $value) {
             if (!in_array($value, [...$allowed['team'], ...$existingValues['team']], true)) {
                 $errors[$fieldPrefix.'team'] = '请从已有快捷选项中选择。';
+                break;
+            }
+        }
+
+        foreach (AssistantDomainStore::normalizeMultiValue($data['erp'] ?? null) as $value) {
+            if (!in_array($value, [...$allowed['erp'], ...$existingValues['erp']], true)) {
+                $errors[$fieldPrefix.'erp'] = '请从已有快捷选项中选择。';
                 break;
             }
         }

@@ -233,7 +233,7 @@ class OperationReportReviewController extends Controller
             'ads.*.agency' => ['required', 'string', 'max:100'],
             'ads.*.media_source' => ['required', 'string', 'max:100'],
             'ads.*.account_name' => ['required', 'string', 'max:191'],
-            'ads.*.account_number' => ['required', 'string', 'max:191'],
+            'ads.*.account_number' => ['required', 'string', 'max:191', 'regex:/^\d+$/'],
             'ads.*.book_spend' => ['required', 'numeric', 'min:0'],
             'ads.*.settlement_coefficient' => ['required', 'numeric', 'min:0'],
             'ads.*.existing_screenshot' => ['nullable', 'string', 'max:500'],

@@ -54,13 +54,16 @@ class RefreshFinanceSummaries extends Command
             if ($tracksRevisions) {
                 $dependencies->resolve($db);
             }
-            // Publish requested reports before rebuilding historical projections.
-            $reportsRefreshed = $reports->refresh($controller, $tracksRevisions);
-            if ($tracksRevisions) {
+            // Materialize only months people are actively viewing. Once those
+            // rows are ready, report snapshots aggregate the projection instead
+            // of joining the raw payment, logistics and settlement ledgers.
+            if ($tracksRevisions && ! $projection->usesSourceFiles()) {
                 try {
-                    // Source revisions do not change when cached reference FX becomes available.
-                    // refresh() also checks its FX fingerprint before reusing a publication.
-                    $periods = $db->table('finance_summary_periods')->orderByDesc('month')->get();
+                    $activeMonths = $db->table('finance_report_scopes')->where('used_at', '>=', now()->subDays(7))
+                        ->whereIn('report', ['summary', 'losses'])->where('month', '<>', '')
+                        ->distinct()->pluck('month');
+                    $periods = $activeMonths->isEmpty() ? collect() : $db->table('finance_summary_periods')
+                        ->whereIn('month', $activeMonths)->orderByDesc('month')->get();
                     foreach ($periods as $period) {
                         $projection->refresh($period);
                     }
@@ -69,6 +72,7 @@ class RefreshFinanceSummaries extends Command
                     $failed = true;
                 }
             }
+            $reportsRefreshed = ! $failed && $reports->refresh($controller, $tracksRevisions);
             return $reportsRefreshed && ! $failed ? self::SUCCESS : self::FAILURE;
         } finally {
             if ($pdo !== null) {

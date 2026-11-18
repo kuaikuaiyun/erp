@@ -31,7 +31,7 @@ class FinanceReportSnapshots
         }
         $failed = false;
         $activeScopes = $db->table('finance_report_scopes')->where('used_at', '>=', $activeSince)
-            ->whereNotIn('report', ['summary', 'transactions', 'losses'])->where('month', '<>', '')
+            ->where('report', '<>', 'transactions')->where('month', '<>', '')
             ->orderByDesc('used_at')->orderBy('scope')->get();
         foreach ($activeScopes as $scope) {
             $started = hrtime(true);
@@ -99,9 +99,12 @@ class FinanceReportSnapshots
         $scope = hash('sha256', json_encode([$report, $month, $filters], JSON_THROW_ON_ERROR));
         $db = $this->workbooks->database();
 
-        // These reports query current channel data; an absent filter-specific cache must
-        // never register a background job and return an empty report to the user.
-        $queryCurrentData = in_array($report, ['summary', 'transactions', 'losses'], true);
+        // Overview reports can scan several months on a cold cache. Their existing
+        // scheduler must do that work outside the PHP-FPM request timeout.
+        if (in_array($report, ['summary', 'losses'], true)) {
+            $live = false;
+        }
+        $queryCurrentData = $report === 'transactions';
         if ($queryCurrentData) {
             $live = true;
             $reusePublishedRevision = $reusePublishedRevision || FinanceSummaryTriggers::available($db);
@@ -165,6 +168,24 @@ class FinanceReportSnapshots
         }
         $saved = (clone $query)->where('revision', $revision)->first(['id', 'created_at']);
         $current = $saved !== null;
+        if (! $current && ! $statusOnly && in_array($report, ['summary', 'losses'], true)
+            && $this->projectionsReady($db, $month, $filters)) {
+            try {
+                $result = $db->transaction($build);
+                if (! $db->table('finance_summary_changes')->exists()
+                    && $revision === $this->revision($db, $report, $month, $filters, true)) {
+                    $snapshot = $this->publish($db, $scope, $revision, $result);
+                    Log::info('Finance report snapshot published from projection', [
+                        'report' => $report, 'month' => $month, 'scope' => $scope,
+                    ]);
+                    return [$result, $snapshot, ['state' => 'ready', 'updated_at' => now()]];
+                }
+                unset($result);
+            } catch (Throwable $exception) {
+                unset($result);
+                report($exception);
+            }
+        }
         $saved ??= $query->first(['id', 'created_at']);
         $current = $current && ! ($tracksRevisions && $db->table('finance_summary_changes')->exists());
         $failed = ! $current && $db->table('finance_report_scopes')->where('scope', $scope)->whereNotNull('failed_at')->exists();
@@ -201,7 +222,7 @@ class FinanceReportSnapshots
     private function revision(Connection $db, string $report, string $month, array $filters, bool $tracksRevisions): string
     {
         $channel = $filters['channel'] ?? null;
-        $transactionVersion = in_array($channel, ['ye', 'worldpay'], true) ? 11 : 12;
+        $transactionVersion = 13;
         // Installations without trigger privileges still generate reports in the background.
         if (! $tracksRevisions) {
             $bucket = (string) intdiv(now()->timestamp, 300);
@@ -210,7 +231,7 @@ class FinanceReportSnapshots
 
             return hash('sha256', match ($report) {
                 'transactions' => $prefix.$bucket,
-                'summary' => 'summary:7:'.$bucket,
+                'summary' => 'summary:8:'.$bucket,
                 default => $bucket,
             });
         }
@@ -224,10 +245,35 @@ class FinanceReportSnapshots
 
         $version = match ($report) {
             'transactions' => $transactionVersion,
-            'summary' => 7,
-            default => 5,
+            'summary' => 8,
+            default => 6,
         };
         return hash('sha256', json_encode([$version, $periods, $rate], JSON_THROW_ON_ERROR));
+    }
+
+    private function projectionsReady(Connection $db, string $month, array $filters): bool
+    {
+        if (! FinanceSummaryTriggers::available($db)
+            || $db->table('finance_summary_changes')->exists()
+            || ! $db->getSchemaBuilder()->hasColumn('finance_summary_rows', 'timezone')
+            || app(FinanceSummaryProjection::class)->usesSourceFiles()) {
+            return false;
+        }
+        $channels = match ($filters['channel'] ?? null) {
+            'paypal' => ['paypal'],
+            null, '', 'combined' => ['paypal', 'credit_card'],
+            default => ['credit_card'],
+        };
+        $periods = $db->table('finance_summary_periods')->where('month', $month)
+            ->whereIn('channel', $channels)->get(['channel', 'revision', 'published'])->keyBy('channel');
+        foreach ($channels as $channel) {
+            $period = $periods->get($channel);
+            if (! $period || (int) $period->published === 0 || (int) $period->published !== (int) $period->revision) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function publish(Connection $db, string $scope, string $revision, array $result): string
