@@ -50,4 +50,54 @@ class AuthenticationModeSwitchTest extends TestCase
         config(['dingtalk.auth_mode' => 'invalid']);
         $this->denied(fn () => app(ModeService::class)->current(), 503);
     }
+    public function test_steady_state_checks_do_not_issue_writes_or_locking_reads(): void
+    {
+        $account = $this->account();
+        $request = $this->browser();
+        $modes = app(ModeService::class);
+        $modes->stamp($request, $account, $modes->current());
+        DB::connection()->enableQueryLog();
+        DB::connection()->flushQueryLog();
+        try {
+            for ($i = 0; $i < 5; $i++) {
+                self::assertSame('dingtalk', $modes->validate($request, $account));
+            }
+            $queries = DB::connection()->getQueryLog();
+        } finally {
+            DB::connection()->disableQueryLog();
+            DB::connection()->flushQueryLog();
+        }
+        $stateReads = 0;
+        foreach ($queries as $query) {
+            self::assertDoesNotMatchRegularExpression('/^\\s*(insert|update|delete|replace)\\b|for\\s+update|lock\\s+in\\s+share/i', $query['query']);
+            if (str_contains($query['query'], 'erp_authentication_states')) $stateReads++;
+        }
+        self::assertSame(5, $stateReads);
+    }
+
+    public function test_initialization_is_idempotent_and_never_resets_account_versions(): void
+    {
+        $modes = app(ModeService::class);
+        $state = $modes->current();
+        self::assertSame(1, (int) $state->version);
+        self::assertSame(1, DB::table('erp_authentication_states')->count());
+        self::assertSame(1, $modes->accountVersion(999));
+        DB::table('erp_authentication_account_versions')->where('account_id', 999)->update(['version' => 7]);
+        self::assertSame(7, $modes->accountVersion(999));
+        self::assertSame(7, $modes->accountVersion(999));
+        self::assertSame(1, (int) $modes->current()->version);
+    }
+
+    public function test_repeated_switch_checks_increment_and_audit_only_once(): void
+    {
+        $modes = app(ModeService::class);
+        $state = $modes->current();
+        config(['dingtalk.auth_mode' => 'password']);
+        $changed = $modes->current();
+        self::assertSame((int) $state->version + 1, (int) $changed->version);
+        for ($i = 0; $i < 5; $i++) {
+            self::assertSame((int) $changed->version, (int) $modes->current()->version);
+        }
+        self::assertSame(1, DB::table('dingtalk_audits')->where('action', 'authentication.mode_changed')->count());
+    }
 }
