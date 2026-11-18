@@ -121,7 +121,7 @@ class OperationAiProductLibraryController extends Controller
                     'roi' => $record->roi !== null ? (string) $record->roi : null,
                     'material_name' => $record->material_name,
                     'video_code' => $record->video_name ? pathinfo((string) $record->video_name, PATHINFO_FILENAME) : null,
-                    'video_url' => $record->video_path
+                    'video_url' => $record->video_path && ! OperationAiProductReferenceVideo::isOperatorMaterialFile($record->video_name)
                         ? route('operation.ai-product-library.placement-evaluations.video', [$evaluation, $record]) : null,
                 ])->values(),
             ])->values(),
@@ -470,6 +470,7 @@ class OperationAiProductLibraryController extends Controller
             ->exists(), 404);
         abort_unless((int) $evaluation->created_by === (int) $context['user']->getKey(), 404);
         abort_unless((int) $record->evaluation_id === (int) $evaluation->getKey(), 404);
+        abort_if(OperationAiProductReferenceVideo::isOperatorMaterialFile($record->video_name), 404);
         abort_unless($record->video_path && Storage::disk($record->video_disk ?: 'local')->exists($record->video_path), 404);
 
         return response()->file(Storage::disk($record->video_disk ?: 'local')->path($record->video_path), [
