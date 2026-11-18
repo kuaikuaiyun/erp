@@ -8,6 +8,15 @@ final class AppLovinGiftConsumption
 
     public const SECOND_THRESHOLD = 10000.0;
 
+    public static function accountIdentity(int $operatorId, string $accountNumber, string $fallbackKey = ''): string
+    {
+        $normalizedNumber = preg_replace('/[^0-9a-z]+/i', '', mb_strtolower(trim($accountNumber))) ?? '';
+
+        return $normalizedNumber !== ''
+            ? $operatorId.'|'.$normalizedNumber
+            : $operatorId.'|key:'.$fallbackKey;
+    }
+
     public static function net(float $historicalConsumption, bool $hasGift): float
     {
         $historicalConsumption = max(0.0, $historicalConsumption);

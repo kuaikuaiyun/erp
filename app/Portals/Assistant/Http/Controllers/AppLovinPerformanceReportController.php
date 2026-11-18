@@ -124,19 +124,35 @@ class AppLovinPerformanceReportController extends Controller
             $reports->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])->pluck('assistant_domain_store_id'))
         )->filter()->map(fn ($id) => (int) $id)->unique()->values();
         $stores = AssistantDomainStore::query()->whereIn('id', $storeIds)->get(['id', 'domain'])->keyBy('id');
-        $accountSpendTotals = $accountSpendReports->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])
+        $accountSpendRecords = $accountSpendReports->flatMap(fn (OperationReport $report) => collect($report->advertising_rows ?: [])
             ->filter(fn (array $ad) => mb_strtolower(trim((string) ($ad['media_source'] ?? ''))) === 'applovin')
-            ->map(fn (array $ad): array => [
-                'account_key' => AppLovinSpendScreenshot::accountKey(
+            ->map(function (array $ad) use ($report): array {
+                $accountKey = AppLovinSpendScreenshot::accountKey(
                     (int) $report->operator_user_id,
                     (string) ($ad['agency'] ?? ''),
                     (string) ($ad['media_source'] ?? ''),
                     (string) ($ad['account_name'] ?? ''),
                     (string) ($ad['account_number'] ?? '')
-                ),
-                'spend' => (float) ($ad['actual_spend'] ?? 0),
-            ]))->groupBy('account_key')->map(fn ($items) => (float) $items->sum('spend'));
-        $giftScreenshots = AppLovinSpendScreenshot::query()->whereIn('account_key', $accountSpendTotals->keys())->get()->keyBy('account_key');
+                );
+
+                return [
+                    'account_identity' => AppLovinGiftConsumption::accountIdentity(
+                        (int) $report->operator_user_id,
+                        (string) ($ad['account_number'] ?? ''),
+                        $accountKey,
+                    ),
+                    'spend' => (float) ($ad['actual_spend'] ?? 0),
+                ];
+            }));
+        $accountSpendTotals = $accountSpendRecords->groupBy('account_identity')->map(fn ($items) => (float) $items->sum('spend'));
+        $giftScreenshots = AppLovinSpendScreenshot::query()
+            ->whereIn('operator_user_id', $accountSpendReports->pluck('operator_user_id')->filter()->unique()->values())
+            ->get()
+            ->keyBy(fn (AppLovinSpendScreenshot $screenshot): string => AppLovinGiftConsumption::accountIdentity(
+                (int) $screenshot->operator_user_id,
+                (string) $screenshot->account_number,
+                (string) $screenshot->account_key,
+            ));
         $historicalRevenueByGroup = $accountSpendReports->reduce(function (array $totals, OperationReport $report) use ($bindings, $stores): array {
             $storeAds = collect($report->advertising_rows ?: [])
                 ->filter(fn (array $ad): bool => mb_strtolower(trim((string) ($ad['media_source'] ?? ''))) === 'applovin')
@@ -190,7 +206,17 @@ class AppLovinPerformanceReportController extends Controller
                         return null;
                     }
 
-                    return [...$ad, 'account_key' => $accountKey, 'resolved_store_id' => $storeId, 'resolved_store_domain' => $domain];
+                    return [
+                        ...$ad,
+                        'account_key' => $accountKey,
+                        'account_identity' => AppLovinGiftConsumption::accountIdentity(
+                            (int) $report->operator_user_id,
+                            (string) ($ad['account_number'] ?? ''),
+                            $accountKey,
+                        ),
+                        'resolved_store_id' => $storeId,
+                        'resolved_store_domain' => $domain,
+                    ];
                 })
                 ->filter()
                 ->groupBy('resolved_store_id');
@@ -207,7 +233,7 @@ class AppLovinPerformanceReportController extends Controller
                 $subscriptionOrders = (int) $metrics->sum('first_subscription_orders');
                 $subscriptionRevenue = round((float) $metrics->sum('first_subscription_revenue'), 2);
                 $spend = round((float) $storeAds->sum('actual_spend'), 2);
-                $accountKeys = $storeAds->pluck('account_key')->filter()->unique()->values();
+                $accountKeys = $storeAds->pluck('account_identity')->filter()->unique()->values();
 
                 return [
                     'date' => $report->report_date->format('Y-m-d'),
