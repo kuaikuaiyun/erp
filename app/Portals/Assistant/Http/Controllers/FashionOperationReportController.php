@@ -11,6 +11,7 @@ use App\Models\FashionLogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
+use App\Portals\Assistant\OperationDashboardDepartmentScopeService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -23,6 +24,7 @@ class FashionOperationReportController extends Controller
         private readonly PortalEntryController $portalEntries,
         private readonly AssistantPortalAuthorizationService $authorization,
         private readonly AssistantStoreOwnerService $storeOwners,
+        private readonly OperationDashboardDepartmentScopeService $dashboardScopes,
     ) {}
 
     public function index(Request $request): Response|View
@@ -37,9 +39,9 @@ class FashionOperationReportController extends Controller
         } else {
             $this->authorization->assertAssistantPortal($context['portal']);
         }
-        $visibleDepartmentIds = $isDashboard || $context['user']->isAdministrator()
-            ? null
-            : $this->storeOwners->visibleOperationDepartmentIds($context['user']);
+        $visibleDepartmentIds = $isDashboard
+            ? $this->dashboardScopes->visibleDepartmentIds($context['user'])
+            : ($context['user']->isAdministrator() ? null : $this->storeOwners->visibleOperationDepartmentIds($context['user']));
 
         $timezones = $this->timezoneOptions();
         $validated = $request->validate([

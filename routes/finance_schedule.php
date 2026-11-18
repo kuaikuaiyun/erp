@@ -12,11 +12,15 @@ $orderWorker = Schedule::command('queue:work finance_orders --queue=finance-orde
     ->everyMinute()->withoutOverlapping(20)
     ->appendOutputTo(storage_path('logs/finance-order-worker.log'));
 
+$indexRefresh = Schedule::command('finance:indexes:apply')->everyMinute()->withoutOverlapping(30)
+    ->sendOutputTo(storage_path('logs/finance-indexes-schedule.log'));
+
 $summaryRefresh = Schedule::command('finance:summaries:refresh')->everyMinute()
     ->sendOutputTo(storage_path('logs/finance-summaries-schedule.log'));
 
 if (! $financeScheduleOnly) {
     $balanceRefresh->runInBackground();
     $orderWorker->runInBackground();
+    $indexRefresh->runInBackground();
     $summaryRefresh->runInBackground();
 }

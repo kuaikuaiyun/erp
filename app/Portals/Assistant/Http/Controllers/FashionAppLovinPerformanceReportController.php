@@ -13,6 +13,7 @@ use App\Models\FashionLogisticsOrder;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
+use App\Portals\Assistant\OperationDashboardDepartmentScopeService;
 use App\Services\DepartmentAuthorizationService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
@@ -28,6 +29,7 @@ class FashionAppLovinPerformanceReportController extends Controller
         private readonly AssistantPortalAuthorizationService $authorization,
         private readonly AssistantStoreOwnerService $storeOwners,
         private readonly DepartmentAuthorizationService $departmentAuthorization,
+        private readonly OperationDashboardDepartmentScopeService $dashboardScopes,
     ) {}
 
     public function index(Request $request): Response|View
@@ -52,7 +54,7 @@ class FashionAppLovinPerformanceReportController extends Controller
             ->map(fn ($id) => (int) $id)->values()->all();
         $operatorOnly = $isFashionPortal && ! $canSeeAll && $managedDepartmentIds === [];
         $visibleDepartmentIds = $isDashboard
-            ? null
+            ? $this->dashboardScopes->visibleDepartmentIds($context['user'])
             : ($isFashionPortal
             ? ($canSeeAll ? null : $managedDepartmentIds)
             : $this->visibleDepartmentIds($context['user']));
@@ -114,7 +116,7 @@ class FashionAppLovinPerformanceReportController extends Controller
                 : $query->whereHas('submitter.departments', fn ($departments) => $departments->whereIn('admin_roles.id', $visibleDepartmentIds)))
             ->when($selectedDepartmentIds !== [], fn ($query) => $query->whereHas('submitter.departments', fn ($department) => $department->whereKey($selectedDepartmentIds)))
             ->when($filters['operator'] ?? null, fn ($query, $name) => $query->where('submitter_name', 'like', '%'.$name.'%'));
-        $accountSpendReports = (clone $reportQuery)->get();
+        $accountSpendReports = (clone $reportQuery)->orderBy('report_date')->orderBy('id')->get();
         $reports = (clone $reportQuery)->whereBetween('report_date', [$dateFrom, $dateTo])->orderBy('report_date')->get();
 
         $accountBindings = AppLovinAccountStoreBinding::query()->pluck('assistant_domain_store_id', 'account_key');
@@ -146,9 +148,12 @@ class FashionAppLovinPerformanceReportController extends Controller
             $groups = $report->adSpendEntries->map(function ($entry) use ($report, $stores, $accountBindings, $accountIdentity, $bindingByIdentity): array {
                 $accountKey = AppLovinSpendScreenshot::accountKey((int) $report->submitter_id, (string) $entry->agency, (string) $entry->media, (string) $entry->account_name, (string) $entry->account_number);
                 $identity = $accountIdentity((int) $report->submitter_id, (string) $entry->agency, (string) $entry->account_number);
-                $storeId = (int) ($entry->assistant_domain_store_id ?: ($accountBindings->get($accountKey) ?? $bindingByIdentity->get($identity, 0)));
+                // The same AppLovin account is occasionally entered with different agency casing
+                // or an older store binding. Use the latest normalized identity binding first so
+                // historical rows stay together instead of being split into duplicate report rows.
+                $storeId = (int) ($bindingByIdentity->get($identity, 0) ?: $entry->assistant_domain_store_id ?: ($accountBindings->get($accountKey) ?? 0));
 
-                return ['store_id' => $storeId, 'domain' => trim((string) ($entry->store_domain ?: $stores->get($storeId)?->domain ?: ''))];
+                return ['store_id' => $storeId, 'domain' => trim((string) ($stores->get($storeId)?->domain ?: $entry->store_domain ?: ''))];
             })->filter(fn (array $entry): bool => $entry['store_id'] > 0)->unique('store_id');
 
             foreach ($groups as $group) {
@@ -169,10 +174,10 @@ class FashionAppLovinPerformanceReportController extends Controller
             return $report->adSpendEntries->map(function ($entry) use ($report, $accountBindings, $accountIdentity, $bindingByIdentity) {
                 $accountKey = AppLovinSpendScreenshot::accountKey((int) $report->submitter_id, (string) $entry->agency, (string) $entry->media, (string) $entry->account_name, (string) $entry->account_number);
                 $identity = $accountIdentity((int) $report->submitter_id, (string) $entry->agency, (string) $entry->account_number);
-                $storeId = (int) ($entry->assistant_domain_store_id ?: ($accountBindings->get($accountKey) ?? $bindingByIdentity->get($identity, 0)));
+                $storeId = (int) ($bindingByIdentity->get($identity, 0) ?: $entry->assistant_domain_store_id ?: ($accountBindings->get($accountKey) ?? 0));
                 $entry->setAttribute('resolved_account_key', $accountKey);
                 $entry->setAttribute('resolved_store_id', $storeId);
-                $entry->setAttribute('resolved_group_key', $storeId > 0 ? 'store:'.$storeId : 'account:'.$accountKey);
+                $entry->setAttribute('resolved_group_key', $storeId > 0 ? 'store:'.$storeId : 'identity:'.$identity);
 
                 return $entry;
             })->groupBy('resolved_group_key')->map(function ($entries) use ($report, $stores, $accountSpendTotals, $timezone, $reportDepartment): array {
@@ -195,7 +200,7 @@ class FashionAppLovinPerformanceReportController extends Controller
                     'operator_id' => (int) $report->submitter_id,
                     'operator' => (string) $report->submitter_name,
                     'store_id' => (int) $storeId,
-                    'store_domain' => (string) ($entries->pluck('store_domain')->filter()->first() ?: $store?->domain ?: '未绑定店铺'),
+                    'store_domain' => (string) ($store?->domain ?: $entries->pluck('store_domain')->filter()->first() ?: '未绑定店铺'),
                     'site_builder' => $storeId > 0 ? ($platform === 'shopline' ? 'Shopline' : 'XShoppy') : '未绑定',
                     'account_numbers' => $entries->pluck('account_number')->map(fn ($number) => trim((string) $number))->filter()->unique()->values()->all(),
                     'account_keys' => $entries->pluck('resolved_account_key')->filter()->unique()->values()->all(),

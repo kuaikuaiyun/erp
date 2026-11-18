@@ -41,6 +41,12 @@ use Symfony\Component\HttpFoundation\Response;
 
 class LogisticsOrderController extends Controller
 {
+    private const EXCLUDED_TONGTU_RECONCILIATION_ORDERS = [
+        'aerynix-2009-m9724',
+        'briellev-1004.1',
+        'briellev-1004.2',
+    ];
+
     private const EXCLUDED_TONGTU_RECONCILIATION_DOMAINS = [
         'demihin.com',
         'asbaght.com',
@@ -222,6 +228,9 @@ class LogisticsOrderController extends Controller
     {
         $domainsByPrefix = $this->tongtuDomainsByPrefix();
         foreach ($query->cursor() as $order) {
+            if (in_array(mb_strtolower(trim($order->number)), self::EXCLUDED_TONGTU_RECONCILIATION_ORDERS, true)) {
+                continue;
+            }
             $order = $this->resolveTongtuDomain($order, $domainsByPrefix);
             if ($order->domain !== null && in_array(strtolower($order->domain), self::EXCLUDED_TONGTU_RECONCILIATION_DOMAINS, true)) {
                 continue;

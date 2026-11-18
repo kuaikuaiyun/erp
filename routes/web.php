@@ -28,6 +28,7 @@ use App\Portals\Assistant\Http\Controllers\FashionAppLovinPerformanceReportContr
 use App\Portals\Assistant\Http\Controllers\FashionOperationReportController;
 use App\Portals\Assistant\Http\Controllers\FashionStoreAnalyticsController;
 use App\Portals\Assistant\Http\Controllers\OperationReportDashboardController;
+use App\Portals\Assistant\Http\Controllers\OperationDashboardDepartmentScopeController;
 use App\Portals\Assistant\Http\Controllers\OperationReportReviewController;
 use App\Portals\Assistant\Http\Controllers\ShopifyAnalyticsController;
 use App\Portals\Assistant\Http\Controllers\StoreLaunchReviewController;
@@ -351,6 +352,8 @@ Route::get('/assistant/operation-reports/order-details', [OperationReportDashboa
 Route::get('/operation-dashboard/operation-reports', [OperationReportDashboardController::class, 'index'])->name('operation-dashboard.operation-reports.index');
 Route::get('/operation-dashboard/operation-reports/order-details', [OperationReportDashboardController::class, 'orderDetails'])->name('operation-dashboard.operation-reports.order-details');
 Route::post('/operation-dashboard/operation-reports/department-scope', [OperationReportDashboardController::class, 'updateDepartmentScope'])->name('operation-dashboard.operation-reports.department-scope.update');
+Route::get('/operation-dashboard/department-scopes', [OperationDashboardDepartmentScopeController::class, 'index'])->name('operation-dashboard.department-scopes.index');
+Route::post('/operation-dashboard/department-scopes', [OperationDashboardDepartmentScopeController::class, 'update'])->name('operation-dashboard.department-scopes.update');
 Route::get('/operation-dashboard/applovin-spends', [AppLovinSpendReviewController::class, 'index'])->name('operation-dashboard.applovin-spends.index');
 Route::post('/operation-dashboard/applovin-spends/store-binding', [AppLovinSpendReviewController::class, 'bindStore'])
     ->name('operation-dashboard.applovin-spends.store-binding');

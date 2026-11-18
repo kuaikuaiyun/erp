@@ -10,6 +10,7 @@ use App\Models\OperationDashboardDepartmentScope;
 use App\Portal\Http\Controllers\PortalEntryController;
 use App\Portals\Assistant\AssistantPortalAuthorizationService;
 use App\Portals\Assistant\AssistantStoreOwnerService;
+use App\Portals\Assistant\OperationDashboardDepartmentScopeService;
 use App\Portals\Operation\OperationReportMetricsService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -30,6 +31,7 @@ class OperationReportDashboardController extends Controller
         private readonly AssistantPortalAuthorizationService $authorization,
         private readonly AssistantStoreOwnerService $assistantStoreOwners,
         private readonly OperationReportMetricsService $metrics,
+        private readonly OperationDashboardDepartmentScopeService $dashboardScopes,
     ) {
     }
 
@@ -534,15 +536,7 @@ class OperationReportDashboardController extends Controller
             return $this->assistantStoreOwners->visibleOperationDepartmentIds($context['user']);
         }
 
-        $allDepartmentIds = $this->assistantStoreOwners->operationDepartments()
-            ->pluck('id')->map(fn ($id) => (int) $id)->all();
-        if ($this->isBoss($context['user'])) return $allDepartmentIds;
-
-        $configuredIds = OperationDashboardDepartmentScope::query()
-            ->where('user_id', $context['user']->getKey())
-            ->pluck('department_id')->map(fn ($id) => (int) $id)->all();
-
-        return $configuredIds === [] ? $allDepartmentIds : array_values(array_intersect($allDepartmentIds, $configuredIds));
+        return $this->dashboardScopes->visibleDepartmentIds($context['user']);
     }
 
     private function isBoss(AdminUser $user): bool
