@@ -20,7 +20,7 @@ class StoreLaunchReviewController extends Controller
     public function index(Request $request): Response|View
     {
         $context=$this->context($request); if($context instanceof Response)return $context;
-        $filters=$request->validate(['operation_department_ids'=>['nullable','array'],'operation_department_ids.*'=>['integer','distinct'],'status'=>['nullable','in:pending,processed'],'operator'=>['nullable','string','max:100']]);
+        $filters=$request->validate(['operation_department_ids'=>['nullable','array'],'operation_department_ids.*'=>['integer','distinct'],'status'=>['nullable','in:pending,processed,rejected'],'operator'=>['nullable','string','max:100']]);
         $query=DailyStoreLaunch::query(); $all=$this->storeOwners->boundBusinessDepartments(); $visible=null;
         $visible=$this->departmentScopes->visibleIdsForReview($context['user']);if($visible!==null){$visible===[]?$query->whereRaw('1=0'):$query->whereIn('operation_department_id',$visible);}
         $departments=$visible===null?$all:$all->whereIn('id',$visible)->values();
@@ -32,9 +32,11 @@ class StoreLaunchReviewController extends Controller
     {
         $context=$this->context($request); if($context instanceof Response)abort($context->getStatusCode());
         $visible=$this->departmentScopes->visibleIdsForReview($context['user']);if($visible!==null)abort_unless(in_array((int)$submission->operation_department_id,$visible,true),403);
-        $data=$request->validate(['response_text'=>['required','string','max:5000']],['response_text.required'=>'请填写回复内容。']);
-        $submission->update(['status'=>DailyStoreLaunch::STATUS_PROCESSED,'response_text'=>trim($data['response_text']),'processed_by'=>$context['user']->id,'processed_by_name'=>$context['user']->name?:$context['user']->username,'processed_at'=>now()]);
-        return back()->with('success','下店需求已回复并标记为已处理。');
+        abort_unless($submission->status === DailyStoreLaunch::STATUS_PENDING, 422, '该下店需求已经处理，请刷新页面查看最新状态。');
+        $data=$request->validate(['decision'=>['required','in:processed,rejected'],'response_text'=>['required','string','max:5000']],['response_text.required'=>'请填写处理结果或驳回原因。']);
+        $status=$data['decision']===DailyStoreLaunch::STATUS_REJECTED?DailyStoreLaunch::STATUS_REJECTED:DailyStoreLaunch::STATUS_PROCESSED;
+        $submission->update(['status'=>$status,'response_text'=>trim($data['response_text']),'processed_by'=>$context['user']->id,'processed_by_name'=>$context['user']->name?:$context['user']->username,'processed_at'=>now()]);
+        return back()->with('success',$status===DailyStoreLaunch::STATUS_REJECTED?'下店需求已驳回。':'下店需求已回复并标记为已处理。');
     }
 
     private function context(Request $request): array|Response

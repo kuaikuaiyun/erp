@@ -29,7 +29,7 @@ class AdvertisingAccountAuthorizationReviewController extends Controller
         $filters = $request->validate([
             'operation_department_ids' => ['nullable', 'array'],
             'operation_department_ids.*' => ['integer', 'distinct'],
-            'status' => ['nullable', 'in:pending,processed'],
+            'status' => ['nullable', 'in:pending,processed,rejected'],
             'operator' => ['nullable', 'string', 'max:100'],
         ]);
         $query = DailyAdvertisingAccountAuthorization::query();
@@ -58,13 +58,20 @@ class AdvertisingAccountAuthorizationReviewController extends Controller
         if ($context instanceof Response) abort($context->getStatusCode());
         $visibleIds = $this->departmentScopes->visibleIdsForReview($context['user']);
         if ($visibleIds !== null) abort_unless(in_array((int) $submission->operation_department_id, $visibleIds, true), 403);
-        $data = $request->validate(['response_text' => ['required', 'string', 'max:5000']], ['response_text.required' => '请填写回复内容。']);
+        abort_unless($submission->status === DailyAdvertisingAccountAuthorization::STATUS_PENDING, 422, '该广告账号授权需求已经处理，请刷新页面查看最新状态。');
+        $data = $request->validate([
+            'decision' => ['required', 'in:processed,rejected'],
+            'response_text' => ['required', 'string', 'max:5000'],
+        ], ['response_text.required' => '请填写处理结果或驳回原因。']);
+        $status = $data['decision'] === DailyAdvertisingAccountAuthorization::STATUS_REJECTED
+            ? DailyAdvertisingAccountAuthorization::STATUS_REJECTED
+            : DailyAdvertisingAccountAuthorization::STATUS_PROCESSED;
         $submission->update([
-            'status' => DailyAdvertisingAccountAuthorization::STATUS_PROCESSED,
+            'status' => $status,
             'response_text' => trim($data['response_text']), 'processed_by' => $context['user']->id,
             'processed_by_name' => $context['user']->name ?: $context['user']->username, 'processed_at' => now(),
         ]);
-        return back()->with('success', '广告账号授权需求已回复并标记为已处理。');
+        return back()->with('success', $status === DailyAdvertisingAccountAuthorization::STATUS_REJECTED ? '广告账号授权需求已驳回。' : '广告账号授权需求已回复并标记为已处理。');
     }
 
     private function context(Request $request): array|Response
