@@ -1,5 +1,6 @@
 @extends('portal.layout')
 @section('page_title','广告账号授权')
+@push('styles')<style>.status-pill.rejected{background:#fde2e2;color:#b42318}</style>@endpush
 @push('styles')
 <style>.auth-box{border:0;border-radius:12px;box-shadow:0 5px 18px rgba(31,67,98,.09);overflow:hidden}.auth-form{display:grid;grid-template-columns:repeat(3,minmax(190px,1fr));gap:14px;padding:18px}.auth-form .form-group{margin:0}.auth-form label{color:#526d82}.auth-form .form-control{height:38px;border-radius:6px}.auth-actions,.old-mail-option{grid-column:1/-1}.old-mail-option{padding:10px 14px;background:#f5f9fc;border-radius:7px}.auth-table{min-width:1300px;margin:0}.auth-table th{background:#eaf3f9;text-align:center}.status-pill{display:inline-block;padding:4px 10px;border-radius:14px;font-size:12px}.status-pill.pending{background:#fff0c2;color:#986700}.status-pill.processed{background:#dff5e9;color:#18784c}@media(max-width:900px){.auth-form{grid-template-columns:1fr}}</style>
 @endpush

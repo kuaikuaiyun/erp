@@ -29,7 +29,7 @@ class AccountOpeningReviewController extends Controller
         $filters = $request->validate([
             'operation_department_ids' => ['nullable', 'array'],
             'operation_department_ids.*' => ['integer', 'distinct'],
-            'status' => ['nullable', 'in:pending,processed'],
+            'status' => ['nullable', 'in:pending,processed,rejected'],
             'agency' => ['nullable', 'string', 'max:100'],
             'media' => ['nullable', 'string', 'max:100'],
             'operator' => ['nullable', 'string', 'max:100'],
@@ -68,20 +68,25 @@ class AccountOpeningReviewController extends Controller
         if ($context instanceof Response) abort($context->getStatusCode());
         $visibleIds = $this->departmentScopes->visibleIdsForReview($context['user']);
         if ($visibleIds !== null) abort_unless(in_array((int) $submission->operation_department_id, $visibleIds, true), 403);
+        abort_unless($submission->status === DailyAccountOpening::STATUS_PENDING, 422, '该开户需求已经处理，请刷新页面查看最新状态。');
         $validated = $request->validate([
+            'decision' => ['required', 'in:processed,rejected'],
             'response_text' => ['required', 'string', 'max:5000'],
         ], [
-            'response_text.required' => '请填写回复内容后再标记为已处理。',
+            'response_text.required' => '请填写处理结果或驳回原因。',
         ]);
+        $status = $validated['decision'] === DailyAccountOpening::STATUS_REJECTED
+            ? DailyAccountOpening::STATUS_REJECTED
+            : DailyAccountOpening::STATUS_PROCESSED;
         $submission->update([
-            'status' => DailyAccountOpening::STATUS_PROCESSED,
+            'status' => $status,
             'response_text' => trim($validated['response_text']),
             'processed_by' => (int) $context['user']->getKey(),
             'processed_by_name' => (string) ($context['user']->name ?: $context['user']->username),
             'processed_at' => now(),
         ]);
 
-        return back()->with('success', '开户需求已标记为已处理。');
+        return back()->with('success', $status === DailyAccountOpening::STATUS_REJECTED ? '开户需求已驳回。' : '开户需求已标记为已处理。');
     }
 
     private function context(Request $request): array|Response

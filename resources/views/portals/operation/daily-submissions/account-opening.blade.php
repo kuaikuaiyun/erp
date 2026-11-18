@@ -1,5 +1,6 @@
 @extends('portal.layout')
 @section('page_title', '开户需求')
+@push('styles')<style>.status-pill.rejected{background:#fde2e2;color:#b42318}</style>@endpush
 @push('styles')
 <style>.opening-box{border:0;border-radius:12px;box-shadow:0 5px 18px rgba(31,67,98,.09);overflow:hidden}.opening-box .box-header{padding:15px 18px}.opening-form{display:grid;grid-template-columns:repeat(3,minmax(180px,1fr));gap:14px;padding:18px}.opening-form .form-group{margin:0}.opening-form label{color:#526d82}.opening-form .form-control{height:38px;border-radius:6px}.opening-actions{grid-column:1/-1}.opening-extra{display:none}.opening-table{min-width:1100px;margin:0}.opening-table th{background:#eaf3f9;text-align:center}.status-pill{display:inline-block;padding:5px 11px;border-radius:15px;font-size:12px}.status-pill.pending{background:#fff0c2;color:#986700}.status-pill.processed{background:#dff5e9;color:#18784c}@media(max-width:900px){.opening-form{grid-template-columns:1fr}}</style>
 @endpush

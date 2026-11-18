@@ -21,7 +21,7 @@ class AccountStoreTransferReviewController extends Controller
     public function index(Request $request):Response|View
     {
         $context=$this->context($request);if($context instanceof Response)return $context;
-        $filters=$request->validate(['operation_department_ids'=>['nullable','array'],'operation_department_ids.*'=>['integer','distinct'],'target_type'=>['nullable','in:account,store'],'action_type'=>['nullable','in:discard,transfer'],'status'=>['nullable','in:pending,processed'],'operator'=>['nullable','string','max:100']]);
+        $filters=$request->validate(['operation_department_ids'=>['nullable','array'],'operation_department_ids.*'=>['integer','distinct'],'target_type'=>['nullable','in:account,store'],'action_type'=>['nullable','in:discard,transfer'],'status'=>['nullable','in:pending,processed,rejected'],'operator'=>['nullable','string','max:100']]);
         $query=DailyAccountStoreTransfer::query();$all=$this->storeOwners->boundBusinessDepartments();$visible=null;
         $visible=$this->departmentScopes->visibleIdsForReview($context['user']);if($visible!==null){$visible===[]?$query->whereRaw('1=0'):$query->whereIn('operation_department_id',$visible);}
         $departments=$visible===null?$all:$all->whereIn('id',$visible)->values();
@@ -32,9 +32,11 @@ class AccountStoreTransferReviewController extends Controller
     {
         $context=$this->context($request);if($context instanceof Response)abort($context->getStatusCode());
         $visible=$this->departmentScopes->visibleIdsForReview($context['user']);if($visible!==null)abort_unless(in_array((int)$submission->operation_department_id,$visible,true),403);
-        $data=$request->validate(['response_text'=>['required','string','max:5000']],['response_text.required'=>'请填写回复内容。']);
-        $submission->update(['status'=>DailyAccountStoreTransfer::STATUS_PROCESSED,'response_text'=>trim($data['response_text']),'processed_by'=>$context['user']->id,'processed_by_name'=>$context['user']->name?:$context['user']->username,'processed_at'=>now()]);
-        return back()->with('success','弃用/转让需求已回复并标记为已处理。');
+        abort_unless($submission->status === DailyAccountStoreTransfer::STATUS_PENDING, 422, '该弃用/转让需求已经处理，请刷新页面查看最新状态。');
+        $data=$request->validate(['decision'=>['required','in:processed,rejected'],'response_text'=>['required','string','max:5000']],['response_text.required'=>'请填写处理结果或驳回原因。']);
+        $status=$data['decision']===DailyAccountStoreTransfer::STATUS_REJECTED?DailyAccountStoreTransfer::STATUS_REJECTED:DailyAccountStoreTransfer::STATUS_PROCESSED;
+        $submission->update(['status'=>$status,'response_text'=>trim($data['response_text']),'processed_by'=>$context['user']->id,'processed_by_name'=>$context['user']->name?:$context['user']->username,'processed_at'=>now()]);
+        return back()->with('success',$status===DailyAccountStoreTransfer::STATUS_REJECTED?'弃用/转让需求已驳回。':'弃用/转让需求已回复并标记为已处理。');
     }
     public function image(Request $request, DailyAccountStoreTransfer $submission, int $image): BinaryFileResponse
     {

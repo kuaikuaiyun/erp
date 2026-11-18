@@ -32,7 +32,7 @@ class AdvertisingRechargeReviewController extends Controller
         $filters = $request->validate([
             'operation_department_ids' => ['nullable', 'array'],
             'operation_department_ids.*' => ['integer', 'distinct'],
-            'status' => ['nullable', 'in:pending,processed'],
+            'status' => ['nullable', 'in:pending,processed,rejected'],
             'date_from' => ['nullable', 'date_format:Y-m-d'],
             'date_to' => ['nullable', 'date_format:Y-m-d'],
             'operator' => ['nullable', 'string', 'max:100'],
@@ -63,6 +63,8 @@ class AdvertisingRechargeReviewController extends Controller
         $todayRechargeGroups = [];
         foreach ($todaySubmissions as $submission) {
             foreach ($submission->entries ?? [] as $entryIndex => $entry) {
+                $entryStatus = (string) ($entry['status'] ?? ($submission->status === DailyAdvertisingRecharge::STATUS_PROCESSED ? DailyAdvertisingRecharge::STATUS_PROCESSED : DailyAdvertisingRecharge::STATUS_PENDING));
+                if ($entryStatus === DailyAdvertisingRecharge::STATUS_REJECTED) continue;
                 $agencyName = trim((string) ($entry['agency'] ?? '')) ?: '未设置代理';
                 $mediaName = trim((string) ($entry['media'] ?? '')) ?: '未设置平台';
                 $key = mb_strtolower($mediaName).'|'.mb_strtolower($agencyName);
@@ -84,7 +86,7 @@ class AdvertisingRechargeReviewController extends Controller
                     'account_number' => (string) ($entry['account_number'] ?? ''),
                     'amount' => round((float) ($entry['amount'] ?? 0), 2),
                     'submitted_at' => $submission->created_at?->timezone('Asia/Shanghai')->format('Y-m-d H:i:s'),
-                    'status' => (string) ($entry['status'] ?? ($submission->status === DailyAdvertisingRecharge::STATUS_PROCESSED ? DailyAdvertisingRecharge::STATUS_PROCESSED : DailyAdvertisingRecharge::STATUS_PENDING)),
+                    'status' => $entryStatus,
                 ];
             }
         }
@@ -119,7 +121,7 @@ class AdvertisingRechargeReviewController extends Controller
             'todayRechargeSummary' => [
                 'group_count' => $todayRechargeGroups->count(),
                 'entry_count' => $todayRechargeGroups->sum('entry_count'),
-                'people_count' => $todaySubmissions->pluck('operator_user_id')->unique()->count(),
+                'people_count' => collect($todayRechargeGroups)->flatMap(fn ($group) => $group['details'])->pluck('operator_user_id')->unique()->count(),
                 'amount' => $todayTotalAmount,
             ],
             'submissions' => $query->orderByRaw("CASE WHEN status = 'pending' THEN 0 ELSE 1 END")
@@ -136,36 +138,44 @@ class AdvertisingRechargeReviewController extends Controller
 
         $validated = $request->validate([
             'entry_index' => ['required', 'integer', 'min:0'],
-        ], ['entry_index.required' => '请选择要处理的广告充值明细。']);
+            'decision' => ['required', 'in:processed,rejected'],
+            'response_text' => ['nullable', 'string', 'max:5000', 'required_if:decision,rejected'],
+        ], [
+            'entry_index.required' => '请选择要处理的广告充值明细。',
+            'response_text.required_if' => '请填写驳回原因。',
+        ]);
         $entryIndex = (int) $validated['entry_index'];
+        $decision = (string) $validated['decision'];
+        $responseText = trim((string) ($validated['response_text'] ?? ''));
         $processorId = (int) $context['user']->getKey();
         $processorName = (string) ($context['user']->name ?: $context['user']->username);
 
-        $submission->getConnection()->transaction(function () use ($submission, $entryIndex, $processorId, $processorName): void {
+        $submission->getConnection()->transaction(function () use ($submission, $entryIndex, $decision, $responseText, $processorId, $processorName): void {
             /** @var DailyAdvertisingRecharge $locked */
             $locked = DailyAdvertisingRecharge::query()->lockForUpdate()->findOrFail($submission->getKey());
             $entries = array_values($locked->entries ?? []);
             abort_unless(isset($entries[$entryIndex]), 422, '该广告充值明细不存在，请刷新页面后重试。');
             $currentStatus = (string) ($entries[$entryIndex]['status'] ?? ($locked->status === DailyAdvertisingRecharge::STATUS_PROCESSED ? DailyAdvertisingRecharge::STATUS_PROCESSED : DailyAdvertisingRecharge::STATUS_PENDING));
-            abort_if($currentStatus === DailyAdvertisingRecharge::STATUS_PROCESSED, 422, '该广告充值明细已经处理，请勿重复操作。');
+            abort_unless($currentStatus === DailyAdvertisingRecharge::STATUS_PENDING, 422, '该广告充值明细已经处理，请刷新页面查看最新状态。');
 
             $processedAt = now();
-            $entries[$entryIndex]['status'] = DailyAdvertisingRecharge::STATUS_PROCESSED;
+            $entries[$entryIndex]['status'] = $decision;
+            $entries[$entryIndex]['response_text'] = $responseText ?: null;
             $entries[$entryIndex]['processed_by'] = $processorId;
             $entries[$entryIndex]['processed_by_name'] = $processorName;
             $entries[$entryIndex]['processed_at'] = $processedAt->toDateTimeString();
-            $allProcessed = collect($entries)->every(fn (array $entry) => ($entry['status'] ?? null) === DailyAdvertisingRecharge::STATUS_PROCESSED);
+            $aggregateStatus = $this->aggregateStatus($entries);
 
             $locked->update([
                 'entries' => $entries,
-                'status' => $allProcessed ? DailyAdvertisingRecharge::STATUS_PROCESSED : DailyAdvertisingRecharge::STATUS_PENDING,
-                'processed_by' => $allProcessed ? $processorId : null,
-                'processed_by_name' => $allProcessed ? $processorName : null,
-                'processed_at' => $allProcessed ? $processedAt : null,
+                'status' => $aggregateStatus,
+                'processed_by' => $aggregateStatus !== DailyAdvertisingRecharge::STATUS_PENDING ? $processorId : null,
+                'processed_by_name' => $aggregateStatus !== DailyAdvertisingRecharge::STATUS_PENDING ? $processorName : null,
+                'processed_at' => $aggregateStatus !== DailyAdvertisingRecharge::STATUS_PENDING ? $processedAt : null,
             ]);
         });
 
-        return back()->with('success', '该条广告充值明细已标记为已处理。');
+        return back()->with('success', $decision === DailyAdvertisingRecharge::STATUS_REJECTED ? '该条广告充值明细已驳回，且不会计入充值统计。' : '该条广告充值明细已标记为已处理。');
     }
 
     public function processSelected(Request $request): RedirectResponse
@@ -197,7 +207,7 @@ class AdvertisingRechargeReviewController extends Controller
                 foreach ($items->pluck('entryIndex')->unique() as $entryIndex) {
                     abort_unless(isset($entries[$entryIndex]), 422, '所选充值明细不存在，请刷新页面后重试。');
                     $status = (string) ($entries[$entryIndex]['status'] ?? ($submission->status === DailyAdvertisingRecharge::STATUS_PROCESSED ? DailyAdvertisingRecharge::STATUS_PROCESSED : DailyAdvertisingRecharge::STATUS_PENDING));
-                    if ($status === DailyAdvertisingRecharge::STATUS_PROCESSED) continue;
+                    if ($status !== DailyAdvertisingRecharge::STATUS_PENDING) continue;
                     $processedAt = now();
                     $entries[$entryIndex]['status'] = DailyAdvertisingRecharge::STATUS_PROCESSED;
                     $entries[$entryIndex]['processed_by'] = $processorId;
@@ -206,13 +216,13 @@ class AdvertisingRechargeReviewController extends Controller
                     $notifications[(int) $submission->operator_user_id][] = $entries[$entryIndex];
                     $processedCount++;
                 }
-                $allProcessed = collect($entries)->every(fn (array $entry) => ($entry['status'] ?? null) === DailyAdvertisingRecharge::STATUS_PROCESSED);
+                $aggregateStatus = $this->aggregateStatus($entries);
                 $submission->update([
                     'entries' => $entries,
-                    'status' => $allProcessed ? DailyAdvertisingRecharge::STATUS_PROCESSED : DailyAdvertisingRecharge::STATUS_PENDING,
-                    'processed_by' => $allProcessed ? $processorId : null,
-                    'processed_by_name' => $allProcessed ? $processorName : null,
-                    'processed_at' => $allProcessed ? now() : null,
+                    'status' => $aggregateStatus,
+                    'processed_by' => $aggregateStatus !== DailyAdvertisingRecharge::STATUS_PENDING ? $processorId : null,
+                    'processed_by_name' => $aggregateStatus !== DailyAdvertisingRecharge::STATUS_PENDING ? $processorName : null,
+                    'processed_at' => $aggregateStatus !== DailyAdvertisingRecharge::STATUS_PENDING ? now() : null,
                 ]);
             }
             abort_if($processedCount === 0, 422, '所选记录均已处理，请刷新页面查看最新状态。');
@@ -250,5 +260,17 @@ class AdvertisingRechargeReviewController extends Controller
         $this->authorization->assertAssistantPortal($context['portal']);
         abort_unless($this->authorization->isAssistantDepartmentMember($context['user']), 403);
         return $context;
+    }
+
+    /** @param list<array<string, mixed>> $entries */
+    private function aggregateStatus(array $entries): string
+    {
+        $statuses = collect($entries)->map(fn (array $entry) => (string) ($entry['status'] ?? DailyAdvertisingRecharge::STATUS_PENDING));
+        if ($statuses->contains(DailyAdvertisingRecharge::STATUS_PENDING)) return DailyAdvertisingRecharge::STATUS_PENDING;
+        if ($statuses->contains(DailyAdvertisingRecharge::STATUS_REJECTED)) {
+            return DailyAdvertisingRecharge::STATUS_REJECTED;
+        }
+
+        return DailyAdvertisingRecharge::STATUS_PROCESSED;
     }
 }
