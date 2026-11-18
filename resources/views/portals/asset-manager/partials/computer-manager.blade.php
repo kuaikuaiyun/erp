@@ -22,8 +22,7 @@
                 @foreach($fields as $key=>$type)
                 <div class="form-group"><label for="am-filter-{{ $key }}">{{ $labels[$key] }}</label>
                     @if(in_array($type, ['user','department']))
-                    <input class="form-control am-option-search" placeholder="{{ __('asset_manager.computer_ui.option_search') }}" aria-label="{{ __('asset_manager.computer_ui.search_placeholder', ['key'=>$labels[$key]]) }}">
-                    <select id="am-filter-{{ $key }}" class="form-control" name="filter[{{ $key }}]">
+                    <select id="am-filter-{{ $key }}" class="form-control am-computer-search-select" name="filter[{{ $key }}]">
                         <option value="">{{ __('asset_manager.all') }}</option>
                         @if($key==='owner_department_id' && $user->isAdministrator())
                         <option value="0" @selected((string)request('filter.owner_department_id')==='0')>{{ __('asset_manager.computer_unassigned') }}</option>
@@ -148,9 +147,31 @@ $clientConfig = ['kind'=>$kind,'fields'=>$fields,'users'=>$users,'departments'=>
 @endphp
 <script>window.AssetManagerConfig=@json($clientConfig);</script>
 <script src="{{ asset('assets/erp/asset-manager.js') }}?v=20261118-2"></script>
+<script src="{{ asset('vendor/laravel-admin/AdminLTE/plugins/select2/select2.full.min.js') }}"></script>
 <script>
 (function ($) {
     var writableDepartments = @json(array_values($writableDepartmentIds));
+    var pickerText = window.AssetManagerConfig.text.computer_ui;
+    if ($.fn.select2) {
+        $('.am-computers .am-computer-search-select').each(function () {
+            var select = $(this);
+            select.select2({
+                width: '100%',
+                minimumResultsForSearch: 0,
+                dropdownCssClass: 'am-computer-select-dropdown',
+                language: {
+                    noResults: function () { return pickerText.no_results; },
+                    searching: function () { return pickerText.searching; },
+                    errorLoading: function () { return pickerText.load_error; }
+                }
+            });
+            select.on('select2:open', function () {
+                $('.am-computer-select-dropdown .select2-search__field')
+                    .attr('placeholder', pickerText.option_search)
+                    .attr('aria-label', pickerText.option_search);
+            });
+        });
+    }
     $('#am-modal').on('show.bs.modal', function () {
         var owner = this.querySelector('select[name="owner_department_id"]');
         if (!owner || owner.disabled) return;

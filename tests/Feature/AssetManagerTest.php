@@ -93,6 +93,12 @@ class AssetManagerTest extends TestCase
         $this->assistant = Portal::create(['code' => 'zhuli', 'name' => 'Assistant', 'status' => 'enabled']);
         (require base_path('database/migrations/2026_11_18_000100_move_asset_pages_to_assistant.php'))->up();
         (require base_path('database/migrations/2026_11_18_000200_add_computer_equipment_department_scope.php'))->up();
+        Schema::create('portal_departments', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('portal_id');
+            $t->unsignedBigInteger('department_id');
+        });
+        (require base_path('database/migrations/2026_11_18_000400_install_asset_computer_department_bindings.php'))->up();
         Schema::create('admin_role_users', function (Blueprint $t) {
             $t->unsignedBigInteger('role_id');
             $t->unsignedBigInteger('user_id');
@@ -140,6 +146,7 @@ class AssetManagerTest extends TestCase
     public function test_crud_and_write_permission_and_disabled_menu(): void
     {
         $owner = Department::create(['name' => 'Equipment', 'slug' => 'equipment']);
+        $this->computerBinding($owner, [$owner->id]);
         $this->postJson('/asset-manager/computers', ['owner_department_id' => $owner->id, 'brand' => 'Brand', 'monthly_rent' => '10.10'])->assertOk();
         $id = AssetComputerEquipment::first()->id;
         $this->getJson('/asset-manager/computers/'.$id)->assertOk()->assertJsonPath('monthly_rent', '10.10');
@@ -301,8 +308,18 @@ class AssetManagerTest extends TestCase
         $root = Department::create(['name' => 'Assistant', 'slug' => 'dept-000004']);
         $a = Department::create(['name' => 'Team A', 'slug' => 'assistant-a', 'parent_id' => $root->id]);
         $b = Department::create(['name' => 'Team B', 'slug' => 'assistant-b', 'parent_id' => $root->id]);
+        $this->computerBinding($a, [$a->id]);
+        $this->computerBinding($b, [$b->id]);
 
         return [$root, $a, $b];
+    }
+
+    private function computerBinding(Department $source, array $targets): void
+    {
+        DB::table('portal_departments')->updateOrInsert(['portal_id' => $this->portal->id, 'department_id' => $source->parent_id ?: $source->id], []);
+        foreach ($targets as $target) {
+            DB::table('asset_computer_department_bindings')->insert(['source_department_id' => $source->id, 'target_department_id' => $target, 'updated_by' => 1]);
+        }
     }
 
     private function joinDepartment(Department $department, string $position = 'member'): void
@@ -315,7 +332,7 @@ class AssetManagerTest extends TestCase
 
     public function test_migration_moves_only_three_menus_and_is_repeatable(): void
     {
-        $this->assertSame(['asset_manager_computers'], $this->portal->menus()->pluck('code')->all());
+        $this->assertSame(['asset_manager_computers', 'asset_computer_department_bindings'], $this->portal->menus()->pluck('code')->all());
         $this->assertCount(3, $this->assistant->menus);
         $migration = require base_path('database/migrations/2026_11_18_000100_move_asset_pages_to_assistant.php');
         $sorts = $this->assistant->menus()->pluck('sort', 'id')->all();
@@ -326,7 +343,7 @@ class AssetManagerTest extends TestCase
             $this->assertTrue(Schema::hasColumn($table, 'owner_department_id'));
         }
         $migration->down();
-        $this->assertSame(4, $this->portal->menus()->count());
+        $this->assertSame(5, $this->portal->menus()->count());
         $this->assertTrue(Schema::hasColumn('asset_resources', 'owner_department_id'));
         $migration->up();
         $this->assertSame(3, $this->assistant->menus()->count());
@@ -552,9 +569,9 @@ class AssetManagerTest extends TestCase
             AssetComputerEquipment::create(['owner_department_id' => $d->id]);
         }AssetComputerEquipment::create([]);
         $this->joinDepartment($root, 'manager');
-        $this->get('/asset-manager/computers')->assertViewHas('rows', fn ($rows) => $rows->total() === 3);
+        $this->get('/asset-manager/computers')->assertViewHas('rows', fn ($rows) => $rows->total() === 2);
         $this->joinDepartment($root, 'deputy');
-        $this->get('/asset-manager/computers')->assertViewHas('rows', fn ($rows) => $rows->total() === 1);
+        $this->get('/asset-manager/computers')->assertViewHas('rows', fn ($rows) => $rows->total() === 0);
         foreach (['manager', 'deputy', 'member'] as $position) {
             $this->joinDepartment($a, $position);
             $this->get('/asset-manager/computers')->assertViewHas('rows', fn ($rows) => $rows->total() === 1);

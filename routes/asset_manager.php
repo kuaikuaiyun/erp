@@ -1,8 +1,14 @@
 <?php
 
 use App\Portals\AssetManager\Http\Controllers\AssetManagerController;
+use App\Portals\AssetManager\Http\Controllers\ComputerDepartmentBindingController;
 use App\Portals\AssetManager\Http\Controllers\DisciplineController;
 use Illuminate\Support\Facades\Route;
+
+Route::prefix('asset-manager/computer-department-bindings')->name('asset-manager.computer-department-bindings.')->controller(ComputerDepartmentBindingController::class)->group(function () {
+    Route::get('/', 'index')->name('index');
+    Route::put('/', 'update')->name('update');
+});
 
 Route::prefix('asset-manager/discipline')->name('asset-manager.discipline.')->controller(DisciplineController::class)->group(function () {
     Route::get('/', 'index')->name('index');

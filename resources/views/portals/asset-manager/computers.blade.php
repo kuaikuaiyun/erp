@@ -7,6 +7,7 @@
 @include('portals.asset-manager.partials.computer-manager')
 @endsection
 @push('styles')
+<link rel="stylesheet" href="{{ asset('vendor/laravel-admin/AdminLTE/plugins/select2/select2.min.css') }}">
 <link rel="stylesheet" href="{{ asset('assets/erp/asset-manager.css') }}?v=20261118-2">
-<link rel="stylesheet" href="{{ asset('assets/erp/asset-computers.css') }}?v=20261118-1">
+<link rel="stylesheet" href="{{ asset('assets/erp/asset-computers.css') }}?v=20261118-2">
 @endpush

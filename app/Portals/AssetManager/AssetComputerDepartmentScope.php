@@ -4,20 +4,18 @@ namespace App\Portals\AssetManager;
 
 use App\Models\AdminUser;
 use App\Models\Department;
-use App\Services\DepartmentAuthorizationService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Validation\Rule;
 
 final class AssetComputerDepartmentScope
 {
-    public function __construct(private DepartmentAuthorizationService $authorization) {}
+    public function __construct(private AssetComputerDepartmentBindingService $bindings) {}
 
     public function departments(AdminUser $user): array
     {
         $query = Department::business()->with('parent')->orderBy('sort')->orderBy('name');
         if (! $user->isAdministrator()) {
-            $ids = $user->departments()->pluck('id')->merge($this->authorization->managedDepartmentIds($user))->unique()->all();
-            $query->whereIn('id', $ids);
+            $query->whereIn('id', $this->bindings->departmentIds($user));
         }
 
         return $query->get()->mapWithKeys(fn ($d) => [$d->id => ($d->parent ? $d->parent->name.' / ' : '').$d->name])->all();
@@ -34,7 +32,7 @@ final class AssetComputerDepartmentScope
             return array_keys($this->departments($user));
         }
 
-        return $this->authorization->managedDepartmentIds($user)->all();
+        return $this->bindings->departmentIds($user, true);
     }
 
     public function canManage(AdminUser $user): bool
